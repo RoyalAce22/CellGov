@@ -78,10 +78,10 @@ fn resolve_sync_wakes_with_missing_pending_response_logs_in_release() {
         .register_with(|id| CountingUnit::new(id, 1));
     rt.registry_mut()
         .set_status_override(waiter, UnitStatus::Blocked);
-    let pre_breaks = rt.lv2_host().invariant_break_count();
+    let pre_breaks = rt.lv2_host().observability().invariant_break_count;
     rt.resolve_sync_wakes_for_test(&[waiter]);
     assert!(
-        rt.lv2_host().invariant_break_count() > pre_breaks,
+        rt.lv2_host().observability().invariant_break_count > pre_breaks,
         "release: log_invariant_break must fire on no-pending-response wake; \
          a counter of {pre_breaks} (unchanged) means the path silently \
          absorbed the bug, exactly the regression this guard catches",

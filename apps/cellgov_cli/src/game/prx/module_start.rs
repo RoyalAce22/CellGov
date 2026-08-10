@@ -333,7 +333,7 @@ pub(in crate::game) fn run_module_start(
     // because a module_start that stalls never reaches the step loop.
     // Counters are cumulative across every module_start so far.
     let host = rt.lv2_host();
-    let ipc = host.system_ipc_witness();
+    let ipc = &host.observability().system_ipc_witness;
     if !ipc.is_silent() {
         eprintln!(
             "BENCH_SYSTEM_IPC_WITNESS_AT_MODULE_START: module={} shm_creates={} \
@@ -367,12 +367,13 @@ pub(in crate::game) fn run_module_start(
     if host.system_seed_applied(cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY) {
         println!(
             "  module_start seed witnesses: ring_wakes={} cond0_producer_waits={} cond_signals={}",
-            host.cond_ring_wakes(),
-            host.cond0_producer_waits(),
-            host.cond_signal_dispatches(),
+            host.observability().cond_ring_wakes,
+            host.observability().cond0_producer_waits(),
+            host.observability().cond_signal_dispatches,
         );
         let by_slot: Vec<String> = host
-            .cond0_producer_waits_by_slot()
+            .observability()
+            .cond0_producer_waits_by_slot
             .iter()
             .map(|(slot, n)| format!("slot{slot}={n}"))
             .collect();
@@ -383,7 +384,8 @@ pub(in crate::game) fn run_module_start(
             );
         }
         let keyed: Vec<String> = host
-            .cond_keyed_signal_counts()
+            .observability()
+            .cond_keyed_signal_counts
             .iter()
             .map(|(key, n)| format!("{key:#018x}={n}"))
             .collect();
@@ -398,12 +400,14 @@ pub(in crate::game) fn run_module_start(
         // reported as `cond0_slot0_signals`.
         let cond0_slot0_key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_COND0_IPC_KEY_BASE;
         let cond0_slot0_signals = host
-            .cond_keyed_signal_counts()
+            .observability()
+            .cond_keyed_signal_counts
             .get(&cond0_slot0_key)
             .copied()
             .unwrap_or(0);
         let slot0_producer_waits = host
-            .cond0_producer_waits_by_slot()
+            .observability()
+            .cond0_producer_waits_by_slot
             .get(&0)
             .copied()
             .unwrap_or(0);
@@ -414,10 +418,10 @@ pub(in crate::game) fn run_module_start(
             prx_info.name,
             u8::from(result.is_err()),
             steps,
-            host.cond_ring_wakes(),
-            host.cond0_producer_waits(),
+            host.observability().cond_ring_wakes,
+            host.observability().cond0_producer_waits(),
             slot0_producer_waits,
-            host.cond_signal_dispatches(),
+            host.observability().cond_signal_dispatches,
             cond0_slot0_signals,
         );
     }

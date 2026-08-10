@@ -115,6 +115,11 @@ Pre-Alpha. What works today:
 - Per-title boot baselines are committed data (step counts,
   outcomes, and named behaviour witnesses), re-measured and
   blessed through a single recording command.
+- Kernel-state hashing is complete by construction -- a host
+  field cannot be added without an explicit fold decision --
+  and the instrumentation layer is proven inert: wiping every
+  witness after each step leaves the boot's state trace
+  byte-identical.
 - ps3autotests cross-runner harness present.
 - Workspace test suite green in debug and release; zero
   `unsafe` (`unsafe_code = forbid`); strict clippy gate.

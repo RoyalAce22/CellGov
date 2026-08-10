@@ -9,6 +9,7 @@
 //! back to the runtime as an `Effect` so the commit pipeline orders it.
 
 mod cond;
+mod derived;
 pub mod diagnostics;
 mod dispatch_route;
 mod event_flag;
@@ -19,12 +20,14 @@ mod lwmutex;
 mod memory;
 mod mmapper;
 mod mutex;
+mod observability;
 mod ppu_thread;
 mod process;
 pub mod rsx;
 mod runtime;
 mod semaphore;
 mod spu;
+mod state;
 mod state_hash;
 mod system_ipc_witness;
 
@@ -39,6 +42,7 @@ mod tests;
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use mmapper::SystemStateSeed;
+pub use observability::Lv2Observability;
 pub use rsx::{
     SysRsxContext, PACKAGE_CELLGOV_SET_FLIP_HANDLER, PACKAGE_CELLGOV_SET_USER_HANDLER,
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,

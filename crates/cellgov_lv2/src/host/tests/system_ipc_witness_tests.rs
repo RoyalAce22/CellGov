@@ -73,7 +73,7 @@ fn a_keyed_shm_create_and_map_bump_the_channel_one_witnesses() {
     let mem_id = alloc_shm(&mut host, &rt, NS_KEY);
     map_shm(&mut host, &rt, mem_id, 0x3000_0000);
 
-    let w = host.system_ipc_witness();
+    let w = &host.observability().system_ipc_witness;
     assert_eq!((w.shm_creates, w.shm_attaches, w.shm_maps), (1, 0, 1));
     assert_eq!(w.keys_touched.get(&NS_KEY), Some(&2));
 }
@@ -86,7 +86,7 @@ fn a_second_keyed_create_counts_as_an_attach_not_a_create() {
     let second = alloc_shm(&mut host, &rt, NS_KEY);
     assert_eq!(first, second, "a registered key resolves to the same shm");
 
-    let w = host.system_ipc_witness();
+    let w = &host.observability().system_ipc_witness;
     assert_eq!((w.shm_creates, w.shm_attaches), (1, 1));
 }
 
@@ -96,7 +96,7 @@ fn a_shm_outside_the_namespace_leaves_every_witness_silent() {
     let rt = FakeRuntime::new(0x1000);
     let mem_id = alloc_shm(&mut host, &rt, OTHER_KEY);
     map_shm(&mut host, &rt, mem_id, 0x3000_0000);
-    assert!(host.system_ipc_witness().is_silent());
+    assert!(host.observability().system_ipc_witness.is_silent());
 }
 
 fn write_effect(addr: u32, len: usize) -> Effect {
@@ -122,7 +122,7 @@ fn a_committed_write_inside_the_mapping_bumps_the_shm_write_witness() {
         write_effect(0x2fff_fffc, 8),
         write_effect(0x3000_ffff, 1),
     ]);
-    assert_eq!(host.system_ipc_witness().shm_writes, 3);
+    assert_eq!(host.observability().system_ipc_witness.shm_writes, 3);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn a_committed_write_outside_the_mapping_does_not_bump_the_shm_write_witness() {
 
     // One byte short of the base, and one byte past the end.
     host.note_committed_effects(&[write_effect(0x2fff_fffc, 4), write_effect(0x3001_0000, 4)]);
-    assert_eq!(host.system_ipc_witness().shm_writes, 0);
+    assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 }
 
 #[test]
@@ -149,12 +149,12 @@ fn the_shm_write_witness_is_blind_to_writes_through_an_unrecorded_alias() {
 
     let alias_base = 0x4000_0000u32;
     host.note_committed_effects(&[write_effect(alias_base, 4)]);
-    assert_eq!(host.system_ipc_witness().shm_writes, 0);
+    assert_eq!(host.observability().system_ipc_witness.shm_writes, 0);
 
     // Same bytes, same shm, counted once the alias is a recorded map.
     map_shm(&mut host, &rt, mem_id, u64::from(alias_base));
     host.note_committed_effects(&[write_effect(alias_base, 4)]);
-    assert_eq!(host.system_ipc_witness().shm_writes, 1);
+    assert_eq!(host.observability().system_ipc_witness.shm_writes, 1);
 }
 
 /// `FakeRuntime` carrying a process-shared `sys_cond_attribute_t` at
@@ -206,7 +206,7 @@ fn keyed_cond_create_and_signal(ipc_key: u64) -> Lv2Host {
 #[test]
 fn a_namespace_cond_create_and_signal_bump_the_cond_witnesses() {
     let host = keyed_cond_create_and_signal(NS_COND_KEY);
-    let w = host.system_ipc_witness();
+    let w = &host.observability().system_ipc_witness;
     assert_eq!((w.cond_creates, w.cond_signals), (1, 2));
     assert_eq!(w.cond_waits, 0);
 }
@@ -214,7 +214,7 @@ fn a_namespace_cond_create_and_signal_bump_the_cond_witnesses() {
 #[test]
 fn a_cond_outside_the_namespace_leaves_the_cond_witnesses_silent() {
     let host = keyed_cond_create_and_signal(OTHER_COND_KEY);
-    assert!(host.system_ipc_witness().is_silent());
+    assert!(host.observability().system_ipc_witness.is_silent());
 }
 
 #[test]
@@ -256,7 +256,7 @@ fn a_namespace_cond_wait_bumps_the_wait_witness() {
         src,
         &rt,
     );
-    assert_eq!(host.system_ipc_witness().cond_waits, 1);
+    assert_eq!(host.observability().system_ipc_witness.cond_waits, 1);
 }
 
 /// Create an IPC-type port (the type `sys_event_port_connect_ipc`
@@ -320,7 +320,7 @@ fn a_namespace_event_queue_create_and_enqueue_bump_channel_two() {
     );
     assert!(matches!(sent, Lv2Dispatch::Immediate { code: 0, .. }));
 
-    let w = host.system_ipc_witness();
+    let w = &host.observability().system_ipc_witness;
     assert_eq!(
         (w.event_queue_creates, w.event_queue_enqueues),
         (1, 1),
@@ -350,7 +350,7 @@ fn a_second_keyed_create_on_the_same_key_is_eexist() {
         second,
         Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into())
     );
-    let w = host.system_ipc_witness();
+    let w = &host.observability().system_ipc_witness;
     assert_eq!((w.event_queue_creates, w.event_queue_references), (1, 1));
 }
 
@@ -375,10 +375,13 @@ fn connect_ipc_resolves_a_namespace_key_and_bumps_the_connect_witness() {
     );
     assert_eq!(connected, Lv2Dispatch::immediate(0));
     assert_eq!(
-        host.event_ports.lookup(port_id).unwrap().queue(),
+        host.state.event_ports.lookup(port_id).unwrap().queue(),
         Some(queue_id)
     );
-    assert_eq!(host.system_ipc_witness().event_port_connects, 1);
+    assert_eq!(
+        host.observability().system_ipc_witness.event_port_connects,
+        1
+    );
 }
 
 #[test]
@@ -401,7 +404,10 @@ fn connect_ipc_to_an_unregistered_namespace_key_is_esrch_and_still_witnessed() {
         Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
     );
     // Counted before the resolve, so a miss is visible.
-    assert_eq!(host.system_ipc_witness().event_port_connects, 1);
+    assert_eq!(
+        host.observability().system_ipc_witness.event_port_connects,
+        1
+    );
 }
 
 #[test]
@@ -422,7 +428,7 @@ fn an_event_queue_outside_the_namespace_leaves_channel_two_silent() {
         src,
         &rt,
     );
-    assert!(host.system_ipc_witness().is_silent());
+    assert!(host.observability().system_ipc_witness.is_silent());
 }
 
 #[test]
@@ -453,7 +459,10 @@ fn a_refused_send_is_not_counted_as_an_enqueue() {
         send(&mut host),
         Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
     );
-    assert_eq!(host.system_ipc_witness().event_queue_enqueues, 4);
+    assert_eq!(
+        host.observability().system_ipc_witness.event_queue_enqueues,
+        4
+    );
 }
 
 #[test]
@@ -478,5 +487,8 @@ fn a_send_through_an_unconnected_port_is_enotconn() {
         sent,
         Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into())
     );
-    assert_eq!(host.system_ipc_witness().event_queue_enqueues, 0);
+    assert_eq!(
+        host.observability().system_ipc_witness.event_queue_enqueues,
+        0
+    );
 }

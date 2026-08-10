@@ -14,6 +14,7 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_fs_write` -- no writable fd in the FS model.
@@ -40,6 +41,7 @@ impl Lv2Host {
         size: u64,
         nwrite_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if nwrite_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
@@ -49,7 +51,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&0u64.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         if buf_ptr == 0 {
             return Lv2Dispatch::Immediate {

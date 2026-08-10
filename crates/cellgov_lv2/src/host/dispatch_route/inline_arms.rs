@@ -10,6 +10,7 @@ use cellgov_ps3_abi::cell_errors;
 use crate::dispatch::Lv2Dispatch;
 
 use crate::host::{Lv2Host, Lv2Runtime};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_spu_thread_group_terminate`: SPU teardown is not
@@ -47,9 +48,10 @@ impl Lv2Host {
         &mut self,
         cid_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let id = self.alloc_id();
-        self.immediate_write_u32(id, cid_ptr, requester)
+        self.immediate_write_u32(id, cid_ptr, requester, tick)
     }
 
     /// `sys_ppu_thread_yield`: round-robin advance happens on the
@@ -76,6 +78,7 @@ impl Lv2Host {
         timezone_ptr: u32,
         summer_time_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if let Some(d) = self.efault_if_null(&[timezone_ptr, summer_time_ptr]) {
             return d;
@@ -86,14 +89,14 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&zero),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         let dst_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(summer_time_ptr, 4),
             bytes: WritePayload::from_slice(&zero),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -121,14 +124,15 @@ impl Lv2Host {
         &self,
         mem_info_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if let Some(d) = self.efault_if_null(&[mem_info_ptr]) {
             return d;
         }
         let total = cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL;
         // ptr starts at base and only grows; set_mem_alloc_base resets both.
-        debug_assert!(self.mem_alloc_ptr >= self.mem_alloc_base);
-        let consumed = self.mem_alloc_ptr - self.mem_alloc_base;
+        debug_assert!(self.state.mem_alloc_ptr >= self.derived.mem_alloc_base);
+        let consumed = self.state.mem_alloc_ptr - self.derived.mem_alloc_base;
         let available = total.saturating_sub(consumed);
         let mut bytes = [0u8; 8];
         bytes[0..4].copy_from_slice(&total.to_be_bytes());
@@ -138,7 +142,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&bytes),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -153,24 +157,25 @@ impl Lv2Host {
         sec_ptr: u32,
         nsec_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if let Some(d) = self.efault_if_null(&[sec_ptr, nsec_ptr]) {
             return d;
         }
-        let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(self.current_tick.raw());
+        let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(tick.raw());
         let sec_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(sec_ptr, 8),
             bytes: WritePayload::from_slice(&sec.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         let nsec_write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(nsec_ptr, 8),
             bytes: WritePayload::from_slice(&nsec.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -220,6 +225,7 @@ impl Lv2Host {
         pkg_id: u64,
         a2: u64,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         match pkg_id {
             1 | 3 => Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into()),
@@ -227,13 +233,13 @@ impl Lv2Host {
                 Err(_) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(0) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(addr) => {
-                    let authid_be = self.program_authority_id.to_be_bytes();
+                    let authid_be = self.state.program_authority_id.to_be_bytes();
                     let write = Effect::SharedWriteIntent {
                         range: ByteRange::contiguous_u32(addr, 8),
                         bytes: WritePayload::from_slice(&authid_be),
                         ordering: PriorityClass::Normal,
                         source: requester,
-                        source_time: self.current_tick,
+                        source_time: tick,
                     };
                     Lv2Dispatch::Immediate {
                         code: 0,
@@ -247,30 +253,40 @@ impl Lv2Host {
 
     /// `sys_timer_create` stub: bumps the `ProcessCounts` timer
     /// counter, mints an id, writes it through `*id_ptr`.
-    pub(super) fn dispatch_timer_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
-        self.process_counts.timer_inc();
+    pub(super) fn dispatch_timer_create(
+        &mut self,
+        id_ptr: u32,
+        requester: UnitId,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        self.state.process_counts.timer_inc();
         let id = self.alloc_id();
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     /// `sys_timer_destroy` stub: decrements the `ProcessCounts`
     /// timer counter and returns CELL_OK.
     pub(super) fn dispatch_timer_destroy(&mut self) -> Lv2Dispatch {
-        self.process_counts.timer_dec();
+        self.state.process_counts.timer_dec();
         Lv2Dispatch::immediate(0)
     }
 
     /// `sys_rwlock_create` stub: mirrors [`Self::dispatch_timer_create`]
     /// against the rwlock counter.
-    pub(super) fn dispatch_rwlock_create(&mut self, id_ptr: u32, requester: UnitId) -> Lv2Dispatch {
-        self.process_counts.rwlock_inc();
+    pub(super) fn dispatch_rwlock_create(
+        &mut self,
+        id_ptr: u32,
+        requester: UnitId,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        self.state.process_counts.rwlock_inc();
         let id = self.alloc_id();
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     /// `sys_rwlock_destroy` stub: mirrors [`Self::dispatch_timer_destroy`].
     pub(super) fn dispatch_rwlock_destroy(&mut self) -> Lv2Dispatch {
-        self.process_counts.rwlock_dec();
+        self.state.process_counts.rwlock_dec();
         Lv2Dispatch::immediate(0)
     }
 
@@ -300,7 +316,7 @@ impl Lv2Host {
         number: u64,
         args: [u64; 8],
     ) -> Lv2Dispatch {
-        *self.unsupported_syscalls.entry(number).or_insert(0) += 1;
+        *self.obs.unsupported_syscalls.entry(number).or_insert(0) += 1;
         self.log_invariant_break(
             "dispatch.unsupported_stub",
             format_args!(
@@ -347,7 +363,7 @@ impl Lv2Host {
         // An absent entry and an empty set both mean "no recorded
         // library": an empty set must not leave a dangling
         // "imported from" with nothing after it.
-        let requested_from = match self.unresolved_import_requesters.get(&nid) {
+        let requested_from = match self.obs.unresolved_import_requesters.get(&nid) {
             Some(libs) if !libs.is_empty() => {
                 let list = libs.iter().map(String::as_str).collect::<Vec<_>>();
                 format!(", imported from {}", list.join(", "))

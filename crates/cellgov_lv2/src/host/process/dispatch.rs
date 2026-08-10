@@ -7,6 +7,7 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
+use cellgov_time::GuestTicks;
 
 /// `sys_memory_access_right_raw_spu` flag value from `sys_memory.h`.
 const SYS_MEMORY_ACCESS_RIGHT_RAW_SPU: u64 = 0x0000_0000_0000_0001;
@@ -40,8 +41,8 @@ impl Lv2Host {
     /// `sys_process_is_stack`: 1 when `addr` is in any tracked PPU
     /// thread's `[stack_base, stack_base + stack_size)`, else 0.
     pub(in crate::host) fn dispatch_process_is_stack(&self, addr: u32) -> Lv2Dispatch {
-        let on_stack = self.ppu_threads.iter_ids().any(|tid| {
-            let attrs = match self.ppu_threads.get(tid) {
+        let on_stack = self.state.ppu_threads.iter_ids().any(|tid| {
+            let attrs = match self.state.ppu_threads.get(tid) {
                 Some(t) => &t.attrs,
                 None => return false,
             };
@@ -115,9 +116,10 @@ impl Lv2Host {
         class_id: u32,
         count_out_ptr: u32,
         source: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let count = self.process_counts.count_for_class(class_id, self);
-        self.immediate_write_u32(count, count_out_ptr, source)
+        let count = self.state.process_counts.count_for_class(class_id, self);
+        self.immediate_write_u32(count, count_out_ptr, source, tick)
     }
 
     /// `sys_process_get_sdk_version`: writes the title's recorded
@@ -135,6 +137,7 @@ impl Lv2Host {
         &self,
         version_out_ptr: u32,
         source: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let version: u32 = self.sdk_version();
         let write = Effect::SharedWriteIntent {
@@ -142,7 +145,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&version.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -159,6 +162,7 @@ impl Lv2Host {
         &self,
         buf_ptr: u32,
         source: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         let mut blob = [0u8; 64];
         blob[0] = 0x01;
@@ -169,7 +173,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&blob),
             ordering: PriorityClass::Normal,
             source,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,

@@ -109,7 +109,7 @@ fn type_without_bit0_returns_ok_and_links_nothing() {
     host.set_program_authority_id(COREOS_AUTHID);
     let rt = FakeRuntime::with_memory(memory_with(2, 0x30, &[]));
     assert_eq!(call(&mut host, &rt, OPT.into()), Lv2Dispatch::immediate(0));
-    let (calls, manual, linked, _) = host.prx_register_module_witness();
+    let (calls, manual, linked, _) = host.observability().prx_register_module_witness();
     assert_eq!((calls, manual, linked), (1, 0, 0));
 }
 
@@ -122,7 +122,11 @@ fn legacy_option_sizes_skip_the_branch() {
         host.set_program_authority_id(COREOS_AUTHID);
         let rt = FakeRuntime::with_memory(memory_with(1, size, &[0xDEAD_BEEF]));
         assert_eq!(call(&mut host, &rt, OPT.into()), Lv2Dispatch::immediate(0));
-        assert_eq!(host.prx_register_module_witness().1, 0, "size 0x{size:x}");
+        assert_eq!(
+            host.observability().prx_register_module_witness().1,
+            0,
+            "size 0x{size:x}"
+        );
     }
 }
 
@@ -134,7 +138,7 @@ fn a_non_coreos_caller_keeps_elf_is_registered() {
         call(&mut host, &rt, OPT.into()),
         Lv2Dispatch::immediate(ELF_IS_REGISTERED)
     );
-    assert_eq!(host.prx_register_module_witness().1, 0);
+    assert_eq!(host.observability().prx_register_module_witness().1, 0);
 }
 
 #[test]
@@ -157,8 +161,30 @@ fn a_coreos_caller_binds_its_got_slot_to_the_exporter_opd() {
         }
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (calls, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (calls, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((calls, manual, linked, unresolved), (1, 1, 1, 0));
+}
+
+#[test]
+fn a_manual_link_slot_write_carries_the_dispatch_entry_tick() {
+    let mut host = Lv2Host::new();
+    host.set_program_authority_id(COREOS_AUTHID);
+    host.set_firmware_exports(exports_under(LIB, &[(0xDEAD_BEEF, 0x0080_1234)]));
+    let tick = cellgov_time::GuestTicks::new(7);
+    let rt = FakeRuntime::with_memory(memory_with(1, 0x30, &[0xDEAD_BEEF])).with_tick(tick);
+
+    match call(&mut host, &rt, OPT.into()) {
+        Lv2Dispatch::Immediate { code: 0, effects } => {
+            assert_eq!(effects.len(), 1);
+            match &effects[0] {
+                cellgov_effects::Effect::SharedWriteIntent { source_time, .. } => {
+                    assert_eq!(*source_time, tick);
+                }
+                other => panic!("expected SharedWriteIntent, got {other:?}"),
+            }
+        }
+        other => panic!("expected Immediate(0), got {other:?}"),
+    }
 }
 
 #[test]
@@ -174,7 +200,7 @@ fn a_nid_exported_under_a_different_library_does_not_bind() {
         Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (_, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 0, 1));
 }
 
@@ -192,7 +218,7 @@ fn an_unreadable_library_name_is_a_named_refusal_not_a_bind() {
         Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (_, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 0, 1));
     assert_eq!(
         host.invariant_break_site_count("dispatch.prx_register_module_name_unreadable"),
@@ -219,7 +245,7 @@ fn an_unterminated_library_name_within_the_cap_is_unreadable() {
         Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (_, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 0, 1));
     assert_eq!(
         host.invariant_break_site_count("dispatch.prx_register_module_name_unreadable"),
@@ -249,7 +275,7 @@ fn a_255_byte_library_name_still_resolves() {
         Lv2Dispatch::Immediate { code: 0, effects } => assert_eq!(effects.len(), 1),
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (_, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 1, 0));
 }
 
@@ -276,7 +302,7 @@ fn a_non_utf8_library_name_matches_its_lossy_decoded_key() {
         Lv2Dispatch::Immediate { code: 0, effects } => assert_eq!(effects.len(), 1),
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (_, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 1, 0));
 }
 
@@ -292,7 +318,7 @@ fn an_unresolved_nid_leaves_its_slot_alone() {
         Lv2Dispatch::Immediate { code: 0, effects } => assert!(effects.is_empty()),
         other => panic!("expected Immediate(0), got {other:?}"),
     }
-    let (_, manual, linked, unresolved) = host.prx_register_module_witness();
+    let (_, manual, linked, unresolved) = host.observability().prx_register_module_witness();
     assert_eq!((manual, linked, unresolved), (1, 0, 1));
 }
 

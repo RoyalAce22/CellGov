@@ -190,6 +190,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         tty_oob_count: 0,
         bogus_fd_count: 0,
         dump_mem_fault_ranges,
+        obs_null_sink: crate::cli::env::parse_env_bool("CELLGOV_OBS_NULL_SINK"),
     };
     let t_loop_start = Instant::now();
     loop_ctx.loop_start = t_loop_start;
@@ -322,12 +323,12 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             boot_outcome,
             steps,
             observation_manifest,
-            rt.lv2_host().tty_log(),
+            &rt.lv2_host().observability().tty_log,
         )
         .map_err(RunError::SaveObservation)?;
     }
     if let Some(path) = save_boot_summary {
-        let host_invariant_breaks = rt.lv2_host().invariant_break_count() as u64;
+        let host_invariant_breaks = rt.lv2_host().observability().invariant_break_count as u64;
         observation::save_boot_summary_json(
             path,
             title,

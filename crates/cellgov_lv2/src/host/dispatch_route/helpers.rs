@@ -8,10 +8,11 @@ use cellgov_ps3_abi::cell_errors;
 use crate::dispatch::Lv2Dispatch;
 
 use crate::host::{Lv2Host, Lv2Runtime};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
-    /// Append the TTY buffer into [`Self::tty_log`] and write
-    /// `nwritten` back.
+    /// Append the TTY buffer into the observability `tty_log` and
+    /// write `nwritten` back.
     ///
     /// An unmapped buffer skips the append and still reports `len`
     /// written: RPCS3's `sys_tty_write` (`sys_tty.cpp`) errors on a
@@ -25,13 +26,14 @@ impl Lv2Host {
         nwritten_ptr: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if len > 0 {
             if let Some(bytes) = rt.read_committed(buf_ptr as u64, len as usize) {
-                self.tty_log.extend_from_slice(bytes);
+                self.obs.tty_log.extend_from_slice(bytes);
             }
         }
-        self.immediate_write_u32(len, nwritten_ptr, requester)
+        self.immediate_write_u32(len, nwritten_ptr, requester, tick)
     }
 
     /// Resolve the path at `path_ptr` against [`Self::prx_registry`]
@@ -64,22 +66,25 @@ impl Lv2Host {
             "resolve_prx_load: read_committed_until returned a {PATH_CAP}-byte slice"
         );
         let Ok(path) = std::str::from_utf8(bytes) else {
-            self.prx_load_not_found_count += 1;
+            self.obs.prx_load_not_found_count += 1;
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
         };
-        if let Some(entry) = self.prx_registry.lookup_by_path(path) {
+        if let Some(entry) = self.state.prx_registry.lookup_by_path(path) {
             return Lv2Dispatch::immediate(u64::from(entry.kernel_id()));
         }
         let stem = crate::prx_registry::extract_stem(path);
         if path.starts_with(FIRMWARE_DIR) && super::firmware_modules::is_known_firmware_stem(&stem)
         {
-            self.prx_load_hle_stub_count += 1;
+            self.obs.prx_load_hle_stub_count += 1;
             let name = stem.clone();
-            let id = self.prx_registry.register(stem, name, 0, 0, 0, None, None);
+            let id = self
+                .state
+                .prx_registry
+                .register(stem, name, 0, 0, 0, None, None);
             return Lv2Dispatch::immediate(u64::from(id));
         }
-        self.prx_load_not_found_count += 1;
-        *self.prx_load_misses.entry(path.to_owned()).or_insert(0) += 1;
+        self.obs.prx_load_not_found_count += 1;
+        *self.obs.prx_load_misses.entry(path.to_owned()).or_insert(0) += 1;
         Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
     }
 
@@ -90,6 +95,7 @@ impl Lv2Host {
         value: u32,
         ptr: u32,
         source: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
@@ -99,7 +105,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&value.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         Lv2Dispatch::Immediate {
             code: 0,
@@ -107,7 +113,6 @@ impl Lv2Host {
         }
     }
 
-    /// Returns a `CELL_EFAULT` dispatch when any of `ptrs` is null.
     pub(super) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
         if ptrs.contains(&0) {
             Some(Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()))

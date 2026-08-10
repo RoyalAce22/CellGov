@@ -13,6 +13,7 @@ use crate::host::Lv2Host;
 
 use super::init::{write_rsx_driver_info_init, write_rsx_reports_init};
 use super::state::{SysRsxContext, RSX_CONTEXT_ID};
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_rsx_context_allocate` (670): reserve driver-info / reports region,
@@ -34,14 +35,16 @@ impl Lv2Host {
         mem_ctx: u64,
         system_mode: u64,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if self.rsx_context.allocated {
+        if self.state.rsx_context.allocated {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        let base = if self.rsx_context.pending_mem_addr != 0 {
-            self.rsx_context.pending_mem_addr
+        let base = if self.state.rsx_context.pending_mem_addr != 0 {
+            self.state.rsx_context.pending_mem_addr
         } else {
             let Some(end) = self
+                .state
                 .rsx_mem_alloc_ptr
                 .checked_add(region::CONTEXT_RESERVATION)
             else {
@@ -50,8 +53,8 @@ impl Lv2Host {
             if end > Self::SYS_RSX_MEM_END {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
             }
-            let start = self.rsx_mem_alloc_ptr;
-            self.rsx_mem_alloc_ptr = end;
+            let start = self.state.rsx_mem_alloc_ptr;
+            self.state.rsx_mem_alloc_ptr = end;
             start
         };
         let dma_control_addr = control_register::DMA_CONTROL_BASE;
@@ -62,6 +65,7 @@ impl Lv2Host {
         // binding driver_info.handler_queue exposes.
         let queue_id = self.alloc_id();
         let queue_created = self
+            .state
             .event_queues
             .create_with_id(queue_id, event_queue::SIZE);
         debug_assert!(
@@ -69,7 +73,7 @@ impl Lv2Host {
             "sys_rsx event queue id {queue_id:#x} collided with existing queue"
         );
 
-        self.rsx_context = SysRsxContext {
+        self.state.rsx_context = SysRsxContext {
             allocated: true,
             context_id: RSX_CONTEXT_ID,
             dma_control_addr,
@@ -79,7 +83,7 @@ impl Lv2Host {
             event_port_id: queue_id,
             mem_ctx,
             system_mode,
-            pending_mem_addr: self.rsx_context.pending_mem_addr,
+            pending_mem_addr: self.state.rsx_context.pending_mem_addr,
             ..SysRsxContext::new()
         };
 
@@ -88,14 +92,14 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&value.to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
         let mk_write_u64 = |ptr: u32, value: u32| Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(ptr, 8),
             bytes: WritePayload::from_slice(&(value as u64).to_be_bytes()),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         let mut reports_bytes = vec![0u8; reports::SIZE];
@@ -105,7 +109,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&reports_bytes),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         let mut driver_info_bytes = vec![0u8; driver_info::SIZE];
@@ -120,7 +124,7 @@ impl Lv2Host {
             bytes: WritePayload::from_slice(&driver_info_bytes),
             ordering: PriorityClass::Normal,
             source: requester,
-            source_time: self.current_tick,
+            source_time: tick,
         };
 
         Lv2Dispatch::Immediate {

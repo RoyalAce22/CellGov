@@ -51,5 +51,9 @@ name = "title_witnesses"
 required-features = ["title-corpus"]
 
 [[test]]
+name = "obs_null_sink"
+required-features = ["title-corpus"]
+
+[[test]]
 name = "authority_id"
 required-features = ["title-corpus"]

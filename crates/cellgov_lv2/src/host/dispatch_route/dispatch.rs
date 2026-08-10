@@ -32,7 +32,7 @@ impl Lv2Host {
         let out = self.dispatch_routed(request, requester, rt);
         if let Lv2Dispatch::Immediate { code, .. } = &out {
             if *code != 0 {
-                *self.dispatch_nonzero_returns.entry(*code).or_insert(0) += 1;
+                *self.obs.dispatch_nonzero_returns.entry(*code).or_insert(0) += 1;
             }
         }
         out
@@ -46,24 +46,26 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        self.current_tick = rt.current_tick();
+        let tick = rt.current_tick();
         match request {
             Lv2Request::SpuImageOpen { img_ptr, path_ptr } => {
-                self.dispatch_image_open(img_ptr, path_ptr, requester, rt)
+                self.dispatch_image_open(img_ptr, path_ptr, requester, rt, tick)
             }
             Lv2Request::SpuImageImport {
                 handle_out,
                 img_ptr,
                 size,
                 type_id,
-            } => self.dispatch_image_import(handle_out, img_ptr, size, type_id, requester, rt),
+            } => {
+                self.dispatch_image_import(handle_out, img_ptr, size, type_id, requester, rt, tick)
+            }
             Lv2Request::SpuThreadGroupCreate {
                 id_ptr,
                 num_threads,
                 ..
-            } => self.dispatch_group_create(id_ptr, num_threads, requester),
+            } => self.dispatch_group_create(id_ptr, num_threads, requester, tick),
             req @ Lv2Request::SpuThreadInitialize { .. } => {
-                self.dispatch_thread_initialize(req, requester, rt)
+                self.dispatch_thread_initialize(req, requester, rt, tick)
             }
             Lv2Request::SpuThreadGroupStart { group_id } => self.dispatch_group_start(group_id),
             Lv2Request::SpuThreadGroupDestroy { id } => self.dispatch_group_destroy(id),
@@ -71,7 +73,7 @@ impl Lv2Host {
                 group_id,
                 cause_ptr,
                 status_ptr,
-            } => self.dispatch_group_join(group_id, cause_ptr, status_ptr, requester),
+            } => self.dispatch_group_join(group_id, cause_ptr, status_ptr, requester, tick),
             Lv2Request::SpuThreadGroupTerminate { group_id, value } => {
                 self.dispatch_spu_thread_group_terminate_stub(group_id, value)
             }
@@ -83,9 +85,9 @@ impl Lv2Host {
                 len,
                 nwritten_ptr,
                 ..
-            } => self.dispatch_tty_write(buf_ptr, len, nwritten_ptr, requester, rt),
+            } => self.dispatch_tty_write(buf_ptr, len, nwritten_ptr, requester, rt, tick),
             Lv2Request::LwMutexCreate { id_ptr, .. } => {
-                self.dispatch_lwmutex_create(id_ptr, requester)
+                self.dispatch_lwmutex_create(id_ptr, requester, tick)
             }
             Lv2Request::LwMutexDestroy { id } => self.dispatch_lwmutex_destroy(id),
             Lv2Request::LwMutexLock { id, mutex_ptr, .. } => {
@@ -98,7 +100,7 @@ impl Lv2Host {
                 flags,
                 fd_out_ptr,
                 mode,
-            } => self.dispatch_fs_open(path_ptr, flags, fd_out_ptr, mode, requester, rt),
+            } => self.dispatch_fs_open(path_ptr, flags, fd_out_ptr, mode, requester, rt, tick),
             Lv2Request::FsClose { fd } => self.dispatch_fs_close(fd),
             Lv2Request::FsRead {
                 fd,
@@ -122,7 +124,7 @@ impl Lv2Host {
             Lv2Request::FsOpendir {
                 path_ptr,
                 fd_out_ptr,
-            } => self.dispatch_fs_opendir(path_ptr, fd_out_ptr, requester, rt),
+            } => self.dispatch_fs_opendir(path_ptr, fd_out_ptr, requester, rt, tick),
             Lv2Request::FsReaddir {
                 fd,
                 dirent_out_ptr,
@@ -134,9 +136,9 @@ impl Lv2Host {
                 buf_ptr,
                 size,
                 nwrite_ptr,
-            } => self.dispatch_fs_write(fd, buf_ptr, size, nwrite_ptr, requester),
+            } => self.dispatch_fs_write(fd, buf_ptr, size, nwrite_ptr, requester, tick),
             Lv2Request::MutexCreate { id_ptr, attr_ptr } => {
-                self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt)
+                self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt, tick)
             }
             Lv2Request::MutexDestroy { mutex_id } => self.dispatch_mutex_destroy(mutex_id),
             Lv2Request::MutexLock { mutex_id, .. } => self.dispatch_mutex_lock(mutex_id, requester),
@@ -149,7 +151,9 @@ impl Lv2Host {
                 attr_ptr,
                 initial,
                 max,
-            } => self.dispatch_semaphore_create(id_ptr, attr_ptr, initial, max, requester, rt),
+            } => {
+                self.dispatch_semaphore_create(id_ptr, attr_ptr, initial, max, requester, rt, tick)
+            }
             Lv2Request::SemaphoreDestroy { id } => self.dispatch_semaphore_destroy(id),
             Lv2Request::SemaphoreWait { id, timeout } => {
                 self.dispatch_semaphore_wait(id, timeout, requester)
@@ -157,17 +161,17 @@ impl Lv2Host {
             Lv2Request::SemaphorePost { id, val } => self.dispatch_semaphore_post(id, val),
             Lv2Request::SemaphoreTryWait { id } => self.dispatch_semaphore_trywait(id),
             Lv2Request::SemaphoreGetValue { id, out_ptr } => {
-                self.dispatch_semaphore_get_value(id, out_ptr, requester)
+                self.dispatch_semaphore_get_value(id, out_ptr, requester, tick)
             }
             Lv2Request::EventQueueCreate {
                 id_ptr, key, size, ..
-            } => self.dispatch_event_queue_create(id_ptr, key, size, requester),
+            } => self.dispatch_event_queue_create(id_ptr, key, size, requester, tick),
             Lv2Request::EventQueueDestroy { queue_id } => {
                 self.dispatch_event_queue_destroy(queue_id)
             }
             Lv2Request::EventQueueReceive {
                 queue_id, out_ptr, ..
-            } => self.dispatch_event_queue_receive(queue_id, out_ptr, requester),
+            } => self.dispatch_event_queue_receive(queue_id, out_ptr, requester, tick),
             Lv2Request::EventPortSend {
                 port_id,
                 data1,
@@ -185,12 +189,13 @@ impl Lv2Host {
                 size,
                 count_out,
                 requester,
+                tick,
             ),
             Lv2Request::EventFlagCreate {
                 id_ptr,
                 attr_ptr,
                 init,
-            } => self.dispatch_event_flag_create(id_ptr, attr_ptr, init, requester, rt),
+            } => self.dispatch_event_flag_create(id_ptr, attr_ptr, init, requester, rt, tick),
             Lv2Request::EventFlagDestroy { id } => self.dispatch_event_flag_destroy(id),
             Lv2Request::EventFlagWait {
                 id,
@@ -198,26 +203,28 @@ impl Lv2Host {
                 mode,
                 result_ptr,
                 timeout,
-            } => self.dispatch_event_flag_wait(id, bits, mode, result_ptr, timeout, requester),
+            } => {
+                self.dispatch_event_flag_wait(id, bits, mode, result_ptr, timeout, requester, tick)
+            }
             Lv2Request::EventFlagTryWait {
                 id,
                 bits,
                 mode,
                 result_ptr,
-            } => self.dispatch_event_flag_trywait(id, bits, mode, result_ptr, requester),
+            } => self.dispatch_event_flag_trywait(id, bits, mode, result_ptr, requester, tick),
             Lv2Request::EventFlagSet { id, bits } => self.dispatch_event_flag_set(id, bits),
             Lv2Request::EventFlagClear { id, bits } => self.dispatch_event_flag_clear(id, bits),
             Lv2Request::EventFlagCancel { id, num_ptr } => {
-                self.dispatch_event_flag_cancel(id, num_ptr, requester)
+                self.dispatch_event_flag_cancel(id, num_ptr, requester, tick)
             }
             Lv2Request::EventFlagGet { id, flags_ptr } => {
-                self.dispatch_event_flag_get(id, flags_ptr, requester)
+                self.dispatch_event_flag_get(id, flags_ptr, requester, tick)
             }
             Lv2Request::CondCreate {
                 id_ptr,
                 mutex_id,
                 attr_ptr,
-            } => self.dispatch_cond_create(id_ptr, mutex_id, attr_ptr, requester, rt),
+            } => self.dispatch_cond_create(id_ptr, mutex_id, attr_ptr, requester, rt, tick),
             Lv2Request::CondDestroy { id } => self.dispatch_cond_destroy(id),
             Lv2Request::CondWait { id, .. } => self.dispatch_cond_wait(id, requester, rt),
             Lv2Request::CondSignal { id } => self.dispatch_cond_signal(id),
@@ -229,10 +236,10 @@ impl Lv2Host {
                 size,
                 alloc_addr_ptr,
                 ..
-            } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester),
+            } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester, tick),
             Lv2Request::MemoryFree { .. } => self.dispatch_memory_free_noop(),
             Lv2Request::MemoryContainerCreate { cid_ptr, .. } => {
-                self.dispatch_memory_container_create(cid_ptr, requester)
+                self.dispatch_memory_container_create(cid_ptr, requester, tick)
             }
             Lv2Request::PpuThreadYield => self.dispatch_ppu_thread_yield(),
             Lv2Request::PpuThreadStart { target } => self.dispatch_ppu_thread_start(target),
@@ -240,12 +247,12 @@ impl Lv2Host {
             Lv2Request::TimeGetTimezone {
                 timezone_ptr,
                 summer_time_ptr,
-            } => self.dispatch_time_get_timezone(timezone_ptr, summer_time_ptr, requester),
+            } => self.dispatch_time_get_timezone(timezone_ptr, summer_time_ptr, requester, tick),
             Lv2Request::MemoryGetUserMemorySize { mem_info_ptr } => {
-                self.dispatch_memory_get_user_memory_size(mem_info_ptr, requester)
+                self.dispatch_memory_get_user_memory_size(mem_info_ptr, requester, tick)
             }
             Lv2Request::TimeGetCurrentTime { sec_ptr, nsec_ptr } => {
-                self.dispatch_time_get_current_time(sec_ptr, nsec_ptr, requester)
+                self.dispatch_time_get_current_time(sec_ptr, nsec_ptr, requester, tick)
             }
             Lv2Request::PpuThreadExit { exit_value } => {
                 self.dispatch_ppu_thread_exit(exit_value, requester)
@@ -263,15 +270,19 @@ impl Lv2Host {
             Lv2Request::PpuThreadJoin {
                 target,
                 status_out_ptr,
-            } => self.dispatch_ppu_thread_join(target, status_out_ptr, requester),
+            } => self.dispatch_ppu_thread_join(target, status_out_ptr, requester, tick),
             Lv2Request::SysRsxMemoryAllocate {
                 mem_handle_ptr,
                 mem_addr_ptr,
                 size,
                 ..
-            } => {
-                self.dispatch_sys_rsx_memory_allocate(mem_handle_ptr, mem_addr_ptr, size, requester)
-            }
+            } => self.dispatch_sys_rsx_memory_allocate(
+                mem_handle_ptr,
+                mem_addr_ptr,
+                size,
+                requester,
+                tick,
+            ),
             Lv2Request::SysRsxMemoryFree { .. } => self.dispatch_sys_rsx_memory_free_noop(),
             Lv2Request::SysRsxContextAllocate {
                 context_id_ptr,
@@ -288,6 +299,7 @@ impl Lv2Host {
                 mem_ctx,
                 system_mode,
                 requester,
+                tick,
             ),
             Lv2Request::SysRsxContextFree { .. } => self.dispatch_sys_rsx_context_free_noop(),
             Lv2Request::SysRsxContextAttribute {
@@ -297,9 +309,9 @@ impl Lv2Host {
                 a4,
                 a5,
                 a6,
-            } => {
-                self.dispatch_sys_rsx_context_attribute(context_id, package_id, a3, a4, a5, a6, rt)
-            }
+            } => self.dispatch_sys_rsx_context_attribute(
+                context_id, package_id, a3, a4, a5, a6, tick, rt,
+            ),
             Lv2Request::SysRsxContextIomap {
                 context_id,
                 io,
@@ -311,9 +323,9 @@ impl Lv2Host {
                 dev_addr_ptr,
                 a2_ptr,
                 dev_id,
-            } => self.dispatch_sys_rsx_device_map(dev_addr_ptr, a2_ptr, dev_id, requester),
+            } => self.dispatch_sys_rsx_device_map(dev_addr_ptr, a2_ptr, dev_id, requester, tick),
             Lv2Request::SsAccessControlEngine { pkg_id, a2, .. } => {
-                self.dispatch_ss_access_control_engine(pkg_id, a2, requester)
+                self.dispatch_ss_access_control_engine(pkg_id, a2, requester, tick)
             }
             // Both signatures place `path` at arg 0: RPCS3
             // sys_prx.cpp `_sys_prx_load_module(path, flags, pOpt)`,
@@ -329,11 +341,11 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_START_MODULE,
                 args,
-            } => self.dispatch_prx_start_module(args, requester, rt),
+            } => self.dispatch_prx_start_module(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_STOP_MODULE,
                 args,
-            } => self.dispatch_prx_stop_module(args, requester, rt),
+            } => self.dispatch_prx_stop_module(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_UNLOAD_MODULE,
                 args,
@@ -349,7 +361,7 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_REGISTER_MODULE,
                 args,
-            } => self.dispatch_prx_register_module(args, requester, rt),
+            } => self.dispatch_prx_register_module(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_REGISTER_LIBRARY,
                 ..
@@ -357,11 +369,11 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::PPU_THREAD_GET_PRIORITY,
                 args,
-            } => self.dispatch_ppu_thread_get_priority(args, requester),
+            } => self.dispatch_ppu_thread_get_priority(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_GET_MODULE_LIST,
                 args,
-            } => self.dispatch_prx_get_module_list(args, requester, rt),
+            } => self.dispatch_prx_get_module_list(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_LOCAL,
                 args,
@@ -389,27 +401,27 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MEMORY_CONTAINER_CREATE_324,
                 args,
-            } => self.dispatch_memory_container_create_324(args, requester),
+            } => self.dispatch_memory_container_create_324(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_ADDRESS,
                 args,
-            } => self.dispatch_mmapper_allocate_address(args, requester),
+            } => self.dispatch_mmapper_allocate_address(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
                 args,
-            } => self.dispatch_mmapper_map_shared_memory(args, requester),
+            } => self.dispatch_mmapper_map_shared_memory(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_SEARCH_AND_MAP,
                 args,
-            } => self.dispatch_mmapper_search_and_map(args, requester),
+            } => self.dispatch_mmapper_search_and_map(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
                 args,
-            } => self.dispatch_mmapper_allocate_shared_memory_from_container(args, requester),
+            } => self.dispatch_mmapper_allocate_shared_memory_from_container(args, requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
                 args,
-            } => self.dispatch_mmapper_allocate_shared_memory(args, requester),
+            } => self.dispatch_mmapper_allocate_shared_memory(args, requester, tick),
             Lv2Request::ProcessExit { .. } => self.dispatch_process_exit(),
             Lv2Request::ProcessGetPid => self.dispatch_process_get_pid(),
             Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(),
@@ -425,24 +437,30 @@ impl Lv2Host {
             Lv2Request::ProcessGetNumberOfObject {
                 class_id,
                 count_out_ptr,
-            } => self.dispatch_process_get_number_of_object(class_id, count_out_ptr, requester),
+            } => {
+                self.dispatch_process_get_number_of_object(class_id, count_out_ptr, requester, tick)
+            }
             Lv2Request::ProcessGetSdkVersion {
                 version_out_ptr, ..
-            } => self.dispatch_process_get_sdk_version(version_out_ptr, requester),
+            } => self.dispatch_process_get_sdk_version(version_out_ptr, requester, tick),
             Lv2Request::ProcessGetParamsfo { buf_ptr } => {
-                self.dispatch_process_get_paramsfo(buf_ptr, requester)
+                self.dispatch_process_get_paramsfo(buf_ptr, requester, tick)
             }
-            Lv2Request::TimerCreate { id_ptr } => self.dispatch_timer_create(id_ptr, requester),
+            Lv2Request::TimerCreate { id_ptr } => {
+                self.dispatch_timer_create(id_ptr, requester, tick)
+            }
             Lv2Request::TimerDestroy { .. } => self.dispatch_timer_destroy(),
             Lv2Request::RwlockCreate { id_ptr, .. } => {
-                self.dispatch_rwlock_create(id_ptr, requester)
+                self.dispatch_rwlock_create(id_ptr, requester, tick)
             }
             Lv2Request::RwlockDestroy { .. } => self.dispatch_rwlock_destroy(),
             Lv2Request::EventPortCreate {
                 id_ptr,
                 port_type,
                 name,
-            } => self.dispatch_event_port_create(id_ptr, u64::from(port_type), name, requester),
+            } => {
+                self.dispatch_event_port_create(id_ptr, u64::from(port_type), name, requester, tick)
+            }
             Lv2Request::EventPortDestroy { id } => self.dispatch_event_port_destroy(id),
             Lv2Request::Hypercall { lev, r11, args } => {
                 self.dispatch_hypercall_rejection(lev.get(), r11, args)

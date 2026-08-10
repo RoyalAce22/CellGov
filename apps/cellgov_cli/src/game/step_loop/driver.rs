@@ -56,6 +56,14 @@ pub(in crate::game) fn step_loop(
                 let commit_result = rt.commit_step(&step.result, &step.effects);
                 let t3 = Instant::now();
 
+                // Inertness gate. Commit/wake paths push invariant
+                // breaks AFTER the dispatch-time drain, so entries can
+                // be pending here; `clear_observability` carries them
+                // across the reset for the next dispatch's trace drain.
+                if ctx.obs_null_sink {
+                    rt.lv2_host_mut().clear_observability();
+                }
+
                 match classify_step_outcome(&step.result, &commit_result, ctx.checkpoint, None) {
                     StepVerdict::RsxCheckpoint(addr) => {
                         break (
@@ -160,7 +168,6 @@ pub(in crate::game) fn step_loop(
                         BootOutcome::ProcessExit,
                     );
                 }
-                // Every unit drained without a process/thread-exit dispatch.
                 break (
                     format!(
                         "ALL_UNITS_FINISHED after {} steps without sys_process_exit",
@@ -192,7 +199,6 @@ pub(in crate::game) fn step_loop(
                 break (diag, BootOutcome::TimeOverflow);
             }
             Err(StepError::SchedulerNotReinstalled) => {
-                // The boot driver does not call Runtime::restore_into.
                 unreachable!(
                     "boot driver does not call Runtime::restore_into; \
                      reaching this arm means a new caller added a \

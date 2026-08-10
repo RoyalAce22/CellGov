@@ -98,7 +98,7 @@ fn syscall_324_writes_fresh_cid_to_out_ptr() {
 fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 334,
@@ -111,7 +111,10 @@ fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -345,7 +348,7 @@ fn syscall_337_search_walks_past_existing_install() {
 fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let r = host.dispatch(
         Lv2Request::Unsupported {
             number: 337,
@@ -355,7 +358,10 @@ fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
         &rt,
     );
     assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()));
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -619,7 +625,11 @@ fn syscall_332_same_ipc_key_returns_existing_mem_id() {
     let second = dispatch_332_keyed(&mut host, &rt, 0x8006_0100_0000_0010, 0x20000);
     assert_eq!(first, second);
     assert_eq!(host.mmapper_ipc().len(), 1);
-    let handle = host.mmapper_handles.get(first).expect("handle must exist");
+    let handle = host
+        .state
+        .mmapper_handles
+        .get(first)
+        .expect("handle must exist");
     assert_eq!(handle.size, 0x10000);
 }
 

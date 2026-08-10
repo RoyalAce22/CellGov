@@ -163,13 +163,14 @@ pub fn bench_boot(
         "BENCH_VRSAVE_WITNESS: mfvrsave_executed={total_mfvrsave_executed} vrsave_written={any_vrsave_written}"
     );
 
-    let host_invariant_breaks = rt.lv2_host().invariant_break_count() as u64;
+    let host_invariant_breaks = rt.lv2_host().observability().invariant_break_count as u64;
     eprintln!("BENCH_HOST_INVARIANT_BREAKS: count={host_invariant_breaks}");
     // Only the first break of a boot prints its detail line, so the
     // per-site split is the only way to read the rest.
     let break_sites: Vec<String> = rt
         .lv2_host()
-        .invariant_break_sites()
+        .observability()
+        .invariant_break_sites
         .iter()
         .map(|(site, hits)| format!("{site}={hits}"))
         .collect();
@@ -241,12 +242,15 @@ pub fn bench_boot(
     let spu_image_registers = rt.lv2_host().content_store().register_invocations();
     eprintln!("BENCH_SPU_IMAGE_REGISTER_WITNESS: count={spu_image_registers}");
 
-    let spu_thread_init_dispatches = rt.lv2_host().spu_thread_initialize_dispatches();
+    let spu_thread_init_dispatches = rt
+        .lv2_host()
+        .observability()
+        .spu_thread_initialize_dispatches;
     eprintln!("BENCH_SPU_THREAD_INIT_WITNESS: count={spu_thread_init_dispatches}");
 
     let lwmutex_acquires = rt.lv2_host().lwmutexes().acquires_count();
     let lwmutex_releases = rt.lv2_host().lwmutexes().releases_count();
-    let cond_reacquires = rt.lv2_host().cond_reacquire_wake_calls();
+    let cond_reacquires = rt.lv2_host().observability().cond_reacquire_wake_calls;
     eprintln!(
         "BENCH_LWMUTEX_COND_WITNESS: lwmutex_acquires={lwmutex_acquires} lwmutex_releases={lwmutex_releases} cond_reacquires={cond_reacquires}"
     );
@@ -254,19 +258,20 @@ pub fn bench_boot(
     // lwmutex_unknown_locks is the cellSysmodule LoadModule-failure
     // signature; a wrong system authid reintroduces it.
     let program_authority_id = rt.lv2_host().program_authority_id();
-    let lwmutex_unknown_locks = rt.lv2_host().lwmutex_unknown_lock_count();
+    let lwmutex_unknown_locks = rt.lv2_host().observability().lwmutex_unknown_lock_count;
     eprintln!(
         "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} authid_source={authid_source} lwmutex_unknown_locks={lwmutex_unknown_locks}"
     );
     eprintln!(
         "BENCH_MUTEX_UNLOCK_WITNESS: not_owner={}",
-        rt.lv2_host().mutex_unlock_not_owner_count()
+        rt.lv2_host().observability().mutex_unlock_not_owner_count
     );
     // Every non-zero immediate return, error or value. A code absent
     // here was never produced by LV2 this boot.
     let codes: Vec<String> = rt
         .lv2_host()
-        .dispatch_nonzero_returns()
+        .observability()
+        .dispatch_nonzero_returns
         .iter()
         .map(|(code, hits)| format!("0x{code:08x}={hits}"))
         .collect();
@@ -277,7 +282,7 @@ pub fn bench_boot(
     // walk resolved. A frontier run with linked=0 means the branch
     // ran but bound nothing.
     let (reg_calls, reg_manual, reg_linked, reg_unresolved) =
-        rt.lv2_host().prx_register_module_witness();
+        rt.lv2_host().observability().prx_register_module_witness();
     eprintln!(
         "BENCH_REGISTER_MODULE_WITNESS: calls={reg_calls} manual={reg_manual} linked_slots={reg_linked} unresolved_nids={reg_unresolved}"
     );
@@ -285,7 +290,7 @@ pub fn bench_boot(
     // Event-port IPC binding: attempts vs. those that found a queue
     // registered under the key. A gap is the connect-before-create
     // race, or a producer CellGov never runs.
-    let (ipc_attempts, ipc_bound) = rt.lv2_host().event_port_ipc_connects();
+    let (ipc_attempts, ipc_bound) = rt.lv2_host().observability().event_port_ipc_connects;
     eprintln!(
         "BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts={ipc_attempts} ipc_connect_bound={ipc_bound} keyed_queues={}",
         rt.lv2_host().keyed_event_queue_count(),
@@ -296,7 +301,8 @@ pub fn bench_boot(
     // frontier row; the counts separate a probe from a retry loop.
     let unsupported: Vec<String> = rt
         .lv2_host()
-        .unsupported_syscalls()
+        .observability()
+        .unsupported_syscalls
         .iter()
         .map(|(number, hits)| format!("{number}={hits}"))
         .collect();
@@ -309,7 +315,7 @@ pub fn bench_boot(
     // System-IPC namespace production witnesses, both channels. A
     // silent namespace prints all zeros; the key line is suppressed
     // rather than printed empty.
-    let ipc = rt.lv2_host().system_ipc_witness();
+    let ipc = &rt.lv2_host().observability().system_ipc_witness;
     eprintln!(
         "BENCH_SYSTEM_IPC_WITNESS: shm_creates={} shm_attaches={} shm_maps={} shm_writes={} \
          cond_creates={} cond_waits={} cond_signals={} equeue_creates={} equeue_refs={} \
@@ -338,12 +344,13 @@ pub fn bench_boot(
     // PRX load-miss witnesses: firmware misses stubbed with a real
     // kernel id vs loads reported CELL_ENOENT. Non-vacuity evidence
     // for the sc 480 miss arms.
-    let prx_hle_stubs = rt.lv2_host().prx_load_hle_stub_count();
-    let prx_not_found = rt.lv2_host().prx_load_not_found_count();
+    let prx_hle_stubs = rt.lv2_host().observability().prx_load_hle_stub_count;
+    let prx_not_found = rt.lv2_host().observability().prx_load_not_found_count;
     eprintln!("BENCH_PRX_LOAD_WITNESS: hle_stubs={prx_hle_stubs} not_found={prx_not_found}");
     let prx_misses: Vec<String> = rt
         .lv2_host()
-        .prx_load_misses()
+        .observability()
+        .prx_load_misses
         .iter()
         .map(|(path, hits)| format!("{path}={hits}"))
         .collect();

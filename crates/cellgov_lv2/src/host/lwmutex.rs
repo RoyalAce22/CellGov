@@ -11,17 +11,19 @@ use cellgov_ps3_abi::cell_errors;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     pub(super) fn dispatch_lwmutex_create(
         &mut self,
         id_ptr: u32,
         requester: UnitId,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let Some(id) = self.lwmutexes.create() else {
+        let Some(id) = self.state.lwmutexes.create() else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_lwmutex_lock(
@@ -30,12 +32,13 @@ impl Lv2Host {
         mutex_ptr: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        match self.lwmutexes.acquire_or_enqueue(id, caller) {
+        match self.state.lwmutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Unknown => {
-                self.lwmutex_unknown_lock_count = self.lwmutex_unknown_lock_count.wrapping_add(1);
+                self.obs.lwmutex_unknown_lock_count =
+                    self.obs.lwmutex_unknown_lock_count.wrapping_add(1);
                 Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Acquired => Lv2Dispatch::immediate(0),
@@ -54,10 +57,10 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_lwmutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        match self.lwmutexes.try_acquire(id, caller) {
+        match self.state.lwmutexes.try_acquire(id, caller) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::LwMutexAcquire::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::LwMutexAcquire::Contended) => {
@@ -67,10 +70,10 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_lwmutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        match self.lwmutexes.release_and_wake_next(id, caller) {
+        match self.state.lwmutexes.release_and_wake_next(id, caller) {
             crate::sync_primitives::LwMutexRelease::Unknown => {
                 Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
             }
@@ -90,7 +93,7 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_lwmutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
-        let Some(entry) = self.lwmutexes.lookup(id) else {
+        let Some(entry) = self.state.lwmutexes.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         // Only parked waiters block destroy; the signal flag does
@@ -98,7 +101,7 @@ impl Lv2Host {
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
-        self.lwmutexes.destroy(id);
+        self.state.lwmutexes.destroy(id);
         Lv2Dispatch::immediate(0)
     }
 }

@@ -48,6 +48,7 @@ impl Lv2Host {
         a4: u64,
         a5: u64,
         _a6: u64,
+        tick: GuestTicks,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         // `allocated && matching id` is a validity gate, not a
@@ -56,27 +57,27 @@ impl Lv2Host {
         // reallocated context re-attributing under the same id
         // passes here. Pinned by
         // sys_rsx_context_attribute_after_free_still_dispatches.
-        if !self.rsx_context.allocated || context_id != self.rsx_context.context_id {
+        if !self.state.rsx_context.allocated || context_id != self.state.rsx_context.context_id {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         match package_id {
-            package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(a3, a4, rt),
+            package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(a3, a4, tick, rt),
             package::FLIP_MODE => {
-                self.rsx_context.flip_mode = a4 as u32;
+                self.state.rsx_context.flip_mode = a4 as u32;
                 Lv2Dispatch::immediate(0)
             }
             package::FLIP_BUFFER => self.sys_rsx_attribute_flip(a3, a4),
             package::SET_DISPLAY_BUFFER => self.sys_rsx_attribute_set_display_buffer(a3, a4, a5),
             PACKAGE_CELLGOV_SET_FLIP_HANDLER => {
-                self.rsx_context.flip_handler_addr = a3 as u32;
+                self.state.rsx_context.flip_handler_addr = a3 as u32;
                 Lv2Dispatch::immediate(0)
             }
             PACKAGE_CELLGOV_SET_VBLANK_HANDLER => {
-                self.rsx_context.vblank_handler_addr = a3 as u32;
+                self.state.rsx_context.vblank_handler_addr = a3 as u32;
                 Lv2Dispatch::immediate(0)
             }
             PACKAGE_CELLGOV_SET_USER_HANDLER => {
-                self.rsx_context.user_handler_addr = a3 as u32;
+                self.state.rsx_context.user_handler_addr = a3 as u32;
                 Lv2Dispatch::immediate(0)
             }
             _ => self.sys_rsx_attribute_unknown(package_id),
@@ -91,16 +92,17 @@ impl Lv2Host {
         &mut self,
         a3: u64,
         a4: u64,
+        tick: GuestTicks,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        self.rsx_context.fifo_get = a3 as u32;
-        self.rsx_context.fifo_put = a4 as u32;
+        self.state.rsx_context.fifo_get = a3 as u32;
+        self.state.rsx_context.fifo_put = a4 as u32;
         let put_writable = rt.writable(control_register::PUT_ADDR as u64, 4);
         let get_writable = rt.writable(control_register::GET_ADDR as u64, 4);
         if !(put_writable && get_writable) {
             return Lv2Dispatch::immediate(0);
         }
-        let now = self.current_tick;
+        let now = tick;
         let effects = mmio_init_effects(a3 as u32, a4 as u32, now);
         Lv2Dispatch::Immediate { code: 0, effects }
     }
@@ -121,15 +123,15 @@ impl Lv2Host {
         let height = a4 as u32;
         let pitch = (a5 >> 32) as u32;
         let offset = a5 as u32;
-        self.rsx_context.display_buffers[id] = RsxDisplayBuffer {
+        self.state.rsx_context.display_buffers[id] = RsxDisplayBuffer {
             offset,
             pitch,
             width,
             height,
         };
         let next_count = (id as u32) + 1;
-        if next_count > self.rsx_context.display_buffers_count {
-            self.rsx_context.display_buffers_count = next_count;
+        if next_count > self.state.rsx_context.display_buffers_count {
+            self.state.rsx_context.display_buffers_count = next_count;
         }
         Lv2Dispatch::immediate(0)
     }
@@ -179,8 +181,11 @@ impl Lv2Host {
     /// Returns the first display-buffer slot whose recorded `offset`
     /// equals `target_offset`, else 0 with a `log_invariant_break`.
     fn resolve_direct_flip_buffer_index(&mut self, target_offset: u32) -> u8 {
-        let count = self.rsx_context.display_buffers_count as usize;
-        for (i, slot) in self.rsx_context.display_buffers[..count].iter().enumerate() {
+        let count = self.state.rsx_context.display_buffers_count as usize;
+        for (i, slot) in self.state.rsx_context.display_buffers[..count]
+            .iter()
+            .enumerate()
+        {
             if slot.offset == target_offset {
                 return i as u8;
             }

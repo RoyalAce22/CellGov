@@ -18,6 +18,7 @@ use cellgov_ps3_abi::system_ipc::{
 use crate::dispatch::{CondMutexKind, Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::PpuThreadId;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     pub(super) fn dispatch_cond_create(
@@ -27,12 +28,14 @@ impl Lv2Host {
         attr_ptr: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if self.mutexes.lookup(mutex_id).is_none() {
+        if self.state.mutexes.lookup(mutex_id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         let id = self.alloc_id();
         if self
+            .state
             .conds
             .create_with_id(id, mutex_id, CondMutexKind::Mutex)
             .is_err()
@@ -45,25 +48,25 @@ impl Lv2Host {
         // stays keyless; attr validation is otherwise unchanged.
         if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
             if ipc_key != 0 {
-                self.cond_ipc_keys.insert(id, ipc_key);
+                self.derived.cond_ipc_keys.insert(id, ipc_key);
                 if super::is_system_ipc_key(ipc_key) {
-                    self.system_ipc_witness.cond_creates += 1;
-                    self.system_ipc_witness.note_key(ipc_key);
+                    self.obs.system_ipc_witness.cond_creates += 1;
+                    self.obs.system_ipc_witness.note_key(ipc_key);
                 }
             }
         }
-        self.immediate_write_u32(id, id_ptr, requester)
+        self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_cond_destroy(&mut self, id: u32) -> Lv2Dispatch {
-        let Some(entry) = self.conds.lookup(id) else {
+        let Some(entry) = self.state.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
             return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
         }
-        self.conds.destroy(id);
-        self.cond_ipc_keys.remove(&id);
+        self.state.conds.destroy(id);
+        self.derived.cond_ipc_keys.remove(&id);
         Lv2Dispatch::immediate(0)
     }
 
@@ -74,7 +77,7 @@ impl Lv2Host {
     /// unconsumed data (cursor < limit). cond\[0\] record-finish waits
     /// are producer-fed and not synthesized here.
     fn cond_ring_wake_check(&mut self, id: u32, rt: &dyn Lv2Runtime) -> bool {
-        let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
+        let Some(&ipc_key) = self.derived.cond_ipc_keys.get(&id) else {
             return false;
         };
         let Some(slot) = ipc_key.checked_sub(CELLSYSUTIL_COND1_IPC_KEY_BASE) else {
@@ -83,7 +86,7 @@ impl Lv2Host {
         if slot >= u64::from(CELLSYSUTIL_SLOT_COUNT) {
             return false;
         }
-        let Some(&base) = self.system_seed_bases.get(&CELLSYSUTIL_SHM_IPC_KEY) else {
+        let Some(&base) = self.derived.system_seed_bases.get(&CELLSYSUTIL_SHM_IPC_KEY) else {
             return false;
         };
         let read_u32 = |addr: u32| -> Option<u32> {
@@ -95,7 +98,7 @@ impl Lv2Host {
         let limit = read_u32(slot_base.wrapping_add(CELLSYSUTIL_SLOT_LIMIT_OFFSET));
         if let (Some(cursor), Some(limit)) = (cursor, limit) {
             if cursor < limit {
-                self.cond_ring_wakes = self.cond_ring_wakes.wrapping_add(1);
+                self.obs.cond_ring_wakes = self.obs.cond_ring_wakes.wrapping_add(1);
                 return true;
             }
         }
@@ -104,30 +107,34 @@ impl Lv2Host {
 
     /// Bump the namespace wait / signal witness for a keyed cond.
     fn note_system_ipc_cond_event(&mut self, id: u32, signal: bool) {
-        let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
+        let Some(&ipc_key) = self.derived.cond_ipc_keys.get(&id) else {
             return;
         };
         if !super::is_system_ipc_key(ipc_key) {
             return;
         }
         if signal {
-            self.system_ipc_witness.cond_signals += 1;
+            self.obs.system_ipc_witness.cond_signals += 1;
         } else {
-            self.system_ipc_witness.cond_waits += 1;
+            self.obs.system_ipc_witness.cond_waits += 1;
         }
-        self.system_ipc_witness.note_key(ipc_key);
+        self.obs.system_ipc_witness.note_key(ipc_key);
     }
 
     /// Bump the producer-wait witness when a park lands on a
     /// cellSysutil cond\[0\] (record-finish wait for the next
     /// producer record).
     fn note_cond_park_after_seed(&mut self, id: u32) {
-        let Some(&ipc_key) = self.cond_ipc_keys.get(&id) else {
+        let Some(&ipc_key) = self.derived.cond_ipc_keys.get(&id) else {
             return;
         };
         if let Some(slot) = ipc_key.checked_sub(CELLSYSUTIL_COND0_IPC_KEY_BASE) {
             if slot < u64::from(CELLSYSUTIL_SLOT_COUNT) {
-                *self.cond0_producer_waits_by_slot.entry(slot).or_insert(0) += 1;
+                *self
+                    .obs
+                    .cond0_producer_waits_by_slot
+                    .entry(slot)
+                    .or_insert(0) += 1;
             }
         }
     }
@@ -138,10 +145,10 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        let Some(caller) = self.ppu_threads.thread_id_for_unit(requester) else {
+        let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        if self.conds.lookup(id).is_none() {
+        if self.state.conds.lookup(id).is_none() {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         }
         self.note_system_ipc_cond_event(id, false);
@@ -149,13 +156,14 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(0);
         }
         let entry = self
+            .state
             .conds
             .lookup(id)
             .expect("cond presence checked just above");
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
         let release = match mutex_kind {
-            CondMutexKind::Mutex => self.mutexes.release_and_wake_next(mutex_id, caller),
+            CondMutexKind::Mutex => self.state.mutexes.release_and_wake_next(mutex_id, caller),
             CondMutexKind::LwMutex => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
             }
@@ -168,7 +176,7 @@ impl Lv2Host {
                 Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
             }
             crate::sync_primitives::MutexRelease::Freed => {
-                match self.conds.enqueue_waiter(id, caller) {
+                match self.state.conds.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
                         return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -196,7 +204,7 @@ impl Lv2Host {
                 }
             }
             crate::sync_primitives::MutexRelease::Transferred { new_owner } => {
-                match self.conds.enqueue_waiter(id, caller) {
+                match self.state.conds.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::CondEnqueueError::UnknownId) => {
                         return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -235,7 +243,7 @@ impl Lv2Host {
 
     pub(super) fn dispatch_cond_signal_all(&mut self, id: u32) -> Lv2Dispatch {
         self.note_system_ipc_cond_event(id, true);
-        let Some(entry) = self.conds.lookup(id) else {
+        let Some(entry) = self.state.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
@@ -244,6 +252,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
         }
         let wakers = self
+            .state
             .conds
             .signal_all(id)
             .expect("cond looked up just above must still exist");
@@ -256,12 +265,12 @@ impl Lv2Host {
             let Some(unit) = self.resolve_wake_thread(waker, "cond_signal_all.waker") else {
                 continue;
             };
-            match self.mutexes.try_acquire(mutex_id, waker) {
+            match self.state.mutexes.try_acquire(mutex_id, waker) {
                 Some(crate::sync_primitives::MutexAcquire::Acquired) => {
                     wake_with(unit, 0u64, &mut woken_unit_ids, &mut response_updates);
                 }
                 Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                    match self.mutexes.enqueue_waiter(mutex_id, waker) {
+                    match self.state.mutexes.enqueue_waiter(mutex_id, waker) {
                         Ok(()) => response_updates
                             .push((unit, PendingResponse::ReturnCode { code: 0u64 })),
                         Err(err) => {
@@ -305,7 +314,7 @@ impl Lv2Host {
 
     pub(super) fn dispatch_cond_signal_to(&mut self, id: u32, target_thread: u32) -> Lv2Dispatch {
         self.note_system_ipc_cond_event(id, true);
-        let Some(entry) = self.conds.lookup(id) else {
+        let Some(entry) = self.state.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
@@ -314,7 +323,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
         }
         let target = PpuThreadId::new(target_thread as u64);
-        match self.conds.signal_to(id, target) {
+        match self.state.conds.signal_to(id, target) {
             Ok(()) => {}
             Err(crate::sync_primitives::CondSignalToError::UnknownId) => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
@@ -327,17 +336,21 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_cond_signal(&mut self, id: u32) -> Lv2Dispatch {
-        self.cond_signal_dispatches = self.cond_signal_dispatches.wrapping_add(1);
-        if let Some(&ipc_key) = self.cond_ipc_keys.get(&id) {
-            *self.cond_keyed_signal_counts.entry(ipc_key).or_insert(0) += 1;
+        self.obs.cond_signal_dispatches = self.obs.cond_signal_dispatches.wrapping_add(1);
+        if let Some(&ipc_key) = self.derived.cond_ipc_keys.get(&id) {
+            *self
+                .obs
+                .cond_keyed_signal_counts
+                .entry(ipc_key)
+                .or_insert(0) += 1;
         }
         self.note_system_ipc_cond_event(id, true);
-        let Some(entry) = self.conds.lookup(id) else {
+        let Some(entry) = self.state.conds.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let mutex_id = entry.mutex_id();
         let mutex_kind = entry.mutex_kind();
-        let Some(waker) = self.conds.signal_one(id) else {
+        let Some(waker) = self.state.conds.signal_one(id) else {
             return Lv2Dispatch::immediate(0);
         };
         match mutex_kind {
@@ -352,17 +365,17 @@ impl Lv2Host {
         mutex_id: u32,
         use_lwmutex: bool,
     ) -> Lv2Dispatch {
-        self.cond_reacquire_wake_calls = self.cond_reacquire_wake_calls.wrapping_add(1);
+        self.obs.cond_reacquire_wake_calls = self.obs.cond_reacquire_wake_calls.wrapping_add(1);
         debug_assert!(!use_lwmutex, "lwmutex cond re-acquire not wired");
         let Some(waker_unit) = self.resolve_wake_thread(waker, "cond_reacquire_wake") else {
             return Lv2Dispatch::immediate(0u64);
         };
-        match self.mutexes.try_acquire(mutex_id, waker) {
+        match self.state.mutexes.try_acquire(mutex_id, waker) {
             Some(crate::sync_primitives::MutexAcquire::Acquired) => {
                 cond_wake_dispatch(waker_unit, 0u64, true)
             }
             Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                if let Err(err) = self.mutexes.enqueue_waiter(mutex_id, waker) {
+                if let Err(err) = self.state.mutexes.enqueue_waiter(mutex_id, waker) {
                     self.record_invariant_break(
                         "cond_reacquire_wake.Contended.enqueue",
                         format_args!(

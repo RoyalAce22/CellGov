@@ -67,7 +67,7 @@ fn zero_size_with_valid_fd_returns_ok_with_nwrite_zero_and_no_break() {
         .register_blob("/foo".into(), b"hello".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let d = run(&mut host, &rt, fs_write(fd, 0x1000, 0, 0x2000));
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
@@ -75,7 +75,7 @@ fn zero_size_with_valid_fd_returns_ok_with_nwrite_zero_and_no_break() {
     assert_eq!(code, 0, "size==0 + valid fd must yield CELL_OK");
     extract_nwrite_zero(&effects, 0x2000);
     assert_eq!(
-        host.invariant_break_count() - breaks_before,
+        host.observability().invariant_break_count - breaks_before,
         0,
         "zero-byte sys_fs_write to a valid fd is not a violation; no invariant break expected"
     );
@@ -145,7 +145,7 @@ fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
         .register_blob("/foo".into(), b"hello".to_vec())
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let d = run(&mut host, &rt, fs_write(fd, 0x1000, 16, 0x2000));
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
@@ -157,7 +157,7 @@ fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
     );
     extract_nwrite_zero(&effects, 0x2000);
     assert_eq!(
-        host.invariant_break_count() - breaks_before,
+        host.observability().invariant_break_count - breaks_before,
         1,
         "the null-backend write path must log_invariant_break exactly once"
     );

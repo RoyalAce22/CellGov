@@ -518,6 +518,22 @@ Includes an SPU ELF loader.
 table, PPU thread table, TLS template, child-stack allocator, syscall
 classification, syscall dispatch.
 
+The host's fields live in exactly three buckets. `Lv2State` is the
+hashed guest-visible state: its `state_hash` opens with an
+exhaustive destructure with no rest pattern, so adding a field
+without a fold decision is a compile error, and every primitive
+table, allocator cursor, and dispatch-steering map folds into the
+runtime's `sync_state_hash` at each commit boundary. `Lv2Derived`
+is guest-visible but unhashed; each field's doc names where a
+divergence in it is caught instead (typically the hashed guest
+memory its effects settle into). `Lv2Observability` holds witness
+counters and diagnostic logs, read through one `observability()`
+accessor, and is provably inert: a boot that wipes every
+instrument after each committed step produces byte-identical
+state traces (the `obs_null_sink` gate). The dispatch tick is not
+host state -- the router snapshots it once per dispatch and
+threads it to the arms that stamp effect timestamps.
+
 Classified into typed `Lv2Request` variants:
 
 | Syscall                                            | Number                  | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |

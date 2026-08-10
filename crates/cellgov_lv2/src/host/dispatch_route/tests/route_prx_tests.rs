@@ -100,7 +100,7 @@ fn syscall_480_non_firmware_unknown_path_returns_enoent() {
         result,
         Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ENOENT.into())
     );
-    assert_eq!(host.prx_load_not_found_count(), 1);
+    assert_eq!(host.observability().prx_load_not_found_count, 1);
 
     // The pointer-echo id the old arm would have handed out must not
     // start: ESRCH with no effects, so the sentinel write is never
@@ -151,11 +151,11 @@ fn syscall_480_firmware_miss_registers_stub_and_start_reaches_sentinel() {
         }
         other => panic!("expected Immediate, got {other:?}"),
     };
-    assert_eq!(host.prx_load_hle_stub_count(), 1);
+    assert_eq!(host.observability().prx_load_hle_stub_count, 1);
 
     // Re-load resolves the stub by stem: same id, no second mint.
     assert_eq!(load(&mut host, &rt), Lv2Dispatch::immediate(u64::from(id)));
-    assert_eq!(host.prx_load_hle_stub_count(), 1);
+    assert_eq!(host.observability().prx_load_hle_stub_count, 1);
 
     // The stub id starts like any loaded module: NO_ENTRY sentinel.
     let p_opt: u32 = 0x4000;
@@ -195,8 +195,8 @@ fn syscall_480_unknown_firmware_name_returns_enoent_not_a_stub() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
     );
-    assert_eq!(host.prx_load_hle_stub_count(), 0);
-    assert_eq!(host.prx_load_not_found_count(), 1);
+    assert_eq!(host.observability().prx_load_hle_stub_count, 0);
+    assert_eq!(host.observability().prx_load_not_found_count, 1);
 }
 
 #[test]
@@ -494,12 +494,12 @@ fn prx_start_module_cmd2_non_resident_echoes_res_and_logs_break() {
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0x8001_0002));
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     assert_eq!(
         start_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(0x8001_0002)
     );
-    assert_eq!(host.invariant_break_count() - before, 1);
+    assert_eq!(host.observability().invariant_break_count - before, 1);
 }
 
 #[test]
@@ -510,12 +510,12 @@ fn prx_start_module_unknown_cmd_returns_prx_error_and_logs_break() {
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 7, 0));
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     assert_eq!(
         start_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
     );
-    assert_eq!(host.invariant_break_count() - before, 1);
+    assert_eq!(host.observability().invariant_break_count - before, 1);
 }
 
 #[test]
@@ -545,13 +545,16 @@ fn prx_unload_module_started_returns_not_removable_and_counts() {
     let (mut host, id) = host_with_one_prx();
     host.prx_registry_mut().mark_started(id);
     let rt = FakeRuntime::new(0x1000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         unload_module(&mut host, id, &rt),
         Lv2Dispatch::immediate(CELL_PRX_ERROR_NOT_REMOVABLE.into())
     );
-    assert_eq!(host.prx_unload_rejections(), 1);
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(host.observability().prx_unload_rejections, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 /// LV2 withdraws an INITIALIZED (never-started) module: a stub the
@@ -564,7 +567,7 @@ fn prx_unload_module_unstarted_withdraws_with_ok() {
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(unload_module(&mut host, id, &rt), Lv2Dispatch::immediate(0));
     assert_eq!(
-        host.prx_unload_rejections(),
+        host.observability().prx_unload_rejections,
         0,
         "a successful withdraw is not a rejection"
     );
@@ -603,7 +606,7 @@ fn prx_unload_module_unknown_id_returns_unknown_module() {
         Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into())
     );
     assert_eq!(
-        host.prx_unload_rejections(),
+        host.observability().prx_unload_rejections,
         0,
         "the rejection witness counts refusals to unload a real module, not unknown ids"
     );
@@ -614,7 +617,7 @@ fn prx_unload_module_unknown_id_returns_unknown_module() {
 #[test]
 fn prx_unload_rejection_witness_starts_at_zero() {
     let (host, _id) = host_with_one_prx();
-    assert_eq!(host.prx_unload_rejections(), 0);
+    assert_eq!(host.observability().prx_unload_rejections, 0);
 }
 
 /// RPCS3 never validates `pOpt->size`; it only compares `size != 0x20`
@@ -636,13 +639,16 @@ fn syscall_481_accepts_size_below_0x20_like_the_oracle() {
 fn syscall_481_unreadable_p_opt_returns_efault_and_logs_break() {
     let (mut host, id) = host_with_one_prx();
     let rt = FakeRuntime::new(0x1000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let result = start_module(&mut host, id, 0x4000_1000, &rt);
     assert_eq!(
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -825,13 +831,13 @@ fn syscall_482_full_handshake_unblocks_unload() {
         Lv2Dispatch::Immediate { code: 0, .. }
     ));
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(0)
     );
     assert_eq!(
-        host.invariant_break_count(),
+        host.observability().invariant_break_count,
         breaks_before,
         "a well-ordered handshake is not an invariant break"
     );
@@ -868,12 +874,15 @@ fn syscall_482_cmd2_without_phase1_logs_break_and_keeps_state() {
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(0)
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
     assert_eq!(
         host.prx_registry().lookup_by_id(id).unwrap().state(),
         PrxState::Started
@@ -886,12 +895,15 @@ fn syscall_482_cmd2_res1_returns_can_not_stop_and_logs_break() {
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 1));
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(CELL_PRX_ERROR_CAN_NOT_STOP.into())
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -904,13 +916,16 @@ fn syscall_482_cmd2_other_res_returns_ok_without_transition() {
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
     stop_module(&mut host, id, p_opt, &rt);
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0x8001_0002));
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(0),
         "RPCS3's default res arm returns CELL_OK"
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
     assert_eq!(
         host.prx_registry().lookup_by_id(id).unwrap().state(),
         PrxState::Stopping,
@@ -949,13 +964,16 @@ fn syscall_482_cmd8_is_a_no_op_stub_that_logs_break() {
         let (mut host, id) = host_with_one_started_prx();
         let p_opt: u32 = 0x4000;
         let rt = runtime_with(p_opt, &start_stop_option(0x20, cmd, 0));
-        let breaks_before = host.invariant_break_count();
+        let breaks_before = host.observability().invariant_break_count;
         assert_eq!(
             stop_module(&mut host, id, p_opt, &rt),
             Lv2Dispatch::immediate(0),
             "cmd={cmd:#x}"
         );
-        assert_eq!(host.invariant_break_count() - breaks_before, 1);
+        assert_eq!(
+            host.observability().invariant_break_count - breaks_before,
+            1
+        );
         assert_eq!(
             host.prx_registry().lookup_by_id(id).unwrap().state(),
             PrxState::Started
@@ -981,24 +999,27 @@ fn syscall_482_unknown_cmd_returns_prx_error_and_logs_break() {
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 7, 0));
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
     );
-    assert_eq!(host.invariant_break_count() - before, 1);
+    assert_eq!(host.observability().invariant_break_count - before, 1);
 }
 
 #[test]
 fn syscall_482_unreadable_p_opt_returns_efault_and_logs_break() {
     let (mut host, id) = host_with_one_started_prx();
     let rt = FakeRuntime::new(0x1000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, 0x4000_1000, &rt),
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -1023,7 +1044,7 @@ fn syscall_494_rejects_null_p_info_with_efault() {
 fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 494,
@@ -1036,14 +1057,17 @@ fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
 fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 494,
@@ -1056,7 +1080,10 @@ fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -1242,7 +1269,7 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
     // wrap check, matching RPCS3's order, so an unknown id would
     // never reach the path under test.
     let (mut host, id) = host_with_one_prx();
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let rt = WrapMock {
         size_be: 0x20u64.to_be_bytes(),
     };
@@ -1262,7 +1289,7 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
         "p_opt+24 wraps u32; must return CELL_EFAULT, not CELL_OK with a wrong-address write"
     );
     assert_eq!(
-        host.invariant_break_count() - breaks_before,
+        host.observability().invariant_break_count - breaks_before,
         1,
         "wrap path must log_invariant_break exactly once"
     );
@@ -1301,7 +1328,7 @@ fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
         }
     }
     let mut host = Lv2Host::new();
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let rt = ZeroReadMock { zeros: [0; 4] };
     let mut args = [0u64; 8];
     args[0] = 0x2; // flags & 2 must be set, else short-circuit OK
@@ -1317,7 +1344,7 @@ fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
         "pInfo+0x18 wraps u32; must return CELL_EFAULT, not silent slot writes at wrong addresses"
     );
     assert_eq!(
-        host.invariant_break_count() - breaks_before,
+        host.observability().invariant_break_count - breaks_before,
         1,
         "wrap path must log_invariant_break exactly once"
     );

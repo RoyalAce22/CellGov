@@ -46,7 +46,7 @@ fn tty_write_appends_buffer_bytes_to_tty_log() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(host.tty_log(), b"hello world\n");
+    assert_eq!(host.observability().tty_log, b"hello world\n");
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn tty_write_concatenates_across_calls_in_dispatch_order() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(host.tty_log(), b"abcdxyz");
+    assert_eq!(host.observability().tty_log, b"abcdxyz");
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn tty_write_zero_len_is_a_noop_for_tty_log() {
         UnitId::new(0),
         &rt,
     );
-    assert!(host.tty_log().is_empty());
+    assert!(host.observability().tty_log.is_empty());
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn tty_write_unmapped_buf_does_not_corrupt_tty_log_and_still_returns_ok() {
         Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, 0),
         other => panic!("expected Immediate, got {other:?}"),
     }
-    assert!(host.tty_log().is_empty());
+    assert!(host.observability().tty_log.is_empty());
 }
 
 #[test]
@@ -175,6 +175,32 @@ fn time_get_current_time_splits_at_billion_tick() {
         assert_eq!(v, 500_000_001);
     } else {
         panic!();
+    }
+}
+
+#[test]
+fn time_get_current_time_stamps_both_effects_with_the_runtime_tick() {
+    let mut host = Lv2Host::new();
+    let tick = cellgov_time::GuestTicks::new(1_500_000_001);
+    let rt = FakeRuntime::new(0x10000).with_tick(tick);
+    let result = host.dispatch(
+        Lv2Request::TimeGetCurrentTime {
+            sec_ptr: 0x1000,
+            nsec_ptr: 0x1008,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let effects = match result {
+        Lv2Dispatch::Immediate { effects, .. } => effects,
+        other => panic!("expected Immediate, got {other:?}"),
+    };
+    assert_eq!(effects.len(), 2);
+    for eff in &effects {
+        match eff {
+            Effect::SharedWriteIntent { source_time, .. } => assert_eq!(*source_time, tick),
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        }
     }
 }
 
@@ -277,7 +303,8 @@ fn time_get_timezone_efault_on_null_ptr() {
 #[test]
 fn immediate_write_u32_efault_on_null_ptr() {
     let host = Lv2Host::new();
-    let result = host.immediate_write_u32(0xCAFE, 0, UnitId::new(0));
+    let result =
+        host.immediate_write_u32(0xCAFE, 0, UnitId::new(0), cellgov_time::GuestTicks::ZERO);
     assert_eq!(
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())

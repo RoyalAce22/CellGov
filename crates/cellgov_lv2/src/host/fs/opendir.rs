@@ -10,6 +10,7 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use super::mount::DirMountResolution;
 use super::path::read_path_bytes;
 use super::ptr::out_ptr_writable;
+use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_fs_opendir` -- snapshot a host-mounted directory and
@@ -34,6 +35,7 @@ impl Lv2Host {
         fd_out_ptr: u32,
         requester: UnitId,
         rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, fd_out_ptr, 4, 4) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
@@ -67,7 +69,7 @@ impl Lv2Host {
         match self.fs_store_mut().open_dir(entries) {
             Ok(fd) => {
                 self.fs_fd_count_inc();
-                self.immediate_write_u32(fd, fd_out_ptr, requester)
+                self.immediate_write_u32(fd, fd_out_ptr, requester, tick)
             }
             Err(FsError::FdExhausted) => Lv2Dispatch::immediate(cell_errors::CELL_EMFILE.into()),
             Err(other) => {

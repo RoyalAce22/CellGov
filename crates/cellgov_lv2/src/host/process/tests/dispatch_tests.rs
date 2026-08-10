@@ -5,7 +5,11 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
 
 fn captured_version(host: &Lv2Host) -> u32 {
-    match host.dispatch_process_get_sdk_version(0x1000, UnitId::new(0)) {
+    match host.dispatch_process_get_sdk_version(
+        0x1000,
+        UnitId::new(0),
+        cellgov_time::GuestTicks::ZERO,
+    ) {
         Lv2Dispatch::Immediate { code, effects } => {
             assert_eq!(code, 0, "sc 25 must return code 0");
             assert_eq!(effects.len(), 1, "sc 25 emits one shared write");

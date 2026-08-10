@@ -110,10 +110,10 @@ fn io_plus_size_overflow_returns_einval_and_logs() {
     // silently accept it.
     let mut host = Lv2Host::new();
     allocate_context(&mut host);
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0xFFF0_0000, 0, 0x0010_0000);
     assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
-    assert_eq!(host.invariant_break_count() - before, 1);
+    assert_eq!(host.observability().invariant_break_count - before, 1);
 }
 
 #[test]
@@ -135,11 +135,14 @@ fn io_plus_size_at_exact_cap_is_ok() {
 fn oversized_size_returns_einval_and_logs_invariant_break() {
     let mut host = Lv2Host::new();
     allocate_context(&mut host);
-    let breaks_before = host.invariant_break_count();
+    let breaks_before = host.observability().invariant_break_count;
     let too_big = u32::try_from(PS3_RSX_IOMAP_SIZE).unwrap() + 0x0010_0000;
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, too_big);
     assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
-    assert_eq!(host.invariant_break_count() - breaks_before, 1);
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
 }
 
 #[test]
@@ -148,11 +151,11 @@ fn ea_plus_size_exceeds_local_mem_returns_einval() {
     // invariant break, matching RPCS3's undifferentiated gate.
     let mut host = Lv2Host::new();
     allocate_context(&mut host);
-    let before = host.invariant_break_count();
+    let before = host.observability().invariant_break_count;
     let local_mem_base = u32::try_from(PS3_RSX_BASE).unwrap();
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, local_mem_base, 0x0010_0000);
     assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
-    assert_eq!(host.invariant_break_count(), before);
+    assert_eq!(host.observability().invariant_break_count, before);
 }
 
 #[test]
