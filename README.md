@@ -107,7 +107,7 @@ Pre-Alpha. What works today:
   Unmodeled syscalls return an ABI-honest "not implemented"
   response via the null backend. Unresolved imports surface
   as named diagnostics via a guest-resident trampoline.
-- Sync primitives (lwmutex, event flag, semaphore, mutex, cond, event queues and ports), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`).
+- Sync primitives (lwmutex, event flag, semaphore, mutex, cond, event queues and ports), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`). Wait timeouts are honoured: a timed wait expires with `CELL_ETIMEDOUT` at its guest-tick deadline, and `usleep`/`sleep` deschedule the caller until the deadline arrives -- all through a deterministic timer-wake queue that is snapshot-captured and state-hashed.
 - Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`;
   every module a boot loads is verified against the install's
   manifest, so an altered or mismatched firmware corpus fails

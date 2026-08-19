@@ -202,7 +202,6 @@ fn invalid_bool_returns_error() {
 
 #[test]
 fn fixed_sizes_match_documentation() {
-    // Pins the wire-size table in the module doc comment.
     let mut buf = Vec::new();
     TraceRecord::UnitScheduled {
         unit: UnitId::new(0),
@@ -289,28 +288,36 @@ fn fixed_sizes_match_documentation() {
 
 #[test]
 fn unit_blocked_roundtrip_each_reason() {
-    let reasons = [
-        TracedBlockReason::WaitOnEvent,
-        TracedBlockReason::MailboxEmpty,
-    ];
-    for r in reasons {
+    use strum::VariantArray;
+    for r in TracedBlockReason::VARIANTS {
         roundtrip(TraceRecord::UnitBlocked {
             unit: UnitId::new(5),
-            reason: r,
+            reason: *r,
         });
     }
 }
 
 #[test]
+fn unit_blocked_reason_discriminants_locked() {
+    assert_eq!(TracedBlockReason::WaitOnEvent as u8, 0);
+    assert_eq!(TracedBlockReason::MailboxEmpty as u8, 1);
+    assert_eq!(TracedBlockReason::DmaWait as u8, 2);
+}
+
+#[test]
+fn unit_woken_reason_discriminants_locked() {
+    assert_eq!(TracedWakeReason::WakeEffect as u8, 0);
+    assert_eq!(TracedWakeReason::DmaCompletion as u8, 1);
+    assert_eq!(TracedWakeReason::Timer as u8, 2);
+}
+
+#[test]
 fn unit_woken_roundtrip_each_reason() {
-    let reasons = [
-        TracedWakeReason::WakeEffect,
-        TracedWakeReason::DmaCompletion,
-    ];
-    for r in reasons {
+    use strum::VariantArray;
+    for r in TracedWakeReason::VARIANTS {
         roundtrip(TraceRecord::UnitWoken {
             unit: UnitId::new(5),
-            reason: r,
+            reason: *r,
         });
     }
 }
@@ -481,8 +488,6 @@ fn ppu_state_full_level_is_hashes() {
 
 #[test]
 fn ppu_state_hash_tag_is_0x07() {
-    // Tag 0x07 is allocated for PpuStateHash; new variants must use strictly
-    // greater tags.
     let r = TraceRecord::PpuStateHash {
         step: 0,
         pc: 0,
@@ -537,8 +542,6 @@ fn host_invariant_break_encode_decode_roundtrip() {
     });
 }
 
-/// Pins the tag byte for `HostInvariantBreak` at `0x09`. Wire-format
-/// invariant: new variants must use strictly greater tags.
 #[test]
 fn host_invariant_break_tag_is_0x09() {
     use crate::record::TracedInvariantBreakReason;
@@ -588,8 +591,6 @@ fn syscall_entered_roundtrip_each_disposition() {
     }
 }
 
-/// Pins the tag byte for `SyscallEntered` at `0x0a` and the wire size
-/// at 82 bytes. New variants must use strictly greater tags.
 #[test]
 fn syscall_entered_tag_is_0x0a() {
     use crate::record::TracedSyscallDisposition;

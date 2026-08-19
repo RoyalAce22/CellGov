@@ -26,8 +26,6 @@ pub struct Runtime {
     /// Persists across commit boundaries: an OFFSET / RELEASE pair may
     /// straddle drains and the later RELEASE must read the earlier OFFSET.
     pub(super) rsx_sem_offset: u32,
-    /// Host must make the RSX region writable before enabling; otherwise
-    /// every put-pointer store reserved-writes.
     pub(super) rsx_mirror_writes: bool,
     pub(super) rsx_flip: crate::rsx::flip::RsxFlipState,
     pub(super) rsx_methods: crate::rsx::method::NvMethodTable,
@@ -37,6 +35,10 @@ pub struct Runtime {
     /// alongside batch N+1 to preserve the atomic-batch contract.
     pub(super) pending_rsx_effects: Vec<Effect>,
     pub(super) dma_queue: DmaQueue,
+    /// Pending wake-at-guest-tick deadlines for parked units.
+    /// Registered at park time, cancelled on early wake, fired by
+    /// [`Runtime::fire_timer_wakes`] and the all-blocked time-warp.
+    pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) dma_latency: Box<dyn DmaLatencyModel>,
     pub(super) lv2_host: Lv2Host,
     pub(super) syscall_responses: SyscallResponseTable,
@@ -89,7 +91,13 @@ pub struct Runtime {
     /// Cumulative count of `NV406E_SET_REFERENCE` dispatches across
     /// every `rsx_advance` invocation. Not snapshot-captured.
     pub(super) rsx_set_reference_dispatches: u64,
-    /// 40F FIFO consumer return-address stack; snapshot-captured.
+    /// Cumulative `sys_timer_usleep` / `sys_timer_sleep` dispatches.
+    /// The timer path bypasses `Lv2Host::dispatch`, so this counter is
+    /// the only host-side witness; the trace's `SyscallEntered` record
+    /// also sees these but is suppressed under `FaultDriven`. Not
+    /// snapshot-captured.
+    pub(super) timer_sleep_dispatches: u64,
+    /// FIFO consumer return-address stack; snapshot-captured.
     pub(super) rsx_call_stack: crate::rsx::RsxCallStack,
     /// Manifest gate for the FIFO consumer's cursor->MMIO
     /// writeback. Default `false`.

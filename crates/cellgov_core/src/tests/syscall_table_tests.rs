@@ -748,11 +748,11 @@ fn state_hash_wire_format_golden() {
             caller: 0x0100_0001,
         },
     );
-    // Sanity: hash is non-zero and stable across the function's
-    // two-step construction. Wire-format drift is caught by
-    // STATE_HASH_FORMAT_VERSION bumps elsewhere.
-    let h1 = t.state_hash();
-    let h2 = t.state_hash();
-    assert_eq!(h1, h2);
-    assert_ne!(h1, 0);
+    const EXPECTED: u64 = 17_424_432_054_441_055_533;
+    let h = t.state_hash();
+    assert_eq!(
+        h, EXPECTED,
+        "syscall-table state-hash wire format drifted (got {h}); a versioned \
+         format change must update EXPECTED in the same commit"
+    );
 }

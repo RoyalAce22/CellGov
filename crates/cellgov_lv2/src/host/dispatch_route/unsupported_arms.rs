@@ -308,8 +308,7 @@ impl Lv2Host {
         // range as occupied. `addr` is in `[0x2000_0000, 0xC000_0000)`
         // per the range check above, so the u32 narrow is lossless.
         self.mmapper_ledger_insert(addr as u32, handle.size);
-        // Coherence witness: same property as sc 337. See
-        // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
+        // Coherence witness: same property as sc 337.
         debug_assert!(
             self.derived
                 .pending_region_installs
@@ -387,8 +386,7 @@ impl Lv2Host {
         self.mmapper_ledger_insert(found_addr, handle.size);
         // Coherence witness: on success, the install must be pending
         // AND the ledger must contain the address we are writing
-        // back. See
-        // `docs/dev/bug_investigations/cellsysutil_mmapper_oob.md`.
+        // back.
         debug_assert!(
             self.derived
                 .pending_region_installs

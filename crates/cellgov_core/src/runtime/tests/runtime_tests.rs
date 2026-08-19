@@ -32,6 +32,8 @@ mod rsx;
 mod state_hashes;
 #[path = "runtime_step_tests.rs"]
 mod stepping;
+#[path = "runtime_timer_tests.rs"]
+mod timers;
 #[path = "runtime_trace_tests.rs"]
 mod trace_records;
 #[path = "runtime_wake_tests.rs"]
@@ -528,10 +530,9 @@ fn build_with_rsx_writable() -> Runtime {
     ];
     let mem = GuestMemory::from_regions(regions).expect("regions non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);
-    // Seed identity iomap covering the flat region; mirrors the
-    // build_with_rsx_and_label_region helper. Required after
-    // IoMap::translate stopped identity-passing un-iomapped offsets
-    // to match the RPCS3 oracle.
+    // Identity iomap over the flat region: IoMap::translate returns
+    // None for un-iomapped offsets (RPCS3's umax-on-miss), so the
+    // FIFO pass needs a seeded mapping.
     rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x1000);
     rt
 }
@@ -640,22 +641,17 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
     let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);
     rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(label_base as u64));
-    // Seed an identity iomap covering the flat region so the FIFO
-    // advance pass can translate IO offsets back to EAs without
-    // going through 672. Production code records this via
-    // dispatch_sys_rsx_context_iomap; tests bypass the syscall and
-    // record it directly. Required since IoMap::translate now
-    // returns None for size == 0 (matching RPCS3's umax-on-miss),
-    // so a runtime built without an iomap would surface
-    // HeaderOutOfRange as soon as the consumer touches the FIFO.
+    // Identity iomap over the flat region so the FIFO advance pass
+    // can translate IO offsets back to EAs. Production records this
+    // via dispatch_sys_rsx_context_iomap; tests record it directly.
+    // IoMap::translate returns None on a miss (RPCS3's umax-on-miss),
+    // so without it the consumer surfaces HeaderOutOfRange.
     rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x10000);
     rt
 }
 
-/// Test fixture: emits a single ExecutionStepResult with
-/// YieldReason::Syscall and caller-supplied syscall_args, then
-/// reports Finished. Used by the apply_lv2_effects bypass tripwire
-/// test below.
+/// Emits one YieldReason::Syscall step with caller-supplied
+/// syscall_args, then reports Finished.
 #[derive(Clone)]
 struct Lv2SyscallEmitterUnit {
     id: UnitId,

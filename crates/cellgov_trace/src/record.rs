@@ -5,7 +5,8 @@
 //! Each record is a 1-byte tag followed by a fixed-length variant payload, all
 //! multi-byte integers little-endian. Tags, per-variant field layouts, and the
 //! discriminants of `TracedYieldReason`, `HashCheckpointKind`,
-//! `TracedEffectKind`, `TracedBlockReason`, and `TracedWakeReason` are part of
+//! `TracedEffectKind`, `TracedBlockReason`, `TracedWakeReason`,
+//! `TracedInvariantBreakReason`, and `TracedSyscallDisposition` are part of
 //! the binary trace contract; new record variants append with strictly greater
 //! tags. The current set is fixed-size, so there is no length field after the
 //! tag.
@@ -83,7 +84,9 @@ pub enum HashCheckpointKind {
 }
 
 /// Why a unit was blocked, as the trace records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
 #[repr(u8)]
 #[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_block_reason))]
 pub enum TracedBlockReason {
@@ -96,7 +99,9 @@ pub enum TracedBlockReason {
 }
 
 /// Why a unit was woken, as the trace records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
 #[repr(u8)]
 #[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_wake_reason))]
 pub enum TracedWakeReason {
@@ -104,6 +109,8 @@ pub enum TracedWakeReason {
     WakeEffect = 0,
     /// Unit woken by DMA completion.
     DmaCompletion = 1,
+    /// Unit woken because guest time reached its timer deadline.
+    Timer = 2,
 }
 
 /// Mirror of `cellgov_effects::Effect` for the trace stream.
@@ -184,7 +191,8 @@ pub enum TracedSyscallDisposition {
     /// these.
     Hypercall = 4,
     /// `TIMER_USLEEP` or `TIMER_SLEEP` short-circuit: bypasses
-    /// `Lv2Host::dispatch` entirely and advances guest time directly.
+    /// `Lv2Host::dispatch` entirely; the caller parks on the runtime's
+    /// timer-wake queue until guest time reaches its deadline.
     TimerFastPath = 5,
 }
 
@@ -319,8 +327,9 @@ pub enum TraceRecord {
         /// Why the unit blocked.
         reason: TracedBlockReason,
     },
-    /// Status overridden to `Runnable` by the commit pipeline or a DMA
-    /// completion. Emitted once per transition, after `CommitApplied`.
+    /// Status overridden to `Runnable` by the commit pipeline, a DMA
+    /// completion, or a timer deadline. Emitted once per transition,
+    /// after `CommitApplied`.
     UnitWoken {
         /// Unit that transitioned to runnable.
         unit: UnitId,
@@ -389,7 +398,7 @@ pub enum TraceRecord {
         num: u64,
         /// Argument registers GPR 3..=10 in declaration order.
         args: [u64; 8],
-        /// Classified dispatch arm; pure over `(lev, num, args)`.
+        /// Classified dispatch arm.
         disposition: TracedSyscallDisposition,
     },
 }

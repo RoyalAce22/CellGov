@@ -180,6 +180,54 @@ fn enqueue_waiter_on_owner_returns_err() {
 }
 
 #[test]
+fn remove_waiter_unqueues_only_the_named_thread() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, default_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    let w1 = tid(0x0100_0002);
+    let w2 = tid(0x0100_0003);
+    let w3 = tid(0x0100_0004);
+    t.try_acquire(1, owner);
+    t.enqueue_waiter(1, w1).unwrap();
+    t.enqueue_waiter(1, w2).unwrap();
+    t.enqueue_waiter(1, w3).unwrap();
+    assert!(t.remove_waiter(1, w2));
+    let remaining: Vec<_> = t.lookup(1).unwrap().waiters().iter().collect();
+    assert_eq!(remaining, vec![w1, w3], "FIFO order of the rest survives");
+    assert_eq!(
+        t.lookup(1).unwrap().owner(),
+        Some(owner),
+        "removal must not grant or move ownership"
+    );
+    assert_eq!(
+        t.release_and_wake_next(1, owner),
+        MutexRelease::Transferred { new_owner: w1 },
+        "post-cancel unlock must transfer to the surviving FIFO head"
+    );
+}
+
+#[test]
+fn remove_waiter_unknown_id_or_unparked_thread_is_false() {
+    let mut t = MutexTable::new();
+    assert!(!t.remove_waiter(99, tid(0x0100_0001)));
+    t.create_with_id(1, default_attrs()).unwrap();
+    assert!(!t.remove_waiter(1, tid(0x0100_0001)));
+}
+
+#[test]
+fn remove_waiter_does_not_remove_the_owner() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, default_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    t.try_acquire(1, owner);
+    assert!(
+        !t.remove_waiter(1, owner),
+        "the owner is not on the waiter list"
+    );
+    assert_eq!(t.lookup(1).unwrap().owner(), Some(owner));
+}
+
+#[test]
 fn release_without_waiters_frees() {
     let mut t = MutexTable::new();
     t.create_with_id(1, default_attrs()).unwrap();

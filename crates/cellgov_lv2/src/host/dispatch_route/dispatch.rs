@@ -29,11 +29,28 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        let arm: &'static str = crate::request::Lv2RequestKind::from(&request).into();
+        let wait_timeout = request.wait_timeout_usec();
         let out = self.dispatch_routed(request, requester, rt);
-        if let Lv2Dispatch::Immediate { code, .. } = &out {
-            if *code != 0 {
+        match &out {
+            Lv2Dispatch::Immediate { code, .. } if *code != 0 => {
                 *self.obs.dispatch_nonzero_returns.entry(*code).or_insert(0) += 1;
+                *self
+                    .obs
+                    .dispatch_return_pairs
+                    .entry((arm, *code))
+                    .or_insert(0) += 1;
             }
+            // Both park shapes register a wake deadline (the runtime's
+            // `register_wait_deadline` covers `Block` and `BlockAndWake`);
+            // `sys_cond_wait` parks via `BlockAndWake` when releasing the
+            // mutex transfers ownership.
+            Lv2Dispatch::Block { .. } | Lv2Dispatch::BlockAndWake { .. } => {
+                if let Some(timeout) = wait_timeout {
+                    *self.obs.park_timeouts.entry((arm, timeout)).or_insert(0) += 1;
+                }
+            }
+            _ => {}
         }
         out
     }
@@ -155,9 +172,7 @@ impl Lv2Host {
                 self.dispatch_semaphore_create(id_ptr, attr_ptr, initial, max, requester, rt, tick)
             }
             Lv2Request::SemaphoreDestroy { id } => self.dispatch_semaphore_destroy(id),
-            Lv2Request::SemaphoreWait { id, timeout } => {
-                self.dispatch_semaphore_wait(id, timeout, requester)
-            }
+            Lv2Request::SemaphoreWait { id, .. } => self.dispatch_semaphore_wait(id, requester),
             Lv2Request::SemaphorePost { id, val } => self.dispatch_semaphore_post(id, val),
             Lv2Request::SemaphoreTryWait { id } => self.dispatch_semaphore_trywait(id),
             Lv2Request::SemaphoreGetValue { id, out_ptr } => {
@@ -202,10 +217,8 @@ impl Lv2Host {
                 bits,
                 mode,
                 result_ptr,
-                timeout,
-            } => {
-                self.dispatch_event_flag_wait(id, bits, mode, result_ptr, timeout, requester, tick)
-            }
+                ..
+            } => self.dispatch_event_flag_wait(id, bits, mode, result_ptr, requester, tick),
             Lv2Request::EventFlagTryWait {
                 id,
                 bits,

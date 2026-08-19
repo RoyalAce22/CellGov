@@ -25,6 +25,7 @@ impl Runtime {
         source: UnitId,
         outcome: &Result<CommitOutcome, CommitError>,
         due: &[(DmaCompletion, Option<Vec<u8>>)],
+        timer_due: &[crate::timer_queue::TimerWake],
     ) {
         if self.mode == RuntimeMode::FaultDriven {
             return;
@@ -69,14 +70,10 @@ impl Runtime {
                 });
             }
         }
-        for (c, _) in due {
-            self.trace.record(&TraceRecord::UnitWoken {
-                unit: c.issuer(),
-                reason: TracedWakeReason::DmaCompletion,
-            });
-        }
+        self.record_dma_wakes(due);
+        self.record_timer_wakes(timer_due);
 
-        // State hash checkpoints taken after the commit and DMA firing.
+        // State hash checkpoints taken after the commit and timer/DMA firing.
         let mem_hash = StateHash::new(self.memory.content_hash());
         self.trace.record(&TraceRecord::StateHashCheckpoint {
             kind: HashCheckpointKind::CommittedMemory,
@@ -103,14 +100,51 @@ impl Runtime {
     /// no-runnable-unit time-warp. Same UnitWoken records as the
     /// commit-boundary path; no CommitApplied or state-hash checkpoints
     /// because no step ran.
-    pub(super) fn emit_time_warp_trace(&mut self, due: &[(DmaCompletion, Option<Vec<u8>>)]) {
+    pub(super) fn emit_time_warp_trace(
+        &mut self,
+        due: &[(DmaCompletion, Option<Vec<u8>>)],
+        timer_due: &[crate::timer_queue::TimerWake],
+    ) {
         if self.mode == RuntimeMode::FaultDriven {
             return;
         }
+        self.record_dma_wakes(due);
+        self.record_timer_wakes(timer_due);
+    }
+
+    /// A fired completion is not always a wake: the fire-side guard in
+    /// [`Runtime::fire_dma_completions`] skips the Runnable override
+    /// for a Finished or Faulted issuer, so the unit had no status
+    /// transition and gets no `UnitWoken` record. Mirrors
+    /// [`Self::record_timer_wakes`].
+    fn record_dma_wakes(&mut self, due: &[(DmaCompletion, Option<Vec<u8>>)]) {
         for (c, _) in due {
+            if self.registry.effective_status(c.issuer())
+                != Some(cellgov_exec::UnitStatus::Runnable)
+            {
+                continue;
+            }
             self.trace.record(&TraceRecord::UnitWoken {
                 unit: c.issuer(),
                 reason: TracedWakeReason::DmaCompletion,
+            });
+        }
+    }
+
+    /// A popped deadline is not always a wake: a timed cond wait whose
+    /// companion mutex is contended re-parks untimed with ETIMEDOUT
+    /// staged ([`cellgov_lv2::Lv2Host::expire_wait`]), leaving the unit
+    /// Blocked. Record `UnitWoken` only for units the firing made
+    /// runnable.
+    fn record_timer_wakes(&mut self, timer_due: &[crate::timer_queue::TimerWake]) {
+        for wake in timer_due {
+            if self.registry.effective_status(wake.unit) != Some(cellgov_exec::UnitStatus::Runnable)
+            {
+                continue;
+            }
+            self.trace.record(&TraceRecord::UnitWoken {
+                unit: wake.unit,
+                reason: TracedWakeReason::Timer,
             });
         }
     }

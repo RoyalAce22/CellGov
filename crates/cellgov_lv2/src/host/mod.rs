@@ -14,6 +14,7 @@ pub mod diagnostics;
 mod dispatch_route;
 mod event_flag;
 mod event_queue;
+mod expire;
 mod fs;
 mod lv2_host;
 mod lwmutex;

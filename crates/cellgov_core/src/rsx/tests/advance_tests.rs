@@ -258,8 +258,8 @@ fn advance_counts_unknown_methods_and_keeps_draining() {
 
 #[test]
 fn advance_honors_jump_redirect_and_reaches_put_via_target() {
-    // 40F consumer: Jump now redirects the walker to the target
-    // offset rather than parking. Layout: OFFSET=0x10 at base,
+    // Jump redirects the walker to the target offset rather than
+    // parking. Layout: OFFSET=0x10 at base,
     // JUMP to base+0x20, RELEASE=0x99 at base+0x20. put sits
     // just past RELEASE so the walker reaches put cleanly via
     // the jump target.

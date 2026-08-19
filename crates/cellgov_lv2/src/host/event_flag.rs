@@ -92,47 +92,43 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "request payload plus the dispatch tick"
-    )]
     pub(super) fn dispatch_event_flag_wait(
         &mut self,
         id: u32,
         bits: u64,
         mode_raw: u32,
         result_ptr: u32,
-        timeout: u64,
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
+        // RPCS3 sys_event_flag.cpp sys_event_flag_wait /
+        // sys_event_store_result: every non-park exit stores through a
+        // non-null result pointer -- error exits store 0, mode
+        // validation precedes the id lookup (EINVAL over ESRCH).
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_EINVAL.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            };
         };
         match self.state.event_flags.try_wait(id, bits, mode) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_ESRCH.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
-                let write = Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(result_ptr, 8),
-                    bytes: WritePayload::from_slice(&observed.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                };
                 Lv2Dispatch::Immediate {
                     code: 0,
-                    effects: vec![write],
+                    effects: event_flag_result_write(result_ptr, observed, requester, tick),
                 }
             }
             Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
-                // Finite timeout with no peer that could set/clear:
-                // ETIMEDOUT immediately.
-                if timeout != 0 && !self.state.ppu_threads.has_other_alive_thread(caller) {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
-                }
+                // A finite timeout parks like any wait; the runtime's
+                // timer-wake queue expires it with ETIMEDOUT at the
+                // deadline.
                 match self
                     .state
                     .event_flags
@@ -140,10 +136,19 @@ impl Lv2Host {
                 {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventFlagEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                        return Lv2Dispatch::Immediate {
+                            code: cell_errors::CELL_ESRCH.into(),
+                            effects: event_flag_result_write(result_ptr, 0, requester, tick),
+                        };
                     }
                     Err(crate::sync_primitives::EventFlagEnqueueError::DuplicateWaiter) => {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                        // Host-side refusal, but the store-result
+                        // contract above covers every non-park exit,
+                        // so this one zeroes the result too.
+                        return Lv2Dispatch::Immediate {
+                            code: cell_errors::CELL_EFAULT.into(),
+                            effects: event_flag_result_write(result_ptr, 0, requester, tick),
+                        };
                     }
                 }
                 Lv2Dispatch::Block {
@@ -167,27 +172,31 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        // RPCS3 sys_event_flag.cpp sys_event_flag_trywait /
+        // sys_event_store_result: every exit stores through a non-null
+        // result pointer -- EINVAL, ESRCH, and the no-match EBUSY all
+        // store 0; only a match stores the observed pattern.
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_EINVAL.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            };
         };
         match self.state.event_flags.try_wait(id, bits, mode) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_ESRCH.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
-                let write = Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(result_ptr, 8),
-                    bytes: WritePayload::from_slice(&observed.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                };
                 Lv2Dispatch::Immediate {
                     code: 0,
-                    effects: vec![write],
+                    effects: event_flag_result_write(result_ptr, observed, requester, tick),
                 }
             }
-            Some(crate::sync_primitives::EventFlagWait::NoMatch) => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
-            }
+            Some(crate::sync_primitives::EventFlagWait::NoMatch) => Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_EBUSY.into(),
+                effects: event_flag_result_write(result_ptr, 0, requester, tick),
+            },
         }
     }
 
@@ -234,12 +243,28 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        // Pattern snapshot before the drain: RPCS3
+        // sys_event_flag.cpp sys_event_flag_cancel captures the
+        // pattern once and every cancelled waiter reports it through
+        // its result pointer alongside ECANCELED. It also zeroes a
+        // non-null num pointer before the id lookup, so the ESRCH
+        // exit still stores 0 through it.
+        let Some(bits) = self.state.event_flags.lookup(id).map(|e| e.bits()) else {
+            return Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_ESRCH.into(),
+                effects: event_flag_count_write(num_ptr, 0, requester, tick),
+            };
+        };
         let Some(waiters) = self.state.event_flags.cancel_waiters(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::Immediate {
+                code: cell_errors::CELL_ESRCH.into(),
+                effects: event_flag_count_write(num_ptr, 0, requester, tick),
+            };
         };
         let count = waiters.len() as u32;
         let mut unit_ids: Vec<UnitId> = Vec::new();
         let mut updates: Vec<(UnitId, PendingResponse)> = Vec::new();
+        let mut effects: Vec<Effect> = Vec::new();
         for w in waiters {
             if let Some(unit) = self.resolve_wake_thread(w.thread, "event_flag_cancel.waker") {
                 unit_ids.push(unit);
@@ -249,18 +274,10 @@ impl Lv2Host {
                         code: cell_errors::CELL_ECANCELED.into(),
                     },
                 ));
+                effects.extend(event_flag_result_write(w.result_ptr, bits, requester, tick));
             }
         }
-        let mut effects: Vec<Effect> = Vec::new();
-        if num_ptr != 0 {
-            effects.push(Effect::SharedWriteIntent {
-                range: ByteRange::contiguous_u32(num_ptr, 4),
-                bytes: WritePayload::from_slice(&count.to_be_bytes()),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            });
-        }
+        effects.extend(event_flag_count_write(num_ptr, count, requester, tick));
         if unit_ids.is_empty() {
             return Lv2Dispatch::Immediate { code: 0, effects };
         }
@@ -298,6 +315,52 @@ impl Lv2Host {
             effects: vec![write],
         }
     }
+}
+
+/// The observed-pattern write for a satisfied wait/trywait.
+///
+/// RPCS3 sys_event_flag.cpp `sys_event_store_result`: the result is
+/// written only through a non-null pointer; a null result pointer is
+/// legal and skipped.
+fn event_flag_result_write(
+    result_ptr: u32,
+    observed: u64,
+    requester: UnitId,
+    tick: GuestTicks,
+) -> Vec<Effect> {
+    if result_ptr == 0 {
+        return vec![];
+    }
+    vec![Effect::SharedWriteIntent {
+        range: ByteRange::contiguous_u32(result_ptr, 8),
+        bytes: WritePayload::from_slice(&observed.to_be_bytes()),
+        ordering: PriorityClass::Normal,
+        source: requester,
+        source_time: tick,
+    }]
+}
+
+/// The cancelled-waiter count write for `sys_event_flag_cancel`.
+///
+/// RPCS3 sys_event_flag.cpp `sys_event_flag_cancel`: the count (u32)
+/// is written only through a non-null num pointer; a null pointer is
+/// legal and skipped. The ESRCH exit writes 0.
+fn event_flag_count_write(
+    num_ptr: u32,
+    count: u32,
+    requester: UnitId,
+    tick: GuestTicks,
+) -> Vec<Effect> {
+    if num_ptr == 0 {
+        return vec![];
+    }
+    vec![Effect::SharedWriteIntent {
+        range: ByteRange::contiguous_u32(num_ptr, 4),
+        bytes: WritePayload::from_slice(&count.to_be_bytes()),
+        ordering: PriorityClass::Normal,
+        source: requester,
+        source_time: tick,
+    }]
 }
 
 #[cfg(test)]

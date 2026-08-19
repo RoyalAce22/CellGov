@@ -21,6 +21,7 @@ mod state;
 mod state_hash;
 mod step;
 mod sync_wakes;
+mod timer;
 mod trace_bridge;
 mod types;
 

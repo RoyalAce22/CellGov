@@ -218,6 +218,17 @@ impl SemaphoreTable {
         Ok(())
     }
 
+    /// Remove `waiter` from the waiter list without consuming a
+    /// slot; `false` if the id is unknown or the thread is not
+    /// parked. Timeout-expiry cancel; no count repair is needed
+    /// because `count` never decrements below zero for waiters.
+    pub fn remove_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return false;
+        };
+        entry.waiters.remove(waiter)
+    }
+
     /// Post `count` slots. Wakes up to `count` FIFO waiters
     /// (without incrementing) and adds any leftover slots to
     /// `entry.count`. Returns `OverMax` if the leftover would push
@@ -225,8 +236,7 @@ impl SemaphoreTable {
     ///
     /// Real LV2 (and RPCS3) atomically consult the post-increment
     /// view: if `count + slots_after_wake > max` the whole call
-    /// fails. We mirror that by computing `would_be_count = max -
-    /// (count - waiters_consumed)` up front.
+    /// fails.
     pub fn post_and_wake_n(&mut self, id: u32, count: u32) -> SemaphorePostN {
         let Some(entry) = self.entries.get_mut(&id) else {
             return SemaphorePostN::Unknown;

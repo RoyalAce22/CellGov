@@ -52,8 +52,7 @@ fn dispatch_does_not_hardcode_the_sentinel() {
         got, SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
         "dispatch_process_get_sdk_version regressed to hardcoded \
          0xFFFFFFFF instead of plumbing through the field set by \
-         Lv2Host::set_sdk_version. See \
-         docs/dev/bug_investigations/cellsysutil_allblocked_43.md"
+         Lv2Host::set_sdk_version"
     );
     assert_eq!(got, 0x0016_0008);
 }

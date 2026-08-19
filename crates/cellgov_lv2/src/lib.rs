@@ -14,7 +14,8 @@ pub mod syscall_classification;
 pub mod thread_group;
 
 pub use dispatch::{
-    CondMutexKind, Lv2BlockReason, Lv2Dispatch, PendingResponse, PpuThreadInitState, SpuInitState,
+    CondMutexKind, ExpiredWait, Lv2BlockReason, Lv2Dispatch, PendingResponse, PpuThreadInitState,
+    SpuInitState,
 };
 pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
 pub use host::{InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, SystemStateSeed};

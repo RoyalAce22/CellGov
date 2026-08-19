@@ -62,13 +62,9 @@ fn resolve_sync_wakes_with_missing_pending_response_debug_panics() {
     rt.resolve_sync_wakes_for_test(&[waiter]);
 }
 
-/// Release-build counterpart to the debug-panic test above. In
-/// release the `debug_assert!(false)` compiles out, but
-/// `log_invariant_break` is release-active and must surface the
-/// dangerous "unit transitions Runnable without an r3 write" path
-/// loudly. Without this witness, a future revert that drops the
-/// log line would silently restore the live-wrong-value failure
-/// mode in release builds with no test catching it.
+/// Release counterpart to the debug-panic test above: the
+/// `debug_assert!` compiles out in release, so the release-active
+/// `log_invariant_break` counter is the observable.
 #[cfg(not(debug_assertions))]
 #[test]
 fn resolve_sync_wakes_with_missing_pending_response_logs_in_release() {
@@ -251,7 +247,6 @@ fn resolve_join_wakes_leaves_joiners_on_a_different_group_untouched() {
     assert_eq!(read_guest_u32_be(&rt, 0x100), 1);
     assert_eq!(read_guest_u32_be(&rt, 0x108), 2);
 
-    // Non-match joiner untouched: still Blocked, no r3, no guest writes.
     assert_eq!(
         rt.registry().effective_status(waiter_other),
         Some(UnitStatus::Blocked),
@@ -260,6 +255,73 @@ fn resolve_join_wakes_leaves_joiners_on_a_different_group_untouched() {
     assert_eq!(rt.registry_mut().drain_syscall_return(waiter_other), None);
     assert_eq!(read_guest_u32_be(&rt, 0x200), 0);
     assert_eq!(read_guest_u32_be(&rt, 0x208), 0);
+}
+
+#[test]
+fn event_flag_wake_with_null_result_ptr_writes_nothing() {
+    let mut rt = build(0x1000, 1, 100);
+    let waiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    rt.registry_mut()
+        .set_status_override(waiter, UnitStatus::Blocked);
+    let _ = rt.syscall_responses_mut().insert(
+        waiter,
+        cellgov_lv2::PendingResponse::EventFlagWake {
+            result_ptr: 0,
+            observed: 0xDEAD_BEEF_0000_0001,
+        },
+    );
+    rt.resolve_sync_wakes_for_test(&[waiter]);
+
+    // The kernel stores the observed pattern only through a non-null
+    // result pointer (RPCS3 sys_event_flag.cpp sys_event_store_result);
+    // guest address 0 must stay untouched.
+    let mem = rt.memory().as_bytes();
+    assert!(
+        mem[..8].iter().all(|&b| b == 0),
+        "NULL result_ptr wake must not write the pattern at guest address 0"
+    );
+    assert_eq!(rt.registry_mut().drain_syscall_return(waiter), Some(0));
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Runnable)
+    );
+}
+
+#[test]
+fn a_break_logged_during_a_commit_traces_before_that_commits_checkpoints() {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    let mut rt = build(256, 5, 100);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    let s = rt.step().unwrap();
+    // A break buffered mid-commit (the shape apply_lv2_effects and the
+    // RSX mirror paths produce) with an empty timer queue: without the
+    // commit-boundary drain it would only trace at the NEXT dispatch,
+    // and never at all on a process-exit final commit.
+    rt.lv2_host_mut().log_invariant_break(
+        "test.commit_boundary_attribution",
+        format_args!("buffered before commit_step"),
+    );
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    let bytes = rt.trace().bytes().to_vec();
+    let records: Vec<TraceRecord> = TraceReader::new(&bytes)
+        .map(|r| r.expect("decode"))
+        .collect();
+    let break_idx = records
+        .iter()
+        .position(|r| matches!(r, TraceRecord::HostInvariantBreak { .. }))
+        .expect("the break logged during the commit must reach the trace in the same commit");
+    let checkpoint_idx = records
+        .iter()
+        .position(|r| matches!(r, TraceRecord::StateHashCheckpoint { .. }))
+        .expect("commit emits state-hash checkpoints");
+    assert!(
+        break_idx < checkpoint_idx,
+        "the break must be attributed inside this commit's window, before its \
+         state-hash checkpoints (break at {break_idx}, first checkpoint at {checkpoint_idx})"
+    );
 }
 
 #[test]
@@ -304,7 +366,6 @@ fn lwmutex_wake_raw_syscall_path_writes_no_user_struct_and_increments_holds() {
         mem[..16].iter().all(|&b| b == 0),
         "raw-syscall path must not write user-space struct"
     );
-    // Holds counter advanced through the unconditional inc.
     assert_eq!(rt.lv2_host().lwmutex_holds_for(tid), 1);
     assert_eq!(rt.registry_mut().drain_syscall_return(waiter), Some(0));
 }

@@ -13,9 +13,11 @@
 //!   replaces via [`Runtime::set_scheduler`] (contract 3).
 //! - [`cellgov_trace::TraceWriter`] (main + zoom) -- cleared on
 //!   `restore_into` (contract 2).
-//! - `rsx_label_writes_committed` -- cumulative instrument counter; never
-//!   feeds the commit pipeline or FIFO advance, and carries its
-//!   pre-restore value forward.
+//! - Audit counters (`rsx_label_writes_committed`,
+//!   `rsx_set_reference_dispatches`, `timer_sleep_dispatches`,
+//!   `lv2_direct_committed_writes`) -- cumulative instruments; never
+//!   feed the commit pipeline or FIFO advance, and carry their
+//!   pre-restore values forward.
 //! - `effects_buf`, `scheduler_dirty_after_restore` -- per-step
 //!   scratch / restore-tracking state (contracts 3, 5).
 //!
@@ -92,6 +94,7 @@ pub struct RuntimeSnapshot {
     pub(super) rsx_methods: NvMethodTable,
     pub(super) pending_rsx_effects: Vec<Effect>,
     pub(super) dma_queue: DmaQueue,
+    pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) lv2_host: Lv2Host,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) commit_pipeline: CommitPipeline,
@@ -103,19 +106,10 @@ pub struct RuntimeSnapshot {
     pub(super) step_woke_others: bool,
     pub(super) per_step_index: u64,
     pub(super) pending_tag_completions: std::collections::BTreeMap<UnitId, u32>,
-    /// Base address for `Effect::RsxLabelWrite` commit targets.
-    /// Mutable via [`Runtime::set_rsx_label_base`] and read every
-    /// commit batch in `commit::process` (`start = base + offset`),
-    /// so a snapshot taken after the base is set must restore it to
-    /// preserve the commit-side guest address; a fresh-runtime
-    /// restore that left base at 0 would commit label writes to a
-    /// different memory address and diverge.
     pub(super) rsx_label_base: u32,
 
     /// Asserted unchanged in [`Runtime::restore_into`] (release-active),
-    /// not restored. `set_budget` and `set_mode` are public; a
-    /// debug-only guard would let a release-build caller mutate these
-    /// between snapshot and restore and silently diverge replays.
+    /// not restored.
     captured_budget_per_step: Budget,
     captured_max_steps: usize,
     captured_mode: RuntimeMode,
@@ -150,6 +144,7 @@ impl Runtime {
             rsx_methods: self.rsx_methods.clone(),
             pending_rsx_effects: self.pending_rsx_effects.clone(),
             dma_queue: self.dma_queue.clone(),
+            timer_wakes: self.timer_wakes.clone(),
             lv2_host: self.lv2_host.clone(),
             syscall_responses: self.syscall_responses.clone(),
             commit_pipeline: self.commit_pipeline.clone(),
@@ -203,6 +198,7 @@ impl Runtime {
         self.rsx_methods = snap.rsx_methods.clone();
         self.pending_rsx_effects = snap.pending_rsx_effects.clone();
         self.dma_queue = snap.dma_queue.clone();
+        self.timer_wakes = snap.timer_wakes.clone();
         self.lv2_host = snap.lv2_host.clone();
         self.syscall_responses = snap.syscall_responses.clone();
         self.commit_pipeline = snap.commit_pipeline.clone();

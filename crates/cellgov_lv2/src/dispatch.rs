@@ -84,12 +84,16 @@ pub enum Lv2Dispatch {
     /// `sys_event_flag_set`).
     ///
     /// # Invariants
-    /// - Every `response_updates` key MUST appear in
-    ///   `woken_unit_ids`; an update for a non-woken unit would
-    ///   silently mutate an unrelated future wait.
-    /// - An update's [`PendingResponse::variant_tag`] MUST match the
-    ///   existing entry's tag -- updates are partial fills, not
-    ///   variant replacements.
+    /// - Every `response_updates` key MUST be in `woken_unit_ids` or
+    ///   still parked with a staged response -- cond signal restages
+    ///   a contended waiter's response as the mutex-grant response
+    ///   without waking it. A unit in neither set could never receive
+    ///   the update.
+    /// - A non-[`PendingResponse::ReturnCode`] update's
+    ///   [`PendingResponse::variant_tag`] MUST match the existing
+    ///   entry's tag -- those updates are partial fills. `ReturnCode`
+    ///   may replace any variant; it is the universal cancel/timeout
+    ///   override.
     WakeAndReturn {
         /// Return code written to the source's r3.
         code: u64,
@@ -152,9 +156,7 @@ pub enum Lv2Dispatch {
 }
 
 impl Lv2Dispatch {
-    /// Shorthand for the error-return shape:
-    /// `Immediate { code, effects: vec![] }`. Use at sites that bail
-    /// without committing effects.
+    /// [`Lv2Dispatch::Immediate`] with no effects, for error returns.
     pub fn immediate(code: u64) -> Self {
         Self::Immediate {
             code,
@@ -252,6 +254,24 @@ pub enum Lv2BlockReason {
         /// Which mutex table `mutex_id` names (distinct id spaces).
         mutex_kind: CondMutexKind,
     },
+}
+
+/// Outcome of a timed wait expiring, shaped like the wake half of
+/// [`Lv2Dispatch::WakeAndReturn`] (there is no releasing source, so no
+/// source return code).
+///
+/// An empty outcome means the expiry was refused as a host invariant
+/// break; the unit stays parked. A `response_updates` entry without a
+/// matching `woken_unit_ids` entry re-parks the unit untimed (the
+/// cond-timeout path contending on its mutex).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ExpiredWait {
+    /// Units whose pending responses resolve now.
+    pub woken_unit_ids: Vec<UnitId>,
+    /// Per-waiter overrides applied to the pending response table.
+    pub response_updates: Vec<(UnitId, PendingResponse)>,
+    /// Effects committed alongside the expiry.
+    pub effects: Vec<Effect>,
 }
 
 /// What the runtime should do when a blocked PPU is woken.

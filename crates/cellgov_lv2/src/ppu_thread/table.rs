@@ -84,11 +84,11 @@ impl PpuThreadTable {
     /// module_start on a transient PPU unit that has no thread
     /// record of its own; real LV2 attributes those syscalls to
     /// the calling (primary) thread (see RPCS3
-    /// `_sys_prx_start_module(ppu_thread&, ...)`,
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_prx.cpp`).
+    /// `_sys_prx_start_module(ppu_thread&, ...)` in
+    /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp`).
     /// Aliasing the transient unit to the primary thread here
     /// gives sync-syscall dispatch sites a real PpuThreadId for
-    /// the caller without weakening the strict lookup elsewhere.
+    /// the caller.
     ///
     /// # Errors
     /// Returns `false` if `existing` is not a known thread or
@@ -176,8 +176,7 @@ impl PpuThreadTable {
     }
 
     /// Destructively take the joiner list without changing
-    /// thread state; for read-only access use
-    /// `get(id)?.join_waiters.as_slice()`.
+    /// thread state.
     pub fn take_join_waiters(&mut self, id: PpuThreadId) -> Vec<PpuThreadId> {
         match self.threads.get_mut(&id) {
             Some(t) => std::mem::take(&mut t.join_waiters),
@@ -232,19 +231,6 @@ impl PpuThreadTable {
         self.threads.keys().copied()
     }
 
-    /// Whether any thread other than `caller` is alive (not yet
-    /// `Finished` / `Detached`).
-    ///
-    /// Used by finite-timeout wait dispatchers to decide between
-    /// blocking and tripping `CELL_ETIMEDOUT`: if no peer thread can
-    /// possibly post / set the awaited condition, blocking would
-    /// deadlock the schedule, so the wait must time-trip immediately.
-    pub fn has_other_alive_thread(&self, caller: PpuThreadId) -> bool {
-        self.threads
-            .iter()
-            .any(|(id, t)| *id != caller && t.state.is_alive())
-    }
-
     /// Whether any thread whose low-32-bit id matches `raw_low32` is
     /// still alive. The user-space owner field of `sys_lwmutex_t` only
     /// stores the low 32 bits of the kernel `PpuThreadId`, so the HLE
@@ -269,11 +255,8 @@ impl PpuThreadTable {
 
     /// FNV-1a fold for determinism checking.
     ///
-    /// Walks entries in BTreeMap order and folds id, unit_id,
-    /// state tag, block-reason tag + payload (via
-    /// [`super::GuestBlockReason::stable_tag`]), attrs, exit
-    /// value, and the join-waiter list length-prefixed so
-    /// `([X,Y], [])` cannot collide with `([X], [Y])`.
+    /// The join-waiter list is length-prefixed so `([X,Y], [])`
+    /// cannot collide with `([X], [Y])`.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         for (id, thread) in &self.threads {

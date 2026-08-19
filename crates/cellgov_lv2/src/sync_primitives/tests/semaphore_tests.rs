@@ -160,6 +160,36 @@ fn enqueue_waiter_unknown_id_returns_err() {
 }
 
 #[test]
+fn remove_waiter_leaves_count_and_order_intact() {
+    let mut t = SemaphoreTable::new();
+    t.create_with_id(1, 0, 8).unwrap();
+    let w1 = tid(0x0100_0001);
+    let w2 = tid(0x0100_0002);
+    let w3 = tid(0x0100_0003);
+    t.enqueue_waiter(1, w1).unwrap();
+    t.enqueue_waiter(1, w2).unwrap();
+    t.enqueue_waiter(1, w3).unwrap();
+    assert!(t.remove_waiter(1, w2));
+    let entry = t.lookup(1).unwrap();
+    let remaining: Vec<_> = entry.waiters().iter().collect();
+    assert_eq!(remaining, vec![w1, w3], "FIFO order of the rest survives");
+    assert_eq!(entry.count(), 0, "no count repair on timeout-cancel");
+    assert_eq!(
+        t.post_and_wake(1),
+        SemaphorePost::Woke { new_owner: w1 },
+        "post-cancel post must hand the slot to the surviving FIFO head"
+    );
+}
+
+#[test]
+fn remove_waiter_unknown_id_or_unparked_thread_is_false() {
+    let mut t = SemaphoreTable::new();
+    assert!(!t.remove_waiter(99, tid(0x0100_0001)));
+    t.create_with_id(1, 0, 8).unwrap();
+    assert!(!t.remove_waiter(1, tid(0x0100_0001)));
+}
+
+#[test]
 fn state_hash_empty_is_stable() {
     let a = SemaphoreTable::new();
     let b = SemaphoreTable::new();

@@ -48,6 +48,23 @@ impl Runtime {
             // are invalidated.
             self.reservations
                 .clear_covering(dst.start().raw(), dst.length(), Some(c.issuer()));
+            // A Finished issuer is process-exit residue: the transfer
+            // still commits (the payload was in flight and the terminal
+            // memory snapshot must include it), but the Runnable
+            // override would replace Finished and resume a stopped
+            // thread. RPCS3 sys_process.cpp _sys_process_exit stops
+            // every thread. Mirrors the guard in fire_timer_wakes.
+            // A Faulted issuer is a pre-validate DmaEnqueue rejection
+            // (see the commit pipeline's DmaEnqueue arm) with an older
+            // accepted transfer still in flight; the mark exists to
+            // keep the unit off the scheduler, so it must not be
+            // replaced either.
+            if matches!(
+                self.registry.effective_status(c.issuer()),
+                Some(UnitStatus::Finished | UnitStatus::Faulted)
+            ) {
+                continue;
+            }
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
             if let Some(tag_id) = c.request().tag_id() {
