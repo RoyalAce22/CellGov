@@ -171,7 +171,7 @@ pub fn bench_boot(
     );
 
     let host_invariant_breaks = rt.lv2_host().observability().invariant_break_count as u64;
-    eprintln!("BENCH_HOST_INVARIANT_BREAKS: count={host_invariant_breaks}");
+    eprintln!("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count={host_invariant_breaks}");
     // Only the first break of a boot prints its detail line, so the
     // per-site split is the only way to read the rest.
     let break_sites: Vec<String> = rt
@@ -229,6 +229,11 @@ pub fn bench_boot(
         "BENCH_MEM_FAULT_WITNESS: arm_entries={mem_fault_arm_entries} unmapped_routed={mem_fault_unmapped_routed}"
     );
 
+    // Timer sleeps bypass Lv2Host::dispatch, so no other witness
+    // records them; a guest sleep loop is invisible without this line.
+    let timer_sleeps = rt.timer_sleep_dispatches();
+    eprintln!("BENCH_TIMER_SLEEP_WITNESS: count={timer_sleeps}");
+
     let rsx_label_writes_committed = rt.rsx_label_writes_committed();
     eprintln!("BENCH_RSX_LABEL_WRITES_WITNESS: count={rsx_label_writes_committed}");
 
@@ -269,12 +274,14 @@ pub fn bench_boot(
     eprintln!(
         "BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x{program_authority_id:016x} authid_source={authid_source} lwmutex_unknown_locks={lwmutex_unknown_locks}"
     );
-    eprintln!(
-        "BENCH_MUTEX_UNLOCK_WITNESS: not_owner={}",
-        rt.lv2_host().observability().mutex_unlock_not_owner_count
-    );
+    let mutex_unlock_not_owner = rt.lv2_host().observability().mutex_unlock_not_owner_count;
+    eprintln!("BENCH_MUTEX_UNLOCK_WITNESS: not_owner={mutex_unlock_not_owner}");
     // Every non-zero immediate return, error or value. A code absent
-    // here was never produced by LV2 this boot.
+    // here was never produced by LV2 this boot. Line convention:
+    // inventory lines (a rendered map, like this one) suppress when
+    // the map is empty; scalar count lines always print because
+    // their zero is the finding; a line carrying both, like the
+    // unsupported-syscall one, keeps its scalar and drops the tail.
     let codes: Vec<String> = rt
         .lv2_host()
         .observability()
@@ -282,7 +289,43 @@ pub fn bench_boot(
         .iter()
         .map(|(code, hits)| format!("0x{code:08x}={hits}"))
         .collect();
-    eprintln!("BENCH_DISPATCH_RETURN_WITNESS: {}", codes.join(" "));
+    if !codes.is_empty() {
+        eprintln!("BENCH_DISPATCH_RETURN_WITNESS: {}", codes.join(" "));
+    }
+    // Same codes attributed to the arm that returned them.
+    let pairs: Vec<String> = rt
+        .lv2_host()
+        .observability()
+        .dispatch_return_pairs
+        .iter()
+        .map(|((arm, code), hits)| format!("{arm}:0x{code:08x}={hits}"))
+        .collect();
+    if !pairs.is_empty() {
+        eprintln!("BENCH_DISPATCH_RETURN_PAIRS: {}", pairs.join(" "));
+    }
+    // Wait-family parks by (arm, timeout usec). timeout=0 is
+    // wait-forever; nonzero registers a wake-at-guest-tick deadline.
+    let parks: Vec<String> = rt
+        .lv2_host()
+        .observability()
+        .park_timeouts
+        .iter()
+        .map(|((arm, timeout), hits)| format!("{arm}:t={timeout}us={hits}"))
+        .collect();
+    if !parks.is_empty() {
+        eprintln!("BENCH_PARK_TIMEOUT_WITNESS: {}", parks.join(" "));
+    }
+    // Timed waits that expired with ETIMEDOUT, by primitive.
+    let expiries: Vec<String> = rt
+        .lv2_host()
+        .observability()
+        .wait_timeout_expiries
+        .iter()
+        .map(|(primitive, hits)| format!("{primitive}={hits}"))
+        .collect();
+    if !expiries.is_empty() {
+        eprintln!("BENCH_WAIT_EXPIRY_WITNESS: {}", expiries.join(" "));
+    }
 
     // sc 484 witness: how many register-module calls arrived, how
     // many took the CoreOS manual-link branch, and how the import
@@ -298,9 +341,9 @@ pub fn bench_boot(
     // registered under the key. A gap is the connect-before-create
     // race, or a producer CellGov never runs.
     let (ipc_attempts, ipc_bound) = rt.lv2_host().observability().event_port_ipc_connects;
+    let keyed_queues = rt.lv2_host().keyed_event_queue_count();
     eprintln!(
-        "BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts={ipc_attempts} ipc_connect_bound={ipc_bound} keyed_queues={}",
-        rt.lv2_host().keyed_event_queue_count(),
+        "BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts={ipc_attempts} ipc_connect_bound={ipc_bound} keyed_queues={keyed_queues}"
     );
 
     // Null-backend inventory: which syscalls this title issued that
@@ -313,11 +356,15 @@ pub fn bench_boot(
         .iter()
         .map(|(number, hits)| format!("{number}={hits}"))
         .collect();
-    eprintln!(
-        "BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct={} {}",
-        unsupported.len(),
-        unsupported.join(" "),
-    );
+    if unsupported.is_empty() {
+        eprintln!("BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct=0");
+    } else {
+        eprintln!(
+            "BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct={} {}",
+            unsupported.len(),
+            unsupported.join(" "),
+        );
+    }
 
     // System-IPC namespace production witnesses, both channels. A
     // silent namespace prints all zeros; the key line is suppressed
@@ -325,8 +372,8 @@ pub fn bench_boot(
     let ipc = &rt.lv2_host().observability().system_ipc_witness;
     eprintln!(
         "BENCH_SYSTEM_IPC_WITNESS: shm_creates={} shm_attaches={} shm_maps={} shm_writes={} \
-         cond_creates={} cond_waits={} cond_signals={} equeue_creates={} equeue_refs={} \
-         equeue_enqueues={} keys={}",
+         cond_creates={} cond_waits={} cond_signals={} event_queue_creates={} \
+         event_queue_references={} event_queue_enqueues={} distinct_keys={}",
         ipc.shm_creates,
         ipc.shm_attaches,
         ipc.shm_maps,
@@ -345,7 +392,7 @@ pub fn bench_boot(
             .iter()
             .map(|(key, events)| format!("0x{key:016x}={events}"))
             .collect();
-        eprintln!("BENCH_SYSTEM_IPC_KEYS: {}", inventory.join(","));
+        eprintln!("BENCH_SYSTEM_IPC_KEYS: {}", inventory.join(" "));
     }
 
     // PRX load-miss witnesses: firmware misses stubbed with a real
@@ -354,21 +401,59 @@ pub fn bench_boot(
     let prx_hle_stubs = rt.lv2_host().observability().prx_load_hle_stub_count;
     let prx_not_found = rt.lv2_host().observability().prx_load_not_found_count;
     eprintln!("BENCH_PRX_LOAD_WITNESS: hle_stubs={prx_hle_stubs} not_found={prx_not_found}");
+    // Paths are guest-supplied. Debug quoting delimits each path and
+    // escapes '"' and '\', so '=' inside a path cannot be confused
+    // with the '=' before the count -- but spaces inside the quotes
+    // stay literal, so a consumer must extract the quoted run first;
+    // whitespace-splitting alone misparses a path containing spaces.
     let prx_misses: Vec<String> = rt
         .lv2_host()
         .observability()
         .prx_load_misses
         .iter()
-        .map(|(path, hits)| format!("{path}={hits}"))
+        .map(|(path, hits)| format!("{path:?}={hits}"))
         .collect();
     if !prx_misses.is_empty() {
         eprintln!("BENCH_PRX_LOAD_MISSES: {}", prx_misses.join(" "));
+    }
+
+    // Terminal parking map: where every live PPU unit stopped, its
+    // scheduler status, and its per-unit atomic traffic. On a
+    // MaxSteps boot this names the PCs an idle loop spins at; the
+    // per-unit ldarx split separates the spinners from the parked.
+    for (id, unit) in rt.registry().iter() {
+        if let Some(ppu) = unit
+            .as_any()
+            .downcast_ref::<cellgov_ppu::PpuExecutionUnit>()
+        {
+            let status = unit_status_label(rt.registry().effective_status(id));
+            eprintln!(
+                "BENCH_FINAL_UNIT_WITNESS: unit={} pc=0x{:08x} lr=0x{:08x} status={status} ldarx={} lwarx={}",
+                id.raw(),
+                ppu.state().pc,
+                ppu.state().lr(),
+                ppu.state().ldarx_executed,
+                ppu.state().lwarx_executed,
+            );
+        }
     }
 
     BenchBootResult {
         steps,
         wall,
         outcome,
+    }
+}
+
+/// Fixed spelling for the parking-map status field: the line is
+/// whitespace-delimited, so the label must never contain spaces.
+fn unit_status_label(status: Option<cellgov_exec::UnitStatus>) -> &'static str {
+    match status {
+        Some(cellgov_exec::UnitStatus::Runnable) => "runnable",
+        Some(cellgov_exec::UnitStatus::Blocked) => "blocked",
+        Some(cellgov_exec::UnitStatus::Faulted) => "faulted",
+        Some(cellgov_exec::UnitStatus::Finished) => "finished",
+        None => "none",
     }
 }
 
@@ -384,10 +469,14 @@ pub fn bench_boot_one_run(
     control_flags1: Option<u32>,
 ) -> BenchBootResult {
     let r = bench_boot(opts, elf_data, authority_id, control_flags1);
+    // wall_us, not wall_ms: the parent reconstructs the Duration from
+    // this token, and millisecond truncation made the parent's
+    // steps_per_sec disagree with the one printed here (and zeroed
+    // the wall entirely on a sub-millisecond run).
     println!(
-        "BENCH_RESULT steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
+        "BENCH_RESULT steps={} wall_us={} steps_per_sec={:.0} outcome={}",
         r.steps,
-        r.wall.as_millis(),
+        r.wall.as_micros(),
         r.steps_per_sec(),
         r.outcome,
     );
@@ -484,17 +573,17 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
     );
     let r1 = spawn_one_run(opts)?;
     println!(
-        "  run 1: steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
+        "  run 1: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
         r1.steps,
-        r1.wall.as_millis(),
+        r1.wall.as_secs_f64() * 1e3,
         r1.steps_per_sec(),
         r1.outcome,
     );
     let r2 = spawn_one_run(opts)?;
     println!(
-        "  run 2: steps={} wall_ms={} steps_per_sec={:.0} outcome={}",
+        "  run 2: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
         r2.steps,
-        r2.wall.as_millis(),
+        r2.wall.as_secs_f64() * 1e3,
         r2.steps_per_sec(),
         r2.outcome,
     );
@@ -503,14 +592,14 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
     match gate {
         BenchGate::Pass => {
             let d = drift_pct.expect("Pass implies finite drift");
-            println!("  agreement: {d:.2}% (gate: <= 5% => OK)");
+            println!("  agreement: {d:.2}% (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => OK)");
         }
         BenchGate::WallDriftExceeded => {
             let d = drift_pct.expect("WallDriftExceeded implies finite drift");
-            println!("  agreement: {d:.2}% (gate: <= 5% => FAIL)");
+            println!("  agreement: {d:.2}% (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => FAIL)");
         }
         BenchGate::WallUnmeasurable => {
-            println!("  agreement: unmeasurable (gate: <= 5% => FAIL)");
+            println!("  agreement: unmeasurable (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => FAIL)");
         }
         BenchGate::DeterminismBreak => {
             println!("  agreement: determinism break (steps/outcome differ)");
@@ -547,10 +636,10 @@ pub enum ParseBenchError {
     MissingSteps,
     #[error("BENCH_RESULT: malformed steps={0:?}")]
     MalformedSteps(String),
-    #[error("BENCH_RESULT: missing wall_ms= field")]
-    MissingWallMs,
-    #[error("BENCH_RESULT: malformed wall_ms={0:?}")]
-    MalformedWallMs(String),
+    #[error("BENCH_RESULT: missing wall_us= field")]
+    MissingWallUs,
+    #[error("BENCH_RESULT: malformed wall_us={0:?}")]
+    MalformedWallUs(String),
     #[error("BENCH_RESULT: missing outcome= field")]
     MissingOutcome,
     #[error("BENCH_RESULT: malformed outcome={token:?}: {source}")]
@@ -561,7 +650,7 @@ pub enum ParseBenchError {
     },
 }
 
-/// Parse the `BENCH_RESULT steps=N wall_ms=M steps_per_sec=X outcome=O`
+/// Parse the `BENCH_RESULT steps=N wall_us=M steps_per_sec=X outcome=O`
 /// line out of captured stdout.
 pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseBenchError> {
     let mut iter = stdout.lines().filter(|l| l.starts_with("BENCH_RESULT "));
@@ -570,7 +659,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
         return Err(ParseBenchError::DuplicateResultLine);
     }
     let mut steps: Option<usize> = None;
-    let mut wall_ms: Option<u64> = None;
+    let mut wall_us: Option<u64> = None;
     let mut outcome_token: Option<String> = None;
     let mut reported_sps: Option<f64> = None;
     for tok in line.split_whitespace().skip(1) {
@@ -579,10 +668,10 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
                 v.parse()
                     .map_err(|_| ParseBenchError::MalformedSteps(v.to_string()))?,
             );
-        } else if let Some(v) = tok.strip_prefix("wall_ms=") {
-            wall_ms = Some(
+        } else if let Some(v) = tok.strip_prefix("wall_us=") {
+            wall_us = Some(
                 v.parse()
-                    .map_err(|_| ParseBenchError::MalformedWallMs(v.to_string()))?,
+                    .map_err(|_| ParseBenchError::MalformedWallUs(v.to_string()))?,
             );
         } else if let Some(v) = tok.strip_prefix("steps_per_sec=") {
             reported_sps = v.parse().ok();
@@ -595,7 +684,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
         }
     }
     let steps = steps.ok_or(ParseBenchError::MissingSteps)?;
-    let wall_ms = wall_ms.ok_or(ParseBenchError::MissingWallMs)?;
+    let wall_us = wall_us.ok_or(ParseBenchError::MissingWallUs)?;
     let outcome_token = outcome_token.ok_or(ParseBenchError::MissingOutcome)?;
     let outcome = BootOutcome::from_str(&outcome_token).map_err(|source| {
         ParseBenchError::UnparseableOutcome {
@@ -603,21 +692,25 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
             source,
         }
     })?;
-    let wall = std::time::Duration::from_millis(wall_ms);
+    let wall = std::time::Duration::from_micros(wall_us);
     let result = BenchBootResult {
         steps,
         wall,
         outcome,
     };
     // Drift beyond rounding tolerance means the formatter and the
-    // recomputation of (steps, wall_ms) have gone out of sync.
+    // recomputation of (steps, wall_us) have gone out of sync. A zero
+    // wall is unmeasurable, not drifted -- the pair gate rejects it
+    // separately via `wall_disagreement_percent`.
     if let Some(reported) = reported_sps {
-        let computed = result.steps_per_sec();
-        let tolerance = (computed * 0.01).max(1.0);
-        debug_assert!(
-            (reported - computed).abs() <= tolerance,
-            "BENCH_RESULT steps_per_sec drift: reported={reported} computed={computed} (tolerance={tolerance})"
-        );
+        if wall_us > 0 {
+            let computed = result.steps_per_sec();
+            let tolerance = (computed * 0.01).max(1.0);
+            debug_assert!(
+                (reported - computed).abs() <= tolerance,
+                "BENCH_RESULT steps_per_sec drift: reported={reported} computed={computed} (tolerance={tolerance})"
+            );
+        }
     }
     Ok(result)
 }

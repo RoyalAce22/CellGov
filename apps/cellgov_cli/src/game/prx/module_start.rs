@@ -36,15 +36,10 @@ pub(in crate::game) enum ModuleStartOutcome {
 /// module_start entries HLE-stubbed to CELL_OK -- declared LLE
 /// divergences.
 ///
-/// `cellSysutil_Library`: its init dispatcher drains serialized
-/// records from a producer-fed shared-memory ring and terminally
-/// waits on cond\[0\] for the next record. The producer lives outside
-/// cellSysutil in real PS3 firmware and CellGov has no equivalent;
-/// satisfying the wait would mean inventing the producer's contract
-/// (STATE_FIELD, cursor advance, record bytes). The honest pieces
-/// (IPC-key registration, first-record seed, cond\[1\] ring-check arm)
-/// advance the consumer through one record then stall AllBlocked --
-/// witnessed by `cond0_producer_waits` in production state.
+/// `cellSysutil_Library`: its init dispatcher terminally waits on a
+/// producer-fed shared-memory ring; the producer lives outside
+/// cellSysutil in real PS3 firmware and CellGov has no equivalent,
+/// so the LLE path stalls AllBlocked.
 const HLE_STUBBED_MODULE_STARTS: &[&str] = &["cellSysutil_Library"];
 
 /// Why a module_start failed to complete.
@@ -133,8 +128,8 @@ pub(in crate::game) fn run_module_start(
     let mut ms_state = cellgov_ppu::state::PpuState::new();
     ms_state.pc = ms.code;
     ms_state.set_gpr(2, ms.toc);
-    // Offset below the game's stack_top so the two cannot collide
-    // if a future caller runs them concurrently.
+    // Offset below the game's stack_top so the two stacks cannot
+    // collide.
     ms_state.set_gpr(1, PS3_PRIMARY_STACK_BASE + 0x8000);
     ms_state.set_gpr(11, kctx_opd);
     ms_state.set_gpr(12, kctx_opd);
@@ -338,7 +333,8 @@ pub(in crate::game) fn run_module_start(
         eprintln!(
             "BENCH_SYSTEM_IPC_WITNESS_AT_MODULE_START: module={} shm_creates={} \
              shm_attaches={} shm_maps={} shm_writes={} cond_creates={} cond_waits={} \
-             cond_signals={} equeue_creates={} equeue_refs={} equeue_enqueues={} keys={}",
+             cond_signals={} event_queue_creates={} event_queue_references={} \
+             event_queue_enqueues={} distinct_keys={}",
             prx_info.name,
             ipc.shm_creates,
             ipc.shm_attaches,
@@ -359,7 +355,7 @@ pub(in crate::game) fn run_module_start(
             .collect();
         eprintln!(
             "BENCH_SYSTEM_IPC_KEYS_AT_MODULE_START: {}",
-            inventory.join(",")
+            inventory.join(" ")
         );
     }
     // Seeded-ring stall witnesses; the producer-fed waits these count
@@ -392,12 +388,8 @@ pub(in crate::game) fn run_module_start(
         if !keyed.is_empty() {
             println!("  module_start keyed cond signals: {}", keyed.join(" "));
         }
-        // Structured witness for the cellSysutil stall-signature
-        // tripwire: every field as a parseable integer, plus the
-        // module-name match and the stall step count. `stalled` is
-        // 1 when module_start failed to return (the producer-fed
-        // wall), 0 when it returned. Slot-0 cond[0] signal count is
-        // reported as `cond0_slot0_signals`.
+        // Parsed by the cellSysutil stall-signature tripwire; every
+        // field must stay a machine-readable integer.
         let cond0_slot0_key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_COND0_IPC_KEY_BASE;
         let cond0_slot0_signals = host
             .observability()
@@ -448,7 +440,15 @@ pub(in crate::game) fn run_module_start(
     // Drop the alias so post-boot syscall dispatch against this
     // retired UnitId hits the strict ESRCH path. The transient unit
     // itself stays in the registry as Faulted (scheduler skips it).
-    let _ = rt.lv2_host_mut().drop_ppu_thread_alias(ms_unit_id);
+    // Install above died on failure, so a missing alias here means
+    // the table changed underneath the loop.
+    if !rt.lv2_host_mut().drop_ppu_thread_alias(ms_unit_id) {
+        eprintln!(
+            "module_start: INVARIANT: no alias to drop for {} (UnitId {ms_unit_id:?}); \
+             post-boot strict-ESRCH behavior for this unit is unverified",
+            prx_info.name,
+        );
+    }
 
     result.map(|steps| ModuleStartOutcome::Completed { steps })
 }

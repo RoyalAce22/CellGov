@@ -19,9 +19,6 @@ type LineSpec = (
 /// A line's tokens are `name=value` pairs. Single-value lines spell
 /// their token `count`, so the table renames it to the witness name;
 /// multi-value lines already name each field and map to themselves.
-/// A key that is neither tracked nor listed as ignored is a parse
-/// error, so a renamed emitter token fails instead of silently
-/// zeroing its witness.
 const LINE_TABLE: &[LineSpec] = &[
     (
         "BENCH_VRSAVE_WITNESS:",
@@ -32,7 +29,7 @@ const LINE_TABLE: &[LineSpec] = &[
         &[],
     ),
     (
-        "BENCH_HOST_INVARIANT_BREAKS:",
+        "BENCH_HOST_INVARIANT_BREAKS_WITNESS:",
         &[("count", "host_invariant_breaks")],
         &[],
     ),
@@ -52,6 +49,14 @@ const LINE_TABLE: &[LineSpec] = &[
             ("arm_entries", "mem_fault_arm_entries"),
             ("unmapped_routed", "mem_fault_unmapped_routed"),
         ],
+        &[],
+    ),
+    (
+        // Timer sleeps bypass Lv2Host::dispatch (the TIMER_USLEEP /
+        // TIMER_SLEEP fast path), so no dispatch-side witness counts
+        // them.
+        "BENCH_TIMER_SLEEP_WITNESS:",
+        &[("count", "timer_sleeps")],
         &[],
     ),
     (

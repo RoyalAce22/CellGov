@@ -83,6 +83,10 @@
       "value": 771,
       "class": "at-least"
     },
+    "timer_sleeps": {
+      "value": 0,
+      "class": "absent"
+    },
     "vrsave_written": {
       "value": 0,
       "class": "exact"
