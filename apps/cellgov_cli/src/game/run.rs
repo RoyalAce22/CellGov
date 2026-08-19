@@ -46,6 +46,9 @@ pub struct RunGameOptions<'a> {
     /// When true, scan the title ELF for unimplemented PPU
     /// encodings before execution and print the gap report.
     pub prescan: bool,
+    /// Guest argv for the primary thread, `argv[0]` included. Empty
+    /// keeps the no-args entry state (r3..r6 = 0).
+    pub guest_args: &'a [String],
 }
 
 /// Terminal-state summary from [`run_game`].
@@ -101,6 +104,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         profile_pairs,
         budget_override,
         prescan,
+        guest_args,
     } = opts;
     for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
         debug_assert!(
@@ -137,6 +141,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         budget_override,
         capture_state_trace: save_state_trace.is_some(),
         prescan,
+        guest_args,
     });
     let t_after_prepare = Instant::now();
     let boot::PreparedBoot {

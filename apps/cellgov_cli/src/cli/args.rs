@@ -8,19 +8,12 @@ use cellgov_compare::CompareMode;
 use super::exit::die;
 
 /// Why a CLI argument or environment-variable parser rejected its input.
-///
-/// Inner `_inner` parsers in `cli/args.rs` and `cli/env.rs` return
-/// `Result<_, CliArgError>`. The outer wrappers call `die()` on the
-/// Display rendering, so the user-visible message is unchanged.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum CliArgError {
-    /// Hex literal is empty after trimming whitespace.
     #[error("{context}: empty hex value")]
     EmptyHexValue { context: String },
-    /// `0x` / `0X` prefix with no following digits.
     #[error("{context}: hex prefix with no digits in {raw:?}")]
     HexPrefixNoDigits { context: String, raw: String },
-    /// Hex parse via `u64::from_str_radix` failed.
     #[error("{context}: cannot parse hex {raw:?}: {source}")]
     CannotParseHexU64 {
         context: String,
@@ -28,7 +21,6 @@ pub(crate) enum CliArgError {
         #[source]
         source: std::num::ParseIntError,
     },
-    /// Hex parse via `u8::from_str_radix` failed.
     #[error("{context}: cannot parse hex u8 {raw:?}: {source}")]
     CannotParseHexU8 {
         context: String,
@@ -36,55 +28,40 @@ pub(crate) enum CliArgError {
         #[source]
         source: std::num::ParseIntError,
     },
-    /// Hex u8 literal is longer than 2 digits.
     #[error("{context}: expected 1-2 hex digits, got {digits} in {raw:?}")]
     HexU8TooLong {
         context: String,
         raw: String,
         digits: usize,
     },
-    /// `--flag` was specified more than once.
     #[error("{flag} was specified more than once; pass it exactly once")]
     DuplicateFlag { flag: String },
-    /// `--flag` has no following value.
     #[error("{flag} requires a value")]
     FlagRequiresValue { flag: String },
-    /// `--flag=value` form used where the two-token form is required.
     #[error("{flag}=... not supported; use the two-token form: {flag} <value>")]
     FlagEqNotSupported { flag: String },
-    /// `--flag value` where `value` itself starts with `--`.
     #[error(
         "{flag} expects a value but got flag-like token {value:?}; likely a missing value upstream"
     )]
     FlagValueLooksLikeFlag { flag: String, value: String },
-    /// `--format <kind>` got an unknown kind.
     #[error("unknown output format: {got}\nvalid formats: human, json")]
     UnknownOutputFormat { got: String },
-    /// `--mode <kind>` got an unknown kind.
     #[error("unknown compare mode: {got}\nvalid modes: strict, memory, events, prefix")]
     UnknownCompareMode { got: String },
-    /// `--patch-byte ""`.
     #[error("--patch-byte: empty argument (expected ADDR=VALUE)")]
     PatchByteEmpty,
-    /// `--patch-byte` value lacks `=`.
     #[error("--patch-byte: missing '=' in {pair:?} (expected ADDR=VALUE)")]
     PatchByteMissingEq { pair: String },
-    /// `--patch-byte =VALUE`.
     #[error("--patch-byte: empty address in {pair:?} (expected ADDR=VALUE)")]
     PatchByteEmptyAddress { pair: String },
-    /// `--patch-byte ADDR=`.
     #[error("--patch-byte: empty value in {pair:?} (expected ADDR=VALUE)")]
     PatchByteEmptyValue { pair: String },
-    /// `--patch-byte ADDR=VAL=EXTRA`.
     #[error("--patch-byte: extra '=' in {pair:?} (expected ADDR=VALUE)")]
     PatchByteExtraEq { pair: String },
-    /// run-game positional: a second non-flag-non-value token.
     #[error("unexpected extra positional: {value:?} (already have {existing:?})")]
     ExtraPositional { value: String, existing: String },
-    /// run-game positional: empty argv slot.
     #[error("unexpected empty positional argument")]
     EmptyPositional,
-    /// CELLGOV_* env-var value not a recognized boolean.
     #[error("{name}={got:?}: expected 0/1/true/false/yes/no/on/off")]
     EnvBoolUnknown { name: String, got: String },
 }
@@ -180,6 +157,135 @@ fn find_flag_value_inner(args: &[String], flag: &str) -> Result<Option<String>, 
         i += 2;
     }
     Ok(found)
+}
+
+/// Split every `--flag <value>` pair out of `args`: the remaining
+/// argument list, plus the values in order. The value token is taken
+/// verbatim -- it may itself start with `--` (guest argv entries
+/// like `--mode=gametool` are values here, not flags). The caller
+/// must run every later scan over the remaining list: a value left
+/// in place would be read a second time as a host token (a guest
+/// `--trace` would switch host tracing on).
+///
+/// # Errors
+///
+/// - Flag is the last token (no following value).
+/// - `--flag=value` form is used.
+pub(crate) fn split_off_flag_values(args: &[String], flag: &str) -> (Vec<String>, Vec<String>) {
+    split_off_flag_values_inner(args, flag).unwrap_or_else(|e| die(&e.to_string()))
+}
+
+fn split_off_flag_values_inner(
+    args: &[String],
+    flag: &str,
+) -> Result<(Vec<String>, Vec<String>), CliArgError> {
+    let mut remaining: Vec<String> = Vec::new();
+    let mut values: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        if a.starts_with(flag) && a.as_bytes().get(flag.len()) == Some(&b'=') {
+            return Err(CliArgError::FlagEqNotSupported {
+                flag: flag.to_string(),
+            });
+        }
+        if a != flag {
+            remaining.push(args[i].clone());
+            i += 1;
+            continue;
+        }
+        match args.get(i + 1) {
+            Some(v) => values.push(v.clone()),
+            None => {
+                return Err(CliArgError::FlagRequiresValue {
+                    flag: flag.to_string(),
+                });
+            }
+        }
+        i += 2;
+    }
+    Ok((remaining, values))
+}
+
+#[cfg(test)]
+mod split_off_flag_values_tests {
+    use super::{split_off_flag_values_inner, CliArgError};
+
+    fn argv(toks: &[&str]) -> Vec<String> {
+        toks.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_flag_like_guest_value_is_removed_not_left_for_host_scanners() {
+        let args = argv(&[
+            "run-game",
+            "a.self",
+            "--guest-arg",
+            "--trace",
+            "--max-steps",
+            "5",
+        ]);
+        let (remaining, values) = split_off_flag_values_inner(&args, "--guest-arg").unwrap();
+        assert_eq!(values, argv(&["--trace"]));
+        assert_eq!(remaining, argv(&["run-game", "a.self", "--max-steps", "5"]));
+    }
+
+    #[test]
+    fn pairs_are_collected_in_order_and_interleave_with_other_flags() {
+        let args = argv(&["--guest-arg", "a", "--budget", "9", "--guest-arg", "b"]);
+        let (remaining, values) = split_off_flag_values_inner(&args, "--guest-arg").unwrap();
+        assert_eq!(values, argv(&["a", "b"]));
+        assert_eq!(remaining, argv(&["--budget", "9"]));
+    }
+
+    #[test]
+    fn a_trailing_flag_without_a_value_is_rejected() {
+        let args = argv(&["--guest-arg"]);
+        assert!(matches!(
+            split_off_flag_values_inner(&args, "--guest-arg"),
+            Err(CliArgError::FlagRequiresValue { .. })
+        ));
+    }
+
+    #[test]
+    fn the_eq_form_is_rejected() {
+        let args = argv(&["--guest-arg=x"]);
+        assert!(matches!(
+            split_off_flag_values_inner(&args, "--guest-arg"),
+            Err(CliArgError::FlagEqNotSupported { .. })
+        ));
+    }
+
+    #[test]
+    fn a_value_spelling_the_flag_itself_is_consumed_verbatim_not_reparsed() {
+        // bench-boot re-encodes each value as `--guest-arg <value>`
+        // for the child; a value equal to the flag must survive the
+        // child's second split instead of consuming its neighbor.
+        let args = argv(&["--guest-arg", "--guest-arg", "positional"]);
+        let (remaining, values) = split_off_flag_values_inner(&args, "--guest-arg").unwrap();
+        assert_eq!(values, argv(&["--guest-arg"]));
+        assert_eq!(remaining, argv(&["positional"]));
+    }
+
+    #[test]
+    fn an_eq_form_token_in_value_position_is_a_value_not_a_rejection() {
+        // The eq-form check applies to flag positions only; a guest
+        // arg spelled `--guest-arg=x` round-trips through the
+        // subprocess re-encode because the value slot is never
+        // inspected as a flag.
+        let args = argv(&["--guest-arg", "--guest-arg=x"]);
+        let (remaining, values) = split_off_flag_values_inner(&args, "--guest-arg").unwrap();
+        assert_eq!(values, argv(&["--guest-arg=x"]));
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn an_absent_flag_returns_the_args_unchanged() {
+        let args = argv(&["run-game", "a.self"]);
+        let (remaining, values) = split_off_flag_values_inner(&args, "--guest-arg").unwrap();
+        assert!(values.is_empty());
+        assert_eq!(remaining, args);
+    }
 }
 
 /// Parse a `--flag <value>` pair where `value: FromStr`.
@@ -318,6 +424,7 @@ pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--save-boot-summary",
     "--save-state-trace",
     "--checkpoint",
+    "--guest-arg",
 ];
 
 /// Locate the positional ELF path in a `run-game` invocation;

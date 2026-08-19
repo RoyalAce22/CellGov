@@ -8,17 +8,15 @@ use crate::game;
 
 use super::args::{
     find_flag_value, find_run_game_elf_path, parse_flag_value, parse_hex_flag, parse_hex_u64,
-    parse_patch_byte_pair,
+    parse_patch_byte_pair, split_off_flag_values,
 };
 use super::exit::die;
 use super::title::{resolve_checkpoint_override, resolve_ps3_vfs_root, resolve_title_manifest};
 
-/// Maximum allowed wall-time disagreement between the two bench-boot
-/// subprocess runs, as a percentage of the faster run.
-const AGREEMENT_GATE_PERCENT: f64 = 5.0;
+use game::BENCH_AGREEMENT_GATE_PCT;
 
-/// Where `cellgov_install install` lands the minimum viable PRX
-/// set's SPRXes by default.
+/// Where `cellgov_install install` lands the sys/external firmware
+/// SPRXes by default.
 const DEFAULT_FIRMWARE_DIR: &str = "firmware/sys/external";
 
 /// Set by synthetic harnesses (e.g. ps3autotests) to suppress the
@@ -138,6 +136,11 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
 }
 
 pub(crate) fn run_game(args: &[String]) {
+    // Guest argv pairs come out first so a guest token that spells a
+    // host flag (a guest `--trace`, `--prescan`, ...) cannot reach
+    // the host-side scans below.
+    let (args, guest_args) = split_off_flag_values(args, "--guest-arg");
+    let args = &args[..];
     let inputs = resolve_boot_inputs(args, "run-game", true);
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000);
     let trace = args.iter().any(|a| a == "--trace");
@@ -189,6 +192,7 @@ pub(crate) fn run_game(args: &[String]) {
         profile_pairs,
         budget_override,
         prescan,
+        guest_args: &guest_args,
     });
     let summary = match result {
         Ok(s) => s,
@@ -315,6 +319,9 @@ fn parse_patch_byte_csv_inner(value: &str) -> Result<Vec<(u64, u8)>, String> {
 }
 
 pub(crate) fn bench_boot_once(args: &[String]) {
+    // See run_game: guest argv pairs must not reach the host scans.
+    let (args, guest_args) = split_off_flag_values(args, "--guest-arg");
+    let args = &args[..];
     let inputs = resolve_boot_inputs(args, "bench-boot-once", false);
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
     let firmware_dir = resolve_firmware_dir(args);
@@ -333,6 +340,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             checkpoint_override,
             budget_override,
             prescan,
+            guest_args: &guest_args,
         },
         inputs.elf_data,
         inputs.authority_id,
@@ -341,6 +349,9 @@ pub(crate) fn bench_boot_once(args: &[String]) {
 }
 
 pub(crate) fn bench_boot(args: &[String]) {
+    // See run_game: guest argv pairs must not reach the host scans.
+    let (args, guest_args) = split_off_flag_values(args, "--guest-arg");
+    let args = &args[..];
     let inputs = resolve_boot_inputs(args, "bench-boot", false);
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
     let firmware_dir = resolve_firmware_dir(args);
@@ -358,6 +369,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         checkpoint_override,
         budget_override,
         prescan,
+        guest_args: &guest_args,
     }) {
         Ok(o) => o,
         Err(e) => {
@@ -394,7 +406,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         game::BenchGate::WallDriftExceeded => {
             let drift = outcome.drift_pct.unwrap_or(f64::NAN);
             eprintln!(
-                "bench-boot: wall disagreement {drift:.2}% exceeds {AGREEMENT_GATE_PERCENT:.1}% gate; \
+                "bench-boot: wall disagreement {drift:.2}% exceeds {BENCH_AGREEMENT_GATE_PCT:.1}% gate; \
                  exiting with status {EXIT_WALL_DRIFT}"
             );
             std::process::exit(EXIT_WALL_DRIFT);
