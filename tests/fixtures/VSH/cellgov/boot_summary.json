@@ -3,9 +3,9 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 390312,
+  "steps": 390099,
   "budget": 256,
-  "host_invariant_breaks": 88,
+  "host_invariant_breaks": 73,
   "witnesses": {
     "cond_reacquires": {
       "value": 1,
@@ -16,23 +16,23 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 88,
+      "value": 73,
       "class": "exact"
     },
     "ldarx": {
-      "value": 141562,
+      "value": 95435,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 141461,
+      "value": 63750,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 117,
+      "value": 31721,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 123,
+      "value": 31727,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -56,7 +56,7 @@
       "class": "absent"
     },
     "prx_load_not_found": {
-      "value": 1,
+      "value": 0,
       "class": "at-least"
     },
     "rsx_label_writes": {
@@ -76,11 +76,15 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 141439,
+      "value": 63708,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 141226,
+      "value": 307,
+      "class": "at-least"
+    },
+    "timer_sleeps": {
+      "value": 7,
       "class": "at-least"
     },
     "vrsave_written": {

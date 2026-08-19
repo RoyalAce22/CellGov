@@ -55,7 +55,7 @@ fn parse_bench_result_round_trips_every_boot_outcome() {
         BootOutcome::TimeOverflow,
     ];
     for v in variants {
-        let line = format!("BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1000 outcome={v}\n");
+        let line = format!("BENCH_RESULT steps=1 wall_us=1 steps_per_sec=1000000 outcome={v}\n");
         let r = parse_bench_result(&line)
             .unwrap_or_else(|e| panic!("round-trip parse failed for {v:?}: {e}"));
         assert_eq!(r.outcome, v, "round-trip mismatch for {v:?}");
@@ -64,7 +64,7 @@ fn parse_bench_result_round_trips_every_boot_outcome() {
 
 #[test]
 fn parse_bench_result_extracts_fields() {
-    let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_ms=323 steps_per_sec=4342377 outcome=ProcessExit\ntrailing noise\n";
+    let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_us=323000 steps_per_sec=4342377 outcome=ProcessExit\ntrailing noise\n";
     let r = parse_bench_result(stdout).expect("parses");
     assert_eq!(r.steps, 1402388);
     assert_eq!(r.wall.as_millis(), 323);
@@ -82,8 +82,8 @@ fn parse_bench_result_errors_on_missing_line() {
 
 #[test]
 fn parse_bench_result_errors_on_duplicate_line() {
-    let stdout = "BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1 outcome=ProcessExit\n\
-                  BENCH_RESULT steps=2 wall_ms=2 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT steps=1 wall_us=1 steps_per_sec=1 outcome=ProcessExit\n\
+                  BENCH_RESULT steps=2 wall_us=2 steps_per_sec=1 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::DuplicateResultLine
@@ -92,7 +92,7 @@ fn parse_bench_result_errors_on_duplicate_line() {
 
 #[test]
 fn parse_bench_result_errors_on_unknown_outcome() {
-    let stdout = "BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1 outcome=WhoKnows\n";
+    let stdout = "BENCH_RESULT steps=1 wall_us=1 steps_per_sec=1 outcome=WhoKnows\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::UnparseableOutcome { token, source: _ } => {
             assert_eq!(token, "WhoKnows");
@@ -103,7 +103,7 @@ fn parse_bench_result_errors_on_unknown_outcome() {
 
 #[test]
 fn parse_bench_result_errors_on_malformed_steps() {
-    let stdout = "BENCH_RESULT steps=abc wall_ms=1 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT steps=abc wall_us=1 steps_per_sec=1 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedSteps(s) => assert_eq!(s, "abc"),
         other => panic!("expected MalformedSteps, got {other:?}"),
@@ -112,7 +112,7 @@ fn parse_bench_result_errors_on_malformed_steps() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_steps() {
-    let stdout = "BENCH_RESULT wall_ms=1 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT wall_us=1 steps_per_sec=1 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingSteps
@@ -120,26 +120,26 @@ fn parse_bench_result_errors_on_missing_steps() {
 }
 
 #[test]
-fn parse_bench_result_errors_on_malformed_wall_ms() {
-    let stdout = "BENCH_RESULT steps=1 wall_ms=xyz steps_per_sec=1 outcome=ProcessExit\n";
+fn parse_bench_result_errors_on_malformed_wall_us() {
+    let stdout = "BENCH_RESULT steps=1 wall_us=xyz steps_per_sec=1 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
-        ParseBenchError::MalformedWallMs(s) => assert_eq!(s, "xyz"),
-        other => panic!("expected MalformedWallMs, got {other:?}"),
+        ParseBenchError::MalformedWallUs(s) => assert_eq!(s, "xyz"),
+        other => panic!("expected MalformedWallUs, got {other:?}"),
     }
 }
 
 #[test]
-fn parse_bench_result_errors_on_missing_wall_ms() {
+fn parse_bench_result_errors_on_missing_wall_us() {
     let stdout = "BENCH_RESULT steps=1 steps_per_sec=1 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
-        ParseBenchError::MissingWallMs
+        ParseBenchError::MissingWallUs
     );
 }
 
 #[test]
 fn parse_bench_result_errors_on_missing_outcome() {
-    let stdout = "BENCH_RESULT steps=1 wall_ms=1 steps_per_sec=1\n";
+    let stdout = "BENCH_RESULT steps=1 wall_us=1 steps_per_sec=1\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingOutcome

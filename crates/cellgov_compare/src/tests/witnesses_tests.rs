@@ -70,8 +70,6 @@ fn informational_never_fails() {
     assert!(check_all(&b, &parsed(&[("dcbz", 0)])).is_empty());
 }
 
-/// A witness whose emitting line vanishes must fail as line-absence,
-/// not read as zero.
 #[test]
 fn a_recorded_witness_that_vanishes_is_a_line_absence_failure() {
     let b = baseline(&[("ldarx", 100, WitnessClass::AtLeast)]);
@@ -80,9 +78,6 @@ fn a_recorded_witness_that_vanishes_is_a_line_absence_failure() {
     assert!(matches!(&failures[0], WitnessFailure::LineAbsent { .. }));
 }
 
-/// The vacuity hole this arm closes: an `Absent`-class witness reads
-/// observed 0 whether its line reported 0 or was never emitted at
-/// all. Deleting the emitter must fail, not stay green.
 #[test]
 fn an_absent_class_witness_fails_when_its_line_is_never_emitted() {
     let b = baseline(&[("dcbz", 0, WitnessClass::Absent)]);
@@ -143,8 +138,6 @@ fn first_record_classifies_by_observed_value() {
     assert_eq!(r["host_invariant_breaks"].class, WitnessClass::Exact);
 }
 
-/// Hand-promoting a class must survive re-recording, or the operator
-/// would silently lose the decision on the next measurement.
 #[test]
 fn re_record_preserves_a_promoted_class() {
     let promoted = baseline(&[("ldarx", 5, WitnessClass::Exact)]);
@@ -153,8 +146,6 @@ fn re_record_preserves_a_promoted_class() {
     assert_eq!(r["ldarx"].class, WitnessClass::Exact);
 }
 
-/// `Absent` + nonzero would record a baseline that fails its own
-/// check on every future run; it reclassifies instead.
 #[test]
 fn re_record_reclassifies_absent_that_started_firing() {
     let prev = baseline(&[("dcbz", 0, WitnessClass::Absent)]);
@@ -170,9 +161,10 @@ fn re_record_reclassifies_absent_that_started_firing() {
 fn parses_every_bench_line_shape() {
     let stderr = "\
 BENCH_VRSAVE_WITNESS: mfvrsave_executed=4 vrsave_written=true
-BENCH_HOST_INVARIANT_BREAKS: count=43
+BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=43
 BENCH_ATOMIC_WITNESS: ldarx=1 stdcx=2 lwarx=3 stwcx=4
 BENCH_MEM_FAULT_WITNESS: arm_entries=5 unmapped_routed=6
+BENCH_TIMER_SLEEP_WITNESS: count=18
 BENCH_RSX_LABEL_WRITES_WITNESS: count=7
 BENCH_RSX_SET_REFERENCE_WITNESS: count=8
 BENCH_DCBZ_WITNESS: count=9
@@ -186,6 +178,7 @@ BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
     assert_eq!(w.values["mfvrsave_executed"], 4);
     assert_eq!(w.values["vrsave_written"], 1, "booleans record as 0 or 1");
     assert_eq!(w.values["host_invariant_breaks"], 43);
+    assert_eq!(w.values["timer_sleeps"], 18);
     assert_eq!(w.values["stwcx"], 4);
     assert_eq!(w.values["mem_fault_unmapped_routed"], 6);
     assert_eq!(w.values["lwmutex_unknown_locks"], 15);
@@ -198,7 +191,7 @@ BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
     );
     assert_eq!(
         w.seen_lines.len(),
-        12,
+        13,
         "every emitted line is remembered for the presence check"
     );
     assert!(
