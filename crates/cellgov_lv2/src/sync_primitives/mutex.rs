@@ -256,6 +256,16 @@ impl MutexTable {
         Ok(())
     }
 
+    /// Remove `waiter` from the waiter list without granting
+    /// ownership; `false` if the id is unknown or the thread is not
+    /// parked. Timeout-expiry cancel; order-preserving for the rest.
+    pub fn remove_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return false;
+        };
+        entry.waiters.remove(waiter)
+    }
+
     /// Release on behalf of `caller`.
     pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> MutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {

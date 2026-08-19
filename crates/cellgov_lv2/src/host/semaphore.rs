@@ -70,12 +70,7 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    pub(super) fn dispatch_semaphore_wait(
-        &mut self,
-        id: u32,
-        timeout: u64,
-        requester: UnitId,
-    ) -> Lv2Dispatch {
+    pub(super) fn dispatch_semaphore_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
@@ -83,12 +78,9 @@ impl Lv2Host {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
-                // Finite timeout with no peer that could post: ETIMEDOUT
-                // now, since CellGov has no guest clock and blocking the
-                // only live thread would stall the schedule.
-                if timeout != 0 && !self.state.ppu_threads.has_other_alive_thread(caller) {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_ETIMEDOUT.into());
-                }
+                // A finite timeout parks like any wait; the runtime's
+                // timer-wake queue expires it with ETIMEDOUT at the
+                // deadline.
                 match self.state.semaphores.enqueue_waiter(id, caller) {
                     Ok(()) => {}
                     // Both branches are host-invariant breaks (try_wait

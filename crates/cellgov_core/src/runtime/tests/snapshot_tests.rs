@@ -60,24 +60,14 @@ fn snapshot_then_restore_replays_to_same_terminal_state() {
         original_hash, restored_hash,
         "terminal memory hash diverged after snapshot/restore replay",
     );
-    // Field-completeness is not what this test proves. The
-    // FakeIsaUnit fixture exercises registry / memory /
-    // commit_pipeline; it never populates lv2_host, dma_queue,
-    // any rsx_* field, etc. A snapshot missing one of those
-    // would still pass here. The structural guard for that is
-    // the exhaustive destructure in
-    // `_snapshot_field_exhaustiveness_compile_guard`.
+    // Field completeness is guarded by
+    // `_snapshot_field_exhaustiveness_compile_guard`, not this replay.
 }
 
-/// Compile-time field-completeness guard. A no-rest destructure
-/// of every [`Runtime`] field; adding a field to `Runtime`
-/// breaks compilation here until it is consciously categorized
-/// as snapshot-captured, deliberately excluded
-/// (set-once / caller-replaced), or asserted-unchanged
-/// (construction param). The fixture-based replay tests can't
-/// reach every field; this can.
-///
-/// Never called. Determinism-neutral, zero runtime cost.
+/// Compile-time field-completeness guard: a no-rest destructure of
+/// every [`Runtime`] field, so adding a field breaks compilation here
+/// until it is categorized as snapshot-captured, excluded, or
+/// asserted-unchanged. Never called.
 #[allow(dead_code)]
 fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
     let Runtime {
@@ -93,6 +83,7 @@ fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
         rsx_methods: _,
         pending_rsx_effects: _,
         dma_queue: _,
+        timer_wakes: _,
         lv2_host: _,
         syscall_responses: _,
         commit_pipeline: _,
@@ -111,7 +102,7 @@ fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
         budget_per_step: _,
         max_steps: _,
         mode: _,
-        // --- deliberately excluded; see module doc for category ---
+        // --- excluded from restore; see module doc for category ---
         dma_latency: _,                   // set-once at construction
         spu_factory: _,                   // set-once at construction
         ppu_factory: _,                   // set-once at construction
@@ -122,6 +113,7 @@ fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
         scheduler_dirty_after_restore: _, // set true by restore
         rsx_label_writes_committed: _,    // audit counter, host-side only
         rsx_set_reference_dispatches: _,  // audit counter, host-side only
+        timer_sleep_dispatches: _,        // audit counter, host-side only
         lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
     } = rt;
 }
@@ -165,24 +157,6 @@ fn snapshot_after_execution_restores_byte_identical_state() {
     );
 }
 
-/// Two-direction container-independence canary on `dma_queue`.
-///
-/// What this proves: cloning the BTreeMap-backed queue produces
-/// an independent top-level container. Inserting a new entry
-/// into the original or restored runtime's map does not touch
-/// the snapshot's map.
-///
-/// What this does NOT prove: that entry *payloads* are
-/// independent. Both directions only insert new entries; neither
-/// mutates a pre-existing captured entry, so an `Arc`-shared
-/// payload would pass green here. Interior aliasing is guarded
-/// structurally (module doc contract 4: no `Arc` on
-/// snapshot-captured paths) rather than by this fixture. If a
-/// future heap-bearing snapshot field gains in-place entry
-/// mutation, an interior-aliasing canary would have to
-/// snapshot-then-mutate-existing on that specific field; the
-/// general `BTreeMap + u64` shape we have today is structurally
-/// `Arc`-free and has no in-place entry mutation to exercise.
 fn make_runtime_with_dma_drivers() -> Runtime {
     let mem = GuestMemory::new(0x4000);
     let mut rt = Runtime::new(mem, Budget::new(100), 100);
@@ -291,19 +265,6 @@ fn repeated_restore_preserves_effects_buf_capacity() {
 
 #[test]
 fn step_after_restore_without_set_scheduler_returns_typed_error() {
-    // F1: the guard was previously a debug_assert, release-silent.
-    // Promoted to a typed StepError variant so cellgov_explore's
-    // step loop catches the misuse uniformly debug + release
-    // instead of unwinding (debug) or producing a divergent
-    // replay (release). No #[cfg(debug_assertions)] gate; this
-    // test runs under `cargo test --release` too.
-    //
-    // assert_eq! on the Result transitively requires PartialEq
-    // + Debug on the Ok type (RuntimeStep) and its components
-    // (Effect, WritePayload). Verified these derives existed
-    // before this test was added (effect.rs:21, types.rs:13);
-    // the test did not force any new derives onto hot domain
-    // types.
     use crate::runtime::StepError;
     let mut rt = make_runtime_with_two_writers();
     let snap = rt.snapshot();
@@ -322,24 +283,88 @@ fn set_scheduler_after_restore_clears_dirty_flag() {
 
 #[test]
 fn snapshot_captures_rsx_label_base_and_restore_overwrites_it() {
-    // N1: rsx_label_base drives commit_step's RsxLabelWrite
-    // commit target. Snapshot must restore it; a fresh-built
-    // runtime that had its base set differently from snap would
-    // otherwise commit label writes to a different address on
-    // replay -- a guest-observable divergence.
+    // rsx_label_base is commit_step's RsxLabelWrite commit target,
+    // so a missed capture is a guest-observable replay divergence.
     let mut rt = make_runtime_with_two_writers();
     rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(0x4000));
     let snap = rt.snapshot();
     assert_eq!(snap.rsx_label_base, 0x4000);
 
-    // Mutate the host between snapshot and restore, then verify
-    // restore overwrites the mutation with snap's value.
     rt.set_rsx_label_base(cellgov_mem::GuestAddr::new(0x8000));
     rt.restore_into(&snap);
     rt.set_scheduler(RoundRobinScheduler::new());
     assert_eq!(
         rt.rsx_label_base, 0x4000,
         "restore_into must overwrite rsx_label_base with snap's captured value",
+    );
+}
+
+#[test]
+fn a_pending_timer_wake_alone_shifts_sync_state_hash() {
+    // Isolated membership witness for the timer_wakes term of
+    // sync_state_hash. The replay-level test
+    // (runtime_timer_tests::snapshot_restores_pending_timer_wake)
+    // fires a real sleeper, which also mutates syscall_responses --
+    // its hash asserts stay green if the timer term is dropped from
+    // the fold. Here the queue is the only mutated source.
+    let mut rt = make_runtime_with_two_writers();
+    let snap = rt.snapshot();
+    let h_no_wake = rt.sync_state_hash();
+
+    rt.timer_wakes.insert(
+        cellgov_time::GuestTicks::new(1_000),
+        cellgov_event::UnitId::new(0),
+        crate::timer_queue::TimerWakeKind::Sleep,
+    );
+    assert_ne!(
+        rt.sync_state_hash(),
+        h_no_wake,
+        "a pending timer wake must shift sync_state_hash on its own",
+    );
+
+    rt.restore_into(&snap);
+    assert_eq!(
+        rt.sync_state_hash(),
+        h_no_wake,
+        "restore must clear the pending wake and return sync_state_hash \
+         to its captured value",
+    );
+}
+
+#[test]
+fn restore_into_carries_audit_counters_forward() {
+    // Audit counters are cumulative host-side instruments that never
+    // feed the commit pipeline; see the snapshot.rs module doc.
+    let mut rt = make_runtime_with_two_writers();
+    let snap = rt.snapshot();
+
+    rt.rsx_label_writes_committed = 3;
+    rt.rsx_set_reference_dispatches = 5;
+    rt.timer_sleep_dispatches = 7;
+    rt.lv2_direct_committed_writes = 11;
+
+    rt.restore_into(&snap);
+    rt.set_scheduler(RoundRobinScheduler::new());
+
+    assert_eq!(
+        rt.rsx_label_writes_committed(),
+        3,
+        "restore_into rewound rsx_label_writes_committed",
+    );
+    assert_eq!(
+        rt.rsx_set_reference_dispatches(),
+        5,
+        "restore_into rewound rsx_set_reference_dispatches",
+    );
+    assert_eq!(
+        rt.timer_sleep_dispatches(),
+        7,
+        "restore_into rewound timer_sleep_dispatches",
+    );
+    assert_eq!(
+        rt.lv2_direct_committed_writes(),
+        11,
+        "restore_into rewound lv2_direct_committed_writes",
     );
 }
 

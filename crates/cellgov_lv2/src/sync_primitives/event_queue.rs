@@ -288,6 +288,15 @@ impl EventQueueTable {
         Ok(())
     }
 
+    /// Remove `thread`'s waiter record without delivering an event;
+    /// `None` if the id is unknown or the thread is not parked.
+    /// Timeout-expiry cancel; order-preserving for the rest.
+    pub fn remove_waiter(&mut self, id: u32, thread: PpuThreadId) -> Option<EventQueueWaiter> {
+        let entry = self.entries.get_mut(&id)?;
+        let pos = entry.waiters.iter().position(|w| w.thread == thread)?;
+        entry.waiters.remove(pos)
+    }
+
     /// Send a payload. Hands off to the head waiter, or buffers,
     /// or returns `Full` at `size`.
     pub fn send_and_wake_or_enqueue(&mut self, id: u32, payload: EventPayload) -> EventQueueSend {

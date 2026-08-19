@@ -19,26 +19,20 @@ use super::{
 };
 
 impl Runtime {
-    /// Apply an `Lv2Dispatch` effects batch by **direct commit**,
+    /// Apply an `Lv2Dispatch` effects batch by direct commit,
     /// bypassing the commit pipeline's [`StagingMemory`].
     ///
-    /// - `SharedWriteIntent` -> [`GuestMemory::apply_commit`]; the
-    ///   memory subset validates and commits all-or-none, and a
-    ///   failure logs a `dispatch.lv2_effect_apply_failed` invariant
-    ///   break instead of landing any write.
-    /// - `MailboxSend` -> `force_send` plus a Blocked -> Runnable
-    ///   override on any unit blocked on the matching `UnitId`.
-    /// - `RsxFlipRequest` -> [`crate::rsx::flip::RsxFlipState::request_flip`];
-    ///   the flip transitions WAITING -> DONE on the next
-    ///   `commit_step` boundary, not during the dispatching batch.
-    /// - Every other variant is dropped with a named invariant
-    ///   break: LV2 handlers must not emit effects the LV2 surface
-    ///   cannot apply (e.g. `RsxLabelWrite`, `DmaEnqueue`); those
-    ///   belong to the unit-effect path through
-    ///   `commit_pipeline.process`.
+    /// The `SharedWriteIntent` subset commits all-or-none: a
+    /// validation failure logs a `dispatch.lv2_effect_apply_failed`
+    /// invariant break and lands none of the writes, while non-memory
+    /// effects still apply. A requested flip transitions
+    /// WAITING -> DONE on the next `commit_step` boundary, not during
+    /// the dispatching batch. Variants with no LV2 producer (e.g.
+    /// `RsxLabelWrite`, `DmaEnqueue`) are dropped with a named
+    /// invariant break; they belong to the unit-effect path through
+    /// `commit_pipeline.process`.
     ///
     /// [`StagingMemory`]: cellgov_mem::StagingMemory
-    /// [`GuestMemory::apply_commit`]: cellgov_mem::GuestMemory::apply_commit
     ///
     /// # Atomic-batch discard semantics
     ///
@@ -50,13 +44,9 @@ impl Runtime {
     ///
     /// # Ordering against unit `SharedWriteIntent`s
     ///
-    /// `Runtime::commit_step` drains staged unit effects FIRST and
-    /// calls this function SECOND, so an LV2 write deterministically
-    /// lands AFTER any same-batch unit store to the same range. The
-    /// ordering is structural (call order), not a staging-buffer
-    /// tiebreak; the `(PriorityClass, source_time, source)` triple
-    /// is inert on this path and carried as a well-formedness
-    /// invariant only.
+    /// `Runtime::commit_step` drains staged unit effects first and
+    /// calls this function second, so an LV2 write deterministically
+    /// lands after any same-batch unit store to the same range.
     ///
     /// # Cross-module contract
     ///
@@ -270,8 +260,7 @@ impl Runtime {
             (d, Some(req))
         };
 
-        // Emit the entry record before any state mutation; FaultDriven
-        // suppresses trace writes per the existing convention.
+        // Emit the entry record before any state mutation.
         if self.mode != RuntimeMode::FaultDriven {
             self.trace.record(&TraceRecord::SyscallEntered {
                 unit: source,
@@ -286,49 +275,50 @@ impl Runtime {
             return;
         }
 
-        // Timer fast-path: advance simulated clock without yielding
-        // through `Lv2Host::dispatch`. Other PPU threads observe the
-        // new time on their next read.
-        match num {
-            TIMER_USLEEP => {
-                let usec = args8[0];
-                self.advance_guest_time_by_us(usec);
-            }
-            TIMER_SLEEP => {
-                let seconds = args8[0];
-                let usec = seconds.saturating_mul(1_000_000);
-                self.advance_guest_time_by_us(usec);
-            }
+        // Timer path: park the caller until guest time reaches the
+        // requested interval, still bypassing `Lv2Host::dispatch`.
+        // Other threads run meanwhile; when everything is parked, the
+        // all-blocked time-warp jumps the clock to the deadline (RPCS3
+        // rpcs3/Emu/Cell/lv2/sys_timer.cpp sys_timer_usleep /
+        // sys_timer_sleep: the thread enters a timed sleep and always
+        // returns CELL_OK).
+        let usec = match num {
+            TIMER_USLEEP => args8[0],
+            // The seconds argument is a 32-bit value; the kernel reads
+            // only the low word of the register (RPCS3 sys_timer.cpp
+            // sys_timer_sleep takes u32 sleep_time). u32::MAX seconds
+            // fits in u64 microseconds, so the scale cannot overflow.
+            TIMER_SLEEP => u64::from(args8[0] as u32) * 1_000_000,
             _ => unreachable!("is_timer_fast_path implies num is TIMER_USLEEP or TIMER_SLEEP"),
+        };
+        self.timer_sleep_dispatches = self.timer_sleep_dispatches.saturating_add(1);
+        if usec == 0 {
+            // Zero-interval sleep is a yield, not a park.
+            self.registry.set_syscall_return(source, 0);
+            return;
         }
-        self.registry.set_syscall_return(source, 0);
-    }
-
-    /// Saturates at `u64::MAX` ticks.
-    fn advance_guest_time_by_us(&mut self, usec: u64) {
-        // 1 tick == 1 ns per cellgov_time::SIMULATED_INSTRUCTIONS_PER_SECOND.
-        let delta_ticks = usec.saturating_mul(1_000);
-        let new_raw = self.time.raw().saturating_add(delta_ticks);
-        self.time = cellgov_time::GuestTicks::new(new_raw);
-    }
-
-    pub(crate) fn dispatch_lv2_request(
-        &mut self,
-        request: cellgov_lv2::Lv2Request,
-        source: UnitId,
-    ) {
-        let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
-        let dispatch = self.lv2_host.dispatch(
-            request,
-            source,
-            &MemoryView {
-                memory: &self.memory,
-                current_tick: self.time,
-            },
+        let deadline = self.deadline_after_usec(usec);
+        let displaced = self
+            .syscall_responses
+            .insert(source, PendingResponse::ReturnCode { code: 0 });
+        debug_assert!(
+            displaced.is_none(),
+            "timer park: source {source:?} already had a pending response: {displaced:?}"
         );
-        // Always drain so the buffer stays bounded; only emit trace
-        // records under modes that write a trace stream. FaultDriven
-        // consults `invariant_break_count` via the boot summary.
+        self.timer_wakes
+            .insert(deadline, source, crate::timer_queue::TimerWakeKind::Sleep);
+        self.registry
+            .set_status_override(source, UnitStatus::Blocked);
+    }
+
+    /// Drain buffered LV2 invariant breaks at the boundary that
+    /// produced them. Always drains so the buffer stays bounded; only
+    /// emits trace records under modes that write a trace stream
+    /// (FaultDriven consults `invariant_break_count` via the boot
+    /// summary). Called after every host dispatch and after timer-wake
+    /// firing, so a break logged during expiry is not attributed to
+    /// the next syscall's dispatch boundary.
+    pub(super) fn drain_invariant_breaks_to_trace(&mut self) {
         if self.mode == RuntimeMode::FaultDriven {
             for _ in self.lv2_host.drain_pending_invariant_breaks() {}
         } else {
@@ -339,6 +329,24 @@ impl Runtime {
                 });
             }
         }
+    }
+
+    pub(crate) fn dispatch_lv2_request(
+        &mut self,
+        request: cellgov_lv2::Lv2Request,
+        source: UnitId,
+    ) {
+        let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
+        let wait_timeout_usec = request.wait_timeout_usec();
+        let dispatch = self.lv2_host.dispatch(
+            request,
+            source,
+            &MemoryView {
+                memory: &self.memory,
+                current_tick: self.time,
+            },
+        );
+        self.drain_invariant_breaks_to_trace();
         // Apply shm region-install requests before the dispatch's effects
         // commit: a 334 that mints a fresh region and an effect targeting
         // that region in the same dispatch would otherwise hit
@@ -373,9 +381,12 @@ impl Runtime {
                 self.handle_register_spu(source, inits, effects, code);
             }
             Lv2Dispatch::Block {
-                pending, effects, ..
+                reason,
+                pending,
+                effects,
             } => {
                 self.handle_block(source, pending, effects);
+                self.register_wait_deadline(source, reason, wait_timeout_usec);
             }
             Lv2Dispatch::PpuThreadExit {
                 exit_value,
@@ -416,11 +427,11 @@ impl Runtime {
                 );
             }
             Lv2Dispatch::BlockAndWake {
+                reason,
                 pending,
                 woken_unit_ids,
                 response_updates,
                 effects,
-                ..
             } => {
                 if !woken_unit_ids.is_empty() {
                     self.step_woke_others = true;
@@ -432,6 +443,7 @@ impl Runtime {
                     response_updates,
                     effects,
                 );
+                self.register_wait_deadline(source, reason, wait_timeout_usec);
             }
         }
     }
@@ -472,6 +484,14 @@ impl Runtime {
                         }
                     }
                 }
+                // The parked response is dropped, so the unit's timer
+                // entry must go with it: fire_timer_wakes runs later
+                // in this same commit, and a deadline the exiting
+                // step just crossed would otherwise wake a unit this
+                // sweep finished (dropping a response without
+                // cancelling its deadline is the invariant break
+                // `Lv2Host::expire_wait` names).
+                self.timer_wakes.cancel(*uid);
                 let _ = self.syscall_responses.try_take(*uid);
             }
         } else {
@@ -580,6 +600,7 @@ impl Runtime {
         self.registry
             .set_status_override(source, UnitStatus::Finished);
         for waiter in woken_unit_ids {
+            self.timer_wakes.cancel(waiter);
             let pending = self.syscall_responses.try_take(waiter);
             if let Some(PendingResponse::PpuThreadJoin { status_out_ptr, .. }) = pending {
                 self.commit_bytes_at(status_out_ptr as u64, &exit_value.to_be_bytes());
@@ -629,6 +650,10 @@ impl Runtime {
             // Partial-fill refinement (e.g. EventQueueReceive
             // None -> Some): drain before re-insert so the insert
             // contract holds. Variant-tag check above guards shape.
+            // A restage supersedes any timer deadline on the original
+            // wait -- the cond two-hop converts a timed cond wait into
+            // an untimed mutex wait.
+            self.timer_wakes.cancel(waiter);
             let _ = self.syscall_responses.try_take(waiter);
             let _ = self.syscall_responses.insert(waiter, response);
         }
@@ -656,6 +681,7 @@ impl Runtime {
             &response_updates,
         );
         for (waiter, response) in response_updates {
+            self.timer_wakes.cancel(waiter);
             let _ = self.syscall_responses.try_take(waiter);
             let _ = self.syscall_responses.insert(waiter, response);
         }

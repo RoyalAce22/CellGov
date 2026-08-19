@@ -32,6 +32,7 @@ impl Runtime {
             && result.fault.is_none()
             && result.yield_reason.allows_trivial_fast_path()
             && self.dma_queue.is_empty()
+            && self.timer_wakes.is_empty()
             && self.pending_rsx_effects.is_empty()
             && self.rsx_cursor.get() == self.rsx_cursor.put()
             && self.rsx_call_stack.is_empty()
@@ -108,9 +109,6 @@ impl Runtime {
             self.mirror_rsx_control_register_writes(effects);
         }
 
-        // `Runtime::step` sets `last_scheduled_unit` before every
-        // commit_step; the unit-0 fallback exists only because release
-        // builds must not panic on a `None` here.
         debug_assert!(
             self.last_scheduled_unit.is_some(),
             "commit_step slow path reached with last_scheduled_unit=None; \
@@ -137,6 +135,7 @@ impl Runtime {
         if let Ok(ref mut o) = outcome {
             o.dma_completions_fired = due.len();
         }
+        let timer_due = self.fire_timer_wakes();
 
         if result.yield_reason == YieldReason::Finished {
             self.resolve_join_wakes(source);
@@ -217,7 +216,13 @@ impl Runtime {
             }
         }
 
-        self.emit_commit_trace(source, &outcome, &due);
+        // Breaks logged after the dispatch-time drain (apply_lv2_effects
+        // inside the dispatch folds, the RSX mirror failures above) must
+        // trace inside this commit's window: fire_timer_wakes drains only
+        // when its queue is non-empty, and on a process-exit final commit
+        // there is no later boundary to pick them up.
+        self.drain_invariant_breaks_to_trace();
+        self.emit_commit_trace(source, &outcome, &due, &timer_due);
 
         let holds_cs = self.lv2_host.unit_holds_lwmutex(source);
         self.scheduler

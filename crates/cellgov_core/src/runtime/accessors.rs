@@ -101,6 +101,14 @@ impl Runtime {
         self.rsx_label_writes_committed
     }
 
+    /// Cumulative `sys_timer_usleep` / `sys_timer_sleep` dispatches
+    /// through the runtime timer path, including zero-interval
+    /// requests that yield instead of parking.
+    #[inline]
+    pub fn timer_sleep_dispatches(&self) -> u64 {
+        self.timer_sleep_dispatches
+    }
+
     /// Cumulative count of `NV406E_SET_REFERENCE` dispatches across
     /// every `rsx_advance` invocation.
     #[inline]
@@ -211,9 +219,7 @@ impl Runtime {
     // -- RSX --
 
     /// Set the base address used by `RsxLabelWrite` effects to
-    /// compute the commit-side guest address. Narrowed to u32 at
-    /// this boundary; `debug_assert` traps a 64-bit address whose
-    /// upper bits are nonzero.
+    /// compute the commit-side guest address.
     pub fn set_rsx_label_base(&mut self, addr: GuestAddr) {
         debug_assert!(
             addr.raw() <= u32::MAX as u64,
@@ -249,7 +255,7 @@ impl Runtime {
         self.rsx_mirror_writes
     }
 
-    /// 40F honest FIFO consumer opt-in: when enabled, the cursor
+    /// Honest FIFO consumer opt-in: when enabled, the cursor
     /// projects into MMIO `dma.ref`/`dma.get` after `rsx_advance`
     /// reaches the FIFO tail. Driven by the manifest
     /// `[rsx] consume` flag.
@@ -257,13 +263,13 @@ impl Runtime {
         self.rsx_consume_fifo = enabled;
     }
 
-    /// True when the 40F consumer's MMIO side effects are armed.
+    /// True when the FIFO consumer's MMIO side effects are armed.
     #[inline]
     pub fn rsx_consume_fifo_enabled(&self) -> bool {
         self.rsx_consume_fifo
     }
 
-    /// Immutable view of the RSX FIFO call stack (40F).
+    /// Immutable view of the RSX FIFO call stack.
     #[inline]
     pub fn rsx_call_stack(&self) -> &rsx::RsxCallStack {
         &self.rsx_call_stack
@@ -292,6 +298,17 @@ impl Runtime {
     #[inline]
     pub fn time(&self) -> GuestTicks {
         self.time
+    }
+
+    /// Number of pending timer wakes.
+    #[inline]
+    pub fn timer_wakes_pending(&self) -> usize {
+        self.timer_wakes.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn timer_wakes_cancel_for_test(&mut self, unit: cellgov_event::UnitId) -> bool {
+        self.timer_wakes.cancel(unit)
     }
 
     /// Advances only at commit boundaries; `step()` never advances it.

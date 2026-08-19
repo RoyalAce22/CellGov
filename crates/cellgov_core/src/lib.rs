@@ -11,6 +11,7 @@ pub mod rsx;
 pub mod runtime;
 pub mod scheduler;
 pub mod syscall_table;
+pub mod timer_queue;
 
 pub use commit::{BlockReason, CommitContext, CommitError, CommitOutcome, CommitPipeline};
 pub use registry::{RegisteredUnit, UnitRegistry};
@@ -20,3 +21,4 @@ pub use runtime::{
 };
 pub use scheduler::{RoundRobinScheduler, Scheduler};
 pub use syscall_table::SyscallResponseTable;
+pub use timer_queue::{TimerWake, TimerWakeKind, TimerWakeQueue};

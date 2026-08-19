@@ -200,6 +200,49 @@ fn enqueue_waiter_unknown_id_returns_err() {
 }
 
 #[test]
+fn remove_waiter_returns_the_record_and_preserves_order() {
+    let mut t = EventQueueTable::new();
+    t.create_with_id(1, 4);
+    let w1 = tid(0x0100_0001);
+    let w2 = tid(0x0100_0002);
+    let w3 = tid(0x0100_0003);
+    t.enqueue_waiter(1, w1, 0x2000).unwrap();
+    t.enqueue_waiter(1, w2, 0x2020).unwrap();
+    t.enqueue_waiter(1, w3, 0x2040).unwrap();
+    assert_eq!(
+        t.remove_waiter(1, w2),
+        Some(EventQueueWaiter {
+            thread: w2,
+            out_ptr: 0x2020,
+        }),
+    );
+    let remaining: Vec<_> = t
+        .lookup(1)
+        .unwrap()
+        .waiters()
+        .iter()
+        .map(|w| w.thread)
+        .collect();
+    assert_eq!(remaining, vec![w1, w3], "FIFO order of the rest survives");
+    assert_eq!(
+        t.send_and_wake_or_enqueue(1, pl(7)),
+        EventQueueSend::Woke {
+            new_owner: w1,
+            out_ptr: 0x2000,
+            payload: pl(7),
+        },
+    );
+}
+
+#[test]
+fn remove_waiter_unknown_id_or_unparked_thread_is_none() {
+    let mut t = EventQueueTable::new();
+    assert_eq!(t.remove_waiter(99, tid(0x0100_0001)), None);
+    t.create_with_id(1, 4);
+    assert_eq!(t.remove_waiter(1, tid(0x0100_0001)), None);
+}
+
+#[test]
 fn is_inert_reflects_both_axes() {
     let mut t = EventQueueTable::new();
     t.create_with_id(1, 4);

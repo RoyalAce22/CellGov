@@ -408,8 +408,7 @@ fn mutex_unlock_non_owner_returns_eperm() {
     assert_eq!(code, cell_errors::CELL_EPERM.into());
 }
 
-// Alias-path coverage for the (1c) module_start fix
-// (`docs/dev/bug_investigations/fix_walk_runtime_lv2_host_asymmetry.md`).
+// Alias-path coverage for transient module_start units.
 // Pair: a transient unit WITHOUT an alias entry must still ESRCH
 // on sync syscall (strict lookup preserved); an aliased transient
 // unit's lock acquires against a host-known mutex (alias works).

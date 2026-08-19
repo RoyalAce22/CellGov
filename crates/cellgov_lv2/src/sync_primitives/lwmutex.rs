@@ -140,16 +140,9 @@ impl LwMutexIdAllocator {
 pub struct LwMutexTable {
     entries: BTreeMap<u32, LwMutexEntry>,
     ids: LwMutexIdAllocator,
-    /// Non-vacuity witness: cumulative count of calls to
-    /// `acquire_or_enqueue` and `enqueue_waiter`. The catch-all
-    /// `debug_assert!`s at lines 234 and 254 of this file guard
-    /// internal contains/duplicate-enqueue invariants; silence is
-    /// non-vacuous only when the functions actually ran. Not
-    /// state-hashed (instrument-only).
+    /// See [`Self::acquires_count`].
     acquires_count: u64,
-    /// Liveness witness: cumulative count of
-    /// `release_and_wake_next` calls. Pairs with `acquires_count`
-    /// on the release side. Not state-hashed.
+    /// See [`Self::releases_count`].
     releases_count: u64,
 }
 
@@ -159,17 +152,19 @@ impl LwMutexTable {
         Self::default()
     }
 
-    /// Non-vacuity witness: cumulative count of
-    /// `acquire_or_enqueue` and `enqueue_waiter` calls. See the
-    /// `acquires_count` field doc.
+    /// Cumulative `acquire_or_enqueue` + `enqueue_waiter` calls.
+    ///
+    /// Lets tests prove the enqueue paths actually ran, so silence
+    /// from the duplicate-enqueue `debug_assert!`s is non-vacuous.
+    /// Not folded into [`Self::state_hash`].
     #[inline]
     pub fn acquires_count(&self) -> u64 {
         self.acquires_count
     }
 
-    /// Liveness witness: cumulative count of
-    /// `release_and_wake_next` calls. See the `releases_count`
-    /// field doc.
+    /// Cumulative `release_and_wake_next` calls; the release-side
+    /// counterpart of [`Self::acquires_count`]. Not folded into
+    /// [`Self::state_hash`].
     #[inline]
     pub fn releases_count(&self) -> u64 {
         self.releases_count
@@ -223,10 +218,8 @@ impl LwMutexTable {
 
     /// Try to consume a pending signal without enqueueing.
     ///
-    /// Returns `Acquired` (signal consumed, caller proceeds) or
-    /// `Contended` (no signal, no state change). Owner / recursion
-    /// checks happen in the user-space wrapper before this entry
-    /// point fires.
+    /// Owner / recursion checks happen in the user-space wrapper
+    /// before this entry point fires.
     pub fn try_acquire(&mut self, id: u32, _caller: PpuThreadId) -> Option<LwMutexAcquire> {
         let entry = self.entries.get_mut(&id)?;
         if entry.signaled {
@@ -238,12 +231,6 @@ impl LwMutexTable {
     }
 
     /// Atomic acquire-or-park.
-    ///
-    /// If the entry is signaled, the caller consumes the signal and
-    /// proceeds (`Acquired`). Otherwise the caller is appended to
-    /// the FIFO sleep queue and must block (`Enqueued`). A caller
-    /// already on the sleep queue indicates a dispatch-layer bug
-    /// and returns `WouldDeadlock`.
     ///
     /// O(n) scan over the waiter list on the already-parked check.
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> LwMutexAcquireOrEnqueue {
@@ -290,11 +277,20 @@ impl LwMutexTable {
         Ok(())
     }
 
-    /// Release on behalf of `caller`. Wakes the head of the sleep
-    /// queue if any waiter is parked (`Transferred`), otherwise sets
-    /// the signal so the next lock-call passes without blocking
-    /// (`Signaled`). The kernel does not validate `_caller`; the
-    /// user-space wrapper verifies the owner before invoking unlock.
+    /// Remove `waiter` from the sleep queue without granting the
+    /// lock; `false` if the id is unknown or the thread is not
+    /// parked. Timeout-expiry cancel; order-preserving for the rest.
+    pub fn remove_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return false;
+        };
+        entry.waiters.remove(waiter)
+    }
+
+    /// Release: wake the sleep-queue head or set the signal.
+    ///
+    /// The kernel does not validate `_caller`; the user-space
+    /// wrapper verifies the owner before invoking unlock.
     pub fn release_and_wake_next(&mut self, id: u32, _caller: PpuThreadId) -> LwMutexRelease {
         self.releases_count = self.releases_count.wrapping_add(1);
         let Some(entry) = self.entries.get_mut(&id) else {

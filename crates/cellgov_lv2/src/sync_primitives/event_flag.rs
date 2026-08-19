@@ -1,10 +1,8 @@
 //! Event flag table.
 //!
-//! Each entry holds `bits: u64` plus a FIFO waiter list.
-//! `set_and_wake` ORs in the new bits then walks the list waking
-//! each waiter whose mask matches its mode. CLEAR-wakes mutate
-//! `bits` mid-walk, so two waiters from a single call can
-//! observe different patterns.
+//! CLEAR-wakes mutate `bits` mid-walk of the waiter list, so two
+//! waiters woken by one `set_and_wake` call can observe different
+//! patterns.
 
 use crate::ppu_thread::{EventFlagWaitMode, PpuThreadId};
 use std::collections::BTreeMap;
@@ -272,6 +270,16 @@ impl EventFlagTable {
         Some(woken)
     }
 
+    /// Remove `thread`'s waiter record without mutating `bits`;
+    /// `None` if the id is unknown or the thread is not parked.
+    /// Timeout-expiry cancel, unlike the all-or-nothing
+    /// [`Self::cancel_waiters`].
+    pub fn remove_waiter(&mut self, id: u32, thread: PpuThreadId) -> Option<EventFlagWaiter> {
+        let entry = self.entries.get_mut(&id)?;
+        let pos = entry.waiters.iter().position(|w| w.thread == thread)?;
+        Some(entry.waiters.remove(pos))
+    }
+
     /// Drain every parked waiter without mutating `bits`. Each
     /// returned [`EventFlagWaiter`] is the full record so the
     /// caller can wake the thread with whatever return code they
@@ -283,16 +291,14 @@ impl EventFlagTable {
     }
 
     /// `entry.bits &= mask` -- the LV2 `sys_event_flag_clear` keeps
-    /// bits **inside** `mask` and drops the rest, matching RPCS3's
-    /// `pattern.atomic_op(|p| p &= bitptn)`. The argument name
-    /// `bits_to_clear` is a misnomer kept for backwards
-    /// compatibility with callers, but the semantics are mask-and,
-    /// not bit-clear. Returns `false` if `id` is unknown.
-    pub fn clear_bits(&mut self, id: u32, bits_to_clear: u64) -> bool {
+    /// bits **inside** `mask` and drops the rest (RPCS3
+    /// `sys_event_flag.cpp` `sys_event_flag_clear` ANDs the pattern
+    /// with the argument). Returns `false` if `id` is unknown.
+    pub fn clear_bits(&mut self, id: u32, mask: u64) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {
             return false;
         };
-        entry.bits &= bits_to_clear;
+        entry.bits &= mask;
         true
     }
 

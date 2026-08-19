@@ -151,7 +151,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-prx-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`, `rpcs3-attribute`, `fixture-gen`, `titles-gen`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_mkelf`                | Standalone tool that generates PPU ELF fixtures for the microtest corpus. No workspace dependencies.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `cellgov_install`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. The fourteen-module minimum viable PRX set from the user's PUP decrypts bit-identically to the output of RPCS3's decrypter run on the same PUP (the user supplies the PUP; neither RPCS3 nor CellGov ships firmware). No RPCS3 dependency at runtime. |
+| `cellgov_install`             | PS3 firmware and SELF decrypter. Lib + bin. The binary's `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` and writes per-module SELFs to `firmware/` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction). The `decrypt-self` subcommand decrypts one SELF at a time. The library's `sce::decrypt_self_to_elf` is also called by `cellgov_cli`'s boot path to peel encrypted SELFs at load time. APP keys cover firmware revisions 0x0000-0x001D, mirroring RPCS3's `KeyVault::LoadSelfAPPKeys`. Firmware modules from the user's PUP decrypt bit-identically to the output of RPCS3's decrypter run on the same PUP, held by a twelve-module parity gate over the stems shipped in both encrypted and pre-decrypted form (the user supplies the PUP; neither RPCS3 nor CellGov ships firmware). No RPCS3 dependency at runtime. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/` (excluded from the workspace's `default-members`) so a plain `cargo build` does not pull in any RPCS3-aware code. Build explicitly with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ## Guest memory layout
@@ -254,10 +254,15 @@ nine-step deterministic loop:
    minimum (the longest ps3autotests printf critical section).
    A single-runnable fast path keeps single-PPU titles off the
    two-pass rotation. When the registry is non-empty but every
-   unit is `Blocked`, `Runtime::step` returns
-   `StepError::AllBlocked` rather than `NoRunnableUnit` --
-   callers that care about liveness vs terminal stall can
-   distinguish the two.
+   unit is `Blocked`, `Runtime::step` first time-warps guest
+   time to the earliest pending wake source -- the next DMA
+   completion or the next timer-wake deadline -- fires it, and
+   retries selection, looping while a wake source remains (a
+   fired deadline can wake nobody, e.g. a contended cond expiry
+   that re-parks its waiter on the mutex). Only when neither
+   queue holds an entry does it return `StepError::AllBlocked`
+   rather than `NoRunnableUnit` -- callers that care about
+   liveness vs terminal stall can distinguish the two.
 2. Grant the unit the per-step `Budget` (default 256 instructions).
 3. Run the unit until it yields (one `ExecutionUnit::run_until_yield`).
    The PPU executes up to Budget instructions per call, batching
@@ -277,7 +282,10 @@ nine-step deterministic loop:
    was `Syscall`; absorb a callback-worker mid-body fault if the
    source is a registered worker.
 7. Advance the commit epoch, then fire any DMA completions whose
-   ready tick has arrived; resolve join wakes if the unit finished;
+   ready tick has arrived and any timer wakes whose guest-tick
+   deadline has arrived (a parked sleep wakes with CELL_OK; a
+   timed sync wait expires with CELL_ETIMEDOUT through
+   `Lv2Host::expire_wait`); resolve join wakes if the unit finished;
    run the RSX FIFO advance pass (its emitted effects queue for the
    next batch under the atomic-batch contract). DMA completions
    publish per-tag completion bits to the issuing SPU's
@@ -578,16 +586,22 @@ Classified into typed `Lv2Request` variants:
 | `sys_fs_fstat`                                     | 809                     | Writes a 56-byte `CellFsStat` to `stat_out_ptr` (8-byte aligned). `mode = S_IFREG \| 0o444`, `size` from the backing blob, `blksize = 4096`, all timestamp fields zero (oracle has no host time). CELL_EBADF on unknown fd.                                                                                                                                                                                                                                                     |
 | `UnresolvedImport`                                 | (trampoline)            | Issued by the guest-resident unresolved-import trampoline when CRT0 calls through a GOT slot whose NID had no matching firmware export. The PRX loader patches such slots to point at a trampoline OPD that loads the NID into r4 and fires this syscall. Dispatcher prints a named diagnostic (`dispatch.unresolved_import`, naming the NID and its `module::name`) and returns CELL_EINVAL so the next observable effect is a structured fault, not control-flow corruption into junk PCs. |
 
-**Timer fast path (141 / 142).** `sys_timer_usleep` and
+**Timer sleep path (141 / 142).** `sys_timer_usleep` and
 `sys_timer_sleep` never reach `Lv2Host::dispatch`. The runtime
-short-circuits them in `lv2_dispatch.rs`: it advances simulated
-guest time by the requested interval and returns CELL_OK, so other
-PPU threads observe the new time on their next read. The
-`SyscallEntered` trace record carries the
-`TracedSyscallDisposition::TimerFastPath` byte, which is how the
-trace distinguishes them from dispatched syscalls. They have no
-`classify` arm because the path bypasses classification entirely --
-their absence from the typed table is not a coverage gap.
+handles them in `lv2_dispatch.rs`: a zero interval yields with
+CELL_OK immediately; a non-zero interval parks the caller
+`Blocked` with a `TimerWakeQueue` entry at `now + interval` (the
+seconds argument of 142 truncates to u32 at the ABI boundary),
+and the wake at the deadline delivers CELL_OK. The queue is the
+same deterministic `(deadline, seq)` structure that expires timed
+sync-primitive waits with CELL_ETIMEDOUT; it is snapshot-captured
+and state-hashed, and timer-driven wakes trace as `UnitWoken`
+with the `Timer` reason. The `SyscallEntered` trace record
+carries the `TracedSyscallDisposition::TimerFastPath` byte, which
+is how the trace distinguishes them from dispatched syscalls.
+They have no `classify` arm because the path bypasses
+classification entirely -- their absence from the typed table is
+not a coverage gap.
 
 Not every classified arm has a row above. The generated
 [lv2_fidelity.md](lv2_fidelity.md) is the complete, drift-gated
@@ -1566,12 +1580,15 @@ re-fire under the new trajectory. See
 with no install step, under the full derived load set (130 of
 142 external modules -- the (namespace, NID) export key lets the
 whole install coexist), and runs to the `MaxSteps` budget cap at
-step 390,312. The shell is a far heavier LV2 consumer than any
+step 390,099. The shell is a far heavier LV2 consumer than any
 game in the corpus: it takes the privileged
 `_sys_prx_register_module` branch and links its runtime import
 tables under the library each entry names, drives the event-port
 family, and produces on the firmware system-IPC key namespace
-(`0x8006_0100_0000_xxxx`) that no game touches.
+(`0x8006_0100_0000_xxxx`) that no game touches. Its timed waits
+are live: at long horizons the shell's one-second event-queue
+receives expire with CELL_ETIMEDOUT at their deadlines and re-arm
+into a 1 Hz poll loop through the runtime timer-wake queue.
 
 The earlier `sys_process_exit` at step 832 was a symptom of the
 partial module set, not a shell defect: with the full set loaded

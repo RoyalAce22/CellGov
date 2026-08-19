@@ -199,6 +199,42 @@ fn clear_bits_masks_without_waking() {
 }
 
 #[test]
+fn remove_waiter_returns_the_record_without_mutating_bits() {
+    let mut t = EventFlagTable::new();
+    t.create_with_id(1, 0b0101).unwrap();
+    let w1 = tid(0x0100_0001);
+    let w2 = tid(0x0100_0002);
+    let w3 = tid(0x0100_0003);
+    t.enqueue_waiter(1, w1, 0b0010, EventFlagWaitMode::AndClear, 0x2000)
+        .unwrap();
+    t.enqueue_waiter(1, w2, 0b1000, EventFlagWaitMode::OrClear, 0x2020)
+        .unwrap();
+    t.enqueue_waiter(1, w3, 0b0010, EventFlagWaitMode::AndNoClear, 0x2040)
+        .unwrap();
+    assert_eq!(
+        t.remove_waiter(1, w2),
+        Some(EventFlagWaiter {
+            thread: w2,
+            mask: 0b1000,
+            mode: EventFlagWaitMode::OrClear,
+            result_ptr: 0x2020,
+        }),
+    );
+    let entry = t.lookup(1).unwrap();
+    assert_eq!(entry.bits(), 0b0101, "cancel must not touch the pattern");
+    let remaining: Vec<_> = entry.waiters().iter().map(|w| w.thread).collect();
+    assert_eq!(remaining, vec![w1, w3], "FIFO order of the rest survives");
+}
+
+#[test]
+fn remove_waiter_unknown_id_or_unparked_thread_is_none() {
+    let mut t = EventFlagTable::new();
+    assert_eq!(t.remove_waiter(99, tid(0x0100_0001)), None);
+    t.create_with_id(1, 0).unwrap();
+    assert_eq!(t.remove_waiter(1, tid(0x0100_0001)), None);
+}
+
+#[test]
 fn unknown_id_returns_none() {
     let mut t = EventFlagTable::new();
     assert!(t.try_wait(99, 0b1, EventFlagWaitMode::AndNoClear).is_none());

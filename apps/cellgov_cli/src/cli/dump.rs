@@ -111,6 +111,7 @@ fn dump_trace(result: &ScenarioResult) {
                 let reason_str = match reason {
                     TracedWakeReason::WakeEffect => "WakeEffect",
                     TracedWakeReason::DmaCompletion => "DmaCompletion",
+                    TracedWakeReason::Timer => "Timer",
                 };
                 println!(
                     "{i:4}  UnitWoken          unit={} reason={}",

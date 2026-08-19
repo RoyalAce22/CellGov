@@ -1,9 +1,7 @@
 //! [`Lv2Observability`]: the inert partition of [`super::Lv2Host`].
 //!
 //! Instruments and diagnostic aids only: removing a field here
-//! changes no guest-visible byte. A field that steers a syscall
-//! return value or an effect belongs in [`super::state::Lv2State`]
-//! or [`super::derived::Lv2Derived`]. The one carve-out is
+//! changes no guest-visible byte. The one carve-out is
 //! `pending_invariant_breaks`, whose carry-over across
 //! [`super::Lv2Host::clear_observability`] is documented on the
 //! field.
@@ -103,9 +101,24 @@ pub struct Lv2Observability {
     /// Witness: every non-zero `Lv2Dispatch::Immediate` code any arm
     /// returned, keyed by code. Includes successful returns that carry
     /// a value (kernel ids, pids), not just errors -- the point is
-    /// completeness: a code absent here was never returned by LV2, so a
-    /// guest reporting it built it itself.
+    /// completeness for the immediate path: a code absent here was
+    /// never returned by an immediate dispatch. Codes delivered on
+    /// wake through a staged `PendingResponse` (ETIMEDOUT expiry,
+    /// ECANCELED) do not land here; expiry codes are witnessed by
+    /// [`Self::wait_timeout_expiries`].
     pub dispatch_nonzero_returns: BTreeMap<u64, u64>,
+    /// Witness: the same non-zero immediate codes, attributed to the
+    /// request arm that returned them. [`Self::dispatch_nonzero_returns`]
+    /// answers "was code X ever produced"; this answers "by whom".
+    pub dispatch_return_pairs: BTreeMap<(&'static str, u64), u64>,
+    /// Witness: every `Lv2Dispatch::Block` or `Lv2Dispatch::BlockAndWake`
+    /// park by a wait-family arm, keyed by (arm, timeout usec). Timeout
+    /// 0 is wait-forever; a non-zero key names a timed wait registered
+    /// on the runtime's wake-at-guest-tick queue.
+    pub park_timeouts: BTreeMap<(&'static str, u64), u64>,
+    /// Witness: timed waits that expired with `CELL_ETIMEDOUT`, keyed
+    /// by the primitive that timed out.
+    pub wait_timeout_expiries: BTreeMap<&'static str, u64>,
     /// Witness: `sys_mutex_unlock` calls refused with `CELL_EPERM`
     /// because the caller does not own the mutex.
     pub mutex_unlock_not_owner_count: u64,

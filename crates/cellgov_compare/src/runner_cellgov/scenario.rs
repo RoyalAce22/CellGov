@@ -17,8 +17,6 @@ use super::region::{extract_regions, RegionDescriptor};
 ///
 /// Out-of-bounds regions are filled with zeros; the comparison layer
 /// catches the mismatch.
-///
-/// Outcome mapping: `Stalled` -> `Completed`, `MaxStepsExceeded` -> `Timeout`.
 pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observation {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
@@ -43,8 +41,7 @@ pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observa
             runner: "cellgov".into(),
             steps: Some(result.steps_taken),
         },
-        // Scenario runner has no LV2 host with a TTY surface; left
-        // empty until we add structural-test TTY capture.
+        // Scenario runner has no LV2 host with a TTY surface.
         tty_log: Vec::new(),
     }
 }
@@ -62,8 +59,6 @@ fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
                     Some((ObservedEventKind::MailboxReceive, unit.raw()))
                 }
                 TracedEffectKind::DmaEnqueue => Some((ObservedEventKind::DmaComplete, unit.raw())),
-                // Exhaustive: a new TracedEffectKind must declare its
-                // observed-event intent at compile time.
                 TracedEffectKind::SharedWriteIntent
                 | TracedEffectKind::WaitOnEvent
                 | TracedEffectKind::WakeUnit
@@ -81,7 +76,9 @@ fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
             TraceRecord::UnitWoken { unit, reason } => {
                 let kind = match reason {
                     TracedWakeReason::DmaCompletion => ObservedEventKind::DmaComplete,
-                    TracedWakeReason::WakeEffect => ObservedEventKind::UnitWake,
+                    TracedWakeReason::WakeEffect | TracedWakeReason::Timer => {
+                        ObservedEventKind::UnitWake
+                    }
                 };
                 Some((kind, unit.raw()))
             }

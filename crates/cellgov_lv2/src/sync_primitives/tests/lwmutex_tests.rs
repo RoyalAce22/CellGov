@@ -58,9 +58,9 @@ fn destroy_removes_entry_and_does_not_recycle_id() {
 
 #[test]
 fn fresh_entry_is_unsignaled() {
-    // A freshly created entry starts un-signaled. Locks reaching
-    // the kernel always park; only an unlock against an empty
-    // queue sets the signal so the next contender can pass.
+    // Locks reaching the kernel always park; only an unlock
+    // against an empty queue sets the signal so the next
+    // contender can pass.
     let mut t = LwMutexTable::new();
     let id = t.create().unwrap();
     assert!(!t.lookup(id).unwrap().signaled());
@@ -77,8 +77,6 @@ fn try_acquire_unsignaled_is_contended() {
 
 #[test]
 fn try_acquire_consumes_signal_set_by_unlock() {
-    // After an unlock-with-no-waiters sets the signal, the next
-    // try_acquire consumes it.
     let mut t = LwMutexTable::new();
     let id = t.create().unwrap();
     let a = tid(0x0100_0001);
@@ -145,7 +143,6 @@ fn acquire_or_enqueue_unknown_id_is_unknown() {
 fn enqueue_waiter_preserves_fifo_order() {
     let mut t = LwMutexTable::new();
     let id = t.create().unwrap();
-    // Consume the initial signal first.
     t.try_acquire(id, tid(0x0100_0001));
     t.enqueue_waiter(id, tid(0x0100_0002)).unwrap();
     t.enqueue_waiter(id, tid(0x0100_0003)).unwrap();
@@ -164,6 +161,39 @@ fn enqueue_waiter_unknown_id_returns_err() {
         t.enqueue_waiter(99, tid(0x0100_0001)),
         Err(LwMutexEnqueueError::UnknownId),
     );
+}
+
+#[test]
+fn remove_waiter_unqueues_only_the_named_thread() {
+    let mut t = LwMutexTable::new();
+    let id = t.create().unwrap();
+    let w1 = tid(0x0100_0001);
+    let w2 = tid(0x0100_0002);
+    let w3 = tid(0x0100_0003);
+    t.enqueue_waiter(id, w1).unwrap();
+    t.enqueue_waiter(id, w2).unwrap();
+    t.enqueue_waiter(id, w3).unwrap();
+    assert!(t.remove_waiter(id, w2));
+    let remaining: Vec<_> = t.lookup(id).unwrap().waiters().iter().collect();
+    assert_eq!(remaining, vec![w1, w3], "FIFO order of the rest survives");
+    assert!(
+        !t.lookup(id).unwrap().signaled(),
+        "removal must not fabricate a pending signal"
+    );
+    let holder = tid(0x0100_0004);
+    assert_eq!(
+        t.release_and_wake_next(id, holder),
+        LwMutexRelease::Transferred { new_owner: w1 },
+        "post-cancel unlock must transfer to the surviving FIFO head"
+    );
+}
+
+#[test]
+fn remove_waiter_unknown_id_or_unparked_thread_is_false() {
+    let mut t = LwMutexTable::new();
+    assert!(!t.remove_waiter(99, tid(0x0100_0001)));
+    let id = t.create().unwrap();
+    assert!(!t.remove_waiter(id, tid(0x0100_0001)));
 }
 
 #[test]
@@ -207,8 +237,6 @@ fn release_unknown_id_is_unknown() {
 
 #[test]
 fn unlock_then_acquire_via_signal() {
-    // Unlock against an empty queue sets the signal; the next
-    // acquire consumes it without parking.
     let mut t = LwMutexTable::new();
     let id = t.create().unwrap();
     let a = tid(0x0100_0001);

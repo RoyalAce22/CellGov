@@ -66,6 +66,170 @@ fn dma_completion_wakes_issuer() {
 }
 
 #[test]
+fn a_dma_completion_for_a_finished_issuer_does_not_resurrect_it() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+    let mut rt = build(256, 5, 100);
+    rt.memory
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            &[0xaa, 0xbb, 0xcc, 0xdd],
+        )
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    // The issuer finished (process-exit sweep shape) with its DMA
+    // still in flight.
+    rt.registry_mut()
+        .set_status_override(UnitId::new(1), cellgov_exec::UnitStatus::Finished);
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        UnitId::new(1),
+    )
+    .unwrap();
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+    let s = rt.step().unwrap();
+    assert_eq!(s.unit, UnitId::new(0));
+    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(outcome.dma_completions_fired, 1);
+    // The in-flight payload still lands in the terminal memory image.
+    assert_eq!(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .unwrap(),
+        &[0xaa, 0xbb, 0xcc, 0xdd]
+    );
+    assert_eq!(
+        rt.registry().effective_status(UnitId::new(1)),
+        Some(cellgov_exec::UnitStatus::Finished),
+        "a finished issuer must not be overridden back to Runnable by a late completion"
+    );
+    // No status transition happened, so no UnitWoken record either:
+    // tracing one would fabricate a wake the guard suppressed.
+    let bytes = rt.trace().bytes().to_vec();
+    let woke_finished = cellgov_trace::TraceReader::new(&bytes)
+        .map(|r| r.expect("decode"))
+        .any(|r| {
+            matches!(
+                r,
+                cellgov_trace::TraceRecord::UnitWoken { unit, .. } if unit == UnitId::new(1)
+            )
+        });
+    assert!(
+        !woke_finished,
+        "a suppressed wake for a Finished issuer must not emit UnitWoken"
+    );
+}
+
+#[test]
+fn a_dma_completion_for_a_faulted_issuer_does_not_resurrect_it() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+    let mut rt = build(256, 5, 100);
+    rt.memory
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            &[0x55, 0x66, 0x77, 0x88],
+        )
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    // The issuer faulted (pre-validate rejection shape) after an
+    // earlier accepted transfer was already in flight.
+    rt.registry_mut()
+        .set_status_override(UnitId::new(1), cellgov_exec::UnitStatus::Faulted);
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        UnitId::new(1),
+    )
+    .unwrap();
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+    let s = rt.step().unwrap();
+    assert_eq!(s.unit, UnitId::new(0));
+    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(outcome.dma_completions_fired, 1);
+    assert_eq!(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .unwrap(),
+        &[0x55, 0x66, 0x77, 0x88],
+        "the accepted transfer still lands"
+    );
+    assert_eq!(
+        rt.registry().effective_status(UnitId::new(1)),
+        Some(cellgov_exec::UnitStatus::Faulted),
+        "the Faulted mark keeps the issuer off the scheduler; a late completion \
+         must not override it back to Runnable"
+    );
+}
+
+#[test]
+fn a_time_warp_over_a_finished_issuers_completion_terminates_at_all_blocked() {
+    use crate::runtime::StepError;
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+    let mut rt = build(256, 5, 100);
+    rt.memory
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+            &[0x11, 0x22, 0x33, 0x44],
+        )
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    rt.registry_mut()
+        .set_status_override(UnitId::new(0), cellgov_exec::UnitStatus::Blocked);
+    rt.registry_mut()
+        .set_status_override(UnitId::new(1), cellgov_exec::UnitStatus::Finished);
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        UnitId::new(1),
+    )
+    .unwrap();
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(50)), None);
+    let err = rt.step().expect_err("no unit can become runnable");
+    assert_eq!(err, StepError::AllBlocked);
+    assert_eq!(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(128), 4).unwrap())
+            .unwrap(),
+        &[0x11, 0x22, 0x33, 0x44],
+        "the in-flight payload still lands during the warp"
+    );
+    assert_eq!(
+        rt.registry().effective_status(UnitId::new(1)),
+        Some(cellgov_exec::UnitStatus::Finished)
+    );
+    assert!(
+        rt.time().raw() >= 50,
+        "the warp advanced to the completion time"
+    );
+    let bytes = rt.trace().bytes().to_vec();
+    let any_woken = cellgov_trace::TraceReader::new(&bytes)
+        .map(|r| r.expect("decode"))
+        .any(|r| matches!(r, cellgov_trace::TraceRecord::UnitWoken { .. }));
+    assert!(
+        !any_woken,
+        "warp over a suppressed wake must not emit UnitWoken for anyone"
+    );
+}
+
+#[test]
 fn dma_completion_does_not_fire_before_its_time() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
     use cellgov_mem::{ByteRange, GuestAddr};
@@ -89,10 +253,6 @@ fn dma_completion_does_not_fire_before_its_time() {
 
 #[test]
 fn dma_enqueue_rejects_reserved_destination_preserves_reservation() {
-    // pre_validate rejects a DmaEnqueue whose destination lies in a
-    // non-ReadWrite region. The atomic-batch contract discards the
-    // batch, so no completion fires and the cross-unit reservation
-    // survives because the DMA was rejected upstream.
     use crate::commit::CommitError;
     use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
     use cellgov_mem::{ByteRange, GuestAddr, PageSize, Region, RegionAccess};
@@ -274,22 +434,13 @@ fn dma_wait_parks_spu_blocked_and_completion_wakes_it() {
         UnitStatus::Finished,
         "the wake must let the SPU resume past the tag poll and reach Finished -- \
          if this fails with the SPU still Blocked, the completion path published \
-         the tag bit but did NOT transition Blocked -> Runnable (the wake is the \
-         load-bearing half of the change)"
+         the tag bit but did NOT transition Blocked -> Runnable"
     );
     assert_eq!(blocked_a, blocked_b, "Blocked observation deterministic");
     assert_eq!(final_a, final_b, "final status deterministic");
     assert_eq!(trace_a, trace_b, "trace deterministic across two runs");
 }
 
-/// Same-commit ordering pin. Per-step budget exceeds the DMA's modeled
-/// latency, so the SPU's DmaWait yield and its outstanding completion
-/// land in the SAME commit_step: park happens, then fire publishes the
-/// tag bit AND overrides Blocked back to Runnable -- one commit, two
-/// transitions. Mutation: swapping commit_step's park-before-fire
-/// ordering to fire-before-park makes this test hang at AllBlocked
-/// because fire's Runnable override gets overwritten by the late
-/// Blocked, and the queue is now empty so time-warp can't recover.
 #[test]
 fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
     use cellgov_exec::UnitStatus;
@@ -344,14 +495,6 @@ fn dma_wait_same_commit_completion_overrides_blocked_to_runnable() {
     assert_eq!(trace_a, trace_b, "trace bytes byte-identical across runs");
 }
 
-/// Pre-validate rejection of an SPU-shape DMA must terminate the issuer,
-/// not leave it polling a tag bit that will never publish. Without the
-/// status mutation at the rejection site, the SPU's next step yields
-/// DmaWait, parks Blocked, then `step` time-warps to an empty dma_queue
-/// and returns `StepError::AllBlocked` -- a forever-stall. With the
-/// mutation, the SPU is `Faulted` and the scheduler returns
-/// `NoRunnableUnit` at the next step. The `CommitError` is unchanged
-/// (the host-visible signal is preserved).
 #[test]
 fn dma_enqueue_rejection_faults_issuer_instead_of_stalling() {
     use crate::commit::CommitError;
@@ -382,8 +525,6 @@ fn dma_enqueue_rejection_faults_issuer_instead_of_stalling() {
             dst_addr: 0x10000,
         });
 
-        // Step 1: SPU yields DmaSubmitted with the DmaEnqueue to the
-        // reserved region; commit_step rejects.
         let step_a = rt.step().expect("first step runs");
         let err = rt
             .commit_step(&step_a.result, &step_a.effects)
@@ -397,11 +538,6 @@ fn dma_enqueue_rejection_faults_issuer_instead_of_stalling() {
 
         let status_after_reject = rt.registry().effective_status(unit_id);
 
-        // Step 2: with the mutation, the SPU is Faulted; scheduler skips
-        // it, no Blocked units, so NoRunnableUnit. Without the mutation,
-        // the SPU is still Runnable, polls the tag bit (never published),
-        // yields DmaWait, parks Blocked; the time-warp finds an empty
-        // queue and returns AllBlocked.
         let terminal = rt.step().expect_err("no further progress possible");
 
         (

@@ -139,7 +139,8 @@ pub enum Lv2Request {
         /// In: mutex id to free.
         mutex_id: u32,
     },
-    /// `timeout == 0` means infinite; the field is ignored.
+    /// `sys_mutex_lock`; timeout semantics in
+    /// [`Lv2Request::wait_timeout_usec`].
     MutexLock {
         /// In: mutex id.
         mutex_id: u32,
@@ -172,7 +173,8 @@ pub enum Lv2Request {
         /// In: semaphore id.
         id: u32,
     },
-    /// `timeout == 0` means infinite; the field is ignored.
+    /// `sys_semaphore_wait`; timeout semantics in
+    /// [`Lv2Request::wait_timeout_usec`].
     SemaphoreWait {
         /// In: semaphore id.
         id: u32,
@@ -215,7 +217,8 @@ pub enum Lv2Request {
         queue_id: u32,
     },
     /// `out_ptr` receives 32 bytes: source / data1 / data2 / data3,
-    /// each u64 BE. `timeout == 0` means infinite (ignored).
+    /// each u64 BE. Timeout semantics in
+    /// [`Lv2Request::wait_timeout_usec`].
     EventQueueReceive {
         /// In: queue id.
         queue_id: u32,
@@ -250,7 +253,8 @@ pub enum Lv2Request {
         id: u32,
     },
     /// `mode` is the raw ABI wait-mode word; the handler maps to
-    /// `EventFlagWaitMode`. `timeout == 0` means infinite (ignored).
+    /// `EventFlagWaitMode`. Timeout semantics in
+    /// [`Lv2Request::wait_timeout_usec`].
     EventFlagWait {
         /// In: event flag id.
         id: u32,
@@ -471,7 +475,7 @@ pub enum Lv2Request {
     /// so the post-wake handler can update owner / recursive_count /
     /// waiter fields. The raw-syscall path arrives with
     /// `mutex_ptr == 0` and the handler skips the user-struct write.
-    /// `timeout == 0` means infinite (ignored).
+    /// Timeout semantics in [`Lv2Request::wait_timeout_usec`].
     LwMutexLock {
         /// In: lwmutex id.
         id: u32,
@@ -599,7 +603,8 @@ pub enum Lv2Request {
         /// In: cond id.
         id: u32,
     },
-    /// `timeout == 0` means infinite (ignored).
+    /// `sys_cond_wait`; timeout semantics in
+    /// [`Lv2Request::wait_timeout_usec`].
     CondWait {
         /// In: cond id.
         id: u32,
@@ -749,12 +754,10 @@ pub enum Lv2Request {
         a3: u64,
     },
     /// `sc` with non-zero LEV. PS3 usermode must never issue this;
-    /// the runtime rejects rather than letting the call reach LV2
-    /// dispatch unflagged.
+    /// the runtime rejects it.
     Hypercall {
-        /// In: privilege level. `NonZeroU8` because LEV=0 is the
-        /// normal-syscall path and never produces a `Hypercall`
-        /// variant; the type makes that contract unrepresentable.
+        /// In: privilege level. LEV=0 is the normal-syscall path
+        /// and never produces a `Hypercall` variant.
         lev: NonZeroU8,
         /// In: r11 (syscall-number register).
         r11: u64,
@@ -788,3 +791,27 @@ pub enum Lv2Request {
         args: [u64; 8],
     },
 }
+
+impl Lv2Request {
+    /// The wait-family timeout argument in microseconds, `None` for
+    /// non-wait requests.
+    ///
+    /// `timeout == 0` means wait forever per the PS3 ABI; a non-zero
+    /// timeout expires with `CELL_ETIMEDOUT` via the runtime
+    /// timer-wake queue.
+    pub fn wait_timeout_usec(&self) -> Option<u64> {
+        match self {
+            Lv2Request::MutexLock { timeout, .. }
+            | Lv2Request::SemaphoreWait { timeout, .. }
+            | Lv2Request::EventQueueReceive { timeout, .. }
+            | Lv2Request::EventFlagWait { timeout, .. }
+            | Lv2Request::LwMutexLock { timeout, .. }
+            | Lv2Request::CondWait { timeout, .. } => Some(*timeout),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+#[path = "tests/types_tests.rs"]
+mod tests;

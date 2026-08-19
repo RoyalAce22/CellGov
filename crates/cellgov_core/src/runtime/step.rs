@@ -34,28 +34,41 @@ impl Runtime {
         let unit_id = match self.scheduler.select_next(&self.registry) {
             Some(id) => id,
             None => {
-                // All units blocked: time-warp to the next pending DMA
-                // completion. fire_dma_completions wakes the issuer via
+                // All units blocked: time-warp to the earlier of the
+                // next pending DMA completion and the next timer-wake
+                // deadline. Both firing paths wake their unit via
                 // set_status_override(Runnable) so the retry can
-                // schedule it.
+                // schedule it. A fired deadline can wake nobody (a
+                // contended cond expiry re-parks its waiter on the
+                // mutex untimed), so the warp loops while a wake
+                // source remains instead of reporting a terminal
+                // AllBlocked with live future deadlines still queued.
+                // Each pass pops at least the queue head it warped
+                // to, so the loop terminates.
                 let any_blocked = self.registry.ids().any(|id| {
                     self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
                 });
                 if !any_blocked {
                     return Err(StepError::NoRunnableUnit);
                 }
-                let next_time = self.dma_queue.peek().map(|c| c.completion_time());
-                let Some(next_time) = next_time else {
-                    return Err(StepError::AllBlocked);
-                };
-                if next_time > self.time {
-                    self.time = next_time;
-                }
-                let due = self.fire_dma_completions();
-                self.emit_time_warp_trace(&due);
-                match self.scheduler.select_next(&self.registry) {
-                    Some(id) => id,
-                    None => return Err(StepError::AllBlocked),
+                loop {
+                    let next_dma = self.dma_queue.peek().map(|c| c.completion_time());
+                    let next_timer = self.timer_wakes.peek_deadline();
+                    let next_time = match (next_dma, next_timer) {
+                        (Some(d), Some(t)) => d.min(t),
+                        (Some(d), None) => d,
+                        (None, Some(t)) => t,
+                        (None, None) => return Err(StepError::AllBlocked),
+                    };
+                    if next_time > self.time {
+                        self.time = next_time;
+                    }
+                    let due = self.fire_dma_completions();
+                    let timer_due = self.fire_timer_wakes();
+                    self.emit_time_warp_trace(&due, &timer_due);
+                    if let Some(id) = self.scheduler.select_next(&self.registry) {
+                        break id;
+                    }
                 }
             }
         };
@@ -72,8 +85,7 @@ impl Runtime {
         }
 
         // Memory borrow scoped to `run_until_yield` to enforce the
-        // freeze-during-step rule. Drains messages / syscall returns the
-        // commit pipeline delivered to this unit.
+        // freeze-during-step rule.
         let received = self.registry.drain_receives(unit_id);
         let syscall_ret = self.registry.drain_syscall_return(unit_id);
         let reg_writes = self.registry.drain_register_writes(unit_id);

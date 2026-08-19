@@ -8,6 +8,9 @@ use cellgov_lv2::PendingResponse;
 use super::Runtime;
 
 impl Runtime {
+    /// Consume each woken unit's pending response and transition it
+    /// Blocked -> Runnable.
+    ///
     /// # Panics
     ///
     /// `EventQueueReceive { payload: None }`: four zero u64s would be
@@ -15,6 +18,10 @@ impl Runtime {
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
+            // A wake through any path supersedes a pending timer
+            // deadline; a stale entry would fire a second wake into a
+            // unit that re-parked on something else.
+            self.timer_wakes.cancel(waiter);
             let pending = self.syscall_responses.try_take(waiter);
             match pending {
                 Some(PendingResponse::ReturnCode { code }) => {
@@ -39,7 +46,13 @@ impl Runtime {
                     result_ptr,
                     observed,
                 }) => {
-                    self.commit_bytes_at(result_ptr as u64, &observed.to_be_bytes());
+                    // The kernel stores the observed pattern only
+                    // through a non-null result pointer (RPCS3
+                    // sys_event_flag.cpp sys_event_store_result); a
+                    // NULL pointer waiter wakes with r3 alone.
+                    if result_ptr != 0 {
+                        self.commit_bytes_at(result_ptr as u64, &observed.to_be_bytes());
+                    }
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::LwMutexWake { mutex_ptr, caller }) => {
@@ -147,11 +160,9 @@ impl Runtime {
             Ok(None) => return,
             Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit) => return,
             Err(err) => {
-                // Not a debug_assert: this path fires under normal
-                // multi-finalize flows (e.g. group teardown after the
-                // SPU has already been marked Finished), not only on
-                // a thread-table-vs-primitive divergence. Keeping the
-                // eprintln until a structured trace event lands.
+                // This path fires under normal multi-finalize flows
+                // (e.g. group teardown after the SPU has already been
+                // marked Finished), so it cannot be an assertion.
                 #[allow(
                     clippy::print_stderr,
                     reason = "diagnostic for an LV2 host invariant break; one line per offending unit per host instance"
@@ -178,9 +189,9 @@ impl Runtime {
                 continue;
             }
             // `take_expected` so an intervening drain panics rather
-            // than silently falling through. Runtime is single-threaded
-            // so peek and take_expected see the same variant; the
-            // let-else converts that guarantee into a typed binding.
+            // than silently falling through. Runtime is single-threaded,
+            // so peek and take_expected see the same variant.
+            self.timer_wakes.cancel(waiter_id);
             let pending = self.syscall_responses.take_expected(waiter_id);
             let PendingResponse::ThreadGroupJoin {
                 code,
