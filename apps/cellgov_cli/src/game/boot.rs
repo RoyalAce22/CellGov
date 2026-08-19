@@ -24,6 +24,25 @@ use crate::cli::exit::die;
 /// block is absent.
 const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 
+/// Decode a `sys_proc_param.primary_stacksize` declaration to bytes.
+///
+/// The field carries either a raw byte count or a kernel sentinel;
+/// mapping per RPCS3 `sys_process.h`
+/// (`SYS_PROCESS_PRIMARY_STACK_SIZE_*`) and `PPUModule.cpp`
+/// `ppu_load_exec`.
+fn decode_primary_stacksize(declared: u32) -> u32 {
+    match declared {
+        0x10 => 32 * 1024,
+        0x20 => 64 * 1024,
+        0x30 => 96 * 1024,
+        0x40 => 128 * 1024,
+        0x50 => 256 * 1024,
+        0x60 => 512 * 1024,
+        0x70 => 1024 * 1024,
+        raw => raw,
+    }
+}
+
 /// Seeded ring size per slot: the dispatcher's six non-zero field
 /// budgets (56+8+76+4+22+10 = 176 bytes) drain inside it, so the
 /// ring never depletes mid-record.
@@ -196,6 +215,9 @@ pub(super) struct PrepareOptions<'a> {
     /// through the PPU decoder before execution and print the gap
     /// report to stderr.
     pub prescan: bool,
+    /// Guest argv for the primary thread, `argv[0]` included. Empty
+    /// keeps the no-args entry state (r3..r6 = 0).
+    pub guest_args: &'a [String],
 }
 
 /// Debug toggles captured by both the primary-thread `register_with`
@@ -432,7 +454,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         None => DEFAULT_PRIMARY_PRIO,
     };
     // `primary_stacksize == 0` reads as "use kernel default".
-    let primary_stack_size: u32 = match proc_param.map(|p| p.primary_stacksize) {
+    let primary_stack_size: u32 = match proc_param.map(|p| decode_primary_stacksize(p.primary_stacksize)) {
         Some(want) if (want as usize) > PS3_PRIMARY_STACK_SIZE => die(&format!(
             "primary_stacksize=0x{want:x} exceeds reserved stack region 0x{:x}; raise PS3_PRIMARY_STACK_SIZE",
             PS3_PRIMARY_STACK_SIZE
@@ -486,9 +508,8 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
     // Plumb the title's recorded SDK version into the LV2 host so
     // `sys_process_get_sdk_version` reports the value cellSysutil's
-    // SDK-keyed init dispatcher gates on. Absent param segment leaves
-    // the PSL1GHT homebrew sentinel in place; see
-    // `docs/dev/bug_investigations/cellsysutil_allblocked_43.md`.
+    // SDK-keyed init dispatcher gates on. An absent param segment
+    // leaves the PSL1GHT homebrew sentinel in place.
     if let Some(p) = proc_param {
         rt.lv2_host_mut().set_sdk_version(p.sdk_version);
     }
@@ -524,8 +545,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         authid_label,
     );
     // Process privilege, from the SELF's plaintext capability header.
-    // No LV2 arm consults these yet; they are boot identity that the
-    // root-gated surfaces read in their own slices.
     if let Some(flags) = opts.control_flags1 {
         rt.lv2_host_mut().set_control_flags1(flags);
     }
@@ -707,11 +726,66 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // r12 the malloc pagesize, r13 the TLS pointer. Stamped BEFORE
     // the primary unit is registered so module_start aliases bind
     // to the real entry state.
-    state.set_gpr(1, PS3_PRIMARY_STACK_TOP);
+    //
+    // With guest args, the args block sits at the stack top and r1
+    // drops below it; r3..r6 carry argc/argv/envp/envc (layout in
+    // [`super::guest_args`]). Without, the entry state is the
+    // historical no-args shape.
+    let args_block = if opts.guest_args.is_empty() {
+        None
+    } else {
+        let block = super::guest_args::build_args_block(
+            PS3_PRIMARY_STACK_TOP,
+            primary_stack_size as u64,
+            opts.guest_args,
+        )
+        .unwrap_or_else(|e| die(&format!("--guest-arg: {e}")));
+        let range = cellgov_mem::ByteRange::new(
+            cellgov_mem::GuestAddr::new(block.base),
+            block.bytes.len() as u64,
+        )
+        .unwrap_or_else(|| {
+            die(&format!(
+                "--guest-arg: args block 0x{:08x}+0x{:x} is not a valid range",
+                block.base,
+                block.bytes.len()
+            ))
+        });
+        rt.memory_mut()
+            .apply_commit(range, &block.bytes)
+            .unwrap_or_else(|e| {
+                die(&format!(
+                    "--guest-arg: committing args block at 0x{:08x} FAILED ({e:?})",
+                    block.base
+                ))
+            });
+        if opts.print_banner {
+            println!(
+                "guest args: argc={} argv=0x{:08x} r1=0x{:08x}",
+                block.argc, block.argv_addr, block.initial_r1
+            );
+        }
+        Some(block)
+    };
+    match &args_block {
+        Some(b) => {
+            // r1 sits a full linkage frame below the block (RPCS3
+            // `PPUModule.cpp` `ppu_load_exec`): with r1 == block
+            // base, the entry's CR/LR saves at 8(r1)/16(r1) would
+            // land inside the argv pointer table.
+            state.set_gpr(1, b.initial_r1);
+            state.set_gpr(3, b.argc);
+            state.set_gpr(4, b.argv_addr);
+            state.set_gpr(5, b.envp_addr);
+        }
+        None => {
+            state.set_gpr(1, PS3_PRIMARY_STACK_TOP);
+            state.set_gpr(3, 0);
+            state.set_gpr(4, 0);
+            state.set_gpr(5, 0);
+        }
+    }
     state.set_lr(0);
-    state.set_gpr(3, 0);
-    state.set_gpr(4, 0);
-    state.set_gpr(5, 0);
     state.set_gpr(6, 0);
     state.set_gpr(7, 0x0100_0000);
     state.set_gpr(8, tls_info.map(|t| t.vaddr).unwrap_or(0));
@@ -953,6 +1027,34 @@ fn assert_gating_state_coherent_with_host(rt: &Runtime, modules_were_loaded: boo
         LIBLV2_ONCE_MUTEX_SLOT,
         mutex_id,
     );
+}
+
+#[cfg(test)]
+mod primary_stacksize_tests {
+    use super::decode_primary_stacksize;
+
+    #[test]
+    fn a_sentinel_stacksize_declaration_decodes_to_its_byte_count() {
+        for (sentinel, bytes) in [
+            (0x10, 32 * 1024),
+            (0x20, 64 * 1024),
+            (0x30, 96 * 1024),
+            (0x40, 128 * 1024),
+            (0x50, 256 * 1024),
+            (0x60, 512 * 1024),
+            (0x70, 1024 * 1024),
+        ] {
+            assert_eq!(decode_primary_stacksize(sentinel), bytes);
+        }
+    }
+
+    #[test]
+    fn a_raw_byte_count_declaration_passes_through_unchanged() {
+        assert_eq!(decode_primary_stacksize(0), 0);
+        assert_eq!(decode_primary_stacksize(0x9000), 0x9000);
+        assert_eq!(decode_primary_stacksize(0x40000), 0x40000);
+        assert_eq!(decode_primary_stacksize(0x100000), 0x100000);
+    }
 }
 
 #[cfg(test)]

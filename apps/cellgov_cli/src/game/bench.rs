@@ -28,6 +28,9 @@ pub struct BenchOptions<'a> {
     /// When true, scan the title ELF for unimplemented PPU
     /// encodings before execution and print the gap report.
     pub prescan: bool,
+    /// Guest argv for the primary thread, `argv[0]` included. Empty
+    /// keeps the no-args entry state (r3..r6 = 0).
+    pub guest_args: &'a [String],
 }
 
 impl BenchOptions<'_> {
@@ -52,6 +55,9 @@ impl BenchOptions<'_> {
         }
         if self.prescan {
             cmd.arg("--prescan");
+        }
+        for arg in self.guest_args {
+            cmd.arg("--guest-arg").arg(arg);
         }
     }
 }
@@ -130,6 +136,7 @@ pub fn bench_boot(
         budget_override: opts.budget_override,
         capture_state_trace: false,
         prescan: opts.prescan,
+        guest_args: opts.guest_args,
     });
     let mut rt = prepared.rt;
     let authid_source = prepared.authid_source;
@@ -456,16 +463,21 @@ fn spawn_one_run(opts: BenchOptions<'_>) -> Result<BenchBootResult, SpawnError> 
 /// Run [`bench_boot_one_run`] twice in separate subprocesses and
 /// classify the pair against the gate.
 pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, SpawnError> {
-    let checkpoint_label = match opts.checkpoint_override {
-        Some(cp) => format!(" checkpoint={}", cp.as_cli_str()),
-        None => String::new(),
-    };
-    let budget_label = opts
-        .budget_override
-        .map(|b| format!(" budget={b}"))
-        .unwrap_or_default();
+    // Optional trailing tokens, each carrying its own leading space
+    // so the banner has no gap when both are absent.
+    let mut overrides = String::new();
+    if let Some(cp) = opts.checkpoint_override {
+        overrides.push_str(&format!(" checkpoint={}", cp.as_cli_str()));
+    }
+    if let Some(b) = opts.budget_override {
+        overrides.push_str(&format!(" budget={b}"));
+    }
+    if !opts.guest_args.is_empty() {
+        // Debug quoting: guest argv entries may contain spaces.
+        overrides.push_str(&format!(" guest_args={:?}", opts.guest_args));
+    }
     println!(
-        "bench-boot: title={} elf={} max_steps={}{checkpoint_label}{budget_label}",
+        "bench-boot: title={} elf={} max_steps={}{overrides}",
         opts.title.name(),
         opts.elf_path,
         opts.max_steps
