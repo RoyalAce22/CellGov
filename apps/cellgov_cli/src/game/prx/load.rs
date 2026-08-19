@@ -236,8 +236,9 @@ pub(in crate::game) fn install_unresolved_trampolines_only(
     (Some(info), stats.unresolved_requesters)
 }
 
-/// Load the minimum viable PRX set via
-/// [`cellgov_ppu::prx_loader::load_firmware_set`], patch the game
+/// Load the title's derived firmware set -- import-closure selection
+/// over the candidate universe, then
+/// [`cellgov_ppu::prx_loader::load_firmware_set`] -- patch the game
 /// ELF's GOT slots against the resulting union export table, and
 /// return one [`PrxLoadInfo`] per module in topological order plus
 /// the manifest-verified firmware identity.
@@ -287,13 +288,13 @@ pub(in crate::game) fn load_firmware_set_bound(
     let mut internal_paths: Vec<(&str, String)> = Vec::new();
     if include_internal {
         let internal_dir = fw_root.join("sys").join("internal");
-        for stem in FIRMWARE_INTERNAL_PRX_STEMS {
-            let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
-                die(&format!(
-                    "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
-                    internal_dir.display()
-                ))
-            });
+        // The shell loads internal modules by guest path at runtime
+        // (sc 480), so the whole directory is candidate material;
+        // viability prunes what does not close, with the reason
+        // printed. A prune is fatal only for the
+        // FIRMWARE_INTERNAL_PRX_STEMS entries, which the shell cannot
+        // boot without.
+        for path in scan_sprx_files(&internal_dir) {
             let elf = match read_firmware_module_elf(&path) {
                 Ok(d) => d,
                 Err(e) => die(&format!("prx: {e}")),
@@ -302,8 +303,29 @@ pub(in crate::game) fn load_firmware_set_bound(
                 Some(s) => s.to_string(),
                 None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
             };
-            internal_paths.push((stem, path_str.clone()));
             candidates.insert(path_str, elf);
+        }
+        for stem in FIRMWARE_INTERNAL_PRX_STEMS {
+            let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
+                die(&format!(
+                    "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
+                    internal_dir.display()
+                ))
+            });
+            let path_str = match path.to_str() {
+                Some(s) => s.to_string(),
+                None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
+            };
+            // The directory scan covers .sprx; a pre-decrypted .prx
+            // resolved by the stem walk still needs its bytes read.
+            if !candidates.contains_key(&path_str) {
+                let elf = match read_firmware_module_elf(&path) {
+                    Ok(d) => d,
+                    Err(e) => die(&format!("prx: {e}")),
+                };
+                candidates.insert(path_str.clone(), elf);
+            }
+            internal_paths.push((stem, path_str));
         }
     }
 
@@ -470,7 +492,13 @@ pub(in crate::game) fn load_firmware_set_bound(
     }
     for id in &image.topological_order {
         let Some(prx) = image.loaded.get(id) else {
-            continue;
+            // `FirmwareImage::topological_order` is documented as a
+            // permutation of `loaded.keys()`.
+            die(&format!(
+                "prx: topological order names module id 0x{:08x} absent from the \
+                 loaded set; the loader's order/loaded invariant broke",
+                id.0,
+            ));
         };
         out.push(PrxLoadInfo {
             name: prx.name.clone(),

@@ -45,9 +45,8 @@ const MODULES: &[&str] = &[
     "libsysutil_np",
 ];
 
-/// Env override verbatim; the default anchors to the workspace root,
-/// since integration tests run with the crate directory as CWD and a
-/// bare relative default would never resolve.
+/// Env override verbatim; the default anchors to the workspace root
+/// because integration tests run with the crate directory as CWD.
 fn dir_from_env_or_default(env_key: &str, default: &str) -> PathBuf {
     std::env::var(env_key)
         .map(PathBuf::from)
@@ -55,8 +54,7 @@ fn dir_from_env_or_default(env_key: &str, default: &str) -> PathBuf {
 }
 
 /// `CELLGOV_REQUIRE_PARITY_FIXTURES` truthiness: `0`, `false`, and
-/// empty mean OFF, matching what a wrapper script setting the var to
-/// opt out would expect. Anything else means ON.
+/// empty mean OFF; anything else means ON.
 fn require_fixtures() -> bool {
     match std::env::var_os(ENV_REQUIRE_FIXTURES) {
         None => false,
@@ -175,7 +173,7 @@ fn decrypt_and_compare(
 }
 
 #[test]
-fn min_viable_prx_decrypt_matches_pre_decrypted_reference() {
+fn firmware_prx_decrypt_matches_pre_decrypted_reference() {
     let Some((encrypted_dir, reference_dir)) = locate_fixtures() else {
         return;
     };

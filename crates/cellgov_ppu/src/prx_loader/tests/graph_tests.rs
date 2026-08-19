@@ -15,10 +15,8 @@ fn different_names_yield_different_ids() {
 
 #[test]
 fn empty_name_yields_fnv_offset() {
-    // FNV-1a starts the hash at the offset basis and folds
-    // zero input bytes through zero rounds -- "" hashes to the
-    // basis itself. This is a property of the algorithm, not a
-    // reserved sentinel; see the function's collision note.
+    // FNV-1a folds zero input bytes, so "" hashes to the offset
+    // basis itself; see the function's collision note.
     assert_eq!(module_id_from_name("").0, 0x811c_9dc5);
 }
 
@@ -28,17 +26,11 @@ fn name_byte_order_matters() {
 }
 
 #[test]
-fn module_id_golden_values_for_canonical_min_viable_prx_names() {
-    // FNV-1a-32 over the canonical minimum-viable PRX stem names.
-    // These values are part of the determinism contract: the
-    // sync_state_hash, the loader's dependency graph, and any
-    // future trace record consuming module ids all transitively
-    // depend on byte-stability of these mappings. Drift in any
-    // direction (different hash, different seed, different
-    // byte handling) shows up here first. Reviewers can verify
-    // these constants by computing FNV-1a-32 over the ASCII
-    // bytes of each name with offset 0x811c9dc5, prime
-    // 0x01000193.
+fn module_id_golden_values_for_canonical_firmware_stems() {
+    // The sync_state_hash and the loader's dependency graph depend
+    // on byte-stability of these mappings. Verify by computing
+    // FNV-1a-32 (offset 0x811c9dc5, prime 0x01000193) over the
+    // ASCII bytes of each name.
     assert_eq!(module_id_from_name("liblv2").0, 0xdef6_ed90);
     assert_eq!(module_id_from_name("libfs").0, 0x3f74_3bf7);
     assert_eq!(module_id_from_name("libsysmodule").0, 0xf5d8_93a5);
@@ -47,11 +39,8 @@ fn module_id_golden_values_for_canonical_min_viable_prx_names() {
 
 #[test]
 fn module_id_round_trips_through_parse_prx() {
-    // Import-graph edges are built by hashing the
-    // importer-declared name via `module_id_from_name`.
-    // Divergence between this hash and parse_prx's derivation
-    // would turn every edge into a phantom prerequisite or a
-    // missing dependency.
+    // Import-graph edges hash the importer-declared name via
+    // `module_id_from_name`; parse_prx must derive the same id.
     let bytes = crate::sprx::test_fixtures::make_test_prx();
     let parsed = crate::sprx::parse_prx(&bytes).expect("parse");
     assert_eq!(parsed.module_id, module_id_from_name(&parsed.name));
@@ -157,7 +146,6 @@ fn topological_sort_singletons_emit_in_id_order() {
 
 #[test]
 fn topological_sort_empty_edges_returns_empty_order() {
-    // Locked-down: empty input is not an error.
     let edges: BTreeMap<PrxModuleId, BTreeSet<PrxModuleId>> = BTreeMap::new();
     let g = topological_sort(&edges).expect("sort");
     assert!(g.order.is_empty());
