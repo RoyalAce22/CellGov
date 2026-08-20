@@ -9,6 +9,16 @@
 /// Numeric class id passed to `sys_process_get_number_of_object`.
 pub type ProcessObjectClassId = u32;
 
+/// Pid LV2 assigns the first non-kernel process.
+// Firmware observation: sys_process_getpid returns this to the
+// first user process on real hardware; PSL1GHT keys on the value.
+pub const BOOT_PROCESS_PID: u32 = 0x0100_0500;
+
+/// Ppid the boot process reports; `sys_process_get_ppu_guid`
+/// returns the same value and PSL1GHT keys on the equality.
+// Firmware observation, same provenance as BOOT_PROCESS_PID.
+pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
+
 /// `sys_event_port` objects.
 pub const SYS_EVENT_PORT_OBJECT: ProcessObjectClassId = 0x0E;
 /// `sys_timer` objects.
@@ -32,13 +42,9 @@ pub const SYS_LWCOND_OBJECT: ProcessObjectClassId = 0x97;
 /// `sys_event_flag` objects.
 pub const SYS_EVENT_FLAG_OBJECT: ProcessObjectClassId = 0x98;
 
-/// Every documented class id, in numeric order. Adding a new
-/// constant above without listing it here is a regression: the
-/// class-id coverage test in `cellgov_lv2::host::process::counts`
-/// drives off this slice, and a class consumed by
-/// `sys_process_get_number_of_object` but not enumerated here
-/// would silently fall through to the count handler's catch-all
-/// and report zero forever.
+/// Every documented class id, in numeric order. The class-id
+/// coverage test in `cellgov_lv2::host::process::counts` drives
+/// off this slice.
 pub const ALL_PROCESS_OBJECT_CLASS_IDS: &[ProcessObjectClassId] = &[
     SYS_EVENT_PORT_OBJECT,
     SYS_TIMER_OBJECT,

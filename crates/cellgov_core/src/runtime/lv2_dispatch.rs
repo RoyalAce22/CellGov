@@ -12,6 +12,7 @@ use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
 use cellgov_mem::MemError;
 use cellgov_trace::{TraceRecord, TracedSyscallDisposition};
 
+use super::spaces::AddressSpaceId;
 use super::types::RuntimeMode;
 use super::{
     trace_bridge::{traced_invariant_break_reason, MemoryView},
@@ -53,8 +54,17 @@ impl Runtime {
     /// LV2 handlers must not emit a non-memory effect whose
     /// semantics depend on a co-batched `SharedWriteIntent` having
     /// committed; a `debug_assert!` below traps that condition.
-    pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect]) {
-        let memory_failure = self.validate_lv2_memory_subset(effects);
+    ///
+    /// `space` is the address space the memory subset commits into:
+    /// the syscall CALLER's space for dispatch-time effects, the
+    /// expiring waiter's space for `expire_wait` effects. LV2 handlers
+    /// must emit only intents whose pointers were decoded from that
+    /// unit's own syscall, so every intent is an address in `space`
+    /// (a handler emitting another unit's parked pointer as an effect
+    /// would commit into the wrong space; waiter-side payloads belong
+    /// on `PendingResponse` / `response_updates` instead).
+    pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect], space: AddressSpaceId) {
+        let memory_failure = self.validate_lv2_memory_subset(effects, space);
         debug_assert!(
             !(memory_failure.is_some()
                 && effects
@@ -72,8 +82,9 @@ impl Runtime {
                 "dispatch.lv2_effect_apply_failed",
                 format_args!(
                     "LV2 SharedWriteIntent validation failed at addr=0x{addr:016x} \
-                     length={length}: {err}; memory subset rolled back, non-memory \
-                     effects still applied",
+                     length={length} in space {}: {err}; memory subset rolled back, \
+                     non-memory effects still applied",
+                    space.raw(),
                 ),
             );
         }
@@ -83,7 +94,44 @@ impl Runtime {
                     if memory_failure.is_some() {
                         continue;
                     }
-                    self.memory.apply_commit(*range, bytes.bytes()).expect(
+                    // LV2 direct commits bypass the commit pipeline's
+                    // shared-view fanout; a write landing inside a
+                    // shared view would leave sibling views incoherent.
+                    // No LV2 emitter targets shared segments yet --
+                    // surface the first one here instead of as silent
+                    // incoherence (same guard as ConditionalStore in
+                    // fanout_shared_writes). The invariant break keeps
+                    // the witness loud in release builds, where the
+                    // debug_assert compiles out and the write would
+                    // otherwise land in this view alone.
+                    if self.range_intersects_shared_view(space, *range) {
+                        self.lv2_host.log_invariant_break(
+                            "dispatch.lv2_write_targets_shared_view",
+                            format_args!(
+                                "LV2 SharedWriteIntent at 0x{:x}+0x{:x} targets a shared \
+                                 view in space {}; cross-space replication of LV2 direct \
+                                 commits is not modeled, sibling views are now incoherent",
+                                range.start().raw(),
+                                range.length(),
+                                space.raw(),
+                            ),
+                        );
+                        debug_assert!(
+                            false,
+                            "LV2 SharedWriteIntent at {:#x}+{:#x} targets a shared view in \
+                             space {}; cross-space replication of LV2 direct commits is not \
+                             modeled",
+                            range.start().raw(),
+                            range.length(),
+                            space.raw(),
+                        );
+                    }
+                    let mem = super::spaces::resolve_space_memory_for_write(
+                        &mut self.memory,
+                        &mut self.spaces,
+                        space,
+                    );
+                    mem.apply_commit(*range, bytes.bytes()).expect(
                         "validate_lv2_memory_subset called GuestMemory::validate_write -- \
                          the same predicate apply_commit uses internally -- so this Err \
                          path is structurally unreachable",
@@ -206,16 +254,19 @@ impl Runtime {
         }
     }
 
-    /// Pre-validate the `SharedWriteIntent` subset of `effects` via
-    /// `GuestMemory::validate_write` (the predicate `apply_commit`
-    /// itself calls). Returns the first failing intent or `None`.
+    /// Pre-validate the `SharedWriteIntent` subset of `effects`
+    /// against `space`'s memory via `GuestMemory::validate_write`
+    /// (the predicate `apply_commit` itself calls). Returns the first
+    /// failing intent or `None`.
     fn validate_lv2_memory_subset(
         &self,
         effects: &[Effect],
+        space: AddressSpaceId,
     ) -> Option<(cellgov_mem::ByteRange, MemError)> {
+        let mem = super::spaces::resolve_space_memory(&self.memory, &self.spaces, space);
         for effect in effects {
             if let Effect::SharedWriteIntent { range, bytes, .. } = effect {
-                if let Err(err) = self.memory.validate_write(*range, bytes.len()) {
+                if let Err(err) = mem.validate_write(*range, bytes.len()) {
                     return Some((*range, err));
                 }
             }
@@ -336,13 +387,29 @@ impl Runtime {
         request: cellgov_lv2::Lv2Request,
         source: UnitId,
     ) {
-        let is_process_exit = matches!(request, cellgov_lv2::Lv2Request::ProcessExit { .. });
+        // ProcessExit2 with empty argv resolves to the same plain
+        // process exit (RPCS3 sys_process.cpp _sys_process_exit2
+        // calls _sys_process_exit when the argv walk finds nothing),
+        // so its Immediate(0) must trigger the same finish-all sweep
+        // -- otherwise the guest resumes past a noreturn exit. Child
+        // exits arrive as Lv2Dispatch::ProcessExitChild and never
+        // reach the Immediate arm, so the flag stays boot-only there.
+        let is_process_exit = matches!(
+            request,
+            cellgov_lv2::Lv2Request::ProcessExit { .. }
+                | cellgov_lv2::Lv2Request::ProcessExit2 { .. }
+        );
         let wait_timeout_usec = request.wait_timeout_usec();
         let dispatch = self.lv2_host.dispatch(
             request,
             source,
+            // Syscall parameters are read from the CALLER's space.
             &MemoryView {
-                memory: &self.memory,
+                memory: crate::runtime::spaces::resolve_unit_memory(
+                    &self.memory,
+                    &self.spaces,
+                    source,
+                ),
                 current_tick: self.time,
             },
         );
@@ -355,13 +422,46 @@ impl Runtime {
         // touching `self.memory`.
         let region_installs: Vec<(u64, usize)> =
             self.lv2_host.drain_pending_region_installs().collect();
-        for (addr, size) in region_installs {
-            self.memory
-                .install_region(addr, size, "shm", cellgov_mem::PageSize::Page64K)
-                .expect(
-                    "mmapper handle table guarantees disjointness against the existing layout; \
-                     overlap here means 334 dispatch let a contradiction through",
-                );
+        if !region_installs.is_empty() {
+            // The mapping appears in the CALLER's address space: the
+            // handler validated the window against the caller's view,
+            // and the caller's own loads/stores resolve through its
+            // space (RPCS3 sys_mmapper.cpp sys_mmapper_map_shared_memory
+            // maps into the calling process's virtual memory).
+            let caller_space = self.spaces.space_of(source);
+            let mem = super::spaces::resolve_space_memory_for_write(
+                &mut self.memory,
+                &mut self.spaces,
+                caller_space,
+            );
+            for (addr, size) in region_installs {
+                if let Err(err) =
+                    mem.install_region(addr, size, "shm", cellgov_mem::PageSize::Page64K)
+                {
+                    // Guest-reachable: the mmapper
+                    // ledger is host-global and cannot see regions the
+                    // spawn loader or boot pipeline installed in the
+                    // caller's space, so a map request can name a
+                    // window its own layout already occupies. The real
+                    // kernel refuses this with CELL_EBUSY (RPCS3
+                    // sys_mmapper.cpp sys_mmapper_map_shared_memory
+                    // when the allocation of the window fails); until
+                    // the 334 handler checks the caller's view, the
+                    // break below witnesses the fabricated success and
+                    // the window stays unmapped, so the caller's next
+                    // access to it faults instead of aliasing.
+                    self.lv2_host.log_invariant_break(
+                        "dispatch.mmapper_region_install_overlap",
+                        format_args!(
+                            "shm region install at 0x{addr:08x}+0x{size:x} overlaps the \
+                             caller's existing layout in space {}: {err}; window not \
+                             installed, the guest already observed success where the \
+                             kernel would return CELL_EBUSY",
+                            caller_space.raw(),
+                        ),
+                    );
+                }
+            }
         }
         match dispatch {
             Lv2Dispatch::Immediate { code, effects } => {
@@ -408,6 +508,12 @@ impl Runtime {
             Lv2Dispatch::PpuThreadCreate { .. } => {
                 self.step_woke_others = true;
                 self.handle_ppu_thread_create(source, dispatch);
+            }
+            Lv2Dispatch::ProcessSpawn { .. } => {
+                self.handle_process_spawn(source, dispatch);
+            }
+            Lv2Dispatch::ProcessExitChild { pid, code, effects } => {
+                self.handle_process_exit_child(source, pid, code, effects);
             }
             Lv2Dispatch::WakeAndReturn {
                 code,
@@ -456,7 +562,8 @@ impl Runtime {
         effects: Vec<Effect>,
         is_process_exit: bool,
     ) {
-        self.apply_lv2_effects(&effects);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
         if is_process_exit {
             let all_ids: Vec<UnitId> = self.registry.ids().collect();
             for uid in &all_ids {
@@ -507,7 +614,8 @@ impl Runtime {
         effects: Vec<Effect>,
         code: u64,
     ) {
-        self.apply_lv2_effects(&effects);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
         if let Some(factory) = &self.spu_factory {
             for (slot, init) in inits {
                 let gid = init.group_id;
@@ -558,7 +666,8 @@ impl Runtime {
     }
 
     fn handle_block(&mut self, source: UnitId, pending: PendingResponse, effects: Vec<Effect>) {
-        self.apply_lv2_effects(&effects);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
         let displaced = self.syscall_responses.insert(source, pending);
         if let Some(prev) = &displaced {
             // Displacement overwrites a pending response, losing the
@@ -596,15 +705,36 @@ impl Runtime {
         lwmutex_inheritors: Vec<UnitId>,
         effects: Vec<Effect>,
     ) {
-        self.apply_lv2_effects(&effects);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
         self.registry
             .set_status_override(source, UnitStatus::Finished);
         for waiter in woken_unit_ids {
             self.timer_wakes.cancel(waiter);
             let pending = self.syscall_responses.try_take(waiter);
             if let Some(PendingResponse::PpuThreadJoin { status_out_ptr, .. }) = pending {
-                self.commit_bytes_at(status_out_ptr as u64, &exit_value.to_be_bytes());
-                self.registry.set_syscall_return(waiter, 0);
+                // The out-pointer was decoded from the JOINER's
+                // syscall, so it addresses the joiner's space.
+                if status_out_ptr != 0 {
+                    let waiter_space = self.spaces.space_of(waiter);
+                    self.commit_bytes_at(
+                        waiter_space,
+                        status_out_ptr as u64,
+                        &exit_value.to_be_bytes(),
+                    );
+                    self.registry.set_syscall_return(waiter, 0);
+                } else {
+                    // A NULL out-pointer is never written -- the join
+                    // itself still completes (the target is reaped),
+                    // but the joiner's r3 reports CELL_EFAULT, not
+                    // success (RPCS3 sys_ppu_thread.cpp
+                    // sys_ppu_thread_join checks vptr only after the
+                    // wait resolves and returns CELL_EFAULT for null).
+                    self.registry.set_syscall_return(
+                        waiter,
+                        cellgov_ps3_abi::cell_errors::CELL_EFAULT.into(),
+                    );
+                }
             } else {
                 self.registry.set_syscall_return(waiter, exit_value);
             }
@@ -639,7 +769,8 @@ impl Runtime {
         response_updates: Vec<(UnitId, PendingResponse)>,
         effects: Vec<Effect>,
     ) {
-        self.apply_lv2_effects(&effects);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
         self.registry.set_syscall_return(source, code);
         self.assert_response_updates_valid(
             "handle_wake_and_return",
@@ -674,7 +805,8 @@ impl Runtime {
         response_updates: Vec<(UnitId, PendingResponse)>,
         effects: Vec<Effect>,
     ) {
-        self.apply_lv2_effects(&effects);
+        let caller_space = self.spaces.space_of(source);
+        self.apply_lv2_effects(&effects, caller_space);
         self.assert_response_updates_valid(
             "handle_block_and_wake",
             &woken_unit_ids,
@@ -717,11 +849,9 @@ impl Runtime {
     }
 }
 
-/// Map a classified `Lv2Request` to its [`TracedSyscallDisposition`].
-///
-/// `Hypercall` is set by the caller (it knows LEV); `TimerFastPath` is
-/// set by the caller (the timer bypass skips classify entirely). Every
-/// other variant routes through this helper.
+/// `Hypercall` and `TimerFastPath` dispositions are set by the caller
+/// (it knows LEV; the timer bypass skips classify entirely); every
+/// other variant maps here.
 fn disposition_from_request(request: &cellgov_lv2::Lv2Request) -> TracedSyscallDisposition {
     match request {
         cellgov_lv2::Lv2Request::Unsupported { .. } => TracedSyscallDisposition::Unsupported,

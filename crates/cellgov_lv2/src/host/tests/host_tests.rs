@@ -338,6 +338,8 @@ fn multi_primitive_determinism_canary() {
                 Lv2Dispatch::RegisterSpu { .. } => "RegSpu".into(),
                 Lv2Dispatch::PpuThreadCreate { .. } => "PpuCreate".into(),
                 Lv2Dispatch::PpuThreadExit { .. } => "PpuExit".into(),
+                Lv2Dispatch::ProcessSpawn { pid, .. } => format!("Spawn({pid:#x})"),
+                Lv2Dispatch::ProcessExitChild { pid, .. } => format!("ExitChild({pid:#x})"),
             };
             trace.push((format!("{label}:{tag}"), host.state_hash()));
         }
@@ -360,6 +362,69 @@ fn multi_primitive_determinism_canary() {
         );
     }
     assert!(run_a.len() >= 15);
+}
+
+#[test]
+fn spawn_trailing_args_are_reported_not_dropped() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let spawn = |host: &mut Lv2Host, unconsumed: [u64; 2]| {
+        host.dispatch(
+            Lv2Request::ProcessSpawn {
+                pid_out_ptr: 0x100,
+                prio: 1000,
+                flags: 0,
+                block_ptr: 0x200,
+                block_size: 0,
+                data_word: 0,
+                unconsumed,
+            },
+            src,
+            &rt,
+        );
+    };
+    spawn(&mut host, [0, 0]);
+    assert_eq!(
+        host.invariant_break_site_count("process.spawn_unconsumed_args"),
+        0,
+        "all-zero trailing args must not report",
+    );
+    spawn(&mut host, [0xAA, 0]);
+    spawn(&mut host, [0, 0xBB]);
+    assert_eq!(
+        host.invariant_break_site_count("process.spawn_unconsumed_args"),
+        2,
+        "each nonzero trailing arg pair must report once",
+    );
+}
+
+#[test]
+fn exit2_fourth_arg_is_reported_not_dropped() {
+    let exit2 = |arg4: u64| {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x10000);
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        host.dispatch(
+            Lv2Request::ProcessExit2 {
+                code: 0,
+                arg_ptr: 0x100,
+                arg_size: 0x30,
+                arg4,
+            },
+            src,
+            &rt,
+        );
+        host.invariant_break_site_count("process.exit2_unconsumed_arg4")
+    };
+    assert_eq!(exit2(0), 0, "zero fourth arg must not report");
+    assert_eq!(
+        exit2(0x1000_0000),
+        1,
+        "the exitspawn wrapper's live fourth arg must report once",
+    );
 }
 
 // Cross-primitive invariant: lwmutex, mutex, semaphore, event queue, and
@@ -645,8 +710,7 @@ mod ss_access_control_engine {
 
     #[test]
     fn pkg_id_two_writes_program_authority_id_be_to_a2_and_returns_ok() {
-        // The boot-supplied authority id (a retail-application id
-        // here) is served verbatim, big-endian.
+        // A retail-application authority id.
         const EXPECTED_AUTHID: u64 = 0x1010_0000_0100_0003;
 
         let mut host = Lv2Host::new();

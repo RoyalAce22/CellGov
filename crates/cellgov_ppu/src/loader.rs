@@ -6,10 +6,8 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
 pub(crate) use cellgov_mem::be::{read_u16, read_u32, read_u64};
 
-/// `(addr, size)` pair describing where a segment would have been
-/// placed. Shared by [`LoadError::SegmentOutOfRange`] (ELF PT_LOAD)
-/// and [`crate::sprx::PrxLoadError::SegmentOutOfRange`] (PRX
-/// text / data).
+/// `(addr, size)` pair describing where a rejected segment would have
+/// been placed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SegmentPlacement {
     /// Guest address at which the segment would have started.
@@ -21,9 +19,8 @@ pub struct SegmentPlacement {
 /// Why loading failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LoadError {
-    /// File is too small to contain an ELF header (or program-header
-    /// table arithmetic overflowed -- treated identically: there is
-    /// no usable ELF structure to load).
+    /// File too small to contain an ELF header, or program-header
+    /// table arithmetic overflowed.
     #[error("PPU ELF too small for header")]
     TooSmall,
     /// ELF magic bytes (0x7F 'E' 'L' 'F') not found.
@@ -40,8 +37,7 @@ pub enum LoadError {
     SegmentTruncated,
     /// A LOAD segment's virtual address + size exceeds guest memory,
     /// overflows a 32-bit PS3 effective address, or arithmetic on the
-    /// vaddr/memsz pair overflowed. `segment_index` is the offending
-    /// segment's slot in the program-header table.
+    /// vaddr/memsz pair overflowed.
     #[error(
         "PPU ELF LOAD segment[{segment_index}] at 0x{:016x} (size 0x{:x}) out of range",
         placement.addr, placement.size
@@ -52,14 +48,25 @@ pub enum LoadError {
         /// Index of the offending PT_LOAD in the program-header table.
         segment_index: usize,
     },
+    /// A LOAD segment claims more file bytes than memory bytes
+    /// (`p_filesz > p_memsz`), which the ELF format forbids for
+    /// loadable segments.
+    #[error("PPU ELF LOAD segment[{segment_index}] filesz 0x{filesz:x} exceeds memsz 0x{memsz:x}")]
+    SegmentFileszExceedsMemsz {
+        /// Index of the offending PT_LOAD in the program-header table.
+        segment_index: usize,
+        /// Declared file-image size.
+        filesz: u64,
+        /// Declared memory-image size.
+        memsz: u64,
+    },
 }
 
 use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, PT_LOAD};
 
-/// Compute `phoff + i * phentsize` defensively. Returns `None` on overflow
-/// or if the resulting program-header slot would extend past `data.len()`,
-/// which the callers translate into `LoadError::TooSmall`. Attacker-controlled
-/// header fields can otherwise wrap and bypass the post-bounds check.
+/// Compute `phoff + i * phentsize`, returning `None` on overflow or
+/// if the program-header slot would extend past `data.len()`; callers
+/// translate `None` into `LoadError::TooSmall`.
 fn ph_slot_base(data_len: usize, phoff: usize, phentsize: usize, i: usize) -> Option<usize> {
     let prod = i.checked_mul(phentsize)?;
     let base = phoff.checked_add(prod)?;
@@ -183,6 +190,18 @@ pub fn load_ppu_elf(
         let p_filesz = read_u64(data, base + 32);
         let p_memsz = read_u64(data, base + 40);
 
+        // The ELF format forbids p_filesz > p_memsz for loadable
+        // segments. The bounds check below is memsz-derived, so a
+        // header claiming extra file bytes would route an oversized
+        // copy into apply_commit and panic instead of erroring.
+        if p_filesz > p_memsz {
+            return Err(LoadError::SegmentFileszExceedsMemsz {
+                segment_index: i,
+                filesz: p_filesz,
+                memsz: p_memsz,
+            });
+        }
+
         if p_memsz == 0 {
             continue;
         }
@@ -242,7 +261,14 @@ pub fn load_ppu_elf(
     // container.
     let entry_off = entry as usize;
     let mem_bytes = memory.as_bytes();
-    if entry_off + 8 <= mem_bytes.len() {
+    // checked_add: a hostile e_entry near u64::MAX would wrap the
+    // end-of-descriptor sum and either panic (debug) or index out of
+    // bounds (release); an out-of-range entry takes the raw-entry
+    // fallback below instead.
+    if entry_off
+        .checked_add(8)
+        .is_some_and(|end| end <= mem_bytes.len())
+    {
         let code_addr = u32::from_be_bytes([
             mem_bytes[entry_off],
             mem_bytes[entry_off + 1],
@@ -277,10 +303,9 @@ pub struct LoadSegment {
     /// Index of the program header within the ELF.
     pub index: usize,
     /// `p_offset`: file-relative byte position where the segment's
-    /// initialized bytes begin. The loader has already bounds-checked
-    /// the program-header slot the value was read from; callers that
-    /// want a `[file_offset, file_offset + filesz)` range still need
-    /// to validate the sum against the file length.
+    /// initialized bytes begin. Callers deriving a
+    /// `[file_offset, file_offset + filesz)` range must validate the
+    /// sum against the file length.
     pub file_offset: u64,
     /// Guest virtual address of the segment start.
     pub vaddr: u64,
@@ -414,19 +439,6 @@ pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
     None
 }
 
-/// PT_TLS initialized bytes plus `(memsz, align, vaddr)`.
-///
-/// `initial_bytes.len() == filesz` on success.
-pub fn extract_tls_template_bytes(data: &[u8]) -> Option<(Vec<u8>, u64, u64, u64)> {
-    let hdr = find_tls_program_header(data)?;
-    let start = hdr.file_offset as usize;
-    let end = start.checked_add(hdr.filesz as usize)?;
-    if end > data.len() {
-        return None;
-    }
-    Some((data[start..end].to_vec(), hdr.memsz, hdr.align, hdr.vaddr))
-}
-
 use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_MAGIC;
 
 /// Parsed `sys_process_param_t`. The caller passes `malloc_pagesize`
@@ -453,10 +465,8 @@ pub struct SysProcessParam {
 }
 
 /// Locate the PT_LOAD whose file range covers `file_off` and return
-/// the corresponding guest virtual address. Returns `None` if no
-/// PT_LOAD covers the offset; used both to filter magic-scan false
-/// positives and to compute the guest location of structs found by
-/// scanning.
+/// the corresponding guest virtual address, or `None` if no PT_LOAD
+/// covers the offset.
 fn pt_load_file_to_guest(data: &[u8], file_off: usize) -> Option<u64> {
     if data.len() < ELF_HEADER_SIZE || data[0..4] != ELF_MAGIC || data[4] != 2 || data[5] != 2 {
         return None;
@@ -563,11 +573,7 @@ pub const SECONDARY_OPD_TABLE_SIZE: u64 = 0x68;
 /// in file-order; caller is responsible for merging adjacent extents
 /// into a single classifier range if desired.
 ///
-/// The scan is 4-byte aligned. A title whose PT_LOAD `p_offset` is
-/// not 4-byte aligned would miss legitimate matches, but the
-/// trade-off favours false-negatives over false-positives in stray
-/// data; the four-byte stride is consistent with the PPC OPD-pointer
-/// natural alignment.
+/// The scan stride is 4 bytes, the PPC OPD-pointer natural alignment.
 pub fn find_secondary_opd_tables(data: &[u8]) -> Vec<SecondaryOpdTable> {
     let mut out = Vec::new();
     if data.len() < 8 {
@@ -641,9 +647,6 @@ const INDIRECT_OPD_TABLE_MIN_ROWS: usize = 4;
 ///
 /// The scan is 4-byte aligned and rejects matches outside any PT_LOAD
 /// file range so stray byte sequences cannot masquerade as real tables.
-/// False positives in non-table data are bounded by the row-count
-/// threshold; false negatives on tables with fewer than four rows are
-/// preferred to misclassifying random pointer pairs.
 pub fn find_indirect_opd_tables(data: &[u8]) -> Vec<IndirectOpdTable> {
     let mut out = Vec::new();
     let Ok(segs) = pt_load_segments(data) else {

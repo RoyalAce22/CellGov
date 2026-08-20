@@ -21,6 +21,15 @@ pub const SYS_SYNC_PRIORITY: u32 = 0x2;
 /// across processes; the attribute's `ipc_key` is meaningful.
 pub const SYS_SYNC_PROCESS_SHARED: u32 = 0x100;
 
+/// `recursive = SYS_SYNC_RECURSIVE`: the owner may re-lock the mutex,
+/// bumping a recursion count (RPCS3 `sys_sync.h`).
+pub const SYS_SYNC_RECURSIVE: u32 = 0x10;
+
+/// `recursive = SYS_SYNC_NOT_RECURSIVE`: an owner re-lock is EDEADLK.
+/// Any `recursive` value other than these two is EINVAL at create
+/// (RPCS3 `sys_mutex.cpp` `sys_mutex_create`).
+pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
+
 /// `type = SYS_SYNC_WAITER_SINGLE`: at most one thread may park on
 /// the primitive at once. Dispatch rejects a second parker.
 pub const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;

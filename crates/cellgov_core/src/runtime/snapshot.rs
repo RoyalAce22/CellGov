@@ -7,8 +7,9 @@
 //! Set-once or caller-replaced; the host `Runtime` retains them
 //! across restores:
 //!
-//! - `spu_factory`, `ppu_factory`, [`cellgov_dma::DmaLatencyModel`]
-//!   -- installed at construction, never mutated.
+//! - `spu_factory`, `ppu_factory`, `process_spawn_loader`,
+//!   [`cellgov_dma::DmaLatencyModel`] -- installed at construction,
+//!   never mutated.
 //! - [`Box<dyn Scheduler>`](crate::scheduler::Scheduler) -- caller
 //!   replaces via [`Runtime::set_scheduler`] (contract 3).
 //! - [`cellgov_trace::TraceWriter`] (main + zoom) -- cleared on
@@ -99,6 +100,7 @@ pub struct RuntimeSnapshot {
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) commit_pipeline: CommitPipeline,
     pub(super) memory: GuestMemory,
+    pub(super) spaces: crate::runtime::spaces::SpaceTable,
     pub(super) time: GuestTicks,
     pub(super) epoch: Epoch,
     pub(super) steps_taken: usize,
@@ -149,6 +151,7 @@ impl Runtime {
             syscall_responses: self.syscall_responses.clone(),
             commit_pipeline: self.commit_pipeline.clone(),
             memory: self.memory.clone(),
+            spaces: self.spaces.clone(),
             time: self.time,
             epoch: self.epoch,
             steps_taken: self.steps_taken,
@@ -203,6 +206,7 @@ impl Runtime {
         self.syscall_responses = snap.syscall_responses.clone();
         self.commit_pipeline = snap.commit_pipeline.clone();
         self.memory = snap.memory.clone();
+        self.spaces = snap.spaces.clone();
         self.time = snap.time;
         self.epoch = snap.epoch;
         self.steps_taken = snap.steps_taken;

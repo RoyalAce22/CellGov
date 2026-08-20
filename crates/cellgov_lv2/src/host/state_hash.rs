@@ -42,7 +42,6 @@ impl Lv2State {
             content,
             groups,
             ppu_threads,
-            tls_template,
             stack_allocator,
             next_kernel_id,
             mem_alloc_ptr,
@@ -63,8 +62,7 @@ impl Lv2State {
             fs_store,
             prx_registry,
             firmware_identity,
-            program_authority_id,
-            control_flags1,
+            processes,
             process_counts,
         } = self;
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
@@ -79,9 +77,6 @@ impl Lv2State {
         hasher.write(&rsx_context.state_hash().to_le_bytes());
         if !ppu_threads.is_empty() {
             hasher.write(&ppu_threads.state_hash().to_le_bytes());
-        }
-        if !tls_template.is_empty() {
-            hasher.write(&tls_template.state_hash().to_le_bytes());
         }
         if let Some(peek) = stack_allocator.peek_next(0x10) {
             if peek != ThreadStackAllocator::CHILD_STACK_BASE {
@@ -122,8 +117,6 @@ impl Lv2State {
         if !mmapper_handles.is_empty() {
             hasher.write(&mmapper_handles.state_hash().to_le_bytes());
         }
-        // The key -> mem_id association steers which id a keyed 332
-        // answers with, and it is recorded nowhere else.
         if !mmapper_ipc.is_empty() {
             hasher.write(&(mmapper_ipc.len() as u64).to_le_bytes());
             for (key, mem_id) in mmapper_ipc {
@@ -134,10 +127,6 @@ impl Lv2State {
         if !process_counts.is_empty() {
             hasher.write(&process_counts.state_hash().to_le_bytes());
         }
-        // Guest-mutable (sc 480 mints miss stubs): two hosts that
-        // disagree on which modules a guest loaded (or unloaded)
-        // must not hash equal, or the divergence hides until a later
-        // sc 494 module-list walk touches memory.
         if !prx_registry.is_empty() {
             hasher.write(&(prx_registry.len() as u64).to_le_bytes());
             for id in prx_registry.ids() {
@@ -154,17 +143,66 @@ impl Lv2State {
             hasher.write(&fw.image_version_hash.to_le_bytes());
             hasher.write(&fw.pup_sha256_bytes);
         }
-        // A raw-ELF boot (no authid) and one set to the
-        // retail-application fallback serve byte-identical
-        // `sys_ss_access_control_engine` pkg-2 responses, so they hash
-        // identically; only a distinct system-process authid folds in.
-        if *program_authority_id != cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID {
-            hasher.write(&program_authority_id.to_le_bytes());
+        for (pid, entry) in processes.iter() {
+            if *pid == cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID {
+                // Boot-entry gating preserves the pre-table byte
+                // stream: a raw-ELF boot (no authid) and one set to
+                // the retail-application fallback serve byte-identical
+                // `sys_ss_access_control_engine` pkg-2 responses, so
+                // they hash identically; only a distinct
+                // system-process authid folds in. Same rationale for
+                // `ctrl_flags1`: an unprivileged boot carries 0 and
+                // hashes as it did before the field existed.
+                if entry.authority_id != cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID {
+                    hasher.write(&entry.authority_id.to_le_bytes());
+                }
+                if entry.control_flags1 != 0 {
+                    hasher.write(&entry.control_flags1.to_le_bytes());
+                }
+                // Boot ppid is fixed at construction, so only a
+                // deviation folds; the tag byte keeps the 4-byte ppid
+                // distinct from an untagged `control_flags1` of the
+                // same value.
+                if entry.ppid != cellgov_ps3_abi::sys_process::BOOT_PROCESS_PPID {
+                    hasher.write(&[2u8]);
+                    hasher.write(&entry.ppid.to_le_bytes());
+                }
+                // Boot exit ends the run; gate keeps the pre-field
+                // stream while it is None. The discriminant byte keeps
+                // a recorded status distinct from a bare
+                // `control_flags1` of the same 4-byte value.
+                if let Some(status) = entry.exit_status {
+                    hasher.write(&[1u8]);
+                    hasher.write(&status.to_le_bytes());
+                }
+            } else {
+                // Children have no legacy stream to preserve; every
+                // identity field folds unconditionally.
+                hasher.write(&pid.to_le_bytes());
+                hasher.write(&entry.ppid.to_le_bytes());
+                hasher.write(&entry.authority_id.to_le_bytes());
+                hasher.write(&entry.control_flags1.to_le_bytes());
+                match entry.exit_status {
+                    Some(status) => {
+                        hasher.write(&[1u8]);
+                        hasher.write(&status.to_le_bytes());
+                    }
+                    None => hasher.write(&[0u8]),
+                }
+            }
         }
-        // Same gating rationale: an unprivileged boot carries 0 and
-        // hashes as it did before the field existed.
-        if *control_flags1 != 0 {
-            hasher.write(&control_flags1.to_le_bytes());
+        // Unit->process bindings exist only once a spawn happened;
+        // empty map contributes nothing. The length prefix (the same
+        // shape as `lwmutex_holds` / `mmapper_ipc` above) keeps a
+        // binding's 12 bytes distinct from the gated boot identity
+        // fields that precede it in the stream.
+        let binding_count = processes.unit_bindings().count() as u64;
+        if binding_count != 0 {
+            hasher.write(&binding_count.to_le_bytes());
+            for (unit, pid) in processes.unit_bindings() {
+                hasher.write(&unit.raw().to_le_bytes());
+                hasher.write(&pid.to_le_bytes());
+            }
         }
         hasher.finish()
     }

@@ -16,7 +16,9 @@ mod dma;
 mod lv2_dispatch;
 mod mem_helpers;
 mod ppu_create;
+mod process_spawn;
 mod snapshot;
+mod spaces;
 mod state;
 mod state_hash;
 mod step;
@@ -26,9 +28,11 @@ mod trace_bridge;
 mod types;
 
 pub use snapshot::RuntimeSnapshot;
+pub use spaces::{AddressSpaceId, SpaceError};
 pub use state::Runtime;
 pub use types::{
-    default_budget_for_mode, PpuFactory, RuntimeMode, RuntimeStep, SpuFactory, StepError,
+    default_budget_for_mode, PpuFactory, ProcessSpawnLoadError, ProcessSpawnLoader, RuntimeMode,
+    RuntimeStep, SpawnedProcessImage, SpuFactory, StepError,
 };
 
 #[cfg(test)]

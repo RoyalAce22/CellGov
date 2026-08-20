@@ -3,33 +3,6 @@
 use super::*;
 
 #[test]
-#[should_panic(expected = "non-empty tls_bytes requires non-zero tls_base")]
-fn ppu_thread_create_tls_base_zero_with_non_empty_tls_panics() {
-    let mut rt = build(16, 1, 100);
-    let source = rt
-        .registry_mut()
-        .register_with(|id| CountingUnit::new(id, 1));
-    let dispatch = cellgov_lv2::Lv2Dispatch::PpuThreadCreate {
-        id_ptr: 0,
-        init: cellgov_lv2::PpuThreadInitState {
-            entry_code: 0,
-            entry_toc: 0,
-            arg: 0,
-            extra_args: [0; 7],
-            stack_top: 0,
-            tls_base: 0,
-            lr_sentinel: 0,
-        },
-        stack_base: 0,
-        stack_size: 0,
-        tls_bytes: vec![0xAB, 0xCD],
-        priority: 0,
-        effects: vec![],
-    };
-    rt.handle_ppu_thread_create_for_test(source, dispatch);
-}
-
-#[test]
 #[should_panic(expected = "unfilled payload")]
 fn event_queue_receive_wake_with_none_payload_panics() {
     let mut rt = build(16, 1, 100);
@@ -255,6 +228,116 @@ fn resolve_join_wakes_leaves_joiners_on_a_different_group_untouched() {
     assert_eq!(rt.registry_mut().drain_syscall_return(waiter_other), None);
     assert_eq!(read_guest_u32_be(&rt, 0x200), 0);
     assert_eq!(read_guest_u32_be(&rt, 0x208), 0);
+}
+
+#[test]
+fn a_wake_for_a_finished_unit_is_dropped_loudly() {
+    let mut rt = build(16, 1, 100);
+    let waiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    // Exited-process residue: the exit sweep finished the unit but its
+    // entry on a host-side waiter list survived, and a releasing peer
+    // just picked it.
+    rt.registry_mut()
+        .set_status_override(waiter, UnitStatus::Finished);
+    let _ = rt
+        .syscall_responses_mut()
+        .insert(waiter, cellgov_lv2::PendingResponse::ReturnCode { code: 0 });
+    rt.resolve_sync_wakes_for_test(&[waiter]);
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Finished),
+        "a wake must not resurrect a Finished unit",
+    );
+    assert_eq!(rt.registry_mut().drain_syscall_return(waiter), None);
+    assert_eq!(
+        rt.lv2_host()
+            .invariant_break_site_count("runtime.resolve_sync_wakes_waiter_finished"),
+        1,
+        "the dropped wake must be witnessed, not silently absorbed",
+    );
+}
+
+#[test]
+fn a_group_join_wake_with_null_cause_writes_nothing_and_returns_efault() {
+    use cellgov_lv2::{GroupState, PendingResponse};
+    let mut rt = build(0x1000, 1, 100);
+    let waiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let spu = cellgov_event::UnitId::new(99);
+
+    let groups = rt.lv2_host_mut().thread_groups_mut();
+    let gid = groups.create(1).unwrap();
+    groups.get_mut(gid).unwrap().state = GroupState::Running;
+    groups.record_spu(spu, gid, 0).unwrap();
+
+    rt.registry_mut()
+        .set_status_override(waiter, UnitStatus::Blocked);
+    let _ = rt.syscall_responses_mut().insert(
+        waiter,
+        PendingResponse::ThreadGroupJoin {
+            group_id: gid,
+            code: 0,
+            cause_ptr: 0,
+            status_ptr: 0x200,
+            cause: 0xDEAD_BEEF,
+            status: 0xCAFE_BABE,
+        },
+    );
+    rt.resolve_join_wakes_for_test(spu);
+
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Runnable),
+        "the join itself completes; only the writeback and code change",
+    );
+    // NULL cause suppresses BOTH writes and reports CELL_EFAULT (RPCS3
+    // sys_spu.cpp sys_spu_thread_group_join).
+    assert_eq!(read_guest_u32_be(&rt, 0x200), 0);
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(waiter),
+        Some(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()),
+    );
+}
+
+#[test]
+fn a_group_join_wake_with_null_status_writes_cause_and_returns_efault() {
+    use cellgov_lv2::{GroupState, PendingResponse};
+    let mut rt = build(0x1000, 1, 100);
+    let waiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let spu = cellgov_event::UnitId::new(99);
+
+    let groups = rt.lv2_host_mut().thread_groups_mut();
+    let gid = groups.create(1).unwrap();
+    groups.get_mut(gid).unwrap().state = GroupState::Running;
+    groups.record_spu(spu, gid, 0).unwrap();
+
+    rt.registry_mut()
+        .set_status_override(waiter, UnitStatus::Blocked);
+    let _ = rt.syscall_responses_mut().insert(
+        waiter,
+        PendingResponse::ThreadGroupJoin {
+            group_id: gid,
+            code: 0,
+            cause_ptr: 0x100,
+            status_ptr: 0,
+            cause: 0xDEAD_BEEF,
+            status: 0xCAFE_BABE,
+        },
+    );
+    rt.resolve_join_wakes_for_test(spu);
+
+    // NULL status alone still writes cause but reports CELL_EFAULT
+    // (RPCS3 sys_spu.cpp sys_spu_thread_group_join).
+    assert_eq!(read_guest_u32_be(&rt, 0x100), 0xDEAD_BEEF);
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(waiter),
+        Some(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()),
+    );
 }
 
 #[test]

@@ -16,7 +16,8 @@ pub mod timer_queue;
 pub use commit::{BlockReason, CommitContext, CommitError, CommitOutcome, CommitPipeline};
 pub use registry::{RegisteredUnit, UnitRegistry};
 pub use runtime::{
-    default_budget_for_mode, Runtime, RuntimeMode, RuntimeSnapshot, RuntimeStep, SpuFactory,
+    default_budget_for_mode, AddressSpaceId, ProcessSpawnLoadError, ProcessSpawnLoader, Runtime,
+    RuntimeMode, RuntimeSnapshot, RuntimeStep, SpaceError, SpawnedProcessImage, SpuFactory,
     StepError,
 };
 pub use scheduler::{RoundRobinScheduler, Scheduler};

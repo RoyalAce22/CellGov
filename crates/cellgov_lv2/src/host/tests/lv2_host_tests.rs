@@ -35,22 +35,6 @@ fn seeding_primary_twice_panics() {
 }
 
 #[test]
-fn set_tls_template_stores_bytes() {
-    let mut host = Lv2Host::new();
-    assert!(host.tls_template().is_empty());
-    host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
-        vec![0xDE, 0xAD],
-        0x100,
-        0x10,
-        0x89_5cd0,
-    ));
-    let tpl = host.tls_template();
-    assert!(!tpl.is_empty());
-    assert_eq!(tpl.initial_bytes(), &[0xDE, 0xAD]);
-    assert_eq!(tpl.vaddr(), 0x89_5cd0);
-}
-
-#[test]
 fn lwmutex_holds_inc_increments_per_thread() {
     let mut host = Lv2Host::new();
     let a = PpuThreadId::new(0x0100_0001);
@@ -269,7 +253,6 @@ fn mmapper_search_free_range_advances_past_existing_install() {
 #[test]
 fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
     let mut host = Lv2Host::new();
-    // Fill the entire 0x7000_0000-byte window with one install.
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
     assert_eq!(
@@ -450,12 +433,72 @@ fn system_state_seeds_iterate_in_key_order() {
     assert_eq!(keys, vec![0x8006_0100_0000_0010, 0x8006_0100_0000_0030]);
 }
 
+mod process_identity_bookkeeping {
+    use super::*;
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+
+    #[test]
+    fn a_second_process_exit_for_the_same_pid_keeps_the_first_status_and_reports() {
+        let mut host = Lv2Host::new();
+        host.mark_process_exited(BOOT_PROCESS_PID, 7);
+        assert_eq!(host.process_exit_status(BOOT_PROCESS_PID), Some(7));
+        host.mark_process_exited(BOOT_PROCESS_PID, 9);
+        assert_eq!(
+            host.process_exit_status(BOOT_PROCESS_PID),
+            Some(7),
+            "the first recorded exit status must survive a double exit",
+        );
+        assert_eq!(host.invariant_break_site_count("process.double_exit"), 1);
+    }
+
+    #[test]
+    fn binding_a_unit_to_an_unknown_pid_is_reported_not_silent() {
+        let mut host = Lv2Host::new();
+        host.bind_unit_process(UnitId::new(5), BOOT_PROCESS_PID + 0x100);
+        assert_eq!(
+            host.invariant_break_site_count("process.bind_to_unknown_pid"),
+            1,
+        );
+        // The binding still lands so the caller's view is consistent.
+        assert_eq!(
+            host.process_of_unit(UnitId::new(5)),
+            BOOT_PROCESS_PID + 0x100,
+        );
+    }
+
+    #[test]
+    fn rebinding_a_unit_to_a_different_pid_is_reported() {
+        use crate::host::process::ProcessEntry;
+        let mut host = Lv2Host::new();
+        for pid in [BOOT_PROCESS_PID + 0x100, BOOT_PROCESS_PID + 0x200] {
+            host.state.processes.insert_child(
+                pid,
+                ProcessEntry {
+                    ppid: BOOT_PROCESS_PID,
+                    authority_id: 0,
+                    control_flags1: 0,
+                    exit_status: None,
+                },
+            );
+        }
+        host.bind_unit_process(UnitId::new(5), BOOT_PROCESS_PID + 0x100);
+        assert_eq!(host.invariant_break_site_count("process.unit_rebound"), 0);
+        // Re-binding to the same pid is idempotent, not a break.
+        host.bind_unit_process(UnitId::new(5), BOOT_PROCESS_PID + 0x100);
+        assert_eq!(host.invariant_break_site_count("process.unit_rebound"), 0);
+        host.bind_unit_process(UnitId::new(5), BOOT_PROCESS_PID + 0x200);
+        assert_eq!(host.invariant_break_site_count("process.unit_rebound"), 1);
+        assert_eq!(
+            host.process_of_unit(UnitId::new(5)),
+            BOOT_PROCESS_PID + 0x200,
+        );
+    }
+}
+
 mod privilege_predicates {
     use super::*;
 
-    /// The three capability masks overlap by construction, so a value
-    /// table is the readable way to pin them. Columns:
-    /// (ctrl_flags1, root, debug_or_root, debug).
+    /// Case columns: (ctrl_flags1, root, debug_or_root, debug).
     const CASES: &[(u32, bool, bool, bool)] = &[
         // No capability header, or one with no privilege bits: the
         // retail shape.
@@ -511,8 +554,6 @@ mod privilege_predicates {
     #[test]
     fn coreos_is_authority_id_derived_not_flag_derived() {
         // A firmware library: CoreOS authority id, no privilege bits.
-        // Proves the two predicates are independent rather than one
-        // being a proxy for the other.
         let mut lib = Lv2Host::new();
         lib.set_program_authority_id(0x1070_0000_4000_0001);
         assert!(lib.is_coreos());

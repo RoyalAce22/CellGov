@@ -187,6 +187,41 @@ fn write_vs_dma_overlapping_conflicts() {
 }
 
 #[test]
+fn dma_over_reserved_line_conflicts_without_byte_overlap() {
+    // Reservation on line 0x1000 with a conditional store touching
+    // only bytes 0x1000..0x1008.
+    let a = StepFootprint::from_effects(&[
+        Effect::ReservationAcquire {
+            line_addr: 0x1000,
+            source: UnitId::new(0),
+        },
+        Effect::ConditionalStore {
+            range: range(0x1000, 8),
+            bytes: WritePayload::new(vec![0; 8]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(0),
+            source_time: GuestTicks::new(0),
+        },
+    ]);
+    // DMA put landing at 0x1040..0x1080: inside line 0x1000 but
+    // disjoint from the store's bytes. Completion clears the
+    // reservation, so the pair is order-dependent.
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        range(0x8000, 0x40),
+        range(0x1040, 0x40),
+        UnitId::new(1),
+    )
+    .unwrap();
+    let b = StepFootprint::from_effects(&[Effect::DmaEnqueue {
+        request: req,
+        payload: None,
+    }]);
+    assert!(a.conflicts(&b));
+    assert!(b.conflicts(&a));
+}
+
+#[test]
 fn wake_vs_wait_conflicts() {
     let a = StepFootprint::from_effects(&[Effect::WakeUnit {
         target: UnitId::new(2),

@@ -49,7 +49,10 @@ impl Runtime {
                 }
                 TimerWakeKind::SyncWait(reason) => {
                     let expired = self.lv2_host.expire_wait(reason, wake.unit, self.time);
-                    self.apply_lv2_effects(&expired.effects);
+                    // Expiry effects repair structs the expiring
+                    // waiter's syscall named, so they land in its space.
+                    let waiter_space = self.spaces.space_of(wake.unit);
+                    self.apply_lv2_effects(&expired.effects, waiter_space);
                     if cfg!(debug_assertions) {
                         crate::runtime::lv2_dispatch::check_response_updates(
                             "fire_timer_wakes",

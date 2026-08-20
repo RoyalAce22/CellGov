@@ -5,30 +5,8 @@ use super::*;
 #[test]
 fn apply_lv2_effects_direct_commits_shared_write_intents() {
     // Tripwire for the LV2-effects-bypass-StagingMemory contract
-    // documented on Runtime::apply_lv2_effects. The integration:
-    //
-    // 1. Build a runtime where the RSX MMIO control-register slots
-    //    are writable (the 0xC000_0000 region, set up by
-    //    build_with_rsx_writable).
-    // 2. Seed Lv2Host so the sys_rsx context reads as allocated
-    //    under RSX_CONTEXT_ID, skipping the 670 OUT-pointer
-    //    plumbing that would otherwise be required.
-    // 3. Register a unit that emits a Syscall step result whose
-    //    args classify as sys_rsx_context_attribute(FIFO_SETUP,
-    //    fifo_get, fifo_put).
-    // 4. step + commit_step. dispatch_syscall fires
-    //    sys_rsx_attribute_fifo_setup which emits two
-    //    SharedWriteIntents (PUT_ADDR <- a4, GET_ADDR <- a3) on
-    //    Lv2Dispatch::Immediate.effects. The runtime's
-    //    apply_lv2_effects consumes them.
-    //
-    // Assertion: lv2_direct_committed_writes >= 2 (non-vacuous --
-    // the apply_commit path actually fired), AND the two memory
-    // slots show the expected big-endian values (the writes
-    // actually landed). A future refactor that routes
-    // apply_lv2_effects's SharedWriteIntents through
-    // StagingMemory::stage drops lv2_direct_committed_writes to 0
-    // and trips the first assertion red.
+    // documented on Runtime::apply_lv2_effects: FIFO_SETUP emits two
+    // SharedWriteIntents that must land via the direct-commit path.
     use crate::rsx::control_register;
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_ps3_abi::sys_rsx::package;
@@ -76,10 +54,6 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
         rt.lv2_direct_committed_writes(),
     );
 
-    // Witness that the writes actually landed in memory at the
-    // expected slots with the expected big-endian values. This
-    // proves the direct-commit path is end-to-end, not just
-    // counter-incrementing.
     let put_bytes = rt
         .memory()
         .read(ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap())
@@ -102,20 +76,10 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
 
 #[test]
 fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
-    // The compile-forcing exhaustive match in apply_lv2_effects is
-    // the primary guarantee that no Effect variant is silently
-    // dropped: adding a new variant to cellgov_effects::Effect
-    // breaks the build here until classified. This test
-    // corroborates the runtime side: one of the loud-reject arms
-    // (TraceMarker -- a PPU/SPU execution-unit breadcrumb that no
-    // LV2 handler should emit) is reachable when the unhandled
-    // variant arrives, AND its log_invariant_break fires.
-    //
-    // TraceMarker chosen because it carries the minimum payload
-    // (a u32 marker + UnitId source) so the test fixture is
-    // simplest. Any of the 10 reject arms would work; the assertion
-    // generalizes via the compiler-witness (all 10 are structurally
-    // identical reject paths).
+    // The exhaustive match in apply_lv2_effects catches new Effect
+    // variants at compile time; this corroborates the runtime side:
+    // TraceMarker, which no LV2 handler emits, reaches a loud-reject
+    // arm and its log_invariant_break fires.
     let mut rt = build(4096, 1, 100);
     let pre_breaks = rt.lv2_host().observability().invariant_break_count;
 
@@ -123,7 +87,7 @@ fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
         marker: 0xDEAD_BEEF,
         source: UnitId::new(0),
     };
-    rt.apply_lv2_effects(&[marker]);
+    rt.apply_lv2_effects(&[marker], crate::runtime::spaces::AddressSpaceId::BOOT);
 
     assert_eq!(
         rt.lv2_host().observability().invariant_break_count,
@@ -136,11 +100,9 @@ fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
 
 #[test]
 fn lv2_apply_rolls_back_count_when_idlist_target_is_reserved() {
-    // Parallel rollback test exercising the ReservedWrite branch of
-    // validate_write (a write into a backed but non-ReadWrite region).
-    // Together with the _unmapped variant this proves the LV2
-    // validator follows BOTH branches of the shared predicate, not
-    // just the Unmapped one.
+    // Exercises the ReservedWrite branch of validate_write (a write
+    // into a backed but non-ReadWrite region); the _unmapped variant
+    // covers the Unmapped branch.
     use cellgov_mem::{PageSize, Region, RegionAccess};
     let mem = cellgov_mem::GuestMemory::from_regions(vec![
         Region::new(0, 0x10000, "rw", PageSize::Page64K),
@@ -263,5 +225,358 @@ fn lv2_apply_rolls_back_count_when_idlist_target_is_unmapped() {
         count_bytes,
         &0xDEAD_BEEFu32.to_be_bytes(),
         "count write must NOT land when a co-batched slot fails memory-subset validation"
+    );
+}
+
+fn range4(addr: u64) -> cellgov_mem::ByteRange {
+    cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4).unwrap()
+}
+
+fn write_intent(addr: u64, value: u32) -> Effect {
+    Effect::SharedWriteIntent {
+        range: range4(addr),
+        bytes: cellgov_effects::WritePayload::from_slice(&value.to_be_bytes()),
+        ordering: cellgov_event::PriorityClass::Normal,
+        source: UnitId::new(0),
+        source_time: GuestTicks::new(0),
+    }
+}
+
+#[test]
+fn mmapper_map_installs_the_window_in_the_callers_space() {
+    // A child-process caller's sys_mmapper_map_shared_memory window
+    // must appear in the CALLER's space: the handler validated it
+    // against the caller's view and the caller's own loads/stores
+    // resolve through that space (RPCS3 sys_mmapper.cpp
+    // sys_mmapper_map_shared_memory maps into the calling process's
+    // virtual memory). An install routed to boot memory instead
+    // leaves the window unmapped for the child and plants a phantom
+    // region in the boot layout.
+    use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
+
+    let mut rt = build(0x10000, 1, 100);
+    let source = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let space = crate::runtime::spaces::AddressSpaceId::new(1);
+    rt.create_address_space(space).unwrap();
+    rt.space_memory_mut(space)
+        .unwrap()
+        .install_region(0, 0x10000, "child", cellgov_mem::PageSize::Page64K)
+        .unwrap();
+    rt.assign_unit_space(source, space).unwrap();
+
+    const MEM_ID_PTR: u64 = 0x4000;
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::Unsupported {
+            number: MMAPPER_ALLOCATE_SHARED_MEMORY,
+            args: [
+                0,
+                0x10000,
+                cellgov_ps3_abi::sys_memory::page_size::FLAG_64K,
+                MEM_ID_PTR,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+        source,
+    );
+    let mem_id_bytes = rt
+        .space_memory(space)
+        .unwrap()
+        .read(range4(MEM_ID_PTR))
+        .expect("332 must write the mem_id through the caller's pointer in the caller's space");
+    let mem_id = u32::from_be_bytes([
+        mem_id_bytes[0],
+        mem_id_bytes[1],
+        mem_id_bytes[2],
+        mem_id_bytes[3],
+    ]);
+
+    const MAP_ADDR: u64 = 0x3000_0000;
+    let breaks_before = rt.lv2_host().observability().invariant_break_count;
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::Unsupported {
+            number: MMAPPER_MAP_SHARED_MEMORY,
+            args: [MAP_ADDR, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+        },
+        source,
+    );
+
+    assert_eq!(
+        rt.lv2_host().observability().invariant_break_count,
+        breaks_before,
+        "a clean child-space map must not log an invariant break",
+    );
+    assert!(
+        rt.space_memory(space)
+            .unwrap()
+            .read(range4(MAP_ADDR))
+            .is_some(),
+        "the mapped window must be readable in the caller's space",
+    );
+    assert!(
+        rt.memory().read(range4(MAP_ADDR)).is_none(),
+        "boot memory must not grow a phantom region for a child-process map",
+    );
+}
+
+#[test]
+fn a_map_over_the_callers_own_layout_is_a_named_break_not_a_panic() {
+    // The mmapper ledger is host-global and cannot see regions the
+    // spawn loader installed in the caller's space, so a guest can ask
+    // sys_mmapper_map_shared_memory (334) for a window its own layout
+    // already occupies. The kernel refuses that with CELL_EBUSY (RPCS3
+    // sys_mmapper.cpp sys_mmapper_map_shared_memory); until the 334
+    // handler checks the caller's view, the runtime must witness the
+    // fabricated success loudly instead of panicking on the install.
+    use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
+
+    let mut rt = build(0x10000, 1, 100);
+    let source = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let space = crate::runtime::spaces::AddressSpaceId::new(1);
+    rt.create_address_space(space).unwrap();
+    rt.space_memory_mut(space)
+        .unwrap()
+        .install_region(0, 0x10000, "child", cellgov_mem::PageSize::Page64K)
+        .unwrap();
+    rt.assign_unit_space(source, space).unwrap();
+
+    const MEM_ID_PTR: u64 = 0x4000;
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::Unsupported {
+            number: MMAPPER_ALLOCATE_SHARED_MEMORY,
+            args: [
+                0,
+                0x10000,
+                cellgov_ps3_abi::sys_memory::page_size::FLAG_64K,
+                MEM_ID_PTR,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+        source,
+    );
+    let mem_id_bytes = rt
+        .space_memory(space)
+        .unwrap()
+        .read(range4(MEM_ID_PTR))
+        .expect("332 writes the mem_id in the caller's space");
+    let mem_id = u32::from_be_bytes([
+        mem_id_bytes[0],
+        mem_id_bytes[1],
+        mem_id_bytes[2],
+        mem_id_bytes[3],
+    ]);
+
+    // Occupy the window in the caller's own space before mapping.
+    const MAP_ADDR: u64 = 0x3000_0000;
+    rt.space_memory_mut(space)
+        .unwrap()
+        .install_region(MAP_ADDR, 0x10000, "image", cellgov_mem::PageSize::Page64K)
+        .unwrap();
+
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::Unsupported {
+            number: MMAPPER_MAP_SHARED_MEMORY,
+            args: [MAP_ADDR, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+        },
+        source,
+    );
+
+    assert_eq!(
+        rt.lv2_host()
+            .invariant_break_site_count("dispatch.mmapper_region_install_overlap"),
+        1,
+        "the occupied-window map must log exactly one named break",
+    );
+    assert!(
+        rt.memory().read(range4(MAP_ADDR)).is_none(),
+        "boot memory must stay untouched by the failed install",
+    );
+}
+
+#[test]
+fn lv2_memory_validation_and_commit_resolve_the_same_space() {
+    // The intent's address is mapped in boot memory but NOT in the
+    // target space: validation must fail against the target space
+    // (named invariant break, memory subset rolled back) and never
+    // fall through to a commit against boot memory.
+    let mut rt = build(0x10000, 1, 100);
+    let space = crate::runtime::spaces::AddressSpaceId::new(1);
+    rt.create_address_space(space).unwrap();
+    rt.memory_mut()
+        .apply_commit(range4(0x4000), &0xDEAD_BEEFu32.to_be_bytes())
+        .unwrap();
+
+    let breaks_before = rt.lv2_host().observability().invariant_break_count;
+    rt.apply_lv2_effects(&[write_intent(0x4000, 0x1122_3344)], space);
+
+    assert_eq!(
+        rt.lv2_host().observability().invariant_break_count,
+        breaks_before + 1,
+        "an intent unmapped in the target space must log one \
+         dispatch.lv2_effect_apply_failed break",
+    );
+    assert_eq!(
+        rt.memory().read(range4(0x4000)).unwrap(),
+        &0xDEAD_BEEFu32.to_be_bytes(),
+        "boot bytes must stay untouched: a commit landing here means validation and \
+         commit resolved different spaces",
+    );
+}
+
+/// Shared-mapping fixture for the shared-view guard tests: boot view
+/// at 0x20000, child view at 0x30000, 0x40 bytes.
+fn build_with_shared_view() -> Runtime {
+    let mut rt = build(0x10000, 1, 100);
+    let space = crate::runtime::spaces::AddressSpaceId::new(1);
+    rt.create_address_space(space).unwrap();
+    rt.register_shared_mapping(
+        0x8006_0100_0000_0020,
+        0x40,
+        &[
+            (crate::runtime::spaces::AddressSpaceId::BOOT, 0x20000),
+            (space, 0x30000),
+        ],
+    )
+    .unwrap();
+    rt
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "targets a shared view")]
+fn an_lv2_write_into_a_shared_view_is_trapped_in_debug() {
+    let mut rt = build_with_shared_view();
+    rt.apply_lv2_effects(
+        &[write_intent(0x20000, 0xAABB_CCDD)],
+        crate::runtime::spaces::AddressSpaceId::BOOT,
+    );
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn an_lv2_write_into_a_shared_view_is_a_named_invariant_break_in_release() {
+    // Release builds have no debug_assert: the write lands in this
+    // view alone (sibling views go incoherent) and the only witness
+    // is the dispatch.lv2_write_targets_shared_view break.
+    let mut rt = build_with_shared_view();
+    let breaks_before = rt.lv2_host().observability().invariant_break_count;
+    rt.apply_lv2_effects(
+        &[write_intent(0x20000, 0xAABB_CCDD)],
+        crate::runtime::spaces::AddressSpaceId::BOOT,
+    );
+    assert_eq!(
+        rt.lv2_host().observability().invariant_break_count,
+        breaks_before + 1,
+        "the shared-view LV2 write must log exactly one invariant break in release",
+    );
+    assert_eq!(
+        rt.memory().read(range4(0x20000)).unwrap(),
+        &0xAABB_CCDDu32.to_be_bytes(),
+        "the write still lands in the targeted view; the break names the incoherence",
+    );
+    let space = crate::runtime::spaces::AddressSpaceId::new(1);
+    assert_eq!(
+        rt.space_memory(space)
+            .unwrap()
+            .read(range4(0x30000))
+            .unwrap(),
+        &[0u8; 4],
+        "no fanout on the LV2 direct channel: the sibling view stays zero",
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "targets a shared view")]
+fn a_wake_payload_into_a_shared_view_is_trapped_in_debug() {
+    let mut rt = build_with_shared_view();
+    rt.commit_bytes_at(
+        crate::runtime::spaces::AddressSpaceId::BOOT,
+        0x20000,
+        &[0xAA; 4],
+    );
+}
+
+#[test]
+fn a_join_completing_with_a_null_status_pointer_returns_efault() {
+    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_join: a NULL vptr still
+    // joins (the target is reaped), but the joiner's r3 reports
+    // CELL_EFAULT after the wait resolves, not CELL_OK.
+    let mut rt = build(0x1000, 1, 100);
+    let joiner = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let exiter = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let attrs = || cellgov_lv2::PpuThreadAttrs {
+        entry: 0x100,
+        arg: 0,
+        stack_base: 0,
+        stack_size: 0,
+        priority: 0,
+        tls_base: 0,
+    };
+    rt.lv2_host_mut()
+        .ppu_threads_mut()
+        .create(joiner, attrs())
+        .expect("joiner thread");
+    let exiter_tid = rt
+        .lv2_host_mut()
+        .ppu_threads_mut()
+        .create(exiter, attrs())
+        .expect("exiter thread");
+
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::PpuThreadJoin {
+            target: exiter_tid.raw(),
+            status_out_ptr: 0,
+        },
+        joiner,
+    );
+    assert_eq!(
+        rt.registry().effective_status(joiner),
+        Some(cellgov_exec::UnitStatus::Blocked)
+    );
+
+    rt.dispatch_lv2_request(
+        cellgov_lv2::Lv2Request::PpuThreadExit { exit_value: 0x77 },
+        exiter,
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(joiner),
+        Some(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()),
+        "a completed join through a NULL out-pointer reports CELL_EFAULT, not success",
+    );
+    assert_eq!(
+        rt.registry().effective_status(joiner),
+        Some(cellgov_exec::UnitStatus::Runnable),
+        "the join itself still completes: the joiner wakes",
+    );
+}
+
+#[cfg(not(debug_assertions))]
+#[test]
+fn a_wake_payload_into_a_shared_view_is_a_named_invariant_break_in_release() {
+    let mut rt = build_with_shared_view();
+    let breaks_before = rt.lv2_host().observability().invariant_break_count;
+    rt.commit_bytes_at(
+        crate::runtime::spaces::AddressSpaceId::BOOT,
+        0x20000,
+        &[0xAA; 4],
+    );
+    assert_eq!(
+        rt.lv2_host().observability().invariant_break_count,
+        breaks_before + 1,
+        "the shared-view wake payload must log exactly one invariant break in release",
     );
 }

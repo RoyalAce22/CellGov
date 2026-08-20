@@ -108,6 +108,57 @@ fn rejects_segment_truncated() {
 }
 
 #[test]
+fn a_load_segment_with_filesz_exceeding_memsz_is_refused_not_panicked() {
+    // vaddr + memsz passes the bounds check but the copy would write
+    // filesz bytes; without the explicit refusal this panicked inside
+    // apply_commit instead of returning a LoadError.
+    let mut data = mk_elf_header(1);
+    write_ph(&mut data, 0, 64 + 56, 0xF0, 0x100, 0x10);
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(0x100);
+    assert_eq!(
+        load_ppu_elf(&data, &mut mem, &mut s),
+        Err(LoadError::SegmentFileszExceedsMemsz {
+            segment_index: 0,
+            filesz: 0x100,
+            memsz: 0x10,
+        })
+    );
+}
+
+#[test]
+fn a_filesz_bearing_segment_with_zero_memsz_is_refused_not_skipped() {
+    // memsz == 0 with filesz > 0 is the same malformed shape; the old
+    // zero-memsz skip absorbed it silently.
+    let mut data = mk_elf_header(1);
+    write_ph(&mut data, 0, 0, 0, 0x10, 0);
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(256);
+    assert_eq!(
+        load_ppu_elf(&data, &mut mem, &mut s),
+        Err(LoadError::SegmentFileszExceedsMemsz {
+            segment_index: 0,
+            filesz: 0x10,
+            memsz: 0,
+        })
+    );
+}
+
+#[test]
+fn an_entry_near_u64_max_takes_the_raw_entry_fallback_without_overflow() {
+    // e_entry + 8 wraps usize; the OPD-deref window check must not
+    // overflow, and the out-of-range entry lands in state.pc raw.
+    let mut data = mk_elf_header(1);
+    write_ph(&mut data, 0, 0, 0, 0, 0);
+    data[24..32].copy_from_slice(&u64::MAX.to_be_bytes());
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(256);
+    let result = load_ppu_elf(&data, &mut mem, &mut s).expect("load ok");
+    assert_eq!(result.entry, u64::MAX);
+    assert_eq!(s.pc, u64::MAX);
+}
+
+#[test]
 fn skips_empty_segment() {
     let mut data = mk_elf_header(2);
     write_ph(&mut data, 0, 0, 0, 0, 0);
@@ -248,31 +299,6 @@ fn find_tls_program_header_returns_all_fields() {
     assert_eq!(hdr.filesz, 6);
     assert_eq!(hdr.memsz, 0x1dc);
     assert_eq!(hdr.align, 0x10);
-}
-
-#[test]
-fn extract_tls_template_bytes_captures_initial_payload() {
-    let initial = [0x11u8, 0x22, 0x33, 0x44, 0x55];
-    let data = make_elf_with_tls_payload(0x10_0000, &initial, 0x100, 0x20);
-    let (bytes, memsz, align, vaddr) =
-        extract_tls_template_bytes(&data).expect("should extract PT_TLS bytes");
-    assert_eq!(bytes, initial);
-    assert_eq!(memsz, 0x100);
-    assert_eq!(align, 0x20);
-    assert_eq!(vaddr, 0x10_0000);
-}
-
-#[test]
-fn extract_tls_template_bytes_returns_none_when_no_tls() {
-    let mut data = vec![0u8; 256];
-    data[0..4].copy_from_slice(&ELF_MAGIC);
-    data[4] = 2;
-    data[5] = 2;
-    data[32..40].copy_from_slice(&64u64.to_be_bytes());
-    data[54..56].copy_from_slice(&56u16.to_be_bytes());
-    data[56..58].copy_from_slice(&1u16.to_be_bytes());
-    data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
-    assert!(extract_tls_template_bytes(&data).is_none());
 }
 
 #[test]

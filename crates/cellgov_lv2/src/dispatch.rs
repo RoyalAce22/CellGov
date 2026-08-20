@@ -30,9 +30,6 @@ pub enum Lv2Dispatch {
         effects: Vec<Effect>,
     },
     /// Construct and register SPUs for a thread group; `code` -> r3.
-    ///
-    /// `BTreeMap` keying gives byte-stable ascending-slot registration
-    /// order across guests that leave slots uninitialized.
     RegisterSpu {
         /// Per-slot SPU init state, keyed by slot index for stable order.
         inits: BTreeMap<u32, SpuInitState>,
@@ -125,18 +122,45 @@ pub enum Lv2Dispatch {
         /// Effects committed alongside the block-and-wake.
         effects: Vec<Effect>,
     },
+    /// `_sys_process_spawn` / `sys_process_spawns_a_self2` with the
+    /// marshalled block already parsed and the image bytes resolved.
+    ///
+    /// The host has minted `pid` and inserted the child's process
+    /// entry; the runtime creates the child's address space, loads
+    /// `elf_bytes` through the installed spawn loader, registers the
+    /// primary-thread unit, and writes `pid` (u32 BE) to
+    /// `pid_out_ptr` in the caller's space. A load failure removes
+    /// the process entry via `Lv2Host::unbind_spawned_process`.
+    ProcessSpawn {
+        /// Minted child pid, already entered in the process table.
+        pid: u32,
+        /// Guest address (caller's space) for the pid writeback.
+        pid_out_ptr: u32,
+        /// Primary thread priority from the request.
+        prio: i32,
+        /// Child SELF path (`argv[0]` of the marshalled block).
+        path: Vec<u8>,
+        /// Resolved image bytes for the spawn loader.
+        elf_bytes: Vec<u8>,
+        /// Effects committed at spawn time.
+        effects: Vec<Effect>,
+    },
+    /// `sys_process_exit` from a unit bound to a child process:
+    /// finish that process's units only; the run continues.
+    ProcessExitChild {
+        /// Exiting child pid.
+        pid: u32,
+        /// Exit status recorded in the process table.
+        code: i32,
+        /// Effects committed at exit.
+        effects: Vec<Effect>,
+    },
     /// `sys_ppu_thread_create` with the OPD already resolved.
     ///
     /// The host reads the 16 BE OPD bytes via
     /// `Lv2Runtime::read_committed` before emitting this variant; a
     /// bad descriptor address surfaces as
     /// `Immediate { code: CELL_EFAULT }` and no child is registered.
-    ///
-    /// # Invariants
-    /// - `tls_bytes.is_empty()` OR `init.tls_base != 0` -- a
-    ///   non-empty TLS image cannot commit to guest address 0. The
-    ///   host rejects the violation with `CELL_EINVAL` upstream; the
-    ///   runtime asserts defensively.
     PpuThreadCreate {
         /// Guest address to receive the minted thread id (u64 BE).
         id_ptr: u32,
@@ -146,8 +170,6 @@ pub enum Lv2Dispatch {
         stack_base: u64,
         /// Child stack size in bytes.
         stack_size: u64,
-        /// Bytes to commit at `init.tls_base` before entry.
-        tls_bytes: Vec<u8>,
         /// Child scheduling priority.
         priority: u32,
         /// Effects committed at create time.
@@ -184,7 +206,10 @@ pub struct PpuThreadInitState {
     pub extra_args: [u64; 7],
     /// r1: 16-byte back-chain area at the top of the stack.
     pub stack_top: u64,
-    /// r13. Zero when the ELF has no PT_TLS segment.
+    /// r13: the guest `ppu_thread_param_t.tls` field, verbatim. The
+    /// kernel does no child TLS allocation or validation; the
+    /// creating thread's wrapper prepared the block, and guest exit
+    /// protocols recover per-thread records from this value.
     pub tls_base: u64,
     /// Loaded into LR; entered if the child returns from entry.
     pub lr_sentinel: u64,

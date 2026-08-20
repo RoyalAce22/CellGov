@@ -24,6 +24,13 @@ impl Lv2Host {
         };
         if target_thread.state.is_finished() {
             let exit_value = target_thread.exit_value.unwrap_or(0);
+            // The kernel completes the join but reports EFAULT rather
+            // than writing through a null status pointer (RPCS3
+            // sys_ppu_thread.cpp sys_ppu_thread_join checks vptr only
+            // after the join concludes).
+            if status_out_ptr == 0 {
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            }
             let write = Effect::SharedWriteIntent {
                 range: ByteRange::contiguous_u32(status_out_ptr, 8),
                 bytes: WritePayload::from_slice(&exit_value.to_be_bytes()),
@@ -53,7 +60,13 @@ impl Lv2Host {
                 effects: vec![],
             },
             AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into()),
-            AddJoinWaiter::TargetDetached => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            // A detached target is EINVAL, not ESRCH; ESRCH is
+            // reserved for ids that name no thread or an
+            // already-reaped one (RPCS3 sys_ppu_thread.cpp
+            // sys_ppu_thread_join: detached -> EINVAL).
+            AddJoinWaiter::TargetDetached => {
+                Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+            }
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
                 self.record_invariant_break(
                     "ppu_thread_join.add_join_waiter_unreachable",
@@ -94,12 +107,28 @@ impl Lv2Host {
             param_bytes[2],
             param_bytes[3],
         ]);
-        let _param_tls = u32::from_be_bytes([
+        let param_tls = u32::from_be_bytes([
             param_bytes[4],
             param_bytes[5],
             param_bytes[6],
             param_bytes[7],
         ]);
+
+        // A null entry descriptor is EFAULT before the priority check
+        // (RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create rejects
+        // !param->entry ahead of the range validation).
+        if entry_opd_ptr == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
+
+        // Priority window: 0..=3071 for user-permission processes;
+        // the floor drops to -512 with debug-or-root capability
+        // (RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create).
+        let prio = priority as i32;
+        let prio_floor = if self.debug_or_root() { -512 } else { 0 };
+        if prio < prio_floor || prio > 3071 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
 
         let opd_bytes: [u8; 8] = match rt
             .read_committed(entry_opd_ptr as u64, 8)
@@ -124,18 +153,6 @@ impl Lv2Host {
             }
         };
 
-        let tls_bytes = self.state.tls_template.instantiate();
-        // Empty template encodes "no TLS, r13 = 0".
-        let tls_base = if tls_bytes.is_empty() {
-            0
-        } else {
-            (stack.end() + 0xF) & !0xF
-        };
-
-        if !tls_bytes.is_empty() && tls_base == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
-        }
-
         Lv2Dispatch::PpuThreadCreate {
             id_ptr,
             init: crate::dispatch::PpuThreadInitState {
@@ -144,14 +161,18 @@ impl Lv2Host {
                 arg,
                 extra_args: [0; 7],
                 stack_top: stack.initial_sp(),
-                tls_base,
+                // The kernel installs the param's tls field as the
+                // child's r13 verbatim, unvalidated; the caller's
+                // wrapper allocated and initialized the block before
+                // the syscall (RPCS3 sys_ppu_thread.cpp
+                // _sys_ppu_thread_create -> PPUThread.cpp gpr[13]).
+                tls_base: param_tls as u64,
                 // LR=0 traps a fallthrough return; guests exit via
                 // sys_ppu_thread_exit.
                 lr_sentinel: 0,
             },
             stack_base: stack.base,
             stack_size: stack.size,
-            tls_bytes,
             priority,
             effects: vec![],
         }

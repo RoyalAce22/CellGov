@@ -18,12 +18,14 @@ pub use dispatch::{
     SpuInitState,
 };
 pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
-pub use host::{InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, SystemStateSeed};
+pub use host::{
+    InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, ProcessEntry, ProcessTable,
+    SystemStateSeed,
+};
 pub use image::{ContentStore, SpuImageHandle, SpuImageRecord};
 pub use ppu_thread::{
     AddJoinWaiter, EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,
     PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack, ThreadStackAllocator,
-    TlsTemplate,
 };
 pub use prx_registry::{LoadedPrxEntry, LoadedPrxRegistry};
 pub use request::Lv2Request;

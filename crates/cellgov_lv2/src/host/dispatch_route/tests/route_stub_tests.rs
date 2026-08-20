@@ -26,9 +26,6 @@ fn unsupported_dispatch_returns_cell_enosys() {
     );
 }
 
-// The exhaustive probe below is what keeps ROUTED_UNSUPPORTED_ARMS
-// honest: the typed half of the fidelity map is compile-enforced, but
-// a routed number's table row is data, and this is its drift gate.
 #[test]
 fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
     use crate::request::fidelity::ROUTED_UNSUPPORTED_ARMS;
@@ -231,9 +228,11 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
             id_ptr: 0x9000,
             param_ptr: 0x4000_0000,
             arg: 0,
+            unk: 0,
             priority: 1000,
             stacksize: 0x4000,
             flags: 0x1, // JOINABLE -- unmodeled
+            threadname_ptr: 0,
         },
         UnitId::new(0),
         &rt,
@@ -241,5 +240,60 @@ fn ppu_thread_create_logs_invariant_break_on_nonzero_flags() {
     assert!(
         host.observability().invariant_break_count > before,
         "expected log_invariant_break to fire on nonzero flags"
+    );
+}
+
+#[test]
+fn ppu_thread_create_nonzero_unk_is_witnessed() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let before = host.invariant_break_site_count("dispatch.ppu_thread_create_unconsumed_unk");
+    let _ = host.dispatch(
+        Lv2Request::PpuThreadCreate {
+            id_ptr: 0x9000,
+            param_ptr: 0x4000_0000,
+            arg: 0,
+            unk: 0x10,
+            priority: 1000,
+            stacksize: 0x4000,
+            flags: 0,
+            threadname_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.ppu_thread_create_unconsumed_unk"),
+        before + 1
+    );
+}
+
+#[test]
+fn ppu_thread_create_joinable_plus_interrupt_flags_return_eperm() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let before = host.observability().invariant_break_count;
+    let result = host.dispatch(
+        Lv2Request::PpuThreadCreate {
+            id_ptr: 0x9000,
+            param_ptr: 0x4000_0000,
+            arg: 0,
+            unk: 0,
+            priority: 1000,
+            stacksize: 0x4000,
+            flags: 0x3, // JOINABLE | INTERRUPT
+            threadname_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
+    );
+    assert_eq!(
+        host.observability().invariant_break_count,
+        before,
+        "a modeled refusal must not report an invariant break"
     );
 }

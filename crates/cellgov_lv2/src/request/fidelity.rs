@@ -1,12 +1,8 @@
 //! Per-arm fidelity of the LV2 dispatch surface.
 //!
-//! Two claims with different evidence standards, kept separate:
-//!
-//! - **Routing layer**: no syscall reaches the guest with a result
-//!   produced by a default arm. Enforced by dispatch structure --
-//!   unhandled numbers hit the null backend and return `CELL_ENOSYS`.
-//! - **Per-arm fidelity**: how faithful each modeled arm is. A
-//!   per-arm claim, individually auditable; that is this map.
+//! Tags how faithful each modeled dispatch arm is. Routing itself
+//! carries no tag: unhandled numbers hit the null backend and return
+//! `CELL_ENOSYS`.
 //!
 //! [`Lv2RequestKind::fidelity`] is an exhaustive match, so a new
 //! request variant fails to compile until it declares a tag.
@@ -270,6 +266,18 @@ impl Lv2RequestKind {
             | Lv2RequestKind::ProcessGetPpid
             | Lv2RequestKind::ProcessGetSdkVersion
             | Lv2RequestKind::ProcessIsStack => Modeled,
+            // Spawn loads the SELF and runs the child; SELF-header
+            // identity (authority id, ctrl flags) is not derived per
+            // child yet, and the trailing args (sc 21 r8/r9, sc 27
+            // r9/r10 config/pair blocks) are reported at dispatch,
+            // not consumed.
+            Lv2RequestKind::ProcessSpawn => PartialState,
+            // Exitspawn re-spawn (non-empty argv) is witnessed, not
+            // performed; the empty-argv path is a full process exit.
+            Lv2RequestKind::ProcessExit2 => PartialState,
+            // Real status encoding unknown (RPCS3 stubs it);
+            // CellGov-decided liveness poll.
+            Lv2RequestKind::ProcessGetStatus => PartialState,
             // Real counts for modeled classes only.
             Lv2RequestKind::ProcessGetNumberOfObject => PartialState,
             // Serves the no-PARAM.SFO homebrew blob for every title.

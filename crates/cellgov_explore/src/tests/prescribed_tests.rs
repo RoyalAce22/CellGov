@@ -65,6 +65,32 @@ fn override_forces_specific_unit() {
     assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
 }
 
+// The stub units cannot express a syscall yield, so stickiness is
+// exercised by driving notify_yielded on the scheduler pair directly.
+#[test]
+fn notify_yielded_reaches_fallback_stickiness() {
+    let mut r = UnitRegistry::new();
+    r.register_with(StubUnit::new);
+    r.register_with(StubUnit::new);
+
+    let mut baseline = cellgov_core::RoundRobinScheduler::new();
+    let mut prescribed = PrescribedScheduler::new(vec![]);
+
+    assert_eq!(baseline.select_next(&r), Some(UnitId::new(0)));
+    assert_eq!(prescribed.select_next(&r), Some(UnitId::new(0)));
+
+    // Non-waking syscall: round-robin re-selects the same unit.
+    baseline.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, false);
+    prescribed.notify_yielded(UnitId::new(0), YieldReason::Syscall, false, false);
+
+    assert_eq!(baseline.select_next(&r), Some(UnitId::new(0)));
+    assert_eq!(
+        prescribed.select_next(&r),
+        Some(UnitId::new(0)),
+        "exhausted prescription must reproduce the baseline sticky pick"
+    );
+}
+
 #[test]
 fn none_override_defers_to_fallback() {
     let mut r = UnitRegistry::new();

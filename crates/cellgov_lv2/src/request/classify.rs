@@ -150,6 +150,39 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             nwritten_ptr: p!(3),
         },
         syscall::PROCESS_EXIT => Lv2Request::ProcessExit { code: s!(0) },
+        // sc 21 and sc 27 share the marshalled-block family, and
+        // both carry payload past r7. sc 27 adds a data word (r8)
+        // plus config-block/pair-block pointers (r9/r10, vsh sc site
+        // 0x608b94); sc 21 instead takes the two pair-block values
+        // directly in r8/r9 and has no r10 slot (vsh sc site
+        // 0x608cc0). The extras ride in `data_word`/`unconsumed` so
+        // the dispatch path reports nonzero values instead of
+        // dropping them.
+        syscall::PROCESS_SPAWN => Lv2Request::ProcessSpawn {
+            pid_out_ptr: p!(0),
+            prio: s!(1),
+            flags: args[2],
+            block_ptr: p!(3),
+            block_size: p!(4),
+            data_word: 0,
+            unconsumed: [args[5], args[6]],
+        },
+        syscall::PROCESS_SPAWNS_A_SELF2 => Lv2Request::ProcessSpawn {
+            pid_out_ptr: p!(0),
+            prio: s!(1),
+            flags: args[2],
+            block_ptr: p!(3),
+            block_size: p!(4),
+            data_word: args[5],
+            unconsumed: [args[6], args[7]],
+        },
+        syscall::PROCESS_EXIT2 => Lv2Request::ProcessExit2 {
+            code: s!(0),
+            arg_ptr: p!(1),
+            arg_size: p!(2),
+            arg4: args[3],
+        },
+        syscall::PROCESS_GET_STATUS => Lv2Request::ProcessGetStatus { pid: p!(0) },
         syscall::PROCESS_GETPID => Lv2Request::ProcessGetPid,
         syscall::PROCESS_GET_NUMBER_OF_OBJECT => Lv2Request::ProcessGetNumberOfObject {
             class_id: p!(0),
@@ -190,13 +223,19 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         syscall::PPU_THREAD_EXIT => Lv2Request::PpuThreadExit {
             exit_value: args[0],
         },
+        // RPCS3 `lv2.cpp` binds 52 to the 8-arg `_sys_ppu_thread_create`
+        // (thread_id, param, arg, unk, prio, stacksize, flags,
+        // threadname); its sysPrxForUser stub passes unk=0 in r6
+        // (`Modules/sys_ppu_thread_.cpp`).
         syscall::PPU_THREAD_CREATE => Lv2Request::PpuThreadCreate {
             id_ptr: p!(0),
             param_ptr: p!(1),
             arg: args[2],
-            priority: s!(3),
-            stacksize: args[4],
-            flags: args[5],
+            unk: args[3],
+            priority: s!(4),
+            stacksize: args[5],
+            flags: args[6],
+            threadname_ptr: p!(7),
         },
         syscall::SYS_RSX_MEMORY_ALLOCATE => Lv2Request::SysRsxMemoryAllocate {
             mem_handle_ptr: p!(0),

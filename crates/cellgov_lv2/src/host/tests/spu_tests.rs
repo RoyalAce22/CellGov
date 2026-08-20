@@ -497,6 +497,106 @@ fn group_start_returns_register_spu_with_inits() {
     }
 }
 
+/// Group 1 created, driven to Running, and its single SPU finished.
+fn host_with_finished_group() -> Lv2Host {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x4000);
+    host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x100,
+            num_threads: 1,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    host.thread_groups_mut().get_mut(1).unwrap().state = GroupState::Running;
+    host.record_spu(UnitId::new(7), 1, 0).unwrap();
+    assert_eq!(host.notify_spu_finished(UnitId::new(7)), Ok(Some(1)));
+    host
+}
+
+fn join_finished_group(cause_ptr: u32, status_ptr: u32) -> Lv2Dispatch {
+    let mut host = host_with_finished_group();
+    let rt = FakeRuntime::new(0x4000);
+    host.dispatch(
+        Lv2Request::SpuThreadGroupJoin {
+            group_id: 1,
+            cause_ptr,
+            status_ptr,
+        },
+        UnitId::new(0),
+        &rt,
+    )
+}
+
+#[test]
+fn a_finished_group_join_with_null_cause_writes_nothing_and_returns_efault() {
+    match join_finished_group(0, 0x300) {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_finished_group_join_with_both_pointers_null_writes_nothing_and_returns_efault() {
+    match join_finished_group(0, 0) {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_finished_group_join_with_null_status_writes_cause_only_and_returns_efault() {
+    match join_finished_group(0x300, 0) {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert_eq!(effects.len(), 1);
+            let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] else {
+                panic!("expected SharedWriteIntent, got {:?}", effects[0]);
+            };
+            assert_eq!(range.start().raw(), 0x300);
+            assert_eq!(range.length(), 4);
+            assert_eq!(
+                bytes.bytes(),
+                &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes()
+            );
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_finished_group_join_with_both_pointers_writes_both_and_returns_ok() {
+    match join_finished_group(0x300, 0x400) {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, 0);
+            assert_eq!(effects.len(), 2);
+            let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] else {
+                panic!("expected SharedWriteIntent, got {:?}", effects[0]);
+            };
+            assert_eq!(range.start().raw(), 0x300);
+            assert_eq!(
+                bytes.bytes(),
+                &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes()
+            );
+            let Effect::SharedWriteIntent { range, bytes, .. } = &effects[1] else {
+                panic!("expected SharedWriteIntent, got {:?}", effects[1]);
+            };
+            assert_eq!(range.start().raw(), 0x400);
+            assert_eq!(bytes.bytes(), &0u32.to_be_bytes());
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+}
+
 #[test]
 fn group_start_unknown_group_returns_error() {
     let mut host = Lv2Host::new();

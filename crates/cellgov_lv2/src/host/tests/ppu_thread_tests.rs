@@ -1,7 +1,7 @@
-//! PPU-thread lifecycle dispatch tests: create with stack/TLS allocation, exit waking join waiters, join blocking, and yield.
+//! PPU-thread lifecycle dispatch tests: create with stack allocation and r13 seeding, exit waking join waiters, join blocking, and yield.
 
 use super::*;
-use crate::host::test_support::{opd_runtime, primary_attrs, FakeRuntime};
+use crate::host::test_support::{opd_runtime, opd_runtime_with_tls, primary_attrs, FakeRuntime};
 use crate::request::Lv2Request;
 
 #[test]
@@ -183,23 +183,71 @@ fn ppu_thread_join_unknown_target_returns_esrch() {
 }
 
 #[test]
-fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
+fn ppu_thread_join_detached_target_returns_einval() {
+    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_join: a detached
+    // target is EINVAL; ESRCH is reserved for unknown ids.
     let mut host = Lv2Host::new();
-    host.set_tls_template(crate::ppu_thread::TlsTemplate::new(
-        vec![0xAB, 0xCD, 0xEF],
-        0x100,
-        0x10,
-        0x89_5cd0,
-    ));
+    host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+    let child = host
+        .ppu_threads_mut()
+        .create(UnitId::new(1), primary_attrs())
+        .expect("child create");
+    assert!(host.ppu_threads_mut().detach(child));
+    let rt = FakeRuntime::new(256);
+    let result = host.dispatch(
+        Lv2Request::PpuThreadJoin {
+            target: child.raw(),
+            status_out_ptr: 0x500,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+#[test]
+fn ppu_thread_join_finished_target_with_null_status_ptr_is_efault_without_write() {
+    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_join checks vptr after
+    // the join concludes and returns EFAULT instead of storing.
+    let mut host = Lv2Host::new();
+    host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
+    let child = host
+        .ppu_threads_mut()
+        .create(UnitId::new(1), primary_attrs())
+        .expect("child create");
+    host.ppu_threads_mut().mark_finished(child, 0xFEED_FACE);
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::PpuThreadJoin {
+            target: child.raw(),
+            status_out_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+}
+
+#[test]
+fn ppu_thread_create_returns_dispatch_with_allocated_stack() {
+    let mut host = Lv2Host::new();
     let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
     let result = host.dispatch(
         Lv2Request::PpuThreadCreate {
             id_ptr: 0x1000,
             param_ptr: 0x200,
             arg: 0xDEAD_BEEF,
+            unk: 0,
             priority: 1500,
             stacksize: 0x10_000,
             flags: 0,
+            threadname_ptr: 0,
         },
         UnitId::new(0),
         &rt,
@@ -210,7 +258,6 @@ fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
             init,
             stack_base,
             stack_size,
-            tls_bytes,
             priority,
             effects,
         } => {
@@ -222,10 +269,6 @@ fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
             assert_eq!(stack_base, 0xD010_0000);
             assert_eq!(stack_size, 0x10_000);
             assert_eq!(init.stack_top, 0xD011_0000 - 0x10);
-            assert!(init.tls_base >= stack_base + stack_size);
-            assert_eq!(tls_bytes.len(), 0x100);
-            assert_eq!(&tls_bytes[..3], &[0xAB, 0xCD, 0xEF]);
-            assert!(tls_bytes[3..].iter().all(|&b| b == 0));
             assert!(effects.is_empty());
         }
         other => panic!("expected PpuThreadCreate, got {other:?}"),
@@ -233,7 +276,33 @@ fn ppu_thread_create_returns_dispatch_with_allocated_stack_and_tls() {
 }
 
 #[test]
-fn ppu_thread_create_with_empty_template_has_no_tls() {
+fn ppu_thread_create_seeds_r13_from_param_tls_verbatim() {
+    let mut host = Lv2Host::new();
+    let rt = opd_runtime_with_tls(0x200, 0x10_0000, 0x10_0100, 0x028e_7220);
+    let result = host.dispatch(
+        Lv2Request::PpuThreadCreate {
+            id_ptr: 0x1000,
+            param_ptr: 0x200,
+            arg: 0,
+            unk: 0,
+            priority: 1000,
+            stacksize: 0x8000,
+            flags: 0,
+            threadname_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::PpuThreadCreate { init, .. } => {
+            assert_eq!(init.tls_base, 0x028e_7220);
+        }
+        other => panic!("expected PpuThreadCreate, got {other:?}"),
+    }
+}
+
+#[test]
+fn ppu_thread_create_passes_zero_param_tls_through_unvalidated() {
     let mut host = Lv2Host::new();
     let rt = opd_runtime(0x200, 0, 0);
     let result = host.dispatch(
@@ -241,19 +310,18 @@ fn ppu_thread_create_with_empty_template_has_no_tls() {
             id_ptr: 0x1000,
             param_ptr: 0x200,
             arg: 0,
+            unk: 0,
             priority: 1000,
             stacksize: 0x8000,
             flags: 0,
+            threadname_ptr: 0,
         },
         UnitId::new(0),
         &rt,
     );
     match result {
-        Lv2Dispatch::PpuThreadCreate {
-            init, tls_bytes, ..
-        } => {
+        Lv2Dispatch::PpuThreadCreate { init, .. } => {
             assert_eq!(init.tls_base, 0);
-            assert!(tls_bytes.is_empty());
         }
         other => panic!("expected PpuThreadCreate, got {other:?}"),
     }
@@ -268,9 +336,11 @@ fn ppu_thread_create_enforces_minimum_stack_size() {
             id_ptr: 0x1000,
             param_ptr: 0x200,
             arg: 0,
+            unk: 0,
             priority: 1000,
             stacksize: 0x100,
             flags: 0,
+            threadname_ptr: 0,
         },
         UnitId::new(0),
         &rt,
@@ -292,9 +362,11 @@ fn ppu_thread_create_bad_opd_returns_efault() {
             id_ptr: 0x10,
             param_ptr: 0xDEAD_BEEF,
             arg: 0,
+            unk: 0,
             priority: 1000,
             stacksize: 0x4000,
             flags: 0,
+            threadname_ptr: 0,
         },
         UnitId::new(0),
         &rt,
@@ -320,9 +392,11 @@ fn ppu_thread_create_bad_opd_via_param_returns_efault() {
             id_ptr: 0x10,
             param_ptr: 0x200,
             arg: 0,
+            unk: 0,
             priority: 1000,
             stacksize: 0x4000,
             flags: 0,
+            threadname_ptr: 0,
         },
         UnitId::new(0),
         &rt,
@@ -330,6 +404,122 @@ fn ppu_thread_create_bad_opd_via_param_returns_efault() {
     assert_eq!(
         result,
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+}
+
+#[test]
+fn ppu_thread_create_null_entry_descriptor_is_efault() {
+    // param.entry_opd_ptr == 0: RPCS3 sys_ppu_thread.cpp
+    // _sys_ppu_thread_create rejects !param->entry with EFAULT.
+    // Without the check, the zeroed arena at address 0 silently
+    // supplies an all-zero OPD.
+    let mut mem = cellgov_mem::GuestMemory::new(0x1_0000);
+    let param_range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 8).unwrap();
+    mem.apply_commit(param_range, &[0u8; 8]).unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let mut host = Lv2Host::new();
+    let result = host.dispatch(
+        Lv2Request::PpuThreadCreate {
+            id_ptr: 0x10,
+            param_ptr: 0x200,
+            arg: 0,
+            unk: 0,
+            priority: 1000,
+            stacksize: 0x4000,
+            flags: 0,
+            threadname_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+}
+
+#[test]
+fn ppu_thread_create_priority_above_3071_is_einval() {
+    // RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create: prio > 3071
+    // is EINVAL regardless of capability.
+    let mut host = Lv2Host::new();
+    let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
+    let result = host.dispatch(
+        Lv2Request::PpuThreadCreate {
+            id_ptr: 0x1000,
+            param_ptr: 0x200,
+            arg: 0,
+            unk: 0,
+            priority: 3072,
+            stacksize: 0x8000,
+            flags: 0,
+            threadname_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+#[test]
+fn ppu_thread_create_negative_priority_is_einval_for_user_perm() {
+    // RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create: the floor is
+    // 0 without debug-or-root capability.
+    let mut host = Lv2Host::new();
+    let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
+    let result = host.dispatch(
+        Lv2Request::PpuThreadCreate {
+            id_ptr: 0x1000,
+            param_ptr: 0x200,
+            arg: 0,
+            unk: 0,
+            priority: -1,
+            stacksize: 0x8000,
+            flags: 0,
+            threadname_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+#[test]
+fn ppu_thread_create_negative_priority_floor_drops_to_minus_512_with_debug_or_root() {
+    // RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create: debug-or-root
+    // callers may go down to -512; -513 stays EINVAL.
+    let mut host = Lv2Host::new();
+    host.set_control_flags1(0x4000_0000); // root -> debug_or_root
+    let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
+    let create = |host: &mut Lv2Host, priority: i32| {
+        host.dispatch(
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x1000,
+                param_ptr: 0x200,
+                arg: 0,
+                unk: 0,
+                priority,
+                stacksize: 0x8000,
+                flags: 0,
+                threadname_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    assert!(matches!(
+        create(&mut host, -512),
+        Lv2Dispatch::PpuThreadCreate { .. }
+    ));
+    assert_eq!(
+        create(&mut host, -513),
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     );
 }
 

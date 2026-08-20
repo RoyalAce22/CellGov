@@ -10,7 +10,6 @@ use crate::fs_store::{FsMountTable, FsStore};
 use crate::image::ContentStore;
 use crate::ppu_thread::{
     PpuThread, PpuThreadAttrs, PpuThreadId, PpuThreadTable, ThreadStack, ThreadStackAllocator,
-    TlsTemplate,
 };
 use crate::prx_registry::LoadedPrxRegistry;
 use crate::sync_primitives::{
@@ -98,7 +97,6 @@ impl Lv2Host {
                 content: ContentStore::new(),
                 groups: ThreadGroupTable::new(),
                 ppu_threads: PpuThreadTable::new(),
-                tls_template: TlsTemplate::empty(),
                 stack_allocator: ThreadStackAllocator::new(),
                 next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
                 mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
@@ -119,8 +117,7 @@ impl Lv2Host {
                 fs_store,
                 prx_registry: LoadedPrxRegistry::new(),
                 firmware_identity: None,
-                program_authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
-                control_flags1: 0,
+                processes: process::ProcessTable::new_boot(),
                 process_counts: process::ProcessCounts::new(),
             },
             derived: derived::Lv2Derived {
@@ -159,23 +156,29 @@ impl Lv2Host {
         self.derived.sdk_version
     }
 
-    /// Set the booting process's program authority id (from the
+    /// Set the boot process's program authority id (from the
     /// title SELF's identification header). Callers with raw-ELF
     /// input leave the retail-application fallback in place.
     pub fn set_program_authority_id(&mut self, authority_id: u64) {
-        self.state.program_authority_id = authority_id;
+        self.state.processes.boot_mut().authority_id = authority_id;
     }
 
-    /// The value `sys_ss_access_control_engine` pkg 2 serves.
+    /// Boot process's program authority id.
     #[inline]
     pub fn program_authority_id(&self) -> u64 {
-        self.state.program_authority_id
+        self.state.processes.boot().authority_id
+    }
+
+    /// Per-process identity table.
+    #[inline]
+    pub fn processes(&self) -> &process::ProcessTable {
+        &self.state.processes
     }
 
     /// Set `ctrl_flags1` from the booting SELF's plaintext capability
     /// header. Raw-ELF input and SELFs without the record leave 0.
     pub fn set_control_flags1(&mut self, flags: u32) {
-        self.state.control_flags1 = flags;
+        self.state.processes.boot_mut().control_flags1 = flags;
     }
 
     /// Install the firmware library -> NID -> OPD map the sc 484
@@ -220,32 +223,30 @@ impl Lv2Host {
     /// Raw capability word backing the privilege predicates.
     #[inline]
     pub fn control_flags1(&self) -> u32 {
-        self.state.control_flags1
+        self.state.processes.boot().control_flags1
     }
 
     /// Whether the booting process holds root privilege.
     ///
     /// The three capability predicates share bits -- root implies
-    /// debug-or-root, and the debug mask overlaps both. They are
-    /// mirrored from the oracle rather than reduced to disjoint bits,
-    /// because the exact per-bit meaning is unconfirmed there too.
+    /// debug-or-root, and the debug mask overlaps both.
     #[inline]
     pub fn has_root_perm(&self) -> bool {
-        self.state.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK != 0
+        self.control_flags1() & cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK != 0
     }
 
     /// Whether the booting process holds debug or root privilege; the
     /// widest of the three masks. See [`Self::has_root_perm`].
     #[inline]
     pub fn debug_or_root(&self) -> bool {
-        self.state.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
+        self.control_flags1() & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
     }
 
     /// Whether the booting process holds debug privilege. See
     /// [`Self::has_root_perm`].
     #[inline]
     pub fn has_debug_perm(&self) -> bool {
-        self.state.control_flags1 & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_MASK != 0
+        self.control_flags1() & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_MASK != 0
     }
 
     /// Whether the booting process is a CoreOS SELF (vsh and the other
@@ -255,7 +256,7 @@ impl Lv2Host {
     /// CoreOS authority id with `ctrl_flags1 == 0`).
     #[inline]
     pub fn is_coreos(&self) -> bool {
-        self.state.program_authority_id >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
+        self.program_authority_id() >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
     }
 
     /// Record the verified-firmware identity. Boot is one-shot; a
@@ -622,6 +623,109 @@ impl Lv2Host {
         &mut self.state.content
     }
 
+    /// Bind `unit` to a spawned process; called by the runtime after
+    /// registering a child's primary-thread unit.
+    ///
+    /// A pid outside the table or a rebind to a different pid is a
+    /// runtime sequencing bug (spawn rollback racing registration);
+    /// both are logged, and the binding still lands so the caller's
+    /// view stays consistent with what it asked for.
+    pub fn bind_unit_process(&mut self, unit: cellgov_event::UnitId, pid: u32) {
+        if self.state.processes.get(pid).is_none() {
+            self.log_invariant_break(
+                "process.bind_to_unknown_pid",
+                format_args!(
+                    "bind_unit_process({unit:?}, {pid:#x}): pid not in the \
+                     process table; binding recorded anyway"
+                ),
+            );
+        }
+        let prior = self
+            .state
+            .processes
+            .unit_bindings()
+            .find(|(u, _)| **u == unit)
+            .map(|(_, p)| *p);
+        if let Some(prev) = prior {
+            if prev != pid {
+                self.log_invariant_break(
+                    "process.unit_rebound",
+                    format_args!(
+                        "bind_unit_process({unit:?}, {pid:#x}): unit already \
+                         bound to {prev:#x}; rebinding"
+                    ),
+                );
+            }
+        }
+        self.state.processes.bind_unit(unit, pid);
+    }
+
+    /// The pid `unit` belongs to (boot pid when unbound).
+    pub fn process_of_unit(&self, unit: cellgov_event::UnitId) -> u32 {
+        self.state.processes.process_of_unit(unit)
+    }
+
+    /// Units bound to `pid`, in unit-id order.
+    pub fn units_of_process(&self, pid: u32) -> Vec<cellgov_event::UnitId> {
+        self.state.processes.units_of(pid)
+    }
+
+    /// Record `pid`'s exit; the entry is retained so later
+    /// `sys_process_get_status` polls resolve deterministically.
+    ///
+    /// A process exits once; a second call for the same pid keeps the
+    /// first status (overwriting it would retroactively change what
+    /// `sys_process_get_status` and the state hash already served)
+    /// and is logged as a runtime sequencing bug.
+    pub fn mark_process_exited(&mut self, pid: u32, status: i32) {
+        match self.state.processes.get(pid).map(|entry| entry.exit_status) {
+            None => self.log_invariant_break(
+                "process.exit_of_unknown_pid",
+                format_args!(
+                    "mark_process_exited({pid:#x}, {status}): pid not in the \
+                     process table; exit status dropped"
+                ),
+            ),
+            Some(Some(prev)) => self.log_invariant_break(
+                "process.double_exit",
+                format_args!(
+                    "mark_process_exited({pid:#x}, {status}): exit status \
+                     {prev} already recorded; first status kept"
+                ),
+            ),
+            Some(None) => {
+                self.state
+                    .processes
+                    .get_mut(pid)
+                    .expect("entry present just above")
+                    .exit_status = Some(status);
+            }
+        }
+    }
+
+    /// Spawn-failure rollback: drop the child entry minted by
+    /// `dispatch_process_spawn` when the runtime's image load fails.
+    pub fn unbind_spawned_process(&mut self, pid: u32) {
+        if self.state.processes.remove_child(pid).is_none() {
+            self.log_invariant_break(
+                "process.rollback_of_unknown_pid",
+                format_args!(
+                    "unbind_spawned_process({pid:#x}): no child entry to \
+                     remove (boot pid or never minted)"
+                ),
+            );
+        }
+    }
+
+    /// `Some(status)` once `pid` has exited; `None` while alive or
+    /// unknown.
+    pub fn process_exit_status(&self, pid: u32) -> Option<i32> {
+        self.state
+            .processes
+            .get(pid)
+            .and_then(|entry| entry.exit_status)
+    }
+
     /// Loaded-PRX registry.
     pub fn prx_registry(&self) -> &LoadedPrxRegistry {
         &self.state.prx_registry
@@ -689,16 +793,6 @@ impl Lv2Host {
             Some(thread) => thread.state.is_finished(),
             None => false,
         }
-    }
-
-    /// Install the TLS template used for new PPU threads.
-    pub fn set_tls_template(&mut self, template: TlsTemplate) {
-        self.state.tls_template = template;
-    }
-
-    /// Installed TLS template.
-    pub fn tls_template(&self) -> &TlsTemplate {
-        &self.state.tls_template
     }
 
     /// Lightweight mutex table.

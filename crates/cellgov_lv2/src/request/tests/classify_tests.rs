@@ -13,10 +13,6 @@ fn classify_unresolved_import_pulls_nid_from_r4() {
 
 #[test]
 fn classify_unresolved_import_namespace_above_base_is_unsupported() {
-    // A syscall in the UnresolvedImport namespace but not at
-    // the reserved UNRESOLVED_IMPORT slot routes to Unsupported.
-    // This keeps room for future per-slot trampolines that
-    // encode the slot index in the syscall number.
     let args = [0; 8];
     let req = classify(syscall::UNRESOLVED_IMPORT + 1, &args);
     assert!(matches!(req, Lv2Request::Unsupported { .. }));
@@ -233,19 +229,53 @@ fn classify_ppu_thread_join_captures_target_and_out_ptr() {
 }
 
 #[test]
-fn classify_ppu_thread_create_captures_all_fields() {
-    let args = [0x3000, 0x2_0000, 0xCAFE_BABE, 1500, 0x10_000, 0, 0, 0];
+fn classify_ppu_thread_create_captures_all_eight_kernel_slots() {
+    // Kernel layout per RPCS3 lv2.cpp: (thread_id, param, arg, unk,
+    // prio, stacksize, flags, threadname).
+    let args = [
+        0x3000,
+        0x2_0000,
+        0xCAFE_BABE,
+        0,
+        1500,
+        0x10_000,
+        0x1,
+        0x7000,
+    ];
     assert_eq!(
         classify(52, &args),
         Lv2Request::PpuThreadCreate {
             id_ptr: 0x3000,
             param_ptr: 0x2_0000,
             arg: 0xCAFE_BABE,
+            unk: 0,
             priority: 1500,
             stacksize: 0x10_000,
-            flags: 0,
+            flags: 0x1,
+            threadname_ptr: 0x7000,
         },
     );
+}
+
+#[test]
+fn classify_ppu_thread_create_reads_priority_from_the_fifth_slot() {
+    // A liblv2-wrapper call shape: unk=0 in r6, real prio in r7. A
+    // decode shifted one slot early reads prio 0 and misreads the
+    // stack size as prio.
+    let args = [0x3000, 0x2_0000, 0, 0, 1000, 0x4000, 0, 0];
+    match classify(52, &args) {
+        Lv2Request::PpuThreadCreate {
+            priority,
+            stacksize,
+            flags,
+            ..
+        } => {
+            assert_eq!(priority, 1000);
+            assert_eq!(stacksize, 0x4000);
+            assert_eq!(flags, 0);
+        }
+        other => panic!("expected PpuThreadCreate, got {other:?}"),
+    }
 }
 
 #[test]
@@ -600,6 +630,10 @@ fn narrow_i32_rejects_large_positive() {
 /// and `every_lv2_syscall_with_narrowing_appears_in_a_table`.
 const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::PROCESS_GETPID, &[]),
+    (syscall::PROCESS_GET_STATUS, &[0]),
+    (syscall::PROCESS_SPAWN, &[0, 3, 4]),
+    (syscall::PROCESS_SPAWNS_A_SELF2, &[0, 3, 4]),
+    (syscall::PROCESS_EXIT2, &[1, 2]),
     (syscall::PROCESS_GET_NUMBER_OF_OBJECT, &[0, 1]),
     (syscall::PROCESS_GETPPID, &[]),
     (syscall::PROCESS_GET_SDK_VERSION, &[0, 1]),
@@ -614,7 +648,7 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::EVENT_PORT_CREATE, &[0, 1]),
     (syscall::EVENT_PORT_DESTROY, &[0]),
     (syscall::PPU_THREAD_JOIN, &[1]),
-    (syscall::PPU_THREAD_CREATE, &[0, 1]),
+    (syscall::PPU_THREAD_CREATE, &[0, 1, 7]),
     (syscall::EVENT_FLAG_CREATE, &[0, 1]),
     (syscall::EVENT_FLAG_DESTROY, &[0]),
     (syscall::EVENT_FLAG_WAIT, &[0, 2, 3]),
@@ -809,6 +843,91 @@ fn classify_process_is_spu_lock_line_reservation_address() {
 }
 
 #[test]
+fn classify_process_spawn_carries_r8_r9_and_ignores_r10() {
+    // The vsh sc-21 site sets r8/r9 but never r10; r10 arrives as
+    // caller leftovers and must not enter the request.
+    let args = [0x100, 1000, 0, 0x2000, 0x58, 0xAA, 0xBB, 0xCC];
+    assert_eq!(
+        classify(syscall::PROCESS_SPAWN, &args),
+        Lv2Request::ProcessSpawn {
+            pid_out_ptr: 0x100,
+            prio: 1000,
+            flags: 0,
+            block_ptr: 0x2000,
+            block_size: 0x58,
+            data_word: 0,
+            unconsumed: [0xAA, 0xBB],
+        }
+    );
+}
+
+#[test]
+fn classify_spawns_a_self2_splits_data_word_from_trailing_ptrs() {
+    // prio -1000 arrives sign-extended; the vsh wrapper extsw's it.
+    let args = [
+        0x100,
+        0xFFFF_FFFF_FFFF_FC18,
+        0x0100_0000,
+        0x2000,
+        0x58,
+        0xDD,
+        0xEE,
+        0xFF,
+    ];
+    assert_eq!(
+        classify(syscall::PROCESS_SPAWNS_A_SELF2, &args),
+        Lv2Request::ProcessSpawn {
+            pid_out_ptr: 0x100,
+            prio: -1000,
+            flags: 0x0100_0000,
+            block_ptr: 0x2000,
+            block_size: 0x58,
+            data_word: 0xDD,
+            unconsumed: [0xEE, 0xFF],
+        }
+    );
+}
+
+#[test]
+fn classify_process_exit2_accepts_sign_extended_status() {
+    let args = [0xFFFF_FFFF_FFFF_FFFF, 0x3000, 0x1030, 0x77, 0, 0, 0, 0];
+    assert_eq!(
+        classify(syscall::PROCESS_EXIT2, &args),
+        Lv2Request::ProcessExit2 {
+            code: -1,
+            arg_ptr: 0x3000,
+            arg_size: 0x1030,
+            arg4: 0x77,
+        }
+    );
+}
+
+#[test]
+fn classify_process_exit2_carries_arg4_for_witness() {
+    // The exitspawn wrapper passes 0x1000_0000 in r6 (RPCS3
+    // sys_game_.cpp exitspawn); the slot must reach the request.
+    let args = [0, 0x3000, 0x1030, 0x1000_0000, 0, 0, 0, 0];
+    assert_eq!(
+        classify(syscall::PROCESS_EXIT2, &args),
+        Lv2Request::ProcessExit2 {
+            code: 0,
+            arg_ptr: 0x3000,
+            arg_size: 0x1030,
+            arg4: 0x1000_0000,
+        }
+    );
+}
+
+#[test]
+fn classify_process_get_status() {
+    let args = [0x2, 0, 0, 0, 0, 0, 0, 0];
+    assert_eq!(
+        classify(syscall::PROCESS_GET_STATUS, &args),
+        Lv2Request::ProcessGetStatus { pid: 2 }
+    );
+}
+
+#[test]
 fn classify_spu_thread_group_destroy() {
     let args = [0x1234, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
@@ -851,7 +970,10 @@ fn classify_sys_rsx_context_attribute() {
 /// [`U32_SLOTS_BY_SYSCALL`].
 const S32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::PROCESS_EXIT, &[0]),
-    (syscall::PPU_THREAD_CREATE, &[3]),
+    (syscall::PROCESS_SPAWN, &[1]),
+    (syscall::PROCESS_SPAWNS_A_SELF2, &[1]),
+    (syscall::PROCESS_EXIT2, &[0]),
+    (syscall::PPU_THREAD_CREATE, &[4]),
     (syscall::SEMAPHORE_CREATE, &[2, 3]),
     (syscall::SEMAPHORE_POST, &[1]),
     (syscall::SPU_THREAD_GROUP_CREATE, &[2]),

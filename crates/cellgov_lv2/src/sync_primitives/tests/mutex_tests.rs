@@ -1,4 +1,4 @@
-//! Mutex table tests -- ownership transfer, contention parking, and would-deadlock detection.
+//! Mutex table tests -- ownership transfer, contention parking, would-deadlock detection, and recursive relock counting.
 
 use super::*;
 
@@ -105,20 +105,113 @@ fn acquire_or_enqueue_already_parked_is_would_deadlock() {
     assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
 }
 
-#[test]
-fn acquire_or_enqueue_ignores_recursive_attr() {
-    let attrs = MutexAttrs {
+fn recursive_attrs() -> MutexAttrs {
+    MutexAttrs {
         recursive: true,
         ..Default::default()
-    };
+    }
+}
+
+#[test]
+fn a_non_recursive_relock_by_the_owner_stays_would_deadlock() {
     let mut t = MutexTable::new();
-    t.create_with_id(1, attrs).unwrap();
+    t.create_with_id(1, default_attrs()).unwrap();
     let a = tid(0x0100_0001);
     t.acquire_or_enqueue(1, a);
     assert_eq!(
         t.acquire_or_enqueue(1, a),
         MutexAcquireOrEnqueue::WouldDeadlock,
     );
+    assert_eq!(t.lookup(1).unwrap().lock_count(), 0);
+}
+
+#[test]
+fn a_recursive_relock_by_the_owner_increments_instead_of_deadlocking() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let a = tid(0x0100_0001);
+    assert_eq!(t.acquire_or_enqueue(1, a), MutexAcquireOrEnqueue::Acquired);
+    assert_eq!(t.acquire_or_enqueue(1, a), MutexAcquireOrEnqueue::Recursed);
+    assert_eq!(t.acquire_or_enqueue(1, a), MutexAcquireOrEnqueue::Recursed);
+    assert_eq!(t.lookup(1).unwrap().owner(), Some(a));
+    assert_eq!(t.lookup(1).unwrap().lock_count(), 2);
+    assert!(t.lookup(1).unwrap().waiters().is_empty());
+}
+
+#[test]
+fn a_recursive_relock_needs_matching_unlocks_before_a_waiter_is_granted() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    let waiter = tid(0x0100_0002);
+    t.acquire_or_enqueue(1, owner);
+    assert_eq!(
+        t.acquire_or_enqueue(1, owner),
+        MutexAcquireOrEnqueue::Recursed,
+    );
+    assert_eq!(
+        t.acquire_or_enqueue(1, waiter),
+        MutexAcquireOrEnqueue::Enqueued,
+    );
+    assert!(t.unlock_decrement(1, owner), "one recursive hold remains");
+    assert_eq!(
+        t.lookup(1).unwrap().owner(),
+        Some(owner),
+        "decrement above zero must not release ownership"
+    );
+    assert_eq!(t.lookup(1).unwrap().waiters().len(), 1);
+    assert!(
+        !t.unlock_decrement(1, owner),
+        "count is back at zero; the final unlock is a release"
+    );
+    assert_eq!(
+        t.release_and_wake_next(1, owner),
+        MutexRelease::Transferred { new_owner: waiter },
+    );
+}
+
+#[test]
+fn unlock_decrement_without_a_recursive_hold_returns_false() {
+    let mut t = MutexTable::new();
+    assert!(!t.unlock_decrement(99, tid(0x0100_0001)), "unknown id");
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    let other = tid(0x0100_0002);
+    assert!(!t.unlock_decrement(1, owner), "unowned mutex");
+    t.acquire_or_enqueue(1, owner);
+    assert!(!t.unlock_decrement(1, owner), "held once, count zero");
+    t.acquire_or_enqueue(1, owner);
+    assert!(!t.unlock_decrement(1, other), "non-owner never decrements");
+    assert_eq!(t.lookup(1).unwrap().lock_count(), 1);
+}
+
+#[test]
+fn a_saturated_lock_count_reports_count_saturated_and_does_not_wrap() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let a = tid(0x0100_0001);
+    t.acquire_or_enqueue(1, a);
+    t.set_lock_count_for_test(1, u32::MAX);
+    assert_eq!(
+        t.acquire_or_enqueue(1, a),
+        MutexAcquireOrEnqueue::CountSaturated,
+    );
+    assert_eq!(t.lookup(1).unwrap().lock_count(), u32::MAX);
+    assert_eq!(t.lookup(1).unwrap().owner(), Some(a));
+}
+
+#[test]
+fn a_full_release_clears_outstanding_recursive_holds() {
+    // The cond-wait release path gives up the mutex outright; a
+    // stale count must not survive into the next owner's hold.
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let a = tid(0x0100_0001);
+    t.acquire_or_enqueue(1, a);
+    t.acquire_or_enqueue(1, a);
+    assert_eq!(t.release_and_wake_next(1, a), MutexRelease::Freed);
+    assert_eq!(t.lookup(1).unwrap().lock_count(), 0);
+    assert_eq!(t.lookup(1).unwrap().owner(), None);
 }
 
 #[test]
@@ -341,6 +434,34 @@ fn state_hash_distinguishes_waiter_order() {
     b.enqueue_waiter(1, tid(0x0100_0003)).unwrap();
     b.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
     assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_distinguishes_an_outstanding_recursion_count() {
+    let mut a = MutexTable::new();
+    let mut b = MutexTable::new();
+    a.create_with_id(1, recursive_attrs()).unwrap();
+    b.create_with_id(1, recursive_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    a.acquire_or_enqueue(1, owner);
+    b.acquire_or_enqueue(1, owner);
+    b.acquire_or_enqueue(1, owner);
+    assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_returns_to_baseline_after_relock_then_decrement() {
+    // Gate edge: a count back at zero folds no bytes, so the hash
+    // reads as if the re-lock never happened.
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    t.acquire_or_enqueue(1, owner);
+    let baseline = t.state_hash();
+    t.acquire_or_enqueue(1, owner);
+    assert_ne!(baseline, t.state_hash());
+    assert!(t.unlock_decrement(1, owner));
+    assert_eq!(baseline, t.state_hash());
 }
 
 #[test]
