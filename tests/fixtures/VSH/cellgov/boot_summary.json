@@ -5,7 +5,7 @@
   "outcome": "MaxSteps",
   "steps": 390099,
   "budget": 256,
-  "host_invariant_breaks": 73,
+  "host_invariant_breaks": 76,
   "witnesses": {
     "cond_reacquires": {
       "value": 1,
@@ -16,23 +16,23 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 73,
+      "value": 76,
       "class": "exact"
     },
     "ldarx": {
-      "value": 95435,
+      "value": 161132,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 63750,
+      "value": 107547,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 31721,
+      "value": 53619,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 31727,
+      "value": 53626,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -76,11 +76,11 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 63708,
+      "value": 107506,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 307,
+      "value": 309,
       "class": "at-least"
     },
     "timer_sleeps": {

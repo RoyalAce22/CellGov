@@ -35,6 +35,9 @@ const EXIT_WALL_DRIFT: i32 = 2;
 /// line was unparseable.
 const EXIT_SUBPROCESS_FAIL: i32 = 4;
 
+/// Exit code: the run disagreed with the title's committed anchor.
+const EXIT_ANCHOR_DRIFT: i32 = 5;
+
 /// `run-game` terminated with a guest fault.
 const EXIT_RUN_GAME_FAULT: i32 = 10;
 /// `run-game` reached `--max-steps` without hitting the configured
@@ -341,6 +344,9 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             budget_override,
             prescan,
             guest_args: &guest_args,
+            // This entry point is the raw measurement the pair spawns
+            // twice; only the pair gates on the anchor.
+            check_anchor: false,
         },
         inputs.elf_data,
         inputs.authority_id,
@@ -360,6 +366,7 @@ pub(crate) fn bench_boot(args: &[String]) {
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
     let prescan = args.iter().any(|a| a == "--prescan");
+    let check_anchor = !args.iter().any(|a| a == "--no-anchor-check");
     let outcome = match game::bench_boot_pair(game::BenchOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -370,6 +377,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         budget_override,
         prescan,
         guest_args: &guest_args,
+        check_anchor,
     }) {
         Ok(o) => o,
         Err(e) => {
@@ -388,12 +396,39 @@ pub(crate) fn bench_boot(args: &[String]) {
     match outcome.gate {
         game::BenchGate::Pass => {}
         game::BenchGate::DeterminismBreak => {
+            // Steps and outcome can match here: a witness that moves
+            // between runs is also a determinism break, and the pair
+            // printed those disagreements to stdout above.
             eprintln!(
                 "bench-boot: determinism break: run 1 steps={} outcome={}, \
-                 run 2 steps={} outcome={}; exiting with status {EXIT_DETERMINISM_BREAK}",
+                 run 2 steps={} outcome={}. Identical steps and outcome here mean \
+                 the runs disagreed on a witness; see the disagreements above. \
+                 Exiting with status {EXIT_DETERMINISM_BREAK}",
                 outcome.run1.steps, outcome.run1.outcome, outcome.run2.steps, outcome.run2.outcome,
             );
             std::process::exit(EXIT_DETERMINISM_BREAK);
+        }
+        game::BenchGate::AnchorDrift => {
+            eprintln!(
+                "bench-boot: {} disagreement(s) with the committed anchor for {} \
+                 (content id {}):",
+                outcome.anchor_failures.len(),
+                inputs.title.name(),
+                inputs.title.content_id,
+            );
+            for failure in &outcome.anchor_failures {
+                eprintln!("  {failure}");
+            }
+            eprintln!(
+                "this run used the configuration the anchor was recorded under, so \
+                 the movement is a regression until it is attributed to a change. \
+                 Once it is, re-bless with:\n  \
+                 cargo run --release -p cellgov_cli -- record-anchors --title {}\n\
+                 --no-anchor-check drops this gate for a measurement-only run.\n\
+                 exiting with status {EXIT_ANCHOR_DRIFT}",
+                inputs.title.name(),
+            );
+            std::process::exit(EXIT_ANCHOR_DRIFT);
         }
         game::BenchGate::WallUnmeasurable => {
             eprintln!(

@@ -1,15 +1,19 @@
 //! `bench-boot` / `bench-boot-once` / `bench-boot-pair` machinery.
 //! A pair runs two subprocesses and gates on per-run agreement.
 
+use std::path::Path;
 use std::str::FromStr;
 use std::time::Instant;
 
-use cellgov_compare::{BootOutcome, BootOutcomeParseError};
+use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
+use cellgov_compare::witnesses::{check_all, unrecorded};
+use cellgov_compare::{BootOutcome, BootOutcomeParseError, BootSummary};
 use cellgov_time::Budget;
 
 use super::boot;
 use super::manifest::{self, TitleManifest};
 use super::step_loop::bench_step_loop;
+use crate::paths::{baseline_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
 
 /// Wall-time disagreement that trips the pair gate, as a percentage
 /// of the faster run.
@@ -31,6 +35,10 @@ pub struct BenchOptions<'a> {
     /// Guest argv for the primary thread, `argv[0]` included. Empty
     /// keeps the no-args entry state (r3..r6 = 0).
     pub guest_args: &'a [String],
+    /// Compare the run against the title's committed anchor. Cleared
+    /// by `--no-anchor-check` for the re-record workflow, where the
+    /// anchor is expected to disagree.
+    pub check_anchor: bool,
 }
 
 impl BenchOptions<'_> {
@@ -90,6 +98,8 @@ pub enum BenchGate {
     Pass,
     /// Runs disagreed on retired step count or boot outcome.
     DeterminismBreak,
+    /// The run disagreed with the title's committed anchor.
+    AnchorDrift,
     /// Wall drift exceeded the gate.
     WallDriftExceeded,
     /// Wall measurement was zero / non-finite.
@@ -97,12 +107,15 @@ pub enum BenchGate {
 }
 
 /// Result of one [`bench_boot_pair`] invocation.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BenchPairOutcome {
     pub run1: BenchBootResult,
     pub run2: BenchBootResult,
     pub drift_pct: Option<f64>,
     pub gate: BenchGate,
+    /// Every anchor disagreement found, empty unless `gate` is
+    /// [`BenchGate::AnchorDrift`].
+    pub anchor_failures: Vec<String>,
 }
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
@@ -522,7 +535,9 @@ impl SpawnError {
 /// Spawn the current binary as `bench-boot-once` and parse its
 /// `BENCH_RESULT` line. Subprocess stderr is forwarded so warnings
 /// reach the parent on the success path.
-fn spawn_one_run(opts: BenchOptions<'_>) -> Result<BenchBootResult, SpawnError> {
+/// Returns the parsed result alongside the subprocess stderr, which
+/// carries the `BENCH_*` witness lines the anchor check reads.
+fn spawn_one_run(opts: BenchOptions<'_>) -> Result<(BenchBootResult, String), SpawnError> {
     let exe = std::env::current_exe().map_err(SpawnError::Io)?;
     let mut cmd = std::process::Command::new(&exe);
     opts.encode_to_command(&mut cmd);
@@ -540,7 +555,7 @@ fn spawn_one_run(opts: BenchOptions<'_>) -> Result<BenchBootResult, SpawnError> 
         eprint!("{stderr}");
     }
     match parse_bench_result(&stdout) {
-        Ok(r) => Ok(r),
+        Ok(r) => Ok((r, stderr)),
         Err(error) => Err(SpawnError::ParseFailed {
             error,
             stdout,
@@ -571,7 +586,7 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         opts.elf_path,
         opts.max_steps
     );
-    let r1 = spawn_one_run(opts)?;
+    let (r1, r1_stderr) = spawn_one_run(opts)?;
     println!(
         "  run 1: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
         r1.steps,
@@ -579,7 +594,7 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         r1.steps_per_sec(),
         r1.outcome,
     );
-    let r2 = spawn_one_run(opts)?;
+    let (r2, r2_stderr) = spawn_one_run(opts)?;
     println!(
         "  run 2: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
         r2.steps,
@@ -588,7 +603,48 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         r2.outcome,
     );
     let drift_pct = wall_disagreement_percent(r1.wall, r2.wall);
-    let gate = classify_pair(&r1, &r2, drift_pct);
+    let witness_break = witness_disagreements(&r1_stderr, &r2_stderr);
+    // Only run 1's stream reaches the anchor. That is sound only
+    // because `witness_disagreements` above has already established
+    // the two runs produced the same one.
+    let anchor = if !opts.check_anchor {
+        AnchorVerdict::Skipped
+    } else {
+        let reasons = incomparable_reasons(&opts);
+        if reasons.is_empty() {
+            check_anchor(
+                &opts.title.content_id,
+                r1.steps as u64,
+                &r1.outcome.to_string(),
+                &r1_stderr,
+            )
+        } else {
+            AnchorVerdict::NotComparable(reasons)
+        }
+    };
+    match &anchor {
+        AnchorVerdict::Skipped => {}
+        AnchorVerdict::NotComparable(reasons) => {
+            println!(
+                "  anchor: NOT COMPARED against {} -- {}",
+                opts.title.content_id,
+                reasons.join("; ")
+            );
+        }
+        AnchorVerdict::NoBaseline => println!(
+            "  anchor: none recorded for {} (skipped)",
+            opts.title.content_id
+        ),
+        AnchorVerdict::Match => println!("  anchor: matches {}", opts.title.content_id),
+        AnchorVerdict::Drift(f) => {
+            println!(
+                "  anchor: {} disagreement(s) vs {}",
+                f.len(),
+                opts.title.content_id
+            )
+        }
+    }
+    let gate = classify_pair(&r1, &r2, drift_pct, &witness_break, &anchor);
     match gate {
         BenchGate::Pass => {
             let d = drift_pct.expect("Pass implies finite drift");
@@ -602,20 +658,253 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
             println!("  agreement: unmeasurable (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => FAIL)");
         }
         BenchGate::DeterminismBreak => {
-            println!("  agreement: determinism break (steps/outcome differ)");
+            println!("  agreement: determinism break");
+            if r1.steps != r2.steps || r1.outcome != r2.outcome {
+                println!("    steps/outcome differ between the two runs");
+            }
+            for failure in &witness_break {
+                println!("    {failure}");
+            }
         }
+        BenchGate::AnchorDrift => {}
     }
     Ok(BenchPairOutcome {
         run1: r1,
         run2: r2,
         drift_pct,
         gate,
+        anchor_failures: match anchor {
+            AnchorVerdict::Drift(f) => f,
+            _ => Vec::new(),
+        },
     })
 }
 
-fn classify_pair(r1: &BenchBootResult, r2: &BenchBootResult, drift_pct: Option<f64>) -> BenchGate {
-    if r1.steps != r2.steps || r1.outcome != r2.outcome {
+/// How a run compared against the title's committed anchor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AnchorVerdict {
+    /// The check was not requested.
+    Skipped,
+    /// The comparison is meaningless for this invocation; each string
+    /// names one cause. Distinct from [`Self::NoBaseline`] so a
+    /// retargeted run never reads as "nothing is recorded".
+    NotComparable(Vec<String>),
+    /// No anchor is committed for this title, so there is nothing to
+    /// compare against. A title being benchmarked before its first
+    /// `record-anchors` is an ordinary state, not a failure.
+    NoBaseline,
+    /// The run reproduced every recorded value.
+    Match,
+    /// Every disagreement found, in the order the comparison made them.
+    Drift(Vec<String>),
+}
+
+/// Why this invocation cannot be held against the committed anchor.
+///
+/// The anchor is measured by `record-anchors`, which boots the title
+/// under its manifest defaults and nothing else. An override that
+/// moves the trajectory yields a legitimately different run, so gating
+/// it would report a regression that is not one. `--prescan` is absent
+/// from the list because it only prints a decode report before
+/// execution; `--firmware-dir` is absent because the resolved value
+/// cannot be told apart from the auto-default here.
+fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
+    let mut reasons = Vec::new();
+    let recorded_cap = opts
+        .title
+        .bench_max_steps
+        .unwrap_or(DEFAULT_BENCH_MAX_STEPS);
+    if opts.max_steps as u64 != recorded_cap {
+        reasons.push(format!(
+            "--max-steps {} differs from the {recorded_cap} the anchor is recorded under",
+            opts.max_steps
+        ));
+    }
+    if let Some(cp) = opts.checkpoint_override {
+        if cp != opts.title.checkpoint_trigger() {
+            reasons.push(format!(
+                "--checkpoint {} overrides the manifest checkpoint {}",
+                cp.as_cli_str(),
+                opts.title.checkpoint_trigger().as_cli_str()
+            ));
+        }
+    }
+    if let Some(b) = opts.budget_override {
+        reasons.push(format!("--budget {b} overrides the manifest budget"));
+    }
+    if opts.strict_reserved {
+        reasons.push("--strict-reserved changes reserved-region write handling".to_string());
+    }
+    if !opts.guest_args.is_empty() {
+        reasons.push(format!(
+            "--guest-arg supplies {} guest argv entries; the anchor is recorded with none",
+            opts.guest_args.len()
+        ));
+    }
+    reasons
+}
+
+/// Witness-level disagreements between the pair's two runs.
+///
+/// The steps/outcome comparison cannot see a counter that moved
+/// without changing either, and the anchor check reads one run's
+/// stream; without this, a witness that is nondeterministic across
+/// runs passes the pair gate whenever it happens to match the anchor.
+fn witness_disagreements(r1_stderr: &str, r2_stderr: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut parsed = Vec::new();
+    for (label, stderr) in [("run 1", r1_stderr), ("run 2", r2_stderr)] {
+        match parse_witness_lines(stderr) {
+            Ok(w) => parsed.push(w),
+            Err(errs) => out.extend(
+                errs.iter()
+                    .map(|e| format!("{label} witness line did not parse: {e}")),
+            ),
+        }
+    }
+    let [a, b] = parsed.as_slice() else {
+        return out;
+    };
+    for line in a.seen_lines.symmetric_difference(&b.seen_lines) {
+        let present = if a.seen_lines.contains(line) { 1 } else { 2 };
+        out.push(format!(
+            "witness line {line} appeared in run {present} only"
+        ));
+    }
+    for (name, x) in &a.values {
+        let Some(y) = b.values.get(name) else {
+            out.push(format!("witness {name}: run 1 {x}, absent from run 2"));
+            continue;
+        };
+        if x != y {
+            out.push(format!("witness {name}: run 1 {x} != run 2 {y}"));
+        }
+    }
+    for name in b.values.keys() {
+        if !a.values.contains_key(name) {
+            out.push(format!(
+                "witness {name}: run 2 {}, absent from run 1",
+                b.values[name]
+            ));
+        }
+    }
+    out
+}
+
+/// Compare a run against a loaded anchor, returning every
+/// disagreement.
+///
+/// Mirrors the comparison in `tests/title_witnesses.rs`: the two must
+/// agree, or `bench-boot` would pass a run the witness suite rejects.
+fn anchor_disagreements(
+    baseline: &BootSummary,
+    steps: u64,
+    outcome: &str,
+    observed: &ParsedWitnesses,
+) -> Vec<String> {
+    let mut failures = Vec::new();
+    if steps != baseline.steps {
+        failures.push(format!("steps {steps} != recorded {}", baseline.steps));
+    }
+    // Display, not Debug: `BootOutcome`'s `FromStr` round-trips the
+    // Display form, and the two disagree for `PcReached`, whose Debug
+    // prints the address in decimal.
+    let recorded_outcome = baseline.outcome.to_string();
+    if outcome != recorded_outcome {
+        failures.push(format!("outcome {outcome} != recorded {recorded_outcome}"));
+    }
+    if baseline.witnesses.is_empty() {
+        failures.push("anchor records no witnesses".to_string());
+        return failures;
+    }
+    for failure in check_all(&baseline.witnesses, observed) {
+        failures.push(failure.to_string());
+    }
+    for name in unrecorded(&baseline.witnesses, &observed.values) {
+        failures.push(format!(
+            "witness {name} is emitted but not recorded in the anchor"
+        ));
+    }
+    failures
+}
+
+/// Load the anchor for `content_id` and compare `stderr`'s witness
+/// lines against it.
+///
+/// An unreadable or unparseable anchor is a disagreement, not a skip:
+/// only a genuinely absent file means "nothing recorded yet".
+///
+/// [`workspace_root`] is compiled in, so a binary invoked outside the
+/// tree it was built from reaches no anchor at all. That says nothing
+/// about what is recorded, so it reports as
+/// [`AnchorVerdict::NotComparable`] rather than letting every title
+/// look unrecorded.
+fn check_anchor(content_id: &str, steps: u64, outcome: &str, stderr: &str) -> AnchorVerdict {
+    check_anchor_under(&workspace_root(), content_id, steps, outcome, stderr)
+}
+
+fn check_anchor_under(
+    root: &Path,
+    content_id: &str,
+    steps: u64,
+    outcome: &str,
+    stderr: &str,
+) -> AnchorVerdict {
+    if !root.is_dir() {
+        return AnchorVerdict::NotComparable(vec![format!(
+            "the compiled-in workspace root {} is not present on this machine, so no \
+             committed anchor is reachable",
+            root.display()
+        )]);
+    }
+    let path = baseline_path(root, content_id);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AnchorVerdict::NoBaseline,
+        Err(e) => {
+            return AnchorVerdict::Drift(vec![format!("read {}: {e}", path.display())]);
+        }
+    };
+    let baseline: BootSummary = match serde_json::from_str(&text) {
+        Ok(b) => b,
+        Err(e) => {
+            return AnchorVerdict::Drift(vec![format!("parse {}: {e}", path.display())]);
+        }
+    };
+    let observed = match parse_witness_lines(stderr) {
+        Ok(w) => w,
+        Err(errs) => {
+            return AnchorVerdict::Drift(
+                errs.iter()
+                    .map(|e| format!("malformed witness line: {e}"))
+                    .collect(),
+            );
+        }
+    };
+    let failures = anchor_disagreements(&baseline, steps, outcome, &observed);
+    if failures.is_empty() {
+        AnchorVerdict::Match
+    } else {
+        AnchorVerdict::Drift(failures)
+    }
+}
+
+/// Order matters: a determinism break makes the witness stream
+/// meaningless, and an anchor disagreement outranks wall drift so a
+/// contended host cannot mask a real regression behind a timing
+/// failure.
+fn classify_pair(
+    r1: &BenchBootResult,
+    r2: &BenchBootResult,
+    drift_pct: Option<f64>,
+    witness_break: &[String],
+    anchor: &AnchorVerdict,
+) -> BenchGate {
+    if r1.steps != r2.steps || r1.outcome != r2.outcome || !witness_break.is_empty() {
         return BenchGate::DeterminismBreak;
+    }
+    if matches!(anchor, AnchorVerdict::Drift(_)) {
+        return BenchGate::AnchorDrift;
     }
     match drift_pct {
         Some(d) if d > BENCH_AGREEMENT_GATE_PCT => BenchGate::WallDriftExceeded,

@@ -12,6 +12,7 @@ mod disasm;
 mod dump_prx_imports;
 mod funcs;
 mod game;
+mod paths;
 
 use cli::exit::die;
 use cli::scenarios::{report, run_scenario, SCENARIOS};
@@ -37,7 +38,10 @@ cellgov_cli run-game <elf-path|--title NAME> [--max-steps N] [--budget N] [--tra
 \t\t(default --firmware-dir: firmware/sys/external/ when present at the current working directory)";
 const USAGE_BENCH_BOOT: &str = "\
 cellgov_cli bench-boot --title <name> [--max-steps N] [--budget N] [--firmware-dir DIR]
-\t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]";
+\t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan] [--guest-arg VAL]
+\t\t[--no-anchor-check]
+\t\t(the run is held against the title's committed anchor; an override that
+\t\t retargets the boot reports as not compared rather than failing)";
 const USAGE_BENCH_BOOT_ONCE: &str = "\
 cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>
 \t\t[--max-steps N] [--budget N] [--firmware-dir DIR]

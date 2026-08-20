@@ -18,18 +18,7 @@ use cellgov_compare::BootSummary;
 use crate::cli::exit::die;
 use crate::game::manifest::TitleRegistry;
 
-const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
-
-/// Workspace root, compiled in so the command works from any CWD and
-/// the child boot resolves its default firmware dir from the same
-/// place the committed baselines live.
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root is two levels above apps/cellgov_cli")
-        .to_path_buf()
-}
+use crate::paths::{baseline_path, history_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.iter()
@@ -130,18 +119,6 @@ fn measure(entry: &Entry) -> Option<(BTreeMap<String, u64>, u64, String)> {
     Some((witnesses.values, steps, outcome))
 }
 
-fn baseline_path(content_id: &str) -> PathBuf {
-    workspace_root().join(format!(
-        "tests/fixtures/{content_id}/cellgov/boot_summary.json"
-    ))
-}
-
-fn history_path(content_id: &str) -> PathBuf {
-    workspace_root().join(format!(
-        "tests/fixtures/{content_id}/cellgov/boot_history.jsonl"
-    ))
-}
-
 /// Read and parse the existing history, dying on any error other than
 /// a missing file. A read failure must not be mistaken for an empty
 /// history -- that would silently replace the append-only record.
@@ -174,7 +151,7 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
         return false;
     };
 
-    let path = baseline_path(&entry.content_id);
+    let path = baseline_path(&workspace_root(), &entry.content_id);
     let previous: Option<BootSummary> = std::fs::read_to_string(&path)
         .ok()
         .and_then(|t| serde_json::from_str(&t).ok());
@@ -191,7 +168,7 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
     // History is parsed BEFORE the baseline is written: a malformed
     // history line must abort while the anchor is still untouched,
     // never leave a moved anchor with no history entry.
-    let hist_path = history_path(&entry.content_id);
+    let hist_path = history_path(&workspace_root(), &entry.content_id);
     let existing_history = read_history(&hist_path);
     let history_entries = boot_history::parse(&existing_history)
         .unwrap_or_else(|e| die(&format!("parse {}: {e}", hist_path.display())));

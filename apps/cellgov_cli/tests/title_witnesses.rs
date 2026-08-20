@@ -147,7 +147,10 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
             title.short_name, observed.steps, baseline.steps
         ));
     }
-    let recorded_outcome = format!("{:?}", baseline.outcome);
+    // Display, not Debug: BENCH_RESULT prints the Display form, and
+    // the two disagree for PcReached, whose Debug renders the address
+    // in decimal.
+    let recorded_outcome = baseline.outcome.to_string();
     if observed.outcome != recorded_outcome {
         failures.push(format!(
             "{}: outcome {} != recorded {recorded_outcome}",
