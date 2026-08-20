@@ -94,7 +94,8 @@ static inline s32 syscall3_s32(u64 num, u64 a, u64 b, u64 c)
     return (s32)r3;
 }
 
-static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f)
+static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
+                               u64 e, u64 f, u64 g, u64 h)
 {
     register u64 r3 __asm__("3") = a;
     register u64 r4 __asm__("4") = b;
@@ -102,12 +103,14 @@ static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f
     register u64 r6 __asm__("6") = d;
     register u64 r7 __asm__("7") = e;
     register u64 r8 __asm__("8") = f;
+    register u64 r9 __asm__("9") = g;
+    register u64 r10 __asm__("10") = h;
     register u64 r11 __asm__("11") = num;
     __asm__ volatile (
         "sc\n"
         : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r11)
-        : "r0", "r9", "r10", "r12", "cr0", "ctr", "memory"
+        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
+        : "r0", "r12", "cr0", "ctr", "memory"
     );
     return (s32)r3;
 }
@@ -133,6 +136,70 @@ static inline void syscall1_noreturn(u64 num, u64 a)
 #define SYS_COND_CREATE      105
 #define SYS_COND_WAIT        107
 #define SYS_COND_SIGNAL      108
+
+/* sys_mutex_attribute_t: protocol@0 u32, recursive@4 u32,
+ * pshared@8 u32, adaptive@12 u32, ipc_key@16 u64, flags@24 s32,
+ * pad@28, name@32. The kernel rejects a NULL attribute pointer
+ * with EFAULT, and recursive must be SYS_SYNC_RECURSIVE (0x10)
+ * or SYS_SYNC_NOT_RECURSIVE (0x20) (RPCS3 sys_mutex.cpp
+ * sys_mutex_create). */
+static const struct {
+    unsigned int protocol;      /* SYS_SYNC_FIFO */
+    unsigned int recursive;     /* SYS_SYNC_NOT_RECURSIVE */
+    unsigned int pshared;       /* SYS_SYNC_NOT_PROCESS_SHARED */
+    unsigned int adaptive;      /* SYS_SYNC_NOT_ADAPTIVE */
+    unsigned long long ipc_key;
+    int flags;
+    unsigned int pad;
+    char name[8];
+} mutex_attr __attribute__((aligned(8))) =
+    { 1, 0x20, 0x200, 0x2000, 0, 0, 0, "" };
+
+/* sys_cond_attribute_t: pshared@0 u32, flags@4 s32, ipc_key@8
+ * u64, name@16. The kernel reads pshared / flags / ipc_key out
+ * of the struct, so the pointer must name valid memory (RPCS3
+ * sys_cond.cpp sys_cond_create). */
+static const struct {
+    unsigned int pshared;       /* SYS_SYNC_NOT_PROCESS_SHARED */
+    int flags;
+    unsigned long long ipc_key;
+    char name[8];
+} cond_attr __attribute__((aligned(8))) = { 0x200, 0, 0, "" };
+
+/* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
+ * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
+ * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
+ * passes unk = 0. The param* in r4 is a ppu_thread_param_t
+ * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
+ * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
+ * bytes of u64 fields -- so repack it before the syscall. */
+struct elfv1_opd {
+    unsigned long long code;
+    unsigned long long toc;
+    unsigned long long env;
+};
+
+struct cg_thread_param {
+    unsigned int entry_opd_ptr; /* -> opd_code below */
+    unsigned int tls;
+    unsigned int opd_code;
+    unsigned int opd_toc;
+};
+
+static unsigned long make_thread_param(struct cg_thread_param *p, const void *fn)
+{
+    const struct elfv1_opd *desc = (const struct elfv1_opd *)fn;
+    unsigned long tls_reg;
+    __asm__ volatile ("mr %0, 13" : "=r"(tls_reg));
+    p->opd_code = (unsigned int)desc->code;
+    p->opd_toc = (unsigned int)desc->toc;
+    p->entry_opd_ptr = (unsigned int)(unsigned long)&p->opd_code;
+    p->tls = (unsigned int)tls_reg;
+    return (unsigned long)p;
+}
+
+static struct cg_thread_param consumer_param __attribute__((aligned(8)));
 
 /* N messages exchanged through a BUF_SIZE-slot bounded buffer.
  * N larger than BUF_SIZE forces both sides to block on cond at
@@ -239,7 +306,8 @@ int main(void)
         buffer[i] = 0;
 
     /* Create mutex. */
-    ret = syscall2_s32(SYS_MUTEX_CREATE, (unsigned long)&mutex_id, 0);
+    ret = syscall2_s32(SYS_MUTEX_CREATE,
+        (unsigned long)&mutex_id, (unsigned long)&mutex_attr);
     if (ret != 0)
         return fail(0x01);
     if (mutex_id == 0)
@@ -247,7 +315,8 @@ int main(void)
 
     /* Create cond_not_empty bound to the mutex. */
     ret = syscall3_s32(SYS_COND_CREATE,
-        (unsigned long)&cond_not_empty, mutex_id, 0);
+        (unsigned long)&cond_not_empty, mutex_id,
+        (unsigned long)&cond_attr);
     if (ret != 0)
         return fail(0x04);
     if (cond_not_empty == 0)
@@ -255,21 +324,24 @@ int main(void)
 
     /* Create cond_not_full bound to the mutex. */
     ret = syscall3_s32(SYS_COND_CREATE,
-        (unsigned long)&cond_not_full, mutex_id, 0);
+        (unsigned long)&cond_not_full, mutex_id,
+        (unsigned long)&cond_attr);
     if (ret != 0)
         return fail(0x10);
     if (cond_not_full == 0)
         return fail(0x20);
 
     /* Spawn consumer. */
-    ret = syscall6_s32(
+    ret = syscall8_s32(
         SYS_PPU_THREAD_CREATE,
         (unsigned long)&tid,
-        (unsigned long)&consumer_entry,
-        0,
-        1000,
-        0x4000,
-        0);
+        make_thread_param(&consumer_param, (const void *)&consumer_entry),
+        0,          /* arg */
+        0,          /* unk (reserved; liblv2's wrapper passes 0) */
+        1000,       /* prio */
+        0x4000,     /* stacksize */
+        0,          /* flags */
+        0);         /* threadname (none) */
     if (ret != 0)
         return fail(0x40);
 

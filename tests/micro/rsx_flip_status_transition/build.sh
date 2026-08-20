@@ -1,12 +1,25 @@
 #!/bin/bash
 # Build the rsx_flip_status_transition microtest.
 #
-# Run inside the ps3dev Docker container with the test source
-# mounted at /src:
+# Requirements -- any environment providing:
+#   1. the ps3dev PPU toolchain (powerpc64-ps3-elf-gcc) and
+#      PSL1GHT, installed under $PS3DEV / $PSL1GHT (default
+#      /usr/local/ps3dev, the ps3toolchain standard prefix;
+#      override via env),
+#   2. python3 (for common/patch_toc.py),
+#   3. this test directory mounted/available at /src and the shared
+#      tests/micro/common at /common (or as /src/../common).
+#
+# Any ps3dev+PSL1GHT container works, e.g. one built from the
+# ps3dev/ps3toolchain and ps3dev/PSL1GHT projects:
 #
 #   docker run --rm -v /path/to/rsx_flip_status_transition:/src \
 #       -v /path/to/common:/common \
-#       -e COMMON=/common ps3dev-fresh bash /src/build.sh
+#       -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
+#
+# Git Bash on Windows rewrites the /src and /common mount targets
+# to Windows paths, which leaves stray "<dir>;C" directories on the
+# host; prefix the command with MSYS_NO_PATHCONV=1 there.
 #
 set -e
 

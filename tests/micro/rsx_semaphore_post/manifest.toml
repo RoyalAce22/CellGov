@@ -24,6 +24,10 @@ content_id = "CG_RXSEM"
 short_name = "rxsem"
 display_name = "CellGov RSX semaphore-post microtest"
 eboot_candidates = ["EBOOT.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "retail-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"

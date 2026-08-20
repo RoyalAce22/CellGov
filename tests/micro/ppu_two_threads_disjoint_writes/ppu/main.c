@@ -39,7 +39,8 @@ SYS_PROCESS_PARAM(1001, 0x10000)
  * no HLE dependency. The calling convention is: r11 = syscall
  * number, r3-r10 = args, `sc` instruction, r3 = return value. */
 
-static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f)
+static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
+                               u64 e, u64 f, u64 g, u64 h)
 {
     register u64 r3 __asm__("3") = a;
     register u64 r4 __asm__("4") = b;
@@ -47,12 +48,14 @@ static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f
     register u64 r6 __asm__("6") = d;
     register u64 r7 __asm__("7") = e;
     register u64 r8 __asm__("8") = f;
+    register u64 r9 __asm__("9") = g;
+    register u64 r10 __asm__("10") = h;
     register u64 r11 __asm__("11") = num;
     __asm__ volatile (
         "sc\n"
         : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r11)
-        : "r0", "r9", "r10", "r12", "cr0", "ctr", "memory"
+        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
+        : "r0", "r12", "cr0", "ctr", "memory"
     );
     return (s32)r3;
 }
@@ -86,6 +89,41 @@ static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
 #define SYS_PPU_THREAD_EXIT   41
 #define SYS_PPU_THREAD_JOIN   44
 #define SYS_PPU_THREAD_CREATE 52
+
+/* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
+ * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
+ * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
+ * passes unk = 0. The param* in r4 is a ppu_thread_param_t
+ * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
+ * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
+ * bytes of u64 fields -- so repack it before the syscall. */
+struct elfv1_opd {
+    unsigned long long code;
+    unsigned long long toc;
+    unsigned long long env;
+};
+
+struct cg_thread_param {
+    unsigned int entry_opd_ptr; /* -> opd_code below */
+    unsigned int tls;
+    unsigned int opd_code;
+    unsigned int opd_toc;
+};
+
+static unsigned long make_thread_param(struct cg_thread_param *p, const void *fn)
+{
+    const struct elfv1_opd *desc = (const struct elfv1_opd *)fn;
+    unsigned long tls_reg;
+    __asm__ volatile ("mr %0, 13" : "=r"(tls_reg));
+    p->opd_code = (unsigned int)desc->code;
+    p->opd_toc = (unsigned int)desc->toc;
+    p->entry_opd_ptr = (unsigned int)(unsigned long)&p->opd_code;
+    p->tls = (unsigned int)tls_reg;
+    return (unsigned long)p;
+}
+
+static struct cg_thread_param child_param __attribute__((aligned(8)));
 
 struct TestResult {
     unsigned int status;
@@ -145,19 +183,16 @@ int main(void)
     child_word = 0xDEADBEEF;
     parent_word = 0xDEADBEEF;
 
-    /* On PPC64 ELFv1, a function pointer is already an OPD
-     * pointer: the linker emits an OPD `{ code_addr, toc, env }`
-     * for every function, and symbol references resolve to the
-     * OPD's address. Passing `&child_entry` into the syscall
-     * hands sys_ppu_thread_create the right pointer directly. */
-    ret = syscall6_s32(
+    ret = syscall8_s32(
         SYS_PPU_THREAD_CREATE,
         (unsigned long)&tid,
-        (unsigned long)&child_entry,
-        0,
-        1000,
-        0x4000,
-        0);
+        make_thread_param(&child_param, (const void *)&child_entry),
+        0,          /* arg */
+        0,          /* unk (reserved; liblv2's wrapper passes 0) */
+        1000,       /* prio */
+        0x4000,     /* stacksize */
+        0,          /* flags */
+        0);         /* threadname (none) */
     if (ret != 0)
         return fail(1);
 
