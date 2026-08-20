@@ -24,6 +24,19 @@ impl Runtime {
         ] {
             hasher.write(&source.to_le_bytes());
         }
+        // An empty table (every single-process boot) contributes
+        // nothing, leaving single-process hashes unchanged.
+        if !self.spaces.is_empty() {
+            hasher.write(&self.spaces.metadata_hash().to_le_bytes());
+        }
+        // Child-space reservation tables, same gating discipline:
+        // only tables holding entries fold.
+        for (space, table) in &self.spaces.extra_reservations {
+            if !table.is_empty() {
+                hasher.write(&space.raw().to_le_bytes());
+                hasher.write(&table.state_hash().to_le_bytes());
+            }
+        }
         hasher.finish()
     }
 }

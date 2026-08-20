@@ -2,8 +2,10 @@
 
 use super::*;
 use crate::classify::OutcomeClass;
+use cellgov_core::AddressSpaceId;
+use cellgov_event::UnitId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
-use cellgov_mem::GuestMemory;
+use cellgov_mem::{GuestMemory, PageSize};
 use cellgov_time::Budget;
 
 #[test]
@@ -145,6 +147,155 @@ fn explore_overlapping_writes_is_sensitive() {
                     ],
                 )
             });
+            rt
+        },
+        &ExplorationConfig::default(),
+    );
+
+    let r = result.expect("should have branching points");
+    assert_eq!(r.outcome, OutcomeClass::ScheduleSensitive);
+}
+
+#[test]
+fn explore_cross_space_same_address_is_stable() {
+    // The overlapping-writes fixture that classifies sensitive in one
+    // space: with the second unit in its own address space, the equal
+    // numeric addresses name different memory and every interleaving
+    // commits the same final state.
+    let result = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            let mut rt = Runtime::new(mem, Budget::new(100), 100);
+            rt.create_address_space(AddressSpaceId::new(1)).unwrap();
+            rt.space_memory_mut(AddressSpaceId::new(1))
+                .unwrap()
+                .install_region(0, 64, "child", PageSize::Page64K)
+                .unwrap();
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAA),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xBB),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.assign_unit_space(UnitId::new(1), AddressSpaceId::new(1))
+                .unwrap();
+            rt
+        },
+        &ExplorationConfig::default(),
+    );
+
+    let r = result.expect("should have branching points");
+    assert_eq!(r.outcome, OutcomeClass::ScheduleStable);
+}
+
+#[test]
+fn explore_child_space_only_divergence_is_sensitive() {
+    // Both racers live in the child space and boot memory never
+    // changes, so only the multi-space committed hash can witness the
+    // last-writer split; a boot-only hash would classify this stable.
+    let result = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            let mut rt = Runtime::new(mem, Budget::new(100), 100);
+            rt.create_address_space(AddressSpaceId::new(1)).unwrap();
+            rt.space_memory_mut(AddressSpaceId::new(1))
+                .unwrap()
+                .install_region(0, 64, "child", PageSize::Page64K)
+                .unwrap();
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAA),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xBB),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.assign_unit_space(UnitId::new(0), AddressSpaceId::new(1))
+                .unwrap();
+            rt.assign_unit_space(UnitId::new(1), AddressSpaceId::new(1))
+                .unwrap();
+            rt
+        },
+        &ExplorationConfig::default(),
+    );
+
+    let r = result.expect("should have branching points");
+    assert_eq!(r.outcome, OutcomeClass::ScheduleSensitive);
+}
+
+#[test]
+fn explore_shared_view_cross_space_is_sensitive() {
+    // Different numeric addresses, same shared bytes: the alias
+    // expansion must keep the pair from being pruned as independent,
+    // and the multi-space hash must witness the last-writer split.
+    let result = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            let mut rt = Runtime::new(mem, Budget::new(100), 100);
+            rt.create_address_space(AddressSpaceId::new(1)).unwrap();
+            rt.register_shared_mapping(
+                11,
+                0x40,
+                &[
+                    (AddressSpaceId::BOOT, 0x2000),
+                    (AddressSpaceId::new(1), 0x3000),
+                ],
+            )
+            .unwrap();
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAA),
+                        FakeOp::SharedStore {
+                            addr: 0x2000,
+                            len: 4,
+                        },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xBB),
+                        FakeOp::SharedStore {
+                            addr: 0x3000,
+                            len: 4,
+                        },
+                        FakeOp::End,
+                    ],
+                )
+            });
+            rt.assign_unit_space(UnitId::new(1), AddressSpaceId::new(1))
+                .unwrap();
             rt
         },
         &ExplorationConfig::default(),

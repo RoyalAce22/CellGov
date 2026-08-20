@@ -139,6 +139,21 @@ impl Runtime {
         self.ppu_factory = Some(Box::new(factory));
     }
 
+    /// Invoked when `Lv2Dispatch::ProcessSpawn` fires; installs a
+    /// spawned SELF's image into its fresh child-space memory. Spawn
+    /// syscalls fail with `CELL_ENOSYS` while unset.
+    pub fn set_process_spawn_loader<F>(&mut self, loader: F)
+    where
+        F: Fn(
+                &[u8],
+                &mut cellgov_mem::GuestMemory,
+            )
+                -> Result<super::types::SpawnedProcessImage, super::types::ProcessSpawnLoadError>
+            + 'static,
+    {
+        self.process_spawn_loader = Some(Box::new(loader));
+    }
+
     /// Immutable view of the syscall response table.
     #[inline]
     pub fn syscall_responses(&self) -> &SyscallResponseTable {
@@ -204,13 +219,14 @@ impl Runtime {
         &mut self.memory
     }
 
-    /// Immutable view of the load-reservation table.
+    /// Immutable view of space 0's load-reservation table; child
+    /// spaces resolve via [`Runtime::space_reservations`].
     #[inline]
     pub fn reservations(&self) -> &cellgov_sync::ReservationTable {
         &self.reservations
     }
 
-    /// Mutable view of the load-reservation table.
+    /// Mutable view of space 0's load-reservation table.
     #[inline]
     pub fn reservations_mut(&mut self) -> &mut cellgov_sync::ReservationTable {
         &mut self.reservations

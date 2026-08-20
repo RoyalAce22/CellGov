@@ -8,7 +8,7 @@
 
 use cellgov_core::{RoundRobinScheduler, Scheduler, UnitRegistry};
 use cellgov_event::UnitId;
-use cellgov_exec::UnitStatus;
+use cellgov_exec::{UnitStatus, YieldReason};
 
 /// Scheduler that picks from a prescribed list, then falls back to
 /// round-robin.
@@ -59,6 +59,21 @@ impl Scheduler for PrescribedScheduler {
             return choice;
         }
         self.fallback.select_next(registry)
+    }
+
+    fn notify_yielded(
+        &mut self,
+        unit: UnitId,
+        yield_reason: YieldReason,
+        woke_others: bool,
+        holds_critical_section: bool,
+    ) {
+        // The fallback's selection is stateful (non-waking-syscall and
+        // critical-section stickiness); it must observe every yield
+        // even while overrides are active, or the selections after the
+        // prescription diverge from the baseline round-robin schedule.
+        self.fallback
+            .notify_yielded(unit, yield_reason, woke_others, holds_critical_section);
     }
 }
 

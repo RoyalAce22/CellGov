@@ -20,6 +20,47 @@ fn parses_process_exit_manifest() {
     assert_eq!(m.distribution, Distribution::PsnHdd);
 }
 
+/// `[cellgov] scenario = ...` manifests are the compare-harness
+/// shape and are out of scope.
+#[test]
+fn every_microtest_cellgov_manifest_parses_under_the_current_schema() {
+    let micro_root = Path::new("../../tests/micro");
+    assert!(
+        micro_root.is_dir(),
+        "tests/micro not found relative to the crate root"
+    );
+    let mut checked = 0usize;
+    let mut failures = Vec::new();
+    for entry in std::fs::read_dir(micro_root).expect("read tests/micro") {
+        let manifest = entry.expect("dir entry").path().join("manifest.toml");
+        if !manifest.is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&manifest).expect("manifest readable");
+        // A real table header, not a prose mention in a comment
+        // ("No [cellgov] section ...").
+        let declares_title = text
+            .lines()
+            .any(|l| l.trim_start().starts_with("[cellgov.title]"));
+        if !declares_title {
+            continue;
+        }
+        checked += 1;
+        if let Err(err) = TitleManifest::load_from_path(&manifest) {
+            failures.push(format!("{}: {err}", manifest.display()));
+        }
+    }
+    assert!(
+        checked >= 12,
+        "gate went vacuous: only {checked} [cellgov.title] manifests found under tests/micro"
+    );
+    assert!(
+        failures.is_empty(),
+        "stale microtest manifests:\n{}",
+        failures.join("\n")
+    );
+}
+
 #[test]
 fn rejects_eboot_candidates_with_elf_before_bin() {
     let bad = r#"
@@ -810,8 +851,6 @@ fn unknown_source_kind_lists_firmware_exec() {
     );
 }
 
-/// The committed vsh manifest is the one #276 boots; a change that
-/// reintroduces a game-only requirement on it should fail here.
 #[test]
 fn committed_vsh_manifest_declares_no_game_requirements() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::fs_store::FsStore;
 use crate::image::ContentStore;
-use crate::ppu_thread::{PpuThreadId, PpuThreadTable, ThreadStackAllocator, TlsTemplate};
+use crate::ppu_thread::{PpuThreadId, PpuThreadTable, ThreadStackAllocator};
 use crate::prx_registry::LoadedPrxRegistry;
 use crate::sync_primitives::{
     CondTable, EventFlagTable, EventPortTable, EventQueueTable, LwMutexTable, MutexTable,
@@ -24,7 +24,6 @@ pub(in crate::host) struct Lv2State {
     pub(in crate::host) content: ContentStore,
     pub(in crate::host) groups: ThreadGroupTable,
     pub(in crate::host) ppu_threads: PpuThreadTable,
-    pub(in crate::host) tls_template: TlsTemplate,
     pub(in crate::host) stack_allocator: ThreadStackAllocator,
     /// Shared id allocator for mutex / semaphore / event-queue /
     /// event-flag / cond. `lwmutexes` has its own allocator from 1.
@@ -62,21 +61,10 @@ pub(in crate::host) struct Lv2State {
     pub(in crate::host) prx_registry: LoadedPrxRegistry,
     /// Folded when set.
     pub(in crate::host) firmware_identity: Option<FirmwareIdentity>,
-    /// The booting process's SELF program authority id, served by
-    /// `sys_ss_access_control_engine` pkg 2. Boot reads it from the
-    /// title SELF's plaintext identification header; raw-ELF inputs
-    /// keep the retail-application fallback (see
-    /// `cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID`).
-    /// Firmware classifies callers by this value -- libsysmodule's
-    /// module_start skips its whole init (including the lwmutex
-    /// every later `cellSysmoduleLoadModule` locks) for recognized
-    /// system-process ids. Folded when it differs from the fallback.
-    pub(in crate::host) program_authority_id: u64,
-    /// `ctrl_flags1` from the booting SELF's plaintext capability
-    /// header (supplemental record type 1); 0 when the SELF carries no
-    /// such record and for raw-ELF input. Source of the root / debug
-    /// privilege predicates. Folded when non-zero.
-    pub(in crate::host) control_flags1: u32,
+    /// Per-process identity ([`process::ProcessEntry`]). Boot seeds
+    /// the boot entry from the title SELF's plaintext headers;
+    /// raw-ELF inputs keep the retail-application fallback.
+    pub(in crate::host) processes: process::ProcessTable,
     /// Feeds `sys_process_get_number_of_object`. Folded when
     /// non-zero.
     pub(in crate::host) process_counts: process::ProcessCounts,

@@ -88,6 +88,7 @@ fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
         syscall_responses: _,
         commit_pipeline: _,
         memory: _,
+        spaces: _,
         time: _,
         epoch: _,
         steps_taken: _,
@@ -115,6 +116,7 @@ fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
         rsx_set_reference_dispatches: _,  // audit counter, host-side only
         timer_sleep_dispatches: _,        // audit counter, host-side only
         lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
+        process_spawn_loader: _,          // host-installed closure, like the factories
     } = rt;
 }
 

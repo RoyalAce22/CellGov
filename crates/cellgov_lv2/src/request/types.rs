@@ -352,6 +352,63 @@ pub enum Lv2Request {
         /// `-1`, not Malformed.
         code: i32,
     },
+    /// `_sys_process_spawn` (sc 21) / `sys_process_spawns_a_self2`
+    /// (sc 27). Both deliver the marshalled path/argv/envp block
+    /// decoded from vsh 0x608950: `{ u64 table_off = 16, u64,
+    /// ptr table [(argc+envc+2) x 8B], packed strings }` with
+    /// `argv[0]` naming the SELF path.
+    ProcessSpawn {
+        /// Out: child pid.
+        pid_out_ptr: u32,
+        /// In: primary thread priority. Signed: both vsh spawn
+        /// wrappers sign-extend the word (`extsw`) before the `sc`
+        /// (0x608ca4 for sc 21, 0x608b78 for sc 27).
+        prio: i32,
+        /// In: spawn flags (0x0100_0000 = request-service re-spawn,
+        /// 0x1000_0000 = adapter-forced; 0x000FF000 reserved --
+        /// vsh's public spawn entry 0x608fd4 rejects nonzero
+        /// reserved bits with 0x80010002 before the `sc`).
+        flags: u64,
+        /// In: marshalled block pointer.
+        block_ptr: u32,
+        /// In: marshalled block size in bytes.
+        block_size: u32,
+        /// In: adapter data word (sc 27 r8), 0 when absent (sc 21
+        /// has no data-word slot; its r8 rides in `unconsumed`).
+        data_word: u64,
+        /// In: raw trailing registers carried for witness, not
+        /// consumed. sc 27: `[r9, r10]` -- the 64-byte config block
+        /// and pair-block pointers its vsh wrapper builds on the
+        /// stack (0x608b84/0x608b8c). sc 21: `[r8, r9]` -- the two
+        /// values sc 27's wrapper stores into that pair block are
+        /// passed by register instead (0x608cb0/0x608cb4); vsh's
+        /// public spawn entry 0x608fd4 zeroes both. Nonzero values
+        /// are reported via a named invariant-break at dispatch.
+        unconsumed: [u64; 2],
+    },
+    /// `_sys_process_exit2`: exit carrying a `sys_exit2_param`
+    /// argv/envp block; non-empty argv requests exitspawn.
+    ProcessExit2 {
+        /// In: exit status.
+        code: i32,
+        /// In: `sys_exit2_param` pointer.
+        arg_ptr: u32,
+        /// In: param block size in bytes.
+        arg_size: u32,
+        /// In: raw r6 carried for witness, not consumed. The kernel
+        /// entry takes a fourth word (RPCS3 `sys_process.h`
+        /// `_sys_process_exit2` declares `u32 arg4`), and the
+        /// exitspawn wrapper passes a live `0x1000_0000` (RPCS3
+        /// `sys_game_.cpp` `exitspawn`). Nonzero values are reported
+        /// via a named invariant-break at dispatch.
+        arg4: u64,
+    },
+    /// `sys_process_get_status`. RPCS3 stubs it (todo, CELL_OK);
+    /// CellGov models a minimal liveness poll keyed by pid.
+    ProcessGetStatus {
+        /// In: target pid.
+        pid: u32,
+    },
     /// `sys_process_getpid`.
     ProcessGetPid,
     /// `class_id` is from `sys_process.h`'s `SYS_*_OBJECT` enum;
@@ -639,6 +696,10 @@ pub enum Lv2Request {
         param_ptr: u32,
         /// In: thread argument.
         arg: u64,
+        /// In: reserved 4th argument; liblv2's wrapper passes 0
+        /// (RPCS3 `Modules/sys_ppu_thread_.cpp`). Witnessed on a
+        /// nonzero value, never consumed.
+        unk: u64,
         /// In: priority. LV2 ABI is signed `int priority`; classify
         /// validates sign extension before constructing the variant.
         priority: i32,
@@ -646,6 +707,10 @@ pub enum Lv2Request {
         stacksize: u64,
         /// In: creation flags.
         flags: u64,
+        /// In: NUL-terminated thread-name pointer. Names have no
+        /// modeled guest-visible surface; the pointer is decoded and
+        /// not dereferenced.
+        threadname_ptr: u32,
     },
     /// `sys_rsx_memory_allocate`.
     SysRsxMemoryAllocate {

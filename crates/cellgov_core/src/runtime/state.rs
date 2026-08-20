@@ -44,9 +44,14 @@ pub struct Runtime {
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) spu_factory: Option<SpuFactory>,
     pub(super) ppu_factory: Option<PpuFactory>,
+    pub(super) process_spawn_loader: Option<crate::runtime::types::ProcessSpawnLoader>,
     pub(super) scheduler: Box<dyn Scheduler>,
     pub(super) commit_pipeline: CommitPipeline,
+    /// Space 0: the boot process's address space.
     pub(crate) memory: GuestMemory,
+    /// Child address spaces, per-unit space tags, and process-shared
+    /// mappings. Empty for single-process boots.
+    pub(super) spaces: crate::runtime::spaces::SpaceTable,
     pub(super) time: GuestTicks,
     pub(super) epoch: Epoch,
     pub(super) budget_per_step: Budget,

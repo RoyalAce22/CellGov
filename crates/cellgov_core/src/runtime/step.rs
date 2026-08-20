@@ -92,23 +92,30 @@ impl Runtime {
         let mut effects_buf = std::mem::take(&mut self.effects_buf);
         effects_buf.clear();
         let (result, retired_hashes, retired_full) = {
+            let unit_mem =
+                crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, unit_id);
             let ctx = if let Some(code) = syscall_ret {
                 if reg_writes.is_empty() {
-                    ExecutionContext::with_syscall_return(&self.memory, &received, code)
+                    ExecutionContext::with_syscall_return(unit_mem, &received, code)
                 } else {
                     ExecutionContext::with_syscall_return_and_regs(
-                        &self.memory,
+                        unit_mem,
                         &received,
                         code,
                         &reg_writes,
                     )
                 }
             } else {
-                ExecutionContext::with_received(&self.memory, &received)
+                ExecutionContext::with_received(unit_mem, &received)
             };
             let completed_tags = self.pending_tag_completions.remove(&unit_id).unwrap_or(0);
+            let unit_reservations = crate::runtime::spaces::resolve_unit_reservations(
+                &self.reservations,
+                &self.spaces,
+                unit_id,
+            );
             let ctx = ctx
-                .with_reservations(&self.reservations)
+                .with_reservations(unit_reservations)
                 .with_current_tick(self.time)
                 .with_trace_per_step(self.mode != RuntimeMode::FaultDriven)
                 .with_completed_dma_tags(completed_tags);

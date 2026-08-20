@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::host::test_support::primary_attrs;
-use crate::ppu_thread::TlsTemplate;
 use cellgov_event::UnitId;
 
 #[test]
@@ -20,12 +19,6 @@ fn state_hash_changes_after_primary_seed() {
 }
 
 #[test]
-fn state_hash_unchanged_when_tls_template_empty() {
-    let fresh = Lv2Host::new();
-    assert_eq!(fresh.state_hash(), Lv2Host::new().state_hash());
-}
-
-#[test]
 fn state_hash_changes_when_holds_inserted_then_returns_to_baseline() {
     let mut host = Lv2Host::new();
     host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
@@ -35,14 +28,6 @@ fn state_hash_changes_when_holds_inserted_then_returns_to_baseline() {
     assert_ne!(baseline, host.state_hash());
     host.lwmutex_holds_dec(tid);
     assert_eq!(baseline, host.state_hash());
-}
-
-#[test]
-fn state_hash_changes_after_tls_template_set() {
-    let pre = Lv2Host::new().state_hash();
-    let mut host = Lv2Host::new();
-    host.set_tls_template(TlsTemplate::new(vec![0x11, 0x22], 0x80, 0x10, 0x1000));
-    assert_ne!(pre, host.state_hash());
 }
 
 #[test]
@@ -125,6 +110,48 @@ fn state_hash_unchanged_for_unprivileged_control_flags() {
 }
 
 #[test]
+fn state_hash_changes_when_a_child_process_is_inserted() {
+    use crate::host::process::{ProcessEntry, ProcessTable};
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    let mut table = ProcessTable::new_boot();
+    table.insert_child(
+        0x0100_0501,
+        ProcessEntry {
+            ppid: BOOT_PROCESS_PID,
+            authority_id: 0x1070_0000_5600_0001,
+            control_flags1: 0,
+            exit_status: None,
+        },
+    );
+    host.state.processes = table;
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_differs_between_two_child_authority_ids() {
+    use crate::host::process::{ProcessEntry, ProcessTable};
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    let build = |authid: u64| {
+        let mut host = Lv2Host::new();
+        let mut table = ProcessTable::new_boot();
+        table.insert_child(
+            0x0100_0501,
+            ProcessEntry {
+                ppid: BOOT_PROCESS_PID,
+                authority_id: authid,
+                control_flags1: 0,
+                exit_status: None,
+            },
+        );
+        host.state.processes = table;
+        host.state_hash()
+    };
+    assert_ne!(build(0x1070_0000_5600_0001), build(0x1070_0000_5600_0002));
+}
+
+#[test]
 fn state_hash_changes_for_root_control_flags() {
     let pre = Lv2Host::new().state_hash();
     let mut host = Lv2Host::new();
@@ -139,6 +166,34 @@ fn state_hash_differs_between_two_distinct_control_flags() {
     a.set_control_flags1(0x4000_0000);
     b.set_control_flags1(0x8000_0000);
     assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_changes_when_a_recursive_mutex_relock_is_outstanding() {
+    use crate::ppu_thread::PpuThreadId;
+    use crate::sync_primitives::{MutexAcquireOrEnqueue, MutexAttrs};
+    let build = |relock: bool| {
+        let mut host = Lv2Host::new();
+        let attrs = MutexAttrs {
+            recursive: true,
+            ..Default::default()
+        };
+        host.mutexes_mut().create_with_id(0x100, attrs).unwrap();
+        assert_eq!(
+            host.mutexes_mut()
+                .acquire_or_enqueue(0x100, PpuThreadId::PRIMARY),
+            MutexAcquireOrEnqueue::Acquired,
+        );
+        if relock {
+            assert_eq!(
+                host.mutexes_mut()
+                    .acquire_or_enqueue(0x100, PpuThreadId::PRIMARY),
+                MutexAcquireOrEnqueue::Recursed,
+            );
+        }
+        host.state_hash()
+    };
+    assert_ne!(build(false), build(true));
 }
 
 #[test]
@@ -276,4 +331,95 @@ fn state_hash_differs_when_mmapper_size_and_align_are_transposed() {
         },
     );
     assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_changes_when_the_boot_exit_status_is_recorded() {
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.mark_process_exited(BOOT_PROCESS_PID, 0);
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_distinguishes_boot_control_flags_from_a_boot_exit_status() {
+    // Both fields are gated 4-byte folds on the boot entry; without a
+    // discriminant on the exit status, {ctrl_flags1=5, alive} and
+    // {ctrl_flags1=0, exited(5)} would produce the same byte stream.
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    let mut flags = Lv2Host::new();
+    flags.set_control_flags1(5);
+    let mut exited = Lv2Host::new();
+    exited.mark_process_exited(BOOT_PROCESS_PID, 5);
+    assert_ne!(flags.state_hash(), exited.state_hash());
+}
+
+#[test]
+fn state_hash_changes_when_a_child_exit_status_is_recorded() {
+    use crate::host::process::ProcessEntry;
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    let child = BOOT_PROCESS_PID + 0x100;
+    let mut host = Lv2Host::new();
+    host.state.processes.insert_child(
+        child,
+        ProcessEntry {
+            ppid: BOOT_PROCESS_PID,
+            authority_id: 0,
+            control_flags1: 0,
+            exit_status: None,
+        },
+    );
+    let alive = host.state_hash();
+    host.mark_process_exited(child, 0);
+    assert_ne!(alive, host.state_hash());
+}
+
+#[test]
+fn state_hash_changes_when_a_unit_binding_is_added() {
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.bind_unit_process(UnitId::new(3), BOOT_PROCESS_PID + 0x100);
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_distinguishes_boot_identity_fields_from_a_unit_binding() {
+    // Adversarial injection check: a boot entry folding
+    // {authority_id (8 bytes), ctrl_flags1 (4 bytes)} and a bindings
+    // fold of one {unit (8 bytes), pid (4 bytes)} entry occupy the
+    // same stream position with the same widths. The bindings length
+    // prefix keeps them apart even when the raw values coincide.
+    let authid: u64 = 0x1070_0000_5600_0001;
+    let flags: u32 = 0x4000_0000;
+    let mut identity = Lv2Host::new();
+    identity.set_program_authority_id(authid);
+    identity.set_control_flags1(flags);
+    let mut binding = Lv2Host::new();
+    binding.bind_unit_process(UnitId::new(authid), flags);
+    assert_ne!(identity.state_hash(), binding.state_hash());
+}
+
+#[test]
+fn state_hash_changes_when_the_boot_ppid_deviates() {
+    // Every ProcessEntry field must fold; ppid is gated on the
+    // constructor default so the pre-table byte stream survives, but
+    // a mutated boot ppid may not hash as the default.
+    let pre = Lv2Host::new().state_hash();
+    let mut host = Lv2Host::new();
+    host.state.processes.boot_mut().ppid = 0x0100_0301;
+    assert_ne!(pre, host.state_hash());
+}
+
+#[test]
+fn state_hash_distinguishes_a_boot_ppid_deviation_from_boot_control_flags() {
+    // Both are gated 4-byte folds on the boot entry; the ppid tag
+    // byte keeps {ppid=X, flags=0} apart from {ppid=default, flags=X}.
+    let value: u32 = 0x0100_0301;
+    let mut ppid = Lv2Host::new();
+    ppid.state.processes.boot_mut().ppid = value;
+    let mut flags = Lv2Host::new();
+    flags.set_control_flags1(value);
+    assert_ne!(ppid.state_hash(), flags.state_hash());
 }

@@ -230,6 +230,36 @@ step. Stores go through `Effect::SharedWriteIntent`
 effects -- the commit pipeline's `apply_commit` is region-aware, so
 stores to any mapped region land correctly.
 
+### Per-process address spaces
+
+A spawned process gets its own `GuestMemory` instance rather than a
+window into the boot map. `Runtime::spaces` (`SpaceTable`) holds the
+child instances keyed by `AddressSpaceId` (space 0 is the boot
+process, backed by `Runtime::memory`), a unit-to-space tag map, the
+child spaces' reservation tables, and the registered shared
+mappings. Equal numeric addresses in different spaces never alias:
+every consumer that touches guest memory on behalf of a unit
+resolves through the unit's space tag, and the LV2 direct-commit
+channel (`apply_lv2_effects`, `commit_bytes_at`) takes an explicit
+space -- the syscall caller's for dispatch effects, the parked
+waiter's for wake payloads.
+
+Cross-process shared memory is an explicit registration: a shared
+mapping names a segment size and a set of `(space, base)` views,
+installed all-or-nothing. Committed writes through one view fan out
+to every sibling view (including a second view in the same space),
+clear reservations on covered lines in the sibling spaces, and
+invalidate predecoded code at the translated alias ranges. Atomic
+`ConditionalStore` through a shared view is unmodeled and refuses
+loudly. DMA stays space-0 end to end, and the RSX subsystem reads
+and mirrors space 0 only -- deferred RSX effects never join a
+child-space commit batch.
+
+The whole `SpaceTable` is pure data: it rides in `RuntimeSnapshot`,
+folds into the sync-channel state hash (tags, mappings, child
+reservations) and the committed-memory hash (child contents), and
+keeps empty-state byte streams identical to the pre-spaces format.
+
 ## Per-step pipeline
 
 `Runtime::step` and `Runtime::commit_step` together implement a
@@ -729,6 +759,30 @@ CoreOS process may hand the kernel its own import tables. The masks
 overlap and their exact bit semantics are unconfirmed even in the
 reference implementation, so they are mirrored as-is rather than
 reduced to disjoint bits.
+
+### Process model and spawn
+
+The LV2 host carries a process identity table: one entry per guest
+process (ppid, authority id, capability flags, exit status), with
+the boot process pre-seeded under the pid LV2 assigns the first
+user process (`cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID`).
+Units bind to a pid after spawn; unbound units belong to the boot
+process. Every entry field folds into the host state hash.
+
+`_sys_process_spawn` and `sys_process_spawns_a_self2` decode the
+caller's marshalled argument block (pointer table, path and argv
+strings, bounded walks that refuse loudly on an unterminated
+table), resolve the child image through the LV2 content store, and
+hand it to a host-injected `ProcessSpawnLoader` that installs the
+image into a fresh child address space. Every failure arm rolls the
+spawn back completely -- space, reservations, unit tags, and pid all
+unwind, and the syscall fails with its honest errno. The child's
+primary thread enters through a PPU factory unit with its own
+stack inside the child space; `sys_process_exit` from a child
+finishes only that process's units, records the exit status for
+`sys_process_get_status` polls, and leaves the boot process
+untouched. getpid/getppid and the SDK-version query answer from
+the caller's table entry, so a child sees its own identity.
 
 ### Null backend for unmodeled syscalls
 
@@ -1239,9 +1293,19 @@ and classifies each outcome as `ScheduleStable`, `ScheduleSensitive`,
 or `Inconclusive`. `StepFootprint` extracted from the nine
 shared-resource `Effect` variants drives conservative dependency
 analysis: pairs of steps with non-overlapping footprints prune as
-provably independent. The `explore_with_regions` mode also captures
-named memory regions per schedule for comparison against external
-baselines.
+provably independent, including DMA destinations against reservation
+lines in both directions (a DMA completion clears cross-unit
+reservations covering its destination line even when the bytes miss
+the conditional store's exact range). Pruning is sound for
+effect-visible operations; plain loads emit no effect, so a
+write-read race whose read feeds a later store to a disjoint address
+is invisible -- the dependency module states that boundary. Schedules
+compare through the multi-space committed-memory hash, so divergence
+confined to a spawned child's address space is witnessed. The
+`explore_with_regions` mode also captures named memory regions per
+schedule for comparison against external baselines; a region spec
+that fails to resolve is captured unresolved and fails oracle
+comparison loudly instead of matching zeros.
 
 ## Comparison harness
 
@@ -1622,6 +1686,7 @@ selection:
 | ppu_lwmutex_counter    | lwmutex contention on a shared counter.                        |
 | rsx_label_write_poll   | RSX label byte transition observed via PPU spin-poll.          |
 | rsx_semaphore_post     | NV4097 semaphore release polled by PPU.                        |
+| process_spawn_wait     | Parent spawns a child SELF into its own address space and waits. |
 
 See `tests/micro/` for the full set.
 

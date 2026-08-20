@@ -292,7 +292,6 @@ impl Lv2Host {
         if thread_num >= MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // Wrap near u32::MAX surfaces as EINVAL, not a silent collision.
         let thread_id = match group_id
             .checked_mul(MAX_SLOTS_PER_GROUP)
             .and_then(|base| base.checked_add(thread_num))
@@ -372,29 +371,39 @@ impl Lv2Host {
                 effects: vec![],
             },
             GroupState::Finished => {
-                let mut effects = vec![];
-                if cause_ptr != 0 {
-                    let range = ByteRange::contiguous_u32(cause_ptr, 4);
-                    effects.push(Effect::SharedWriteIntent {
-                        range,
-                        bytes: WritePayload::from_slice(
-                            &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes(),
-                        ),
-                        ordering: PriorityClass::Normal,
-                        source: requester,
-                        source_time: tick,
-                    });
+                // NULL out-pointer contract (RPCS3 sys_spu.cpp
+                // sys_spu_thread_group_join checks the pointers after
+                // the wait, so it applies even when the group already
+                // finished): a NULL cause writes nothing -- not even a
+                // non-NULL status -- and returns CELL_EFAULT; a NULL
+                // status alone still writes cause and returns
+                // CELL_EFAULT. Mirrors resolve_join_wakes in
+                // cellgov_core so the immediate and parked paths agree.
+                if cause_ptr == 0 {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
                 }
-                if status_ptr != 0 {
-                    let range = ByteRange::contiguous_u32(status_ptr, 4);
-                    effects.push(Effect::SharedWriteIntent {
-                        range,
-                        bytes: WritePayload::from_slice(&0u32.to_be_bytes()),
-                        ordering: PriorityClass::Normal,
-                        source: requester,
-                        source_time: tick,
-                    });
+                let mut effects = vec![Effect::SharedWriteIntent {
+                    range: ByteRange::contiguous_u32(cause_ptr, 4),
+                    bytes: WritePayload::from_slice(
+                        &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes(),
+                    ),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: tick,
+                }];
+                if status_ptr == 0 {
+                    return Lv2Dispatch::Immediate {
+                        code: cell_errors::CELL_EFAULT.into(),
+                        effects,
+                    };
                 }
+                effects.push(Effect::SharedWriteIntent {
+                    range: ByteRange::contiguous_u32(status_ptr, 4),
+                    bytes: WritePayload::from_slice(&0u32.to_be_bytes()),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: tick,
+                });
                 Lv2Dispatch::Immediate { code: 0, effects }
             }
         }
@@ -406,7 +415,6 @@ impl Lv2Host {
         value: u32,
         requester: UnitId,
     ) -> Lv2Dispatch {
-        // Non-running target: ESRCH. Silent drop would lose mailbox data.
         let target_uid = match self.state.groups.running_unit_for_thread(thread_id) {
             Some(uid) => uid,
             None => {

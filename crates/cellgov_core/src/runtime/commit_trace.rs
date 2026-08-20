@@ -1,10 +1,5 @@
-//! Commit-boundary trace emission. One helper --
-//! [`Runtime::emit_commit_trace`] -- writes one `CommitApplied`, one
-//! `UnitBlocked` / `UnitWoken` per status transition (including
-//! DMA-completion wakes), and the four `StateHashCheckpoint` records
-//! (committed memory, runnable queue, unit status, sync state) taken
-//! after the commit and DMA firing. Skipped under
-//! `RuntimeMode::FaultDriven`.
+//! Commit-boundary trace emission: the commit, block/wake, and
+//! state-hash checkpoint records written after each commit.
 
 use cellgov_dma::DmaCompletion;
 use cellgov_event::UnitId;
@@ -74,7 +69,7 @@ impl Runtime {
         self.record_timer_wakes(timer_due);
 
         // State hash checkpoints taken after the commit and timer/DMA firing.
-        let mem_hash = StateHash::new(self.memory.content_hash());
+        let mem_hash = StateHash::new(self.committed_memory_hash());
         self.trace.record(&TraceRecord::StateHashCheckpoint {
             kind: HashCheckpointKind::CommittedMemory,
             hash: mem_hash,

@@ -38,7 +38,15 @@ pub fn observe_decisions_with_snapshots(
         }
         match rt.step() {
             Ok(step) => {
-                let footprint = StepFootprint::from_effects(&step.effects);
+                let mut footprint = StepFootprint::from_effects(&step.effects);
+                // A write through one view of a shared mapping is a
+                // write to every sibling view's bytes.
+                let aliases: Vec<_> = footprint
+                    .shared_writes
+                    .iter()
+                    .flat_map(|r| rt.shared_alias_ranges(step.unit, *r))
+                    .collect();
+                footprint.shared_writes.extend(aliases);
                 let _ = rt.commit_step(&step.result, &step.effects);
                 log.push(DecisionPoint {
                     step: step_idx,

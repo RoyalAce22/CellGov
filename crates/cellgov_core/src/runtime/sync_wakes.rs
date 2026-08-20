@@ -18,6 +18,36 @@ impl Runtime {
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
+            // A Finished unit on the wake list is exited-process
+            // residue: the exit sweep finishes every unit of the pid
+            // but leaves the LV2 host's waiter lists unpurged, so a
+            // later release can still pick the unit. On PS3 an exited
+            // process's threads are gone before any wake can reach
+            // them (RPCS3 sys_process.cpp _sys_process_exit stops
+            // every thread), so the Runnable transition below would
+            // resurrect a unit the guest already terminated -- the
+            // same reasoning as the Finished guard in
+            // fire_timer_wakes. The release side consumed a waiter
+            // slot on a dead unit, which can skew guest-visible
+            // primitive state, so the drop is logged.
+            if self.registry.effective_status(waiter) == Some(UnitStatus::Finished) {
+                self.timer_wakes.cancel(waiter);
+                // The pending response (already drained by the exit
+                // sweep in the ordinary flow) can never be consumed.
+                let _ = self.syscall_responses.try_take(waiter);
+                self.lv2_host.log_invariant_break(
+                    "runtime.resolve_sync_wakes_waiter_finished",
+                    format_args!(
+                        "wake for {waiter:?} which is already Finished (exited-process \
+                         residue on a host-side waiter list); wake dropped, unit stays \
+                         Finished",
+                    ),
+                );
+                continue;
+            }
+            // Continuation payloads land through pointers the WAITER
+            // supplied when it parked, so they resolve in its space.
+            let waiter_space = self.spaces.space_of(waiter);
             // A wake through any path supersedes a pending timer
             // deadline; a stale entry would fire a second wake into a
             // unit that re-parked on something else.
@@ -39,7 +69,7 @@ impl Runtime {
                     buf[8..16].copy_from_slice(&payload.data1.to_be_bytes());
                     buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
                     buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
-                    self.commit_bytes_at(out_ptr as u64, &buf);
+                    self.commit_bytes_at(waiter_space, out_ptr as u64, &buf);
                     self.registry.set_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::EventFlagWake {
@@ -51,7 +81,11 @@ impl Runtime {
                     // sys_event_flag.cpp sys_event_store_result); a
                     // NULL pointer waiter wakes with r3 alone.
                     if result_ptr != 0 {
-                        self.commit_bytes_at(result_ptr as u64, &observed.to_be_bytes());
+                        self.commit_bytes_at(
+                            waiter_space,
+                            result_ptr as u64,
+                            &observed.to_be_bytes(),
+                        );
                     }
                     self.registry.set_syscall_return(waiter, 0);
                 }
@@ -64,10 +98,17 @@ impl Runtime {
                         //   offset 0  : owner (u32 BE)
                         //   offset 4  : waiter count (u32 BE)
                         //   offset 12 : recursive_count (u32 BE)
-                        self.commit_bytes_at(base, &caller.to_be_bytes());
-                        self.commit_bytes_at(base + 12, &1u32.to_be_bytes());
+                        self.commit_bytes_at(waiter_space, base, &caller.to_be_bytes());
+                        self.commit_bytes_at(waiter_space, base + 12, &1u32.to_be_bytes());
                         let waiter_addr = base + 4;
-                        let bytes = self.memory.read(
+                        // The user-space struct lives in the waking
+                        // unit's space; read it back from there.
+                        let bytes = super::spaces::resolve_space_memory(
+                            &self.memory,
+                            &self.spaces,
+                            waiter_space,
+                        )
+                        .read(
                             cellgov_mem::ByteRange::new(
                                 cellgov_mem::GuestAddr::new(waiter_addr),
                                 4,
@@ -91,7 +132,7 @@ impl Runtime {
                              (host waiter list diverged from guest struct)",
                         );
                         let next = current.saturating_sub(1);
-                        self.commit_bytes_at(waiter_addr, &next.to_be_bytes());
+                        self.commit_bytes_at(waiter_space, waiter_addr, &next.to_be_bytes());
                     }
                     if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
                         self.lv2_host.lwmutex_holds_inc(tid);
@@ -207,8 +248,28 @@ impl Runtime {
                      returned {pending:?} for {waiter_id:?}",
                 );
             };
-            self.commit_bytes_at(cause_ptr as u64, &cause.to_be_bytes());
-            self.commit_bytes_at(status_ptr as u64, &status.to_be_bytes());
+            // Both out-pointers came from the joiner's syscall
+            // arguments, so they address the joiner's space. The join
+            // itself completes regardless, but NULL out-pointers
+            // change the outcome (RPCS3 sys_spu.cpp
+            // sys_spu_thread_group_join checks the pointers after the
+            // wait): a NULL cause writes nothing -- not even a
+            // non-NULL status -- and returns CELL_EFAULT; a NULL
+            // status alone still writes cause and returns CELL_EFAULT.
+            // Address 0 may be mapped, so NULL is never written
+            // through.
+            let waiter_space = self.spaces.space_of(waiter_id);
+            let code = if cause_ptr == 0 {
+                cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()
+            } else {
+                self.commit_bytes_at(waiter_space, cause_ptr as u64, &cause.to_be_bytes());
+                if status_ptr == 0 {
+                    cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()
+                } else {
+                    self.commit_bytes_at(waiter_space, status_ptr as u64, &status.to_be_bytes());
+                    code
+                }
+            };
             self.registry.set_syscall_return(waiter_id, code);
             self.registry
                 .set_status_override(waiter_id, UnitStatus::Runnable);

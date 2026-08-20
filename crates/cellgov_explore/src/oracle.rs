@@ -25,8 +25,16 @@ pub struct MemoryRegionSpec {
 pub struct CapturedRegion {
     /// Region name (from the spec).
     pub name: String,
-    /// Raw bytes from committed memory.
+    /// Raw bytes from committed memory; empty when `resolved` is false.
     pub data: Vec<u8>,
+    /// False when the spec's range could not be read from this run's
+    /// committed memory (unmapped address or overflowing range).
+    ///
+    /// `data` is left empty in that case rather than zero-filled: a
+    /// fabricated all-zero capture is indistinguishable from a real
+    /// zeroed region and would compare equal against an all-zero
+    /// oracle baseline.
+    pub resolved: bool,
 }
 
 /// Memory snapshot from one explored schedule.
@@ -65,7 +73,7 @@ where
 {
     let mut rt_baseline = make_runtime();
     let (log, snapshots) = observe_decisions_with_snapshots(&mut rt_baseline, true);
-    let baseline_hash = rt_baseline.memory().content_hash();
+    let baseline_hash = rt_baseline.committed_memory_hash();
     let baseline_regions = extract_regions(rt_baseline.memory(), regions);
 
     let total_branching_points = log.branching_count();
@@ -81,7 +89,7 @@ where
         rt_baseline.restore_into(snap);
         rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
         run_to_stall(&mut rt_baseline, config.max_steps_per_run);
-        let hash = rt_baseline.memory().content_hash();
+        let hash = rt_baseline.committed_memory_hash();
         let captured = extract_regions(rt_baseline.memory(), regions);
         alternates.push(ScheduleSnapshot {
             memory_hash: hash,
@@ -108,13 +116,19 @@ fn extract_regions(
     specs
         .iter()
         .map(|spec| {
-            let data = ByteRange::new(GuestAddr::new(spec.addr), spec.size)
+            match ByteRange::new(GuestAddr::new(spec.addr), spec.size)
                 .and_then(|range| memory.read(range))
-                .map(|bytes| bytes.to_vec())
-                .unwrap_or_else(|| vec![0u8; spec.size as usize]);
-            CapturedRegion {
-                name: spec.name.clone(),
-                data,
+            {
+                Some(bytes) => CapturedRegion {
+                    name: spec.name.clone(),
+                    data: bytes.to_vec(),
+                    resolved: true,
+                },
+                None => CapturedRegion {
+                    name: spec.name.clone(),
+                    data: Vec::new(),
+                    resolved: false,
+                },
             }
         })
         .collect()
@@ -123,3 +137,106 @@ fn extract_regions(
 #[cfg(test)]
 #[path = "tests/oracle_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    use crate::config::ExplorationConfig;
+    use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+    use cellgov_mem::GuestMemory;
+    use cellgov_time::Budget;
+
+    #[test]
+    fn an_unmapped_region_spec_is_captured_unresolved_not_zero_filled() {
+        // The 64-byte fixture memory ends well before 0x1_0000, so the
+        // spec's range cannot be read from any run's committed memory.
+        let specs = vec![MemoryRegionSpec {
+            name: "outside".into(),
+            addr: 0x1_0000,
+            size: 4,
+        }];
+        let result = explore_with_regions(
+            || {
+                let mem = GuestMemory::new(64);
+                let mut rt = Runtime::new(mem, Budget::new(100), 100);
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(0xAA),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(0xBB),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+                rt
+            },
+            &ExplorationConfig::default(),
+            &specs,
+        );
+
+        let r = result.expect("should have branching points");
+        assert!(!r.baseline.regions[0].resolved);
+        assert!(r.baseline.regions[0].data.is_empty());
+        assert!(
+            !r.alternates.is_empty(),
+            "overlapping writers must produce at least one explored alternate"
+        );
+        for alt in &r.alternates {
+            assert!(!alt.regions[0].resolved);
+            assert!(alt.regions[0].data.is_empty());
+        }
+    }
+
+    #[test]
+    fn a_mapped_region_spec_is_captured_resolved() {
+        let specs = vec![MemoryRegionSpec {
+            name: "inside".into(),
+            addr: 0,
+            size: 4,
+        }];
+        let result = explore_with_regions(
+            || {
+                let mem = GuestMemory::new(64);
+                let mut rt = Runtime::new(mem, Budget::new(100), 100);
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(0xAA),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(0xBB),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+                rt
+            },
+            &ExplorationConfig::default(),
+            &specs,
+        );
+
+        let r = result.expect("should have branching points");
+        assert!(r.baseline.regions[0].resolved);
+        assert_eq!(r.baseline.regions[0].data.len(), 4);
+    }
+}

@@ -108,18 +108,9 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
                 break ScenarioOutcome::Stalled;
             }
             Err(StepError::SchedulerNotReinstalled) => {
-                // Programming error, not a guest/terminal condition.
-                // The testkit runner builds a fresh runtime and never
-                // calls restore_into, so this arm is provably
-                // unreachable. Folding it into ScenarioOutcome::Stalled
-                // would silently truncate the run with no diagnostic
-                // naming the wiring mistake; panic instead so the
-                // misuse is loud at the site that introduced it.
-                unreachable!(
-                    "testkit runner does not call Runtime::restore_into; \
-                     reaching this arm means a new caller added a \
-                     restore path without rethinking the dispatch."
-                );
+                // The runner builds a fresh runtime and never calls
+                // restore_into, so this arm is unreachable.
+                unreachable!("testkit runner does not call Runtime::restore_into");
             }
         }
     };
@@ -132,7 +123,7 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
         outcome,
         steps_taken: rt.steps_taken(),
         trace_bytes: rt.trace().bytes().to_vec(),
-        final_memory_hash: StateHash::new(rt.memory().content_hash()),
+        final_memory_hash: StateHash::new(rt.committed_memory_hash()),
         final_unit_status_hash: StateHash::new(rt.registry().status_hash()),
         final_sync_hash: StateHash::new(rt.sync_state_hash()),
         final_memory: rt.memory().as_bytes().to_vec(),

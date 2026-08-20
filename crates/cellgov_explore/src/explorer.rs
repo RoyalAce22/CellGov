@@ -15,9 +15,8 @@ use cellgov_core::Runtime;
 /// Run bounded schedule exploration on a workload.
 ///
 /// Returns `None` if the baseline run has no branching points.
-/// `make_runtime` is invoked exactly once -- alternates replay from
-/// snapshots, not by reconstructing the runtime. Exploration stops
-/// at `config.max_schedules` alternates and each replay at
+/// `make_runtime` is invoked exactly once. Exploration stops at
+/// `config.max_schedules` alternates and each replay at
 /// `config.max_steps_per_run` steps.
 pub fn explore<F>(mut make_runtime: F, config: &ExplorationConfig) -> Option<ExplorationResult>
 where
@@ -25,7 +24,7 @@ where
 {
     let mut rt_baseline = make_runtime();
     let (log, snapshots) = observe_decisions_with_snapshots(&mut rt_baseline, true);
-    let baseline_hash = rt_baseline.memory().content_hash();
+    let baseline_hash = rt_baseline.committed_memory_hash();
 
     let total_branching_points = log.branching_count();
     if total_branching_points == 0 {
@@ -39,7 +38,7 @@ where
         rt_baseline.restore_into(snap);
         rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
         run_to_stall(&mut rt_baseline, config.max_steps_per_run);
-        rt_baseline.memory().content_hash()
+        rt_baseline.committed_memory_hash()
     });
 
     Some(classify_iteration(

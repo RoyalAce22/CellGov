@@ -408,18 +408,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     let kctx_opd = install_kernel_context_opd(&mut mem);
 
     let tls_info = cellgov_ppu::loader::find_tls_segment(&elf_data);
-    let tls_template = cellgov_ppu::loader::extract_tls_template_bytes(&elf_data);
-    match (tls_info.is_some(), tls_template.is_some()) {
-        (false, true) => die(
-            "tls: PT_TLS bytes extractable but find_tls_segment returned None; \
-             PT_TLS parsers disagreed and child-thread r13-relative loads would alias undefined memory",
-        ),
-        (true, false) => die(
-            "tls: find_tls_segment found PT_TLS but extract_tls_template_bytes returned None; \
-             PT_TLS parsers disagreed and child-thread TLS would be uninitialized",
-        ),
-        _ => {}
-    }
     let proc_param = cellgov_ppu::loader::find_sys_process_param(&elf_data);
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
 
@@ -607,10 +595,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         // unload; only sc 480 miss stubs stay unstarted.
         rt.lv2_host_mut().prx_registry_mut().mark_started(id);
     }
-    if let Some((bytes, memsz, align, vaddr)) = tls_template {
-        rt.lv2_host_mut()
-            .set_tls_template(cellgov_lv2::TlsTemplate::new(bytes, memsz, align, vaddr));
-    }
     let debug_opts = BootDebugOptions {
         dump_at_pc: opts.dump_at_pc,
         dump_skip: opts.dump_skip,
@@ -653,20 +637,63 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         Box::new(unit)
     });
 
+    // Spawned-child image loads (`_sys_process_spawn` /
+    // `sys_process_spawns_a_self2`): install a self-contained child
+    // space and load the ELF the same way the microtest harness
+    // does. SELF paths resolve through the LV2 content store.
+    rt.set_process_spawn_loader(|elf_bytes, mem| {
+        const CHILD_EXIT_STUB_ADDR: u64 = 0;
+        let required = cellgov_ppu::loader::required_memory_size(elf_bytes).map_err(|e| {
+            cellgov_core::ProcessSpawnLoadError::ImageParse {
+                detail: format!("{e:?}"),
+            }
+        })?;
+        let child_mem_size = spawned_child_region_size(required)?;
+        mem.install_region(0, child_mem_size, "spawned", cellgov_mem::PageSize::Page64K)
+            .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
+        // li r11, 22; sc -- entered if the child's entry returns.
+        let stub: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
+        let range = cellgov_mem::ByteRange::new(
+            cellgov_mem::GuestAddr::new(CHILD_EXIT_STUB_ADDR),
+            stub.len() as u64,
+        )
+        .expect("fixed 8-byte stub range");
+        mem.apply_commit(range, &stub)
+            .map_err(|source| cellgov_core::ProcessSpawnLoadError::ExitStubWrite { source })?;
+        let mut state = cellgov_ppu::state::PpuState::new();
+        cellgov_ppu::loader::load_ppu_elf(elf_bytes, mem, &mut state).map_err(|e| {
+            cellgov_core::ProcessSpawnLoadError::ImageLoad {
+                detail: format!("{e:?}"),
+            }
+        })?;
+        Ok(cellgov_core::SpawnedProcessImage {
+            entry_code: state.pc,
+            entry_toc: state.gpr[2],
+            stack_top: (child_mem_size as u64) - 0x1000,
+            lr_sentinel: CHILD_EXIT_STUB_ADDR,
+        })
+    });
+
     // Resolves `sysSpuImageOpen("/app_home/spu_main.elf")` against
-    // an EBOOT sibling.
+    // an EBOOT sibling; same discovery for a spawn microtest's
+    // child SELF.
     if let Some(parent) = std::path::Path::new(opts.elf_path).parent() {
-        let spu_candidate = parent.join("spu_main.elf");
-        if spu_candidate.exists() {
-            let bytes = std::fs::read(&spu_candidate).unwrap_or_else(|e| {
-                die(&format!(
-                    "run-game: cannot read {}: {e}",
-                    spu_candidate.display()
-                ))
-            });
-            rt.lv2_host_mut()
-                .content_store_mut()
-                .register(b"/app_home/spu_main.elf", bytes);
+        for (sibling, guest_path) in [
+            ("spu_main.elf", b"/app_home/spu_main.elf".as_slice()),
+            ("child.self", b"/app_home/child.self".as_slice()),
+        ] {
+            let candidate = parent.join(sibling);
+            if candidate.exists() {
+                let bytes = std::fs::read(&candidate).unwrap_or_else(|e| {
+                    die(&format!(
+                        "run-game: cannot read {}: {e}",
+                        candidate.display()
+                    ))
+                });
+                rt.lv2_host_mut()
+                    .content_store_mut()
+                    .register(guest_path, bytes);
+            }
         }
     }
 
@@ -1002,6 +1029,38 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
 }
 
+/// Sizes a spawned child's address-space region from its ELF's
+/// required memory.
+///
+/// The floor covers a PSL1GHT child's user region plus its
+/// SYS_PROCESS_PARAM segment at 0x1000_0000 (the microtest harness
+/// sizing). The child's initial SP sits one page below the region
+/// end and its stack grows down toward the image, so the floor is
+/// kept only when at least the 0x4000 ABI stack floor (back chain +
+/// register save area, the same minimum `dispatch_ppu_thread_create`
+/// enforces for child-thread stacks) fits between the image end and
+/// the SP; a child that would squeeze that gap -- or whose PT_LOADs
+/// reach past the floor entirely -- gets the required-size-plus-
+/// headroom sizing the parent boot uses (64K alignment, 128K above
+/// the image) instead of a zero-depth stack or a rejected spawn.
+fn spawned_child_region_size(
+    required: usize,
+) -> Result<usize, cellgov_core::ProcessSpawnLoadError> {
+    const CHILD_MEM_FLOOR: usize = 0x1002_0000;
+    const STACK_TOP_PAD: usize = 0x1000;
+    const MIN_CHILD_STACK: usize = 0x4000;
+    if required.saturating_add(STACK_TOP_PAD + MIN_CHILD_STACK) <= CHILD_MEM_FLOOR {
+        return Ok(CHILD_MEM_FLOOR);
+    }
+    required
+        .checked_add(0xFFFF)
+        .map(|v| v & !0xFFFF)
+        .and_then(|v| v.checked_add(0x2_0000))
+        .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
+            detail: format!("required_size=0x{required:x} overflows usize"),
+        })
+}
+
 /// Liblv2's once-mutex slot.
 const LIBLV2_ONCE_MUTEX_SLOT: u64 = 0x103a49d8;
 
@@ -1027,6 +1086,53 @@ fn assert_gating_state_coherent_with_host(rt: &Runtime, modules_were_loaded: boo
         LIBLV2_ONCE_MUTEX_SLOT,
         mutex_id,
     );
+}
+
+#[cfg(test)]
+mod spawned_child_region_size_tests {
+    use super::spawned_child_region_size;
+
+    #[test]
+    fn a_psl1ght_shaped_child_keeps_the_microtest_floor() {
+        // The committed process_spawn_wait child: PT_LOADs end at
+        // 0x1001_0010, well under the floor minus the SP pad and the
+        // minimum stack.
+        assert_eq!(spawned_child_region_size(0x1001_0010), Ok(0x1002_0000));
+        assert_eq!(spawned_child_region_size(0), Ok(0x1002_0000));
+        // Boundary: image end exactly MIN_CHILD_STACK below the SP.
+        assert_eq!(spawned_child_region_size(0x1001_b000), Ok(0x1002_0000));
+    }
+
+    #[test]
+    fn a_child_larger_than_the_floor_grows_instead_of_failing() {
+        // 64K-aligned required plus 128K headroom.
+        assert_eq!(spawned_child_region_size(0x1002_0001), Ok(0x1005_0000));
+        assert_eq!(spawned_child_region_size(0x2000_0000), Ok(0x2002_0000));
+    }
+
+    #[test]
+    fn a_child_that_would_squeeze_the_stack_grows_instead_of_colliding() {
+        // One byte past the floor's minimum-stack boundary: keeping
+        // the floor would leave the SP less than 0x4000 above the
+        // image end, so the sizing grows the region instead.
+        assert_eq!(spawned_child_region_size(0x1001_b001), Ok(0x1004_0000));
+        // The old boundary shape: image end flush against the SP
+        // (zero stack depth under the pre-fix floor rule).
+        assert_eq!(spawned_child_region_size(0x1001_f000), Ok(0x1004_0000));
+    }
+
+    #[test]
+    fn a_required_size_near_usize_max_reports_overflow_not_panic() {
+        let err = spawned_child_region_size(usize::MAX - 0x10).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                cellgov_core::ProcessSpawnLoadError::RegionSize { detail }
+                    if detail.contains("overflows")
+            ),
+            "got: {err}"
+        );
+    }
 }
 
 #[cfg(test)]

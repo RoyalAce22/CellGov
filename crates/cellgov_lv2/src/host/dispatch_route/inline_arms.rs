@@ -183,19 +183,44 @@ impl Lv2Host {
         }
     }
 
-    /// Wraps `dispatch_ppu_thread_create` with a log on nonzero `flags`;
-    /// `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` are not modeled.
+    /// Wraps `dispatch_ppu_thread_create`: EPERM on JOINABLE+INTERRUPT
+    /// together, a log on any other nonzero `flags` (single
+    /// `SYS_PPU_THREAD_CREATE_{JOINABLE,INTERRUPT}` bits are not
+    /// modeled). `threadname_ptr` is unconsumed: thread names have no
+    /// modeled guest-visible surface.
     #[allow(clippy::too_many_arguments, reason = "mirrors the Lv2Request variant")]
     pub(super) fn dispatch_ppu_thread_create_with_flag_log(
         &mut self,
         id_ptr: u32,
         param_ptr: u32,
         arg: u64,
+        unk: u64,
         priority: i32,
         stacksize: u64,
         flags: u64,
+        threadname_ptr: u32,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        let _ = threadname_ptr;
+        // The kernel ignores `unk` (RPCS3 `sys_ppu_thread.cpp`
+        // `_sys_ppu_thread_create` only logs it; the sysPrxForUser
+        // wrapper passes 0), so a nonzero value is decode evidence
+        // worth keeping loud.
+        if unk != 0 {
+            self.log_invariant_break(
+                "dispatch.ppu_thread_create_unconsumed_unk",
+                format_args!("sys_ppu_thread_create unk=0x{unk:x} carries a nonzero value"),
+            );
+        }
+        // JOINABLE and INTERRUPT together are refused (RPCS3
+        // sys_ppu_thread.cpp _sys_ppu_thread_create returns CELL_EPERM
+        // for (flags & 3) == 3). RPCS3 orders this check after the
+        // entry EFAULT and priority EINVAL checks; those run inside
+        // dispatch_ppu_thread_create here, so this refusal fires first
+        // when both would apply.
+        if flags & 3 == 3 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
+        }
         if flags != 0 {
             self.log_invariant_break(
                 "dispatch.ppu_thread_create_unmodeled_flags",
@@ -211,17 +236,20 @@ impl Lv2Host {
 
     /// `sys_ss_access_control_engine`. Oracle: RPCS3's `sys_ss.cpp`.
     /// `pkg_id` 1/3 require debug-or-root and return ENOSYS for
-    /// user-perm callers. `pkg_id == 2` writes the booting process's
-    /// program authority id to `*a2` -- boot supplies it from the
-    /// title SELF's identification header via
-    /// [`Lv2Host::set_program_authority_id`]; raw-ELF inputs serve
-    /// the retail-application fallback. Firmware modules classify
-    /// callers by this value (libsysmodule's module_start skips its
-    /// init entirely for recognized system-process ids), so it must
-    /// name the booting title, never a system SELF. Any other
-    /// `pkg_id` is SS-domain status `0x8001_051D`.
+    /// user-perm callers. `pkg_id == 2` writes the CALLING process's
+    /// program authority id to `*a2` (RPCS3 `sys_ss.cpp`
+    /// `sys_ss_access_control_engine` serves the caller's per-process
+    /// info) -- boot supplies its value from the title SELF's
+    /// identification header via
+    /// [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
+    /// spawned children serve the retail-application fallback.
+    /// Firmware modules classify callers by this value (libsysmodule's
+    /// module_start skips its init entirely for recognized
+    /// system-process ids), so it must name the caller's own SELF,
+    /// never another process's. Any other `pkg_id` is SS-domain
+    /// status `0x8001_051D`.
     pub(super) fn dispatch_ss_access_control_engine(
-        &self,
+        &mut self,
         pkg_id: u64,
         a2: u64,
         requester: UnitId,
@@ -233,7 +261,26 @@ impl Lv2Host {
                 Err(_) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(0) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
                 Ok(addr) => {
-                    let authid_be = self.state.program_authority_id.to_be_bytes();
+                    let pid = self.state.processes.process_of_unit(requester);
+                    let authority_id = match self.state.processes.get(pid) {
+                        Some(entry) => entry.authority_id,
+                        None => {
+                            // Reachable only through a unit binding
+                            // naming a pid the table never held; the
+                            // boot value served here is a fabricated
+                            // answer, so it never passes silently.
+                            self.log_invariant_break(
+                                "process.authority_of_unknown_pid",
+                                format_args!(
+                                    "access-control pkg 2 from {requester:?} bound to \
+                                     pid {pid:#x} with no table entry; serving the \
+                                     boot authority id"
+                                ),
+                            );
+                            self.state.processes.boot().authority_id
+                        }
+                    };
+                    let authid_be = authority_id.to_be_bytes();
                     let write = Effect::SharedWriteIntent {
                         range: ByteRange::contiguous_u32(addr, 8),
                         bytes: WritePayload::from_slice(&authid_be),

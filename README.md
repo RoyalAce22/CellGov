@@ -107,7 +107,14 @@ Pre-Alpha. What works today:
   Unmodeled syscalls return an ABI-honest "not implemented"
   response via the null backend. Unresolved imports surface
   as named diagnostics via a guest-resident trampoline.
-- Sync primitives (lwmutex, event flag, semaphore, mutex, cond, event queues and ports), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`). Wait timeouts are honoured: a timed wait expires with `CELL_ETIMEDOUT` at its guest-tick deadline, and `usleep`/`sleep` deschedule the caller until the deadline arrives -- all through a deterministic timer-wake queue that is snapshot-captured and state-hashed.
+- Sync primitives (lwmutex, event flag, semaphore, mutex, cond, event queues and ports), filesystem with host-backed VFS, and PRX import inspection (`cellgov_cli dump-prx-imports`). Recursive mutexes carry real lock counts (owner relock succeeds, unlock releases only at zero), and create/join arms enforce the kernel's argument-validation contracts. Wait timeouts are honoured: a timed wait expires with `CELL_ETIMEDOUT` at its guest-tick deadline, and `usleep`/`sleep` deschedule the caller until the deadline arrives -- all through a deterministic timer-wake queue that is snapshot-captured and state-hashed.
+- Multi-process: `sys_process_spawn` creates a real child process in
+  its own address space, with per-process identity
+  (getpid/getppid/exit status) and explicit cross-process shared
+  mappings; writes through one process's view replicate to every
+  registered sibling view, and schedule exploration compares child
+  spaces too, so cross-process races are witnessed, not missed. A
+  parent-spawns-child guest microtest runs the surface end to end.
 - Real-firmware SELF decryption and loading from `PS3UPDAT.PUP`;
   every module a boot loads is verified against the install's
   manifest, so an altered or mismatched firmware corpus fails

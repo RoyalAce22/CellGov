@@ -274,11 +274,21 @@ impl Lv2Host {
                 id_ptr,
                 param_ptr,
                 arg,
+                unk,
                 priority,
                 stacksize,
                 flags,
+                threadname_ptr,
             } => self.dispatch_ppu_thread_create_with_flag_log(
-                id_ptr, param_ptr, arg, priority, stacksize, flags, rt,
+                id_ptr,
+                param_ptr,
+                arg,
+                unk,
+                priority,
+                stacksize,
+                flags,
+                threadname_ptr,
+                rt,
             ),
             Lv2Request::PpuThreadJoin {
                 target,
@@ -435,9 +445,60 @@ impl Lv2Host {
                 number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
                 args,
             } => self.dispatch_mmapper_allocate_shared_memory(args, requester, tick),
-            Lv2Request::ProcessExit { .. } => self.dispatch_process_exit(),
-            Lv2Request::ProcessGetPid => self.dispatch_process_get_pid(),
-            Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(),
+            Lv2Request::ProcessExit { code } => self.dispatch_process_exit(code, requester),
+            Lv2Request::ProcessExit2 {
+                code,
+                arg_ptr,
+                arg_size,
+                arg4,
+            } => {
+                if arg4 != 0 {
+                    self.log_invariant_break(
+                        "process.exit2_unconsumed_arg4",
+                        format_args!(
+                            "process exit2 carried nonzero fourth arg \
+                             {arg4:#x} (RPCS3 sys_game_.cpp exitspawn \
+                             passes 0x1000_0000); not consumed",
+                        ),
+                    );
+                }
+                self.dispatch_process_exit2(code, arg_ptr, arg_size, requester, rt)
+            }
+            Lv2Request::ProcessSpawn {
+                pid_out_ptr,
+                prio,
+                flags,
+                block_ptr,
+                block_size,
+                data_word,
+                unconsumed,
+            } => {
+                if unconsumed != [0; 2] {
+                    self.log_invariant_break(
+                        "process.spawn_unconsumed_args",
+                        format_args!(
+                            "process spawn carried nonzero trailing args \
+                             [{:#x}, {:#x}] (sc 21: r8/r9 pair values; \
+                             sc 27: r9 config block / r10 pair block); \
+                             not consumed",
+                            unconsumed[0], unconsumed[1],
+                        ),
+                    );
+                }
+                self.dispatch_process_spawn(
+                    pid_out_ptr,
+                    prio,
+                    flags,
+                    block_ptr,
+                    block_size,
+                    data_word,
+                    requester,
+                    rt,
+                )
+            }
+            Lv2Request::ProcessGetStatus { pid } => self.dispatch_process_get_status(pid),
+            Lv2Request::ProcessGetPid => self.dispatch_process_get_pid(requester),
+            Lv2Request::ProcessGetPpid => self.dispatch_process_get_ppid(requester),
             Lv2Request::ProcessGetPpuGuid => self.dispatch_process_get_ppu_guid(),
             Lv2Request::ProcessIsStack { addr } => self.dispatch_process_is_stack(addr),
             Lv2Request::ProcessIsSpuLockLineReservationAddress { addr, flags } => {

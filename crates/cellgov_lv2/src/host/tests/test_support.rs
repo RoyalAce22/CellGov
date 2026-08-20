@@ -173,6 +173,15 @@ pub(super) fn primary_attrs() -> PpuThreadAttrs {
 /// Panics if `param_addr + 8` overflows `u32` or if `param_addr +
 /// 16` exceeds the 0x1_0000-byte arena.
 pub(super) fn opd_runtime(param_addr: u32, entry_code: u32, entry_toc: u32) -> FakeRuntime {
+    opd_runtime_with_tls(param_addr, entry_code, entry_toc, 0)
+}
+
+pub(super) fn opd_runtime_with_tls(
+    param_addr: u32,
+    entry_code: u32,
+    entry_toc: u32,
+    tls: u32,
+) -> FakeRuntime {
     let mut mem = GuestMemory::new(0x1_0000);
     let opd_addr = param_addr
         .checked_add(8)
@@ -185,6 +194,7 @@ pub(super) fn opd_runtime(param_addr: u32, entry_code: u32, entry_toc: u32) -> F
 
     let mut param_bytes = [0u8; 8];
     param_bytes[0..4].copy_from_slice(&opd_addr.to_be_bytes());
+    param_bytes[4..8].copy_from_slice(&tls.to_be_bytes());
     let param_range = ByteRange::new(GuestAddr::new(param_addr as u64), 8).unwrap();
     mem.apply_commit(param_range, &param_bytes).unwrap();
 

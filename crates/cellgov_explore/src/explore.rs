@@ -42,7 +42,7 @@ where
 {
     let mut rt_a = make_runtime();
     let log = observe_decisions(&mut rt_a);
-    let hash_a = rt_a.memory().content_hash();
+    let hash_a = rt_a.committed_memory_hash();
 
     let branch = log.branching_points().next()?;
     let branch_step = branch.step;
@@ -58,7 +58,7 @@ where
     let mut rt_b = make_runtime();
     rt_b.set_scheduler(PrescribedScheduler::new(overrides));
     run_to_stall(&mut rt_b, usize::MAX);
-    let hash_b = rt_b.memory().content_hash();
+    let hash_b = rt_b.committed_memory_hash();
 
     Some(PairResult {
         log,

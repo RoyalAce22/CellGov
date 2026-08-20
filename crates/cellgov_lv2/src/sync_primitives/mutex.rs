@@ -1,9 +1,7 @@
 //! Heavy mutex table.
 //!
 //! Ids come from the shared kernel-object allocator, distinct
-//! from the lwmutex id space. Attributes captured from
-//! `sys_mutex_create` are stored and hashed but never honored;
-//! see [`MutexAttrs`].
+//! from the lwmutex id space.
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::WaiterList;
@@ -25,8 +23,12 @@ pub enum MutexAcquireOrEnqueue {
     Acquired,
     /// Caller was appended to the waiter list.
     Enqueued,
-    /// Caller already holds the mutex or is already parked.
-    /// Non-recursive regardless of [`MutexAttrs::recursive`].
+    /// Owner re-locked a recursive mutex; the lock count grew.
+    Recursed,
+    /// Recursive re-lock would overflow the lock count.
+    CountSaturated,
+    /// Caller already holds a non-recursive mutex or is already
+    /// parked.
     WouldDeadlock,
     /// Unknown id.
     Unknown,
@@ -76,14 +78,12 @@ pub enum MutexEnqueueError {
     WaiterIsOwner,
 }
 
-/// Attribute bag captured from `sys_mutex_create`. No field
-/// affects blocking or waking; recursive locks surface as
-/// `WouldDeadlock` / `WaiterIsOwner` regardless of `recursive`.
+/// Attribute bag captured from `sys_mutex_create`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MutexAttrs {
     /// Priority-ordering policy; diagnostic only.
     pub priority_policy: u32,
-    /// Recursive flag; not honored.
+    /// Owner re-locks count instead of deadlocking.
     pub recursive: bool,
     /// Raw protocol bits; diagnostic only.
     pub protocol: u32,
@@ -95,6 +95,7 @@ pub struct MutexEntry {
     owner: Option<PpuThreadId>,
     waiters: WaiterList,
     attrs: MutexAttrs,
+    lock_count: u32,
 }
 
 impl MutexEntry {
@@ -103,12 +104,19 @@ impl MutexEntry {
             owner: None,
             waiters: WaiterList::new(),
             attrs,
+            lock_count: 0,
         }
     }
 
     /// Current owner, or `None` if free.
     pub fn owner(&self) -> Option<PpuThreadId> {
         self.owner
+    }
+
+    /// Recursive re-locks beyond the first hold; nonzero only
+    /// while owned.
+    pub fn lock_count(&self) -> u32 {
+        self.lock_count
     }
 
     /// Read-only view of the waiter list.
@@ -212,7 +220,23 @@ impl MutexTable {
                 entry.owner = Some(caller);
                 MutexAcquireOrEnqueue::Acquired
             }
-            Some(owner) if owner == caller => MutexAcquireOrEnqueue::WouldDeadlock,
+            Some(owner) if owner == caller => {
+                if entry.attrs.recursive {
+                    // Owner re-lock on a SYS_SYNC_RECURSIVE mutex
+                    // bumps the lock count; a count at u32::MAX is
+                    // EKRESOURCE (RPCS3 sys_mutex.h
+                    // lv2_mutex::try_lock).
+                    match entry.lock_count.checked_add(1) {
+                        Some(next) => {
+                            entry.lock_count = next;
+                            MutexAcquireOrEnqueue::Recursed
+                        }
+                        None => MutexAcquireOrEnqueue::CountSaturated,
+                    }
+                } else {
+                    MutexAcquireOrEnqueue::WouldDeadlock
+                }
+            }
             Some(_) => {
                 if entry.waiters.contains(caller) {
                     return MutexAcquireOrEnqueue::WouldDeadlock;
@@ -266,6 +290,23 @@ impl MutexTable {
         entry.waiters.remove(waiter)
     }
 
+    /// Consume one recursive hold without releasing ownership.
+    ///
+    /// `true` only when `caller` owns the mutex and the lock count
+    /// is above zero; the caller still holds the mutex afterwards
+    /// (RPCS3 sys_mutex.cpp sys_mutex_unlock: a nonzero lock count
+    /// decrements and returns without waking a waiter).
+    pub fn unlock_decrement(&mut self, id: u32, caller: PpuThreadId) -> bool {
+        let Some(entry) = self.entries.get_mut(&id) else {
+            return false;
+        };
+        if entry.owner != Some(caller) || entry.lock_count == 0 {
+            return false;
+        }
+        entry.lock_count -= 1;
+        true
+    }
+
     /// Release on behalf of `caller`.
     pub fn release_and_wake_next(&mut self, id: u32, caller: PpuThreadId) -> MutexRelease {
         let Some(entry) = self.entries.get_mut(&id) else {
@@ -274,6 +315,11 @@ impl MutexTable {
         if entry.owner != Some(caller) {
             return MutexRelease::NotOwner;
         }
+        // A full release drops any recursive holds. Syscall unlock
+        // drains the count first via `unlock_decrement`; the
+        // cond-wait release gives up the mutex outright, so a stale
+        // count must not survive into the next owner's hold.
+        entry.lock_count = 0;
         match entry.waiters.dequeue_one() {
             Some(new_owner) => {
                 entry.owner = Some(new_owner);
@@ -284,6 +330,16 @@ impl MutexTable {
                 MutexRelease::Freed
             }
         }
+    }
+
+    /// Test-only override to reach the count-saturation path
+    /// without `u32::MAX` re-locks.
+    #[cfg(test)]
+    pub(crate) fn set_lock_count_for_test(&mut self, id: u32, count: u32) {
+        self.entries
+            .get_mut(&id)
+            .expect("test mutex id must exist")
+            .lock_count = count;
     }
 
     /// FNV-1a digest of the table's state, including attrs.
@@ -298,6 +354,14 @@ impl MutexTable {
                     hasher.write(&owner.raw().to_le_bytes());
                 }
                 None => hasher.write(&[0u8]),
+            }
+            // Gated on a live recursion count so byte streams from
+            // runs that never recursively re-lock stay identical;
+            // the tag byte keeps the 4-byte count distinct from the
+            // owner fold above.
+            if entry.lock_count != 0 {
+                hasher.write(&[2u8]);
+                hasher.write(&entry.lock_count.to_le_bytes());
             }
             hasher.write(&(entry.waiters.len() as u64).to_le_bytes());
             for waiter in entry.waiters.iter() {

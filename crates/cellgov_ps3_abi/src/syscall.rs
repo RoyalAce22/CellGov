@@ -71,6 +71,10 @@ lv2_syscalls! {
     /// `sys_process_getpid`.
     PROCESS_GETPID = 1;
 
+    /// `sys_process_get_status`. RPCS3 stubs it; CellGov models a
+    /// minimal liveness poll (see the dispatch handler).
+    PROCESS_GET_STATUS = 4;
+
     /// `sys_process_get_number_of_object`.
     PROCESS_GET_NUMBER_OF_OBJECT = 12;
 
@@ -82,11 +86,32 @@ lv2_syscalls! {
     /// `sys_process_getppid`.
     PROCESS_GETPPID = 18;
 
+    /// `_sys_process_spawn` -- legacy spawn, same marshalled-block
+    /// family as `sys_process_spawns_a_self2`. Not a shorter call:
+    /// the two values sc 27 stores into the pair block behind its
+    /// r10 go directly in r8/r9 here, and there is no r10 slot (vsh
+    /// private wrapper 0x608be8, sc at 0x608cc0). The audio-fallback
+    /// site at 0xcb484 spawns via the public entry 0x608fd4, which
+    /// zeroes both extras.
+    PROCESS_SPAWN = 21;
+
     /// `sys_process_exit`.
     PROCESS_EXIT = 22;
 
     /// `sys_process_get_sdk_version`.
     PROCESS_GET_SDK_VERSION = 25;
+
+    /// `_sys_process_exit2` -- exit carrying an argv/envp block;
+    /// non-empty argv means exitspawn (RPCS3 `sys_process.cpp`
+    /// `lv2_exitspawn`).
+    PROCESS_EXIT2 = 26;
+
+    /// `sys_process_spawns_a_self2` -- spawn a SELF as a child
+    /// process. Decoded actual signature (vsh 0x608a8c): (pid_out,
+    /// prio, flags, marshalled path/argv/envp block ptr, block size,
+    /// data word, 64B cfg block, dbg pair ptr); RPCS3's
+    /// stack/stack_size guess is the block/size pair.
+    PROCESS_SPAWNS_A_SELF2 = 27;
 
     /// `_sys_process_get_paramsfo`.
     PROCESS_GET_PARAMSFO = 30;
@@ -321,17 +346,10 @@ pub const UNRESOLVED_IMPORT: u64 = 0x10000;
 
 // -----------------------------------------------------------------
 // Syscall numbers routed via `Lv2Request::Unsupported { number, ..}`
-// in `cellgov_lv2::host::dispatch_route`. These have explicit
+// in `cellgov_lv2::host::dispatch_route`: these have explicit
 // handlers but are not first-class `Lv2Request` variants (the
 // classifier leaves them in `Unsupported` and the dispatcher
-// branches on the number). Naming them here lets the dispatcher
-// match against a constant instead of a hand-typed integer literal.
-//
-// NOT in [`ALL_LV2_NUMBERS`]: that list is the typed-
-// arm set. These constants live in the Lv2 namespace too, but the
-// classifier produces `Lv2Request::Unsupported` for them rather
-// than a typed arm. The `unsupported_routed_syscall_numbers_do_not_collide_with_typed_arms`
-// test pins the partition.
+// branches on the number).
 // -----------------------------------------------------------------
 
 lv2_syscalls! {

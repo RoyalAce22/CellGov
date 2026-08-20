@@ -5,9 +5,13 @@
 //! produce a different observable outcome; non-conflicting steps are
 //! independent and the swap need not be explored.
 //!
-//! The analysis over-approximates dependency so that false
-//! independencies never occur; false dependencies only waste
-//! exploration budget.
+//! The analysis over-approximates dependency for effect-visible
+//! operations (writes, DMA transfers, reservations, mailbox / signal /
+//! barrier traffic): among those, false independencies never occur,
+//! and false dependencies only waste exploration budget. Plain loads
+//! emit no effect (`cellgov_effects` has no read-intent variant), so a
+//! write-read race whose read feeds a later store to a disjoint
+//! address is invisible here and the pair can be pruned.
 
 use cellgov_effects::Effect;
 use cellgov_mem::ByteRange;
@@ -156,6 +160,19 @@ impl StepFootprint {
 
         if write_covers_any_line(&self.shared_writes, &other.reservation_lines)
             || write_covers_any_line(&other.shared_writes, &self.reservation_lines)
+        {
+            return true;
+        }
+
+        // A completed cross-unit DMA clears every other unit's
+        // reservation whose 128-byte line its destination touches,
+        // even when the transferred bytes miss the conditional
+        // store's exact range (cellgov_core runtime/dma.rs,
+        // `fire_dma_completions` -> `clear_covering`), flipping the
+        // store's verdict. Source ranges ride along in `dma_ranges`;
+        // pairing them too only over-approximates.
+        if write_covers_any_line(&self.dma_ranges, &other.reservation_lines)
+            || write_covers_any_line(&other.dma_ranges, &self.reservation_lines)
         {
             return true;
         }
