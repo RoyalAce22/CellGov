@@ -28,18 +28,19 @@ outcome = "completed"
 # (above) and the CellGov run-game config (below).
 #
 # Usage:
-#   1. Build the ELF (requires ps3dev-fresh docker image):
+#   1. Build the ELF (requires a ps3dev+PSL1GHT toolchain image; see
+#      this test's build.sh for the requirements):
 #        docker run --rm \
 #          -v "$(pwd)/tests/micro/ppu_lwmutex_counter:/src" \
 #          -v "$(pwd)/tests/micro/common:/common" \
-#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
 #   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
 #      expects:
-#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_LWMTX/USRDIR
+#        mkdir -p vfs/dev_hdd0/game/CG_LWMTX/USRDIR
 #        cp tests/micro/ppu_lwmutex_counter/build/\
 #           ppu_lwmutex_counter.elf \
-#           tools/rpcs3/dev_hdd0/game/CG_LWMTX/USRDIR/EBOOT.elf
+#           vfs/dev_hdd0/game/CG_LWMTX/USRDIR/EBOOT.elf
 #
 #   3. Run:
 #        cargo run --release -p cellgov_cli -- run-game \
@@ -55,6 +56,10 @@ content_id = "CG_LWMTX"
 short_name = "lwmtx"
 display_name = "CellGov lwmutex counter microtest"
 eboot_candidates = ["EBOOT.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "retail-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"

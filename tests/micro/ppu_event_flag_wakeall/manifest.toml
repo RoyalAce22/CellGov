@@ -24,6 +24,10 @@ content_id = "CG_EVF"
 short_name = "evf"
 display_name = "CellGov event-flag wake-all microtest"
 eboot_candidates = ["EBOOT.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "retail-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"

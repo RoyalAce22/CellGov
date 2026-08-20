@@ -2,16 +2,23 @@
  * each under a lightweight mutex. Final value must be exactly 2*N
  * with no lost updates.
  *
- * Structural microtest for the lwmutex primitive. It proves:
+ * Structural microtest for the lwmutex primitive's kernel side.
+ * _sys_lwmutex_lock (97) is the SLOW PATH only: on real firmware
+ * the userspace wrapper owns the uncontended atomic fast path, and
+ * the kernel object is a signal queue that starts with no signal
+ * pending (RPCS3 sys_lwmutex.cpp _sys_lwmutex_lock /
+ * _sys_lwmutex_unlock). Raw-syscall usage therefore primes the
+ * queue with one _sys_lwmutex_unlock (98) after create; lock and
+ * unlock then behave as a binary semaphore. It proves:
  *
- *   1. sys_lwmutex_create (95) allocates an id and initializes
- *      the lwmutex in the unowned state.
- *   2. sys_lwmutex_lock (97) on an unowned lwmutex completes
+ *   1. _sys_lwmutex_create (95) allocates an id with no signal
+ *      pending.
+ *   2. _sys_lwmutex_lock consumes a pending signal and completes
  *      immediately.
- *   3. sys_lwmutex_lock on a contended lwmutex blocks the caller
- *      until the current owner calls sys_lwmutex_unlock.
- *   4. sys_lwmutex_unlock (98) transfers ownership to the head of
- *      the waiter list in FIFO order when waiters are parked.
+ *   3. _sys_lwmutex_lock with no signal pending blocks the caller
+ *      until a peer calls _sys_lwmutex_unlock.
+ *   4. _sys_lwmutex_unlock hands the signal to the head of the
+ *      waiter list in FIFO order when waiters are parked.
  *   5. Mutual exclusion is preserved: every increment observes a
  *      fresh counter value and commits it back without the other
  *      thread's write racing in.
@@ -103,6 +110,27 @@ static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f
     return (s32)r3;
 }
 
+static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
+                               u64 e, u64 f, u64 g, u64 h)
+{
+    register u64 r3 __asm__("3") = a;
+    register u64 r4 __asm__("4") = b;
+    register u64 r5 __asm__("5") = c;
+    register u64 r6 __asm__("6") = d;
+    register u64 r7 __asm__("7") = e;
+    register u64 r8 __asm__("8") = f;
+    register u64 r9 __asm__("9") = g;
+    register u64 r10 __asm__("10") = h;
+    register u64 r11 __asm__("11") = num;
+    __asm__ volatile (
+        "sc\n"
+        : "+r"(r3)
+        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
+        : "r0", "r12", "cr0", "ctr", "memory"
+    );
+    return (s32)r3;
+}
+
 static inline void syscall1_noreturn(u64 num, u64 a)
 {
     register u64 r3 __asm__("3") = a;
@@ -121,6 +149,47 @@ static inline void syscall1_noreturn(u64 num, u64 a)
 #define SYS_LWMUTEX_CREATE    95
 #define SYS_LWMUTEX_LOCK      97
 #define SYS_LWMUTEX_UNLOCK    98
+
+/* _sys_lwmutex_create (95) is (id_ptr, protocol, control_ptr,
+ * has_name, name): r4 carries the protocol word -- FIFO (1),
+ * PRIORITY (2), or RETRY (4); anything else is EINVAL -- and r5
+ * names the user-space sys_lwmutex_t the kernel records for the
+ * object (RPCS3 sys_lwmutex.cpp _sys_lwmutex_create). */
+#define SYS_SYNC_FIFO 1
+static unsigned char lwmutex_control[32] __attribute__((aligned(8)));
+
+/* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
+ * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
+ * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
+ * passes unk = 0. The param* in r4 is a ppu_thread_param_t
+ * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
+ * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
+ * bytes of u64 fields -- so repack it before the syscall. */
+struct elfv1_opd {
+    unsigned long long code;
+    unsigned long long toc;
+    unsigned long long env;
+};
+
+struct cg_thread_param {
+    unsigned int entry_opd_ptr; /* -> opd_code below */
+    unsigned int tls;
+    unsigned int opd_code;
+    unsigned int opd_toc;
+};
+
+static unsigned long make_thread_param(struct cg_thread_param *p, const void *fn)
+{
+    const struct elfv1_opd *desc = (const struct elfv1_opd *)fn;
+    unsigned long tls_reg;
+    __asm__ volatile ("mr %0, 13" : "=r"(tls_reg));
+    p->opd_code = (unsigned int)desc->code;
+    p->opd_toc = (unsigned int)desc->toc;
+    p->entry_opd_ptr = (unsigned int)(unsigned long)&p->opd_code;
+    p->tls = (unsigned int)tls_reg;
+    return (unsigned long)p;
+}
 
 /* Each thread performs INCREMENTS_PER_THREAD lock / read / write /
  * unlock cycles. Total expected counter = 2 * INCREMENTS_PER_THREAD.
@@ -145,6 +214,7 @@ static volatile unsigned int child_lock_errors __attribute__((aligned(128)));
 static volatile unsigned int child_unlock_errors __attribute__((aligned(128)));
 static unsigned int lwmutex_id __attribute__((aligned(128)));
 static struct TestResult result __attribute__((aligned(128)));
+static struct cg_thread_param child_param __attribute__((aligned(8)));
 
 /* Child thread: runs INCREMENTS_PER_THREAD increments under the
  * shared lwmutex. Reports lock / unlock failure counts via the
@@ -214,23 +284,34 @@ int main(void)
     child_lock_errors = 0xDEADBEEF;
     child_unlock_errors = 0xDEADBEEF;
 
-    /* Create the lwmutex. attr_ptr = 0 -- the handler accepts a
-     * zero/null attribute bag and applies defaults. */
-    ret = syscall2_s32(SYS_LWMUTEX_CREATE, (unsigned long)&lwmutex_id, 0);
+    /* Create the lwmutex: FIFO protocol, unnamed, with a valid
+     * user-space control area (see the defines above). */
+    ret = syscall6_s32(SYS_LWMUTEX_CREATE,
+        (unsigned long)&lwmutex_id, SYS_SYNC_FIFO,
+        (unsigned long)lwmutex_control, 0, 0, 0);
     if (ret != 0)
         return fail(0x01);
     if (lwmutex_id == 0)
         return fail(0x02);
 
+    /* Prime the kernel signal queue (see the header comment): a
+     * fresh lwmutex has no signal pending, so without this every
+     * locker parks forever. */
+    ret = syscall1_s32(SYS_LWMUTEX_UNLOCK, lwmutex_id);
+    if (ret != 0)
+        return fail(0x100);
+
     /* Spawn the child thread (syscall 52). */
-    ret = syscall6_s32(
+    ret = syscall8_s32(
         SYS_PPU_THREAD_CREATE,
         (unsigned long)&tid,
-        (unsigned long)&child_entry,
-        0,
-        1000,
-        0x4000,
-        0);
+        make_thread_param(&child_param, (const void *)&child_entry),
+        0,          /* arg */
+        0,          /* unk (reserved; liblv2's wrapper passes 0) */
+        1000,       /* prio */
+        0x4000,     /* stacksize */
+        0,          /* flags */
+        0);         /* threadname (none) */
     if (ret != 0)
         return fail(0x04);
 

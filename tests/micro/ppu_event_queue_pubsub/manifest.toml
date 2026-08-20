@@ -24,6 +24,10 @@ content_id = "CG_EVQ"
 short_name = "evq"
 display_name = "CellGov event-queue pub-sub microtest"
 eboot_candidates = ["EBOOT.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "retail-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"

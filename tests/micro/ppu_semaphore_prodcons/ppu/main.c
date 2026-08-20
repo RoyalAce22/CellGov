@@ -86,7 +86,8 @@ static inline s32 syscall4_s32(u64 num, u64 a, u64 b, u64 c, u64 d)
     return (s32)r3;
 }
 
-static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f)
+static inline s32 syscall8_s32(u64 num, u64 a, u64 b, u64 c, u64 d,
+                               u64 e, u64 f, u64 g, u64 h)
 {
     register u64 r3 __asm__("3") = a;
     register u64 r4 __asm__("4") = b;
@@ -94,12 +95,14 @@ static inline s32 syscall6_s32(u64 num, u64 a, u64 b, u64 c, u64 d, u64 e, u64 f
     register u64 r6 __asm__("6") = d;
     register u64 r7 __asm__("7") = e;
     register u64 r8 __asm__("8") = f;
+    register u64 r9 __asm__("9") = g;
+    register u64 r10 __asm__("10") = h;
     register u64 r11 __asm__("11") = num;
     __asm__ volatile (
         "sc\n"
         : "+r"(r3)
-        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r11)
-        : "r0", "r9", "r10", "r12", "cr0", "ctr", "memory"
+        : "r"(r4), "r"(r5), "r"(r6), "r"(r7), "r"(r8), "r"(r9), "r"(r10), "r"(r11)
+        : "r0", "r12", "cr0", "ctr", "memory"
     );
     return (s32)r3;
 }
@@ -119,9 +122,58 @@ static inline void syscall1_noreturn(u64 num, u64 a)
 #define SYS_PPU_THREAD_EXIT   41
 #define SYS_PPU_THREAD_JOIN   44
 #define SYS_PPU_THREAD_CREATE 52
-#define SYS_SEMAPHORE_CREATE  93
-#define SYS_SEMAPHORE_WAIT   114
-#define SYS_SEMAPHORE_POST   115
+#define SYS_SEMAPHORE_CREATE  90
+#define SYS_SEMAPHORE_WAIT    92
+#define SYS_SEMAPHORE_POST    94
+
+/* sys_semaphore_attribute_t: protocol@0 u32, pshared@4 u32,
+ * ipc_key@8 u64, flags@16 s32, pad@20, name@24. The kernel
+ * rejects a NULL attribute pointer with EFAULT and a protocol
+ * that is neither FIFO (1) nor PRIORITY (2) with EINVAL (RPCS3
+ * sys_semaphore.cpp sys_semaphore_create). */
+static const struct {
+    unsigned int protocol;      /* SYS_SYNC_FIFO */
+    unsigned int pshared;       /* SYS_SYNC_NOT_PROCESS_SHARED */
+    unsigned long long ipc_key;
+    unsigned int flags;
+    unsigned int pad;
+    char name[8];
+} sem_attr __attribute__((aligned(8))) = { 1, 0x200, 0, 0, 0, "" };
+
+/* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
+ * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
+ * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
+ * passes unk = 0. The param* in r4 is a ppu_thread_param_t
+ * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
+ * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
+ * bytes of u64 fields -- so repack it before the syscall. */
+struct elfv1_opd {
+    unsigned long long code;
+    unsigned long long toc;
+    unsigned long long env;
+};
+
+struct cg_thread_param {
+    unsigned int entry_opd_ptr; /* -> opd_code below */
+    unsigned int tls;
+    unsigned int opd_code;
+    unsigned int opd_toc;
+};
+
+static unsigned long make_thread_param(struct cg_thread_param *p, const void *fn)
+{
+    const struct elfv1_opd *desc = (const struct elfv1_opd *)fn;
+    unsigned long tls_reg;
+    __asm__ volatile ("mr %0, 13" : "=r"(tls_reg));
+    p->opd_code = (unsigned int)desc->code;
+    p->opd_toc = (unsigned int)desc->toc;
+    p->entry_opd_ptr = (unsigned int)(unsigned long)&p->opd_code;
+    p->tls = (unsigned int)tls_reg;
+    return (unsigned long)p;
+}
+
+static struct cg_thread_param consumer_param __attribute__((aligned(8)));
 
 /* N messages exchanged through a BUF_SIZE-slot bounded buffer.
  * N is larger than BUF_SIZE so the producer MUST block on the
@@ -210,7 +262,8 @@ int main(void)
 
     /* Create space_sem (initial BUF_SIZE, max BUF_SIZE). */
     ret = syscall4_s32(SYS_SEMAPHORE_CREATE,
-        (unsigned long)&space_sem, 0, BUF_SIZE, BUF_SIZE);
+        (unsigned long)&space_sem, (unsigned long)&sem_attr,
+        BUF_SIZE, BUF_SIZE);
     if (ret != 0)
         return fail(0x01);
     if (space_sem == 0)
@@ -218,21 +271,24 @@ int main(void)
 
     /* Create data_sem (initial 0, max BUF_SIZE). */
     ret = syscall4_s32(SYS_SEMAPHORE_CREATE,
-        (unsigned long)&data_sem, 0, 0, BUF_SIZE);
+        (unsigned long)&data_sem, (unsigned long)&sem_attr,
+        0, BUF_SIZE);
     if (ret != 0)
         return fail(0x04);
     if (data_sem == 0)
         return fail(0x08);
 
     /* Spawn consumer. */
-    ret = syscall6_s32(
+    ret = syscall8_s32(
         SYS_PPU_THREAD_CREATE,
         (unsigned long)&tid,
-        (unsigned long)&consumer_entry,
-        0,
-        1000,
-        0x4000,
-        0);
+        make_thread_param(&consumer_param, (const void *)&consumer_entry),
+        0,          /* arg */
+        0,          /* unk (reserved; liblv2's wrapper passes 0) */
+        1000,       /* prio */
+        0x4000,     /* stacksize */
+        0,          /* flags */
+        0);         /* threadname (none) */
     if (ret != 0)
         return fail(0x10);
 

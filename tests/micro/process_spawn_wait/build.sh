@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build the ppu_semaphore_prodcons microtest.
+# Build the process_spawn_wait microtest (parent + child ELFs).
 #
 # Requirements -- any environment providing:
 #   1. the ps3dev PPU toolchain (powerpc64-ps3-elf-gcc) and
@@ -13,7 +13,7 @@
 # Any ps3dev+PSL1GHT container works, e.g. one built from the
 # ps3dev/ps3toolchain and ps3dev/PSL1GHT projects:
 #
-#   docker run --rm -v /path/to/ppu_semaphore_prodcons:/src \
+#   docker run --rm -v /path/to/process_spawn_wait:/src \
 #       -v /path/to/common:/common \
 #       -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
@@ -34,22 +34,24 @@ mkdir -p "$OUT"
 echo "=== Assembling custom CRT0 ==="
 ${PPU_PREFIX}-gcc -c -o "$OUT/crt0.o" "$COMMON/crt0.S"
 
-echo "=== Linking PPU program ==="
-${PPU_PREFIX}-gcc \
-    -nostartfiles \
-    -I${PSL1GHT}/ppu/include \
-    -L${PSL1GHT}/ppu/lib \
-    -O2 -Wall \
-    -o "$OUT/ppu_semaphore_prodcons.elf" \
-    "$OUT/crt0.o" \
-    /src/ppu/main.c \
-    -llv2 -lsysmodule -lrt
+for prog in parent child; do
+  echo "=== Linking $prog ==="
+  ${PPU_PREFIX}-gcc \
+      -nostartfiles \
+      -I${PSL1GHT}/ppu/include \
+      -L${PSL1GHT}/ppu/lib \
+      -O2 -Wall \
+      -o "$OUT/$prog.elf" \
+      "$OUT/crt0.o" \
+      /src/ppu/$prog.c \
+      -llv2 -lsysmodule -lrt
 
-echo "=== Patching TOC and rldicr ==="
-python3 "$COMMON/patch_toc.py" \
-    "$OUT/ppu_semaphore_prodcons.elf" \
-    "${PPU_PREFIX}-readelf" \
-    "${PPU_PREFIX}-nm"
+  echo "=== Patching TOC and rldicr ($prog) ==="
+  python3 "$COMMON/patch_toc.py" \
+      "$OUT/$prog.elf" \
+      "${PPU_PREFIX}-readelf" \
+      "${PPU_PREFIX}-nm"
+done
 
 echo "=== Build complete ==="
-ls -la "$OUT/ppu_semaphore_prodcons.elf"
+ls -la "$OUT"/parent.elf "$OUT"/child.elf

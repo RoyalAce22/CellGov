@@ -30,18 +30,19 @@ outcome = "completed"
 # the CellGov run-game config (below).
 #
 # Usage:
-#   1. Build the ELF (requires ps3dev-fresh docker image):
+#   1. Build the ELF (requires a ps3dev+PSL1GHT toolchain image; see
+#      this test's build.sh for the requirements):
 #        docker run --rm \
 #          -v "$(pwd)/tests/micro/ppu_atomic_spinlock:/src" \
 #          -v "$(pwd)/tests/micro/common:/common" \
-#          -e COMMON=/common ps3dev-fresh:latest bash /src/build.sh
+#          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
 #   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
 #      expects:
-#        mkdir -p tools/rpcs3/dev_hdd0/game/CG_ATOMIC/USRDIR
+#        mkdir -p vfs/dev_hdd0/game/CG_ATOMIC/USRDIR
 #        cp tests/micro/ppu_atomic_spinlock/build/\
 #           ppu_atomic_spinlock.elf \
-#           tools/rpcs3/dev_hdd0/game/CG_ATOMIC/USRDIR/EBOOT.elf
+#           vfs/dev_hdd0/game/CG_ATOMIC/USRDIR/EBOOT.elf
 #
 #   3. Run:
 #        cargo run --release -p cellgov_cli -- run-game \
@@ -58,6 +59,10 @@ content_id = "CG_ATOMIC"
 short_name = "atomicspin"
 display_name = "CellGov PPU atomic spinlock microtest"
 eboot_candidates = ["EBOOT.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "retail-hdd"
 
 [cellgov.checkpoint]
 kind = "process-exit"

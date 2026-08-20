@@ -1,0 +1,55 @@
+[test]
+name = "process_spawn_wait"
+
+# Structural microtest for the LV2 process model (Stage-2 exit
+# criterion, docs/dev/vsh_hosted_boot.md). The parent spawns
+# child.elf as a separate guest process via _sys_process_spawn
+# (sc 21, the vsh audio-fallback shape) with the marshalled
+# path/argv/envp block, then polls sys_process_get_status (sc 4)
+# until the child's exit is observed. Both processes run under the
+# deterministic scheduler in disjoint address spaces.
+#
+# RPCS3 cannot run this test: it todo-stubs sc 21/27 (spawn), sc 4
+# (get_status), and sc 2/23 (wait); there is no [rpcs3] section.
+# The CellGov-side CI gate is
+# apps/cellgov_cli/tests/process_spawn_microtest.rs, which boots
+# the pair twice and requires bit-identical hash streams. It skips
+# when build/parent.elf is absent (ELFs are gitignored; build via
+# build.sh in any ps3dev+PSL1GHT toolchain container -- see the
+# requirements comment in that script).
+
+[observe]
+# Parent TestResult at 0x100 (parent space):
+#   status + pid + spawn_rc + polls
+memory_regions = [
+  { name = "result", addr = 256, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+
+# CellGov title manifest. Consumed by `cellgov_cli run-game
+# --title-manifest <this file>` after staging:
+#   mkdir -p vfs/dev_hdd0/game/CG_SPAWN/USRDIR
+#   cp tests/micro/process_spawn_wait/build/parent.elf \
+#      vfs/dev_hdd0/game/CG_SPAWN/USRDIR/EBOOT.elf
+#   cp tests/micro/process_spawn_wait/build/child.elf \
+#      vfs/dev_hdd0/game/CG_SPAWN/USRDIR/child.self
+# (the boot pipeline registers the EBOOT sibling `child.self` under
+# /app_home/child.self in the LV2 content store).
+#
+# Expected TTY payload (CGOV magic + 16 bytes):
+#   status=0x00000000 pid=0x01000600 spawn_rc=0x00000000 polls>0
+
+[cellgov.title]
+content_id = "CG_SPAWN"
+short_name = "spawn"
+display_name = "CellGov process spawn/exit/wait microtest"
+eboot_candidates = ["EBOOT.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "retail-hdd"
+
+[cellgov.checkpoint]
+kind = "process-exit"
