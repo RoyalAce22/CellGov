@@ -40,10 +40,30 @@ fn pending_response_variant_tags_are_distinct() {
             caller: 0,
         }
         .variant_tag(),
+        PendingResponse::EventFlagCancelWake {
+            result_ptr: 0,
+            observed: 0,
+        }
+        .variant_tag(),
     ];
     let mut seen = std::collections::BTreeSet::new();
     for tag in tags {
         assert!(seen.insert(tag), "duplicate variant_tag byte");
+    }
+    // The list above is hand-maintained, so a variant added without a
+    // sample here would leave its tag unguarded. Destructuring every
+    // variant once makes that a compile error rather than a silent
+    // coverage hole.
+    let sample = PendingResponse::ReturnCode { code: 0 };
+    match sample {
+        PendingResponse::ReturnCode { .. }
+        | PendingResponse::ThreadGroupJoin { .. }
+        | PendingResponse::PpuThreadJoin { .. }
+        | PendingResponse::EventQueueReceive { .. }
+        | PendingResponse::EventFlagWake { .. }
+        | PendingResponse::EventFlagCancelWake { .. }
+        | PendingResponse::CondWakeReacquire { .. }
+        | PendingResponse::LwMutexWake { .. } => {}
     }
 }
 

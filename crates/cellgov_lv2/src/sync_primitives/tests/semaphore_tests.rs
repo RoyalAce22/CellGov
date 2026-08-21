@@ -14,6 +14,62 @@ fn fresh_table_is_empty() {
 }
 
 #[test]
+fn purge_waiters_of_leaves_the_count_alone_and_the_next_post_increments() {
+    let mut t = SemaphoreTable::new();
+    let (dead, alive) = (tid(0x0100_0001), tid(0x0100_0002));
+    t.create_with_id(1, 0, 4).unwrap();
+    t.enqueue_waiter(1, dead).unwrap();
+    t.enqueue_waiter(1, alive).unwrap();
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(1, dead)]);
+    assert_eq!(
+        t.lookup(1).unwrap().count(),
+        0,
+        "parking never spent a slot"
+    );
+    assert_eq!(t.post_and_wake(1), SemaphorePost::Woke { new_owner: alive });
+    assert_eq!(t.post_and_wake(1), SemaphorePost::Incremented);
+    assert_eq!(t.lookup(1).unwrap().count(), 1);
+}
+
+#[test]
+fn purge_waiters_of_spans_every_semaphore_in_id_order() {
+    let mut t = SemaphoreTable::new();
+    let (dead_a, dead_b) = (tid(0x0100_0001), tid(0x0100_0002));
+    for id in [9, 4] {
+        t.create_with_id(id, 0, 2).unwrap();
+        t.enqueue_waiter(id, dead_b).unwrap();
+        t.enqueue_waiter(id, dead_a).unwrap();
+    }
+    let dead: std::collections::BTreeSet<_> = [dead_a, dead_b].into_iter().collect();
+    assert_eq!(
+        t.purge_waiters_of(&dead),
+        vec![(4, dead_b), (4, dead_a), (9, dead_b), (9, dead_a)],
+    );
+    assert!(t.lookup(4).unwrap().waiters().is_empty());
+    assert!(t.lookup(9).unwrap().waiters().is_empty());
+}
+
+#[test]
+fn a_bulk_post_after_a_purge_counts_only_surviving_waiters() {
+    let mut t = SemaphoreTable::new();
+    let (dead, alive) = (tid(0x0100_0001), tid(0x0100_0002));
+    t.create_with_id(1, 0, 2).unwrap();
+    t.enqueue_waiter(1, dead).unwrap();
+    t.enqueue_waiter(1, alive).unwrap();
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(1, dead)]);
+    assert_eq!(
+        t.post_and_wake_n(1, 3),
+        SemaphorePostN::Posted {
+            woken: vec![alive],
+            incremented: 2,
+        },
+    );
+    assert_eq!(t.lookup(1).unwrap().count(), 2);
+}
+
+#[test]
 fn create_rejects_initial_above_max() {
     let mut t = SemaphoreTable::new();
     assert_eq!(

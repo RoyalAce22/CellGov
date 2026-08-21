@@ -56,8 +56,7 @@ pub enum CondCreateError {
     /// Same id, same binding.
     #[error("cond create: redundant registration")]
     RedundantRegistration,
-    /// Same id, different binding. `collision.id` is the colliding
-    /// id; the `existing_*` fields describe the pre-existing entry.
+    /// Same id, different binding.
     #[error("cond create: {collision} (existing bound to mutex 0x{existing_mutex_id:08x} kind {existing_mutex_kind:?})")]
     IdCollision {
         /// Underlying id-collision diagnostic shared across primitives.
@@ -198,6 +197,23 @@ impl CondTable {
     pub fn signal_all(&mut self, id: u32) -> Option<Vec<PpuThreadId>> {
         let entry = self.entries.get_mut(&id)?;
         Some(entry.waiters.drain_all().collect())
+    }
+
+    /// Remove every waiter in `threads` from every cond, preserving
+    /// the order of survivors; returns `(id, thread)` pairs in table
+    /// order. Process-exit purge.
+    #[must_use = "the purged pairs are the only witness that these wakes were cancelled"]
+    pub fn purge_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(u32, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            for thread in entry.waiters.remove_set(threads) {
+                removed.push((*id, thread));
+            }
+        }
+        removed
     }
 
     /// Remove `target` from the waiter list.

@@ -15,6 +15,56 @@ fn fresh_table_is_empty() {
 }
 
 #[test]
+fn purge_waiters_of_spans_every_cond_and_keeps_survivor_order() {
+    let mut t = CondTable::new();
+    let (dead_a, dead_b, alive) = (tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003));
+    for id in [20, 10] {
+        t.create_with_id(id, id + 1, CondMutexKind::Mutex).unwrap();
+        t.enqueue_waiter(id, dead_a).unwrap();
+        t.enqueue_waiter(id, alive).unwrap();
+        t.enqueue_waiter(id, dead_b).unwrap();
+    }
+    let dead: std::collections::BTreeSet<_> = [dead_a, dead_b].into_iter().collect();
+    assert_eq!(
+        t.purge_waiters_of(&dead),
+        vec![(10, dead_a), (10, dead_b), (20, dead_a), (20, dead_b)],
+    );
+    for id in [10, 20] {
+        let e = t.lookup(id).unwrap();
+        assert_eq!(e.waiters().iter().collect::<Vec<_>>(), vec![alive]);
+        assert_eq!(e.mutex_id(), id + 1, "the mutex binding is not a waiter");
+        assert_eq!(e.mutex_kind(), CondMutexKind::Mutex);
+    }
+}
+
+#[test]
+fn a_purged_cond_waiter_is_no_longer_signalable() {
+    let mut t = CondTable::new();
+    let dead = tid(0x0100_0001);
+    t.create_with_id(1, 2, CondMutexKind::Mutex).unwrap();
+    t.enqueue_waiter(1, dead).unwrap();
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(1, dead)]);
+    assert_eq!(t.signal_one(1), None);
+    assert_eq!(
+        t.signal_to(1, dead),
+        Err(CondSignalToError::TargetNotWaiting)
+    );
+    assert_eq!(t.signal_all(1), Some(vec![]));
+}
+
+#[test]
+fn purge_waiters_of_an_untouched_table_leaves_the_state_hash_alone() {
+    let mut t = CondTable::new();
+    t.create_with_id(1, 2, CondMutexKind::Mutex).unwrap();
+    t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
+    let before = t.state_hash();
+    let miss: std::collections::BTreeSet<_> = [tid(0x0100_0099)].into_iter().collect();
+    assert!(t.purge_waiters_of(&miss).is_empty());
+    assert_eq!(t.state_hash(), before);
+}
+
+#[test]
 fn create_with_id_stores_binding() {
     let mut t = CondTable::new();
     assert_eq!(

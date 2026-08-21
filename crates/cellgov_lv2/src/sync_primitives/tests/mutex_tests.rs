@@ -215,6 +215,155 @@ fn a_full_release_clears_outstanding_recursive_holds() {
 }
 
 #[test]
+fn a_release_that_drops_recursive_holds_is_witnessed() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let a = tid(0x0100_0001);
+    t.acquire_or_enqueue(1, a);
+    t.acquire_or_enqueue(1, a);
+    assert_eq!(t.recursion_discards_count(), 0);
+    assert_eq!(t.release_and_wake_next(1, a), MutexRelease::Freed);
+    assert_eq!(
+        t.recursion_discards_count(),
+        1,
+        "the depth owed back on a cond-wake re-acquire must not vanish unwitnessed",
+    );
+}
+
+#[test]
+fn a_release_of_a_singly_held_mutex_is_not_a_recursion_discard() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let a = tid(0x0100_0001);
+    t.acquire_or_enqueue(1, a);
+    t.acquire_or_enqueue(1, a);
+    assert!(t.unlock_decrement(1, a), "drain the one recursive hold");
+    assert_eq!(t.release_and_wake_next(1, a), MutexRelease::Freed);
+    assert_eq!(t.recursion_discards_count(), 0);
+    // A refused release must not count either.
+    assert_eq!(
+        t.release_and_wake_next(99, a),
+        MutexRelease::Unknown,
+        "unknown id",
+    );
+    assert_eq!(t.recursion_discards_count(), 0);
+}
+
+#[test]
+fn a_non_owner_release_leaves_the_recursion_witness_and_the_depth_alone() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let (owner, other) = (tid(0x0100_0001), tid(0x0100_0002));
+    t.acquire_or_enqueue(1, owner);
+    t.acquire_or_enqueue(1, owner);
+    assert_eq!(t.release_and_wake_next(1, other), MutexRelease::NotOwner);
+    assert_eq!(t.recursion_discards_count(), 0);
+    assert_eq!(t.lookup(1).unwrap().lock_count(), 1);
+    assert_eq!(t.lookup(1).unwrap().owner(), Some(owner));
+}
+
+#[test]
+fn purge_waiters_of_reports_pairs_in_id_then_enqueue_order() {
+    let mut t = MutexTable::new();
+    let (a, b, c) = (tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003));
+    for id in [2, 1] {
+        t.create_with_id(id, default_attrs()).unwrap();
+        t.try_acquire(id, c);
+        t.enqueue_waiter(id, b).unwrap();
+        t.enqueue_waiter(id, a).unwrap();
+    }
+    let dead: std::collections::BTreeSet<_> = [a, b].into_iter().collect();
+    assert_eq!(
+        t.purge_waiters_of(&dead),
+        vec![(1, b), (1, a), (2, b), (2, a)],
+        "ids ascend; within one mutex the queue order stands",
+    );
+    assert!(t.lookup(1).unwrap().waiters().is_empty());
+    assert!(t.lookup(2).unwrap().waiters().is_empty());
+}
+
+#[test]
+fn purge_waiters_of_leaves_ownership_and_lock_count_alone() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, recursive_attrs()).unwrap();
+    let owner = tid(0x0100_0001);
+    let dead_waiter = tid(0x0100_0002);
+    t.acquire_or_enqueue(1, owner);
+    t.acquire_or_enqueue(1, owner);
+    t.enqueue_waiter(1, dead_waiter).unwrap();
+    let dead: std::collections::BTreeSet<_> = [dead_waiter].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&dead), vec![(1, dead_waiter)]);
+    let e = t.lookup(1).unwrap();
+    assert_eq!(e.owner(), Some(owner));
+    assert_eq!(e.lock_count(), 1);
+}
+
+#[test]
+fn a_purged_waiter_never_inherits_the_mutex_on_release() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, default_attrs()).unwrap();
+    let (owner, dead, alive) = (tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003));
+    t.try_acquire(1, owner);
+    t.enqueue_waiter(1, dead).unwrap();
+    t.enqueue_waiter(1, alive).unwrap();
+    let purged: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&purged), vec![(1, dead)]);
+    assert_eq!(
+        t.release_and_wake_next(1, owner),
+        MutexRelease::Transferred { new_owner: alive },
+    );
+}
+
+#[test]
+fn purge_waiters_of_an_empty_set_is_a_no_op_on_the_state_hash() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, default_attrs()).unwrap();
+    t.try_acquire(1, tid(0x0100_0001));
+    t.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
+    let before = t.state_hash();
+    assert!(t
+        .purge_waiters_of(&std::collections::BTreeSet::new())
+        .is_empty());
+    assert_eq!(t.state_hash(), before);
+}
+
+#[test]
+fn ids_owned_by_lists_only_the_mutexes_a_named_thread_holds() {
+    let mut t = MutexTable::new();
+    let (dead, alive) = (tid(0x0100_0001), tid(0x0100_0002));
+    for id in [3, 1, 2, 4] {
+        t.create_with_id(id, default_attrs()).unwrap();
+    }
+    t.try_acquire(3, dead);
+    t.try_acquire(1, alive);
+    t.try_acquire(2, dead);
+    // Mutex 4 stays unowned.
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.ids_owned_by(&set), vec![2, 3], "ascending id order");
+}
+
+#[test]
+fn ids_owned_by_an_empty_set_finds_nothing() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, default_attrs()).unwrap();
+    t.try_acquire(1, tid(0x0100_0001));
+    assert!(t
+        .ids_owned_by(&std::collections::BTreeSet::new())
+        .is_empty());
+}
+
+#[test]
+fn a_waiter_only_thread_is_not_reported_as_an_owner() {
+    let mut t = MutexTable::new();
+    t.create_with_id(1, default_attrs()).unwrap();
+    let (owner, waiter) = (tid(0x0100_0001), tid(0x0100_0002));
+    t.try_acquire(1, owner);
+    t.enqueue_waiter(1, waiter).unwrap();
+    let set: std::collections::BTreeSet<_> = [waiter].into_iter().collect();
+    assert!(t.ids_owned_by(&set).is_empty());
+}
+
+#[test]
 fn acquire_or_enqueue_unknown_id_is_unknown() {
     let mut t = MutexTable::new();
     assert_eq!(

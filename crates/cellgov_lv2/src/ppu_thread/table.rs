@@ -86,9 +86,6 @@ impl PpuThreadTable {
     /// the calling (primary) thread (see RPCS3
     /// `_sys_prx_start_module(ppu_thread&, ...)` in
     /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp`).
-    /// Aliasing the transient unit to the primary thread here
-    /// gives sync-syscall dispatch sites a real PpuThreadId for
-    /// the caller.
     ///
     /// # Errors
     /// Returns `false` if `existing` is not a known thread or
@@ -141,6 +138,39 @@ impl PpuThreadTable {
     /// Translate a runtime unit id to its guest thread id.
     pub fn thread_id_for_unit(&self, unit_id: UnitId) -> Option<PpuThreadId> {
         self.unit_to_thread.get(&unit_id).copied()
+    }
+
+    /// Remove every thread in `threads` from every thread's
+    /// join-waiter list; returns `(target, waiter)` pairs in
+    /// ascending target order, and within a target in the order the
+    /// waiters were parked.
+    ///
+    /// Process-exit purge: a purged joiner must never be handed the
+    /// target's exit value on a later `mark_finished`.
+    ///
+    /// # Cross-module contract
+    ///
+    /// Join-side record only: nothing is woken and no
+    /// `SyscallResponseTable` entry is cleared, so every purged
+    /// waiter stays parked. The process-exit caller depends on that
+    /// -- its threads are being finished, not resumed -- so any other
+    /// caller owes each returned waiter a wake of its own.
+    pub fn purge_join_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(PpuThreadId, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (target, thread) in &mut self.threads {
+            thread.join_waiters.retain(|&waiter| {
+                if threads.contains(&waiter) {
+                    removed.push((*target, waiter));
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        removed
     }
 
     /// Mark a thread finished and return its drained joiners.

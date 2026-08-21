@@ -90,7 +90,10 @@ pub enum Lv2Dispatch {
     ///   [`PendingResponse::variant_tag`] MUST match the existing
     ///   entry's tag -- those updates are partial fills. `ReturnCode`
     ///   may replace any variant; it is the universal cancel/timeout
-    ///   override.
+    ///   override. The one payload-carrying exception is
+    ///   [`PendingResponse::EventFlagWake`] refined to
+    ///   [`PendingResponse::EventFlagCancelWake`], which
+    ///   `sys_event_flag_cancel` stages over a parked eflag wait.
     WakeAndReturn {
         /// Return code written to the source's r3.
         code: u64,
@@ -359,6 +362,18 @@ pub enum PendingResponse {
         /// Filled in at wake time by the set side.
         observed: u64,
     },
+    /// On wake, write `observed` (u64 BE) to a non-null `result_ptr`
+    /// and set r3 = `CELL_ECANCELED`. Staged by
+    /// `sys_event_flag_cancel` for each drained waiter, so the store
+    /// resolves in the waiter's space, not the canceller's (RPCS3
+    /// sys_event_flag.cpp sys_event_flag_cancel stores the captured
+    /// pattern per waiter).
+    EventFlagCancelWake {
+        /// Guest out-pointer receiving `observed` (u64 BE).
+        result_ptr: u32,
+        /// Flag pattern captured once at cancel time.
+        observed: u64,
+    },
     /// On wake, re-acquire `mutex_id` before returning r3 = 0. A held
     /// mutex re-parks the caller on its waiter list; the pending
     /// entry is replaced by `ReturnCode { code: 0 }`.
@@ -403,6 +418,7 @@ impl PendingResponse {
             PendingResponse::EventFlagWake { .. } => 4,
             PendingResponse::CondWakeReacquire { .. } => 5,
             PendingResponse::LwMutexWake { .. } => 6,
+            PendingResponse::EventFlagCancelWake { .. } => 7,
         }
     }
 }

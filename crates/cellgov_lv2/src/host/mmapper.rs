@@ -45,7 +45,6 @@ impl MmapperHandleTable {
         self.handles.get(&mem_id).copied()
     }
 
-    /// True when no handles are live.
     pub(crate) fn is_empty(&self) -> bool {
         self.handles.is_empty()
     }
@@ -64,20 +63,24 @@ impl MmapperHandleTable {
     }
 }
 
-/// Pending region-install request emitted by 334 and drained by the
-/// runtime after `Lv2Host::dispatch` returns.
+/// Pending region-install request emitted by 334 / 337 and drained by
+/// the runtime after `Lv2Host::dispatch` returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PendingRegionInstall {
     pub addr: u64,
     pub size: usize,
+    /// The IPC key the mapped `mem_id` was registered under by a
+    /// keyed 332, `None` for keyless handles. The runtime uses it to
+    /// keep views of one keyed segment coherent across address
+    /// spaces.
+    pub ipc_key: Option<u64>,
 }
 
 /// Deterministic boot-state writes applied when the shm registered
 /// under `shm_ipc_key` is first mapped into guest memory (334 / 337).
 ///
 /// Models system state an external firmware producer would have
-/// established before the title ran; CellGov encodes it as data, not
-/// as cross-process communication.
+/// established before the title ran.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemStateSeed {
     /// Must match a key later passed to a keyed 332.

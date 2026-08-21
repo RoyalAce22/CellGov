@@ -26,9 +26,7 @@ pub struct EventFlagWaiter {
 pub struct EventFlagWake {
     /// Woken thread.
     pub thread: PpuThreadId,
-    /// `bits` at the moment this waiter's predicate fired; may
-    /// differ across waiters from one call when an earlier
-    /// CLEAR-wake mutated `bits`.
+    /// `bits` at the moment this waiter's predicate fired.
     pub observed: u64,
     /// Guest address to write the observed pattern to.
     pub result_ptr: u32,
@@ -280,11 +278,34 @@ impl EventFlagTable {
         Some(entry.waiters.remove(pos))
     }
 
-    /// Drain every parked waiter without mutating `bits`. Each
-    /// returned [`EventFlagWaiter`] is the full record so the
-    /// caller can wake the thread with whatever return code they
-    /// choose (typically `CELL_ECANCELED`). Returns `None` if `id`
-    /// is unknown.
+    /// Remove every waiter in `threads` from every flag without
+    /// mutating `bits` or writing result pointers, preserving the
+    /// order of survivors; returns `(id, thread)` pairs in table
+    /// order. Process-exit purge.
+    #[must_use = "the purged pairs are the only witness that these wakes were cancelled"]
+    pub fn purge_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(u32, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            entry.waiters.retain(|w| {
+                if threads.contains(&w.thread) {
+                    removed.push((*id, w.thread));
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        removed
+    }
+
+    /// Drain every parked waiter without mutating `bits`; `None`
+    /// if `id` is unknown.
+    ///
+    /// Caller must wake each returned waiter, typically with
+    /// `CELL_ECANCELED`.
     pub fn cancel_waiters(&mut self, id: u32) -> Option<Vec<EventFlagWaiter>> {
         let entry = self.entries.get_mut(&id)?;
         Some(std::mem::take(&mut entry.waiters))

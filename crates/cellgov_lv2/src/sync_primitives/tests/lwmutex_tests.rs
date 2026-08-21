@@ -15,6 +15,60 @@ fn fresh_table_is_empty() {
 }
 
 #[test]
+fn purge_waiters_of_leaves_the_signaled_flag_and_survivor_order_alone() {
+    let mut t = LwMutexTable::new();
+    let (dead, alive) = (tid(0x0100_0001), tid(0x0100_0002));
+    let a = t.create().unwrap();
+    let b = t.create().unwrap();
+    t.enqueue_waiter(a, dead).unwrap();
+    t.enqueue_waiter(a, alive).unwrap();
+    // `b` has an empty queue, so its release leaves a pending signal
+    // that the purge must not consume.
+    assert_eq!(t.release_and_wake_next(b, alive), LwMutexRelease::Signaled);
+    assert!(t.lookup(b).unwrap().signaled());
+
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(a, dead)]);
+    assert!(t.lookup(b).unwrap().signaled(), "signal survives the purge");
+    assert_eq!(
+        t.lookup(a).unwrap().waiters().iter().collect::<Vec<_>>(),
+        vec![alive],
+    );
+}
+
+#[test]
+fn purge_waiters_of_reports_every_lwmutex_in_id_order() {
+    let mut t = LwMutexTable::new();
+    let (dead_a, dead_b) = (tid(0x0100_0001), tid(0x0100_0002));
+    let a = t.create().unwrap();
+    let b = t.create().unwrap();
+    for id in [b, a] {
+        t.enqueue_waiter(id, dead_b).unwrap();
+        t.enqueue_waiter(id, dead_a).unwrap();
+    }
+    let dead: std::collections::BTreeSet<_> = [dead_a, dead_b].into_iter().collect();
+    assert_eq!(
+        t.purge_waiters_of(&dead),
+        vec![(a, dead_b), (a, dead_a), (b, dead_b), (b, dead_a)],
+    );
+    // With the queue drained, an unlock has to fall back to the flag.
+    assert_eq!(t.release_and_wake_next(a, dead_a), LwMutexRelease::Signaled);
+}
+
+#[test]
+fn purge_waiters_of_does_not_move_the_acquire_or_release_witnesses() {
+    let mut t = LwMutexTable::new();
+    let dead = tid(0x0100_0001);
+    let id = t.create().unwrap();
+    t.enqueue_waiter(id, dead).unwrap();
+    let (acquires, releases) = (t.acquires_count(), t.releases_count());
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(id, dead)]);
+    assert_eq!(t.acquires_count(), acquires);
+    assert_eq!(t.releases_count(), releases);
+}
+
+#[test]
 fn id_allocator_is_monotonic_and_starts_at_one() {
     let mut a = LwMutexIdAllocator::new();
     assert_eq!(a.allocate(), Some(1));
@@ -108,7 +162,6 @@ fn acquire_or_enqueue_unsignaled_parks() {
 fn acquire_or_enqueue_consumes_signal_when_pending() {
     let mut t = LwMutexTable::new();
     let id = t.create().unwrap();
-    // Set the signal via an unlock against an empty queue.
     t.release_and_wake_next(id, tid(0x0100_0001));
     assert_eq!(
         t.acquire_or_enqueue(id, tid(0x0100_0002)),
@@ -263,7 +316,6 @@ fn state_hash_distinguishes_signaled_state() {
     let id_a = a.create().unwrap();
     b.create().unwrap();
     assert_eq!(a.state_hash(), b.state_hash());
-    // Unlock-with-no-waiters sets the signal on `a` only.
     a.release_and_wake_next(id_a, tid(0x0100_0001));
     assert_ne!(a.state_hash(), b.state_hash());
 }

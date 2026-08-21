@@ -33,10 +33,13 @@ outcome = "completed"
 #   mkdir -p vfs/dev_hdd0/game/CG_SPAWN/USRDIR
 #   cp tests/micro/process_spawn_wait/build/parent.elf \
 #      vfs/dev_hdd0/game/CG_SPAWN/USRDIR/EBOOT.elf
-#   cp tests/micro/process_spawn_wait/build/child.elf \
+#   cp tests/micro/process_spawn_wait/build/child.self \
 #      vfs/dev_hdd0/game/CG_SPAWN/USRDIR/child.self
 # (the boot pipeline registers the EBOOT sibling `child.self` under
-# /app_home/child.self in the LV2 content store).
+# /app_home/child.self in the LV2 content store; build.sh's child.self
+# is genuinely SCE-wrapped via make_self, and the spawn loader
+# unwraps it -- a raw child.elf copy also works, the loader detects
+# by magic).
 #
 # Expected TTY payload (CGOV magic + 16 bytes):
 #   status=0x00000000 pid=0x01000600 spawn_rc=0x00000000 polls>0

@@ -268,13 +268,18 @@ impl Lv2Host {
         for w in waiters {
             if let Some(unit) = self.resolve_wake_thread(w.thread, "event_flag_cancel.waker") {
                 unit_ids.push(unit);
+                // Each result_ptr was decoded from the WAITER's
+                // park-time syscall, so it must resolve in the
+                // waiter's space; the canceller's effects commit into
+                // the canceller's. Hence the store rides the wake
+                // channel.
                 updates.push((
                     unit,
-                    PendingResponse::ReturnCode {
-                        code: cell_errors::CELL_ECANCELED.into(),
+                    PendingResponse::EventFlagCancelWake {
+                        result_ptr: w.result_ptr,
+                        observed: bits,
                     },
                 ));
-                effects.extend(event_flag_result_write(w.result_ptr, bits, requester, tick));
             }
         }
         effects.extend(event_flag_count_write(num_ptr, count, requester, tick));

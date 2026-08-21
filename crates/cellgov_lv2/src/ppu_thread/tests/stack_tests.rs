@@ -81,3 +81,67 @@ fn stack_allocator_returns_none_on_overflow() {
     };
     assert!(a.allocate(0x1000, 0x10).is_none());
 }
+
+#[test]
+fn free_last_rewinds_so_the_next_allocation_reuses_the_block() {
+    let mut a = ThreadStackAllocator::new();
+    let s1 = a.allocate(0x10_000, 0x10).unwrap();
+    assert!(a.free_last(&s1));
+    let s2 = a.allocate(0x10_000, 0x10).unwrap();
+    assert_eq!(s2.base, s1.base, "a freed last block must be reused");
+}
+
+#[test]
+fn free_last_refuses_a_block_that_is_not_the_most_recent() {
+    let mut a = ThreadStackAllocator::new();
+    let s1 = a.allocate(0x10_000, 0x10).unwrap();
+    let s2 = a.allocate(0x10_000, 0x10).unwrap();
+    assert!(!a.free_last(&s1));
+    // s2 stays live: the next allocation sits above it.
+    let s3 = a.allocate(0x10_000, 0x10).unwrap();
+    assert!(s3.base >= s2.end());
+}
+
+#[test]
+fn a_second_free_last_of_the_same_block_is_refused() {
+    let mut a = ThreadStackAllocator::new();
+    let s1 = a.allocate(0x10_000, 0x10).unwrap();
+    assert!(a.free_last(&s1));
+    assert!(!a.free_last(&s1), "a double free must not rewind twice");
+    assert_eq!(a.peek_next(0x10), Some(s1.base));
+}
+
+#[test]
+fn free_last_refuses_a_block_below_the_arena_floor() {
+    let mut a = ThreadStackAllocator::new();
+    // Ends exactly at the untouched bump pointer, but starts below
+    // the floor: honouring it would rewind into the primary stack.
+    let bogus = ThreadStack::new(ThreadStackAllocator::CHILD_STACK_BASE - 0x1000, 0x1000);
+    assert!(!a.free_last(&bogus));
+    assert_eq!(
+        a.peek_next(0x10),
+        Some(ThreadStackAllocator::CHILD_STACK_BASE),
+    );
+}
+
+#[test]
+fn free_last_refuses_a_block_whose_end_would_wrap() {
+    let mut a = ThreadStackAllocator::new();
+    let wrapping = ThreadStack::new(u64::MAX, 0x10);
+    assert!(!a.free_last(&wrapping));
+    assert_eq!(
+        a.peek_next(0x10),
+        Some(ThreadStackAllocator::CHILD_STACK_BASE),
+    );
+}
+
+#[test]
+fn free_last_of_an_over_aligned_block_leaves_the_next_base_at_that_block() {
+    let mut a = ThreadStackAllocator::new();
+    let _pad = a.allocate(0x10, 0x10).unwrap();
+    let s = a.allocate(0x10_000, 0x1_0000).unwrap();
+    assert!(a.free_last(&s));
+    // The rewind lands on the aligned base, not on the pre-allocation
+    // bump pointer: the alignment padding below `s` stays consumed.
+    assert_eq!(a.peek_next(0x10), Some(s.base));
+}

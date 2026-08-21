@@ -84,6 +84,72 @@ fn remove_missing_returns_false() {
     assert_eq!(w.len(), 1);
 }
 
+fn set(ids: &[PpuThreadId]) -> std::collections::BTreeSet<PpuThreadId> {
+    ids.iter().copied().collect()
+}
+
+#[test]
+fn remove_set_returns_removals_in_enqueue_order_not_set_order() {
+    let mut w = WaiterList::new();
+    for raw in [0x0100_0004, 0x0100_0001, 0x0100_0003, 0x0100_0002] {
+        w.enqueue(tid(raw)).unwrap();
+    }
+    assert_eq!(
+        w.remove_set(&set(&[tid(0x0100_0002), tid(0x0100_0004)])),
+        vec![tid(0x0100_0004), tid(0x0100_0002)],
+    );
+    let survivors: Vec<PpuThreadId> = w.iter().collect();
+    assert_eq!(survivors, vec![tid(0x0100_0001), tid(0x0100_0003)]);
+}
+
+#[test]
+fn remove_set_with_an_empty_set_removes_nothing() {
+    let mut w = WaiterList::new();
+    w.enqueue(tid(0x0100_0001)).unwrap();
+    w.enqueue(tid(0x0100_0002)).unwrap();
+    assert!(w.remove_set(&set(&[])).is_empty());
+    assert_eq!(w.len(), 2);
+}
+
+#[test]
+fn remove_set_ignores_ids_that_were_never_parked() {
+    let mut w = WaiterList::new();
+    w.enqueue(tid(0x0100_0001)).unwrap();
+    assert!(w
+        .remove_set(&set(&[tid(0x0100_0099), tid(0x0100_0098)]))
+        .is_empty(),);
+    assert_eq!(w.len(), 1);
+    assert!(w.contains(tid(0x0100_0001)));
+}
+
+#[test]
+fn remove_set_can_drain_the_whole_list() {
+    let mut w = WaiterList::new();
+    let ids = [tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003)];
+    for id in ids {
+        w.enqueue(id).unwrap();
+    }
+    assert_eq!(w.remove_set(&set(&ids)), ids.to_vec());
+    assert!(w.is_empty());
+    assert_eq!(w.dequeue_one(), None);
+}
+
+#[test]
+fn a_list_that_survived_a_remove_set_still_rejects_duplicates() {
+    let mut w = WaiterList::new();
+    let a = tid(0x0100_0001);
+    w.enqueue(a).unwrap();
+    w.enqueue(tid(0x0100_0002)).unwrap();
+    assert_eq!(w.remove_set(&set(&[a])), vec![a]);
+    w.enqueue(a).unwrap();
+    assert_eq!(
+        w.enqueue(a),
+        Err(DuplicateEnqueue { id: a }),
+        "re-parking must not leave a stale duplicate-detection hole",
+    );
+    assert_eq!(w.iter().collect::<Vec<_>>(), vec![tid(0x0100_0002), a]);
+}
+
 #[test]
 fn iter_yields_enqueue_order() {
     let mut w = WaiterList::new();

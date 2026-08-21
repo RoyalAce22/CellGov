@@ -22,6 +22,79 @@ fn fresh_table_is_empty() {
 }
 
 #[test]
+fn purge_waiters_of_keeps_survivor_out_pointers_and_queue_order() {
+    let mut t = EventQueueTable::new();
+    let (dead_a, alive, dead_b) = (tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003));
+    for id in [8, 3] {
+        assert!(t.create_with_id(id, 4));
+        t.enqueue_waiter(id, dead_a, 0x1000).unwrap();
+        t.enqueue_waiter(id, alive, 0x2000).unwrap();
+        t.enqueue_waiter(id, dead_b, 0x3000).unwrap();
+    }
+    let dead: std::collections::BTreeSet<_> = [dead_a, dead_b].into_iter().collect();
+    assert_eq!(
+        t.purge_waiters_of(&dead),
+        vec![(3, dead_a), (3, dead_b), (8, dead_a), (8, dead_b)],
+    );
+    for id in [3, 8] {
+        let waiters: Vec<_> = t.lookup(id).unwrap().waiters().iter().copied().collect();
+        assert_eq!(
+            waiters,
+            vec![EventQueueWaiter {
+                thread: alive,
+                out_ptr: 0x2000,
+            }],
+            "the survivor keeps the out pointer it parked with",
+        );
+    }
+    assert_eq!(
+        t.send_and_wake_or_enqueue(3, pl(7)),
+        EventQueueSend::Woke {
+            new_owner: alive,
+            out_ptr: 0x2000,
+            payload: pl(7),
+        },
+    );
+}
+
+#[test]
+fn purge_waiters_of_leaves_buffered_payloads_untouched() {
+    let mut t = EventQueueTable::new();
+    let dead = tid(0x0100_0001);
+    assert!(t.create_with_id(1, 2));
+    assert!(t.create_with_id(2, 2));
+    // Queue 1 buffers; queue 2 parks. The storage invariant keeps a
+    // single queue from holding both, so the purge is exercised
+    // across two entries.
+    assert_eq!(
+        t.send_and_wake_or_enqueue(1, pl(10)),
+        EventQueueSend::Enqueued
+    );
+    t.enqueue_waiter(2, dead, 0x4000).unwrap();
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(2, dead)]);
+    assert_eq!(t.lookup(1).unwrap().len(), 1);
+    assert_eq!(t.try_receive(1), Some(EventQueueReceive::Delivered(pl(10))),);
+    assert!(t.lookup(2).unwrap().is_inert(), "queue 2 has nothing left");
+}
+
+#[test]
+fn a_purged_waiter_never_receives_a_later_send() {
+    let mut t = EventQueueTable::new();
+    let dead = tid(0x0100_0001);
+    assert!(t.create_with_id(1, 1));
+    t.enqueue_waiter(1, dead, 0x1000).unwrap();
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(1, dead)]);
+    assert_eq!(
+        t.send_and_wake_or_enqueue(1, pl(1)),
+        EventQueueSend::Enqueued
+    );
+    assert_eq!(t.send_and_wake_or_enqueue(1, pl(2)), EventQueueSend::Full);
+    assert_eq!(t.remove_waiter(1, dead), None);
+}
+
+#[test]
 fn create_rejects_zero_size() {
     let mut t = EventQueueTable::new();
     assert!(!t.create_with_id(1, 0));

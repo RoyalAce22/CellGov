@@ -5,9 +5,7 @@ pub const PS3_PRIMARY_STACK_BASE: u64 = 0xD000_0000;
 
 /// Size in bytes of the primary thread's stack region. 1 MiB
 /// matches what real PS3 titles declare in their `sys_proc_param`
-/// (PROC_PARAM.primary_stacksize); a smaller floor used to alias
-/// onto the child-stacks region when a title asked for 1 MiB and
-/// the boot.rs check now refuses to truncate.
+/// (PROC_PARAM.primary_stacksize).
 pub const PS3_PRIMARY_STACK_SIZE: usize = 0x0010_0000;
 
 /// Sits immediately above the primary stack so child-stack allocator
@@ -27,8 +25,8 @@ pub const PS3_PRIMARY_STACK_TOP: u64 =
 /// allocations land in a writable region.
 pub const PS3_RSX_IOMAP_BASE: u64 = 0x4000_0000;
 
-/// Size of the backed iomap region. Captured from WipEout's first
-/// `sys_rsx_context_iomap` call (the `size` argument); larger
+/// Size of the backed iomap region. Captured from the `size` argument
+/// of a retail title's first `sys_rsx_context_iomap` call; larger
 /// requests trip the over-cap diagnostic in the 672 dispatch handler.
 pub const PS3_RSX_IOMAP_SIZE: usize = 0x0550_0000;
 

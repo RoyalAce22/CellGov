@@ -5,7 +5,7 @@
   "outcome": "MaxSteps",
   "steps": 390099,
   "budget": 256,
-  "host_invariant_breaks": 76,
+  "host_invariant_breaks": 77,
   "witnesses": {
     "cond_reacquires": {
       "value": 1,
@@ -16,7 +16,7 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 76,
+      "value": 77,
       "class": "exact"
     },
     "ldarx": {

@@ -94,6 +94,225 @@ fn syscall_324_writes_fresh_cid_to_out_ptr() {
     }
 }
 
+/// The kernel truncates the request to the 1 MiB granule first, so a
+/// sub-granule container has nothing left to allocate. Oracle: RPCS3
+/// `sys_memory.cpp` `sys_memory_container_create`.
+#[test]
+fn syscall_324_sub_granule_size_returns_enomem_and_mints_no_id() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    for size in [0u64, 1, 0xF_FFFF] {
+        let result = host.dispatch(
+            Lv2Request::Unsupported {
+                number: 324,
+                args: [0x9000, size, 0, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(
+            result,
+            Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
+            "size {size:#x} rounds down to zero",
+        );
+    }
+    assert_eq!(
+        host.alloc_id(),
+        Lv2Host::new().alloc_id(),
+        "a refused create must not consume an id",
+    );
+}
+
+/// RPCS3 truncates and refuses the size before it ever reaches the
+/// `cid` write, so a call wrong in both ways answers for its size.
+#[test]
+fn syscall_324_sub_granule_size_outranks_a_null_cid() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 324,
+            args: [0, 0xF_FFFF, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into())
+    );
+}
+
+#[test]
+fn syscall_324_null_cid_with_an_accepted_size_is_efault() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 324,
+            args: [0, 0x10_0000, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+    assert_eq!(
+        host.alloc_id(),
+        Lv2Host::new().alloc_id(),
+        "a refused create must not consume an id",
+    );
+}
+
+#[test]
+fn syscall_324_exactly_one_granule_is_accepted() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 324,
+            args: [0x9000, 0x10_0000, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert!(matches!(result, Lv2Dispatch::Immediate { code: 0, .. }));
+}
+
+/// A misaligned reservation is refused, not silently rounded up to
+/// the next 256 MiB area. Oracle: RPCS3 `sys_mmapper.cpp`
+/// `sys_mmapper_allocate_address`.
+#[test]
+fn syscall_330_size_off_the_area_granule_returns_ealign() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    for size in [1u64, 0x1000_0001, 0x0FFF_FFFF] {
+        let result = host.dispatch(
+            Lv2Request::Unsupported {
+                number: 330,
+                args: [size, 0x400, 0, 0x9000, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(
+            result,
+            Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+            "size {size:#x} is not an area multiple",
+        );
+    }
+}
+
+/// A `size` past `u32::MAX` must not narrow into an accepted request.
+#[test]
+fn syscall_330_size_beyond_u32_returns_enomem() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 330,
+            args: [0x1_1000_0000, 0x400, 0, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
+        "the low word alone must not decide the request",
+    );
+}
+
+#[test]
+fn syscall_330_rejects_an_alignment_outside_the_area_sizes() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    for alignment in [0x1000u64, 0x10_0000, 0x3000_0000, 0x1_0000_0000] {
+        let result = host.dispatch(
+            Lv2Request::Unsupported {
+                number: 330,
+                args: [0x1000_0000, 0x400, alignment, 0x9000, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(
+            result,
+            Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+            "alignment {alignment:#x} is not a VM area size",
+        );
+    }
+}
+
+/// RPCS3 checks `size`, then `alignment`, and only reaches the
+/// `alloc_addr` write afterwards, so a call wrong in two ways answers
+/// for its arguments first.
+#[test]
+fn syscall_330_argument_refusals_outrank_a_null_alloc_addr() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    // Bad size, null out-pointer.
+    assert_eq!(
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 330,
+                args: [1, 0x400, 0, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        ),
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+    );
+    // Bad alignment, null out-pointer.
+    assert_eq!(
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 330,
+                args: [0x1000_0000, 0x400, 0x1000, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        ),
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+    );
+    // Everything valid but the out-pointer.
+    assert_eq!(
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 330,
+                args: [0x1000_0000, 0x400, 0, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        ),
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+    );
+}
+
+/// A zero alignment is the documented PSL1GHT allowance: the kernel
+/// reads it as the default area size.
+#[test]
+fn syscall_330_accepts_a_zero_alignment_and_the_four_area_sizes() {
+    let rt = FakeRuntime::new(0x10000);
+    for alignment in [0u64, 0x1000_0000, 0x2000_0000, 0x4000_0000, 0x8000_0000] {
+        let mut host = Lv2Host::new();
+        let result = host.dispatch(
+            Lv2Request::Unsupported {
+                number: 330,
+                args: [0x1000_0000, 0x400, alignment, 0x9000, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert!(
+            matches!(result, Lv2Dispatch::Immediate { code: 0, .. }),
+            "alignment {alignment:#x}: got {result:?}",
+        );
+    }
+}
+
 #[test]
 fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
     let mut host = Lv2Host::new();
@@ -162,7 +381,7 @@ fn syscall_332_then_334_records_pending_region_install() {
         Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
     );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
-    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0400_0000_usize)]);
+    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0400_0000_usize, None)]);
 }
 
 #[test]
@@ -273,7 +492,7 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
         Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
     );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
-    assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize)]);
+    assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize, None)]);
 }
 
 #[test]
@@ -303,7 +522,7 @@ fn syscall_332_then_337_searches_installs_and_writes_back_found_addr() {
         "empty window -> search returns the hint as the found address",
     );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
-    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0010_0000_usize)]);
+    assert_eq!(installs, vec![(0x5000_0000_u64, 0x0010_0000_usize, None)]);
 }
 
 #[test]
@@ -417,9 +636,7 @@ fn syscall_337_null_alloc_addr_returns_efault() {
 fn syscall_337_exhausted_window_returns_enomem() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
-    // Fill the entire mmapper window in the ledger (direct insert; we
-    // don't go through the dispatch arm here -- just the ledger
-    // state the search will consult).
+    // Fill the entire mmapper window in the ledger the search consults.
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
     let mem_id = mint_mmapper_handle(&mut host, &rt, 0x0010_0000, 0x400);
@@ -434,13 +651,10 @@ fn syscall_337_exhausted_window_returns_enomem() {
     assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()));
 }
 
-/// Non-vacuous coverage for the sc 337 / sc 334 coherence witness.
-/// The dispatch's `debug_assert!` body is reconstructed here in
-/// isolation against a state that violates the invariant
-/// (ledger has an entry, but `pending_region_installs` is empty --
-/// exactly the pre-fix fabricated-success shape). The panic message
-/// must match the dispatch's so a future refactor that drops or
-/// renames the witness will surface here.
+/// Non-vacuous coverage for the sc 337 / sc 334 coherence witness: the
+/// dispatch's `debug_assert!` body reconstructed against a state that
+/// violates it (a ledger entry with `pending_region_installs` empty),
+/// with the same panic message the dispatch carries.
 #[test]
 #[cfg(debug_assertions)]
 #[should_panic(expected = "sc 337 coherence")]
@@ -924,4 +1138,447 @@ fn memory_free_is_no_op_returning_ok() {
     let rt = FakeRuntime::new(0x10000);
     let result = host.dispatch(Lv2Request::MemoryFree { addr: 0x1000 }, UnitId::new(0), &rt);
     assert_eq!(result, Lv2Dispatch::immediate(0));
+}
+
+#[test]
+fn syscall_334_over_an_occupied_window_returns_ebusy_and_stages_nothing() {
+    let mut host = Lv2Host::new();
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    mem.install_region(
+        0x5000_0000,
+        0x10000,
+        "loader",
+        cellgov_mem::PageSize::Page64K,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x10000, 0x200);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5000_0000, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into()),
+        "an occupied window is EBUSY, not a fabricated OK",
+    );
+    let installs: Vec<_> = host.drain_pending_region_installs().collect();
+    assert!(installs.is_empty(), "a refused map must stage no install");
+}
+
+#[test]
+fn syscall_334_partial_overlap_is_ebusy_too() {
+    let mut host = Lv2Host::new();
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    mem.install_region(
+        0x5000_8000,
+        0x10000,
+        "loader",
+        cellgov_mem::PageSize::Page64K,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x10000, 0x200);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5000_0000, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+    );
+}
+
+/// RPCS3's `area->alloc` searches the caller's vm area, so an
+/// occupied window is skipped rather than returned and then refused.
+#[test]
+fn syscall_337_search_skips_caller_occupied_windows() {
+    let mut host = Lv2Host::new();
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    mem.install_region(
+        u64::from(Lv2Host::MMAPPER_REGION_START),
+        0x10000,
+        "loader",
+        cellgov_mem::PageSize::Page64K,
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+    let mem_id = mint_mmapper_handle(&mut host, &rt, 0x10000, 0x200);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [
+                u64::from(Lv2Host::MMAPPER_REGION_START),
+                u64::from(mem_id),
+                0,
+                0x9100,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::Immediate { code: 0, effects } = result else {
+        panic!("337 must succeed by skipping the occupied window, got {result:?}");
+    };
+    let Effect::SharedWriteIntent { bytes, .. } = &effects[0] else {
+        panic!("337 must write the found address back");
+    };
+    assert_eq!(
+        u32::from_be_bytes(bytes.bytes().try_into().unwrap()),
+        Lv2Host::MMAPPER_REGION_START + 0x10000,
+        "the search must land past the caller-occupied window",
+    );
+}
+
+/// The host ledger records a map the runtime has not committed yet,
+/// and outlives an install the drain refused, so 334 must consult it
+/// as well as the caller's committed layout.
+#[test]
+fn syscall_334_over_a_window_the_host_already_mapped_returns_ebusy() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let first = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
+    let second = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
+    let map = |host: &mut Lv2Host, mem_id: u32, addr: u64| {
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 334,
+                args: [addr, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    assert_eq!(
+        map(&mut host, first, 0x5000_0000),
+        Lv2Dispatch::immediate(0)
+    );
+    assert_eq!(
+        map(&mut host, second, 0x5000_0000),
+        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into()),
+        "re-mapping a window the ledger already holds is EBUSY",
+    );
+    let installs: Vec<_> = host.drain_pending_region_installs().collect();
+    assert_eq!(installs.len(), 1, "the refused map must stage no install");
+}
+
+#[test]
+fn syscall_334_partially_overlapping_a_prior_337_map_returns_ebusy() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let searched = mint_mmapper_handle(&mut host, &rt, 0x20_0000, 0x400);
+    let fixed = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
+    // 337 claims [0x5000_0000, 0x5020_0000).
+    host.dispatch(
+        Lv2Request::Unsupported {
+            number: 337,
+            args: [0x5000_0000, u64::from(searched), 0, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    // A granule-aligned 334 whose window starts inside that range.
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5010_0000, u64::from(fixed), 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+    );
+}
+
+/// The gates keep the ledger non-overlapping, so a nested entry is not
+/// reachable through 334 / 337; seeding one directly pins that the busy
+/// test surveys every entry rather than the nearest one.
+#[test]
+fn syscall_334_over_a_window_nested_in_a_longer_ledger_entry_returns_ebusy() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let handle = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
+    // A long entry, then a shorter one starting later and ending
+    // before the candidate -- the shorter is what `next_back` finds.
+    host.mmapper_ledger_insert(0x5000_0000, 0x40_0000);
+    host.mmapper_ledger_insert(0x5010_0000, 0x1_0000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 334,
+            args: [0x5020_0000, u64::from(handle), 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into()),
+        "a window covered only by the longer, earlier entry is still busy",
+    );
+}
+
+#[test]
+fn syscall_334_immediately_after_a_prior_map_is_not_busy() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let first = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
+    let second = mint_mmapper_handle(&mut host, &rt, 0x10_0000, 0x400);
+    let map = |host: &mut Lv2Host, mem_id: u32, addr: u64| {
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 334,
+                args: [addr, u64::from(mem_id), 0, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    assert_eq!(
+        map(&mut host, first, 0x5000_0000),
+        Lv2Dispatch::immediate(0)
+    );
+    assert_eq!(
+        map(&mut host, second, 0x5010_0000),
+        Lv2Dispatch::immediate(0),
+        "an abutting window shares no byte with the prior map",
+    );
+}
+
+/// The kernel refuses a zero-size shm outright; rounding it into a
+/// zero-size handle would stage a zero-byte region install downstream.
+/// Oracle: RPCS3 `sys_mmapper.cpp`
+/// `sys_mmapper_allocate_shared_memory`.
+#[test]
+fn syscall_332_zero_size_returns_ealign_and_mints_no_handle() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [0x8006_0100_0000_0010, 0, 0x200, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
+    assert!(host.state.mmapper_handles.is_empty());
+    assert!(
+        host.mmapper_ipc().is_empty(),
+        "a refused create registers no key"
+    );
+}
+
+#[test]
+fn syscall_362_zero_size_returns_ealign() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 362,
+            args: [
+                0xffff_0000_0000_0000,
+                0, // size
+                0x4000_0015,
+                0x400,
+                0x9000,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
+    assert!(host.state.mmapper_handles.is_empty());
+}
+
+/// The granularity field is an encoding: a value outside
+/// {unset, 64K, 1M} is refused rather than resolved to a
+/// granule. Oracle: RPCS3 `sys_mmapper.cpp`
+/// `sys_mmapper_allocate_shared_memory` default arm.
+#[test]
+fn syscall_332_unencodable_granularity_field_returns_einval() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    for flags in [0x600u64, 0x100, 0x800, 0xf00] {
+        let result = host.dispatch(
+            Lv2Request::Unsupported {
+                number: 332,
+                args: [0xffff_0000_0000_0000, 0x10_0000, flags, 0x9000, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        assert_eq!(
+            result,
+            Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            "flags {flags:#x} must not resolve to a granule",
+        );
+    }
+    assert!(host.state.mmapper_handles.is_empty());
+}
+
+#[test]
+fn syscall_362_unencodable_granularity_field_returns_einval() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 362,
+            args: [
+                0xffff_0000_0000_0000,
+                0x10_0000,
+                0x4000_0015,
+                0x600, // both granularity bits set
+                0x9000,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+    );
+}
+
+/// Bits above the granularity field are not part of the encoding.
+#[test]
+fn syscall_332_accepts_a_valid_granularity_beside_unrelated_flag_bits() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [
+                0xffff_0000_0000_0000,
+                0x1_0000,
+                0x4000_0200,
+                0x9000,
+                0,
+                0,
+                0,
+                0,
+            ],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert!(
+        matches!(result, Lv2Dispatch::Immediate { code: 0, .. }),
+        "got {result:?}",
+    );
+}
+
+/// RPCS3 refuses `size` and `flags` before it ever reaches the
+/// `mem_id` write, so a call wrong in two ways answers for its
+/// arguments first.
+#[test]
+fn syscall_332_argument_refusals_outrank_a_null_mem_id() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let call = |host: &mut Lv2Host, size: u64, flags: u64| {
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 332,
+                args: [0xffff_0000_0000_0000, size, flags, 0, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    assert_eq!(
+        call(&mut host, 0, 0x200),
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+    );
+    assert_eq!(
+        call(&mut host, 0x10_0000, 0x600),
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+    );
+    assert_eq!(
+        call(&mut host, 0x1_0000, 0x400),
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+    );
+    assert_eq!(
+        call(&mut host, 0x10_0000, 0x400),
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        "only a request the kernel would have accepted reaches the pointer gate",
+    );
+    assert!(
+        host.state.mmapper_handles.is_empty(),
+        "no refusal path may mint a handle",
+    );
+}
+
+#[test]
+fn syscall_362_argument_refusals_outrank_a_null_mem_id() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let call = |host: &mut Lv2Host, size: u64, flags: u64| {
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 362,
+                args: [0xffff_0000_0000_0000, size, 0x4000_0015, flags, 0, 0, 0, 0],
+            },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    assert_eq!(
+        call(&mut host, 0, 0x400),
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+    );
+    assert_eq!(
+        call(&mut host, 0x10_0000, 0x600),
+        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+    );
+    assert_eq!(
+        call(&mut host, 0x10_0000, 0x400),
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+    );
+    assert!(host.state.mmapper_handles.is_empty());
+}
+
+/// An unset granularity field means 1 MiB, so a 64 KiB size is
+/// misaligned rather than accepted.
+#[test]
+fn syscall_332_unset_granularity_field_means_the_1m_granule() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 332,
+            args: [0xffff_0000_0000_0000, 0x1_0000, 0, 0x9000, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+    );
 }

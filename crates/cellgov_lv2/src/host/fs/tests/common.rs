@@ -47,6 +47,11 @@ impl PathRuntime {
 }
 
 impl Lv2Runtime for PathRuntime {
+    fn committed_overlap_end(&self, _addr: u64, _size: u64) -> Option<u64> {
+        // No region model; every window reads as free.
+        None
+    }
+
     fn read_committed(&self, addr: u64, len: usize) -> Option<&[u8]> {
         let start = addr as usize;
         let end = start.checked_add(len)?;
@@ -182,7 +187,7 @@ pub(super) fn assert_immediate(
 }
 
 /// Pull the u32 fd payload out of a single SharedWriteIntent at
-/// `expected_addr`. Panics if the dispatch shape diverges.
+/// `expected_addr`.
 pub(super) fn extract_fd(d: Lv2Dispatch, expected_addr: u64) -> u32 {
     let effects = match d {
         Lv2Dispatch::Immediate { code, effects } => {
@@ -205,7 +210,7 @@ pub(super) fn extract_fd(d: Lv2Dispatch, expected_addr: u64) -> u32 {
 /// Open `path` against `host` (which must already have the blob
 /// registered) and return the allocated fd plus the
 /// [`PathRuntime`] used for the open (so callers can reuse its
-/// sandbox layout). Panics on any dispatch shape divergence.
+/// sandbox layout).
 pub(super) fn open_registered(host: &mut Lv2Host, path: &[u8]) -> (u32, PathRuntime) {
     let mut bytes = path.to_vec();
     bytes.push(0);
@@ -357,9 +362,7 @@ pub(super) fn extract_pos(d: Lv2Dispatch, expected_addr: u64) -> u64 {
     }
 }
 
-/// Per-test scratch dir under the host temp directory. Drops
-/// remove the directory tree so parallel tests do not pollute
-/// each other and the leftover bytes are not committed.
+/// Per-test scratch dir under the host temp directory.
 pub(super) struct TempMountDir {
     pub(super) path: std::path::PathBuf,
 }

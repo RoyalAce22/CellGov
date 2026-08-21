@@ -13,6 +13,78 @@ fn fresh_table_is_empty() {
 }
 
 #[test]
+fn purge_waiters_of_leaves_bits_alone_and_keeps_survivor_wait_records() {
+    let mut t = EventFlagTable::new();
+    let (dead_a, alive, dead_b) = (tid(0x0100_0001), tid(0x0100_0002), tid(0x0100_0003));
+    for id in [7, 2] {
+        t.create_with_id(id, 0b0001).unwrap();
+        t.enqueue_waiter(id, dead_a, 0b0010, EventFlagWaitMode::AndClear, 0x1000)
+            .unwrap();
+        t.enqueue_waiter(id, alive, 0b0100, EventFlagWaitMode::OrNoClear, 0x2000)
+            .unwrap();
+        t.enqueue_waiter(id, dead_b, 0b1000, EventFlagWaitMode::OrClear, 0x3000)
+            .unwrap();
+    }
+    let dead: std::collections::BTreeSet<_> = [dead_a, dead_b].into_iter().collect();
+    assert_eq!(
+        t.purge_waiters_of(&dead),
+        vec![(2, dead_a), (2, dead_b), (7, dead_a), (7, dead_b)],
+    );
+    for id in [2, 7] {
+        let e = t.lookup(id).unwrap();
+        assert_eq!(e.bits(), 0b0001, "a purge is not a clear");
+        assert_eq!(e.init(), 0b0001);
+        assert_eq!(
+            e.waiters(),
+            &[EventFlagWaiter {
+                thread: alive,
+                mask: 0b0100,
+                mode: EventFlagWaitMode::OrNoClear,
+                result_ptr: 0x2000,
+            }],
+        );
+    }
+}
+
+#[test]
+fn a_purged_waiters_mask_no_longer_clears_bits_on_a_later_set() {
+    let mut t = EventFlagTable::new();
+    let (dead, alive) = (tid(0x0100_0001), tid(0x0100_0002));
+    t.create_with_id(1, 0).unwrap();
+    t.enqueue_waiter(1, dead, 0b0001, EventFlagWaitMode::AndClear, 0x1000)
+        .unwrap();
+    t.enqueue_waiter(1, alive, 0b0010, EventFlagWaitMode::AndNoClear, 0x2000)
+        .unwrap();
+    let set: std::collections::BTreeSet<_> = [dead].into_iter().collect();
+    assert_eq!(t.purge_waiters_of(&set), vec![(1, dead)]);
+    assert_eq!(
+        t.set_and_wake(1, 0b0011),
+        Some(vec![EventFlagWake {
+            thread: alive,
+            observed: 0b0011,
+            result_ptr: 0x2000,
+        }]),
+    );
+    assert_eq!(
+        t.lookup(1).unwrap().bits(),
+        0b0011,
+        "the dead CLEAR waiter must not consume bit 0",
+    );
+}
+
+#[test]
+fn purge_waiters_of_a_miss_leaves_the_state_hash_alone() {
+    let mut t = EventFlagTable::new();
+    t.create_with_id(1, 0).unwrap();
+    t.enqueue_waiter(1, tid(0x0100_0001), 1, EventFlagWaitMode::OrNoClear, 0x10)
+        .unwrap();
+    let before = t.state_hash();
+    let miss: std::collections::BTreeSet<_> = [tid(0x0100_0099)].into_iter().collect();
+    assert!(t.purge_waiters_of(&miss).is_empty());
+    assert_eq!(t.state_hash(), before);
+}
+
+#[test]
 fn try_wait_and_mode_requires_all_bits() {
     let mut t = EventFlagTable::new();
     t.create_with_id(1, 0b1010).unwrap();

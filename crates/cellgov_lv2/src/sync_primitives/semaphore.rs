@@ -34,9 +34,7 @@ pub enum SemaphorePost {
     Unknown,
 }
 
-/// Outcome of a `post_and_wake_n` call. Distinct from `SemaphorePost`
-/// because a single bulk post can both wake several waiters AND
-/// increment the leftover.
+/// Outcome of a `post_and_wake_n` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemaphorePostN {
     /// Up to `count` waiters were dequeued and the leftover was
@@ -150,10 +148,10 @@ impl SemaphoreTable {
 
     /// Remove the entry; `None` if the id was unknown.
     ///
-    /// Dispatch rejects non-empty destroy with `CELL_EBUSY`, so
-    /// the `debug_assert!` here is defense-in-depth. If bypassed
-    /// in release, callers **must** drain `entry.waiters()` and
-    /// wake each parked thread.
+    /// Caller contract: dispatch rejects non-empty destroy with
+    /// `CELL_EBUSY` (`debug_assert!` fires on violation). If
+    /// bypassed in release, callers **must** drain
+    /// `entry.waiters()` and wake each parked thread.
     pub fn destroy(&mut self, id: u32) -> Option<SemaphoreEntry> {
         let entry = self.entries.remove(&id)?;
         debug_assert!(
@@ -218,10 +216,30 @@ impl SemaphoreTable {
         Ok(())
     }
 
+    /// Remove every waiter in `threads` from every semaphore,
+    /// preserving the order of survivors; returns `(id, thread)`
+    /// pairs in table order. Process-exit purge; no count repair is
+    /// needed because `count` never decrements below zero for
+    /// waiters.
+    #[must_use = "the purged pairs are the only witness that these wakes were cancelled"]
+    pub fn purge_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(u32, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            for thread in entry.waiters.remove_set(threads) {
+                removed.push((*id, thread));
+            }
+        }
+        removed
+    }
+
     /// Remove `waiter` from the waiter list without consuming a
     /// slot; `false` if the id is unknown or the thread is not
-    /// parked. Timeout-expiry cancel; no count repair is needed
-    /// because `count` never decrements below zero for waiters.
+    /// parked. Timeout-expiry cancel; order-preserving for the
+    /// rest, and no count repair is needed for the reason given on
+    /// [`Self::purge_waiters_of`].
     pub fn remove_waiter(&mut self, id: u32, waiter: PpuThreadId) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {
             return false;

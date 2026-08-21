@@ -202,6 +202,108 @@ fn take_join_waiters_without_state_change() {
 }
 
 #[test]
+fn purge_join_waiters_of_removes_only_the_named_waiters() {
+    let mut t = PpuThreadTable::new();
+    t.insert_primary(UnitId::new(1), dummy_attrs());
+    let target = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+    let doomed = t.create(UnitId::new(3), dummy_attrs()).unwrap();
+    let survivor = t.create(UnitId::new(4), dummy_attrs()).unwrap();
+    t.add_join_waiter(target, doomed);
+    t.add_join_waiter(target, survivor);
+
+    let removed = t.purge_join_waiters_of(&std::collections::BTreeSet::from([doomed]));
+    assert_eq!(removed, vec![(target, doomed)]);
+    assert_eq!(t.get(target).unwrap().join_waiters, vec![survivor]);
+}
+
+#[test]
+fn a_purged_joiner_is_not_returned_by_a_later_mark_finished() {
+    let mut t = PpuThreadTable::new();
+    t.insert_primary(UnitId::new(1), dummy_attrs());
+    let target = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+    let doomed = t.create(UnitId::new(3), dummy_attrs()).unwrap();
+    t.add_join_waiter(target, doomed);
+    t.add_join_waiter(target, PpuThreadId::PRIMARY);
+
+    t.purge_join_waiters_of(&std::collections::BTreeSet::from([doomed]));
+    assert_eq!(t.mark_finished(target, 0x42), vec![PpuThreadId::PRIMARY]);
+}
+
+#[test]
+fn purge_join_waiters_of_reports_pairs_in_ascending_target_order() {
+    let mut t = PpuThreadTable::new();
+    t.insert_primary(UnitId::new(1), dummy_attrs());
+    let first = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+    let second = t.create(UnitId::new(3), dummy_attrs()).unwrap();
+    let a = t.create(UnitId::new(4), dummy_attrs()).unwrap();
+    let b = t.create(UnitId::new(5), dummy_attrs()).unwrap();
+    // Park b before a on `second` so waiter order is not id order.
+    t.add_join_waiter(second, b);
+    t.add_join_waiter(second, a);
+    t.add_join_waiter(first, a);
+
+    let removed = t.purge_join_waiters_of(&std::collections::BTreeSet::from([a, b]));
+    assert_eq!(
+        removed,
+        vec![(first, a), (second, b), (second, a)],
+        "pairs must walk targets ascending and waiters in park order",
+    );
+    assert!(t.get(first).unwrap().join_waiters.is_empty());
+    assert!(t.get(second).unwrap().join_waiters.is_empty());
+}
+
+#[test]
+fn purging_a_thread_that_waits_on_nothing_reports_no_pairs() {
+    let mut t = PpuThreadTable::new();
+    t.insert_primary(UnitId::new(1), dummy_attrs());
+    let target = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+    t.add_join_waiter(target, PpuThreadId::PRIMARY);
+    let stranger = PpuThreadId::new(0x9999);
+
+    assert!(t
+        .purge_join_waiters_of(&std::collections::BTreeSet::from([stranger]))
+        .is_empty());
+    assert_eq!(
+        t.get(target).unwrap().join_waiters,
+        vec![PpuThreadId::PRIMARY],
+    );
+}
+
+#[test]
+fn purging_an_empty_set_leaves_every_join_list_intact() {
+    let mut t = PpuThreadTable::new();
+    t.insert_primary(UnitId::new(1), dummy_attrs());
+    let target = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+    t.add_join_waiter(target, PpuThreadId::PRIMARY);
+    let before = t.state_hash();
+
+    assert!(t
+        .purge_join_waiters_of(&std::collections::BTreeSet::new())
+        .is_empty());
+    assert_eq!(t.state_hash(), before);
+}
+
+#[test]
+fn a_purged_waiter_that_is_itself_a_join_target_keeps_its_own_waiters() {
+    let mut t = PpuThreadTable::new();
+    t.insert_primary(UnitId::new(1), dummy_attrs());
+    let doomed = t.create(UnitId::new(2), dummy_attrs()).unwrap();
+    let other = t.create(UnitId::new(3), dummy_attrs()).unwrap();
+    // `doomed` waits on `other`, and PRIMARY waits on `doomed`.
+    t.add_join_waiter(other, doomed);
+    t.add_join_waiter(doomed, PpuThreadId::PRIMARY);
+
+    let removed = t.purge_join_waiters_of(&std::collections::BTreeSet::from([doomed]));
+    assert_eq!(removed, vec![(other, doomed)]);
+    // The purge is waiter-side only: PRIMARY stays parked on the
+    // dead target and is still owed a wake by the caller.
+    assert_eq!(
+        t.get(doomed).unwrap().join_waiters,
+        vec![PpuThreadId::PRIMARY],
+    );
+}
+
+#[test]
 fn detach_sets_state() {
     let mut t = PpuThreadTable::new();
     let id = t.create(UnitId::new(2), dummy_attrs()).unwrap();

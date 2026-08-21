@@ -87,6 +87,28 @@ impl ThreadStackAllocator {
         Some(ThreadStack { base, size })
     }
 
+    /// Return `stack` iff it is the most recent allocation, rewinding
+    /// the bump pointer to its base so the next allocation reuses it.
+    ///
+    /// The single caller is the create-refusal path, which frees the
+    /// block it just allocated before anything else can allocate;
+    /// `false` (not the last block) means that flow was broken.
+    ///
+    /// A base below [`Self::CHILD_STACK_BASE`] or a wrapping
+    /// `base + size` draws the same `false`: rewinding under the
+    /// arena floor would hand out blocks overlapping the primary
+    /// thread's stack.
+    pub fn free_last(&mut self, stack: &ThreadStack) -> bool {
+        let Some(end) = stack.base.checked_add(stack.size) else {
+            return false;
+        };
+        if end != self.next || stack.base < Self::CHILD_STACK_BASE {
+            return false;
+        }
+        self.next = stack.base;
+        true
+    }
+
     /// Peek the next allocation's base for the given alignment
     /// without advancing the allocator.
     pub fn peek_next(&self, align: u64) -> Option<u64> {

@@ -183,9 +183,8 @@ impl EventQueueTable {
     pub fn try_receive(&mut self, id: u32) -> Option<EventQueueReceive> {
         let entry = self.entries.get_mut(&id)?;
         // Mutual-exclusion invariant: the queue holds buffered
-        // payloads OR parked waiters, never both. Without this
-        // guard `try_receive` could pop a head payload while
-        // leaving a parked waiter on a drained queue.
+        // payloads OR parked waiters, never both. A break strands
+        // a parked waiter on a drained queue.
         if !(entry.waiters.is_empty() || entry.payloads.is_empty()) {
             #[allow(
                 clippy::print_stderr,
@@ -295,6 +294,29 @@ impl EventQueueTable {
         let entry = self.entries.get_mut(&id)?;
         let pos = entry.waiters.iter().position(|w| w.thread == thread)?;
         entry.waiters.remove(pos)
+    }
+
+    /// Remove every waiter in `threads` from every queue without
+    /// delivering events, preserving the order of survivors; returns
+    /// `(id, thread)` pairs in table order. Process-exit purge;
+    /// buffered payloads are untouched.
+    #[must_use = "the purged pairs are the only witness that these wakes were cancelled"]
+    pub fn purge_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(u32, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            entry.waiters.retain(|w| {
+                if threads.contains(&w.thread) {
+                    removed.push((*id, w.thread));
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+        removed
     }
 
     /// Send a payload. Hands off to the head waiter, or buffers,

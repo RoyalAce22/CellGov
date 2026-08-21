@@ -44,15 +44,11 @@ impl FakeRuntime {
         self
     }
 
-    /// Override `writable()` to return `value` for every query.
     pub(super) fn with_writable_override(mut self, value: bool) -> Self {
         self.writable_override = Some(value);
         self
     }
 
-    /// Register a per-address writability override. Queries to `addr`
-    /// return `value`; other addresses fall through to
-    /// `writable_override` or the default bounds check.
     pub(super) fn with_writable_at(mut self, addr: u64, value: bool) -> Self {
         self.writable_at.insert(addr, value);
         self
@@ -87,6 +83,26 @@ impl Lv2Runtime for FakeRuntime {
         Some(&window[..nul_pos])
     }
 
+    fn committed_overlap_end(&self, addr: u64, size: u64) -> Option<u64> {
+        if size == 0 {
+            return None;
+        }
+        // Same answer as the runtime's `MemoryView`: a window running
+        // past the address space cannot be claimed, so it reports as
+        // occupied rather than free.
+        let Some(end) = addr.checked_add(size) else {
+            return Some(u64::MAX);
+        };
+        self.memory
+            .regions()
+            .filter(|r| {
+                let r_end = r.base() + r.size();
+                r.base() < end && addr < r_end
+            })
+            .map(|r| r.base() + r.size())
+            .max()
+    }
+
     fn writable(&self, addr: u64, len: usize) -> bool {
         if let Some(&per_addr) = self.writable_at.get(&addr) {
             return per_addr;
@@ -114,7 +130,6 @@ pub(super) fn extract_write_u32(effect: &Effect) -> u32 {
     }
 }
 
-/// Seed a primary PPU thread mapped to `unit_id`.
 pub(super) fn seed_primary_ppu(host: &mut Lv2Host, unit_id: UnitId) {
     host.seed_primary_ppu_thread(
         unit_id,
@@ -136,9 +151,7 @@ pub(super) const VALID_SYNC_ATTR_PTR: u32 = 0x800;
 
 /// Build a `FakeRuntime` whose guest memory has a valid 24-byte
 /// `sys_*_attribute_t` header (protocol = SYS_SYNC_FIFO at +0, type =
-/// SYS_SYNC_WAITER_SINGLE at +20) at [`VALID_SYNC_ATTR_PTR`]. Use when
-/// the test exercises a happy-path create that needs the LV2 host to
-/// validate the attribute fields rather than reject NULL/zero attrs.
+/// SYS_SYNC_WAITER_SINGLE at +20) at [`VALID_SYNC_ATTR_PTR`].
 pub(super) fn fake_runtime_with_valid_sync_attr(size: usize) -> FakeRuntime {
     let mut mem = GuestMemory::new(size);
     let mut attr = [0u8; 24];

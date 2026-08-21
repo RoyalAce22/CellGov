@@ -284,8 +284,6 @@ fn shared_mapping_replicates_writes_both_directions() {
     )
     .unwrap();
 
-    // Unit 0 in space 0 writes into its view; unit 1 in space 1
-    // writes into its own view at a different offset.
     rt.registry_mut()
         .register_with(|id| AddrWriter::new(id, 0x2010, 0x5A));
     rt.registry_mut()
@@ -661,4 +659,510 @@ fn two_process_run_is_deterministic() {
     let b = run();
     assert!(!a.is_empty());
     assert_eq!(a, b, "two-process schedule must be bit-identical");
+}
+
+/// The first view's pre-attach content seeds the attaching view, and
+/// post-attach stores replicate both directions through the commit
+/// pipeline's fanout.
+#[test]
+fn keyed_shm_views_cohere_across_address_spaces() {
+    use cellgov_lv2::request::classify;
+    const KEY: u64 = 0x8006_0100_0000_0010;
+    const BOOT_VIEW: u64 = 0x3000_0000;
+    const CHILD_VIEW: u64 = 0x3100_0000;
+    const SIZE: u64 = 0x10000;
+    const FLAGS_64K: u64 = cellgov_ps3_abi::sys_memory::page_size::FLAG_64K;
+
+    let mut rt = build(0x1000);
+    rt.create_address_space(S1).unwrap();
+    rt.space_memory_mut(S1)
+        .unwrap()
+        .install_region(0, 0x1000, "child", PageSize::Page64K)
+        .unwrap();
+
+    // Boot unit 0 and child-space unit 1; both idle until the
+    // post-attach writers run.
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, BOOT_VIEW + 0x200, 0x5A));
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, CHILD_VIEW + 0x300, 0xC3));
+    rt.assign_unit_space(UnitId::new(1), S1).unwrap();
+
+    // Boot: keyed 332 + 334 at BOOT_VIEW.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, SIZE, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    let mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.memory(), 0x20).unwrap().try_into().unwrap(),
+    ));
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[BOOT_VIEW, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+
+    // Pre-attach content through the boot view.
+    rt.memory_mut()
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(BOOT_VIEW + 0x100), 4).unwrap(),
+            &[0xAB; 4],
+        )
+        .unwrap();
+
+    // Child: keyed 332 attach (same mem_id back) + 334 at CHILD_VIEW.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, SIZE, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(1)),
+        Some(0)
+    );
+    let child_mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.space_memory(S1).unwrap(), 0x20)
+            .unwrap()
+            .try_into()
+            .unwrap(),
+    ));
+    assert_eq!(
+        child_mem_id, mem_id,
+        "keyed 332 must return the same handle"
+    );
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[CHILD_VIEW, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(1)),
+        Some(0)
+    );
+
+    // The attach observed the pre-attach content.
+    assert_eq!(
+        read4(rt.space_memory(S1).unwrap(), CHILD_VIEW + 0x100).unwrap(),
+        vec![0xAB; 4],
+        "the attaching view must be seeded with the segment's current bytes",
+    );
+
+    // Post-attach stores replicate both directions.
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(
+        read4(rt.space_memory(S1).unwrap(), CHILD_VIEW + 0x200).unwrap(),
+        vec![0x5A; 4],
+        "a boot-view store must appear through the child view",
+    );
+    assert_eq!(
+        read4(rt.memory(), BOOT_VIEW + 0x300).unwrap(),
+        vec![0xC3; 4],
+        "a child-view store must appear through the boot view",
+    );
+}
+
+/// Boundary case: keyed maps confined to one address space never
+/// register a shared mapping, so single-process boots keep their
+/// hash channels untouched.
+#[test]
+fn single_space_keyed_maps_do_not_register_a_mapping() {
+    use cellgov_lv2::request::classify;
+    let mut rt = build(0x1000);
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[
+                0x8006_0100_0000_0020,
+                0x10000,
+                cellgov_ps3_abi::sys_memory::page_size::FLAG_64K,
+                0x20,
+                0,
+                0,
+                0,
+                0,
+            ],
+        ),
+        UnitId::new(0),
+    );
+    let mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.memory(), 0x20).unwrap().try_into().unwrap(),
+    ));
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[0x3000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    assert!(
+        rt.shared_alias_ranges(
+            UnitId::new(0),
+            ByteRange::new(GuestAddr::new(0x3000_0010), 4).unwrap()
+        )
+        .is_empty(),
+        "a single-space keyed map must not promote into the shared table",
+    );
+}
+
+/// The 334 occupancy check reads the CALLER's space. A window
+/// occupied in the child's layout but free in the boot layout is
+/// EBUSY for the child and OK for boot.
+#[test]
+fn map_occupancy_is_judged_in_the_callers_space() {
+    use cellgov_lv2::request::classify;
+    let mut rt = build(0x1000);
+    rt.create_address_space(S1).unwrap();
+    let child_mem = rt.space_memory_mut(S1).unwrap();
+    child_mem
+        .install_region(0, 0x1000, "child", PageSize::Page64K)
+        .unwrap();
+    // Child image occupies the window the guest will ask for.
+    child_mem
+        .install_region(0x5000_0000, 0x10000, "child_image", PageSize::Page64K)
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.assign_unit_space(UnitId::new(1), S1).unwrap();
+
+    // Keyless 332 from boot mints the handle both callers name.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[
+                0,
+                0x10000,
+                cellgov_ps3_abi::sys_memory::page_size::FLAG_64K,
+                0x20,
+                0,
+                0,
+                0,
+                0,
+            ],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    let mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.memory(), 0x20).unwrap().try_into().unwrap(),
+    ));
+
+    // Child: EBUSY, its own layout occupies the window.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[0x5000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(1)),
+        Some(cellgov_ps3_abi::cell_errors::CELL_EBUSY.into()),
+        "the child's occupied window must refuse with EBUSY",
+    );
+    assert_eq!(
+        rt.lv2_host()
+            .invariant_break_site_count("dispatch.mmapper_region_install_overlap"),
+        0,
+        "the refusal happens at dispatch, before any install is staged",
+    );
+
+    // Boot: same window, free in ITS layout -- the map succeeds.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[0x5000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    assert!(
+        read4(rt.memory(), 0x5000_0000).is_some(),
+        "boot's map must install its window",
+    );
+}
+
+/// The kernel binds one backing store to every address a shared
+/// segment is mapped at (RPCS3 sys_mmapper.cpp
+/// sys_mmapper_map_shared_memory), so a repeat map inside the first
+/// space must not keep its own zero-filled bytes once the segment
+/// becomes shared.
+#[test]
+fn a_repeat_map_in_one_space_is_seeded_when_the_segment_becomes_shared() {
+    use cellgov_lv2::request::classify;
+    const KEY: u64 = 0x8006_0100_0000_0030;
+    const VIEW_A: u64 = 0x3000_0000;
+    const VIEW_B: u64 = 0x3100_0000;
+    const CHILD_VIEW: u64 = 0x3200_0000;
+    const SIZE: u64 = 0x10000;
+    const FLAGS_64K: u64 = cellgov_ps3_abi::sys_memory::page_size::FLAG_64K;
+
+    let mut rt = build(0x1000);
+    rt.create_address_space(S1).unwrap();
+    rt.space_memory_mut(S1)
+        .unwrap()
+        .install_region(0, 0x1000, "child", PageSize::Page64K)
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.assign_unit_space(UnitId::new(1), S1).unwrap();
+
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, SIZE, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    let mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.memory(), 0x20).unwrap().try_into().unwrap(),
+    ));
+
+    for view in [VIEW_A, VIEW_B] {
+        rt.dispatch_lv2_request(
+            classify(
+                cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+                &[view, mem_id, 0, 0, 0, 0, 0, 0],
+            ),
+            UnitId::new(0),
+        );
+        assert_eq!(
+            rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+            Some(0),
+            "the kernel admits a repeat map of one segment",
+        );
+    }
+
+    // Content written through the first view only; the second view is
+    // still an independent zero-filled region at this point.
+    rt.memory_mut()
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(VIEW_A + 0x100), 4).unwrap(),
+            &[0xAB; 4],
+        )
+        .unwrap();
+
+    // A second address space attaches, promoting the segment.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, SIZE, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(1)),
+        Some(0)
+    );
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[CHILD_VIEW, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(1)),
+        Some(0)
+    );
+
+    assert_eq!(
+        read4(rt.memory(), VIEW_B + 0x100).unwrap(),
+        vec![0xAB; 4],
+        "the same-space repeat map must be seeded from the segment",
+    );
+    assert_eq!(
+        read4(rt.space_memory(S1).unwrap(), CHILD_VIEW + 0x100).unwrap(),
+        vec![0xAB; 4],
+        "the attaching view must be seeded from the segment",
+    );
+}
+
+#[test]
+fn seeding_an_attaching_view_clears_that_spaces_reservations() {
+    use cellgov_lv2::request::classify;
+    const KEY: u64 = 0x8006_0100_0000_0040;
+    const BOOT_VIEW: u64 = 0x3000_0000;
+    const CHILD_VIEW: u64 = 0x3100_0000;
+    const SIZE: u64 = 0x10000;
+    const FLAGS_64K: u64 = cellgov_ps3_abi::sys_memory::page_size::FLAG_64K;
+
+    let mut rt = build(0x1000);
+    rt.create_address_space(S1).unwrap();
+    rt.space_memory_mut(S1)
+        .unwrap()
+        .install_region(0, 0x1000, "child", PageSize::Page64K)
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+    rt.assign_unit_space(UnitId::new(1), S1).unwrap();
+
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, SIZE, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    let mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.memory(), 0x20).unwrap().try_into().unwrap(),
+    ));
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[BOOT_VIEW, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    rt.memory_mut()
+        .apply_commit(
+            ByteRange::new(GuestAddr::new(BOOT_VIEW + 0x100), 4).unwrap(),
+            &[0xAB; 4],
+        )
+        .unwrap();
+
+    // A holder in the attaching space over bytes the seed rewrites,
+    // plus one outside the segment that must survive.
+    rt.space_reservations_mut(S1)
+        .unwrap()
+        .insert_or_replace(UnitId::new(9), ReservedLine::containing(CHILD_VIEW + 0x100));
+    rt.space_reservations_mut(S1)
+        .unwrap()
+        .insert_or_replace(UnitId::new(8), ReservedLine::containing(0x40));
+
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, SIZE, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[CHILD_VIEW, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(1),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(1)),
+        Some(0)
+    );
+
+    assert!(!rt
+        .space_reservations(S1)
+        .unwrap()
+        .is_held_by(UnitId::new(9)));
+    assert!(rt
+        .space_reservations(S1)
+        .unwrap()
+        .is_held_by(UnitId::new(8)));
+}
+
+/// A view whose length is not the live mapping's length is not a view
+/// of that segment: appending it would make every later offset
+/// translation in the fanout resolve against the wrong size.
+#[test]
+fn a_keyed_view_of_a_different_size_is_refused_against_a_live_mapping() {
+    use cellgov_lv2::request::classify;
+    const KEY: u64 = 0x8006_0100_0000_0050;
+    const FLAGS_64K: u64 = cellgov_ps3_abi::sys_memory::page_size::FLAG_64K;
+
+    let mut rt = build(0x1000);
+    rt.create_address_space(S1).unwrap();
+    rt.space_memory_mut(S1)
+        .unwrap()
+        .install_region(0, 0x1000, "child", PageSize::Page64K)
+        .unwrap();
+    rt.register_shared_mapping(KEY, 0x40, &[(AddressSpaceId::BOOT, 0x2000), (S1, 0x3000)])
+        .unwrap();
+    rt.registry_mut()
+        .register_with(|id| AddrWriter::new(id, 0x40, 0));
+
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            &[KEY, 0x10000, FLAGS_64K, 0x20, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    let mem_id = u64::from(u32::from_be_bytes(
+        read4(rt.memory(), 0x20).unwrap().try_into().unwrap(),
+    ));
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::MMAPPER_MAP_SHARED_MEMORY,
+            &[0x4000_0000, mem_id, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+
+    assert_eq!(
+        rt.lv2_host()
+            .invariant_break_site_count("spaces.keyed_shm_size_drift"),
+        1,
+        "a size mismatch against a live mapping must be named",
+    );
+    assert!(
+        rt.shared_alias_ranges(
+            UnitId::new(0),
+            ByteRange::new(GuestAddr::new(0x4000_0000), 4).unwrap()
+        )
+        .is_empty(),
+        "the mismatched view must not join the mapping",
+    );
+    // The pre-existing views are untouched.
+    assert_eq!(
+        rt.shared_alias_ranges(
+            UnitId::new(0),
+            ByteRange::new(GuestAddr::new(0x2000), 4).unwrap()
+        )
+        .len(),
+        1,
+    );
 }

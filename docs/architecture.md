@@ -255,6 +255,23 @@ loudly. DMA stays space-0 end to end, and the RSX subsystem reads
 and mirrors space 0 only -- deferred RSX effects never join a
 child-space commit batch.
 
+An ipc-keyed `sys_mmapper` map registers its window as a view of
+that key's segment. The guest never declares the mapping: each map
+of a keyed handle carries its key into the region-install drain,
+which records the window against the key. A key mapped only inside
+one address space stays bookkeeping -- it never enters the shared
+table, so a single-process boot's hash channels are byte-identical
+to a run with no keyed maps at all. The moment a second address
+space attaches, the key promotes: every recorded window becomes a
+view, and each is seeded from the first view's bytes with the
+reservations it overwrites cleared. Seeding covers all the views,
+not only the one attaching, because until promotion each window was
+an independent zero-filled region -- a repeat map inside the first
+space would otherwise stay stale forever. Later attaches append to
+the live mapping and seed the same way. A view of a length that
+disagrees with the segment, or a window with no backing region, is
+refused with a named witness rather than joining the mapping.
+
 The whole `SpaceTable` is pure data: it rides in `RuntimeSnapshot`,
 folds into the sync-channel state hash (tags, mappings, child
 reservations) and the committed-memory hash (child contents), and
@@ -582,7 +599,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_ppu_thread_yield`                             | 43                      | No-op scheduling hint; round-robin picks the next runnable unit.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `sys_ppu_thread_join`                              | 44                      | Either returns exit value immediately or blocks caller on target.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `sys_ppu_thread_create`                            | 52                      | Allocates stack + TLS, seeds child `PpuState`, registers a new PPU unit mid-run via `PpuFactory`.                                                                                                                                                                                                                                                                                                                                                                               |
-| `sys_event_flag_*`                                 | 82, 83, 85, 86, 87, 118, 132, 139 | Create / destroy / wait / trywait / set / clear / cancel / get. AND/OR match with CLEAR/NO-CLEAR wake policy. Cancel (132) wakes every waiter with CELL_ECANCELED and writes the woken count to `*num_ptr` (skipped when null); get (139) writes the current bits as BE u64. Slot 84 is `_sys_interrupt_thread_establish`; slot 118 is the firmware-era home of `sys_event_flag_clear`.                                                                                          |
+| `sys_event_flag_*`                                 | 82, 83, 85, 86, 87, 118, 132, 139 | Create / destroy / wait / trywait / set / clear / cancel / get. AND/OR match with CLEAR/NO-CLEAR wake policy. Cancel (132) wakes every waiter with CELL_ECANCELED, hands each one the bit pattern captured at cancel time through the `result_ptr` that waiter parked with, and writes the woken count to `*num_ptr` (skipped when null). The per-waiter result store rides the wake channel rather than the canceller's effects, so it resolves in the WAITER's address space. Get (139) writes the current bits as BE u64. Slot 84 is `_sys_interrupt_thread_establish`; slot 118 is the firmware-era home of `sys_event_flag_clear`.                                                                                          |
 | `sys_semaphore_*`                                  | 90-94, 114              | Create / destroy / wait / trywait / post / get_value. Wake-or-increment on post.                                                                                                                                                                                                                                                                                                                                                                                                |
 | `sys_lwmutex_*`                                    | 95-99                   | Create / destroy / lock / unlock / trylock. FIFO waiter list. The kernel entry holds only `signaled` plus the waiter list -- owner and recursion count live in the guest-side `sys_lwmutex_t`, so unlock does not consult the caller. CELL_EDEADLK fires when the caller is already parked on the sleep queue, not on owner re-entry.                                                                                                                                            |
 | `sys_mutex_*`                                      | 100-104                 | Create / destroy / lock / unlock / trylock. Heavy-mutex variant of lwmutex with attribute capture; unlike lwmutex the kernel entry DOES track the owner. Destroy (101) is CELL_ESRCH on unknown id, CELL_EBUSY while owned or with waiters present.                                                                                                                                                                                                                             |
@@ -600,7 +617,7 @@ Classified into typed `Lv2Request` variants:
 | `sys_spu_thread_group_terminate`                   | 177                     | Not modeled; typed-variant arm logs an invariant break and returns CELL_ENOSYS. Split from join so dispatch cannot conflate the two ABI shapes. RPCS3 reference: its `sys_spu.cpp` terminate handler.                                                                                                                                                                                                                                                                           |
 | `sys_spu_thread_group_join`                        | 178                     | Blocks caller; wakes when all SPUs in the group finish.                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `sys_spu_thread_write_spu_mb`                      | 190                     | Deposits a value into the target SPU's inbound mailbox.                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `sys_memory_container_create`                      | 341                     | Allocates a monotonic container id, writes it to guest pointer.                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `sys_memory_container_create`                      | 341                     | Allocates a monotonic container id, writes it to guest pointer. Shares one arm with syscall 324 -- LV2 binds both numbers to the same kernel entry point. CELL_ENOMEM when `size` truncates to nothing against the 1 MiB granule; CELL_EFAULT on a null pointer.                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `sys_memory_allocate`                              | 348                     | Bump-allocates 64KB-aligned guest memory from the PS3 user region (0x00010000+, above the loaded ELF).                                                                                                                                                                                                                                                                                                                                                                          |
 | `sys_memory_free`                                  | 349                     | Stub: no-op (CellGov does not track deallocation).                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `sys_memory_get_user_memory_size`                  | 352                     | Writes `sys_memory_info_t` to the guest pointer: `total` is the fixed user-memory size, `available` is `total - (mem_alloc_ptr - mem_alloc_base)` and therefore SHRINKS as the bump allocator hands out memory.                                                                                                                                                                                                                                                                 |
@@ -678,6 +695,17 @@ scheduler, which stays agnostic to the blocking cause.
 Child stacks come from the 15 MB `child_stacks` region at
 `0xD0100000+`. `ThreadStackAllocator` is a deterministic bump
 allocator: two fresh allocators produce byte-identical sequences.
+The arena is host-global but the backing memory is not: a stack
+block is installed as a region in the CREATOR's address space, so a
+thread spawned by a child process stacks inside that process rather
+than in the boot map (the boot pipeline pre-installs the whole
+window, so boot-process creates skip the install). A create that
+gets refused after taking a block -- no PPU factory installed, the
+thread-id space exhausted, or a stack region that will not install
+-- returns the block to the arena, so a refusal cannot leak the
+window one allocation at a time. The arena only rewinds its most
+recent block, and a return that is not that block is refused with a
+named witness rather than corrupting a live stack.
 
 Per-thread TLS is instantiated from the captured `TlsTemplate`:
 `set_tls_template` fires once at boot (from the loader's PT_TLS
@@ -705,18 +733,18 @@ return `CELL_ENOSYS` with a traced diagnostic.
 | `sys_ppu_thread_get_priority`                            | 48     | Writes target priority (s32) to `*priop`; CELL_ESRCH for ids absent from the thread table (checked before the null gate, matching RPCS3's lookup-then-write order). CELL_EFAULT on null `priop`.                                                                                                          |
 | `sys_tty_read`                                           | 402    | CELL_EIO (debug console off in retail).                                                                                                                                                                                                                                                                  |
 | DEX-only unused slot                                     | 462    | CELL_ENOSYS so retail liblv2 takes its fallback path.                                                                                                                                                                                                                                                    |
-| `sys_memory_container_create`                            | 324    | Mints kernel id, writes to `*cid_ptr`. CELL_EFAULT on null pointer.                                                                                                                                                                                                                                      |
-| `sys_mmapper_allocate_address`                           | 330    | Bumps a 256 MiB-aligned cursor across `[MMAPPER_REGION_START = 0x5000_0000, MMAPPER_REGION_END = 0xC000_0000)` -- the start sits 256 MiB above `SYS_RSX_MEM_END` so the reserved `[0x4000_0000, 0x5000_0000)` rsx_context window cannot alias a handout, and the end is capped below the RSX dma_control MMIO base. Writes base to `*alloc_addr_ptr`. CELL_ENOMEM on `size == 0`, u32 overflow, or cap-exceeded. CELL_EFAULT on null pointer. |
-| `sys_mmapper_allocate_shared_memory`                     | 332    | Mints a monotonic mem_id, writes to `*mem_id_ptr`. A keyed `ipc_key` (non-zero AND not the `SYS_MMAPPER_NO_SHM_KEY` sentinel that liblv2 passes on its keyless path) routes through the process-shared IPC registry: a registered key returns the existing mem_id (size / flags ignored), an unregistered key mints and registers. CELL_EFAULT on null `mem_id_ptr`; CELL_ENOMEM when size exceeds u32; CELL_EALIGN when size is not a multiple of the flag-selected granule. |
-| `sys_mmapper_map_shared_memory`                          | 334    | Validates `addr` inside `[0x2000_0000, 0xC000_0000)` and against the 332 / 362 handle's alignment and size, pushes a `PendingRegionInstall` plus its ledger entry, and co-emits any registered `SystemStateSeed` writes for the mapped key in the same effect batch. CELL_EINVAL for an out-of-range or wrapping `addr`; CELL_ESRCH when `mem_id` is not in the handle table; CELL_EALIGN on a misaligned `addr`. |
-| `sys_mmapper_search_and_map`                             | 337    | Searches the install ledger for the first free aligned range of the handle's size at or after `start_addr`, records the install, and writes the actual mapped address back to `*alloc_addr_ptr` (not the caller's hint). CELL_EFAULT on null `alloc_addr_ptr`; CELL_EINVAL when `start_addr` is outside the mmapper window; CELL_ESRCH when `mem_id` is not in the handle table (332 / 362 must precede 337); CELL_ENOMEM when the search exhausts the window.                                                   |
-| `sys_mmapper_allocate_shared_memory_from_container`      | 362    | Container variant of 332 with flags at r6 and `*mem_id_ptr` at r7. It has NO ipc-key path: every call mints a fresh mem_id, so the process-shared dedupe 332 performs does not apply here. Same EFAULT / ENOMEM / EALIGN arms.                                                                            |
+| `sys_memory_container_create`                            | 324    | Same arm as syscall 341. Mints kernel id, writes to `*cid_ptr`. Physical-memory budgets are not tracked, so the only size-derived refusal is CELL_ENOMEM for a request that truncates to nothing against the 1 MiB granule; that gate fires before CELL_EFAULT on a null `cid_ptr`.                       |
+| `sys_mmapper_allocate_address`                           | 330    | Bumps a 256 MiB-aligned cursor across `[MMAPPER_REGION_START = 0x5000_0000, MMAPPER_REGION_END = 0xC000_0000)` -- the start sits 256 MiB above `SYS_RSX_MEM_END` so the reserved `[0x4000_0000, 0x5000_0000)` rsx_context window cannot alias a handout, and the end is capped below the RSX dma_control MMIO base. Writes base to `*alloc_addr_ptr`. Argument gates fire first, in the kernel's order: CELL_EALIGN when `size` is not a multiple of the 256 MiB VM-area granule (a misaligned request is refused, never rounded up), CELL_ENOMEM when `size` exceeds u32, then CELL_EALIGN when `alignment` is none of the four area sizes the kernel accepts (a zero `alignment` reads as the default area size, which is what PSL1GHT's sbrk relies on). CELL_EFAULT on null pointer; CELL_ENOMEM on `size == 0` or cap-exceeded. |
+| `sys_mmapper_allocate_shared_memory`                     | 332    | Mints a monotonic mem_id, writes to `*mem_id_ptr`. A keyed `ipc_key` (non-zero AND not the `SYS_MMAPPER_NO_SHM_KEY` sentinel that liblv2 passes on its keyless path) routes through the process-shared IPC registry: a registered key returns the existing mem_id (size / flags ignored), an unregistered key mints and registers. Argument gates precede the out-pointer gate, matching the kernel's order: CELL_EALIGN on `size == 0`; CELL_EINVAL when the `flags` granularity field holds an encoding the kernel refuses (unset, 64 KiB, and 1 MiB are the only accepted values -- an unknown field is an error, not a value rounded to a granule); CELL_ENOMEM when size exceeds u32; CELL_EALIGN when size is not a multiple of the flag-selected granule; then CELL_EFAULT on null `mem_id_ptr`. |
+| `sys_mmapper_map_shared_memory`                          | 334    | Validates `addr` inside `[0x2000_0000, 0xC000_0000)` and against the 332 / 362 handle's alignment and size, pushes a `PendingRegionInstall` (carrying the ipc key the handle was registered under, so the runtime can keep views of one keyed segment coherent) plus its ledger entry, and co-emits any registered `SystemStateSeed` writes for the mapped key in the same effect batch. CELL_EINVAL for an out-of-range or wrapping `addr`; CELL_ESRCH when `mem_id` is not in the handle table; CELL_EALIGN on a misaligned `addr`; CELL_EBUSY when the window intersects a region already committed in the CALLER's address space (loader images included) or a window this host already handed out through 334 / 337. The occupancy test consults both the host ledger and the caller's committed layout, because the ledger is host-global and cannot see regions the boot pipeline or the spawn loader installed. |
+| `sys_mmapper_search_and_map`                             | 337    | Searches for the first free aligned range of the handle's size at or after `start_addr`, records the install, and writes the actual mapped address back to `*alloc_addr_ptr` (not the caller's hint). The search skips both the host install ledger and every window occupied in the caller's committed layout -- an occupied window advances the candidate rather than failing the call, which is the kernel's own behavior when it allocates inside the caller's VM area. CELL_EFAULT on null `alloc_addr_ptr`; CELL_EINVAL when `start_addr` is outside the mmapper window; CELL_ESRCH when `mem_id` is not in the handle table (332 / 362 must precede 337); CELL_ENOMEM when the search exhausts the window.                                                   |
+| `sys_mmapper_allocate_shared_memory_from_container`      | 362    | Container variant of 332 with flags at r6 and `*mem_id_ptr` at r7. It has NO ipc-key path: every call mints a fresh mem_id, so the process-shared dedupe 332 performs does not apply here. Same EALIGN / EINVAL / ENOMEM / EFAULT arms in the same order.                                                                            |
 | `_sys_prx_load_module`                                   | 480    | Resolves path at r3 against the PRX registry; returns the registered kernel id on match. A firmware-path miss whose stem names a module retail firmware ships registers a stub entry under a real kernel id (RPCS3 forces the same `hle_load` fallback for its whitelisted names), stable across re-loads; a name outside the retail module set, or any other miss, is CELL_ENOENT; unreadable path pointer is CELL_EFAULT. |
 | `_sys_prx_start_module`                                  | 481    | Two-phase handshake on `pOpt->cmd & 0xF`. cmd=1 writes `~0` (no-start sentinel) to `pOpt->entry` (and `entry2` when `size != 0x20`) and returns CELL_OK; cmd=2 with `res == 0` marks the module started and returns CELL_OK, any other `res` returns `res & 0xFFFF_FFFF`; an unknown nibble is CELL_PRX_ERROR_ERROR. CELL_EINVAL when `id == 0` or `pOpt == 0`; CELL_ESRCH for an unknown id; CELL_EFAULT on unreadable or wrapping `pOpt`. |
 | `_sys_prx_stop_module`                                   | 482    | Stop-side counterpart of 481 on the same option struct, with 481's cmd 1/2 handshake plus cmd 4 (read entries, no state change) and cmd 8 (disable-stop no-op stub). cmd=1 moves a started module to stopping and writes the `~0` sentinel entries; cmd=2 with `res == 0` completes the stop (making a later unload succeed), `res == 1` is CELL_PRX_ERROR_CAN_NOT_STOP, other values are CELL_OK no-ops; wrong-state calls answer CELL_PRX_ERROR_NOT_STARTED / ALREADY_STOPPED / ALREADY_STOPPING. Unlike 481 the id lookup precedes the null-`pOpt` gate (CELL_ESRCH before CELL_EINVAL); CELL_EFAULT on unreadable or wrapping `pOpt`. |
 | `_sys_prx_unload_module`                                 | 483    | Withdraws a never-started module (an sc 480 miss stub the guest abandoned) or one whose sc 482 stop handshake completed, with CELL_OK, freeing its id; a started or stopping resident module is CELL_PRX_ERROR_NOT_REMOVABLE; unknown id is CELL_PRX_ERROR_UNKNOWN_MODULE. Mirrors LV2's INITIALIZED/STOPPED-only withdraw.                                          |
-| `_sys_prx_register_module`                               | 484    | Reads the option struct at r4: sizes `0x1c` / `0x20` are the legacy forms (rebuilt with `type = 0`, so no field reads), `0x30` carries the module type plus the caller's stub table `(ea, size)`; any other size is CELL_EINVAL, a null or unreadable option pointer is CELL_EINVAL / CELL_EFAULT. With `type & 1 == 0` the call is CELL_OK and nothing is bound. With the bit set the caller is handing the kernel its own import tables, which only a privileged CoreOS process may do -- a normal application gets CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`), while a CoreOS caller has its stub table linked against the resolved firmware exports, each entry resolving under the library name it carries; a NID the named library does not export stays unresolved and is attributed to that library in diagnostics. Privilege comes from the SELF capability header (see "Process privilege"). |
-| `_sys_prx_register_library`                              | 486    | CELL_OK -- the kernel's no-match success path.                                                                                                                                                                                                                                                           |
+| `_sys_prx_register_module`                               | 484    | Reads the option struct at r4: sizes `0x1c` / `0x20` are the legacy forms (rebuilt with `type = 0`, so no field reads), `0x30` carries the module type plus the caller's stub table `(ea, size)`; any other size is CELL_EINVAL, a null or unreadable option pointer is CELL_EINVAL / CELL_EFAULT. With `type & 1 == 0` the call is CELL_OK and nothing is bound. With the bit set the caller is handing the kernel its own import tables, which only a privileged CoreOS process may do -- a normal application gets CELL_PRX_ERROR_ELF_IS_REGISTERED (`0x8001_1910`), while a CoreOS caller has its stub table linked against the resolved firmware exports, each entry resolving under the library name it carries; a NID the named library does not export stays unresolved and is attributed to that library in diagnostics. Every way the stub-table walk can stop short of the table end -- an unreadable entry header, an entry declaring a below-minimum size, an entry advance or NID slot that wraps u32 -- names its own invariant break, so a truncated table is never mistaken for a fully linked one. Privilege comes from the SELF capability header (see "Process privilege"). |
+| `_sys_prx_register_library`                              | 486    | CELL_EFAULT on a null or unmapped `library` descriptor, otherwise CELL_OK -- the kernel's no-match success path. Binding the descriptor to a loaded module's export table is not modeled: CellGov publishes every firmware module's exports at boot, so a caller-registered library adds no resolvable symbol. |
 | `_sys_prx_get_module_list`                               | 494    | `flags & 0x2 == 0` -> CELL_OK no-op. With bit 2 set: CELL_EFAULT on null `pInfo`, otherwise walks the PRX registry (filtering liblv2.sprx) writing kernel ids to the `idlist` slot and the count to `pInfo->count`, capped at the caller's `pInfo->max`. A null `idlist` skips the slot writes but still writes the count. Iteration is BTreeMap-keyed so the byte output is independent of registration order. CELL_EFAULT on a wrapping `pInfo` or unreadable `max` / `idlist` fields. |
 | `_sys_prx_load_module_on_memcontainer`                   | 497    | Same resolver as 480.                                                                                                                                                                                                                                                                                    |
 | `sys_hid_manager_is_process_permission_root`             | 512    | Returns 0: retail titles run unprivileged.                                                                                                                                                                                                                                                               |
@@ -774,15 +802,30 @@ caller's marshalled argument block (pointer table, path and argv
 strings, bounded walks that refuse loudly on an unterminated
 table), resolve the child image through the LV2 content store, and
 hand it to a host-injected `ProcessSpawnLoader` that installs the
-image into a fresh child address space. Every failure arm rolls the
+image into a fresh child address space. A child image arriving
+SCE-wrapped (the system shell spawns SELFs, not raw ELFs) is
+unwrapped through the APP-keyed decrypt before the ELF parse; an
+NPDRM-wrapped child is named as such from its plaintext NPD header
+and refused, because klicensee resolution belongs to the
+title-install layer, not the spawn path. Every failure arm rolls the
 spawn back completely -- space, reservations, unit tags, and pid all
-unwind, and the syscall fails with its honest errno. The child's
-primary thread enters through a PPU factory unit with its own
-stack inside the child space; `sys_process_exit` from a child
-finishes only that process's units, records the exit status for
-`sys_process_get_status` polls, and leaves the boot process
-untouched. getpid/getppid and the SDK-version query answer from
-the caller's table entry, so a child sees its own identity.
+unwind, and the syscall fails with its honest errno.
+
+The child's primary thread enters through a PPU factory unit with
+its own stack inside the child space, and its LR sentinel points at
+an 8-byte exit stub (`li r11, 22; sc`) that runs if the entry point
+returns instead of calling `sys_process_exit`. The stub sits above
+the loaded image, derived from the highest PT_LOAD end rather than
+placed at a fixed address, so no segment can land on it and address
+0 stays reserved as null -- a stub at 0 would quietly turn a guest
+branch through a null function pointer into a clean exit instead of
+a fault.
+
+`sys_process_exit` from a child finishes only that process's units,
+records the exit status for `sys_process_get_status` polls, and
+leaves the boot process untouched. getpid/getppid and the
+SDK-version query answer from the caller's table entry, so a child
+sees its own identity.
 
 ### Null backend for unmodeled syscalls
 
@@ -939,6 +982,24 @@ result pointer) are co-located on the primitive's waiter entry,
 not on the release-side dispatch. This is the invariant that
 kept the pattern from drifting into the lost-wake class of
 bugs: parking records everything the wake needs to know.
+
+#### Process-exit purge
+
+When a process exits, every thread it owns is removed from every
+waiter list in one sweep: the six primitive tables plus the
+per-thread join-waiter lists. The exit finishes all of that
+process's units, so a grant handed to one of them afterwards is a
+resource no thread will ever consume or release -- a semaphore
+count sunk into a dead waiter, a mutex transferred to an owner that
+can never unlock it, or an exit value delivered to a joiner that no
+longer runs. The purge is a record-only removal: nothing is woken
+and no pending-response entry is cleared, because the purged
+threads are being finished rather than resumed. Per-primitive purge
+counts are witnessed. A mutex still owned by a dead thread keeps
+its owner and is reported as a named invariant break: reclaiming it
+needs creator attribution the shared-object namespace does not
+record yet, and the process-shared case with surviving attachments
+has no oracle, so retained-locked is the honest interim for both.
 
 #### Cond-wake re-acquire (two-hop block)
 
@@ -1686,7 +1747,7 @@ selection:
 | ppu_lwmutex_counter    | lwmutex contention on a shared counter.                        |
 | rsx_label_write_poll   | RSX label byte transition observed via PPU spin-poll.          |
 | rsx_semaphore_post     | NV4097 semaphore release polled by PPU.                        |
-| process_spawn_wait     | Parent spawns a child SELF into its own address space and waits. |
+| process_spawn_wait     | Parent spawns an SCE-wrapped child into its own address space and waits while the child runs a PPU thread off a stack in that space. |
 
 See `tests/micro/` for the full set.
 
