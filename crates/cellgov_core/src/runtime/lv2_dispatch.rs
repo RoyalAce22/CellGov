@@ -420,7 +420,7 @@ impl Runtime {
         // `CommitError::OutOfRange` at pre-validation. Collect into a
         // local so the borrow on `self.lv2_host` releases before
         // touching `self.memory`.
-        let region_installs: Vec<(u64, usize)> =
+        let region_installs: Vec<(u64, usize, Option<u64>)> =
             self.lv2_host.drain_pending_region_installs().collect();
         if !region_installs.is_empty() {
             // The mapping appears in the CALLER's address space: the
@@ -429,27 +429,25 @@ impl Runtime {
             // space (RPCS3 sys_mmapper.cpp sys_mmapper_map_shared_memory
             // maps into the calling process's virtual memory).
             let caller_space = self.spaces.space_of(source);
-            let mem = super::spaces::resolve_space_memory_for_write(
-                &mut self.memory,
-                &mut self.spaces,
-                caller_space,
-            );
-            for (addr, size) in region_installs {
+            for (addr, size, ipc_key) in region_installs {
+                let mem = super::spaces::resolve_space_memory_for_write(
+                    &mut self.memory,
+                    &mut self.spaces,
+                    caller_space,
+                );
                 if let Err(err) =
                     mem.install_region(addr, size, "shm", cellgov_mem::PageSize::Page64K)
                 {
-                    // Guest-reachable: the mmapper
-                    // ledger is host-global and cannot see regions the
-                    // spawn loader or boot pipeline installed in the
-                    // caller's space, so a map request can name a
-                    // window its own layout already occupies. The real
-                    // kernel refuses this with CELL_EBUSY (RPCS3
-                    // sys_mmapper.cpp sys_mmapper_map_shared_memory
-                    // when the allocation of the window fails); until
-                    // the 334 handler checks the caller's view, the
-                    // break below witnesses the fabricated success and
-                    // the window stays unmapped, so the caller's next
-                    // access to it faults instead of aliasing.
+                    // Guest-reachable, but no longer expected: sc 334
+                    // now refuses an occupied window with CELL_EBUSY
+                    // up front, consulting both the host ledger and
+                    // the caller's committed layout, and sc 337's
+                    // search skips both. Reaching this arm means a
+                    // window passed those gates and still failed to
+                    // install, so the break names a gap between the
+                    // gates and the caller's real layout. The window
+                    // stays unmapped, so the caller's next access to
+                    // it faults instead of aliasing.
                     self.lv2_host.log_invariant_break(
                         "dispatch.mmapper_region_install_overlap",
                         format_args!(
@@ -460,6 +458,13 @@ impl Runtime {
                             caller_space.raw(),
                         ),
                     );
+                    continue;
+                }
+                // A keyed window is a view of a process-shared
+                // segment; record it so views stay coherent across
+                // address spaces once a second space attaches.
+                if let Some(key) = ipc_key {
+                    self.attach_keyed_shm_view(key, size as u64, caller_space, addr);
                 }
             }
         }
@@ -749,11 +754,9 @@ impl Runtime {
         }
     }
 
-    /// Overrides replace (not merge) the existing entry;
-    /// [`Self::assert_response_updates_valid`] enforces that every
-    /// updated unit is in `woken_unit_ids` or still parked with a
-    /// pending response, and each payload-carrying update's variant
-    /// matches the existing entry.
+    /// Overrides replace the existing entry;
+    /// [`Self::assert_response_updates_valid`] enforces the
+    /// [`Lv2Dispatch::WakeAndReturn`] `response_updates` invariants.
     ///
     /// Cross-module contract: when the caller is a callback worker,
     /// `Lv2Host::dispatch_callback_return` has already transitioned
@@ -828,9 +831,6 @@ impl Runtime {
             .set_status_override(source, UnitStatus::Blocked);
     }
 
-    /// Debug-only: every updated unit is in the wake set or parked
-    /// with a staged response being replaced, and each
-    /// payload-carrying update's variant matches the existing entry.
     fn assert_response_updates_valid(
         &self,
         site: &'static str,
@@ -888,6 +888,18 @@ pub(crate) fn check_response_updates(
             continue;
         }
         if let Some(existing) = table.peek(*waiter) {
+            // sys_event_flag_cancel refines a parked eflag-wait
+            // response into its ECANCELED counterpart; every other
+            // payload-carrying update must match the parked variant.
+            if matches!(
+                (existing, update),
+                (
+                    PendingResponse::EventFlagWake { .. },
+                    PendingResponse::EventFlagCancelWake { .. }
+                )
+            ) {
+                continue;
+            }
             assert_eq!(
                 existing.variant_tag(),
                 update.variant_tag(),

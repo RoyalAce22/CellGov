@@ -4,7 +4,7 @@
 //! FIFO waiter list. User-space wrappers track owner / recursion /
 //! waiter count in the `sys_lwmutex_t` struct and only invoke the
 //! kernel on contention, so this mirrors RPCS3's `lv2_lwmutex`
-//! (`signaled` + sleep queue) rather than a full mutex.
+//! (`signaled` + sleep queue).
 //!
 //! Ids are minted monotonically by [`LwMutexIdAllocator`]; the
 //! id space is distinct from the heavy mutex table.
@@ -65,11 +65,6 @@ pub enum LwMutexEnqueueError {
 }
 
 /// A single lightweight mutex.
-///
-/// `signaled` is the binary "wake pending" flag set by an unlock
-/// against an empty sleep queue and consumed by the next lock.
-/// User-space ownership and recursion tracking live in the
-/// guest's `sys_lwmutex_t` struct, not here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LwMutexEntry {
     signaled: bool,
@@ -78,9 +73,6 @@ pub struct LwMutexEntry {
 
 impl LwMutexEntry {
     fn new() -> Self {
-        // Starts un-signaled: the HLE wrapper only invokes the
-        // kernel on contention, so a kernel acquire always means
-        // "block until the holder posts a wake".
         Self {
             signaled: false,
             waiters: WaiterList::new(),
@@ -153,9 +145,6 @@ impl LwMutexTable {
     }
 
     /// Cumulative `acquire_or_enqueue` + `enqueue_waiter` calls.
-    ///
-    /// Lets tests prove the enqueue paths actually ran, so silence
-    /// from the duplicate-enqueue `debug_assert!`s is non-vacuous.
     /// Not folded into [`Self::state_hash`].
     #[inline]
     pub fn acquires_count(&self) -> u64 {
@@ -275,6 +264,23 @@ impl LwMutexTable {
             return Err(LwMutexEnqueueError::DuplicateWaiter);
         }
         Ok(())
+    }
+
+    /// Remove every waiter in `threads` from every lwmutex, preserving
+    /// the order of survivors; returns `(id, thread)` pairs in table
+    /// order. Process-exit purge; the signaled flag is untouched.
+    #[must_use = "the purged pairs are the only witness that these wakes were cancelled"]
+    pub fn purge_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(u32, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            for thread in entry.waiters.remove_set(threads) {
+                removed.push((*id, thread));
+            }
+        }
+        removed
     }
 
     /// Remove `waiter` from the sleep queue without granting the

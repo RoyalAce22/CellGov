@@ -384,7 +384,7 @@ fn a_child_process_out_pointer_effect_lands_in_its_own_space() {
     // sys_process_get_sdk_version answers through a SharedWriteIntent
     // on the dispatch's effects -- the apply_lv2_effects direct-commit
     // path. Called by a child-process unit, the write must land in
-    // the CHILD's space, not corrupt the boot space (#374).
+    // the CHILD's space, not corrupt the boot space.
     let mut rt = build_spawn_ready();
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     let child = UnitId::new(1);
@@ -426,7 +426,7 @@ fn a_child_process_out_pointer_effect_lands_in_its_own_space() {
 fn a_join_inside_a_child_process_writes_status_into_its_own_space() {
     // The PpuThreadJoin status writeback goes through commit_bytes_at;
     // with the joiner in a child process it must resolve the joiner's
-    // space, not the boot space (#374).
+    // space, not the boot space.
     let mut rt = build_spawn_ready();
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     let child = UnitId::new(1);
@@ -659,4 +659,405 @@ fn spawn_then_exit_hash_stream_is_deterministic() {
         hashes
     };
     assert_eq!(run(), run());
+}
+
+/// The exit purge unqueues the waiter host-side before any later
+/// send can reach it.
+#[test]
+fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
+    let mut rt = build_spawn_ready();
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        UnitId::new(0),
+        cellgov_lv2::ppu_thread::PpuThreadAttrs {
+            entry: 0x100,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x1000,
+            priority: 1000,
+            tls_base: 0,
+        },
+    );
+    rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
+    let child = UnitId::new(1);
+
+    // A second thread of the child process, parked on a queue that
+    // the boot process can also reach (the LV2 object namespace is
+    // host-global).
+    let waiter = rt.registry_mut().register_with(Idle::new);
+    rt.lv2_host_mut()
+        .ppu_threads_mut()
+        .create(
+            waiter,
+            cellgov_lv2::ppu_thread::PpuThreadAttrs {
+                entry: 0x100,
+                arg: 0,
+                stack_base: 0xE00,
+                stack_size: 0x100,
+                priority: 1000,
+                tls_base: 0,
+            },
+        )
+        .unwrap();
+    rt.lv2_host_mut().bind_unit_process(waiter, EXPECTED_PID);
+    rt.assign_unit_space(waiter, AddressSpaceId::new(1))
+        .unwrap();
+
+    let read_u32 = |rt: &Runtime, addr: u64| {
+        u32::from_be_bytes(
+            rt.memory()
+                .read(ByteRange::new(GuestAddr::new(addr), 4).unwrap())
+                .unwrap()
+                .to_vec()
+                .try_into()
+                .unwrap(),
+        )
+    };
+
+    let q_id_ptr: u64 = 0x30;
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_QUEUE_CREATE,
+            &[q_id_ptr, 0, 0, 4, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    let queue = u64::from(read_u32(&rt, q_id_ptr));
+
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_QUEUE_RECEIVE,
+            &[queue, 0x50, 0, 0, 0, 0, 0, 0],
+        ),
+        waiter,
+    );
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Blocked),
+        "the child-process waiter must park on the empty queue",
+    );
+
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::PROCESS_EXIT,
+            &[7, 0, 0, 0, 0, 0, 0, 0],
+        ),
+        child,
+    );
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Finished)
+    );
+    assert_eq!(
+        rt.lv2_host()
+            .observability()
+            .process_exit_waiter_purges
+            .get("equeue"),
+        Some(&1),
+        "the exit must purge the parked waiter from the queue",
+    );
+
+    // Boot side: port -> connect -> send into the purged queue.
+    let port_id_ptr: u64 = 0x34;
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_PORT_CREATE,
+            &[port_id_ptr, 1, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    let port = u64::from(read_u32(&rt, port_id_ptr));
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_PORT_CONNECT_LOCAL,
+            &[port, queue, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_PORT_SEND,
+            &[port, 1, 2, 3, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+
+    // The dead waiter stayed dead, silently: no wake reached it, so
+    // the Finished guard in resolve_sync_wakes never had to fire.
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Finished)
+    );
+    assert_eq!(
+        rt.lv2_host()
+            .invariant_break_site_count("runtime.resolve_sync_wakes_waiter_finished"),
+        0,
+        "the purge must remove the waiter before any wake can target it",
+    );
+
+    // The event went to the buffer: the boot process receives it.
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_QUEUE_RECEIVE,
+            &[queue, 0x60, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0),
+        "the sent event must be buffered for survivors, not lost",
+    );
+}
+
+/// The canceller's own effects (the num_ptr count write) stay in the
+/// canceller's space.
+#[test]
+fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
+    let mut rt = build_spawn_ready();
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        UnitId::new(0),
+        cellgov_lv2::ppu_thread::PpuThreadAttrs {
+            entry: 0x100,
+            arg: 0,
+            stack_base: 0xD000_0000,
+            stack_size: 0x1000,
+            priority: 1000,
+            tls_base: 0,
+        },
+    );
+    rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
+
+    let waiter = rt.registry_mut().register_with(Idle::new);
+    rt.lv2_host_mut()
+        .ppu_threads_mut()
+        .create(
+            waiter,
+            cellgov_lv2::ppu_thread::PpuThreadAttrs {
+                entry: 0x100,
+                arg: 0,
+                stack_base: 0xE00,
+                stack_size: 0x100,
+                priority: 1000,
+                tls_base: 0,
+            },
+        )
+        .unwrap();
+    rt.lv2_host_mut().bind_unit_process(waiter, EXPECTED_PID);
+    rt.assign_unit_space(waiter, AddressSpaceId::new(1))
+        .unwrap();
+
+    // sys_event_flag_attribute_t in boot memory: protocol@0,
+    // type@20; init pattern 0xABCD.
+    let attr_ptr: u64 = 0x300;
+    let write_boot = |rt: &mut Runtime, addr: u64, bytes: &[u8]| {
+        let range = ByteRange::new(GuestAddr::new(addr), bytes.len() as u64).unwrap();
+        rt.memory_mut().apply_commit(range, bytes).unwrap();
+    };
+    write_boot(
+        &mut rt,
+        attr_ptr,
+        &cellgov_ps3_abi::sys_sync::SYS_SYNC_FIFO.to_be_bytes(),
+    );
+    write_boot(
+        &mut rt,
+        attr_ptr + 20,
+        &cellgov_ps3_abi::sys_sync::SYS_SYNC_WAITER_SINGLE.to_be_bytes(),
+    );
+    let flag_id_ptr: u64 = 0x38;
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_FLAG_CREATE,
+            &[flag_id_ptr, attr_ptr, 0xABCD, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+    let flag = u64::from(u32::from_be_bytes(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(flag_id_ptr), 4).unwrap())
+            .unwrap()
+            .to_vec()
+            .try_into()
+            .unwrap(),
+    ));
+
+    // The child-space waiter parks on a pattern the flag never
+    // matches (AND on a clear bit). The result pointer targets ITS
+    // space, at an address no boot-side fixture data occupies (the
+    // spawn marshal block spans 0x40..0x60).
+    let result_ptr: u64 = 0x200;
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_FLAG_WAIT,
+            &[flag, 0x10000, 0x01, result_ptr, 0, 0, 0, 0],
+        ),
+        waiter,
+    );
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Blocked)
+    );
+
+    // Boot cancels; count lands at num_ptr in BOOT's memory.
+    let num_ptr: u64 = 0x58;
+    rt.dispatch_lv2_request(
+        classify(
+            cellgov_ps3_abi::syscall::EVENT_FLAG_CANCEL,
+            &[flag, num_ptr, 0, 0, 0, 0, 0, 0],
+        ),
+        UnitId::new(0),
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(0)
+    );
+
+    // The waiter woke with ECANCELED and the pattern in ITS space.
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Runnable)
+    );
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(waiter),
+        Some(cell_errors::CELL_ECANCELED.into())
+    );
+    let child_bytes = rt
+        .space_memory(AddressSpaceId::new(1))
+        .unwrap()
+        .read(ByteRange::new(GuestAddr::new(result_ptr), 8).unwrap())
+        .unwrap()
+        .to_vec();
+    assert_eq!(
+        u64::from_be_bytes(child_bytes.try_into().unwrap()),
+        0xABCD,
+        "the captured pattern must land through the waiter's space",
+    );
+    let boot_bytes = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new(result_ptr), 8).unwrap())
+        .unwrap()
+        .to_vec();
+    assert_eq!(
+        u64::from_be_bytes(boot_bytes.try_into().unwrap()),
+        0,
+        "boot memory at the same address must stay untouched",
+    );
+    let count = u32::from_be_bytes(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(num_ptr), 4).unwrap())
+            .unwrap()
+            .to_vec()
+            .try_into()
+            .unwrap(),
+    );
+    assert_eq!(
+        count, 1,
+        "the canceller's count write stays in its own space"
+    );
+}
+
+#[test]
+fn a_child_process_thread_gets_a_stack_region_in_its_own_space() {
+    let mut rt = build_spawn_ready();
+    rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
+    let child = UnitId::new(1);
+    let child_space = AddressSpaceId::new(1);
+
+    {
+        let mem = rt.space_memory_mut(child_space).unwrap();
+        let mut write = |addr: u64, bytes: &[u8]| {
+            let range = ByteRange::new(GuestAddr::new(addr), bytes.len() as u64).unwrap();
+            mem.apply_commit(range, bytes).unwrap();
+        };
+        write(0x200, &0x210u32.to_be_bytes()); // param.entry_opd_ptr
+        write(0x204, &0u32.to_be_bytes()); // param.tls
+        write(0x210, &0x300u32.to_be_bytes()); // OPD code
+        write(0x214, &0x400u32.to_be_bytes()); // OPD toc
+    }
+    let create = classify(
+        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        &[0x30, 0x200, 0, 0, 1000, 0x4000, 0, 0],
+    );
+    rt.dispatch_lv2_request(create, child);
+    assert_eq!(rt.registry_mut().drain_syscall_return(child), Some(0));
+
+    let thread = UnitId::new(2);
+    let stack_base = rt
+        .lv2_host()
+        .ppu_thread_for_unit(thread)
+        .expect("created thread has a record")
+        .attrs
+        .stack_base as u64;
+    // The whole block is readable through the child's space...
+    assert!(
+        rt.space_memory(child_space)
+            .unwrap()
+            .read(ByteRange::new(GuestAddr::new(stack_base), 0x4000).unwrap())
+            .is_some(),
+        "the child's space must map the new thread's stack block",
+    );
+    // ...and the boot space never grew a region for it (its layout
+    // is the 0x1000-byte test arena).
+    assert!(
+        rt.memory()
+            .read(ByteRange::new(GuestAddr::new(stack_base), 16).unwrap())
+            .is_none(),
+        "a child thread's stack must not be installed into the boot space",
+    );
+}
+
+#[test]
+fn a_refused_thread_create_returns_its_stack_block_to_the_arena() {
+    let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(4), 100);
+    rt.registry_mut().register_with(Idle::new);
+    {
+        let mem = rt.memory_mut();
+        let mut write = |addr: u64, bytes: &[u8]| {
+            let range = ByteRange::new(GuestAddr::new(addr), bytes.len() as u64).unwrap();
+            mem.apply_commit(range, bytes).unwrap();
+        };
+        write(0x200, &0x210u32.to_be_bytes());
+        write(0x204, &0u32.to_be_bytes());
+        write(0x210, &0x300u32.to_be_bytes());
+        write(0x214, &0x400u32.to_be_bytes());
+    }
+    let create = classify(
+        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        &[0x30, 0x200, 0, 0, 1000, 0x4000, 0, 0],
+    );
+    // No factory installed: the runtime refuses with E2BIG.
+    rt.dispatch_lv2_request(create, UnitId::new(0));
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(UnitId::new(0)),
+        Some(cell_errors::CELL_E2BIG.into())
+    );
+    // The arena rewound: the next block starts at the arena base.
+    let next = rt
+        .lv2_host_mut()
+        .allocate_child_stack(0x4000, 0x10)
+        .unwrap();
+    assert_eq!(
+        next.base(),
+        0xD010_0000,
+        "the refused create must return its block to the arena",
+    );
 }

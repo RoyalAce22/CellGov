@@ -1,7 +1,7 @@
 //! Lv2Host internal bookkeeping: PPU-thread seeding, lwmutex hold counts, child stacks, FS mounts, mmapper window allocation and search, and firmware identity hashing.
 
 use super::*;
-use crate::host::test_support::primary_attrs;
+use crate::host::test_support::{primary_attrs, FakeRuntime};
 
 #[test]
 fn new_host_has_empty_ppu_thread_table() {
@@ -97,6 +97,49 @@ fn allocate_child_stack_produces_non_overlapping_blocks() {
     assert_eq!(s1.base, 0xD010_0000);
     assert!(s2.base >= s1.end());
     assert!(s3.base >= s2.end());
+}
+
+#[test]
+fn free_child_stack_rewinds_the_arena_for_the_refusal_path() {
+    let mut host = Lv2Host::new();
+    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    host.free_child_stack(s1.base(), s1.size());
+    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    assert_eq!(s2.base(), s1.base());
+    assert_eq!(
+        host.invariant_break_site_count("ppu_thread_create.stack_free_mismatch"),
+        0,
+    );
+}
+
+#[test]
+fn free_child_stack_out_of_order_is_loud_and_leaks_instead_of_corrupting() {
+    let mut host = Lv2Host::new();
+    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    host.free_child_stack(s1.base(), s1.size());
+    assert_eq!(
+        host.invariant_break_site_count("ppu_thread_create.stack_free_mismatch"),
+        1,
+    );
+    // s2 stays live: the next block sits above it.
+    let s3 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    assert!(s3.base() >= s2.end());
+}
+
+#[test]
+fn free_child_stack_below_the_abi_stack_floor_is_reported_not_a_panic() {
+    let mut host = Lv2Host::new();
+    let s1 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    host.free_child_stack(s1.base(), 0x8);
+    assert_eq!(
+        host.invariant_break_site_count("ppu_thread_create.stack_free_mismatch"),
+        1,
+    );
+    // The real block is untouched: the next allocation still sits
+    // above it.
+    let s2 = host.allocate_child_stack(0x10_000, 0x10).unwrap();
+    assert!(s2.base() >= s1.end());
 }
 
 #[test]
@@ -221,7 +264,12 @@ fn mmapper_alloc_caps_at_mmapper_region_end() {
 fn mmapper_search_free_range_returns_hint_when_window_is_empty() {
     let host = Lv2Host::new();
     let addr = host
-        .mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000)
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &FakeRuntime::new(0x10),
+        )
         .expect("first search succeeds");
     assert_eq!(addr, Lv2Host::MMAPPER_REGION_START);
 }
@@ -231,7 +279,7 @@ fn mmapper_search_free_range_rounds_misaligned_hint_up() {
     let host = Lv2Host::new();
     let hint = Lv2Host::MMAPPER_REGION_START + 0x12345;
     let addr = host
-        .mmapper_search_free_range(hint, 0x1000, 0x10000)
+        .mmapper_search_free_range(hint, 0x1000, 0x10000, &FakeRuntime::new(0x10))
         .expect("aligned candidate available");
     assert_eq!(
         addr,
@@ -245,7 +293,12 @@ fn mmapper_search_free_range_advances_past_existing_install() {
     let mut host = Lv2Host::new();
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
     let addr = host
-        .mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000)
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &FakeRuntime::new(0x10),
+        )
         .expect("next aligned slot available");
     assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x10000);
 }
@@ -256,7 +309,12 @@ fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
     let window = Lv2Host::MMAPPER_REGION_END - Lv2Host::MMAPPER_REGION_START;
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, window);
     assert_eq!(
-        host.mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000),
+        host.mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &FakeRuntime::new(0x10)
+        ),
         None,
     );
 }
@@ -265,7 +323,12 @@ fn mmapper_search_free_range_returns_none_on_window_exhaustion() {
 fn mmapper_search_free_range_rejects_zero_size() {
     let host = Lv2Host::new();
     assert_eq!(
-        host.mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0, 0x10000),
+        host.mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0,
+            0x10000,
+            &FakeRuntime::new(0x10)
+        ),
         None,
     );
 }
@@ -279,7 +342,12 @@ fn mmapper_search_free_range_walks_through_multiple_holes() {
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
     host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START + 0x20000, 0x10000);
     let addr = host
-        .mmapper_search_free_range(Lv2Host::MMAPPER_REGION_START, 0x10000, 0x10000)
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &FakeRuntime::new(0x10),
+        )
         .expect("middle hole is free");
     assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x10000);
 }
@@ -288,9 +356,104 @@ fn mmapper_search_free_range_walks_through_multiple_holes() {
 fn mmapper_search_free_range_clamps_hint_below_region_start_up_to_start() {
     let host = Lv2Host::new();
     let addr = host
-        .mmapper_search_free_range(0, 0x10000, 0x10000)
+        .mmapper_search_free_range(0, 0x10000, 0x10000, &FakeRuntime::new(0x10))
         .expect("hint below region clamps to start");
     assert_eq!(addr, Lv2Host::MMAPPER_REGION_START);
+}
+
+/// Runtime whose committed layout occupies `[base, base + size)` --
+/// the loader-image case the ledger cannot see.
+fn runtime_occupying(base: u32, size: u32) -> FakeRuntime {
+    let mut mem = cellgov_mem::GuestMemory::new(0x10);
+    mem.install_region(
+        u64::from(base),
+        size as usize,
+        "loader",
+        cellgov_mem::PageSize::Page64K,
+    )
+    .expect("the seeded window sits above the flat arena");
+    FakeRuntime::with_memory(mem)
+}
+
+#[test]
+fn mmapper_search_free_range_skips_a_window_the_caller_already_committed() {
+    let host = Lv2Host::new();
+    let addr = host
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &runtime_occupying(Lv2Host::MMAPPER_REGION_START, 0x20000),
+        )
+        .expect("the window past the committed region is free");
+    assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x20000);
+}
+
+#[test]
+fn mmapper_search_free_range_takes_the_furthest_of_the_ledger_and_committed_skips() {
+    let mut host = Lv2Host::new();
+    // Ledger stops at +0x10000, the committed layout at +0x30000.
+    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x10000);
+    let addr = host
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &runtime_occupying(Lv2Host::MMAPPER_REGION_START, 0x30000),
+        )
+        .expect("the window past both obstacles is free");
+    assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x30000);
+
+    // Reversed: the ledger is now the furthest obstacle.
+    let mut host = Lv2Host::new();
+    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x30000);
+    let addr = host
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &runtime_occupying(Lv2Host::MMAPPER_REGION_START, 0x10000),
+        )
+        .expect("the window past both obstacles is free");
+    assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x30000);
+}
+
+#[test]
+fn mmapper_search_free_range_does_not_hand_out_a_hole_nested_in_a_longer_entry() {
+    // A map whose region install was refused leaves a ledger entry
+    // with no committed region behind it, so a later, shorter entry
+    // can be recorded inside the earlier one's span. The search must
+    // still treat the whole span as occupied.
+    let mut host = Lv2Host::new();
+    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, 0x40000);
+    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START + 0x10000, 0x1000);
+    let addr = host
+        .mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START + 0x20000,
+            0x10000,
+            0x10000,
+            &FakeRuntime::new(0x10),
+        )
+        .expect("a slot past the longer entry is available");
+    assert_eq!(addr, Lv2Host::MMAPPER_REGION_START + 0x40000);
+}
+
+#[test]
+fn mmapper_search_free_range_reports_exhaustion_for_a_ledger_entry_that_overflows_u32() {
+    let mut host = Lv2Host::new();
+    // Only reachable if a dispatch arm ever records an unbounded
+    // length; the search must refuse rather than read the overflow as
+    // free space.
+    host.mmapper_ledger_insert(Lv2Host::MMAPPER_REGION_START, u32::MAX);
+    assert_eq!(
+        host.mmapper_search_free_range(
+            Lv2Host::MMAPPER_REGION_START,
+            0x10000,
+            0x10000,
+            &FakeRuntime::new(0x10)
+        ),
+        None,
+    );
 }
 
 #[test]
@@ -576,5 +739,189 @@ mod privilege_predicates {
     #[test]
     fn the_default_authority_id_is_not_coreos() {
         assert!(!Lv2Host::new().is_coreos());
+    }
+}
+
+mod process_exit_waiter_purge {
+    use std::collections::BTreeSet;
+
+    use super::*;
+    use crate::dispatch::CondMutexKind;
+    use crate::host::process::ProcessEntry;
+    use crate::ppu_thread::EventFlagWaitMode;
+    use crate::sync_primitives::MutexAttrs;
+    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+
+    const CHILD_PID: u32 = BOOT_PROCESS_PID + 0x100;
+    const MUTEX: u32 = 0x100;
+    const COND: u32 = 0x101;
+    const SEMA: u32 = 0x102;
+    const EQUEUE: u32 = 0x103;
+    const EFLAG: u32 = 0x104;
+
+    fn plain_attrs() -> MutexAttrs {
+        MutexAttrs {
+            priority_policy: 0,
+            recursive: false,
+            protocol: 0,
+        }
+    }
+
+    /// Boot primary (unit 0) plus two child-process threads (units
+    /// 10, 11), one primitive of every family, and the child threads
+    /// parked across all of them.
+    fn host_with_parked_child() -> (
+        Lv2Host,
+        crate::ppu_thread::PpuThreadId,
+        crate::ppu_thread::PpuThreadId,
+    ) {
+        let mut host = Lv2Host::new();
+        host.seed_primary_ppu_thread(UnitId::new(0), crate::host::test_support::primary_attrs());
+        assert!(host.state.processes.insert_child(
+            CHILD_PID,
+            ProcessEntry {
+                ppid: BOOT_PROCESS_PID,
+                authority_id: 0,
+                control_flags1: 0,
+                exit_status: None,
+            }
+        ));
+        let t1 = host
+            .ppu_threads_mut()
+            .create(UnitId::new(10), crate::host::test_support::primary_attrs())
+            .unwrap();
+        let t2 = host
+            .ppu_threads_mut()
+            .create(UnitId::new(11), crate::host::test_support::primary_attrs())
+            .unwrap();
+        host.bind_unit_process(UnitId::new(10), CHILD_PID);
+        host.bind_unit_process(UnitId::new(11), CHILD_PID);
+
+        host.state
+            .mutexes
+            .create_with_id(MUTEX, plain_attrs())
+            .unwrap();
+        host.state
+            .conds
+            .create_with_id(COND, MUTEX, CondMutexKind::Mutex)
+            .unwrap();
+        host.state.semaphores.create_with_id(SEMA, 0, 4).unwrap();
+        assert!(host.state.event_queues.create_with_id(EQUEUE, 4));
+        host.state.event_flags.create_with_id(EFLAG, 0).unwrap();
+        let lwm = host.state.lwmutexes.create().unwrap();
+        assert_eq!(lwm, 1, "first lwmutex id");
+
+        host.state.mutexes.enqueue_waiter(MUTEX, t1).unwrap();
+        host.state.conds.enqueue_waiter(COND, t2).unwrap();
+        host.state.semaphores.enqueue_waiter(SEMA, t1).unwrap();
+        host.state
+            .event_queues
+            .enqueue_waiter(EQUEUE, t2, 0x1000)
+            .unwrap();
+        host.state
+            .event_flags
+            .enqueue_waiter(EFLAG, t1, 0x1, EventFlagWaitMode::OrNoClear, 0x2000)
+            .unwrap();
+        host.state.lwmutexes.enqueue_waiter(lwm, t2).unwrap();
+        (host, t1, t2)
+    }
+
+    #[test]
+    fn a_fresh_exit_unqueues_the_pids_threads_from_every_primitive() {
+        let (mut host, t1, t2) = host_with_parked_child();
+        host.mark_process_exited(CHILD_PID, 0);
+
+        let dead: BTreeSet<_> = [t1, t2].into_iter().collect();
+        assert!(host.state.mutexes.purge_waiters_of(&dead).is_empty());
+        assert!(host.state.conds.purge_waiters_of(&dead).is_empty());
+        assert!(host.state.semaphores.purge_waiters_of(&dead).is_empty());
+        assert!(host.state.event_queues.purge_waiters_of(&dead).is_empty());
+        assert!(host.state.event_flags.purge_waiters_of(&dead).is_empty());
+        assert!(host.state.lwmutexes.purge_waiters_of(&dead).is_empty());
+
+        let purges = &host.observability().process_exit_waiter_purges;
+        assert_eq!(purges.get("mutex"), Some(&1));
+        assert_eq!(purges.get("cond"), Some(&1));
+        assert_eq!(purges.get("semaphore"), Some(&1));
+        assert_eq!(purges.get("equeue"), Some(&1));
+        assert_eq!(purges.get("eflag"), Some(&1));
+        assert_eq!(purges.get("lwmutex"), Some(&1));
+    }
+
+    #[test]
+    fn survivors_keep_their_waiter_slots_through_a_purge() {
+        let (mut host, _t1, _t2) = host_with_parked_child();
+        let boot = host.ppu_thread_id_for_unit(UnitId::new(0)).unwrap();
+        host.state.semaphores.enqueue_waiter(SEMA, boot).unwrap();
+        host.mark_process_exited(CHILD_PID, 0);
+        let alive: BTreeSet<_> = [boot].into_iter().collect();
+        assert_eq!(
+            host.state.semaphores.purge_waiters_of(&alive),
+            vec![(SEMA, boot)],
+            "the boot waiter must survive the child purge",
+        );
+    }
+
+    #[test]
+    fn a_purged_joiner_is_never_handed_the_targets_exit_value() {
+        let (mut host, t1, _t2) = host_with_parked_child();
+        let boot = host.ppu_thread_id_for_unit(UnitId::new(0)).unwrap();
+        assert_eq!(
+            host.ppu_threads_mut().add_join_waiter(boot, t1),
+            crate::ppu_thread::AddJoinWaiter::Parked,
+        );
+        host.mark_process_exited(CHILD_PID, 0);
+        assert_eq!(purges_of(&host, "join"), 1);
+        assert!(
+            host.ppu_threads_mut().mark_finished(boot, 0).is_empty(),
+            "the dead joiner must not receive the exit value",
+        );
+    }
+
+    #[test]
+    fn ownership_held_by_the_dead_process_is_retained_and_witnessed() {
+        let (mut host, t1, _t2) = host_with_parked_child();
+        let owned: u32 = 0x200;
+        host.state
+            .mutexes
+            .create_with_id(owned, plain_attrs())
+            .unwrap();
+        assert_eq!(
+            host.state.mutexes.try_acquire(owned, t1),
+            Some(crate::sync_primitives::MutexAcquire::Acquired),
+        );
+        host.mark_process_exited(CHILD_PID, 0);
+        assert_eq!(host.observability().process_exit_retained_mutex_owners, 1);
+        assert_eq!(
+            host.invariant_break_site_count("process.exit_retained_mutex_owner"),
+            1,
+        );
+        // Still locked: a survivor cannot acquire it.
+        let boot = host.ppu_thread_id_for_unit(UnitId::new(0)).unwrap();
+        assert_eq!(
+            host.state.mutexes.try_acquire(owned, boot),
+            Some(crate::sync_primitives::MutexAcquire::Contended),
+        );
+    }
+
+    #[test]
+    fn a_double_exit_purges_only_once() {
+        let (mut host, _t1, _t2) = host_with_parked_child();
+        host.mark_process_exited(CHILD_PID, 0);
+        let first = host.observability().process_exit_waiter_purges.clone();
+        host.mark_process_exited(CHILD_PID, 9);
+        assert_eq!(
+            host.observability().process_exit_waiter_purges,
+            first,
+            "the double-exit arm must not re-run the purge",
+        );
+    }
+
+    fn purges_of(host: &Lv2Host, primitive: &str) -> u64 {
+        host.observability()
+            .process_exit_waiter_purges
+            .get(primitive)
+            .copied()
+            .unwrap_or(0)
     }
 }

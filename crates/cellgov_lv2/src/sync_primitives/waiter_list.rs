@@ -1,12 +1,12 @@
-//! FIFO queue of PPU threads parked on a single primitive. Wake order
-//! is strictly enqueue order.
+//! Waiter queue shared by the LV2 sync-primitive tables.
 
 use std::collections::VecDeque;
 
 use crate::ppu_thread::PpuThreadId;
 use crate::sync_primitives::errors::DuplicateEnqueue;
 
-/// FIFO queue of PPU threads parked on a single primitive.
+/// FIFO queue of PPU threads parked on a single primitive; wake
+/// order is strictly enqueue order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct WaiterList {
     queue: VecDeque<PpuThreadId>,
@@ -20,7 +20,7 @@ impl WaiterList {
         }
     }
 
-    /// Append `id` to the tail.
+    /// Append `id` to the tail. O(n) scan for the duplicate check.
     ///
     /// # Errors
     /// [`DuplicateEnqueue`] if `id` is already parked.
@@ -46,6 +46,25 @@ impl WaiterList {
     /// Whether `id` is currently parked.
     pub fn contains(&self, id: PpuThreadId) -> bool {
         self.queue.iter().any(|&existing| existing == id)
+    }
+
+    /// Remove every waiter in `threads`, preserving the order of the
+    /// remaining waiters; returns the removed ids in enqueue order.
+    #[must_use = "the removed ids are the only record that these waiters were unparked"]
+    pub fn remove_set(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<PpuThreadId> {
+        let mut removed = Vec::new();
+        self.queue.retain(|&id| {
+            if threads.contains(&id) {
+                removed.push(id);
+                false
+            } else {
+                true
+            }
+        });
+        removed
     }
 
     /// Remove `id`, preserving the order of the remaining waiters.

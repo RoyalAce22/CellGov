@@ -53,5 +53,13 @@ for prog in parent child; do
       "${PPU_PREFIX}-nm"
 done
 
+echo "=== Wrapping child.elf as a genuinely SCE-wrapped SELF ==="
+# make_self produces an APP-keyed encrypted SELF -- the shape a real
+# spawned child arrives in -- so the spawn loader's SCE unwrap path
+# is exercised by a real container, not a raw ELF renamed .self.
+# (fself's fake-SELF layout has no CTR metadata directory and is not
+# in the decrypt path's scope.)
+make_self "$OUT/child.elf" "$OUT/child.self"
+
 echo "=== Build complete ==="
-ls -la "$OUT"/parent.elf "$OUT"/child.elf
+ls -la "$OUT"/parent.elf "$OUT"/child.elf "$OUT"/child.self

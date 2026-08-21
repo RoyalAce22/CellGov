@@ -249,9 +249,7 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
     // against the caller's view and the caller's own loads/stores
     // resolve through that space (RPCS3 sys_mmapper.cpp
     // sys_mmapper_map_shared_memory maps into the calling process's
-    // virtual memory). An install routed to boot memory instead
-    // leaves the window unmapped for the child and plants a phantom
-    // region in the boot layout.
+    // virtual memory).
     use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
 
     let mut rt = build(0x10000, 1, 100);
@@ -324,14 +322,15 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
 }
 
 #[test]
-fn a_map_over_the_callers_own_layout_is_a_named_break_not_a_panic() {
+fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
     // The mmapper ledger is host-global and cannot see regions the
     // spawn loader installed in the caller's space, so a guest can ask
     // sys_mmapper_map_shared_memory (334) for a window its own layout
-    // already occupies. The kernel refuses that with CELL_EBUSY (RPCS3
-    // sys_mmapper.cpp sys_mmapper_map_shared_memory); until the 334
-    // handler checks the caller's view, the runtime must witness the
-    // fabricated success loudly instead of panicking on the install.
+    // already occupies. The handler checks the caller's committed
+    // layout and refuses with CELL_EBUSY (RPCS3 sys_mmapper.cpp
+    // sys_mmapper_map_shared_memory) before staging anything; the
+    // runtime's install-overlap witness stays as defense in depth and
+    // must NOT fire on this path.
     use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
 
     let mut rt = build(0x10000, 1, 100);
@@ -391,14 +390,19 @@ fn a_map_over_the_callers_own_layout_is_a_named_break_not_a_panic() {
     );
 
     assert_eq!(
+        rt.registry_mut().drain_syscall_return(source),
+        Some(cellgov_ps3_abi::cell_errors::CELL_EBUSY.into()),
+        "an occupied window is EBUSY at dispatch, not a fabricated OK",
+    );
+    assert_eq!(
         rt.lv2_host()
             .invariant_break_site_count("dispatch.mmapper_region_install_overlap"),
-        1,
-        "the occupied-window map must log exactly one named break",
+        0,
+        "the dispatch-time refusal must keep the install witness quiet",
     );
     assert!(
         rt.memory().read(range4(MAP_ADDR)).is_none(),
-        "boot memory must stay untouched by the failed install",
+        "boot memory must stay untouched by the refused map",
     );
 }
 

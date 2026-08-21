@@ -102,9 +102,8 @@ fn syscall_480_non_firmware_unknown_path_returns_enoent() {
     );
     assert_eq!(host.observability().prx_load_not_found_count, 1);
 
-    // The pointer-echo id the old arm would have handed out must not
-    // start: ESRCH with no effects, so the sentinel write is never
-    // reached and the double-success chain is broken at both links.
+    // A path the resolver refused must not start: ESRCH, so the
+    // sentinel write is never reached.
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
     let start = start_module(&mut host, 0x5000, p_opt, &rt);
@@ -298,8 +297,65 @@ fn syscall_494_walks_registry_writing_ids_and_count() {
     }
 }
 
+/// A CoreOS 484 whose import table wraps `u32` links nothing; the
+/// walk that never ran must name itself rather than look like an
+/// empty table.
 #[test]
-fn syscall_486_returns_ok() {
+fn syscall_484_import_table_wrapping_u32_links_nothing_and_names_the_break() {
+    use cellgov_mem::{ByteRange as R, GuestAddr};
+    let mut host = Lv2Host::new();
+    // Authority id whose `>> 36` marks the process as CoreOS.
+    host.set_program_authority_id(0x1070_0005_FF00_0001);
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    let mut opt = vec![0u8; 0x30];
+    opt[0..8].copy_from_slice(&0x30u64.to_be_bytes());
+    opt[8..16].copy_from_slice(&1u64.to_be_bytes());
+    opt[0x20..0x24].copy_from_slice(&0xFFFF_F000u32.to_be_bytes());
+    opt[0x24..0x28].copy_from_slice(&0x2000u32.to_be_bytes());
+    mem.apply_commit(R::new(GuestAddr::new(0x2000), 0x30).unwrap(), &opt)
+        .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+
+    let breaks_before = host.observability().invariant_break_count;
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 484,
+            args: [0, 0x2000, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![],
+        }
+    );
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1,
+        "the refused walk must be witnessed",
+    );
+}
+
+#[test]
+fn syscall_486_with_a_mapped_library_descriptor_returns_ok() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(256);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 486,
+            args: [0x40, 0, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(result, Lv2Dispatch::immediate(0));
+}
+
+#[test]
+fn syscall_486_null_library_is_efault_not_a_fabricated_ok() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);
     let result = host.dispatch(
@@ -310,7 +366,28 @@ fn syscall_486_returns_ok() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(0));
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+}
+
+#[test]
+fn syscall_486_unmapped_library_is_efault() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(256);
+    let result = host.dispatch(
+        Lv2Request::Unsupported {
+            number: 486,
+            args: [0x8000_0000, 0, 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    assert_eq!(
+        result,
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
 }
 
 #[test]
@@ -370,9 +447,8 @@ fn host_with_one_prx() -> (Lv2Host, u32) {
 
 /// Build a `sys_prx_start_stop_module_option_t` image.
 ///
-/// `size`, `cmd`, and `res` are all `be_t<u64>`. Writing `size` as a
-/// `u32` at offset 0 lands in the HIGH half and reads back as zero --
-/// the bug this fixture exists to keep fixed.
+/// `size`, `cmd`, and `res` are all `be_t<u64>`, so a `u32` written at
+/// offset 0 lands in the HIGH half and reads back as zero.
 fn start_stop_option(size: u64, cmd: u64, res: u64) -> [u8; 0x28] {
     let mut buf = [0u8; 0x28];
     buf[0x00..0x08].copy_from_slice(&size.to_be_bytes());
@@ -431,10 +507,8 @@ fn prx_start_module_cmd1_writes_no_entry_sentinel() {
     }
 }
 
-/// The size field is a `be_t<u64>`. Reading only its low 4 bytes at
-/// offset 0 yields the high half -- zero for every realistic size --
-/// which failed the `size >= 0x20` gate and returned EINVAL for every
-/// real caller.
+/// The size field is a `be_t<u64>`: its low 4 bytes at offset 0 are the
+/// high half, zero for every realistic size.
 #[test]
 fn prx_start_module_reads_size_as_a_full_be_u64() {
     let (mut host, id) = host_with_one_prx();
@@ -612,8 +686,6 @@ fn prx_unload_module_unknown_id_returns_unknown_module() {
     );
 }
 
-/// Non-vacuous guard for the witness: it must stay at zero when no
-/// unload is attempted.
 #[test]
 fn prx_unload_rejection_witness_starts_at_zero() {
     let (host, _id) = host_with_one_prx();
@@ -1233,11 +1305,8 @@ fn syscall_494_idlist_order_is_independent_of_registration_order() {
     );
 }
 
-// Witnesses for the debug_assert-only-guard sweep (findings #6, #7).
-// Each prior debug_assert! was the only guard against a wrapping
-// u32 pointer producing a wrong-address SharedWriteIntent + lying
-// CELL_OK in release. The fix replaces both with runtime EFAULT
-// returns; these tests pin that contract.
+// A wrapping u32 pointer must return EFAULT rather than emit a
+// wrong-address SharedWriteIntent behind a CELL_OK.
 
 #[test]
 fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
@@ -1247,6 +1316,11 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
         size_be: [u8; 8],
     }
     impl Lv2Runtime for WrapMock {
+        fn committed_overlap_end(&self, _addr: u64, _size: u64) -> Option<u64> {
+            // No region model; every window reads as free.
+            None
+        }
+
         fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
             (len == 8).then_some(&self.size_be[..])
         }
@@ -1299,16 +1373,18 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
 fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
     use crate::host::Lv2Runtime;
     use cellgov_time::GuestTicks;
-    // Returns 4 zero bytes for every read so the post-wrap-check
-    // path would reach the count-write at count_addr = pInfo+0x10
-    // (which wraps to addr 0). Without the wrap check, the
-    // adversarial revert produces a SharedWriteIntent at addr 0
-    // with the dispatch returning CELL_OK, not a quiet EFAULT --
-    // the witness distinguishes the adversarial state from the fix.
+    // Returns 4 zero bytes for every read, so without the wrap check
+    // the arm would reach the count-write at count_addr = pInfo+0x10,
+    // which wraps to addr 0, behind a CELL_OK.
     struct ZeroReadMock {
         zeros: [u8; 4],
     }
     impl Lv2Runtime for ZeroReadMock {
+        fn committed_overlap_end(&self, _addr: u64, _size: u64) -> Option<u64> {
+            // No region model; every window reads as free.
+            None
+        }
+
         fn read_committed(&self, _addr: u64, len: usize) -> Option<&[u8]> {
             (len == 4).then_some(&self.zeros[..])
         }

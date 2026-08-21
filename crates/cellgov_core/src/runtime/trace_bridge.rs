@@ -27,9 +27,7 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
 }
 
 /// Cross-crate mirror for the lv2-owned [`InvariantBreakReason`]
-/// onto its `cellgov_trace` discriminant. The match has no `_` arm
-/// so a new source variant is a build break across the crate
-/// boundary, mirroring `traced_effect_kind` / `traced_yield_reason`.
+/// onto its `cellgov_trace` discriminant.
 pub(super) fn traced_invariant_break_reason(
     reason: InvariantBreakReason,
 ) -> TracedInvariantBreakReason {
@@ -105,6 +103,25 @@ impl Lv2Runtime for MemoryView<'_> {
         let window = self.memory.read(window_range)?;
         let nul_pos = window.iter().position(|&b| b == terminator)?;
         Some(&window[..nul_pos])
+    }
+
+    fn committed_overlap_end(&self, addr: u64, size: u64) -> Option<u64> {
+        if size == 0 {
+            return None;
+        }
+        // A window running past the address space cannot be claimed;
+        // report the overflow as an overlap ending at the space's end.
+        let Some(end) = addr.checked_add(size) else {
+            return Some(u64::MAX);
+        };
+        self.memory
+            .regions()
+            .filter(|r| {
+                let r_end = r.base() + r.size();
+                r.base() < end && addr < r_end
+            })
+            .map(|r| r.base() + r.size())
+            .max()
     }
 
     fn writable(&self, addr: u64, len: usize) -> bool {

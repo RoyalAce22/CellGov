@@ -89,6 +89,26 @@ impl Runtime {
                     }
                     self.registry.set_syscall_return(waiter, 0);
                 }
+                Some(PendingResponse::EventFlagCancelWake {
+                    result_ptr,
+                    observed,
+                }) => {
+                    // RPCS3 sys_event_flag.cpp sys_event_flag_cancel:
+                    // each drained waiter stores the captured pattern
+                    // through its own non-null result pointer and
+                    // returns CELL_ECANCELED.
+                    if result_ptr != 0 {
+                        self.commit_bytes_at(
+                            waiter_space,
+                            result_ptr as u64,
+                            &observed.to_be_bytes(),
+                        );
+                    }
+                    self.registry.set_syscall_return(
+                        waiter,
+                        cellgov_ps3_abi::cell_errors::CELL_ECANCELED.into(),
+                    );
+                }
                 Some(PendingResponse::LwMutexWake { mutex_ptr, caller }) => {
                     // `mutex_ptr == 0` is the raw LV2-syscall path with
                     // no user-space struct.

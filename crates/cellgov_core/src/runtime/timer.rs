@@ -11,13 +11,6 @@ impl Runtime {
     /// Pop and resolve timer wakes whose deadline has arrived; returns
     /// the fired list for trace recording. Due entries whose unit is
     /// already Finished (process-exit residue) are dropped unfired.
-    ///
-    /// `Sleep` wakes route through the sync-wake resolver so the parked
-    /// unit's pending `ReturnCode` is consumed like any other wake.
-    /// `SyncWait` wakes first unqueue the waiter host-side via
-    /// [`cellgov_lv2::Lv2Host::expire_wait`], then apply its staged
-    /// outcome through the same response-update + sync-wake path a
-    /// releasing peer would use.
     pub(super) fn fire_timer_wakes(&mut self) -> Vec<TimerWake> {
         if self.timer_wakes.is_empty() {
             // Breaks buffered by earlier work in this commit still
@@ -34,9 +27,12 @@ impl Runtime {
             // firing pass runs in the same commit. Firing anyway would
             // resurrect the unit (the Runnable override replaces
             // Finished) and trip the missing-response invariant break.
-            // RPCS3 sys_process.cpp _sys_process_exit stops every
-            // thread, so a due sleep or timed wait never resumes its
-            // thread after exit. Dropped wakes are excluded from the
+            // handle_process_exit_child finishes every one of the
+            // pid's units at the same exit, so a due sleep or timed
+            // wait never resumes its thread after exit. (RPCS3 is not
+            // an oracle here: its _sys_process_exit calls Emu.Kill()
+            // and tears down the whole emulator rather than reclaiming
+            // one process.) Dropped wakes are excluded from the
             // returned list so no UnitWoken record is traced for a
             // unit that stays Finished.
             if self.registry.effective_status(wake.unit) == Some(cellgov_exec::UnitStatus::Finished)

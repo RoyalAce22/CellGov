@@ -5,7 +5,9 @@ use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_memory::{page_size, SYS_MMAPPER_NO_SHM_KEY};
+use cellgov_ps3_abi::sys_memory::{
+    page_size, CONTAINER_GRANULE, SYS_MMAPPER_NO_SHM_KEY, VM_AREA_ALIGNMENTS, VM_AREA_GRANULE,
+};
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -52,18 +54,39 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_memory_container_create` (324): mints a container id and
-    /// writes it to `*cid`.
+    /// `sys_memory_container_create`: mints a container id and writes
+    /// it to `*cid`.
     ///
-    /// Physical-memory budgets are not tracked. Oracle: RPCS3's
-    /// `sys_memory.cpp`.
-    pub(super) fn dispatch_memory_container_create_324(
+    /// Serves syscalls 324 and 341, which RPCS3's syscall table binds
+    /// to this one kernel entry point, so both answer identically.
+    ///
+    /// Physical-memory budgets are not tracked, so the only refusal
+    /// modelled from the container size is the one that does not need
+    /// a budget. Oracle: RPCS3's `sys_memory.cpp`.
+    ///
+    /// # Errors
+    ///
+    /// Listed in the order they fire, which is the order RPCS3 checks
+    /// them.
+    ///
+    /// - `CELL_ENOMEM` when `size` rounds down to zero. The kernel
+    ///   truncates the request to the 1 MiB granule and refuses what
+    ///   is left of a sub-granule request (RPCS3
+    ///   `sys_memory_container_create`).
+    /// - `CELL_EFAULT` when `cid` is null. RPCS3 has no such gate --
+    ///   it writes through the pointer once the container exists --
+    ///   so the gate sits after the size refusal and before the id is
+    ///   minted.
+    pub(super) fn dispatch_memory_container_create(
         &mut self,
-        args: [u64; 8],
+        cid_ptr: u32,
+        size: u64,
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let cid_ptr = args[0] as u32;
+        if size < CONTAINER_GRANULE {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+        }
         if let Some(d) = self.efault_if_null(&[cid_ptr]) {
             return d;
         }
@@ -84,15 +107,53 @@ impl Lv2Host {
     /// `sys_mmapper_allocate_address` (330): bumps a 256 MiB-aligned
     /// cursor and writes its base to `*alloc_addr`.
     ///
-    /// Overflow returns CELL_ENOMEM. Oracle: RPCS3's `sys_mmapper.cpp`.
+    /// Oracle: RPCS3's `sys_mmapper.cpp`
+    /// `sys_mmapper_allocate_address`.
+    ///
+    /// # Errors
+    ///
+    /// Listed in the order they fire, which is the order RPCS3 checks
+    /// them: the argument gates precede the `alloc_addr` gate, so a
+    /// call that is wrong in two ways answers for its `size` or
+    /// `alignment` first.
+    ///
+    /// - `CELL_EALIGN` when `size` is not a multiple of the 256 MiB
+    ///   VM-area granule. A misaligned request is refused, never
+    ///   rounded up to the next granule.
+    /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
+    /// - `CELL_EALIGN` when `alignment` is not one of the four area
+    ///   sizes the kernel accepts.
+    /// - `CELL_EFAULT` when `alloc_addr` is null. RPCS3 has no such
+    ///   gate -- it reserves the area and then writes through the
+    ///   pointer -- so the gate sits as late as it can without
+    ///   consuming a VM area the caller can never read back.
+    /// - `CELL_ENOMEM` when the VM window is exhausted.
     pub(super) fn dispatch_mmapper_allocate_address(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let size = args[0] as u32;
+        let size = args[0];
+        let alignment = args[2];
         let alloc_addr_ptr = args[3] as u32;
+        if !size.is_multiple_of(VM_AREA_GRANULE) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
+        let Ok(size) = u32::try_from(size) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+        };
+        // A zero alignment is technically invalid but the hardware
+        // accepts it as the default area size; PSL1GHT's sbrk relies
+        // on that, and RPCS3 carries the same allowance.
+        let alignment = if alignment == 0 {
+            VM_AREA_GRANULE
+        } else {
+            alignment
+        };
+        if !VM_AREA_ALIGNMENTS.contains(&alignment) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
         }
@@ -126,9 +187,20 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EFAULT` when `mem_id_ptr` is null.
+    /// Listed in the order they fire. The argument gates precede the
+    /// `mem_id` gate, matching RPCS3's order; a call that is wrong in
+    /// two ways answers for its `size` or `flags` first.
+    ///
+    /// - `CELL_EALIGN` when `size` is zero.
+    /// - `CELL_EINVAL` when the `flags` granularity field carries an
+    ///   encoding the kernel does not accept.
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
-    /// - `CELL_EALIGN` when `size % granule_from_flags(flags) != 0`.
+    /// - `CELL_EALIGN` when `size` is not a multiple of the granule
+    ///   the `flags` field selects.
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null. RPCS3 has no such
+    ///   gate -- it writes through the pointer once the shm exists --
+    ///   so the gate sits after the argument refusals and before any
+    ///   id or ipc-key registration.
     pub(super) fn dispatch_mmapper_allocate_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -139,15 +211,20 @@ impl Lv2Host {
         let size = args[1];
         let flags = args[2];
         let mem_id_ptr = args[3] as u32;
-        if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
-            return d;
+        if size == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
         }
+        let Some(align) = accepted_granule(flags) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        };
         let Ok(size_u32) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
-        let align = page_size::granule_from_flags(flags);
         if !size_u32.is_multiple_of(align) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
+        if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
+            return d;
         }
         let keyed = ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY;
         let in_namespace = keyed && crate::host::is_system_ipc_key(ipc_key);
@@ -191,6 +268,16 @@ impl Lv2Host {
         }
     }
 
+    /// The IPC key a keyed 332 registered `mem_id` under, `None` for
+    /// keyless handles. O(keyed handles); the map stays small.
+    fn ipc_key_of_mem_id(&self, mem_id: u32) -> Option<u64> {
+        self.state
+            .mmapper_ipc
+            .iter()
+            .find(|&(_, &id)| id == mem_id)
+            .map(|(&k, _)| k)
+    }
+
     /// Seed effects for the first map of an ipc-keyed shm with a
     /// registered [`crate::SystemStateSeed`]; empty for keyless shms,
     /// unseeded keys, and already-applied seeds.
@@ -209,13 +296,7 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Vec<Effect> {
-        let Some(&ipc_key) = self
-            .state
-            .mmapper_ipc
-            .iter()
-            .find(|&(_, &id)| id == mem_id)
-            .map(|(k, _)| k)
-        else {
+        let Some(ipc_key) = self.ipc_key_of_mem_id(mem_id) else {
             return Vec::new();
         };
         if self.derived.system_seeds_applied.contains(&ipc_key) {
@@ -255,11 +336,8 @@ impl Lv2Host {
     }
 
     /// `sys_mmapper_map_shared_memory` (334): validates `addr`
-    /// against the 332/362 handle and pushes a pending region install.
-    ///
-    /// Overlap with an existing region is not detected here; the
-    /// runtime's `install_region` drain rejects an overlapping
-    /// `PendingRegionInstall`.
+    /// against the 332/362 handle and the caller's committed layout,
+    /// then pushes a pending region install.
     ///
     /// # Errors
     ///
@@ -268,10 +346,17 @@ impl Lv2Host {
     /// - `CELL_ESRCH` (plus a `dispatch.mmapper_map_unknown_mem_id`
     ///   invariant break) when `mem_id` is not in the handle table.
     /// - `CELL_EALIGN` when `addr % handle.align != 0`.
+    /// - `CELL_EBUSY` when the window intersects a region already
+    ///   committed in the caller's space, or a window this host
+    ///   already handed out through 334 / 337 -- loader images and
+    ///   prior maps alike (RPCS3 sys_mmapper.cpp
+    ///   sys_mmapper_map_shared_memory when the window cannot be
+    ///   claimed).
     pub(super) fn dispatch_mmapper_map_shared_memory(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        rt: &dyn crate::host::Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let addr = args[0];
@@ -298,11 +383,35 @@ impl Lv2Host {
         if end > 0xC000_0000 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
+        // A window this host already handed out through 334 / 337 is
+        // claimed even before the runtime commits its region, and the
+        // ledger outlives an install the drain refused. Consulting it
+        // alongside the caller's layout is what keeps ledger entries
+        // non-overlapping, which `mmapper_ledger_insert`'s freshness
+        // assertion depends on. The test is the furthest end over every
+        // entry starting before this window: a shorter entry can start
+        // later than -- and sit wholly inside -- a longer one, so
+        // `next_back` alone would report a nested window as free.
+        let ledger_busy = self
+            .derived
+            .mmapper_install_ledger
+            .range(..(end as u32))
+            .map(|(&start, &len)| u64::from(start) + u64::from(len))
+            .max()
+            .is_some_and(|entry_end| entry_end > addr);
+        if ledger_busy
+            || rt
+                .committed_overlap_end(addr, u64::from(handle.size))
+                .is_some()
+        {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+        }
         self.derived
             .pending_region_installs
             .push(PendingRegionInstall {
                 addr,
                 size: handle.size as usize,
+                ipc_key: self.ipc_key_of_mem_id(mem_id),
             });
         // Record in the host ledger so sc 337's search sees this
         // range as occupied. `addr` is in `[0x2000_0000, 0xC000_0000)`
@@ -351,6 +460,7 @@ impl Lv2Host {
         &mut self,
         args: [u64; 8],
         requester: UnitId,
+        rt: &dyn crate::host::Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let start_addr = args[0] as u32;
@@ -373,7 +483,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         let Some(found_addr) =
-            self.mmapper_search_free_range(start_addr, handle.size, handle.align)
+            self.mmapper_search_free_range(start_addr, handle.size, handle.align, rt)
         else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
@@ -382,6 +492,7 @@ impl Lv2Host {
             .push(PendingRegionInstall {
                 addr: u64::from(found_addr),
                 size: handle.size as usize,
+                ipc_key: self.ipc_key_of_mem_id(mem_id),
             });
         self.mmapper_ledger_insert(found_addr, handle.size);
         // Coherence witness: on success, the install must be pending
@@ -418,9 +529,8 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EFAULT` when `mem_id_ptr` is null.
-    /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
-    /// - `CELL_EALIGN` when `size % granule_from_flags(flags) != 0`.
+    /// Same set and same order as
+    /// `dispatch_mmapper_allocate_shared_memory`.
     pub(super) fn dispatch_mmapper_allocate_shared_memory_from_container(
         &mut self,
         args: [u64; 8],
@@ -430,15 +540,20 @@ impl Lv2Host {
         let size = args[1];
         let flags = args[3];
         let mem_id_ptr = args[4] as u32;
-        if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
-            return d;
+        if size == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
         }
+        let Some(align) = accepted_granule(flags) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        };
         let Ok(size_u32) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
-        let align = page_size::granule_from_flags(flags);
         if !size_u32.is_multiple_of(align) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
+        if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
+            return d;
         }
         let mem_id = self.alloc_id();
         self.state.mmapper_handles.insert(
@@ -980,7 +1095,8 @@ impl Lv2Host {
     /// a huge size. Every read is bounds-checked through the runtime and
     /// a failed read ends the walk rather than faulting the host; an
     /// unresolved NID is left alone so the guest's own stub address
-    /// stays in the slot and the failure stays visible.
+    /// stays in the slot. Each way the walk can stop early names its
+    /// own invariant break.
     fn link_manual_imports(
         &mut self,
         stub_ea: u32,
@@ -997,6 +1113,13 @@ impl Lv2Host {
 
         let mut effects = Vec::new();
         let Some(table_end) = stub_ea.checked_add(stub_size) else {
+            self.log_invariant_break(
+                "dispatch.prx_register_module_table_wraps",
+                format_args!(
+                    "import table [0x{stub_ea:08x}, +0x{stub_size:x}) wraps u32; \
+                     nothing linked"
+                ),
+            );
             return effects;
         };
         let mut cursor = stub_ea;
@@ -1004,10 +1127,25 @@ impl Lv2Host {
             let Some(hdr) =
                 rt.read_committed(u64::from(cursor), PRX_IMPORT_ENTRY_MIN_SIZE as usize)
             else {
+                self.log_invariant_break(
+                    "dispatch.prx_register_module_entry_unreadable",
+                    format_args!(
+                        "import entry header at 0x{cursor:08x} is unreadable; the walk \
+                         stops short of the table end 0x{table_end:08x}"
+                    ),
+                );
                 break;
             };
             let entry_size = hdr[PRX_IMPORT_SIZE_OFFSET];
             if entry_size < PRX_IMPORT_ENTRY_MIN_SIZE {
+                self.log_invariant_break(
+                    "dispatch.prx_register_module_entry_size_invalid",
+                    format_args!(
+                        "import entry at 0x{cursor:08x} declares size {entry_size} below the \
+                         {PRX_IMPORT_ENTRY_MIN_SIZE}-byte minimum; the walk stops short of \
+                         the table end 0x{table_end:08x}"
+                    ),
+                );
                 break;
             }
             let func_count = u16::from_be_bytes([
@@ -1064,9 +1202,24 @@ impl Lv2Host {
                     nids_ptr.checked_add(i * 4).map(u64::from),
                     stub_ptr.checked_add(i * 4).map(u64::from),
                 ) else {
+                    self.log_invariant_break(
+                        "dispatch.prx_register_module_nid_table_truncated",
+                        format_args!(
+                            "import entry at 0x{cursor:08x}: NID slot {i} of {func_count} \
+                             wraps u32 (nids=0x{nids_ptr:08x} stubs=0x{stub_ptr:08x}); the \
+                             remaining NIDs stay unresolved"
+                        ),
+                    );
                     break;
                 };
                 let Some(nid) = read_be_u32(rt, nid_at) else {
+                    self.log_invariant_break(
+                        "dispatch.prx_register_module_nid_table_truncated",
+                        format_args!(
+                            "import entry at 0x{cursor:08x}: NID {i} of {func_count} at \
+                             0x{nid_at:08x} is unreadable; the remaining NIDs stay unresolved"
+                        ),
+                    );
                     break;
                 };
                 let Some(&opd) = library.and_then(|lib| lib.get(&nid)) else {
@@ -1083,6 +1236,13 @@ impl Lv2Host {
                 self.obs.prx_register_module_linked += 1;
             }
             let Some(next) = cursor.checked_add(u32::from(entry_size)) else {
+                self.log_invariant_break(
+                    "dispatch.prx_register_module_entry_advance_wraps",
+                    format_args!(
+                        "import entry at 0x{cursor:08x} plus its size {entry_size} wraps u32; \
+                         the walk stops short of the table end 0x{table_end:08x}"
+                    ),
+                );
                 break;
             };
             cursor = next;
@@ -1090,18 +1250,41 @@ impl Lv2Host {
         effects
     }
 
-    /// `_sys_prx_register_library` (486): returns CELL_OK (kernel's
-    /// no-match success path).
-    pub(super) fn dispatch_prx_register_library(&self) -> Lv2Dispatch {
+    /// `_sys_prx_register_library` (486): gates the library
+    /// descriptor, then returns CELL_OK (the kernel's no-match
+    /// success path).
+    ///
+    /// Associating the descriptor with a loaded module's export table
+    /// is not modelled; CellGov publishes every firmware module's
+    /// exports at boot, so a caller-registered library adds no
+    /// resolvable symbol.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT` when `library` is null or unmapped. RPCS3's
+    ///   `sys_prx.cpp` `_sys_prx_register_library` refuses an address
+    ///   that fails its mapping check before touching the descriptor.
+    pub(super) fn dispatch_prx_register_library(
+        &self,
+        args: [u64; 8],
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
+        let library = args[0];
+        if library == 0 || rt.read_committed(library, 1).is_none() {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
         Lv2Dispatch::immediate(0)
     }
 
     /// `_sys_prx_get_module_list` (494): fills `pInfo->idlist` and
     /// writes `pInfo->count`, filtering liblv2.sprx.
     ///
-    /// Struct layout (per `sys_prx.h`): `size@0, pad@8, max@0xC,
-    /// count@0x10, idlist@0x14, unk@0x1C`. `flags & 0x2 == 0`
-    /// short-circuits to CELL_OK. CELL_EFAULT on null `pInfo`.
+    /// Struct layout (RPCS3 `sys_prx.h`
+    /// `sys_prx_get_module_list_option_t`): `size@0` (u64), `pad@8`,
+    /// `max@0xC`, `count@0x10`, `idlist@0x14`, `unk@0x18`, tail
+    /// padding to 0x20. Only `[p_info, p_info+0x18)` is touched.
+    /// `flags & 0x2 == 0` short-circuits to CELL_OK. CELL_EFAULT on
+    /// null `pInfo`.
     ///
     /// # Cross-module contract
     ///
@@ -1234,6 +1417,21 @@ impl Lv2Host {
             format_args!("sys_rsx_attribute: stub returning CELL_OK with no state change"),
         );
         Lv2Dispatch::immediate(0)
+    }
+}
+
+/// The page granule a `sys_mmapper` `flags` word selects, `None` when
+/// its granularity field holds an encoding the kernel refuses.
+///
+/// The field is `flags` bits [8,11]; unset, 64 KiB, and 1 MiB are the
+/// only accepted values, and anything else is an error rather than a
+/// value rounded to a granule. RPCS3's `sys_mmapper.cpp`
+/// `sys_mmapper_allocate_shared_memory` switches on the field and
+/// answers CELL_EINVAL from its default arm.
+fn accepted_granule(flags: u64) -> Option<u32> {
+    match flags & page_size::GRANULARITY_FIELD {
+        0 | page_size::FLAG_64K | page_size::FLAG_1M => Some(page_size::granule_from_flags(flags)),
+        _ => None,
     }
 }
 

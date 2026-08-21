@@ -134,17 +134,15 @@ impl Lv2Host {
                 sdk_version: SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN,
                 firmware_exports: BTreeMap::new(),
             },
-            // Derived `Default` IS the boot state, so
-            // `clear_observability` cannot drift from `new`.
             obs: observability::Lv2Observability::default(),
         }
     }
 
     /// Set the title's recorded SDK version (the value read from the
-    /// title ELF's `process_param_t`). Boot reads it via
-    /// `cellgov_ppu::loader::find_sys_process_param` and plumbs the
-    /// parsed `sdk_version` through. Callers that omit this leave the
-    /// PS3 absent-case sentinel `0xFFFFFFFF` in place.
+    /// title ELF's `process_param_t`).
+    ///
+    /// Callers that omit this leave the PS3 absent-case sentinel
+    /// `0xFFFFFFFF` in place.
     pub fn set_sdk_version(&mut self, sdk_version: u32) {
         self.derived.sdk_version = sdk_version;
     }
@@ -207,13 +205,8 @@ impl Lv2Host {
 
     /// Reset every instrument to its boot state.
     ///
-    /// Test hook for the observability inertness gate: a boot that
-    /// clears this after every committed step must produce the same
-    /// state-hash sequence and trace bytes as one that records.
-    ///
-    /// `pending_invariant_breaks` is carried over, not reset; the
-    /// field's doc on [`observability::Lv2Observability`] names the
-    /// contract.
+    /// `pending_invariant_breaks` is carried over; the field's doc on
+    /// [`observability::Lv2Observability`] names the contract.
     pub fn clear_observability(&mut self) {
         let pending = std::mem::take(&mut self.obs.pending_invariant_breaks);
         self.obs = observability::Lv2Observability::default();
@@ -250,17 +243,20 @@ impl Lv2Host {
     }
 
     /// Whether the booting process is a CoreOS SELF (vsh and the other
-    /// system executables). Derived from the program authority id, not
-    /// from `ctrl_flags1`: the two are independent, and a CoreOS SELF
-    /// is not necessarily root-capable (firmware libraries carry a
-    /// CoreOS authority id with `ctrl_flags1 == 0`).
+    /// system executables).
+    ///
+    /// A CoreOS SELF is not necessarily root-capable: firmware
+    /// libraries carry a CoreOS authority id with `ctrl_flags1 == 0`.
     #[inline]
     pub fn is_coreos(&self) -> bool {
         self.program_authority_id() >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
     }
 
-    /// Record the verified-firmware identity. Boot is one-shot; a
-    /// second call panics in debug builds.
+    /// Record the verified-firmware identity.
+    ///
+    /// # Panics
+    /// Debug-only if an identity is already recorded; boot is
+    /// one-shot.
     pub fn set_firmware_identity(&mut self, image_version: &str, pup_sha256_bytes: [u8; 32]) {
         debug_assert!(
             self.state.firmware_identity.is_none(),
@@ -388,11 +384,10 @@ impl Lv2Host {
         &self.state.rsx_context
     }
 
-    /// Record an iomap mapping without going through 672. Synthetic
-    /// test scenarios use this to wire up the IO -> EA translation
-    /// the FIFO advance pass needs without booting the firmware-set
-    /// `sys_rsx_context_iomap` path. Production code calls
-    /// `dispatch_sys_rsx_context_iomap`, which validates against the
+    /// Record an iomap mapping without going through 672.
+    ///
+    /// Unvalidated seeding hook for synthetic scenarios;
+    /// `dispatch_sys_rsx_context_iomap` is the path that checks the
     /// 672 contract.
     pub fn seed_rsx_iomap(&mut self, io: u32, ea: u32, size: u32) {
         self.state.rsx_context.iomap_io = io;
@@ -401,11 +396,12 @@ impl Lv2Host {
     }
 
     /// Mark the sys_rsx context as allocated under `context_id`
-    /// without going through 670. Synthetic test scenarios use this
-    /// to satisfy the `allocated && matching id` guard at the top of
+    /// without going through 670.
+    ///
+    /// Satisfies the `allocated && matching id` guard at the top of
     /// `sys_rsx_context_attribute` (674) without the OUT-pointer
-    /// memory plumbing 670 requires. Production code calls
-    /// `dispatch_sys_rsx_context_allocate`.
+    /// memory plumbing 670 requires;
+    /// `dispatch_sys_rsx_context_allocate` is the validated path.
     pub fn seed_rsx_context_allocated(&mut self, context_id: u32) {
         self.state.rsx_context.allocated = true;
         self.state.rsx_context.context_id = context_id;
@@ -431,7 +427,7 @@ impl Lv2Host {
         if size == 0 {
             return None;
         }
-        let granule = 0x1000_0000u32;
+        let granule = u32::try_from(cellgov_ps3_abi::sys_memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
         let base = self.state.mmapper_addr_cursor;
         let next = base.checked_add(rounded)?;
@@ -444,15 +440,18 @@ impl Lv2Host {
 
     /// Search for the first free, `align`-aligned range of `size`
     /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
-    /// or after `hint`, skipping over every range currently recorded
-    /// in [`Self::mmapper_install_ledger`].
+    /// or after `hint`, skipping every range recorded in
+    /// [`Self::mmapper_install_ledger`] and every window occupied in
+    /// the caller's committed layout (loader regions are invisible to
+    /// the ledger; RPCS3's `area->alloc` searches the caller's vm
+    /// area, so occupied windows are skipped, not errors).
     ///
-    /// `hint` is rounded UP to `align`; misaligned hints do not
-    /// fail. RPCS3's `area->alloc` does the same (the
-    /// `start_addr != area->addr` check at
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp`
-    /// `sys_mmapper_search_and_map` is
-    /// area selection, not in-area alignment).
+    /// `hint` is rounded UP to `align`; misaligned hints do not fail.
+    /// The `start_addr != area->addr` check in `sys_mmapper.cpp`
+    /// `sys_mmapper_search_and_map` is area selection, not in-area
+    /// alignment: RPCS3 uses `start_addr` only to pick the vm block,
+    /// and `vm.cpp` `block_t::alloc` then scans from that block's
+    /// base rather than from the hint.
     ///
     /// Returns `None` on exhaustion (matches RPCS3's `CELL_ENOMEM`
     /// path in `sys_mmapper_search_and_map`).
@@ -461,6 +460,7 @@ impl Lv2Host {
         hint: u32,
         size: u32,
         align: u32,
+        rt: &dyn crate::host::Lv2Runtime,
     ) -> Option<u32> {
         debug_assert!(
             align.is_power_of_two(),
@@ -478,23 +478,41 @@ impl Lv2Host {
             if end > Self::MMAPPER_REGION_END {
                 return None;
             }
-            // Find the closest ledger entry whose start is < end. If
-            // its [start, start+len) overlaps [candidate, end), advance.
-            let prior = self
+            // Every ledger entry starting below `end` is a possible
+            // overlap, not only the nearest one: a map whose runtime
+            // `install_region` was refused still left its ledger
+            // entry behind, so a later map can record a range nested
+            // inside a longer one. O(ledger) per step, and the ledger
+            // holds one entry per shm map the boot made.
+            let ledger_skip_to = self
                 .derived
                 .mmapper_install_ledger
                 .range(..end)
-                .next_back()
-                .map(|(&start, &len)| (start, len));
-            match prior {
-                Some((start, len)) => {
-                    let prior_end = start.checked_add(len)?;
-                    if prior_end > candidate {
-                        // Overlap: advance past prior_end, re-align.
-                        candidate = prior_end.checked_add(align_mask)? & !align_mask;
-                        continue;
-                    }
-                    return Some(candidate);
+                // An entry whose end overflows u32 covers the rest of
+                // the address space; saturating keeps it an obstacle
+                // instead of letting the overflow read as free.
+                .map(|(&start, &len)| start.saturating_add(len))
+                .filter(|&prior_end| prior_end > candidate)
+                .max();
+            let committed_skip_to = rt
+                .committed_overlap_end(u64::from(candidate), u64::from(size))
+                .map(|e| u32::try_from(e).unwrap_or(u32::MAX));
+            debug_assert!(
+                committed_skip_to.is_none_or(|e| e > candidate),
+                "committed_overlap_end({candidate:#x}, {size:#x}) answered \
+                 {committed_skip_to:?}, which does not lie past the window it \
+                 claims to overlap",
+            );
+            // Both arms are filtered to ends strictly above
+            // `candidate`, so the re-aligned candidate strictly
+            // increases every step and the loop terminates.
+            match ledger_skip_to
+                .into_iter()
+                .chain(committed_skip_to.filter(|&e| e > candidate))
+                .max()
+            {
+                Some(skip_to) => {
+                    candidate = skip_to.checked_add(align_mask)? & !align_mask;
                 }
                 None => return Some(candidate),
             }
@@ -604,8 +622,7 @@ impl Lv2Host {
     }
 
     /// Read-only `pending_region_installs` snapshot used by sibling
-    /// dispatch-arm tests. Not a drain; the runtime is still the
-    /// authoritative drain consumer.
+    /// dispatch-arm tests; the runtime remains the drain consumer.
     #[cfg(all(test, debug_assertions))]
     pub(super) fn drain_pending_region_installs_inspect(
         &self,
@@ -670,6 +687,86 @@ impl Lv2Host {
         self.state.processes.units_of(pid)
     }
 
+    /// Remove every waiter record owned by `pid`'s threads from every
+    /// LV2 waiter list: the six sync-primitive tables plus per-thread
+    /// join-waiter lists.
+    ///
+    /// A parked thread of an exited process must never be granted a
+    /// resource or handed an exit value: the runtime finishes every
+    /// one of the pid's units at the same exit, so a grant handed to
+    /// one of them is a resource no thread will ever consume or
+    /// release. RPCS3 is not an oracle for the per-process case --
+    /// its `sys_process.cpp` `_sys_process_exit` kills the whole
+    /// emulator rather than one process's threads.
+    ///
+    /// Mutex ownership held by a dead thread is retained and
+    /// witnessed in `process_exit_retained_mutex_owners`. LV2
+    /// reclaims a terminating process's own sync primitives at exit;
+    /// reclaiming here needs creator attribution the shared object
+    /// namespace does not record yet, and the process-shared case
+    /// with surviving attachments has no oracle (RPCS3
+    /// sys_process.cpp _sys_process_exit tears down the whole
+    /// emulator), so retained-locked is the interim for both.
+    fn purge_exited_process_waiters(&mut self, pid: u32) {
+        let threads: std::collections::BTreeSet<crate::ppu_thread::PpuThreadId> = self
+            .state
+            .processes
+            .units_of(pid)
+            .into_iter()
+            .filter_map(|unit| self.state.ppu_threads.thread_id_for_unit(unit))
+            .collect();
+        if threads.is_empty() {
+            return;
+        }
+        let purges: [(&'static str, usize); 7] = [
+            ("mutex", self.state.mutexes.purge_waiters_of(&threads).len()),
+            (
+                "lwmutex",
+                self.state.lwmutexes.purge_waiters_of(&threads).len(),
+            ),
+            ("cond", self.state.conds.purge_waiters_of(&threads).len()),
+            (
+                "semaphore",
+                self.state.semaphores.purge_waiters_of(&threads).len(),
+            ),
+            (
+                "equeue",
+                self.state.event_queues.purge_waiters_of(&threads).len(),
+            ),
+            (
+                "eflag",
+                self.state.event_flags.purge_waiters_of(&threads).len(),
+            ),
+            (
+                "join",
+                self.state.ppu_threads.purge_join_waiters_of(&threads).len(),
+            ),
+        ];
+        for (primitive, count) in purges {
+            if count > 0 {
+                *self
+                    .obs
+                    .process_exit_waiter_purges
+                    .entry(primitive)
+                    .or_insert(0) += count as u64;
+            }
+        }
+        let orphaned = self.state.mutexes.ids_owned_by(&threads);
+        if !orphaned.is_empty() {
+            self.obs.process_exit_retained_mutex_owners += orphaned.len() as u64;
+            // Guest-reachable (a process may exit holding a mutex), so
+            // log-only: the witness names the ids without asserting.
+            self.log_invariant_break(
+                "process.exit_retained_mutex_owner",
+                format_args!(
+                    "pid {pid:#x} exited owning mutex ids {orphaned:?}; ownership retained \
+                     until exit-time collection lands, survivors that lock these park \
+                     forever"
+                ),
+            );
+        }
+    }
+
     /// Record `pid`'s exit; the entry is retained so later
     /// `sys_process_get_status` polls resolve deterministically.
     ///
@@ -677,6 +774,9 @@ impl Lv2Host {
     /// first status (overwriting it would retroactively change what
     /// `sys_process_get_status` and the state hash already served)
     /// and is logged as a runtime sequencing bug.
+    ///
+    /// A fresh exit also purges the pid's threads from every LV2
+    /// waiter list; see `purge_exited_process_waiters`.
     pub fn mark_process_exited(&mut self, pid: u32, status: i32) {
         match self.state.processes.get(pid).map(|entry| entry.exit_status) {
             None => self.log_invariant_break(
@@ -699,6 +799,7 @@ impl Lv2Host {
                     .get_mut(pid)
                     .expect("entry present just above")
                     .exit_status = Some(status);
+                self.purge_exited_process_waiters(pid);
             }
         }
     }
@@ -858,6 +959,34 @@ impl Lv2Host {
     /// Allocate a child-thread stack of `size` bytes at `align`.
     pub fn allocate_child_stack(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
         self.state.stack_allocator.allocate(size, align)
+    }
+
+    /// Return the stack block a refused thread-create allocated.
+    ///
+    /// # Cross-module contract
+    ///
+    /// Must be called before anything else can allocate: the arena
+    /// only rewinds its most recent block. A mismatch is logged and
+    /// the block leaks rather than corrupting live stacks.
+    pub fn free_child_stack(&mut self, base: u64, size: u64) {
+        // `ThreadStack::new` asserts the 0x10 ABI save-area floor and
+        // the arena never hands out a block below it, so a sub-floor
+        // size is the same "not the arena's block" refusal -- report
+        // it rather than aborting the run inside the assert.
+        let freed = size >= 0x10
+            && self
+                .state
+                .stack_allocator
+                .free_last(&ThreadStack::new(base, size));
+        if !freed {
+            self.log_invariant_break(
+                "ppu_thread_create.stack_free_mismatch",
+                format_args!(
+                    "free_child_stack(0x{base:x}, 0x{size:x}) is not the arena's most \
+                     recent block; refusal-path free out of order, block leaked"
+                ),
+            );
+        }
     }
 
     /// Bind an SPU `unit_id` to `(group_id, slot)`.

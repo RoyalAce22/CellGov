@@ -32,19 +32,23 @@ impl Lv2Host {
     }
 
     /// Drain pending shared-memory region-install requests emitted by
-    /// `sys_mmapper_map_shared_memory` (334).
+    /// `sys_mmapper_map_shared_memory` (334) / `search_and_map` (337).
     ///
     /// # Cross-module contract
     ///
-    /// Each `(addr, size)` must be applied via
+    /// Each `(addr, size, ipc_key)` must be applied via
     /// `GuestMemory::install_region` before the dispatch's effects
     /// commit; otherwise subsequent guest writes through `addr` trip
-    /// `CommitError::OutOfRange`.
-    pub fn drain_pending_region_installs(&mut self) -> impl Iterator<Item = (u64, usize)> + '_ {
+    /// `CommitError::OutOfRange`. A `Some(ipc_key)` names the keyed
+    /// segment this window views; the runtime keeps keyed views
+    /// coherent across address spaces.
+    pub fn drain_pending_region_installs(
+        &mut self,
+    ) -> impl Iterator<Item = (u64, usize, Option<u64>)> + '_ {
         self.derived
             .pending_region_installs
             .drain(..)
-            .map(|p| (p.addr, p.size))
+            .map(|p| (p.addr, p.size, p.ipc_key))
     }
 
     /// Debug-panic + log-once for a host-invariant break.
@@ -79,10 +83,6 @@ impl Lv2Host {
     }
 
     /// Break count for one `log_invariant_break` site string.
-    ///
-    /// The site vocabulary is the set of `"dispatch.*"` literals in
-    /// this crate; `"dispatch.unsupported_stub"` distinguishes the
-    /// null backend's generic arm from every dedicated arm.
     pub fn invariant_break_site_count(&self, site: &str) -> u64 {
         self.obs
             .invariant_break_sites

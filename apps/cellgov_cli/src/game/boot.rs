@@ -642,35 +642,69 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     // space and load the ELF the same way the microtest harness
     // does. SELF paths resolve through the LV2 content store.
     rt.set_process_spawn_loader(|elf_bytes, mem| {
-        const CHILD_EXIT_STUB_ADDR: u64 = 0;
+        // A child image may arrive SCE-wrapped (vsh spawns SELFs, not
+        // raw ELFs); unwrap through the APP-keyed path before the ELF
+        // parse.
+        let decrypted;
+        let elf_bytes: &[u8] =
+            if elf_bytes.len() >= 4 && elf_bytes[..4] == cellgov_ps3_abi::sce::SCE_MAGIC {
+                // Name the NPDRM refusal before attempting the decrypt.
+                // The NPD supplemental header is plaintext, so no key
+                // material is needed to spot one; without this probe an
+                // NPDRM child surfaces as a key-envelope padding failure
+                // that reads like a corrupt file rather than an
+                // unsupported one. A malformed supplemental chain is left
+                // to the decrypt below, which names its own error.
+                if let Ok(Some(npd)) = cellgov_install::npdrm::find_npd_header_info(elf_bytes) {
+                    return Err(cellgov_core::ProcessSpawnLoadError::ImageParse {
+                        detail: format!(
+                            "child SELF is NPDRM-wrapped (content_id {}, license {:?}); the spawn \
+                             loader is APP-keyed only -- klicensee resolution belongs to the \
+                             title-install layer",
+                            npd.content_id, npd.license,
+                        ),
+                    });
+                }
+                decrypted = cellgov_install::sce::decrypt_self_to_elf(elf_bytes).map_err(|e| {
+                    cellgov_core::ProcessSpawnLoadError::ImageParse {
+                        detail: format!("child SELF decrypt failed: {e}"),
+                    }
+                })?;
+                &decrypted
+            } else {
+                elf_bytes
+            };
         let required = cellgov_ppu::loader::required_memory_size(elf_bytes).map_err(|e| {
             cellgov_core::ProcessSpawnLoadError::ImageParse {
-                detail: format!("{e:?}"),
+                detail: e.to_string(),
             }
         })?;
         let child_mem_size = spawned_child_region_size(required)?;
         mem.install_region(0, child_mem_size, "spawned", cellgov_mem::PageSize::Page64K)
             .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
+        let exit_stub_addr = child_exit_stub_addr(required);
         // li r11, 22; sc -- entered if the child's entry returns.
         let stub: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
         let range = cellgov_mem::ByteRange::new(
-            cellgov_mem::GuestAddr::new(CHILD_EXIT_STUB_ADDR),
+            cellgov_mem::GuestAddr::new(exit_stub_addr),
             stub.len() as u64,
         )
-        .expect("fixed 8-byte stub range");
+        .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
+            detail: format!("exit-stub range at 0x{exit_stub_addr:x} is not addressable"),
+        })?;
         mem.apply_commit(range, &stub)
             .map_err(|source| cellgov_core::ProcessSpawnLoadError::ExitStubWrite { source })?;
         let mut state = cellgov_ppu::state::PpuState::new();
         cellgov_ppu::loader::load_ppu_elf(elf_bytes, mem, &mut state).map_err(|e| {
             cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                detail: format!("{e:?}"),
+                detail: e.to_string(),
             }
         })?;
         Ok(cellgov_core::SpawnedProcessImage {
             entry_code: state.pc,
             entry_toc: state.gpr[2],
             stack_top: (child_mem_size as u64) - 0x1000,
-            lr_sentinel: CHILD_EXIT_STUB_ADDR,
+            lr_sentinel: exit_stub_addr,
         })
     });
 
@@ -1029,6 +1063,39 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
 }
 
+/// Address of a spawned child's exit stub: the landing site a child
+/// enters when its entry returns instead of calling
+/// `sys_process_exit`.
+///
+/// Derived from `required` (the highest PT_LOAD end) rather than
+/// fixed, so no segment of the image can land on it. `load_ppu_elf`
+/// writes only `[p_vaddr, p_vaddr + p_memsz)` per PT_LOAD -- never
+/// the segment's `p_align` padding -- so "at or above the highest
+/// segment end" is the whole disjointness argument.
+///
+/// The floor of `STUB_MIN_ADDR` keeps address 0 out of the answer for
+/// an image whose PT_LOADs total zero bytes. RPCS3 reaches the same
+/// property by allocating its equivalent return sentinel out of the
+/// main area after the image's own fixed allocations
+/// (`Emu/Cell/PPUModule.cpp` `ppu_initialize_modules` fills an
+/// allocated fake-OPD array, and `Emu/Cell/PPUThread.cpp`
+/// `ppu_thread::fast_call` points LR at one of its slots); there
+/// `vm::alloc` returns 0 only to signal failure, so 0 is a null
+/// sentinel and never a code site. A stub at 0 would also silently
+/// convert a guest branch through a null function pointer into a
+/// clean `sys_process_exit(22)` instead of a fault.
+///
+/// The caller sizes the child region with [`spawned_child_region_size`],
+/// which always leaves headroom above the image, so the returned
+/// address is inside the region and below the initial SP.
+fn child_exit_stub_addr(required: usize) -> u64 {
+    /// Lowest address the stub may occupy; keeps 0 reserved as null.
+    const STUB_MIN_ADDR: u64 = 16;
+    // `required_memory_size` caps every segment end at the 4 GiB EA
+    // ceiling, so the round-up cannot overflow.
+    (required as u64).next_multiple_of(16).max(STUB_MIN_ADDR)
+}
+
 /// Sizes a spawned child's address-space region from its ELF's
 /// required memory.
 ///
@@ -1086,6 +1153,114 @@ fn assert_gating_state_coherent_with_host(rt: &Runtime, modules_were_loaded: boo
         LIBLV2_ONCE_MUTEX_SLOT,
         mutex_id,
     );
+}
+
+#[cfg(test)]
+mod child_exit_stub_addr_tests {
+    use super::{child_exit_stub_addr, spawned_child_region_size};
+
+    /// ELF64 big-endian header plus one PT_LOAD per
+    /// `(p_vaddr, p_filesz, p_memsz)`. Only the headers matter --
+    /// `required_memory_size` never reads segment contents.
+    fn elf64_be_with_loads(segments: &[(u64, u64, u64)]) -> Vec<u8> {
+        const EHDR: usize = 64;
+        const PHENT: usize = 56;
+        const PT_LOAD: u32 = 1;
+        let mut out = vec![0u8; EHDR + PHENT * segments.len()];
+        out[..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+        out[4] = 2; // ELFCLASS64
+        out[5] = 2; // ELFDATA2MSB
+        out[6] = 1; // EV_CURRENT
+        out[32..40].copy_from_slice(&(EHDR as u64).to_be_bytes()); // e_phoff
+        out[54..56].copy_from_slice(&(PHENT as u16).to_be_bytes()); // e_phentsize
+        out[56..58].copy_from_slice(&(segments.len() as u16).to_be_bytes()); // e_phnum
+        for (i, &(vaddr, filesz, memsz)) in segments.iter().enumerate() {
+            let b = EHDR + PHENT * i;
+            out[b..b + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+            out[b + 16..b + 24].copy_from_slice(&vaddr.to_be_bytes());
+            out[b + 32..b + 40].copy_from_slice(&filesz.to_be_bytes());
+            out[b + 40..b + 48].copy_from_slice(&memsz.to_be_bytes());
+            // A large p_align is what would tempt a reader to think the
+            // image occupies more than its highest segment end.
+            out[b + 48..b + 56].copy_from_slice(&0x1_0000u64.to_be_bytes());
+        }
+        out
+    }
+
+    #[test]
+    fn the_stub_never_lands_on_a_segment_byte() {
+        // Sparse, out-of-order, memsz > filesz, a zero-memsz segment,
+        // and a highest segment that ends unaligned against its own
+        // p_align -- every shape that could put a written byte above
+        // the reported image end.
+        let layouts: &[&[(u64, u64, u64)]] = &[
+            &[(0, 0x100, 0x1000)],
+            &[(0, 1, 0x11)],
+            &[
+                (0x1_0000, 0x100, 0x1000),
+                (0x1000_0000, 0x10, 0x8000),
+                (0x2_0000, 0x40, 0x40),
+            ],
+            &[(0x1000_0000, 0x10, 0x8001), (0, 0, 0)],
+            &[(0x8000, 0, 0x4000)],
+        ];
+        for segments in layouts {
+            let elf = elf64_be_with_loads(segments);
+            let required = cellgov_ppu::loader::required_memory_size(&elf)
+                .expect("synthetic ELF headers parse");
+            let stub = child_exit_stub_addr(required);
+            for &(vaddr, _, memsz) in segments.iter() {
+                if memsz == 0 {
+                    continue;
+                }
+                assert!(
+                    stub >= vaddr + memsz || stub + 8 <= vaddr,
+                    "stub 0x{stub:x}+8 overlaps segment 0x{vaddr:x}+0x{memsz:x}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_stub_is_instruction_aligned() {
+        for required in [0, 1, 8, 0x11, 0x1001_0010] {
+            assert_eq!(child_exit_stub_addr(required) % 16, 0);
+        }
+    }
+
+    #[test]
+    fn an_image_with_no_loadable_bytes_keeps_address_zero_reserved() {
+        assert_eq!(child_exit_stub_addr(0), 16);
+    }
+
+    #[test]
+    fn the_stub_fits_inside_the_region_the_caller_sizes() {
+        // Pairing with the sizing rule is the contract that keeps the
+        // stub write in bounds and below the initial SP. The last
+        // entry is the 4 GiB EA ceiling `required_memory_size` caps
+        // every segment end at, so nothing larger can reach here.
+        for required in [
+            0,
+            0x1001_0010,
+            0x1001_b000,
+            0x1001_b001,
+            0x1002_0001,
+            0x2000_0000,
+            0x1_0000_0000,
+        ] {
+            let size = spawned_child_region_size(required).expect("sizable child");
+            let stub_end = child_exit_stub_addr(required) + 8;
+            let stack_top = size as u64 - 0x1000;
+            assert!(
+                stub_end <= stack_top,
+                "stub for required=0x{required:x} must end at or below the SP",
+            );
+            assert!(
+                stub_end <= size as u64,
+                "stub for required=0x{required:x} must end inside the region",
+            );
+        }
+    }
 }
 
 #[cfg(test)]

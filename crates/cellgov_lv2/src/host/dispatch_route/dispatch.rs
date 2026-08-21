@@ -1,8 +1,7 @@
 //! Top-level dispatch routing for [`Lv2Host`].
 //!
-//! Each arm is a one-line delegation to a `dispatch_*` method.
 //! Per-arm shape and oracle citations live with the extracted
-//! methods; shared helpers live in [`super::helpers`].
+//! `dispatch_*` methods; shared helpers live in [`super::helpers`].
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::syscall;
@@ -55,8 +54,8 @@ impl Lv2Host {
         out
     }
 
-    /// The routing match itself. Split from [`Self::dispatch`] so the
-    /// return witness sees every arm's return through one point.
+    /// Split from [`Self::dispatch`] so every arm's return passes one
+    /// observation point.
     fn dispatch_routed(
         &mut self,
         request: Lv2Request,
@@ -251,8 +250,8 @@ impl Lv2Host {
                 ..
             } => self.dispatch_memory_allocate(size, alloc_addr_ptr, requester, tick),
             Lv2Request::MemoryFree { .. } => self.dispatch_memory_free_noop(),
-            Lv2Request::MemoryContainerCreate { cid_ptr, .. } => {
-                self.dispatch_memory_container_create(cid_ptr, requester, tick)
+            Lv2Request::MemoryContainerCreate { cid_ptr, size } => {
+                self.dispatch_memory_container_create(cid_ptr, size, requester, tick)
             }
             Lv2Request::PpuThreadYield => self.dispatch_ppu_thread_yield(),
             Lv2Request::PpuThreadStart { target } => self.dispatch_ppu_thread_start(target),
@@ -387,8 +386,8 @@ impl Lv2Host {
             } => self.dispatch_prx_register_module(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_REGISTER_LIBRARY,
-                ..
-            } => self.dispatch_prx_register_library(),
+                args,
+            } => self.dispatch_prx_register_library(args, rt),
             Lv2Request::Unsupported {
                 number: syscall::PPU_THREAD_GET_PRIORITY,
                 args,
@@ -424,7 +423,7 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MEMORY_CONTAINER_CREATE_324,
                 args,
-            } => self.dispatch_memory_container_create_324(args, requester, tick),
+            } => self.dispatch_memory_container_create(args[0] as u32, args[1], requester, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_ADDRESS,
                 args,
@@ -432,11 +431,11 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_MAP_SHARED_MEMORY,
                 args,
-            } => self.dispatch_mmapper_map_shared_memory(args, requester, tick),
+            } => self.dispatch_mmapper_map_shared_memory(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_SEARCH_AND_MAP,
                 args,
-            } => self.dispatch_mmapper_search_and_map(args, requester, tick),
+            } => self.dispatch_mmapper_search_and_map(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
                 args,

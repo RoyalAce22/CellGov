@@ -149,10 +149,22 @@ impl SyscallResponseTable {
     /// Wire format: `STATE_HASH_FORMAT_VERSION` (u64 LE), entry count
     /// (u64 LE), then for each `(UnitId, PendingResponse)` pair in
     /// ascending id order the id's u64 LE bytes, a 1-byte variant tag
-    /// (0..=5), and the variant's fixed-size fields. Any variable-length
-    /// field added to a variant requires a new format version.
+    /// (0..=7), and the variant's fixed-size fields. Any variable-length
+    /// field added to a variant requires a new format version; a new
+    /// fixed-size variant takes the next free tag and leaves existing
+    /// encodings byte-identical.
     ///
-    /// Drift is pinned by `state_hash_wire_format_golden` and by
+    /// These tags are a private wire alphabet, NOT
+    /// [`PendingResponse::variant_tag`]: the two disagree today
+    /// (`EventFlagWake` hashes as 5 but reports tag 4;
+    /// `CondWakeReacquire` hashes as 4 but reports tag 5). Do not
+    /// substitute one for the other -- renumbering either side
+    /// rewrites this hash, which folds into `Runtime::sync_state_hash`
+    /// and therefore into every recorded state-hash stream and the
+    /// goldens in `tests`.
+    ///
+    /// Drift is pinned by `state_hash_wire_bytes_match_the_hash`,
+    /// `state_hash_wire_format_golden`, and
     /// `state_hash_is_insertion_order_independent`.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
@@ -223,6 +235,14 @@ impl SyscallResponseTable {
                     hasher.write(&[6u8]);
                     hasher.write(&mutex_ptr.to_le_bytes());
                     hasher.write(&caller.to_le_bytes());
+                }
+                PendingResponse::EventFlagCancelWake {
+                    result_ptr,
+                    observed,
+                } => {
+                    hasher.write(&[7u8]);
+                    hasher.write(&result_ptr.to_le_bytes());
+                    hasher.write(&observed.to_le_bytes());
                 }
             }
         }

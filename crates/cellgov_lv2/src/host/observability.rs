@@ -96,13 +96,12 @@ pub struct Lv2Observability {
     /// wrong program-authority-id skips libsysmodule's lwmutex
     /// creation, so every later `cellSysmoduleLoadModule` locks id 0
     /// and bumps this; a non-zero count is that signature. Counts
-    /// every occurrence boot-wide, not one window.
+    /// every occurrence boot-wide.
     pub lwmutex_unknown_lock_count: u64,
     /// Witness: every non-zero `Lv2Dispatch::Immediate` code any arm
     /// returned, keyed by code. Includes successful returns that carry
-    /// a value (kernel ids, pids), not just errors -- the point is
-    /// completeness for the immediate path: a code absent here was
-    /// never returned by an immediate dispatch. Codes delivered on
+    /// a value (kernel ids, pids): a code absent here was never
+    /// returned by an immediate dispatch. Codes delivered on
     /// wake through a staged `PendingResponse` (ETIMEDOUT expiry,
     /// ECANCELED) do not land here; expiry codes are witnessed by
     /// [`Self::wait_timeout_expiries`].
@@ -119,6 +118,20 @@ pub struct Lv2Observability {
     /// Witness: timed waits that expired with `CELL_ETIMEDOUT`, keyed
     /// by the primitive that timed out.
     pub wait_timeout_expiries: BTreeMap<&'static str, u64>,
+    /// Witness: waiter records dropped from LV2 waiter lists by the
+    /// process-exit purge, keyed by primitive. See
+    /// `Lv2Host::mark_process_exited` for why a purged waiter must
+    /// never be granted a resource.
+    ///
+    /// RPCS3 is not an oracle for the per-process case -- its
+    /// `sys_process.cpp` `_sys_process_exit` kills the whole emulator
+    /// rather than one process's threads -- but it agrees on the part
+    /// this counter guards: no further wake is delivered.
+    pub process_exit_waiter_purges: BTreeMap<&'static str, u64>,
+    /// Witness: mutexes whose owner belonged to an exited process at
+    /// purge time. Ownership is retained, so each count here is a
+    /// primitive a survivor can no longer acquire.
+    pub process_exit_retained_mutex_owners: u64,
     /// Witness: `sys_mutex_unlock` calls refused with `CELL_EPERM`
     /// because the caller does not own the mutex.
     pub mutex_unlock_not_owner_count: u64,

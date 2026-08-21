@@ -206,3 +206,69 @@ fn memory_container_create_writes_monotonic_id() {
     assert_ne!(id1, 0);
     assert_ne!(id1, id2, "IDs must be monotonic across create calls");
 }
+
+/// Syscalls 324 and 341 are one kernel entry point, so the sub-granule
+/// refusal cannot depend on which number the guest used.
+#[test]
+fn memory_container_create_sub_granule_size_is_enomem_on_both_syscall_numbers() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let source = UnitId::new(0);
+    let enomem = Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+
+    assert_eq!(
+        host.dispatch(
+            Lv2Request::MemoryContainerCreate {
+                cid_ptr: 0x100,
+                size: 0xF_FFFF,
+            },
+            source,
+            &rt,
+        ),
+        enomem,
+    );
+    assert_eq!(
+        host.dispatch(
+            Lv2Request::Unsupported {
+                number: 324,
+                args: [0x100, 0xF_FFFF, 0, 0, 0, 0, 0, 0],
+            },
+            source,
+            &rt,
+        ),
+        enomem,
+    );
+}
+
+#[test]
+fn memory_container_create_mints_no_id_for_a_refused_size() {
+    let rt = FakeRuntime::new(0x10000);
+    let source = UnitId::new(0);
+    let accepted = |host: &mut Lv2Host| match host.dispatch(
+        Lv2Request::MemoryContainerCreate {
+            cid_ptr: 0x100,
+            size: 0x10_0000,
+        },
+        source,
+        &rt,
+    ) {
+        Lv2Dispatch::Immediate { code: 0, effects } => extract_write_u32(&effects[0]),
+        other => panic!("expected Immediate(0), got {other:?}"),
+    };
+
+    let mut after_refusal = Lv2Host::new();
+    after_refusal.dispatch(
+        Lv2Request::MemoryContainerCreate {
+            cid_ptr: 0x100,
+            size: 0,
+        },
+        source,
+        &rt,
+    );
+    let mut untouched = Lv2Host::new();
+    assert_eq!(
+        accepted(&mut after_refusal),
+        accepted(&mut untouched),
+        "the refused create must not consume an id",
+    );
+}

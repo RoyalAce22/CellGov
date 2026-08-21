@@ -15,11 +15,11 @@ use cellgov_time::Budget;
 
 const PARENT_ELF: &str = "../../tests/micro/process_spawn_wait/build/parent.elf";
 const CHILD_ELF: &str = "../../tests/micro/process_spawn_wait/build/child.elf";
+const CHILD_SELF: &str = "../../tests/micro/process_spawn_wait/build/child.self";
 
 // Covers the ELF's user region plus the SYS_PROCESS_PARAM segment
 // at 0x1000_0000 (same sizing as cellgov_ppu's microtest harness).
 const MEM_SIZE: usize = 0x1002_0000;
-const EXIT_STUB_ADDR: u64 = 0;
 const RESULT_ADDR: u64 = 0x100;
 const EXPECTED_PID: u32 = cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID + 0x100;
 const CHILD_MAGIC: u32 = 0x600D_F00D;
@@ -27,20 +27,44 @@ const CHILD_MAGIC: u32 = 0x600D_F00D;
 /// `li r11, 22; sc` -- a terminal `blr` lands on sys_process_exit.
 const EXIT_STUB: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
 
-fn plant_exit_stub(mem: &mut GuestMemory) {
-    let range = ByteRange::new(GuestAddr::new(EXIT_STUB_ADDR), EXIT_STUB.len() as u64)
-        .expect("fixed 8-byte stub range");
+/// Initial SP for both spaces; the stub must stay below it or the
+/// guest stack would grow down onto it.
+const STACK_TOP: u64 = (MEM_SIZE as u64) - 0x1000;
+
+/// Mirrors `child_exit_stub_addr` in the run-game boot pipeline: the
+/// stub sits just above the image's highest PT_LOAD, so no segment
+/// can overwrite it, with 0 reserved as null. This harness installs
+/// its own spawn loader, so nothing cross-checks the two copies.
+fn exit_stub_addr_for(required: usize) -> u64 {
+    (required as u64).next_multiple_of(16).max(16)
+}
+
+fn exit_stub_addr(elf: &[u8]) -> u64 {
+    let required = cellgov_ppu::loader::required_memory_size(elf)
+        .expect("microtest image headers parse before placement");
+    exit_stub_addr_for(required)
+}
+
+fn plant_exit_stub(mem: &mut GuestMemory, addr: u64) {
+    assert!(
+        addr + EXIT_STUB.len() as u64 <= STACK_TOP,
+        "stub at 0x{addr:x} would sit at or above the initial SP 0x{STACK_TOP:x}; \
+         the image outgrew MEM_SIZE",
+    );
+    let range =
+        ByteRange::new(GuestAddr::new(addr), EXIT_STUB.len() as u64).expect("8-byte stub range");
     mem.apply_commit(range, &EXIT_STUB)
         .expect("stub range inside the fresh region");
 }
 
 fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
     let mut mem = GuestMemory::new(MEM_SIZE);
-    plant_exit_stub(&mut mem);
+    let parent_stub = exit_stub_addr(parent_elf);
+    plant_exit_stub(&mut mem, parent_stub);
     let mut state = cellgov_ppu::state::PpuState::new();
     cellgov_ppu::loader::load_ppu_elf(parent_elf, &mut mem, &mut state).expect("parent ELF loads");
-    state.set_gpr(1, (MEM_SIZE as u64) - 0x1000);
-    state.set_lr(EXIT_STUB_ADDR);
+    state.set_gpr(1, STACK_TOP);
+    state.set_lr(parent_stub);
 
     let mut rt = Runtime::new(mem, Budget::new(10_000), 50_000);
     rt.registry_mut().register_with(move |id| {
@@ -62,20 +86,44 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
         Box::new(unit)
     });
     rt.set_process_spawn_loader(|elf_bytes, mem| {
+        // Same unwrap shape as run-game's spawn loader: the content
+        // store hands over whatever the title shipped, so an
+        // SCE-wrapped child.self decrypts here, not at staging time.
+        let decrypted;
+        let elf_bytes: &[u8] =
+            if elf_bytes.len() >= 4 && elf_bytes[..4] == cellgov_ps3_abi::sce::SCE_MAGIC {
+                decrypted = cellgov_install::sce::decrypt_self_to_elf(elf_bytes).map_err(|e| {
+                    cellgov_core::ProcessSpawnLoadError::ImageParse {
+                        detail: format!("child SELF decrypt failed: {e}"),
+                    }
+                })?;
+                &decrypted
+            } else {
+                elf_bytes
+            };
+        // The decrypted bytes are guest-supplied here, so a header
+        // that does not parse is an ImageParse refusal, not a harness
+        // panic -- same shape as run-game's loader.
+        let required = cellgov_ppu::loader::required_memory_size(elf_bytes).map_err(|e| {
+            cellgov_core::ProcessSpawnLoadError::ImageParse {
+                detail: e.to_string(),
+            }
+        })?;
         mem.install_region(0, MEM_SIZE, "spawned", PageSize::Page64K)
             .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
-        plant_exit_stub(mem);
+        let child_stub = exit_stub_addr_for(required);
+        plant_exit_stub(mem, child_stub);
         let mut state = cellgov_ppu::state::PpuState::new();
         cellgov_ppu::loader::load_ppu_elf(elf_bytes, mem, &mut state).map_err(|e| {
             cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                detail: format!("{e:?}"),
+                detail: e.to_string(),
             }
         })?;
         Ok(SpawnedProcessImage {
             entry_code: state.pc,
             entry_toc: state.gpr[2],
-            stack_top: (MEM_SIZE as u64) - 0x1000,
-            lr_sentinel: EXIT_STUB_ADDR,
+            stack_top: STACK_TOP,
+            lr_sentinel: child_stub,
         })
     });
     rt.lv2_host_mut()
@@ -99,7 +147,19 @@ struct RunOutcome {
     result: [u32; 4],
     child_magic: Option<u32>,
     child_exit_status: Option<i32>,
+    /// Named host invariant-break sites and their hit counts. The
+    /// host logs these to stderr, which a passing test swallows, so
+    /// the run has to carry them out for an assertion to see them.
+    invariant_breaks: Vec<(&'static str, u64)>,
 }
+
+/// Invariant-break sites this microtest is known to trip, with their
+/// per-run counts. `process.spawn_unconsumed_args` is the guest
+/// passing sc-21 trailing register args the host does not model; the
+/// gate is an equality so both a new site and a fixed one show up.
+/// Entries must be in site-string order -- the run collects them from
+/// a `BTreeMap`.
+const EXPECTED_INVARIANT_BREAKS: &[(&str, u64)] = &[("process.spawn_unconsumed_args", 1)];
 
 fn run_once(parent_elf: &[u8], child_elf: &[u8]) -> RunOutcome {
     let mut rt = build_runtime(parent_elf, child_elf);
@@ -142,6 +202,13 @@ fn run_once(parent_elf: &[u8], child_elf: &[u8]) -> RunOutcome {
                 .map(|b| u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
         });
     let child_exit_status = rt.lv2_host().process_exit_status(EXPECTED_PID);
+    let invariant_breaks = rt
+        .lv2_host()
+        .observability()
+        .invariant_break_sites
+        .iter()
+        .map(|(site, count)| (*site, *count))
+        .collect();
     RunOutcome {
         hashes,
         steps,
@@ -150,6 +217,7 @@ fn run_once(parent_elf: &[u8], child_elf: &[u8]) -> RunOutcome {
         result,
         child_magic,
         child_exit_status,
+        invariant_breaks,
     }
 }
 
@@ -210,6 +278,11 @@ fn parent_spawns_child_and_observes_exit_bit_identically_twice() {
         "child's write lands in its own space",
     );
     assert_eq!(a.child_exit_status, Some(42), "exit status recorded");
+    assert_eq!(
+        a.invariant_breaks, EXPECTED_INVARIANT_BREAKS,
+        "host invariant-break sites drifted; the host logs these to stderr, which a \
+         passing test would otherwise swallow",
+    );
 
     let b = run_once(&parent_elf, &child_elf);
     assert_eq!(b.first_fault, None);
@@ -222,4 +295,122 @@ fn parent_spawns_child_and_observes_exit_bit_identically_twice() {
     assert_eq!(a.result, b.result);
     assert_eq!(a.child_magic, b.child_magic);
     assert_eq!(a.child_exit_status, b.child_exit_status);
+    assert_eq!(a.invariant_breaks, b.invariant_breaks);
+}
+
+/// The spawn loader unwraps a genuinely SCE-wrapped child SELF
+/// (build.sh wraps child.elf via make_self) and the child still runs
+/// to its magic write and exit 42, bit-identically across two boots.
+#[test]
+fn parent_spawns_a_genuinely_sce_wrapped_child_self() {
+    let parent_path = std::path::Path::new(PARENT_ELF);
+    let child_path = std::path::Path::new(CHILD_SELF);
+    if !parent_path.exists() || !child_path.exists() {
+        if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
+            panic!("required microtest fixtures missing: {PARENT_ELF}, {CHILD_SELF}");
+        }
+        #[allow(
+            clippy::print_stderr,
+            reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
+        )]
+        {
+            eprintln!("[skip] process_spawn_wait wrapped child.self not built (see build.sh)");
+        }
+        return;
+    }
+    let parent_elf =
+        std::fs::read(parent_path).expect("parent.elf exists but is unreadable; not a skip");
+    let child_self =
+        std::fs::read(child_path).expect("child.self exists but is unreadable; not a skip");
+    // Vacuity guard: a raw ELF renamed .self would exercise nothing.
+    // `get` rather than a slice index so a truncated fixture reports
+    // the wrong-magic message instead of an out-of-range panic.
+    assert_eq!(
+        child_self.get(..4),
+        Some(cellgov_ps3_abi::sce::SCE_MAGIC.as_slice()),
+        "child.self must be genuinely SCE-wrapped; rebuild via build.sh's make_self step",
+    );
+
+    let a = run_once(&parent_elf, &child_self);
+    assert_eq!(a.first_fault, None, "no unit may fault during the run");
+    assert_eq!(a.terminal, StepError::NoRunnableUnit);
+    let [status, pid, spawn_rc, polls] = a.result;
+    assert_eq!(spawn_rc, 0, "sc 21 must return CELL_OK");
+    assert_eq!(pid, EXPECTED_PID);
+    assert_eq!(status, 0);
+    assert!(polls > 0);
+    assert_eq!(
+        a.child_magic,
+        Some(CHILD_MAGIC),
+        "the decrypted child's write lands in its own space",
+    );
+    assert_eq!(a.child_exit_status, Some(42));
+    assert_eq!(
+        a.invariant_breaks, EXPECTED_INVARIANT_BREAKS,
+        "the SELF path must not trip a site the plaintext path does not",
+    );
+
+    let b = run_once(&parent_elf, &child_self);
+    assert_eq!(b.first_fault, None);
+    assert_eq!(b.terminal, StepError::NoRunnableUnit);
+    assert_eq!(a.steps, b.steps);
+    assert_eq!(
+        a.hashes, b.hashes,
+        "wrapped-child boots must be bit-identical"
+    );
+    assert_eq!(a.result, b.result);
+    assert_eq!(a.child_magic, b.child_magic);
+    // Host-side, so the memory-hash stream above does not cover it.
+    assert_eq!(a.child_exit_status, b.child_exit_status);
+}
+
+/// The two spawn paths differ only in the SELF envelope: an
+/// APP-keyed child.self and the raw child.elf it wraps must produce
+/// the same step count and hash stream.
+#[test]
+fn a_wrapped_child_and_its_plaintext_elf_run_identically() {
+    let parent_path = std::path::Path::new(PARENT_ELF);
+    let elf_path = std::path::Path::new(CHILD_ELF);
+    let self_path = std::path::Path::new(CHILD_SELF);
+    if !parent_path.exists() || !elf_path.exists() || !self_path.exists() {
+        if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
+            panic!("required microtest fixtures missing: {PARENT_ELF}, {CHILD_ELF}, {CHILD_SELF}");
+        }
+        #[allow(
+            clippy::print_stderr,
+            reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
+        )]
+        {
+            eprintln!("[skip] process_spawn_wait elf/self pair not built (see build.sh)");
+        }
+        return;
+    }
+    let parent_elf = std::fs::read(parent_path).expect("parent.elf exists but is unreadable");
+    let child_elf = std::fs::read(elf_path).expect("child.elf exists but is unreadable");
+    let child_self = std::fs::read(self_path).expect("child.self exists but is unreadable");
+
+    let plain = run_once(&parent_elf, &child_elf);
+    let wrapped = run_once(&parent_elf, &child_self);
+    assert_eq!(
+        plain.steps, wrapped.steps,
+        "the SELF envelope must not change how far the run gets",
+    );
+    // Memory-hash component only. `committed_memory_hash` folds every
+    // space, so this asserts the reassembled child maps byte-for-byte
+    // onto what the plaintext ELF maps -- the vacuity guard for the
+    // unwrap. The sync-state component is excluded because the LV2
+    // content store hashes the registered blob itself, and the two
+    // runs register different bytes under the same guest path.
+    let plain_mem: Vec<u64> = plain.hashes.iter().map(|&(_, m)| m).collect();
+    let wrapped_mem: Vec<u64> = wrapped.hashes.iter().map(|&(_, m)| m).collect();
+    assert_eq!(
+        plain_mem, wrapped_mem,
+        "unwrapping a child SELF must reproduce the plaintext ELF's committed memory",
+    );
+    assert_eq!(plain.terminal, wrapped.terminal);
+    assert_eq!(plain.first_fault, wrapped.first_fault);
+    assert_eq!(plain.result, wrapped.result);
+    assert_eq!(plain.child_magic, wrapped.child_magic);
+    assert_eq!(plain.child_exit_status, wrapped.child_exit_status);
+    assert_eq!(plain.invariant_breaks, wrapped.invariant_breaks);
 }

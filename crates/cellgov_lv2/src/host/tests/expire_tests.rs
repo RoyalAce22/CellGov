@@ -365,7 +365,6 @@ fn event_flag_error_and_busy_exits_zero_a_nonnull_result_ptr() {
     );
     assert_zero_store(&bad_mode, cell_errors::CELL_EINVAL.into(), 0x300);
 
-    // Unknown id: ESRCH stores 0.
     let unknown = host.dispatch(
         Lv2Request::EventFlagTryWait {
             id: id + 1,
@@ -378,7 +377,6 @@ fn event_flag_error_and_busy_exits_zero_a_nonnull_result_ptr() {
     );
     assert_zero_store(&unknown, cell_errors::CELL_ESRCH.into(), 0x308);
 
-    // Trywait no-match: EBUSY stores 0.
     let busy = host.dispatch(
         Lv2Request::EventFlagTryWait {
             id,
@@ -438,21 +436,24 @@ fn event_flag_cancel_reports_the_pattern_through_each_result_ptr() {
             effects,
         } => {
             assert_eq!(woken_unit_ids, vec![src]);
+            // The pattern rides the wake channel so it resolves in
+            // the WAITER's space; the canceller's effects carry only
+            // its own count write.
             assert_eq!(
                 response_updates,
                 vec![(
                     src,
-                    PendingResponse::ReturnCode {
-                        code: cell_errors::CELL_ECANCELED.into()
+                    PendingResponse::EventFlagCancelWake {
+                        result_ptr: 0x300,
+                        observed: 0b101,
                     }
                 )]
             );
-            // Pattern write for the cancelled waiter, then the count.
-            assert_eq!(effects.len(), 2);
+            assert_eq!(effects.len(), 1);
             match &effects[0] {
                 cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } => {
-                    assert_eq!(range.start().raw(), 0x300);
-                    assert_eq!(bytes.bytes(), &0b101u64.to_be_bytes());
+                    assert_eq!(range.start().raw(), 0x400);
+                    assert_eq!(bytes.bytes(), &1u32.to_be_bytes());
                 }
                 other => panic!("expected SharedWriteIntent, got {other:?}"),
             }

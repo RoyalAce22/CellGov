@@ -1,4 +1,4 @@
-//! PPU thread spawning: child-thread creation.
+//! `sys_ppu_thread_create`: child PPU thread registration.
 
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
@@ -28,6 +28,7 @@ impl Runtime {
 
         let Some(factory) = self.ppu_factory.as_ref() else {
             // Foundation-title baselines pin CELL_E2BIG on this path.
+            self.lv2_host.free_child_stack(stack_base, stack_size);
             self.lv2_host.log_invariant_break(
                 "runtime.ppu_thread_create_factory_missing",
                 format_args!(
@@ -61,6 +62,7 @@ impl Runtime {
             // pid's live units).
             self.registry
                 .set_status_override(child_unit_id, UnitStatus::Finished);
+            self.lv2_host.free_child_stack(stack_base, stack_size);
             self.lv2_host.log_invariant_break(
                 "runtime.ppu_thread_create_thread_ids_exhausted",
                 format_args!(
@@ -77,6 +79,47 @@ impl Runtime {
         // binds every unit it registers for a spawned child). Boot
         // callers keep the untagged default.
         if caller_space != AddressSpaceId::BOOT {
+            // The arena hands out addresses inside the boot layout's
+            // child-stacks window; a child space has no region there
+            // until this install, so without it the new thread's
+            // first stack store faults. Boot callers skip it: the
+            // boot pipeline pre-installs the whole window.
+            let mem = super::spaces::resolve_space_memory_for_write(
+                &mut self.memory,
+                &mut self.spaces,
+                caller_space,
+            );
+            if let Err(err) = mem.install_region(
+                stack_base,
+                stack_size as usize,
+                "child_stack",
+                cellgov_mem::PageSize::Page4K,
+            ) {
+                // Guest-reachable only when the child's image layout
+                // occupies the child-stacks window; the kernel would
+                // have failed the stack allocation itself, and a
+                // failed stack allocation is CELL_ENOMEM (RPCS3
+                // sys_ppu_thread.cpp _sys_ppu_thread_create).
+                self.registry
+                    .set_status_override(child_unit_id, UnitStatus::Finished);
+                let stranded = self.lv2_host.ppu_threads_mut().mark_finished(thread_id, 0);
+                debug_assert!(
+                    stranded.is_empty(),
+                    "a thread refused inside its own create cannot have joiners yet; \
+                     {stranded:?} would never wake",
+                );
+                self.lv2_host.free_child_stack(stack_base, stack_size);
+                self.lv2_host.log_invariant_break(
+                    "runtime.ppu_thread_create_stack_install_overlap",
+                    format_args!(
+                        "child stack region 0x{stack_base:x}+0x{stack_size:x} overlaps \
+                         space {}'s existing layout: {err}; thread refused with ENOMEM",
+                        caller_space.raw(),
+                    ),
+                );
+                self.registry.set_syscall_return(source, CELL_ENOMEM.into());
+                return;
+            }
             self.assign_unit_space(child_unit_id, caller_space)
                 .expect("caller's space exists while the caller runs in it");
         }

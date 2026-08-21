@@ -30,9 +30,9 @@ impl Lv2Host {
         Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
-    /// `sys_memory_free`: bump allocator does not track per-allocation
-    /// state, so a valid-free vs bad-pointer vs unknown-id distinction
-    /// cannot be made; logged as a known gap and returns CELL_OK.
+    /// `sys_memory_free`: the bump allocator tracks no per-allocation
+    /// state, so a valid free, a bad pointer, and an unknown id are
+    /// indistinguishable; all answer CELL_OK.
     pub(super) fn dispatch_memory_free_noop(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.memory_free_noop",
@@ -42,16 +42,6 @@ impl Lv2Host {
             ),
         );
         Lv2Dispatch::immediate(0u64)
-    }
-
-    pub(super) fn dispatch_memory_container_create(
-        &mut self,
-        cid_ptr: u32,
-        requester: UnitId,
-        tick: GuestTicks,
-    ) -> Lv2Dispatch {
-        let id = self.alloc_id();
-        self.immediate_write_u32(id, cid_ptr, requester, tick)
     }
 
     /// `sys_ppu_thread_yield`: round-robin advance happens on the
@@ -106,12 +96,9 @@ impl Lv2Host {
 
     /// Writes `(total, available)` to `*mem_info_ptr`; EFAULT on null.
     ///
-    /// `total` is the PS3 game-mode user-memory cap. `available`
+    /// `total` is the PS3 game-mode user-memory cap; `available`
     /// subtracts what the bump allocator has handed out this boot
     /// (`sys_memory_free` is a no-op, so consumption is monotonic).
-    /// The allocator's budget equals `total`, so the subtraction
-    /// cannot underflow; `saturating_sub` guards the debug-only
-    /// invariant anyway.
     ///
     /// Known divergence from the oracle (RPCS3 reports
     /// `container.size - container.used`): real LV2 charges the
@@ -245,9 +232,8 @@ impl Lv2Host {
     /// spawned children serve the retail-application fallback.
     /// Firmware modules classify callers by this value (libsysmodule's
     /// module_start skips its init entirely for recognized
-    /// system-process ids), so it must name the caller's own SELF,
-    /// never another process's. Any other `pkg_id` is SS-domain
-    /// status `0x8001_051D`.
+    /// system-process ids). Any other `pkg_id` is SS-domain status
+    /// `0x8001_051D`.
     pub(super) fn dispatch_ss_access_control_engine(
         &mut self,
         pkg_id: u64,
@@ -266,9 +252,7 @@ impl Lv2Host {
                         Some(entry) => entry.authority_id,
                         None => {
                             // Reachable only through a unit binding
-                            // naming a pid the table never held; the
-                            // boot value served here is a fabricated
-                            // answer, so it never passes silently.
+                            // naming a pid the table never held.
                             self.log_invariant_break(
                                 "process.authority_of_unknown_pid",
                                 format_args!(
@@ -298,8 +282,8 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_timer_create` stub: bumps the `ProcessCounts` timer
-    /// counter, mints an id, writes it through `*id_ptr`.
+    /// `sys_timer_create` stub: no timer state beyond the
+    /// `ProcessCounts` tally is modeled.
     pub(super) fn dispatch_timer_create(
         &mut self,
         id_ptr: u32,
@@ -311,8 +295,8 @@ impl Lv2Host {
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
-    /// `sys_timer_destroy` stub: decrements the `ProcessCounts`
-    /// timer counter and returns CELL_OK.
+    /// `sys_timer_destroy` stub: counterpart to
+    /// [`Self::dispatch_timer_create`].
     pub(super) fn dispatch_timer_destroy(&mut self) -> Lv2Dispatch {
         self.state.process_counts.timer_dec();
         Lv2Dispatch::immediate(0)
@@ -337,8 +321,7 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// PS3 usermode never issues `sc` with LEV != 0; reject with
-    /// CELL_EINVAL and log.
+    /// PS3 usermode never issues `sc` with LEV != 0; CELL_EINVAL.
     pub(super) fn dispatch_hypercall_rejection(
         &mut self,
         lev: u8,
@@ -357,7 +340,7 @@ impl Lv2Host {
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     }
 
-    /// `Unsupported` catch-all: log and return CELL_ENOSYS.
+    /// `Unsupported` catch-all: CELL_ENOSYS.
     pub(super) fn dispatch_unsupported_default(
         &mut self,
         number: u64,
@@ -375,8 +358,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
     }
 
-    /// `Malformed` rejection: classifier failed to bind request fields;
-    /// log and return CELL_EINVAL.
+    /// `Malformed` rejection: the classifier could not bind the
+    /// request's fields; CELL_EINVAL.
     pub(super) fn dispatch_malformed_rejection(
         &mut self,
         number: u64,
@@ -394,22 +377,18 @@ impl Lv2Host {
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
     }
 
-    /// `UnresolvedImport`: trampoline in an unpatched GOT slot fired;
-    /// log NID + name (if in the db) + the library the import table
-    /// asked for it from (if the boot recorded one), and return
-    /// CELL_EINVAL.
+    /// `UnresolvedImport`: a trampoline in an unpatched GOT slot
+    /// fired; CELL_EINVAL.
     pub(super) fn dispatch_unresolved_import(
         &mut self,
         nid: u32,
         _requester: cellgov_event::UnitId,
     ) -> Lv2Dispatch {
         // The trampoline carries only the NID, so the library comes
-        // from the requester map the GOT patcher installed, not from
-        // the syscall. More than one library can appear when two
-        // import tables both failed to resolve the same NID.
-        // An absent entry and an empty set both mean "no recorded
-        // library": an empty set must not leave a dangling
-        // "imported from" with nothing after it.
+        // from the requester map the GOT patcher installed. More than
+        // one library can appear when two import tables both failed to
+        // resolve the same NID; an absent entry and an empty set both
+        // mean "no recorded library".
         let requested_from = match self.obs.unresolved_import_requesters.get(&nid) {
             Some(libs) if !libs.is_empty() => {
                 let list = libs.iter().map(String::as_str).collect::<Vec<_>>();

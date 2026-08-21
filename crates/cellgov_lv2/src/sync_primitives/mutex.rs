@@ -134,12 +134,30 @@ impl MutexEntry {
 #[derive(Debug, Clone, Default)]
 pub struct MutexTable {
     entries: BTreeMap<u32, MutexEntry>,
+    /// See [`Self::recursion_discards_count`].
+    recursion_discards_count: u64,
 }
 
 impl MutexTable {
     /// Construct an empty table.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Releases that dropped a nonzero recursive lock count.
+    ///
+    /// Only the cond-wait release reaches this: the unlock syscall
+    /// drains the count one hold at a time first. LV2 hands the
+    /// recursion depth back when the cond waiter re-acquires the
+    /// mutex on wake (RPCS3 `sys_cond.cpp` `sys_cond_wait` swaps
+    /// `lock_count` to zero before reowning and writes the saved
+    /// value back after the re-acquire), and nothing carries the
+    /// saved depth across the park here yet, so a nonzero counter
+    /// means some guest's recursion depth was lost. Not folded into
+    /// [`Self::state_hash`].
+    #[inline]
+    pub fn recursion_discards_count(&self) -> u64 {
+        self.recursion_discards_count
     }
 
     /// Insert a fresh entry. See [`MutexCreateError`].
@@ -209,8 +227,7 @@ impl MutexTable {
 
     /// Atomic acquire-or-park.
     ///
-    /// O(n) scan over the waiter list on the already-parked
-    /// check; defensive (normal dispatch cannot reach it).
+    /// O(n) scan over the waiter list on the already-parked check.
     pub fn acquire_or_enqueue(&mut self, id: u32, caller: PpuThreadId) -> MutexAcquireOrEnqueue {
         let Some(entry) = self.entries.get_mut(&id) else {
             return MutexAcquireOrEnqueue::Unknown;
@@ -241,7 +258,6 @@ impl MutexTable {
                 if entry.waiters.contains(caller) {
                     return MutexAcquireOrEnqueue::WouldDeadlock;
                 }
-                // Contains check above rules out duplicate.
                 if entry.waiters.enqueue(caller).is_err() {
                     debug_assert!(
                         false,
@@ -260,8 +276,7 @@ impl MutexTable {
     /// - [`MutexEnqueueError::WaiterIsOwner`] if `waiter` holds
     ///   the mutex.
     /// - [`MutexEnqueueError::DuplicateWaiter`] if `waiter` is
-    ///   already parked; callers must route to
-    ///   `record_invariant_break`.
+    ///   already parked.
     pub fn enqueue_waiter(
         &mut self,
         id: u32,
@@ -290,6 +305,36 @@ impl MutexTable {
         entry.waiters.remove(waiter)
     }
 
+    /// Remove every waiter in `threads` from every mutex, preserving
+    /// the order of survivors; returns `(id, thread)` pairs in table
+    /// order. Process-exit purge; ownership is untouched.
+    #[must_use = "the purged pairs are the only witness that these wakes were cancelled"]
+    pub fn purge_waiters_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<(u32, PpuThreadId)> {
+        let mut removed = Vec::new();
+        for (id, entry) in &mut self.entries {
+            for thread in entry.waiters.remove_set(threads) {
+                removed.push((*id, thread));
+            }
+        }
+        removed
+    }
+
+    /// Ids whose current owner is in `threads`, in table order.
+    ///
+    /// Process-exit survey; ownership is left intact. Reclaiming the
+    /// entry would need creator attribution the table does not
+    /// record, so the caller witnesses these ids instead.
+    pub fn ids_owned_by(&self, threads: &std::collections::BTreeSet<PpuThreadId>) -> Vec<u32> {
+        self.entries
+            .iter()
+            .filter(|(_, e)| e.owner.is_some_and(|o| threads.contains(&o)))
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     /// Consume one recursive hold without releasing ownership.
     ///
     /// `true` only when `caller` owns the mutex and the lock count
@@ -315,10 +360,12 @@ impl MutexTable {
         if entry.owner != Some(caller) {
             return MutexRelease::NotOwner;
         }
-        // A full release drops any recursive holds. Syscall unlock
-        // drains the count first via `unlock_decrement`; the
-        // cond-wait release gives up the mutex outright, so a stale
-        // count must not survive into the next owner's hold.
+        // A full release drops any recursive holds so a stale count
+        // cannot survive into the next owner's hold; see
+        // `recursion_discards_count`.
+        if entry.lock_count != 0 {
+            self.recursion_discards_count = self.recursion_discards_count.wrapping_add(1);
+        }
         entry.lock_count = 0;
         match entry.waiters.dequeue_one() {
             Some(new_owner) => {

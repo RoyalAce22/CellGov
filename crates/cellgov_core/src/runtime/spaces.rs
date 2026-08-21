@@ -22,9 +22,10 @@
 //! [`ReservationTable`], and the commit pipeline's clear-sweeps run
 //! against the emitting unit's table only -- equal numeric addresses
 //! in different spaces are different memory and never alias. The one
-//! cross-space path is a shared mapping: replicating a committed
-//! write into a sibling view also clears reservations covering the
-//! translated range in that view's space. DMA stays space 0 end to
+//! cross-space path is a shared mapping: both replicating a committed
+//! write into a sibling view and seeding a view when the segment
+//! promotes clear reservations covering the translated range in that
+//! view's space. DMA stays space 0 end to
 //! end (payloads land in `Runtime::memory`, the completion sweep
 //! hits the space-0 table).
 
@@ -77,6 +78,13 @@ pub(super) struct SpaceTable {
     pub(super) shared: BTreeMap<u64, SharedMapping>,
     /// Unit -> space; absent means space 0.
     pub(super) unit_spaces: BTreeMap<UnitId, AddressSpaceId>,
+    /// Keyed-shm install history: ipc key -> (segment size, views in
+    /// map order). Pre-registration bookkeeping only -- a keyed map
+    /// promotes into `shared` the moment a second address space
+    /// attaches. Excluded from `metadata_hash` and `is_empty`:
+    /// single-space entries are derivable from the install stream and
+    /// must not perturb single-process boot hashes.
+    pub(super) keyed_installs: BTreeMap<u64, (u64, Vec<(AddressSpaceId, u64)>)>,
     /// Child-space reservation tables, keyed 1:1 with `extra`;
     /// space 0's table is `Runtime::reservations`.
     pub(super) extra_reservations: BTreeMap<AddressSpaceId, ReservationTable>,
@@ -425,6 +433,189 @@ impl Runtime {
             },
         );
         Ok(())
+    }
+
+    /// Record a keyed-shm window install (334 / 337 drain) and keep
+    /// views of one segment coherent across address spaces.
+    ///
+    /// Single-space maps only book-keep: the mapping registers in
+    /// [`SpaceTable::shared`] the moment a second address space
+    /// attaches, adopting every recorded view (their regions are
+    /// already installed by the drain) and seeding each of them from
+    /// the first view -- an attach must observe content written
+    /// before it, and a repeat map inside the first space got its own
+    /// zero-filled region rather than the segment's bytes. Later
+    /// attaches append to the live mapping the same way.
+    /// Single-process boots therefore never touch the shared table.
+    pub(super) fn attach_keyed_shm_view(
+        &mut self,
+        key: u64,
+        size: u64,
+        space: AddressSpaceId,
+        base: u64,
+    ) {
+        // A live mapping's size is the segment's size; a view of a
+        // different length is not a view of this segment, and
+        // appending it would corrupt every later containment test.
+        if let Some(mapping) = self.spaces.shared.get(&key) {
+            if mapping.size != size {
+                self.lv2_host.log_invariant_break(
+                    "spaces.keyed_shm_size_drift",
+                    format_args!(
+                        "keyed shm 0x{key:016x} mapped with size 0x{size:x} against a live \
+                         mapping of size 0x{0:x}; view at 0x{base:x} left unreplicated",
+                        mapping.size,
+                    ),
+                );
+                return;
+            }
+        }
+        let entry = self
+            .spaces
+            .keyed_installs
+            .entry(key)
+            .or_insert((size, Vec::new()));
+        if entry.0 != size {
+            self.lv2_host.log_invariant_break(
+                "spaces.keyed_shm_size_drift",
+                format_args!(
+                    "keyed shm 0x{key:016x} mapped with size 0x{size:x} after size \
+                     0x{0:x}; view at 0x{base:x} left unreplicated",
+                    entry.0,
+                ),
+            );
+            return;
+        }
+        entry.1.push((space, base));
+        if self.spaces.shared.contains_key(&key) {
+            self.adopt_shared_view(key, size, space, base);
+            return;
+        }
+        let distinct_spaces: std::collections::BTreeSet<AddressSpaceId> =
+            entry.1.iter().map(|&(s, _)| s).collect();
+        if distinct_spaces.len() < 2 {
+            return;
+        }
+        let views = self
+            .spaces
+            .keyed_installs
+            .get(&key)
+            .expect("entry inserted above")
+            .1
+            .clone();
+        // Validate every view before mutating anything: each region
+        // was installed by its own drain, so a miss here means the
+        // install stream and this bookkeeping diverged.
+        for &(view_space, view_base) in &views {
+            if !self.shared_view_backed(view_space, view_base, size) {
+                self.lv2_host.log_invariant_break(
+                    "spaces.keyed_shm_view_unbacked",
+                    format_args!(
+                        "keyed shm 0x{key:016x}: view at 0x{view_base:x}+0x{size:x} in \
+                         space {} has no backing region; replication not registered",
+                        view_space.raw(),
+                    ),
+                );
+                return;
+            }
+        }
+        // Every view is one map of the same segment -- the kernel
+        // installs one backing store at each mapped address (RPCS3
+        // sys_mmapper.cpp sys_mmapper_map_shared_memory maps the
+        // handle's shm object into every window it claims). Until
+        // promotion each view was an independent zero-filled region,
+        // so bring them ALL up to the first view's content, not just
+        // the one attaching now: a repeat map inside the first space
+        // would otherwise stay silently stale forever.
+        let (first, rest) = views.split_first().expect("promotion needs two views");
+        for &view in rest {
+            self.copy_shared_segment(*first, view, size);
+        }
+        self.spaces
+            .shared
+            .insert(key, SharedMapping { size, views });
+    }
+
+    /// Append one view to a live keyed mapping, seeding it from the
+    /// mapping's first view.
+    fn adopt_shared_view(&mut self, key: u64, size: u64, space: AddressSpaceId, base: u64) {
+        if !self.shared_view_backed(space, base, size) {
+            self.lv2_host.log_invariant_break(
+                "spaces.keyed_shm_view_unbacked",
+                format_args!(
+                    "keyed shm 0x{key:016x}: attaching view at 0x{base:x}+0x{size:x} in \
+                     space {} has no backing region; view not added",
+                    space.raw(),
+                ),
+            );
+            return;
+        }
+        let first = self.spaces.shared[&key].views[0];
+        self.copy_shared_segment(first, (space, base), size);
+        self.spaces
+            .shared
+            .get_mut(&key)
+            .expect("caller checked the key is live")
+            .views
+            .push((space, base));
+    }
+
+    /// Whether `space` has one `ReadWrite` region wholly containing
+    /// `[base, base+size)`. Read-only or reserved backing does not
+    /// count: [`Runtime::copy_shared_segment`] reads and writes the
+    /// whole window, and a non-`ReadWrite` region would fail both.
+    fn shared_view_backed(&self, space: AddressSpaceId, base: u64, size: u64) -> bool {
+        let mem = match space {
+            AddressSpaceId::BOOT => &self.memory,
+            s => match self.spaces.extra.get(&s) {
+                Some(m) => m,
+                None => return false,
+            },
+        };
+        mem.containing_region(base, size)
+            .is_some_and(|r| r.access() == cellgov_mem::RegionAccess::ReadWrite)
+    }
+
+    /// Copy the segment bytes visible through `src` into `dst`, and
+    /// drop the reservations `dst`'s space holds over the rewritten
+    /// bytes. No-op for the trivial self-copy.
+    fn copy_shared_segment(
+        &mut self,
+        src: (AddressSpaceId, u64),
+        dst: (AddressSpaceId, u64),
+        size: u64,
+    ) {
+        if src == dst {
+            return;
+        }
+        let src_range = ByteRange::new(GuestAddr::new(src.1), size).expect("validated view range");
+        let bytes: Vec<u8> = {
+            let mem = match src.0 {
+                AddressSpaceId::BOOT => &self.memory,
+                s => self.spaces.extra.get(&s).expect("validated view space"),
+            };
+            mem.read(src_range)
+                .expect("validated backing region is readable")
+                .to_vec()
+        };
+        let dst_range = ByteRange::new(GuestAddr::new(dst.1), size).expect("validated view range");
+        let (mem, dst_reservations) = match dst.0 {
+            AddressSpaceId::BOOT => (&mut self.memory, &mut self.reservations),
+            s => (
+                self.spaces.extra.get_mut(&s).expect("validated view space"),
+                self.spaces
+                    .extra_reservations
+                    .get_mut(&s)
+                    .expect("reservation table is created with its space"),
+            ),
+        };
+        mem.apply_commit(dst_range, &bytes)
+            .expect("validated backing region accepts the segment write");
+        // Seeding rewrites the destination view's bytes, so it
+        // invalidates every reservation covering them -- the same rule
+        // `fanout_shared_writes` applies to a replicated store, and
+        // the module's cross-space reservation contract.
+        dst_reservations.clear_covering(dst.1, size, None);
     }
 
     /// Replicate committed writes that landed in a shared view into
