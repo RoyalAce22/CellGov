@@ -16,8 +16,9 @@ use super::title::{resolve_checkpoint_override, resolve_ps3_vfs_root, resolve_ti
 use game::BENCH_AGREEMENT_GATE_PCT;
 
 /// Where `cellgov_install install` lands the sys/external firmware
-/// SPRXes by default.
-const DEFAULT_FIRMWARE_DIR: &str = "firmware/sys/external";
+/// SPRXes by default: the `dev_flash` mount of the VFS root, beside
+/// the `dev_hdd0` / `dev_bdvd` mounts the game installers populate.
+const DEFAULT_FIRMWARE_DIR: &str = "vfs/dev_flash/sys/external";
 
 /// Set by synthetic harnesses (e.g. ps3autotests) to suppress the
 /// auto-default.

@@ -13,8 +13,9 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 /// Build a TTY log file with the framed protocol: CGOV + len + payload.
 fn write_tty_log(prefix: &[u8], payload: &[u8], suffix: &[u8]) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join("cellgov_rpcs3_test");
-    std::fs::create_dir_all(&dir).ok();
+    let dir = std::env::temp_dir().join(format!("cellgov_rpcs3_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("scratch dir {} not creatable: {e}", dir.display()));
     let path = dir.join(format!("tty_{n}.log"));
     let mut f = std::fs::File::create(&path).expect("create tty");
     f.write_all(prefix).expect("write prefix");
@@ -76,8 +77,9 @@ fn parse_tty_log_finds_tag_after_noise() {
 #[test]
 fn parse_tty_log_no_magic_returns_error() {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join("cellgov_rpcs3_test");
-    std::fs::create_dir_all(&dir).ok();
+    let dir = std::env::temp_dir().join(format!("cellgov_rpcs3_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("scratch dir {} not creatable: {e}", dir.display()));
     let path = dir.join(format!("tty_nomag_{n}.log"));
     std::fs::write(&path, b"just some TTY noise\n").expect("write");
     let result = parse_tty_log(&path, &[tty_region("r", 4, 0)]);
@@ -88,8 +90,9 @@ fn parse_tty_log_no_magic_returns_error() {
 #[test]
 fn parse_tty_log_truncated_payload_returns_error() {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join("cellgov_rpcs3_test");
-    std::fs::create_dir_all(&dir).ok();
+    let dir = std::env::temp_dir().join(format!("cellgov_rpcs3_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("scratch dir {} not creatable: {e}", dir.display()));
     let path = dir.join(format!("tty_trunc_{n}.log"));
     let mut f = std::fs::File::create(&path).expect("create");
     f.write_all(TTY_MAGIC).expect("magic");

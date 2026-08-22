@@ -2,25 +2,11 @@
 //! a minimal PARAM.SFO emitter and a retail-PKG emitter. Compiled
 //! only under `cfg(test)`.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-
 use aes::cipher::{BlockEncrypt, KeyInit};
 use cellgov_ps3_abi::sce::PKG_AES_KEY;
 
 /// `format::string` tag.
 const SFO_FMT_STRING: u16 = 0x0204;
-
-static SCRATCH_SEQ: AtomicU32 = AtomicU32::new(0);
-
-/// A fresh, empty scratch directory unique to this process + call, for
-/// install/uninstall filesystem tests.
-pub fn scratch() -> PathBuf {
-    let n = SCRATCH_SEQ.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("cellgov_game_test_{}_{}", std::process::id(), n));
-    std::fs::create_dir_all(&dir).expect("scratch dir");
-    dir
-}
 
 /// Build a minimal PARAM.SFO holding the given string entries (the
 /// keys the installer reads). Layout matches the real format: `\0PSF`

@@ -1,13 +1,15 @@
 //! Bit-identical parity test for the SELF decryption pipeline.
 //!
-//! For each module in [`MODULES`], decrypt `<name>.sprx` and bit-
-//! compare against the `<name>.prx` reference.
+//! For each module in [`MODULES`], decrypt `<name>.sprx` from the
+//! CellGov firmware install and compare against the committed RPCS3
+//! reference digest. The expected value is data
+//! (`tests/fixtures/rpcs3_digests/digests.txt`), not a live RPCS3
+//! install tree, so the only fixture a run needs is the encrypted
+//! firmware CellGov installed itself.
 //!
 //! # Configuration
 //!
-//! - `CELLGOV_FIRMWARE_DIR` (default: `firmware/sys/external`).
-//! - `CELLGOV_DECRYPTED_REF_DIR` (default:
-//!   `tools/rpcs3/dev_flash_decrypted/sys/external`).
+//! - `CELLGOV_FIRMWARE_DIR` (default: `vfs/dev_flash/sys/external`).
 //! - `CELLGOV_REQUIRE_PARITY_FIXTURES=1` makes missing fixtures fail
 //!   instead of skip.
 
@@ -22,12 +24,13 @@
 
 use std::path::{Path, PathBuf};
 
+#[path = "common/digests.rs"]
+mod digests;
+
 const ENV_FIRMWARE_DIR: &str = "CELLGOV_FIRMWARE_DIR";
-const ENV_DECRYPTED_REF_DIR: &str = "CELLGOV_DECRYPTED_REF_DIR";
 const ENV_REQUIRE_FIXTURES: &str = "CELLGOV_REQUIRE_PARITY_FIXTURES";
 
-const DEFAULT_FIRMWARE_DIR: &str = "firmware/sys/external";
-const DEFAULT_REF_DIR: &str = "tools/rpcs3/dev_flash_decrypted/sys/external";
+const DEFAULT_FIRMWARE_DIR: &str = "vfs/dev_flash/sys/external";
 
 /// Module stems present as both `<stem>.sprx` and `<stem>.prx`.
 const MODULES: &[&str] = &[
@@ -65,60 +68,57 @@ fn require_fixtures() -> bool {
     }
 }
 
-/// Returns `None` when either fixture dir is absent;
+/// Returns `None` when the installed firmware is absent;
 /// `CELLGOV_REQUIRE_PARITY_FIXTURES=1` promotes that to a panic.
-fn locate_fixtures() -> Option<(PathBuf, PathBuf)> {
+///
+/// Only the encrypted half is a fixture -- the expected plaintext is
+/// a committed digest, not a directory.
+fn locate_fixtures() -> Option<PathBuf> {
     let encrypted = dir_from_env_or_default(ENV_FIRMWARE_DIR, DEFAULT_FIRMWARE_DIR);
-    let reference = dir_from_env_or_default(ENV_DECRYPTED_REF_DIR, DEFAULT_REF_DIR);
-    if !encrypted.is_dir() || !reference.is_dir() {
+    if !encrypted.is_dir() {
         if require_fixtures() {
             panic!(
-                "{ENV_REQUIRE_FIXTURES} set but fixtures missing: \
-                 encrypted={} (exists={}), reference={} (exists={})",
+                "{ENV_REQUIRE_FIXTURES} set but the encrypted firmware is missing: {}",
                 encrypted.display(),
-                encrypted.is_dir(),
-                reference.display(),
-                reference.is_dir(),
             );
         }
         eprintln!(
-            "cellgov_install parity: skipping (encrypted={}, reference={}; \
-             set {ENV_FIRMWARE_DIR} / {ENV_DECRYPTED_REF_DIR} or run \
-             `cellgov_install install` to populate)",
+            "cellgov_install parity: skipping (encrypted={} absent; \
+             set {ENV_FIRMWARE_DIR} or run `cellgov_install install` \
+             to populate)",
             encrypted.display(),
-            reference.display(),
         );
         return None;
     }
-    Some((encrypted, reference))
+    Some(encrypted)
 }
 
-/// Returns `true` when the pair was actually compared.
-fn decrypt_and_compare(
-    stem: &str,
-    encrypted_dir: &Path,
-    reference_dir: &Path,
-    require: bool,
-) -> bool {
+/// Returns `true` when the module was actually compared.
+///
+/// The expected value is the committed masked digest, so only the encrypted
+/// half is a fixture: RPCS3's plaintext was captured once rather than
+/// read from an install tree at test time.
+fn decrypt_and_compare(stem: &str, encrypted_dir: &Path, require: bool) -> bool {
     let sprx_path = encrypted_dir.join(format!("{stem}.sprx"));
-    let prx_path = reference_dir.join(format!("{stem}.prx"));
-    if !sprx_path.is_file() || !prx_path.is_file() {
+    let expected = digests::table();
+    let key = format!("decrypted_masked/{stem}");
+    let Some(expected) = expected.get(&key) else {
+        panic!(
+            "{stem}: no committed reference digest under key {key:?}; \
+             see tests/fixtures/rpcs3_digests/README.md"
+        );
+    };
+    if !sprx_path.is_file() {
         if require {
             panic!(
-                "{ENV_REQUIRE_FIXTURES} set but ({stem}) fixture half missing: \
-                 sprx={} exists={}, prx={} exists={}",
+                "{ENV_REQUIRE_FIXTURES} set but ({stem}) encrypted fixture missing: \
+                 sprx={}",
                 sprx_path.display(),
-                sprx_path.is_file(),
-                prx_path.display(),
-                prx_path.is_file(),
             );
         }
         eprintln!(
-            "cellgov_install parity ({stem}): skipping (sprx={} exists={}, prx={} exists={})",
+            "cellgov_install parity ({stem}): skipping (sprx={} absent)",
             sprx_path.display(),
-            sprx_path.is_file(),
-            prx_path.display(),
-            prx_path.is_file(),
         );
         return false;
     }
@@ -130,7 +130,6 @@ fn decrypt_and_compare(
         "{stem}: decrypt produced {} bytes, < ELF64 header",
         decrypted.len()
     );
-    let mut reference = std::fs::read(&prx_path).unwrap();
     // Shape-check the SPRX inner ELF: this corpus ships with
     // e_shoff = 0 and `decrypt_self_to_elf` copies it verbatim.
     assert_eq!(
@@ -149,48 +148,37 @@ fn decrypt_and_compare(
         "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shstrndx"
     );
     cellgov_install::sce::mask_non_semantic_elf_bytes(&mut decrypted);
-    cellgov_install::sce::mask_non_semantic_elf_bytes(&mut reference);
+    let got = digests::sha256_bytes(&decrypted);
     assert_eq!(
+        &got,
+        expected,
+        "{stem}: CellGov's decrypt diverges from the RPCS3 reference \
+         ({} bytes produced). Investigate the divergence rather than \
+         re-blessing; see tests/fixtures/rpcs3_digests/README.md",
         decrypted.len(),
-        reference.len(),
-        "{stem}: decrypt-length mismatch (decrypt produced {} bytes, reference is {} bytes)",
-        decrypted.len(),
-        reference.len(),
     );
-    if decrypted != reference {
-        let first_diff = decrypted
-            .iter()
-            .zip(reference.iter())
-            .position(|(a, b)| a != b)
-            .expect("buffers differ but no differing byte found");
-        panic!(
-            "{stem}: byte mismatch at offset 0x{first_diff:x} \
-             (decrypted=0x{:02x}, reference=0x{:02x})",
-            decrypted[first_diff], reference[first_diff],
-        );
-    }
     true
 }
 
 #[test]
 fn firmware_prx_decrypt_matches_pre_decrypted_reference() {
-    let Some((encrypted_dir, reference_dir)) = locate_fixtures() else {
+    let Some(encrypted_dir) = locate_fixtures() else {
         return;
     };
     let require = require_fixtures();
     let mut compared = 0usize;
     for stem in MODULES {
-        if decrypt_and_compare(stem, &encrypted_dir, &reference_dir, require) {
+        if decrypt_and_compare(stem, &encrypted_dir, require) {
             compared += 1;
         }
     }
-    // Anti-vacuity floor: both fixture dirs exist, so a run that
-    // compared nothing (e.g. a renamed reference tree) must not pass
-    // as if it verified the pipeline.
+    // Anti-vacuity floor: the firmware dir exists, so a run that
+    // compared nothing (e.g. a renamed module set) must not pass as
+    // if it verified the pipeline.
     assert!(
         compared > 0,
-        "both parity fixture dirs exist but none of the {} module pairs was \
-         present to compare; the fixture layout has drifted",
+        "the firmware dir exists but none of the {} modules was present \
+         to compare; the fixture layout has drifted",
         MODULES.len()
     );
     eprintln!(
@@ -199,8 +187,8 @@ fn firmware_prx_decrypt_matches_pre_decrypted_reference() {
     );
 }
 
-// Game-title SELF byte-identity gates. Oracles live in
-// `tests/parity_oracles.toml`; one row per content_id. NPDRM rows
+// Game-title SELF byte-identity gates. Expected hashes live in
+// `tests/parity_digests.toml`; one row per content_id. NPDRM rows
 // (flOw / SSHD) carry RPCS3-derived unmasked + masked SHA-256
 // hashes; APP rows (WipEout) carry a CellGov-derived
 // refactor-invariance baseline (unmasked only).
@@ -213,12 +201,12 @@ fn workspace_root() -> PathBuf {
 }
 
 #[derive(Deserialize)]
-struct OracleManifest {
-    title: Vec<Oracle>,
+struct DigestManifest {
+    title: Vec<TitleDigest>,
 }
 
 #[derive(Deserialize)]
-struct Oracle {
+struct TitleDigest {
     content_id: String,
     display: String,
     key: String,
@@ -227,11 +215,11 @@ struct Oracle {
     masked_sha256: Option<String>,
 }
 
-fn load_oracles() -> Vec<Oracle> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_oracles.toml");
+fn load_title_digests() -> Vec<TitleDigest> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_digests.toml");
     let s =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let parsed: OracleManifest =
+    let parsed: DigestManifest =
         toml::from_str(&s).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
     parsed.title
 }
@@ -250,20 +238,48 @@ fn bin_path_for(content_id: &str, key: &str) -> PathBuf {
     let ws = workspace_root();
     match key {
         "npdrm" => ws
-            .join("tools/rpcs3/dev_hdd0/game")
+            .join("vfs/dev_hdd0/game")
             .join(content_id)
             .join("USRDIR/EBOOT.BIN"),
         "app" => ws
-            .join("tools/rpcs3/dev_bdvd")
+            .join("vfs/dev_bdvd")
             .join(content_id)
             .join("PS3_GAME/USRDIR/EBOOT.BIN"),
         other => panic!("{content_id}: unknown key {other:?}"),
     }
 }
 
+/// The directory `install-game` / `install-iso` creates for a title.
+///
+/// Its presence separates "this title is not installed" (a documented
+/// skip) from "the EBOOT path this test derives no longer matches
+/// where the installer writes" (drift that must be loud).
+fn title_dir_for(content_id: &str, key: &str) -> PathBuf {
+    let ws = workspace_root();
+    match key {
+        "npdrm" => ws.join("vfs/dev_hdd0/game").join(content_id),
+        "app" => ws.join("vfs/dev_bdvd").join(content_id),
+        other => panic!("{content_id}: unknown key {other:?}"),
+    }
+}
+
+/// Refuse a skip that only looks like an absent fixture.
+fn assert_not_installed(entry: &TitleDigest, bin_path: &Path) {
+    let title_dir = title_dir_for(&entry.content_id, &entry.key);
+    assert!(
+        bin_path.is_file() || !title_dir.is_dir(),
+        "{} is installed under {} but the pinned EBOOT {} resolved \
+         nothing: the derived path has drifted from where the \
+         installer writes",
+        entry.display,
+        title_dir.display(),
+        bin_path.display(),
+    );
+}
+
 fn rap_path_for(rap_filename: &str) -> PathBuf {
     workspace_root()
-        .join("tools/rpcs3/dev_hdd0/home/00000001/exdata")
+        .join("vfs/dev_hdd0/home/00000001/exdata")
         .join(rap_filename)
 }
 
@@ -275,17 +291,19 @@ fn rap_path_for(rap_filename: &str) -> PathBuf {
 /// requires the section tables to coincide. See
 /// [`cellgov_install::sce::mask_non_semantic_elf_bytes`] for the
 /// section-vs-segment split.
-fn run_npdrm_oracle(oracle: &Oracle) {
-    let title = &oracle.display;
-    let bin_path = bin_path_for(&oracle.content_id, &oracle.key);
-    let rap_filename = oracle.rap_filename.as_ref().unwrap_or_else(|| {
-        panic!("{title}: npdrm oracle requires rap_filename in parity_oracles.toml")
+///
+/// Returns `true` when the title was actually compared.
+fn run_npdrm_digest_check(entry: &TitleDigest) -> bool {
+    let title = &entry.display;
+    let bin_path = bin_path_for(&entry.content_id, &entry.key);
+    let rap_filename = entry.rap_filename.as_ref().unwrap_or_else(|| {
+        panic!("{title}: npdrm row requires rap_filename in parity_digests.toml")
     });
     let rap_path = rap_path_for(rap_filename);
     if !bin_path.is_file() || !rap_path.is_file() {
         if require_fixtures() {
             panic!(
-                "{ENV_REQUIRE_FIXTURES} set but ({title}) oracle fixture missing: \
+                "{ENV_REQUIRE_FIXTURES} set but ({title}) fixture missing: \
                  bin={} exists={}, rap={} exists={}",
                 bin_path.display(),
                 bin_path.is_file(),
@@ -293,16 +311,17 @@ fn run_npdrm_oracle(oracle: &Oracle) {
                 rap_path.is_file(),
             );
         }
+        assert_not_installed(entry, &bin_path);
         eprintln!(
             "cellgov_install C.2 ({title}): skipping; missing {} or {}",
             bin_path.display(),
             rap_path.display(),
         );
-        return;
+        return false;
     }
-    let expected_unmasked = hex_to_bytes32(&oracle.unmasked_sha256, &format!("{title} unmasked"));
-    let expected_masked_hex = oracle.masked_sha256.as_ref().unwrap_or_else(|| {
-        panic!("{title}: npdrm oracle requires masked_sha256 in parity_oracles.toml")
+    let expected_unmasked = hex_to_bytes32(&entry.unmasked_sha256, &format!("{title} unmasked"));
+    let expected_masked_hex = entry.masked_sha256.as_ref().unwrap_or_else(|| {
+        panic!("{title}: npdrm row requires masked_sha256 in parity_digests.toml")
     });
     let expected_masked = hex_to_bytes32(expected_masked_hex, &format!("{title} masked"));
 
@@ -326,20 +345,20 @@ fn run_npdrm_oracle(oracle: &Oracle) {
 
     let got_unmasked: [u8; 32] = Sha256::digest(&elf).into();
     if got_unmasked == expected_unmasked {
-        eprintln!("{title}: byte-identical to RPCS3 oracle (unmasked)");
-        return;
+        eprintln!("{title}: byte-identical to the RPCS3 reference (unmasked)");
+        return true;
     }
     cellgov_install::sce::mask_non_semantic_elf_bytes(&mut elf);
     let got_masked: [u8; 32] = Sha256::digest(&elf).into();
     if got_masked == expected_masked {
         eprintln!(
-            "{title}: byte-identical to RPCS3 oracle (masked; \
+            "{title}: byte-identical to the RPCS3 reference (masked; \
              section-header layout is non-semantic)"
         );
-        return;
+        return true;
     }
     panic!(
-        "{title}: CellGov decrypt diverges from RPCS3 oracle:\n  \
+        "{title}: CellGov decrypt diverges from the RPCS3 reference:\n  \
          got unmasked = {}\n  exp unmasked = {}\n  got masked   = {}\n  exp masked   = {}",
         hex_str(&got_unmasked),
         hex_str(&expected_unmasked),
@@ -348,24 +367,26 @@ fn run_npdrm_oracle(oracle: &Oracle) {
     );
 }
 
-fn run_app_oracle(oracle: &Oracle) {
-    let title = &oracle.display;
-    let bin_path = bin_path_for(&oracle.content_id, &oracle.key);
+/// Returns `true` when the title was actually compared.
+fn run_app_digest_check(entry: &TitleDigest) -> bool {
+    let title = &entry.display;
+    let bin_path = bin_path_for(&entry.content_id, &entry.key);
     if !bin_path.is_file() {
         if require_fixtures() {
             panic!(
-                "{ENV_REQUIRE_FIXTURES} set but ({title}) oracle fixture missing: \
+                "{ENV_REQUIRE_FIXTURES} set but ({title}) fixture missing: \
                  bin={}",
                 bin_path.display(),
             );
         }
+        assert_not_installed(entry, &bin_path);
         eprintln!(
             "cellgov_install C.2 ({title}): skipping; missing {}",
             bin_path.display()
         );
-        return;
+        return false;
     }
-    let expected = hex_to_bytes32(&oracle.unmasked_sha256, &format!("{title} unmasked"));
+    let expected = hex_to_bytes32(&entry.unmasked_sha256, &format!("{title} unmasked"));
     let bin = std::fs::read(&bin_path).unwrap();
     let elf = cellgov_install::sce::decrypt_self_to_elf(&bin)
         .unwrap_or_else(|e| panic!("{title}: APP decrypt failed: {e}"));
@@ -383,6 +404,7 @@ fn run_app_oracle(oracle: &Oracle) {
         hex_str(&got),
         hex_str(&expected),
     );
+    true
 }
 
 fn hex_str(bytes: &[u8]) -> String {
@@ -390,20 +412,33 @@ fn hex_str(bytes: &[u8]) -> String {
 }
 
 #[test]
-fn eboot_byte_identity_against_oracles() {
-    let oracles = load_oracles();
+fn eboot_byte_identity_against_committed_digests() {
+    let titles = load_title_digests();
     assert!(
-        !oracles.is_empty(),
-        "parity_oracles.toml must declare at least one [[title]] entry"
+        !titles.is_empty(),
+        "parity_digests.toml must declare at least one [[title]] entry"
     );
-    for oracle in &oracles {
-        match oracle.key.as_str() {
-            "npdrm" => run_npdrm_oracle(oracle),
-            "app" => run_app_oracle(oracle),
+    let mut compared = 0usize;
+    for entry in &titles {
+        let checked = match entry.key.as_str() {
+            "npdrm" => run_npdrm_digest_check(entry),
+            "app" => run_app_digest_check(entry),
             other => panic!(
-                "{}: unknown key {:?} in parity_oracles.toml",
-                oracle.content_id, other
+                "{}: unknown key {:?} in parity_digests.toml",
+                entry.content_id, other
             ),
+        };
+        if checked {
+            compared += 1;
         }
     }
+    // Anti-vacuity lives per title, in `assert_not_installed`: a title
+    // whose install directory is present while the derived EBOOT path
+    // resolves nothing fails there. Gating on `vfs/` instead would
+    // fail a firmware-only VFS, which `cellgov_install install`
+    // produces without writing any title.
+    eprintln!(
+        "cellgov_install C.2: compared {compared}/{} titles",
+        titles.len()
+    );
 }

@@ -3,9 +3,10 @@
 //! Two consumers share one pipeline: the `cellgov_install` binary's
 //! `install` subcommand peels the outer SCE/PUP wrapping at install
 //! time, and `cellgov_cli`'s boot path calls
-//! [`sce::decrypt_self_to_elf`] (APP-keyed) or
-//! [`npdrm::decrypt_self_to_elf_auto`] (auto-detect APP vs NPDRM) to
-//! peel the inner SELF at load time.
+//! [`self_image::to_plaintext_elf`] to peel the inner SELF at load
+//! time. That wrapper routes to [`sce::decrypt_self_to_elf`]
+//! (APP-keyed) or [`npdrm::decrypt_self_to_elf_auto`] (auto-detect
+//! APP vs NPDRM) according to the caller's declared key policy.
 //!
 //! APP-keyed firmware SELFs and RAP-driven NPDRM SELFs are in scope.
 //! RIF-only paths (act.dat / IDPS console-identity derivation) and
@@ -29,7 +30,11 @@ pub mod param_sfo;
 pub mod pkg;
 pub mod pup;
 pub mod sce;
+pub mod self_image;
 pub mod tar;
+
+#[cfg(test)]
+pub(crate) mod scratch_dir;
 
 #[cfg(test)]
 pub(crate) mod test_support;

@@ -20,8 +20,8 @@ backward edges. `cellgov_ps3_abi` is the data-only leaf for PS3
 ABI source-of-truth values (NIDs, errnos, struct layouts, syscall
 numbers, ELF/PRX layout, hardware constants); it depends on nothing
 in the workspace and is depended on by every layer that consumes
-PS3 ABI literals. `cellgov_install` is fully standalone (no
-workspace library dependencies); `cellgov_mkelf` likewise.
+PS3 ABI literals -- `cellgov_install` and `cellgov_mkelf` included,
+which take that one dependency and no other.
 
 ```mermaid
 graph BT
@@ -59,6 +59,8 @@ graph BT
   ps3_abi --> spu
   ps3_abi --> core
   ps3_abi --> cli
+  ps3_abi --> firmware
+  ps3_abi --> mkelf
 
   time --> event
   time --> mem
@@ -101,7 +103,6 @@ graph BT
 
   ppu ~~~ spu
   firmware --> cli
-  firmware ~~~ mkelf
 ```
 
 Four structural rules worth calling out:
@@ -120,8 +121,11 @@ Four structural rules worth calling out:
   and `decrypt-self` subcommands; the library exposes the same PUP
   / SCE / SELF / TAR / APP-key primitives. `cellgov_cli` takes a
   library dependency to decrypt SCE-wrapped SELFs on the fly at
-  boot time. The crypto crates (`aes`, `cbc`, `ctr`, `hmac`,
-  `sha1`, `flate2`) are pulled by `cellgov_install` alone.
+  boot time, through `self_image::to_plaintext_elf` -- the one
+  place that probes for the SCE wrapper and routes to the APP-keyed
+  or klicensee-resolving decrypt according to the caller's declared
+  `KeyPolicy`. The crypto crates (`aes`, `cbc`, `ctr`, `hmac`,
+  `sha1`, `sha2`, `flate2`) are pulled by `cellgov_install` alone.
 
 External dependencies are minimal: `serde`, `serde_json`, and `toml`
 in `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore`
@@ -1488,7 +1492,7 @@ NPUA80068`), or explicit manifest path (`--title-manifest
   in memory at boot through `cellgov_install::sce::decrypt_self_to_elf`.
 - **System shell** (`vsh`): not a game. A `[source] kind =
   "firmware-exec"` block points the resolver at the firmware image
-  itself (`firmware/vsh/module/vsh.self`) rather than at any
+  itself (`vfs/dev_flash/vsh/module/vsh.self`) rather than at any
   installed-game layout, so the shell boots as an ordinary guest
   process with no install step. It is the one entry that exercises
   the privileged paths described under "Process privilege"; its
@@ -1569,7 +1573,7 @@ SCE-wrapped (`SCE\0` magic is dispatched to
 runs the PPU at the mode's default step budget (256; `--budget`
 overrides). When
 `--firmware-dir` resolves to a directory holding the firmware
-SPRX modules (it auto-defaults to `firmware/sys/external/` if
+SPRX modules (it auto-defaults to `vfs/dev_flash/sys/external/` if
 that exists), the boot path scans every module in the install,
 derives the title's load set
 (`prx_loader::selection::select_import_closure`: a game takes

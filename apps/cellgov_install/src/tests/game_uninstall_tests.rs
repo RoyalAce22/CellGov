@@ -7,7 +7,7 @@ use super::*;
 use crate::game_install::{
     sha256_of, InstallRecord, RapRecord, SourceRecord, TitleRecord, INSTALL_RECORD_FORMAT_VERSION,
 };
-use crate::test_support::scratch;
+use crate::scratch_dir::scratch;
 
 /// Hand-write a game tree + RAP + install record under `out`/`installs`
 /// (uninstall is record-driven and needs no decryptable EBOOT).

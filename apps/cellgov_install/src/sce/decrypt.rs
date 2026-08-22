@@ -31,6 +31,17 @@ pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, SceError> {
 /// that verifies signatures.
 pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
+    // High bit of revision_flags marks an unencrypted debug SELF.
+    // `decrypt_envelope` skips both the key peel and the padding check
+    // for one, so without this guard the still-encrypted envelope bytes
+    // would be used as key material and the refusal would surface as an
+    // unrelated truncation error further down. The NPDRM entry point
+    // refuses the same shape.
+    if hdr.revision_flags & 0x8000 != 0 {
+        return Err(SceError::DebugSelfUnsupported {
+            revision_flags: hdr.revision_flags,
+        });
+    }
     let revision = hdr.revision_flags & 0x7FFF;
     let key =
         crate::crypto::app_key_for_revision(revision).ok_or(SceError::NoAppKey { revision })?;

@@ -1,5 +1,6 @@
 //! Decrypted-sections -> plaintext run-image assembly.
 
+use cellgov_ps3_abi::elf::ELF_MAGIC_U32;
 use cellgov_ps3_abi::sce::SCE_SECTION_KIND_PHDR;
 
 use super::error::SceError;
@@ -39,7 +40,7 @@ pub(crate) fn assemble_elf_from_sections(
         });
     }
     let inner_magic = read_be_u32(data, ehdr_offset);
-    if inner_magic != 0x7F45_4C46 {
+    if inner_magic != ELF_MAGIC_U32 {
         return Err(SceError::InnerElfBadMagic { got: inner_magic });
     }
     // Field offsets below assume ELFCLASS64 (the only value PS3 SELFs use).
@@ -93,7 +94,16 @@ pub(crate) fn assemble_elf_from_sections(
         }
     }
     let shdr_table_bytes = checked_mul_oob(e_shnum, e_shentsize, "SELF section headers")?;
-    if shdr_offset_in_self != 0 && e_shnum > 0 {
+    // A null `e_shoff` with a non-zero `e_shnum` leaves the
+    // section-header table nowhere to land -- copying it to offset 0
+    // would overwrite the ELF header and surface as a
+    // `ReconstructedBadMagic` refusal. The table is not part of the
+    // run image (see [`mask_non_semantic_elf_bytes`]), so the shape is
+    // dropped rather than placed, matching RPCS3 `unself.cpp`
+    // `SELFDecrypter::LoadHeaders`, which skips the section-header
+    // load on the same condition.
+    let place_shdr_table = shdr_offset_in_self != 0 && e_shnum > 0 && e_shoff != 0;
+    if place_shdr_table {
         let shdr_end = checked_add_oob(e_shoff, shdr_table_bytes, "SELF section headers")?;
         if shdr_end > elf_size {
             elf_size = shdr_end;
@@ -119,7 +129,7 @@ pub(crate) fn assemble_elf_from_sections(
     // original value may differ from 0x40.
     elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
 
-    if shdr_offset_in_self != 0 && e_shnum > 0 {
+    if place_shdr_table {
         elf[e_shoff..e_shoff + shdr_table_bytes]
             .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_table_bytes]);
     }
@@ -167,7 +177,7 @@ pub(crate) fn assemble_elf_from_sections(
     }
 
     let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
-    if magic != 0x7F454C46 {
+    if magic != ELF_MAGIC_U32 {
         return Err(SceError::ReconstructedBadMagic { got: magic });
     }
 

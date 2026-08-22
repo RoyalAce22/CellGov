@@ -86,21 +86,17 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
         Box::new(unit)
     });
     rt.set_process_spawn_loader(|elf_bytes, mem| {
-        // Same unwrap shape as run-game's spawn loader: the content
-        // store hands over whatever the title shipped, so an
-        // SCE-wrapped child.self decrypts here, not at staging time.
-        let decrypted;
-        let elf_bytes: &[u8] =
-            if elf_bytes.len() >= 4 && elf_bytes[..4] == cellgov_ps3_abi::sce::SCE_MAGIC {
-                decrypted = cellgov_install::sce::decrypt_self_to_elf(elf_bytes).map_err(|e| {
-                    cellgov_core::ProcessSpawnLoadError::ImageParse {
-                        detail: format!("child SELF decrypt failed: {e}"),
-                    }
-                })?;
-                &decrypted
-            } else {
-                elf_bytes
-            };
+        // Same call the run-game spawn loader makes: the content store
+        // hands over whatever the title shipped, so an SCE-wrapped
+        // child.self decrypts here, not at staging time.
+        let plaintext = cellgov_install::self_image::to_plaintext_elf(
+            elf_bytes,
+            cellgov_install::self_image::KeyPolicy::AppOnly,
+        )
+        .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageParse {
+            detail: format!("child SELF: {e}"),
+        })?;
+        let elf_bytes: &[u8] = &plaintext;
         // The decrypted bytes are guest-supplied here, so a header
         // that does not parse is an ImageParse refusal, not a harness
         // panic -- same shape as run-game's loader.

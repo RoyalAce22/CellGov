@@ -498,7 +498,7 @@ kind = "process-exit"
 
 [[fs.mounts]]
 prefix = "/dev_hdd0"
-host = "tools/rpcs3/dev_hdd0"
+host = "vfs/dev_hdd0"
 
 [[fs.mounts]]
 prefix = "/app_home"
@@ -508,7 +508,7 @@ override_env = "CELLGOV_FLOW_APP_HOME"
     let m = parse(text);
     assert_eq!(m.mounts.len(), 2);
     assert_eq!(m.mounts[0].prefix, "/dev_hdd0");
-    assert_eq!(m.mounts[0].host, "tools/rpcs3/dev_hdd0");
+    assert_eq!(m.mounts[0].host, "vfs/dev_hdd0");
     assert!(m.mounts[0].override_env.is_none());
     assert_eq!(m.mounts[1].prefix, "/app_home");
     assert_eq!(m.mounts[1].host, "tests/fixtures/flow_assets");

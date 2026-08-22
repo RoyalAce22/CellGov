@@ -36,11 +36,9 @@ unwired `sys_rsx_context_attribute(package_id=0x10A)` arm
 returning CELL_EINVAL. Pinning the specific trigger is the
 entry point for a future ISA-coverage / SPURS-bringup phase.
 
-The 4 host-invariant breaks are all expected-benign per
-`docs/dev/bug_investigations/flow_post_40f_libgcm_ref_addr_spin.md`
-("Pre-close verification" section): the SPU + PPU init / thread
-warnings are pre-existing; the RSX attribute arm is an honest
-not-implemented EINVAL return. The 39 `_sys_prx_stop_module`
+The 4 host-invariant breaks are all expected-benign: the SPU + PPU
+init / thread warnings are pre-existing; the RSX attribute arm is an
+honest not-implemented EINVAL return. The 39 `_sys_prx_stop_module`
 breaks that previously dominated the count retired when the 482
 stop handshake was modeled.
 

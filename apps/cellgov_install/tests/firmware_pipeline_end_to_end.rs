@@ -1,16 +1,16 @@
 //! Integration tests for `cellgov_install install` against a real
 //! PS3UPDAT.PUP.
 //!
-//! # Configuration
+//! `--output` names the VFS root, so the firmware lands in its
+//! `dev_flash` mount beside whatever `install-game` put in
+//! `dev_hdd0` / `dev_bdvd`.
 //!
-//! - `CELLGOV_PS3UPDAT_PUP` points at the PUP file. Unset or
-//!   non-existent skips silently.
-//! - `CELLGOV_REQUIRE_PUP=1` makes a missing PUP fail instead.
+//! The PUP is operator-owned, so this suite is compiled only under
+//! the `firmware-corpus` feature and hard-asserts the fixture is
+//! present rather than skipping. `CELLGOV_PS3UPDAT_PUP` names it;
+//! the fallback is the conventional corpus location, which an
+//! operator populates -- nothing in the repo ships a PUP.
 
-#![allow(
-    clippy::print_stderr,
-    reason = "integration test: stderr carries fixture-absent diagnostics"
-)]
 #![allow(
     clippy::unwrap_used,
     reason = "integration test: unwrap on unexpected failure is correct"
@@ -19,60 +19,76 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+#[path = "common/scratch.rs"]
+mod scratch;
+
+/// Workspace root, resolved from this crate's manifest dir.
+///
+/// Local rather than shared: pulling in the digest module would drag
+/// its unit tests into this binary, inflating what the firmware gate
+/// appears to prove.
+fn workspace_root() -> PathBuf {
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop();
+    p.pop();
+    p
+}
+
 const ENV_PUP: &str = "CELLGOV_PS3UPDAT_PUP";
 
-/// Path from `CELLGOV_PS3UPDAT_PUP`, gated on the file existing.
-fn locate_pup() -> Option<PathBuf> {
-    let env_path = std::env::var(ENV_PUP).ok()?;
-    let p = PathBuf::from(env_path);
-    p.is_file().then_some(p)
-}
+/// Mount the firmware lands in under the VFS root `--output` names.
+const DEV_FLASH: &str = "dev_flash";
 
-fn require_pup(test_name: &str) -> Option<PathBuf> {
-    if let Some(p) = locate_pup() {
-        return Some(p);
-    }
-    if std::env::var_os("CELLGOV_REQUIRE_PUP").is_some() {
-        panic!("CELLGOV_REQUIRE_PUP set but {ENV_PUP} is unset or points at a non-existent file");
-    }
-    eprintln!(
-        "cellgov_install install integration ({test_name}): skipping \
-         (set {ENV_PUP}=<absolute PUP path> to run)"
+/// The PUP under test.
+///
+/// # Panics
+///
+/// If neither `CELLGOV_PS3UPDAT_PUP` nor the conventional corpus
+/// location resolves to a file. Under `firmware-corpus` the fixture
+/// is declared present, so its absence is a failure, not a skip.
+fn locate_pup() -> PathBuf {
+    let p = std::env::var(ENV_PUP)
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| workspace_root().join("dumps/firmware/PS3UPDAT.PUP"));
+    assert!(
+        p.is_file(),
+        "firmware-corpus: no PUP at {}. Either drop a PS3UPDAT.PUP \
+         there or point {ENV_PUP} at one.",
+        p.display()
     );
-    None
+    p
 }
 
-fn fresh_temp_dir(stem: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cellgov_install_install_{stem}_31b2"));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// Run `cellgov_install install` into `vfs_root`, returning its output.
+fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::process::Output {
+    let bin = env!("CARGO_BIN_EXE_cellgov_install");
+    let mut cmd = Command::new(bin);
+    cmd.arg("install")
+        .arg(pup)
+        .arg("--output")
+        .arg(vfs_root.as_os_str());
+    if force {
+        cmd.arg("--force");
+    }
+    cmd.output().expect("spawn cellgov_install install")
 }
 
 #[test]
-fn install_with_empty_output_dir_succeeds_and_populates_sys_external() {
-    let Some(pup) = require_pup("happy_path") else {
-        return;
-    };
-    let output = fresh_temp_dir("happy");
-    let bin = env!("CARGO_BIN_EXE_cellgov_install");
-    let result = Command::new(bin)
-        .arg("install")
-        .arg(&pup)
-        .arg("--output")
-        .arg(&output)
-        .output()
-        .expect("spawn cellgov_install install");
+fn install_with_an_empty_vfs_populates_dev_flash_sys_external() {
+    let pup = locate_pup();
+    let output = scratch::ScratchDir::new("fw_happy");
+    let result = run_install(&pup, &output, false);
     assert!(
         result.status.success(),
         "install failed.\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr),
     );
-    let sys_external = output.join("sys").join("external");
+
+    let sys_external = output.join(DEV_FLASH).join("sys").join("external");
     assert!(
         sys_external.is_dir(),
-        "expected {} to exist after install",
+        "expected {} after install",
         sys_external.display(),
     );
     let any_module = std::fs::read_dir(&sys_external)
@@ -88,56 +104,72 @@ fn install_with_empty_output_dir_succeeds_and_populates_sys_external() {
         "expected at least one .prx / .sprx / .self in {}",
         sys_external.display(),
     );
-    let _ = std::fs::remove_dir_all(&output);
+    // The manifest describes the firmware image, so it sits in the
+    // mount it covers rather than at the VFS root.
+    assert!(
+        output.join(DEV_FLASH).join("firmware.toml").is_file(),
+        "expected firmware.toml inside the dev_flash mount"
+    );
 }
 
 #[test]
-fn install_refuses_non_empty_output_dir_without_force() {
-    let Some(pup) = require_pup("refuse_overwrite") else {
-        return;
-    };
-    let output = fresh_temp_dir("refuse");
-    std::fs::write(output.join("decoy.txt"), b"existing").unwrap();
+fn install_refuses_a_non_empty_dev_flash_without_force() {
+    let pup = locate_pup();
+    let output = scratch::ScratchDir::new("fw_refuse");
+    // The preflight is scoped to the mount the install writes, so the
+    // decoy has to live there -- a file at the VFS root is legitimate
+    // (dev_hdd0 and friends) and must not block a firmware install.
+    let dev_flash = output.join(DEV_FLASH);
+    std::fs::create_dir_all(&dev_flash).unwrap();
+    std::fs::write(dev_flash.join("decoy.txt"), b"existing").unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_cellgov_install");
-    let result = Command::new(bin)
-        .arg("install")
-        .arg(&pup)
-        .arg("--output")
-        .arg(&output)
-        .output()
-        .expect("spawn cellgov_install install");
+    let result = run_install(&pup, &output, false);
     assert!(
         !result.status.success(),
-        "expected install to refuse non-empty dir without --force\nstdout:\n{}\nstderr:\n{}",
+        "expected install to refuse a non-empty dev_flash without --force\n\
+         stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr),
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(
         stderr.contains("exists and is non-empty"),
-        "expected refuse-overwrite message in stderr, got:\n{stderr}",
+        "expected the refuse-overwrite message in stderr, got:\n{stderr}",
     );
-    let _ = std::fs::remove_dir_all(&output);
 }
 
 #[test]
-fn install_force_flag_allows_non_empty_output_dir() {
-    let Some(pup) = require_pup("force_flag") else {
-        return;
-    };
-    let output = fresh_temp_dir("force");
-    std::fs::write(output.join("decoy.txt"), b"existing").unwrap();
+fn a_populated_vfs_root_does_not_block_a_firmware_install() {
+    let pup = locate_pup();
+    let output = scratch::ScratchDir::new("fw_sibling");
+    // A game install already put a mount here. dev_flash is untouched,
+    // so the firmware install must proceed without --force.
+    std::fs::create_dir_all(output.join("dev_hdd0/game/NPUA80001")).unwrap();
+    std::fs::write(output.join("dev_hdd0/game/NPUA80001/x.bin"), b"game").unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_cellgov_install");
-    let result = Command::new(bin)
-        .arg("install")
-        .arg(&pup)
-        .arg("--output")
-        .arg(&output)
-        .arg("--force")
-        .output()
-        .expect("spawn cellgov_install install --force");
+    let result = run_install(&pup, &output, false);
+    assert!(
+        result.status.success(),
+        "a populated dev_hdd0 must not block a firmware install.\n\
+         stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr),
+    );
+    assert!(
+        output.join("dev_hdd0/game/NPUA80001/x.bin").is_file(),
+        "the firmware install must not disturb a sibling mount"
+    );
+}
+
+#[test]
+fn force_allows_a_non_empty_dev_flash() {
+    let pup = locate_pup();
+    let output = scratch::ScratchDir::new("fw_force");
+    let dev_flash = output.join(DEV_FLASH);
+    std::fs::create_dir_all(&dev_flash).unwrap();
+    std::fs::write(dev_flash.join("decoy.txt"), b"existing").unwrap();
+
+    let result = run_install(&pup, &output, true);
     assert!(
         result.status.success(),
         "install --force failed.\nstdout:\n{}\nstderr:\n{}",
@@ -145,8 +177,7 @@ fn install_force_flag_allows_non_empty_output_dir() {
         String::from_utf8_lossy(&result.stderr),
     );
     assert!(
-        output.join("sys").join("external").is_dir(),
-        "expected sys/external after --force install",
+        dev_flash.join("sys").join("external").is_dir(),
+        "expected dev_flash/sys/external after --force install",
     );
-    let _ = std::fs::remove_dir_all(&output);
 }

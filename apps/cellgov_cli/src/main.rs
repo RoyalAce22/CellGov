@@ -35,7 +35,7 @@ cellgov_cli explore micro <name> [--format human|json]";
 const USAGE_RUN_GAME: &str = "\
 cellgov_cli run-game <elf-path|--title NAME> [--max-steps N] [--budget N] [--trace] [--profile]
 \t\t[--firmware-dir DIR] [--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]
-\t\t(default --firmware-dir: firmware/sys/external/ when present at the current working directory)";
+\t\t(default --firmware-dir: vfs/dev_flash/sys/external/ when present at the current working directory)";
 const USAGE_BENCH_BOOT: &str = "\
 cellgov_cli bench-boot --title <name> [--max-steps N] [--budget N] [--firmware-dir DIR]
 \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan] [--guest-arg VAL]

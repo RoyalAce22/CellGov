@@ -8,8 +8,9 @@ static COUNTER: AtomicU32 = AtomicU32::new(0);
 
 fn write_temp_dump(data: &[u8]) -> PathBuf {
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join("cellgov_rpcs3_test");
-    std::fs::create_dir_all(&dir).ok();
+    let dir = std::env::temp_dir().join(format!("cellgov_rpcs3_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("scratch dir {} not creatable: {e}", dir.display()));
     let path = dir.join(format!("dump_{n}.bin"));
     let mut f = std::fs::File::create(&path).expect("create dump");
     f.write_all(data).expect("write dump");

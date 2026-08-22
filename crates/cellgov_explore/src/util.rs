@@ -6,23 +6,54 @@ use crate::decision::DecisionLog;
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
 
+/// Why [`run_to_stall`] returned.
+///
+/// Only [`StopReason::Stalled`] means the workload ran itself out. Every
+/// other reason leaves a prefix of the schedule, whose memory hash must
+/// not be read as a finished run's answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StopReason {
+    /// No unit was runnable: the workload finished.
+    Stalled,
+    /// `max_steps` was reached with work still runnable.
+    StepBound,
+    /// `Runtime::step` refused.
+    StepError,
+    /// A commit was refused, so the step's effects never reached guest
+    /// state.
+    CommitError,
+}
+
+impl StopReason {
+    /// True when the run stopped before the workload finished.
+    pub fn is_truncated(self) -> bool {
+        !matches!(self, StopReason::Stalled)
+    }
+}
+
 /// Drive `rt` until no unit is runnable or `max_steps` is reached,
 /// committing each step immediately.
-pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) {
+///
+/// A refused commit stops the run rather than continuing: its effects
+/// never landed, so every later step would build on a state the
+/// schedule did not produce.
+pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
     let mut steps = 0;
     loop {
         if rt.registry().runnable_ids().next().is_none() {
-            break;
+            return StopReason::Stalled;
         }
         if steps >= max_steps {
-            break;
+            return StopReason::StepBound;
         }
         match rt.step() {
             Ok(step) => {
-                let _ = rt.commit_step(&step.result, &step.effects);
+                if rt.commit_step(&step.result, &step.effects).is_err() {
+                    return StopReason::CommitError;
+                }
                 steps += 1;
             }
-            Err(_) => break,
+            Err(_) => return StopReason::StepError,
         }
     }
 }

@@ -82,13 +82,17 @@ where
     }
 
     let mut alternates = Vec::new();
-    let iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
+    // A replay that returns for any reason other than a stall is a
+    // prefix of its schedule, so its hash cannot stand as evidence that
+    // the workload is schedule-stable.
+    let mut replay_cut_short = false;
+    let mut iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
         let snap = snapshots
             .get(&step)
             .expect("observer must snapshot every branching point");
         rt_baseline.restore_into(snap);
         rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
-        run_to_stall(&mut rt_baseline, config.max_steps_per_run);
+        replay_cut_short |= run_to_stall(&mut rt_baseline, config.max_steps_per_run).is_truncated();
         let hash = rt_baseline.committed_memory_hash();
         let captured = extract_regions(rt_baseline.memory(), regions);
         alternates.push(ScheduleSnapshot {
@@ -97,6 +101,10 @@ where
         });
         hash
     });
+
+    // `ExplorationConfig`: exceeding either bound forces Inconclusive
+    // when no divergence has been observed.
+    iter.bounds_hit |= replay_cut_short;
 
     let exploration = classify_iteration(iter, baseline_hash, total_branching_points);
     Some(OracleExplorationResult {

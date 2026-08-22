@@ -8,7 +8,7 @@
 //! bytes the parser consumes) to `path`. The output is byte-identical
 //! to RPCS3's `unself` for the same input. Useful when the firmware
 //! PRX of interest (`libsysutil_avconf_ext`, `libsre`, `libfiber`)
-//! isn't pre-staged under `tools/rpcs3/dev_flash_decrypted/` and you
+//! isn't pre-staged under `vfs/dev_flash/` and you
 //! need an ELF to pass to `cellgov_cli disasm`.
 
 const NAME_COLUMN_WIDTH: usize = 49;

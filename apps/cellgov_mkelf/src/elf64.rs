@@ -5,8 +5,8 @@
 //! `process_param_t` during ELF load.
 
 use cellgov_ps3_abi::elf::{
-    ELFCLASS64, ELFDATA2MSB, ELF_HEADER_SIZE, ELF_PHENTSIZE, EM_PPC64, ET_EXEC, EV_CURRENT, PF_R,
-    PF_W, PF_X, PT_LOAD, PT_PROC_PARAM,
+    ELFCLASS64, ELFDATA2MSB, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, EM_PPC64, ET_EXEC,
+    EV_CURRENT, PF_R, PF_W, PF_X, PT_LOAD, PT_PROC_PARAM, SYS_PROCESS_PARAM_MAGIC,
 };
 
 /// `e_ehsize` field value: cast of [`ELF_HEADER_SIZE`].
@@ -23,7 +23,7 @@ pub use cellgov_ps3_abi::elf::PROC_PARAM_SIZE;
 pub fn proc_param(sdk_version: u32) -> Vec<u8> {
     let mut buf = Vec::with_capacity(PROC_PARAM_SIZE as usize);
     write_u32(&mut buf, 0x40);
-    write_u32(&mut buf, 0x13bcc5f6);
+    write_u32(&mut buf, SYS_PROCESS_PARAM_MAGIC);
     write_u32(&mut buf, sdk_version);
     write_u32(&mut buf, sdk_version);
     write_u32(&mut buf, 1001);
@@ -46,6 +46,22 @@ pub fn build(
     data: &[u8],
     proc_param_offset: Option<u64>,
 ) -> Vec<u8> {
+    // The PT_PROC_PARAM segment declares p_filesz = PROC_PARAM_SIZE at
+    // `data_file_offset + pp_offset`. A record that does not fit inside
+    // `data` would put [p_offset, p_offset + p_filesz) past end of file
+    // -- the same malformed-segment shape the disasm PT_LOAD parser
+    // rejects as SegmentTruncated. Refuse to emit it.
+    if let Some(pp_offset) = proc_param_offset {
+        assert!(
+            pp_offset
+                .checked_add(PROC_PARAM_SIZE)
+                .is_some_and(|end| end <= data.len() as u64),
+            "proc_param_offset 0x{pp_offset:x} + {PROC_PARAM_SIZE} bytes runs past the \
+             {}-byte data segment",
+            data.len()
+        );
+    }
+
     let phnum: u16 = if proc_param_offset.is_some() { 3 } else { 2 };
     let phoff: u64 = ELF64_EHDR_SIZE as u64;
 
@@ -56,7 +72,7 @@ pub fn build(
     let mut buf = Vec::with_capacity(total_size as usize);
 
     // ELF64 header
-    buf.extend_from_slice(&[0x7f, b'E', b'L', b'F']);
+    buf.extend_from_slice(&ELF_MAGIC);
     buf.push(ELFCLASS64);
     buf.push(ELFDATA2MSB);
     buf.push(EV_CURRENT);
@@ -64,7 +80,7 @@ pub fn build(
     buf.extend_from_slice(&[0u8; 8]);
     write_u16(&mut buf, ET_EXEC);
     write_u16(&mut buf, EM_PPC64);
-    write_u32(&mut buf, 1);
+    write_u32(&mut buf, EV_CURRENT.into());
     write_u64(&mut buf, entry_vaddr);
     write_u64(&mut buf, phoff);
     write_u64(&mut buf, 0);
@@ -75,7 +91,7 @@ pub fn build(
     write_u16(&mut buf, 0);
     write_u16(&mut buf, 0);
     write_u16(&mut buf, 0);
-    assert_eq!(buf.len(), 64);
+    assert_eq!(buf.len(), ELF_HEADER_SIZE);
 
     // PT_LOAD code (R+X)
     write_u32(&mut buf, PT_LOAD);

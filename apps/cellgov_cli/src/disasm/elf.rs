@@ -7,10 +7,17 @@
 //! inputs at the entry point so downstream code can assume PS3 PPE
 //! shape.
 
+use cellgov_ps3_abi::elf::{
+    ELFCLASS64, ELFDATA2MSB, ELF_EI_CLASS, ELF_EI_DATA, ELF_EI_VERSION, ELF_E_MACHINE_OFFSET,
+    ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET,
+    ELF_PHOFF_OFFSET, ELF_PN_XNUM, EM_PPC64, EV_CURRENT, PHDR_P_FILESZ_OFFSET, PHDR_P_MEMSZ_OFFSET,
+    PHDR_P_OFFSET_OFFSET, PHDR_P_VADDR_OFFSET, PT_LOAD,
+};
+
 /// Reason an ELF failed to parse.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(super) enum ElfError {
-    #[error("not an ELF (file is {len} bytes; need >= 64)")]
+    #[error("not an ELF (file is {len} bytes; need >= {})", ELF_HEADER_SIZE)]
     TooSmall { len: usize },
     #[error("not an ELF (magic mismatch)")]
     BadMagic,
@@ -20,11 +27,20 @@ pub(super) enum ElfError {
     NotBigEndian { ei_data: u8 },
     #[error("ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT (1) is supported")]
     UnknownElfVersion { ei_version: u8 },
-    #[error("ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 (21)")]
+    #[error(
+        "ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 ({})",
+        EM_PPC64
+    )]
     NotPpc64 { e_machine: u16 },
-    #[error("ELF e_phentsize={phentsize} is smaller than Elf64_Phdr (56)")]
+    #[error(
+        "ELF e_phentsize={phentsize} is smaller than Elf64_Phdr ({})",
+        ELF_PHENTSIZE
+    )]
     PhentsizeTooSmall { phentsize: u16 },
-    #[error("ELF e_phnum=0xFFFF (PN_XNUM extension) is not supported by this tool")]
+    #[error(
+        "ELF e_phnum=0x{:04X} (PN_XNUM extension) is not supported by this tool",
+        ELF_PN_XNUM
+    )]
     PhdrCountExtended,
     #[error("ELF program-header arithmetic overflows: phoff=0x{phoff:x} phnum={phnum} phentsize={phentsize}")]
     PhdrTableOverflow {
@@ -90,37 +106,40 @@ pub(super) struct PtLoad {
 /// `p_vaddr + p_memsz` not overflowing u64) to skip per-byte bounds
 /// checks in its hot loop.
 pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
-    if data.len() < 64 {
+    if data.len() < ELF_HEADER_SIZE {
         return Err(ElfError::TooSmall { len: data.len() });
     }
-    if &data[0..4] != b"\x7fELF" {
+    if data[0..4] != ELF_MAGIC {
         return Err(ElfError::BadMagic);
     }
-    if data[4] != 2 {
-        return Err(ElfError::NotElf64 { ei_class: data[4] });
-    }
-    if data[5] != 2 {
-        return Err(ElfError::NotBigEndian { ei_data: data[5] });
-    }
-    if data[6] != 1 {
-        return Err(ElfError::UnknownElfVersion {
-            ei_version: data[6],
+    if data[ELF_EI_CLASS] != ELFCLASS64 {
+        return Err(ElfError::NotElf64 {
+            ei_class: data[ELF_EI_CLASS],
         });
     }
-    let e_machine = u16::from_be_bytes([data[18], data[19]]);
-    // EM_PPC64 = 21 per the PowerPC ELF supplement.
-    if e_machine != 21 {
+    if data[ELF_EI_DATA] != ELFDATA2MSB {
+        return Err(ElfError::NotBigEndian {
+            ei_data: data[ELF_EI_DATA],
+        });
+    }
+    if data[ELF_EI_VERSION] != EV_CURRENT {
+        return Err(ElfError::UnknownElfVersion {
+            ei_version: data[ELF_EI_VERSION],
+        });
+    }
+    let e_machine = read_be_u16(data, ELF_E_MACHINE_OFFSET);
+    if e_machine != EM_PPC64 {
         return Err(ElfError::NotPpc64 { e_machine });
     }
 
-    let phoff = read_be_u64(data, 32);
-    let phentsize = u16::from_be_bytes([data[54], data[55]]);
-    let phnum = u16::from_be_bytes([data[56], data[57]]);
+    let phoff = read_be_u64(data, ELF_PHOFF_OFFSET);
+    let phentsize = read_be_u16(data, ELF_PHENTSIZE_OFFSET);
+    let phnum = read_be_u16(data, ELF_PHNUM_OFFSET);
 
-    if phnum == 0xFFFF {
+    if phnum == ELF_PN_XNUM {
         return Err(ElfError::PhdrCountExtended);
     }
-    if (phentsize as usize) < 56 {
+    if (phentsize as usize) < ELF_PHENTSIZE {
         return Err(ElfError::PhentsizeTooSmall { phentsize });
     }
 
@@ -152,13 +171,13 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
         let base = phoff as usize + i * phentsize as usize;
         let p_type =
             u32::from_be_bytes([data[base], data[base + 1], data[base + 2], data[base + 3]]);
-        if p_type != 1 {
+        if p_type != PT_LOAD {
             continue;
         }
-        let p_offset = read_be_u64(data, base + 8);
-        let p_vaddr = read_be_u64(data, base + 16);
-        let p_filesz = read_be_u64(data, base + 32);
-        let p_memsz = read_be_u64(data, base + 40);
+        let p_offset = read_be_u64(data, base + PHDR_P_OFFSET_OFFSET);
+        let p_vaddr = read_be_u64(data, base + PHDR_P_VADDR_OFFSET);
+        let p_filesz = read_be_u64(data, base + PHDR_P_FILESZ_OFFSET);
+        let p_memsz = read_be_u64(data, base + PHDR_P_MEMSZ_OFFSET);
 
         let seg_end_in_file =
             p_offset
@@ -202,6 +221,10 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
         });
     }
     Ok(out)
+}
+
+fn read_be_u16(data: &[u8], off: usize) -> u16 {
+    u16::from_be_bytes([data[off], data[off + 1]])
 }
 
 pub(super) fn read_be_u64(data: &[u8], off: usize) -> u64 {

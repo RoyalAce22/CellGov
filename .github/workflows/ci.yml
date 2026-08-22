@@ -11,8 +11,8 @@ env:
   RUSTFLAGS: -D warnings
   # Suites reading a local PS3 corpus sit behind cellgov_cli's
   # firmware-corpus / title-corpus features and are not built here.
-  # CI still type-checks and lints them so they cannot bitrot.
-  CORPUS_FEATURES: cellgov_cli/title-corpus
+  # CI still type-checks and lints them so they cannot rot.
+  CORPUS_FEATURES: cellgov_cli/title-corpus,cellgov_install/title-corpus,cellgov_install/firmware-corpus
 
 jobs:
   msrv:
