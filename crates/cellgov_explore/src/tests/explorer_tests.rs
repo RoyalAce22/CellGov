@@ -468,6 +468,79 @@ fn max_schedules_bound_produces_inconclusive() {
 }
 
 #[test]
+fn a_replay_cut_short_by_the_step_bound_reports_bounds_hit() {
+    let config = ExplorationConfig {
+        max_schedules: 256,
+        max_steps_per_run: 1,
+    };
+    let result = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            let mut rt = Runtime::new(mem, Budget::new(100), 100);
+            for imm in [0xAAu32, 0xBB] {
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(imm),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+            }
+            rt
+        },
+        &config,
+    );
+
+    let r = result.expect("should have branching points");
+    assert!(
+        r.bounds_hit,
+        "a replay stopped by max_steps_per_run must not read as a completed exploration",
+    );
+    assert_ne!(r.outcome, OutcomeClass::ScheduleStable);
+}
+
+#[test]
+fn a_truncated_replay_with_no_divergence_is_inconclusive_not_stable() {
+    let make = || {
+        let mem = GuestMemory::new(64);
+        let mut rt = Runtime::new(mem, Budget::new(100), 100);
+        for _ in 0..2 {
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0x42),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+        }
+        rt
+    };
+
+    let unbounded = explore(make, &ExplorationConfig::default())
+        .expect("matching-value workload must have branching points");
+    assert_eq!(unbounded.outcome, OutcomeClass::ScheduleStable);
+    assert!(!unbounded.bounds_hit);
+
+    // Same workload, replays cut one step short of the stall.
+    let truncated = explore(
+        make,
+        &ExplorationConfig {
+            max_schedules: 256,
+            max_steps_per_run: 5,
+        },
+    )
+    .expect("matching-value workload must have branching points");
+    assert!(truncated.bounds_hit);
+    assert_eq!(truncated.outcome, OutcomeClass::Inconclusive);
+}
+
+#[test]
 fn result_fields_are_populated() {
     let result = explore(
         || {

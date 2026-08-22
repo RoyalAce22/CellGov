@@ -11,6 +11,11 @@
 /// signed PS3 file.
 pub const SCE_MAGIC: [u8; 4] = *b"SCE\0";
 
+/// [`SCE_MAGIC`] as the big-endian word a header parser reads at
+/// offset 0, for comparing against a `read_be_u32` result without
+/// re-spelling the bytes.
+pub const SCE_MAGIC_U32: u32 = u32::from_be_bytes(SCE_MAGIC);
+
 /// `section_kind` value for SCE sections that describe the original
 /// program-header table; consumed by the SELF decrypter to rebuild
 /// the plaintext ELF's PHDR.

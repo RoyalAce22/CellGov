@@ -14,7 +14,8 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn tmp(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("cellgov_9a4_{name}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("cellgov_adapter_e2e_{name}_{pid}"));
     fs::remove_dir_all(&dir).ok();
     fs::create_dir_all(&dir).unwrap();
     dir

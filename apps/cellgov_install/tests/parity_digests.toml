@@ -1,16 +1,16 @@
-# Game-title SELF byte-identity oracle hashes for
+# Game-title SELF byte-identity reference hashes for
 # `parity_decrypted_reference.rs`. One row per title.
 #
 # `key = "npdrm"` titles carry both unmasked and masked SHA-256
 # hashes (RPCS3-derived), plus the RAP basename under
-# `tools/rpcs3/dev_hdd0/home/00000001/exdata/`. The unmasked hash
+# `vfs/dev_hdd0/home/00000001/exdata/`. The unmasked hash
 # is checked first; the masked branch is the documented
 # non-semantic fallback per the C.2 decision tree.
 #
 # `key = "app"` titles carry only an unmasked SHA-256
 # (CellGov-derived refactor-invariance baseline, not an RPCS3
-# oracle). The masked branch does not apply. Replace with an
-# RPCS3-derived oracle once a bridge run lands.
+# reference). The masked branch does not apply. Replace with an
+# RPCS3-derived value once a bridge run lands.
 #
 # Adding a title: add one `[[title]]` block. Bin/RAP paths are
 # derived from `content_id` plus the embedded `rap_filename`.

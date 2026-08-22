@@ -39,15 +39,7 @@ tests/fixtures/*/rpcs3/observation.json
 tests/fixtures/*/rpcs3/observation_*.json
 tests/fixtures/*/rpcs3/*.dump
 
-# Firmware install destination. cellgov_install install extracts a
-# user-supplied PS3UPDAT.PUP here; cellgov_cli reads encrypted SELFs
-# from firmware/sys/external/ at boot. Bytes are never vendored.
-firmware/
-
-# Game install destination. cellgov_install install-game / install-iso
-# extract user-supplied PKG/ISO dumps here (the CellGov-owned VFS); the
-# per-install records live in installs/. Multi-GB game bytes are never
-# vendored.
+# The CellGov VFS
 vfs/
 installs/
 

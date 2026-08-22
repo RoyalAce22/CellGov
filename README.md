@@ -182,10 +182,10 @@ cargo run -p cellgov_install -- install /path/to/PS3UPDAT.PUP
 ```
 
 The install unwraps the outer SCE/PUP envelope and writes per-module
-SELFs under `firmware/` (gitignored; bytes are never vendored). Each
+SELFs under `vfs/dev_flash/` (gitignored; bytes are never vendored). Each
 SELF stays encrypted on disk and is decrypted at boot time. `run-game`
 auto-discovers the install: `--firmware-dir` defaults to
-`firmware/sys/external/` when that directory exists at the current
+`vfs/dev_flash/sys/external/` when that directory exists at the current
 working directory; pass `--firmware-dir DIR` to override or set
 `CELLGOV_NO_FIRMWARE_DIR=1` to suppress the default.
 

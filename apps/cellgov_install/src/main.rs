@@ -13,7 +13,7 @@
 use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
-use cellgov_install::{disc_crypt, game_install, game_uninstall, pup, sce, tar};
+use cellgov_install::{disc_crypt, game_install, game_uninstall, pup, sce, self_image, tar};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -40,8 +40,9 @@ fn main() {
 fn print_usage() {
     eprintln!("usage:");
     eprintln!("  cellgov_install install <PUP_PATH> [--output <dir>] [--force]");
-    eprintln!("    default --output: firmware/ (at the current working directory)");
-    eprintln!("    --force: overwrite a non-empty output directory");
+    eprintln!("    default --output: vfs/ (at the current working directory)");
+    eprintln!("    extracts the firmware image to dev_flash/ (+ dev_flash2/, dev_flash3/)");
+    eprintln!("    --force: overwrite a non-empty dev_flash/, dev_flash2/ or dev_flash3/");
     eprintln!(
         "  cellgov_install install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
     );
@@ -71,7 +72,18 @@ struct InstallArgs {
     force: bool,
 }
 
-const DEFAULT_INSTALL_OUTPUT: &str = "firmware";
+/// `install`'s `--output` names the VFS root, the same root
+/// `install-game` and `install-iso` populate. The firmware lands in
+/// its `dev_flash/` mount (plus any sibling `dev_flash2/`,
+/// `dev_flash3/`), beside `dev_hdd0/` and `dev_bdvd/`.
+const DEFAULT_INSTALL_OUTPUT: &str = "vfs";
+
+/// Mount under the VFS root that holds the firmware image and its
+/// `firmware.toml` manifest. The emptiness preflight covers this mount
+/// and its siblings ([`preflight_firmware_mounts`]) rather than the VFS
+/// root, so installing firmware into a VFS that already has games does
+/// not trip the non-empty guard.
+const DEV_FLASH_MOUNT: &str = "dev_flash";
 
 /// Why a cellgov_install CLI helper failed.
 #[derive(Debug, thiserror::Error)]
@@ -270,15 +282,50 @@ const PRUNED_DEV_FLASH_DIRS: [&str; 3] = ["ps1emu/", "ps2emu/", "pspemu/"];
 /// dead-entry marker (never written to disk, matching
 /// `tar_object::extract`), and CellGov's emulator prune
 /// ([`PRUNED_DEV_FLASH_DIRS`]).
+///
+/// The prune decides on [`tar::route_entry_path`]'s output so it sees
+/// the exact path the extractor would write; matching against the raw
+/// name let a `000/`-packaged or leading-slash entry land inside a
+/// pruned subtree.
 fn is_install_excluded(entry_name: &str) -> bool {
     if entry_name.contains('\u{ff04}') {
         return true;
     }
-    let rel = entry_name
-        .trim_start_matches('/')
-        .strip_prefix("dev_flash/")
-        .unwrap_or(entry_name);
+    let Some(routed) = tar::route_entry_path(entry_name) else {
+        return false;
+    };
+    let Some(rel) = routed.strip_prefix("dev_flash/") else {
+        return false;
+    };
     PRUNED_DEV_FLASH_DIRS.iter().any(|d| rel.starts_with(d))
+}
+
+/// Mounts under the VFS root that `install` writes into: the firmware
+/// image plus its siblings. Every one is guarded by the emptiness
+/// preflight; `firmware.toml` covers [`DEV_FLASH_MOUNT`] alone.
+fn firmware_mounts() -> impl Iterator<Item = &'static str> {
+    std::iter::once(DEV_FLASH_MOUNT)
+        .chain(tar::SIBLING_MOUNTS.iter().map(|m| m.trim_end_matches('/')))
+}
+
+/// Refuse the install when any mount it writes is already populated.
+///
+/// Scoped to [`firmware_mounts`]: `--output` is the whole VFS root,
+/// which legitimately already holds `dev_hdd0` / `dev_bdvd` from a game
+/// install, so checking it wholesale would refuse every firmware
+/// install onto a populated VFS. The sibling mounts are firmware
+/// content too, so leaving them out would let a second PUP overwrite
+/// them with nothing asking.
+///
+/// # Errors
+///
+/// [`FirmwareCliError::OutputDirNotEmpty`] naming the first occupied
+/// mount, or [`FirmwareCliError::OutputDirReadFailed`].
+fn preflight_firmware_mounts(output_dir: &Path, force: bool) -> Result<(), FirmwareCliError> {
+    for mount in firmware_mounts() {
+        check_output_dir(&output_dir.join(mount), force)?;
+    }
+    Ok(())
 }
 
 fn cmd_install(args: &[String]) {
@@ -293,7 +340,8 @@ fn cmd_install(args: &[String]) {
         force,
     } = install_args;
 
-    check_output_dir(&output_dir, force).unwrap_or_else(|e| {
+    let dev_flash_dir = output_dir.join(DEV_FLASH_MOUNT);
+    preflight_firmware_mounts(&output_dir, force).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1);
     });
@@ -357,6 +405,7 @@ fn cmd_install(args: &[String]) {
     );
 
     let mut total_files = 0usize;
+    let mut total_skipped = 0usize;
     let mut packages_attempted = 0usize;
     let mut extract_errors: Vec<tar::ExtractError> = Vec::new();
     for entry in &dev_flash_entries {
@@ -376,15 +425,17 @@ fn cmd_install(args: &[String]) {
                     }
                     let report = tar::extract_to_disk(&inner_files, &output_dir);
                     total_files += report.written;
-                    if report.errors.is_empty() {
-                        println!(" {} files", report.written);
-                    } else {
-                        println!(
-                            " {} files, {} extract errors",
-                            report.written,
-                            report.errors.len()
-                        );
+                    total_skipped += report.skipped;
+                    // A routed-to-nothing entry is named rather than
+                    // left to show up as a shortfall in the file count.
+                    print!(" {} files", report.written);
+                    if report.skipped > 0 {
+                        print!(", {} entries addressing no file", report.skipped);
                     }
+                    if !report.errors.is_empty() {
+                        print!(", {} extract errors", report.errors.len());
+                    }
+                    println!();
                     extract_errors.extend(report.errors);
                 }
                 Err(e) => {
@@ -412,22 +463,27 @@ fn cmd_install(args: &[String]) {
     }
 
     println!(
-        "cellgov_install: installed {} files to {} ({} packages, {} errors)",
+        "cellgov_install: installed {} files to {} ({} packages, {} skipped, {} errors)",
         total_files,
         output_dir.display(),
         packages_attempted,
+        total_skipped,
         extract_errors.len(),
     );
 
     print!("  building firmware.toml...");
-    let manifest = match build_firmware_manifest(&pup_data, pup.image_version, &output_dir) {
+    // Rooted at the dev_flash mount, not the VFS root: the manifest
+    // describes the firmware image, so its entry paths stay
+    // `sys/external/...` and `cellgov_cli`'s walk-up from the
+    // firmware dir finds it beside the tree it covers.
+    let manifest = match build_firmware_manifest(&pup_data, pup.image_version, &dev_flash_dir) {
         Ok(m) => m,
         Err(e) => {
             println!(" FAILED ({e})");
             std::process::exit(1);
         }
     };
-    let manifest_path = output_dir.join("firmware.toml");
+    let manifest_path = dev_flash_dir.join("firmware.toml");
     let text = manifest::serialize_manifest(&manifest).unwrap_or_else(|e| {
         eprintln!("\nfirmware.toml serialise failed: {e}");
         std::process::exit(1);
@@ -784,7 +840,7 @@ fn build_firmware_manifest(
         // Pre-decrypted `.prx` files carry no SCE wrapper: hash the
         // raw bytes (identical to their post-decrypt image) and record
         // revision 0, since the wrapper that carried it is gone.
-        let (elf, revision) = if raw.len() >= 4 && &raw[..4] == b"SCE\0" {
+        let (elf, revision) = if self_image::is_sce_wrapped(&raw) {
             let elf = match sce::decrypt_self_to_elf(&raw) {
                 Ok(e) => e,
                 Err(_) => {
@@ -844,6 +900,9 @@ fn build_firmware_manifest(
         files,
     })
 }
+
+#[cfg(test)]
+mod scratch_dir;
 
 #[cfg(test)]
 #[path = "tests/main_tests.rs"]

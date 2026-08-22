@@ -159,6 +159,44 @@ fn an_entry_near_u64_max_takes_the_raw_entry_fallback_without_overflow() {
 }
 
 #[test]
+fn an_in_range_entry_descriptor_sets_pc_and_r2_from_the_loaded_image() {
+    // e_entry names an OPD `{ code, toc }` that the loader reads back
+    // out of guest memory, so this also pins that PT_LOAD bytes land
+    // at p_vaddr rather than at their file offset.
+    let pt_off = 0x100usize;
+    let pt_sz = 0x100usize;
+    let pt_vaddr = 0x1000u64;
+    let opd_vaddr = 0x1080u64;
+    let code_vaddr = 0x1010u32;
+    let toc = 0x10C0u32;
+    let insn = 0x3860_0001u32; // li r3, 1
+
+    let mut data = mk_elf_with_pt_load(pt_off, pt_sz, pt_vaddr);
+    data[24..32].copy_from_slice(&opd_vaddr.to_be_bytes());
+    let opd_off = pt_off + (opd_vaddr - pt_vaddr) as usize;
+    data[opd_off..opd_off + 4].copy_from_slice(&code_vaddr.to_be_bytes());
+    data[opd_off + 4..opd_off + 8].copy_from_slice(&toc.to_be_bytes());
+    let insn_off = pt_off + (code_vaddr as u64 - pt_vaddr) as usize;
+    data[insn_off..insn_off + 4].copy_from_slice(&insn.to_be_bytes());
+
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(0x2000);
+    let result = load_ppu_elf(&data, &mut mem, &mut s).expect("load ok");
+
+    assert_eq!(result.entry, opd_vaddr, "entry stays the descriptor vaddr");
+    assert_eq!(s.pc, code_vaddr as u64, "pc comes from the OPD code word");
+    assert_eq!(s.gpr[2], toc as u64, "r2 comes from the OPD toc word");
+    assert_eq!(result.min_memory_size, pt_vaddr as usize + pt_sz);
+
+    let pc = s.pc as usize;
+    assert_eq!(
+        u32::from_be_bytes(mem.as_bytes()[pc..pc + 4].try_into().unwrap()),
+        insn,
+        "segment bytes must land at p_vaddr",
+    );
+}
+
+#[test]
 fn skips_empty_segment() {
     let mut data = mk_elf_header(2);
     write_ph(&mut data, 0, 0, 0, 0, 0);
@@ -181,29 +219,6 @@ fn loads_real_ppu_elf() {
     let result = load_ppu_elf(&data, &mut mem, &mut s).unwrap();
     assert_eq!(result.entry, 0x10000000);
     assert_eq!(s.pc, 0x10200);
-    let pc = s.pc as usize;
-    let first_insn = u32::from_be_bytes([
-        mem.as_bytes()[pc],
-        mem.as_bytes()[pc + 1],
-        mem.as_bytes()[pc + 2],
-        mem.as_bytes()[pc + 3],
-    ]);
-    assert_ne!(first_insn, 0, "entry point should have code");
-}
-
-#[test]
-fn loads_rpcs3_test_binary() {
-    let path = std::path::Path::new("../../tools/rpcs3/test/ppu_thread.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
-    let mut s = PpuState::new();
-    let mut mem = GuestMemory::new(0x40000);
-    let result = load_ppu_elf(&data, &mut mem, &mut s).unwrap();
-    assert_eq!(result.entry, 0x301c0);
-    assert_eq!(s.pc, 0x1022c);
-    assert_eq!(s.gpr[2], 0x38b50);
     let pc = s.pc as usize;
     let first_insn = u32::from_be_bytes([
         mem.as_bytes()[pc],
@@ -542,20 +557,6 @@ fn load_ppu_elf_leaves_sys_proc_param_range_none_without_struct() {
     assert!(result.sys_proc_param_range.is_none());
 }
 
-#[test]
-fn find_tls_on_real_elf() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
-    let tls = find_tls_segment(&data).expect("retail EBOOT should have a PT_TLS program header");
-    assert_eq!(tls.vaddr, 0x895cd0);
-    assert_eq!(tls.filesz, 4);
-    assert_eq!(tls.memsz, 0x1dc);
-}
-
 /// Build an ELF with one PT_LOAD covering `[pt_off, pt_off+pt_sz)`
 /// at guest `pt_vaddr`, plus a writeable byte buffer the caller
 /// can plant table-header bytes into. Returns the assembled file.
@@ -687,42 +688,6 @@ fn find_secondary_opd_tables_rejects_unaligned_or_mismatched_seq() {
     );
 }
 
-#[test]
-fn find_secondary_opd_tables_on_real_sshd_elf() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
-    let tables = find_secondary_opd_tables(&data);
-    // SSHD has two adjacent tables at guest 0x829b10 and 0x829b78.
-    assert_eq!(tables.len(), 2, "SSHD must expose two secondary OPD tables");
-    assert_eq!(tables[0].guest_addr, 0x829b10);
-    assert_eq!(tables[0].size, SECONDARY_OPD_TABLE_SIZE);
-    assert_eq!(tables[1].guest_addr, 0x829b78);
-    assert_eq!(tables[1].size, SECONDARY_OPD_TABLE_SIZE);
-}
-
-#[test]
-fn find_secondary_opd_tables_on_real_wipeout_elf() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
-    let tables = find_secondary_opd_tables(&data);
-    // WipEout has two adjacent tables at guest 0x925008 and 0x925070.
-    assert_eq!(
-        tables.len(),
-        2,
-        "WipEout must expose two secondary OPD tables"
-    );
-    assert_eq!(tables[0].guest_addr, 0x925008);
-    assert_eq!(tables[1].guest_addr, 0x925070);
-}
-
 /// Build a 2-PT_LOAD ELF: exec segment at `[exec_off, +exec_sz)` /
 /// `exec_vaddr`, plus a non-executable segment at `[data_off, +data_sz)` /
 /// `data_vaddr` for the caller to plant a table into.
@@ -824,26 +789,4 @@ fn find_indirect_opd_tables_rejects_short_run() {
     }
     let tables = find_indirect_opd_tables(&data);
     assert!(tables.is_empty(), "3-row run is below threshold");
-}
-
-#[test]
-fn find_indirect_opd_tables_on_real_wipeout_elf() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
-    let tables = find_indirect_opd_tables(&data);
-    // WipEout's binary carries one indirect-OPD table at data
-    // offset 0xc1110 (guest 0x921110). Row count is a function of
-    // import count; assert the table covers the byte range the
-    // cross-runner pending-bytes investigation observed.
-    let covering = tables
-        .iter()
-        .find(|t| t.guest_addr <= 0x921110 && t.guest_addr + t.size > 0x9213c8);
-    assert!(
-        covering.is_some(),
-        "WipEout's indirect-OPD table at 0x921110 must be found; got {tables:?}",
-    );
 }

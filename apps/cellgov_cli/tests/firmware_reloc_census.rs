@@ -7,7 +7,7 @@
 //! ```
 //!
 //! Iterates `<firmware-dir>/*.sprx` (env `CELLGOV_FIRMWARE_DIR`,
-//! default `firmware/sys/external`), decrypts and parses each,
+//! default `vfs/dev_flash/sys/external`), decrypts and parses each,
 //! and writes the per-PRX type table plus the union. The
 //! "Applier covered?" column reads
 //! [`cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`] so the doc cannot
@@ -156,7 +156,7 @@ fn filename_is_safe(name: &str) -> bool {
 fn regenerate_firmware_reloc_census() {
     let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
         Ok(s) => PathBuf::from(s),
-        Err(_) => workspace_root().join("firmware/sys/external"),
+        Err(_) => workspace_root().join("vfs/dev_flash/sys/external"),
     };
     assert!(
         dir.is_dir(),
@@ -243,7 +243,7 @@ fn regenerate_firmware_reloc_census() {
     // the corpus came from without pinning it to one checkout.
     writeln!(
         out,
-        "Source: every `*.sprx` under the firmware directory (default `firmware/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`). Each row lists the distinct `R_PPC64_*` types observed in that PRX's `PT_PRX_RELOC` segment after SCE decryption. The applier at `crates/cellgov_ppu/src/sprx.rs::apply_relocations` must cover the union of these types for the dependency-ordered firmware loader to handle every module. The \"Applier covered?\" column reads `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`, so this doc and the applier never disagree silently."
+        "Source: every `*.sprx` under the firmware directory (default `vfs/dev_flash/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`). Each row lists the distinct `R_PPC64_*` types observed in that PRX's `PT_PRX_RELOC` segment after SCE decryption. The applier at `crates/cellgov_ppu/src/sprx.rs::apply_relocations` must cover the union of these types for the dependency-ordered firmware loader to handle every module. The \"Applier covered?\" column reads `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`, so this doc and the applier never disagree silently."
     )
     .expect("write to String");
     writeln!(out).expect("write to String");

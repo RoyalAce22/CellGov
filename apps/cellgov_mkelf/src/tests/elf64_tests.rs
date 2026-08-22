@@ -49,6 +49,15 @@ fn proc_param_has_correct_magic() {
 }
 
 #[test]
+#[should_panic(expected = "runs past the")]
+fn a_proc_param_that_does_not_fit_the_data_segment_is_refused() {
+    // 8 bytes of data, proc-param claimed at offset 0: the
+    // PT_PROC_PARAM segment would declare 32 file-backed bytes that
+    // the file does not contain.
+    build(0x10000, 0x10000, &[0; 16], 0x20000, &[0u8; 8], Some(0));
+}
+
+#[test]
 fn code_bytes_appear_in_output() {
     let code = vec![0xDE, 0xAD, 0xBE, 0xEF];
     let elf = build(0x10000, 0x10000, &code, 0x20000, &[0; 4], None);

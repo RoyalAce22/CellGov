@@ -1,0 +1,23 @@
+# RPCS3-extracted reference digests.
+#
+# CellGov's install and decrypt pipelines are held byte-identical to
+# RPCS3's output. RPCS3 is the reference, but a live RPCS3 install tree
+# is not a test input -- these digests are, captured once and
+# committed. See tests/fixtures/rpcs3_digests/README.md to re-bless.
+#
+# Format: <sha256>  <key>  <bytes>
+8a837487c92253eef78cdcd227328bd986e50cd4e09f8cf4150c6cdc40006b36  eboot/NPUA80001  10143200
+5974598612118161814fadda2634d28f8ca464e54e2f9b343bb89e157ee13bbc  eboot/NPUA80068  8509040
+0ee388eb90a99d2211e793d18c26f9364650d15843df506f39e62ad3e69e0a08  eboot/BCES00664  9630912
+1e9a8281acd1b5b75af21139a07775c5e01091452d1a8629f62ccea5129f7d70  decrypted_masked/libaudio  29120
+b927cab05973ef71fbcd6103f1e44f498de0a0c21300c32d7fd7807e006e0e7e  decrypted_masked/libfs  108600
+6b02dbb03ed7e3432c632565bbdf428c71a62c67aa98a31e5bf7c77525767873  decrypted_masked/libgcm_sys  66912
+1ddab585f28c4c5990a66dddc119b21e86a4e5cff9a306db1208c0229b1d8d65  decrypted_masked/libio  74368
+aac69540830b4a6673b93331bf52266f360551a2732adcbb3c7a808daddf09c5  decrypted_masked/liblv2  109488
+ea5931b7e96870fba073a91d034b54f8ed36a97b63443eeb302814f16490d671  decrypted_masked/libnet  172976
+515b65ebacac505d8cefd45c31f0eb304382d428a5a5fdc906890bac8d5382e1  decrypted_masked/libnetctl  49456
+7d9d334676b43b40220613e071b1ca74550015f6adb3ba041cf25dbd9df03d96  decrypted_masked/libspurs_jq  74864
+769e7907bea7acf0575cec3722cc10de86a576b4550d639be4d25657f9951b98  decrypted_masked/libsync2  38832
+6e4c69756c84a0965206e64fee264c14d0e5ae09e35ec37f6713f519283c3be0  decrypted_masked/libsysmodule  59816
+821fab878f7030ccd6045dee436f5458f0a3d0b0e170ec78db3aee094f676325  decrypted_masked/libsysutil  203328
+bd72d1b82d3b3f9091a1a01708ddb94c7d711b129d32783037c40c23c51ca7ef  decrypted_masked/libsysutil_np  283728

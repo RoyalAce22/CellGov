@@ -81,6 +81,21 @@ fn synthetic_sce_header_with_revision_flags(revision_flags: u16) -> Vec<u8> {
 }
 
 #[test]
+fn the_app_decrypt_path_rejects_a_debug_self_by_name() {
+    // The APP path skips the key peel for a debug SELF exactly as the
+    // NPDRM path does, so without its own guard it would feed still
+    // encrypted bytes forward and refuse under an unrelated name.
+    let data = synthetic_sce_header_with_revision_flags(0x8000);
+    let err = crate::sce::decrypt_self_to_elf(&data).unwrap_err();
+    assert!(matches!(
+        err,
+        SceError::DebugSelfUnsupported {
+            revision_flags: 0x8000
+        }
+    ));
+}
+
+#[test]
 fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_high_bit_set() {
     let data = synthetic_sce_header_with_revision_flags(0x8000);
     let dummy_klic = [0u8; 16];

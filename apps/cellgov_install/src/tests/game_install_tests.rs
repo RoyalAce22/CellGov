@@ -4,9 +4,9 @@
 //! in `tests/parity_pkg.rs`).
 
 use super::*;
+use crate::scratch_dir::scratch;
 use crate::test_support::{
-    build_iso, build_npdrm_eboot_header, build_param_sfo, build_pkg, pkg_file, scratch, IsoNode,
-    PkgItem,
+    build_iso, build_npdrm_eboot_header, build_param_sfo, build_pkg, pkg_file, IsoNode, PkgItem,
 };
 use std::path::PathBuf;
 

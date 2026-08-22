@@ -12,6 +12,7 @@ use cellgov_compare::{
     DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome, RegionPairOutcome,
     UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
 };
+use cellgov_ps3_abi::elf::ELF_MAGIC;
 
 use super::args::find_flag_value;
 use super::exit::{die, load_file_or_die};
@@ -288,7 +289,7 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
     let magic: [u8; 4] = eboot_bytes[0..4]
         .try_into()
         .expect("guarded by len() >= ELF_HEADER_SIZE");
-    if magic != [0x7f, b'E', b'L', b'F'] {
+    if magic != ELF_MAGIC {
         return Err(ElfHeaderParseError::BadMagic { found: magic });
     }
     let class = eboot_bytes[4];

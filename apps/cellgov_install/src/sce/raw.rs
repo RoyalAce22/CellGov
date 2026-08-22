@@ -1,6 +1,8 @@
 //! Byte-level readers, SCE header layouts, and the container /
 //! supplemental-chain parses over them.
 
+use cellgov_ps3_abi::sce::SCE_MAGIC_U32;
+
 use super::error::SceError;
 
 /// Outer SCE container header at file offset 0 (big-endian, 0x20 bytes).
@@ -137,7 +139,7 @@ pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, SceError> {
         });
     }
     let magic = read_be_u32(data, 0);
-    if magic != 0x53434500 {
+    if magic != SCE_MAGIC_U32 {
         return Err(SceError::BadMagic { got: magic });
     }
     Ok(SceContainerHeader {

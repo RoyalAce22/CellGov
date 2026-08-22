@@ -38,7 +38,7 @@ fn workspace_root() -> PathBuf {
 fn locate_firmware_dir() -> PathBuf {
     let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
         Ok(s) => PathBuf::from(s),
-        Err(_) => workspace_root().join("firmware/sys/external"),
+        Err(_) => workspace_root().join("vfs/dev_flash/sys/external"),
     };
     assert!(
         dir.is_dir(),

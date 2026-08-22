@@ -9,6 +9,11 @@
 /// `\x7FELF` magic bytes at offset 0 of every ELF file.
 pub const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 
+/// [`ELF_MAGIC`] as the big-endian word a header parser reads at
+/// offset 0, for comparing against a `read_be_u32` result without
+/// re-spelling the bytes.
+pub const ELF_MAGIC_U32: u32 = u32::from_be_bytes(ELF_MAGIC);
+
 /// Size of the PS3 PPU ELF header (ELF64). The PPU loader reads
 /// `e_phoff` and friends through this.
 pub const ELF_HEADER_SIZE: usize = 64;
@@ -30,10 +35,28 @@ pub const ELFDATA2MSB: u8 = 2;
 /// `e_ident[EI_VERSION]` and `e_version` value for the current ELF revision.
 pub const EV_CURRENT: u8 = 1;
 
+/// Byte index of `EI_CLASS` within `e_ident`.
+pub const ELF_EI_CLASS: usize = 4;
+
+/// Byte index of `EI_DATA` within `e_ident`.
+pub const ELF_EI_DATA: usize = 5;
+
+/// Byte index of `EI_VERSION` within `e_ident`.
+pub const ELF_EI_VERSION: usize = 6;
+
+/// `e_machine` field offset in the ELF64 header.
+pub const ELF_E_MACHINE_OFFSET: usize = 18;
+
+/// `e_phnum` value reserved by the PN_XNUM extension: the real
+/// program-header count lives in section header 0's `sh_info`, so a
+/// parser that only walks the header table cannot honour it.
+pub const ELF_PN_XNUM: u16 = 0xFFFF;
+
 /// `e_type` value for executable files.
 pub const ET_EXEC: u16 = 2;
 
-/// `e_machine` value for 64-bit PowerPC.
+/// `e_machine` value for 64-bit PowerPC, per the PowerPC ELF
+/// supplement.
 pub const EM_PPC64: u16 = 21;
 
 /// `e_type` value for PS3 PRX modules (Sony-specific extension to ELF
@@ -223,6 +246,27 @@ pub const PHDR_P_PADDR_OFFSET: usize = 24;
 /// `p_filesz` field offset within an ELF64 program header.
 pub const PHDR_P_FILESZ_OFFSET: usize = 32;
 
+/// `p_memsz` field offset within an ELF64 program header. Exceeds
+/// `p_filesz` by the segment's zero-fill (`.bss`) tail.
+pub const PHDR_P_MEMSZ_OFFSET: usize = 40;
+
+// Same coupling contract as the `ELF64_*` block above, for the
+// program-header field offsets: a reader that has bounds-checked the
+// container (`ELF_HEADER_SIZE` bytes of header, `ELF_PHENTSIZE` bytes
+// per phdr slot) can read any field below without a second check.
+const _: () = assert!(ELF_EI_CLASS < ELF_HEADER_SIZE);
+const _: () = assert!(ELF_EI_DATA < ELF_HEADER_SIZE);
+const _: () = assert!(ELF_EI_VERSION < ELF_HEADER_SIZE);
+const _: () = assert!(ELF_E_MACHINE_OFFSET + 2 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF_PHOFF_OFFSET + 8 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF_PHENTSIZE_OFFSET + 2 <= ELF_HEADER_SIZE);
+const _: () = assert!(ELF_PHNUM_OFFSET + 2 <= ELF_HEADER_SIZE);
+const _: () = assert!(PHDR_P_OFFSET_OFFSET + 8 <= ELF_PHENTSIZE);
+const _: () = assert!(PHDR_P_VADDR_OFFSET + 8 <= ELF_PHENTSIZE);
+const _: () = assert!(PHDR_P_PADDR_OFFSET + 8 <= ELF_PHENTSIZE);
+const _: () = assert!(PHDR_P_FILESZ_OFFSET + 8 <= ELF_PHENTSIZE);
+const _: () = assert!(PHDR_P_MEMSZ_OFFSET + 8 <= ELF_PHENTSIZE);
+
 /// Offset of the `header_size` u32 field in `PrxParamHeader`.
 pub const PRX_PARAM_HEADER_SIZE_OFFSET: usize = 0;
 
@@ -281,10 +325,12 @@ pub const PRX_IMPORT_VSTUBS_PTR_OFFSET: usize = 32;
 /// this are treated as function-only.
 pub const PRX_IMPORT_ENTRY_VAR_MIN_SIZE: u8 = 36;
 
-/// Canonical size of one `PrxImportEntry` in bytes. Matches
-/// `sizeof(ppu_prx_module_info)` in RPCS3; an entry whose declared
-/// `size` byte is below this is structurally corrupt (its fields
-/// would not cover the `addrs_ptr` field at +24).
+/// Smallest declared entry size a `PrxImportEntry` can carry and
+/// still be parseable: an entry whose declared `size` byte is below
+/// this is structurally corrupt, because its fields would not cover
+/// the `addrs_ptr` field at +24. Not the full struct size -- RPCS3's
+/// `ppu_prx_module_info` (`PPUModule.cpp`) declares fields past
+/// `vstubs` at +32, so a conforming entry may declare more.
 pub const PRX_IMPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
 
 /// Cap on the length of a C string the PRX parser will accept when

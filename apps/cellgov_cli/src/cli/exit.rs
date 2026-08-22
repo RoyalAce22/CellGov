@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::npdrm::NpdHeaderInfo;
 use cellgov_install::sce::SceError;
-use cellgov_ps3_abi::sce::SCE_MAGIC;
+use cellgov_install::self_image::{is_sce_wrapped, to_plaintext_elf, KeyPolicy};
+use cellgov_ps3_abi::elf::ELF_MAGIC;
 
 use crate::game::manifest::TitleManifest;
 
@@ -31,9 +32,6 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// to `NP_KLIC_FREE`, Network / Local titles surface
 /// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.
 pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path) -> Vec<u8> {
-    if !(bytes.len() >= 4 && bytes[..4] == SCE_MAGIC) {
-        return bytes.to_vec();
-    }
     let exdata = vfs_root.join("home").join("00000001").join("exdata");
     let resolver = |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
         let rap_path = exdata.join(format!("{}.rap", npd.content_id));
@@ -47,8 +45,8 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
         });
         Some(cellgov_install::npdrm::rap_to_klic(&rap_arr))
     };
-    match cellgov_install::npdrm::decrypt_self_to_elf_auto(bytes, resolver) {
-        Ok(elf) => elf,
+    match to_plaintext_elf(bytes, KeyPolicy::Auto(&resolver)) {
+        Ok(elf) => elf.into_owned(),
         Err(e @ SceError::NoRapForNpdrmTitle { .. }) => die(&format!(
             "{e}; expected its RAP at {}/<content_id>.rap",
             exdata.display()
@@ -121,7 +119,7 @@ pub(crate) fn load_ppu_image_with_title_or_die(
     vfs_root: &Path,
 ) -> LoadedPpuImage {
     let bytes = load_file_or_die(path);
-    if !(bytes.len() >= 4 && bytes[..4] == SCE_MAGIC) {
+    if !is_sce_wrapped(&bytes) {
         return LoadedPpuImage {
             elf_data: bytes,
             authority_id: None,
@@ -134,8 +132,9 @@ pub(crate) fn load_ppu_image_with_title_or_die(
     let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
         .unwrap_or_else(|e| die(&format!("SELF {path}: capability header: {e}")));
     let resolver = klicensee_resolver(title, vfs_root.to_path_buf());
-    let elf_data = cellgov_install::npdrm::decrypt_self_to_elf_auto(&bytes, resolver)
-        .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")));
+    let elf_data = to_plaintext_elf(&bytes, KeyPolicy::Auto(&resolver))
+        .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")))
+        .into_owned();
     LoadedPpuImage {
         elf_data,
         authority_id,
@@ -179,16 +178,40 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                 continue;
             }
         };
-        if bytes.len() >= 4 && bytes[..4] == SCE_MAGIC {
-            let authority_id = cellgov_install::sce::parse_program_authority_id(&bytes).ok();
-            let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
-                .ok()
-                .flatten();
-            match cellgov_install::npdrm::decrypt_self_to_elf_auto(&bytes, &resolver) {
+        if is_sce_wrapped(&bytes) {
+            // Both headers are plaintext, so a parse failure here is a
+            // structural anomaly in a file the walk is about to boot,
+            // not a legitimate absence. Dropping it into `None` would
+            // seat the shared retail authority id and an unprivileged
+            // ctrl_flags1 while the banner reported the fallback as
+            // "raw-ELF input", so name each refusal instead.
+            let authority_id = match cellgov_install::sce::parse_program_authority_id(&bytes) {
+                Ok(id) => Some(id),
+                Err(e) => {
+                    eprintln!(
+                        "load ppu image: {}: SELF identification header: {e}; \
+                         program_authority_id falls back to the retail constant",
+                        path.display(),
+                    );
+                    None
+                }
+            };
+            let control_flags1 = match cellgov_install::sce::parse_control_flags1(&bytes) {
+                Ok(flags) => flags,
+                Err(e) => {
+                    eprintln!(
+                        "load ppu image: {}: SELF capability header: {e}; \
+                         ctrl_flags1 falls back to unprivileged",
+                        path.display(),
+                    );
+                    None
+                }
+            };
+            match to_plaintext_elf(&bytes, KeyPolicy::Auto(&resolver)) {
                 Ok(elf) => {
                     return (
                         LoadedPpuImage {
-                            elf_data: elf,
+                            elf_data: elf.into_owned(),
                             authority_id,
                             control_flags1,
                         },
@@ -200,7 +223,7 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                     continue;
                 }
             }
-        } else if bytes.len() >= 4 && bytes[..4] == [0x7F, b'E', b'L', b'F'] {
+        } else if bytes.len() >= 4 && bytes[..4] == ELF_MAGIC {
             return (
                 LoadedPpuImage {
                     elf_data: bytes,

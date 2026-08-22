@@ -133,16 +133,16 @@ fn read_firmware_module_elf(path: &Path) -> Result<Vec<u8>, PrxLoadStageError> {
         path: path.to_path_buf(),
         source,
     })?;
-    if raw.len() >= 4 && &raw[..4] == b"SCE\0" {
-        cellgov_install::sce::decrypt_self_to_elf(&raw).map_err(|source| {
-            PrxLoadStageError::Decrypt {
-                path: path.to_path_buf(),
-                source,
-            }
-        })
-    } else {
-        Ok(raw)
-    }
+    // A firmware tree carries no NPDRM content and no RAP to resolve
+    // against, so its SELFs are APP-keyed by construction.
+    cellgov_install::self_image::into_plaintext_elf(
+        raw,
+        cellgov_install::self_image::KeyPolicy::AppOnly,
+    )
+    .map_err(|source| PrxLoadStageError::Decrypt {
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 /// Round `addr` up to the next 4 KiB boundary.
@@ -502,7 +502,21 @@ pub(in crate::game) fn load_firmware_set_bound(
         };
         out.push(PrxLoadInfo {
             name: prx.name.clone(),
-            stem: id_to_stem.get(id).cloned().unwrap_or_default(),
+            // `load_firmware_set` keys `loaded` by the same
+            // `parse_prx().module_id` this map was built with, and
+            // rejects a duplicate id outright, so a miss is a broken
+            // loader invariant. An empty stem here would drop the
+            // module out of the boot-side PRX registry without a word
+            // (boot.rs skips a stemless entry as the synthetic
+            // trampoline pseudo-module), leaving firmware-side
+            // load-by-path unable to reach it.
+            stem: id_to_stem.get(id).cloned().unwrap_or_else(|| {
+                die(&format!(
+                    "prx: loaded module id 0x{:08x} ({:?}) has no recorded stem; the \
+                     loader's module-id/stem invariant broke",
+                    id.0, prx.name,
+                ))
+            }),
             base: prx.base,
             data_end: prx.data_end,
             toc: prx.toc,

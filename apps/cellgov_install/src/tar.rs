@@ -24,7 +24,7 @@ pub enum ExtractError {
     PathTraversal {
         /// Original archive-relative path as recorded in the tar header.
         guest_path: String,
-        /// Host path the entry would have resolved to under `base`.
+        /// Host path the entry would have resolved to under `vfs_root`.
         host_path: PathBuf,
     },
     /// `create_dir_all` on the destination's parent failed.
@@ -98,10 +98,16 @@ pub enum TarParseError {
 /// Summary returned by [`extract_to_disk`]. `errors` is non-empty when
 /// one or more entries failed; the caller decides whether that aborts
 /// the install or is logged and tolerated.
+///
+/// `written + skipped + errors.len()` equals the number of entries
+/// handed in, so no entry leaves the extractor untallied.
 #[derive(Debug, Default)]
 pub struct ExtractReport {
     /// Number of entries successfully written to disk.
     pub written: usize,
+    /// Entries whose name addressed no file ([`route_entry_path`]
+    /// returned `None`), so nothing was written and nothing failed.
+    pub skipped: usize,
     /// Per-entry failures, in the order they occurred.
     pub errors: Vec<ExtractError>,
 }
@@ -196,37 +202,93 @@ fn is_safe_relative(clean: &str) -> bool {
         .all(|c| !matches!(c, Component::ParentDir))
 }
 
-/// Write `entries` under `base`, stripping PUP packaging prefixes
-/// (`000/`, `dev_flash/`) so `base` ends up as the dev_flash VFS root.
+/// Mounts a PUP carries alongside `dev_flash`, named by their own
+/// prefix. They are siblings of `dev_flash` on the console, not
+/// content inside it, so they keep their prefix and land beside it.
+///
+/// The set is closed at two: LV2 publishes exactly `/dev_flash`,
+/// `/dev_flash2` and `/dev_flash3` as flash mount points, and
+/// `/dev_flash` is itself flash 1, so there is no `dev_flash1` for a
+/// PUP to carry. RPCS3 mirrors the same three in `Emu/System.cpp`
+/// `Emulator::Init` and `Emu/Cell/lv2/sys_fs.cpp`
+/// `g_mp_sys_dev_flash{,2,3}`.
+pub const SIBLING_MOUNTS: [&str; 2] = ["dev_flash2/", "dev_flash3/"];
+
+/// VFS-root-relative destination for one archive entry name, or
+/// `None` when the name resolves to no file (empty, or a bare mount
+/// root).
+///
+/// A leading `/` and the `000/` packaging artefact are stripped; each
+/// [`SIBLING_MOUNTS`] prefix is kept, and everything else is dev_flash
+/// content, so a `dev_flash/`-prefixed name and a prefixless one
+/// resolve to the same place.
+///
+/// The result always starts with a mount component and is therefore
+/// relative, but it is NOT traversal-checked -- a caller that joins it
+/// onto a real directory must reject `..` itself.
+///
+/// # Examples
+///
+/// ```
+/// use cellgov_install::tar::route_entry_path;
+/// assert_eq!(route_entry_path("000/vsh/module/a.self").as_deref(), Some("dev_flash/vsh/module/a.self"));
+/// assert_eq!(route_entry_path("dev_flash2/etc/x.sys").as_deref(), Some("dev_flash2/etc/x.sys"));
+/// assert_eq!(route_entry_path("dev_flash2/"), None);
+/// ```
+pub fn route_entry_path(name: &str) -> Option<String> {
+    let clean = name.trim_start_matches('/');
+    let clean = clean.strip_prefix("000/").unwrap_or(clean);
+    let clean = clean.trim_start_matches('/');
+    if clean.is_empty() {
+        return None;
+    }
+    if let Some(mount) = SIBLING_MOUNTS.iter().find(|m| clean.starts_with(**m)) {
+        // A bare `dev_flash2/` names the mount root itself; writing it
+        // would drop a regular file where the mount directory belongs
+        // and fail every later entry under that mount.
+        if clean[mount.len()..].trim_start_matches('/').is_empty() {
+            return None;
+        }
+        return Some(clean.to_string());
+    }
+    let inner = clean
+        .strip_prefix("dev_flash/")
+        .unwrap_or(clean)
+        .trim_start_matches('/');
+    if inner.is_empty() {
+        return None;
+    }
+    Some(format!("dev_flash/{inner}"))
+}
+
+/// Write `entries` under `vfs_root`, routing each name through
+/// [`route_entry_path`] so `dev_flash` content lands in
+/// `vfs_root/dev_flash/` and each [`SIBLING_MOUNTS`] mount lands
+/// beside it.
+///
 /// Path-traversal (`..`) entries are rejected and recorded in the
 /// returned report. Per-entry I/O failures are collected rather than
 /// short-circuiting; the caller decides whether the report's `errors`
-/// vec aborts the install.
-pub fn extract_to_disk(entries: &[TarEntry], base: &Path) -> ExtractReport {
+/// vec aborts the install. An entry the router addresses to no file is
+/// counted in `skipped` rather than vanishing.
+pub fn extract_to_disk(entries: &[TarEntry], vfs_root: &Path) -> ExtractReport {
     let mut report = ExtractReport::default();
     for entry in entries {
         // Empty `data` is still written (PS3 firmware ships 0-byte
-        // placeholder files); only a nameless entry is unrepresentable.
-        if entry.name.is_empty() {
+        // placeholder files); only a name that routes to no file skips.
+        let Some(routed) = route_entry_path(&entry.name) else {
+            report.skipped += 1;
             continue;
-        }
-        let clean = entry.name.trim_start_matches('/');
-        // `base` is the dev_flash VFS root, so "dev_flash/" and the
-        // "000/" packaging artefact strip; "dev_flash2/" and
-        // "dev_flash3/" are sibling mounts and stay intact.
-        let clean = clean.strip_prefix("000/").unwrap_or(clean);
-        let clean = clean.strip_prefix("dev_flash/").unwrap_or(clean);
-        if clean.is_empty() {
-            continue;
-        }
+        };
+        let clean: &str = &routed;
         if !is_safe_relative(clean) {
             report.errors.push(ExtractError::PathTraversal {
                 guest_path: entry.name.clone(),
-                host_path: base.join(clean),
+                host_path: vfs_root.join(clean),
             });
             continue;
         }
-        let dest: PathBuf = base.join(clean);
+        let dest: PathBuf = vfs_root.join(clean);
         if let Some(parent) = dest.parent() {
             if let Err(e) = std::fs::create_dir_all(parent) {
                 report.errors.push(ExtractError::CreateDir {

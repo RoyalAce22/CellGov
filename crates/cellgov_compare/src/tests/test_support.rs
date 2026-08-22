@@ -95,17 +95,36 @@ pub fn sample_observation() -> Observation {
 /// RAII guard for a per-test temp directory under `std::env::temp_dir()`.
 ///
 /// Removes the directory recursively on drop so panicking tests do not
-/// leak temp state across runs.
+/// leak temp state across runs. The path carries the process id, so two
+/// concurrent `cargo test` invocations cannot resolve to the same
+/// directory and delete each other's fixtures mid-test.
+///
+/// `name` is the only thing separating one live guard from another
+/// inside a single process, and the harness runs tests in parallel:
+/// each call site must pass a name no other call site uses.
 pub struct TempDir {
     path: PathBuf,
 }
 
 impl TempDir {
-    /// Create a fresh temp directory named `cellgov_<name>`.
+    /// Create a fresh temp directory named `cellgov_<name>_<pid>`.
+    ///
+    /// # Panics
+    ///
+    /// If a stale directory at the same path cannot be removed, or the
+    /// fresh one cannot be created.
     pub fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("cellgov_{name}"));
-        std::fs::remove_dir_all(&path).ok();
-        std::fs::create_dir_all(&path).ok();
+        let pid = std::process::id();
+        let path = std::env::temp_dir().join(format!("cellgov_{name}_{pid}"));
+        // Anything other than "it was not there" means the fixtures
+        // this test writes would sit beside a previous run's files.
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => panic!("stale temp dir {} not removable: {e}", path.display()),
+        }
+        std::fs::create_dir_all(&path)
+            .unwrap_or_else(|e| panic!("temp dir {} not creatable: {e}", path.display()));
         Self { path }
     }
 
@@ -116,7 +135,15 @@ impl TempDir {
 }
 
 impl Drop for TempDir {
+    #[allow(
+        clippy::print_stderr,
+        reason = "a drop-time cleanup refusal cannot panic; stderr is the only channel left"
+    )]
     fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.path).ok();
+        // Unwinding out of `drop` aborts the process, so a refusal is
+        // named rather than raised.
+        if let Err(e) = std::fs::remove_dir_all(&self.path) {
+            eprintln!("temp dir {} not removed on drop: {e}", self.path.display());
+        }
     }
 }

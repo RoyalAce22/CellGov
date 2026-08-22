@@ -28,13 +28,36 @@ thiserror = "2"
 
 [features]
 # Enable the npdrm oracle vector tests that include_bytes!() the
-# operator-supplied RAP files under
-# tools/rpcs3/dev_hdd0/home/00000001/exdata/. Off by default so a
-# fresh checkout without those license files compiles cleanly; CI
-# enables it on the host that carries the RAPs to run the
-# 16-byte-boundary regression anchors. The rap_to_klic_is_pure
-# test (no fixture dependency) stays unconditional.
+# operator-supplied RAP and EBOOT files from the installed corpus
+# under vfs/dev_hdd0/. Off by default so a fresh checkout without
+# those license files compiles cleanly; CI enables it on the host
+# that carries them to run the 16-byte-boundary regression anchors.
+# The rap_to_klic_is_pure test (no fixture dependency) stays
+# unconditional.
 npdrm-oracle-vectors = []
+
+# Suites that need an operator-owned title dump (a retail PKG or a
+# ~2GB decrypted disc image). Off by default so a fresh checkout
+# neither builds nor silently skips them; on, they hard-assert the
+# dump is present. CI type-checks and lints them so they cannot
+# bitrot.
+title-corpus = []
+
+# Suite that needs an operator-owned PS3UPDAT.PUP. Same contract as
+# title-corpus: off means not built, on means hard-assert.
+firmware-corpus = []
+
+[[test]]
+name = "parity_pkg"
+required-features = ["title-corpus"]
+
+[[test]]
+name = "parity_disc"
+required-features = ["title-corpus"]
+
+[[test]]
+name = "firmware_pipeline_end_to_end"
+required-features = ["firmware-corpus"]
 
 [lints]
 workspace = true

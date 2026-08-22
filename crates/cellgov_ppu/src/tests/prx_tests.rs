@@ -68,36 +68,6 @@ fn import_parse_error_display_renders_every_variant() {
     }
 }
 
-#[test]
-#[ignore = "requires tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf; \
-            run with CELLGOV_RETAIL_FIXTURES=1 cargo test -- --ignored"]
-fn parse_retail_eboot_imports() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.elf");
-    if !path.exists() {
-        if std::env::var_os("CELLGOV_RETAIL_FIXTURES").is_some() {
-            panic!(
-                "CELLGOV_RETAIL_FIXTURES set but {} is absent",
-                path.display()
-            );
-        }
-        return;
-    }
-    let data = std::fs::read(&path).unwrap();
-    let modules = parse_imports(&data).unwrap();
-
-    assert!(!modules.is_empty(), "should find imported modules");
-
-    let total_funcs: usize = modules.iter().map(|m| m.functions.len()).sum();
-    assert_eq!(modules.len(), 12);
-    assert_eq!(total_funcs, 140);
-
-    let names: Vec<&str> = modules.iter().map(|m| m.name.as_str()).collect();
-    assert!(names.contains(&"cellSysutil"));
-    assert!(names.contains(&"sysPrxForUser"));
-    assert!(names.contains(&"cellGcmSys"));
-}
-
 /// `p_filesz` written on synthetic PT_PRX_PARAM headers, matching the
 /// `header_size` the builders declare.
 const PRX_PARAM_BODY_SIZE: u64 = 0x40;
@@ -171,6 +141,93 @@ fn parse_synthetic_elf_round_trips_one_module_one_function() {
     assert_eq!(modules[0].functions.len(), 1);
     assert_eq!(modules[0].functions[0].nid, nid);
     assert_eq!(modules[0].functions[0].stub_addr, 260);
+}
+
+/// Two import entries of *different* declared sizes, two functions
+/// each. The size difference is the point: a walk that advanced by a
+/// fixed stride instead of the entry's own `entry_size` would land
+/// mid-entry on the second module.
+fn build_two_module_prx_elf() -> Vec<u8> {
+    const TOTAL_SIZE: usize = 512;
+    const PARAM_OFF: usize = 176;
+    const ENTRY0_OFF: usize = 256;
+    const ENTRY0_SIZE: u8 = 0x1C;
+    const ENTRY1_OFF: usize = ENTRY0_OFF + ENTRY0_SIZE as usize;
+    const ENTRY1_SIZE: u8 = 0x2C;
+    const IMPORTS_END: usize = ENTRY1_OFF + ENTRY1_SIZE as usize;
+    const NAME0_OFF: usize = 328;
+    const NIDS0_OFF: usize = 336;
+    const STUBS0_OFF: usize = 344;
+    const NAME1_OFF: usize = 352;
+    const NIDS1_OFF: usize = 360;
+    const STUBS1_OFF: usize = 368;
+
+    let mut data = vec![0u8; TOTAL_SIZE];
+    data[0..4].copy_from_slice(&[0x7F, b'E', b'L', b'F']);
+    data[4] = 2;
+    data[5] = 2;
+    data[32..40].copy_from_slice(&64u64.to_be_bytes());
+    data[54..56].copy_from_slice(&56u16.to_be_bytes());
+    data[56..58].copy_from_slice(&2u16.to_be_bytes());
+
+    // PT_LOAD covering the whole file with vaddr == file offset.
+    let ph0 = 64usize;
+    data[ph0..ph0 + 4].copy_from_slice(&1u32.to_be_bytes());
+    data[ph0 + 32..ph0 + 40].copy_from_slice(&(TOTAL_SIZE as u64).to_be_bytes());
+
+    let ph1 = 64 + 56;
+    data[ph1..ph1 + 4].copy_from_slice(&PT_PRX_PARAM.to_be_bytes());
+    data[ph1 + 8..ph1 + 16].copy_from_slice(&(PARAM_OFF as u64).to_be_bytes());
+    data[ph1 + 32..ph1 + 40].copy_from_slice(&PRX_PARAM_BODY_SIZE.to_be_bytes());
+
+    data[PARAM_OFF..PARAM_OFF + 4].copy_from_slice(&0x40u32.to_be_bytes());
+    data[PARAM_OFF + 4..PARAM_OFF + 8].copy_from_slice(&PRX_PARAM_MAGIC.to_be_bytes());
+    data[PARAM_OFF + 24..PARAM_OFF + 28].copy_from_slice(&(ENTRY0_OFF as u32).to_be_bytes());
+    data[PARAM_OFF + 28..PARAM_OFF + 32].copy_from_slice(&(IMPORTS_END as u32).to_be_bytes());
+
+    for (entry_off, entry_size, name_off, nids_off, stubs_off) in [
+        (ENTRY0_OFF, ENTRY0_SIZE, NAME0_OFF, NIDS0_OFF, STUBS0_OFF),
+        (ENTRY1_OFF, ENTRY1_SIZE, NAME1_OFF, NIDS1_OFF, STUBS1_OFF),
+    ] {
+        data[entry_off] = entry_size;
+        data[entry_off + 6..entry_off + 8].copy_from_slice(&2u16.to_be_bytes());
+        data[entry_off + 16..entry_off + 20].copy_from_slice(&(name_off as u32).to_be_bytes());
+        data[entry_off + 20..entry_off + 24].copy_from_slice(&(nids_off as u32).to_be_bytes());
+        data[entry_off + 24..entry_off + 28].copy_from_slice(&(stubs_off as u32).to_be_bytes());
+    }
+
+    data[NAME0_OFF..NAME0_OFF + 4].copy_from_slice(b"aaa\0");
+    data[NIDS0_OFF..NIDS0_OFF + 4].copy_from_slice(&0x1111_1111u32.to_be_bytes());
+    data[NIDS0_OFF + 4..NIDS0_OFF + 8].copy_from_slice(&0x2222_2222u32.to_be_bytes());
+    data[NAME1_OFF..NAME1_OFF + 5].copy_from_slice(b"bbbb\0");
+    data[NIDS1_OFF..NIDS1_OFF + 4].copy_from_slice(&0x3333_3333u32.to_be_bytes());
+    data[NIDS1_OFF + 4..NIDS1_OFF + 8].copy_from_slice(&0x4444_4444u32.to_be_bytes());
+
+    data
+}
+
+#[test]
+fn parse_walks_every_entry_and_every_function_slot() {
+    let modules = parse_imports(&build_two_module_prx_elf()).expect("two-module ELF must parse");
+    let seen: Vec<(&str, Vec<(u32, u32)>)> = modules
+        .iter()
+        .map(|m| {
+            (
+                m.name.as_str(),
+                m.functions
+                    .iter()
+                    .map(|f| (f.nid, f.stub_addr))
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            ("aaa", vec![(0x1111_1111, 344), (0x2222_2222, 348)]),
+            ("bbbb", vec![(0x3333_3333, 368), (0x4444_4444, 372)]),
+        ],
+    );
 }
 
 #[test]

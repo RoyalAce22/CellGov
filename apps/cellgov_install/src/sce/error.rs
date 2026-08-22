@@ -155,6 +155,17 @@ pub enum SceError {
         /// `content_id` from the NPD supplemental header.
         content_id: String,
     },
+    /// SELF is NPDRM-wrapped but the caller declared an APP-only key
+    /// policy, so no klicensee is available to open it.
+    #[error("SCE: SELF is NPDRM-wrapped (content_id {content_id}, license {license}); the caller's key policy is APP-only, so klicensee resolution is out of reach")]
+    NpdrmUnderAppOnlyPolicy {
+        /// `content_id` from the NPD supplemental header.
+        content_id: String,
+        /// Validated `license` wire value (1 = Network, 2 = Local,
+        /// 3 = Free); an out-of-range one surfaces as
+        /// [`SceError::NpdrmBadLicense`] instead.
+        license: u32,
+    },
     /// NPDRM license value is not 1, 2, or 3.
     #[error("SCE: NPDRM license value {got} is not 1, 2, or 3")]
     NpdrmBadLicense {
@@ -162,8 +173,8 @@ pub enum SceError {
         got: u32,
     },
     /// SELF carries the debug/fself flag (high bit of `revision_flags`);
-    /// the NPDRM decrypt path does not handle unencrypted SELFs.
-    #[error("SCE: SELF is flagged debug/fself (revision_flags=0x{revision_flags:04x}); unencrypted SELFs are not in scope for the NPDRM decrypt path")]
+    /// neither decrypt path handles unencrypted SELFs.
+    #[error("SCE: SELF is flagged debug/fself (revision_flags=0x{revision_flags:04x}); unencrypted SELFs are not in scope for the decrypt paths")]
     DebugSelfUnsupported {
         /// Raw `revision_flags` field from the SCE container header.
         revision_flags: u16,

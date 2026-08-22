@@ -1,6 +1,7 @@
 //! Install-subcommand argument parsing and output-directory preflight checks.
 
 use super::*;
+use crate::scratch_dir::scratch;
 
 fn argv(parts: &[&str]) -> Vec<String> {
     let mut v = vec!["cellgov_install".to_string(), "install".to_string()];
@@ -9,7 +10,7 @@ fn argv(parts: &[&str]) -> Vec<String> {
 }
 
 #[test]
-fn parse_default_output_is_firmware() {
+fn parse_default_output_is_the_vfs_root() {
     let a = parse_install_args(&argv(&["/tmp/PS3UPDAT.PUP"])).expect("parse");
     assert_eq!(a.pup_path, PathBuf::from("/tmp/PS3UPDAT.PUP"));
     assert_eq!(a.output_dir, PathBuf::from(DEFAULT_INSTALL_OUTPUT));
@@ -63,38 +64,44 @@ fn parse_unknown_flag_errors() {
 
 #[test]
 fn check_output_dir_missing_is_ok() {
-    let dir = std::env::temp_dir().join("cellgov_install_test_missing_xyz_31b2");
-    let _ = std::fs::remove_dir_all(&dir);
-    assert!(check_output_dir(&dir, false).is_ok());
+    let dir = scratch();
+    assert!(check_output_dir(&dir.join("absent"), false).is_ok());
 }
 
 #[test]
 fn check_output_dir_empty_is_ok() {
-    let dir = std::env::temp_dir().join("cellgov_install_test_empty_31b2");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     assert!(check_output_dir(&dir, false).is_ok());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
 fn check_output_dir_nonempty_without_force_errors() {
-    let dir = std::env::temp_dir().join("cellgov_install_test_nonempty_31b2");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     std::fs::write(dir.join("preexisting.txt"), b"x").unwrap();
-    assert!(check_output_dir(&dir, false).is_err());
-    std::fs::remove_dir_all(&dir).unwrap();
+    assert!(matches!(
+        check_output_dir(&dir, false),
+        Err(FirmwareCliError::OutputDirNotEmpty { .. })
+    ));
+}
+
+#[test]
+fn check_output_dir_on_a_non_directory_reports_the_read_failure() {
+    let dir = scratch();
+    let file = dir.join("not_a_dir");
+    std::fs::write(&file, b"x").unwrap();
+    // The path exists, so the preflight gets past the `exists` arm and
+    // has to name the `read_dir` refusal rather than treat it as empty.
+    assert!(matches!(
+        check_output_dir(&file, false),
+        Err(FirmwareCliError::OutputDirReadFailed { .. })
+    ));
 }
 
 #[test]
 fn check_output_dir_nonempty_with_force_is_ok() {
-    let dir = std::env::temp_dir().join("cellgov_install_test_force_31b2");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
     std::fs::write(dir.join("preexisting.txt"), b"x").unwrap();
     assert!(check_output_dir(&dir, true).is_ok());
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -117,4 +124,69 @@ fn install_exclusion_keeps_real_firmware_paths() {
     assert!(!is_install_excluded("dev_flash/vsh/resource/a$b.txt"));
     // "pspemu" matches only as a leading path component, not a substring.
     assert!(!is_install_excluded("dev_flash/data/pspemu_notes.txt"));
+    // A sibling mount is not dev_flash content, so the dev_flash-rooted
+    // prune list must not reach into it.
+    assert!(!is_install_excluded("dev_flash2/ps2emu/x.self"));
+}
+
+#[test]
+fn install_exclusion_prunes_through_the_packaging_prefixes_the_extractor_strips() {
+    // The extractor routes all four of these to dev_flash/ps2emu/...,
+    // so the prune has to see them as the same entry.
+    assert!(is_install_excluded("ps2emu/ps2_netemu.self"));
+    assert!(is_install_excluded("/ps2emu/ps2_netemu.self"));
+    assert!(is_install_excluded("000/ps2emu/ps2_netemu.self"));
+    assert!(is_install_excluded("000/dev_flash/ps2emu/ps2_netemu.self"));
+}
+
+#[test]
+fn firmware_mounts_covers_dev_flash_and_both_siblings() {
+    let mounts: Vec<&str> = firmware_mounts().collect();
+    assert_eq!(mounts, vec!["dev_flash", "dev_flash2", "dev_flash3"]);
+}
+
+#[test]
+fn preflight_refuses_an_occupied_sibling_mount_and_names_it() {
+    let dir = scratch();
+    // dev_flash itself is empty, so a preflight scoped to dev_flash
+    // alone would let a second PUP overwrite dev_flash3 unasked.
+    std::fs::create_dir_all(dir.join("dev_flash3")).unwrap();
+    std::fs::write(dir.join("dev_flash3/leftover.bin"), b"x").unwrap();
+
+    let err = preflight_firmware_mounts(&dir, false).expect_err("refuses");
+    let FirmwareCliError::OutputDirNotEmpty { path } = &err else {
+        panic!("expected OutputDirNotEmpty, got {err}");
+    };
+    assert!(
+        path.ends_with("dev_flash3"),
+        "the refusal must name the occupied mount, got {}",
+        path.display()
+    );
+}
+
+#[test]
+fn preflight_ignores_mounts_a_firmware_install_does_not_write() {
+    let dir = scratch();
+    std::fs::create_dir_all(dir.join("dev_hdd0/game/NPUA80001")).unwrap();
+    std::fs::write(dir.join("dev_hdd0/game/NPUA80001/x.bin"), b"g").unwrap();
+    std::fs::create_dir_all(dir.join("dev_bdvd")).unwrap();
+    std::fs::write(dir.join("dev_bdvd/PS3_DISC.SFB"), b"d").unwrap();
+    assert!(preflight_firmware_mounts(&dir, false).is_ok());
+}
+
+#[test]
+fn preflight_force_clears_every_firmware_mount() {
+    for occupied in ["dev_flash", "dev_flash2", "dev_flash3"] {
+        let dir = scratch();
+        std::fs::create_dir_all(dir.join(occupied)).unwrap();
+        std::fs::write(dir.join(occupied).join("leftover.bin"), b"x").unwrap();
+        assert!(
+            preflight_firmware_mounts(&dir, false).is_err(),
+            "{occupied} must block without --force"
+        );
+        assert!(
+            preflight_firmware_mounts(&dir, true).is_ok(),
+            "--force must clear {occupied}"
+        );
+    }
 }

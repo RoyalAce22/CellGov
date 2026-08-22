@@ -1,7 +1,7 @@
 //! PRX parsing: segments, exports, module entry points, and relocation records.
 
 use super::*;
-use crate::sprx::{R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR32};
+use crate::sprx::{R_PPC64_ADDR16_HA, R_PPC64_ADDR32};
 
 use crate::sprx::test_fixtures::make_test_prx;
 
@@ -94,49 +94,6 @@ fn reject_too_small() {
 fn reject_bad_magic() {
     let data = vec![0u8; 128];
     assert!(matches!(parse_prx(&data), Err(PrxParseError::BadMagic)));
-}
-
-#[test]
-fn parse_real_liblv2() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_flash_decrypted/sys/external/liblv2.prx");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(&path).unwrap();
-    let prx = parse_prx(&data).unwrap();
-
-    assert_eq!(prx.name, "liblv2");
-    assert_eq!(prx.toc, 0x1c620);
-
-    let spy = prx
-        .exports
-        .iter()
-        .find(|e| e.name == "sysPrxForUser")
-        .expect("liblv2 should export sysPrxForUser");
-    assert_eq!(spy.functions.len(), 157);
-
-    let ms = prx.module_start.expect("liblv2 should have module_start");
-    assert_eq!(ms.code, 0x0);
-    assert_eq!(ms.toc, 0x1c620);
-
-    assert!(
-        prx.relocations.len() > 1000,
-        "expected >1000 relocs, got {}",
-        prx.relocations.len()
-    );
-
-    for r in &prx.relocations {
-        assert!(
-            matches!(
-                r.rtype,
-                R_PPC64_ADDR32 | R_PPC64_ADDR16_LO | R_PPC64_ADDR16_HI | R_PPC64_ADDR16_HA
-            ),
-            "unexpected reloc type {} at offset 0x{:x}",
-            r.rtype,
-            r.offset
-        );
-    }
 }
 
 #[test]

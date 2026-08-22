@@ -1,6 +1,7 @@
 //! USTAR archive parsing: prefix-field path assembly, size decoding, and bounds rejection.
 
 use super::*;
+use crate::scratch_dir::scratch;
 
 /// Build a single USTAR 512-byte header.
 fn ustar_header(name: &str, prefix: &str, size: usize, typeflag: u8) -> [u8; 512] {
@@ -83,9 +84,7 @@ fn parse_rejects_payload_past_eof() {
 
 #[test]
 fn extract_strips_pup_prefixes() {
-    let dir = std::env::temp_dir().join("cellgov_tar_strip_31c1");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
 
     let entries = vec![
         TarEntry {
@@ -114,20 +113,153 @@ fn extract_strips_pup_prefixes() {
     assert_eq!(report.written, 5);
     assert!(report.errors.is_empty());
 
-    assert!(dir.join("sys/external/liblv2.sprx").is_file());
-    assert!(dir.join("sys/internal/x.sprx").is_file());
+    // `dir` is the VFS root: dev_flash content lands under dev_flash/,
+    // whether the PUP entry carried the prefix (liblv2), carried the
+    // `000/` packaging artefact instead (x.sprx), or carried neither
+    // (w.self).
+    assert!(dir.join("dev_flash/sys/external/liblv2.sprx").is_file());
+    assert!(dir.join("dev_flash/sys/internal/x.sprx").is_file());
+    assert!(dir.join("dev_flash/vsh/module/w.self").is_file());
+    // dev_flash2 and dev_flash3 are sibling mounts, not content inside
+    // dev_flash.
     assert!(dir.join("dev_flash2/keep/y.bin").is_file());
     assert!(dir.join("dev_flash3/keep/z.bin").is_file());
-    assert!(dir.join("vsh/module/w.self").is_file());
+    assert!(!dir.join("dev_flash/dev_flash2").exists());
+    assert!(!dir.join("dev_flash/dev_flash3").exists());
+}
 
-    std::fs::remove_dir_all(&dir).unwrap();
+#[test]
+fn route_strips_leading_slashes_and_the_packaging_prefix() {
+    assert_eq!(
+        route_entry_path("/000/vsh/module/a.self").as_deref(),
+        Some("dev_flash/vsh/module/a.self")
+    );
+    assert_eq!(
+        route_entry_path("//dev_flash//sys/external/b.sprx").as_deref(),
+        Some("dev_flash/sys/external/b.sprx")
+    );
+    // A `000/`-packaged sibling-mount entry stays a sibling.
+    assert_eq!(
+        route_entry_path("000/dev_flash2/etc/x.sys").as_deref(),
+        Some("dev_flash2/etc/x.sys")
+    );
+    // Only one `000/` layer is packaging; a second is content.
+    assert_eq!(
+        route_entry_path("000/000/x").as_deref(),
+        Some("dev_flash/000/x")
+    );
+    // Stripping `000/` can itself expose a leading separator, so the
+    // sibling match has to run on the re-trimmed name.
+    assert_eq!(
+        route_entry_path("/000//dev_flash2/x.sys").as_deref(),
+        Some("dev_flash2/x.sys")
+    );
+    assert_eq!(
+        route_entry_path("000//000/x").as_deref(),
+        Some("dev_flash/000/x")
+    );
+    assert_eq!(route_entry_path("///x").as_deref(), Some("dev_flash/x"));
+}
+
+#[test]
+fn route_returns_none_for_a_name_that_addresses_no_file() {
+    for name in ["", "/", "000/", "dev_flash/", "dev_flash2/", "dev_flash3//"] {
+        assert_eq!(route_entry_path(name), None, "{name:?}");
+    }
+}
+
+#[test]
+fn sibling_mount_match_needs_a_whole_path_component() {
+    for name in ["dev_flash2foo/x", "dev_flash20/x", "dev_flash2"] {
+        let routed = route_entry_path(name).expect("routes");
+        assert!(
+            routed.starts_with("dev_flash/"),
+            "{name:?} routed to {routed:?}"
+        );
+    }
+}
+
+#[test]
+fn extract_rejects_traversal_out_of_a_sibling_mount() {
+    let dir = scratch();
+    let entries = vec![TarEntry {
+        name: "dev_flash2/../../escape.bin".into(),
+        data: b"nope".to_vec(),
+    }];
+    let report = extract_to_disk(&entries, &dir);
+    assert_eq!(report.written, 0);
+    assert!(matches!(
+        report.errors[0],
+        ExtractError::PathTraversal { .. }
+    ));
+}
+
+#[test]
+fn extract_rejects_traversal_that_would_normalize_back_inside() {
+    let dir = scratch();
+    let entries = vec![TarEntry {
+        name: "dev_flash/../dev_flash2/x.bin".into(),
+        data: b"nope".to_vec(),
+    }];
+    let report = extract_to_disk(&entries, &dir);
+    assert_eq!(report.written, 0);
+    assert!(matches!(
+        report.errors[0],
+        ExtractError::PathTraversal { .. }
+    ));
+}
+
+#[test]
+fn extract_skips_a_bare_sibling_mount_root_rather_than_shadowing_it() {
+    let dir = scratch();
+    let entries = vec![
+        TarEntry {
+            name: "dev_flash2/".into(),
+            data: b"shadow".to_vec(),
+        },
+        TarEntry {
+            name: "dev_flash2/etc/x.sys".into(),
+            data: b"X".to_vec(),
+        },
+    ];
+    let report = extract_to_disk(&entries, &dir);
+    assert_eq!(report.written, 1);
+    assert!(report.errors.is_empty());
+    assert!(dir.join("dev_flash2/etc/x.sys").is_file());
+    assert!(dir.join("dev_flash2").is_dir());
+}
+
+#[test]
+fn extract_tallies_an_entry_that_addresses_no_file_instead_of_dropping_it() {
+    let dir = scratch();
+    let entries = vec![
+        TarEntry {
+            name: "dev_flash2/".into(),
+            data: b"shadow".to_vec(),
+        },
+        TarEntry {
+            name: String::new(),
+            data: b"nameless".to_vec(),
+        },
+        TarEntry {
+            name: "dev_flash/keep.bin".into(),
+            data: b"K".to_vec(),
+        },
+    ];
+    let report = extract_to_disk(&entries, &dir);
+    assert_eq!(report.written, 1);
+    assert_eq!(report.skipped, 2);
+    assert!(report.errors.is_empty());
+    // Every entry handed in is accounted for by exactly one tally.
+    assert_eq!(
+        report.written + report.skipped + report.errors.len(),
+        entries.len()
+    );
 }
 
 #[test]
 fn extract_rejects_path_traversal() {
-    let dir = std::env::temp_dir().join("cellgov_tar_traverse_31c1");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
 
     let entries = vec![TarEntry {
         name: "../escape.bin".into(),
@@ -140,8 +272,6 @@ fn extract_rejects_path_traversal() {
         report.errors[0],
         ExtractError::PathTraversal { .. }
     ));
-
-    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
@@ -172,9 +302,7 @@ fn parse_keeps_zero_byte_regular_file() {
 
 #[test]
 fn extract_writes_zero_byte_file() {
-    let dir = std::env::temp_dir().join("cellgov_tar_empty_31c1");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = scratch();
 
     let entries = vec![TarEntry {
         name: "dev_flash/vsh/resource/silk/lib/Plugins/dummy.txt".into(),
@@ -183,9 +311,7 @@ fn extract_writes_zero_byte_file() {
     let report = extract_to_disk(&entries, &dir);
     assert_eq!(report.written, 1);
     assert!(report.errors.is_empty());
-    let dest = dir.join("vsh/resource/silk/lib/Plugins/dummy.txt");
+    let dest = dir.join("dev_flash/vsh/resource/silk/lib/Plugins/dummy.txt");
     assert!(dest.is_file());
     assert_eq!(std::fs::metadata(&dest).unwrap().len(), 0);
-
-    std::fs::remove_dir_all(&dir).unwrap();
 }

@@ -9,7 +9,7 @@
 //! rejoins [`crate::sce::decrypt_self_to_elf`]'s shared CTR path.
 //!
 //! Fixture-dependent tests (`include_bytes!` of operator-supplied
-//! RAP and EBOOT files under `tools/rpcs3/dev_hdd0/`) live behind
+//! RAP and EBOOT files under `vfs/dev_hdd0/`) live behind
 //! the `npdrm-oracle-vectors` feature.
 
 use aes::cipher::{BlockDecrypt, KeyInit};
@@ -241,19 +241,19 @@ mod oracle_vectors {
     ];
 
     const FLOW_EBOOT: &[u8] =
-        include_bytes!("../../../tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN");
+        include_bytes!("../../../vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN");
     const SSHD_EBOOT: &[u8] =
-        include_bytes!("../../../tools/rpcs3/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN");
+        include_bytes!("../../../vfs/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN");
 
     const fn include_bytes_array_flow_rap() -> [u8; 16] {
         *include_bytes!(
-            "../../../tools/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap"
+            "../../../vfs/dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap"
         )
     }
 
     const fn include_bytes_array_sshd_rap() -> [u8; 16] {
         *include_bytes!(
-            "../../../tools/rpcs3/dev_hdd0/home/00000001/exdata/UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
+            "../../../vfs/dev_hdd0/home/00000001/exdata/UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
         )
     }
 

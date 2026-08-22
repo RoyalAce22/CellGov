@@ -86,7 +86,7 @@ struct Module {
 fn regenerate_firmware_export_conflict_census() {
     let external = match std::env::var("CELLGOV_FIRMWARE_DIR") {
         Ok(s) => PathBuf::from(s),
-        Err(_) => workspace_root().join("firmware/sys/external"),
+        Err(_) => workspace_root().join("vfs/dev_flash/sys/external"),
     };
     assert!(
         external.is_dir(),
@@ -301,7 +301,7 @@ fn regenerate_firmware_export_conflict_census() {
     writeln!(out).expect("write to String");
     writeln!(
         out,
-        "Source: every `*.sprx` under the firmware directory (default `firmware/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`) and its `internal` sibling. Each module is SCE-decrypted and parsed, then the loader's first-wins namespace shadowing is replayed so the counts describe what `FirmwareExportTable::build` would actually see."
+        "Source: every `*.sprx` under the firmware directory (default `vfs/dev_flash/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`) and its `internal` sibling. Each module is SCE-decrypted and parsed, then the loader's first-wins namespace shadowing is replayed so the counts describe what `FirmwareExportTable::build` would actually see."
     )
     .expect("write to String");
     writeln!(out).expect("write to String");

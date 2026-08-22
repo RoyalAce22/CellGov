@@ -5,7 +5,7 @@ display_name = "PS3 System Software (vsh)"
 eboot_candidates = ["vsh.self"]
 # Build date of the installed firmware image (release 04.9200,
 # build 68466, 2025-02-18) rather than vsh's original ship year;
-# the authoritative version lives in firmware/firmware.toml.
+# the authoritative version lives in vfs/dev_flash/firmware.toml.
 year = 2025
 developer = "Sony Interactive Entertainment"
 engine = "PAF"
@@ -16,7 +16,7 @@ distribution = "firmware-exec"
 # rather than NPDRM-wrapped.
 [source]
 kind = "firmware-exec"
-path = "firmware/vsh/module"
+path = "vfs/dev_flash/vsh/module"
 
 [checkpoint]
 kind = "process-exit"

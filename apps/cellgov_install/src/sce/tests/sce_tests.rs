@@ -95,22 +95,31 @@ fn parse_program_authority_id_matches_known_corpus_values() {
         p.pop();
         p
     };
+    // (label, fixture, the directory `install-game` / `install-iso`
+    // creates for that title, expected authority id).
     let cases = [
         (
             "flOw (NPDRM SELF)",
-            "tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
+            "vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
+            "vfs/dev_hdd0/game/NPUA80001",
             0x1010_0000_0100_0003u64,
         ),
         (
             "WipEout (disc SELF)",
-            "tools/rpcs3/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.BIN",
+            "vfs/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.BIN",
+            "vfs/dev_bdvd/BCES00664",
             0x1010_0000_0100_0003u64,
         ),
     ];
-    for (label, rel, expected) in cases {
+    for (label, rel, installed, expected) in cases {
         let path = root.join(rel);
         let Ok(bytes) = std::fs::read(&path) else {
-            eprintln!("parse_program_authority_id corpus pin: skipping {label} (fixture absent)");
+            assert!(
+                !root.join(installed).is_dir(),
+                "{label} is installed under {installed} but the pin {rel} \
+                 resolved nothing: the path pin is stale and proves nothing",
+            );
+            eprintln!("parse_program_authority_id corpus pin: skipping {label} (not installed)");
             continue;
         };
         assert_eq!(
@@ -202,6 +211,22 @@ fn assemble_phdr_table_extent_overflow_returns_typed_error() {
     data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
     let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
     assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+}
+
+#[test]
+fn a_null_section_header_offset_does_not_overwrite_the_elf_header() {
+    let mut data = build_synthetic_self();
+    // Section-header table present in the SELF (shdr_offset_in_self at
+    // +0x40) and e_shnum > 0, but the inner ELF declares e_shoff = 0.
+    // Placing the table at 0 would land on the ELF header.
+    data[0x40..0x48].copy_from_slice(&0x300u64.to_be_bytes());
+    data[0x13C..0x13E].copy_from_slice(&1u16.to_be_bytes());
+    let elf = assemble_elf_from_sections(&data, &[]).expect("null e_shoff drops the table");
+    assert_eq!(
+        &elf[0..4],
+        &0x7F45_4C46u32.to_be_bytes(),
+        "ELF header must survive"
+    );
 }
 
 #[test]
@@ -326,28 +351,38 @@ fn parse_control_flags1_matches_known_corpus_values() {
         p.pop();
         p
     };
+    // (label, fixture, the directory `cellgov_install` creates when
+    // that module / title is installed, expected ctrl_flags1).
     let cases = [
         (
             "vsh.self (CoreOS)",
-            "firmware/vsh/module/vsh.self",
+            "vfs/dev_flash/vsh/module/vsh.self",
+            "vfs/dev_flash/vsh/module",
             0x4000_0000u32,
         ),
         (
             "flOw (NPDRM SELF)",
             "vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
+            "vfs/dev_hdd0/game/NPUA80001",
             0x0000_0000u32,
         ),
         (
             "Super Stardust HD (NPDRM SELF)",
             "vfs/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN",
+            "vfs/dev_hdd0/game/NPUA80068",
             0x0000_0000u32,
         ),
     ];
     let mut checked = 0;
-    for (label, rel, expected) in cases {
+    for (label, rel, installed, expected) in cases {
         let path = root.join(rel);
         let Ok(bytes) = std::fs::read(&path) else {
-            eprintln!("parse_control_flags1 corpus pin: skipping {label} (fixture absent)");
+            assert!(
+                !root.join(installed).is_dir(),
+                "{label} is installed under {installed} but the pin {rel} \
+                 resolved nothing: the path pin is stale and proves nothing",
+            );
+            eprintln!("parse_control_flags1 corpus pin: skipping {label} (not installed)");
             continue;
         };
         let got = parse_control_flags1(&bytes).unwrap().unwrap_or(0);

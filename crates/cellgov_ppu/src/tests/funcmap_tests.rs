@@ -1,5 +1,5 @@
-//! OPD-walk function-boundary detection over synthetic ELFs plus a
-//! presence-gated real-firmware pass.
+//! OPD-walk function-boundary detection over synthetic ET_EXEC and
+//! ET_PRX images.
 
 use super::*;
 
@@ -250,6 +250,86 @@ fn sweep_finds_discontiguous_descriptor_tables() {
     assert_eq!(starts, vec![0x10000, 0x10020]);
 }
 
+/// [`make_test_prx`] with an executable text segment and its three
+/// exports repointed at real OPD descriptors in the data segment.
+/// The shipped fixture leaves `p_flags` zero and aims the export
+/// stubs at raw text, neither of which the funcmap walk accepts.
+fn prx_with_export_opds() -> Vec<u8> {
+    // Data maps file 0x1F0 -> vaddr 0x100; file 0x380..0x398 is the
+    // unused tail, so the descriptors land at vaddr 0x290..0x2A8.
+    const OPD_FILE: usize = 0x380;
+    const OPD_VADDR: u32 = 0x290;
+    const STUB_TABLE_FILE: usize = 0x2D0;
+    const TOC: u32 = 0x200;
+    let codes = [0x40u32, 0x50, 0x60];
+
+    let mut buf = crate::sprx::test_fixtures::make_test_prx();
+    // PF_R | PF_X on the text PT_LOAD.
+    buf[64 + 4..64 + 8].copy_from_slice(&0x5u32.to_be_bytes());
+    for (i, code) in codes.iter().enumerate() {
+        let opd = OPD_FILE + i * 8;
+        buf[opd..opd + 4].copy_from_slice(&code.to_be_bytes());
+        buf[opd + 4..opd + 8].copy_from_slice(&TOC.to_be_bytes());
+        let stub = STUB_TABLE_FILE + i * 4;
+        buf[stub..stub + 4].copy_from_slice(&(OPD_VADDR + (i as u32) * 8).to_be_bytes());
+    }
+    buf
+}
+
+#[test]
+fn prx_exports_and_module_entries_appear_as_named_function_starts() {
+    let data = prx_with_export_opds();
+    let map = build(&data).unwrap();
+    assert!(!map.truncated);
+    assert_map_invariants(&map);
+
+    for (name, code) in [("module_start", 0x10u32), ("module_stop", 0x20)] {
+        let span = map
+            .functions
+            .iter()
+            .find(|s| s.start == code)
+            .unwrap_or_else(|| panic!("{name} code 0x{code:08x} missing from map"));
+        assert_eq!(span.name, FunctionName::Known(name));
+        assert_eq!(span.origin, FunctionOrigin::ExportOpd);
+        assert!(span.end > span.start, "{name} span is empty");
+    }
+
+    for (nid, code) in [
+        (0xAAAAAAAAu32, 0x40u32),
+        (0xBBBBBBBB, 0x50),
+        (0xCCCCCCCC, 0x60),
+    ] {
+        let span = map
+            .functions
+            .iter()
+            .find(|s| s.start == code)
+            .unwrap_or_else(|| panic!("export NID 0x{nid:08x} code 0x{code:08x} missing from map"));
+        assert_eq!(
+            span.name,
+            FunctionName::Nid(nid),
+            "export at 0x{code:08x} lost its NID attribution",
+        );
+        assert_eq!(span.origin, FunctionOrigin::ExportOpd);
+        assert!(
+            span.end > span.start,
+            "export span at 0x{code:08x} is empty"
+        );
+    }
+}
+
+#[test]
+fn a_prx_export_whose_opd_carries_a_zero_toc_is_not_a_function_start() {
+    let mut data = prx_with_export_opds();
+    // Third export's OPD toc word -> 0; the code word stays valid.
+    data[0x390 + 4..0x390 + 8].copy_from_slice(&0u32.to_be_bytes());
+    let map = build(&data).unwrap();
+    assert!(
+        !map.functions.iter().any(|s| s.start == 0x60),
+        "toc == 0 marks a corrupt descriptor and must not anchor",
+    );
+    assert!(map.functions.iter().any(|s| s.start == 0x50));
+}
+
 #[test]
 fn unsupported_elf_type_errors() {
     let mut elf = two_seg_elf(DATA_BASE, vec![0u8; 0x10]);
@@ -263,52 +343,4 @@ fn unsupported_elf_type_errors() {
 #[test]
 fn truncated_input_errors() {
     assert!(matches!(build(&[0u8; 16]), Err(FuncMapError::TooSmall)));
-}
-
-#[test]
-fn real_liblv2_exports_appear_as_function_starts() {
-    let path =
-        std::path::PathBuf::from("../../tools/rpcs3/dev_flash_decrypted/sys/external/liblv2.prx");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(&path).unwrap();
-    let map = build(&data).unwrap();
-    assert!(!map.truncated);
-    assert_map_invariants(&map);
-    assert!(
-        map.functions.len() > 100,
-        "liblv2 should yield hundreds of functions, got {}",
-        map.functions.len()
-    );
-
-    // Every export's OPD code address appears as a function start.
-    let prx = crate::sprx::parse_prx(&data).unwrap();
-    let segments = crate::loader::pt_load_segments(&data).unwrap();
-    let starts: std::collections::BTreeSet<u32> = map.functions.iter().map(|s| s.start).collect();
-    let mut checked = 0usize;
-    for lib in &prx.exports {
-        for export in &lib.functions {
-            if let Some((code, toc)) = deref_opd(&data, &segments, export.vaddr as u64) {
-                if toc != 0 && code_in_exec(&segments, code) {
-                    assert!(
-                        starts.contains(&code),
-                        "export NID 0x{:08x} code 0x{code:08x} missing from map",
-                        export.nid
-                    );
-                    checked += 1;
-                }
-            }
-        }
-    }
-    assert!(checked > 50, "too few exports checked: {checked}");
-
-    // module_start is present under its known name and its span is
-    // sane (nonempty, within an executable segment).
-    let module_start = map
-        .functions
-        .iter()
-        .find(|s| s.name == FunctionName::Known("module_start"))
-        .expect("liblv2 exports module_start");
-    assert!(module_start.end > module_start.start);
 }
