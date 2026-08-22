@@ -202,6 +202,13 @@ hashes, never against human-readable logs. The comparison harness
 validates CellGov observations against RPCS3 baselines through a
 runner-agnostic observation schema.
 
+Suites that need a local PS3 corpus -- a firmware image, an owned
+title dump, the compiled micro-test ELFs -- sit behind cargo features
+rather than environment variables. With the feature off the target is
+not built; with it on, a missing fixture is a hard error. Nothing
+skips silently, so `cargo test` on a fresh clone runs everything that
+can run and reports green only for gates that actually executed.
+
 ## License
 
 Licensed under either of:

@@ -9,8 +9,7 @@ use crate::game_install::{
 };
 use crate::scratch_dir::scratch;
 
-/// Hand-write a game tree + RAP + install record under `out`/`installs`
-/// (uninstall is record-driven and needs no decryptable EBOOT).
+/// Hand-write a game tree + RAP + install record under `out`/`installs`.
 fn stage_synthetic_install(
     out: &Path,
     installs: &Path,
@@ -71,6 +70,12 @@ const NO_VERIFY: UninstallOptions = UninstallOptions {
     force: false,
 };
 
+const VERIFY: UninstallOptions = UninstallOptions {
+    verify: true,
+    keep_rap: false,
+    force: false,
+};
+
 #[test]
 fn uninstall_round_trip_removes_tree_rap_record() {
     let out = scratch();
@@ -122,7 +127,6 @@ fn uninstall_verify_detects_modified_tree_and_force_overrides() {
         &[("USRDIR/EBOOT.BIN", b"original")],
         None,
     );
-    // Tamper with a live file after recording.
     std::fs::write(
         vfs.join("dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN"),
         b"tampered",
@@ -139,10 +143,8 @@ fn uninstall_verify_detects_modified_tree_and_force_overrides() {
         matches!(err, GameUninstallError::TreeModified { .. }),
         "verify must catch the tamper, got {err:?}"
     );
-    // The tree is untouched by a failed verify.
     assert!(vfs.join("dev_hdd0/game/NPUA80001").exists());
 
-    // force overrides the gate.
     let forced = UninstallOptions {
         verify: true,
         keep_rap: false,
@@ -151,6 +153,99 @@ fn uninstall_verify_detects_modified_tree_and_force_overrides() {
     let outcome = uninstall("NPUA80001", &vfs, &installs, forced).expect("force uninstall");
     assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
     assert_eq!(outcome.files_verified, Some(0)); // the one file mismatched
+}
+
+#[test]
+fn verify_on_an_intact_tree_counts_every_recorded_file() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[("USRDIR/EBOOT.BIN", b"eboot"), ("PARAM.SFO", b"sfo")],
+        Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
+    );
+
+    let outcome = uninstall("NPUA80001", &vfs, &installs, VERIFY).expect("intact tree verifies");
+    assert_eq!(outcome.files_verified, Some(2));
+    assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
+}
+
+#[test]
+fn verify_detects_a_tampered_rap_and_leaves_it_in_place() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[("USRDIR/EBOOT.BIN", b"eboot")],
+        Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
+    );
+    let rap = vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap");
+    std::fs::write(&rap, [8u8; 16]).unwrap();
+
+    let err = uninstall("NPUA80001", &vfs, &installs, VERIFY).unwrap_err();
+    assert!(
+        matches!(&err, GameUninstallError::TreeModified { path, .. } if path == &rap),
+        "verify must name the RAP, got {err:?}"
+    );
+    assert!(rap.exists(), "a failed verify removes nothing");
+    assert!(vfs.join("dev_hdd0/game/NPUA80001").exists());
+    assert!(installs.join("NPUA80001.install.toml").exists());
+}
+
+#[test]
+fn keep_rap_leaves_the_rap_in_exdata() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[("USRDIR/EBOOT.BIN", b"eboot")],
+        Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
+    );
+
+    let keep = UninstallOptions {
+        verify: false,
+        keep_rap: true,
+        force: false,
+    };
+    let outcome = uninstall("NPUA80001", &vfs, &installs, keep).expect("uninstall");
+    assert!(
+        vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap")
+            .exists(),
+        "keep_rap leaves the RAP for a title that may share it"
+    );
+    assert!(outcome.rap_removed.is_none());
+    assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
+    assert!(!installs.join("NPUA80001.install.toml").exists());
+}
+
+#[test]
+fn a_record_that_does_not_parse_is_named_and_removes_nothing() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(&vfs, &installs, "NPUA80001", false, &[("X", b"x")], None);
+    let record = installs.join("NPUA80001.install.toml");
+    std::fs::write(&record, "format_version = ").unwrap();
+
+    let err = uninstall("NPUA80001", &vfs, &installs, NO_VERIFY).unwrap_err();
+    assert!(
+        matches!(err, GameUninstallError::RecordParse(_)),
+        "an unparseable record is not a NoRecord miss, got {err:?}"
+    );
+    assert!(record.exists(), "an unreadable record is not deleted");
+    assert!(vfs.join("dev_hdd0/game/NPUA80001").exists());
 }
 
 #[test]
@@ -166,7 +261,6 @@ fn uninstall_tree_already_gone_still_succeeds() {
         &[("USRDIR/EBOOT.BIN", b"eboot")],
         Some(("R.rap", &[1u8; 16])),
     );
-    // Tree vanished out from under the record.
     std::fs::remove_dir_all(vfs.join("dev_hdd0/game/NPUA80001")).unwrap();
 
     uninstall("NPUA80001", &vfs, &installs, NO_VERIFY).expect("idempotent uninstall");
@@ -190,7 +284,6 @@ fn uninstall_disc_touches_no_exdata() {
     let out = scratch();
     let vfs = out.join("vfs");
     let installs = out.join("installs");
-    // A foreign RAP from another title must survive a disc uninstall.
     let exdata = vfs.join("dev_hdd0/home/00000001/exdata");
     std::fs::create_dir_all(&exdata).unwrap();
     std::fs::write(exdata.join("FOREIGN.rap"), [9u8; 16]).unwrap();

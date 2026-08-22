@@ -88,6 +88,10 @@ fn parse_program_authority_id_rejects_truncated_ext_header() {
 /// APP, program_type 4) both carry the retail-application authority id
 /// `0x1010_0000_0100_0003`.
 #[test]
+#[cfg_attr(
+    not(feature = "title-corpus"),
+    ignore = "pins values read off installed titles under vfs/; run with --features title-corpus"
+)]
 fn parse_program_authority_id_matches_known_corpus_values() {
     let root = {
         let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -111,6 +115,7 @@ fn parse_program_authority_id_matches_known_corpus_values() {
             0x1010_0000_0100_0003u64,
         ),
     ];
+    let mut checked = 0;
     for (label, rel, installed, expected) in cases {
         let path = root.join(rel);
         let Ok(bytes) = std::fs::read(&path) else {
@@ -127,16 +132,22 @@ fn parse_program_authority_id_matches_known_corpus_values() {
             expected,
             "{label}: authority id mismatch",
         );
+        checked += 1;
     }
+    // Which titles the operator owns is theirs to choose; owning none
+    // makes this pin a no-op that still reports ok.
+    assert!(
+        checked > 0,
+        "title-corpus is on but none of the {} pinned titles is installed",
+        cases.len()
+    );
 }
 
 #[test]
 fn mask_non_semantic_elf_bytes_zeroes_section_header_fields_and_moves_nothing_else() {
     // The {e_shoff, e_shnum, e_shstrndx} set is empirically
     // sufficient for the current title corpus (flOw / SSHD /
-    // WipEout + the firmware-PRX byte parity). Not proven-minimal
-    // against arbitrary PS3 SELFs; widen only when a corpus
-    // addition surfaces a fourth non-semantic ELF64 header field.
+    // WipEout + the firmware-PRX byte parity).
     let mut elf: Vec<u8> = (0u8..=0xFFu8).cycle().take(0x80).collect();
     elf[0x28..0x30].copy_from_slice(&0xDEADBEEFCAFEBABEu64.to_be_bytes());
     elf[0x3C..0x3E].copy_from_slice(&0x4242u16.to_be_bytes());
@@ -174,8 +185,7 @@ fn mask_non_semantic_elf_bytes_is_noop_on_short_input() {
 /// Craft a minimal SELF buffer that satisfies the early
 /// fixed-position bounds checks in `assemble_elf_from_sections`:
 /// ehdr at 0x100 with valid magic + ELFCLASS64 + ELF64 entsize
-/// values, phdr at 0x200, no section-header table. Per-field
-/// perturbations on top of this are the per-overflow tests below.
+/// values, phdr at 0x200, no section-header table.
 fn build_synthetic_self() -> Vec<u8> {
     let mut data = vec![0u8; 0x400];
     let ehdr_offset: u64 = 0x100;
@@ -226,6 +236,48 @@ fn a_null_section_header_offset_does_not_overwrite_the_elf_header() {
         &elf[0..4],
         &0x7F45_4C46u32.to_be_bytes(),
         "ELF header must survive"
+    );
+}
+
+#[test]
+fn the_section_header_table_lands_on_top_of_an_overlapping_segment_payload() {
+    // RPCS3 `unself.h` `SELFDecrypter::WriteElf` writes the ehdr, the
+    // program headers, every PHDR-kind payload, and only then seeks
+    // to `e_shoff` for the section-header table, so the table wins an
+    // overlap.
+    let mut data = build_synthetic_self();
+    // Section-header table lives at SELF offset 0x300, one 0x40-byte
+    // entry, and the inner ELF places it at e_shoff = 0x80.
+    data[0x40..0x48].copy_from_slice(&0x300u64.to_be_bytes());
+    data[0x128..0x130].copy_from_slice(&0x80u64.to_be_bytes());
+    data[0x13C..0x13E].copy_from_slice(&1u16.to_be_bytes());
+    data[0x300..0x340].fill(0x5A);
+    // One program header whose segment covers exactly the same range.
+    data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+    data[0x208..0x210].copy_from_slice(&0x80u64.to_be_bytes());
+    data[0x220..0x228].copy_from_slice(&0x40u64.to_be_bytes());
+
+    let sections = vec![(
+        EncryptedSectionDescriptor {
+            payload_offset: 0,
+            payload_size: 0,
+            section_kind: 2,
+            program_segment_index: 0,
+            sha1_hashed: 0,
+            sha1_slot: 0,
+            encryption_kind: 0,
+            key_slot: 0,
+            iv_slot: 0,
+            compression_kind: 0,
+        },
+        vec![0xAAu8; 0x40],
+    )];
+
+    let elf = assemble_elf_from_sections(&data, &sections).expect("overlapping placement");
+    assert_eq!(
+        &elf[0x80..0xC0],
+        &[0x5Au8; 0x40],
+        "section headers must overwrite the overlapping segment payload"
     );
 }
 
@@ -341,9 +393,13 @@ fn parse_control_flags1_rejects_non_sce_input() {
     ));
 }
 
-/// Corpus pin for the privilege split this slice exists to produce:
-/// vsh.self is root-capable, retail application SELFs are not.
+/// Corpus pin for the privilege split: vsh.self is root-capable,
+/// retail application SELFs are not.
 #[test]
+#[cfg_attr(
+    not(feature = "title-corpus"),
+    ignore = "pins values read off an installed vfs/; run with --features title-corpus"
+)]
 fn parse_control_flags1_matches_known_corpus_values() {
     let root = {
         let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -387,7 +443,6 @@ fn parse_control_flags1_matches_known_corpus_values() {
         };
         let got = parse_control_flags1(&bytes).unwrap().unwrap_or(0);
         assert_eq!(got, expected, "{label}: ctrl_flags1 mismatch");
-        // The whole point of the value: root for vsh, not for games.
         assert_eq!(
             got & 0xC000_0000 != 0,
             expected != 0,
@@ -395,5 +450,17 @@ fn parse_control_flags1_matches_known_corpus_values() {
         );
         checked += 1;
     }
-    eprintln!("parse_control_flags1 corpus pin: checked {checked}/3 fixtures");
+    // Floor only. Proving the root-vs-non-root split needs one fixture
+    // of each class, but vsh comes with firmware while the games come
+    // with titles -- two independent features -- so a run carrying only
+    // one class still checks what it can rather than failing.
+    assert!(
+        checked > 0,
+        "title-corpus is on but none of the {} pinned fixtures is installed",
+        cases.len()
+    );
+    eprintln!(
+        "parse_control_flags1 corpus pin: checked {checked}/{} fixtures",
+        cases.len()
+    );
 }

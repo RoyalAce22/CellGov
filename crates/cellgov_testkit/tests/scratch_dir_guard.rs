@@ -1,15 +1,18 @@
 //! Convention guard: scratch directories carry the process id.
 //!
 //! `cargo test` and `cargo test --release` are separate processes over
-//! one `std::env::temp_dir()`, and nothing stops an operator from
-//! overlapping them. A scratch path fixed at compile time resolves to
-//! the same directory in both, so one process's `remove_dir_all` races
-//! the other's writes.
+//! one `std::env::temp_dir()`, so a scratch path fixed at compile time
+//! resolves to the same directory in both and one process's
+//! `remove_dir_all` races the other's writes.
 //!
 //! Every `std::env::temp_dir()` call under `crates/`, `apps/`, and
 //! `bridges/` must therefore reach `std::process::id()` -- inline in
 //! the same statement, or through a `let pid = std::process::id();`
-//! binding earlier in the same function, interpolated as `{pid}`.
+//! binding written in that exact form earlier in the same function and
+//! interpolated as `{pid}` inside that same statement. A pid reached
+//! any other way (a differently spelled binding, a positional
+//! `format!` argument, a name assembled over several statements) is
+//! reported; the failure message names the two accepted forms.
 //!
 //! The scan reads code only: comment bodies and string/char-literal
 //! contents are blanked before matching, so neither a `temp_dir()`
@@ -26,6 +29,24 @@ const PID_BINDING: &str = "let pid = std::process::id();";
 /// and `}` are in the set because a scratch path is often the tail
 /// expression of a helper, where no `;` follows the call at all.
 const STATEMENT_ENDS: [char; 3] = [';', '{', '}'];
+
+/// Byte offset of the end of the statement `masked[from..]` opens.
+///
+/// A closer counts only at `(`/`[` depth zero: a scratch name built
+/// through a `match`, an `if`, or a closure inside the call's argument
+/// list carries braces nested in parentheses.
+fn statement_end(masked: &str, from: usize) -> usize {
+    let mut depth = 0usize;
+    for (off, ch) in masked[from..].char_indices() {
+        match ch {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            c if depth == 0 && STATEMENT_ENDS.contains(&c) => return from + off,
+            _ => {}
+        }
+    }
+    masked.len()
+}
 
 fn rs_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries =
@@ -200,8 +221,7 @@ fn violation_lines(source: &str) -> Vec<usize> {
         if at > 0 && is_ident_byte(masked.as_bytes()[at - 1]) {
             continue;
         }
-        let tail = &masked[at..];
-        let end = at + tail.find(STATEMENT_ENDS).unwrap_or(tail.len());
+        let end = statement_end(&masked, at);
         let binds_pid = masked[enclosing_fn_start(&masked, at)..at].contains(PID_BINDING);
         // The `{pid}` marker lives inside a format string, so it is read
         // from the unmasked source; the offsets line up byte for byte.
@@ -214,18 +234,44 @@ fn violation_lines(source: &str) -> Vec<usize> {
     lines
 }
 
-#[test]
-fn scratch_paths_carry_the_process_id() {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .expect("testkit manifest dir is two levels under the workspace root")
-        .to_path_buf();
+        .to_path_buf()
+}
 
+fn scanned_rs_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for group in ["crates", "apps", "bridges"] {
-        rs_files_under(&workspace_root.join(group), &mut files);
+        rs_files_under(&root.join(group), &mut files);
     }
+    files
+}
+
+/// The scan reaches nested `tests/` directories, so an empty result is
+/// a broken walk rather than a clean workspace.
+#[test]
+fn the_scan_set_contains_this_guard() {
+    let root = workspace_root();
+    let files = scanned_rs_files(&root);
+    let me = root
+        .join("crates")
+        .join("cellgov_testkit")
+        .join("tests")
+        .join("scratch_dir_guard.rs");
+    assert!(
+        files.contains(&me),
+        "the scan did not reach {}; {} files were collected",
+        me.display(),
+        files.len()
+    );
+}
+
+#[test]
+fn scratch_paths_carry_the_process_id() {
+    let files = scanned_rs_files(&workspace_root());
     assert!(
         !files.is_empty(),
         "no .rs files found under crates/apps/bridges"
@@ -276,6 +322,18 @@ fn a_pid_binding_in_the_same_function_satisfies_the_rule() {
 fn a_pid_binding_in_another_function_does_not_satisfy_the_rule() {
     let source = "fn a() {\n    let pid = std::process::id();\n    let _ = pid;\n}\n\nfn b(pid: u32) {\n    let d = std::env::temp_dir().join(format!(\"cellgov_{pid}\"));\n}\n";
     assert_eq!(violation_lines(source), vec![7]);
+}
+
+#[test]
+fn a_pid_interpolated_inside_a_braced_arm_satisfies_the_rule() {
+    let source = "fn f(k: u8) {\n    let pid = std::process::id();\n    let d = std::env::temp_dir().join(match k {\n        0 => format!(\"a_{pid}\"),\n        _ => format!(\"b_{pid}\"),\n    });\n}\n";
+    assert!(violation_lines(source).is_empty());
+}
+
+#[test]
+fn an_inline_process_id_inside_a_closure_argument_satisfies_the_rule() {
+    let source = "fn f() {\n    let d = std::env::temp_dir().join((|| {\n        format!(\"cellgov_{}\", std::process::id())\n    })());\n}\n";
+    assert!(violation_lines(source).is_empty());
 }
 
 #[test]

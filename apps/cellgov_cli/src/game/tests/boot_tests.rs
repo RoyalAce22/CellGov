@@ -131,9 +131,10 @@ fn cellsysutil_seed_writes_stay_inside_the_64k_shm() {
     }
 }
 
-// Sizing and placement rules for a spawned child image. Imported
-// here so the nested modules below can reach them through `super`.
-use super::{child_exit_stub_addr, decode_primary_stacksize, spawned_child_region_size};
+use super::{
+    child_exit_stub_addr, decode_primary_stacksize, primary_stack_base_for,
+    spawned_child_region_size,
+};
 
 use super::step_call_cap;
 
@@ -188,8 +189,8 @@ mod child_exit_stub_addr_tests {
             out[b + 16..b + 24].copy_from_slice(&vaddr.to_be_bytes());
             out[b + 32..b + 40].copy_from_slice(&filesz.to_be_bytes());
             out[b + 40..b + 48].copy_from_slice(&memsz.to_be_bytes());
-            // A large p_align is what would tempt a reader to think the
-            // image occupies more than its highest segment end.
+            // A large p_align exercises the case where alignment could
+            // inflate the reported image end past the highest segment.
             out[b + 48..b + 56].copy_from_slice(&0x1_0000u64.to_be_bytes());
         }
         out
@@ -298,8 +299,8 @@ mod spawned_child_region_size_tests {
         // the floor would leave the SP less than 0x4000 above the
         // image end, so the sizing grows the region instead.
         assert_eq!(spawned_child_region_size(0x1001_b001), Ok(0x1004_0000));
-        // The old boundary shape: image end flush against the SP
-        // (zero stack depth under the pre-fix floor rule).
+        // Image end flush against the SP: keeping the floor would leave
+        // zero stack depth.
         assert_eq!(spawned_child_region_size(0x1001_f000), Ok(0x1004_0000));
     }
 
@@ -318,7 +319,10 @@ mod spawned_child_region_size_tests {
 }
 
 mod primary_stacksize_tests {
-    use super::decode_primary_stacksize;
+    use super::{decode_primary_stacksize, primary_stack_base_for};
+    use cellgov_ps3_abi::process_address_space::{
+        PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP,
+    };
 
     #[test]
     fn a_sentinel_stacksize_declaration_decodes_to_its_byte_count() {
@@ -336,10 +340,57 @@ mod primary_stacksize_tests {
     }
 
     #[test]
-    fn a_raw_byte_count_declaration_passes_through_unchanged() {
-        assert_eq!(decode_primary_stacksize(0), 0);
-        assert_eq!(decode_primary_stacksize(0x9000), 0x9000);
+    fn a_raw_byte_count_inside_the_window_passes_through_unchanged() {
+        assert_eq!(decode_primary_stacksize(0x10000), 0x10000);
         assert_eq!(decode_primary_stacksize(0x40000), 0x40000);
         assert_eq!(decode_primary_stacksize(0x100000), 0x100000);
+    }
+
+    #[test]
+    fn a_raw_byte_count_below_the_kernel_floor_is_raised_to_it() {
+        // The system software's own param segment declares 0x9000;
+        // the floor the kernel enforces is 64 KiB.
+        assert_eq!(decode_primary_stacksize(0x9000), 0x10000);
+        assert_eq!(decode_primary_stacksize(0), 0x10000);
+        assert_eq!(decode_primary_stacksize(1), 0x10000);
+        assert_eq!(decode_primary_stacksize(0xFFFF), 0x10000);
+    }
+
+    #[test]
+    fn a_raw_byte_count_above_the_kernel_ceiling_is_clamped_not_refused() {
+        assert_eq!(decode_primary_stacksize(0x10_0001), 0x10_0000);
+        assert_eq!(decode_primary_stacksize(u32::MAX), 0x10_0000);
+    }
+
+    #[test]
+    fn a_raw_byte_count_is_rounded_up_to_a_page() {
+        assert_eq!(decode_primary_stacksize(0x10001), 0x11000);
+        assert_eq!(decode_primary_stacksize(0x40001), 0x41000);
+        // The round-up cannot escape the ceiling, which is itself a
+        // page multiple.
+        assert_eq!(decode_primary_stacksize(0xF_FFFF), 0x10_0000);
+    }
+
+    #[test]
+    fn the_recorded_stack_range_always_contains_the_initial_sp() {
+        for declared in [0u32, 0x9000, 0x10, 0x40, 0x70, 0x40000, 0x100000, u32::MAX] {
+            let size = decode_primary_stacksize(declared);
+            let base = primary_stack_base_for(size);
+            let end = base + u64::from(size);
+            assert!(
+                (base..end).contains(&PS3_PRIMARY_STACK_TOP),
+                "declared 0x{declared:x} -> stack 0x{base:x}..0x{end:x} excludes SP \
+                 0x{PS3_PRIMARY_STACK_TOP:x}",
+            );
+            assert!(
+                base >= PS3_PRIMARY_STACK_BASE,
+                "declared 0x{declared:x} -> base 0x{base:x} escapes the reservation",
+            );
+            assert_eq!(
+                end,
+                PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64,
+                "the stack always ends at the top of the reservation",
+            );
+        }
     }
 }

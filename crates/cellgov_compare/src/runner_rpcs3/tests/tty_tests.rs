@@ -104,6 +104,28 @@ fn parse_tty_log_truncated_payload_returns_error() {
     std::fs::remove_file(&path).ok();
 }
 
+/// The magic can be the last thing a killed run flushed, leaving the
+/// be32 length half-written.
+#[test]
+fn parse_tty_log_truncated_header_returns_error() {
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("cellgov_rpcs3_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|e| panic!("scratch dir {} not creatable: {e}", dir.display()));
+    let path = dir.join(format!("tty_hdr_{n}.log"));
+    let mut log = TTY_MAGIC.to_vec();
+    log.extend_from_slice(&[0x00, 0x00]);
+    std::fs::write(&path, &log).expect("write");
+    match parse_tty_log(&path, &[tty_region("r", 4, 0)]) {
+        Err(Rpcs3Error::TtyPayloadTooSmall { expected, actual }) => {
+            assert_eq!(expected, 8);
+            assert_eq!(actual, 6);
+        }
+        other => panic!("expected TtyPayloadTooSmall, got {other:?}"),
+    }
+    std::fs::remove_file(&path).ok();
+}
+
 #[test]
 fn parse_tty_log_regions_exceed_payload_returns_error() {
     let payload = vec![0u8; 4];
@@ -141,16 +163,4 @@ fn observe_from_tty_builds_observation() {
     assert_eq!(obs.metadata.runner, "rpcs3-interpreter");
     assert!(obs.state_hashes.is_none());
     std::fs::remove_file(&path).ok();
-}
-
-#[test]
-fn observe_from_tty_with_real_baseline() {
-    let tty_path = Path::new("../../baselines/spu_fixed_value/rpcs3_interpreter.tty");
-    if !tty_path.exists() {
-        return;
-    }
-    let regions = vec![tty_region("result", 8, 0)];
-    let obs = observe_from_tty(tty_path, &regions, Rpcs3Decoder::Interpreter).expect("observe");
-    assert_eq!(obs.outcome, ObservedOutcome::Completed);
-    assert_eq!(obs.memory_regions[0].data[4..8], [0x13, 0x37, 0xBA, 0xAD]);
 }

@@ -58,6 +58,33 @@ fn a_proc_param_that_does_not_fit_the_data_segment_is_refused() {
 }
 
 #[test]
+fn a_proc_param_ending_exactly_at_the_data_end_is_accepted() {
+    let data = vec![0u8; PROC_PARAM_SIZE as usize];
+    let elf = build(0x10000, 0x10000, &[0; 16], 0x20000, &data, Some(0));
+    let phnum = u16::from_be_bytes(elf[56..58].try_into().unwrap());
+    assert_eq!(phnum, 3);
+    // p_filesz of the third phdr must stay inside the emitted file.
+    let ph3 = 64 + 2 * 56;
+    let p_offset = u64::from_be_bytes(elf[ph3 + 8..ph3 + 16].try_into().unwrap());
+    let p_filesz = u64::from_be_bytes(elf[ph3 + 32..ph3 + 40].try_into().unwrap());
+    assert_eq!(p_filesz, PROC_PARAM_SIZE);
+    assert!(p_offset + p_filesz <= elf.len() as u64);
+}
+
+#[test]
+#[should_panic(expected = "runs past the")]
+fn a_proc_param_offset_that_overflows_the_file_extent_is_refused() {
+    build(
+        0x10000,
+        0x10000,
+        &[0; 16],
+        0x20000,
+        &[0u8; 64],
+        Some(u64::MAX),
+    );
+}
+
+#[test]
 fn code_bytes_appear_in_output() {
     let code = vec![0xDE, 0xAD, 0xBE, 0xEF];
     let elf = build(0x10000, 0x10000, &code, 0x20000, &[0; 4], None);

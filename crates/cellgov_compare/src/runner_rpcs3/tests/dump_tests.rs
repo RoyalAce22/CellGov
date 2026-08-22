@@ -67,7 +67,7 @@ fn parse_dump_rejects_region_past_end() {
     let regions = vec![DumpRegion {
         name: "oob".into(),
         offset: 4,
-        size: 8, // extends past end
+        size: 8,
         guest_addr: 0x1000,
     }];
     let result = parse_dump(&path, &regions);

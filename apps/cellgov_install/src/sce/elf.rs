@@ -12,12 +12,10 @@ use super::raw::{
 /// Reassemble a plaintext ELF from decrypted SCE sections.
 ///
 /// Layout: ehdr as-is, program headers packed immediately after,
-/// each PHDR-kind section copied to its declared `p_offset`, then
-/// -- if the SELF's `shdr_offset` is non-zero -- the original
-/// section-header table copied to the ELF's declared `e_shoff`.
-/// Shared by [`super::decrypt_self_to_elf`] (APP-keyed) and
-/// [`crate::npdrm::decrypt_self_to_elf_npdrm`] (NPDRM-keyed); only
-/// the envelope path upstream differs.
+/// each PHDR-kind section copied to its declared `p_offset`, and
+/// last -- if the SELF's `shdr_offset` and the inner ELF's `e_shoff`
+/// are both non-zero -- the original section-header table copied to
+/// `e_shoff`.
 pub(crate) fn assemble_elf_from_sections(
     data: &[u8],
     sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
@@ -95,13 +93,10 @@ pub(crate) fn assemble_elf_from_sections(
     }
     let shdr_table_bytes = checked_mul_oob(e_shnum, e_shentsize, "SELF section headers")?;
     // A null `e_shoff` with a non-zero `e_shnum` leaves the
-    // section-header table nowhere to land -- copying it to offset 0
-    // would overwrite the ELF header and surface as a
-    // `ReconstructedBadMagic` refusal. The table is not part of the
-    // run image (see [`mask_non_semantic_elf_bytes`]), so the shape is
-    // dropped rather than placed, matching RPCS3 `unself.cpp`
-    // `SELFDecrypter::LoadHeaders`, which skips the section-header
-    // load on the same condition.
+    // section-header table nowhere to land. The table is no part of
+    // the run image (see [`mask_non_semantic_elf_bytes`]), so the
+    // shape is dropped, matching RPCS3 `unself.cpp`
+    // `SELFDecrypter::LoadHeaders`.
     let place_shdr_table = shdr_offset_in_self != 0 && e_shnum > 0 && e_shoff != 0;
     if place_shdr_table {
         let shdr_end = checked_add_oob(e_shoff, shdr_table_bytes, "SELF section headers")?;
@@ -128,11 +123,6 @@ pub(crate) fn assemble_elf_from_sections(
     // Rewrite e_phoff to the packed phdr position; the inner ELF's
     // original value may differ from 0x40.
     elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
-
-    if place_shdr_table {
-        elf[e_shoff..e_shoff + shdr_table_bytes]
-            .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_table_bytes]);
-    }
 
     for (sec, sec_data) in sections {
         if sec.section_kind != SCE_SECTION_KIND_PHDR {
@@ -176,6 +166,18 @@ pub(crate) fn assemble_elf_from_sections(
         elf[p_offset..write_end].copy_from_slice(sec_data);
     }
 
+    // Placed after the segment payloads: RPCS3 `unself.h`
+    // `SELFDecrypter::WriteElf` emits the ehdr, the program headers,
+    // every PHDR-kind section payload, and only then seeks to
+    // `e_shoff` for the section-header table. A SELF whose `e_shoff`
+    // falls inside a segment's `[p_offset, p_offset + p_filesz)`
+    // therefore resolves to the section headers in the oracle's
+    // output.
+    if place_shdr_table {
+        elf[e_shoff..e_shoff + shdr_table_bytes]
+            .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_table_bytes]);
+    }
+
     let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);
     if magic != ELF_MAGIC_U32 {
         return Err(SceError::ReconstructedBadMagic { got: magic });
@@ -187,18 +189,10 @@ pub(crate) fn assemble_elf_from_sections(
 /// Zero `e_shoff`, `e_shnum`, and `e_shstrndx` so a reconstructed
 /// ELF can be byte-compared modulo section-header layout.
 ///
-/// The contract is "identical run image," not "identical ELF
-/// file": `e_shoff` / `e_shnum` / `e_shstrndx` describe the
-/// section / link view, not part of the run image. `e_phoff` and
-/// the program-header table describe the segment / execution
-/// view, which the loader consumes to build the run image, and
-/// stay unmasked.
-///
-/// The three-field set is empirically sufficient for the current
-/// title corpus (flOw / SSHD / WipEout plus the firmware-PRX
-/// parity gate); not proven-minimal against arbitrary PS3 SELFs.
-/// Widen when a corpus addition surfaces a fourth non-semantic
-/// ELF64 header field.
+/// The masked fields describe the section / link view. `e_phoff` and
+/// the program-header table describe the segment / execution view,
+/// which the loader consumes to build the run image, and stay
+/// unmasked.
 pub fn mask_non_semantic_elf_bytes(elf: &mut [u8]) {
     if elf.len() < 0x40 {
         return;

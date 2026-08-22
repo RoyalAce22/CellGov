@@ -83,22 +83,27 @@ fn multi_baseline_pipeline() {
 fn rpcs3_tty_baseline_roundtrip() {
     use crate::runner_rpcs3::TtyRegion;
 
-    let tty_path = std::path::Path::new("../../baselines/spu_fixed_value/rpcs3_interpreter.tty");
-    if !tty_path.exists() {
-        return;
-    }
+    // A captured .tty is gitignored, so this writes the framed log
+    // the runner would have produced: CGOV + be32 length + payload.
+    let dir = TempDir::new("rpcs3_tty_roundtrip");
+    let tty_path = dir.file("rpcs3_interpreter.tty");
+    let payload: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x13, 0x37, 0xBA, 0xAD];
+    let mut log = crate::runner_rpcs3::TTY_MAGIC.to_vec();
+    log.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    log.extend_from_slice(&payload);
+    std::fs::write(&tty_path, &log).expect("write synthetic tty");
 
     let regions = vec![TtyRegion {
         name: "result".into(),
         size: 8,
         guest_addr: 0,
     }];
-    let memory_regions = crate::runner_rpcs3::parse_tty_log(tty_path, &regions).expect("parse tty");
+    let memory_regions =
+        crate::runner_rpcs3::parse_tty_log(&tty_path, &regions).expect("parse tty");
     assert_eq!(memory_regions.len(), 1);
     assert_eq!(memory_regions[0].name, "result");
-    assert_eq!(memory_regions[0].data.len(), 8);
-    // status=0 (4 bytes) + value=0 (4 bytes)
-    assert_eq!(&memory_regions[0].data[..4], &[0, 0, 0, 0]);
+    // status=0 (4 bytes) + value (4 bytes).
+    assert_eq!(memory_regions[0].data, payload);
 
     let obs = Observation {
         outcome: ObservedOutcome::Completed,
@@ -128,9 +133,6 @@ fn compare_cellgov_vs_rpcs3_baseline() {
 
     let baseline_path =
         std::path::Path::new("../../baselines/spu_fixed_value/rpcs3_interpreter.json");
-    if !baseline_path.exists() {
-        return;
-    }
     let rpcs3_obs = load(baseline_path).expect("load baseline");
 
     let factory = || fixtures::mailbox_send_scenario(1);

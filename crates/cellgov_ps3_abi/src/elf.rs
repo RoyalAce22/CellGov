@@ -2,28 +2,21 @@
 //!
 //! Behaviour (the loader, the PRX import binder, the relocation
 //! applicator) lives in `cellgov_ppu::loader` and `cellgov_ppu::sprx`;
-//! this module is data only. Mixes general ELF values (PT_LOAD,
-//! R_PPC64_*) with PS3-specific types (ET_PRX, PT_PRX_RELOC,
-//! NID_MODULE_*, SYS_PROCESS_PARAM_MAGIC).
+//! this module is data only.
 
 /// `\x7FELF` magic bytes at offset 0 of every ELF file.
 pub const ELF_MAGIC: [u8; 4] = [0x7F, b'E', b'L', b'F'];
 
-/// [`ELF_MAGIC`] as the big-endian word a header parser reads at
-/// offset 0, for comparing against a `read_be_u32` result without
-/// re-spelling the bytes.
+/// [`ELF_MAGIC`] as the big-endian word a header parser reads at offset 0.
 pub const ELF_MAGIC_U32: u32 = u32::from_be_bytes(ELF_MAGIC);
 
-/// Size of the PS3 PPU ELF header (ELF64). The PPU loader reads
-/// `e_phoff` and friends through this.
+/// Size of the PS3 PPU ELF header (ELF64).
 pub const ELF_HEADER_SIZE: usize = 64;
 
-/// Size of the PS3 SPU ELF header (ELF32). SPU binaries are 32-bit
-/// big-endian; `cellgov_spu::loader` uses this.
+/// Size of the PS3 SPU ELF header (ELF32); SPU binaries are 32-bit big-endian.
 pub const ELF32_HEADER_SIZE: usize = 52;
 
-/// Size of one ELF32 program header entry. SPU PHDR table walks
-/// stride by this.
+/// Size of one ELF32 program header entry.
 pub const ELF32_PHDR_SIZE: usize = 32;
 
 /// `e_ident[EI_CLASS]` value for 64-bit ELF.
@@ -133,8 +126,10 @@ pub const ELF64_E_SHNUM: usize = 60;
 /// `.shstrtab`) inside the ELF64 header.
 pub const ELF64_E_SHSTRNDX: usize = 62;
 
-/// Byte offsets of the ELF64 section-header fields within one
-/// section-header-table entry. See ELF64 spec Figure 1-9.
+// Byte offsets of the ELF64 section-header fields within one
+// section-header-table entry: ELF64 spec Figure 1-9.
+
+/// Byte offset of `sh_type` within an ELF64 section-header entry.
 pub const ELF64_SH_TYPE: usize = 4;
 /// Byte offset of `sh_name` (u32, strtab index) within an ELF64
 /// section-header entry.
@@ -152,15 +147,11 @@ pub const SHN_UNDEF: u16 = 0;
 /// `sh_type` for the string-table section (`.shstrtab`, `.strtab`).
 pub const SHT_STRTAB: u32 = 3;
 
-// Compile-time coupling checks between the byte-offset / width
-// constants and the container sizes they live in. Readers in
-// downstream crates (e.g. `cellgov_ppu::prescan::sections`) rely on
-// the fact that every `ELF64_*` field fits inside its container, so
-// a runtime bounds check on the container size (`elf_data.len() >=
-// ELF_HEADER_SIZE` or `shentsize >= ELF64_SHENT_SIZE`) implies every
-// per-field read is in range. If a future edit to these constants
-// breaks the coupling, compilation fails here rather than crashing
-// at runtime on malformed input.
+// Downstream readers (e.g. `cellgov_ppu::prescan::sections`) rely on
+// every `ELF64_*` field fitting inside its container, so one runtime
+// bounds check on the container size (`elf_data.len() >=
+// ELF_HEADER_SIZE` or `shentsize >= ELF64_SHENT_SIZE`) covers every
+// per-field read below.
 const _: () = assert!(ELF64_E_SHOFF + 8 <= ELF_HEADER_SIZE);
 const _: () = assert!(ELF64_E_SHENTSIZE + 2 <= ELF_HEADER_SIZE);
 const _: () = assert!(ELF64_E_SHNUM + 2 <= ELF_HEADER_SIZE);
@@ -211,12 +202,10 @@ pub const EXPORT_ATTR_SYSTEM: u16 = 0x8000;
 pub const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bc_c5f6;
 
 /// Sentinel `sys_process_get_sdk_version` returns when no
-/// `sys_process_param_t` segment is present (PSL1GHT homebrew with
-/// no recorded SDK build). RPCS3 mirrors this default at
-/// `PPUModule.cpp`. Retail titles always carry a real value
-/// here; cellSysutil's SDK-keyed init dispatcher gates on it via an
-/// unsigned-greater comparison at runtime PC `0x1048537c`, so the
-/// sentinel must NOT leak into a retail boot.
+/// `sys_process_param_t` segment is present (PSL1GHT homebrew with no
+/// recorded SDK build); RPCS3 mirrors this default in `PPUModule.cpp`.
+/// Retail titles always carry a real version here, and cellSysutil's
+/// SDK-keyed init dispatcher takes a different branch on the sentinel.
 pub const SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN: u32 = 0xFFFF_FFFF;
 
 /// `e_phoff` field offset in the ELF64 header.
@@ -328,9 +317,9 @@ pub const PRX_IMPORT_ENTRY_VAR_MIN_SIZE: u8 = 36;
 /// Smallest declared entry size a `PrxImportEntry` can carry and
 /// still be parseable: an entry whose declared `size` byte is below
 /// this is structurally corrupt, because its fields would not cover
-/// the `addrs_ptr` field at +24. Not the full struct size -- RPCS3's
-/// `ppu_prx_module_info` (`PPUModule.cpp`) declares fields past
-/// `vstubs` at +32, so a conforming entry may declare more.
+/// the `addrs_ptr` field at +24. A conforming entry may declare more:
+/// RPCS3's `ppu_prx_module_info` (`PPUModule.cpp`) carries fields past
+/// `vstubs` at +32.
 pub const PRX_IMPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
 
 /// Cap on the length of a C string the PRX parser will accept when

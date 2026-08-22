@@ -42,9 +42,28 @@ sysinfo = "0.32"
 firmware-corpus = []
 title-corpus = ["firmware-corpus"]
 
+# Suites that boot the micro-test ELFs built by tests/micro/*/build.sh.
+# The C sources are committed and the toolchain instructions ship with
+# them, but the build output is gitignored, so opting in declares the
+# corpus built and a missing artifact is a hard error.
+microtests = []
+
+# Suite that boots the ps3autotests corpus -- a GPLv2 tree the
+# developer clones locally (tests/ps3autotests.README.md), never
+# vendored, so cellgov stays MIT/Apache-2.0.
+ps3autotests = []
+
 [[test]]
 name = "firmware_set_load"
 required-features = ["firmware-corpus"]
+
+[[test]]
+name = "ps3autotests"
+required-features = ["ps3autotests"]
+
+[[test]]
+name = "process_spawn_microtest"
+required-features = ["microtests"]
 
 [[test]]
 name = "title_witnesses"

@@ -73,16 +73,11 @@ struct InstallArgs {
 }
 
 /// `install`'s `--output` names the VFS root, the same root
-/// `install-game` and `install-iso` populate. The firmware lands in
-/// its `dev_flash/` mount (plus any sibling `dev_flash2/`,
-/// `dev_flash3/`), beside `dev_hdd0/` and `dev_bdvd/`.
+/// `install-game` and `install-iso` populate.
 const DEFAULT_INSTALL_OUTPUT: &str = "vfs";
 
 /// Mount under the VFS root that holds the firmware image and its
-/// `firmware.toml` manifest. The emptiness preflight covers this mount
-/// and its siblings ([`preflight_firmware_mounts`]) rather than the VFS
-/// root, so installing firmware into a VFS that already has games does
-/// not trip the non-empty guard.
+/// `firmware.toml` manifest.
 const DEV_FLASH_MOUNT: &str = "dev_flash";
 
 /// Why a cellgov_install CLI helper failed.
@@ -125,6 +120,15 @@ enum FirmwareCliError {
     /// `check_output_dir`: existing output is non-empty and --force not set.
     #[error("output directory {} exists and is non-empty; pass --force to overwrite", path.display())]
     OutputDirNotEmpty { path: PathBuf },
+    /// `collect_sprx_paths`: a directory in the installed firmware tree
+    /// could not be listed, so the manifest would silently omit
+    /// whatever that subtree holds.
+    #[error("read firmware tree {}: {source}", path.display())]
+    FirmwareTreeReadFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     /// `build_firmware_manifest`: reading an SPRX failed.
     #[error("read {}: {source}", path.display())]
     SprxReadFailed {
@@ -270,10 +274,9 @@ fn cmd_decrypt_self(args: &[String]) {
     );
 }
 
-/// dev_flash subtrees CellGov never loads and prunes at install
-/// time. The PS1 / PS2 / PSP backward-compat emulators are pure dead
-/// weight for a CBE execution oracle. This is a deliberate divergence
-/// from a stock RPCS3 dev_flash, which keeps them.
+/// dev_flash subtrees CellGov never loads and prunes at install time:
+/// the PS1 / PS2 / PSP backward-compat emulators, which a CBE
+/// execution oracle never runs.
 const PRUNED_DEV_FLASH_DIRS: [&str; 3] = ["ps1emu/", "ps2emu/", "pspemu/"];
 
 /// Whether an inner dev_flash entry is dropped at install time.
@@ -284,9 +287,8 @@ const PRUNED_DEV_FLASH_DIRS: [&str; 3] = ["ps1emu/", "ps2emu/", "pspemu/"];
 /// ([`PRUNED_DEV_FLASH_DIRS`]).
 ///
 /// The prune decides on [`tar::route_entry_path`]'s output so it sees
-/// the exact path the extractor would write; matching against the raw
-/// name let a `000/`-packaged or leading-slash entry land inside a
-/// pruned subtree.
+/// the exact path the extractor would write, whatever the `000/`
+/// packaging or leading slash the raw name carries.
 fn is_install_excluded(entry_name: &str) -> bool {
     if entry_name.contains('\u{ff04}') {
         return true;
@@ -301,8 +303,8 @@ fn is_install_excluded(entry_name: &str) -> bool {
 }
 
 /// Mounts under the VFS root that `install` writes into: the firmware
-/// image plus its siblings. Every one is guarded by the emptiness
-/// preflight; `firmware.toml` covers [`DEV_FLASH_MOUNT`] alone.
+/// image plus its siblings. `firmware.toml` covers
+/// [`DEV_FLASH_MOUNT`] alone.
 fn firmware_mounts() -> impl Iterator<Item = &'static str> {
     std::iter::once(DEV_FLASH_MOUNT)
         .chain(tar::SIBLING_MOUNTS.iter().map(|m| m.trim_end_matches('/')))
@@ -310,12 +312,9 @@ fn firmware_mounts() -> impl Iterator<Item = &'static str> {
 
 /// Refuse the install when any mount it writes is already populated.
 ///
-/// Scoped to [`firmware_mounts`]: `--output` is the whole VFS root,
-/// which legitimately already holds `dev_hdd0` / `dev_bdvd` from a game
-/// install, so checking it wholesale would refuse every firmware
-/// install onto a populated VFS. The sibling mounts are firmware
-/// content too, so leaving them out would let a second PUP overwrite
-/// them with nothing asking.
+/// Scoped to [`firmware_mounts`] rather than the whole VFS root, which
+/// legitimately already holds `dev_hdd0` / `dev_bdvd` from a game
+/// install.
 ///
 /// # Errors
 ///
@@ -391,8 +390,7 @@ fn cmd_install(args: &[String]) {
     });
     // Match RPCS3: only packages whose name contains `dev_flash_`
     // (with the trailing underscore) are firmware payload. This drops
-    // the `dev_flash3_*` revocation-list package RPCS3 also skips; a
-    // bare `dev_flash` substring would wrongly keep it.
+    // the `dev_flash3_*` revocation-list package RPCS3 also skips.
     let dev_flash_entries: Vec<_> = outer_tar
         .iter()
         .filter(|e| e.name.contains("dev_flash_"))
@@ -406,6 +404,7 @@ fn cmd_install(args: &[String]) {
 
     let mut total_files = 0usize;
     let mut total_skipped = 0usize;
+    let mut total_pruned = 0usize;
     let mut packages_attempted = 0usize;
     let mut extract_errors: Vec<tar::ExtractError> = Vec::new();
     for entry in &dev_flash_entries {
@@ -415,20 +414,24 @@ fn cmd_install(args: &[String]) {
         match sce::decrypt_package(&entry.data) {
             Ok(inner_tar_data) => match tar::parse(&inner_tar_data) {
                 Ok(inner_files) => {
+                    let packaged = inner_files.len();
                     let inner_files: Vec<tar::TarEntry> = inner_files
                         .into_iter()
                         .filter(|f| !is_install_excluded(&f.name))
                         .collect();
+                    let pruned = packaged - inner_files.len();
+                    total_pruned += pruned;
                     if inner_files.is_empty() {
-                        println!(" empty");
+                        println!(" empty ({packaged} entries, {pruned} pruned)");
                         continue;
                     }
                     let report = tar::extract_to_disk(&inner_files, &output_dir);
                     total_files += report.written;
                     total_skipped += report.skipped;
-                    // A routed-to-nothing entry is named rather than
-                    // left to show up as a shortfall in the file count.
                     print!(" {} files", report.written);
+                    if pruned > 0 {
+                        print!(", {pruned} pruned");
+                    }
                     if report.skipped > 0 {
                         print!(", {} entries addressing no file", report.skipped);
                     }
@@ -463,19 +466,19 @@ fn cmd_install(args: &[String]) {
     }
 
     println!(
-        "cellgov_install: installed {} files to {} ({} packages, {} skipped, {} errors)",
+        "cellgov_install: installed {} files to {} ({} packages, {} pruned, {} skipped, {} errors)",
         total_files,
         output_dir.display(),
         packages_attempted,
+        total_pruned,
         total_skipped,
         extract_errors.len(),
     );
 
     print!("  building firmware.toml...");
-    // Rooted at the dev_flash mount, not the VFS root: the manifest
-    // describes the firmware image, so its entry paths stay
-    // `sys/external/...` and `cellgov_cli`'s walk-up from the
-    // firmware dir finds it beside the tree it covers.
+    // Rooted at the dev_flash mount so entry paths stay
+    // `sys/external/...` and `cellgov_cli`'s walk-up from the firmware
+    // dir finds the manifest beside the tree it covers.
     let manifest = match build_firmware_manifest(&pup_data, pup.image_version, &dev_flash_dir) {
         Ok(m) => m,
         Err(e) => {
@@ -795,15 +798,30 @@ fn cmd_uninstall(args: &[String]) {
 /// path ending in `.sprx` or `.prx` to `paths`. `.prx` covers
 /// pre-decrypted corpora, which the boot verifier loads through the
 /// same manifest path.
-fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    let mut sorted: Vec<PathBuf> = entries.filter_map(|r| r.ok()).map(|e| e.path()).collect();
+///
+/// # Errors
+///
+/// [`FirmwareCliError::FirmwareTreeReadFailed`] for any directory or
+/// directory entry the walk cannot read; the walk aborts rather than
+/// emitting a manifest short of the modules it claims to cover.
+fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), FirmwareCliError> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|source| FirmwareCliError::FirmwareTreeReadFailed {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+    let mut sorted: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| FirmwareCliError::FirmwareTreeReadFailed {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        sorted.push(entry.path());
+    }
     sorted.sort();
     for p in sorted {
         if p.is_dir() {
-            collect_sprx_paths(&p, paths);
+            collect_sprx_paths(&p, paths)?;
         } else if p
             .extension()
             .and_then(|x| x.to_str())
@@ -812,12 +830,20 @@ fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
             paths.push(p);
         }
     }
+    Ok(())
 }
 
 /// Build the firmware.toml manifest from a freshly-installed tree.
 /// PUP hash is over `pup_data`; per-file hashes are over the post-
-/// decrypt ELF bytes. Files unable to decrypt are skipped silently
-/// (e.g., revisions without an APP key in [`crypto::app_key_for_revision`]).
+/// decrypt ELF bytes. Files that fail to decrypt (e.g. a revision with
+/// no APP key) are left out of the manifest and their count is
+/// reported on stderr.
+///
+/// # Errors
+///
+/// [`FirmwareCliError::FirmwareTreeReadFailed`] when the walk cannot
+/// list part of the tree, plus the per-file read / strip_prefix /
+/// non-UTF-8 refusals.
 fn build_firmware_manifest(
     pup_data: &[u8],
     pup_image_version: u64,
@@ -828,7 +854,7 @@ fn build_firmware_manifest(
     let pup_sha256 = manifest::Sha256(pup_hasher.finalize().into());
 
     let mut sprx_paths = Vec::new();
-    collect_sprx_paths(output_dir, &mut sprx_paths);
+    collect_sprx_paths(output_dir, &mut sprx_paths)?;
 
     let mut files = Vec::with_capacity(sprx_paths.len());
     let mut skipped = 0usize;
@@ -849,9 +875,7 @@ fn build_firmware_manifest(
                 }
             };
             // decrypt_self_to_elf already parsed the same header to get
-            // here, so this parse cannot fail; expect rather than
-            // silent-fallback so a future change that decouples the two
-            // paths surfaces the violation instead of writing 0.
+            // here, so this parse cannot fail.
             let revision = sce::parse_sce_header(&raw)
                 .expect("decrypt_self_to_elf success implies parse_sce_header success")
                 .revision_flags
@@ -888,12 +912,10 @@ fn build_firmware_manifest(
     Ok(FirmwareManifest {
         format_version: SUPPORTED_FORMAT_VERSION,
         firmware: FirmwareIdentity {
-            // PUP-header `image_version` is an opaque u64 identifier,
-            // not a user-facing version string (RPCS3 likewise reads
-            // user-facing version from `vsh/etc/version.txt`, not from
-            // this header field). Render as zero-padded hex so a
-            // human inspecting firmware.toml sees the raw value;
-            // decimal-of-u64 would round-trip but be unreadable.
+            // PUP-header `image_version` is an opaque u64 identifier
+            // (RPCS3 reads the user-facing version from
+            // `vsh/etc/version.txt` instead). Rendered as zero-padded
+            // hex so firmware.toml shows the raw value.
             image_version: format!("0x{pup_image_version:016x}"),
             pup_sha256,
         },

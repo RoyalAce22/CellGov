@@ -6,8 +6,7 @@
 //!   -- --ignored regenerate_firmware_reloc_census
 //! ```
 //!
-//! Iterates `<firmware-dir>/*.sprx` (env `CELLGOV_FIRMWARE_DIR`,
-//! default `vfs/dev_flash/sys/external`), decrypts and parses each,
+//! Iterates `vfs/dev_flash/sys/external/*.sprx`, decrypts and parses each,
 //! and writes the per-PRX type table plus the union. The
 //! "Applier covered?" column reads
 //! [`cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`] so the doc cannot
@@ -16,6 +15,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::PathBuf;
+
+#[path = "common/corpus.rs"]
+mod corpus;
 
 fn reloc_type_name(rtype: u32) -> &'static str {
     match rtype {
@@ -127,23 +129,6 @@ fn reloc_type_name(rtype: u32) -> &'static str {
     }
 }
 
-fn workspace_root() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    loop {
-        // is_ok_and: a permission-denied read on an ancestor falls
-        // through; the loop still terminates via pop() returning false.
-        if std::fs::read_to_string(p.join("Cargo.toml")).is_ok_and(|t| t.contains("[workspace]")) {
-            return p;
-        }
-        if !p.pop() {
-            panic!(
-                "workspace root not found above {}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-        }
-    }
-}
-
 fn filename_is_safe(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -154,15 +139,7 @@ fn filename_is_safe(name: &str) -> bool {
 #[test]
 #[ignore = "regeneration: run with --ignored regenerate_firmware_reloc_census"]
 fn regenerate_firmware_reloc_census() {
-    let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
-        Ok(s) => PathBuf::from(s),
-        Err(_) => workspace_root().join("vfs/dev_flash/sys/external"),
-    };
-    assert!(
-        dir.is_dir(),
-        "firmware dir {} not found; run `cellgov_install install` first or set CELLGOV_FIRMWARE_DIR",
-        dir.display()
-    );
+    let dir = corpus::firmware_external_dir();
 
     let mut sprx_paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("read_dir on validated firmware dir")
@@ -238,12 +215,9 @@ fn regenerate_firmware_reloc_census() {
     )
     .expect("write to String");
     writeln!(out).expect("write to String");
-    // The generating machine's absolute firmware path stays out of the
-    // committed text; the parenthetical already tells a reader where
-    // the corpus came from without pinning it to one checkout.
     writeln!(
         out,
-        "Source: every `*.sprx` under the firmware directory (default `vfs/dev_flash/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`). Each row lists the distinct `R_PPC64_*` types observed in that PRX's `PT_PRX_RELOC` segment after SCE decryption. The applier at `crates/cellgov_ppu/src/sprx.rs::apply_relocations` must cover the union of these types for the dependency-ordered firmware loader to handle every module. The \"Applier covered?\" column reads `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`, so this doc and the applier never disagree silently."
+        "Source: every `*.sprx` under the firmware directory (`vfs/dev_flash/sys/external`). Each row lists the distinct `R_PPC64_*` types observed in that PRX's `PT_PRX_RELOC` segment after SCE decryption. The applier at `crates/cellgov_ppu/src/sprx.rs::apply_relocations` must cover the union of these types for the dependency-ordered firmware loader to handle every module. The \"Applier covered?\" column reads `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES`, so this doc and the applier never disagree silently."
     )
     .expect("write to String");
     writeln!(out).expect("write to String");
@@ -334,7 +308,7 @@ fn regenerate_firmware_reloc_census() {
         writeln!(out).expect("write to String");
         writeln!(
             out,
-            "Numeric values absent from `reloc_type_name`'s match. A future firmware revision that emits one of these surfaces here loudly; the `debug_assert!` at the end of the regenerator trips the test in debug builds."
+            "Numeric values absent from `reloc_type_name`'s match. A future firmware revision that emits one of these surfaces here loudly; the assertion at the end of the regenerator also fails the run, in both the debug and release profiles."
         )
         .expect("write to String");
         writeln!(out).expect("write to String");
@@ -364,26 +338,39 @@ fn regenerate_firmware_reloc_census() {
         writeln!(out).expect("write to String");
     }
 
-    let dst = workspace_root().join("docs/dev/audits/firmware_reloc_census.md");
+    let dst = corpus::workspace_root().join("docs/dev/audits/firmware_reloc_census.md");
     // docs/dev/ is gitignored; create it so fs::write does not ENOENT.
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).expect("create docs/dev parent dir");
     }
     std::fs::write(&dst, &out).expect("write firmware_reloc_census.md");
 
-    debug_assert!(
+    // `assert!` rather than `debug_assert!`: the invocation this module
+    // documents passes `--release`, where a debug assertion compiles
+    // out and an unknown type would regenerate the doc and report ok.
+    assert!(
         unknowns.is_empty(),
         "{} unknown reloc type(s) appeared in firmware corpus; extend reloc_type_name and re-run: {:?}",
         unknowns.len(),
         unknowns
     );
+
+    // Anti-vacuity floor: a wrong directory or a decrypt regression
+    // that skipped every module would still write a well-formed doc
+    // with empty tables and report ok.
+    assert!(
+        per_module.len() >= 100,
+        "censused {} of {} candidate modules ({} skipped); a full retail install \
+         carries 100+ and the tables above would otherwise be empty",
+        per_module.len(),
+        sprx_paths.len(),
+        skipped.len(),
+    );
 }
 
-/// Every type in `APPLIER_SUPPORTED_TYPES` must resolve to a
-/// non-`R_PPC64_UNKNOWN` name in `reloc_type_name`. The regeneration
-/// test above is `#[ignore]` (it needs a decrypted firmware corpus);
-/// this companion test runs in CI and catches a drift where the
-/// applier supports a numeric the local table cannot label.
+/// The regenerator above is `#[ignore]` (it needs a decrypted firmware
+/// corpus), so this companion is what catches an applier type the local
+/// table cannot label in CI.
 #[test]
 fn reloc_type_name_covers_applier_supported() {
     for &t in cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES {

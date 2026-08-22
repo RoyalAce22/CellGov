@@ -180,11 +180,8 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
         };
         if is_sce_wrapped(&bytes) {
             // Both headers are plaintext, so a parse failure here is a
-            // structural anomaly in a file the walk is about to boot,
-            // not a legitimate absence. Dropping it into `None` would
-            // seat the shared retail authority id and an unprivileged
-            // ctrl_flags1 while the banner reported the fallback as
-            // "raw-ELF input", so name each refusal instead.
+            // structural anomaly in a file the walk is about to boot;
+            // each refusal is named rather than folded into `None`.
             let authority_id = match cellgov_install::sce::parse_program_authority_id(&bytes) {
                 Ok(id) => Some(id),
                 Err(e) => {

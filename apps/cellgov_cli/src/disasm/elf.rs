@@ -1,11 +1,7 @@
 //! ELF64-BE program-header parser for the `disasm` subcommand.
 //!
-//! Owns the producer-side validation that lets [`super::stream::disassemble`]
-//! skip per-byte bounds checks in its hot loop: PT_LOAD `[p_offset,
-//! p_offset + p_filesz)` lies inside the file, and `p_vaddr + p_memsz`
-//! fits in `u64`. Rejects non-PPC64 / non-ELFCLASS64 / non-big-endian
-//! inputs at the entry point so downstream code can assume PS3 PPE
-//! shape.
+//! Owns the producer-side validation described on [`parse_pt_loads`],
+//! rejecting anything that is not a PS3 PPE object at the entry point.
 
 use cellgov_ps3_abi::elf::{
     ELFCLASS64, ELFDATA2MSB, ELF_EI_CLASS, ELF_EI_DATA, ELF_EI_VERSION, ELF_E_MACHINE_OFFSET,
@@ -14,7 +10,6 @@ use cellgov_ps3_abi::elf::{
     PHDR_P_OFFSET_OFFSET, PHDR_P_VADDR_OFFSET, PT_LOAD,
 };
 
-/// Reason an ELF failed to parse.
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub(super) enum ElfError {
     #[error("not an ELF (file is {len} bytes; need >= {})", ELF_HEADER_SIZE)]
@@ -25,7 +20,10 @@ pub(super) enum ElfError {
     NotElf64 { ei_class: u8 },
     #[error("ELF EI_DATA=0x{ei_data:02x}; this tool only handles ELFDATA2MSB (PS3 PPE objects)")]
     NotBigEndian { ei_data: u8 },
-    #[error("ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT (1) is supported")]
+    #[error(
+        "ELF EI_VERSION=0x{ei_version:02x}; only EV_CURRENT ({}) is supported",
+        EV_CURRENT
+    )]
     UnknownElfVersion { ei_version: u8 },
     #[error(
         "ELF e_machine={e_machine} (0x{e_machine:04x}); this tool only handles EM_PPC64 ({})",

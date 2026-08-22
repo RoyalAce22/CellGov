@@ -6,8 +6,8 @@
 //! load possible; a regression to NID-only resolution surfaces here
 //! as `ConflictingExport` long before any title boot sees it.
 //!
-//! Requires the `firmware-corpus` feature and an installed firmware
-//! set; `CELLGOV_FIRMWARE_DIR` overrides the default location.
+//! Requires the `firmware-corpus` feature and a firmware set
+//! installed by `cellgov_install install`.
 
 #![allow(
     clippy::print_stderr,
@@ -20,38 +20,12 @@ use std::path::PathBuf;
 use cellgov_mem::{GuestMemory, PageSize, Region};
 use cellgov_ppu::prx_loader::{load_firmware_set, select_import_closure, PrxModuleId};
 
-fn workspace_root() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    loop {
-        if std::fs::read_to_string(p.join("Cargo.toml")).is_ok_and(|t| t.contains("[workspace]")) {
-            return p;
-        }
-        if !p.pop() {
-            panic!(
-                "workspace root not found above {}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-        }
-    }
-}
-
-fn locate_firmware_dir() -> PathBuf {
-    let dir = match std::env::var("CELLGOV_FIRMWARE_DIR") {
-        Ok(s) => PathBuf::from(s),
-        Err(_) => workspace_root().join("vfs/dev_flash/sys/external"),
-    };
-    assert!(
-        dir.is_dir(),
-        "firmware dir not found: {}. Populate it with `cellgov_install install`, \
-         or point CELLGOV_FIRMWARE_DIR at an existing install.",
-        dir.display()
-    );
-    dir
-}
+#[path = "common/corpus.rs"]
+mod corpus;
 
 #[test]
 fn load_firmware_set_against_installed_corpus_is_coherent() {
-    let dir = locate_firmware_dir();
+    let dir = corpus::firmware_external_dir();
 
     let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     let mut sprx_paths: Vec<PathBuf> = std::fs::read_dir(&dir)
@@ -105,6 +79,17 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         bytes_by_path.len(),
         sprx_paths.len(),
         selection.pruned.len()
+    );
+    // Anti-vacuity floor: every coherence assertion below iterates
+    // `image.loaded`, so a selection that pruned the corpus down to
+    // nothing would satisfy all of them. The 100-module candidate
+    // floor above does not cover that -- pruning happens after it.
+    assert!(
+        bytes_by_path.len() >= 100,
+        "selection kept only {} of {} candidates; the coherence assertions below \
+         iterate the loaded set and would pass vacuously",
+        bytes_by_path.len(),
+        sprx_paths.len(),
     );
 
     // Pre-parse the set of module ids the input is expected to

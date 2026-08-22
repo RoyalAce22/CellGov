@@ -31,6 +31,16 @@ pub enum LoadError {
         /// Memory size of the segment.
         memsz: u32,
     },
+    /// A LOAD segment claims more file bytes than memory bytes
+    /// (`p_filesz > p_memsz`), which the ELF format forbids for
+    /// loadable segments.
+    #[error("SPU ELF LOAD segment filesz 0x{filesz:08x} exceeds memsz 0x{memsz:08x}")]
+    SegmentFileszExceedsMemsz {
+        /// Declared file-image size.
+        filesz: u32,
+        /// Declared memory-image size.
+        memsz: u32,
+    },
 }
 
 /// Load an SPU ELF binary into `state`, copying PT_LOAD segments into
@@ -79,6 +89,16 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         let p_vaddr = read_u32(data, base + 8);
         let p_filesz = read_u32(data, base + 16) as usize;
         let p_memsz = read_u32(data, base + 20) as usize;
+
+        // The local-store bound below is memsz-derived while the copy
+        // is filesz bytes, so a header claiming extra file bytes would
+        // index past the slice and panic instead of erroring.
+        if p_filesz > p_memsz {
+            return Err(LoadError::SegmentFileszExceedsMemsz {
+                filesz: p_filesz as u32,
+                memsz: p_memsz as u32,
+            });
+        }
 
         // [CBE-Handbook p:64 s:3.1.1] Local Store is 256 KB; segments must fit.
         let end = p_vaddr as usize + p_memsz;

@@ -206,7 +206,7 @@ fn explore_cross_space_same_address_is_stable() {
 fn explore_child_space_only_divergence_is_sensitive() {
     // Both racers live in the child space and boot memory never
     // changes, so only the multi-space committed hash can witness the
-    // last-writer split; a boot-only hash would classify this stable.
+    // last-writer split.
     let result = explore(
         || {
             let mem = GuestMemory::new(64);
@@ -462,13 +462,12 @@ fn max_schedules_bound_produces_inconclusive() {
     assert_eq!(r.schedules.len(), 1, "should stop after 1 schedule");
     assert!(r.bounds_hit);
     // The one explored alternate swaps LoadImm order but not the
-    // last writer, so no divergence is visible; bounds-hit without
-    // divergence classifies as Inconclusive.
+    // last writer, so no divergence is visible.
     assert_eq!(r.outcome, OutcomeClass::Inconclusive);
 }
 
 #[test]
-fn a_replay_cut_short_by_the_step_bound_reports_bounds_hit() {
+fn a_replay_cut_short_by_the_step_bound_is_inconclusive_not_a_divergence() {
     let config = ExplorationConfig {
         max_schedules: 256,
         max_steps_per_run: 1,
@@ -499,7 +498,52 @@ fn a_replay_cut_short_by_the_step_bound_reports_bounds_hit() {
         r.bounds_hit,
         "a replay stopped by max_steps_per_run must not read as a completed exploration",
     );
-    assert_ne!(r.outcome, OutcomeClass::ScheduleStable);
+    // One step in, the alternate has not reached its store, so its
+    // hash differs from the completed baseline's for a reason that has
+    // nothing to do with the schedule.
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::Inconclusive,
+        "a prefix hash must not be reported as ScheduleSensitive",
+    );
+}
+
+/// A replay stopped by `Runtime`'s own `max_steps` cap comes back as
+/// `StepError`, not `StepBound`, and must land in the same place.
+#[test]
+fn a_replay_cut_short_by_a_step_error_is_inconclusive_not_a_divergence() {
+    let config = ExplorationConfig {
+        max_schedules: 256,
+        max_steps_per_run: 10_000,
+    };
+    let result = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            // Two 3-op units need 6 steps; the cap refuses the 5th.
+            let mut rt = Runtime::new(mem, Budget::new(100), 4);
+            for imm in [0xAAu32, 0xBB] {
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(imm),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+            }
+            rt
+        },
+        &config,
+    );
+
+    let r = result.expect("should have branching points");
+    assert!(
+        r.bounds_hit,
+        "a replay refused by Runtime::step must not read as a completed exploration",
+    );
+    assert_eq!(r.outcome, OutcomeClass::Inconclusive);
 }
 
 #[test]

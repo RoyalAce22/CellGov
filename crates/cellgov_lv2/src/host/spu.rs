@@ -276,10 +276,8 @@ impl Lv2Host {
             match rt.read_committed(arg_ptr as u64, 32) {
                 Some(bytes) if bytes.len() >= 32 => {
                     let mut a = [0u64; 4];
-                    for (i, chunk) in bytes.chunks_exact(8).enumerate().take(4) {
-                        a[i] = u64::from_be_bytes(
-                            chunk.try_into().expect("chunks_exact(8) yields [u8; 8]"),
-                        );
+                    for (i, chunk) in bytes.as_chunks::<8>().0.iter().enumerate().take(4) {
+                        a[i] = u64::from_be_bytes(*chunk);
                     }
                     a
                 }

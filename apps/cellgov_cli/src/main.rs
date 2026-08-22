@@ -17,8 +17,7 @@ mod paths;
 use cli::exit::die;
 use cli::scenarios::{report, run_scenario, SCENARIOS};
 
-/// Usage lines for the fixed-arity subcommands. Referenced both by
-/// the per-arm `die` on wrong arity and the [`Subcommand::usage`] table.
+/// Usage lines for the fixed-arity subcommands.
 const USAGE_COMPARE_OBSERVATIONS: &str =
     "cellgov_cli compare-observations <a.json> <b.json> [--format human|json]";
 const USAGE_DIVERGE: &str = "cellgov_cli diverge <a.state> <b.state>";
@@ -33,7 +32,8 @@ const USAGE_EXPLORE: &str = "\
 cellgov_cli explore <scenario> [--format human|json]
 cellgov_cli explore micro <name> [--format human|json]";
 const USAGE_RUN_GAME: &str = "\
-cellgov_cli run-game <elf-path|--title NAME> [--max-steps N] [--budget N] [--trace] [--profile]
+cellgov_cli run-game <--title NAME|--content-id ID|--title-manifest PATH> [elf-path]
+\t\t[--max-steps N] [--budget N] [--trace] [--profile]
 \t\t[--firmware-dir DIR] [--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]
 \t\t(default --firmware-dir: vfs/dev_flash/sys/external/ when present at the current working directory)";
 const USAGE_BENCH_BOOT: &str = "\
@@ -69,9 +69,7 @@ cellgov_cli record-anchors <--all | --title NAME> [--registry DIR]
 \t\tbaseline; appends to boot_history.jsonl only when a value moved.
 \t\tWitness classes already set in the baseline are preserved.";
 
-/// Top-level dispatcher routes. Adding a variant produces an
-/// exhaustiveness error in [`Subcommand::tokens`], [`Subcommand::usage`],
-/// and the `main` dispatch match.
+/// Top-level dispatcher routes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Subcommand {
     Help,
@@ -120,9 +118,8 @@ impl Subcommand {
         }
     }
 
-    /// Usage block printed by [`print_usage`]. May contain embedded
-    /// `\n` for subcommands that document several invocation shapes.
-    /// `None` for variants rolled into the trailing summary line.
+    /// Usage block printed by [`print_usage`], or `None` for variants
+    /// rolled into the trailing summary line.
     fn usage(self) -> Option<&'static str> {
         match self {
             Self::Help | Self::Version => None,
@@ -154,8 +151,7 @@ impl Subcommand {
     }
 }
 
-/// Canonical iteration order driving [`print_usage`] layout and the
-/// unknown-token diagnostic.
+/// Canonical iteration order driving [`print_usage`] layout.
 const SUBCOMMANDS: &[Subcommand] = &[
     Subcommand::Help,
     Subcommand::Version,
@@ -244,8 +240,8 @@ fn main() {
     }
 }
 
-/// Materialize argv as `Vec<String>`, dying with a structured error on
-/// non-UTF-8 arguments instead of letting `std::env::args` panic.
+/// Materialize argv as `Vec<String>`, dying with a structured error
+/// where `std::env::args` would panic on a non-UTF-8 argument.
 fn collect_args_or_die() -> Vec<String> {
     let mut out = Vec::new();
     for (i, raw) in std::env::args_os().enumerate() {
@@ -259,8 +255,8 @@ fn collect_args_or_die() -> Vec<String> {
     out
 }
 
-/// Parse a step count for `zoom`. Accepts `0x`/`0X` hex per the rest
-/// of the CLI's address-shaped flags; otherwise decimal.
+/// Parse a step count for `zoom`, accepting `0x` hex like the CLI's
+/// other address-shaped flags.
 fn parse_step_count(s: &str) -> Result<u64, std::num::ParseIntError> {
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
         u64::from_str_radix(hex, 16)
@@ -269,8 +265,6 @@ fn parse_step_count(s: &str) -> Result<u64, std::num::ParseIntError> {
     }
 }
 
-/// Every dispatcher-recognized token across all subcommands, in
-/// `SUBCOMMANDS` order.
 fn all_subcommand_tokens() -> Vec<&'static str> {
     SUBCOMMANDS
         .iter()

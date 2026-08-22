@@ -9,14 +9,12 @@ use cellgov_ps3_abi::elf::{
     EV_CURRENT, PF_R, PF_W, PF_X, PT_LOAD, PT_PROC_PARAM, SYS_PROCESS_PARAM_MAGIC,
 };
 
-/// `e_ehsize` field value: cast of [`ELF_HEADER_SIZE`].
+/// `e_ehsize` field value.
 const ELF64_EHDR_SIZE: u16 = ELF_HEADER_SIZE as u16;
 
-/// `e_phentsize` field value: cast of [`ELF_PHENTSIZE`].
+/// `e_phentsize` field value.
 const ELF64_PHDR_SIZE: u16 = ELF_PHENTSIZE as u16;
 
-/// Re-export of [`cellgov_ps3_abi::elf::PROC_PARAM_SIZE`] for callers
-/// that previously consumed it via this module.
 pub use cellgov_ps3_abi::elf::PROC_PARAM_SIZE;
 
 /// Build a `process_param_t` structure (32 bytes, big-endian).
@@ -35,9 +33,12 @@ pub fn proc_param(sdk_version: u32) -> Vec<u8> {
 
 /// Build a PPU ELF64 with code, data, and optional PROC_PARAM.
 ///
-/// `entry_vaddr` points at the OPD in the code segment. When
-/// `proc_param_offset` is `Some`, the data at `data_vaddr + offset`
-/// must be a valid `process_param_t` of length [`PROC_PARAM_SIZE`].
+/// `entry_vaddr` points at the OPD in the code segment.
+///
+/// # Panics
+///
+/// When `proc_param_offset` is `Some`, a `process_param_t` of length
+/// [`PROC_PARAM_SIZE`] must fit inside `data` at that offset.
 pub fn build(
     entry_vaddr: u64,
     code_vaddr: u64,
@@ -50,7 +51,7 @@ pub fn build(
     // `data_file_offset + pp_offset`. A record that does not fit inside
     // `data` would put [p_offset, p_offset + p_filesz) past end of file
     // -- the same malformed-segment shape the disasm PT_LOAD parser
-    // rejects as SegmentTruncated. Refuse to emit it.
+    // rejects as SegmentTruncated.
     if let Some(pp_offset) = proc_param_offset {
         assert!(
             pp_offset

@@ -355,8 +355,11 @@ fn decode_name(bytes: &[u8], ucs2: bool, pos: usize) -> Result<String, IsoError>
             return Err(IsoError::MalformedJolietName { pos });
         }
         let units: Vec<u16> = bytes
-            .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .copied()
+            .map(u16::from_be_bytes)
             .collect();
         String::from_utf16(&units).map_err(|_| IsoError::UndecodableName { pos })?
     } else {

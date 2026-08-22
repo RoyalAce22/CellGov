@@ -4,11 +4,8 @@ use super::*;
 use cellgov_exec::ExecutionContext;
 use cellgov_mem::GuestMemory;
 
-/// Read a micro-test build artifact. Only reached when the
-/// `spu-microtests` feature opted in (see the `cfg_attr(ignore)` on
-/// every caller), so absence is a hard error, not a skip: opting in
-/// declares the corpus built.
-fn microtest_elf<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
+/// Read a micro-test build artifact.
+pub(crate) fn microtest_elf<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
     let path = path.as_ref();
     std::fs::read(path).unwrap_or_else(|e| {
         panic!(
@@ -379,9 +376,7 @@ fn run_spu_fixed_value_binary() {
             YieldReason::DmaWait => {
                 // Direct-loop test has no Runtime / DMA queue; simulate
                 // the completion publish by ORing the issued tag bit.
-                // The yield must be observed first -- this proves the
-                // SPU genuinely parked on the unset bit and isn't just
-                // straight-lining through an eager-set state.
+                // The yield must be observed first.
                 let tag_id = unit.state().channels.mfc_tag_id as u8;
                 unit.state_mut().channels.tag_status |= 1u32 << tag_id;
                 continue;

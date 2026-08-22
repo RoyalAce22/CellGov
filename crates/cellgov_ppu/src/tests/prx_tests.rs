@@ -389,14 +389,124 @@ fn parse_rejects_function_count_larger_than_nid_array_in_file() {
 }
 
 #[test]
-fn parse_synthetic_elf_function_count_zero_is_variable_only_module() {
+fn parse_synthetic_elf_function_count_zero_yields_an_import_free_module() {
     let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    let mod_info_off = 208;
+    data[mod_info_off + 6..mod_info_off + 8].copy_from_slice(&0u16.to_be_bytes());
+    let modules = parse_imports(&data).expect("function-free module must parse");
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0].name, "tst");
+    assert!(modules[0].functions.is_empty());
+    assert!(modules[0].variables.is_empty());
+}
+
+/// Two variable imports on the synthetic fixture's single entry.
+/// Bytes 264..280 are past the NID / stub tables and inside the
+/// PT_LOAD, so the vnids and vstubs tables fit without disturbing
+/// the function imports. The entry's declared 0x2C size already
+/// covers `vstubs_ptr` at +32.
+fn add_two_variable_imports(data: &mut [u8]) {
+    const MOD_INFO_OFF: usize = 208;
+    const VNIDS_OFF: u32 = 264;
+    const VSTUBS_OFF: u32 = 272;
+    data[MOD_INFO_OFF + 8..MOD_INFO_OFF + 10].copy_from_slice(&2u16.to_be_bytes());
+    data[MOD_INFO_OFF + 28..MOD_INFO_OFF + 32].copy_from_slice(&VNIDS_OFF.to_be_bytes());
+    data[MOD_INFO_OFF + 32..MOD_INFO_OFF + 36].copy_from_slice(&VSTUBS_OFF.to_be_bytes());
+    let v = VNIDS_OFF as usize;
+    data[v..v + 4].copy_from_slice(&0x1234_5678u32.to_be_bytes());
+    data[v + 4..v + 8].copy_from_slice(&0x8765_4321u32.to_be_bytes());
+}
+
+/// RPCS3 walks `vnids[i]` / `vstubs[i]` for `i < num_var` in its
+/// import path (`rpcs3/Emu/Cell/PPUModule.cpp`); the VNID comes from
+/// the vnids table and the slot the binder patches from vstubs.
+#[test]
+fn variable_imports_are_walked_when_the_entry_declares_the_variable_section() {
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    add_two_variable_imports(&mut data);
+    let modules = parse_imports(&data).expect("entry with variable imports must parse");
+    assert_eq!(modules.len(), 1);
+    let seen: Vec<(u32, u32)> = modules[0]
+        .variables
+        .iter()
+        .map(|v| (v.vnid, v.vref_addr))
+        .collect();
+    assert_eq!(seen, vec![(0x1234_5678, 272), (0x8765_4321, 276)]);
+    // The function imports are untouched by the variable section.
+    assert_eq!(modules[0].functions.len(), 1);
+    assert_eq!(modules[0].functions[0].nid, 0xDEAD_BEEF);
+}
+
+#[test]
+fn an_entry_too_small_for_the_variable_section_reports_no_variable_imports() {
+    // A 0x1C entry stops at +28, so `vnids_ptr` / `vstubs_ptr` are
+    // not its bytes to read -- they belong to whatever follows. The
+    // num_var word alone must not open the variable walk.
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    add_two_variable_imports(&mut data);
+    let mod_info_off = 208usize;
+    let param_off = 176usize;
+    data[mod_info_off] = PRX_IMPORT_ENTRY_MIN_SIZE;
+    let shrunk_end = mod_info_off as u32 + u32::from(PRX_IMPORT_ENTRY_MIN_SIZE);
+    data[param_off + 28..param_off + 32].copy_from_slice(&shrunk_end.to_be_bytes());
+
+    let modules = parse_imports(&data).expect("function-only entry must parse");
+    assert_eq!(modules.len(), 1);
+    assert_eq!(modules[0].functions.len(), 1);
+    assert!(
+        modules[0].variables.is_empty(),
+        "num_var must be ignored below the {PRX_IMPORT_ENTRY_VAR_MIN_SIZE}-byte variable-section \
+         threshold, got {:?}",
+        modules[0].variables,
+    );
+}
+
+#[test]
+fn a_variable_only_module_parses_with_no_function_imports() {
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    add_two_variable_imports(&mut data);
     let mod_info_off = 208;
     data[mod_info_off + 6..mod_info_off + 8].copy_from_slice(&0u16.to_be_bytes());
     let modules = parse_imports(&data).expect("variable-only module must parse");
     assert_eq!(modules.len(), 1);
-    assert_eq!(modules[0].name, "tst");
     assert!(modules[0].functions.is_empty());
+    assert_eq!(modules[0].variables.len(), 2);
+}
+
+#[test]
+fn parse_rejects_unmapped_vnid_table() {
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    add_two_variable_imports(&mut data);
+    let mod_info_off = 208;
+    let unmapped: u32 = 0xFFFF_0000;
+    data[mod_info_off + 28..mod_info_off + 32].copy_from_slice(&unmapped.to_be_bytes());
+    let err = parse_imports(&data).unwrap_err();
+    assert_eq!(
+        err,
+        ImportParseError::InvalidNidPtr {
+            vaddr: 0xFFFF_0000,
+            function_count: 2,
+        },
+    );
+}
+
+#[test]
+fn parse_rejects_vstub_table_running_past_the_segment() {
+    // TOTAL_SIZE is 320, so a two-slot vstubs table starting at 316
+    // has its last byte outside the only PT_LOAD.
+    let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);
+    add_two_variable_imports(&mut data);
+    let mod_info_off = 208;
+    let straddling: u32 = 316;
+    data[mod_info_off + 32..mod_info_off + 36].copy_from_slice(&straddling.to_be_bytes());
+    let err = parse_imports(&data).unwrap_err();
+    assert_eq!(
+        err,
+        ImportParseError::InvalidStubPtr {
+            vaddr: 316,
+            function_count: 2,
+        },
+    );
 }
 
 #[test]
@@ -600,7 +710,8 @@ fn bodyless_prx_param_does_not_fall_back_to_library_info() {
     let modules = parse_imports(&data).expect("bodyless PT_PRX_PARAM must not reject");
     assert!(
         modules.is_empty(),
-        "bodyless PT_PRX_PARAM must terminate the search, but the          library-info fallback produced {} module(s)",
+        "bodyless PT_PRX_PARAM must terminate the search, but the \
+         library-info fallback produced {} module(s)",
         modules.len()
     );
 }

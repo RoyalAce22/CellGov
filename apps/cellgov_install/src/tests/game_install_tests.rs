@@ -73,7 +73,6 @@ fn rejects_missing_eboot() {
     let out = scratch();
     let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
     assert!(matches!(err, GameInstallError::NoEboot));
-    // A rejection before staging must leave no game tree behind.
     assert!(!out.join("vfs/dev_hdd0/game/NPUA80001").exists());
 }
 
@@ -137,6 +136,46 @@ fn iso_rejects_missing_eboot() {
     assert!(!out.join("vfs/dev_bdvd/BCES00664").exists());
 }
 
+#[test]
+fn iso_pre_commit_fault_leaves_no_staging_residue() {
+    // On the disc path the staging root *is* the tree (no `tree/`
+    // nesting), so a failed decrypt-proof has to discard the root
+    // itself. The EBOOT is not a SELF, so the proof faults.
+    let image = build_iso(vec![IsoNode::Dir(
+        "PS3_GAME",
+        vec![
+            IsoNode::File(
+                "PARAM.SFO",
+                build_param_sfo(&[("TITLE_ID", "BCES00664"), ("CATEGORY", "DG")]),
+            ),
+            IsoNode::Dir(
+                "USRDIR",
+                vec![IsoNode::File("EBOOT.BIN", b"not a SELF".to_vec())],
+            ),
+        ],
+    )]);
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    let err = install_iso(&image, &image, &vfs, &installs, false).unwrap_err();
+    assert!(
+        matches!(err, GameInstallError::DecryptProof(_)),
+        "synthetic disc EBOOT must fail the proof, got {err:?}"
+    );
+    assert!(
+        !vfs.join("dev_bdvd/.staging-BCES00664").exists(),
+        "staging root discarded"
+    );
+    assert!(
+        !vfs.join("dev_bdvd/BCES00664").exists(),
+        "nothing committed"
+    );
+    assert!(
+        !installs.join("BCES00664.install.toml").exists(),
+        "no record for a failed install"
+    );
+}
+
 // --- Input sanitizers -------------------------------------------------
 
 #[test]
@@ -146,7 +185,6 @@ fn safe_join_accepts_normal_nested_path() {
         safe_join(base, "USRDIR/EBOOT.BIN").unwrap(),
         base.join("USRDIR").join("EBOOT.BIN")
     );
-    // A leading `./` component is dropped, not an error.
     assert_eq!(
         safe_join(base, "./PARAM.SFO").unwrap(),
         base.join("PARAM.SFO")
@@ -187,6 +225,21 @@ fn validate_content_id_rejects_slash_and_empty() {
     ));
 }
 
+#[test]
+fn validate_content_id_rejects_a_dot_prefixed_id_that_would_escape_the_mount() {
+    // `..` joins to the mount root itself, which commit() removes
+    // wholesale under --force; `.` collapses to the game directory.
+    for id in ["..", ".", "...", ".staging-NPUA80001"] {
+        assert!(
+            matches!(
+                validate_content_id(id).unwrap_err(),
+                GameInstallError::UnsafeContentId { .. }
+            ),
+            "{id:?} must be refused as a path component"
+        );
+    }
+}
+
 /// A base v2 record with the given `rap`, for round-trip tests.
 fn sample_record(rap: Option<RapRecord>) -> InstallRecord {
     InstallRecord {
@@ -218,7 +271,6 @@ fn install_record_round_trips_with_rap_present() {
         sha256: sha256_of(b"rap bytes"),
     }));
     let text = toml::to_string(&record).expect("serialise");
-    // The compact form is a single [files] table, not a [[files]] array.
     assert!(text.contains("[files]"));
     assert!(!text.contains("[[files]]"));
     assert!(
@@ -239,7 +291,6 @@ fn install_record_round_trips_with_rap_present() {
 fn install_record_round_trips_with_rap_absent() {
     let record = sample_record(None);
     let text = toml::to_string(&record).expect("serialise");
-    // A RAP-absent record omits the [rap] table entirely.
     assert!(
         !text.contains("[rap]"),
         "RAP-absent record has no [rap] table"
@@ -279,9 +330,7 @@ fn exdata_rap(vfs: &Path) -> PathBuf {
 fn pre_commit_fault_leaves_no_exdata_residue() {
     // Network license + a 16-byte RAP: the RAP stages under the root,
     // the proof fails on the synthetic EBOOT, and the batch is
-    // discarded -- nothing reaches exdata. (Reverting the
-    // stage-RAP-under-root change, which wrote the RAP to live exdata
-    // before the proof, turns this red.)
+    // discarded -- nothing reaches exdata.
     let pkg = npdrm_pkg(1);
     let out = scratch();
     let vfs = out.join("vfs");
@@ -326,27 +375,48 @@ fn rejects_wrong_size_rap() {
 fn rap_consumed_only_for_network_and_local() {
     use crate::npdrm::NpdLicense;
     assert!(!rap_consumed(None)); // APP-keyed, no NPD header
-    assert!(!rap_consumed(Some(NpdLicense::Free))); // the finding-6 case
+    assert!(!rap_consumed(Some(NpdLicense::Free))); // NP_KLIC_FREE fallback
     assert!(rap_consumed(Some(NpdLicense::Network)));
     assert!(rap_consumed(Some(NpdLicense::Local)));
 }
 
+/// The staged-RAP plan for `license` with `rap` supplied, driven
+/// through the same license gate `install_pkg` uses.
+fn plan_for(license: Option<crate::npdrm::NpdLicense>, rap: Option<&[u8]>) -> Option<StagedRap> {
+    plan_staged_rap(
+        rap_consumed(license),
+        rap,
+        "X",
+        Path::new("s"),
+        Path::new("e"),
+    )
+}
+
 #[test]
-fn free_license_with_supplied_rap_plans_no_rap() {
-    // The finding-6 witness: a free title plans no RAP even when one is
-    // supplied. Collapsing the license gate back to a RAP-presence test
-    // (the bug) flips this red -- the FS residue tests cannot, since a
-    // failed proof discards either way.
-    let plan = plan_staged_rap(false, Some(&[0u8; 16]), "X", Path::new("s"), Path::new("e"));
+fn a_free_license_plans_no_rap_even_when_one_is_supplied() {
+    // A free title resolves through NP_KLIC_FREE, so a supplied RAP is
+    // dropped at the plan and never staged, committed, or recorded.
+    let plan = plan_for(Some(crate::npdrm::NpdLicense::Free), Some(&[0u8; 16]));
     assert!(plan.is_none(), "free license plans no staged RAP");
 }
 
 #[test]
-fn network_license_plans_a_rap() {
-    let plan = plan_staged_rap(true, Some(&[0u8; 16]), "X", Path::new("s"), Path::new("e"));
-    let sr = plan.expect("network license plans a staged RAP");
+fn an_app_keyed_title_plans_no_rap_even_when_one_is_supplied() {
+    // No NPD header at all: same drop, via the `None` arm of the gate.
+    assert!(plan_for(None, Some(&[0u8; 16])).is_none());
+}
+
+#[test]
+fn a_network_license_plans_a_rap_under_the_staging_root() {
+    let sr = plan_for(Some(crate::npdrm::NpdLicense::Network), Some(&[0u8; 16]))
+        .expect("network license plans a staged RAP");
     assert_eq!(sr.staged_path, Path::new("s").join("rap").join("X.rap"));
     assert_eq!(sr.final_path, Path::new("e").join("X.rap"));
+}
+
+#[test]
+fn a_local_license_plans_a_rap() {
+    assert!(plan_for(Some(crate::npdrm::NpdLicense::Local), Some(&[0u8; 16])).is_some());
 }
 
 #[test]
@@ -362,8 +432,8 @@ fn rejects_existing_target_without_force_and_force_bypasses() {
     let err = install_pkg(&pkg, Some(&[0u8; 16]), &vfs, &out.join("installs"), false).unwrap_err();
     assert!(matches!(err, GameInstallError::TargetExists { .. }));
 
-    // force=true: the guard is bypassed; the synthetic EBOOT then fails
-    // the proof (not TargetExists), proving force got past the gate.
+    // force=true: the synthetic EBOOT reaches the decrypt proof and
+    // fails there.
     let err = install_pkg(&pkg, Some(&[0u8; 16]), &vfs, &out.join("installs"), true).unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
@@ -388,9 +458,8 @@ fn prepare_staging_clears_stale_content() {
 #[test]
 fn prepare_staging_surfaces_non_notfound_removal_error() {
     // A regular file where prepare_staging expects to remove a dir:
-    // remove_dir_all returns a non-NotFound error, which must surface
-    // rather than be swallowed (the swallow was the pre-fix bug). NotFound
-    // (the dir simply absent) stays the silent, fine case.
+    // remove_dir_all returns a non-NotFound error, which must surface.
+    // NotFound (the dir simply absent) stays the silent, fine case.
     let out = scratch();
     let staging = out.join(".staging-X");
     std::fs::write(&staging, b"not a dir").unwrap();
@@ -449,9 +518,16 @@ fn build_record_is_deterministic_and_sorted() {
     let a = toml::to_string(&mk()).expect("serialise");
     let b = toml::to_string(&mk()).expect("serialise");
     assert_eq!(a, b, "record TOML is a pure function of its inputs");
-    // Files are sorted by path regardless of staged order.
     assert!(
         a.find("\"PARAM.SFO\"").unwrap() < a.find("\"USRDIR/EBOOT.BIN\"").unwrap(),
         "[files] keys are sorted"
+    );
+    // Directory entries carry no bytes and are not recorded, so the
+    // record stays a hash of the installed files only.
+    let record = mk();
+    assert_eq!(record.files.len(), 2, "only the two file entries recorded");
+    assert!(
+        !record.files.contains_key("USRDIR"),
+        "the staged directory entry is not a recorded file"
     );
 }

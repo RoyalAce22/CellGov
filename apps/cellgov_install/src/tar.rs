@@ -95,9 +95,7 @@ pub enum TarParseError {
     },
 }
 
-/// Summary returned by [`extract_to_disk`]. `errors` is non-empty when
-/// one or more entries failed; the caller decides whether that aborts
-/// the install or is logged and tolerated.
+/// Summary returned by [`extract_to_disk`].
 ///
 /// `written + skipped + errors.len()` equals the number of entries
 /// handed in, so no entry leaves the extractor untallied.
@@ -195,7 +193,6 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
     Ok(entries)
 }
 
-/// Reject any cleaned path containing a `ParentDir` component.
 fn is_safe_relative(clean: &str) -> bool {
     Path::new(clean)
         .components()
@@ -203,20 +200,38 @@ fn is_safe_relative(clean: &str) -> bool {
 }
 
 /// Mounts a PUP carries alongside `dev_flash`, named by their own
-/// prefix. They are siblings of `dev_flash` on the console, not
-/// content inside it, so they keep their prefix and land beside it.
+/// prefix; they are siblings of `dev_flash` on the console, so they
+/// keep their prefix and land beside it.
 ///
-/// The set is closed at two: LV2 publishes exactly `/dev_flash`,
-/// `/dev_flash2` and `/dev_flash3` as flash mount points, and
-/// `/dev_flash` is itself flash 1, so there is no `dev_flash1` for a
-/// PUP to carry. RPCS3 mirrors the same three in `Emu/System.cpp`
-/// `Emulator::Init` and `Emu/Cell/lv2/sys_fs.cpp`
+/// LV2 publishes exactly `/dev_flash`, `/dev_flash2` and
+/// `/dev_flash3` as flash mount points, and `/dev_flash` is itself
+/// flash 1, so the set is closed at two. RPCS3 mirrors the same three
+/// in `Emu/System.cpp` `Emulator::Init` and `Emu/Cell/lv2/sys_fs.cpp`
 /// `g_mp_sys_dev_flash{,2,3}`.
 pub const SIBLING_MOUNTS: [&str; 2] = ["dev_flash2/", "dev_flash3/"];
 
+/// The flash-1 mount every name without a [`SIBLING_MOUNTS`] prefix
+/// belongs to, whether or not it spells the prefix out.
+const DEV_FLASH_MOUNT: &str = "dev_flash/";
+
+/// Whether `clean` addresses `mount` itself rather than a file under
+/// it -- `dev_flash2`, `dev_flash2/`, `dev_flash2//` and so on.
+///
+/// A tar entry naming a mount point addresses the mount directory:
+/// RPCS3 resolves the name through the mount table and then fails the
+/// write against the directory that is already there
+/// (`Loader/TAR.cpp` `tar_object::extract`, mounts registered in
+/// `Emu/System.cpp` `Emulator::Init`).
+fn addresses_mount_root(clean: &str, mount: &str) -> bool {
+    let bare = mount.trim_end_matches('/');
+    clean == bare
+        || clean
+            .strip_prefix(mount)
+            .is_some_and(|rest| rest.trim_start_matches('/').is_empty())
+}
+
 /// VFS-root-relative destination for one archive entry name, or
-/// `None` when the name resolves to no file (empty, or a bare mount
-/// root).
+/// `None` when the name resolves to no file (empty, or a mount root).
 ///
 /// A leading `/` and the `000/` packaging artefact are stripped; each
 /// [`SIBLING_MOUNTS`] prefix is kept, and everything else is dev_flash
@@ -234,6 +249,7 @@ pub const SIBLING_MOUNTS: [&str; 2] = ["dev_flash2/", "dev_flash3/"];
 /// assert_eq!(route_entry_path("000/vsh/module/a.self").as_deref(), Some("dev_flash/vsh/module/a.self"));
 /// assert_eq!(route_entry_path("dev_flash2/etc/x.sys").as_deref(), Some("dev_flash2/etc/x.sys"));
 /// assert_eq!(route_entry_path("dev_flash2/"), None);
+/// assert_eq!(route_entry_path("dev_flash2"), None);
 /// ```
 pub fn route_entry_path(name: &str) -> Option<String> {
     let clean = name.trim_start_matches('/');
@@ -242,23 +258,25 @@ pub fn route_entry_path(name: &str) -> Option<String> {
     if clean.is_empty() {
         return None;
     }
-    if let Some(mount) = SIBLING_MOUNTS.iter().find(|m| clean.starts_with(**m)) {
-        // A bare `dev_flash2/` names the mount root itself; writing it
-        // would drop a regular file where the mount directory belongs
-        // and fail every later entry under that mount.
-        if clean[mount.len()..].trim_start_matches('/').is_empty() {
+    for mount in SIBLING_MOUNTS {
+        if addresses_mount_root(clean, mount) {
             return None;
         }
-        return Some(clean.to_string());
+        if let Some(rest) = clean.strip_prefix(mount) {
+            return Some(format!("{mount}{}", rest.trim_start_matches('/')));
+        }
+    }
+    if addresses_mount_root(clean, DEV_FLASH_MOUNT) {
+        return None;
     }
     let inner = clean
-        .strip_prefix("dev_flash/")
+        .strip_prefix(DEV_FLASH_MOUNT)
         .unwrap_or(clean)
         .trim_start_matches('/');
     if inner.is_empty() {
         return None;
     }
-    Some(format!("dev_flash/{inner}"))
+    Some(format!("{DEV_FLASH_MOUNT}{inner}"))
 }
 
 /// Write `entries` under `vfs_root`, routing each name through
@@ -269,8 +287,7 @@ pub fn route_entry_path(name: &str) -> Option<String> {
 /// Path-traversal (`..`) entries are rejected and recorded in the
 /// returned report. Per-entry I/O failures are collected rather than
 /// short-circuiting; the caller decides whether the report's `errors`
-/// vec aborts the install. An entry the router addresses to no file is
-/// counted in `skipped` rather than vanishing.
+/// vec aborts the install.
 pub fn extract_to_disk(entries: &[TarEntry], vfs_root: &Path) -> ExtractReport {
     let mut report = ExtractReport::default();
     for entry in entries {

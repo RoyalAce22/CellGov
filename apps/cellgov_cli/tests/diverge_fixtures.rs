@@ -335,8 +335,7 @@ fn cli_zoom_reports_missing_step_when_window_excluded_it() {
 
 #[test]
 fn truncated_b_reports_length_mismatch_at_truncation_point() {
-    // Side B halted mid-run; the common prefix matches. Distinguishes
-    // length-mismatch from content divergence.
+    // Side B halted mid-run; the common prefix matches.
     let mem = linear_addi_program(20);
     let a = ppu_trace_bytes(&mem, 20);
     let b = ppu_trace_bytes(&mem, 7);

@@ -26,11 +26,16 @@ const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 
 /// Decode a `sys_proc_param.primary_stacksize` declaration to bytes.
 ///
-/// The field carries either a raw byte count or a kernel sentinel;
-/// mapping per RPCS3 `sys_process.h`
-/// (`SYS_PROCESS_PRIMARY_STACK_SIZE_*`) and `PPUModule.cpp`
+/// The field carries either a kernel sentinel or a raw byte count;
+/// a raw count is clamped into the kernel's accepted window and
+/// rounded up to a page. Mapping and clamp per RPCS3 `sys_process.h`
+/// (`SYS_PROCESS_PRIMARY_STACK_SIZE_*`,
+/// `SYS_PROCESS_PARAM_STACK_SIZE_MAX`) and `PPUModule.cpp`
 /// `ppu_load_exec`.
 fn decode_primary_stacksize(declared: u32) -> u32 {
+    use cellgov_ps3_abi::process_address_space::{
+        PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_SIZE_MIN, PS3_STACK_SIZE_GRANULARITY,
+    };
     match declared {
         0x10 => 32 * 1024,
         0x20 => 64 * 1024,
@@ -39,7 +44,11 @@ fn decode_primary_stacksize(declared: u32) -> u32 {
         0x50 => 256 * 1024,
         0x60 => 512 * 1024,
         0x70 => 1024 * 1024,
-        raw => raw,
+        // Both clamp bounds are page multiples, so the round-up
+        // cannot push the result past the maximum.
+        raw => raw
+            .clamp(PS3_PRIMARY_STACK_SIZE_MIN, PS3_PRIMARY_STACK_SIZE_MAX)
+            .next_multiple_of(PS3_STACK_SIZE_GRANULARITY),
     }
 }
 
@@ -98,9 +107,7 @@ fn u32_or_die(label: &str, value: u64) -> u32 {
         .unwrap_or_else(|_| die(&format!("{label}: 0x{value:x} does not fit in u32")))
 }
 
-/// `--strict-reserved` plus `rsx_mirror = true` is unsatisfiable:
-/// strict-reserved forces RSX `ReservedStrict` (rejects all writes),
-/// rsx_mirror projects flip-status bytes into that same region.
+/// Boot configurations that cannot both hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub(super) enum StrictReservedConflict {
     #[error(
@@ -161,13 +168,10 @@ pub(super) struct PreparedBoot {
     pub rt: Runtime,
     pub elf_data: Vec<u8>,
     pub timings: StartupTimings,
-    /// Per-step budget resolved during `prepare`.
     pub step_budget: Budget,
     /// Where the served program-authority-id came from: `"self"`
     /// (SELF identification header), `"fallback"` (raw-ELF retail
-    /// fallback), or `"forced"` (the adversarial env knob). Lets the
-    /// authority witness distinguish a real per-title id from a
-    /// parse regression that fell back to the shared retail constant.
+    /// fallback), or `"forced"` (the adversarial env knob).
     pub authid_source: &'static str,
 }
 
@@ -423,8 +427,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         if b.is_exhausted() {
             // A zero budget stalls the runtime without retiring work
             // (`cellgov_core::Runtime::new` "Zero values"), so the boot
-            // would never advance. Raise it, but name the coercion so
-            // the run is not read as honouring what was asked for.
+            // would never advance.
             eprintln!("boot: budget 0 retires no work; raised to 1");
             Budget::new(1)
         } else {
@@ -454,15 +457,26 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
         None => DEFAULT_PRIMARY_PRIO,
     };
-    // `primary_stacksize == 0` reads as "use kernel default".
-    let primary_stack_size: u32 = match proc_param.map(|p| decode_primary_stacksize(p.primary_stacksize)) {
-        Some(want) if (want as usize) > PS3_PRIMARY_STACK_SIZE => die(&format!(
-            "primary_stacksize=0x{want:x} exceeds reserved stack region 0x{:x}; raise PS3_PRIMARY_STACK_SIZE",
-            PS3_PRIMARY_STACK_SIZE
-        )),
-        Some(want) if want > 0 => want,
-        _ => u32_or_die("PS3_PRIMARY_STACK_SIZE", PS3_PRIMARY_STACK_SIZE as u64),
+    // An absent param segment leaves the kernel's own starting value,
+    // the 1 MiB `SYS_PROCESS_PARAM_STACK_SIZE_MAX` (RPCS3
+    // `PPUModule.cpp` `ppu_load_exec`). A present one is decoded and
+    // clamped to that same ceiling, so the guard below cannot fire
+    // while the reservation is 1 MiB.
+    let primary_stack_size: u32 = match proc_param {
+        Some(p) => {
+            let want = decode_primary_stacksize(p.primary_stacksize);
+            if (want as usize) > PS3_PRIMARY_STACK_SIZE {
+                die(&format!(
+                    "primary_stacksize=0x{want:x} exceeds reserved stack region 0x{:x}; \
+                     raise PS3_PRIMARY_STACK_SIZE",
+                    PS3_PRIMARY_STACK_SIZE
+                ));
+            }
+            want
+        }
+        None => u32_or_die("PS3_PRIMARY_STACK_SIZE", PS3_PRIMARY_STACK_SIZE as u64),
     };
+    let primary_stack_base = primary_stack_base_for(primary_stack_size);
 
     if opts.print_banner {
         println!("title: {}", opts.title.display_name());
@@ -786,8 +800,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     //
     // With guest args, the args block sits at the stack top and r1
     // drops below it; r3..r6 carry argc/argv/envp/envc (layout in
-    // [`super::guest_args`]). Without, the entry state is the
-    // historical no-args shape.
+    // [`super::guest_args`]).
     let args_block = if opts.guest_args.is_empty() {
         None
     } else {
@@ -898,7 +911,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         cellgov_lv2::PpuThreadAttrs {
             entry: load_result.entry,
             arg: 0,
-            stack_base: u32_or_die("PS3_PRIMARY_STACK_BASE", PS3_PRIMARY_STACK_BASE),
+            stack_base: u32_or_die("primary stack base", primary_stack_base),
             stack_size: primary_stack_size,
             priority: primary_prio,
             tls_base: tls_info
@@ -936,11 +949,9 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                     Ok(ModuleStartOutcome::Skipped) => {}
                     // A guest fault leaves the module un-started and the
                     // boot alive: the runner already tore the transient
-                    // unit down (alias dropped, unit Faulted and skipped),
-                    // and one broken init out of a derived load set must
-                    // not brick every other module's boot. The other
-                    // error kinds can leave a parked unit behind, so they
-                    // stay fatal.
+                    // unit down (alias dropped, unit Faulted and
+                    // skipped). The other error kinds can leave a parked
+                    // unit behind, so they stay fatal.
                     Err(super::prx::ModuleStartError::Faulted { module, .. }) => {
                         faulted.push(module);
                     }
@@ -1059,6 +1070,29 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     }
 }
 
+/// Base address recorded for the primary thread's stack of `size`
+/// bytes.
+///
+/// LV2 starts the primary thread's SP at the top of the stack it
+/// allocated for it (RPCS3 `PPUThread.cpp` `ppu_thread::ppu_thread`
+/// seeds `gpr[1]` from `stack_addr + stack_size`). CellGov's SP is the
+/// fixed [`PS3_PRIMARY_STACK_TOP`], so the recorded base sits `size`
+/// below the top of the reservation rather than at its bottom, which
+/// keeps the running SP inside the range `sys_process_is_stack`
+/// answers for.
+///
+/// # Panics
+///
+/// `size` must not exceed [`PS3_PRIMARY_STACK_SIZE`]; the caller
+/// rejects a larger declaration before reaching here.
+fn primary_stack_base_for(size: u32) -> u64 {
+    debug_assert!(
+        size as usize <= PS3_PRIMARY_STACK_SIZE,
+        "caller rejects a stack larger than the reservation",
+    );
+    PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - size as u64
+}
+
 /// Convert a retired-instruction cap into the `rt.step()` call cap
 /// [`Runtime::new`] takes, paired with the instruction cap that
 /// actually results.
@@ -1080,11 +1114,10 @@ fn step_call_cap(max_instructions: usize, budget: usize) -> (usize, usize) {
 /// enters when its entry returns instead of calling
 /// `sys_process_exit`.
 ///
-/// Derived from `required` (the highest PT_LOAD end) rather than
-/// fixed, so no segment of the image can land on it. `load_ppu_elf`
-/// writes only `[p_vaddr, p_vaddr + p_memsz)` per PT_LOAD -- never
-/// the segment's `p_align` padding -- so "at or above the highest
-/// segment end" is the whole disjointness argument.
+/// Derived from `required` (the highest PT_LOAD end), so no segment
+/// of the image can land on it: `load_ppu_elf` writes only
+/// `[p_vaddr, p_vaddr + p_memsz)` per PT_LOAD, never the segment's
+/// `p_align` padding.
 ///
 /// The floor of `STUB_MIN_ADDR` keeps address 0 out of the answer for
 /// an image whose PT_LOADs total zero bytes. RPCS3 reaches the same
@@ -1094,9 +1127,7 @@ fn step_call_cap(max_instructions: usize, budget: usize) -> (usize, usize) {
 /// allocated fake-OPD array, and `Emu/Cell/PPUThread.cpp`
 /// `ppu_thread::fast_call` points LR at one of its slots); there
 /// `vm::alloc` returns 0 only to signal failure, so 0 is a null
-/// sentinel and never a code site. A stub at 0 would also silently
-/// convert a guest branch through a null function pointer into a
-/// clean `_sys_process_exit` (LV2 syscall 22) instead of a fault.
+/// sentinel and never a code site.
 ///
 /// The caller sizes the child region with [`spawned_child_region_size`],
 /// which always leaves headroom above the image, so the returned
@@ -1122,7 +1153,7 @@ fn child_exit_stub_addr(required: usize) -> u64 {
 /// the SP; a child that would squeeze that gap -- or whose PT_LOADs
 /// reach past the floor entirely -- gets the required-size-plus-
 /// headroom sizing the parent boot uses (64K alignment, 128K above
-/// the image) instead of a zero-depth stack or a rejected spawn.
+/// the image).
 fn spawned_child_region_size(
     required: usize,
 ) -> Result<usize, cellgov_core::ProcessSpawnLoadError> {
