@@ -70,19 +70,32 @@ pub fn build_overrides(branch_step: usize, choice: UnitId) -> Vec<Option<UnitId>
 pub struct AlternateIteration {
     /// Per-schedule outcomes.
     pub schedules: Vec<ScheduleRecord>,
-    /// True if the `max_schedules` bound was hit.
+    /// True if the `max_schedules` bound was hit, or if any replay
+    /// returned a [`StopReason`] other than [`StopReason::Stalled`].
     pub bounds_hit: bool,
-    /// True if at least one alternate produced a different memory hash.
+    /// True if at least one alternate that ran to a stall produced a
+    /// different memory hash.
+    ///
+    /// A truncated replay never sets this: its hash is a prefix of the
+    /// alternate schedule, and a prefix differs from a completed
+    /// baseline whether or not the workload is schedule-sensitive.
     pub found_divergence: bool,
     /// Alternates skipped by dependency pruning.
     pub schedules_pruned: usize,
+    /// Alternates whose replay stopped before the workload finished.
+    pub schedules_truncated: usize,
 }
 
 /// Iterate each non-pruned alternate at every branching point.
 ///
 /// `process` is called with `(branch_step, alternate_unit)` and returns
-/// that alternate's final memory hash. Iteration stops early when the
-/// `max_schedules` bound is reached.
+/// that alternate's final memory hash together with why its replay
+/// stopped. Iteration stops early when the `max_schedules` bound is
+/// reached.
+///
+/// Only a replay that reports [`StopReason::Stalled`] can contribute
+/// `found_divergence`; any other reason marks the pass inconclusive
+/// instead.
 pub fn for_each_alternate<F>(
     log: &DecisionLog,
     config: &ExplorationConfig,
@@ -90,13 +103,14 @@ pub fn for_each_alternate<F>(
     mut process: F,
 ) -> AlternateIteration
 where
-    F: FnMut(usize, UnitId) -> u64,
+    F: FnMut(usize, UnitId) -> (u64, StopReason),
 {
     let branching: Vec<_> = log.branching_points().collect();
     let mut schedules = Vec::new();
     let mut bounds_hit = false;
     let mut found_divergence = false;
     let mut schedules_pruned: usize = 0;
+    let mut schedules_truncated: usize = 0;
 
     'outer: for bp in &branching {
         let default_choice = bp.chosen;
@@ -118,8 +132,11 @@ where
                 }
             }
 
-            let hash = process(bp.step, alt);
-            if hash != baseline_hash {
+            let (hash, stop) = process(bp.step, alt);
+            if stop.is_truncated() {
+                schedules_truncated += 1;
+                bounds_hit = true;
+            } else if hash != baseline_hash {
                 found_divergence = true;
             }
             schedules.push(ScheduleRecord {
@@ -135,6 +152,7 @@ where
         bounds_hit,
         found_divergence,
         schedules_pruned,
+        schedules_truncated,
     }
 }
 

@@ -5,11 +5,11 @@
 //! `dev_flash` mount beside whatever `install-game` put in
 //! `dev_hdd0` / `dev_bdvd`.
 //!
-//! The PUP is operator-owned, so this suite is compiled only under
-//! the `firmware-corpus` feature and hard-asserts the fixture is
-//! present rather than skipping. `CELLGOV_PS3UPDAT_PUP` names it;
-//! the fallback is the conventional corpus location, which an
-//! operator populates -- nothing in the repo ships a PUP.
+//! The PUP is operator-owned and read from the dump root
+//! (`common/dumps.rs`); nothing in the repo ships one. This suite is
+//! compiled only under the `firmware-dumps` feature, which declares
+//! that fixture present: a missing one is a hard failure rather than
+//! a skip.
 
 #![allow(
     clippy::unwrap_used,
@@ -19,22 +19,10 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+#[path = "common/dumps.rs"]
+mod dumps;
 #[path = "common/scratch.rs"]
 mod scratch;
-
-/// Workspace root, resolved from this crate's manifest dir.
-///
-/// Local rather than shared: pulling in the digest module would drag
-/// its unit tests into this binary, inflating what the firmware gate
-/// appears to prove.
-fn workspace_root() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.pop();
-    p.pop();
-    p
-}
-
-const ENV_PUP: &str = "CELLGOV_PS3UPDAT_PUP";
 
 /// Mount the firmware lands in under the VFS root `--output` names.
 const DEV_FLASH: &str = "dev_flash";
@@ -43,23 +31,19 @@ const DEV_FLASH: &str = "dev_flash";
 ///
 /// # Panics
 ///
-/// If neither `CELLGOV_PS3UPDAT_PUP` nor the conventional corpus
-/// location resolves to a file. Under `firmware-corpus` the fixture
-/// is declared present, so its absence is a failure, not a skip.
+/// If the dump root holds no PUP.
 fn locate_pup() -> PathBuf {
-    let p = std::env::var(ENV_PUP)
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| workspace_root().join("dumps/firmware/PS3UPDAT.PUP"));
+    let p = dumps::ps3updat_pup();
     assert!(
         p.is_file(),
-        "firmware-corpus: no PUP at {}. Either drop a PS3UPDAT.PUP \
-         there or point {ENV_PUP} at one.",
-        p.display()
+        "firmware-dumps: no PUP at {}. Either drop a PS3UPDAT.PUP \
+         there or point {} at a dump root holding one.",
+        p.display(),
+        dumps::ENV_DUMPS_DIR,
     );
     p
 }
 
-/// Run `cellgov_install install` into `vfs_root`, returning its output.
 fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::process::Output {
     let bin = env!("CARGO_BIN_EXE_cellgov_install");
     let mut cmd = Command::new(bin);
@@ -142,8 +126,6 @@ fn install_refuses_a_non_empty_dev_flash_without_force() {
 fn a_populated_vfs_root_does_not_block_a_firmware_install() {
     let pup = locate_pup();
     let output = scratch::ScratchDir::new("fw_sibling");
-    // A game install already put a mount here. dev_flash is untouched,
-    // so the firmware install must proceed without --force.
     std::fs::create_dir_all(output.join("dev_hdd0/game/NPUA80001")).unwrap();
     std::fs::write(output.join("dev_hdd0/game/NPUA80001/x.bin"), b"game").unwrap();
 

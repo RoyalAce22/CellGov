@@ -34,7 +34,10 @@ const INLINE_BYTE_LIMIT: u64 = 16;
 /// Why the ELF-header-plus-PHDR-table parser rejected the EBOOT.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub(crate) enum ElfHeaderParseError {
-    #[error("EBOOT shorter than ELF64 header (got {len} bytes, need 64)")]
+    #[error(
+        "EBOOT shorter than ELF64 header (got {len} bytes, need {})",
+        ELF_HEADER_SIZE
+    )]
     TooShort { len: usize },
     #[error("EBOOT magic is not 0x7f 'E' 'L' 'F' (got {:02x} {:02x} {:02x} {:02x})", found[0], found[1], found[2], found[3])]
     BadMagic { found: [u8; 4] },

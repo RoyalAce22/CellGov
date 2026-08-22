@@ -64,8 +64,7 @@ fn width_stride_law() {
 
 /// For every signed/unsigned pair in the compare, min/max, average,
 /// multiply-odd/even, sum-across, and saturating add/sub families,
-/// signed XO == unsigned XO + 256. This is the precise law the
-/// audited third-party tables violate.
+/// signed XO == unsigned XO + 256.
 #[test]
 fn signedness_law() {
     let names = vx_names();
@@ -113,9 +112,8 @@ fn saturate_law() {
     assert_eq!(checked, 6, "expected exactly the 6 add/sub modulo ops");
 }
 
-/// Rc=1 compare forms are not separate variants: `1024 | base`
-/// resolves to the base op with `rc = true`, and only for the 13
-/// VXR compare bases.
+/// `1024 | base` resolves to the base op with `rc = true`, and only
+/// for the 13 VXR compare bases.
 #[test]
 fn vxr_rc_pairing_law() {
     let mut vxr = 0usize;
@@ -149,10 +147,7 @@ fn vxr_rc_pairing_law() {
 }
 
 /// Every op round-trips through `from_xo`; A-form ops additionally
-/// resolve with any FRC value riding in the upper XO bits. An
-/// X-form op whose low 5 bits aliased an A-form discriminant would
-/// fail its own round-trip, so the split is covered by the first
-/// assertion.
+/// resolve with any FRC value riding in the upper XO bits.
 #[test]
 fn fp63_form_split_law() {
     for op in Fp63Op::iter() {
@@ -199,17 +194,21 @@ fn mnemonic_serialization_anchors() {
 }
 
 /// Dev-only differential spot-check: every op-enum mnemonic must
-/// exist as a `PPUDisAsm` method in the RPCS3 source tree. RPCS3 is
-/// evidence, not authority -- a miss here gets triaged against the
-/// ISA PDFs by hand. Skips cleanly when `tools/rpcs3-src` is absent
-/// (the tree is gitignored; a clone relies on the law tests above).
+/// exist as a `PPUDisAsm` method in the RPCS3 source tree.
 #[test]
+#[cfg_attr(
+    not(feature = "rpcs3-src"),
+    ignore = "needs the gitignored tools/rpcs3-src checkout; run with --features rpcs3-src"
+)]
 fn rpcs3_ppudisasm_recognizes_every_mnemonic() {
     let path = std::path::PathBuf::from("../../tools/rpcs3-src/rpcs3/Emu/Cell/PPUDisAsm.h");
-    if !path.exists() {
-        return;
-    }
-    let src = std::fs::read_to_string(&path).expect("PPUDisAsm.h must be readable");
+    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e}\nthe rpcs3-src feature declares the reference checkout \
+             present",
+            path.display()
+        )
+    });
     let names = VxOp::iter()
         .map(|op| <&'static str>::from(op).to_uppercase())
         .chain(VaOp::iter().map(|op| <&'static str>::from(op).to_uppercase()))

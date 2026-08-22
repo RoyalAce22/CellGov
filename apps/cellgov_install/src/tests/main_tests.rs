@@ -106,8 +106,6 @@ fn check_output_dir_nonempty_with_force_is_ok() {
 
 #[test]
 fn install_exclusion_prunes_emulators_and_dollar_entries() {
-    // Emulator subtrees are pruned, with or without the dev_flash/
-    // packaging prefix.
     assert!(is_install_excluded("dev_flash/ps1emu/ps1_emu.self"));
     assert!(is_install_excluded("dev_flash/ps2emu/ps2_emu.self"));
     assert!(is_install_excluded("dev_flash/pspemu/flash0/font/x.pgf"));
@@ -148,8 +146,7 @@ fn firmware_mounts_covers_dev_flash_and_both_siblings() {
 #[test]
 fn preflight_refuses_an_occupied_sibling_mount_and_names_it() {
     let dir = scratch();
-    // dev_flash itself is empty, so a preflight scoped to dev_flash
-    // alone would let a second PUP overwrite dev_flash3 unasked.
+    // dev_flash itself is empty; only the sibling mount is occupied.
     std::fs::create_dir_all(dir.join("dev_flash3")).unwrap();
     std::fs::write(dir.join("dev_flash3/leftover.bin"), b"x").unwrap();
 
@@ -172,6 +169,49 @@ fn preflight_ignores_mounts_a_firmware_install_does_not_write() {
     std::fs::create_dir_all(dir.join("dev_bdvd")).unwrap();
     std::fs::write(dir.join("dev_bdvd/PS3_DISC.SFB"), b"d").unwrap();
     assert!(preflight_firmware_mounts(&dir, false).is_ok());
+}
+
+#[test]
+fn an_unreadable_firmware_tree_is_named_rather_than_yielding_a_short_manifest() {
+    let dir = scratch();
+    let absent = dir.join("dev_flash");
+    assert!(matches!(
+        build_firmware_manifest(b"pup", 0, &absent),
+        Err(FirmwareCliError::FirmwareTreeReadFailed { .. })
+    ));
+
+    let not_a_dir = dir.join("dev_flash.txt");
+    std::fs::write(&not_a_dir, b"x").unwrap();
+    assert!(matches!(
+        build_firmware_manifest(b"pup", 0, &not_a_dir),
+        Err(FirmwareCliError::FirmwareTreeReadFailed { .. })
+    ));
+}
+
+#[test]
+fn the_manifest_walk_collects_prx_and_sprx_from_every_depth_in_sorted_order() {
+    let dir = scratch();
+    std::fs::create_dir_all(dir.join("sys/external")).unwrap();
+    std::fs::write(dir.join("sys/external/b.sprx"), b"B").unwrap();
+    std::fs::write(dir.join("sys/external/a.PRX"), b"A").unwrap();
+    std::fs::write(dir.join("sys/external/notes.txt"), b"N").unwrap();
+    std::fs::write(dir.join("top.prx"), b"T").unwrap();
+
+    let mut paths = Vec::new();
+    collect_sprx_paths(&dir, &mut paths).expect("walk");
+    let rel: Vec<String> = paths
+        .iter()
+        .map(|p| {
+            p.strip_prefix(&*dir)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert_eq!(
+        rel,
+        vec!["sys/external/a.PRX", "sys/external/b.sprx", "top.prx"]
+    );
 }
 
 #[test]

@@ -1,11 +1,11 @@
 # Game-title SELF byte-identity reference hashes for
-# `parity_decrypted_reference.rs`. One row per title.
+# `parity_title_digests.rs`. One row per title.
 #
 # `key = "npdrm"` titles carry both unmasked and masked SHA-256
 # hashes (RPCS3-derived), plus the RAP basename under
 # `vfs/dev_hdd0/home/00000001/exdata/`. The unmasked hash
-# is checked first; the masked branch is the documented
-# non-semantic fallback per the C.2 decision tree.
+# is checked first; the masked branch is the fallback for
+# section-header layout, which is non-semantic.
 #
 # `key = "app"` titles carry only an unmasked SHA-256
 # (CellGov-derived refactor-invariance baseline, not an RPCS3

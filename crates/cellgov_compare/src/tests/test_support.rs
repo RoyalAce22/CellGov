@@ -7,7 +7,7 @@ use crate::observation::{
 use cellgov_trace::StateHash;
 use std::path::PathBuf;
 
-/// Build observation metadata tagged with the given runner name.
+/// Metadata tagged with the given runner name and no step count.
 pub fn meta(runner: &str) -> ObservationMetadata {
     ObservationMetadata {
         runner: runner.into(),
@@ -24,7 +24,6 @@ pub fn region(name: &str, data: Vec<u8>) -> NamedMemoryRegion {
     }
 }
 
-/// Build an observed event with the given kind, unit, and sequence.
 pub fn event(kind: ObservedEventKind, unit: u64, sequence: u32) -> ObservedEvent {
     ObservedEvent {
         kind,
@@ -33,11 +32,8 @@ pub fn event(kind: ObservedEventKind, unit: u64, sequence: u32) -> ObservedEvent
     }
 }
 
-/// Build an observation with the given outcome, regions, and events.
-///
-/// Metadata is tagged `"test"` and state hashes are absent. Tests that
-/// need hashes should use [`sample_observation`] or construct
-/// [`Observation`] directly.
+/// Observation whose metadata is tagged `"test"` and whose state
+/// hashes are absent.
 pub fn obs(
     outcome: ObservedOutcome,
     regions: Vec<NamedMemoryRegion>,
@@ -94,10 +90,8 @@ pub fn sample_observation() -> Observation {
 
 /// RAII guard for a per-test temp directory under `std::env::temp_dir()`.
 ///
-/// Removes the directory recursively on drop so panicking tests do not
-/// leak temp state across runs. The path carries the process id, so two
-/// concurrent `cargo test` invocations cannot resolve to the same
-/// directory and delete each other's fixtures mid-test.
+/// The directory is removed recursively on drop, so a panicking test
+/// does not leak temp state across runs.
 ///
 /// `name` is the only thing separating one live guard from another
 /// inside a single process, and the harness runs tests in parallel:
@@ -140,8 +134,6 @@ impl Drop for TempDir {
         reason = "a drop-time cleanup refusal cannot panic; stderr is the only channel left"
     )]
     fn drop(&mut self) {
-        // Unwinding out of `drop` aborts the process, so a refusal is
-        // named rather than raised.
         if let Err(e) = std::fs::remove_dir_all(&self.path) {
             eprintln!("temp dir {} not removed on drop: {e}", self.path.display());
         }

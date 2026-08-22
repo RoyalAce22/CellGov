@@ -3,10 +3,11 @@
 //! spaces, the parent observes the child's exit, and the whole run
 //! is bit-identical across two boots.
 //!
-//! Skips when the microtest ELFs are absent (they are gitignored;
-//! build with tests/micro/process_spawn_wait/build.sh in any
-//! ps3dev+PSL1GHT toolchain container -- requirements are in that
-//! script's header).
+//! Compiled only under the `microtests` feature: the ELFs are
+//! gitignored build output, so opting in declares them built and a
+//! missing fixture is a hard error rather than a skip. Build with
+//! tests/micro/process_spawn_wait/build.sh in any ps3dev+PSL1GHT
+//! toolchain container -- requirements are in that script's header.
 
 use cellgov_core::{AddressSpaceId, Runtime, SpawnedProcessImage, StepError};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
@@ -32,11 +33,19 @@ const EXIT_STUB: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
 const STACK_TOP: u64 = (MEM_SIZE as u64) - 0x1000;
 
 /// Mirrors `child_exit_stub_addr` in the run-game boot pipeline: the
-/// stub sits just above the image's highest PT_LOAD, so no segment
-/// can overwrite it, with 0 reserved as null. This harness installs
-/// its own spawn loader, so nothing cross-checks the two copies.
+/// stub sits just above the image's highest PT_LOAD, so no segment can
+/// overwrite it, with 0 reserved as null.
 fn exit_stub_addr_for(required: usize) -> u64 {
     (required as u64).next_multiple_of(16).max(16)
+}
+
+fn microtest_bytes(path: &str) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|e| {
+        panic!(
+            "{path}: {e}\nthe microtests feature declares the corpus built; \
+             build it with tests/micro/process_spawn_wait/build.sh"
+        )
+    })
 }
 
 fn exit_stub_addr(elf: &[u8]) -> u64 {
@@ -88,7 +97,7 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
     rt.set_process_spawn_loader(|elf_bytes, mem| {
         // Same call the run-game spawn loader makes: the content store
         // hands over whatever the title shipped, so an SCE-wrapped
-        // child.self decrypts here, not at staging time.
+        // child.self decrypts here rather than at staging time.
         let plaintext = cellgov_install::self_image::to_plaintext_elf(
             elf_bytes,
             cellgov_install::self_image::KeyPolicy::AppOnly,
@@ -97,9 +106,6 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
             detail: format!("child SELF: {e}"),
         })?;
         let elf_bytes: &[u8] = &plaintext;
-        // The decrypted bytes are guest-supplied here, so a header
-        // that does not parse is an ImageParse refusal, not a harness
-        // panic -- same shape as run-game's loader.
         let required = cellgov_ppu::loader::required_memory_size(elf_bytes).map_err(|e| {
             cellgov_core::ProcessSpawnLoadError::ImageParse {
                 detail: e.to_string(),
@@ -131,28 +137,24 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
 struct RunOutcome {
     hashes: Vec<(u64, u64)>,
     steps: usize,
-    /// Why the step loop ended. `NoRunnableUnit` is the only clean
-    /// finish (every unit exited); `MaxStepsExceeded` / `AllBlocked` /
-    /// `TimeOverflow` mean the run died mid-flight, and the fixed
-    /// result block would then hold stale or zeroed values.
+    /// `NoRunnableUnit` is the only clean finish (every unit exited);
+    /// any other variant means the run died mid-flight and the fixed
+    /// result block holds stale or zeroed values.
     terminal: StepError,
-    /// First fault any step reported, if one did. A faulted unit also
-    /// funnels into `NoRunnableUnit`, so the terminal error alone
-    /// cannot distinguish "finished" from "crashed".
+    /// A faulted unit also funnels into `NoRunnableUnit`, so the
+    /// terminal error alone cannot distinguish finished from crashed.
     first_fault: Option<String>,
     result: [u32; 4],
     child_magic: Option<u32>,
     child_exit_status: Option<i32>,
-    /// Named host invariant-break sites and their hit counts. The
-    /// host logs these to stderr, which a passing test swallows, so
+    /// The host logs these to stderr, which a passing test swallows, so
     /// the run has to carry them out for an assertion to see them.
     invariant_breaks: Vec<(&'static str, u64)>,
 }
 
 /// Invariant-break sites this microtest is known to trip, with their
 /// per-run counts. `process.spawn_unconsumed_args` is the guest
-/// passing sc-21 trailing register args the host does not model; the
-/// gate is an equality so both a new site and a fixed one show up.
+/// passing sc-21 trailing register args the host does not model.
 /// Entries must be in site-string order -- the run collects them from
 /// a `BTreeMap`.
 const EXPECTED_INVARIANT_BREAKS: &[(&str, u64)] = &[("process.spawn_unconsumed_args", 1)];
@@ -219,29 +221,8 @@ fn run_once(parent_elf: &[u8], child_elf: &[u8]) -> RunOutcome {
 
 #[test]
 fn parent_spawns_child_and_observes_exit_bit_identically_twice() {
-    // Same skip contract as cellgov_ppu's `skip_if_missing`: only
-    // ABSENCE skips (corpus optional locally, required under CI's env
-    // flag). A fixture that exists but fails to read is a real
-    // failure, never a skip.
-    let parent_path = std::path::Path::new(PARENT_ELF);
-    let child_path = std::path::Path::new(CHILD_ELF);
-    if !parent_path.exists() || !child_path.exists() {
-        if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
-            panic!("required microtest fixtures missing: {PARENT_ELF}, {CHILD_ELF}");
-        }
-        #[allow(
-            clippy::print_stderr,
-            reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
-        )]
-        {
-            eprintln!("[skip] process_spawn_wait ELFs not built (see build.sh)");
-        }
-        return;
-    }
-    let parent_elf =
-        std::fs::read(parent_path).expect("parent.elf exists but is unreadable; not a skip");
-    let child_elf =
-        std::fs::read(child_path).expect("child.elf exists but is unreadable; not a skip");
+    let parent_elf = microtest_bytes(PARENT_ELF);
+    let child_elf = microtest_bytes(CHILD_ELF);
 
     let a = run_once(&parent_elf, &child_elf);
 
@@ -294,30 +275,10 @@ fn parent_spawns_child_and_observes_exit_bit_identically_twice() {
     assert_eq!(a.invariant_breaks, b.invariant_breaks);
 }
 
-/// The spawn loader unwraps a genuinely SCE-wrapped child SELF
-/// (build.sh wraps child.elf via make_self) and the child still runs
-/// to its magic write and exit 42, bit-identically across two boots.
 #[test]
 fn parent_spawns_a_genuinely_sce_wrapped_child_self() {
-    let parent_path = std::path::Path::new(PARENT_ELF);
-    let child_path = std::path::Path::new(CHILD_SELF);
-    if !parent_path.exists() || !child_path.exists() {
-        if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
-            panic!("required microtest fixtures missing: {PARENT_ELF}, {CHILD_SELF}");
-        }
-        #[allow(
-            clippy::print_stderr,
-            reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
-        )]
-        {
-            eprintln!("[skip] process_spawn_wait wrapped child.self not built (see build.sh)");
-        }
-        return;
-    }
-    let parent_elf =
-        std::fs::read(parent_path).expect("parent.elf exists but is unreadable; not a skip");
-    let child_self =
-        std::fs::read(child_path).expect("child.self exists but is unreadable; not a skip");
+    let parent_elf = microtest_bytes(PARENT_ELF);
+    let child_self = microtest_bytes(CHILD_SELF);
     // Vacuity guard: a raw ELF renamed .self would exercise nothing.
     // `get` rather than a slice index so a truncated fixture reports
     // the wrong-magic message instead of an out-of-range panic.
@@ -360,30 +321,23 @@ fn parent_spawns_a_genuinely_sce_wrapped_child_self() {
     assert_eq!(a.child_exit_status, b.child_exit_status);
 }
 
-/// The two spawn paths differ only in the SELF envelope: an
-/// APP-keyed child.self and the raw child.elf it wraps must produce
-/// the same step count and hash stream.
 #[test]
 fn a_wrapped_child_and_its_plaintext_elf_run_identically() {
-    let parent_path = std::path::Path::new(PARENT_ELF);
-    let elf_path = std::path::Path::new(CHILD_ELF);
-    let self_path = std::path::Path::new(CHILD_SELF);
-    if !parent_path.exists() || !elf_path.exists() || !self_path.exists() {
-        if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
-            panic!("required microtest fixtures missing: {PARENT_ELF}, {CHILD_ELF}, {CHILD_SELF}");
-        }
-        #[allow(
-            clippy::print_stderr,
-            reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
-        )]
-        {
-            eprintln!("[skip] process_spawn_wait elf/self pair not built (see build.sh)");
-        }
-        return;
-    }
-    let parent_elf = std::fs::read(parent_path).expect("parent.elf exists but is unreadable");
-    let child_elf = std::fs::read(elf_path).expect("child.elf exists but is unreadable");
-    let child_self = std::fs::read(self_path).expect("child.self exists but is unreadable");
+    let parent_elf = microtest_bytes(PARENT_ELF);
+    let child_elf = microtest_bytes(CHILD_ELF);
+    let child_self = microtest_bytes(CHILD_SELF);
+    // Vacuity guard: the memory-hash equality below is only evidence
+    // about the unwrap if child.self is genuinely wrapped. A raw ELF
+    // renamed .self makes both sides the same run.
+    assert_eq!(
+        child_self.get(..4),
+        Some(cellgov_ps3_abi::sce::SCE_MAGIC.as_slice()),
+        "child.self must be genuinely SCE-wrapped; rebuild via build.sh's make_self step",
+    );
+    assert_ne!(
+        child_self, child_elf,
+        "child.self and child.elf must be distinct images for this comparison to mean anything",
+    );
 
     let plain = run_once(&parent_elf, &child_elf);
     let wrapped = run_once(&parent_elf, &child_self);
@@ -391,12 +345,10 @@ fn a_wrapped_child_and_its_plaintext_elf_run_identically() {
         plain.steps, wrapped.steps,
         "the SELF envelope must not change how far the run gets",
     );
-    // Memory-hash component only. `committed_memory_hash` folds every
-    // space, so this asserts the reassembled child maps byte-for-byte
-    // onto what the plaintext ELF maps -- the vacuity guard for the
-    // unwrap. The sync-state component is excluded because the LV2
-    // content store hashes the registered blob itself, and the two
-    // runs register different bytes under the same guest path.
+    // Memory-hash component only: the sync-state component is excluded
+    // because the LV2 content store hashes the registered blob itself,
+    // and the two runs register different bytes under the same guest
+    // path.
     let plain_mem: Vec<u64> = plain.hashes.iter().map(|&(_, m)| m).collect();
     let wrapped_mem: Vec<u64> = wrapped.hashes.iter().map(|&(_, m)| m).collect();
     assert_eq!(

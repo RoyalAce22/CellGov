@@ -6,10 +6,7 @@
 //!
 //! `--save-elf <path>` writes the decrypted plaintext ELF (the same
 //! bytes the parser consumes) to `path`. The output is byte-identical
-//! to RPCS3's `unself` for the same input. Useful when the firmware
-//! PRX of interest (`libsysutil_avconf_ext`, `libsre`, `libfiber`)
-//! isn't pre-staged under `vfs/dev_flash/` and you
-//! need an ELF to pass to `cellgov_cli disasm`.
+//! to RPCS3's `unself` for the same input.
 
 const NAME_COLUMN_WIDTH: usize = 49;
 
@@ -28,6 +25,24 @@ struct Args {
     filter_addr: Option<u32>,
     filter_module: Option<String>,
     save_elf: Option<std::path::PathBuf>,
+}
+
+/// The token after `flag`, refusing a flag-like token in the value
+/// slot as [`crate::cli::args::find_flag_value`] does.
+fn value_after<'a>(
+    args: &'a [String],
+    i: usize,
+    flag: &str,
+    what: &str,
+) -> Result<&'a str, String> {
+    match args.get(i + 1) {
+        None => Err(format!("{flag} requires {what}")),
+        Some(v) if v.starts_with("--") => Err(format!(
+            "{flag} expects {what} but got flag-like token {v:?}; \
+             likely a missing value upstream"
+        )),
+        Some(v) => Ok(v.as_str()),
+    }
 }
 
 /// Parse argv into [`Args`]; `Err` is a usage-format string ready
@@ -50,9 +65,7 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
                 if filter_addr.is_some() {
                     return Err("dump-prx-imports: --at specified more than once".to_string());
                 }
-                let v = args.get(i + 1).ok_or_else(|| {
-                    "--at requires a hex value (e.g. --at 0x009bff10)".to_string()
-                })?;
+                let v = value_after(args, i, "--at", "a hex value (e.g. --at 0x009bff10)")?;
                 let stripped = v
                     .strip_prefix("0x")
                     .or_else(|| v.strip_prefix("0X"))
@@ -66,32 +79,31 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
                 if filter_module.is_some() {
                     return Err("dump-prx-imports: --module specified more than once".to_string());
                 }
-                let v = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--module requires a name".to_string())?;
-                filter_module = Some(v.clone());
+                let v = value_after(args, i, "--module", "a name")?;
+                filter_module = Some(v.to_string());
                 i += 2;
             }
             "--save-elf" => {
                 if save_elf.is_some() {
                     return Err("dump-prx-imports: --save-elf specified more than once".to_string());
                 }
-                let v = args
-                    .get(i + 1)
-                    .ok_or_else(|| "--save-elf requires an output path".to_string())?;
+                let v = value_after(args, i, "--save-elf", "an output path")?;
                 save_elf = Some(std::path::PathBuf::from(v));
                 i += 2;
             }
             // Consumed so it is not rejected as unknown; re-read by
             // `resolve_ps3_vfs_root` for NPDRM RAP resolution.
             "--vfs-root" => {
-                if args.get(i + 1).is_none() {
-                    return Err("--vfs-root requires a path".to_string());
-                }
+                value_after(args, i, "--vfs-root", "a path")?;
                 i += 2;
             }
             other if other.starts_with("--") => {
                 return Err(format!("dump-prx-imports: unknown flag {other}"));
+            }
+            "" => {
+                // Same refusal the shared positional scanner makes:
+                // an empty token names no file.
+                return Err("dump-prx-imports: unexpected empty positional argument".to_string());
             }
             _ => {
                 if path.is_some() {
@@ -214,9 +226,22 @@ pub(crate) fn run(args: &[String]) {
         );
     }
 
-    // Best-effort: game EBOOTs / partial fixtures parse imports
-    // but not the full PRX; degrade by omitting module identity.
-    let sprx_parsed = cellgov_ppu::sprx::parse_prx(&elf_bytes).ok();
+    // A title executable is ET_EXEC, so `NotPrx` is the expected
+    // answer for an EBOOT and the identity block is simply absent.
+    // Every other variant is a structural anomaly in a file whose
+    // import table is about to be printed as authoritative.
+    let sprx_parsed = match cellgov_ppu::sprx::parse_prx(&elf_bytes) {
+        Ok(p) => Some(p),
+        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(_)) => None,
+        Err(e) => {
+            eprintln!(
+                "dump-prx-imports: {}: PRX module info: {e}; \
+                 module name and export namespaces omitted from the listing",
+                parsed.path.display(),
+            );
+            None
+        }
+    };
 
     let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).unwrap_or_else(|e| {
         crate::cli::exit::die(&format!("dump-prx-imports: parse_imports failed: {e}"))

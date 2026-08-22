@@ -47,8 +47,8 @@ fn into_plaintext_elf_moves_a_plaintext_image_without_reallocating() {
     let raw = plaintext_image();
     let addr = raw.as_ptr();
     let out = into_plaintext_elf(raw, KeyPolicy::AppOnly).expect("plaintext passes through");
-    // Pointer identity is the assertion: the pass-through arm exists
-    // to keep a multi-megabyte firmware module off a second copy.
+    // Pointer identity keeps a multi-megabyte firmware module off a
+    // second copy.
     assert_eq!(out.as_ptr(), addr);
 }
 
@@ -69,13 +69,50 @@ fn an_npdrm_self_under_app_only_policy_is_refused_by_name() {
 }
 
 #[test]
-fn a_non_npdrm_wrapper_under_app_only_policy_reaches_the_decrypt() {
-    let mut raw = vec![0u8; 0x20];
-    raw[0..4].copy_from_slice(b"SCE\0");
-    let err = to_plaintext_elf(&raw, KeyPolicy::AppOnly).expect_err("revision 0 has no APP key");
+fn a_wrapper_with_an_empty_supplemental_chain_under_app_only_policy_reaches_the_decrypt() {
+    // Extended header present, supplemental_hdr_size = 0: the walk
+    // completes and finds no NPDRM record, which is the only shape
+    // that clears an image for APP keys.
+    let mut raw = vec![0u8; 0x68];
+    raw[0..4].copy_from_slice(&SCE_MAGIC);
+    let err = to_plaintext_elf(&raw, KeyPolicy::AppOnly)
+        .expect_err("zeroed key material fails the envelope padding check");
     assert!(
-        !matches!(err, SceError::NpdrmUnderAppOnlyPolicy { .. }),
-        "a wrapper with no NPDRM supplemental must fall through to the decrypt, got {err:?}"
+        matches!(err, SceError::KeyEnvelopePadding),
+        "an empty chain must fall through to the APP decrypt, got {err:?}"
+    );
+}
+
+#[test]
+fn a_wrapper_too_short_for_the_extended_header_is_refused_by_name() {
+    // The chain cannot be read at all, so nothing establishes the key
+    // class.
+    let mut raw = vec![0u8; 0x20];
+    raw[0..4].copy_from_slice(&SCE_MAGIC);
+    let err = to_plaintext_elf(&raw, KeyPolicy::AppOnly).expect_err("0x20 bytes is not a SELF");
+    assert!(
+        matches!(
+            err,
+            SceError::TooSmall {
+                what: "SELF extended header",
+                ..
+            }
+        ),
+        "a truncated extended header must surface as itself, got {err:?}"
+    );
+}
+
+#[test]
+fn a_supplemental_chain_that_escapes_the_buffer_is_refused_by_name() {
+    let mut raw = vec![0u8; 0x100];
+    raw[0..4].copy_from_slice(&SCE_MAGIC);
+    raw[0x58..0x60].copy_from_slice(&0x80u64.to_be_bytes());
+    raw[0x60..0x68].copy_from_slice(&0x1000u64.to_be_bytes());
+    let err =
+        to_plaintext_elf(&raw, KeyPolicy::AppOnly).expect_err("the chain runs past the buffer");
+    assert!(
+        matches!(err, SceError::HeaderOffsetOutOfRange { .. }),
+        "an unwalkable chain must surface as itself, got {err:?}"
     );
 }
 

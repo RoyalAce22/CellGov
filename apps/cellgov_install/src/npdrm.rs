@@ -22,10 +22,9 @@ use crate::sce::{
     find_supplemental_body, parse_sce_header, SceError,
 };
 
-/// Validated NPDRM license type. Wire field is u32 BE; only 1 /
-/// 2 / 3 are accepted, with any other wire value surfacing as
-/// [`SceError::NpdrmBadLicense`] at the parse site. Discriminants
-/// match the wire encoding.
+/// Validated NPDRM license type; discriminants match the u32 BE wire
+/// encoding, and any other wire value is rejected with
+/// [`SceError::NpdrmBadLicense`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum NpdLicense {
@@ -40,9 +39,6 @@ pub enum NpdLicense {
     Free = 3,
 }
 
-// Hand-rolled so the error path lands directly on
-// `SceError::NpdrmBadLicense { got }` without a `From` wrapper for
-// `num_enum::TryFromPrimitiveError`.
 impl TryFrom<u32> for NpdLicense {
     type Error = SceError;
     fn try_from(value: u32) -> Result<Self, Self::Error> {
@@ -60,10 +56,7 @@ impl TryFrom<u32> for NpdLicense {
 pub struct NpdHeaderInfo {
     /// Title `content_id` (up to 48 bytes, NUL-trimmed).
     pub content_id: String,
-    /// Validated license type. Out-of-range wire values are
-    /// rejected by [`find_npd_header_info`] with
-    /// [`SceError::NpdrmBadLicense`]; consumers receive a value
-    /// already in the 1 / 2 / 3 set.
+    /// License type, already validated by [`find_npd_header_info`].
     pub license: NpdLicense,
 }
 
@@ -196,12 +189,6 @@ pub fn decrypt_self_to_elf_auto(
 }
 
 /// Resolve the klicensee bytes for an NPDRM SELF given its NPD header.
-///
-/// `NpdLicense::Network` and `NpdLicense::Local` both resolve from
-/// RAP material via the lookup; `None` surfaces as
-/// [`SceError::NoRapForNpdrmTitle`]. `NpdLicense::Free` falls back
-/// to `NP_KLIC_FREE` when the lookup returns `None`, but honours a
-/// supplied klic if one is returned.
 fn resolve_npdrm_klicensee(
     npd: &NpdHeaderInfo,
     klicensee_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<[u8; 16]>,
@@ -225,10 +212,7 @@ mod oracle_vectors {
     use super::*;
 
     const FLOW_RAP: [u8; 16] = include_bytes_array_flow_rap();
-    /// flOw klic witness, frozen against `FLOW_RAP` and a fixed
-    /// reverse-engineered algorithm. Localization aid: if the
-    /// end-to-end ELF test flips and this test also flips, the
-    /// regression is in `rap_to_klic`; otherwise downstream.
+    /// flOw klic witness, frozen against `FLOW_RAP`.
     const FLOW_EXPECTED_KLIC: [u8; 16] = [
         0x04, 0x43, 0xFA, 0x57, 0x9C, 0xB8, 0xEF, 0xBF, 0xE5, 0xA8, 0x98, 0xAE, 0xF2, 0x81, 0x8E,
         0xC1,
@@ -257,9 +241,8 @@ mod oracle_vectors {
         )
     }
 
-    /// Assert that `elf` is a 64-bit big-endian PS3 ELF (magic +
-    /// EI_CLASS=ELFCLASS64 + EI_DATA=ELFDATA2MSB + e_machine=EM_PPC64)
-    /// and that the declared phdr table fits within the buffer.
+    /// Assert that `elf` is a 64-bit big-endian PS3 ELF whose declared
+    /// phdr table fits within the buffer.
     fn assert_is_ps3_ppc64_elf(elf: &[u8]) {
         assert!(elf.len() >= 0x40, "ELF shorter than ehdr");
         assert_eq!(&elf[..4], b"\x7fELF", "ELF magic");

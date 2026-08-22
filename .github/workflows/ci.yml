@@ -9,10 +9,16 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
-  # Suites reading a local PS3 corpus sit behind cellgov_cli's
-  # firmware-corpus / title-corpus features and are not built here.
-  # CI still type-checks and lints them so they cannot rot.
-  CORPUS_FEATURES: cellgov_cli/title-corpus,cellgov_install/title-corpus,cellgov_install/firmware-corpus
+  # Suites reading a local corpus -- a PS3 firmware image, owned title
+  # dumps, the built micro-test ELFs, or the cloned ps3autotests tree --
+  # sit behind these features and are not built here. CI still
+  # type-checks and lints them so they cannot rot.
+  #
+  # cellgov_install/npdrm-oracle-vectors is deliberately absent: it
+  # include_bytes!()s operator-supplied files, so enabling it without
+  # them is a compile error rather than a lint. See CellGov-Dev #247.
+  CORPUS_FEATURES: >-
+    cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
 jobs:
   msrv:

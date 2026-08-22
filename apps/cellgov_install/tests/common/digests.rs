@@ -1,8 +1,8 @@
 //! Committed RPCS3 reference digests, read by the parity tests.
 //!
 //! What RPCS3 produces for a given input is captured once into
-//! `tests/fixtures/rpcs3_digests/digests.txt` and committed, so a
-//! parity test needs no RPCS3 install tree at run time.
+//! `tests/fixtures/rpcs3_digests/digests.txt`, so a parity test needs
+//! no RPCS3 install tree at run time.
 
 // Each integration test binary compiles this module separately and
 // uses a different subset of it.
@@ -19,14 +19,21 @@ pub fn workspace_root() -> PathBuf {
     p
 }
 
+/// One committed row: what RPCS3 produced for that key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reference {
+    /// Lowercase hex SHA-256 of the artifact.
+    pub sha256: String,
+    /// Byte length of the same artifact the digest covers.
+    pub bytes: u64,
+}
+
 /// Parse the committed digest table, keyed as in the file.
 ///
 /// # Panics
 ///
-/// If the table is missing or a data line is malformed. It is a
-/// committed fixture: absence means a broken checkout, not an
-/// optional corpus, so it fails rather than skips.
-pub fn table() -> BTreeMap<String, String> {
+/// If the table is missing or a data line is malformed.
+pub fn table() -> BTreeMap<String, Reference> {
     let path = workspace_root().join("tests/fixtures/rpcs3_digests/digests.txt");
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
         panic!(
@@ -41,36 +48,52 @@ pub fn table() -> BTreeMap<String, String> {
 ///
 /// # Panics
 ///
-/// If a data line is malformed, its digest column is not 64 hex
-/// characters, or a key repeats. Re-blessing pastes fresh rows into
-/// the file, so a duplicate is an operator slip that must be named
-/// rather than resolved by insertion order.
-fn parse_table(text: &str, origin: &str) -> BTreeMap<String, String> {
-    let mut out: BTreeMap<String, String> = BTreeMap::new();
+/// If a data line does not carry exactly the three documented columns,
+/// its digest column is not 64 hex characters, its byte count is not a
+/// number, or a key repeats.
+fn parse_table(text: &str, origin: &str) -> BTreeMap<String, Reference> {
+    const COLUMNS: &str = "columns are <sha256>  <key>  <bytes>";
+    let mut out: BTreeMap<String, Reference> = BTreeMap::new();
     for (n, line) in text.lines().enumerate() {
         let line = line.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
         let mut cols = line.split_whitespace();
-        let (Some(sha), Some(key)) = (cols.next(), cols.next()) else {
-            panic!("{origin}:{}: malformed digest line {line:?}", n + 1);
+        let (Some(sha), Some(key), Some(bytes)) = (cols.next(), cols.next(), cols.next()) else {
+            panic!(
+                "{origin}:{}: malformed digest line {line:?}; {COLUMNS}",
+                n + 1
+            );
         };
         assert!(
-            sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()),
-            "{origin}:{}: digest column {sha:?} is not 64 hex characters; \
-             columns are <sha256>  <key>  <bytes>",
+            cols.next().is_none(),
+            "{origin}:{}: digest line {line:?} carries a fourth column; {COLUMNS}",
             n + 1
         );
+        assert!(
+            sha.len() == 64 && sha.bytes().all(|b| b.is_ascii_hexdigit()),
+            "{origin}:{}: digest column {sha:?} is not 64 hex characters; {COLUMNS}",
+            n + 1
+        );
+        let bytes: u64 = bytes.parse().unwrap_or_else(|e| {
+            panic!(
+                "{origin}:{}: byte-count column {bytes:?} is not a number: {e}; {COLUMNS}",
+                n + 1
+            )
+        });
         // The comparison side formats lowercase hex; fold case here so
         // an uppercase row is a match rather than a phantom divergence.
         let sha = sha.to_ascii_lowercase();
-        if let Some(prev) = out.insert(key.to_string(), sha.clone()) {
+        let row = Reference { sha256: sha, bytes };
+        if let Some(prev) = out.insert(key.to_string(), row.clone()) {
             panic!(
                 "{origin}:{}: key {key:?} appears more than once \
-                 (first {prev}, then {sha}); delete the stale row rather \
+                 (first {}, then {}); delete the stale row rather \
                  than leaving insertion order to pick",
-                n + 1
+                n + 1,
+                prev.sha256,
+                row.sha256,
             );
         }
     }
@@ -104,9 +127,6 @@ const B64: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 /// # Panics
 ///
 /// If `text` parsed, or the refusal carried a non-string payload.
-/// Asserting on the message keeps a test from passing on an unrelated
-/// panic -- an index slip refuses the input too, but for the wrong
-/// reason.
 fn refusal_message(text: &str) -> String {
     let payload = std::panic::catch_unwind(|| parse_table(text, "t"))
         .err()
@@ -118,8 +138,15 @@ fn refusal_message(text: &str) -> String {
         .unwrap_or_else(|| panic!("refusal of {text:?} carried a non-string payload"))
 }
 
+/// Rows whose key no parity suite reads yet.
+///
+/// `eboot/NPUA80068` was captured by the re-bless recipe alongside the
+/// two the suites do read, but no suite installs SSHD's PKG, so its
+/// install path is not held against RPCS3.
+const CAPTURED_BUT_UNREAD: &[&str] = &["eboot/NPUA80068"];
+
 #[test]
-fn the_committed_table_parses_and_lists_every_key_the_parity_tests_read() {
+fn the_committed_table_parses_and_lists_every_key_a_parity_suite_reads() {
     let t = table();
     for stem in [
         "libaudio",
@@ -140,11 +167,20 @@ fn the_committed_table_parses_and_lists_every_key_the_parity_tests_read() {
             "digests.txt is missing decrypted_masked/{stem}"
         );
     }
-    for id in ["NPUA80001", "NPUA80068", "BCES00664"] {
+    // NPUA80001 is read by parity_pkg, BCES00664 by parity_disc.
+    for id in ["NPUA80001", "BCES00664"] {
         assert!(
             t.contains_key(&format!("eboot/{id}")),
             "digests.txt is missing eboot/{id}"
         );
+    }
+    for key in CAPTURED_BUT_UNREAD {
+        assert!(t.contains_key(*key), "digests.txt is missing {key}");
+    }
+    // The byte count is what the parity suites hold a produced length
+    // against, so a row carrying zero would assert nothing.
+    for (key, row) in &t {
+        assert!(row.bytes > 0, "digests.txt row {key} claims 0 bytes");
     }
 }
 
@@ -158,7 +194,7 @@ fn a_repeated_key_is_named_rather_than_resolved_by_insertion_order() {
 #[test]
 fn an_uppercase_digest_row_folds_to_the_lowercase_the_comparison_produces() {
     let text = format!("{}  eboot/X  4\n", A64.to_ascii_uppercase());
-    assert_eq!(parse_table(&text, "t")["eboot/X"], A64);
+    assert_eq!(parse_table(&text, "t")["eboot/X"].sha256, A64);
 }
 
 #[test]
@@ -186,14 +222,39 @@ fn a_digest_column_that_is_not_64_hex_characters_is_rejected() {
 fn crlf_rows_and_trailing_whitespace_parse_the_same_as_bare_newlines() {
     let text = format!("# c\r\n{A64}  eboot/X  4  \r\n\r\n{B64}\teboot/Y\t8\r\n");
     let t = parse_table(&text, "t");
-    assert_eq!(t["eboot/X"], A64);
-    assert_eq!(t["eboot/Y"], B64);
+    assert_eq!(t["eboot/X"].sha256, A64);
+    assert_eq!(t["eboot/X"].bytes, 4);
+    assert_eq!(t["eboot/Y"].sha256, B64);
+    assert_eq!(t["eboot/Y"].bytes, 8);
 }
 
 #[test]
 fn a_line_carrying_only_a_digest_is_rejected_rather_than_silently_dropped() {
     let msg = refusal_message(&format!("{A64}\n"));
     assert!(msg.contains("malformed digest line"), "got {msg:?}");
+}
+
+#[test]
+fn a_row_missing_the_byte_count_is_rejected_rather_than_read_as_a_digest_only_row() {
+    let msg = refusal_message(&format!("{A64}  eboot/X\n"));
+    assert!(msg.contains("malformed digest line"), "got {msg:?}");
+}
+
+#[test]
+fn a_byte_count_that_is_not_a_number_is_named() {
+    for bad in ["4a", "-1", "0x10", "4.0"] {
+        let msg = refusal_message(&format!("{A64}  eboot/X  {bad}\n"));
+        assert!(
+            msg.contains("is not a number"),
+            "byte count {bad:?}: got {msg:?}"
+        );
+    }
+}
+
+#[test]
+fn a_row_carrying_a_fourth_column_is_rejected() {
+    let msg = refusal_message(&format!("{A64}  eboot/X  4  extra\n"));
+    assert!(msg.contains("fourth column"), "got {msg:?}");
 }
 
 #[test]

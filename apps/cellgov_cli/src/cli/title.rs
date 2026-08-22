@@ -64,14 +64,14 @@ pub(crate) fn resolve_checkpoint_override(
 /// Resolve the PS3 VFS root using, in priority order: `--vfs-root
 /// <path>`, `CELLGOV_PS3_VFS_ROOT` env var, then `vfs/dev_hdd0` (the
 /// CellGov-owned VFS that `cellgov_install install-game` / `install-iso`
-/// populate). An RPCS3 install tree is not a corpus location; it is an RPCS3
-/// checkout used only to generate offline baselines. Existence is not
-/// verified here.
+/// populate). Existence is not verified here.
 pub(crate) fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
     if let Some(p) = find_flag_value(args, "--vfs-root") {
         return std::path::PathBuf::from(p);
     }
-    if let Ok(p) = std::env::var("CELLGOV_PS3_VFS_ROOT") {
+    // A root path the platform accepts but that is not UTF-8 must
+    // still reach the resolver.
+    if let Some(p) = std::env::var_os("CELLGOV_PS3_VFS_ROOT") {
         return std::path::PathBuf::from(p);
     }
     std::path::PathBuf::from("vfs/dev_hdd0")

@@ -66,25 +66,15 @@ fn place_insn(mem: &mut GuestMemory, offset: usize, raw: u32) {
     mem.apply_commit(range, &raw.to_be_bytes()).unwrap();
 }
 
-/// Returns `true` (and emits a stderr notice) if `path` is absent.
-/// Under `CELLGOV_REQUIRE_MICROTESTS` (CI), a missing fixture
-/// becomes a hard panic so a broken microtest build cannot pass
-/// silently as it would with a bare `if !exists { return; }`.
-fn skip_if_missing(path: &std::path::Path) -> bool {
-    if path.exists() {
-        return false;
-    }
-    if std::env::var("CELLGOV_REQUIRE_MICROTESTS").is_ok() {
-        panic!("required microtest fixture missing: {}", path.display());
-    }
-    #[allow(
-        clippy::print_stderr,
-        reason = "test-harness diagnostic when the optional microtest corpus is absent; CELLGOV_REQUIRE_MICROTESTS=1 promotes the skip to a panic"
-    )]
-    {
-        eprintln!("[skip] microtest fixture missing: {}", path.display());
-    }
-    true
+fn microtest_bytes<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
+    let path = path.as_ref();
+    std::fs::read(path).unwrap_or_else(|e| {
+        panic!(
+            "{}: {e}\nthe ppu-microtests feature declares the micro-test corpus \
+             built; build it with the corresponding tests/micro/*/build.sh",
+            path.display()
+        )
+    })
 }
 
 #[test]
@@ -371,14 +361,10 @@ fn plant_exit_stub(mem: &mut GuestMemory) {
     mem.apply_commit(range, &bytes).unwrap();
 }
 
-/// Run a microtest PPU ELF to halt. Returns (yield_reason, r11,
-/// consumed_cost, pc), or None when the binary has not been built.
-fn run_microtest_ppu(rel_path: &str) -> Option<(YieldReason, u64, u64, u64)> {
-    let path = std::path::Path::new(rel_path);
-    if skip_if_missing(path) {
-        return None;
-    }
-    let data = std::fs::read(path).unwrap();
+/// Run a microtest PPU ELF to halt, returning (yield_reason, r11,
+/// consumed_cost, pc).
+fn run_microtest_ppu(rel_path: &str) -> (YieldReason, u64, u64, u64) {
+    let data = microtest_bytes(rel_path);
     let mem_size = 0x1002_0000usize;
     let mut mem = GuestMemory::new(mem_size);
     plant_exit_stub(&mut mem);
@@ -391,21 +377,22 @@ fn run_microtest_ppu(rel_path: &str) -> Option<(YieldReason, u64, u64, u64)> {
     *unit.state_mut() = state;
     let budget = Budget::new(100_000);
     let (result, _effects) = run_to_completion(&mut unit, &mem, budget);
-    Some((
+    (
         result.yield_reason,
         unit.state().gpr[11],
         result.consumed_cost.raw(),
         unit.state().pc,
-    ))
+    )
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn dma_completion_runs_to_process_exit() {
-    let Some((reason, r11, consumed, _pc)) =
-        run_microtest_ppu("../../tests/micro/dma_completion/build/dma_completion.elf")
-    else {
-        return;
-    };
+    let (reason, r11, consumed, _pc) =
+        run_microtest_ppu("../../tests/micro/dma_completion/build/dma_completion.elf");
     assert_eq!(
         reason,
         YieldReason::Finished,
@@ -417,12 +404,13 @@ fn dma_completion_runs_to_process_exit() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn spu_fixed_value_runs_to_process_exit() {
-    let Some((reason, r11, consumed, _pc)) =
-        run_microtest_ppu("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf")
-    else {
-        return;
-    };
+    let (reason, r11, consumed, _pc) =
+        run_microtest_ppu("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     assert_eq!(
         reason,
         YieldReason::Finished,
@@ -434,12 +422,13 @@ fn spu_fixed_value_runs_to_process_exit() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn mailbox_roundtrip_runs_to_process_exit() {
-    let Some((reason, r11, consumed, _pc)) =
-        run_microtest_ppu("../../tests/micro/mailbox_roundtrip/build/mailbox_roundtrip.elf")
-    else {
-        return;
-    };
+    let (reason, r11, consumed, _pc) =
+        run_microtest_ppu("../../tests/micro/mailbox_roundtrip/build/mailbox_roundtrip.elf");
     assert_eq!(
         reason,
         YieldReason::Finished,
@@ -450,12 +439,13 @@ fn mailbox_roundtrip_runs_to_process_exit() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn atomic_reservation_runs_to_process_exit() {
-    let Some((reason, r11, consumed, _pc)) =
-        run_microtest_ppu("../../tests/micro/atomic_reservation/build/atomic_reservation.elf")
-    else {
-        return;
-    };
+    let (reason, r11, consumed, _pc) =
+        run_microtest_ppu("../../tests/micro/atomic_reservation/build/atomic_reservation.elf");
     assert_eq!(
         reason,
         YieldReason::Finished,
@@ -466,12 +456,13 @@ fn atomic_reservation_runs_to_process_exit() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn barrier_wakeup_runs_to_process_exit() {
-    let Some((reason, r11, consumed, _pc)) =
-        run_microtest_ppu("../../tests/micro/barrier_wakeup/build/barrier_wakeup.elf")
-    else {
-        return;
-    };
+    let (reason, r11, consumed, _pc) =
+        run_microtest_ppu("../../tests/micro/barrier_wakeup/build/barrier_wakeup.elf");
     assert_eq!(
         reason,
         YieldReason::Finished,
@@ -547,6 +538,10 @@ fn build_lv2_driven_fixture(
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn spu_fixed_value_runs_through_scenario_runner() {
     use cellgov_testkit::fixtures::ScenarioFixture;
     use cellgov_testkit::runner::ScenarioOutcome;
@@ -555,10 +550,7 @@ fn spu_fixed_value_runs_through_scenario_runner() {
 
     let elf_path =
         std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
-    if skip_if_missing(elf_path) {
-        return;
-    }
-    let elf_data = std::fs::read(elf_path).unwrap();
+    let elf_data = microtest_bytes(elf_path);
     let mem_size = 0x1002_0000usize;
     let stack_top = (mem_size as u64) - 0x1000;
 
@@ -608,12 +600,13 @@ fn spu_fixed_value_runs_through_scenario_runner() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn ls_to_shared_runs_to_process_exit() {
-    let Some((reason, r11, consumed, _pc)) =
-        run_microtest_ppu("../../tests/micro/ls_to_shared/build/ls_to_shared.elf")
-    else {
-        return;
-    };
+    let (reason, r11, consumed, _pc) =
+        run_microtest_ppu("../../tests/micro/ls_to_shared/build/ls_to_shared.elf");
     assert_eq!(
         reason,
         YieldReason::Finished,
@@ -727,15 +720,16 @@ fn drain_profile_insns_actually_drains() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     let ppu_path =
         std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     let spu_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
-    if skip_if_missing(ppu_path) || skip_if_missing(spu_path) {
-        return;
-    }
-    let ppu_elf = std::fs::read(ppu_path).unwrap();
-    let spu_elf = std::fs::read(spu_path).unwrap();
+    let ppu_elf = microtest_bytes(ppu_path);
+    let spu_elf = microtest_bytes(spu_path);
 
     let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
     let result = run_pooled_lv2_driven(fixture);
@@ -753,8 +747,7 @@ fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
 /// Compare an LV2-driven microtest against RPCS3 baselines and
 /// assert expected marker patterns appear within their named
 /// regions. `region_defs` are (name, offset_from_symbol, size);
-/// `markers` are (region_name, expected_bytes). Skips if ELFs or
-/// baselines are missing.
+/// `markers` are (region_name, expected_bytes).
 fn run_lv2_driven_baseline_check(
     microtest: &str,
     symbol: &str,
@@ -772,15 +765,8 @@ fn run_lv2_driven_baseline_check(
     let baseline_dir = std::path::PathBuf::from(format!("../../baselines/{}", microtest));
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
-    if skip_if_missing(&ppu_path)
-        || skip_if_missing(&spu_path)
-        || skip_if_missing(&interp_path)
-        || skip_if_missing(&llvm_path)
-    {
-        return;
-    }
-    let ppu_elf = std::fs::read(&ppu_path).unwrap();
-    let spu_elf = std::fs::read(&spu_path).unwrap();
+    let ppu_elf = microtest_bytes(&ppu_path);
+    let spu_elf = microtest_bytes(&spu_path);
 
     let base_addr = crate::loader::find_symbol(&ppu_elf, symbol)
         .unwrap_or_else(|| panic!("symbol '{}' not found in {}", symbol, microtest));
@@ -845,6 +831,10 @@ fn run_lv2_driven_baseline_check(
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn spu_fixed_value_lv2_baseline() {
     run_lv2_driven_baseline_check(
         "spu_fixed_value",
@@ -855,6 +845,10 @@ fn spu_fixed_value_lv2_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn dma_completion_lv2_baseline() {
     run_lv2_driven_baseline_check(
         "dma_completion",
@@ -865,6 +859,10 @@ fn dma_completion_lv2_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn ls_to_shared_lv2_baseline() {
     run_lv2_driven_baseline_check(
         "ls_to_shared",
@@ -875,6 +873,10 @@ fn ls_to_shared_lv2_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn atomic_reservation_lv2_baseline() {
     run_lv2_driven_baseline_check(
         "atomic_reservation",
@@ -885,6 +887,10 @@ fn atomic_reservation_lv2_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn mailbox_roundtrip_lv2_baseline() {
     run_lv2_driven_baseline_check(
         "mailbox_roundtrip",
@@ -895,6 +901,10 @@ fn mailbox_roundtrip_lv2_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn barrier_wakeup_lv2_baseline() {
     run_lv2_driven_baseline_check(
         "barrier_wakeup",
@@ -908,15 +918,16 @@ fn barrier_wakeup_lv2_baseline() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn lv2_driven_dma_completion_is_deterministic() {
     let ppu_path =
         std::path::Path::new("../../tests/micro/dma_completion/build/dma_completion.elf");
     let spu_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
-    if skip_if_missing(ppu_path) || skip_if_missing(spu_path) {
-        return;
-    }
-    let ppu_elf = std::fs::read(ppu_path).unwrap();
-    let spu_elf = std::fs::read(spu_path).unwrap();
+    let ppu_elf = microtest_bytes(ppu_path);
+    let spu_elf = microtest_bytes(spu_path);
 
     let base_addr = crate::loader::find_symbol(&ppu_elf, "result_buf")
         .expect("symbol 'result_buf' not found in dma_completion");
@@ -1659,6 +1670,10 @@ fn profile_mode_counts_raw_instructions() {
 /// PPU CAS loop and SPU atomic loop contend on a shared 128-byte
 /// line; counter must equal PPU_N + SPU_N under any interleaving.
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
     use cellgov_testkit::fixtures::ScenarioFixture;
@@ -1668,10 +1683,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
 
     let spu_elf_path =
         std::path::Path::new("../../tests/micro/spu_atomic_cross_spu/build/spu_main.elf");
-    if skip_if_missing(spu_elf_path) {
-        return;
-    }
-    let spu_elf = std::sync::Arc::new(std::fs::read(spu_elf_path).unwrap());
+    let spu_elf = std::sync::Arc::new(microtest_bytes(spu_elf_path));
 
     // Layout: 0x0100 PPU program, 0x1000 SPU result, 0x10000 atomic line.
     let ppu_pc: u64 = 0x100;
@@ -1773,8 +1785,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
 }
 
 /// Build a 2-slot shadow over `mem[0..8]` and assert the pair fused
-/// into a super-pair. Returns the unit with the shadow attached and
-/// initial PC at 0.
+/// into a super-pair.
 fn unit_with_shadow_for_pair(mem: &GuestMemory, raw0: u32, raw1: u32) -> PpuExecutionUnit {
     let mut shadow_bytes = [0u8; 8];
     shadow_bytes[0..4].copy_from_slice(&raw0.to_be_bytes());
@@ -1796,7 +1807,6 @@ fn unit_with_shadow_for_pair(mem: &GuestMemory, raw0: u32, raw1: u32) -> PpuExec
 
 #[test]
 fn fetch_loop_advances_past_consumed_after_super_pair() {
-    // Fetch loop must skip the Consumed placeholder; PC ends at 8.
     let mut mem = GuestMemory::new(256);
     let lwz: u32 = (32 << 26) | (3 << 21) | 128;
     let cmpwi: u32 = (11 << 26) | (3 << 16) | 5;

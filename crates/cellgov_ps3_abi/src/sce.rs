@@ -4,16 +4,13 @@
 //! Behaviour (the decrypter pipeline, the PUP unpacker) lives in
 //! `cellgov_install::{sce,pup,crypto}`; this module is data only.
 //! Per-revision SELF APP keys and the `app_key_for_revision` lookup
-//! live in `cellgov_install::crypto` alongside the const-fn
-//! constructors that build the APP_KEYS table.
+//! live in `cellgov_install::crypto`.
 
 /// SCE container magic bytes (`"SCE\0"`) at offset 0 of every
 /// signed PS3 file.
 pub const SCE_MAGIC: [u8; 4] = *b"SCE\0";
 
-/// [`SCE_MAGIC`] as the big-endian word a header parser reads at
-/// offset 0, for comparing against a `read_be_u32` result without
-/// re-spelling the bytes.
+/// [`SCE_MAGIC`] as the big-endian word a header parser reads at offset 0.
 pub const SCE_MAGIC_U32: u32 = u32::from_be_bytes(SCE_MAGIC);
 
 /// `section_kind` value for SCE sections that describe the original
@@ -82,9 +79,8 @@ pub const COREOS_AUTHORITY_ID_PREFIX: u64 = 0x0107_0000;
 
 /// `ctrl_flags1` mask for root privilege.
 ///
-/// The three capability masks overlap and their exact bit semantics
-/// are unconfirmed even in the reference implementation; they are
-/// mirrored as-is rather than reduced to disjoint bits.
+/// The three capability masks overlap, and their exact bit semantics
+/// are unconfirmed even in the reference implementation.
 pub const CTRL_FLAGS1_ROOT_MASK: u32 = 0xC000_0000;
 
 /// `ctrl_flags1` mask for debug-or-root privilege. See

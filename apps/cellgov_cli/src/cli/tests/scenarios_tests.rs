@@ -121,9 +121,14 @@ fn explore_micro_runs_for_elf_microtests() {
         let base = repo_root.join(format!("tests/micro/{name}/build"));
         let ppu_path = base.join(format!("{name}.elf"));
         let spu_path = base.join("spu_main.elf");
-        if !ppu_path.exists() || !spu_path.exists() {
-            continue;
-        }
+        // Running with --ignored declares the corpus built.
+        assert!(
+            ppu_path.is_file() && spu_path.is_file(),
+            "microtest {name} not built: expected {} and {}. Build it \
+             with tests/micro/{name}/build.sh.",
+            ppu_path.display(),
+            spu_path.display(),
+        );
         let prev = std::env::current_dir().unwrap();
         std::env::set_current_dir(repo_root).unwrap();
         let result = cellgov_explore::explore(|| build_lv2_fixture(name).build_runtime(), &config);

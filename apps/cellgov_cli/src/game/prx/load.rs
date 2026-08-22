@@ -505,11 +505,7 @@ pub(in crate::game) fn load_firmware_set_bound(
             // `load_firmware_set` keys `loaded` by the same
             // `parse_prx().module_id` this map was built with, and
             // rejects a duplicate id outright, so a miss is a broken
-            // loader invariant. An empty stem here would drop the
-            // module out of the boot-side PRX registry without a word
-            // (boot.rs skips a stemless entry as the synthetic
-            // trampoline pseudo-module), leaving firmware-side
-            // load-by-path unable to reach it.
+            // loader invariant.
             stem: id_to_stem.get(id).cloned().unwrap_or_else(|| {
                 die(&format!(
                     "prx: loaded module id 0x{:08x} ({:?}) has no recorded stem; the \

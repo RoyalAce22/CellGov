@@ -143,7 +143,6 @@ fn entry_opd_plus_contiguous_run_yields_exact_spans() {
     assert_eq!(map.functions[0].name, FunctionName::Synthetic);
     assert_eq!(map.functions[2].origin, FunctionOrigin::OpdScan);
 
-    // Lookup hits inside spans and misses outside.
     assert_eq!(map.span_at(0x10014).unwrap().start, 0x10010);
     assert_eq!(map.span_at(0x1000C).unwrap().start, 0x10000);
     assert!(map.span_at(0xFFFC).is_none());
@@ -343,4 +342,39 @@ fn unsupported_elf_type_errors() {
 #[test]
 fn truncated_input_errors() {
     assert!(matches!(build(&[0u8; 16]), Err(FuncMapError::TooSmall)));
+}
+
+#[test]
+fn a_non_elf64_image_surfaces_the_program_header_parse_error() {
+    // The module contract is that `pt_load_segments` screens EI_CLASS
+    // / EI_DATA before the raw e_type and e_entry reads, so a 32-bit
+    // image must reach the caller as an Elf(_) arm rather than being
+    // decoded with ELF64 field offsets.
+    let mut elf = two_seg_elf(DATA_BASE, vec![0u8; 0x10]);
+    elf[4] = 1; // ELFCLASS32
+    match build(&elf) {
+        Err(FuncMapError::Elf(LoadError::Not64Bit)) => {}
+        other => panic!("expected Elf(Not64Bit), got {other:?}"),
+    }
+
+    let mut elf = two_seg_elf(DATA_BASE, vec![0u8; 0x10]);
+    elf[5] = 1; // ELFDATA2LSB
+    match build(&elf) {
+        Err(FuncMapError::Elf(LoadError::NotBigEndian)) => {}
+        other => panic!("expected Elf(NotBigEndian), got {other:?}"),
+    }
+}
+
+#[test]
+fn a_prx_whose_structures_do_not_parse_surfaces_the_prx_parse_error() {
+    // phentsize below the ELF64 program-header size: the PT_LOAD walk
+    // still yields one segment, so the rejection has to come out of
+    // parse_prx and be reported as such, not swallowed into an empty
+    // map.
+    let mut data = crate::sprx::test_fixtures::make_test_prx();
+    data[54..56].copy_from_slice(&8u16.to_be_bytes());
+    match build(&data) {
+        Err(FuncMapError::Prx(PrxParseError::OutOfBounds)) => {}
+        other => panic!("expected Prx(OutOfBounds), got {other:?}"),
+    }
 }

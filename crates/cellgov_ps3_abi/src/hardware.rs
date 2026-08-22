@@ -16,11 +16,8 @@ pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 /// bytes by the CBE PPU specification.
 pub const RESERVATION_LINE_BYTES: u64 = 128;
 
-/// `dcbz` block size on the Cell PPU. The dcbz block is the
-/// implementation's data cache line; on Cell PPU this matches
-/// [`RESERVATION_LINE_BYTES`]. Both are forced equal by the CBE
-/// PPU spec but carry separate names so call sites stay
-/// semantically clear (cache-zero target vs. reservation granule).
+/// `dcbz` block size on the Cell PPU: the implementation's data cache
+/// line, which here equals [`RESERVATION_LINE_BYTES`].
 // [PPC-Book2 p:20 s:3.2 Cache Management Instructions] dcbz block is implementation-defined.
 // [CBE-Handbook p:135 s:6.1] PPE L1 DCache cache-line size is 128 bytes; coherence block matches.
 pub const DCBZ_BLOCK_BYTES: usize = 128;
@@ -42,7 +39,7 @@ pub const VR_COUNT: usize = 32;
 pub const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
 
 /// SPU local store size in bytes (256 KiB).
-// [CBEA p:79 s:6.2] Local Store is 256 KB.
+// [CBE-Handbook p:64 s:3.1.1] Local Store is a 256 KB single-ported memory.
 pub const SPU_LS_SIZE: usize = 256 * 1024;
 
 /// Number of SPU general-purpose 128-bit registers (r0..r127).

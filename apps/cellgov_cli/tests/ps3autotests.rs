@@ -2,8 +2,10 @@
 //! `cellgov_cli run-game` and compares captured TTY against the
 //! real-PS3 `.expected` file.
 //!
-//! Skips silently when the (gitignored) corpus is absent;
-//! `CELLGOV_REQUIRE_AUTOTESTS=1` promotes that to a hard failure.
+//! Compiled only under the `ps3autotests` feature: the corpus is a
+//! GPLv2 tree cloned by the developer (see tests/ps3autotests.README.md)
+//! and gitignored, so opting in declares it present and its absence is
+//! a hard error rather than a silent pass.
 //!
 //! Cross-module contract: assumes `sys_tty_write` HLE captures
 //! byte-identical output to a real PS3 TTY. A capture-side
@@ -11,7 +13,7 @@
 
 #![allow(
     clippy::print_stderr,
-    reason = "integration test harness: stderr carries diagnostic output for skipped corpora and verdict mismatches"
+    reason = "integration test harness: stderr carries the concurrency gate, step-drift warnings and verdict diagnostics"
 )]
 #![allow(
     clippy::unwrap_used,
@@ -67,8 +69,8 @@ impl Drop for Permit<'_> {
     }
 }
 
-/// Acquire a slot for spawning `cellgov_cli run-game`. Without this
-/// gate, `nproc * peak-RSS` can exceed host RAM and OOM the suite.
+/// Without this gate, `nproc * peak-RSS` can exceed host RAM and OOM
+/// the suite.
 fn subprocess_permit() -> Permit<'static> {
     static SEM: OnceLock<Semaphore> = OnceLock::new();
     let sem = SEM.get_or_init(|| {
@@ -85,12 +87,13 @@ fn subprocess_permit() -> Permit<'static> {
 
 fn compute_limit() -> usize {
     if let Ok(s) = std::env::var(OVERRIDE_ENV) {
-        return s
+        let n: usize = s
             .trim()
-            .parse::<usize>()
-            .ok()
-            .filter(|&n| n >= 1)
-            .unwrap_or(1);
+            .parse()
+            .unwrap_or_else(|e| panic!("{OVERRIDE_ENV}={s:?}: not a non-negative integer ({e})"));
+        // 0 clamps to the documented floor rather than deadlocking on a
+        // semaphore no permit can ever be taken from.
+        return n.max(1);
     }
     let mut sys = sysinfo::System::new();
     sys.refresh_memory();
@@ -105,9 +108,8 @@ fn compute_limit() -> usize {
 struct Case {
     rel_dir: &'static str,
     stem: &'static str,
-    /// Scheduler-step cap (not retired instructions; default budget
-    /// is 256 instructions/step). Tighten when the case's
-    /// `expected_steps` is far below the cap.
+    /// Scheduler-step cap; the default budget retires up to 256
+    /// instructions per step.
     max_steps: usize,
     /// Reference step count. Drift outside +/-25% emits a WARN line.
     /// `None` waives the check.
@@ -135,17 +137,23 @@ fn workspace_root() -> PathBuf {
     }
 }
 
-fn ps3autotests_root() -> Option<PathBuf> {
+fn ps3autotests_root() -> PathBuf {
     let dir = workspace_root().join(PS3AUTOTESTS_RELPATH);
-    dir.is_dir().then_some(dir)
+    assert!(
+        dir.is_dir(),
+        "ps3autotests: the feature declares the corpus present but \
+         {} is missing -- clone \
+         https://github.com/AerialX/ps3autotests.git into that path \
+         (see tests/ps3autotests.README.md)",
+        dir.display()
+    );
+    dir
 }
 
-/// # Cross-module contract
-///
-/// `cellgov_cli run-game` resolves the ELF
-/// from argv, not from the manifest's `eboot_candidates`. ps3autotests
-/// ELFs do not live in a PS3 VFS layout; the manifest carries the
-/// candidate purely so the schema validates.
+/// `cellgov_cli run-game` resolves the ELF from argv rather than from
+/// the manifest's `eboot_candidates`; ps3autotests ELFs do not live in
+/// a PS3 VFS layout, so the manifest carries the candidate purely so
+/// the schema validates.
 fn write_manifest(path: &Path, case: &Case) {
     let content = format!(
         r#"[title]
@@ -170,8 +178,8 @@ kind = "process-exit"
 
 /// `run_id` discriminates concurrent or sequential re-runs of one
 /// case so they cannot race on the scratch dir's `observation.json`.
-fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
-    let autotests = ps3autotests_root()?;
+fn run_observation(case: &Case, run_id: &str) -> Observation {
+    let autotests = ps3autotests_root();
     let test_dir = autotests.join("tests").join(case.rel_dir);
     let elf_path = test_dir.join(format!("{}.ppu.elf", case.stem));
     let expected_path = test_dir.join(format!("{}.expected", case.stem));
@@ -188,9 +196,14 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
         case.stem
     );
 
+    // The path carries the process id for the same reason every other
+    // scratch dir in the workspace does: the debug and release passes
+    // of the CI gate otherwise resolve to one directory and race on
+    // observation.json.
     let scratch = workspace_root()
         .join("target")
         .join("ps3autotests_scratch")
+        .join(std::process::id().to_string())
         .join(case.rel_dir.replace('/', "_"))
         .join(case.stem)
         .join(run_id);
@@ -215,12 +228,14 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
             .arg(case.max_steps.to_string())
             .arg("--save-observation")
             .arg(&observation_path)
-            // Synthetic test ELFs have no firmware-side imports;
-            // CELLGOV_NO_FIRMWARE_DIR suppresses the auto-default
-            // firmware-dir lookup so the boot installs unresolved
-            // trampolines instead of loading the firmware set.
             .arg(&elf_path)
             .current_dir(workspace_root())
+            // These ELFs do import firmware namespaces --
+            // `cellgov_cli dump-prx-imports` on cpu/basic lists 12
+            // sysPrxForUser NIDs. The suppression keeps the boot off
+            // the firmware set so every such slot lands on the
+            // unresolved-import trampoline, the state the `#[ignore]`
+            // reasons below describe.
             .env("CELLGOV_NO_FIRMWARE_DIR", "1")
             .output()
             .expect("spawn cellgov_cli run-game")
@@ -242,41 +257,38 @@ fn run_observation(case: &Case, run_id: &str) -> Option<Observation> {
         let json = std::fs::read_to_string(&observation_path).expect("read observation.json");
         serde_json::from_str(&json).expect("deserialize Observation")
     };
-    // A `None` here silently no-ops the drift-band check below; catch
-    // a future runner change that omits the field rather than letting
-    // step regressions slip through unnoticed.
-    debug_assert!(
+    // A `None` here silently no-ops the drift-band check below.
+    // `assert!` rather than `debug_assert!`: the CI gate runs the suite
+    // under `--release` too, where a debug assertion compiles out and
+    // the drift band goes quiet.
+    assert!(
         observation.metadata.steps.is_some(),
         "ps3autotests {}/{}: observation.metadata.steps was None",
         case.rel_dir,
         case.stem
     );
-    Some(observation)
+    observation
 }
 
 fn run_case(case: &Case) {
-    let Some(observation) = run_observation(case, "r0") else {
-        if std::env::var_os("CELLGOV_REQUIRE_AUTOTESTS").is_some() {
-            panic!(
-                "ps3autotests: CELLGOV_REQUIRE_AUTOTESTS is set but \
-                 {PS3AUTOTESTS_RELPATH}/ is missing or empty -- clone \
-                 https://github.com/AerialX/ps3autotests.git into that \
-                 path (see tests/ps3autotests.README.md)"
-            );
-        }
-        eprintln!(
-            "ps3autotests: skipping {}/{} ({PS3AUTOTESTS_RELPATH}/ not present)",
-            case.rel_dir, case.stem,
-        );
-        return;
-    };
-
-    let autotests = ps3autotests_root().expect("checked in run_observation");
+    let observation = run_observation(case, "r0");
+    let autotests = ps3autotests_root();
     let expected_path = autotests
         .join("tests")
         .join(case.rel_dir)
         .join(format!("{}.expected", case.stem));
     let expected = std::fs::read(&expected_path).expect("read .expected");
+    // Anti-vacuity floor: `report_verdict` reports MATCH on a
+    // byte-equal compare, and an empty `.expected` matches an empty
+    // capture. A truncated or line-ending-mangled checkout must be a
+    // failure, not a green run that compared nothing.
+    assert!(
+        !expected.is_empty(),
+        "ps3autotests {}/{}: {} is empty; nothing to compare against",
+        case.rel_dir,
+        case.stem,
+        expected_path.display(),
+    );
     report_verdict(case, &observation, &expected);
 }
 
@@ -483,7 +495,6 @@ fn lv2_sys_semaphore() {
     });
 }
 
-/// Determinism canary across two reruns of the same scenario.
 #[test]
 #[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
             sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
@@ -502,18 +513,8 @@ fn determinism_double_run_cpu_basic() {
         max_steps: 200_000,
         expected_steps: None,
     };
-    let Some(first) = run_observation(&case, "determinism_a") else {
-        if std::env::var_os("CELLGOV_REQUIRE_AUTOTESTS").is_some() {
-            panic!(
-                "ps3autotests: CELLGOV_REQUIRE_AUTOTESTS set but corpus \
-                 missing -- cannot run determinism check"
-            );
-        }
-        eprintln!("ps3autotests: skipping determinism_double_run_cpu_basic");
-        return;
-    };
-    let second =
-        run_observation(&case, "determinism_b").expect("second run must produce an observation");
+    let first = run_observation(&case, "determinism_a");
+    let second = run_observation(&case, "determinism_b");
     assert_eq!(
         first.outcome, second.outcome,
         "determinism: outcome differs between runs"

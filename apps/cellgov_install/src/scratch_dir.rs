@@ -1,6 +1,6 @@
 //! Per-process scratch directories for filesystem tests. Declared by
 //! both `lib.rs` and `main.rs` so the library and binary test suites
-//! share one implementation. Compiled only under `cfg(test)`.
+//! share one implementation.
 
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -13,9 +13,7 @@ static SCRATCH_SEQ: AtomicU32 = AtomicU32::new(0);
 /// The path carries the process id and a per-call counter, so neither
 /// overlapping `cargo test` / `cargo test --release` invocations nor
 /// two tests running on parallel harness threads resolve to the same
-/// directory. Drop runs on unwind, so a failing assertion cleans up;
-/// a drop-time removal that the OS refuses is reported on stderr,
-/// since a panic there would abort the run.
+/// directory.
 pub struct ScratchDir {
     path: PathBuf,
 }
@@ -32,9 +30,7 @@ impl Drop for ScratchDir {
     fn drop(&mut self) {
         if let Err(e) = std::fs::remove_dir_all(&self.path) {
             // Unwinding out of `drop` aborts the process, so a refusal
-            // is named rather than raised. Leftovers are harmless --
-            // the next run with this pid sweeps them -- but silence
-            // would hide an open-handle or permission problem.
+            // is reported on stderr instead of raised.
             eprintln!(
                 "scratch dir {} not removed on drop: {e}",
                 self.path.display()
@@ -58,8 +54,6 @@ pub fn scratch() -> ScratchDir {
     ));
     // A pid is reused only once the earlier process is gone, so this
     // sweeps a crashed run's leftovers without racing a live one.
-    // Anything other than "it was not there" means the fresh directory
-    // would inherit that run's files, so it is a hard failure.
     match std::fs::remove_dir_all(&path) {
         Ok(()) => {}
         Err(e) if e.kind() == ErrorKind::NotFound => {}

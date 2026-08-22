@@ -807,7 +807,6 @@ fn firmware_exec_source_carries_its_directory() {
             dir: PathBuf::from("firmware/vsh/module")
         }
     );
-    // The game-only requirements are absent, not defaulted.
     assert_eq!(m.rap_filename, None);
     assert_eq!(m.content, None);
     assert!(m.mounts.is_empty());

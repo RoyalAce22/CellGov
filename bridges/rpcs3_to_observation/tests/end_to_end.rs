@@ -25,7 +25,6 @@ fn adapter_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_rpcs3_to_observation"))
 }
 
-/// Returns the adapter's oracle-mode config hash as a "0x..." string.
 fn expected_config_hash_hex() -> String {
     let out = Command::new(adapter_bin())
         .arg("--print-expected-config-hash")
@@ -165,7 +164,7 @@ size = "0x4"
 
     let rpcs3_obs_path = work.join("rpcs3.json");
     let cfg_hash = expected_config_hash_hex();
-    Command::new(adapter_bin())
+    let out = Command::new(adapter_bin())
         .args([
             "--dump",
             dump_path.to_str().unwrap(),
@@ -178,8 +177,13 @@ size = "0x4"
             "--config-hash",
             &cfg_hash,
         ])
-        .status()
-        .unwrap();
+        .output()
+        .expect("adapter runs");
+    assert!(
+        out.status.success(),
+        "adapter exited non-zero: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
 
     let cellgov_obs = Observation {
         outcome: ObservedOutcome::Completed,

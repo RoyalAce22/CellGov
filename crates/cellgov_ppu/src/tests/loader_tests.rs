@@ -110,8 +110,8 @@ fn rejects_segment_truncated() {
 #[test]
 fn a_load_segment_with_filesz_exceeding_memsz_is_refused_not_panicked() {
     // vaddr + memsz passes the bounds check but the copy would write
-    // filesz bytes; without the explicit refusal this panicked inside
-    // apply_commit instead of returning a LoadError.
+    // filesz bytes; an unchecked copy panics inside apply_commit
+    // instead of returning a LoadError.
     let mut data = mk_elf_header(1);
     write_ph(&mut data, 0, 64 + 56, 0xF0, 0x100, 0x10);
     let mut s = PpuState::new();
@@ -128,8 +128,8 @@ fn a_load_segment_with_filesz_exceeding_memsz_is_refused_not_panicked() {
 
 #[test]
 fn a_filesz_bearing_segment_with_zero_memsz_is_refused_not_skipped() {
-    // memsz == 0 with filesz > 0 is the same malformed shape; the old
-    // zero-memsz skip absorbed it silently.
+    // memsz == 0 with filesz > 0 is the same malformed shape; a
+    // zero-memsz skip absorbs it silently.
     let mut data = mk_elf_header(1);
     write_ph(&mut data, 0, 0, 0, 0x10, 0);
     let mut s = PpuState::new();
@@ -207,13 +207,22 @@ fn skips_empty_segment() {
     assert_eq!(result.min_memory_size, 0);
 }
 
+fn microtest_bytes(path: &str) -> Vec<u8> {
+    std::fs::read(path).unwrap_or_else(|e| {
+        panic!(
+            "{path}: {e}\nthe ppu-microtests feature declares the micro-test \
+             corpus built; build it with tests/micro/spu_fixed_value/build.sh"
+        )
+    })
+}
+
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn loads_real_ppu_elf() {
-    let path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
-    if !path.exists() {
-        return; // skip if not built
-    }
-    let data = std::fs::read(path).unwrap();
+    let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     let mut s = PpuState::new();
     let mut mem = GuestMemory::new(0x10020000);
     let result = load_ppu_elf(&data, &mut mem, &mut s).unwrap();
@@ -230,12 +239,12 @@ fn loads_real_ppu_elf() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn find_symbol_locates_result_in_ppu_elf() {
-    let path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
+    let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     let addr = find_symbol(&data, "result");
     assert!(addr.is_some(), "symbol 'result' not found in ELF");
     // `result` is declared with __attribute__((aligned(128))).
@@ -243,12 +252,12 @@ fn find_symbol_locates_result_in_ppu_elf() {
 }
 
 #[test]
+#[cfg_attr(
+    not(feature = "ppu-microtests"),
+    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+)]
 fn find_symbol_returns_none_for_missing() {
-    let path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
-    if !path.exists() {
-        return;
-    }
-    let data = std::fs::read(path).unwrap();
+    let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     assert!(find_symbol(&data, "nonexistent_symbol_xyz").is_none());
 }
 
@@ -559,7 +568,7 @@ fn load_ppu_elf_leaves_sys_proc_param_range_none_without_struct() {
 
 /// Build an ELF with one PT_LOAD covering `[pt_off, pt_off+pt_sz)`
 /// at guest `pt_vaddr`, plus a writeable byte buffer the caller
-/// can plant table-header bytes into. Returns the assembled file.
+/// can plant table-header bytes into.
 fn mk_elf_with_pt_load(pt_off: usize, pt_sz: usize, pt_vaddr: u64) -> Vec<u8> {
     let mut data = vec![0u8; pt_off + pt_sz + 16];
     data[0..4].copy_from_slice(&ELF_MAGIC);

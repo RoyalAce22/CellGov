@@ -10,7 +10,8 @@
 //! `(namespace, nid)` instead of `nid` alone, would every export in the
 //! full install resolve to exactly one address?
 //!
-//! Walks `*.sprx` under `<firmware-dir>` and its `../internal` sibling,
+//! Walks `*.sprx` under `vfs/dev_flash/sys/external` and its
+//! `internal` sibling,
 //! decrypts and parses each, replays the loader's first-wins namespace
 //! shadowing, and then counts collisions under both keys. The
 //! shadowing replay mirrors `prx_loader::body::load_firmware_set`; if
@@ -20,20 +21,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-fn workspace_root() -> PathBuf {
-    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    loop {
-        if std::fs::read_to_string(p.join("Cargo.toml")).is_ok_and(|t| t.contains("[workspace]")) {
-            return p;
-        }
-        if !p.pop() {
-            panic!(
-                "workspace root not found above {}",
-                env!("CARGO_MANIFEST_DIR")
-            );
-        }
-    }
-}
+#[path = "common/corpus.rs"]
+mod corpus;
 
 fn filename_is_safe(name: &str) -> bool {
     !name.is_empty()
@@ -42,8 +31,10 @@ fn filename_is_safe(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'.' | b'-'))
 }
 
-/// Panics on an unreadable directory or entry: an io failure here
-/// would otherwise shrink the census silently and skew the verdict.
+/// # Panics
+///
+/// On an unreadable directory or entry: an io failure would otherwise
+/// shrink the census silently and skew the verdict.
 fn sprx_paths_in(dir: &PathBuf) -> Vec<PathBuf> {
     let entries =
         std::fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()));
@@ -84,15 +75,7 @@ struct Module {
 #[test]
 #[ignore = "regeneration: run with --ignored regenerate_firmware_export_conflict_census"]
 fn regenerate_firmware_export_conflict_census() {
-    let external = match std::env::var("CELLGOV_FIRMWARE_DIR") {
-        Ok(s) => PathBuf::from(s),
-        Err(_) => workspace_root().join("vfs/dev_flash/sys/external"),
-    };
-    assert!(
-        external.is_dir(),
-        "firmware dir {} not found; run `cellgov_install install` first or set CELLGOV_FIRMWARE_DIR",
-        external.display()
-    );
+    let external = corpus::firmware_external_dir();
     let internal = external
         .parent()
         .expect("firmware dir always has a parent")
@@ -193,10 +176,8 @@ fn regenerate_firmware_export_conflict_census() {
     // different modules lands at two different OPDs, because each
     // module loads at its own base -- that is ConflictingExport.
     let mut by_nid: BTreeMap<u32, Exporters> = BTreeMap::new();
-    // The same, ignoring shadowing. The delta between the two is the
-    // set of conflicts shadowing already resolves, which is where a
-    // conflict observed by hand can go missing from the post-shadow
-    // tables.
+    // The same, ignoring shadowing; the delta is the set of conflicts
+    // shadowing already resolves.
     let mut by_nid_preshadow: BTreeMap<u32, Exporters> = BTreeMap::new();
     // Key B: (namespace, nid). A collision here is a nid exported
     // twice under one namespace name, which the re-key cannot fix.
@@ -262,8 +243,7 @@ fn regenerate_firmware_export_conflict_census() {
         .collect();
 
     // Post-shadow, each namespace has exactly one provider, so a
-    // same-namespace cross-module conflict cannot exist by
-    // construction. Assert it rather than assume it -- if shadowing
+    // same-namespace cross-module conflict cannot exist; if shadowing
     // ever stops being first-wins, this is where it shows up.
     let same_namespace_conflicts: Vec<(u32, &Exporters)> = cross_module_nid_conflicts
         .iter()
@@ -301,7 +281,7 @@ fn regenerate_firmware_export_conflict_census() {
     writeln!(out).expect("write to String");
     writeln!(
         out,
-        "Source: every `*.sprx` under the firmware directory (default `vfs/dev_flash/sys/external`, overridable via `CELLGOV_FIRMWARE_DIR`) and its `internal` sibling. Each module is SCE-decrypted and parsed, then the loader's first-wins namespace shadowing is replayed so the counts describe what `FirmwareExportTable::build` would actually see."
+        "Source: every `*.sprx` under the firmware directory (`vfs/dev_flash/sys/external`) and its `internal` sibling. Each module is SCE-decrypted and parsed, then the loader's first-wins namespace shadowing is replayed so the counts describe what `FirmwareExportTable::build` would actually see."
     )
     .expect("write to String");
     writeln!(out).expect("write to String");
@@ -483,8 +463,22 @@ fn regenerate_firmware_export_conflict_census() {
         writeln!(out).expect("write to String");
     }
 
-    let dst = workspace_root().join("docs/dev/audits/firmware_export_conflict_census.md");
-    std::fs::create_dir_all(dst.parent().expect("audits path always has a parent"))
-        .expect("create audits dir");
+    let dst = corpus::workspace_root().join("docs/dev/audits/firmware_export_conflict_census.md");
+    // docs/dev/ is gitignored; create it so fs::write does not ENOENT.
+    std::fs::create_dir_all(dst.parent().expect("output path always has a parent"))
+        .expect("create output dir");
     std::fs::write(&dst, out).expect("write census doc");
+
+    // Anti-vacuity floor: the verdict above is computed from empty
+    // tables when every candidate was skipped, and "World 0 -- no
+    // cross-module NID conflicts at all" is exactly what a corpus that
+    // parsed nothing produces.
+    assert!(
+        modules.len() >= 100,
+        "parsed {} of {} candidates ({} skipped); a full retail install carries 100+ \
+         and the verdict would otherwise be drawn from empty tables",
+        modules.len(),
+        candidates.len(),
+        skipped.len(),
+    );
 }

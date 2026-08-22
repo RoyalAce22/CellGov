@@ -138,7 +138,6 @@ fn route_strips_leading_slashes_and_the_packaging_prefix() {
         route_entry_path("//dev_flash//sys/external/b.sprx").as_deref(),
         Some("dev_flash/sys/external/b.sprx")
     );
-    // A `000/`-packaged sibling-mount entry stays a sibling.
     assert_eq!(
         route_entry_path("000/dev_flash2/etc/x.sys").as_deref(),
         Some("dev_flash2/etc/x.sys")
@@ -169,14 +168,37 @@ fn route_returns_none_for_a_name_that_addresses_no_file() {
 }
 
 #[test]
+fn a_mount_root_addresses_no_file_with_or_without_its_trailing_slash() {
+    // `dev_flash2/` and `dev_flash2` name the same thing -- the mount
+    // directory.
+    for name in [
+        "dev_flash",
+        "dev_flash2",
+        "dev_flash3",
+        "/000/dev_flash2",
+        "///dev_flash//",
+    ] {
+        assert_eq!(route_entry_path(name), None, "{name:?}");
+    }
+}
+
+#[test]
 fn sibling_mount_match_needs_a_whole_path_component() {
-    for name in ["dev_flash2foo/x", "dev_flash20/x", "dev_flash2"] {
+    for name in ["dev_flash2foo/x", "dev_flash20/x", "dev_flash2x"] {
         let routed = route_entry_path(name).expect("routes");
         assert!(
             routed.starts_with("dev_flash/"),
             "{name:?} routed to {routed:?}"
         );
     }
+}
+
+#[test]
+fn a_sibling_mount_entry_keeps_one_separator_after_its_prefix() {
+    assert_eq!(
+        route_entry_path("dev_flash2//etc//x.sys").as_deref(),
+        Some("dev_flash2/etc//x.sys")
+    );
 }
 
 #[test]
@@ -291,8 +313,7 @@ fn parse_minimal_tar_entry() {
 
 #[test]
 fn parse_keeps_zero_byte_regular_file() {
-    // PS3 firmware ships empty placeholder files (e.g. vsh dummy.txt);
-    // a 0-byte regular entry must survive parse with empty data.
+    // PS3 firmware ships empty placeholder files (e.g. vsh dummy.txt).
     let header = ustar_header("empty.txt", "", 0, b'0');
     let entries = parse(&header).expect("parse");
     assert_eq!(entries.len(), 1);

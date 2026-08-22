@@ -113,8 +113,11 @@ pub fn scan_words(words: impl IntoIterator<Item = u32>) -> PrescanReport {
 /// words. Trailing bytes that don't form a full word are ignored.
 pub fn scan_be_bytes(bytes: &[u8]) -> PrescanReport {
     let words = bytes
-        .chunks_exact(4)
-        .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .copied()
+        .map(u32::from_be_bytes);
     scan_words(words)
 }
 

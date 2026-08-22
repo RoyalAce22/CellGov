@@ -9,9 +9,7 @@ use cellgov_ps3_abi::sce::PKG_AES_KEY;
 const SFO_FMT_STRING: u16 = 0x0204;
 
 /// Build a minimal PARAM.SFO holding the given string entries (the
-/// keys the installer reads). Layout matches the real format: `\0PSF`
-/// magic, version 0x101, a 16-byte index per entry, a 4-byte-aligned
-/// key table, then the data table.
+/// keys the installer reads), laid out as the real format.
 pub fn build_param_sfo(entries: &[(&str, &str)]) -> Vec<u8> {
     let header_len = 0x14usize;
     let index_len = 0x10usize;
@@ -158,8 +156,7 @@ pub fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[PkgItem]) -> Vec<u8> 
 /// `content_id`, enough for `find_npd_header_info` to classify it.
 ///
 /// The bytes are not a real encryptable SELF (revision 0 has no key),
-/// so a decrypt attempt fails -- which is exactly what the install
-/// decrypt-proof gate observes when fed a synthetic EBOOT.
+/// so any decrypt attempt fails.
 pub fn build_npdrm_eboot_header(license: u32, content_id: &str) -> Vec<u8> {
     const SUPP_OFF: usize = 0x80;
     const BODY_LEN: usize = 0x80;

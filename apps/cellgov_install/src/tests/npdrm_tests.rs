@@ -11,6 +11,14 @@ fn rap_to_klic_is_pure() {
     assert_eq!(a, b);
 }
 
+#[test]
+fn rap_to_klic_is_not_a_constant_or_the_identity() {
+    let a = rap_to_klic(&[0x42u8; 16]);
+    let b = rap_to_klic(&[0x43u8; 16]);
+    assert_ne!(a, b, "distinct RAPs derive distinct klics");
+    assert_ne!(a, [0x42u8; 16], "the RAP is transformed, not echoed");
+}
+
 fn npd(license: NpdLicense, content_id: &str) -> NpdHeaderInfo {
     NpdHeaderInfo {
         license,
@@ -82,9 +90,6 @@ fn synthetic_sce_header_with_revision_flags(revision_flags: u16) -> Vec<u8> {
 
 #[test]
 fn the_app_decrypt_path_rejects_a_debug_self_by_name() {
-    // The APP path skips the key peel for a debug SELF exactly as the
-    // NPDRM path does, so without its own guard it would feed still
-    // encrypted bytes forward and refuse under an unrelated name.
     let data = synthetic_sce_header_with_revision_flags(0x8000);
     let err = crate::sce::decrypt_self_to_elf(&data).unwrap_err();
     assert!(matches!(

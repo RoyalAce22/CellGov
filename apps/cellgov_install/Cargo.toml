@@ -36,27 +36,47 @@ thiserror = "2"
 # unconditional.
 npdrm-oracle-vectors = []
 
-# Suites that need an operator-owned title dump (a retail PKG or a
-# ~2GB decrypted disc image). Off by default so a fresh checkout
-# neither builds nor silently skips them; on, they hard-assert the
-# dump is present. CI type-checks and lints them so they cannot
-# bitrot.
+# Suites that install a title from an operator-owned raw dump: a
+# retail PKG plus its RAP, or a ~2GB decrypted disc image, read from
+# the dump root. Distinct from title-corpus: owning the installed
+# result under vfs/ does not mean the raw dump was kept, and these
+# suites install from scratch.
+title-dumps = []
+
+# Suites that read titles already installed under vfs/. Off by default
+# so a fresh checkout neither builds nor silently skips them; on, they
+# hard-assert. CI type-checks and lints them so they cannot bitrot.
 title-corpus = []
 
-# Suite that needs an operator-owned PS3UPDAT.PUP. Same contract as
-# title-corpus: off means not built, on means hard-assert.
+# Suites that read firmware already installed under vfs/dev_flash.
+# Same contract as title-corpus: off means not built, on means
+# hard-assert.
 firmware-corpus = []
+
+# Suite that installs firmware from an operator-owned PS3UPDAT.PUP in
+# the dump root. Distinct from firmware-corpus for the same reason
+# title-dumps is distinct from title-corpus: having the installed
+# result under vfs/ does not mean the update package was kept.
+firmware-dumps = []
 
 [[test]]
 name = "parity_pkg"
-required-features = ["title-corpus"]
+required-features = ["title-dumps"]
 
 [[test]]
 name = "parity_disc"
+required-features = ["title-dumps"]
+
+[[test]]
+name = "parity_title_digests"
 required-features = ["title-corpus"]
 
 [[test]]
 name = "firmware_pipeline_end_to_end"
+required-features = ["firmware-dumps"]
+
+[[test]]
+name = "parity_firmware_decrypt"
 required-features = ["firmware-corpus"]
 
 [lints]

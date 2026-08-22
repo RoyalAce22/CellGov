@@ -26,17 +26,13 @@ pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, SceError> {
 
 /// Decrypt a SELF container and reconstruct a plaintext ELF64 image.
 ///
-/// The returned ELF has section-header offsets zeroed and per-segment
-/// signatures stripped; it must not be re-signed or handed to anything
-/// that verifies signatures.
+/// The returned ELF carries none of the SELF's signature material; it
+/// must not be handed to anything that verifies signatures.
 pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
-    // High bit of revision_flags marks an unencrypted debug SELF.
+    // High bit of revision_flags marks an unencrypted debug SELF;
     // `decrypt_envelope` skips both the key peel and the padding check
-    // for one, so without this guard the still-encrypted envelope bytes
-    // would be used as key material and the refusal would surface as an
-    // unrelated truncation error further down. The NPDRM entry point
-    // refuses the same shape.
+    // for one. The NPDRM entry point refuses the same shape.
     if hdr.revision_flags & 0x8000 != 0 {
         return Err(SceError::DebugSelfUnsupported {
             revision_flags: hdr.revision_flags,
@@ -89,11 +85,8 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
 /// ERK/RIV and return each section descriptor paired with its decrypted
 /// (and zlib-decompressed where applicable) payload.
 ///
-/// APP-keyed path: extracts the [`super::MetadataKeyEnvelope`] via
-/// AES-256-CBC against ERK/RIV, then hands off to a shared
-/// section-decrypt helper. The NPDRM path produces the envelope
-/// differently (see [`crate::npdrm`]) but consumes the same
-/// downstream helper.
+/// APP-keyed path; the NPDRM path produces its envelope through
+/// [`crate::npdrm`].
 pub fn decrypt_sce_sections(
     data: &[u8],
     erk: &[u8; 0x20],
@@ -147,7 +140,6 @@ pub(crate) fn decrypt_envelope(
 
     let is_debug = (hdr.revision_flags & 0x8000) != 0;
     if !is_debug {
-        // NPDRM peel runs first when present, then the APP peel.
         if let Some(layer_key) = npdrm_layer_key {
             type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
             let cbc_iv = [0u8; 16];
@@ -180,9 +172,7 @@ pub(crate) fn decrypt_envelope(
 }
 
 /// Decrypt the metadata directory and every encrypted section using
-/// a plaintext [`super::MetadataKeyEnvelope`]. Shared by the
-/// APP-keyed and NPDRM-keyed paths once each has produced the
-/// envelope by its own route.
+/// a plaintext [`super::MetadataKeyEnvelope`].
 ///
 /// The envelope layout is:
 ///   `[0x00..0x10] = aes_key`

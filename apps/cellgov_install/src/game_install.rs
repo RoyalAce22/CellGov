@@ -9,9 +9,8 @@
 //!
 //! - The whole pre-commit batch -- game tree, staged RAP, and the
 //!   decrypt-proof -- lives under one staging root
-//!   (`.staging-<title-id>/`). A fault anywhere before commit discards
-//!   that root whole, so a failed install leaves zero `exdata` residue.
-//! - Commit runs only after the decrypt-proof passes, as a short fixed
+//!   (`.staging-<title-id>/`); a fault before commit discards it whole.
+//! - Commit runs only after the decrypt-proof passes, as a fixed
 //!   rename sequence: the staged RAP into `exdata/` first, then the
 //!   game tree into its final directory (the commit point), then the
 //!   record last. The single residue window is between those two
@@ -33,7 +32,6 @@ use crate::pkg::{self, PkgEntryKind};
 use crate::sce;
 
 /// Install-record schema version; bumped on any breaking layout change.
-/// v2 added the optional `[rap]` table.
 pub const INSTALL_RECORD_FORMAT_VERSION: u32 = 2;
 
 /// The single modeled user profile, matching the boot path's
@@ -51,7 +49,6 @@ struct StagedRap {
     staged_path: PathBuf,
     /// `exdata/<content-id>.rap` -- the commit destination.
     final_path: PathBuf,
-    /// The record entry (filename + hash) for the install record.
     record: RapRecord,
 }
 
@@ -60,7 +57,6 @@ struct StagedRap {
 struct StagedFile {
     /// Target-relative path, `/`-separated.
     path: String,
-    /// Whether this is a directory (no bytes).
     is_dir: bool,
     /// File bytes (empty for a directory).
     data: Vec<u8>,
@@ -243,9 +239,9 @@ pub struct InstallRecord {
     pub source: SourceRecord,
     /// Title identity.
     pub title: TitleRecord,
-    /// Per-file SHA-256, keyed by game-tree-relative path. A
-    /// `BTreeMap` serialises as a single `[files]` table sorted by
-    /// path, so the byte output is a pure function of the tree.
+    /// Per-file SHA-256, keyed by game-tree-relative path; the
+    /// `BTreeMap` order makes the serialised `[files]` table a pure
+    /// function of the tree.
     pub files: BTreeMap<String, HexSha256>,
     /// The installed RAP, when the title is NPDRM with a network/local
     /// license. Absent (and omitted from the TOML) for disc, free, and
@@ -289,9 +285,7 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> Result<(), GameInstallError> {
 }
 
 /// Join a container-relative entry path under `base`, rejecting any
-/// component that could escape it. Only `Normal` components extend the
-/// path; `.` is dropped; an absolute root, drive prefix, or `..` is a
-/// hard error.
+/// component that could escape it.
 fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, GameInstallError> {
     use std::path::Component::{CurDir, Normal, ParentDir, Prefix, RootDir};
     let mut out = base.to_path_buf();
@@ -311,10 +305,7 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, GameInstallError> {
 
 /// The staging-relative path a staged entry lands at, as a
 /// `/`-separated string built from the same `Normal` components
-/// [`safe_join`] keeps. Drops `.` and collapses odd separators so the
-/// record key equals the on-disk path -- keeping the record a pure
-/// function of the installed tree, not the container's path spelling.
-/// Identity for the clean `/`-separated paths real PKGs/ISOs carry.
+/// [`safe_join`] keeps, so the record key equals the on-disk path.
 fn normalized_rel(rel: &str) -> String {
     Path::new(rel)
         .components()
@@ -330,7 +321,14 @@ fn normalized_rel(rel: &str) -> String {
 /// `[A-Za-z0-9._-]`, before it is used to build a game-directory or
 /// RAP-file path.
 fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
+    // The id comes from the package's own PARAM.SFO and is joined onto
+    // the mount root as a single path component. A leading dot makes it
+    // resolve somewhere other than a fresh sibling: `..` walks up to the
+    // mount itself, which `commit` would then `remove_dir_all`, and
+    // `.staging-*` / `.uninstalling-*` collide with in-progress residue.
+    // The boot side refuses the same shape (`ResolveEbootError::HiddenContentId`).
     if id.is_empty()
+        || id.starts_with('.')
         || !id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
@@ -344,10 +342,7 @@ fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
 
 /// Whether a license consumes a RAP. Only network/local do; free and
 /// APP-keyed (no NPD header) titles resolve their klicensee without one
-/// (free falls back to `NP_KLIC_FREE`). Match every `NpdLicense` variant
-/// explicitly: a `matches!(.. A | B)` would silently treat any new
-/// variant as "no RAP", so a future addition must make a conscious
-/// choice here.
+/// (free falls back to `NP_KLIC_FREE`).
 fn rap_consumed(license: Option<NpdLicense>) -> bool {
     match license {
         Some(NpdLicense::Network) | Some(NpdLicense::Local) => true,
@@ -357,11 +352,8 @@ fn rap_consumed(license: Option<NpdLicense>) -> bool {
 
 /// The RAP to stage for a title, or `None` for disc/free/no-RAP titles.
 ///
-/// The whole network-vs-free decision lives here, isolated from the
-/// filesystem so the gate is testable without a passing decrypt-proof:
-/// `rap_needed` is true only for a network/local license, so a RAP
-/// supplied for a free title is dropped here and never staged, committed,
-/// or recorded.
+/// A RAP supplied for a title [`rap_consumed`] rejects is dropped here
+/// and never staged, committed, or recorded.
 fn plan_staged_rap(
     rap_needed: bool,
     rap: Option<&[u8]>,
@@ -465,9 +457,7 @@ pub fn install_pkg(
         return Err(GameInstallError::TargetExists { path: final_dir });
     }
 
-    // Fail fast on the RAP contract before staging anything. Only
-    // network/local licenses consume a RAP; a RAP supplied for a free
-    // title is ignored.
+    // Fail fast on the RAP contract before staging anything.
     let license = npd.as_ref().map(|n| n.license);
     let rap_needed = rap_consumed(license);
     if rap_needed && rap.is_none() {
@@ -489,15 +479,10 @@ pub fn install_pkg(
         })
         .collect();
 
-    // Build the whole batch (tree + RAP + proof) under the staging
-    // root; any failure discards it whole, leaving no exdata residue.
+    // Build the whole batch (tree + RAP + proof) under the staging root.
     prepare_staging(&staging_root)?;
     let staged_rap = run_or_clean(&staging_root, || {
         stage_tree(&staged, &tree_staging)?;
-        // Stage the RAP under the root (network/local only).
-        // `plan_staged_rap` owns the network-vs-free decision; a RAP for
-        // a free title is dropped there, and a free title with no RAP
-        // uses the NP_KLIC_FREE fallback in the resolver below.
         let staged_rap = plan_staged_rap(rap_needed, rap, &content_id, &staging_root, &exdata);
         if let Some(sr) = &staged_rap {
             let rap_bytes = rap.expect(
@@ -666,15 +651,12 @@ fn parse_identity(sfo_bytes: &[u8]) -> Result<(String, String, String, String), 
     Ok((title_id, category, title, app_version))
 }
 
-/// Number of file (non-directory) entries in a staged tree.
 fn count_files(staged: &[StagedFile]) -> usize {
     staged.iter().filter(|f| !f.is_dir).count()
 }
 
-/// Clear and recreate a staging directory. A pre-existing staging dir
-/// is removed; its absence is fine, but any other removal error
-/// surfaces (a swallowed error could leave foreign residue that the
-/// commit rename would then carry into the live tree).
+/// Clear and recreate a staging directory, so no foreign residue
+/// survives into the commit rename.
 fn prepare_staging(staging_dir: &Path) -> Result<(), GameInstallError> {
     match std::fs::remove_dir_all(staging_dir) {
         Ok(()) => {}
@@ -684,8 +666,7 @@ fn prepare_staging(staging_dir: &Path) -> Result<(), GameInstallError> {
     std::fs::create_dir_all(staging_dir).map_err(io_err("create dir", staging_dir))
 }
 
-/// Run `f`, removing the staging directory if it fails. Used to keep a
-/// partial tree from outliving a pre-commit error.
+/// Run `f`, removing the staging directory if it fails.
 fn run_or_clean<T>(
     staging_dir: &Path,
     f: impl FnOnce() -> Result<T, GameInstallError>,
@@ -733,10 +714,8 @@ fn commit(
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
     }
 
-    // RAP first. An orphan RAP (if the tree rename then fails) is
-    // inert: it is read only when its content-id's game tree is
-    // decrypted, and a retry overwrites it with identical bytes. rename
-    // replaces an existing destination file on both platforms.
+    // RAP first; an orphan RAP is inert (see the module invariants).
+    // rename replaces an existing destination file on both platforms.
     if let Some(sr) = staged_rap {
         if let Some(parent) = sr.final_path.parent() {
             std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
@@ -775,7 +754,7 @@ fn commit(
 
 /// Build the install record from a staged tree. File hashes are over
 /// the bytes as written and keyed by path -- content-only, no mtimes
-/// or permissions. The `BTreeMap` keeps the output sorted by path.
+/// or permissions.
 fn build_record(
     kind: &str,
     source_bytes: &[u8],

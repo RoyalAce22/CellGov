@@ -159,9 +159,8 @@ pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, SceError> {
 /// The extended header at file offset 0x20 carries
 /// `program_identification_hdr_offset` (u64 BE at offset 0x28); the
 /// authority id is the first u64 of that header. Field layout per
-/// RPCS3 `unself.h` / `unself.cpp`. Both
-/// headers are plaintext -- no decryption is involved, so the id is
-/// readable from NPDRM-wrapped SELFs without RAP material.
+/// RPCS3 `unself.h` / `unself.cpp`. Both headers are plaintext, so the
+/// id is readable from NPDRM-wrapped SELFs without RAP material.
 ///
 /// # Errors
 ///
@@ -197,13 +196,10 @@ pub fn parse_program_authority_id(data: &[u8]) -> Result<u64, SceError> {
 /// (supplemental record type 1), or `Ok(None)` when the SELF carries
 /// no such record.
 ///
-/// Plaintext, like the program-authority id: no decryption and no RAP
-/// material is involved. The value is the first big-endian word of the
-/// record body.
-///
-/// A SELF with more than one type-1 record resolves to the first, which
-/// is the value the reference implementation ends up with as well (it
-/// takes the first and treats a second as an error).
+/// Plaintext, like [`parse_program_authority_id`]: no decryption and no
+/// RAP material is involved. The value is the first big-endian word of
+/// the record body, and a SELF carrying more than one type-1 record
+/// resolves to the first.
 ///
 /// # Errors
 ///

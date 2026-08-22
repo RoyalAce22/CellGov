@@ -73,9 +73,7 @@ impl DirtyPages {
 
     #[inline]
     fn clear(&mut self) {
-        for w in &mut self.bits {
-            *w = 0;
-        }
+        self.bits.fill(0);
     }
 }
 

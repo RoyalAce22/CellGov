@@ -16,18 +16,26 @@ git clone https://github.com/AerialX/ps3autotests.git tests/ps3autotests
 
 After cloning, `tests/ps3autotests/tests/cpu/basic/basic.ppu.elf` (and
 the other whitelisted ELFs in `apps/cellgov_cli/tests/ps3autotests.rs`)
-should exist. Running `cargo test -p cellgov_cli --test ps3autotests`
-will then exercise them. Without the fixture present the tests log a
-skip note and return clean, so CI without the corpus stays green.
+should exist.
 
-## Forcing the fixture to be present
+## Running the suite
 
-To make a missing corpus a hard failure (e.g. on a release-gate runner)
-set `CELLGOV_REQUIRE_AUTOTESTS` to any non-empty value:
+The suite sits behind the `ps3autotests` cargo feature, so a checkout
+without the corpus does not build it and CI stays green without
+skipping anything:
 
 ```bash
-CELLGOV_REQUIRE_AUTOTESTS=1 cargo test -p cellgov_cli --test ps3autotests
+cargo test -p cellgov_cli --features ps3autotests --test ps3autotests
 ```
+
+Enabling the feature declares the corpus present: a missing clone is a
+hard failure naming the path, never a silent pass. There is no env var
+to set.
+
+Every case is additionally `#[ignore]`d on an unrelated blocker -- the
+synthetic ELFs import `sysPrxForUser` NIDs that no HLE module binds --
+so they report as ignored until that is resolved. Each test's ignore
+reason states the condition.
 
 ## Line-ending caveat
 

@@ -4,13 +4,10 @@
 //! install` into `vfs/dev_flash/`, titles from `install-game` /
 //! `install-iso` into `vfs/dev_hdd0/` and `vfs/dev_bdvd/`, and
 //! anything RPCS3 alone can answer is captured into committed data
-//! under `tests/fixtures/`. An operator's RPCS3 installation is not a
-//! corpus location: it is gitignored, present on one machine, and
-//! shaped by whatever that operator last ran.
+//! under `tests/fixtures/`.
 //!
 //! The RPCS3 *source* checkout (`tools/rpcs3-src/`) is a different
-//! thing and stays allowed -- it is the behavioural reference that
-//! citations name, never a fixture read at run time.
+//! directory and stays allowed.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -27,6 +24,7 @@ const SOURCE_CHECKOUT_SUFFIX: &str = "-src";
 
 /// Fold a line to one spelling: ASCII-lowercase, backslash separators
 /// to forward slashes, runs of separators to one, and `/./` to `/`.
+///
 /// Without it a Windows-style, uppercase, doubled-separator, or
 /// dot-component spelling of the same tree slips past a plain
 /// substring test.
@@ -58,9 +56,7 @@ fn normalize(line: &str) -> String {
 /// same tree through one `join` -- but the character after the prefix
 /// must not be a name character, or every sibling directory that
 /// merely starts with the same letters gets flagged too. The sibling
-/// that matters is [`SOURCE_CHECKOUT_SUFFIX`]: the RPCS3 source
-/// checkout is what behavioural citations point at, and a guard that
-/// flagged it would push contributors to delete those citations.
+/// that matters is [`SOURCE_CHECKOUT_SUFFIX`].
 fn names_install_tree(line: &str, needle: &str) -> bool {
     let normalized = normalize(line);
     normalized.match_indices(needle).any(|(at, _)| {
@@ -137,9 +133,6 @@ fn matcher_leaves_the_source_checkout_alone() {
     }
 }
 
-/// The install tree is one exact directory. Flagging every sibling
-/// whose name starts with the same letters would turn a citation of
-/// the source checkout into a guard violation.
 #[test]
 fn matcher_leaves_siblings_that_merely_share_the_prefix_alone() {
     let needle = banned_prefix();
@@ -153,29 +146,47 @@ fn matcher_leaves_siblings_that_merely_share_the_prefix_alone() {
     }
 }
 
-#[test]
-fn no_source_reads_an_rpcs3_install_tree() {
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
         .expect("testkit manifest dir is two levels under the workspace root")
-        .to_path_buf();
-    let needle = banned_prefix();
+        .to_path_buf()
+}
 
+/// Every `.rs` file the guard is responsible for.
+fn scanned_rs_files(root: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     for group in ["crates", "apps", "bridges"] {
-        let group_dir = workspace_root.join(group);
-        let crate_dirs = fs::read_dir(&group_dir)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", group_dir.display()));
-        for entry in crate_dirs {
-            let dir = entry
-                .unwrap_or_else(|e| panic!("cannot read {group} entry: {e}"))
-                .path();
-            if dir.is_dir() {
-                rs_files_under(&dir, &mut files);
-            }
-        }
+        rs_files_under(&root.join(group), &mut files);
     }
+    files
+}
+
+/// The scan reaches nested `tests/` directories, so an empty result is
+/// a broken walk rather than a clean workspace.
+#[test]
+fn the_scan_set_contains_this_guard() {
+    let root = workspace_root();
+    let files = scanned_rs_files(&root);
+    let me = root
+        .join("crates")
+        .join("cellgov_testkit")
+        .join("tests")
+        .join("corpus_path_guard.rs");
+    assert!(
+        files.contains(&me),
+        "the scan did not reach {}; {} files were collected",
+        me.display(),
+        files.len()
+    );
+}
+
+#[test]
+fn no_source_reads_an_rpcs3_install_tree() {
+    let needle = banned_prefix();
+
+    let files = scanned_rs_files(&workspace_root());
     assert!(
         !files.is_empty(),
         "no .rs files found under crates/apps/bridges"
