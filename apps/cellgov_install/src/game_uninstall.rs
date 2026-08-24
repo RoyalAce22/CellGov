@@ -72,9 +72,10 @@ pub enum GameUninstallError {
         #[source]
         source: std::io::Error,
     },
-    /// Parsing the install record failed.
+    /// Loading the install record failed: bad TOML, or a schema this
+    /// build does not read.
     #[error("parse install record: {0}")]
-    RecordParse(#[from] toml::de::Error),
+    RecordParse(#[from] crate::game_install::InstallRecordParseError),
     /// The operator-supplied title-id is not usable as a single path
     /// component under the mount roots (see
     /// `game_install::content_id_is_safe`).
@@ -245,7 +246,7 @@ pub fn uninstall(
             })
         }
     };
-    let record: InstallRecord = toml::from_str(&text)?;
+    let record = InstallRecord::parse(&text)?;
 
     // Resolve targets from the recorded distribution / source kind.
     let dev_hdd0 = output_dir.join("dev_hdd0");

@@ -1,6 +1,6 @@
 //! Game-install orchestration: turn a retail PKG or disc image into a
-//! `dev_hdd0`/`dev_bdvd` tree, an installed RAP, and an
-//! `installs/<title-id>.install.toml` record.
+//! `dev_hdd0`/`dev_bdvd` tree, an installed RAP, and an install
+//! record under [`installs_dir`].
 //!
 //! The pure container work lives in [`crate::pkg`] / [`crate::iso`];
 //! this module owns the filesystem shell.
@@ -31,8 +31,48 @@ use crate::param_sfo;
 use crate::pkg::{self, PkgEntryKind};
 use crate::sce;
 
-/// Install-record schema version; bumped on any breaking layout change.
+/// Install-record schema version. A record declaring anything else is
+/// refused by [`InstallRecord::parse`] rather than read as current.
 pub const INSTALL_RECORD_FORMAT_VERSION: u32 = 2;
+
+/// Directory holding the install records for the VFS rooted at
+/// `vfs_root`, as `<title-id>.install.toml` files.
+///
+/// The records describe that root, so they live inside it: a caller
+/// that relocates the VFS carries them along instead of leaving them
+/// behind to be read against some other tree. The leading dot keeps
+/// them out of the PS3-shaped mount names beside them; mounts are
+/// registered one explicit `(prefix, host_path)` pair at a time, so
+/// nothing here reaches a guest unless a title manifest names this
+/// directory as a mount host.
+pub fn installs_dir(vfs_root: &Path) -> PathBuf {
+    vfs_root.join(".cellgov").join("installs")
+}
+
+/// Where `install-game` / `install-iso` land a title tree when no
+/// `--output-dir` is given, and where a reader looks for the matching
+/// records. Shared so the writer and the reader cannot drift onto
+/// different roots.
+pub const DEFAULT_VFS_ROOT: &str = "vfs";
+
+/// Why an install record could not be loaded.
+#[derive(Debug, thiserror::Error)]
+pub enum InstallRecordParseError {
+    /// The file is not valid TOML, or does not match the record shape.
+    #[error("install record is not valid TOML: {0}")]
+    Toml(#[from] toml::de::Error),
+    /// The record declares a schema this build does not read.
+    #[error(
+        "install record declares format_version {found}, this build reads {supported}; \
+         reinstall the title to regenerate it"
+    )]
+    UnsupportedFormatVersion {
+        /// Version the record declared.
+        found: u32,
+        /// The only version this build accepts.
+        supported: u32,
+    },
+}
 
 /// The single modeled user profile, matching the boot path's
 /// `home/00000001/exdata` RAP lookup. Shared with [`crate::game_uninstall`].
@@ -252,8 +292,8 @@ pub struct TitleRecord {
     pub distribution: String,
 }
 
-/// The `installs/<title-id>.install.toml` record: enough to verify a
-/// reinstall reproduces the same tree from the same source.
+/// A `<title-id>.install.toml` record under [`installs_dir`]: enough
+/// to verify a reinstall reproduces the same tree from the same source.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallRecord {
     /// Schema version.
@@ -271,6 +311,30 @@ pub struct InstallRecord {
     /// no-RAP titles.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub rap: Option<RapRecord>,
+}
+
+impl InstallRecord {
+    /// Parse a record, refusing one this build does not read.
+    ///
+    /// # Errors
+    ///
+    /// [`InstallRecordParseError::UnsupportedFormatVersion`] when
+    /// `format_version` is not [`INSTALL_RECORD_FORMAT_VERSION`], and
+    /// [`InstallRecordParseError::Toml`] when the text does not
+    /// deserialize. Every reader goes through here, so a stale record
+    /// is named rather than read as current -- `rap` is
+    /// `#[serde(default)]`, so an older record would otherwise load as
+    /// a title with no RAP.
+    pub fn parse(text: &str) -> Result<Self, InstallRecordParseError> {
+        let record: Self = toml::from_str(text)?;
+        if record.format_version != INSTALL_RECORD_FORMAT_VERSION {
+            return Err(InstallRecordParseError::UnsupportedFormatVersion {
+                found: record.format_version,
+                supported: INSTALL_RECORD_FORMAT_VERSION,
+            });
+        }
+        Ok(record)
+    }
 }
 
 pub(crate) fn sha256_of(bytes: &[u8]) -> HexSha256 {

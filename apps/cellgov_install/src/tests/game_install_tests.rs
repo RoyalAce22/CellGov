@@ -19,6 +19,94 @@ fn sfo_item(entries: &[(&str, &str)]) -> PkgItem {
 }
 
 #[test]
+fn install_records_resolve_inside_the_vfs_root_they_describe() {
+    for root in ["vfs", "relative/nested/vfs", "/tmp/other-vfs"] {
+        let root = Path::new(root);
+        let dir = installs_dir(root);
+        assert!(
+            dir.starts_with(root),
+            "{} escaped the root it describes",
+            dir.display()
+        );
+    }
+}
+
+#[test]
+fn two_vfs_roots_do_not_share_one_record_directory() {
+    assert_ne!(
+        installs_dir(Path::new("vfs-a")),
+        installs_dir(Path::new("vfs-b"))
+    );
+}
+
+/// The install side writes under this root and `cellgov_cli
+/// gen-manifest` reads from it; a second literal in either crate would
+/// send the reader somewhere the writer never wrote.
+#[test]
+fn the_default_vfs_root_is_the_directory_the_installers_write_into() {
+    assert_eq!(DEFAULT_VFS_ROOT, "vfs");
+    assert_eq!(
+        installs_dir(Path::new(DEFAULT_VFS_ROOT)),
+        Path::new("vfs").join(".cellgov").join("installs")
+    );
+}
+
+/// Placeholder identity: the version gate runs before a caller reads
+/// any of it, so these name no real title and no installed corpus.
+const SYNTHETIC_TITLE_ID: &str = "TEST00000";
+const SYNTHETIC_CONTENT_ID: &str = "TT0000-TEST00000_00-SYNTHETICRECORD0";
+
+fn record_toml(format_version: u32) -> String {
+    let record = InstallRecord {
+        format_version,
+        source: SourceRecord {
+            kind: "pkg".to_string(),
+            sha256: sha256_of(b"src"),
+        },
+        title: TitleRecord {
+            title_id: SYNTHETIC_TITLE_ID.to_string(),
+            content_id: SYNTHETIC_CONTENT_ID.to_string(),
+            category: "HG".to_string(),
+            title: "synthetic record".to_string(),
+            app_version: "01.00".to_string(),
+            distribution: "psn-hdd".to_string(),
+        },
+        files: BTreeMap::new(),
+        rap: None,
+    };
+    toml::to_string(&record).unwrap()
+}
+
+#[test]
+fn a_record_declaring_another_schema_version_is_refused_by_name() {
+    for found in [0, 1, INSTALL_RECORD_FORMAT_VERSION + 1] {
+        let err = InstallRecord::parse(&record_toml(found)).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                InstallRecordParseError::UnsupportedFormatVersion { found: f, supported }
+                    if f == found && supported == INSTALL_RECORD_FORMAT_VERSION
+            ),
+            "format_version {found} produced {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_record_at_the_current_schema_version_parses() {
+    let record = InstallRecord::parse(&record_toml(INSTALL_RECORD_FORMAT_VERSION)).unwrap();
+    assert_eq!(record.format_version, INSTALL_RECORD_FORMAT_VERSION);
+    assert_eq!(record.title.title_id, SYNTHETIC_TITLE_ID);
+    assert_eq!(record.title.content_id, SYNTHETIC_CONTENT_ID);
+}
+
+#[test]
+fn a_record_that_is_not_toml_is_refused_separately_from_a_version_mismatch() {
+    let err = InstallRecord::parse("this is not toml {{{").unwrap_err();
+    assert!(matches!(err, InstallRecordParseError::Toml(_)), "{err:?}");
+}
+
+#[test]
 fn rejects_missing_param_sfo() {
     let pkg = build_pkg(&KLIC, "NPUA80001", &[pkg_file("README.TXT", 3, b"hi")]);
     let out = scratch();

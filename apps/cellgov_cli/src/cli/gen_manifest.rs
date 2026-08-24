@@ -19,7 +19,15 @@ use crate::cli::args::{find_flag_value, has_bool_flag, reject_flag_here, require
 use crate::cli::exit::die;
 
 const DEFAULT_REGISTRY: &str = "docs/title_manifests";
-const DEFAULT_INSTALLS: &str = "installs";
+
+/// Records for the default VFS root, matching where `cellgov_install`
+/// writes them. `--installs` names the directory directly, for a VFS
+/// rooted elsewhere.
+fn default_installs() -> PathBuf {
+    cellgov_install::game_install::installs_dir(Path::new(
+        cellgov_install::game_install::DEFAULT_VFS_ROOT,
+    ))
+}
 
 /// Escape a string for a double-quoted TOML basic string.
 fn toml_escape(s: &str) -> String {
@@ -41,10 +49,9 @@ pub(crate) fn run(args: &[String]) {
             reject_flag_here(args, "--installs", "a --title-id lookup");
             PathBuf::from(p)
         }
-        (None, Some(id)) => PathBuf::from(
-            find_flag_value(args, "--installs").unwrap_or_else(|| DEFAULT_INSTALLS.to_string()),
-        )
-        .join(format!("{id}.install.toml")),
+        (None, Some(id)) => find_flag_value(args, "--installs")
+            .map_or_else(default_installs, PathBuf::from)
+            .join(format!("{id}.install.toml")),
         (None, None) => die("gen-manifest requires --record <path> or --title-id <id>"),
     };
     let registry = PathBuf::from(
@@ -54,7 +61,7 @@ pub(crate) fn run(args: &[String]) {
 
     let text = std::fs::read_to_string(&record_path)
         .unwrap_or_else(|e| die(&format!("failed to read {}: {e}", record_path.display())));
-    let record: InstallRecord = toml::from_str(&text)
+    let record = InstallRecord::parse(&text)
         .unwrap_or_else(|e| die(&format!("parse {}: {e}", record_path.display())));
 
     let gen = GeneratedFields::from_record(&record);

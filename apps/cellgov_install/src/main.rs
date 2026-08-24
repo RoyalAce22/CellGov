@@ -676,10 +676,7 @@ struct InstallGameArgs {
     force: bool,
 }
 
-const DEFAULT_GAME_INSTALL_OUTPUT: &str = "vfs";
-/// Install records live at the project root, outside the PS3-shaped
-/// `vfs/` tree.
-const INSTALLS_DIR: &str = "installs";
+const DEFAULT_GAME_INSTALL_OUTPUT: &str = game_install::DEFAULT_VFS_ROOT;
 
 fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareCliError> {
     if args.len() < 3 {
@@ -743,7 +740,7 @@ fn cmd_install_game(args: &[String]) {
         pkg_data.len() as f64 / (1024.0 * 1024.0)
     );
 
-    let installs_dir = PathBuf::from(INSTALLS_DIR);
+    let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let outcome = game_install::install_pkg(
         &pkg_data,
         rap_data.as_deref(),
@@ -860,7 +857,7 @@ fn cmd_install_iso(args: &[String]) {
         None => iso_data.clone(),
     };
 
-    let installs_dir = PathBuf::from(INSTALLS_DIR);
+    let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let outcome = game_install::install_iso(
         &decrypted,
         &iso_data,
@@ -933,7 +930,7 @@ fn cmd_uninstall(args: &[String]) {
         std::process::exit(1);
     });
 
-    let installs_dir = PathBuf::from(INSTALLS_DIR);
+    let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let opts = game_uninstall::UninstallOptions {
         verify: parsed.verify,
         keep_rap: parsed.keep_rap,
