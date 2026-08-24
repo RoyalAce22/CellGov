@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Condvar, Mutex, OnceLock};
 
-use cellgov_compare::{Observation, ObservedOutcome};
+use cellgov_compare::{Observation, ObservationMetadata, ObservedOutcome};
 
 /// Peak RSS budget per subprocess: ~1.8 GiB guest memory plus a
 /// transient JSON-array dump from `--save-observation`. 4 GiB covers
@@ -260,8 +260,18 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
     write_manifest(&manifest_path, case);
 
     let observation_path = scratch.join("observation.json");
+    // Presence of this file is what decides below whether the run
+    // produced an outcome, so a survivor from an earlier run would be
+    // read as if this run had written it.
     if observation_path.exists() {
-        std::fs::remove_file(&observation_path).ok();
+        std::fs::remove_file(&observation_path).unwrap_or_else(|e| {
+            panic!(
+                "ps3autotests {}/{}: cannot clear the previous {} ({e})",
+                case.rel_dir,
+                case.stem,
+                observation_path.display(),
+            )
+        });
     }
 
     let cli_bin = env!("CARGO_BIN_EXE_cellgov_cli");
@@ -288,22 +298,30 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
             .expect("spawn cellgov_cli run-game")
     };
 
-    if !output.status.success() {
-        eprintln!(
-            "ps3autotests {}/{}: cellgov_cli run-game exited non-zero",
-            case.rel_dir, case.stem
-        );
-        eprintln!("--- stdout ---");
-        eprintln!("{}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("--- stderr ---");
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-        panic!("cellgov_cli run-game failed");
-    }
-
-    let observation: Observation = {
-        let json = std::fs::read_to_string(&observation_path).expect("read observation.json");
-        serde_json::from_str(&json).expect("deserialize Observation")
-    };
+    // `run-game` exits non-zero on Fault and on MaxSteps, and writes a
+    // full observation for both. Those are outcomes for
+    // [`report_verdict`] to classify, so the exit status decides
+    // nothing here -- a run that left no readable observation is the
+    // only harness failure.
+    let json = std::fs::read_to_string(&observation_path).unwrap_or_else(|e| {
+        dump_run_output(case, &output);
+        panic!(
+            "ps3autotests {}/{}: run-game {} and left no observation at {} ({e})",
+            case.rel_dir,
+            case.stem,
+            describe_exit(&output.status),
+            observation_path.display(),
+        )
+    });
+    let observation: Observation = serde_json::from_str(&json).unwrap_or_else(|e| {
+        dump_run_output(case, &output);
+        panic!(
+            "ps3autotests {}/{}: {} is not a deserializable Observation ({e})",
+            case.rel_dir,
+            case.stem,
+            observation_path.display(),
+        )
+    });
     // A `None` here silently no-ops the drift-band check below, and a
     // zero makes every cross-run equality downstream compare two empty
     // runs. `assert!` rather than `debug_assert!`: the CI gate runs the
@@ -318,6 +336,28 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         observation.metadata.steps,
     );
     observation
+}
+
+fn describe_exit(status: &std::process::ExitStatus) -> String {
+    match status.code() {
+        Some(code) => format!("exited {code}"),
+        None => "was terminated by a signal".to_string(),
+    }
+}
+
+/// Both streams of a `run-game` whose observation the harness could
+/// not read; the failure itself is only visible in the child's output.
+fn dump_run_output(case: &Case, output: &std::process::Output) {
+    eprintln!(
+        "ps3autotests {}/{}: cellgov_cli run-game {}",
+        case.rel_dir,
+        case.stem,
+        describe_exit(&output.status),
+    );
+    eprintln!("--- stdout ---");
+    eprintln!("{}", String::from_utf8_lossy(&output.stdout));
+    eprintln!("--- stderr ---");
+    eprintln!("{}", String::from_utf8_lossy(&output.stderr));
 }
 
 fn run_case(case: &Case) {
@@ -502,6 +542,69 @@ fn the_case_table_names_each_fixture_once() {
     }
 }
 
+/// [`report_verdict`] reads only the outcome, the step count, and
+/// `tty_log`; every other field stays empty.
+fn observation_with(outcome: ObservedOutcome, steps: usize) -> Observation {
+    Observation {
+        outcome,
+        memory_regions: Vec::new(),
+        events: Vec::new(),
+        state_hashes: None,
+        metadata: ObservationMetadata {
+            runner: "cellgov-boot".into(),
+            steps: Some(steps),
+        },
+        tty_log: Vec::new(),
+    }
+}
+
+#[test]
+#[should_panic(expected = "outcome=Fault")]
+fn a_faulted_run_is_named_as_a_fault_not_compared_against_expected() {
+    report_verdict(
+        &CPU_BASIC,
+        &observation_with(ObservedOutcome::Fault, 40),
+        b"expected output",
+    );
+}
+
+#[test]
+#[should_panic(expected = "outcome=Timeout")]
+fn a_capped_run_is_named_as_a_timeout_not_compared_against_expected() {
+    report_verdict(
+        &CPU_PPU_BRANCH,
+        &observation_with(ObservedOutcome::Timeout, 195_312),
+        b"expected output",
+    );
+}
+
+#[test]
+#[should_panic(expected = "outcome=Stalled")]
+fn a_stalled_run_is_named_as_a_stall_not_compared_against_expected() {
+    report_verdict(
+        &LV2_SYS_SEMAPHORE,
+        &observation_with(ObservedOutcome::Stalled, 500),
+        b"expected output",
+    );
+}
+
+#[test]
+fn a_clean_exit_whose_tty_matches_reports_a_match() {
+    let mut observation = observation_with(ObservedOutcome::ProcessExit, 83);
+    observation.tty_log = b"hello\n".to_vec();
+    report_verdict(&CPU_BASIC, &observation, b"hello\n");
+}
+
+/// Negative control for the match above: without it, a byte compare
+/// that always succeeded would leave every test here green.
+#[test]
+#[should_panic(expected = "TTY divergence")]
+fn a_clean_exit_whose_tty_differs_is_a_divergence() {
+    let mut observation = observation_with(ObservedOutcome::ProcessExit, 83);
+    observation.tty_log = b"hello\n".to_vec();
+    report_verdict(&CPU_BASIC, &observation, b"goodbye\n");
+}
+
 #[test]
 #[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
             sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
@@ -577,17 +680,10 @@ fn lv2_sys_semaphore() {
     run_case(&LV2_SYS_SEMAPHORE);
 }
 
+/// Needs neither a bound import nor a converging trajectory: two boots
+/// agreeing is the whole claim, so the fault this ELF currently takes
+/// is itself what is held stable.
 #[test]
-#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
-            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
-            identified by name in cellgov_ps3_abi::nid but no HLE module in \
-            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
-            and patch_got_atomic therefore does not bind their GOT slots. The harness \
-            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
-            gap either, and guest calls land at dispatch.unresolved_import returning \
-            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
-            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
-            synthetic boots."]
 fn two_boots_of_cpu_basic_produce_the_same_observation() {
     let case = Case {
         expected_steps: None,
