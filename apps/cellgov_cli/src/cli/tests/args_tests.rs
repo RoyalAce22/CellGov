@@ -332,6 +332,124 @@ fn parse_hex_flag_absent_returns_none() {
 }
 
 #[test]
+fn a_boolean_flag_spelled_with_eq_is_rejected_not_read_as_absent() {
+    let args = sv(&["cli", "run-game", "--trace=1"]);
+    let err = has_bool_flag_inner(&args, "--trace")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("--trace=... not supported"), "got: {err}");
+}
+
+#[test]
+fn a_boolean_flag_repeated_stays_on() {
+    let args = sv(&["cli", "run-game", "--trace", "--trace"]);
+    assert!(has_bool_flag_inner(&args, "--trace").unwrap());
+}
+
+#[test]
+fn a_longer_flag_sharing_a_prefix_is_not_the_boolean_flag() {
+    let args = sv(&["cli", "run-game", "--profile-pairs"]);
+    assert!(!has_bool_flag_inner(&args, "--profile").unwrap());
+    assert!(has_bool_flag_inner(&args, "--profile-pairs").unwrap());
+}
+
+#[test]
+fn an_absent_boolean_flag_is_off() {
+    let args = sv(&["cli", "run-game", "--title", "flow"]);
+    assert!(!has_bool_flag_inner(&args, "--trace").unwrap());
+}
+
+#[test]
+fn two_output_selecting_flags_together_are_rejected() {
+    let args = sv(&[
+        "cli",
+        "compare",
+        "m.toml",
+        "--save-baseline",
+        "a.json",
+        "--against-baseline",
+        "b.json",
+    ]);
+    let err = require_at_most_one_inner(&args, &["--save-baseline", "--against-baseline"])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("--save-baseline and --against-baseline"),
+        "got: {err}"
+    );
+    assert!(err.contains("pass exactly one"), "got: {err}");
+}
+
+#[test]
+fn one_output_selecting_flag_is_accepted() {
+    let args = sv(&["cli", "compare", "m.toml", "--save-baseline", "a.json"]);
+    assert!(require_at_most_one_inner(&args, &["--save-baseline", "--against-baseline"]).is_ok());
+}
+
+#[test]
+fn a_flag_this_path_never_reads_is_named_not_dropped() {
+    let args = sv(&["cli", "compare", "isa", "--observations-dir", "obs"]);
+    let err = reject_flag_here_inner(&args, "--observations-dir", "a manifest.toml target")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("--observations-dir applies to a manifest.toml target only"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn a_flag_this_path_never_reads_is_named_in_its_eq_spelling_too() {
+    // `explore <scenario>` never calls find_flag_value for this flag,
+    // so nothing downstream would raise FlagEqNotSupported and the
+    // value would be dropped without a word.
+    let args = sv(&["cli", "explore", "isa", "--observations-dir=obs"]);
+    let err = reject_flag_here_inner(&args, "--observations-dir", "`explore micro <name>`")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("--observations-dir applies to"), "got: {err}");
+}
+
+#[test]
+fn a_longer_flag_sharing_a_prefix_is_not_the_rejected_flag() {
+    let args = sv(&["cli", "explore", "isa", "--observations-dir-extra", "obs"]);
+    assert!(reject_flag_here_inner(&args, "--observations-dir", "micro").is_ok());
+}
+
+#[test]
+fn find_run_game_elf_path_rejects_a_flag_like_value_instead_of_promoting_the_next_token() {
+    // Without the check `500000` becomes the positional ELF path and
+    // the missing --budget value is never named.
+    let args = sv(&[
+        "cli",
+        "run-game",
+        "--title",
+        "flow",
+        "--budget",
+        "--max-steps",
+        "500000",
+    ]);
+    let err = find_run_game_elf_path_inner(&args).unwrap_err().to_string();
+    assert!(err.contains("--budget expects a value"), "got: {err}");
+    assert!(err.contains("--max-steps"), "got: {err}");
+}
+
+#[test]
+fn find_run_game_elf_path_accepts_a_flag_like_guest_arg_value() {
+    // Guest argv is the one value slot that may spell a host flag.
+    let args = sv(&[
+        "cli",
+        "run-game",
+        "--title",
+        "flow",
+        "--guest-arg",
+        "--mode=gametool",
+        "EBOOT.BIN",
+    ]);
+    assert_eq!(find_run_game_elf_path(&args), Some("EBOOT.BIN".to_string()));
+}
+
+#[test]
 fn flag_table_invariants() {
     let mut seen = std::collections::BTreeSet::new();
     for flag in RUN_GAME_VALUE_FLAGS {

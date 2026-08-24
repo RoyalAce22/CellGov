@@ -60,6 +60,8 @@ fn build_body(result: &CompareResult) -> CompareReportBody<'_> {
             offset: d.offset,
             expected: d.expected,
             actual: d.actual,
+            expected_len: d.lengths.map(|(e, _)| e),
+            actual_len: d.lengths.map(|(_, a)| a),
         }),
         event_divergence: result.event_divergence.as_ref().map(|d| EventDiv {
             index: d.index,
@@ -111,6 +113,12 @@ struct MemoryDiv<'a> {
     offset: usize,
     expected: u8,
     actual: u8,
+    /// Present only when the two sides declared different byte
+    /// lengths for the region.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_len: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actual_len: Option<usize>,
 }
 
 #[derive(Serialize)]

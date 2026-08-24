@@ -66,6 +66,10 @@ name = "process_spawn_microtest"
 required-features = ["microtests"]
 
 [[test]]
+name = "microtests"
+required-features = ["microtests"]
+
+[[test]]
 name = "title_witnesses"
 required-features = ["title-corpus"]
 

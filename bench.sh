@@ -3,17 +3,20 @@
 #
 # Usage:
 #   ./bench.sh                  Run all benchmarks
-#   ./bench.sh save <name>      Run and save baseline
-#   ./bench.sh compare <name>   Run and compare against saved baseline
+#   ./bench.sh save <name>      Run and save the measurements
+#   ./bench.sh compare <name>   Run and compare against a saved run
 #   ./bench.sh quick            Run only fast benchmarks (skip 260 MB and 1 GB)
 #   ./bench.sh list             List bench IDs without running them
 #
-# Baselines are stored in target/criterion/ by criterion automatically.
+# Criterion stores saved runs under target/criterion/ automatically.
+# It calls them baselines; its --save-baseline / --baseline flags below
+# carry that name. They are unrelated to anything under
+# tests/scenario_observations/ or tests/fixtures/.
 #
 # Requires bash >= 4.0 (associative-array / empty-array semantics).
 # macOS ships bash 3.2 by default; `brew install bash` for a modern one.
 #
-# 'compare' mode assumes baselines were saved on the same machine,
+# 'compare' mode assumes the saved run came from the same machine,
 # same toolchain, and same bench-ID set. Cross-machine compare is
 # not supported -- criterion does not embed provenance, and a
 # compare across a toolchain or CPU change renders meaningless drift
@@ -29,7 +32,7 @@ BENCHES=(
 )
 
 # Anchored alternation regex for `quick` mode. The `^...$` anchoring is
-# load-bearing: criterion treats the filter as `Regex::is_match` on the
+# critical: criterion treats the filter as `Regex::is_match` on the
 # full bench id and does NOT insert anchors, so a bare alternation
 # `content_hash/1mb|...` substring-matches `content_hash/1mb_cached`
 # and overshoots. Each branch must be a full ID for the filter to be
@@ -86,14 +89,14 @@ list_benches() {
 case "${1:-}" in
     save)
         name="${2:?usage: bench.sh save <name>}"
-        echo "Saving baseline: $name"
+        echo "Saving run: $name"
         echo
         run_bench --save-baseline "$name"
-        echo "Baseline '$name' saved to target/criterion/"
+        echo "Run '$name' saved to target/criterion/"
         ;;
     compare)
         name="${2:?usage: bench.sh compare <name>}"
-        echo "Comparing against baseline: $name"
+        echo "Comparing against saved run: $name"
         echo
         run_bench --baseline "$name"
         ;;

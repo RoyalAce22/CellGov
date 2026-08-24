@@ -5,10 +5,10 @@ use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
 use cellgov_ps3_abi::sce::{
     SCEPKG_ERK, SCEPKG_RIV, SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR,
-    SCE_ENC_KIND_PLAIN,
+    SCE_ENC_KIND_PLAIN, SCE_SECTION_KIND_PHDR,
 };
 
-use super::elf::assemble_elf_from_sections;
+use super::elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 use super::error::SceError;
 use super::raw::{
     checked_add_oob, checked_mul_oob, parse_sce_header, read_be_u32, read_be_u64,
@@ -31,8 +31,8 @@ pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, SceError> {
 pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
     // High bit of revision_flags marks an unencrypted debug SELF;
-    // `decrypt_envelope` skips both the key peel and the padding check
-    // for one. The NPDRM entry point refuses the same shape.
+    // `decrypt_envelope` skips the key peel for one. The NPDRM entry
+    // point refuses the same shape.
     if hdr.revision_flags & 0x8000 != 0 {
         return Err(SceError::DebugSelfUnsupported {
             revision_flags: hdr.revision_flags,
@@ -43,7 +43,9 @@ pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
         crate::crypto::app_key_for_revision(revision).ok_or(SceError::NoAppKey { revision })?;
 
     let envelope = decrypt_envelope_app_keyed(data, &hdr, &key.erk, &key.riv)?;
-    let sections = decrypt_sections_from_envelope(data, &hdr, &envelope)?;
+    let segment_file_sizes = inner_elf_segment_file_sizes(data)?;
+    let sections =
+        decrypt_sections_from_envelope(data, &hdr, &envelope, Some(&segment_file_sizes))?;
     assemble_elf_from_sections(data, &sections)
 }
 
@@ -87,6 +89,10 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
 ///
 /// APP-keyed path; the NPDRM path produces its envelope through
 /// [`crate::npdrm`].
+///
+/// The container is not assumed to wrap an ELF -- a firmware-update
+/// PKG does not -- so no per-segment inflate bound is available and a
+/// zlib section is inflated to whatever length its stream produces.
 pub fn decrypt_sce_sections(
     data: &[u8],
     erk: &[u8; 0x20],
@@ -94,7 +100,7 @@ pub fn decrypt_sce_sections(
 ) -> Result<Vec<(EncryptedSectionDescriptor, Vec<u8>)>, SceError> {
     let hdr = parse_sce_header(data)?;
     let envelope = decrypt_envelope_app_keyed(data, &hdr, erk, riv)?;
-    decrypt_sections_from_envelope(data, &hdr, &envelope)
+    decrypt_sections_from_envelope(data, &hdr, &envelope, None)
 }
 
 /// Decrypt the 0x40-byte [`super::MetadataKeyEnvelope`] using the
@@ -161,9 +167,12 @@ pub(crate) fn decrypt_envelope(
             .map_err(|_| SceError::AesCbcDecryptFailed)?;
     }
 
-    if !is_debug
-        && (envelope[0x10..0x20].iter().any(|&b| b != 0)
-            || envelope[0x30..0x40].iter().any(|&b| b != 0))
+    // The padding self-check runs for a debug container too. RPCS3
+    // `unself.cpp` `SELFDecrypter::LoadMetadata` validates the key and
+    // IV pad bytes after the debug branch closes, not inside it, so a
+    // container that claims to be plaintext but is not gets named here
+    // instead of carrying a garbage AES key into the CTR pass.
+    if envelope[0x10..0x20].iter().any(|&b| b != 0) || envelope[0x30..0x40].iter().any(|&b| b != 0)
     {
         return Err(SceError::KeyEnvelopePadding);
     }
@@ -179,10 +188,16 @@ pub(crate) fn decrypt_envelope(
 ///   `[0x10..0x20] = zero padding`
 ///   `[0x20..0x30] = aes_iv`
 ///   `[0x30..0x40] = zero padding`
+///
+/// `segment_file_sizes` is the inner ELF's `p_filesz` table, supplied
+/// by callers decrypting a SELF; it bounds how far a PHDR-kind
+/// section's zlib stream may inflate. `None` leaves zlib sections
+/// unbounded, which is all a container with no inner ELF can offer.
 pub(crate) fn decrypt_sections_from_envelope(
     data: &[u8],
     hdr: &SceContainerHeader,
     envelope: &[u8; 0x40],
+    segment_file_sizes: Option<&[usize]>,
 ) -> Result<Vec<(EncryptedSectionDescriptor, Vec<u8>)>, SceError> {
     let key_envelope_offset =
         checked_add_oob(hdr.metadata_offset as usize, 0x20, "SCE metadata info")?;
@@ -196,11 +211,20 @@ pub(crate) fn decrypt_sections_from_envelope(
 
     let directory_offset = checked_add_oob(key_envelope_offset, 0x40, "SCE metadata directory")?;
     let directory_end = hdr.header_size as usize;
-    if directory_end > data.len() || directory_offset >= directory_end {
+    if directory_end > data.len() {
         return Err(SceError::TooSmall {
             what: "SCE metadata headers",
             got: data.len(),
             need: directory_end,
+        });
+    }
+    // `header_size` is where the metadata directory ends. A value at or
+    // below where it starts describes no directory at all -- a
+    // malformed header, not a short file, and reporting it as `TooSmall`
+    // would print a `need` smaller than the bytes already on hand.
+    if directory_offset >= directory_end {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "SCE metadata directory",
         });
     }
     let mut directory_buf = data[directory_offset..directory_end].to_vec();
@@ -306,11 +330,51 @@ pub(crate) fn decrypt_sections_from_envelope(
             SCE_COMP_KIND_ZLIB => {
                 use flate2::read::ZlibDecoder;
                 use std::io::Read;
+                // RPCS3 `unself.h` `SELFDecrypter::WriteElf` sizes the
+                // inflate output buffer at exactly
+                // `phdr[program_idx].p_filesz`, so a stream that wants
+                // more bytes than its destination segment declares is
+                // not a stream this container describes. Reading one
+                // byte past that size separates the two without
+                // letting a crafted stream drive the allocation; the
+                // oracle logs zlib's buffer error and writes the
+                // truncated buffer anyway, which is the silent half of
+                // the behaviour, so the overrun is named here.
+                let cap = match segment_file_sizes {
+                    Some(sizes) if sec.section_kind == SCE_SECTION_KIND_PHDR => {
+                        let prog_idx = sec.program_segment_index as usize;
+                        Some(*sizes.get(prog_idx).ok_or(
+                            SceError::SectionProgramIndexOutOfRange {
+                                prog_idx,
+                                e_phnum: sizes.len(),
+                            },
+                        )?)
+                    }
+                    _ => None,
+                };
                 let mut decoder = ZlibDecoder::new(sec_data.as_slice());
                 let mut decompressed = Vec::new();
-                decoder
-                    .read_to_end(&mut decompressed)
-                    .map_err(|source| SceError::ZlibDecompress { index: i, source })?;
+                match cap {
+                    Some(cap) => {
+                        let inflated = decoder
+                            .by_ref()
+                            .take((cap as u64).saturating_add(1))
+                            .read_to_end(&mut decompressed)
+                            .map_err(|source| SceError::ZlibDecompress { index: i, source })?;
+                        if inflated > cap {
+                            return Err(SceError::SectionInflatesPastSegment {
+                                index: i,
+                                prog_idx: sec.program_segment_index as usize,
+                                p_filesz: cap,
+                            });
+                        }
+                    }
+                    None => {
+                        decoder
+                            .read_to_end(&mut decompressed)
+                            .map_err(|source| SceError::ZlibDecompress { index: i, source })?;
+                    }
+                }
                 sec_data = decompressed;
             }
             other => {

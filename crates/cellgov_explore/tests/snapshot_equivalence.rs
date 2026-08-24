@@ -40,7 +40,7 @@ where
     F: FnMut() -> Runtime,
 {
     let mut rt_baseline = make_runtime();
-    let log = observe_decisions(&mut rt_baseline);
+    let (log, baseline_stop) = observe_decisions(&mut rt_baseline);
     let baseline_hash = rt_baseline.memory().content_hash();
 
     let total_branching_points = log.branching_count();
@@ -52,6 +52,7 @@ where
     let mut bounds_hit = false;
     let mut found_divergence = false;
     let mut schedules_pruned = 0usize;
+    let mut schedules_truncated = 0usize;
 
     'outer: for bp in log.branching_points() {
         let default_choice = bp.chosen;
@@ -75,16 +76,34 @@ where
             let overrides = build_overrides(bp.step, alt);
             let mut rt = make_runtime();
             rt.set_scheduler(PrescribedScheduler::new(overrides));
-            run_to_stall(&mut rt, config.max_steps_per_run);
+            let stop = run_to_stall(&mut rt, config.max_steps_per_run);
             let hash = rt.memory().content_hash();
-            if hash != baseline_hash {
+            let truncated = stop.is_truncated();
+            if truncated {
+                schedules_truncated += 1;
+                bounds_hit = true;
+            } else if hash != baseline_hash {
                 found_divergence = true;
             }
             schedules.push(ScheduleRecord {
                 branch_step: bp.step,
                 alternate_choice: alt,
                 memory_hash: hash,
+                truncated,
             });
+        }
+    }
+
+    // A prefix baseline withdraws every divergence claim, mirroring
+    // `AlternateIteration::mark_baseline_truncated`.
+    // A prefix baseline withdraws every divergence claim, mirroring
+    // `AlternateIteration::mark_baseline_truncated`.
+    if baseline_stop.is_truncated() {
+        found_divergence = false;
+        bounds_hit = true;
+        schedules_truncated = schedules.len();
+        for record in &mut schedules {
+            record.truncated = true;
         }
     }
 
@@ -102,12 +121,17 @@ where
         total_branching_points,
         bounds_hit,
         schedules_pruned,
+        schedules_truncated,
     })
 }
 
 /// Whole-struct equality (catches forgotten fields) plus
 /// field-level fallback for sharper failure messages.
-fn assert_equivalent<F>(make_runtime: F, config: &ExplorationConfig, scenario: &str)
+fn assert_equivalent<F>(
+    make_runtime: F,
+    config: &ExplorationConfig,
+    scenario: &str,
+) -> ExplorationResult
 where
     F: FnMut() -> Runtime + Clone,
 {
@@ -118,7 +142,7 @@ where
     match (snap_path, factory_path) {
         (Some(s), Some(f)) => {
             if s == f {
-                return;
+                return s;
             }
             // Per-field dump on mismatch so the first divergent
             // axis names itself rather than requiring a Debug-blob
@@ -136,6 +160,10 @@ where
             assert_eq!(
                 s.schedules_pruned, f.schedules_pruned,
                 "{scenario}: schedules_pruned differs"
+            );
+            assert_eq!(
+                s.schedules_truncated, f.schedules_truncated,
+                "{scenario}: schedules_truncated differs"
             );
             assert_eq!(
                 s.schedules.len(),
@@ -300,7 +328,7 @@ fn make_dma_overlapping_writes() -> impl FnMut() -> Runtime + Clone {
 
 #[test]
 fn equivalence_disjoint_writes() {
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_disjoint_writes(),
         &ExplorationConfig::default(),
         "disjoint_writes",
@@ -309,7 +337,7 @@ fn equivalence_disjoint_writes() {
 
 #[test]
 fn equivalence_overlapping_writes() {
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_overlapping_writes(),
         &ExplorationConfig::default(),
         "overlapping_writes",
@@ -318,7 +346,7 @@ fn equivalence_overlapping_writes() {
 
 #[test]
 fn equivalence_three_overlapping_writes() {
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_three_overlapping_writes(),
         &ExplorationConfig::default(),
         "three_overlapping_writes",
@@ -327,7 +355,7 @@ fn equivalence_three_overlapping_writes() {
 
 #[test]
 fn equivalence_atomic_contention() {
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_atomic_contention(),
         &ExplorationConfig::default(),
         "atomic_contention",
@@ -336,7 +364,7 @@ fn equivalence_atomic_contention() {
 
 #[test]
 fn equivalence_dma_overlapping_writes() {
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_dma_overlapping_writes(),
         &ExplorationConfig::default(),
         "dma_overlapping_writes",
@@ -356,7 +384,7 @@ fn equivalence_three_overlapping_with_tight_bounds() {
         max_steps_per_run: 100,
         ..ExplorationConfig::default()
     };
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_three_overlapping_writes(),
         &config,
         "three_overlapping_tight_bounds",
@@ -373,9 +401,105 @@ fn equivalence_three_overlapping_with_exact_bounds() {
         max_steps_per_run: 100,
         ..ExplorationConfig::default()
     };
-    assert_equivalent(
+    let _ = assert_equivalent(
         make_three_overlapping_writes(),
         &config,
         "three_overlapping_exact_bounds",
     );
+}
+
+/// Both units need three steps but the runtime's own cap refuses the
+/// fifth, so the baseline stops on `StepError` with work still
+/// runnable. Every recorded hash is then a prefix hash.
+fn make_baseline_truncated_by_step_cap() -> impl FnMut() -> Runtime + Clone {
+    || {
+        let mem = GuestMemory::new(64);
+        let mut rt = Runtime::new(mem, Budget::new(100), 4);
+        for v in [0xAAu32, 0xBB] {
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(v),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+        }
+        rt
+    }
+}
+
+/// The truncation rule is the one part of `for_each_alternate` that no
+/// other scenario here reaches: without a scenario that actually stops
+/// short, the reference implementation can drop the rule entirely and
+/// still match.
+#[test]
+fn equivalence_holds_when_the_baseline_stops_short() {
+    let r = assert_equivalent(
+        make_baseline_truncated_by_step_cap(),
+        &ExplorationConfig::default(),
+        "baseline_truncated_by_step_cap",
+    );
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::Inconclusive,
+        "a prefix baseline cannot support any verdict but inconclusive",
+    );
+    assert!(r.bounds_hit);
+    assert!(
+        !r.schedules.is_empty(),
+        "the scenario must explore at least one alternate for the          truncation rule to be under test",
+    );
+    assert_eq!(
+        r.schedules_truncated,
+        r.schedules.len(),
+        "a prefix baseline taints every record",
+    );
+    assert!(r.schedules.iter().all(|s| s.truncated));
+}
+
+/// Disjoint writers are pruned to nothing, so `bounds_hit` can only
+/// come from the baseline rule -- without it a prefix run reports
+/// `schedule-stable`.
+fn make_pruned_alternates_with_a_truncated_baseline() -> impl FnMut() -> Runtime + Clone {
+    || {
+        let mem = GuestMemory::new(64);
+        let mut rt = Runtime::new(mem, Budget::new(100), 4);
+        for (addr, v) in [(0u64, 0xAAu32), (8, 0xBB)] {
+            rt.registry_mut().register_with(move |id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(v),
+                        FakeOp::SharedStore { addr, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+        }
+        rt
+    }
+}
+
+#[test]
+fn a_truncated_baseline_whose_alternates_were_all_pruned_is_not_stable() {
+    let r = assert_equivalent(
+        make_pruned_alternates_with_a_truncated_baseline(),
+        &ExplorationConfig::default(),
+        "pruned_alternates_truncated_baseline",
+    );
+    assert!(
+        r.schedules.is_empty() && r.schedules_pruned > 0,
+        "the scenario must prune every alternate for the baseline rule to be          the only thing that can set bounds_hit: got {} schedules, {} pruned",
+        r.schedules.len(),
+        r.schedules_pruned,
+    );
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::Inconclusive,
+        "a prefix baseline with nothing left to compare is not evidence of stability",
+    );
+    assert!(r.bounds_hit);
 }

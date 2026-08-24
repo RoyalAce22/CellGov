@@ -15,21 +15,62 @@ pub const PS3_CHILD_STACKS_BASE: u64 = 0xD010_0000;
 /// Size in bytes of the child-thread stacks region.
 pub const PS3_CHILD_STACKS_SIZE: usize = 0x00F0_0000;
 
-/// 16 bytes below stack top reserves the PPC64 ABI backchain+linkage area.
-pub const PS3_PRIMARY_STACK_TOP: u64 =
-    PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - 0x10;
+/// Smallest stack frame a PPE 64-bit callee may be handed: the
+/// 48-byte fixed header plus the 64-byte minimum parameter save area.
+// [CBE-Handbook p:398 s:14.3] The PPE 64-bit standard stack frame holds the
+// back chain at R1+0 and the rest of the fixed slots below R1+48, above which
+// the parameter save area is at least 64 bytes.
+pub const PS3_ABI_MIN_STACK_FRAME: u64 = 0x70;
 
-/// Smallest primary stack the kernel hands out, larger than the 4 KiB
-/// floor the headers advertise. RPCS3 `PPUModule.cpp` `ppu_load_exec`
-/// records the observed floor as 64 KiB.
+/// Initial stack pointer of the primary thread: one minimum stack
+/// frame below the top of the primary stack region.
+///
+/// The reserve is the callee's, not the caller's: the entry function
+/// stores CR at 8(r1) and LR at 16(r1) into linkage slots its caller
+/// is required to have provided, so anything less than a whole
+/// minimum frame puts those stores past the end of the region. RPCS3
+/// seeds every PPU thread the same way -- `PPUThread.cpp`
+/// `ppu_thread::ppu_thread` sets `gpr[1]` to `stack_addr + stack_size`
+/// less its `ppu_stack_start_offset`, which is also 0x70.
+pub const PS3_PRIMARY_STACK_TOP: u64 =
+    PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - PS3_ABI_MIN_STACK_FRAME;
+
+// The frame the entry function writes into has to lie inside the
+// primary stack: at 0x10 of headroom the LR save slot at 16(r1) landed
+// on the first byte of the child-stack arena above it.
+const _: () = assert!(
+    PS3_PRIMARY_STACK_TOP + PS3_ABI_MIN_STACK_FRAME
+        <= PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64
+);
+// Quadword-aligned SP: the ABI requires it and stack walkers reject an
+// r1 that is not a multiple of 16.
+const _: () = assert!(PS3_PRIMARY_STACK_TOP.is_multiple_of(0x10));
+
+/// Smallest primary stack the kernel hands out, above the 4 KiB floor
+/// the published constant advertises. RPCS3 `PPUModule.cpp`
+/// `ppu_load_exec` records the observed floor as 64 KiB.
 pub const PS3_PRIMARY_STACK_SIZE_MIN: u32 = 0x1_0000;
 
 /// Largest primary stack the kernel hands out; a declaration above it
-/// is clamped, not refused. RPCS3 `sys_process.h`.
+/// is clamped, not refused. RPCS3 `sys_process.h`
+/// (`SYS_PROCESS_PARAM_STACK_SIZE_MAX`), clamped in `PPUModule.cpp`
+/// `ppu_load_exec`.
 pub const PS3_PRIMARY_STACK_SIZE_MAX: u32 = 0x10_0000;
 
 /// Granularity a clamped primary-stack size is rounded up to.
 pub const PS3_STACK_SIZE_GRANULARITY: u32 = 0x1000;
+
+// Decoders clamp a declared `primary_stacksize` into
+// [MIN, MAX] and then round up to the granularity. That round-up can
+// only stay inside the window while both bounds are themselves
+// granularity multiples, and the resulting stack only fits the backed
+// region while the region is at least MAX bytes -- otherwise a
+// max-declaring title's stack silently runs into the child-stack
+// region below it.
+const _: () = assert!(PS3_PRIMARY_STACK_SIZE_MIN <= PS3_PRIMARY_STACK_SIZE_MAX);
+const _: () = assert!(PS3_PRIMARY_STACK_SIZE_MIN.is_multiple_of(PS3_STACK_SIZE_GRANULARITY));
+const _: () = assert!(PS3_PRIMARY_STACK_SIZE_MAX.is_multiple_of(PS3_STACK_SIZE_GRANULARITY));
+const _: () = assert!(PS3_PRIMARY_STACK_SIZE as u64 >= PS3_PRIMARY_STACK_SIZE_MAX as u64);
 
 /// Base of the iomap region `sys_rsx_context_iomap` (672) maps into;
 /// libgcm asks for an IO window starting here.
@@ -56,7 +97,21 @@ pub const PS3_SPU_RESERVED_SIZE: usize = 0x2000_0000;
 /// above. An LV2 convention with no architectural backing.
 pub const PS3_USER_TEXT_FLOOR: u64 = 0x0001_0000;
 
-// The boot-composed iomap window must not overlap the RSX MMIO
-// region. The sibling regions (primary stack, child stacks, SPU MMIO)
-// all sit above PS3_RSX_BASE and so stay disjoint.
+// The boot-composed regions must tile the address space without
+// overlapping. Each bound below is checked against the *end* of the
+// region beneath it, not its base: the primary stack starts exactly at
+// PS3_RSX_BASE + PS3_RSX_SIZE, so growing the RSX window by one page
+// would overlap it with no other signal.
 const _: () = assert!(PS3_RSX_IOMAP_BASE + PS3_RSX_IOMAP_SIZE as u64 <= PS3_RSX_BASE);
+const _: () = assert!(PS3_RSX_BASE + PS3_RSX_SIZE as u64 <= PS3_PRIMARY_STACK_BASE);
+const _: () =
+    assert!(PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 <= PS3_CHILD_STACKS_BASE);
+const _: () =
+    assert!(PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64 <= PS3_SPU_RESERVED_BASE);
+// The topmost region must not wrap past the end of the address space.
+const _: () = assert!(PS3_SPU_RESERVED_BASE
+    .checked_add(PS3_SPU_RESERVED_SIZE as u64)
+    .is_some());
+// The user-text floor sits below every mapped region, so a diagnostic
+// walk rejecting addresses under it cannot reject a real one.
+const _: () = assert!(PS3_USER_TEXT_FLOOR < PS3_RSX_IOMAP_BASE);

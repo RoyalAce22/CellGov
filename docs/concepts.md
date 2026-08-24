@@ -155,6 +155,23 @@ tool prints `MATCH`.
 code path the title exercised up to that checkpoint. `DIVERGE` is
 the starting point for investigation -- not a conclusion.
 
+### Two committed reference trees
+
+Comparison needs something to compare against, and the two trees
+that hold it answer different questions.
+
+A **scenario observation** is RPCS3's answer for one synthetic
+scenario, under `tests/scenario_observations/<scenario>/`. Each
+scenario is recorded once per RPCS3 decoder, so two independent
+answers can be checked against each other before either is trusted.
+The tree's `README.md` carries the capture procedure.
+
+A **boot anchor** is CellGov's own witness set for one real title,
+under `tests/fixtures/<content-id>/cellgov/`. It records the step
+count, outcome, and named counters a boot must reproduce.
+`bench-boot` gates a run against the anchor; `record-anchors`
+writes it.
+
 ## Semantic vs non-semantic divergence
 
 This is the section the rest of the docs are read through. Skip it

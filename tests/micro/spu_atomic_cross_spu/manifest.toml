@@ -29,24 +29,22 @@ outcome = "completed"
 #     -v "$(pwd)/tests/micro/common:/common" \
 #     -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
-#   mkdir -p vfs/dev_hdd0/game/CG_SPUAT/USRDIR
-#   cp tests/micro/spu_atomic_cross_spu/build/\
-#      spu_atomic_cross_spu.elf \
-#      vfs/dev_hdd0/game/CG_SPUAT/USRDIR/EBOOT.elf
-#
 #   cargo run --release -p cellgov_cli -- run-game \
 #     --title-manifest tests/micro/spu_atomic_cross_spu/manifest.toml \
 #     --max-steps 5000000
 
 [cellgov.title]
-content_id = "CG_SPUAT"
 short_name = "spuatomic"
 display_name = "CellGov cross-SPU atomic contention microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["spu_atomic_cross_spu.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"

@@ -107,6 +107,11 @@ fn explore_single_unit_returns_none() {
     assert!(result.is_none(), "single-unit isa has no branching points");
 }
 
+// The `microtests` feature is the one declaration that the ELF corpus
+// under tests/micro/*/build/ exists; without it this test is not
+// compiled, so no invocation can reach it and silently skip. The
+// `#[ignore]` is unrelated to the corpus -- it is the ~7 min runtime.
+#[cfg(feature = "microtests")]
 #[test]
 #[ignore] // ~7 min: runs 3 ELF microtests with full exploration
 fn explore_micro_runs_for_elf_microtests() {
@@ -121,7 +126,8 @@ fn explore_micro_runs_for_elf_microtests() {
         let base = repo_root.join(format!("tests/micro/{name}/build"));
         let ppu_path = base.join(format!("{name}.elf"));
         let spu_path = base.join("spu_main.elf");
-        // Running with --ignored declares the corpus built.
+        // The feature declares the corpus built, so a missing
+        // artifact is a hard error rather than a skip.
         assert!(
             ppu_path.is_file() && spu_path.is_file(),
             "microtest {name} not built: expected {} and {}. Build it \
@@ -129,10 +135,14 @@ fn explore_micro_runs_for_elf_microtests() {
             ppu_path.display(),
             spu_path.display(),
         );
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(repo_root).unwrap();
-        let result = cellgov_explore::explore(|| build_lv2_fixture(name).build_runtime(), &config);
-        std::env::set_current_dir(&prev).unwrap();
+        // The corpus root is named rather than chdir'd to: the working
+        // directory is process-global, so moving it here would have
+        // moved it for every test running in parallel in this binary,
+        // and a panic between the two calls never restored it.
+        let result = cellgov_explore::explore(
+            || build_lv2_fixture_under(repo_root, name).build_runtime(),
+            &config,
+        );
         assert!(
             result.is_some(),
             "microtest {name} should have branching points"

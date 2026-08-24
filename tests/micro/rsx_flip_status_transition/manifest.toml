@@ -20,17 +20,26 @@ memory_regions = [
 outcome = "completed"
 
 [cellgov.title]
-content_id = "CG_RXFLP"
 short_name = "rxflp"
 display_name = "CellGov RSX flip-status-transition microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["rsx_flip_status_transition.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"
 
 [cellgov.rsx]
 mirror = true
+consume = true
+# The guest seeds cursor.get by storing to the MMIO GET slot, and
+# only the FIFO consumer reconciles cursor.get from MMIO
+# (mirror_rsx_control_register_writes mirrors PUT and REF, not GET).
+# Without this the drain walks from get = 0 and never reaches the
+# commands this test wrote.

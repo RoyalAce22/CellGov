@@ -95,6 +95,7 @@ fn rpcs3_tty_baseline_roundtrip() {
 
     let regions = vec![TtyRegion {
         name: "result".into(),
+        offset: 0,
         size: 8,
         guest_addr: 0,
     }];
@@ -131,9 +132,10 @@ fn compare_cellgov_vs_rpcs3_baseline() {
     use crate::runner_cellgov::{observe_with_determinism_check, RegionDescriptor};
     use cellgov_testkit::fixtures;
 
-    let baseline_path =
-        std::path::Path::new("../../baselines/spu_fixed_value/rpcs3_interpreter.json");
-    let rpcs3_obs = load(baseline_path).expect("load baseline");
+    let observation_path = std::path::Path::new(
+        "../../tests/scenario_observations/spu_fixed_value/rpcs3_interpreter.json",
+    );
+    let rpcs3_obs = load(observation_path).expect("load scenario observation");
 
     let factory = || fixtures::mailbox_send_scenario(1);
     let regions: Vec<RegionDescriptor> = vec![];

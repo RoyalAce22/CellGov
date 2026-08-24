@@ -207,6 +207,28 @@ fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
     Err(LoadError::BadMagic { magic })
 }
 
+/// The module-identity block for the listing header, or the reason
+/// there is none.
+///
+/// `Ok(None)` is the title-executable case: `e_type` is ET_EXEC, so
+/// no `sys_prx_module_info_t` exists and none is expected. Every
+/// other refusal, including any other `e_type`, is a structural
+/// anomaly in a file whose import table is about to be printed as
+/// authoritative, so it is returned for the caller to name. RPCS3's
+/// `Loader/ELF.h` admits a PPU object only as `elf_type::exec` or
+/// `elf_type::prx`.
+fn module_identity(
+    elf_bytes: &[u8],
+) -> Result<Option<cellgov_ppu::sprx::ParsedPrx>, cellgov_ppu::sprx::PrxParseError> {
+    match cellgov_ppu::sprx::parse_prx(elf_bytes) {
+        Ok(p) => Ok(Some(p)),
+        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(t)) if t == cellgov_ps3_abi::elf::ET_EXEC => {
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 pub(crate) fn run(args: &[String]) {
     let parsed = try_parse_args(args).unwrap_or_else(|msg| crate::cli::exit::die(&msg));
     let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
@@ -226,13 +248,8 @@ pub(crate) fn run(args: &[String]) {
         );
     }
 
-    // A title executable is ET_EXEC, so `NotPrx` is the expected
-    // answer for an EBOOT and the identity block is simply absent.
-    // Every other variant is a structural anomaly in a file whose
-    // import table is about to be printed as authoritative.
-    let sprx_parsed = match cellgov_ppu::sprx::parse_prx(&elf_bytes) {
-        Ok(p) => Some(p),
-        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(_)) => None,
+    let sprx_parsed = match module_identity(&elf_bytes) {
+        Ok(p) => p,
         Err(e) => {
             eprintln!(
                 "dump-prx-imports: {}: PRX module info: {e}; \

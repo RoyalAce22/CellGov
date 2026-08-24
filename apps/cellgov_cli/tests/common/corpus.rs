@@ -1,8 +1,7 @@
 //! Where the local PS3 corpus lives on disk.
 //!
-//! Every path here is fixed and repo-relative because `cellgov_install`
-//! produces them: `install` writes the firmware mounts under `vfs/`,
-//! `install-game` and `install-iso` write the title mounts beside them.
+//! Every path here is fixed and repo-relative because `cellgov_install
+//! install` produces it under `vfs/`.
 
 #![allow(
     dead_code,

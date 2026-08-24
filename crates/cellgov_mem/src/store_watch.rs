@@ -20,6 +20,7 @@
 use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 struct WatchState {
@@ -30,6 +31,9 @@ struct WatchState {
 }
 
 static STATE: OnceLock<Option<WatchState>> = OnceLock::new();
+
+/// Latch so a failing sink names itself once instead of per record.
+static WRITE_FAILED: AtomicBool = AtomicBool::new(false);
 
 fn init() -> Option<WatchState> {
     let spec = env::var("CELLGOV_STORE_WATCH").ok()?;
@@ -63,6 +67,22 @@ fn init() -> Option<WatchState> {
 
 fn state() -> Option<&'static WatchState> {
     STATE.get_or_init(init).as_ref()
+}
+
+/// One 28-byte record: `{ step u64, pc u32, ea u32, width u32, value u64 }`,
+/// little-endian.
+///
+/// Packed whole so one `write_all` either lands the record or none of
+/// it: the RPCS3-side reader walks fixed-size records from the header,
+/// and a torn one shifts every later field.
+fn pack_record(step: u64, pc: u32, ea: u64, width: u32, value: u64) -> [u8; 28] {
+    let mut record = [0u8; 28];
+    record[0..8].copy_from_slice(&step.to_le_bytes());
+    record[8..12].copy_from_slice(&pc.to_le_bytes());
+    record[12..16].copy_from_slice(&(ea as u32).to_le_bytes());
+    record[16..20].copy_from_slice(&width.to_le_bytes());
+    record[20..28].copy_from_slice(&value.to_le_bytes());
+    record
 }
 
 /// Emit one watch record per byte-range that overlaps the configured
@@ -103,16 +123,22 @@ pub fn emit(pc: u32, ea: u64, bytes: &[u8]) {
     *step_g = step.wrapping_add(1);
     drop(step_g);
 
+    let record = pack_record(step, effective_pc, ea, width, value_u64);
+
     let mut writer = s.writer.lock().expect("store-watch writer mutex");
-    // 28 bytes per record: { step u64, pc u32, ea u32, width u32, value u64 }
-    let _ = writer.write_all(&step.to_le_bytes());
-    let _ = writer.write_all(&effective_pc.to_le_bytes());
-    let _ = writer.write_all(&(ea as u32).to_le_bytes());
-    let _ = writer.write_all(&width.to_le_bytes());
-    let _ = writer.write_all(&value_u64.to_le_bytes());
     // Per-record flush so a crash mid-run leaves the file readable up
     // to the last completed record.
-    let _ = writer.flush();
+    if let Err(e) = writer.write_all(&record).and_then(|()| writer.flush()) {
+        // A dropped record makes every later one land at the wrong
+        // offset for a reader counting from the header, so the operator
+        // hears about it rather than reading a short capture as a
+        // complete one.
+        if !WRITE_FAILED.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "[cellgov] store-watch write failed at record {step}: {e};                  the capture is truncated from here"
+            );
+        }
+    }
 }
 
 thread_local! {
@@ -124,3 +150,7 @@ thread_local! {
 pub fn set_last_ppu_cia(pc: u32) {
     LAST_PPU_CIA.with(|c| c.set(pc));
 }
+
+#[cfg(test)]
+#[path = "tests/store_watch_tests.rs"]
+mod tests;

@@ -48,6 +48,80 @@ fn proc_param_has_correct_magic() {
     assert_eq!(magic, 0x13bcc5f6);
 }
 
+/// The declared extent is what the compare classifier turns into
+/// `sys_proc_param_range`, so it has to be the bytes actually emitted.
+#[test]
+fn proc_param_declares_the_extent_it_emits() {
+    let pp = proc_param(0x00360001);
+    let declared = u32::from_be_bytes(pp[0..4].try_into().unwrap());
+    assert_eq!(u64::from(declared), PROC_PARAM_SIZE);
+    assert_eq!(pp.len() as u64, PROC_PARAM_SIZE);
+}
+
+#[test]
+fn version_and_sdk_version_are_separate_fields() {
+    let pp = proc_param(0x00360001);
+    let version = u32::from_be_bytes(pp[8..12].try_into().unwrap());
+    let sdk_version = u32::from_be_bytes(pp[12..16].try_into().unwrap());
+    assert_eq!(version, SYS_PROCESS_PARAM_VERSION_330_0);
+    assert_eq!(sdk_version, 0x00360001);
+}
+
+#[test]
+#[should_panic(expected = "data segment vaddr overflows")]
+fn a_data_vaddr_that_puts_the_proc_param_past_the_address_space_is_refused() {
+    let data = vec![0u8; PROC_PARAM_SIZE as usize + 16];
+    build(0x10000, 0x10000, &[0; 16], u64::MAX - 8, &data, Some(16));
+}
+
+/// Nothing about the wrap depends on the proc-param segment: the plain
+/// two-PT_LOAD form has to refuse it too, or `build` hands back an ELF
+/// whose data segment claims bytes past the end of the address space.
+#[test]
+#[should_panic(expected = "data segment vaddr overflows")]
+fn a_wrapping_data_segment_is_refused_without_a_proc_param() {
+    build(0x10000, 0x10000, &[0; 16], u64::MAX - 8, &[0u8; 48], None);
+}
+
+#[test]
+#[should_panic(expected = "code segment vaddr overflows")]
+fn a_wrapping_code_segment_is_refused() {
+    build(0x10000, u64::MAX - 8, &[0u8; 48], 0x20000, &[0; 16], None);
+}
+
+/// The exclusive end `p_vaddr + p_memsz` has to stay representable: a
+/// segment whose last byte is 0xFFFF_FFFF_FFFF_FFFF is refused because
+/// every consumer that forms that end address overflows computing it.
+#[test]
+#[should_panic(expected = "data segment vaddr overflows")]
+fn a_segment_ending_exactly_at_the_top_of_the_address_space_is_refused() {
+    let data = [0u8; 16];
+    build(
+        0x10000,
+        0x10000,
+        &[0; 16],
+        u64::MAX - data.len() as u64 + 1,
+        &data,
+        None,
+    );
+}
+
+#[test]
+fn a_segment_whose_exclusive_end_is_the_last_address_is_accepted() {
+    let data = [0u8; 16];
+    let elf = build(
+        0x10000,
+        0x10000,
+        &[0; 16],
+        u64::MAX - data.len() as u64,
+        &data,
+        None,
+    );
+    let ph2 = ELF_HEADER_SIZE + ELF_PHENTSIZE;
+    let p_vaddr = u64::from_be_bytes(elf[ph2 + 16..ph2 + 24].try_into().unwrap());
+    assert_eq!(p_vaddr, u64::MAX - 16);
+}
+
 #[test]
 #[should_panic(expected = "runs past the")]
 fn a_proc_param_that_does_not_fit_the_data_segment_is_refused() {

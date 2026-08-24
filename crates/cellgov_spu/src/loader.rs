@@ -41,6 +41,20 @@ pub enum LoadError {
         /// Declared memory-image size.
         memsz: u32,
     },
+    /// The ELF entry point leaves no whole instruction word inside
+    /// local store.
+    #[error("SPU ELF entry point 0x{entry:08x} is outside local store")]
+    EntryOutOfRange {
+        /// Declared `e_entry`.
+        entry: u32,
+    },
+    /// `e_phentsize` is not the ELF32 program-header size, so the
+    /// table cannot be strided.
+    #[error("SPU ELF declares program-header entry size {phentsize}, not {ELF32_PHDR_SIZE}")]
+    BadPhentsize {
+        /// Declared `e_phentsize`.
+        phentsize: usize,
+    },
 }
 
 /// Load an SPU ELF binary into `state`, copying PT_LOAD segments into
@@ -73,6 +87,16 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
     let phoff = read_u32(data, 28) as usize;
     let phnum = read_u16(data, 44) as usize;
     let phentsize = read_u16(data, 42) as usize;
+
+    // Every read below indexes the slot at fixed ELF32 offsets, so a
+    // declared slot size other than the architected one is refused
+    // rather than strided over: zero would re-read slot 0 `e_phnum`
+    // times and anything narrower would overlap the neighbouring
+    // header. RPCS3 `Loader/ELF.h` `elf_object::open` refuses the same
+    // mismatch whenever `e_phnum` is nonzero.
+    if phnum != 0 && phentsize != ELF32_PHDR_SIZE {
+        return Err(LoadError::BadPhentsize { phentsize });
+    }
 
     for i in 0..phnum {
         let base = phoff + i * phentsize;
@@ -122,6 +146,14 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
             let bss_end = dst_start + p_memsz;
             state.ls[bss_start..bss_end].fill(0);
         }
+    }
+
+    // An entry point with no whole word left inside local store is
+    // rejected at load rather than deferred to the first failed fetch.
+    // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` refuses a user
+    // image whose entry point sits above `SPU_LS_SIZE - 4`.
+    if entry as usize + 4 > state.ls.len() {
+        return Err(LoadError::EntryOutOfRange { entry });
     }
 
     // [CBE-Handbook p:421 s:14.6.3.3] SPE loader transfers control to entry parameter (e_entry).

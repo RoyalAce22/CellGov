@@ -468,3 +468,167 @@ fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
         "advance pass must have drained after the mirror updated put"
     );
 }
+
+/// Emits one `RsxLabelWrite` on its first step, then finishes.
+#[derive(Clone)]
+struct RsxLabelWriteEmitterUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    offset: u32,
+    value: u32,
+}
+
+impl ExecutionUnit for RsxLabelWriteEmitterUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 1 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.steps.set(1);
+        effects.push(Effect::RsxLabelWrite {
+            offset: self.offset,
+            value: self.value,
+        });
+        ExecutionStepResult {
+            yield_reason: YieldReason::BudgetExhausted,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+/// Backs the flat low region plus the whole per-context sys_rsx
+/// reservation so `sys_rsx_context_allocate`'s driver-info and reports
+/// initialisation writes have somewhere to land.
+fn build_with_sys_rsx_reservation() -> Runtime {
+    use cellgov_lv2::host::Lv2Host;
+    use cellgov_mem::{PageSize, Region};
+    use cellgov_ps3_abi::sys_rsx::region;
+    let regions = vec![
+        Region::new(0, 0x10000, "flat", PageSize::Page4K),
+        Region::new(
+            Lv2Host::SYS_RSX_MEM_BASE as u64,
+            region::CONTEXT_RESERVATION as usize,
+            "rsxmem",
+            PageSize::Page64K,
+        ),
+    ];
+    let mem = GuestMemory::from_regions(regions).expect("non-overlapping");
+    Runtime::new(mem, Budget::new(1), 100)
+}
+
+#[test]
+fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() {
+    use cellgov_lv2::host::Lv2Host;
+    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_ps3_abi::sys_rsx::region;
+    use cellgov_ps3_abi::syscall::SYS_RSX_CONTEXT_ALLOCATE;
+
+    const OFFSET: u32 = 0x40;
+    const VALUE: u32 = 0xCAFE_BABE;
+
+    let mut rt = build_with_sys_rsx_reservation();
+    // Seeded base a scenario might have set before GCM ran; the
+    // published context base has to win over it.
+    rt.set_rsx_label_base(GuestAddr::new(0x4000));
+
+    let mut syscall_args = [0u64; 9];
+    syscall_args[0] = SYS_RSX_CONTEXT_ALLOCATE;
+    syscall_args[1] = 0x100; // context_id_ptr
+    syscall_args[2] = 0x108; // lpar_dma_control_ptr
+    syscall_args[3] = 0x110; // lpar_driver_info_ptr
+    syscall_args[4] = 0x118; // lpar_reports_ptr
+    rt.registry_mut().register_with(|id| Lv2SyscallEmitterUnit {
+        id,
+        steps: Cell::new(0),
+        syscall_args,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    let reports_addr = Lv2Host::SYS_RSX_MEM_BASE + region::REPORTS_OFFSET;
+    assert_eq!(
+        rt.lv2_host().sys_rsx_context().reports_addr,
+        reports_addr,
+        "670 must publish the reports base the label writes resolve against",
+    );
+
+    rt.registry_mut()
+        .register_with(|id| RsxLabelWriteEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            offset: OFFSET,
+            value: VALUE,
+        });
+    let s = rt.step().unwrap();
+    let outcome = rt.commit_step(&s.result, &s.effects).unwrap();
+    assert_eq!(outcome.writes_committed, 1);
+
+    let landed = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new((reports_addr + OFFSET) as u64), 4).unwrap())
+        .expect("reports region is backed");
+    assert_eq!(
+        landed,
+        &VALUE.to_be_bytes(),
+        "the label write must land at reports_addr + offset, not at the \
+         pre-GCM seed or at the bare offset",
+    );
+    let seed_slot = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new(0x4000 + OFFSET as u64), 4).unwrap())
+        .expect("flat region is backed");
+    assert_eq!(
+        seed_slot, &[0u8; 4],
+        "the stale pre-GCM seed must not still be the commit target",
+    );
+}
+
+#[test]
+fn a_label_write_falls_back_to_the_seed_while_no_sys_rsx_context_exists() {
+    use cellgov_mem::{ByteRange, GuestAddr};
+    const LABEL_BASE: u32 = 0x4000;
+    const OFFSET: u32 = 0x40;
+    const VALUE: u32 = 0x0BAD_F00D;
+
+    let mut rt = build_with_sys_rsx_reservation();
+    rt.set_rsx_label_base(GuestAddr::new(LABEL_BASE as u64));
+    assert_eq!(rt.lv2_host().sys_rsx_context().reports_addr, 0);
+
+    rt.registry_mut()
+        .register_with(|id| RsxLabelWriteEmitterUnit {
+            id,
+            steps: Cell::new(0),
+            offset: OFFSET,
+            value: VALUE,
+        });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    let landed = rt
+        .memory()
+        .read(ByteRange::new(GuestAddr::new((LABEL_BASE + OFFSET) as u64), 4).unwrap())
+        .expect("flat region is backed");
+    assert_eq!(landed, &VALUE.to_be_bytes());
+}

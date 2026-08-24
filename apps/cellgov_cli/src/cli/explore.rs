@@ -4,8 +4,8 @@
 use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::args::{find_flag_value, parse_output_format, OutputFormat};
-use super::compare::load_baselines_from_dir;
+use super::args::{find_flag_value, parse_output_format, reject_flag_here, OutputFormat};
+use super::compare::load_observations_from_dir;
 use super::exit::{die, load_file_or_die};
 use super::scenarios::{build_lv2_fixture, microtest_region_defs, scenario_factory, MICROTESTS};
 
@@ -19,17 +19,20 @@ pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     if target == "micro" {
         let name = args.get(3).map(String::as_str).unwrap_or_else(|| {
             die(&format!(
-                "usage: cellgov_cli explore micro <name> [--format human|json]\n       cellgov_cli explore micro <name> --baselines-dir <dir> [--format human|json]\navailable microtests: {}",
+                "usage: cellgov_cli explore micro <name> [--format human|json]\n       cellgov_cli explore micro <name> --observations-dir <dir> [--format human|json]\navailable microtests: {}",
                 MICROTESTS.join(", ")
             ))
         });
-        let baselines_dir = find_flag_value(args, "--baselines-dir");
-        if let Some(dir) = baselines_dir {
+        let observations_dir = find_flag_value(args, "--observations-dir");
+        if let Some(dir) = observations_dir {
             run_explore_micro_oracle(name, &dir, format);
         } else {
             run_explore_micro(name, format);
         }
     } else {
+        // Only the microtest path carries region specs to compare, so
+        // the flag would be read and then never used here.
+        reject_flag_here(args, "--observations-dir", "`explore micro <name>`");
         match scenario_factory(target) {
             Some(factory) => run_explore(&factory, target, format),
             None => die(&format!(
@@ -96,7 +99,7 @@ fn run_explore_micro(name: &str, format: OutputFormat) {
     }
 }
 
-fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputFormat) {
+fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFormat) {
     if !MICROTESTS.contains(&name) {
         die(&format!(
             "unknown microtest: {name}\navailable: {}",
@@ -104,9 +107,11 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
         ));
     }
 
-    let baselines = load_baselines_from_dir(baselines_dir);
+    let baselines = load_observations_from_dir(observations_dir);
     if baselines.is_empty() {
-        die(&format!("no baseline .json files found in {baselines_dir}"));
+        die(&format!(
+            "no observation .json files found in {observations_dir}"
+        ));
     }
 
     let (symbol, region_defs) = microtest_region_defs(name);
@@ -134,8 +139,27 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
     let Some(r) = result else {
         println!("microtest: {name}");
         println!("outcome: no branching points");
+        // No schedules were explored, so nothing was held against the
+        // oracle. Say so rather than letting a silent exit 0 read as
+        // a passing oracle check.
+        println!("oracle_verdict: NOT COMPARED -- no branching points to explore");
         return;
     };
+
+    // An unresolved capture is an unmapped or overflowing region spec,
+    // not a divergence: its bytes are empty regardless of what the run
+    // produced, so comparing it would report a harness fault as an
+    // oracle mismatch.
+    let unresolved = unresolved_region_names(&r.baseline, &r.alternates);
+    if !unresolved.is_empty() {
+        die(&format!(
+            "explore micro {name}: {} region capture(s) could not be read from committed memory: {}\n\
+             a spec that does not resolve makes every verdict below it meaningless; \
+             fix the region spec or the microtest before reading one",
+            unresolved.len(),
+            unresolved.join(", "),
+        ));
+    }
 
     let baseline_matches = compare_regions_against_oracle(&r.baseline.regions, &baselines);
     let alt_matches: Vec<bool> = r
@@ -192,7 +216,30 @@ fn run_explore_micro_oracle(name: &str, baselines_dir: &str, format: OutputForma
     }
 }
 
-/// Returns true when every captured region matches at least one oracle baseline.
+/// `schedule:region` for every capture whose range could not be read,
+/// baseline first then alternates in exploration order.
+fn unresolved_region_names(
+    baseline: &cellgov_explore::oracle::ScheduleSnapshot,
+    alternates: &[cellgov_explore::oracle::ScheduleSnapshot],
+) -> Vec<String> {
+    let labelled = std::iter::once(("baseline".to_string(), baseline)).chain(
+        alternates
+            .iter()
+            .enumerate()
+            .map(|(i, s)| (format!("schedule {i}"), s)),
+    );
+    labelled
+        .flat_map(|(label, snap)| {
+            snap.regions
+                .iter()
+                .filter(|region| !region.resolved)
+                .map(move |region| format!("{label}:{}", region.name))
+        })
+        .collect()
+}
+
+/// Returns true when a single oracle observation carries a matching
+/// name and bytes for every captured region.
 fn compare_regions_against_oracle(
     captured: &[cellgov_explore::oracle::CapturedRegion],
     baselines: &[cellgov_compare::Observation],
@@ -205,3 +252,7 @@ fn compare_regions_against_oracle(
         })
     })
 }
+
+#[cfg(test)]
+#[path = "tests/explore_tests.rs"]
+mod tests;

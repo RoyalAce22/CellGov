@@ -23,48 +23,17 @@
 
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 #[path = "common/digests.rs"]
 mod digests;
+#[path = "common/title_digests.rs"]
+mod title_digests;
 
-#[derive(Deserialize)]
-struct DigestManifest {
-    title: Vec<TitleDigest>,
-}
-
-#[derive(Deserialize)]
-struct TitleDigest {
-    content_id: String,
-    display: String,
-    key: String,
-    rap_filename: Option<String>,
-    unmasked_sha256: String,
-    masked_sha256: Option<String>,
-}
+use title_digests::{hex_to_bytes32, TitleDigest};
 
 fn workspace_root() -> PathBuf {
     digests::workspace_root()
-}
-
-fn load_title_digests() -> Vec<TitleDigest> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/parity_digests.toml");
-    let s =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let parsed: DigestManifest =
-        toml::from_str(&s).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
-    parsed.title
-}
-
-fn hex_to_bytes32(s: &str, ctx: &str) -> [u8; 32] {
-    assert_eq!(s.len(), 64, "{ctx}: hex must be 64 chars, got {}", s.len());
-    let mut out = [0u8; 32];
-    for i in 0..32 {
-        out[i] = u8::from_str_radix(&s[i * 2..i * 2 + 2], 16)
-            .unwrap_or_else(|_| panic!("{ctx}: invalid hex byte at index {i} in {s:?}"));
-    }
-    out
 }
 
 fn bin_path_for(content_id: &str, key: &str) -> PathBuf {
@@ -242,12 +211,10 @@ fn hex_str(bytes: &[u8]) -> String {
 
 #[test]
 fn eboot_byte_identity_against_committed_digests() {
-    let titles = load_title_digests();
-    assert!(
-        !titles.is_empty(),
-        "parity_digests.toml must declare at least one [[title]] entry"
-    );
+    let titles = title_digests::load();
+    title_digests::assert_well_formed(&titles);
     let mut compared = 0usize;
+    let mut against_rpcs3 = 0usize;
     for entry in &titles {
         let checked = match entry.key.as_str() {
             "npdrm" => run_npdrm_digest_check(entry),
@@ -259,6 +226,9 @@ fn eboot_byte_identity_against_committed_digests() {
         };
         if checked {
             compared += 1;
+            if entry.is_rpcs3_reference() {
+                against_rpcs3 += 1;
+            }
         }
     }
     // title-corpus declares the operator owns title dumps. Which rows
@@ -271,8 +241,22 @@ fn eboot_byte_identity_against_committed_digests() {
          or build without the feature.",
         titles.len()
     );
+    // Only npdrm rows carry an RPCS3-derived hash. A run of app rows
+    // alone still gates -- against CellGov's own refactor-invariance
+    // baseline -- but it is not cross-runner parity, and the census is
+    // the only place a reader learns which of the two happened.
     eprintln!(
-        "cellgov_install eboot parity: compared {compared}/{} titles",
-        titles.len()
+        "cellgov_install eboot parity: compared {compared}/{} titles \
+         ({against_rpcs3} against the RPCS3 reference, {} against a \
+         CellGov baseline)",
+        titles.len(),
+        compared - against_rpcs3,
     );
+    if against_rpcs3 == 0 {
+        eprintln!(
+            "cellgov_install eboot parity: no installed title carries an \
+             RPCS3 reference hash; this run held nothing against RPCS3. \
+             Install an npdrm title to close that gap."
+        );
+    }
 }

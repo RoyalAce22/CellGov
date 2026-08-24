@@ -45,8 +45,9 @@ fn cross_space_pair_is_schedule_stable() {
     });
 
     let r = result.expect("should have a branching point");
-    assert!(
+    assert_eq!(
         r.is_schedule_stable(),
+        Some(true),
         "same numeric address in disjoint spaces must not alias across schedules"
     );
 }
@@ -92,8 +93,9 @@ fn child_space_only_divergence_is_not_schedule_stable() {
     });
 
     let r = result.expect("should have a branching point");
-    assert!(
-        !r.is_schedule_stable(),
+    assert_eq!(
+        r.is_schedule_stable(),
+        Some(false),
         "a last-writer race confined to a child space must be witnessed"
     );
 }
@@ -127,8 +129,9 @@ fn disjoint_writes_are_schedule_stable() {
     });
 
     let r = result.expect("should have a branching point");
-    assert!(
+    assert_eq!(
         r.is_schedule_stable(),
+        Some(true),
         "disjoint writes should produce identical memory regardless of order"
     );
 }
@@ -162,8 +165,9 @@ fn overlapping_writes_are_schedule_sensitive() {
     });
 
     let r = result.expect("should have a branching point");
-    assert!(
-        !r.is_schedule_stable(),
+    assert_eq!(
+        r.is_schedule_stable(),
+        Some(false),
         "overlapping writes should produce different memory depending on order"
     );
 }
@@ -178,4 +182,34 @@ fn no_branching_returns_none() {
         rt
     });
     assert!(result.is_none());
+}
+
+#[test]
+fn a_pair_whose_runs_stopped_short_reports_no_stability_verdict() {
+    let result = explore_pair(|| {
+        let mem = GuestMemory::new(64);
+        // Two 3-op units need 6 steps; the cap refuses the 5th.
+        let mut rt = Runtime::new(mem, Budget::new(100), 4);
+        for imm in [0xAAu32, 0xBB] {
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(imm),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+        }
+        rt
+    });
+
+    let r = result.expect("should have a branching point");
+    assert!(r.stop_a.is_truncated());
+    assert_eq!(
+        r.is_schedule_stable(),
+        None,
+        "a prefix hash cannot answer the stability question either way",
+    );
 }

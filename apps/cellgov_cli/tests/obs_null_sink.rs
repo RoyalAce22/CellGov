@@ -26,7 +26,7 @@ use std::process::Command;
 
 use cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL;
 use cellgov_compare::BootSummary;
-use registry::{baseline_path, titles, workspace_root, TitleUnderTest};
+use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
 
 enum Run {
     NotInstalled,
@@ -87,24 +87,27 @@ fn observability_is_inert_wiping_it_every_step_leaves_the_state_trace_byte_ident
         std::env::temp_dir().join(format!("cellgov_obs_null_sink_{}", std::process::id()));
     std::fs::create_dir_all(&scratch).expect("create scratch dir");
 
+    // Every registered title carries a committed baseline
+    // (`registry_structure` gates that), so an unreadable or malformed
+    // one is a corpus defect. Dropping it would quietly re-order the
+    // cheapest-first selection below and boot a different title than
+    // the one this gate is sized for.
     let mut by_cost: Vec<(u64, TitleUnderTest)> = titles()
         .into_iter()
-        .filter_map(|t| {
-            let path = baseline_path(&t.content_id);
-            let text = std::fs::read_to_string(&path).ok()?;
-            let summary: BootSummary = serde_json::from_str(&text).ok()?;
-            Some((summary.steps, t))
+        .map(|t| {
+            let path = boot_anchor_path(&t.content_id);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("{}: read {}: {e}", t.short_name, path.display()));
+            let summary: BootSummary = serde_json::from_str(&text).unwrap_or_else(|e| {
+                panic!(
+                    "{}: {} is not a BootSummary: {e}",
+                    t.short_name,
+                    path.display()
+                )
+            });
+            (summary.steps, t)
         })
         .collect();
-    // The filter above drops a title whose baseline file is missing or
-    // malformed; if that drops every title the loop below never runs
-    // and the not-installed message would misattribute the cause.
-    assert!(
-        !by_cost.is_empty(),
-        "no registry title has a readable committed baseline \
-         (boot_summary.json missing or malformed for every title); \
-         the inertness gate cannot select a title"
-    );
     by_cost.sort_by_key(|(steps, _)| *steps);
 
     let mut ran = 0usize;

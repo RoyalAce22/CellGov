@@ -232,12 +232,17 @@ fn range4(addr: u64) -> cellgov_mem::ByteRange {
     cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4).unwrap()
 }
 
+/// Emitter for write intents whose source these tests do not care
+/// about. Outside the range the registry allocates from, so it cannot
+/// coincide with a unit a test registers and start meaning something.
+const UNSPECIFIED_SOURCE: UnitId = UnitId::new(0xD0);
+
 fn write_intent(addr: u64, value: u32) -> Effect {
     Effect::SharedWriteIntent {
         range: range4(addr),
         bytes: cellgov_effects::WritePayload::from_slice(&value.to_be_bytes()),
         ordering: cellgov_event::PriorityClass::Normal,
-        source: UnitId::new(0),
+        source: UNSPECIFIED_SOURCE,
         source_time: GuestTicks::new(0),
     }
 }

@@ -4,7 +4,14 @@ use super::*;
 
 #[test]
 fn parse_sce_header_rejects_short() {
-    assert!(parse_sce_header(&[0u8; 16]).is_err());
+    assert!(matches!(
+        parse_sce_header(&[0u8; 16]).unwrap_err(),
+        SceError::TooSmall {
+            what: "SCE header",
+            got: 16,
+            need: 0x20
+        }
+    ));
 }
 
 #[test]
@@ -29,7 +36,198 @@ fn parse_sce_header_accepts_valid() {
 
 #[test]
 fn decrypt_package_rejects_truncated() {
-    assert!(decrypt_package(&[0u8; 8]).is_err());
+    assert!(matches!(
+        decrypt_package(&[0u8; 8]).unwrap_err(),
+        SceError::TooSmall {
+            what: "SCE header",
+            got: 8,
+            need: 0x20
+        }
+    ));
+}
+
+/// 0x100-byte SCE container with `metadata_offset` 0x20, so the key
+/// envelope sits at 0x40..0x80 and the metadata directory starts at
+/// 0x80.
+fn build_sce_container(revision_flags: u16, header_size: u64) -> Vec<u8> {
+    let mut data = vec![0u8; 0x100];
+    data[0..4].copy_from_slice(&0x5343_4500u32.to_be_bytes());
+    data[8..10].copy_from_slice(&revision_flags.to_be_bytes());
+    data[12..16].copy_from_slice(&0x20u32.to_be_bytes());
+    data[16..24].copy_from_slice(&header_size.to_be_bytes());
+    data
+}
+
+#[test]
+fn a_debug_container_whose_envelope_padding_is_not_zero_is_named() {
+    let mut data = build_sce_container(0x8000, 0x100);
+    // Envelope key-padding region at 0x40 + 0x10.
+    data[0x50] = 0x01;
+    let hdr = parse_sce_header(&data).unwrap();
+    let err = decrypt_envelope(&data, &hdr, &[0u8; 0x20], &[0u8; 0x10], None).unwrap_err();
+    assert!(
+        matches!(err, SceError::KeyEnvelopePadding),
+        "the debug branch skips the key peel, not the self-check, got {err:?}"
+    );
+}
+
+#[test]
+fn a_debug_container_whose_envelope_padding_is_zero_passes_through_unpeeled() {
+    let mut data = build_sce_container(0x8000, 0x100);
+    data[0x40..0x50].copy_from_slice(&[0xABu8; 16]);
+    data[0x60..0x70].copy_from_slice(&[0xCDu8; 16]);
+    let hdr = parse_sce_header(&data).unwrap();
+    let envelope = decrypt_envelope(&data, &hdr, &[0u8; 0x20], &[0u8; 0x10], None)
+        .expect("zero padding certifies the plaintext envelope");
+    assert_eq!(&envelope[0x00..0x10], &[0xABu8; 16]);
+    assert_eq!(&envelope[0x20..0x30], &[0xCDu8; 16]);
+}
+
+#[test]
+fn a_header_size_at_or_below_the_metadata_directory_start_is_not_reported_as_a_short_file() {
+    // header_size 0x40 ends the directory before its 0x80 start while
+    // the buffer holds 0x100 bytes -- a short-file answer here would
+    // name a `need` below the bytes already on hand.
+    let data = build_sce_container(0x0001, 0x40);
+    let hdr = parse_sce_header(&data).unwrap();
+    let err = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], None).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "SCE metadata directory"
+            }
+        ),
+        "a header_size that describes no directory is a malformed header, got {err:?}"
+    );
+}
+
+#[test]
+fn a_header_size_past_the_buffer_is_still_reported_as_a_short_file() {
+    let data = build_sce_container(0x0001, 0x200);
+    let hdr = parse_sce_header(&data).unwrap();
+    let err = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], None).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::TooSmall {
+                what: "SCE metadata headers",
+                got: 0x100,
+                need: 0x200
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+fn zlib_compress(plain: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(plain).unwrap();
+    encoder.finish().unwrap()
+}
+
+/// SCE container holding one PHDR-kind, plaintext, zlib-compressed
+/// section that targets program-header row 0.
+///
+/// `decrypt_sections_from_envelope` CTR-decrypts the metadata
+/// directory under the envelope it is handed; the tests hand it an
+/// all-zero envelope, and CTR is its own inverse, so the directory is
+/// stored through the same pass.
+fn build_container_with_one_zlib_section(compressed: &[u8]) -> Vec<u8> {
+    use aes::cipher::{KeyIvInit, StreamCipher};
+
+    const DIRECTORY_OFFSET: usize = 0x80;
+    const PAYLOAD_OFFSET: usize = 0x100;
+    const DIRECTORY_LEN: usize = 0x20 + 0x30;
+    const HEADER_SIZE: usize = DIRECTORY_OFFSET + DIRECTORY_LEN;
+
+    let mut directory = vec![0u8; DIRECTORY_LEN];
+    directory[0x0C..0x10].copy_from_slice(&1u32.to_be_bytes()); // section_count
+    let row = 0x20;
+    directory[row..row + 8].copy_from_slice(&(PAYLOAD_OFFSET as u64).to_be_bytes());
+    directory[row + 8..row + 0x10].copy_from_slice(&(compressed.len() as u64).to_be_bytes());
+    directory[row + 0x10..row + 0x14].copy_from_slice(&2u32.to_be_bytes()); // PHDR kind
+    directory[row + 0x20..row + 0x24].copy_from_slice(&1u32.to_be_bytes()); // plaintext
+    directory[row + 0x2C..row + 0x30].copy_from_slice(&2u32.to_be_bytes()); // zlib
+
+    ctr::Ctr128BE::<aes::Aes128>::new(&[0u8; 16].into(), &[0u8; 16].into())
+        .apply_keystream(&mut directory);
+
+    let mut data = vec![0u8; PAYLOAD_OFFSET + compressed.len()];
+    data[0..4].copy_from_slice(&0x5343_4500u32.to_be_bytes());
+    data[12..16].copy_from_slice(&0x20u32.to_be_bytes()); // metadata_offset
+    data[16..24].copy_from_slice(&(HEADER_SIZE as u64).to_be_bytes());
+    data[DIRECTORY_OFFSET..HEADER_SIZE].copy_from_slice(&directory);
+    data[PAYLOAD_OFFSET..].copy_from_slice(compressed);
+    data
+}
+
+#[test]
+fn a_zlib_section_inflating_past_its_segment_filesz_is_named() {
+    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
+    let hdr = parse_sce_header(&data).unwrap();
+    let err =
+        decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], Some(&[0x100])).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::SectionInflatesPastSegment {
+                index: 0,
+                prog_idx: 0,
+                p_filesz: 0x100
+            }
+        ),
+        "a stream that wants more than its segment declares must be named, got {err:?}"
+    );
+}
+
+#[test]
+fn a_zlib_section_inflating_to_exactly_its_segment_filesz_is_accepted() {
+    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
+    let hdr = parse_sce_header(&data).unwrap();
+    let sections = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], Some(&[0x400]))
+        .expect("an exact-fit stream is the shape every real SELF ships");
+    assert_eq!(sections[0].1, vec![0xAAu8; 0x400]);
+}
+
+#[test]
+fn a_zlib_section_naming_a_program_index_past_the_phdr_table_cannot_escape_the_inflate_bound() {
+    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
+    let hdr = parse_sce_header(&data).unwrap();
+    let err = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], Some(&[])).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::SectionProgramIndexOutOfRange {
+                prog_idx: 0,
+                e_phnum: 0
+            }
+        ),
+        "an out-of-range program index must be named, not read as no bound at all, got {err:?}"
+    );
+}
+
+#[test]
+fn a_segment_declaring_the_widest_possible_filesz_does_not_overflow_the_inflate_bound() {
+    // The bound is the declared size plus one, so a `p_filesz` of
+    // `usize::MAX` is the value that wraps it.
+    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
+    let hdr = parse_sce_header(&data).unwrap();
+    let sections = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], Some(&[usize::MAX]))
+        .expect("a segment wider than the stream bounds nothing away");
+    assert_eq!(sections[0].1.len(), 0x400);
+}
+
+#[test]
+fn a_zlib_section_in_a_container_with_no_inner_elf_inflates_unbounded() {
+    // The firmware-update PKG path wraps no ELF, so no program header
+    // declares a size for its sections to be held to.
+    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
+    let hdr = parse_sce_header(&data).unwrap();
+    let sections = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], None)
+        .expect("no segment table, no bound");
+    assert_eq!(sections[0].1.len(), 0x400);
 }
 
 /// Minimal SCE buffer with a program identification header at
@@ -281,6 +479,98 @@ fn the_section_header_table_lands_on_top_of_an_overlapping_segment_payload() {
     );
 }
 
+/// PHDR-kind descriptor naming program-header row `prog_idx`. The
+/// payload fields go unread: `assemble_elf_from_sections` takes the
+/// already-decrypted bytes from its `sections` argument.
+fn phdr_section(prog_idx: u32) -> EncryptedSectionDescriptor {
+    EncryptedSectionDescriptor {
+        payload_offset: 0,
+        payload_size: 0,
+        section_kind: 2,
+        program_segment_index: prog_idx,
+        sha1_hashed: 0,
+        sha1_slot: 0,
+        encryption_kind: 0,
+        key_slot: 0,
+        iv_slot: 0,
+        compression_kind: 0,
+    }
+}
+
+#[test]
+fn an_empty_payload_against_a_non_zero_filesz_is_named_rather_than_left_as_zeroes() {
+    let mut data = build_synthetic_self();
+    // One program header: p_offset = 0x80, p_filesz = 0x40.
+    data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+    data[0x208..0x210].copy_from_slice(&0x80u64.to_be_bytes());
+    data[0x220..0x228].copy_from_slice(&0x40u64.to_be_bytes());
+
+    let sections = vec![(phdr_section(0), Vec::new())];
+    let err = assemble_elf_from_sections(&data, &sections).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::SectionSizeMismatch {
+                prog_idx: 0,
+                got: 0,
+                expected: 0x40
+            }
+        ),
+        "an empty section for a 0x40-byte segment must be named, got {err:?}"
+    );
+}
+
+#[test]
+fn an_empty_payload_against_a_zero_filesz_segment_still_assembles() {
+    let mut data = build_synthetic_self();
+    // One program header with p_offset = 0x80 and p_filesz = 0: the
+    // shape a .bss-only PT_LOAD produces, and the one case an
+    // empty-payload skip would legitimately cover.
+    data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+    data[0x208..0x210].copy_from_slice(&0x80u64.to_be_bytes());
+
+    let sections = vec![(phdr_section(0), Vec::new())];
+    let elf = assemble_elf_from_sections(&data, &sections).expect("zero-length segment assembles");
+    assert_eq!(&elf[0..4], &0x7F45_4C46u32.to_be_bytes());
+}
+
+#[test]
+fn an_empty_payload_naming_a_program_index_past_e_phnum_is_still_rejected() {
+    let mut data = build_synthetic_self();
+    data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+
+    let sections = vec![(phdr_section(7), Vec::new())];
+    let err = assemble_elf_from_sections(&data, &sections).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::SectionProgramIndexOutOfRange {
+                prog_idx: 7,
+                e_phnum: 1
+            }
+        ),
+        "an empty payload must not buy a section past the phdr table, got {err:?}"
+    );
+}
+
+#[test]
+fn a_program_segment_extent_too_large_to_allocate_is_named_rather_than_aborting() {
+    let mut data = build_synthetic_self();
+    // One program header whose p_offset alone names an image past
+    // anything a host can back. The extent addition does not overflow,
+    // so only the fallible reserve stands between this header and an
+    // allocation abort.
+    data[0x138..0x13A].copy_from_slice(&1u16.to_be_bytes());
+    data[0x208..0x210].copy_from_slice(&0x0000_7FFF_FFFF_0000u64.to_be_bytes());
+    data[0x220..0x228].copy_from_slice(&0x40u64.to_be_bytes());
+
+    let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+    assert!(
+        matches!(err, SceError::ReconstructedElfTooLarge { .. }),
+        "an unallocatable image size must be named, got {err:?}"
+    );
+}
+
 #[test]
 fn assemble_inner_elf_bad_magic_returns_typed_error() {
     let mut data = build_synthetic_self();
@@ -330,15 +620,23 @@ fn assemble_bad_shentsize_returns_typed_error() {
 }
 
 #[test]
-fn assemble_zero_phnum_with_zero_phentsize_is_accepted() {
-    // SPRX shape: e_phnum = e_shnum = 0, entsize fields zero.
-    // Must clear the entsize gate; downstream failures are
-    // out of scope for this assertion.
+fn an_sprx_shape_with_zero_counts_and_zero_entsizes_assembles_to_a_bare_elf_header() {
+    // SPRX shape: e_phnum = e_shnum = 0, entsize fields zero. The
+    // entsize gate fires only on a non-zero count, so this clears it
+    // and reassembles to the 0x40-byte header alone.
     let data = build_synthetic_self();
-    let result = assemble_elf_from_sections(&data, &[]);
-    if let Err(SceError::BadElfEntSize { .. }) = result {
-        panic!("unexpected BadElfEntSize for SPRX-shape input");
-    }
+    let elf = assemble_elf_from_sections(&data, &[]).expect("SPRX-shape input reassembles");
+    assert_eq!(
+        elf.len(),
+        0x40,
+        "no phdr table, no payload sections, no shdr table"
+    );
+    assert_eq!(&elf[0..4], &0x7F45_4C46u32.to_be_bytes());
+    assert_eq!(
+        &elf[0x20..0x28],
+        &0x40u64.to_be_bytes(),
+        "e_phoff rewritten to the packed phdr position"
+    );
 }
 
 /// SCE buffer with a supplemental chain holding one record of `kind`
@@ -408,29 +706,33 @@ fn parse_control_flags1_matches_known_corpus_values() {
         p
     };
     // (label, fixture, the directory `cellgov_install` creates when
-    // that module / title is installed, expected ctrl_flags1).
+    // that module / title is installed, whether the SELF carries a
+    // plaintext capability record at all, expected ctrl_flags1).
     let cases = [
         (
             "vsh.self (CoreOS)",
             "vfs/dev_flash/vsh/module/vsh.self",
             "vfs/dev_flash/vsh/module",
+            true,
             0x4000_0000u32,
         ),
         (
             "flOw (NPDRM SELF)",
             "vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
             "vfs/dev_hdd0/game/NPUA80001",
+            true,
             0x0000_0000u32,
         ),
         (
             "Super Stardust HD (NPDRM SELF)",
             "vfs/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN",
             "vfs/dev_hdd0/game/NPUA80068",
+            true,
             0x0000_0000u32,
         ),
     ];
     let mut checked = 0;
-    for (label, rel, installed, expected) in cases {
+    for (label, rel, installed, has_capability_record, expected) in cases {
         let path = root.join(rel);
         let Ok(bytes) = std::fs::read(&path) else {
             assert!(
@@ -441,12 +743,20 @@ fn parse_control_flags1_matches_known_corpus_values() {
             eprintln!("parse_control_flags1 corpus pin: skipping {label} (not installed)");
             continue;
         };
-        let got = parse_control_flags1(&bytes).unwrap().unwrap_or(0);
-        assert_eq!(got, expected, "{label}: ctrl_flags1 mismatch");
+        let flags = parse_control_flags1(&bytes).unwrap();
+        // All three carry a capability record; the retail pair's flags
+        // word is simply zero. Collapsing `None` to 0 would read a
+        // vanished record as an unprivileged one, so presence is
+        // pinned apart from the value.
         assert_eq!(
-            got & 0xC000_0000 != 0,
-            expected != 0,
-            "{label}: root predicate disagrees with the pinned flags"
+            flags.is_some(),
+            has_capability_record,
+            "{label}: capability-record presence"
+        );
+        assert_eq!(
+            flags.unwrap_or(0),
+            expected,
+            "{label}: ctrl_flags1 mismatch"
         );
         checked += 1;
     }

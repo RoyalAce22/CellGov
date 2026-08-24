@@ -27,35 +27,43 @@ const USAGE_COMPARE: &str = "\
 cellgov_cli compare <scenario|manifest.toml> [--mode strict|memory|events|prefix] [--format human|json]
 cellgov_cli compare <scenario|manifest.toml> --save-baseline <path>
 cellgov_cli compare <scenario|manifest.toml> --against-baseline <path> [--mode ...] [--format ...]
-cellgov_cli compare <manifest.toml> --baselines-dir <dir> [--mode ...] [--format ...]";
+cellgov_cli compare <manifest.toml> --observations-dir <dir> [--mode ...] [--format ...]";
 const USAGE_EXPLORE: &str = "\
 cellgov_cli explore <scenario> [--format human|json]
-cellgov_cli explore micro <name> [--format human|json]";
+cellgov_cli explore micro <name> [--observations-dir <dir>] [--format human|json]";
 const USAGE_RUN_GAME: &str = "\
 cellgov_cli run-game <--title NAME|--content-id ID|--title-manifest PATH> [elf-path]
 \t\t[--max-steps N] [--budget N] [--trace] [--profile]
 \t\t[--firmware-dir DIR] [--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]
 \t\t(default --firmware-dir: vfs/dev_flash/sys/external/ when present at the current working directory)";
 const USAGE_BENCH_BOOT: &str = "\
-cellgov_cli bench-boot --title <name> [--max-steps N] [--budget N] [--firmware-dir DIR]
+cellgov_cli bench-boot <--title NAME|--content-id ID|--title-manifest PATH>
+\t\t[--max-steps N] [--budget N] [--firmware-dir DIR] [--vfs-root PATH]
 \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan] [--guest-arg VAL]
-\t\t[--no-anchor-check]
-\t\t(the run is held against the title's committed anchor; an override that
-\t\t retargets the boot reports as not compared rather than failing)";
+\t\t[--strict-reserved] [--no-anchor-check]
+\t\t(--max-steps defaults to the manifest's bench_max_steps, the cap the
+\t\t anchor is recorded at; the run is held against the title's committed
+\t\t anchor, and an override that retargets the boot reports as not
+\t\t compared rather than failing)";
 const USAGE_BENCH_BOOT_ONCE: &str = "\
 cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>
-\t\t[--max-steps N] [--budget N] [--firmware-dir DIR]
-\t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR]";
+\t\t[--max-steps N] [--budget N] [--firmware-dir DIR] [--vfs-root PATH]
+\t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan]
+\t\t[--strict-reserved] [--guest-arg VAL]";
 const USAGE_DUMP: &str = "cellgov_cli dump <scenario>";
-const USAGE_DUMP_PRX_IMPORTS: &str =
-    "cellgov_cli dump-prx-imports <path-to-prx-or-sprx> [--at 0xADDR] [--module NAME]";
-const USAGE_DISASM: &str = "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize]";
-const USAGE_FUNCS: &str = "cellgov_cli funcs <elf-path> [--json]";
-const USAGE_RPCS3_ATTRIBUTE: &str =
-    "cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]";
+const USAGE_DUMP_PRX_IMPORTS: &str = "\
+cellgov_cli dump-prx-imports <path-to-prx-or-sprx> [--at 0xADDR] [--module NAME]
+\t\t[--save-elf PATH] [--vfs-root PATH]";
+const USAGE_DISASM: &str =
+    "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize] [--vfs-root PATH]";
+const USAGE_FUNCS: &str = "cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]";
+const USAGE_RPCS3_ATTRIBUTE: &str = "\
+cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]
+\t\t[--name SUBSTR]  (at least one query mode is required)";
 const USAGE_FIXTURE_GEN: &str = "\
 cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --output-dir <path>
-\t\t[--vfs-root PATH] (defaults: CELLGOV_PS3_VFS_ROOT env, then vfs/dev_hdd0)";
+\t\t[--vfs-root PATH] [--allow-divergence]
+\t\t(defaults: CELLGOV_PS3_VFS_ROOT env, then vfs/dev_hdd0)";
 const USAGE_TITLES_GEN: &str = "\
 cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
 \t\t(defaults: docs/title_manifests, tests/fixtures, docs/titles.md)";
@@ -67,7 +75,10 @@ const USAGE_RECORD_ANCHORS: &str = "\
 cellgov_cli record-anchors <--all | --title NAME> [--registry DIR]
 \t\tre-measure each title and rewrite its committed boot_summary.json
 \t\tbaseline; appends to boot_history.jsonl only when a value moved.
-\t\tWitness classes already set in the baseline are preserved.";
+\t\tWitness classes already set in the baseline are preserved.
+\t\t--registry must name the default docs/title_manifests: the boot is
+\t\tre-entered as `bench-boot-once --title NAME`, which reads only that
+\t\tdirectory, so any other DIR is refused rather than measured wrong.";
 
 /// Top-level dispatcher routes.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

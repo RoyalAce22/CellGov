@@ -15,21 +15,11 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::game_install::InstallRecord;
 
+use crate::cli::args::{find_flag_value, has_bool_flag, reject_flag_here, require_at_most_one};
 use crate::cli::exit::die;
 
 const DEFAULT_REGISTRY: &str = "docs/title_manifests";
 const DEFAULT_INSTALLS: &str = "installs";
-
-fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1))
-        .map(String::as_str)
-}
-
-fn has_flag(args: &[String], name: &str) -> bool {
-    args.iter().any(|a| a == name)
-}
 
 /// Escape a string for a double-quoted TOML basic string.
 fn toml_escape(s: &str) -> String {
@@ -37,14 +27,30 @@ fn toml_escape(s: &str) -> String {
 }
 
 pub(crate) fn run(args: &[String]) {
-    let record_path = match (flag(args, "--record"), flag(args, "--title-id")) {
-        (Some(p), _) => PathBuf::from(p),
-        (None, Some(id)) => PathBuf::from(flag(args, "--installs").unwrap_or(DEFAULT_INSTALLS))
-            .join(format!("{id}.install.toml")),
+    // The shared parsers, not a local scan: they refuse `--flag=value`
+    // and a duplicate, both of which a bare `position(|a| a == name)`
+    // reads as absent -- a `--force=1` that read as absent left the
+    // existing manifest in place and still exited 0.
+    require_at_most_one(args, &["--record", "--title-id"]);
+    let record_flag = find_flag_value(args, "--record");
+    let title_id = find_flag_value(args, "--title-id");
+    let record_path = match (record_flag, title_id) {
+        (Some(p), _) => {
+            // --installs only names the directory a --title-id is
+            // resolved under; an explicit record path is already whole.
+            reject_flag_here(args, "--installs", "a --title-id lookup");
+            PathBuf::from(p)
+        }
+        (None, Some(id)) => PathBuf::from(
+            find_flag_value(args, "--installs").unwrap_or_else(|| DEFAULT_INSTALLS.to_string()),
+        )
+        .join(format!("{id}.install.toml")),
         (None, None) => die("gen-manifest requires --record <path> or --title-id <id>"),
     };
-    let registry = PathBuf::from(flag(args, "--registry").unwrap_or(DEFAULT_REGISTRY));
-    let force = has_flag(args, "--force");
+    let registry = PathBuf::from(
+        find_flag_value(args, "--registry").unwrap_or_else(|| DEFAULT_REGISTRY.to_string()),
+    );
+    let force = has_bool_flag(args, "--force");
 
     let text = std::fs::read_to_string(&record_path)
         .unwrap_or_else(|e| die(&format!("failed to read {}: {e}", record_path.display())));

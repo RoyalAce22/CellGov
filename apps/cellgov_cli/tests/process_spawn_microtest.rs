@@ -341,6 +341,20 @@ fn a_wrapped_child_and_its_plaintext_elf_run_identically() {
 
     let plain = run_once(&parent_elf, &child_elf);
     let wrapped = run_once(&parent_elf, &child_self);
+    // Anti-vacuity floor: every equality below holds trivially between
+    // two runs that died before the spawn, so the plaintext side has to
+    // be a clean finish before it can stand in as the reference.
+    assert_eq!(plain.first_fault, None, "no unit may fault during the run");
+    assert_eq!(
+        plain.terminal,
+        StepError::NoRunnableUnit,
+        "the plaintext reference run must end with every unit Finished",
+    );
+    assert_eq!(
+        plain.child_exit_status,
+        Some(42),
+        "the plaintext reference run must have spawned and reaped the child",
+    );
     assert_eq!(
         plain.steps, wrapped.steps,
         "the SELF envelope must not change how far the run gets",

@@ -4,7 +4,7 @@
 use crate::decision::DecisionLog;
 use crate::observer::observe_decisions;
 use crate::prescribed::PrescribedScheduler;
-use crate::util::{build_overrides, run_to_stall};
+use crate::util::{build_overrides, run_to_stall, StopReason};
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
 
@@ -21,12 +21,25 @@ pub struct PairResult {
     pub branch_step: usize,
     /// Unit chosen at the branch point in the alternate run.
     pub alternate_choice: UnitId,
+    /// Why the default run stopped.
+    pub stop_a: StopReason,
+    /// Why the alternate run stopped.
+    pub stop_b: StopReason,
 }
 
 impl PairResult {
-    /// True when the two schedules committed identical memory.
-    pub fn is_schedule_stable(&self) -> bool {
-        self.hash_a == self.hash_b
+    /// `Some(true)` when both schedules ran themselves out and
+    /// committed identical memory, `Some(false)` when they ran
+    /// themselves out and disagreed.
+    ///
+    /// `None` when either run stopped short: a prefix hash differs from
+    /// a finished run's hash whether or not the workload is schedule-
+    /// sensitive, so neither answer is available.
+    pub fn is_schedule_stable(&self) -> Option<bool> {
+        if self.stop_a.is_truncated() || self.stop_b.is_truncated() {
+            return None;
+        }
+        Some(self.hash_a == self.hash_b)
     }
 }
 
@@ -41,7 +54,7 @@ where
     F: FnMut() -> Runtime,
 {
     let mut rt_a = make_runtime();
-    let log = observe_decisions(&mut rt_a);
+    let (log, stop_a) = observe_decisions(&mut rt_a);
     let hash_a = rt_a.committed_memory_hash();
 
     let branch = log.branching_points().next()?;
@@ -57,7 +70,7 @@ where
     let overrides = build_overrides(branch_step, alternate_choice);
     let mut rt_b = make_runtime();
     rt_b.set_scheduler(PrescribedScheduler::new(overrides));
-    run_to_stall(&mut rt_b, usize::MAX);
+    let stop_b = run_to_stall(&mut rt_b, usize::MAX);
     let hash_b = rt_b.committed_memory_hash();
 
     Some(PairResult {
@@ -66,6 +79,8 @@ where
         hash_b,
         branch_step,
         alternate_choice,
+        stop_a,
+        stop_b,
     })
 }
 

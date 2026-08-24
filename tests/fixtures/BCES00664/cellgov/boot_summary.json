@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 43082,
+  "steps": 43040,
   "budget": 256,
   "host_invariant_breaks": 2,
   "witnesses": {
@@ -12,7 +12,7 @@
       "class": "absent"
     },
     "dcbz": {
-      "value": 615,
+      "value": 614,
       "class": "at-least"
     },
     "host_invariant_breaks": {
@@ -20,19 +20,19 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 11795,
+      "value": 11779,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 10805,
+      "value": 10797,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 990,
+      "value": 982,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 990,
+      "value": 982,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -76,11 +76,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 10805,
+      "value": 10797,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 8824,
+      "value": 8832,
       "class": "at-least"
     },
     "timer_sleeps": {

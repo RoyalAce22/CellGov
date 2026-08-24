@@ -56,11 +56,17 @@ pub(super) struct ManifestRsx {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ManifestSource {
-    /// One of `"hdd"`, `"disc"`, `"firmware-exec"`.
+    /// One of `"hdd"`, `"disc"`, `"firmware-exec"`,
+    /// `"manifest-relative"`.
     pub(super) kind: String,
     /// Host directory holding the executable. Required by
-    /// `firmware-exec`, rejected by the other kinds, which derive the
-    /// directory from `content_id`.
+    /// `firmware-exec` and `manifest-relative`, rejected by the other
+    /// kinds, which derive the directory from `content_id`. A
+    /// `manifest-relative` path resolves against the manifest's own
+    /// directory; a `firmware-exec` one against the process cwd. Empty
+    /// is rejected for both, and a rooted or drive-prefixed path is
+    /// rejected for `manifest-relative`, which such a path would
+    /// silently stop being.
     #[serde(default)]
     pub(super) path: Option<String>,
 }
@@ -68,14 +74,19 @@ pub(super) struct ManifestSource {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ManifestTitle {
-    pub(super) content_id: String,
+    /// Omittable only by a `manifest-relative` title, which has no PSN
+    /// identity; the loader then derives it from the manifest's
+    /// directory name.
+    #[serde(default)]
+    pub(super) content_id: Option<String>,
     pub(super) short_name: String,
     pub(super) display_name: String,
     pub(super) eboot_candidates: Vec<String>,
     pub(super) year: u16,
     pub(super) developer: String,
     pub(super) engine: String,
-    /// One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`.
+    /// One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`,
+    /// `"firmware-exec"`, `"microtest"`.
     pub(super) distribution: String,
     /// Operator-supplied RAP filename for NPDRM titles, resolved at
     /// boot under `<vfs_root>/home/00000001/exdata/`. Required for

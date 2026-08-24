@@ -105,6 +105,7 @@ fn compute_limit() -> usize {
 
 /// `rel_dir` is relative to ps3autotests' `tests/` root; `stem` is
 /// shared between `<stem>.ppu.elf` and `<stem>.expected`.
+#[derive(Clone, Copy)]
 struct Case {
     rel_dir: &'static str,
     stem: &'static str,
@@ -115,6 +116,52 @@ struct Case {
     /// `None` waives the check.
     expected_steps: Option<usize>,
 }
+
+const CPU_BASIC: Case = Case {
+    rel_dir: "cpu/basic",
+    stem: "basic",
+    max_steps: 200_000,
+    expected_steps: Some(83),
+};
+
+const CPU_PPU_BRANCH: Case = Case {
+    rel_dir: "cpu/ppu_branch",
+    stem: "ppu_branch",
+    max_steps: 50_000_000,
+    expected_steps: Some(52_622),
+};
+
+const LV2_SYS_EVENT_FLAG: Case = Case {
+    rel_dir: "lv2/sys_event_flag",
+    stem: "sys_event_flag",
+    max_steps: 10_000_000,
+    expected_steps: Some(1_494),
+};
+
+const LV2_SYS_PROCESS: Case = Case {
+    rel_dir: "lv2/sys_process",
+    stem: "sys_process",
+    max_steps: 10_000_000,
+    expected_steps: Some(3_686),
+};
+
+const LV2_SYS_SEMAPHORE: Case = Case {
+    rel_dir: "lv2/sys_semaphore",
+    stem: "sys_semaphore",
+    max_steps: 10_000_000,
+    expected_steps: Some(1_167),
+};
+
+/// Every case the boot tests below name. They are all `#[ignore]`
+/// pending an HLE binding for the sysPrxForUser NIDs these ELFs
+/// import, so this table is what the corpus gate walks.
+const CASES: &[Case] = &[
+    CPU_BASIC,
+    CPU_PPU_BRANCH,
+    LV2_SYS_EVENT_FLAG,
+    LV2_SYS_PROCESS,
+    LV2_SYS_SEMAPHORE,
+];
 
 const PS3AUTOTESTS_RELPATH: &str = "tests/ps3autotests";
 
@@ -257,15 +304,18 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         let json = std::fs::read_to_string(&observation_path).expect("read observation.json");
         serde_json::from_str(&json).expect("deserialize Observation")
     };
-    // A `None` here silently no-ops the drift-band check below.
-    // `assert!` rather than `debug_assert!`: the CI gate runs the suite
-    // under `--release` too, where a debug assertion compiles out and
-    // the drift band goes quiet.
+    // A `None` here silently no-ops the drift-band check below, and a
+    // zero makes every cross-run equality downstream compare two empty
+    // runs. `assert!` rather than `debug_assert!`: the CI gate runs the
+    // suite under `--release` too, where a debug assertion compiles out
+    // and the drift band goes quiet.
     assert!(
-        observation.metadata.steps.is_some(),
-        "ps3autotests {}/{}: observation.metadata.steps was None",
+        observation.metadata.steps.is_some_and(|s| s > 0),
+        "ps3autotests {}/{}: observation.metadata.steps is {:?}; the boot \
+         retired nothing, so every comparison against it is vacuous",
         case.rel_dir,
-        case.stem
+        case.stem,
+        observation.metadata.steps,
     );
     observation
 }
@@ -395,6 +445,63 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> String {
     }
 }
 
+/// Every boot test below is `#[ignore]`, so without this gate
+/// `--features ps3autotests` compiles a suite that asserts nothing: an
+/// absent, half-cloned, or LFS-stubbed corpus reports green. The
+/// feature declares the tree present, so a case whose ELF or
+/// `.expected` is missing or empty is a hard error here.
+#[test]
+fn every_declared_case_names_a_present_non_empty_fixture_pair() {
+    assert!(!CASES.is_empty(), "the case table is empty");
+    let root = ps3autotests_root().join("tests");
+    for case in CASES {
+        let dir = root.join(case.rel_dir);
+        for file in [
+            dir.join(format!("{}.ppu.elf", case.stem)),
+            dir.join(format!("{}.expected", case.stem)),
+        ] {
+            let len = std::fs::metadata(&file)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "ps3autotests {}/{}: {} ({e}); the feature declares the corpus \
+                         present -- clone \
+                         https://github.com/AerialX/ps3autotests.git into {} \
+                         (see tests/ps3autotests.README.md)",
+                        case.rel_dir,
+                        case.stem,
+                        file.display(),
+                        PS3AUTOTESTS_RELPATH,
+                    )
+                })
+                .len();
+            // `report_verdict` calls a byte-equal compare MATCH, and an
+            // empty capture matches an empty `.expected`.
+            assert!(
+                len > 0,
+                "ps3autotests {}/{}: {} is empty",
+                case.rel_dir,
+                case.stem,
+                file.display(),
+            );
+        }
+    }
+}
+
+/// A case named twice would boot the same ELF under two test names and
+/// read as broader coverage than the table holds.
+#[test]
+fn the_case_table_names_each_fixture_once() {
+    let mut seen: std::collections::BTreeSet<(&str, &str)> = std::collections::BTreeSet::new();
+    for case in CASES {
+        assert!(
+            seen.insert((case.rel_dir, case.stem)),
+            "duplicate case {}/{}",
+            case.rel_dir,
+            case.stem
+        );
+    }
+}
+
 #[test]
 #[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
             sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
@@ -407,12 +514,7 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> String {
             NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
             synthetic boots."]
 fn cpu_basic() {
-    run_case(&Case {
-        rel_dir: "cpu/basic",
-        stem: "basic",
-        max_steps: 200_000,
-        expected_steps: Some(83),
-    });
+    run_case(&CPU_BASIC);
 }
 
 #[test]
@@ -427,12 +529,7 @@ fn cpu_basic() {
             NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
             synthetic boots."]
 fn cpu_ppu_branch() {
-    run_case(&Case {
-        rel_dir: "cpu/ppu_branch",
-        stem: "ppu_branch",
-        max_steps: 50_000_000,
-        expected_steps: Some(52_622),
-    });
+    run_case(&CPU_PPU_BRANCH);
 }
 
 #[test]
@@ -447,12 +544,7 @@ fn cpu_ppu_branch() {
             NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
             synthetic boots."]
 fn lv2_sys_event_flag() {
-    run_case(&Case {
-        rel_dir: "lv2/sys_event_flag",
-        stem: "sys_event_flag",
-        max_steps: 10_000_000,
-        expected_steps: Some(1_494),
-    });
+    run_case(&LV2_SYS_EVENT_FLAG);
 }
 
 #[test]
@@ -467,12 +559,7 @@ fn lv2_sys_event_flag() {
             NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
             synthetic boots."]
 fn lv2_sys_process() {
-    run_case(&Case {
-        rel_dir: "lv2/sys_process",
-        stem: "sys_process",
-        max_steps: 10_000_000,
-        expected_steps: Some(3_686),
-    });
+    run_case(&LV2_SYS_PROCESS);
 }
 
 #[test]
@@ -487,12 +574,7 @@ fn lv2_sys_process() {
             NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
             synthetic boots."]
 fn lv2_sys_semaphore() {
-    run_case(&Case {
-        rel_dir: "lv2/sys_semaphore",
-        stem: "sys_semaphore",
-        max_steps: 10_000_000,
-        expected_steps: Some(1_167),
-    });
+    run_case(&LV2_SYS_SEMAPHORE);
 }
 
 #[test]
@@ -506,12 +588,10 @@ fn lv2_sys_semaphore() {
             CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
             NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
             synthetic boots."]
-fn determinism_double_run_cpu_basic() {
+fn two_boots_of_cpu_basic_produce_the_same_observation() {
     let case = Case {
-        rel_dir: "cpu/basic",
-        stem: "basic",
-        max_steps: 200_000,
         expected_steps: None,
+        ..CPU_BASIC
     };
     let first = run_observation(&case, "determinism_a");
     let second = run_observation(&case, "determinism_b");

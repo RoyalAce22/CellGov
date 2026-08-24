@@ -19,7 +19,7 @@ pub use raw::{
 };
 
 pub(crate) use decrypt::{decrypt_envelope, decrypt_sections_from_envelope};
-pub(crate) use elf::assemble_elf_from_sections;
+pub(crate) use elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 pub(crate) use raw::find_supplemental_body;
 
 #[cfg(test)]

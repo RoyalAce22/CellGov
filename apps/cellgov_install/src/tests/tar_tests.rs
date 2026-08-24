@@ -75,11 +75,116 @@ fn parse_rejects_unparseable_size() {
     assert!(matches!(err, TarParseError::UnparseableSize { .. }));
 }
 
+/// A size field padded out to nothing is a malformed record, not a
+/// zero-length file the archive asked for.
+#[test]
+fn parse_rejects_a_size_field_holding_no_octal_digits() {
+    let mut header = ustar_header("f.bin", "", 0, TYPE_REGULAR);
+    header[0x7C..0x7C + 12].fill(b' ');
+    let err = parse(&header).unwrap_err();
+    assert!(
+        matches!(err, TarParseError::UnparseableSize { .. }),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_size_field_padded_with_nul_and_blank_at_both_ends_still_decodes() {
+    let mut header = ustar_header("f.bin", "", 0, TYPE_REGULAR);
+    let mut field = [0u8; 12];
+    field[0] = b' ';
+    field[2..11].copy_from_slice(b"000000144");
+    header[0x7C..0x7C + 12].copy_from_slice(&field);
+    let mut data = Vec::new();
+    data.extend_from_slice(&header);
+    data.extend_from_slice(&[0u8; 512]);
+
+    let entries = parse(&data).expect("parse");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].data.len(), 0o144);
+}
+
 #[test]
 fn parse_rejects_payload_past_eof() {
     let header = ustar_header("f.bin", "", 100, b'0');
     let err = parse(&header).unwrap_err();
     assert!(matches!(err, TarParseError::PayloadPastArchive { .. }));
+}
+
+#[test]
+fn parse_refuses_a_block_that_carries_no_ustar_magic() {
+    let mut header = ustar_header("f.bin", "", 0, TYPE_REGULAR);
+    header[MAGIC_FIELD_OFFSET] = b'x';
+    let err = parse(&header).unwrap_err();
+    assert!(
+        matches!(err, TarParseError::NotUstarHeader { offset: 0 }),
+        "{err}"
+    );
+}
+
+#[test]
+fn parse_walks_past_a_directory_record_to_the_files_behind_it() {
+    let mut data = Vec::new();
+    data.extend_from_slice(&ustar_header("dev_flash/vsh/", "", 0, TYPE_DIRECTORY));
+    data.extend_from_slice(&ustar_header("dev_flash/vsh/a.self", "", 1, TYPE_REGULAR));
+    let mut block = [0u8; 512];
+    block[0] = b'A';
+    data.extend_from_slice(&block);
+
+    let entries = parse(&data).expect("parse");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, "dev_flash/vsh/a.self");
+    assert_eq!(entries[0].data, b"A");
+}
+
+/// The scan advances by a skipped record's declared size just as it
+/// does for a kept one, so an over-long size on a directory record
+/// would otherwise end the archive early and return `Ok` having
+/// dropped everything behind it.
+#[test]
+fn parse_bounds_a_skipped_records_payload_against_the_archive() {
+    let mut data = Vec::new();
+    data.extend_from_slice(&ustar_header("bogus_dir/", "", 0x10_0000, TYPE_DIRECTORY));
+    data.extend_from_slice(&ustar_header("after.bin", "", 0, TYPE_REGULAR));
+
+    let err = parse(&data).unwrap_err();
+    assert!(
+        matches!(err, TarParseError::PayloadPastArchive { .. }),
+        "{err}"
+    );
+}
+
+#[test]
+fn parse_refuses_a_gnu_long_name_record_rather_than_truncating_the_next_path() {
+    let mut data = Vec::new();
+    data.extend_from_slice(&ustar_header("././@LongLink", "", 0, b'L'));
+    data.extend_from_slice(&ustar_header("short.bin", "", 0, TYPE_REGULAR));
+
+    let err = parse(&data).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            TarParseError::UnsupportedFileType {
+                offset: 0,
+                filetype: b'L',
+                ..
+            }
+        ),
+        "{err}"
+    );
+}
+
+#[test]
+fn parse_refuses_a_symlink_record() {
+    let header = ustar_header("link", "", 0, b'2');
+    let err = parse(&header).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            TarParseError::UnsupportedFileType { filetype: b'2', .. }
+        ),
+        "{err}"
+    );
 }
 
 #[test]
@@ -184,11 +289,17 @@ fn a_mount_root_addresses_no_file_with_or_without_its_trailing_slash() {
 
 #[test]
 fn sibling_mount_match_needs_a_whole_path_component() {
-    for name in ["dev_flash2foo/x", "dev_flash20/x", "dev_flash2x"] {
-        let routed = route_entry_path(name).expect("routes");
-        assert!(
-            routed.starts_with("dev_flash/"),
-            "{name:?} routed to {routed:?}"
+    // A near-miss is ordinary dev_flash content and keeps its whole
+    // name, rather than being split at the `dev_flash2` prefix.
+    for (name, expected) in [
+        ("dev_flash2foo/x", "dev_flash/dev_flash2foo/x"),
+        ("dev_flash20/x", "dev_flash/dev_flash20/x"),
+        ("dev_flash2x", "dev_flash/dev_flash2x"),
+    ] {
+        assert_eq!(
+            route_entry_path(name).as_deref(),
+            Some(expected),
+            "{name:?}"
         );
     }
 }
@@ -210,10 +321,16 @@ fn extract_rejects_traversal_out_of_a_sibling_mount() {
     }];
     let report = extract_to_disk(&entries, &dir);
     assert_eq!(report.written, 0);
+    assert_eq!(report.errors.len(), 1);
     assert!(matches!(
         report.errors[0],
         ExtractError::PathTraversal { .. }
     ));
+    assert_eq!(
+        std::fs::read_dir(&*dir).expect("read_dir").count(),
+        0,
+        "a refused entry leaves the VFS root untouched"
+    );
 }
 
 #[test]
@@ -225,10 +342,19 @@ fn extract_rejects_traversal_that_would_normalize_back_inside() {
     }];
     let report = extract_to_disk(&entries, &dir);
     assert_eq!(report.written, 0);
+    assert_eq!(report.errors.len(), 1);
     assert!(matches!(
         report.errors[0],
         ExtractError::PathTraversal { .. }
     ));
+    // The normalized destination is inside the root, so a traversal
+    // check that only compared the final path would have written it.
+    assert!(!dir.join("dev_flash2/x.bin").exists());
+    assert_eq!(
+        std::fs::read_dir(&*dir).expect("read_dir").count(),
+        0,
+        "a refused entry leaves the VFS root untouched"
+    );
 }
 
 #[test]
@@ -273,6 +399,33 @@ fn extract_tallies_an_entry_that_addresses_no_file_instead_of_dropping_it() {
     assert_eq!(report.skipped, 2);
     assert!(report.errors.is_empty());
     // Every entry handed in is accounted for by exactly one tally.
+    assert_eq!(
+        report.written + report.skipped + report.errors.len(),
+        entries.len()
+    );
+}
+
+#[test]
+fn every_entry_lands_in_exactly_one_extract_tally_including_the_error_arm() {
+    let dir = scratch();
+    let entries = vec![
+        TarEntry {
+            name: "dev_flash/keep.bin".into(),
+            data: b"K".to_vec(),
+        },
+        TarEntry {
+            name: "dev_flash/".into(),
+            data: Vec::new(),
+        },
+        TarEntry {
+            name: "../escape.bin".into(),
+            data: b"nope".to_vec(),
+        },
+    ];
+    let report = extract_to_disk(&entries, &dir);
+    assert_eq!(report.written, 1);
+    assert_eq!(report.skipped, 1);
+    assert_eq!(report.errors.len(), 1);
     assert_eq!(
         report.written + report.skipped + report.errors.len(),
         entries.len()

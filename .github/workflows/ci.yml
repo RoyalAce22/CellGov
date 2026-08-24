@@ -8,29 +8,50 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -D warnings
-  # Suites reading a local corpus -- a PS3 firmware image, owned title
-  # dumps, the built micro-test ELFs, or the cloned ps3autotests tree --
-  # sit behind these features and are not built here. CI still
-  # type-checks and lints them so they cannot rot.
+  # RUSTFLAGS is per-job: `-D warnings` on a floating channel lets a new
+  # compiler fail a branch that did not change.
   #
-  # cellgov_install/npdrm-oracle-vectors is deliberately absent: it
-  # include_bytes!()s operator-supplied files, so enabling it without
-  # them is a compile error rather than a lint. See CellGov-Dev #247.
+  # Corpus suites are type-checked and linted here, never run. Absent
+  # from the list: cellgov_install/npdrm-oracle-vectors include_bytes!()s
+  # operator files, so enabling it without them is a compile error rather
+  # than a lint. See CellGov-Dev #247.
   CORPUS_FEATURES: >-
     cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
 jobs:
-  msrv:
-    name: MSRV (1.95)
+  # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix
+  # as a job output rather than a second copy of the number.
+  config:
+    name: config
     runs-on: ubuntu-latest
+    outputs:
+      msrv: ${{ steps.read.outputs.msrv }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install MSRV toolchain
+      - name: Read MSRV from [workspace.package]
+        id: read
+        run: |
+          msrv=$(grep -m1 '^rust-version = ' Cargo.toml | cut -d'"' -f2)
+          test -n "$msrv" || { echo "no rust-version in Cargo.toml"; exit 1; }
+          echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
+          echo "MSRV is $msrv"
+
+  # Blocking. The only job that denies warnings, on a version that moves
+  # only when this file does.
+  lint:
+    name: lint (pinned 1.95.0)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.95"
+          toolchain: "1.95.0"
+          components: rustfmt, clippy
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -39,23 +60,36 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-lint-1.95.0-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-msrv-
+            ${{ runner.os }}-cargo-lint-1.95.0-
 
-      - name: cargo check (MSRV)
-        run: cargo check --workspace --all-targets --locked
+      - name: cargo fmt --check
+        run: cargo fmt --check
 
-      - name: cargo check (MSRV, corpus suites)
-        run: cargo check --workspace --all-targets --locked --features "$CORPUS_FEATURES"
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  check:
-    name: fmt + clippy + test
+      - name: cargo clippy (corpus suites)
+        run: cargo clippy --workspace --all-targets --locked --features "$CORPUS_FEATURES" -- -D warnings
+
+      - name: cargo doc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps --locked
+
+  # Informational. Same commands on stable, so lints added upstream show
+  # up before the pinned version is bumped.
+  lint-stable:
+    name: lint (stable, informational)
     runs-on: ubuntu-latest
+    continue-on-error: true
+    env:
+      RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install Rust toolchain
+      - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -67,29 +101,73 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-lint-stable-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-lint-stable-
 
       - name: cargo fmt --check
         run: cargo fmt --check
 
       - name: cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: cargo clippy (corpus suites)
-        run: cargo clippy --workspace --all-targets --features "$CORPUS_FEATURES" -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked --features "$CORPUS_FEATURES" -- -D warnings
 
       - name: cargo doc
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps
+        run: cargo doc --workspace --no-deps --locked
+
+  # No `-D warnings`: a warning is not a test failure. `beta` is
+  # informational. The release run is required -- debug_assert! compiles
+  # out, so a #[should_panic] on a debug-only assertion only fails there.
+  test:
+    name: test (${{ matrix.name }})
+    needs: config
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.informational }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: msrv
+            toolchain: ${{ needs.config.outputs.msrv }}
+            informational: false
+          - name: stable
+            toolchain: stable
+            informational: false
+          - name: beta
+            toolchain: beta
+            informational: true
+    steps:
+      - uses: actions/checkout@v6
+
+      # Exports RUSTUP_TOOLCHAIN, which outranks rust-toolchain.toml.
+      - name: Install ${{ matrix.toolchain }} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - name: Cache cargo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-test-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-test-${{ matrix.toolchain }}-
+
+      - name: cargo check (corpus suites)
+        run: cargo check --workspace --all-targets --locked --features "$CORPUS_FEATURES"
 
       - name: cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
       - name: cargo test --release
-        run: cargo test --workspace --release
+        run: cargo test --workspace --release --locked
 
       - name: cargo bench --no-run --benches
-        run: cargo bench --workspace --no-run --benches
+        run: cargo bench --workspace --no-run --benches --locked

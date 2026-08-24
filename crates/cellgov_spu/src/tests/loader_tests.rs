@@ -105,6 +105,73 @@ fn rejects_a_segment_claiming_more_file_bytes_than_memory_bytes() {
 }
 
 #[test]
+fn a_phentsize_that_is_not_the_elf32_program_header_size_is_refused() {
+    // Zero would re-read slot 0 `e_phnum` times and anything narrower
+    // would overlap the next header, so the declared size is refused
+    // rather than strided over.
+    for phentsize in [0u16, 8, 16, 31, 33, 64] {
+        let mut s = SpuState::new();
+        let mut data = mk_spu_elf(0x100, 0, 0x10, 0x10, 0x400);
+        data[42..44].copy_from_slice(&phentsize.to_be_bytes());
+        assert_eq!(
+            load_spu_elf(&data, &mut s),
+            Err(LoadError::BadPhentsize {
+                phentsize: phentsize as usize
+            })
+        );
+    }
+}
+
+#[test]
+fn an_elf_with_no_program_headers_at_all_does_not_trip_the_phentsize_check() {
+    // `e_phentsize` is only meaningful when there are entries to size.
+    let mut s = SpuState::new();
+    let mut data = mk_spu_elf(0x100, 0, 0x10, 0x10, 0x400);
+    data[42..44].copy_from_slice(&0u16.to_be_bytes());
+    data[44..46].copy_from_slice(&0u16.to_be_bytes());
+    load_spu_elf(&data, &mut s).expect("a header-only SPU ELF loads nothing and succeeds");
+}
+
+/// `e_entry` lives at offset 24 of the ELF32 header.
+fn set_entry(data: &mut [u8], entry: u32) {
+    data[24..28].copy_from_slice(&entry.to_be_bytes());
+}
+
+#[test]
+fn an_entry_point_past_the_end_of_local_store_is_rejected() {
+    let mut s = SpuState::new();
+    let ls_len = s.ls.len() as u32;
+    let mut data = mk_spu_elf(0x100, 0, 0x10, 0x10, 0x400);
+    set_entry(&mut data, ls_len);
+    assert_eq!(
+        load_spu_elf(&data, &mut s),
+        Err(LoadError::EntryOutOfRange { entry: ls_len })
+    );
+}
+
+#[test]
+fn an_entry_point_whose_instruction_word_straddles_the_top_of_local_store_is_rejected() {
+    let mut s = SpuState::new();
+    let ls_len = s.ls.len() as u32;
+    let mut data = mk_spu_elf(0x100, 0, 0x10, 0x10, 0x400);
+    set_entry(&mut data, ls_len - 3);
+    assert_eq!(
+        load_spu_elf(&data, &mut s),
+        Err(LoadError::EntryOutOfRange { entry: ls_len - 3 })
+    );
+}
+
+#[test]
+fn an_entry_point_on_the_last_whole_word_of_local_store_is_accepted() {
+    let mut s = SpuState::new();
+    let ls_len = s.ls.len() as u32;
+    let mut data = mk_spu_elf(0x100, 0, 0x10, 0x10, 0x400);
+    set_entry(&mut data, ls_len - 4);
+    load_spu_elf(&data, &mut s).expect("the final word of local store is a legal entry");
+    assert_eq!(s.pc, ls_len - 4);
+}
+
+#[test]
 fn the_bss_tail_beyond_filesz_is_zeroed_over_prior_local_store_contents() {
     let mut s = SpuState::new();
     // Dirty the whole destination first: a loader that only copied
@@ -130,6 +197,21 @@ fn the_bss_tail_beyond_filesz_is_zeroed_over_prior_local_store_contents() {
         s.ls[0x280..0x300].iter().all(|&b| b == 0xA5),
         "zeroing must stop at memsz"
     );
+}
+
+#[test]
+fn the_elf_entry_parameter_becomes_the_initial_pc() {
+    // [CBE-Handbook p:421 s:14.6.3.3] The SPE loader branches to the
+    // address named by the image's entry parameter, so e_entry -- not
+    // the first loaded segment's vaddr -- is where execution starts.
+    let mut s = SpuState::new();
+    s.pc = 0xDEAD;
+    // Segment at vaddr 0x200; the entry sits below it.
+    let entry: u32 = 0x160;
+    let mut data = mk_spu_elf(0x100, 0x200, 0x10, 0x10, 0x400);
+    set_entry(&mut data, entry);
+    load_spu_elf(&data, &mut s).expect("load ok");
+    assert_eq!(s.pc, entry);
 }
 
 #[test]

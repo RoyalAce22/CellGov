@@ -102,6 +102,17 @@ pub enum SceError {
         #[source]
         source: std::io::Error,
     },
+    /// Section's zlib stream inflates past the size its destination
+    /// program segment declares.
+    #[error("SCE: section {index} inflates past program segment {prog_idx} p_filesz {p_filesz}")]
+    SectionInflatesPastSegment {
+        /// Zero-based section index whose inflate output overran.
+        index: usize,
+        /// Program-header index the section targets.
+        prog_idx: usize,
+        /// `p_filesz` declared by the destination program header.
+        p_filesz: usize,
+    },
     /// Unknown compression_kind in section header.
     #[error("SCE: section {index} has unknown compression_kind {got} (expected 1=none or 2=zlib)")]
     UnknownCompressionKind {
@@ -138,6 +149,12 @@ pub enum SceError {
         /// `p_filesz` of the destination program segment.
         size: usize,
         /// Total size of the reconstructed ELF buffer.
+        elf_size: usize,
+    },
+    /// Image size the SELF's program headers imply cannot be allocated.
+    #[error("SCE: reconstructed ELF size 0x{elf_size:x} cannot be allocated")]
+    ReconstructedElfTooLarge {
+        /// Largest `p_offset + p_filesz` extent the program headers declare.
         elf_size: usize,
     },
     /// Reconstructed ELF has bad magic.

@@ -1,22 +1,44 @@
-# CellGov oracle-mode required RPCS3 settings.
+# CellGov reference-mode required RPCS3 settings.
 #
-# Cross-runner observations captured under different settings are
-# not comparable: host audio, host rendering, and non-LLVM decoders
-# each introduce divergence that no amount of per-step tracing can
-# reconstruct. The bridge refuses dumps whose config hash does not
-# match the hash of this canonical YAML.
+# Host audio and host rendering introduce divergence that per-step
+# tracing cannot reconstruct. Captures made with them enabled cannot be
+# compared. The bridge hashes the block below and refuses any dump
+# whose supplied hash disagrees.
 #
-# These four settings are the full oracle contract. RPCS3's build
-# revision is recorded separately in the dump header (not hashed
-# here) because the bridge tolerates any RPCS3 build that passes
-# the cross-runner regression tests. If a future RPCS3 build
-# changes oracle-relevant semantics the config shape itself will
-# change, producing a new hash and forcing an explicit update.
+# RPCS3's build revision stays out of the hash. The dump header records
+# it, and the bridge accepts any build that passes the cross-runner
+# regression tests. A build that changes comparison-relevant semantics
+# changes the config shape, which changes the hash and forces an
+# explicit update here.
+#
+# The bridge hashes exactly the lines between the two markers. Editing
+# anything inside them changes the expected hash; run
+# `rpcs3_to_observation --print-expected-config-hash` to read the new
+# value.
 
+# --- BEGIN HASHED ---
 Video:
   Renderer: "Null"
 Audio:
   Renderer: "Null"
-Core:
-  PPU Decoder: Recompiler (LLVM)
-  SPU Decoder: Recompiler (LLVM)
+# --- END HASHED ---
+
+# Outside the hash. The decoder is the axis a capture set varies: each
+# scenario is recorded once per decoder so two independent answers can
+# be checked against each other. Hashing it would make one of the two
+# variants unreproducible.
+#
+# Set one pair in RPCS3, then pass the matching name to the bridge as
+# `--decoder <name>`; the flag is required. The bridge writes it to
+# `metadata.runner` as `rpcs3-<name>`. An output filename ending
+# `_<name>.json` must name that same decoder -- the two-per-scenario
+# tree under tests/scenario_observations/ is named that way. A name
+# claiming no decoder, such as the per-title
+# tests/fixtures/<id>/rpcs3/observation.json, is accepted.
+Decoders:
+  interpreter:
+    PPU Decoder: "Interpreter (static)"
+    SPU Decoder: "Interpreter (static)"
+  llvm:
+    PPU Decoder: "Recompiler (LLVM)"
+    SPU Decoder: "Recompiler (LLVM)"

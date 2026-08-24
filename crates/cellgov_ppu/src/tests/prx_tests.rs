@@ -57,6 +57,21 @@ fn import_parse_error_display_renders_every_variant() {
         ),
     ];
     for (err, needles) in cases {
+        // Exhaustive by construction: an added variant fails to
+        // compile here rather than silently escaping the sweep with
+        // the test still claiming to cover every variant.
+        match err {
+            ImportParseError::NoImportsTable
+            | ImportParseError::BadMagic(_)
+            | ImportParseError::ParamHeaderTooSmall(_)
+            | ImportParseError::OutOfBounds
+            | ImportParseError::BadImportsTableRange { .. }
+            | ImportParseError::EntryTooSmall { .. }
+            | ImportParseError::EntryPastImportsTable { .. }
+            | ImportParseError::InvalidNamePtr { .. }
+            | ImportParseError::InvalidStubPtr { .. }
+            | ImportParseError::InvalidNidPtr { .. } => {}
+        }
         let s = format!("{err}");
         assert!(!s.is_empty(), "empty Display for {err:?}");
         for needle in *needles {
@@ -66,6 +81,7 @@ fn import_parse_error_display_renders_every_variant() {
             );
         }
     }
+    assert_eq!(cases.len(), 10, "one case per ImportParseError variant");
 }
 
 /// `p_filesz` written on synthetic PT_PRX_PARAM headers, matching the

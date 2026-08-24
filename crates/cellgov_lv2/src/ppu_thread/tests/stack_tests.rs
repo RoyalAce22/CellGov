@@ -51,16 +51,27 @@ fn stack_allocator_rejects_size_below_save_area() {
     let mut a = ThreadStackAllocator::new();
     assert!(a.allocate(0x8, 0x10).is_none());
     assert!(a.allocate(0xF, 0x10).is_none());
+    assert!(
+        a.allocate(ABI_MIN_STACK_FRAME - 1, 0x10).is_none(),
+        "a block one byte short of a minimum frame cannot hold one",
+    );
+    assert!(a.allocate(ABI_MIN_STACK_FRAME, 0x10).is_some());
 }
 
 #[test]
-fn thread_stack_initial_sp_leaves_16_byte_reserve() {
+fn thread_stack_initial_sp_leaves_a_whole_minimum_frame() {
     let s = ThreadStack {
         base: 0xD001_0000,
         size: 0x10_000,
     };
-    assert_eq!(s.initial_sp(), 0xD002_0000 - 0x10);
+    assert_eq!(ABI_MIN_STACK_FRAME, 0x70);
+    assert_eq!(
+        s.initial_sp(),
+        0xD002_0000 - 0x70,
+        "16 bytes is the header's first two doublewords, not a frame: a          callee saving LR at 16(r1) would write above the block",
+    );
     assert_eq!(s.end(), 0xD002_0000);
+    assert_eq!(s.end() - s.initial_sp(), ABI_MIN_STACK_FRAME);
 }
 
 #[test]
@@ -127,7 +138,7 @@ fn free_last_refuses_a_block_below_the_arena_floor() {
 #[test]
 fn free_last_refuses_a_block_whose_end_would_wrap() {
     let mut a = ThreadStackAllocator::new();
-    let wrapping = ThreadStack::new(u64::MAX, 0x10);
+    let wrapping = ThreadStack::new(u64::MAX, ABI_MIN_STACK_FRAME);
     assert!(!a.free_last(&wrapping));
     assert_eq!(
         a.peek_next(0x10),
@@ -138,7 +149,7 @@ fn free_last_refuses_a_block_whose_end_would_wrap() {
 #[test]
 fn free_last_of_an_over_aligned_block_leaves_the_next_base_at_that_block() {
     let mut a = ThreadStackAllocator::new();
-    let _pad = a.allocate(0x10, 0x10).unwrap();
+    let _pad = a.allocate(ABI_MIN_STACK_FRAME, 0x10).unwrap();
     let s = a.allocate(0x10_000, 0x1_0000).unwrap();
     assert!(a.free_last(&s));
     // The rewind lands on the aligned base, not on the pre-allocation

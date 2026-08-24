@@ -48,8 +48,7 @@ pub const ELF_PN_XNUM: u16 = 0xFFFF;
 /// `e_type` value for executable files.
 pub const ET_EXEC: u16 = 2;
 
-/// `e_machine` value for 64-bit PowerPC, per the PowerPC ELF
-/// supplement.
+/// `e_machine` value for 64-bit PowerPC.
 pub const EM_PPC64: u16 = 21;
 
 /// `e_type` value for PS3 PRX modules (Sony-specific extension to ELF
@@ -69,7 +68,13 @@ pub const PF_R: u32 = 4;
 /// 0x60000001 -- Sony PT_LOOS-range extension).
 pub const PT_PROC_PARAM: u32 = 0x6000_0001;
 
-/// Size in bytes of a PS3 `sys_process_param_t` record.
+/// Bytes covered by the eight `sys_process_param_t` fields the loader
+/// reads, `size` through `ppc_seg`.
+///
+/// Not a fixed record length: a record's own leading `size` field is
+/// its extent, and a title may declare more than this. Matches
+/// `sizeof(process_param_t)` in RPCS3 `PPUModule.cpp` `ppu_load_exec`,
+/// which warns rather than refuses when a record declares less.
 pub const PROC_PARAM_SIZE: u64 = 32;
 
 /// `p_type` for normal loadable segments.
@@ -207,6 +212,15 @@ pub const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bc_c5f6;
 /// Retail titles always carry a real version here, and cellSysutil's
 /// SDK-keyed init dispatcher takes a different branch on the sentinel.
 pub const SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN: u32 = 0xFFFF_FFFF;
+
+/// `version` field of `sys_process_param_t` for SDK 3.30 and later.
+///
+/// A namespace of its own, unrelated to `sdk_version`: every firmware
+/// executable in the 4.92 image carries this value alongside
+/// `sdk_version` 0x00492000, and a 2.50-era title carries 0x00009000
+/// alongside `sdk_version` 0x00250001. RPCS3 enumerates the space as
+/// `SYS_PROCESS_PARAM_VERSION_*` in `sys_process.h`.
+pub const SYS_PROCESS_PARAM_VERSION_330_0: u32 = 0x0033_0000;
 
 /// `e_phoff` field offset in the ELF64 header.
 pub const ELF_PHOFF_OFFSET: usize = 32;

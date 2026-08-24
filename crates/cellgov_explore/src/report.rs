@@ -13,12 +13,21 @@ pub fn format_human(result: &ExplorationResult) -> String {
     ));
     out.push_str(&format!("schedules_explored: {}\n", result.schedules.len()));
     out.push_str(&format!("schedules_pruned: {}\n", result.schedules_pruned));
+    out.push_str(&format!(
+        "schedules_truncated: {}\n",
+        result.schedules_truncated
+    ));
     out.push_str(&format!("bounds_hit: {}\n", result.bounds_hit));
 
     if !result.schedules.is_empty() {
         out.push_str("schedules:\n");
         for (i, s) in result.schedules.iter().enumerate() {
-            let diverged = if s.memory_hash != result.baseline_hash {
+            // A prefix hash is never labelled DIVERGED: it differs from
+            // a finished baseline whether or not the workload is
+            // schedule-sensitive.
+            let diverged = if s.truncated {
+                " TRUNCATED"
+            } else if s.memory_hash != result.baseline_hash {
                 " DIVERGED"
             } else {
                 ""
@@ -46,7 +55,8 @@ pub fn format_json(result: &ExplorationResult) -> String {
                 "branch_step": s.branch_step,
                 "alternate_choice": s.alternate_choice.raw(),
                 "memory_hash": format!("0x{:016x}", s.memory_hash),
-                "diverged": s.memory_hash != result.baseline_hash,
+                "diverged": !s.truncated && s.memory_hash != result.baseline_hash,
+                "truncated": s.truncated,
             })
         })
         .collect();
@@ -57,6 +67,7 @@ pub fn format_json(result: &ExplorationResult) -> String {
         "branching_points": result.total_branching_points,
         "schedules_explored": result.schedules.len(),
         "schedules_pruned": result.schedules_pruned,
+        "schedules_truncated": result.schedules_truncated,
         "bounds_hit": result.bounds_hit,
         "schedules": schedules,
     });

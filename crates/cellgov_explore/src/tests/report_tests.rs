@@ -27,11 +27,13 @@ fn sample_result() -> ExplorationResult {
             branch_step: 0,
             alternate_choice: UnitId::new(1),
             memory_hash: 0xCAFEBABE,
+            truncated: false,
         }],
         outcome: OutcomeClass::ScheduleSensitive,
         total_branching_points: 2,
         bounds_hit: false,
         schedules_pruned: 1,
+        schedules_truncated: 0,
     }
 }
 
@@ -43,6 +45,7 @@ fn human_report_contains_key_fields() {
     assert!(text.contains("branching_points: 2"));
     assert!(text.contains("schedules_explored: 1"));
     assert!(text.contains("schedules_pruned: 1"));
+    assert!(text.contains("schedules_truncated: 0"));
     assert!(text.contains("DIVERGED"));
 }
 
@@ -54,7 +57,9 @@ fn json_report_parses_correctly() {
     assert_eq!(v["branching_points"], 2);
     assert_eq!(v["schedules_explored"], 1);
     assert_eq!(v["schedules_pruned"], 1);
+    assert_eq!(v["schedules_truncated"], 0);
     assert_eq!(v["schedules"][0]["diverged"], true);
+    assert_eq!(v["schedules"][0]["truncated"], false);
 }
 
 #[test]
@@ -66,9 +71,40 @@ fn stable_result_no_diverged_tag() {
         total_branching_points: 1,
         bounds_hit: false,
         schedules_pruned: 1,
+        schedules_truncated: 0,
     };
     let text = format_human(&r);
     assert!(text.contains("schedule-stable"));
     assert!(!text.contains("DIVERGED"));
     assert!(!text.contains("schedules:\n"));
+}
+
+#[test]
+fn a_truncated_record_is_never_labelled_diverged() {
+    let r = ExplorationResult {
+        baseline_hash: 0xDEADBEEF,
+        schedules: vec![ScheduleRecord {
+            branch_step: 0,
+            alternate_choice: UnitId::new(1),
+            memory_hash: 0xCAFEBABE,
+            truncated: true,
+        }],
+        outcome: OutcomeClass::Inconclusive,
+        total_branching_points: 2,
+        bounds_hit: true,
+        schedules_pruned: 0,
+        schedules_truncated: 1,
+    };
+    let text = format_human(&r);
+    assert!(text.contains("schedules_truncated: 1"));
+    assert!(text.contains("TRUNCATED"));
+    assert!(
+        !text.contains("DIVERGED"),
+        "a prefix hash differs from the baseline for a reason that is not divergence",
+    );
+
+    let v: serde_json::Value = serde_json::from_str(&format_json(&r)).expect("valid JSON");
+    assert_eq!(v["schedules"][0]["diverged"], false);
+    assert_eq!(v["schedules"][0]["truncated"], true);
+    assert_eq!(v["schedules_truncated"], 1);
 }

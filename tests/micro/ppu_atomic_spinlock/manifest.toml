@@ -37,32 +37,30 @@ outcome = "completed"
 #          -v "$(pwd)/tests/micro/common:/common" \
 #          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
-#   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
-#      expects:
-#        mkdir -p vfs/dev_hdd0/game/CG_ATOMIC/USRDIR
-#        cp tests/micro/ppu_atomic_spinlock/build/\
-#           ppu_atomic_spinlock.elf \
-#           vfs/dev_hdd0/game/CG_ATOMIC/USRDIR/EBOOT.elf
-#
-#   3. Run:
+#   2. Run:
 #        cargo run --release -p cellgov_cli -- run-game \
 #          --title-manifest tests/micro/ppu_atomic_spinlock/\
 # manifest.toml --max-steps 1000000
 #
 # Expected TTY payload (CGOV magic + 16 bytes):
 #   status=0x00000000 counter=0x00000080 (128 = 2*64)
-#   parent_retries=<nonzero under contention>
-#   child_retries=<nonzero under contention>
+#   parent_retries, child_retries: scheduler-dependent. Both are 0
+#   under CellGov's deterministic scheduler, which does not interleave
+#   the two threads inside a lwarx/stwcx window. The counter is the
+#   invariant: a value below 2*64 means a lost update.
 
 [cellgov.title]
-content_id = "CG_ATOMIC"
 short_name = "atomicspin"
 display_name = "CellGov PPU atomic spinlock microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["ppu_atomic_spinlock.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"

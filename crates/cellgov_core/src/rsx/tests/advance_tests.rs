@@ -50,6 +50,7 @@ fn advance_is_noop_when_get_equals_put() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -96,6 +97,7 @@ fn advance_dispatches_nv406e_offset_release_pair_and_emits_label_write() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -145,6 +147,7 @@ fn advance_is_deterministic_across_two_runs() {
                 &IoMap::IDENTITY,
                 &mut cursor,
                 &mut sem_offset,
+                0,
                 &mut call_stack,
                 &table,
                 &mut emitted,
@@ -186,6 +189,7 @@ fn advance_preserves_fifo_address_order_in_emitted_effects() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -237,6 +241,7 @@ fn advance_counts_unknown_methods_and_keeps_draining() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -287,6 +292,7 @@ fn advance_honors_jump_redirect_and_reaches_put_via_target() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -327,6 +333,7 @@ fn advance_stops_on_out_of_range_header_read() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -362,6 +369,7 @@ fn advance_stops_on_arg_out_of_range() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -395,6 +403,7 @@ fn advance_stops_on_truncated_method() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -442,6 +451,7 @@ fn advance_stops_on_address_overflow() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -477,6 +487,7 @@ fn advance_refuses_wrapped_cursor() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -506,6 +517,7 @@ fn advance_malformed_stop_carries_raw_header() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -546,6 +558,7 @@ fn advance_non_increment_passes_full_arg_slice_to_single_handler() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -597,6 +610,7 @@ fn advance_increment_dispatches_per_arg_to_sequential_methods() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -632,6 +646,7 @@ fn advance_unknown_non_increment_header_counts_as_single_attempt() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -665,6 +680,7 @@ fn advance_dispatches_set_reference_into_cursor() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -705,6 +721,7 @@ fn advance_handles_zero_count_header() {
             &IoMap::IDENTITY,
             &mut cursor,
             &mut sem_offset,
+            0,
             &mut call_stack,
             &table,
             &mut emitted,
@@ -750,6 +767,7 @@ fn return_on_empty_stack_emits_underflow_raw_not_overflow_raw() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -803,6 +821,7 @@ fn call_overflow_emits_overflow_raw_not_underflow_raw() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -864,6 +883,7 @@ fn jump_target_past_put_surfaces_wrapped_cursor_not_silent_drift() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -914,6 +934,7 @@ fn self_pointing_jump_terminates_at_iteration_cap() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -980,6 +1001,7 @@ fn advance_honors_new_jump_redirect_and_reaches_put_via_target() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -1047,6 +1069,7 @@ fn partial_increment_dispatches_known_and_counts_unknown_per_sub_method() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -1101,6 +1124,7 @@ fn unpaired_release_emits_label_write_at_offset_zero() {
         &IoMap::IDENTITY,
         &mut cursor,
         &mut sem_offset,
+        0,
         &mut call_stack,
         &table,
         &mut emitted,
@@ -1116,5 +1140,52 @@ fn unpaired_release_emits_label_write_at_offset_zero() {
         }],
         "unpaired RELEASE uses sem_offset=0; cross-drain carry is intentional \
          per the handler doc, NOT a silent state-machine error",
+    );
+}
+
+/// The walker hands its label base to the handlers, so a
+/// `NV4097_GET_REPORT` drained under a base emits into the report
+/// block rather than onto the semaphore slot the bare offset names.
+#[test]
+fn a_drain_under_a_label_base_emits_a_report_into_the_report_block() {
+    use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    const LABEL_BASE: u32 = 0x3020_0000;
+    let mut memory = make_memory();
+    let words = [
+        encode_header(crate::rsx::method::NV4097_GET_REPORT, 1),
+        0x0000_0050u32,
+    ];
+    write_fifo_words(&mut memory, FIFO_BASE, &words);
+    let put = FIFO_BASE + (words.len() as u32) * 4;
+
+    let mut cursor = RsxFifoCursor::new();
+    cursor.set_put(put);
+    cursor.set_get(FIFO_BASE);
+    let mut sem_offset = 0u32;
+    let mut table = NvMethodTable::new();
+    crate::rsx::method::register_nv4097_report_handler(&mut table).unwrap();
+    let mut emitted: Vec<Effect> = Vec::new();
+
+    let outcome = {
+        let mut call_stack = RsxCallStack::new();
+        rsx_advance(
+            &memory,
+            &IoMap::IDENTITY,
+            &mut cursor,
+            &mut sem_offset,
+            LABEL_BASE,
+            &mut call_stack,
+            &table,
+            &mut emitted,
+            GuestTicks::new(0x77),
+        )
+    };
+    assert!(outcome.reached_put());
+    assert_eq!(
+        emitted.as_slice(),
+        &[Effect::RsxLabelWrite {
+            offset: REPORTS_REPORT_OFFSET + 0x50,
+            value: 0x77,
+        }]
     );
 }

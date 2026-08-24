@@ -19,6 +19,14 @@ pub const BOOT_PROCESS_PID: u32 = 0x0100_0500;
 // Firmware observation, same provenance as BOOT_PROCESS_PID.
 pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
 
+/// One past the highest `sys_process_param.primary_prio` the kernel
+/// adopts; a declaration at or above it leaves the kernel default
+/// standing rather than failing the load.
+// RPCS3 `PPUModule.cpp` `ppu_load_exec` takes the declared priority
+// only when it is below this bound and at or above the process
+// class's floor.
+pub const SYS_PROCESS_PARAM_PRIO_LIMIT: i32 = 3072;
+
 /// `sys_event_port` objects.
 pub const SYS_EVENT_PORT_OBJECT: ProcessObjectClassId = 0x0E;
 /// `sys_timer` objects.

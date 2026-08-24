@@ -95,9 +95,14 @@ int main(void)
     g_thrattr0.nsize = 8;
     g_thrattr0.name = "atm_a";
     memset(&g_args0, 0, sizeof(g_args0));
-    /* arg0 = EA of atomic line; arg1 = EA of result slot 0. */
-    g_args0.arg0 = (u64)(unsigned long)(buf + 256);
-    g_args0.arg1 = (u64)(unsigned long)(buf + 0);
+    /* PSL1GHT's argN fields are 0-indexed and land in SPU r(3+N), so
+     * arg0 -> r3, arg1 -> r4, arg2 -> r5. spu/main.c takes its
+     * parameters in that order: spe_id, atomic EA, result EA. Naming
+     * the atomic line in arg0 would put it in r3 and shift everything
+     * down one register. */
+    g_args0.arg0 = 0;
+    g_args0.arg1 = (u64)(unsigned long)(buf + 256);
+    g_args0.arg2 = (u64)(unsigned long)(buf + 0);
     ret = sysSpuThreadInitialize(&g_t0, g_group, 0, &g_image, &g_thrattr0, &g_args0);
     if (ret != 0) return fail(3);
 
@@ -105,8 +110,9 @@ int main(void)
     g_thrattr1.nsize = 8;
     g_thrattr1.name = "atm_b";
     memset(&g_args1, 0, sizeof(g_args1));
-    g_args1.arg0 = (u64)(unsigned long)(buf + 256);
-    g_args1.arg1 = (u64)(unsigned long)(buf + 16);
+    g_args1.arg0 = 1;
+    g_args1.arg1 = (u64)(unsigned long)(buf + 256);
+    g_args1.arg2 = (u64)(unsigned long)(buf + 16);
     ret = sysSpuThreadInitialize(&g_t1, g_group, 1, &g_image, &g_thrattr1, &g_args1);
     if (ret != 0) return fail(4);
 
@@ -131,6 +137,13 @@ int main(void)
     int verdict = (atomic_line[0] == (2u * INCREMENTS_PER_THREAD)) ? 0 : 0x80;
 
     sysSpuThreadGroupDestroy(g_group);
-    sysSpuImageClose(&g_image);
+    /* No sysSpuImageClose: it is not an LV2 syscall but a
+     * sysPrxForUser export, reached through a GOT stub that a PRX
+     * import table would fill in. This ELF is statically linked with
+     * -nostartfiles and declares no imports, so the slot keeps
+     * pointing at the stub, which then reads its own first
+     * instruction word as an OPD entry and branches to it. The image
+     * struct is process-local and the process is exiting; nothing
+     * leaks by leaving it. */
     return verdict;
 }

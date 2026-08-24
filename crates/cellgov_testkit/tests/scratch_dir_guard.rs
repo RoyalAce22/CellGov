@@ -211,11 +211,11 @@ fn enclosing_fn_start(masked: &str, at: usize) -> usize {
         .map_or(0, |(i, _)| i)
 }
 
-/// Lines (1-indexed) of the `temp_dir()` calls in `source` whose scratch
-/// path does not reach `std::process::id()`.
-fn violation_lines(source: &str) -> Vec<usize> {
+/// Every `std::env::temp_dir()` call site in `source` as
+/// `(line, reaches_the_process_id)`.
+fn call_sites(source: &str) -> Vec<(usize, bool)> {
     let masked = mask_comments_and_literals(source);
-    let mut lines = Vec::new();
+    let mut sites = Vec::new();
     for (at, _) in masked.match_indices("temp_dir()") {
         // `fn fresh_temp_dir()` and calls to it are not the std call.
         if at > 0 && is_ident_byte(masked.as_bytes()[at - 1]) {
@@ -227,11 +227,18 @@ fn violation_lines(source: &str) -> Vec<usize> {
         // from the unmasked source; the offsets line up byte for byte.
         let discriminated = masked[at..end].contains("process::id()")
             || (binds_pid && source[at..end].contains("{pid}"));
-        if !discriminated {
-            lines.push(line_of(source, at));
-        }
+        sites.push((line_of(source, at), discriminated));
     }
-    lines
+    sites
+}
+
+/// Lines (1-indexed) of the `temp_dir()` calls in `source` whose scratch
+/// path does not reach `std::process::id()`.
+fn violation_lines(source: &str) -> Vec<usize> {
+    call_sites(source)
+        .into_iter()
+        .filter_map(|(line, ok)| (!ok).then_some(line))
+        .collect()
 }
 
 fn workspace_root() -> PathBuf {
@@ -266,6 +273,33 @@ fn the_scan_set_contains_this_guard() {
         "the scan did not reach {}; {} files were collected",
         me.display(),
         files.len()
+    );
+}
+
+/// Floor on the population the rule polices.
+///
+/// The scan reaching files says nothing about the matcher still
+/// recognising a call site: a rename of `std::env::temp_dir`, a helper
+/// that wraps it, or a stray edit to the needle would leave this guard
+/// green while it inspects nothing. The workspace has kept well over a
+/// dozen scratch paths for several phases, so a collapse to single
+/// digits is a broken matcher, not a tidied workspace.
+const MIN_CALL_SITES: usize = 10;
+
+#[test]
+fn the_scan_finds_real_temp_dir_call_sites() {
+    let mut sites = 0usize;
+    for file in scanned_rs_files(&workspace_root()) {
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+        sites += call_sites(&source).len();
+    }
+    assert!(
+        sites >= MIN_CALL_SITES,
+        "gate went vacuous: only {sites} std::env::temp_dir() call site(s) \
+         found across crates/apps/bridges, expected at least \
+         {MIN_CALL_SITES}. Either the matcher no longer recognises the \
+         call or the scan lost its root"
     );
 }
 
@@ -309,13 +343,15 @@ fn a_fixed_scratch_name_is_a_violation() {
 #[test]
 fn an_inline_process_id_satisfies_the_rule() {
     let source = "fn f() {\n    let d = std::env::temp_dir()\n        .join(format!(\"cellgov_{}\", std::process::id()));\n}\n";
-    assert!(violation_lines(source).is_empty());
+    // The pair, not `violation_lines(..).is_empty()`: an empty violation
+    // list is also what a matcher that never saw the call returns.
+    assert_eq!(call_sites(source), vec![(2, true)]);
 }
 
 #[test]
 fn a_pid_binding_in_the_same_function_satisfies_the_rule() {
     let source = "fn f(name: &str) {\n    let pid = std::process::id();\n    let d = std::env::temp_dir().join(format!(\"cellgov_{name}_{pid}\"));\n}\n";
-    assert!(violation_lines(source).is_empty());
+    assert_eq!(call_sites(source), vec![(3, true)]);
 }
 
 #[test]
@@ -327,13 +363,13 @@ fn a_pid_binding_in_another_function_does_not_satisfy_the_rule() {
 #[test]
 fn a_pid_interpolated_inside_a_braced_arm_satisfies_the_rule() {
     let source = "fn f(k: u8) {\n    let pid = std::process::id();\n    let d = std::env::temp_dir().join(match k {\n        0 => format!(\"a_{pid}\"),\n        _ => format!(\"b_{pid}\"),\n    });\n}\n";
-    assert!(violation_lines(source).is_empty());
+    assert_eq!(call_sites(source), vec![(3, true)]);
 }
 
 #[test]
 fn an_inline_process_id_inside_a_closure_argument_satisfies_the_rule() {
     let source = "fn f() {\n    let d = std::env::temp_dir().join((|| {\n        format!(\"cellgov_{}\", std::process::id())\n    })());\n}\n";
-    assert!(violation_lines(source).is_empty());
+    assert_eq!(call_sites(source), vec![(2, true)]);
 }
 
 #[test]
@@ -357,13 +393,14 @@ fn a_string_literal_naming_process_id_does_not_satisfy_the_rule() {
 #[test]
 fn temp_dir_named_only_in_prose_is_not_a_call_site() {
     let source = "/// A temp directory under `std::env::temp_dir()`.\npub struct TempDir;\n";
-    assert!(violation_lines(source).is_empty());
+    assert!(call_sites(source).is_empty());
 }
 
 #[test]
 fn a_helper_named_after_temp_dir_is_not_the_std_call() {
     let source = "fn fresh_temp_dir() -> PathBuf {\n    let pid = std::process::id();\n    std::env::temp_dir().join(format!(\"cellgov_{pid}\"))\n}\n";
-    assert!(violation_lines(source).is_empty());
+    // The `fn` name is skipped; the std call on line 3 is still counted.
+    assert_eq!(call_sites(source), vec![(3, true)]);
 }
 
 #[test]

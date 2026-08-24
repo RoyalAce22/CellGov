@@ -16,20 +16,12 @@ use cellgov_compare::witnesses::{record, BOOT_STARTED_SENTINEL, TITLE_NOT_INSTAL
 use cellgov_compare::BootSummary;
 
 use crate::cli::exit::die;
+use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use crate::game::manifest::TitleRegistry;
 
-use crate::paths::{baseline_path, history_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
+use crate::paths::{anchor_max_steps, boot_anchor_path, history_path, workspace_root};
 
-fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.iter()
-        .position(|a| a == name)
-        .and_then(|i| args.get(i + 1))
-        .map(String::as_str)
-}
-
-fn has_flag(args: &[String], name: &str) -> bool {
-    args.iter().any(|a| a == name)
-}
+use crate::cli::args::{find_flag_value, has_bool_flag};
 
 struct Entry {
     short_name: String,
@@ -45,7 +37,7 @@ fn read_registry(dir: &Path) -> Vec<Entry> {
         .map(|m| Entry {
             short_name: m.short_name.clone(),
             content_id: m.content_id.clone(),
-            max_steps: m.bench_max_steps.unwrap_or(DEFAULT_BENCH_MAX_STEPS),
+            max_steps: anchor_max_steps(m),
         })
         .collect();
     out.sort_by(|a, b| a.short_name.cmp(&b.short_name));
@@ -133,6 +125,36 @@ fn read_history(path: &Path) -> String {
     }
 }
 
+/// The committed anchor this run updates.
+///
+/// The three ways to not get one are kept apart: only an absent file
+/// means "never recorded". An unreadable or unparseable file names
+/// itself, because the anchor carries the checkpoint and budget this
+/// command does not measure -- rewriting it from scratch would drop
+/// curated fields that are still on disk.
+fn read_previous_anchor(short_name: &str, path: &Path) -> BootSummary {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => die(&format!(
+            "{short_name}: no existing {} to update. The baseline carries checkpoint and \
+             budget, which this command does not measure; create it first with \
+             run-game --save-boot-summary.",
+            path.display()
+        )),
+        Err(e) => die(&format!(
+            "{short_name}: read {}: {e}; refusing to treat an unreadable anchor as absent",
+            path.display()
+        )),
+    };
+    serde_json::from_str(&text).unwrap_or_else(|e| {
+        die(&format!(
+            "{short_name}: parse {}: {e}; the anchor exists but is malformed. Repair it \
+             rather than letting this run recreate it without its checkpoint and budget.",
+            path.display()
+        ))
+    })
+}
+
 /// Rewrite one title's baseline, preserving any hand-promoted witness
 /// class. Returns `false` when the title is not installed: `--all`
 /// skips it by name, `--title` treats it as an error.
@@ -151,19 +173,8 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
         return false;
     };
 
-    let path = baseline_path(&workspace_root(), &entry.content_id);
-    let previous: Option<BootSummary> = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|t| serde_json::from_str(&t).ok());
-    let Some(mut summary) = previous else {
-        die(&format!(
-            "{}: no existing {} to update. The baseline carries checkpoint and \
-             budget, which this command does not measure; create it first with \
-             run-game --save-boot-summary.",
-            entry.short_name,
-            path.display()
-        ));
-    };
+    let path = boot_anchor_path(&workspace_root(), &entry.content_id);
+    let mut summary = read_previous_anchor(&entry.short_name, &path);
 
     // History is parsed BEFORE the baseline is written: a malformed
     // history line must abort while the anchor is still untouched,
@@ -227,13 +238,46 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
     true
 }
 
-pub(crate) fn run(args: &[String]) {
-    let registry = match flag(args, "--registry") {
-        Some(p) => PathBuf::from(p),
-        None => workspace_root().join("docs/title_manifests"),
+/// Refuse a `--registry` the spawned measurement cannot honour.
+///
+/// `measure` re-enters the binary as `bench-boot-once --title <name>`,
+/// and that path resolves the name against the compiled-in registry
+/// directory. A `--registry` pointing elsewhere would enumerate one
+/// set of manifests, boot the same-named title from another, and then
+/// write the anchor under the first manifest's content id.
+fn reject_unforwardable_registry(registry: &Path, default: &Path) {
+    let same = match (registry.canonicalize(), default.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => registry == default,
     };
-    let all = has_flag(args, "--all");
-    let one = flag(args, "--title");
+    if !same {
+        die(&format!(
+            "record-anchors: --registry {} is not the registry the measurement reads. \
+             The boot is re-entered as `bench-boot-once --title <name>`, which resolves \
+             names against {}, so the anchor would be measured from one manifest and \
+             filed under another. Point --registry at {} or drop it.",
+            registry.display(),
+            default.display(),
+            default.display(),
+        ));
+    }
+}
+
+pub(crate) fn run(args: &[String]) {
+    let default_registry = workspace_root().join(DEFAULT_TITLE_REGISTRY_DIR);
+    // The shared parsers, not a local scan: they refuse `--flag=value`
+    // and a duplicate, both of which a bare `position(|a| a == name)`
+    // reads as absent.
+    let registry = match find_flag_value(args, "--registry") {
+        Some(p) => {
+            let given = PathBuf::from(p);
+            reject_unforwardable_registry(&given, &default_registry);
+            given
+        }
+        None => default_registry,
+    };
+    let all = has_bool_flag(args, "--all");
+    let one = find_flag_value(args, "--title");
     if all == one.is_some() {
         die("record-anchors requires exactly one of --all or --title <name>");
     }
@@ -243,7 +287,7 @@ pub(crate) fn run(args: &[String]) {
         die(&format!("no title manifests under {}", registry.display()));
     }
 
-    let selected: Vec<&Entry> = match one {
+    let selected: Vec<&Entry> = match one.as_deref() {
         Some(name) => {
             let hit = entries.iter().find(|e| e.short_name == name);
             let Some(hit) = hit else {

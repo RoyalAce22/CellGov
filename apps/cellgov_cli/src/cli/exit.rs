@@ -35,7 +35,19 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
     let exdata = vfs_root.join("home").join("00000001").join("exdata");
     let resolver = |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
         let rap_path = exdata.join(format!("{}.rap", npd.content_id));
-        let rap_bytes = std::fs::read(&rap_path).ok()?;
+        // Only "no such file" is an absent RAP. Any other read failure
+        // (permissions, a directory in its place) would otherwise take
+        // the same silent path and boot the title on NP_KLIC_FREE.
+        let rap_bytes = match std::fs::read(&rap_path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(e) => die(&format!(
+                "failed to read RAP for NPDRM content {} at {}: {}",
+                npd.content_id,
+                rap_path.display(),
+                e,
+            )),
+        };
         let rap_arr: [u8; 16] = rap_bytes.as_slice().try_into().unwrap_or_else(|_| {
             die(&format!(
                 "RAP file {} is {} bytes; expected exactly 16",
@@ -126,9 +138,10 @@ pub(crate) fn load_ppu_image_with_title_or_die(
             control_flags1: None,
         };
     }
-    let authority_id = cellgov_install::sce::parse_program_authority_id(&bytes)
-        .map_err(|e| die(&format!("SELF {path}: identification header: {e}")))
-        .ok();
+    let authority_id = Some(
+        cellgov_install::sce::parse_program_authority_id(&bytes)
+            .unwrap_or_else(|e| die(&format!("SELF {path}: identification header: {e}"))),
+    );
     let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
         .unwrap_or_else(|e| die(&format!("SELF {path}: capability header: {e}")));
     let resolver = klicensee_resolver(title, vfs_root.to_path_buf());

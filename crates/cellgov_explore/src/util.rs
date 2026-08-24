@@ -86,6 +86,24 @@ pub struct AlternateIteration {
     pub schedules_truncated: usize,
 }
 
+impl AlternateIteration {
+    /// Withdraw every divergence claim because the baseline itself
+    /// stopped short.
+    ///
+    /// Alternates are compared against `baseline_hash`; when that hash
+    /// came from a prefix of the baseline schedule, neither a match nor
+    /// a mismatch says anything about schedule sensitivity, so the pass
+    /// can only report inconclusive.
+    pub fn mark_baseline_truncated(&mut self) {
+        self.found_divergence = false;
+        self.bounds_hit = true;
+        self.schedules_truncated = self.schedules.len();
+        for record in &mut self.schedules {
+            record.truncated = true;
+        }
+    }
+}
+
 /// Iterate each non-pruned alternate at every branching point.
 ///
 /// `process` is called with `(branch_step, alternate_unit)` and returns
@@ -133,7 +151,8 @@ where
             }
 
             let (hash, stop) = process(bp.step, alt);
-            if stop.is_truncated() {
+            let truncated = stop.is_truncated();
+            if truncated {
                 schedules_truncated += 1;
                 bounds_hit = true;
             } else if hash != baseline_hash {
@@ -143,6 +162,7 @@ where
                 branch_step: bp.step,
                 alternate_choice: alt,
                 memory_hash: hash,
+                truncated,
             });
         }
     }
@@ -177,5 +197,6 @@ pub fn classify_iteration(
         total_branching_points,
         bounds_hit: iter.bounds_hit,
         schedules_pruned: iter.schedules_pruned,
+        schedules_truncated: iter.schedules_truncated,
     }
 }

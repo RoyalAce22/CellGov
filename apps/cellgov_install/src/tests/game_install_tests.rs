@@ -415,8 +415,21 @@ fn a_network_license_plans_a_rap_under_the_staging_root() {
 }
 
 #[test]
-fn a_local_license_plans_a_rap() {
-    assert!(plan_for(Some(crate::npdrm::NpdLicense::Local), Some(&[0u8; 16])).is_some());
+fn a_local_license_plans_a_rap_under_the_staging_root() {
+    let sr = plan_for(Some(crate::npdrm::NpdLicense::Local), Some(&[0u8; 16]))
+        .expect("local license plans a staged RAP");
+    assert_eq!(sr.staged_path, Path::new("s").join("rap").join("X.rap"));
+    assert_eq!(sr.final_path, Path::new("e").join("X.rap"));
+}
+
+#[test]
+#[should_panic(expected = "invariant: rap_needed without a RAP")]
+fn a_consuming_license_with_no_rap_is_the_callers_invariant_to_have_refused() {
+    // `install_pkg` returns RapRequired before it gets here, so the
+    // plan treats the pair as unreachable rather than staging an empty
+    // RAP. `rejects_rap_required_for_network_license` covers the
+    // refusal that keeps it unreachable.
+    let _ = plan_for(Some(crate::npdrm::NpdLicense::Network), None);
 }
 
 #[test]
@@ -530,4 +543,108 @@ fn build_record_is_deterministic_and_sorted() {
         !record.files.contains_key("USRDIR"),
         "the staged directory entry is not a recorded file"
     );
+}
+
+/// Two container entries whose paths normalize to the same key stage
+/// to one file (the second overwrites) and collapse to one record key,
+/// so the outcome's `file_count` is drawn from the record rather than
+/// from the staged-entry list, which would report two.
+#[test]
+fn entries_that_normalize_to_one_path_are_one_recorded_file() {
+    let staged = vec![
+        StagedFile {
+            path: "USRDIR/EBOOT.BIN".to_string(),
+            is_dir: false,
+            data: b"first".to_vec(),
+        },
+        StagedFile {
+            path: "./USRDIR//EBOOT.BIN".to_string(),
+            is_dir: false,
+            data: b"second".to_vec(),
+        },
+    ];
+    let record = build_record(
+        "pkg",
+        b"src-bytes",
+        &staged,
+        TitleRecord {
+            title_id: "NPUA80001".to_string(),
+            content_id: "UP9000-NPUA80001_00-TEST".to_string(),
+            category: "HG".to_string(),
+            title: "T".to_string(),
+            app_version: "01.00".to_string(),
+            distribution: "psn-hdd".to_string(),
+        },
+        None,
+    );
+    assert_eq!(
+        staged.iter().filter(|f| !f.is_dir).count(),
+        2,
+        "two staged entries went in"
+    );
+    assert_eq!(
+        record.files.len(),
+        1,
+        "both entries address one file: {:?}",
+        record.files.keys().collect::<Vec<_>>()
+    );
+    // The last writer wins on disk, so the record holds its bytes.
+    assert_eq!(
+        record.files.get("USRDIR/EBOOT.BIN"),
+        Some(&sha256_of(b"second")),
+        "the record hashes the bytes the tree ends up holding"
+    );
+}
+
+#[test]
+fn a_cleanup_that_cannot_discard_the_staging_root_names_the_residue() {
+    let out = scratch();
+    // A regular file at the staging path: `remove_dir_all` refuses it
+    // with something other than NotFound, which is exactly the shape of
+    // a cleanup that leaves residue behind.
+    let staging = out.join("not-a-staging-dir");
+    std::fs::write(&staging, b"x").unwrap();
+
+    let err = run_or_clean::<()>(&staging, || Err(GameInstallError::NoParamSfo))
+        .expect_err("the pre-commit fault still fails the install");
+    let GameInstallError::StagingResidue { path, cause, .. } = &err else {
+        panic!("expected StagingResidue, got {err:?}");
+    };
+    assert_eq!(path, &staging);
+    assert!(
+        matches!(**cause, GameInstallError::NoParamSfo),
+        "the original fault survives the wrap"
+    );
+    // Both halves reach the operator: what went wrong and what is left.
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("PARAM.SFO"),
+        "names the fault: {rendered}"
+    );
+    assert!(
+        rendered.contains("could not be discarded"),
+        "names the residue: {rendered}"
+    );
+}
+
+#[test]
+fn a_cleanup_that_succeeds_passes_the_original_fault_through_unwrapped() {
+    let out = scratch();
+    let staging = out.join("staging");
+    std::fs::create_dir_all(staging.join("tree")).unwrap();
+
+    let err = run_or_clean::<()>(&staging, || Err(GameInstallError::NoEboot))
+        .expect_err("the pre-commit fault fails the install");
+    assert!(matches!(err, GameInstallError::NoEboot), "got {err:?}");
+    assert!(!staging.exists(), "the batch was discarded whole");
+}
+
+#[test]
+fn a_leading_dot_content_id_is_not_a_usable_path_component() {
+    for bad in ["", ".", "..", ".staging-NPUA80001", "a/b", "a\\b", "a b"] {
+        assert!(!content_id_is_safe(bad), "{bad:?} must be refused");
+    }
+    for ok in ["NPUA80001", "UP9000-NPUA80001_00-TEST", "BCES00664"] {
+        assert!(content_id_is_safe(ok), "{ok:?} must be accepted");
+    }
 }

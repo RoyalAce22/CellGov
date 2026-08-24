@@ -197,6 +197,52 @@ fn an_in_range_entry_descriptor_sets_pc_and_r2_from_the_loaded_image() {
 }
 
 #[test]
+fn an_entry_outside_every_loaded_segment_does_not_become_pc_zero() {
+    // The descriptor address fits in guest memory but nothing was
+    // committed there, so the eight bytes read back are the zero fill.
+    // Treating them as an OPD would silently boot the image at pc 0
+    // with no TOC; the raw entry has to survive instead.
+    let pt_off = 0x100usize;
+    let pt_sz = 0x100usize;
+    let pt_vaddr = 0x1000u64;
+    let unmapped_entry = 0x1800u64;
+
+    let mut data = mk_elf_with_pt_load(pt_off, pt_sz, pt_vaddr);
+    data[24..32].copy_from_slice(&unmapped_entry.to_be_bytes());
+
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(0x2000);
+    let result = load_ppu_elf(&data, &mut mem, &mut s).expect("load ok");
+
+    assert_eq!(result.entry, unmapped_entry);
+    assert_eq!(s.pc, unmapped_entry, "the raw entry, not the zero fill");
+    assert_eq!(s.gpr[2], 0);
+    // The zero fill really is there -- the test would pass for the
+    // wrong reason if guest memory happened to hold something else.
+    let off = unmapped_entry as usize;
+    assert_eq!(&mem.as_bytes()[off..off + 8], &[0u8; 8]);
+}
+
+#[test]
+fn an_entry_descriptor_straddling_the_end_of_its_segment_is_not_dereferenced() {
+    // Six of the descriptor's eight bytes are loaded and two are not.
+    let pt_off = 0x100usize;
+    let pt_sz = 0x100usize;
+    let pt_vaddr = 0x1000u64;
+    let straddling = pt_vaddr + pt_sz as u64 - 6;
+
+    let mut data = mk_elf_with_pt_load(pt_off, pt_sz, pt_vaddr);
+    data[24..32].copy_from_slice(&straddling.to_be_bytes());
+    let opd_off = pt_off + (straddling - pt_vaddr) as usize;
+    data[opd_off..opd_off + 4].copy_from_slice(&0x1010u32.to_be_bytes());
+
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(0x2000);
+    load_ppu_elf(&data, &mut mem, &mut s).expect("load ok");
+    assert_eq!(s.pc, straddling, "the raw entry, not a half-loaded OPD");
+}
+
+#[test]
 fn skips_empty_segment() {
     let mut data = mk_elf_header(2);
     write_ph(&mut data, 0, 0, 0, 0, 0);
@@ -259,6 +305,134 @@ fn find_symbol_locates_result_in_ppu_elf() {
 fn find_symbol_returns_none_for_missing() {
     let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
     assert!(find_symbol(&data, "nonexistent_symbol_xyz").is_none());
+}
+
+/// Every reader of a program-header slot, so a refusal added to one
+/// entry point cannot be missing from another.
+fn assert_every_ph_reader_refuses(data: &[u8], expected: LoadError) {
+    let mut s = PpuState::new();
+    let mut mem = GuestMemory::new(256);
+    assert_eq!(load_ppu_elf(data, &mut mem, &mut s), Err(expected.clone()));
+    assert_eq!(required_memory_size(data), Err(expected.clone()));
+    assert_eq!(pt_load_segments(data), Err(expected));
+    assert!(find_tls_segment(data).is_none());
+    assert!(find_tls_program_header(data).is_none());
+}
+
+#[test]
+fn a_phentsize_that_is_not_the_elf64_program_header_size_is_refused() {
+    // e_phentsize is attacker-supplied, and every reader indexes the
+    // slot at fixed ELF64 offsets -- p_memsz at 40, p_align at 48. A
+    // narrower slot puts those reads past the declared entry; a wider
+    // or zero one makes the stride disagree with the layout. Both are
+    // named refusals, not a clamp.
+    for phentsize in [0u16, 8, 32, 55, 57, 64] {
+        let mut data = mk_elf_header(1);
+        data[54..56].copy_from_slice(&phentsize.to_be_bytes());
+        data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
+        assert_every_ph_reader_refuses(
+            &data,
+            LoadError::BadPhentsize {
+                phentsize: phentsize as usize,
+            },
+        );
+    }
+}
+
+#[test]
+fn a_program_header_table_running_past_the_end_of_the_file_is_refused() {
+    // The architected slot size, but the file stops inside the slot.
+    let mut data = mk_elf_header(1);
+    data[64..68].copy_from_slice(&PT_LOAD.to_be_bytes());
+    data.truncate(64 + 55);
+    assert_every_ph_reader_refuses(&data, LoadError::TooSmall);
+}
+
+/// One ELF64 section header slot, written at the architected offsets.
+struct Sh {
+    sh_type: u32,
+    sh_offset: u64,
+    sh_size: u64,
+    sh_link: u32,
+    sh_entsize: u64,
+}
+
+fn write_sh(data: &mut [u8], shoff: usize, slot: usize, sh: &Sh) {
+    let base = shoff + slot * 64;
+    data[base + 4..base + 8].copy_from_slice(&sh.sh_type.to_be_bytes());
+    data[base + 24..base + 32].copy_from_slice(&sh.sh_offset.to_be_bytes());
+    data[base + 32..base + 40].copy_from_slice(&sh.sh_size.to_be_bytes());
+    data[base + 40..base + 44].copy_from_slice(&sh.sh_link.to_be_bytes());
+    data[base + 56..base + 64].copy_from_slice(&sh.sh_entsize.to_be_bytes());
+}
+
+fn mk_elf_with_sections(shoff: usize, shnum: u16) -> Vec<u8> {
+    let mut data = vec![0u8; shoff + 64 * shnum as usize];
+    data[0..4].copy_from_slice(&ELF_MAGIC);
+    data[4] = 2;
+    data[5] = 2;
+    data[40..48].copy_from_slice(&(shoff as u64).to_be_bytes());
+    data[58..60].copy_from_slice(&64u16.to_be_bytes());
+    data[60..62].copy_from_slice(&shnum.to_be_bytes());
+    data
+}
+
+#[test]
+fn a_symbol_table_whose_offset_plus_size_wraps_usize_is_not_searched() {
+    // sh_offset and sh_size are 64-bit header fields; forming
+    // `sh_offset + j * sh_entsize` unchecked wraps on this pair, and a
+    // wrapped index passes the length check while reading unrelated
+    // bytes (or trips the big-endian reader's debug assertion).
+    let shoff = 64;
+    let mut data = mk_elf_with_sections(shoff, 2);
+    write_sh(
+        &mut data,
+        shoff,
+        0,
+        &Sh {
+            sh_type: SHT_SYMTAB,
+            sh_offset: u64::MAX - 10,
+            sh_size: 24,
+            sh_link: 1,
+            sh_entsize: 24,
+        },
+    );
+    write_sh(
+        &mut data,
+        shoff,
+        1,
+        &Sh {
+            sh_type: cellgov_ps3_abi::elf::SHT_STRTAB,
+            sh_offset: 0,
+            sh_size: 16,
+            sh_link: 0,
+            sh_entsize: 0,
+        },
+    );
+    assert!(find_symbol(&data, "anything").is_none());
+}
+
+#[test]
+fn a_shentsize_narrower_than_an_elf64_section_header_is_not_searched() {
+    // sh_entsize lives at section-header offset 56, past a slot the
+    // header declares to be 8 bytes wide.
+    let shoff = 64;
+    let mut data = mk_elf_with_sections(shoff, 1);
+    write_sh(
+        &mut data,
+        shoff,
+        0,
+        &Sh {
+            sh_type: SHT_SYMTAB,
+            sh_offset: 0,
+            sh_size: 24,
+            sh_link: 0,
+            sh_entsize: 24,
+        },
+    );
+    data[58..60].copy_from_slice(&8u16.to_be_bytes());
+    data.truncate(shoff + 8);
+    assert!(find_symbol(&data, "anything").is_none());
 }
 
 fn make_elf_with_tls(tls_vaddr: u64, tls_filesz: u64, tls_memsz: u64) -> Vec<u8> {
@@ -553,6 +727,38 @@ fn load_ppu_elf_populates_sys_proc_param_range_when_struct_present() {
         result.sys_proc_param_range,
         Some(0x10_0040..0x10_0070),
         "sys_proc_param_range must cover [guest_addr, guest_addr + struct_size)",
+    );
+}
+
+/// A `p_vaddr` near the top of the address space would wrap the
+/// file-offset-to-guest translation and hand back a low address that
+/// looks legitimate.
+#[test]
+fn a_proc_param_whose_guest_address_would_wrap_is_not_reported() {
+    let payload_offset = 0x140usize;
+    let pt_load_offset = 0x100usize;
+    let pt_load_size = 0x80usize;
+    let mut data = vec![0u8; pt_load_offset + pt_load_size + 32];
+    data[0..4].copy_from_slice(&ELF_MAGIC);
+    data[4] = 2;
+    data[5] = 2;
+    data[32..40].copy_from_slice(&64u64.to_be_bytes());
+    data[54..56].copy_from_slice(&56u16.to_be_bytes());
+    data[56..58].copy_from_slice(&1u16.to_be_bytes());
+    let ph = 64;
+    data[ph..ph + 4].copy_from_slice(&PT_LOAD.to_be_bytes());
+    data[ph + 8..ph + 16].copy_from_slice(&(pt_load_offset as u64).to_be_bytes());
+    // Translating payload_offset adds 0x40 to this, which wraps.
+    data[ph + 16..ph + 24].copy_from_slice(&(u64::MAX - 8).to_be_bytes());
+    data[ph + 32..ph + 40].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+    data[ph + 40..ph + 48].copy_from_slice(&(pt_load_size as u64).to_be_bytes());
+    let start = payload_offset;
+    data[start..start + 4].copy_from_slice(&0x20u32.to_be_bytes());
+    data[start + 4..start + 8].copy_from_slice(&SYS_PROCESS_PARAM_MAGIC.to_be_bytes());
+
+    assert!(
+        find_sys_process_param(&data).is_none(),
+        "a wrapping guest address must be refused, not folded to a low one"
     );
 }
 

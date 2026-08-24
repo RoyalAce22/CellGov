@@ -75,11 +75,69 @@ fn resolve_eboot_rejects_dot_prefixed_content_id() {
         matches!(err, ResolveEbootError::HiddenContentId { .. }),
         "expected HiddenContentId, got {err:?}"
     );
-    // Witness: the guard actually executed (not a vacuous pass).
-    assert_eq!(
-        HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed),
-        before + 1
-    );
+    // Witness: the guard actually executed (not a vacuous pass). The
+    // counter is process-wide and tests run in parallel, so the delta
+    // is at least one, not exactly one.
+    assert!(HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed) > before);
+}
+
+/// The guard runs ahead of the source match. A manifest-relative title
+/// never puts its content-id in the resolved path, but the id is
+/// derived from a directory name nobody chose as an identity, so it is
+/// the one that can acquire a leading dot by accident -- and the id
+/// still names the source-independent `tests/fixtures/<id>/` anchor
+/// directory.
+#[test]
+fn the_hidden_content_id_guard_covers_the_sources_that_ignore_the_id_too() {
+    use std::sync::atomic::Ordering;
+
+    let dir = PathBuf::from(".hidden").join("build");
+    for source in [
+        GameSource::ManifestRelative { dir: dir.clone() },
+        GameSource::FirmwareExec { dir },
+    ] {
+        let mut m = hdd_manifest(".hidden", "t", &["mt.elf"]);
+        m.source = source.clone();
+        let before = HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed);
+        let err = m
+            .resolve_eboot(Path::new(""))
+            .expect_err("a dot-prefixed id is refused whatever the source");
+        assert!(
+            matches!(err, ResolveEbootError::HiddenContentId { .. }),
+            "{source:?}: expected HiddenContentId, got {err:?}"
+        );
+        assert!(HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed) > before);
+    }
+}
+
+/// A manifest under a dot-prefixed directory picks the leading dot up
+/// from the filesystem, with no `content_id` written anywhere.
+#[test]
+fn a_manifest_relative_title_derives_a_hidden_content_id_from_a_dot_directory() {
+    const TOML: &str = r#"
+[title]
+short_name = "mt"
+display_name = "mt"
+eboot_candidates = ["mt.elf"]
+year = 2026
+developer = "CellGov"
+engine = "microtest"
+distribution = "microtest"
+
+[source]
+kind = "manifest-relative"
+path = "build"
+
+[checkpoint]
+kind = "process-exit"
+"#;
+    let origin = Path::new("tests/micro/.scratch/manifest.toml");
+    let m = TitleManifest::load_from_text(TOML, origin).expect("loads");
+    assert_eq!(m.content_id, ".scratch");
+    assert!(matches!(
+        m.resolve_eboot(Path::new("")),
+        Err(ResolveEbootError::HiddenContentId { .. })
+    ));
 }
 
 mod distribution_tests {
@@ -119,6 +177,41 @@ mod distribution_tests {
             assert_eq!(back, *d);
         }
     }
+}
+
+#[test]
+fn a_candidate_taken_by_a_directory_is_named_rather_than_folded_into_the_miss_list() {
+    let tmp = TmpDir::new("resolve_candidate_is_dir");
+    let usrdir = tmp.path().join("game").join("NPAA00001").join("USRDIR");
+    std::fs::create_dir_all(usrdir.join("EBOOT.BIN")).unwrap();
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+    let err = m
+        .resolve_eboot(tmp.path())
+        .expect_err("a directory is not an executable");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("not a regular file"),
+        "diagnostic must name the taken path: {rendered}"
+    );
+    match err {
+        ResolveEbootError::NotFound { not_regular, .. } => {
+            assert_eq!(not_regular, vec![usrdir.join("EBOOT.BIN")]);
+        }
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_directory_on_the_first_candidate_does_not_block_the_second() {
+    let tmp = TmpDir::new("resolve_dir_then_file");
+    let usrdir = tmp.path().join("game").join("NPAA00001").join("USRDIR");
+    std::fs::create_dir_all(usrdir.join("EBOOT.BIN")).unwrap();
+    std::fs::write(usrdir.join("EBOOT.elf"), b"elf").unwrap();
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN", "EBOOT.elf"]);
+    let got = m
+        .resolve_eboot(tmp.path())
+        .expect("second candidate resolves");
+    assert_eq!(got, usrdir.join("EBOOT.elf"));
 }
 
 fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -> TitleManifest {
@@ -176,5 +269,51 @@ fn resolve_eboot_firmware_exec_missing_file_reports_the_firmware_dir() {
             assert_eq!(searched, moddir);
         }
         other => panic!("expected NotFound under the firmware dir, got {other:?}"),
+    }
+}
+
+#[test]
+fn resolve_eboot_manifest_relative_uses_its_dir_and_ignores_vfs_root() {
+    let tmp = TmpDir::new("resolve_manifest_relative");
+    let builddir = tmp
+        .path()
+        .join("tests")
+        .join("micro")
+        .join("mt")
+        .join("build");
+    std::fs::create_dir_all(&builddir).unwrap();
+    std::fs::write(builddir.join("mt.elf"), b"x").unwrap();
+
+    let mut m = hdd_manifest("mt", "mt", &["mt.elf"]);
+    m.source = GameSource::ManifestRelative {
+        dir: builddir.clone(),
+    };
+
+    // A vfs_root that would break an Hdd or Disc resolve: no game
+    // directory under it, and no parent for the disc layout.
+    let got = m
+        .resolve_eboot(Path::new(""))
+        .expect("manifest-relative resolves from its own dir");
+    assert_eq!(got, builddir.join("mt.elf"));
+}
+
+#[test]
+fn resolve_eboot_manifest_relative_missing_file_reports_the_build_dir() {
+    let tmp = TmpDir::new("resolve_manifest_relative_absent");
+    let builddir = tmp
+        .path()
+        .join("tests")
+        .join("micro")
+        .join("mt")
+        .join("build");
+    let mut m = hdd_manifest("mt", "mt", &["mt.elf"]);
+    m.source = GameSource::ManifestRelative {
+        dir: builddir.clone(),
+    };
+    match m.resolve_eboot(Path::new("")) {
+        Err(ResolveEbootError::NotFound { searched, .. }) => {
+            assert_eq!(searched, builddir);
+        }
+        other => panic!("expected NotFound under the build dir, got {other:?}"),
     }
 }

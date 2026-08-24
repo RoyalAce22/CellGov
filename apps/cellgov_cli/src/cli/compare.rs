@@ -8,7 +8,10 @@ use cellgov_compare::{
 };
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::args::{find_flag_value, parse_compare_mode, parse_output_format, OutputFormat};
+use super::args::{
+    find_flag_value, parse_compare_mode, parse_output_format, reject_flag_here,
+    require_at_most_one, OutputFormat,
+};
 use super::exit::{die, load_file_or_die};
 use super::scenarios::scenario_factory;
 
@@ -22,13 +25,43 @@ pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
     });
     let mode = parse_compare_mode(args);
     let format = parse_output_format(args);
+    // Each of these selects a different job; the handlers below test
+    // them in a fixed order and return, so two at once would drop one
+    // without a word.
+    require_at_most_one(
+        args,
+        &[
+            "--save-baseline",
+            "--against-baseline",
+            "--observations-dir",
+        ],
+    );
     let save_path = find_flag_value(args, "--save-baseline");
     let against_path = find_flag_value(args, "--against-baseline");
-    let baselines_dir = find_flag_value(args, "--baselines-dir");
+    let observations_dir = find_flag_value(args, "--observations-dir");
+    if save_path.is_some() {
+        // Recording an observation runs no comparison and prints no
+        // report, so both of these were parsed and then dropped --
+        // `--format json` beside `--save-baseline` still emitted the
+        // human line.
+        reject_flag_here(args, "--mode", "a run that produces a comparison report");
+        reject_flag_here(args, "--format", "a run that produces a comparison report");
+    }
 
     if target.ends_with(".toml") {
-        run_manifest_compare(target, mode, format, save_path, against_path, baselines_dir);
+        run_manifest_compare(
+            target,
+            mode,
+            format,
+            save_path,
+            against_path,
+            observations_dir,
+        );
     } else {
+        // Multi-observation compare needs a manifest's memory-region
+        // descriptors; a bare scenario has none, so the flag would be
+        // read and then never used.
+        reject_flag_here(args, "--observations-dir", "a manifest.toml target");
         match scenario_factory(target) {
             Some(factory) => {
                 if let Some(path) = save_path {
@@ -150,7 +183,7 @@ fn run_manifest_compare(
     format: OutputFormat,
     save_path: Option<String>,
     against_path: Option<String>,
-    baselines_dir: Option<String>,
+    observations_dir: Option<String>,
 ) {
     let manifest = cellgov_compare::manifest::load(std::path::Path::new(manifest_path))
         .unwrap_or_else(|e| die(&format!("failed to load manifest {manifest_path}: {e:?}")));
@@ -198,17 +231,17 @@ fn run_manifest_compare(
 
     let obs = require_determinism(&factory, test_name, &regions);
 
-    if let Some(dir) = baselines_dir {
-        let baselines = load_baselines_from_dir(&dir);
+    if let Some(dir) = observations_dir {
+        let baselines = load_observations_from_dir(&dir);
         if baselines.is_empty() {
-            die(&format!("no baseline .json files found in {dir}"));
+            die(&format!("no observation .json files found in {dir}"));
         }
         let result = compare_multi(&baselines, &obs, mode);
         match format {
             OutputFormat::Human => {
                 println!("test: {test_name}");
                 println!("manifest: {manifest_path}");
-                println!("baselines-dir: {dir}");
+                println!("observations-dir: {dir}");
                 print!("{}", format_multi_human(&result, baselines.len()));
             }
             OutputFormat::Json => {
@@ -283,16 +316,16 @@ fn run_manifest_compare(
     }
 }
 
-/// Load all `.json` baseline files from a directory, sorted by
-/// name. Read failures die via [`die`].
-pub(crate) fn load_baselines_from_dir(dir: &str) -> Vec<Observation> {
+/// Load every `.json` observation in a directory, sorted by name.
+/// Read failures die via [`die`].
+pub(crate) fn load_observations_from_dir(dir: &str) -> Vec<Observation> {
     let rd = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| die(&format!("failed to read baselines directory {dir}: {e}")));
+        .unwrap_or_else(|e| die(&format!("failed to read observations directory {dir}: {e}")));
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
     for entry in rd {
         let entry = entry.unwrap_or_else(|e| {
             die(&format!(
-                "baselines directory {dir}: failed to read entry: {e}"
+                "observations directory {dir}: failed to read entry: {e}"
             ))
         });
         let path = entry.path();
@@ -307,7 +340,7 @@ pub(crate) fn load_baselines_from_dir(dir: &str) -> Vec<Observation> {
         .map(|path| {
             cellgov_compare::baseline::load(path).unwrap_or_else(|e| {
                 die(&format!(
-                    "failed to load baseline {}: {e:?}",
+                    "failed to load observation {}: {e:?}",
                     path.display()
                 ))
             })

@@ -38,6 +38,14 @@ pub const INSTALL_RECORD_FORMAT_VERSION: u32 = 2;
 /// `home/00000001/exdata` RAP lookup. Shared with [`crate::game_uninstall`].
 pub(crate) const HDD0_USER: &str = "00000001";
 
+/// Where installed RAPs live under a `dev_hdd0` mount, keyed by
+/// `<content-id>.rap`. RPCS3 reads the same layout on boot, so a RAP
+/// installed once is found by content id with nothing else to pass.
+#[must_use]
+pub fn exdata_dir(dev_hdd0: &Path) -> PathBuf {
+    dev_hdd0.join("home").join(HDD0_USER).join("exdata")
+}
+
 /// PARAM.SFO categories that mark a disc title (`DG` disc game,
 /// `GD` disc game/data).
 const DISC_CATEGORIES: [&str; 2] = ["DG", "GD"];
@@ -74,7 +82,10 @@ pub struct GameInstallOutcome {
     pub game_dir: PathBuf,
     /// Whether a RAP was installed into `exdata/`.
     pub rap_installed: bool,
-    /// Number of files written to the game tree.
+    /// Number of distinct files the committed tree holds, equal to the
+    /// record's file count. Two container entries whose paths normalize
+    /// to the same key are one file on disk and one record key, so the
+    /// staged-entry count would over-report both.
     pub file_count: usize,
     /// The written install record.
     pub record_path: PathBuf,
@@ -189,6 +200,18 @@ pub enum GameInstallError {
     UnsafeContentId {
         /// The offending content-id.
         content_id: String,
+    },
+    /// A pre-commit fault was followed by a cleanup that could not
+    /// discard the staging root, so residue outlived the failed install.
+    #[error("{cause}; the staging root {} could not be discarded: {source}", path.display())]
+    StagingResidue {
+        /// The staging root still on disk.
+        path: PathBuf,
+        /// Why the cleanup removal failed.
+        #[source]
+        source: std::io::Error,
+        /// The pre-commit fault that triggered the cleanup.
+        cause: Box<GameInstallError>,
     },
 }
 
@@ -317,27 +340,37 @@ fn normalized_rel(rel: &str) -> String {
         .join("/")
 }
 
-/// Reject a content-id that is empty or carries a byte outside
-/// `[A-Za-z0-9._-]`, before it is used to build a game-directory or
-/// RAP-file path.
-fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
-    // The id comes from the package's own PARAM.SFO and is joined onto
-    // the mount root as a single path component. A leading dot makes it
-    // resolve somewhere other than a fresh sibling: `..` walks up to the
-    // mount itself, which `commit` would then `remove_dir_all`, and
-    // `.staging-*` / `.uninstalling-*` collide with in-progress residue.
-    // The boot side refuses the same shape (`ResolveEbootError::HiddenContentId`).
-    if id.is_empty()
-        || id.starts_with('.')
-        || !id
+/// Whether an id is safe to use as a single path component under a
+/// mount root: non-empty, no leading dot, and `[A-Za-z0-9._-]` only.
+///
+/// Shared with [`crate::game_uninstall`], which joins an
+/// operator-supplied title-id onto the same mount roots and so needs
+/// the identical rule.
+// The id comes from the package's own PARAM.SFO (or, on the uninstall
+// side, the command line) and is joined onto the mount root as a single
+// path component. A leading dot makes it resolve somewhere other than a
+// fresh sibling: `..` walks up to the mount itself, which `commit` would
+// then `remove_dir_all`, and `.staging-*` / `.uninstalling-*` collide
+// with in-progress residue. The boot side refuses the same shape
+// (`ResolveEbootError::HiddenContentId`).
+pub(crate) fn content_id_is_safe(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('.')
+        && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-    {
-        return Err(GameInstallError::UnsafeContentId {
+}
+
+/// Reject a content-id [`content_id_is_safe`] refuses, before it is used
+/// to build a game-directory or RAP-file path.
+fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
+    if content_id_is_safe(id) {
+        Ok(())
+    } else {
+        Err(GameInstallError::UnsafeContentId {
             content_id: id.to_string(),
-        });
+        })
     }
-    Ok(())
 }
 
 /// Whether a license consumes a RAP. Only network/local do; free and
@@ -447,7 +480,7 @@ pub fn install_pkg(
     // Layout. The pre-commit batch lives under one staging root:
     // `tree/` is the game tree, `rap/` holds the staged RAP.
     let dev_hdd0 = output_dir.join("dev_hdd0");
-    let exdata = dev_hdd0.join("home").join(HDD0_USER).join("exdata");
+    let exdata = exdata_dir(&dev_hdd0);
     let game_root = dev_hdd0.join("game");
     let final_dir = game_root.join(&title_id);
     let staging_root = game_root.join(format!(".staging-{title_id}"));
@@ -536,7 +569,7 @@ pub fn install_pkg(
         content_id,
         game_dir: final_dir,
         rap_installed,
-        file_count: count_files(&staged),
+        file_count: record.files.len(),
         record_path,
     })
 }
@@ -628,7 +661,7 @@ pub fn install_iso(
         content_id: title_id,
         game_dir: final_dir,
         rap_installed: false,
-        file_count: count_files(&staged),
+        file_count: record.files.len(),
         record_path,
     })
 }
@@ -651,10 +684,6 @@ fn parse_identity(sfo_bytes: &[u8]) -> Result<(String, String, String, String), 
     Ok((title_id, category, title, app_version))
 }
 
-fn count_files(staged: &[StagedFile]) -> usize {
-    staged.iter().filter(|f| !f.is_dir).count()
-}
-
 /// Clear and recreate a staging directory, so no foreign residue
 /// survives into the commit rename.
 fn prepare_staging(staging_dir: &Path) -> Result<(), GameInstallError> {
@@ -667,16 +696,26 @@ fn prepare_staging(staging_dir: &Path) -> Result<(), GameInstallError> {
 }
 
 /// Run `f`, removing the staging directory if it fails.
+///
+/// A cleanup that cannot remove the root falsifies the module's
+/// discard-whole invariant, so it surfaces as
+/// [`GameInstallError::StagingResidue`] carrying the original fault
+/// rather than being dropped.
 fn run_or_clean<T>(
     staging_dir: &Path,
     f: impl FnOnce() -> Result<T, GameInstallError>,
 ) -> Result<T, GameInstallError> {
     match f() {
         Ok(v) => Ok(v),
-        Err(e) => {
-            std::fs::remove_dir_all(staging_dir).ok();
-            Err(e)
-        }
+        Err(e) => match std::fs::remove_dir_all(staging_dir) {
+            Ok(()) => Err(e),
+            Err(c) if c.kind() == std::io::ErrorKind::NotFound => Err(e),
+            Err(c) => Err(GameInstallError::StagingResidue {
+                path: staging_dir.to_path_buf(),
+                source: c,
+                cause: Box::new(e),
+            }),
+        },
     }
 }
 

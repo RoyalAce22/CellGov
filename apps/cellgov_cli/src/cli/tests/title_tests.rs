@@ -53,3 +53,40 @@ fn resolve_ps3_vfs_root_default_is_project_relative() {
     let got = resolve_ps3_vfs_root(&args);
     assert_eq!(got, std::path::PathBuf::from("vfs/dev_hdd0"));
 }
+
+#[test]
+fn an_empty_vfs_root_flag_is_refused_rather_than_meaning_the_current_directory() {
+    let args = sv(&["cli", "run-game", "--title", "flow", "--vfs-root", ""]);
+    let err = resolve_ps3_vfs_root_inner(&args, None).expect_err("empty root names no directory");
+    assert!(
+        err.contains("--vfs-root"),
+        "message names the origin: {err}"
+    );
+}
+
+#[test]
+fn an_empty_vfs_root_env_var_is_refused_rather_than_meaning_the_current_directory() {
+    let args = sv(&["cli", "run-game", "--title", "flow"]);
+    let err = resolve_ps3_vfs_root_inner(&args, Some(std::ffi::OsString::new()))
+        .expect_err("empty root names no directory");
+    assert!(
+        err.contains("CELLGOV_PS3_VFS_ROOT"),
+        "message names the origin: {err}"
+    );
+}
+
+#[test]
+fn a_set_vfs_root_env_var_beats_the_default() {
+    let args = sv(&["cli", "run-game", "--title", "flow"]);
+    let got = resolve_ps3_vfs_root_inner(&args, Some(std::ffi::OsString::from("/from/env")))
+        .expect("non-empty env root resolves");
+    assert_eq!(got, std::path::PathBuf::from("/from/env"));
+}
+
+#[test]
+fn the_vfs_root_flag_beats_a_set_env_var() {
+    let args = sv(&["cli", "run-game", "--vfs-root", "/from/flag"]);
+    let got = resolve_ps3_vfs_root_inner(&args, Some(std::ffi::OsString::from("/from/env")))
+        .expect("flag wins");
+    assert_eq!(got, std::path::PathBuf::from("/from/flag"));
+}

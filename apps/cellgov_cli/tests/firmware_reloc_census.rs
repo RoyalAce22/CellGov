@@ -1,5 +1,6 @@
 //! Regenerate `docs/dev/audits/firmware_reloc_census.md` from the installed
-//! firmware corpus. Run with:
+//! firmware corpus. The destination is gitignored, so this writes a
+//! local-only artifact and a fresh clone will not have one. Run with:
 //!
 //! ```text
 //! cargo test -p cellgov_cli --test firmware_reloc_census --release \
@@ -141,10 +142,14 @@ fn filename_is_safe(name: &str) -> bool {
 fn regenerate_firmware_reloc_census() {
     let dir = corpus::firmware_external_dir();
 
+    // An unreadable entry is a hard error: dropping it would shrink the
+    // census without any row saying so.
     let mut sprx_paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("read_dir on validated firmware dir")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
+        .map(|e| {
+            e.unwrap_or_else(|err| panic!("read_dir entry under {}: {err}", dir.display()))
+                .path()
+        })
         .filter(|p| {
             p.extension()
                 .and_then(|x| x.to_str())
@@ -366,6 +371,25 @@ fn regenerate_firmware_reloc_census() {
         sprx_paths.len(),
         skipped.len(),
     );
+    // A module count alone does not witness a relocation: a parse
+    // regression returning zero relocations per module clears the floor
+    // above, empties `union_types`, and makes the unknown-type check
+    // above pass over nothing.
+    //
+    // The type floor is the shape a relocatable PPC module has to emit
+    // rather than a transcript of today's corpus: absolute pointers,
+    // the LO/HA pair that materializes an address across two
+    // instructions, and a relative branch.
+    let total_relocs: u64 = totals.values().sum();
+    assert!(
+        total_relocs >= 10_000 && union_types.len() >= 4,
+        "{} relocation(s) across {} distinct type(s) in {} modules; \
+         the firmware set carries tens of thousands across several types, \
+         so the union table and the unknown-type check above covered nothing",
+        total_relocs,
+        union_types.len(),
+        per_module.len(),
+    );
 }
 
 /// The regenerator above is `#[ignore]` (it needs a decrypted firmware
@@ -373,6 +397,12 @@ fn regenerate_firmware_reloc_census() {
 /// table cannot label in CI.
 #[test]
 fn reloc_type_name_covers_applier_supported() {
+    // An empty slice would make the loop below cover nothing.
+    assert!(
+        cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES.len() >= 4,
+        "APPLIER_SUPPORTED_TYPES holds {} entries; the loop below covers nothing",
+        cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES.len()
+    );
     for &t in cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES {
         let name = reloc_type_name(t);
         assert_ne!(

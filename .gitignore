@@ -24,8 +24,10 @@ tests/micro/**/*.o
 tests/micro/**/build/
 tests/micro/hello_world/
 
-# Raw TTY dumps (binary artifacts from RPCS3 runs)
-baselines/**/*.tty
+# Raw TTY dumps: the intermediate an RPCS3 run produces on the way to
+# a scenario observation. The .json beside it is the committed artifact;
+# no test may read one of these (see the tree's README).
+tests/scenario_observations/**/*.tty
 
 # RPCS3 HLE trace files produced by the cellgov_hle_trace patch
 *.htrc

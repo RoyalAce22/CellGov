@@ -1,0 +1,5 @@
+# Matches the blocking `lint` job in .github/workflows/ci.yml. Not the
+# MSRV -- that is [workspace.package] rust-version, tested by CI.
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt"]

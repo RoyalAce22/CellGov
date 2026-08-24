@@ -4,7 +4,16 @@
     {
       "name": "result",
       "addr": 0,
-      "data": [0, 0, 0, 0, 19, 55, 186, 173]
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        19,
+        55,
+        186,
+        173
+      ]
     }
   ],
   "events": [],
@@ -12,5 +21,6 @@
   "metadata": {
     "runner": "rpcs3-llvm",
     "steps": null
-  }
+  },
+  "tty_log": []
 }

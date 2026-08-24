@@ -60,21 +60,48 @@ pub enum LoadError {
         /// Declared memory-image size.
         memsz: u64,
     },
+    /// `e_phentsize` is not the ELF64 program-header size, so the
+    /// table cannot be strided.
+    #[error("PPU ELF declares program-header entry size {phentsize}, not {ELF_PHENTSIZE}")]
+    BadPhentsize {
+        /// Declared `e_phentsize`.
+        phentsize: usize,
+    },
 }
 
-use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, PT_LOAD};
+use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, PT_LOAD};
 
-/// Compute `phoff + i * phentsize`, returning `None` on overflow or
-/// if the program-header slot would extend past `data.len()`; callers
-/// translate `None` into `LoadError::TooSmall`.
-fn ph_slot_base(data_len: usize, phoff: usize, phentsize: usize, i: usize) -> Option<usize> {
-    let prod = i.checked_mul(phentsize)?;
-    let base = phoff.checked_add(prod)?;
-    let end = base.checked_add(phentsize)?;
-    if end > data_len {
-        return None;
+/// Byte offset of program-header slot `i`.
+///
+/// # Errors
+///
+/// [`LoadError::BadPhentsize`] when the header declares a slot size
+/// other than the ELF64 program header, and [`LoadError::TooSmall`] on
+/// overflow or when the slot would extend past `data_len`.
+///
+/// The size check is a refusal rather than a clamp because
+/// `e_phentsize` is attacker-supplied and every reader below indexes
+/// the slot at fixed ELF64 offsets -- `p_memsz` at 40, `p_align` at
+/// 48. A narrower declared slot puts those reads outside the validated
+/// window, and a wider or zero one makes the stride disagree with the
+/// layout the readers assume. RPCS3 `Loader/ELF.h` `elf_object::open`
+/// refuses the same mismatch.
+fn ph_slot_base(
+    data_len: usize,
+    phoff: usize,
+    phentsize: usize,
+    i: usize,
+) -> Result<usize, LoadError> {
+    if phentsize != ELF_PHENTSIZE {
+        return Err(LoadError::BadPhentsize { phentsize });
     }
-    Some(base)
+    let prod = i.checked_mul(phentsize).ok_or(LoadError::TooSmall)?;
+    let base = phoff.checked_add(prod).ok_or(LoadError::TooSmall)?;
+    let end = base.checked_add(phentsize).ok_or(LoadError::TooSmall)?;
+    if end > data_len {
+        return Err(LoadError::TooSmall);
+    }
+    Ok(base)
 }
 
 /// Entry point and the minimum guest memory size needed to hold every
@@ -112,7 +139,7 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
 
     let mut max_addr: u64 = 0;
     for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok_or(LoadError::TooSmall)?;
+        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
         let p_type = read_u32(data, base);
         if p_type != PT_LOAD {
             continue;
@@ -176,9 +203,14 @@ pub fn load_ppu_elf(
 
     let mem_size = memory.as_bytes().len();
     let mut max_addr: u64 = 0;
+    // Address ranges this call actually committed. The entry
+    // descriptor is only read from one of these: guest memory outside
+    // them is zero-filled, and eight zero bytes there would otherwise
+    // read back as a perfectly plausible descriptor naming pc 0.
+    let mut loaded: Vec<std::ops::Range<u64>> = Vec::new();
 
     for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok_or(LoadError::TooSmall)?;
+        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
 
         let p_type = read_u32(data, base);
         if p_type != PT_LOAD {
@@ -254,6 +286,7 @@ pub fn load_ppu_elf(
         if end > max_addr {
             max_addr = end;
         }
+        loaded.push(p_vaddr..end);
     }
 
     // PPC64 ELF ABI v1: e_entry names a descriptor { u32 code, u32 toc }
@@ -264,10 +297,17 @@ pub fn load_ppu_elf(
     // checked_add: a hostile e_entry near u64::MAX would wrap the
     // end-of-descriptor sum and either panic (debug) or index out of
     // bounds (release); an out-of-range entry takes the raw-entry
-    // fallback below instead.
-    if entry_off
+    // fallback below instead. The descriptor must also lie inside a
+    // segment this call committed -- an e_entry that merely fits in
+    // guest memory reads eight zero bytes and would set pc 0 with no
+    // TOC, which is indistinguishable from a successful load.
+    let descriptor_loaded = entry
         .checked_add(8)
-        .is_some_and(|end| end <= mem_bytes.len())
+        .is_some_and(|end| loaded.iter().any(|r| r.start <= entry && end <= r.end));
+    if descriptor_loaded
+        && entry_off
+            .checked_add(8)
+            .is_some_and(|end| end <= mem_bytes.len())
     {
         let code_addr = u32::from_be_bytes([
             mem_bytes[entry_off],
@@ -287,8 +327,14 @@ pub fn load_ppu_elf(
         state.pc = entry;
     }
 
-    let sys_proc_param_range =
-        find_sys_process_param(data).map(|p| p.guest_addr..p.guest_addr + p.struct_size as u64);
+    // A wrapping end would invert the range into an empty one, and an
+    // empty range silently classifies nothing -- the divergences this
+    // range exists to attribute would fall through unlabelled. Drop the
+    // range instead, so the classifier reports them as unattributed.
+    let sys_proc_param_range = find_sys_process_param(data).and_then(|p| {
+        let end = p.guest_addr.checked_add(u64::from(p.struct_size))?;
+        Some(p.guest_addr..end)
+    });
 
     Ok(LoadResult {
         entry,
@@ -341,7 +387,7 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
     let phnum = read_u16(data, 56) as usize;
     let mut out = Vec::new();
     for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok_or(LoadError::TooSmall)?;
+        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
         if read_u32(data, base) != PT_LOAD {
             continue;
         }
@@ -402,7 +448,7 @@ pub fn find_tls_segment(data: &[u8]) -> Option<TlsInfo> {
     let phnum = read_u16(data, 56) as usize;
 
     for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
+        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok()?;
         if read_u32(data, base) == PT_TLS {
             return Some(TlsInfo {
                 vaddr: read_u64(data, base + 16),
@@ -425,7 +471,7 @@ pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
     let phnum = read_u16(data, 56) as usize;
 
     for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
+        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok()?;
         if read_u32(data, base) == PT_TLS {
             return Some(TlsProgramHeader {
                 file_offset: read_u64(data, base + 8),
@@ -475,7 +521,7 @@ fn pt_load_file_to_guest(data: &[u8], file_off: usize) -> Option<u64> {
     let phentsize = read_u16(data, 54) as usize;
     let phnum = read_u16(data, 56) as usize;
     for i in 0..phnum {
-        let base = ph_slot_base(data.len(), phoff, phentsize, i)?;
+        let base = ph_slot_base(data.len(), phoff, phentsize, i).ok()?;
         if read_u32(data, base) != PT_LOAD {
             continue;
         }
@@ -484,7 +530,7 @@ fn pt_load_file_to_guest(data: &[u8], file_off: usize) -> Option<u64> {
         let p_filesz = read_u64(data, base + 32) as usize;
         let p_end = p_offset.checked_add(p_filesz)?;
         if file_off >= p_offset && file_off < p_end {
-            return Some(p_vaddr + (file_off - p_offset) as u64);
+            return p_vaddr.checked_add((file_off - p_offset) as u64);
         }
     }
     None
@@ -696,7 +742,7 @@ pub fn find_indirect_opd_tables(data: &[u8]) -> Vec<IndirectOpdTable> {
     out
 }
 
-use cellgov_ps3_abi::elf::{SHT_DYNSYM, SHT_SYMTAB};
+use cellgov_ps3_abi::elf::{ELF64_SHENT_SIZE, SHT_DYNSYM, SHT_SYMTAB};
 
 /// Symbol address by name, or `None` if not found or the ELF has no
 /// symbol table. Searches every `SHT_SYMTAB` and `SHT_DYNSYM` section
@@ -708,10 +754,15 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
     let shoff = read_u64(data, 40) as usize;
     let shentsize = read_u16(data, 58) as usize;
     let shnum = read_u16(data, 60) as usize;
+    // `sh_entsize` sits at section-header offset 56, so the validated
+    // window has to span a full ELF64 section header even when
+    // `e_shentsize` declares something narrower. Striding still uses
+    // the declared value.
+    let sh_window = shentsize.max(ELF64_SHENT_SIZE);
 
     for i in 0..shnum {
         let sh = shoff.checked_add(i.checked_mul(shentsize)?)?;
-        if sh.checked_add(shentsize)? > data.len() {
+        if sh.checked_add(sh_window)? > data.len() {
             return None;
         }
         let sh_type = read_u32(data, sh + 4);
@@ -726,7 +777,7 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
         let Some(str_sh) = shoff.checked_add(strtab_idx.checked_mul(shentsize)?) else {
             continue;
         };
-        if str_sh.checked_add(shentsize)? > data.len() {
+        if str_sh.checked_add(sh_window)? > data.len() {
             continue;
         }
         let str_off = read_u64(data, str_sh + 24) as usize;
@@ -744,9 +795,22 @@ pub fn find_symbol(data: &[u8], name: &str) -> Option<u64> {
         }
         let count = sym_size / sym_entsize;
         for j in 0..count {
-            let entry = sym_off + j * sym_entsize;
-            if entry + sym_entsize > data.len() {
+            // sh_offset and sh_size are 64-bit header fields: a hostile
+            // pair near usize::MAX wraps this sum, and a wrapped index
+            // passes the length check below while reading the wrong
+            // bytes. Stop the section walk instead.
+            let Some(entry) = j
+                .checked_mul(sym_entsize)
+                .and_then(|off| sym_off.checked_add(off))
+            else {
                 break;
+            };
+            // st_value lives at entry offset 8..16, so the validated
+            // window never shrinks below 16 bytes however small
+            // `sh_entsize` claims the entries are.
+            match entry.checked_add(sym_entsize.max(16)) {
+                Some(end) if end <= data.len() => {}
+                _ => break,
             }
             let st_name = read_u32(data, entry) as usize;
             if st_name >= strtab.len() {

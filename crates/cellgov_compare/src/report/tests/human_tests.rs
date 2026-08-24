@@ -48,6 +48,7 @@ fn human_divergence_with_memory() {
             offset: 3,
             expected: 0xAA,
             actual: 0xBB,
+            lengths: None,
         }),
         event_divergence: None,
     };
@@ -56,6 +57,28 @@ fn human_divergence_with_memory() {
     assert!(text.contains("offset=3"));
     assert!(text.contains("0xaa"));
     assert!(text.contains("0xbb"));
+}
+
+/// A length disagreement is a divergence the byte pair alone cannot
+/// express, so the line has to carry both lengths.
+#[test]
+fn human_memory_divergence_names_both_lengths_when_they_differ() {
+    let result = CompareResult {
+        classification: Classification::Divergence,
+        mode: CompareMode::Memory,
+        outcome_mismatch: None,
+        memory_divergence: Some(MemoryDivergence {
+            region: "data".into(),
+            offset: 2,
+            expected: 0,
+            actual: 0,
+            lengths: Some((2, 4)),
+        }),
+        event_divergence: None,
+    };
+    let text = format_human(&result);
+    assert!(text.contains("expected_len=2"), "got {text}");
+    assert!(text.contains("actual_len=4"), "got {text}");
 }
 
 #[test]

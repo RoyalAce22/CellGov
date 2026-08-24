@@ -9,6 +9,11 @@ use super::config::{Rpcs3Config, Rpcs3TestConfig};
 use super::error::Rpcs3Error;
 
 /// Launch RPCS3 and wait for exit or timeout. Returns the mapped outcome.
+///
+/// `--headless` is the only flag passed. `config.decoder` is not a
+/// launch argument -- RPCS3 has no decoder command-line option -- so
+/// the emulator runs under whatever its own config file holds; see
+/// [`Rpcs3Config::decoder`].
 pub(super) fn invoke(
     config: &Rpcs3Config,
     test: &Rpcs3TestConfig,

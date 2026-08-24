@@ -20,14 +20,17 @@ memory_regions = [
 outcome = "completed"
 
 [cellgov.title]
-content_id = "CG_EVF"
 short_name = "evf"
 display_name = "CellGov event-flag wake-all microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["ppu_event_flag_wakeall.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"

@@ -28,7 +28,13 @@ fn region(name: &str, addr: u64, data: Vec<u8>) -> NamedMemoryRegion {
 }
 
 fn synthetic_elf64_be(phoff: u64, phentsize: u16, phnum: u16) -> Vec<u8> {
-    let mut eboot = vec![0u8; 64];
+    synthetic_elf64_be_sized(phoff, phentsize, phnum, 64)
+}
+
+/// Same header, padded out to `len` bytes so a declared PHDR table
+/// can legitimately fit inside the image.
+fn synthetic_elf64_be_sized(phoff: u64, phentsize: u16, phnum: u16, len: usize) -> Vec<u8> {
+    let mut eboot = vec![0u8; len.max(64)];
     eboot[0..4].copy_from_slice(b"\x7fELF");
     eboot[4] = 2; // ELFCLASS64
     eboot[5] = 2; // ELFDATA2MSB
@@ -86,8 +92,46 @@ fn build_classifier_context_populates_elf_header_when_code_region_present() {
 #[test]
 fn elf_header_range_widens_to_include_phdr_table() {
     // phoff=0x40 + 5 * phentsize=0x38 -> PHDR end at 0x158.
-    let eboot = synthetic_elf64_be(0x40, 0x38, 5);
+    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x158);
     assert_eq!(elf_header_plus_phdr_table_end(&eboot).unwrap(), 0x158);
+}
+
+#[test]
+fn a_phdr_table_ending_exactly_at_the_eboot_end_is_accepted() {
+    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x158);
+    assert_eq!(elf_header_plus_phdr_table_end(&eboot).unwrap(), 0x158);
+}
+
+#[test]
+fn a_phdr_table_declared_past_the_eboot_end_is_refused() {
+    // One byte short of the declared 0x158 table end.
+    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x157);
+    assert!(matches!(
+        elf_header_plus_phdr_table_end(&eboot),
+        Err(ElfHeaderParseError::PhdrTableOutOfFile {
+            phdr_end: 0x158,
+            file_len: 0x157,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn an_out_of_file_phdr_table_never_widens_the_elf_header_class_range() {
+    let observation = obs(
+        ObservedOutcome::Completed,
+        vec![region("code", 0x10000, vec![0u8; 4])],
+    );
+    // Declares a 0x38000-byte PHDR table in a 64-byte image: accepted,
+    // it would mark every divergent byte under 0x10000..0x48040 as
+    // non-semantic ElfHeader.
+    let eboot = synthetic_elf64_be(0x40, 0x38, 0x1000);
+    assert!(matches!(
+        build_classifier_context(&eboot, &observation),
+        Err(FixtureGenError::ElfHeaderParse(
+            ElfHeaderParseError::PhdrTableOutOfFile { .. }
+        ))
+    ));
 }
 
 #[test]
@@ -250,7 +294,7 @@ fn build_classifier_context_overflows_on_code_region_addr_near_u64_max() {
         vec![region("code", u64::MAX - 0x20, vec![0u8; 0x40])],
     );
     // phoff=0x40 + 5 * 0x38 = 0x158 PHDR end; adds to addr -> overflow.
-    let eboot = synthetic_elf64_be(0x40, 0x38, 5);
+    let eboot = synthetic_elf64_be_sized(0x40, 0x38, 5, 0x158);
     assert!(matches!(
         build_classifier_context(&eboot, &observation),
         Err(FixtureGenError::CodeRegionAddrOverflow { .. })

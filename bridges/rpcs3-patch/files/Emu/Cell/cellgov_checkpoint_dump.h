@@ -72,11 +72,18 @@ namespace cellgov
 	// Walk `regions_env`'s comma-separated `addr:size` pairs, page-aware
 	// (4 KiB), and append committed pages to `f`; write zeros for
 	// unmapped pages so file offsets stay aligned with the requested
-	// region boundaries. Returns total bytes written.
+	// region boundaries.
+	//
+	// The consumer slices this file by the same region list and refuses
+	// a length that is not exactly the declared total, so every pair
+	// this walk declines to write is announced on stderr rather than
+	// dropped quietly: the operator needs to see which entry was
+	// rejected, not only that the byte count came out wrong.
 	inline void cellgov_write_regions(std::FILE* f, const char* regions_env)
 	{
 		std::string s(regions_env);
 		std::size_t cursor = 0;
+		unsigned long long total = 0;
 		while (cursor < s.size())
 		{
 			std::size_t comma = s.find(',', cursor);
@@ -84,37 +91,80 @@ namespace cellgov
 			cursor = comma == std::string::npos ? s.size() : comma + 1;
 
 			std::size_t colon = pair.find(':');
-			if (colon == std::string::npos) continue;
+			if (colon == std::string::npos)
+			{
+				std::fprintf(stderr, "[cellgov] CELLGOV_DUMP_REGIONS entry \"%s\" has no ':'; nothing written for it\n",
+					pair.c_str());
+				continue;
+			}
 
-			unsigned long long addr = std::strtoull(pair.substr(0, colon).c_str(), nullptr, 16);
-			unsigned long long size = std::strtoull(pair.substr(colon + 1).c_str(), nullptr, 16);
-			if (size == 0) continue;
+			const std::string addr_text = pair.substr(0, colon);
+			const std::string size_text = pair.substr(colon + 1);
+			char* addr_end = nullptr;
+			char* size_end = nullptr;
+			unsigned long long addr = std::strtoull(addr_text.c_str(), &addr_end, 16);
+			unsigned long long size = std::strtoull(size_text.c_str(), &size_end, 16);
+			// strtoull reports "no digits consumed" by leaving the end
+			// pointer at the start, and a trailing typo by stopping
+			// short. Either reads as address 0 or size 0 otherwise.
+			if (addr_end == addr_text.c_str() || *addr_end != '\0' ||
+				size_end == size_text.c_str() || *size_end != '\0')
+			{
+				std::fprintf(stderr, "[cellgov] CELLGOV_DUMP_REGIONS entry \"%s\" is not a hex addr:size pair; nothing written for it\n",
+					pair.c_str());
+				continue;
+			}
+			if (size == 0)
+			{
+				std::fprintf(stderr, "[cellgov] CELLGOV_DUMP_REGIONS entry \"%s\" declares zero bytes; nothing written for it\n",
+					pair.c_str());
+				continue;
+			}
+			// The walk truncates both ends to u32, so a region reaching
+			// past 4 GiB would silently write a wrapped or empty range.
+			if (addr + size > 0x1'0000'0000ull)
+			{
+				std::fprintf(stderr, "[cellgov] CELLGOV_DUMP_REGIONS entry \"%s\" ends past the 32-bit guest address space; nothing written for it\n",
+					pair.c_str());
+				continue;
+			}
 
 			const u32 page_sz = 4096;
 			u32 cur = static_cast<u32>(addr);
-			const u32 end = static_cast<u32>(addr + size);
+			// Counted down rather than walked to a u32 end address: a
+			// region ending exactly at 4 GiB truncates to end == 0, and
+			// `cur < end` then writes nothing at all.
+			unsigned long long remaining = size;
 			u32 wrote = 0;
 			u32 zeroed = 0;
 			static const u8 zeros[page_sz] = {0};
-			while (cur < end)
+			while (remaining > 0)
 			{
 				u32 chunk = page_sz - (cur % page_sz);
-				if (chunk > end - cur) chunk = end - cur;
-				if (vm::check_addr(cur, vm::page_readable, chunk))
+				if (chunk > remaining) chunk = static_cast<u32>(remaining);
+				const bool mapped = vm::check_addr(cur, vm::page_readable, chunk);
+				const void* src = mapped ? static_cast<const void*>(vm::base(cur)) : static_cast<const void*>(zeros);
+				if (mapped) wrote++; else zeroed++;
+				const std::size_t put = std::fwrite(src, 1, chunk, f);
+				if (put != chunk)
 				{
-					std::fwrite(vm::base(cur), 1, chunk, f);
-					wrote++;
+					// A short write leaves every later region at the
+					// wrong file offset. Say so here; the consumer sees
+					// only a total that does not add up.
+					std::fprintf(stderr, "[cellgov] short write in region 0x%llx:0x%llx at 0x%x: %llu of %u bytes; dump is truncated\n",
+						addr, size, cur, static_cast<unsigned long long>(put), chunk);
+					return;
 				}
-				else
-				{
-					std::fwrite(zeros, 1, chunk, f);
-					zeroed++;
-				}
+				total += chunk;
+				remaining -= chunk;
+				// Wraps to 0 on a region that ends at 4 GiB; `remaining`
+				// is 0 by then, so the loop has already finished.
 				cur += chunk;
 			}
 			std::fprintf(stderr, "[cellgov] region 0x%llx:0x%llx wrote %u chunks, %u zero-filled\n",
 				addr, size, wrote, zeroed);
 		}
+		std::fprintf(stderr, "[cellgov] dump total %llu bytes; the region manifest must declare exactly this\n", total);
 	}
 
 	// Dump configured regions to the file named by `path_env`. No-op
@@ -147,7 +197,13 @@ namespace cellgov
 
 		cellgov_write_regions(f, regions_env);
 
-		std::fclose(f);
+		// Buffered bytes are flushed here, so a full disk surfaces at
+		// close and nowhere earlier.
+		if (std::fclose(f) != 0)
+		{
+			std::fprintf(stderr, "[cellgov] failed to close dump %s; its tail may be missing\n", path);
+			return;
+		}
 		std::fprintf(stderr, "[cellgov] checkpoint dump (%s) written to %s\n", path_env, path);
 	}
 }

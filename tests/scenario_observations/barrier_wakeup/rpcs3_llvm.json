@@ -4,12 +4,30 @@
     {
       "name": "spu0_result",
       "addr": 0,
-      "data": [0, 0, 0, 0, 170, 170, 0, 0]
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        170,
+        170,
+        0,
+        0
+      ]
     },
     {
       "name": "spu1_result",
       "addr": 16,
-      "data": [0, 0, 0, 0, 187, 187, 0, 1]
+      "data": [
+        0,
+        0,
+        0,
+        0,
+        187,
+        187,
+        0,
+        1
+      ]
     }
   ],
   "events": [],
@@ -17,5 +35,6 @@
   "metadata": {
     "runner": "rpcs3-llvm",
     "steps": null
-  }
+  },
+  "tty_log": []
 }

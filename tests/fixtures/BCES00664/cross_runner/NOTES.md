@@ -6,12 +6,12 @@ developer: Sony Liverpool
 engine: Studio Liverpool proprietary
 distribution: Disc ISO
 checkpoint: FirstRsxWrite
-steps: 43082
+steps: 43040
 convergence: Yes
 byte_parity: 975 non-semantic + 1 pending
 ---
 
-Reaches `FirstRsxWrite` at step 43,082 deterministically across
+Reaches `FirstRsxWrite` at step 43,040 deterministically across
 two runs. Both runners are sampled at the same checkpoint: CG at
 its `MemError::ReservedWrite` trap on the put-store, RP at the
 `CELLGOV_DUMP_PATH_RSX` trigger (first observed
@@ -77,7 +77,7 @@ threading through `StoreBuffer::Entry` / `flush()` /
 Supporting observation from shipped tooling:
 `target/release/cellgov_cli.exe bench-boot --title wipeout
 --checkpoint pc=0x6516F0 --max-steps 100000000` halts at
-step 43,082 / Fault without firing the PC check at
+step 43,040 / Fault without firing the PC check at
 `0x6516F0` (the title call site preceding the path that
 on RP reaches the helper).
 
@@ -89,7 +89,7 @@ pre-checkpoint trajectory; the record stays inside the
 title's data segment.
 
 Inert at FirstRsxWrite: CG reaches FirstRsxWrite at
-step 43,082, `host_invariant_breaks=2`, bit-identical
+step 43,040, `host_invariant_breaks=2`, bit-identical
 across two `bench-boot --title wipeout` runs. CG and RP
 read divergent values at `+0x0c` along their respective
 pre-checkpoint trajectories with no resulting step-count

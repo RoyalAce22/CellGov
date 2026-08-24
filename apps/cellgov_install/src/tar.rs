@@ -1,7 +1,8 @@
 //! USTAR TAR archive parser and extractor.
 //!
-//! Only regular files are returned; symlinks and other non-regular types are
-//! skipped. Records are padded to 512-byte boundaries.
+//! Only regular files are returned. A directory record is dropped, and
+//! every other record type is a named refusal rather than a silent
+//! skip. Records are padded to 512-byte boundaries.
 
 use std::io;
 use std::path::{Component, Path, PathBuf};
@@ -88,10 +89,32 @@ pub enum TarParseError {
         name: String,
         /// Byte offset where the payload was expected to start.
         offset: usize,
-        /// Declared payload size from the header (bytes).
-        size: usize,
+        /// Declared payload size from the header (bytes). Held at the
+        /// archive field's own width so an oversized value is reported
+        /// rather than truncated into `usize`.
+        size: u64,
         /// Total archive size for context.
         archive_size: usize,
+    },
+    /// A 512-byte block that is neither the terminating all-zero block
+    /// nor a USTAR header.
+    #[error("tar: block at offset 0x{offset:x} carries no USTAR magic")]
+    NotUstarHeader {
+        /// Byte offset of the block that failed the magic check.
+        offset: usize,
+    },
+    /// A record's type flag names a record kind this loader does not
+    /// model.
+    #[error(
+        "tar: header at offset 0x{offset:x} ({name:?}) has unsupported file type 0x{filetype:02x}"
+    )]
+    UnsupportedFileType {
+        /// Byte offset of the offending header in the archive.
+        offset: usize,
+        /// Assembled full name of the entry carrying the type flag.
+        name: String,
+        /// Raw USTAR type flag byte (header offset 0x9C).
+        filetype: u8,
     },
 }
 
@@ -115,22 +138,50 @@ pub struct ExtractReport {
 const PREFIX_FIELD_OFFSET: usize = 0x159;
 const PREFIX_FIELD_SIZE: usize = 155;
 
+/// USTAR magic field, sitting just past the 100-byte linkname.
+///
+/// Only the first five bytes are compared: POSIX writers follow
+/// `ustar` with `\0` plus a two-digit version, GNU writers follow it
+/// with two spaces, and both are the same layout for everything this
+/// loader reads. RPCS3 compares the same five bytes before it will
+/// treat a block as a header (`Loader/TAR.cpp` `tar_object::get_file`).
+const MAGIC_FIELD_OFFSET: usize = 0x101;
+const USTAR_MAGIC: &[u8] = b"ustar";
+
+/// Type flag for a regular file. `0` is the historical spelling of the
+/// same thing and both are accepted, as in RPCS3's `tar_object::extract`.
+const TYPE_REGULAR: u8 = b'0';
+/// Type flag for a directory record.
+const TYPE_DIRECTORY: u8 = b'5';
+
+/// Decode a USTAR octal numeric field, which pads with any mix of NUL
+/// and blank at either end.
+///
+/// A field holding no octal digits at all is a decode failure, not a
+/// zero. RPCS3 reports the same field as unparseable rather than
+/// substituting a length (`Loader/TAR.cpp` `octal_text_to_u64`), and a
+/// zero invented here would turn a malformed record into an empty file
+/// that the archive never described.
 fn octal_to_u64(s: &[u8]) -> Option<u64> {
     let s = std::str::from_utf8(s).ok()?;
-    let s = s.trim_end_matches('\0').trim();
-    if s.is_empty() {
-        return Some(0);
-    }
+    let s = s.trim_matches(|c: char| c == '\0' || c.is_ascii_whitespace());
     u64::from_str_radix(s, 8).ok()
 }
 
 /// Parse a USTAR archive into its regular-file entries.
 ///
-/// Non-regular records (symlinks, directories, device nodes, etc.) are
-/// silently skipped. Zero-byte regular files ARE returned (with empty
-/// `data`): PS3 firmware ships empty placeholder files the install
-/// must reproduce. A pair of all-zero 512-byte blocks terminates the
-/// archive; trailing padding past that is ignored.
+/// Directory records carry no payload and are dropped; every other
+/// non-regular type is a [`TarParseError::UnsupportedFileType`]
+/// refusal, matching RPCS3, which fails the whole extract on any type
+/// flag outside `\0` / `0` / `5` (`Loader/TAR.cpp`
+/// `tar_object::extract`). Naming the refusal also keeps a GNU
+/// long-name (`L`) record from being swallowed, which would silently
+/// truncate the following entry's path to the 100-byte name field.
+///
+/// Zero-byte regular files ARE returned (with empty `data`): PS3
+/// firmware ships empty placeholder files the install must reproduce.
+/// The first all-zero 512-byte block terminates the archive; anything
+/// past it, padding or not, is not read.
 pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
     let mut entries = Vec::new();
     let mut offset = 0usize;
@@ -140,6 +191,15 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
 
         if header.iter().all(|&b| b == 0) {
             break;
+        }
+
+        // Without the magic, the fields below are just whatever bytes
+        // happen to sit at those offsets -- a name and a size invented
+        // out of unrelated data. RPCS3 gates every field read on the
+        // same check (`Loader/TAR.cpp` `tar_object::get_file`); where it
+        // resyncs to the next block, an oracle refuses instead.
+        if &header[MAGIC_FIELD_OFFSET..MAGIC_FIELD_OFFSET + USTAR_MAGIC.len()] != USTAR_MAGIC {
+            return Err(TarParseError::NotUstarHeader { offset });
         }
 
         let name_raw = &header[0..100];
@@ -161,33 +221,57 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
             format!("{prefix_str}/{name_str}")
         };
 
-        let size = octal_to_u64(&header[0x7C..0x7C + 12]).ok_or_else(|| {
+        let declared_size = octal_to_u64(&header[0x7C..0x7C + 12]).ok_or_else(|| {
             TarParseError::UnparseableSize {
                 offset,
                 name: full_name.clone(),
             }
-        })? as usize;
+        })?;
         let filetype = header[0x9C];
+        let header_offset = offset;
 
         offset += 512;
 
-        if filetype == b'0' || filetype == 0 {
-            if offset + size > data.len() {
-                return Err(TarParseError::PayloadPastArchive {
-                    name: full_name,
-                    offset,
-                    size,
-                    archive_size: data.len(),
-                });
-            }
-            entries.push(TarEntry {
+        // Bound the payload of EVERY record, not just the ones whose
+        // bytes are kept. A record whose payload is skipped still
+        // advances `offset` by its declared size, so an over-long size
+        // on a skipped record would walk past the archive and end the
+        // scan with `Ok`, silently dropping every entry behind it.
+        // RPCS3 applies its bound before caching any header, whatever
+        // the type flag (`Loader/TAR.cpp` `tar_object::get_file`).
+        // Comparing at the archive field's own width also keeps a size
+        // wider than `usize` from truncating into a short read.
+        if declared_size > (data.len() - offset) as u64 {
+            return Err(TarParseError::PayloadPastArchive {
                 name: full_name,
-                data: data[offset..offset + size].to_vec(),
+                offset,
+                size: declared_size,
+                archive_size: data.len(),
             });
         }
+        // Exact: the bound above holds `declared_size` at or below the
+        // remaining archive length.
+        let size = declared_size as usize;
 
-        let aligned = (size + 511) & !511;
-        offset += aligned;
+        match filetype {
+            TYPE_REGULAR | 0 => entries.push(TarEntry {
+                name: full_name,
+                data: data[offset..offset + size].to_vec(),
+            }),
+            // A directory record carries no payload, and every parent a
+            // written file needs is created during extraction, so the
+            // record itself is redundant for all but an empty directory.
+            TYPE_DIRECTORY => {}
+            filetype => {
+                return Err(TarParseError::UnsupportedFileType {
+                    offset: header_offset,
+                    name: full_name,
+                    filetype,
+                });
+            }
+        }
+
+        offset += (size + 511) & !511;
     }
 
     Ok(entries)

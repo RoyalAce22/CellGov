@@ -27,6 +27,7 @@
 use std::env;
 use std::fs::File;
 use std::io::{BufWriter, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 struct State {
@@ -38,6 +39,9 @@ struct State {
 }
 
 static STATE: OnceLock<Option<State>> = OnceLock::new();
+
+/// Latch so a failing sink names itself once instead of per record.
+static WRITE_FAILED: AtomicBool = AtomicBool::new(false);
 
 fn init() -> Option<State> {
     let spec = env::var("CELLGOV_VALUE_SAMPLE").ok()?;
@@ -94,6 +98,21 @@ pub fn pending(step: u64) -> Option<(u64, u32)> {
     Some((s.addr, s.width))
 }
 
+/// One record: `{ step u64, status u8, actual_len u32, value[width] }`,
+/// little-endian.
+///
+/// Packed whole so one `write_all` either lands the record or none of
+/// it: a reader walks fixed-size records from the header, and a torn
+/// one shifts every later field.
+fn pack_record(step: u64, status: u8, actual_len: u32, value: &[u8]) -> Vec<u8> {
+    let mut record = Vec::with_capacity(13 + value.len());
+    record.extend_from_slice(&step.to_le_bytes());
+    record.push(status);
+    record.extend_from_slice(&actual_len.to_le_bytes());
+    record.extend_from_slice(value);
+    record
+}
+
 /// Emit one sample record. `bytes` is `Some(slice)` when the read
 /// returned anything (full or short), `None` when the address was
 /// unmapped at this step. Short reads are recorded as status=2 with
@@ -114,13 +133,22 @@ pub fn emit(step: u64, bytes: Option<&[u8]>) {
         }
         None => (0, 0),
     };
+    let record = pack_record(step, status, actual_len, &buf);
+
     let mut writer = s.writer.lock().expect("value-sample writer mutex");
-    let _ = writer.write_all(&step.to_le_bytes());
-    let _ = writer.write_all(&[status]);
-    let _ = writer.write_all(&actual_len.to_le_bytes());
-    let _ = writer.write_all(&buf);
-    // No per-record flush: BufWriter (8 KiB) flushes when full and on
-    // Drop. Per-record flush would perturb timing on wider sweeps.
+    // Per-record flush, matching `super::store_watch`: the writer lives
+    // in a static that is never dropped, so a buffered tail would be
+    // lost at process exit with nothing reporting the gap.
+    if let Err(e) = writer.write_all(&record).and_then(|()| writer.flush()) {
+        if !WRITE_FAILED.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "[cellgov] value-sample write failed at step {step}: {e};                  the capture is truncated from here"
+            );
+        }
+        return;
+    }
+    // Counted only once the record is on disk: this is the operator's
+    // completeness witness against the file's record count.
     let mut cnt = s
         .samples_written
         .lock()
@@ -138,3 +166,7 @@ pub fn samples_written() -> Option<u64> {
             .expect("value-sample counter mutex"),
     )
 }
+
+#[cfg(test)]
+#[path = "tests/value_sample_tests.rs"]
+mod tests;

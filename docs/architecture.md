@@ -2,7 +2,7 @@
 
 CellGov is a deterministic Rust runtime that interprets PS3 PPU and SPU
 code, produces replayable execution traces, and validates its output
-against RPCS3 baselines. It is the oracle layer for static
+against recorded RPCS3 observations. It is the oracle layer for static
 recompilation: it does not run games, it tells the recompiler what the
 correct output is.
 
@@ -1189,7 +1189,13 @@ a 32-bit big-endian write to the RSX label area through the
 standard `SharedWriteIntent` path, so the reservation clear
 sweep and the state-hash contribution run automatically; kept
 as a typed variant so traces can distinguish FIFO-origin
-label writes from PPU / SPU / DMA writes. `RsxFlipRequest
+label writes from PPU / SPU / DMA writes. `offset` is relative
+to the label base the LV2 RSX context supplies; the commit
+resolves it against that base, and the guard that keeps a write
+inside the label area measures from the same base. A report
+offset resolves against the report block base, which keeps
+report entry 0 and semaphore slot 0 at distinct addresses.
+`RsxFlipRequest
 { buffer_index }` has no memory side-effect -- it drives the
 flip state machine only.
 
@@ -1700,12 +1706,11 @@ paths that no longer re-fire under the new trajectory.
 from `<vfs-parent>/dev_bdvd/BCES00664/PS3_GAME/USRDIR/` after
 SELF decryption via `cellgov_install decrypt-self`. Past the
 seeded `cellSysutil_Library` `module_start`, WipEout reaches its
-`FirstRsxWrite` checkpoint at step 43,082 -- the one foundation
+`FirstRsxWrite` checkpoint at step 43,040 -- the one foundation
 title that converges with RPCS3 at its checkpoint (`Yes`), with
 cross-runner byte parity at `975 non-semantic + 1 pending`. The
-prior `43,066 / COMMIT_FAULT: OutOfRange` and the earlier
-cellSysutil stall are preserved as code paths that no longer
-re-fire under the new trajectory. See
+checkpoint is the title's first label write, which resolves
+against the reports base the LV2 RSX context supplies. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
 
 **System shell (vsh).** Boots straight out of the firmware image
@@ -1758,10 +1763,10 @@ selection:
 
 See `tests/micro/` for the full set.
 
-Each test has interpreter and LLVM RPCS3 baselines (oracle settled --
-both decoders agree). CellGov runs each through
-`observe_with_determinism_check` (proves identical results across two
-runs) and compares against both baselines via
+Each test has interpreter and LLVM scenario observations under
+`tests/scenario_observations/`, settled when both decoders agree.
+CellGov runs each through `observe_with_determinism_check` (proves
+identical results across two runs) and compares against both via
 `compare_multi --mode memory`.
 
 For per-crate detail and module layout, run

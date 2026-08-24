@@ -4,12 +4,12 @@
 #[path = "common/registry.rs"]
 mod registry;
 
-use registry::{baseline_path, titles};
+use registry::{boot_anchor_path, titles};
 
 #[test]
 fn every_registered_title_has_a_committed_baseline() {
     for t in titles() {
-        let p = baseline_path(&t.content_id);
+        let p = boot_anchor_path(&t.content_id);
         assert!(
             p.is_file(),
             "{}: no committed baseline at {} -- record it with \

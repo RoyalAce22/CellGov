@@ -234,8 +234,11 @@ impl Runtime {
 
     // -- RSX --
 
-    /// Set the base address used by `RsxLabelWrite` effects to
-    /// compute the commit-side guest address.
+    /// Seed the base `RsxLabelWrite` effects resolve against.
+    ///
+    /// Only consulted while the LV2 RSX context has published no
+    /// reports base; after `sys_rsx_context_allocate` the context's
+    /// base wins over this seed.
     pub fn set_rsx_label_base(&mut self, addr: GuestAddr) {
         debug_assert!(
             addr.raw() <= u32::MAX as u64,

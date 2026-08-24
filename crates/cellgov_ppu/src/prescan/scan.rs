@@ -125,8 +125,10 @@ pub fn scan_be_bytes(bytes: &[u8]) -> PrescanReport {
 /// scanned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CoverageMode {
-    /// Scan did not run (zero PF_X segments, or `scan_elf_text`
-    /// returned `Err`).
+    /// Scan did not run: zero PF_X segments, or `scan_elf_text`
+    /// returned `Err`. The two are told apart by the returned
+    /// `Result`, not by this variant; the other `ElfTextCoverage`
+    /// fields may still be populated on the zero-PF_X path.
     #[default]
     NotRun,
     /// Qualifying executable section exists with a non-empty name
@@ -138,8 +140,10 @@ pub enum CoverageMode {
     /// [`cellgov_ps3_abi::elf::SHN_UNDEF`] / the `.shstrtab` is
     /// absent or empty). Coverage is segment-grade.
     SectionFilteredAnonymous,
-    /// Section header table absent (`e_shoff == 0`); each executable
-    /// PT_LOAD segment walked in full.
+    /// No qualifying `SHT_PROGBITS + SHF_ALLOC + SHF_EXECINSTR`
+    /// section was found -- the section header table is absent
+    /// (`e_shoff == 0`) or a stripped binary has none -- so each
+    /// executable PT_LOAD segment is walked in full.
     SegmentFallback,
 }
 
@@ -151,8 +155,12 @@ pub struct ElfTextCoverage {
     /// Number of `SHT_PROGBITS + SHF_ALLOC + SHF_EXECINSTR` sections
     /// the section walk yielded. Zero on a stripped binary.
     pub sections_scanned: u32,
-    /// Total bytes walked, post-merge across (section ∩ segment)
-    /// intersections; overlapping PT_LOADs counted once.
+    /// Bytes handed to the decoder walk, post-merge across
+    /// (section ∩ segment) intersections; overlapping PT_LOADs counted
+    /// once. A segment whose declared file range runs past the end of
+    /// the image is clamped to the image, so this can undercount what
+    /// the headers claimed. The sub-word tail of each range is counted
+    /// here but produces no `words_scanned`.
     pub bytes_scanned: u64,
     /// Which precision the scan achieved.
     pub mode: CoverageMode,
@@ -166,8 +174,9 @@ pub struct ElfTextCoverage {
 /// Returns [`PrescanError::Loader`] when the input is not a parseable
 /// PPU ELF (bad magic, wrong ELF class, wrong endianness, malformed
 /// program-header table). A valid ELF with zero PF_X segments returns
-/// `Ok` with an empty report and zero coverage -- "scan ran, found
-/// nothing to walk" -- distinct from "scan could not run."
+/// `Ok` with an empty report and [`CoverageMode::NotRun`]; the `Ok`
+/// return, not the coverage mode, is what separates "found nothing to
+/// walk" from "could not run."
 ///
 /// The scan reads program-header offsets out of the loader-validated
 /// `LoadSegment` list; it does NOT need guest memory or a runtime.

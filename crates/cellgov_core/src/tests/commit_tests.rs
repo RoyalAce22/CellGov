@@ -21,6 +21,8 @@ struct CommitTestBed {
     latency: FixedLatency,
     now: GuestTicks,
     reservations: ReservationTable,
+    /// `CommitContext::rsx_label_base` for the next `process` call.
+    label_base: u32,
 }
 
 impl CommitTestBed {
@@ -35,6 +37,7 @@ impl CommitTestBed {
             latency: FixedLatency::new(10),
             now: GuestTicks::ZERO,
             reservations: ReservationTable::new(),
+            label_base: 0,
         }
     }
 
@@ -54,7 +57,7 @@ impl CommitTestBed {
             dma_latency: &self.latency,
             now: self.now,
             reservations: &mut self.reservations,
-            rsx_label_base: 0,
+            rsx_label_base: self.label_base,
             rsx_flip: &mut flip,
             rsx_label_writes_committed: &mut label_writes,
         };
@@ -118,12 +121,25 @@ fn range(start: u64, length: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(start), length).unwrap()
 }
 
+/// Emitter for write intents whose source the test does not care
+/// about.
+///
+/// Sits outside the range [`UnitRegistry`] allocates from, so it never
+/// matches a registered unit and never takes the same-processor branch
+/// of the reservation sweep. Tests that care about the source pass
+/// their own id to [`write_intent_from`].
+const UNSPECIFIED_SOURCE: UnitId = UnitId::new(0xD0);
+
 fn write_intent(start: u64, bytes: Vec<u8>) -> Effect {
+    write_intent_from(start, bytes, UNSPECIFIED_SOURCE)
+}
+
+fn write_intent_from(start: u64, bytes: Vec<u8>, source: UnitId) -> Effect {
     Effect::SharedWriteIntent {
         range: range(start, bytes.len() as u64),
         bytes: WritePayload::new(bytes),
         ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
+        source,
         source_time: GuestTicks::new(0),
     }
 }
@@ -881,6 +897,23 @@ fn conditional_store_also_clears_other_units_reservations_on_same_line() {
     assert!(bed.reservations.is_empty());
 }
 
+/// [`UNSPECIFIED_SOURCE`] is only a don't-care while it cannot equal
+/// an id the registry assigns. If allocation ever starts elsewhere or
+/// reuses ids, the write intents in this file silently become
+/// same-processor stores and the reservation sweeps stop running.
+#[test]
+fn the_unspecified_source_is_not_an_id_the_registry_assigns() {
+    let mut units = UnitRegistry::new();
+    // Comfortably above the handful any test here registers.
+    for _ in 0..64 {
+        let id = units.register_with(DummyUnit::runnable);
+        assert_ne!(
+            id, UNSPECIFIED_SOURCE,
+            "the registry assigned the id write_intent uses as its don't-care source",
+        );
+    }
+}
+
 #[test]
 fn same_unit_acquire_then_own_store_preserves_reservation() {
     // Acquire at effect index 0, write at effect index 1 from the
@@ -889,36 +922,47 @@ fn same_unit_acquire_then_own_store_preserves_reservation() {
     // *another* processor [PPC-Book2 p:10 s:1.7.3.1].
     let mut bed = CommitTestBed::new(4096);
     let u = bed.units.register_with(DummyUnit::runnable);
-    // write_intent hardcodes source = UnitId::new(0); the first
-    // registered unit gets id 0, so source matches u.
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![
             reservation_acquire(0x100, u),
-            write_intent(0x140, vec![1, 2, 3, 4]),
+            write_intent_from(0x140, vec![1, 2, 3, 4], u),
         ],
     );
     bed.process(&r, &e).unwrap();
-    assert!(bed.reservations.is_held_by(u));
+    assert!(
+        bed.reservations.is_held_by(u),
+        "the write's source is {u:?}, the same unit that holds the reservation, \
+         so the clear sweep must skip it",
+    );
 }
 
 #[test]
 fn other_unit_store_clears_reservation_on_same_line() {
-    // Cross-unit store DOES invalidate: the reservation belongs to u
-    // (id 0), and the SharedWriteIntent's hardcoded source (id 0)
-    // is *not* u, so the clear sweep takes effect.
+    // Cross-unit store DOES invalidate: the write's source is a
+    // different unit from the one holding the reservation, so the
+    // clear sweep takes effect.
     let mut bed = CommitTestBed::new(4096);
-    let writer = bed.units.register_with(DummyUnit::runnable); // id 0
     let holder = UnitId::new(99);
+    let writer = UnitId::new(7);
+    assert_ne!(writer, holder, "the cross-unit path needs distinct ids");
     bed.reservations
         .insert_or_replace(holder, cellgov_sync::ReservedLine::containing(0x100));
+    // Floor: without a reservation to clear, the post-condition below
+    // holds for a table that was empty all along.
+    assert!(
+        bed.reservations.is_held_by(holder),
+        "setup must seat a reservation for the sweep to clear",
+    );
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
-        vec![write_intent(0x140, vec![1, 2, 3, 4])],
+        vec![write_intent_from(0x140, vec![1, 2, 3, 4], writer)],
     );
-    let _ = writer; // silence unused warning; we only needed it to advance the registry
     bed.process(&r, &e).unwrap();
-    assert!(!bed.reservations.is_held_by(holder));
+    assert!(
+        !bed.reservations.is_held_by(holder),
+        "a store from {writer:?} must clear {holder:?}'s reservation on the same line",
+    );
 }
 
 #[test]
@@ -1076,4 +1120,133 @@ fn dma_enqueue_destination_out_of_range_rejects_batch() {
     ));
     // Queue stays empty when the batch is rejected atomically.
     assert!(bed.dma_queue.is_empty());
+}
+
+/// A guest that never reached GCM init has no label base, so the
+/// offset it emits is the absolute address it wants written. The
+/// RSX microtests under `tests/micro/` do exactly this.
+#[test]
+fn rsx_label_write_past_the_label_area_commits_when_no_label_base_exists() {
+    let mut bed = CommitTestBed::new(0x2_0000);
+    let effect = Effect::RsxLabelWrite {
+        offset: 0x1_0000,
+        value: 0xCAFE_BABE,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
+    let outcome = bed.process(&r, &e).expect("absolute offset commits");
+    assert_eq!(outcome.writes_committed, 1);
+    assert_eq!(
+        bed.mem.read(range(0x1_0000, 4)).unwrap(),
+        &0xCAFE_BABEu32.to_be_bytes()
+    );
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "escapes the")]
+fn rsx_label_write_past_the_label_area_trips_the_guard_under_a_label_base() {
+    let mut bed = CommitTestBed::new(0x2_0000);
+    bed.label_base = 0x2000;
+    let effect = Effect::RsxLabelWrite {
+        offset: cellgov_ps3_abi::sys_rsx::reports::SIZE as u32,
+        value: 1,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
+    let _ = bed.process(&r, &e);
+}
+
+#[test]
+fn rsx_label_write_inside_the_semaphore_region_commits_relative_to_the_label_base() {
+    let mut bed = CommitTestBed::new(0x1_0000);
+    bed.label_base = 0x2000;
+    let effect = Effect::RsxLabelWrite {
+        offset: 0x40,
+        value: 0x1234_5678,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
+    let outcome = bed.process(&r, &e).expect("relative offset commits");
+    assert_eq!(outcome.writes_committed, 1);
+    assert_eq!(
+        bed.mem.read(range(0x2040, 4)).unwrap(),
+        &0x1234_5678u32.to_be_bytes()
+    );
+}
+
+/// The label base addresses the whole `RsxReports` area, so the report
+/// entries at 0x1400 are a destination `NV4097_GET_REPORT` legitimately
+/// names -- not a write past the end of the semaphore block.
+#[test]
+fn rsx_label_write_into_the_report_region_commits_without_tripping_the_guard() {
+    let mut bed = CommitTestBed::new(0x1_0000);
+    bed.label_base = 0x2000;
+    let offset = cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    let effect = Effect::RsxLabelWrite {
+        offset,
+        value: 0x0BAD_F00D,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
+    let outcome = bed.process(&r, &e).expect("report offset commits");
+    assert_eq!(outcome.writes_committed, 1);
+    assert_eq!(
+        bed.mem.read(range(0x2000 + offset as u64, 4)).unwrap(),
+        &0x0BAD_F00Du32.to_be_bytes()
+    );
+}
+
+#[test]
+fn an_rsx_label_write_clears_a_reservation_it_lands_on() {
+    let mut bed = CommitTestBed::new(0x1_0000);
+    bed.label_base = 0x2000;
+    let holder = UnitId::new(11);
+    bed.reservations
+        .insert_or_replace(holder, cellgov_sync::ReservedLine::containing(0x2040));
+    assert!(
+        bed.reservations.is_held_by(holder),
+        "setup must seat a reservation for the sweep to clear",
+    );
+    let effect = Effect::RsxLabelWrite {
+        offset: 0x40,
+        value: 7,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
+    let outcome = bed.process(&r, &e).expect("label write commits");
+    assert_eq!(outcome.reservations_cleared, 1);
+    assert!(
+        !bed.reservations.is_held_by(holder),
+        "the RSX is another bus master, so its store must clear {holder:?}'s reservation",
+    );
+}
+
+#[test]
+fn an_rsx_label_write_leaves_a_reservation_on_an_unrelated_line_alone() {
+    let mut bed = CommitTestBed::new(0x1_0000);
+    bed.label_base = 0x2000;
+    let holder = UnitId::new(11);
+    // A full line away from 0x2040, so the four bytes cannot overlap.
+    bed.reservations
+        .insert_or_replace(holder, cellgov_sync::ReservedLine::containing(0x3000));
+    let effect = Effect::RsxLabelWrite {
+        offset: 0x40,
+        value: 7,
+    };
+    let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
+    let outcome = bed.process(&r, &e).expect("label write commits");
+    assert_eq!(outcome.reservations_cleared, 0);
+    assert!(bed.reservations.is_held_by(holder));
+}
+
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "the discard contract is driven by the yield reason")]
+fn a_fault_effect_in_a_non_faulting_batch_trips_the_discard_guard() {
+    let mut bed = CommitTestBed::new(4096);
+    let u = bed.units.register_with(DummyUnit::runnable);
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![Effect::FaultRaised {
+            kind: FaultKind::Guest(0x300),
+            source: u,
+        }],
+    );
+    let _ = bed.process(&r, &e);
 }

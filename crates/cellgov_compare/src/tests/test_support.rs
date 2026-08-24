@@ -95,19 +95,42 @@ pub fn sample_observation() -> Observation {
 ///
 /// `name` is the only thing separating one live guard from another
 /// inside a single process, and the harness runs tests in parallel:
-/// each call site must pass a name no other call site uses.
+/// each call site must pass a name no other call site uses. The
+/// requirement is enforced, not merely asked for -- see [`TempDir::new`].
 pub struct TempDir {
     path: PathBuf,
+    name: String,
 }
+
+/// Names with a live [`TempDir`] guard in this process.
+///
+/// `TempDir::new` wipes the directory it is handed, so a second guard
+/// under a live name would delete the first one's fixtures mid-test.
+/// Refusing by name turns that into a failure that says what happened.
+static LIVE_NAMES: std::sync::Mutex<std::collections::BTreeSet<String>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
 
 impl TempDir {
     /// Create a fresh temp directory named `cellgov_<name>_<pid>`.
     ///
     /// # Panics
     ///
-    /// If a stale directory at the same path cannot be removed, or the
-    /// fresh one cannot be created.
+    /// If `name` already has a live guard in this process, if a stale
+    /// directory at the same path cannot be removed, or if the fresh
+    /// one cannot be created.
     pub fn new(name: &str) -> Self {
+        // Claim the name before touching the filesystem, and release the
+        // lock before asserting so a refusal does not poison it.
+        let claimed = LIVE_NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(name.to_owned());
+        assert!(
+            claimed,
+            "temp dir name {name:?} already has a live guard in this process; \
+             a second guard would delete the first one's fixtures",
+        );
+
         let pid = std::process::id();
         let path = std::env::temp_dir().join(format!("cellgov_{name}_{pid}"));
         // Anything other than "it was not there" means the fixtures
@@ -119,7 +142,10 @@ impl TempDir {
         }
         std::fs::create_dir_all(&path)
             .unwrap_or_else(|e| panic!("temp dir {} not creatable: {e}", path.display()));
-        Self { path }
+        Self {
+            path,
+            name: name.to_owned(),
+        }
     }
 
     /// Absolute path of a file inside this temp directory.
@@ -134,8 +160,34 @@ impl Drop for TempDir {
         reason = "a drop-time cleanup refusal cannot panic; stderr is the only channel left"
     )]
     fn drop(&mut self) {
+        LIVE_NAMES
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.name);
         if let Err(e) = std::fs::remove_dir_all(&self.path) {
             eprintln!("temp dir {} not removed on drop: {e}", self.path.display());
         }
+    }
+}
+
+#[cfg(test)]
+mod temp_dir_tests {
+    use super::TempDir;
+
+    #[test]
+    #[should_panic(expected = "already has a live guard")]
+    fn a_second_guard_under_a_live_name_is_refused() {
+        let _first = TempDir::new("duplicate_name_refusal");
+        let _second = TempDir::new("duplicate_name_refusal");
+    }
+
+    #[test]
+    fn a_name_is_reusable_once_its_guard_is_dropped() {
+        let path = {
+            let first = TempDir::new("sequential_name_reuse");
+            first.file("marker")
+        };
+        let second = TempDir::new("sequential_name_reuse");
+        assert_eq!(second.file("marker"), path);
     }
 }

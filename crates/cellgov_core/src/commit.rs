@@ -10,7 +10,8 @@
 //! - Validation rejects the whole batch; a rejected batch commits
 //!   nothing and surfaces as a fault on the originating unit.
 //! - Every committed `SharedWriteIntent` runs the reservation-table
-//!   clear sweep against overlapping lines.
+//!   clear sweep against overlapping lines. So does `RsxLabelWrite`,
+//!   with no unit exempted: the RSX is a bus master, not a unit.
 //! - `RsxLabelWrite` is bounds-checked against the resolved label
 //!   base before staging.
 
@@ -198,6 +199,10 @@ pub struct CommitContext<'a> {
     pub reservations: &'a mut ReservationTable,
     /// Zero means GCM has not been initialised; `RsxLabelWrite` commits as
     /// a 4-byte big-endian store at `rsx_label_base + offset`.
+    ///
+    /// The value also decides whether an offset is checked against the
+    /// RSX label area's extent: relative offsets are only meaningful once
+    /// a base exists, so the guard is skipped while this is zero.
     pub rsx_label_base: u32,
     /// Write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
@@ -406,15 +411,35 @@ impl CommitPipeline {
                         }
                     }
                     Effect::RsxLabelWrite { offset, value } => {
-                        // 0..0x1000 is the semaphore region; 0x1000+ is
-                        // notify/report space. Asserting here surfaces a
-                        // guest bug at the boundary instead of as silent
-                        // notify corruption.
+                        // The label base addresses the whole `RsxReports`
+                        // area, not just its leading semaphore block:
+                        // semaphores occupy 0..0x1000, notify entries
+                        // start at 0x1000 and report entries at 0x1400,
+                        // out to `reports::SIZE`. Notify and report slots
+                        // are what `NV4097_GET_REPORT` legitimately
+                        // targets, so the boundary worth asserting is the
+                        // end of the area GCM handed out; past it the
+                        // write corrupts whatever follows. RPCS3
+                        // `sys_rsx.h` `RsxReports` and `sys_rsx.cpp`
+                        // `sys_rsx_context_allocate` publish the same
+                        // layout through `reportsNotifyOffset` /
+                        // `reportsReportOffset`.
+                        //
+                        // The window only means something once a label
+                        // base exists. A base of zero says GCM never
+                        // handed one out, so the guest has no window to be
+                        // relative to and `offset` is the absolute address
+                        // it wants written -- routinely past the area size
+                        // and not a bug.
                         debug_assert!(
-                            *offset < 0x1000,
-                            "RsxLabelWrite offset {:#x} past semaphore region (guest bug? \
-                         0..0x1000 is semaphore, 0x1000+ is notify/report)",
-                            *offset
+                            ctx.rsx_label_base == 0
+                                || (*offset as usize) < cellgov_ps3_abi::sys_rsx::reports::SIZE,
+                            "RsxLabelWrite offset {:#x} escapes the {:#x}-byte RSX label area \
+                         under label base {:#x} (guest bug? semaphores 0..0x1000, notify at \
+                         0x1000, reports at 0x1400)",
+                            *offset,
+                            cellgov_ps3_abi::sys_rsx::reports::SIZE,
+                            ctx.rsx_label_base,
                         );
                         *ctx.rsx_label_writes_committed =
                             ctx.rsx_label_writes_committed.wrapping_add(1);
@@ -437,6 +462,23 @@ impl CommitPipeline {
                             bytes: value.to_be_bytes().to_vec(),
                         });
                         writes += 1;
+                    }
+                    Effect::FaultRaised { kind, source } => {
+                        // The variant's contract is that the whole step is
+                        // discarded, but this pipeline drives the discard
+                        // off `YieldReason::Fault`, which already returned
+                        // above. Reaching here means the emitter raised a
+                        // fault without yielding one, and every sibling
+                        // effect in the batch is about to commit.
+                        debug_assert!(
+                            result.yield_reason == YieldReason::Fault,
+                            "FaultRaised({kind:?}) from unit {} in a batch that yielded {:?}; \
+                         the discard contract is driven by the yield reason, so the batch \
+                         commits instead",
+                            source.raw(),
+                            result.yield_reason,
+                        );
+                        deferred += 1;
                     }
                     _ => {
                         deferred += 1;
@@ -546,6 +588,15 @@ impl CommitPipeline {
                     reservations_cleared +=
                         ctx.reservations
                             .clear_covering(range.start().raw(), range.length(), None);
+                }
+                Effect::RsxLabelWrite { offset, .. } => {
+                    // The RSX is a bus master with no `UnitId`, so no
+                    // entry is exempt: every reservation covering the four
+                    // bytes it lands on is dropped.
+                    // [PPC-Book2 p:10 s:1.7.3.1] a store by some other
+                    // mechanism into the granule loses the reservation.
+                    let start = (ctx.rsx_label_base as u64).wrapping_add(*offset as u64);
+                    reservations_cleared += ctx.reservations.clear_covering(start, 4, None);
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
                     ctx.rsx_flip.request_flip(*buffer_index);

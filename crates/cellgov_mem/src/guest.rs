@@ -214,7 +214,12 @@ pub struct GuestMemory {
 pub struct FaultContext {
     /// Faulting guest address.
     pub addr: u64,
-    /// Label of the nearest mapped region whose end is `<= addr`, if any.
+    /// Label of the mapped region with the greatest base `<= addr`, if
+    /// any.
+    ///
+    /// A range that starts inside a region and runs past its end faults
+    /// with `addr` still mapped, and this names the region `addr` sits
+    /// in rather than one below it.
     pub nearest_below: Option<&'static str>,
     /// Label of the nearest mapped region whose base is `> addr`, if any.
     pub nearest_above: Option<&'static str>,
@@ -241,6 +246,17 @@ pub enum MemError {
     /// Two regions' address ranges overlap.
     #[error("overlapping address ranges")]
     OverlappingRegions,
+    /// A region's `base + size` runs past the end of the address space.
+    ///
+    /// Distinct from [`MemError::OverlappingRegions`]: nothing is in the
+    /// way, the region simply does not fit.
+    #[error("region at 0x{base:016x} of {size} bytes runs past the end of the address space")]
+    RegionOverflow {
+        /// Base address of the rejected region.
+        base: u64,
+        /// Size in bytes of the rejected region.
+        size: u64,
+    },
     /// Range is not entirely contained within any single mapped region.
     #[error("{0}")]
     Unmapped(FaultContext),
@@ -273,9 +289,21 @@ impl GuestMemory {
     /// # Errors
     ///
     /// Returns [`MemError::OverlappingRegions`] if any two regions' address
-    /// ranges overlap. Empty input is allowed; every read then faults.
+    /// ranges overlap, or [`MemError::RegionOverflow`] if one runs past the
+    /// end of the address space. Empty input is allowed; every read then
+    /// faults.
     pub fn from_regions(mut regions: Vec<Region>) -> Result<Self, MemError> {
         regions.sort_by_key(|r| r.base());
+        for r in &regions {
+            // `Region::end` saturates, so an overflowing region would
+            // otherwise be admitted with its tail silently unaddressable.
+            if r.base().checked_add(r.size()).is_none() {
+                return Err(MemError::RegionOverflow {
+                    base: r.base(),
+                    size: r.size(),
+                });
+            }
+        }
         for pair in regions.windows(2) {
             if pair[0].end() > pair[1].base() {
                 return Err(MemError::OverlappingRegions);
@@ -293,7 +321,8 @@ impl GuestMemory {
     /// # Errors
     ///
     /// Returns [`MemError::OverlappingRegions`] if the new range overlaps any
-    /// existing region.
+    /// existing region, or [`MemError::RegionOverflow`] if it runs past the
+    /// end of the address space.
     pub fn install_region(
         &mut self,
         base: u64,
@@ -303,7 +332,10 @@ impl GuestMemory {
     ) -> Result<(), MemError> {
         let new_end = (base as u128) + (size as u128);
         if new_end > u64::MAX as u128 {
-            return Err(MemError::OverlappingRegions);
+            return Err(MemError::RegionOverflow {
+                base,
+                size: size as u64,
+            });
         }
         let insertion = self.regions.partition_point(|r| r.base() <= base);
         if insertion > 0 {
@@ -552,7 +584,10 @@ impl GuestMemory {
         }
     }
 
-    /// Build a [`FaultContext`] for an out-of-region access at `addr`.
+    /// Build a [`FaultContext`] for a faulting access whose range
+    /// starts at `addr`. `addr` itself may still be mapped when the
+    /// range overruns its region's end; see
+    /// [`FaultContext::nearest_below`].
     pub fn fault_context(&self, addr: u64) -> FaultContext {
         let idx = self.regions.partition_point(|r| r.base() <= addr);
         let below = if idx > 0 {

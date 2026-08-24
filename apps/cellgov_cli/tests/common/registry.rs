@@ -111,8 +111,8 @@ pub fn titles() -> Vec<TitleUnderTest> {
     out
 }
 
-#[allow(dead_code, reason = "not every suite reads baselines")]
-pub fn baseline_path(content_id: &str) -> PathBuf {
+#[allow(dead_code, reason = "not every suite reads boot anchors")]
+pub fn boot_anchor_path(content_id: &str) -> PathBuf {
     workspace_root().join(format!(
         "tests/fixtures/{content_id}/cellgov/boot_summary.json"
     ))

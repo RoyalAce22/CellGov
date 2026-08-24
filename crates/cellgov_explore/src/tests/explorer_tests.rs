@@ -585,6 +585,133 @@ fn a_truncated_replay_with_no_divergence_is_inconclusive_not_stable() {
 }
 
 #[test]
+fn a_baseline_stopped_by_the_runtime_step_cap_forces_inconclusive() {
+    // Two 3-op units need 6 steps; the cap refuses the 5th, so the
+    // baseline hash covers only a prefix of the default schedule.
+    let make = || {
+        let mem = GuestMemory::new(64);
+        let mut rt = Runtime::new(mem, Budget::new(100), 4);
+        for imm in [0xAAu32, 0xBB] {
+            rt.registry_mut().register_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(imm),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
+        }
+        rt
+    };
+
+    let r = explore(make, &ExplorationConfig::default())
+        .expect("two contending units must produce a branching point");
+    assert!(r.bounds_hit);
+    assert_eq!(r.outcome, OutcomeClass::Inconclusive);
+    assert!(!r.schedules.is_empty());
+    assert_eq!(
+        r.schedules_truncated,
+        r.schedules.len(),
+        "a prefix baseline taints every record it was compared against",
+    );
+    assert!(r.schedules.iter().all(|s| s.truncated));
+}
+
+#[test]
+fn a_truncated_baseline_with_every_alternate_pruned_is_not_stable() {
+    // Disjoint writers prune to nothing, and pruning alone never sets
+    // `bounds_hit`, so the verdict rests entirely on the baseline rule.
+    let r = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            let mut rt = Runtime::new(mem, Budget::new(100), 4);
+            for (addr, v) in [(0u64, 0xAAu32), (8, 0xBB)] {
+                rt.registry_mut().register_with(move |id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(v),
+                            FakeOp::SharedStore { addr, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+            }
+            rt
+        },
+        &ExplorationConfig::default(),
+    )
+    .expect("two units must produce a branching point");
+    assert!(r.schedules.is_empty());
+    assert!(r.schedules_pruned > 0);
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::Inconclusive,
+        "a prefix baseline with nothing left to compare is not evidence of stability",
+    );
+    assert!(r.bounds_hit);
+}
+
+#[test]
+fn a_baseline_that_ran_itself_out_leaves_no_truncation_witness() {
+    let r = explore(
+        || {
+            let mem = GuestMemory::new(64);
+            let mut rt = Runtime::new(mem, Budget::new(100), 100);
+            for imm in [0xAAu32, 0xBB] {
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(imm),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+            }
+            rt
+        },
+        &ExplorationConfig::default(),
+    )
+    .expect("two contending units must produce a branching point");
+    assert_eq!(r.schedules_truncated, 0);
+    assert!(r.schedules.iter().all(|s| !s.truncated));
+}
+
+#[test]
+fn a_truncated_baseline_withdraws_a_divergence_that_was_already_found() {
+    // Hashes recorded against a prefix baseline are not evidence of
+    // schedule sensitivity, whatever they compared as.
+    let mut iter = crate::util::AlternateIteration {
+        schedules: vec![crate::classify::ScheduleRecord {
+            branch_step: 0,
+            alternate_choice: UnitId::new(1),
+            memory_hash: 0x1234,
+            truncated: false,
+        }],
+        bounds_hit: false,
+        found_divergence: true,
+        schedules_pruned: 0,
+        schedules_truncated: 0,
+    };
+    iter.mark_baseline_truncated();
+    assert_eq!(iter.schedules_truncated, 1);
+    assert!(iter.schedules[0].truncated);
+
+    let r = classify_iteration(iter, 0xDEAD_BEEF, 1);
+    assert!(r.bounds_hit);
+    assert_eq!(r.schedules_truncated, 1);
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::Inconclusive,
+        "a prefix baseline cannot support a ScheduleSensitive verdict",
+    );
+}
+
+#[test]
 fn result_fields_are_populated() {
     let result = explore(
         || {

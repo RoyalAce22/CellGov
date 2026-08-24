@@ -64,6 +64,10 @@ pub(crate) enum CliArgError {
     EmptyPositional,
     #[error("{name}={got:?}: expected 0/1/true/false/yes/no/on/off")]
     EnvBoolUnknown { name: String, got: String },
+    #[error("{flags} select different outputs; pass exactly one")]
+    MutuallyExclusiveFlags { flags: String },
+    #[error("{flag} applies to {context} only")]
+    FlagNotValidHere { flag: String, context: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +161,78 @@ fn find_flag_value_inner(args: &[String], flag: &str) -> Result<Option<String>, 
         i += 2;
     }
     Ok(found)
+}
+
+/// True when the valueless `--flag` appears in `args`.
+///
+/// # Errors
+///
+/// - `--flag=value` form is used. A boolean flag spelled with an `=`
+///   would otherwise read as absent and switch its feature off without
+///   a word, which is exactly what [`find_flag_value`] refuses for
+///   value-taking flags.
+pub(crate) fn has_bool_flag(args: &[String], flag: &str) -> bool {
+    has_bool_flag_inner(args, flag).unwrap_or_else(|e| die(&e.to_string()))
+}
+
+fn has_bool_flag_inner(args: &[String], flag: &str) -> Result<bool, CliArgError> {
+    let mut seen = false;
+    for arg in args {
+        let a = arg.as_str();
+        if a.starts_with(flag) && a.as_bytes().get(flag.len()) == Some(&b'=') {
+            return Err(CliArgError::FlagEqNotSupported {
+                flag: flag.to_string(),
+            });
+        }
+        if a == flag {
+            seen = true;
+        }
+    }
+    Ok(seen)
+}
+
+/// Refuse an invocation naming more than one of a set of flags that
+/// each select a different output. The handlers honour the first one
+/// they test and return, so without this the others are dropped in
+/// silence.
+pub(crate) fn require_at_most_one(args: &[String], flags: &[&str]) {
+    require_at_most_one_inner(args, flags).unwrap_or_else(|e| die(&e.to_string()))
+}
+
+fn require_at_most_one_inner(args: &[String], flags: &[&str]) -> Result<(), CliArgError> {
+    let present: Vec<&str> = flags
+        .iter()
+        .copied()
+        .filter(|f| args.iter().any(|a| a == *f))
+        .collect();
+    if present.len() > 1 {
+        return Err(CliArgError::MutuallyExclusiveFlags {
+            flags: present.join(" and "),
+        });
+    }
+    Ok(())
+}
+
+/// Refuse a flag that parsed fine but this code path would never read.
+pub(crate) fn reject_flag_here(args: &[String], flag: &str, context: &str) {
+    reject_flag_here_inner(args, flag, context).unwrap_or_else(|e| die(&e.to_string()))
+}
+
+fn reject_flag_here_inner(args: &[String], flag: &str, context: &str) -> Result<(), CliArgError> {
+    // The `=` spelling counts. On a path that never calls
+    // [`find_flag_value`] for this flag, nothing else would ever raise
+    // `FlagEqNotSupported`, so an exact-match-only scan would let
+    // `--flag=value` through to be dropped in silence.
+    let present = args
+        .iter()
+        .any(|a| a == flag || (a.starts_with(flag) && a.as_bytes().get(flag.len()) == Some(&b'=')));
+    if present {
+        return Err(CliArgError::FlagNotValidHere {
+            flag: flag.to_string(),
+            context: context.to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// Split every `--flag <value>` pair out of `args`: the remaining
@@ -323,6 +399,11 @@ fn parse_patch_byte_pair_inner(pair: &str) -> Result<(u64, u8), CliArgError> {
     Ok((addr, val))
 }
 
+/// The one value flag whose value is guest argv, so it may spell a
+/// host flag verbatim. Every other entry of [`RUN_GAME_VALUE_FLAGS`]
+/// takes a plain value.
+pub(crate) const GUEST_ARG_FLAG: &str = "--guest-arg";
+
 /// Flags consumed by `run-game` / `bench-boot` that take a
 /// following value argument.
 pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
@@ -343,7 +424,7 @@ pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--save-boot-summary",
     "--save-state-trace",
     "--checkpoint",
-    "--guest-arg",
+    GUEST_ARG_FLAG,
 ];
 
 /// Locate the positional ELF path in a `run-game` invocation;
@@ -366,8 +447,18 @@ fn find_run_game_elf_path_inner(args: &[String]) -> Result<Option<String>, CliAr
             });
         }
         if RUN_GAME_VALUE_FLAGS.contains(&a.as_str()) {
-            if args.get(i + 1).is_none() {
+            let Some(val) = args.get(i + 1) else {
                 return Err(CliArgError::FlagRequiresValue { flag: a.clone() });
+            };
+            // Same rule [`find_flag_value_inner`] applies: a flag-like
+            // token in a value slot means the value is missing
+            // upstream. Skipping the pair silently would promote the
+            // NEXT token to the positional ELF path instead.
+            if a != GUEST_ARG_FLAG && val.starts_with("--") {
+                return Err(CliArgError::FlagValueLooksLikeFlag {
+                    flag: a.clone(),
+                    value: val.clone(),
+                });
             }
             i += 2;
             continue;

@@ -20,6 +20,14 @@ pub enum GameSource {
     /// directory. Relative `dir` resolves against the process's
     /// current directory, matching [`MountEntry::host`].
     FirmwareExec { dir: PathBuf },
+    /// Executable sitting beside the manifest that names it, at `dir`
+    /// on the host. Ignores `vfs_root`, like [`Self::FirmwareExec`],
+    /// but the loader has already joined the declared path onto the
+    /// manifest's own directory, so the reference resolves the same
+    /// from any working directory. The loader rejects a rooted or
+    /// drive-prefixed declared path, which `Path::join` would drop
+    /// that directory for.
+    ManifestRelative { dir: PathBuf },
 }
 
 /// Distribution channel for the `titles.md` Format column. Display only;
@@ -33,6 +41,10 @@ pub enum Distribution {
     /// Shipped inside the firmware image rather than distributed as a
     /// title (vsh and the other CoreOS executables).
     FirmwareExec,
+    /// Built from in-repo source under `tests/micro/`; never
+    /// distributed. Keeps a structural microtest out of the retail
+    /// channels it would otherwise have to claim.
+    Microtest,
 }
 
 impl Distribution {
@@ -44,6 +56,7 @@ impl Distribution {
             Self::RetailHdd => "Retail HDD",
             Self::DiscIso => "Disc ISO",
             Self::FirmwareExec => "Firmware Exec",
+            Self::Microtest => "Microtest",
         }
     }
 
@@ -54,6 +67,7 @@ impl Distribution {
             Self::RetailHdd => "retail-hdd",
             Self::DiscIso => "disc-iso",
             Self::FirmwareExec => "firmware-exec",
+            Self::Microtest => "microtest",
         }
     }
 
@@ -70,8 +84,12 @@ impl Distribution {
 /// One title's manifest as loaded from `docs/title_manifests/<content-id>.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitleManifest {
-    /// PSN content id; primary lookup key and the directory name
-    /// under `/dev_hdd0/game/`.
+    /// PSN content id; primary lookup key and, for
+    /// [`GameSource::Hdd`] / [`GameSource::Disc`], the directory name
+    /// holding the executable. A
+    /// [`GameSource::ManifestRelative`] title has no PSN identity and
+    /// may omit it in TOML; the loader then fills it from the
+    /// manifest's own directory name.
     pub content_id: String,
     /// Short CLI name for `--title <name>`. Unique across the registry.
     pub short_name: String,
@@ -151,17 +169,33 @@ pub enum ResolveEbootError {
     },
     /// No candidate executable exists under the resolved USRDIR.
     /// `probe_errors` collects non-NotFound I/O errors.
-    #[error("{}", render_not_found(searched, candidates, probe_errors))]
+    #[error(
+        "{}",
+        render_not_found(searched, candidates, probe_errors, not_regular)
+    )]
     NotFound {
         searched: PathBuf,
         candidates: Vec<String>,
         probe_errors: Vec<(PathBuf, std::io::Error)>,
+        /// Candidates that exist but are not regular files -- a
+        /// directory or a special file sitting on the name. Reported
+        /// apart from a plain miss: the name is taken, so the fix is
+        /// a different one.
+        not_regular: Vec<PathBuf>,
     },
-    /// `content_id` begins with `.`, which would resolve a hidden /
-    /// in-progress directory (e.g. an install's `.staging-*` sibling)
-    /// instead of a real title. There is no VFS directory scan -- titles
-    /// come from explicit manifests -- so this resolver is the gate that
-    /// keeps a dot-prefixed key off the boot path.
+    /// `content_id` begins with `.`. For [`GameSource::Hdd`] and
+    /// [`GameSource::Disc`] that would resolve a hidden / in-progress
+    /// directory (e.g. an install's `.staging-*` sibling) instead of a
+    /// real title. There is no VFS directory scan -- titles come from
+    /// explicit manifests -- so this resolver is the gate.
+    ///
+    /// It refuses ahead of the source match, so it also covers the two
+    /// sources whose executable path never mentions the id: the id
+    /// still names the title's `tests/fixtures/<content-id>/` anchor
+    /// directory, which is source-independent, and a
+    /// [`GameSource::ManifestRelative`] title's id is derived from a
+    /// directory name rather than chosen, so it is the one that can
+    /// pick up a leading dot without anyone writing one.
     #[error("title '{short_name}' has a hidden content-id {content_id:?} (leading '.')")]
     HiddenContentId {
         content_id: String,
@@ -171,7 +205,9 @@ pub enum ResolveEbootError {
 
 /// Test witness: counts how many times the hidden-content-id guard in
 /// [`TitleManifest::resolve_eboot`] fired, so a test can prove the
-/// guard executed rather than passing vacuously.
+/// guard executed rather than passing vacuously. Shared by every test
+/// in the process, so a reader compares for growth, not for an exact
+/// delta.
 #[cfg(test)]
 pub(crate) static HIDDEN_CONTENT_ID_REJECTIONS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
@@ -180,11 +216,15 @@ fn render_not_found(
     searched: &Path,
     candidates: &[String],
     probe_errors: &[(PathBuf, std::io::Error)],
+    not_regular: &[PathBuf],
 ) -> String {
     use std::fmt::Write as _;
     let mut s = String::from("no executable found; looked for:");
     for name in candidates {
         let _ = write!(s, "\n  {}", searched.join(name).display());
+    }
+    for p in not_regular {
+        let _ = write!(s, "\n  exists but is not a regular file: {}", p.display());
     }
     for (p, e) in probe_errors {
         let _ = write!(s, "\n  probe error: {}: {e}", p.display());
@@ -250,14 +290,18 @@ impl TitleManifest {
                     .join("PS3_GAME")
                     .join("USRDIR")
             }
-            GameSource::FirmwareExec { dir } => dir.clone(),
+            GameSource::FirmwareExec { dir } | GameSource::ManifestRelative { dir } => dir.clone(),
         };
         let mut probe_errors = Vec::new();
+        let mut not_regular = Vec::new();
         for name in &self.eboot_candidates {
             let p = usrdir.join(name);
             match std::fs::metadata(&p) {
                 Ok(md) if md.is_file() => return Ok(p),
-                Ok(_) => {}
+                // The name is taken by a directory or a special file.
+                // Not a miss -- say so rather than folding it into the
+                // "looked for" list, which reads as "nothing was there".
+                Ok(_) => not_regular.push(p),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => probe_errors.push((p, e)),
             }
@@ -266,6 +310,7 @@ impl TitleManifest {
             searched: usrdir,
             candidates: self.eboot_candidates.clone(),
             probe_errors,
+            not_regular,
         })
     }
 }

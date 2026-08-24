@@ -28,10 +28,14 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     let dir = corpus::firmware_external_dir();
 
     let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    // An unreadable entry is a hard error: dropping it would shrink the
+    // corpus under test without changing a single assertion.
     let mut sprx_paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("read_dir on validated firmware dir")
-        .filter_map(Result::ok)
-        .map(|e| e.path())
+        .map(|e| {
+            e.unwrap_or_else(|err| panic!("read_dir entry under {}: {err}", dir.display()))
+                .path()
+        })
         .filter(|p| {
             p.extension()
                 .and_then(|x| x.to_str())
@@ -131,6 +135,16 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         })
         .collect();
     let table_keys: BTreeSet<(&str, u32)> = image.export_table.keys().collect();
+    // Two empty sets compare equal, so the equality below says nothing
+    // unless the corpus actually published exports.
+    assert!(
+        image.export_table.len() >= 1000,
+        "export table holds {} (namespace, NID) pairs across {} modules; \
+         a full external set publishes thousands and the union check below \
+         would otherwise compare two empty sets",
+        image.export_table.len(),
+        image.loaded.len(),
+    );
     assert_eq!(
         union, table_keys,
         "export table != union of per-module exports"
@@ -171,15 +185,26 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         .enumerate()
         .map(|(i, id)| (*id, i))
         .collect();
+    let import_edges: usize = image.imports_by_id.values().map(BTreeSet::len).sum();
+    assert!(
+        import_edges >= 100,
+        "only {import_edges} resolved import edges across {} modules; \
+         the ordering check below iterates the edge set and would pass vacuously",
+        image.loaded.len(),
+    );
     for (importer, targets) in &image.imports_by_id {
         let importer_pos = position[importer];
         for target in targets {
-            if let Some(&target_pos) = position.get(target) {
-                assert!(
-                    target_pos < importer_pos,
-                    "topological order violated: target {target:?} at {target_pos} precedes importer {importer:?} at {importer_pos}"
-                );
-            }
+            // `FirmwareImage::imports_by_id` documents every target as a
+            // key in `loaded`; skipping an absent one would hide exactly
+            // the incoherence this test exists to catch.
+            let target_pos = *position.get(target).unwrap_or_else(|| {
+                panic!("import target {target:?} of {importer:?} is absent from the loaded set")
+            });
+            assert!(
+                target_pos < importer_pos,
+                "topological order violated: target {target:?} at {target_pos} precedes importer {importer:?} at {importer_pos}"
+            );
         }
     }
 
@@ -212,7 +237,8 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
     }
 
     eprintln!(
-        "firmware_set_load: loaded {} PRX modules; export table {} (namespace, NID) pairs",
+        "firmware_set_load: loaded {} PRX modules; export table {} (namespace, NID) pairs; \
+         {import_edges} resolved import edges",
         image.loaded.len(),
         image.export_table.len()
     );

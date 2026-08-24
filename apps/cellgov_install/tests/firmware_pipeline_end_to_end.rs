@@ -19,6 +19,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+#[path = "common/digests.rs"]
+mod digests;
 #[path = "common/dumps.rs"]
 mod dumps;
 #[path = "common/scratch.rs"]
@@ -57,6 +59,40 @@ fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::p
     cmd.output().expect("spawn cellgov_install install")
 }
 
+/// Every module the committed digest table pins is present in `dir`.
+///
+/// "At least one file with a module extension" would pass an install
+/// that wrote a single module. Each `decrypted_masked/<stem>` row is a
+/// module `parity_firmware_decrypt` later decrypts out of an installed
+/// firmware tree, so a fresh install has to produce all of them.
+///
+/// # Panics
+///
+/// If a pinned module is absent, or the table pins none -- a table
+/// with no such row would make this check assert nothing.
+fn assert_pinned_modules_present(dir: &std::path::Path) {
+    let mut pinned = 0usize;
+    for key in digests::table().keys() {
+        let Some(stem) = key.strip_prefix("decrypted_masked/") else {
+            continue;
+        };
+        let module = dir.join(format!("{stem}.sprx"));
+        assert!(
+            module.is_file(),
+            "install populated {} but wrote no {}, pinned by the \
+             committed digest table under {key}",
+            dir.display(),
+            module.display(),
+        );
+        pinned += 1;
+    }
+    assert!(
+        pinned > 0,
+        "the committed digest table pins no decrypted_masked/ row, so \
+         this install asserted nothing about the modules it wrote"
+    );
+}
+
 #[test]
 fn install_with_an_empty_vfs_populates_dev_flash_sys_external() {
     let pup = locate_pup();
@@ -75,19 +111,7 @@ fn install_with_an_empty_vfs_populates_dev_flash_sys_external() {
         "expected {} after install",
         sys_external.display(),
     );
-    let any_module = std::fs::read_dir(&sys_external)
-        .unwrap()
-        .filter_map(Result::ok)
-        .any(|e| {
-            let name = e.file_name();
-            let s = name.to_string_lossy().to_lowercase();
-            s.ends_with(".prx") || s.ends_with(".sprx") || s.ends_with(".self")
-        });
-    assert!(
-        any_module,
-        "expected at least one .prx / .sprx / .self in {}",
-        sys_external.display(),
-    );
+    assert_pinned_modules_present(&sys_external);
     // The manifest describes the firmware image, so it sits in the
     // mount it covers rather than at the VFS root.
     assert!(
@@ -141,6 +165,10 @@ fn a_populated_vfs_root_does_not_block_a_firmware_install() {
         output.join("dev_hdd0/game/NPUA80001/x.bin").is_file(),
         "the firmware install must not disturb a sibling mount"
     );
+    // A zero-exit install that wrote nothing would satisfy both
+    // assertions above, so hold this run to the same output floor as
+    // the empty-VFS one.
+    assert_pinned_modules_present(&output.join(DEV_FLASH).join("sys").join("external"));
 }
 
 #[test]
@@ -158,8 +186,12 @@ fn force_allows_a_non_empty_dev_flash() {
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr),
     );
+    let sys_external = dev_flash.join("sys").join("external");
     assert!(
-        dev_flash.join("sys").join("external").is_dir(),
+        sys_external.is_dir(),
         "expected dev_flash/sys/external after --force install",
     );
+    // An empty sys_external would satisfy the directory check, so
+    // --force is held to the same output floor as a clean install.
+    assert_pinned_modules_present(&sys_external);
 }

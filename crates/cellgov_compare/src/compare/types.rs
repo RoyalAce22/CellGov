@@ -49,10 +49,18 @@ pub struct MemoryDivergence {
     pub region: String,
     /// Byte offset of the first differing byte.
     pub offset: usize,
-    /// Byte in the expected observation.
+    /// Byte in the expected observation, zero past that side's end.
     pub expected: u8,
-    /// Byte in the actual observation.
+    /// Byte in the actual observation, zero past that side's end.
     pub actual: u8,
+    /// `Some((expected_len, actual_len))` when the two sides declared
+    /// different byte lengths for this region.
+    ///
+    /// The byte walk reads a short side as zeros past its end, so a
+    /// length difference whose surplus is all zeros produces no
+    /// differing byte. Two runners that disagree on how much of a
+    /// region exists have diverged whatever the padding says.
+    pub lengths: Option<(usize, usize)>,
 }
 
 /// First difference between two event sequences.

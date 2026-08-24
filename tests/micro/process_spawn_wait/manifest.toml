@@ -28,30 +28,30 @@ memory_regions = [
 outcome = "completed"
 
 # CellGov title manifest. Consumed by `cellgov_cli run-game
-# --title-manifest <this file>` after staging:
-#   mkdir -p vfs/dev_hdd0/game/CG_SPAWN/USRDIR
-#   cp tests/micro/process_spawn_wait/build/parent.elf \
-#      vfs/dev_hdd0/game/CG_SPAWN/USRDIR/EBOOT.elf
-#   cp tests/micro/process_spawn_wait/build/child.self \
-#      vfs/dev_hdd0/game/CG_SPAWN/USRDIR/child.self
-# (the boot pipeline registers the EBOOT sibling `child.self` under
-# /app_home/child.self in the LV2 content store; build.sh's child.self
-# is genuinely SCE-wrapped via make_self, and the spawn loader
-# unwraps it -- a raw child.elf copy also works, the loader detects
-# by magic).
+# --title-manifest <this file>`; both processes load straight out of
+# build/.
+#
+# The boot pipeline registers the EBOOT's sibling `child.self` under
+# /app_home/child.self in the LV2 content store, so the spawn target
+# is found without being named here. build.sh's child.self is
+# genuinely SCE-wrapped via make_self and the spawn loader unwraps it;
+# a raw child.elf works too, since the loader detects by magic.
 #
 # Expected TTY payload (CGOV magic + 16 bytes):
 #   status=0x00000000 pid=0x01000600 spawn_rc=0x00000000 polls>0
 
 [cellgov.title]
-content_id = "CG_SPAWN"
 short_name = "spawn"
 display_name = "CellGov process spawn/exit/wait microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["parent.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"

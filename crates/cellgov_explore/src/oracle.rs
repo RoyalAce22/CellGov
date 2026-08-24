@@ -57,7 +57,9 @@ pub struct OracleExplorationResult {
 /// Like [`crate::explore()`] but also captures named regions from every
 /// run.
 ///
-/// Returns `None` if the baseline has no branching points.
+/// Returns `None` if the baseline has no branching points. A baseline
+/// that stopped short withdraws every divergence claim, exactly as in
+/// [`crate::explore()`].
 pub fn explore_with_regions<F>(
     mut make_runtime: F,
     config: &ExplorationConfig,
@@ -67,7 +69,7 @@ where
     F: FnMut() -> Runtime,
 {
     let mut rt_baseline = make_runtime();
-    let (log, snapshots) = observe_decisions_with_snapshots(&mut rt_baseline, true);
+    let (log, snapshots, baseline_stop) = observe_decisions_with_snapshots(&mut rt_baseline, true);
     let baseline_hash = rt_baseline.committed_memory_hash();
     let baseline_regions = extract_regions(rt_baseline.memory(), regions);
 
@@ -77,7 +79,7 @@ where
     }
 
     let mut alternates = Vec::new();
-    let iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
+    let mut iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
         let snap = snapshots
             .get(&step)
             .expect("observer must snapshot every branching point");
@@ -92,6 +94,10 @@ where
         });
         (hash, stop)
     });
+
+    if baseline_stop.is_truncated() {
+        iter.mark_baseline_truncated();
+    }
 
     let exploration = classify_iteration(iter, baseline_hash, total_branching_points);
     Some(OracleExplorationResult {

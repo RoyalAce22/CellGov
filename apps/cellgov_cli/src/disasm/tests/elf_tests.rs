@@ -67,6 +67,15 @@ fn pt_loads_rejects_pn_xnum() {
 }
 
 #[test]
+fn a_container_with_no_program_header_table_names_that_not_an_undersized_entry() {
+    // e_phnum=0 goes with e_phentsize=0; reading that as a malformed
+    // entry size blamed the wrong field.
+    let mut data = build_elf64_be(&[]);
+    put_be_u16(&mut data, 54, 0);
+    assert_eq!(parse_pt_loads(&data), Err(ElfError::NoProgramHeaders));
+}
+
+#[test]
 fn pt_loads_rejects_phentsize_too_small() {
     let mut data = build_elf64_be(&[SegSpec::pt_load(0x200, 0x10000, PPC_NOP_BYTES.to_vec())]);
     put_be_u16(&mut data, 54, 32);

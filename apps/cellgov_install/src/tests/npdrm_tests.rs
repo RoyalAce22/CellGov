@@ -130,12 +130,17 @@ fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_both_bits_set() {
 
 #[test]
 fn decrypt_self_to_elf_npdrm_does_not_treat_high_revision_as_debug() {
-    // 0x7FFF: highest non-debug revision. Must fall through
-    // past the debug guard (the downstream NoAppKey is fine).
+    // 0x7FFF: highest non-debug revision. It clears the debug guard
+    // and reaches the key lookup, which has no key for that revision.
+    // Pinning the variant keeps this from passing on any failure that
+    // never got past the guard at all.
     let data = synthetic_sce_header_with_revision_flags(0x7FFF);
     let dummy_klic = [0u8; 16];
     let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
-    assert!(!matches!(err, SceError::DebugSelfUnsupported { .. }));
+    assert!(
+        matches!(err, SceError::NoAppKey { revision: 0x7FFF }),
+        "expected the key lookup to be reached, got {err:?}"
+    );
 }
 
 /// Build a minimal supplemental-header chain at offset 0x68.
@@ -180,30 +185,54 @@ fn find_npd_record_size_under_minimum_returns_typed_error() {
     records[4..8].copy_from_slice(&0x0Fu32.to_be_bytes());
     let data = build_synthetic_supplemental_chain(&records);
     let err = find_npd_header_info(&data).unwrap_err();
-    assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    assert!(
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "SELF supplemental header record body"
+            }
+        ),
+        "a record smaller than its own header must be named as such, got {err:?}"
+    );
 }
 
 #[test]
-fn find_npd_record_size_overflow_returns_typed_error() {
+fn find_npd_a_record_claiming_more_bytes_than_the_chain_holds_returns_typed_error() {
     let mut records = vec![0u8; 0x10];
     records[0..4].copy_from_slice(&1u32.to_be_bytes());
     records[4..8].copy_from_slice(&u32::MAX.to_be_bytes());
     let data = build_synthetic_supplemental_chain(&records);
     let err = find_npd_header_info(&data).unwrap_err();
-    assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    assert!(
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "SELF supplemental header record body"
+            }
+        ),
+        "a record body running past the chain must be named as such, got {err:?}"
+    );
 }
 
 #[test]
-fn find_npd_npd_body_overflow_returns_typed_error() {
-    // Record with kind=NPDRM and size=0x10 (just the record header,
-    // no body). NPD body needs 0x80 bytes past cursor+0x10, but
-    // supplemental_size = 0x10 means npd_end > supplemental_end.
+fn find_npd_a_record_whose_body_is_shorter_than_the_npd_header_returns_typed_error() {
+    // kind=NPDRM at the minimum record size of 0x10: the record walks
+    // and settles the key class, but its body is empty where the NPD
+    // header needs 0x80 bytes.
     let mut records = vec![0u8; 0x10];
     records[0..4].copy_from_slice(&SCE_SUPPLEMENTAL_KIND_NPDRM.to_be_bytes());
     records[4..8].copy_from_slice(&0x10u32.to_be_bytes());
     let data = build_synthetic_supplemental_chain(&records);
     let err = find_npd_header_info(&data).unwrap_err();
-    assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
+    assert!(
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "NPDRM supplemental NPD body"
+            }
+        ),
+        "the NPD body parse must name itself, not the chain walk, got {err:?}"
+    );
 }
 
 /// Build a single NPDRM record of size 0x90 (record header +

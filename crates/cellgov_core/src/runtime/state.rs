@@ -66,10 +66,11 @@ pub struct Runtime {
     /// `event_flag_set`) from non-waking ones (`tty_write`,
     /// `ppu_thread_get_id`).
     pub(super) step_woke_others: bool,
-    /// Base address used by `RsxLabelWrite` effects when computing the
-    /// commit-side guest address (`base + offset`). Zero means RSX has
-    /// not allocated label memory yet; synthetic scenarios set it
-    /// directly via [`Runtime::set_rsx_label_base`].
+    /// Seed for the base `RsxLabelWrite` effects resolve against
+    /// (`base + offset`), used only while the LV2 RSX context has no
+    /// reports base of its own; once `sys_rsx_context_allocate` runs,
+    /// that context wins. Synthetic scenarios set the seed via
+    /// [`Runtime::set_rsx_label_base`].
     pub(super) rsx_label_base: u32,
     pub(super) effects_buf: Vec<Effect>,
     pub(super) mode: RuntimeMode,

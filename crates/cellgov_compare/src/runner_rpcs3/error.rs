@@ -45,6 +45,22 @@ pub enum Rpcs3Error {
     /// The TTY log does not contain the expected magic tag.
     #[error("rpcs3 tty: magic tag not found")]
     TtyMagicNotFound,
+    /// A second `CGOV` frame follows the one that was parsed.
+    ///
+    /// RPCS3 truncates TTY.log when it opens it, so a log carrying two
+    /// frames outside one another's payload means either the guest
+    /// emitted twice or the file outlived a run. Picking the first is a
+    /// guess, and the wrong guess returns plausible neighbouring bytes.
+    #[error(
+        "rpcs3 tty: frame at byte {first} is followed by a second CGOV frame at byte {second}; \
+         delete TTY.log before the run so one capture is unambiguous"
+    )]
+    TtyFrameAmbiguous {
+        /// Byte offset of the frame that was parsed.
+        first: usize,
+        /// Byte offset of the next frame found past its payload.
+        second: usize,
+    },
     /// The TTY payload is shorter than declared regions require.
     #[error("rpcs3 tty payload too small: expected >= {expected} bytes, got {actual}")]
     TtyPayloadTooSmall {
@@ -54,10 +70,14 @@ pub enum Rpcs3Error {
         actual: u64,
     },
     /// TTY-manifest offset / size arithmetic overflows `u64`.
-    #[error("rpcs3 tty offset/size overflow for region {region_name:?}: size={size}")]
+    #[error(
+        "rpcs3 tty offset/size overflow for region {region_name:?}: offset={offset}, size={size}"
+    )]
     TtyOffsetOverflow {
         /// Region name from the TTY manifest.
         region_name: String,
+        /// Payload offset declared for the region.
+        offset: u64,
         /// Region byte length declared in the manifest.
         size: u64,
     },

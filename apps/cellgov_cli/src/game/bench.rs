@@ -13,7 +13,7 @@ use cellgov_time::Budget;
 use super::boot;
 use super::manifest::{self, TitleManifest};
 use super::step_loop::bench_step_loop;
-use crate::paths::{baseline_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
+use crate::paths::{boot_anchor_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
 
 /// Wall-time disagreement that trips the pair gate, as a percentage
 /// of the faster run.
@@ -857,7 +857,7 @@ fn check_anchor_under(
             root.display()
         )]);
     }
-    let path = baseline_path(root, content_id);
+    let path = boot_anchor_path(root, content_id);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AnchorVerdict::NoBaseline,

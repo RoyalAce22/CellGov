@@ -60,8 +60,16 @@ pub(crate) const MICROTESTS: &[&str] =
     &["barrier_wakeup", "mailbox_roundtrip", "atomic_reservation"];
 
 /// Build a ScenarioFixture for an LV2-driven ELF microtest. Reads
-/// PPU and SPU ELF binaries from `tests/micro/<name>/build/`.
+/// PPU and SPU ELF binaries from `tests/micro/<name>/build/`, relative
+/// to the working directory.
 pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
+    build_lv2_fixture_under(std::path::Path::new("."), name)
+}
+
+/// [`build_lv2_fixture`] with the corpus root named explicitly, so a
+/// caller that is not run from the workspace root does not have to
+/// move the process's working directory to reach it.
+pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> ScenarioFixture {
     use cellgov_mem::ByteRange;
     use cellgov_ppu::PpuExecutionUnit;
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
@@ -69,9 +77,9 @@ pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    let base = format!("tests/micro/{name}/build");
-    let ppu_elf = load_file_or_die(&format!("{base}/{name}.elf"));
-    let spu_elf = load_file_or_die(&format!("{base}/spu_main.elf"));
+    let base = root.join(format!("tests/micro/{name}/build"));
+    let ppu_elf = load_file_or_die(&base.join(format!("{name}.elf")).to_string_lossy());
+    let spu_elf = load_file_or_die(&base.join("spu_main.elf").to_string_lossy());
 
     let mem_size = 0x1002_0000usize;
     let stack_top = (mem_size as u64) - 0x1000;

@@ -14,6 +14,10 @@ use crate::runner_rpcs3::invoke::invoke;
 use crate::runner_rpcs3::tty::parse_tty_log;
 
 /// Invoke RPCS3 headless, then extract regions via the configured method.
+///
+/// `metadata.runner` is stamped from [`Rpcs3Config::decoder`], which
+/// the caller attests to rather than the launch selecting; see that
+/// field.
 pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observation, Rpcs3Error> {
     let outcome = invoke(config, test)?;
     let memory_regions = match &test.extraction {

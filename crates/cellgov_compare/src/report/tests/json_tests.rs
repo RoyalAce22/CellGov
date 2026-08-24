@@ -40,6 +40,7 @@ fn json_divergence_includes_details() {
             offset: 0,
             expected: 1,
             actual: 2,
+            lengths: None,
         }),
         event_divergence: None,
     };
@@ -150,6 +151,7 @@ fn multi_json_settled_includes_cellgov_result_details() {
                 offset: 7,
                 expected: 0xAA,
                 actual: 0xBB,
+                lengths: None,
             }),
             event_divergence: None,
         }),

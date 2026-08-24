@@ -136,6 +136,7 @@ pub fn rsx_advance(
     iomap: &IoMap,
     cursor: &mut RsxFifoCursor,
     sem_offset: &mut u32,
+    label_base: u32,
     call_stack: &mut RsxCallStack,
     table: &NvMethodTable,
     emitted: &mut Vec<Effect>,
@@ -207,6 +208,7 @@ pub fn rsx_advance(
                 let mut ctx = NvDispatchContext {
                     cursor: &mut *cursor,
                     sem_offset: &mut *sem_offset,
+                    label_base,
                     emitted: &mut *emitted,
                     now,
                 };

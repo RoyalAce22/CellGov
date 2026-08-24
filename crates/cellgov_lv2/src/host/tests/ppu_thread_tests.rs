@@ -268,7 +268,11 @@ fn ppu_thread_create_returns_dispatch_with_allocated_stack() {
             assert_eq!(priority, 1500);
             assert_eq!(stack_base, 0xD010_0000);
             assert_eq!(stack_size, 0x10_000);
-            assert_eq!(init.stack_top, 0xD011_0000 - 0x10);
+            assert_eq!(
+                init.stack_top,
+                0xD011_0000 - crate::ppu_thread::ABI_MIN_STACK_FRAME,
+                "a child thread starts with a whole minimum frame reserved",
+            );
             assert!(effects.is_empty());
         }
         other => panic!("expected PpuThreadCreate, got {other:?}"),

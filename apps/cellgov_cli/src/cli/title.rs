@@ -5,7 +5,10 @@ use super::args::find_flag_value;
 use super::exit::die;
 use crate::game;
 
-const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/title_manifests";
+/// Registry directory every title-driven subcommand resolves
+/// `--title` / `--content-id` against, relative to the working
+/// directory.
+pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/title_manifests";
 
 /// Resolve the active [`game::manifest::TitleManifest`] for a
 /// subcommand, in priority order: `--title-manifest <path>`,
@@ -64,17 +67,46 @@ pub(crate) fn resolve_checkpoint_override(
 /// Resolve the PS3 VFS root using, in priority order: `--vfs-root
 /// <path>`, `CELLGOV_PS3_VFS_ROOT` env var, then `vfs/dev_hdd0` (the
 /// CellGov-owned VFS that `cellgov_install install-game` / `install-iso`
-/// populate). Existence is not verified here.
+/// populate). An empty value from either override is refused rather
+/// than resolved against the current directory. Existence is not
+/// verified here.
 pub(crate) fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
+    resolve_ps3_vfs_root_inner(args, std::env::var_os("CELLGOV_PS3_VFS_ROOT"))
+        .unwrap_or_else(|msg| die(&msg))
+}
+
+/// # Errors
+///
+/// An empty root from either override: it names no directory, so
+/// every mount joined onto it would resolve against the process's
+/// current directory. The manifest loader refuses an empty
+/// `[source] path` for the same reason.
+fn resolve_ps3_vfs_root_inner(
+    args: &[String],
+    env: Option<std::ffi::OsString>,
+) -> Result<std::path::PathBuf, String> {
+    let empty = |origin: &str| {
+        format!(
+            "{origin} is empty; an empty VFS root names no directory and would leave \
+             dev_hdd0 / dev_bdvd / exdata to be resolved against the process's current \
+             directory. Name the root, or unset it to take the vfs/dev_hdd0 default."
+        )
+    };
     if let Some(p) = find_flag_value(args, "--vfs-root") {
-        return std::path::PathBuf::from(p);
+        if p.is_empty() {
+            return Err(empty("--vfs-root"));
+        }
+        return Ok(std::path::PathBuf::from(p));
     }
     // A root path the platform accepts but that is not UTF-8 must
     // still reach the resolver.
-    if let Some(p) = std::env::var_os("CELLGOV_PS3_VFS_ROOT") {
-        return std::path::PathBuf::from(p);
+    if let Some(p) = env {
+        if p.is_empty() {
+            return Err(empty("CELLGOV_PS3_VFS_ROOT"));
+        }
+        return Ok(std::path::PathBuf::from(p));
     }
-    std::path::PathBuf::from("vfs/dev_hdd0")
+    Ok(std::path::PathBuf::from("vfs/dev_hdd0"))
 }
 
 #[cfg(test)]

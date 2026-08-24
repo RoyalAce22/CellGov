@@ -9,17 +9,20 @@ use super::raw::{
     EncryptedSectionDescriptor,
 };
 
-/// Reassemble a plaintext ELF from decrypted SCE sections.
-///
-/// Layout: ehdr as-is, program headers packed immediately after,
-/// each PHDR-kind section copied to its declared `p_offset`, and
-/// last -- if the SELF's `shdr_offset` and the inner ELF's `e_shoff`
-/// are both non-zero -- the original section-header table copied to
-/// `e_shoff`.
-pub(crate) fn assemble_elf_from_sections(
-    data: &[u8],
-    sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
-) -> Result<Vec<u8>, SceError> {
+/// Plaintext geometry of a SELF's inner ELF, read from the SELF
+/// extended header and the ELF header it points at.
+struct InnerElf {
+    ehdr_offset: usize,
+    phdr_offset: usize,
+    phdr_table_bytes: usize,
+    e_shoff: usize,
+    e_shnum: usize,
+    e_shentsize: usize,
+    /// `(p_offset, p_filesz)` per program-header row, in table order.
+    segments: Vec<(usize, usize)>,
+}
+
+fn parse_inner_elf(data: &[u8]) -> Result<InnerElf, SceError> {
     if data.len() < 0x68 {
         return Err(SceError::TooSmall {
             what: "SELF extended header",
@@ -29,7 +32,6 @@ pub(crate) fn assemble_elf_from_sections(
     }
     let ehdr_offset = read_be_u64(data, 0x30) as usize;
     let phdr_offset = read_be_u64(data, 0x38) as usize;
-    let shdr_offset_in_self = read_be_u64(data, 0x40) as usize;
 
     let ehdr_end = checked_add_oob(ehdr_offset, 0x40, "SELF ELF header")?;
     if ehdr_end > data.len() {
@@ -80,12 +82,66 @@ pub(crate) fn assemble_elf_from_sections(
         });
     }
 
-    let mut elf_size: usize = checked_add_oob(0x40, phdr_table_bytes, "reconstructed ELF size")?;
+    let mut segments = Vec::with_capacity(e_phnum);
     for i in 0..e_phnum {
         let row_off = checked_mul_oob(i, e_phentsize, "SELF program header row")?;
         let ph_off = checked_add_oob(phdr_offset, row_off, "SELF program header row")?;
-        let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
-        let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
+        segments.push((
+            read_be_u64(data, ph_off + 0x08) as usize,
+            read_be_u64(data, ph_off + 0x20) as usize,
+        ));
+    }
+
+    Ok(InnerElf {
+        ehdr_offset,
+        phdr_offset,
+        phdr_table_bytes,
+        e_shoff,
+        e_shnum,
+        e_shentsize,
+        segments,
+    })
+}
+
+/// `p_filesz` per program header of `data`'s inner ELF, in table order.
+///
+/// The decrypt pass bounds a zlib section's inflate output at the size
+/// its destination segment declares; RPCS3 `unself.h`
+/// `SELFDecrypter::WriteElf` sizes that inflate buffer at exactly
+/// `phdr[program_idx].p_filesz`.
+pub(crate) fn inner_elf_segment_file_sizes(data: &[u8]) -> Result<Vec<usize>, SceError> {
+    Ok(parse_inner_elf(data)?
+        .segments
+        .into_iter()
+        .map(|(_, p_filesz)| p_filesz)
+        .collect())
+}
+
+/// Reassemble a plaintext ELF from decrypted SCE sections.
+///
+/// Layout: ehdr as-is, program headers packed immediately after,
+/// each PHDR-kind section copied to its declared `p_offset`, and
+/// last -- if the SELF's `shdr_offset` and the inner ELF's `e_shoff`
+/// are both non-zero -- the original section-header table copied to
+/// `e_shoff`.
+pub(crate) fn assemble_elf_from_sections(
+    data: &[u8],
+    sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
+) -> Result<Vec<u8>, SceError> {
+    let InnerElf {
+        ehdr_offset,
+        phdr_offset,
+        phdr_table_bytes,
+        e_shoff,
+        e_shnum,
+        e_shentsize,
+        segments,
+    } = parse_inner_elf(data)?;
+    let shdr_offset_in_self = read_be_u64(data, 0x40) as usize;
+    let e_phnum = segments.len();
+
+    let mut elf_size: usize = checked_add_oob(0x40, phdr_table_bytes, "reconstructed ELF size")?;
+    for &(p_offset, p_filesz) in &segments {
         let end = checked_add_oob(p_offset, p_filesz, "SELF program segment extent")?;
         if end > elf_size {
             elf_size = end;
@@ -115,7 +171,15 @@ pub(crate) fn assemble_elf_from_sections(
         }
     }
 
-    let mut elf = vec![0u8; elf_size];
+    // `elf_size` is the maximum of file-derived `p_offset + p_filesz`
+    // extents, so a corrupt program header can name an image far larger
+    // than any host can back. A plain `vec![0u8; elf_size]` would abort
+    // the process on allocation failure; the fallible reserve turns
+    // that into a named refusal.
+    let mut elf: Vec<u8> = Vec::new();
+    elf.try_reserve_exact(elf_size)
+        .map_err(|_| SceError::ReconstructedElfTooLarge { elf_size })?;
+    elf.resize(elf_size, 0);
     elf[..0x40].copy_from_slice(&data[ehdr_offset..ehdr_offset + 0x40]);
     let phdr_dst = 0x40usize;
     elf[phdr_dst..phdr_dst + phdr_table_bytes]
@@ -128,17 +192,14 @@ pub(crate) fn assemble_elf_from_sections(
         if sec.section_kind != SCE_SECTION_KIND_PHDR {
             continue;
         }
-        if sec_data.is_empty() {
-            continue;
-        }
+        // No early exit on an empty payload. A zero-length section
+        // against a non-zero `p_filesz` is exactly the shape the size
+        // check below exists to name; skipping it would leave the
+        // segment as silent zeroes in the run image.
         let prog_idx = sec.program_segment_index as usize;
-        if prog_idx >= e_phnum {
-            return Err(SceError::SectionProgramIndexOutOfRange { prog_idx, e_phnum });
-        }
-        let row_off = checked_mul_oob(prog_idx, e_phentsize, "SELF program header row")?;
-        let ph_off = checked_add_oob(phdr_offset, row_off, "SELF program header row")?;
-        let p_offset = read_be_u64(data, ph_off + 0x08) as usize;
-        let p_filesz = read_be_u64(data, ph_off + 0x20) as usize;
+        let &(p_offset, p_filesz) = segments
+            .get(prog_idx)
+            .ok_or(SceError::SectionProgramIndexOutOfRange { prog_idx, e_phnum })?;
         if sec_data.len() != p_filesz {
             return Err(SceError::SectionSizeMismatch {
                 prog_idx,

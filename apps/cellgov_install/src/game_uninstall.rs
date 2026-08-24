@@ -17,7 +17,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::game_install::{sha256_of, InstallRecord, HDD0_USER};
+use crate::game_install::{content_id_is_safe, exdata_dir, sha256_of, InstallRecord};
 use crate::manifest::Sha256 as HexSha256;
 
 /// Options for [`uninstall`].
@@ -44,8 +44,13 @@ pub struct GameUninstallOutcome {
     pub rap_removed: Option<PathBuf>,
     /// The install record that was removed.
     pub record_removed: PathBuf,
-    /// Number of recorded files verified, when `verify` was set.
+    /// Number of recorded artefacts that matched, when `verify` was
+    /// set: the recorded files plus the recorded RAP when it is on disk.
     pub files_verified: Option<usize>,
+    /// Number of recorded artefacts that were missing or modified, over
+    /// the same set [`Self::files_verified`] counts. Non-zero only under
+    /// `force`, the sole way a divergence gets past the gate.
+    pub files_diverged: Option<usize>,
 }
 
 /// Why an uninstall failed. Local to this operation per the
@@ -70,6 +75,21 @@ pub enum GameUninstallError {
     /// Parsing the install record failed.
     #[error("parse install record: {0}")]
     RecordParse(#[from] toml::de::Error),
+    /// The operator-supplied title-id is not usable as a single path
+    /// component under the mount roots (see
+    /// `game_install::content_id_is_safe`).
+    #[error("unsafe title-id {title_id:?}")]
+    UnsafeTitleId {
+        /// The offending title-id.
+        title_id: String,
+    },
+    /// A file the record lists is absent from the live tree; pass
+    /// `force` to uninstall anyway.
+    #[error("recorded file missing from the installed tree: {}", path.display())]
+    RecordedFileMissing {
+        /// The absent path.
+        path: PathBuf,
+    },
     /// A live file's hash diverged from the record (the tree was
     /// modified since install); pass `force` to uninstall anyway.
     #[error("tree modified since install: {} (recorded {}, found {})", path.display(), expected.to_hex(), found.to_hex())]
@@ -78,7 +98,7 @@ pub enum GameUninstallError {
         path: PathBuf,
         /// Hash the record holds.
         expected: HexSha256,
-        /// Hash found on disk (the empty-bytes hash if the file is gone).
+        /// Hash found on disk.
         found: HexSha256,
     },
     /// A filesystem operation failed.
@@ -114,51 +134,78 @@ fn remove_dir_if_present(path: &Path) -> Result<(), GameUninstallError> {
     }
 }
 
-/// Re-hash the live tree (and RAP) against `record`, returning the
-/// count of recorded files verified. A divergence is
-/// [`GameUninstallError::TreeModified`] unless `force`.
+/// Re-hash the live tree (and RAP) against `record`, returning
+/// `(matched, diverged)` over every recorded artefact checked -- the
+/// recorded files plus the recorded RAP when it is present on disk, so
+/// the two tallies sum to what was examined. A divergence is
+/// [`GameUninstallError::TreeModified`] or
+/// [`GameUninstallError::RecordedFileMissing`] unless `force`; under
+/// `force` it still increments `diverged`, so the override reports what
+/// it waved through instead of dropping it.
 fn verify_against_record(
     game_dir: &Path,
     rap_path: Option<&Path>,
     record: &InstallRecord,
     force: bool,
-) -> Result<usize, GameUninstallError> {
+) -> Result<(usize, usize), GameUninstallError> {
     // Tree already gone: nothing to verify (the idempotent path).
     if !game_dir.exists() {
-        return Ok(0);
+        return Ok((0, 0));
     }
     let mut verified = 0usize;
+    let mut diverged = 0usize;
     for (rel, expected) in &record.files {
         let path = game_dir.join(rel);
+        // Absence is its own arm, not the empty-bytes hash: a record
+        // holds that hash for any zero-byte entry the container carried,
+        // so folding the two together lets a deleted placeholder verify
+        // as intact.
         let found = match std::fs::read(&path) {
             Ok(bytes) => sha256_of(&bytes),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => sha256_of(&[]),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                diverged += 1;
+                if force {
+                    continue;
+                }
+                return Err(GameUninstallError::RecordedFileMissing { path });
+            }
             Err(e) => return Err(uio_err("verify-read", &path)(e)),
         };
         if &found == expected {
             verified += 1;
-        } else if !force {
-            return Err(GameUninstallError::TreeModified {
-                path,
-                expected: *expected,
-                found,
-            });
+        } else {
+            diverged += 1;
+            if !force {
+                return Err(GameUninstallError::TreeModified {
+                    path,
+                    expected: *expected,
+                    found,
+                });
+            }
         }
     }
     if let (Some(rp), Some(rap)) = (rap_path, &record.rap) {
         if rp.exists() {
             let bytes = std::fs::read(rp).map_err(uio_err("verify-read", rp))?;
             let found = sha256_of(&bytes);
-            if found != rap.sha256 && !force {
-                return Err(GameUninstallError::TreeModified {
-                    path: rp.to_path_buf(),
-                    expected: rap.sha256,
-                    found,
-                });
+            if found == rap.sha256 {
+                // The RAP counts in both tallies or neither: counting
+                // only its divergence would let `diverged` exceed the
+                // entries `verified` was drawn from.
+                verified += 1;
+            } else {
+                diverged += 1;
+                if !force {
+                    return Err(GameUninstallError::TreeModified {
+                        path: rp.to_path_buf(),
+                        expected: rap.sha256,
+                        found,
+                    });
+                }
             }
         }
     }
-    Ok(verified)
+    Ok((verified, diverged))
 }
 
 /// Remove an installed title named by its record. See the module
@@ -173,6 +220,15 @@ pub fn uninstall(
     installs_dir: &Path,
     opts: UninstallOptions,
 ) -> Result<GameUninstallOutcome, GameUninstallError> {
+    // The title-id is joined onto the record dir and both mount roots
+    // and spells the tombstone, so it takes the same path-component rule
+    // the install side applies to the id it commits under.
+    if !content_id_is_safe(title_id) {
+        return Err(GameUninstallError::UnsafeTitleId {
+            title_id: title_id.to_string(),
+        });
+    }
+
     // Load the record (the source of truth for what to remove).
     let record_path = installs_dir.join(format!("{title_id}.install.toml"));
     let text = match std::fs::read_to_string(&record_path) {
@@ -197,7 +253,7 @@ pub fn uninstall(
     let (game_dir, rap_path) = if is_disc {
         (output_dir.join("dev_bdvd").join(title_id), None)
     } else {
-        let exdata = dev_hdd0.join("home").join(HDD0_USER).join("exdata");
+        let exdata = exdata_dir(&dev_hdd0);
         let rap = record.rap.as_ref().map(|r| exdata.join(&r.filename));
         (dev_hdd0.join("game").join(title_id), rap)
     };
@@ -207,15 +263,11 @@ pub fn uninstall(
     remove_dir_if_present(&tombstone)?;
 
     // Verify-before-destroy gate.
-    let files_verified = if opts.verify {
-        Some(verify_against_record(
-            &game_dir,
-            rap_path.as_deref(),
-            &record,
-            opts.force,
-        )?)
+    let (files_verified, files_diverged) = if opts.verify {
+        let (ok, bad) = verify_against_record(&game_dir, rap_path.as_deref(), &record, opts.force)?;
+        (Some(ok), Some(bad))
     } else {
-        None
+        (None, None)
     };
 
     // Tombstone rename: the atomic point. Absent tree is idempotent.
@@ -224,15 +276,16 @@ pub fn uninstall(
     }
 
     // RAP: remove after the tombstone rename, unless asked to keep it.
+    // An already-absent RAP is not reported as removed: the outcome
+    // names what this call actually took away.
     let rap_removed = if opts.keep_rap {
         None
     } else if let Some(rp) = &rap_path {
         match std::fs::remove_file(rp) {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(()) => Some(rp.clone()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(uio_err("remove", rp)(e)),
         }
-        Some(rp.clone())
     } else {
         None
     };
@@ -253,6 +306,7 @@ pub fn uninstall(
         rap_removed,
         record_removed: record_path,
         files_verified,
+        files_diverged,
     })
 }
 

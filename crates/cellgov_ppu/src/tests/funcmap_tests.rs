@@ -189,7 +189,8 @@ fn code_outside_executable_range_rejects() {
     data[0x20..0x28].copy_from_slice(&descriptor(0x10012, TOC));
     let elf = two_seg_elf(DATA_BASE + 0x10, data);
     let map = build(&elf).unwrap();
-    assert_eq!(map.functions.len(), 1);
+    let starts: Vec<u32> = map.functions.iter().map(|s| s.start).collect();
+    assert_eq!(starts, vec![0x10000]);
 }
 
 #[test]
@@ -367,12 +368,18 @@ fn a_non_elf64_image_surfaces_the_program_header_parse_error() {
 
 #[test]
 fn a_prx_whose_structures_do_not_parse_surfaces_the_prx_parse_error() {
-    // phentsize below the ELF64 program-header size: the PT_LOAD walk
-    // still yields one segment, so the rejection has to come out of
+    // The ELF header and its PT_LOADs stay well-formed, so the loader
+    // has nothing to object to; it is module_info's export range that
+    // leaves the mapped image. The rejection has to come out of
     // parse_prx and be reported as such, not swallowed into an empty
     // map.
     let mut data = crate::sprx::test_fixtures::make_test_prx();
-    data[54..56].copy_from_slice(&8u16.to_be_bytes());
+    // module_info sits at file 0x1F0; exports_end is its 40th byte.
+    data[0x1F0 + 40..0x1F0 + 44].copy_from_slice(&0x7FFF_0000u32.to_be_bytes());
+    assert!(
+        crate::loader::pt_load_segments(&data).is_ok(),
+        "the ELF itself must still load, or the test is not exercising parse_prx"
+    );
     match build(&data) {
         Err(FuncMapError::Prx(PrxParseError::OutOfBounds)) => {}
         other => panic!("expected Prx(OutOfBounds), got {other:?}"),

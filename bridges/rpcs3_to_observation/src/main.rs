@@ -1,13 +1,17 @@
 //! Adapter from RPCS3 dump + manifest into `cellgov_compare::Observation` JSON.
 //!
 //! ```text
-//! rpcs3_to_observation --dump <path> --manifest <path> --outcome <kind> \
-//!     --config-hash <hex> [--steps <n>] --output <path>
+//! rpcs3_to_observation (--dump <path> | --tty <path>) --manifest <path> \
+//!     --outcome <kind> \
+//!     --decoder <interpreter|llvm> --config-hash <hex> [--steps <n>] \
+//!     --output <path>
 //! rpcs3_to_observation --print-expected-config-hash
 //! ```
 //!
-//! `<kind>` is one of `completed|stalled|timeout|fault`. `--config-hash` is the
-//! 16-char hex FNV-1a of the canonical oracle-mode YAML; a mismatch is rejected.
+//! `<kind>` is one of `completed|stalled|timeout|fault`. `--config-hash` is
+//! the 16-char hex FNV-1a of the hashed block in the canonical config YAML.
+//! `--decoder` records which decoder ran; an `--output` whose name ends
+//! `_<decoder>.json` must name that same decoder.
 
 #![allow(
     clippy::print_stdout,
@@ -19,9 +23,11 @@
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedOutcome,
 };
+use cellgov_compare::runner_rpcs3::{parse_tty_log, TtyRegion};
 use serde::Deserialize;
+use std::collections::BTreeSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Region list in dump order; the RPCS3 patch writes regions in the same order.
@@ -45,18 +51,62 @@ fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     u64::from_str_radix(trimmed, 16).map_err(serde::de::Error::custom)
 }
 
+/// Where the region bytes come from. RPCS3 produces one or the
+/// other: a binary memory dump from the checkpoint hook, or its
+/// TTY log carrying a `CGOV`-framed payload.
+enum Capture {
+    Dump(PathBuf),
+    Tty(PathBuf),
+}
+
 struct Args {
-    dump: PathBuf,
+    capture: Capture,
     manifest: PathBuf,
     outcome: ObservedOutcome,
     steps: Option<usize>,
     output: PathBuf,
     config_hash: u64,
+    decoder: Decoder,
 }
 
-/// Canonical RPCS3 oracle-mode config; dumps produced under any other settings
-/// are not cross-runner comparable and are rejected at conversion time.
-const ORACLE_MODE_CONFIG_YAML: &str = include_str!("../../rpcs3-patch/oracle_mode_config.yml");
+/// Canonical RPCS3 reference-mode config. Dumps produced under other
+/// settings compare against nothing meaningful and are rejected at
+/// conversion time.
+const REFERENCE_MODE_CONFIG_YAML: &str = include_str!("../../rpcs3-patch/oracle_mode_config.yml");
+
+const HASHED_BEGIN: &str = "# --- BEGIN HASHED ---";
+const HASHED_END: &str = "# --- END HASHED ---";
+
+/// Decoder a capture ran under. Recorded per capture and kept out of
+/// the config hash, so both variants of a scenario stay reproducible.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Decoder {
+    Interpreter,
+    Llvm,
+}
+
+impl Decoder {
+    /// Every decoder token, for checking an output name against the ones
+    /// this capture did not run under.
+    const ALL: [Decoder; 2] = [Decoder::Interpreter, Decoder::Llvm];
+
+    /// The `metadata.runner` tail, and the token an output filename may
+    /// carry as `_<name>.json`.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Interpreter => "interpreter",
+            Self::Llvm => "llvm",
+        }
+    }
+}
+
+fn parse_decoder(s: &str) -> Result<Decoder, Rpcs3BridgeError> {
+    match s {
+        "interpreter" => Ok(Decoder::Interpreter),
+        "llvm" => Ok(Decoder::Llvm),
+        other => Err(Rpcs3BridgeError::UnknownDecoder(other.to_string())),
+    }
+}
 
 fn fnv1a_64(bytes: &[u8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
@@ -69,8 +119,28 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
     h
 }
 
+/// The lines between the two markers: the settings every capture must
+/// share. Everything outside varies per capture or is commentary.
+///
+/// # Panics
+///
+/// If either marker is absent or they appear out of order. The file is
+/// `include_str!`d from this repo, so a missing marker is a build-time
+/// editing mistake, and hashing the whole file instead would silently
+/// restore the behaviour this split exists to remove.
+fn hashed_config_section(yaml: &str) -> &str {
+    let after_begin = yaml
+        .split_once(HASHED_BEGIN)
+        .expect("invariant: oracle_mode_config.yml carries the BEGIN HASHED marker")
+        .1;
+    after_begin
+        .split_once(HASHED_END)
+        .expect("invariant: oracle_mode_config.yml carries the END HASHED marker after BEGIN")
+        .0
+}
+
 fn expected_config_hash() -> u64 {
-    fnv1a_64(ORACLE_MODE_CONFIG_YAML.as_bytes())
+    fnv1a_64(hashed_config_section(REFERENCE_MODE_CONFIG_YAML).as_bytes())
 }
 
 /// Why the rpcs3 to-observation bridge failed.
@@ -86,6 +156,53 @@ enum Rpcs3BridgeError {
     /// Outcome token unrecognized.
     #[error("unknown outcome: {0}")]
     UnknownOutcome(String),
+    /// Both capture sources named at once.
+    #[error("--dump and --tty name two different captures; pass one")]
+    CaptureSourceAmbiguous,
+    /// The same flag was given more than once.
+    #[error(
+        "{flag} given more than once; the later value would silently win, \
+         and which capture the observation describes would depend on \
+         argument order"
+    )]
+    DuplicateFlag { flag: String },
+    /// The TTY log could not be parsed into the declared regions.
+    #[error("parse tty log: {0}")]
+    TtyParse(#[source] cellgov_compare::runner_rpcs3::Rpcs3Error),
+    /// Decoder token unrecognized.
+    #[error("unknown decoder: {0} (accepted: interpreter, llvm)")]
+    UnknownDecoder(String),
+    /// The output filename names a decoder other than the one passed.
+    #[error(
+        "--decoder {decoder} but output {} is named for the {named} \
+         decoder. Writing it would file one decoder's answer under the \
+         other's name.",
+        output.display()
+    )]
+    DecoderFilenameMismatch {
+        decoder: &'static str,
+        named: &'static str,
+        output: PathBuf,
+    },
+    /// Two manifest regions share a name.
+    #[error(
+        "manifest declares region {region} twice; observations are matched \
+         region-by-name, so the second copy would never be compared"
+    )]
+    DuplicateRegionName { region: String },
+    /// The manifest declares nothing to extract.
+    #[error(
+        "manifest declares no regions; the observation would carry no \
+         guest-visible state and compare as a match against anything"
+    )]
+    ManifestHasNoRegions,
+    /// Dump longer than the regions the manifest declares.
+    #[error(
+        "dump has {dump_len} bytes but the manifest declares {declared}; the \
+         dump is exactly the declared regions concatenated, so a surplus \
+         means this manifest does not describe this dump"
+    )]
+    DumpLongerThanManifest { declared: usize, dump_len: usize },
     /// CLI flag with no following value.
     #[error("flag {flag} requires a value")]
     FlagMissingValue { flag: String },
@@ -111,13 +228,14 @@ enum Rpcs3BridgeError {
         end: usize,
         dump_len: usize,
     },
-    /// rpcs3 oracle-mode config hash disagrees with the patch source.
+    /// rpcs3 reference-mode config hash disagrees with the patch source.
     #[error(
-        "rpcs3 oracle-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
-         The dump was produced under RPCS3 settings that differ from \
-         bridges/rpcs3-patch/oracle_mode_config.yml. Cross-runner \
-         observations from different settings are not comparable; \
-         re-run RPCS3 with the canonical oracle-mode settings."
+        "rpcs3 reference-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
+         The dump was produced under RPCS3 settings that differ from the \
+         hashed block of bridges/rpcs3-patch/oracle_mode_config.yml. \
+         Captures made under different settings compare against nothing \
+         meaningful; re-run RPCS3 with those settings. The decoder pair \
+         sits outside the hash -- pass it as --decoder instead."
     )]
     ConfigHashMismatch { supplied: u64, expected: u64 },
     /// Reading the manifest file failed.
@@ -173,13 +291,30 @@ enum ParsedArgs {
     PrintExpectedConfigHash,
 }
 
+/// Fill a not-yet-set slot, refusing a flag that already has a value.
+///
+/// # Errors
+///
+/// Returns `Err` when `slot` is already `Some`.
+fn set_once<T>(slot: &mut Option<T>, flag: &str, value: T) -> Result<(), Rpcs3BridgeError> {
+    if slot.is_some() {
+        return Err(Rpcs3BridgeError::DuplicateFlag {
+            flag: flag.to_string(),
+        });
+    }
+    *slot = Some(value);
+    Ok(())
+}
+
 fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
     let mut dump: Option<PathBuf> = None;
+    let mut tty: Option<PathBuf> = None;
     let mut manifest: Option<PathBuf> = None;
     let mut outcome: Option<ObservedOutcome> = None;
     let mut steps: Option<usize> = None;
     let mut output: Option<PathBuf> = None;
     let mut config_hash: Option<u64> = None;
+    let mut decoder: Option<Decoder> = None;
 
     let mut it = argv.into_iter().skip(1);
     while let Some(flag) = it.next() {
@@ -190,20 +325,33 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
             .next()
             .ok_or_else(|| Rpcs3BridgeError::FlagMissingValue { flag: flag.clone() })?;
         match flag.as_str() {
-            "--dump" => dump = Some(PathBuf::from(val)),
-            "--manifest" => manifest = Some(PathBuf::from(val)),
-            "--outcome" => outcome = Some(parse_outcome(&val)?),
-            "--steps" => {
-                steps = Some(val.parse().map_err(Rpcs3BridgeError::InvalidSteps)?);
-            }
-            "--output" => output = Some(PathBuf::from(val)),
-            "--config-hash" => config_hash = Some(parse_hex_u64(&val)?),
+            "--dump" => set_once(&mut dump, &flag, PathBuf::from(val))?,
+            "--tty" => set_once(&mut tty, &flag, PathBuf::from(val))?,
+            "--manifest" => set_once(&mut manifest, &flag, PathBuf::from(val))?,
+            "--outcome" => set_once(&mut outcome, &flag, parse_outcome(&val)?)?,
+            "--steps" => set_once(
+                &mut steps,
+                &flag,
+                val.parse().map_err(Rpcs3BridgeError::InvalidSteps)?,
+            )?,
+            "--output" => set_once(&mut output, &flag, PathBuf::from(val))?,
+            "--config-hash" => set_once(&mut config_hash, &flag, parse_hex_u64(&val)?)?,
+            "--decoder" => set_once(&mut decoder, &flag, parse_decoder(&val)?)?,
             other => return Err(Rpcs3BridgeError::UnknownFlag(other.to_string())),
         }
     }
 
     Ok(ParsedArgs::Convert(Args {
-        dump: dump.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--dump" })?,
+        capture: match (dump, tty) {
+            (Some(d), None) => Capture::Dump(d),
+            (None, Some(t)) => Capture::Tty(t),
+            (Some(_), Some(_)) => return Err(Rpcs3BridgeError::CaptureSourceAmbiguous),
+            (None, None) => {
+                return Err(Rpcs3BridgeError::RequiredFlagMissing {
+                    flag: "--dump or --tty",
+                })
+            }
+        },
         manifest: manifest.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--manifest" })?,
         outcome: outcome.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--outcome" })?,
         steps,
@@ -211,20 +359,45 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
         config_hash: config_hash.ok_or(Rpcs3BridgeError::RequiredFlagMissing {
             flag: "--config-hash",
         })?,
+        decoder: decoder.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--decoder" })?,
     }))
 }
 
-/// Slice `dump` into regions by walking the manifest and advancing a byte cursor.
+/// Reject a manifest that cannot produce a comparable observation.
 ///
 /// # Errors
 ///
-/// Returns `Err` when the dump is shorter than the sum of manifest region sizes.
-fn build_observation(
+/// Returns `Err` on an empty region list, or on two regions sharing a
+/// name.
+fn check_manifest(manifest: &Manifest) -> Result<(), Rpcs3BridgeError> {
+    if manifest.regions.is_empty() {
+        return Err(Rpcs3BridgeError::ManifestHasNoRegions);
+    }
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
+    for r in &manifest.regions {
+        // `find_memory_divergence` in cellgov_compare pairs regions by
+        // name and takes the first match, so a repeated name hides the
+        // later region from every comparison.
+        if !seen.insert(r.name.as_str()) {
+            return Err(Rpcs3BridgeError::DuplicateRegionName {
+                region: r.name.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Cut the manifest's regions out of a memory dump. Regions sit
+/// contiguously in declaration order, matching how the hook wrote them.
+///
+/// # Errors
+///
+/// Returns `Err` when the dump does not hold exactly the declared
+/// regions: short of them, or longer than their total.
+fn slice_dump(
     dump: &[u8],
     manifest: &Manifest,
-    outcome: ObservedOutcome,
-    steps: Option<usize>,
-) -> Result<Observation, Rpcs3BridgeError> {
+) -> Result<Vec<NamedMemoryRegion>, Rpcs3BridgeError> {
     let mut cursor: usize = 0;
     let mut regions = Vec::with_capacity(manifest.regions.len());
     for r in &manifest.regions {
@@ -250,19 +423,60 @@ fn build_observation(
         cursor = end;
     }
 
-    Ok(Observation {
+    // The dump hook appends each declared region and nothing else, so a
+    // dump with bytes left over was produced from a different region
+    // list than this manifest names -- see bridges/rpcs3-patch/README.md.
+    if cursor != dump.len() {
+        return Err(Rpcs3BridgeError::DumpLongerThanManifest {
+            declared: cursor,
+            dump_len: dump.len(),
+        });
+    }
+
+    Ok(regions)
+}
+
+/// Pack extracted regions into an observation.
+fn build_observation(
+    memory_regions: Vec<NamedMemoryRegion>,
+    outcome: ObservedOutcome,
+    steps: Option<usize>,
+    decoder: Decoder,
+) -> Observation {
+    Observation {
         outcome,
-        memory_regions: regions,
+        memory_regions,
         events: vec![],
         state_hashes: None,
         metadata: ObservationMetadata {
-            runner: "rpcs3".into(),
+            runner: format!("rpcs3-{}", decoder.name()),
             steps,
         },
-        // The bridge consumes RPCS3's magic-tagged region payload, not
-        // the surrounding TTY stream; left empty.
+        // The regions above carry the payload; the surrounding TTY
+        // stream is left out.
         tty_log: Vec::new(),
-    })
+    }
+}
+
+/// Refuse an output filename that names a decoder this capture did not
+/// run under.
+///
+/// A name claiming no decoder is accepted: the per-title fixture tree
+/// writes a fixed `rpcs3/observation.json` that `cellgov_cli
+/// fixture-gen --rpcs3` reads by that name, and `metadata.runner`
+/// carries the decoder inside the file either way.
+fn check_output_names_decoder(output: &Path, decoder: Decoder) -> Result<(), Rpcs3BridgeError> {
+    let name = output.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    for other in Decoder::ALL {
+        if other != decoder && name.ends_with(&format!("_{}.json", other.name())) {
+            return Err(Rpcs3BridgeError::DecoderFilenameMismatch {
+                decoder: decoder.name(),
+                named: other.name(),
+                output: output.to_path_buf(),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn check_config_hash(supplied: u64) -> Result<(), Rpcs3BridgeError> {
@@ -275,6 +489,7 @@ fn check_config_hash(supplied: u64) -> Result<(), Rpcs3BridgeError> {
 
 fn run(args: Args) -> Result<(), Rpcs3BridgeError> {
     check_config_hash(args.config_hash)?;
+    check_output_names_decoder(&args.output, args.decoder)?;
 
     let manifest_text =
         fs::read_to_string(&args.manifest).map_err(|source| Rpcs3BridgeError::ManifestRead {
@@ -283,13 +498,35 @@ fn run(args: Args) -> Result<(), Rpcs3BridgeError> {
         })?;
     let manifest: Manifest =
         toml::from_str(&manifest_text).map_err(Rpcs3BridgeError::ManifestParse)?;
+    check_manifest(&manifest)?;
 
-    let dump = fs::read(&args.dump).map_err(|source| Rpcs3BridgeError::DumpRead {
-        path: args.dump.clone(),
-        source,
-    })?;
+    let regions = match &args.capture {
+        Capture::Dump(path) => {
+            let dump = fs::read(path).map_err(|source| Rpcs3BridgeError::DumpRead {
+                path: path.clone(),
+                source,
+            })?;
+            slice_dump(&dump, &manifest)?
+        }
+        Capture::Tty(path) => {
+            let tty_regions: Vec<TtyRegion> = manifest
+                .regions
+                .iter()
+                .map(|r| TtyRegion {
+                    name: r.name.clone(),
+                    // The manifest's addr is a position inside the
+                    // emitted struct, and the observation reports the
+                    // same number.
+                    offset: r.addr,
+                    size: r.size,
+                    guest_addr: r.addr,
+                })
+                .collect();
+            parse_tty_log(path, &tty_regions).map_err(Rpcs3BridgeError::TtyParse)?
+        }
+    };
 
-    let obs = build_observation(&dump, &manifest, args.outcome, args.steps)?;
+    let obs = build_observation(regions, args.outcome, args.steps, args.decoder);
 
     let json = serde_json::to_string_pretty(&obs).map_err(Rpcs3BridgeError::Serialize)?;
     fs::write(&args.output, json).map_err(|source| Rpcs3BridgeError::OutputWrite {

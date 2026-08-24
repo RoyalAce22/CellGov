@@ -136,7 +136,12 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        if num_threads > MAX_SLOTS_PER_GROUP {
+        // A zero-thread group is refused before anything is allocated:
+        // RPCS3 `sys_spu.cpp` `sys_spu_thread_group_create` rejects
+        // `!num` with CELL_EINVAL, and a slotless group could never
+        // reach the fully-initialized state that
+        // `sys_spu_thread_group_start` requires.
+        if num_threads == 0 || num_threads > MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let group_id = match self.state.groups.create(num_threads) {
@@ -176,6 +181,9 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_spu_thread_group_start`: register every initialized slot's
+    /// SPU and move the group to [`GroupState::Running`]. Unknown id ->
+    /// CELL_ESRCH; a group that has already been started -> CELL_ESTAT.
     pub(super) fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
         let group = match self.state.groups.get_mut(group_id) {
             Some(g) => g,
@@ -183,6 +191,15 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
             }
         };
+
+        // RPCS3 `sys_spu.cpp` `sys_spu_thread_group_start` compare-and-
+        // swaps the group out of its initialized state and answers
+        // CELL_ESTAT for every other state, so a restart of a running or
+        // finished group is refused instead of silently re-registering
+        // its SPUs against a second RegisterSpu dispatch.
+        if group.state != GroupState::Created {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESTAT.into());
+        }
 
         // Two-pass: validate every handle, then build `inits`. The second
         // pass's `expect` requires `lookup_by_handle` to be a pure read.
@@ -257,6 +274,15 @@ impl Lv2Host {
             }
         };
 
+        // Slot index is screened ahead of every pointer read: RPCS3
+        // `sys_spu.cpp` `sys_spu_thread_initialize` rejects an out-of-
+        // range `spu_num` as its first act, so an out-of-range slot with
+        // an unreadable image pointer answers CELL_EINVAL, not
+        // CELL_EFAULT.
+        if thread_num >= MAX_SLOTS_PER_GROUP {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+
         let image_handle = match rt.read_committed(img_ptr as u64, 4) {
             Some(bytes) if bytes.len() >= 4 => {
                 let fixed: [u8; 4] = bytes[0..4].try_into().expect("slice length checked above");
@@ -287,9 +313,6 @@ impl Lv2Host {
             }
         };
 
-        if thread_num >= MAX_SLOTS_PER_GROUP {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
-        }
         let thread_id = match group_id
             .checked_mul(MAX_SLOTS_PER_GROUP)
             .and_then(|base| base.checked_add(thread_num))
@@ -316,7 +339,19 @@ impl Lv2Host {
             Err(crate::thread_group::InitializeThreadError::SlotAlreadyInitialized) => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
             }
-            Err(_) => {
+            // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` answers
+            // CELL_EBUSY once the group has left its not-initialized
+            // state, the same code it uses for an occupied slot.
+            Err(crate::thread_group::InitializeThreadError::GroupAlreadyStarted { .. }) => {
+                return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            }
+            // A slot index past the thread map is the bad-argument arm
+            // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` answers
+            // CELL_EINVAL for. `SlotOutOfBounds` is this model's own
+            // denser rule -- slots must fall inside the count the group
+            // declared -- and takes the same code.
+            Err(crate::thread_group::InitializeThreadError::SlotOutOfBounds { .. })
+            | Err(crate::thread_group::InitializeThreadError::SlotOutOfRange) => {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
             }
         }

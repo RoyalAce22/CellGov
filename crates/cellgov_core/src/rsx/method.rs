@@ -9,6 +9,7 @@
 
 use crate::rsx::RsxFifoCursor;
 use cellgov_effects::Effect;
+use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
@@ -155,6 +156,11 @@ pub struct NvDispatchContext<'a> {
     /// hash so a forgotten reset surfaces as a state-hash diff rather
     /// than a silent cross-drain leak.
     pub sem_offset: &'a mut u32,
+    /// Base the emitted `RsxLabelWrite` offsets resolve against at
+    /// commit time. Handlers read it only to place an offset inside
+    /// the right block of the `RsxReports` area; zero is the
+    /// absolute-offset regime, where no block base applies.
+    pub label_base: u32,
     /// FIFO-order sink for effects the drain forwards into the next
     /// commit batch.
     pub emitted: &'a mut Vec<Effect>,
@@ -246,13 +252,28 @@ pub fn register_nv4097_flip_handler(
 pub(crate) const NV4097_REPORT_OFFSET_MASK_U: u32 = NV4097_REPORT_OFFSET_MASK;
 
 /// `NV4097_GET_REPORT` (`0x1800`): write the low 32 bits of
-/// guest-ticks as a 4-byte report payload at
-/// `label_base + (arg & NV4097_REPORT_OFFSET_MASK)`. The 16-byte
-/// envelope retail titles poll is wider; only the timestamp slot is
-/// written today.
+/// guest-ticks as a 4-byte report payload into the report block of
+/// the label area. The 16-byte envelope retail titles poll is wider;
+/// only the timestamp slot is written today.
+///
+/// The argument's offset field is relative to the report block, not
+/// to the label area's base: report entries sit
+/// [`REPORTS_REPORT_OFFSET`] in, behind the semaphore and notify
+/// blocks. RPCS3 `RSXThread.cpp` `get_address` resolves the local
+/// report DMA context the same way, adding the `RsxReports::report`
+/// field offset to the label address before the guest's offset. A
+/// zero `label_base` is the absolute-offset regime the commit
+/// pipeline documents, where no block base applies either.
+///
+/// [`REPORTS_REPORT_OFFSET`]: cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET
 pub fn nv4097_get_report(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&arg) = args.first() {
-        let offset = arg & NV4097_REPORT_OFFSET_MASK_U;
+        let field = arg & NV4097_REPORT_OFFSET_MASK_U;
+        let offset = if ctx.label_base == 0 {
+            field
+        } else {
+            field.wrapping_add(REPORTS_REPORT_OFFSET)
+        };
         let value = ctx.now.raw() as u32;
         ctx.emitted.push(Effect::RsxLabelWrite { offset, value });
     }

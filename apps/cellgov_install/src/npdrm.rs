@@ -19,7 +19,7 @@ use cellgov_ps3_abi::sce::{
 
 use crate::sce::{
     assemble_elf_from_sections, decrypt_envelope, decrypt_sections_from_envelope,
-    find_supplemental_body, parse_sce_header, SceError,
+    find_supplemental_body, inner_elf_segment_file_sizes, parse_sce_header, SceError,
 };
 
 /// Validated NPDRM license type; discriminants match the u32 BE wire
@@ -162,7 +162,9 @@ pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Ve
         crate::crypto::npdrm_key_for_revision(revision).ok_or(SceError::NoAppKey { revision })?;
     let layer_key = klicensee_to_layer_key(klicensee);
     let envelope = decrypt_envelope(data, &hdr, &key.erk, &key.riv, Some(&layer_key))?;
-    let sections = decrypt_sections_from_envelope(data, &hdr, &envelope)?;
+    let segment_file_sizes = inner_elf_segment_file_sizes(data)?;
+    let sections =
+        decrypt_sections_from_envelope(data, &hdr, &envelope, Some(&segment_file_sizes))?;
     assemble_elf_from_sections(data, &sections)
 }
 

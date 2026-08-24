@@ -7,11 +7,13 @@ use cellgov_time::Budget;
 use crate::game;
 
 use super::args::{
-    find_flag_value, find_run_game_elf_path, parse_flag_value, parse_hex_flag, parse_hex_u64,
-    parse_patch_byte_pair, split_off_flag_values,
+    find_flag_value, find_run_game_elf_path, has_bool_flag, parse_flag_value, parse_hex_flag,
+    parse_hex_u64, parse_patch_byte_pair, split_off_flag_values, GUEST_ARG_FLAG,
 };
+use super::env::parse_env_bool;
 use super::exit::die;
 use super::title::{resolve_checkpoint_override, resolve_ps3_vfs_root, resolve_title_manifest};
+use crate::paths::anchor_max_steps;
 
 use game::BENCH_AGREEMENT_GATE_PCT;
 
@@ -20,8 +22,8 @@ use game::BENCH_AGREEMENT_GATE_PCT;
 /// the `dev_hdd0` / `dev_bdvd` mounts the game installers populate.
 const DEFAULT_FIRMWARE_DIR: &str = "vfs/dev_flash/sys/external";
 
-/// Set by synthetic harnesses (e.g. ps3autotests) to suppress the
-/// auto-default.
+/// Set to `1` by synthetic harnesses (e.g. ps3autotests) to suppress
+/// the auto-default.
 const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 
 /// Exit code: two bench-boot runs disagreed on step count or
@@ -50,8 +52,9 @@ const EXIT_RUN_GAME_TIME_OVERFLOW: i32 = 12;
 /// `run-game` completed but the loop logged an anomaly that violates
 /// the determinism contract (lost syscall-wake responses).
 const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
-/// `--save-observation` was supplied but writing the JSON failed.
-const EXIT_RUN_GAME_SAVE_OBSERVATION: i32 = 14;
+/// A `--save-observation` / `--save-boot-summary` artifact was
+/// requested but writing its JSON failed.
+const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = 14;
 
 /// Explicit `--firmware-dir` wins (validated as an existing
 /// directory); otherwise auto-default to [`DEFAULT_FIRMWARE_DIR`]
@@ -65,7 +68,9 @@ fn resolve_firmware_dir(args: &[String]) -> Option<String> {
         }
         return Some(explicit);
     }
-    if std::env::var_os(DISABLE_DEFAULT_ENV).is_some() {
+    // The value decides, not the presence: `CELLGOV_NO_FIRMWARE_DIR=0`
+    // leaves the default in place.
+    if parse_env_bool(DISABLE_DEFAULT_ENV) {
         return None;
     }
     if std::path::Path::new(DEFAULT_FIRMWARE_DIR).is_dir() {
@@ -125,10 +130,17 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
     };
     // Past this line a failing run is a boot failure, never a missing
     // dump; the suites key their skip/fail split on it.
+    //
+    // `eboot` and `elf_bytes` name the image that was actually loaded,
+    // so a stale build cannot pass for a fresh one. `elf_bytes` counts
+    // the plaintext ELF, which for a SELF input differs from the file
+    // on disk; both are deterministic, unlike an mtime.
     eprintln!(
-        "{} title={}",
+        "{} title={} eboot={} elf_bytes={}",
         cellgov_compare::witnesses::BOOT_STARTED_SENTINEL,
-        title.name()
+        title.name(),
+        elf_path,
+        image.elf_data.len(),
     );
     BootInputs {
         title,
@@ -143,12 +155,12 @@ pub(crate) fn run_game(args: &[String]) {
     // Guest argv pairs come out first so a guest token that spells a
     // host flag (a guest `--trace`, `--prescan`, ...) cannot reach
     // the host-side scans below.
-    let (args, guest_args) = split_off_flag_values(args, "--guest-arg");
+    let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
     let args = &args[..];
     let inputs = resolve_boot_inputs(args, "run-game", true);
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000);
-    let trace = args.iter().any(|a| a == "--trace");
-    let profile = args.iter().any(|a| a == "--profile");
+    let trace = has_bool_flag(args, "--trace");
+    let profile = has_bool_flag(args, "--profile");
     let firmware_dir = resolve_firmware_dir(args);
     let dump_at_pc = parse_hex_flag(args, "--dump-at-pc");
     let dump_skip: u32 = parse_flag_value(args, "--dump-skip").unwrap_or(0);
@@ -168,11 +180,11 @@ pub(crate) fn run_game(args: &[String]) {
     let observation_manifest = find_flag_value(args, "--observation-manifest");
     let save_boot_summary = find_flag_value(args, "--save-boot-summary");
     let save_state_trace = find_flag_value(args, "--save-state-trace");
-    let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
-    let profile_pairs = args.iter().any(|a| a == "--profile-pairs");
+    let strict_reserved = has_bool_flag(args, "--strict-reserved");
+    let profile_pairs = has_bool_flag(args, "--profile-pairs");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    let prescan = args.iter().any(|a| a == "--prescan");
+    let prescan = has_bool_flag(args, "--prescan");
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -202,7 +214,7 @@ pub(crate) fn run_game(args: &[String]) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("run-game: {e}");
-            std::process::exit(EXIT_RUN_GAME_SAVE_OBSERVATION);
+            std::process::exit(EXIT_RUN_GAME_SAVE_ARTIFACT);
         }
     };
     let code = classify_run_game_exit(&summary);
@@ -322,18 +334,31 @@ fn parse_patch_byte_csv_inner(value: &str) -> Result<Vec<(u64, u8)>, String> {
     Ok(out)
 }
 
+/// [`anchor_max_steps`] as a step count, so an un-overridden bench run
+/// stays comparable to the anchor `record-anchors` measured.
+fn default_bench_max_steps(title: &game::manifest::TitleManifest) -> usize {
+    let cap = anchor_max_steps(title);
+    usize::try_from(cap).unwrap_or_else(|_| {
+        die(&format!(
+            "{}: bench_max_steps {cap} does not fit this host's usize",
+            title.name()
+        ))
+    })
+}
+
 pub(crate) fn bench_boot_once(args: &[String]) {
     // See run_game: guest argv pairs must not reach the host scans.
-    let (args, guest_args) = split_off_flag_values(args, "--guest-arg");
+    let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
     let args = &args[..];
     let inputs = resolve_boot_inputs(args, "bench-boot-once", false);
-    let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
+    let max_steps: usize = parse_flag_value(args, "--max-steps")
+        .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
     let firmware_dir = resolve_firmware_dir(args);
-    let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+    let strict_reserved = has_bool_flag(args, "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    let prescan = args.iter().any(|a| a == "--prescan");
+    let prescan = has_bool_flag(args, "--prescan");
     game::bench_boot_one_run(
         game::BenchOptions {
             title: &inputs.title,
@@ -357,17 +382,18 @@ pub(crate) fn bench_boot_once(args: &[String]) {
 
 pub(crate) fn bench_boot(args: &[String]) {
     // See run_game: guest argv pairs must not reach the host scans.
-    let (args, guest_args) = split_off_flag_values(args, "--guest-arg");
+    let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
     let args = &args[..];
     let inputs = resolve_boot_inputs(args, "bench-boot", false);
-    let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000_000);
+    let max_steps: usize = parse_flag_value(args, "--max-steps")
+        .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
     let firmware_dir = resolve_firmware_dir(args);
-    let strict_reserved = args.iter().any(|a| a == "--strict-reserved");
+    let strict_reserved = has_bool_flag(args, "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot");
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    let prescan = args.iter().any(|a| a == "--prescan");
-    let check_anchor = !args.iter().any(|a| a == "--no-anchor-check");
+    let prescan = has_bool_flag(args, "--prescan");
+    let check_anchor = !has_bool_flag(args, "--no-anchor-check");
     let outcome = match game::bench_boot_pair(game::BenchOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,

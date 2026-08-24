@@ -4,8 +4,11 @@
 //!
 //! The test writes `CGOV` (4 bytes) + big-endian u32 payload length +
 //! raw payload bytes via `sys_tty_write`. The adapter locates the magic
-//! tag in the log and slices regions from the payload in declaration
-//! order.
+//! tag in the log and slices each region from the payload at its
+//! stated offset.
+//!
+//! One log carries exactly one frame. A second frame past the first
+//! one's payload is refused rather than resolved by position.
 
 use std::path::Path;
 
@@ -20,18 +23,29 @@ pub const TTY_MAGIC: &[u8; 4] = b"CGOV";
 /// TTY frame header: 4-byte magic + 4-byte length.
 const TTY_HEADER_SIZE: usize = 8;
 
-/// Scan a TTY log for the `CGOV` frame and slice the declared regions
-/// from its payload in declaration order.
+/// Byte offset of the first `CGOV` at or after `from`.
+fn find_magic(data: &[u8], from: usize) -> Option<usize> {
+    data.get(from..)?
+        .windows(TTY_MAGIC.len())
+        .position(|w| w == TTY_MAGIC.as_slice())
+        .map(|p| p + from)
+}
+
+/// Scan a TTY log for the `CGOV` frame and slice each declared region
+/// out of its payload at that region's offset.
+///
+/// # Errors
+///
+/// Returns `Err` when the log carries no frame, carries a second frame
+/// past the first one's payload, is truncated inside the header or
+/// payload, or declares a region the payload cannot satisfy.
 pub fn parse_tty_log(
     tty_path: &Path,
     regions: &[TtyRegion],
 ) -> Result<Vec<NamedMemoryRegion>, Rpcs3Error> {
     let data = std::fs::read(tty_path).map_err(Rpcs3Error::TtyRead)?;
 
-    let magic_pos = data
-        .windows(TTY_MAGIC.len())
-        .position(|w| w == TTY_MAGIC.as_slice())
-        .ok_or(Rpcs3Error::TtyMagicNotFound)?;
+    let magic_pos = find_magic(&data, 0).ok_or(Rpcs3Error::TtyMagicNotFound)?;
 
     // `magic_pos < data.len()` by find-position contract, so the
     // header_end add is bounded by `data.len() + TTY_HEADER_SIZE`,
@@ -58,45 +72,41 @@ pub fn parse_tty_log(
         });
     }
     let payload_end = payload_end_u64 as usize;
-    let payload = &data[payload_start..payload_end];
-
-    let mut total_needed: u64 = 0;
-    for r in regions {
-        total_needed =
-            total_needed
-                .checked_add(r.size)
-                .ok_or_else(|| Rpcs3Error::TtyOffsetOverflow {
-                    region_name: r.name.clone(),
-                    size: r.size,
-                })?;
-    }
-    if total_needed > payload_len_u64 {
-        return Err(Rpcs3Error::TtyPayloadTooSmall {
-            expected: total_needed,
-            actual: payload_len_u64,
+    // Magic bytes inside the payload are region data. One that starts
+    // past the payload is a second frame, and nothing here can tell
+    // which of the two the caller meant.
+    if let Some(second) = find_magic(&data, payload_end) {
+        return Err(Rpcs3Error::TtyFrameAmbiguous {
+            first: magic_pos,
+            second,
         });
     }
+    let payload = &data[payload_start..payload_end];
 
-    let mut offset: u64 = 0;
     let mut result = Vec::with_capacity(regions.len());
     for region in regions {
-        let region_end =
-            offset
-                .checked_add(region.size)
-                .ok_or_else(|| Rpcs3Error::TtyOffsetOverflow {
-                    region_name: region.name.clone(),
-                    size: region.size,
-                })?;
-        // total_needed <= payload_len_u64 <= u32::MAX, so the per-region
-        // accumulator stays within usize on all supported hosts.
-        let lo = offset as usize;
+        let region_end = region.offset.checked_add(region.size).ok_or_else(|| {
+            Rpcs3Error::TtyOffsetOverflow {
+                region_name: region.name.clone(),
+                offset: region.offset,
+                size: region.size,
+            }
+        })?;
+        if region_end > payload_len_u64 {
+            return Err(Rpcs3Error::TtyPayloadTooSmall {
+                expected: region_end,
+                actual: payload_len_u64,
+            });
+        }
+        // region_end <= payload_len_u64 <= u32::MAX, so both bounds stay
+        // within usize on all supported hosts.
+        let lo = region.offset as usize;
         let hi = region_end as usize;
         result.push(NamedMemoryRegion {
             name: region.name.clone(),
             addr: region.guest_addr,
             data: payload[lo..hi].to_vec(),
         });
-        offset = region_end;
     }
     Ok(result)
 }

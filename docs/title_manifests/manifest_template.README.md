@@ -39,14 +39,14 @@ load error.
 
 | Field              | Type     | Required | Notes                                                                                                                                                                                                                                |
 | ------------------ | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `content_id`       | string   | yes      | PSN serial. Disc-ISO titles use `BCES.../BLES.../BLUS...`; PSN titles use `NPUA.../NPEA...`.                                                                                                                                         |
+| `content_id`       | string   | usually  | PSN serial. Disc-ISO titles use `BCES.../BLES.../BLUS...`; PSN titles use `NPUA.../NPEA...`. Omittable only by a `manifest-relative` title, which has no PSN identity; the loader then uses the manifest's own directory name.        |
 | `short_name`       | string   | yes      | Kebab-cased lookup label used by `--title`. Pick something short and stable; tests reference it.                                                                                                                                     |
 | `display_name`     | string   | yes      | Human title for matrix output.                                                                                                                                                                                                       |
 | `eboot_candidates` | string[] | yes      | List of executable filenames the boot path probes in order. `EBOOT.BIN` MUST precede `EBOOT.elf` if both are listed; the loader rejects the reverse order so a stale in-tree decrypt cannot shadow the canonical SCE-wrapped binary. |
 | `year`             | integer  | yes      | Release year (`u16`).                                                                                                                                                                                                                |
 | `developer`        | string   | yes      | Studio credit.                                                                                                                                                                                                                       |
 | `engine`           | string   | yes      | Engine name (e.g. `"PhyreEngine"`, `"<studio> proprietary"`).                                                                                                                                                                        |
-| `distribution`     | string   | yes      | One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`. Lowercase kebab; the loader rejects other casings.                                                                                                                                 |
+| `distribution`     | string   | yes      | One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`, `"firmware-exec"`, `"microtest"`. Lowercase kebab; the loader rejects other casings.                                                                                               |
 | `rap_filename`     | string   | no       | NPDRM license file under the VFS `exdata/` dir; needed to decrypt PSN EBOOTs whose RAP name does not match the content id.                                                                                                            |
 | `bench_max_steps`  | integer  | no       | Per-title instruction cap for `bench-boot-once` and the title suites; defaults to 100,000,000. Raise it when a title's checkpoint sits past the default cap.                                                                          |
 
@@ -76,13 +76,23 @@ Choosing a checkpoint:
 
 ### `[source]` (optional)
 
-| Field  | Type   | Required | Notes                                                                                                     |
-| ------ | ------ | -------- | --------------------------------------------------------------------------------------------------------- |
-| `kind` | string | no       | `"disc"` for disc-ISO titles, `"hdd"` for PSN/HDD installs. Defaults to `"hdd"` when the block is absent. |
+| Field  | Type   | Required             | Notes                                                                                                                                                  |
+| ------ | ------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind` | string | no                   | One of `"hdd"`, `"disc"`, `"firmware-exec"`, `"manifest-relative"`. Defaults to `"hdd"` when the block is absent.                                       |
+| `path` | string | for the last two     | Directory holding the executable. Rejected on `hdd` / `disc`, which derive their directory from `content_id`.                                          |
 
 `disc` titles are looked up under `vfs/dev_bdvd/`; `hdd` titles
 under `vfs/dev_hdd0/game/`. The actual VFS root can be overridden
 with the `CELLGOV_PS3_VFS_ROOT` env var.
+
+The other two kinds ignore the VFS root entirely, because neither
+is installed under a content-id directory. `firmware-exec` names
+an executable shipped inside the firmware image and resolves
+`path` against the process's current directory.
+`manifest-relative` names one sitting beside the manifest -- the
+microtests under `tests/micro/` -- and resolves `path` against
+the manifest's own directory, so the reference means the same
+thing from any working directory and needs no staging copy.
 
 ### `[rsx]` (optional)
 

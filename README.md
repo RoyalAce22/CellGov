@@ -2,14 +2,14 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.95-orange.svg)](https://blog.rust-lang.org/2026/04/03/Rust-1.95.0.html)
+[![MSRV](https://img.shields.io/badge/MSRV-1.88-orange.svg)](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/)
 [![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-orange.svg)](#status)
 
 ## What CellGov is
 
 CellGov interprets PS3 PPU and SPU code deterministically, produces
-replayable execution traces, and validates its output against RPCS3
-baselines. It is the **foundation layer for static recompilation** of
+replayable execution traces, and validates its output against recorded
+RPCS3 observations. It is the **foundation layer for static recompilation** of
 PS3 games to native binaries: not the recompiler itself, but the oracle
 that tells the recompiler what the correct output is and which
 synchronization patterns it must preserve.
@@ -130,7 +130,7 @@ Pre-Alpha. What works today:
   every module a boot loads is verified against the install's
   manifest, so an altered or mismatched firmware corpus fails
   loudly instead of skewing the oracle.
-- Per-title boot baselines are committed data (step counts,
+- Per-title boot anchors are committed data (step counts,
   outcomes, and named behaviour witnesses), re-measured and
   blessed through a single recording command.
 - Kernel-state hashing is complete by construction -- a host
@@ -161,7 +161,8 @@ diagram and per-crate responsibilities.
 
 ## Building
 
-Requires Rust 1.95 or newer.
+Requires Rust 1.88 or newer. `rust-toolchain.toml` pins development to
+1.95.0, the version CI lints against; the 1.88 floor is what CI tests.
 
 ```bash
 cargo build --workspace
@@ -183,7 +184,10 @@ cargo run -p cellgov_install -- install /path/to/PS3UPDAT.PUP
 
 The install unwraps the outer SCE/PUP envelope and writes per-module
 SELFs under `vfs/dev_flash/` (gitignored; bytes are never vendored). Each
-SELF stays encrypted on disk and is decrypted at boot time. `run-game`
+SELF stays encrypted on disk and is decrypted at boot time. Every
+package in the update must decrypt and every entry must extract for the
+install to report success; a failure names what it dropped and exits
+nonzero. `run-game`
 auto-discovers the install: `--firmware-dir` defaults to
 `vfs/dev_flash/sys/external/` when that directory exists at the current
 working directory; pass `--firmware-dir DIR` to override or set
@@ -199,8 +203,8 @@ just want the `Observation` schema, `compare()`, `diverge()`, and
 
 Test assertions run against structured trace records and final state
 hashes, never against human-readable logs. The comparison harness
-validates CellGov observations against RPCS3 baselines through a
-runner-agnostic observation schema.
+validates CellGov observations against recorded RPCS3 observations
+through a runner-agnostic observation schema.
 
 Suites that need a local PS3 corpus -- a firmware image, an owned
 title dump, the compiled micro-test ELFs -- sit behind cargo features

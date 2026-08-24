@@ -598,6 +598,185 @@ fn a_finished_group_join_with_both_pointers_writes_both_and_returns_ok() {
 }
 
 #[test]
+fn an_out_of_range_slot_outranks_an_unreadable_image_pointer() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x100);
+    let result = host.dispatch(
+        Lv2Request::SpuThreadInitialize {
+            thread_ptr: 0x10,
+            group_id: 1,
+            thread_num: MAX_SLOTS_PER_GROUP,
+            img_ptr: 0xDEAD_0000,
+            attr_ptr: 0,
+            arg_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+        }
+        other => panic!("expected Immediate EINVAL, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_zero_thread_group_create_is_rejected_as_einval() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x1000);
+    let result = host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x100,
+            num_threads: 0,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert!(effects.is_empty(), "a refused create writes no group id");
+        }
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+    assert_eq!(host.thread_groups().len(), 0, "no group may be allocated");
+}
+
+#[test]
+fn a_second_start_of_a_running_group_is_rejected_as_estat() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x4000);
+    host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x100,
+            num_threads: 1,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    host.thread_groups_mut().get_mut(1).unwrap().state = GroupState::Running;
+    let result = host.dispatch(
+        Lv2Request::SpuThreadGroupStart { group_id: 1 },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, cell_errors::CELL_ESTAT.into());
+        }
+        other => panic!("expected Immediate ESTAT, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_start_of_a_finished_group_is_rejected_as_estat() {
+    let mut host = host_with_finished_group();
+    let rt = FakeRuntime::new(0x4000);
+    let result = host.dispatch(
+        Lv2Request::SpuThreadGroupStart { group_id: 1 },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, cell_errors::CELL_ESTAT.into());
+        }
+        other => panic!("expected Immediate ESTAT, got {other:?}"),
+    }
+}
+
+#[test]
+fn initializing_a_thread_in_a_started_group_is_rejected_as_ebusy() {
+    let mut host = Lv2Host::new();
+    let handle = host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
+
+    let mut mem = GuestMemory::new(0x4000);
+    let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
+    mem.apply_commit(img_range, &handle.raw().to_be_bytes())
+        .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+
+    host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x400,
+            num_threads: 2,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    host.thread_groups_mut().get_mut(1).unwrap().state = GroupState::Running;
+
+    let result = host.dispatch(
+        Lv2Request::SpuThreadInitialize {
+            thread_ptr: 0x500,
+            group_id: 1,
+            thread_num: 1,
+            img_ptr: 0x300,
+            attr_ptr: 0,
+            arg_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, cell_errors::CELL_EBUSY.into());
+            assert!(effects.is_empty(), "a refused initialize writes no id");
+        }
+        other => panic!("expected Immediate EBUSY, got {other:?}"),
+    }
+}
+
+#[test]
+fn initializing_a_slot_past_the_declared_thread_count_is_rejected_as_einval() {
+    let mut host = Lv2Host::new();
+    let handle = host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
+
+    let mut mem = GuestMemory::new(0x4000);
+    let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
+    mem.apply_commit(img_range, &handle.raw().to_be_bytes())
+        .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+
+    host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x400,
+            num_threads: 1,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+
+    let result = host.dispatch(
+        Lv2Request::SpuThreadInitialize {
+            thread_ptr: 0x500,
+            group_id: 1,
+            thread_num: 1,
+            img_ptr: 0x300,
+            attr_ptr: 0,
+            arg_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, .. } => {
+            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+        }
+        other => panic!("expected Immediate EINVAL, got {other:?}"),
+    }
+}
+
+#[test]
 fn group_start_unknown_group_returns_error() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(256);

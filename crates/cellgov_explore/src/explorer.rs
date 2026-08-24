@@ -18,13 +18,15 @@ use cellgov_core::Runtime;
 /// `config.max_schedules` alternates and each replay at
 /// `config.max_steps_per_run` steps. A replay that stops for any
 /// reason other than a stall sets [`ExplorationResult::bounds_hit`]
-/// and cannot contribute a divergence.
+/// and cannot contribute a divergence; a baseline that itself stopped
+/// short withdraws every divergence claim, since `baseline_hash` is
+/// then a prefix hash that no alternate can be measured against.
 pub fn explore<F>(mut make_runtime: F, config: &ExplorationConfig) -> Option<ExplorationResult>
 where
     F: FnMut() -> Runtime,
 {
     let mut rt_baseline = make_runtime();
-    let (log, snapshots) = observe_decisions_with_snapshots(&mut rt_baseline, true);
+    let (log, snapshots, baseline_stop) = observe_decisions_with_snapshots(&mut rt_baseline, true);
     let baseline_hash = rt_baseline.committed_memory_hash();
 
     let total_branching_points = log.branching_count();
@@ -32,7 +34,7 @@ where
         return None;
     }
 
-    let iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
+    let mut iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
         let snap = snapshots
             .get(&step)
             .expect("observer must snapshot every branching point");
@@ -41,6 +43,10 @@ where
         let stop = run_to_stall(&mut rt_baseline, config.max_steps_per_run);
         (rt_baseline.committed_memory_hash(), stop)
     });
+
+    if baseline_stop.is_truncated() {
+        iter.mark_baseline_truncated();
+    }
 
     Some(classify_iteration(
         iter,

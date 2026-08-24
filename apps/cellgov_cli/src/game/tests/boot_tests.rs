@@ -132,8 +132,8 @@ fn cellsysutil_seed_writes_stay_inside_the_64k_shm() {
 }
 
 use super::{
-    child_exit_stub_addr, decode_primary_stacksize, primary_stack_base_for,
-    spawned_child_region_size,
+    child_exit_stub_addr, decode_primary_stacksize, primary_entry_sp, primary_stack_base_for,
+    resolve_primary_prio, spawned_child_region_size, DEFAULT_PRIMARY_PRIO,
 };
 
 use super::step_call_cap;
@@ -318,10 +318,70 @@ mod spawned_child_region_size_tests {
     }
 }
 
-mod primary_stacksize_tests {
-    use super::{decode_primary_stacksize, primary_stack_base_for};
+mod primary_prio_tests {
+    use super::{resolve_primary_prio, DEFAULT_PRIMARY_PRIO};
+
+    #[test]
+    fn an_absent_param_segment_takes_the_kernel_default() {
+        assert_eq!(resolve_primary_prio(None), DEFAULT_PRIMARY_PRIO);
+    }
+
+    #[test]
+    fn a_declaration_inside_the_accepted_range_is_adopted() {
+        for p in [0, 1, 100, 1001, 3070, 3071] {
+            assert_eq!(resolve_primary_prio(Some(p)), p as u32);
+        }
+    }
+
+    #[test]
+    fn a_declaration_at_or_above_the_ceiling_falls_back_to_the_default() {
+        for p in [3072, 3073, 100_000, i32::MAX] {
+            assert_eq!(resolve_primary_prio(Some(p)), DEFAULT_PRIMARY_PRIO);
+        }
+    }
+
+    #[test]
+    fn a_negative_declaration_falls_back_instead_of_wrapping() {
+        for p in [-1, -512, -513, i32::MIN] {
+            assert_eq!(resolve_primary_prio(Some(p)), DEFAULT_PRIMARY_PRIO);
+        }
+    }
+}
+
+mod primary_entry_sp_tests {
+    use super::primary_entry_sp;
     use cellgov_ps3_abi::process_address_space::{
-        PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP,
+        PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_CHILD_STACKS_BASE,
+        PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
+    };
+
+    #[test]
+    fn the_entry_frame_stays_below_the_child_stack_arena() {
+        // The first block `ThreadStackAllocator` hands out starts at
+        // PS3_CHILD_STACKS_BASE, so a callee's LR/CR/parameter-save
+        // stores above the entry r1 must all land under it.
+        let sp = primary_entry_sp();
+        assert!(
+            sp + ENTRY_FRAME_RESERVE <= PS3_CHILD_STACKS_BASE,
+            "entry frame 0x{sp:x}+0x{ENTRY_FRAME_RESERVE:x} reaches the child-stack arena",
+        );
+        assert!(
+            sp + ENTRY_FRAME_RESERVE <= PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64,
+            "entry frame escapes the primary stack reservation",
+        );
+    }
+
+    #[test]
+    fn the_entry_sp_is_quadword_aligned() {
+        assert_eq!(primary_entry_sp() % 0x10, 0);
+    }
+}
+
+mod primary_stacksize_tests {
+    use super::{decode_primary_stacksize, primary_entry_sp, primary_stack_base_for};
+    use cellgov_ps3_abi::process_address_space::{
+        PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_PRIMARY_STACK_BASE,
+        PS3_PRIMARY_STACK_SIZE,
     };
 
     #[test]
@@ -372,15 +432,20 @@ mod primary_stacksize_tests {
     }
 
     #[test]
-    fn the_recorded_stack_range_always_contains_the_initial_sp() {
+    fn the_recorded_stack_range_always_contains_the_whole_entry_frame() {
         for declared in [0u32, 0x9000, 0x10, 0x40, 0x70, 0x40000, 0x100000, u32::MAX] {
             let size = decode_primary_stacksize(declared);
             let base = primary_stack_base_for(size);
             let end = base + u64::from(size);
+            let sp = primary_entry_sp();
             assert!(
-                (base..end).contains(&PS3_PRIMARY_STACK_TOP),
-                "declared 0x{declared:x} -> stack 0x{base:x}..0x{end:x} excludes SP \
-                 0x{PS3_PRIMARY_STACK_TOP:x}",
+                (base..end).contains(&sp),
+                "declared 0x{declared:x} -> stack 0x{base:x}..0x{end:x} excludes SP 0x{sp:x}",
+            );
+            assert!(
+                sp + ENTRY_FRAME_RESERVE <= end,
+                "declared 0x{declared:x} -> the entry frame above SP 0x{sp:x} runs past the \
+                 stack end 0x{end:x}",
             );
             assert!(
                 base >= PS3_PRIMARY_STACK_BASE,

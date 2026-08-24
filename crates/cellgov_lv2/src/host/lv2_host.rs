@@ -969,7 +969,7 @@ impl Lv2Host {
     /// only rewinds its most recent block. A mismatch is logged and
     /// the block leaks rather than corrupting live stacks.
     pub fn free_child_stack(&mut self, base: u64, size: u64) {
-        // `ThreadStack::new` asserts the 0x10 ABI save-area floor and
+        // `ThreadStack::new` asserts the minimum-frame floor and
         // the arena never hands out a block below it, so a sub-floor
         // size is the same "not the arena's block" refusal -- report
         // it rather than aborting the run inside the assert.

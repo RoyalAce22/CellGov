@@ -17,9 +17,11 @@ fn schedule_record_holds_data() {
         branch_step: 3,
         alternate_choice: UnitId::new(1),
         memory_hash: 0xDEAD,
+        truncated: false,
     };
     assert_eq!(rec.branch_step, 3);
     assert_eq!(rec.memory_hash, 0xDEAD);
+    assert!(!rec.truncated);
 }
 
 #[test]
@@ -31,6 +33,7 @@ fn exploration_result_construction() {
         total_branching_points: 0,
         bounds_hit: false,
         schedules_pruned: 0,
+        schedules_truncated: 0,
     };
     assert_eq!(res.outcome, OutcomeClass::ScheduleStable);
     assert!(!res.bounds_hit);

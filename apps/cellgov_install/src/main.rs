@@ -10,11 +10,15 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use cellgov_ps3_abi::elf::ELF_MAGIC;
+
 use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
+use cellgov_install::npdrm::{self, NpdHeaderInfo};
 use cellgov_install::{disc_crypt, game_install, game_uninstall, pup, sce, self_image, tar};
 use sha2::{Digest, Sha256};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 
 fn main() {
@@ -62,7 +66,12 @@ fn print_usage() {
     eprintln!("    --verify: re-hash the live tree against the install record first");
     eprintln!("    --keep-rap: leave the RAP in exdata/ (another title may share it)");
     eprintln!("    --force: uninstall even if --verify finds a modified tree");
-    eprintln!("  cellgov_install decrypt-self <SELF_PATH> [--output <path>]");
+    eprintln!(
+        "  cellgov_install decrypt-self <SELF_PATH> [--output <path>] [--rap <RAP_PATH>] [--vfs-root <dir>]"
+    );
+    eprintln!("    NPDRM SELFs resolve their RAP from <vfs-root>/dev_hdd0/home/00000001/exdata/");
+    eprintln!("    --rap: use this RAP instead, for a title that is not installed");
+    eprintln!("    default --vfs-root: vfs/ (at the current working directory)");
 }
 
 /// Parsed `install` subcommand arguments.
@@ -107,6 +116,23 @@ enum FirmwareCliError {
     /// `--dkey` flag with no following argument.
     #[error("--dkey requires a path argument")]
     DkeyFlagMissingValue,
+    /// `--vfs-root` flag with no following argument.
+    #[error("--vfs-root requires a directory argument")]
+    VfsRootFlagMissingValue,
+    /// A RAP file is not the 16 bytes the klicensee derivation needs.
+    #[error("RAP {} is {len} bytes; expected exactly 16", path.display())]
+    RapWrongSize { path: PathBuf, len: usize },
+    /// A RAP file exists but could not be read.
+    #[error("read RAP {}: {source}", path.display())]
+    RapReadFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// `--rap` named a file that is not there. Distinct from the
+    /// exdata probe, whose miss is the ordinary uninstalled case.
+    #[error("--rap {} does not exist", path.display())]
+    ExplicitRapMissing { path: PathBuf },
     /// Unknown subcommand flag.
     #[error("unknown argument: {0}")]
     UnknownArgument(String),
@@ -206,6 +232,8 @@ fn check_output_dir(dir: &Path, force: bool) -> Result<(), FirmwareCliError> {
 struct DecryptSelfArgs {
     self_path: PathBuf,
     output_path: Option<PathBuf>,
+    rap_path: Option<PathBuf>,
+    vfs_root: PathBuf,
 }
 
 fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareCliError> {
@@ -214,6 +242,8 @@ fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareC
     }
     let self_path = PathBuf::from(&args[2]);
     let mut output_path: Option<PathBuf> = None;
+    let mut rap_path: Option<PathBuf> = None;
+    let mut vfs_root: Option<PathBuf> = None;
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -224,6 +254,20 @@ fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareC
                 }
                 output_path = Some(PathBuf::from(&args[i]));
             }
+            "--rap" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::RapFlagMissingValue);
+                }
+                rap_path = Some(PathBuf::from(&args[i]));
+            }
+            "--vfs-root" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::VfsRootFlagMissingValue);
+                }
+                vfs_root = Some(PathBuf::from(&args[i]));
+            }
             other => {
                 return Err(FirmwareCliError::UnknownArgument(other.to_string()));
             }
@@ -233,7 +277,69 @@ fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareC
     Ok(DecryptSelfArgs {
         self_path,
         output_path,
+        rap_path,
+        vfs_root: vfs_root.unwrap_or_else(|| PathBuf::from(DEFAULT_INSTALL_OUTPUT)),
     })
+}
+
+/// Read a 16-byte RAP and derive its klicensee.
+///
+/// # Errors
+///
+/// [`FirmwareCliError::RapWrongSize`] for a file that is not exactly
+/// 16 bytes, and [`FirmwareCliError::RapReadFailed`] for a file that is
+/// there but unreadable. Only absence is `Ok(None)`: that is the
+/// ordinary "not installed" case, which the NPDRM layer turns into
+/// either the license-3 free-key fallback or a named refusal. Any other
+/// read failure would otherwise be indistinguishable from absence and
+/// slip through as the free key.
+fn klicensee_from_rap(path: &Path) -> Result<Option<[u8; 16]>, FirmwareCliError> {
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(FirmwareCliError::RapReadFailed {
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+    };
+    let arr: [u8; 16] =
+        bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| FirmwareCliError::RapWrongSize {
+                path: path.to_path_buf(),
+                len: bytes.len(),
+            })?;
+    Ok(Some(npdrm::rap_to_klic(&arr)))
+}
+
+/// Resolve the klicensee for one NPDRM content id: from `explicit`
+/// when `--rap` named a file, otherwise from `<exdata>/<id>.rap`.
+///
+/// # Errors
+///
+/// Everything [`klicensee_from_rap`] refuses, plus
+/// [`FirmwareCliError::ExplicitRapMissing`] when `--rap` named a file
+/// that is not there. Only the exdata probe may miss quietly -- an
+/// explicit flag that resolved to nothing would otherwise be indis-
+/// tinguishable from not passing it, and license-3 titles decrypt on
+/// the free-key fallback either way.
+fn resolve_rap_klicensee(
+    explicit: Option<&Path>,
+    exdata: &Path,
+    content_id: &str,
+) -> Result<Option<[u8; 16]>, FirmwareCliError> {
+    let rap = match explicit {
+        Some(p) => p.to_path_buf(),
+        None => exdata.join(format!("{content_id}.rap")),
+    };
+    match klicensee_from_rap(&rap)? {
+        Some(k) => Ok(Some(k)),
+        None if explicit.is_some() => Err(FirmwareCliError::ExplicitRapMissing { path: rap }),
+        None => Ok(None),
+    }
 }
 
 fn cmd_decrypt_self(args: &[String]) {
@@ -258,8 +364,45 @@ fn cmd_decrypt_self(args: &[String]) {
         data.len() as f64 / (1024.0 * 1024.0)
     );
 
-    let elf = sce::decrypt_self_to_elf(&data).unwrap_or_else(|e| {
+    // Auto, not AppOnly: firmware and disc SELFs are APP-keyed and
+    // take the same path they always did, while an NPDRM title finds
+    // its klicensee the way the boot path does.
+    let exdata = game_install::exdata_dir(&parsed.vfs_root.join("dev_hdd0"));
+    let resolve_error: RefCell<Option<FirmwareCliError>> = RefCell::new(None);
+    let resolver = |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
+        match resolve_rap_klicensee(parsed.rap_path.as_deref(), &exdata, &npd.content_id) {
+            Ok(k) => k,
+            Err(e) => {
+                // A refused RAP is a hard error, but the resolver
+                // signature can only say "no key". Carry it out so the
+                // exit names the file instead of the missing key.
+                *resolve_error.borrow_mut() = Some(e);
+                None
+            }
+        }
+    };
+
+    let decrypted = self_image::to_plaintext_elf(&data, self_image::KeyPolicy::Auto(&resolver));
+
+    // Checked whichever way the decrypt went. A license-3 SELF falls
+    // back to NP_KLIC_FREE when the resolver yields no key, so a
+    // refused RAP would otherwise be swallowed by a "successful"
+    // free-key decrypt that ignored the RAP the caller supplied.
+    if let Some(rap_err) = resolve_error.borrow_mut().take() {
+        eprintln!("{rap_err}");
+        std::process::exit(1);
+    }
+
+    let elf = decrypted.unwrap_or_else(|e| {
         eprintln!("SELF decryption failed: {e}");
+        // Only reachable without --rap: an explicit RAP that will not
+        // read is already refused by name above.
+        if let sce::SceError::NoRapForNpdrmTitle { .. } = e {
+            eprintln!(
+                "  searched {} for <content_id>.rap; pass --rap <path> for an uninstalled title",
+                exdata.display()
+            );
+        }
         std::process::exit(1);
     });
 
@@ -406,6 +549,7 @@ fn cmd_install(args: &[String]) {
     let mut total_skipped = 0usize;
     let mut total_pruned = 0usize;
     let mut packages_attempted = 0usize;
+    let mut packages_failed = 0usize;
     let mut extract_errors: Vec<tar::ExtractError> = Vec::new();
     for entry in &dev_flash_entries {
         packages_attempted += 1;
@@ -442,11 +586,13 @@ fn cmd_install(args: &[String]) {
                     extract_errors.extend(report.errors);
                 }
                 Err(e) => {
-                    println!(" skip (inner TAR parse: {e})");
+                    packages_failed += 1;
+                    println!(" FAILED (inner TAR parse: {e})");
                 }
             },
             Err(e) => {
-                println!(" skip ({e})");
+                packages_failed += 1;
+                println!(" FAILED ({e})");
             }
         }
     }
@@ -465,13 +611,30 @@ fn cmd_install(args: &[String]) {
         std::process::exit(1);
     }
 
+    // A dropped package or a failed write leaves the tree short of the
+    // firmware the PUP carries, and firmware.toml built over it would
+    // record the gap as if it were the image. RPCS3 refuses the same
+    // way: `main_window.cpp` `HandlePupInstallation` aborts the whole
+    // install when a dev_flash sub-package will not decrypt or when
+    // `Loader/TAR.cpp` `tar_object::extract` reports a failed write,
+    // and announces success only once every package landed.
+    if packages_failed > 0 || !extract_errors.is_empty() {
+        eprintln!(
+            "cellgov_install: partial install ({total_files} files, {packages_failed} of \
+             {packages_attempted} packages failed, {} extract errors); refusing to claim success",
+            extract_errors.len(),
+        );
+        std::process::exit(1);
+    }
+
     println!(
-        "cellgov_install: installed {} files to {} ({} packages, {} pruned, {} skipped, {} errors)",
+        "cellgov_install: installed {} files to {} ({} packages, {} pruned, {} skipped, {} failed packages, {} errors)",
         total_files,
         output_dir.display(),
         packages_attempted,
         total_pruned,
         total_skipped,
+        packages_failed,
         extract_errors.len(),
     );
 
@@ -791,6 +954,13 @@ fn cmd_uninstall(args: &[String]) {
     if let Some(n) = outcome.files_verified {
         println!("  verified {n} files against the record before removal");
     }
+    // Non-zero only under --force, which is the one way a divergence
+    // gets past the gate; the override still names what it waved past.
+    if let Some(n) = outcome.files_diverged {
+        if n > 0 {
+            eprintln!("  --force overrode {n} recorded files that were missing or modified");
+        }
+    }
     println!("  removed record {}", outcome.record_removed.display());
 }
 
@@ -835,9 +1005,11 @@ fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Firmwa
 
 /// Build the firmware.toml manifest from a freshly-installed tree.
 /// PUP hash is over `pup_data`; per-file hashes are over the post-
-/// decrypt ELF bytes. Files that fail to decrypt (e.g. a revision with
-/// no APP key) are left out of the manifest and their count is
-/// reported on stderr.
+/// decrypt ELF bytes. A file that fails to decrypt (e.g. a revision
+/// with no APP key) is left out of the manifest, as is a file that is
+/// neither an SCE container nor a bare ELF. Each omission is named on
+/// stderr with the reason -- a tally alone cannot distinguish an
+/// expected missing-key skip from a corrupt install.
 ///
 /// # Errors
 ///
@@ -857,20 +1029,22 @@ fn build_firmware_manifest(
     collect_sprx_paths(output_dir, &mut sprx_paths)?;
 
     let mut files = Vec::with_capacity(sprx_paths.len());
-    let mut skipped = 0usize;
+    let mut undecryptable: Vec<(PathBuf, String)> = Vec::new();
+    let mut not_a_module: Vec<(PathBuf, usize)> = Vec::new();
     for sprx_path in &sprx_paths {
         let raw = std::fs::read(sprx_path).map_err(|source| FirmwareCliError::SprxReadFailed {
             path: sprx_path.clone(),
             source,
         })?;
-        // Pre-decrypted `.prx` files carry no SCE wrapper: hash the
-        // raw bytes (identical to their post-decrypt image) and record
-        // revision 0, since the wrapper that carried it is gone.
         let (elf, revision) = if self_image::is_sce_wrapped(&raw) {
             let elf = match sce::decrypt_self_to_elf(&raw) {
                 Ok(e) => e,
-                Err(_) => {
-                    skipped += 1;
+                // The module is omitted from the manifest either way,
+                // but the omission carries its cause: a bare tally
+                // cannot tell a revision with no APP key from a
+                // truncated or corrupted install.
+                Err(source) => {
+                    undecryptable.push((sprx_path.clone(), source.to_string()));
                     continue;
                 }
             };
@@ -881,8 +1055,21 @@ fn build_firmware_manifest(
                 .revision_flags
                 & 0x7FFF;
             (elf, revision)
-        } else {
+        } else if raw.starts_with(&ELF_MAGIC) {
+            // Pre-decrypted `.prx` files carry no SCE wrapper: hash the
+            // raw bytes (identical to their post-decrypt image) and
+            // record revision 0, since the wrapper that carried it is
+            // gone.
             (raw, 0)
+        } else {
+            // Neither an SCE container nor a bare ELF, so there is no
+            // module image to hash. PS3 firmware ships at least one
+            // zero-byte `.sprx` placeholder; recording it would put the
+            // empty-bytes hash in the manifest under revision 0, as
+            // though an empty file were a pre-decrypted module the boot
+            // verifier could load.
+            not_a_module.push((sprx_path.clone(), raw.len()));
+            continue;
         };
         let mut h = Sha256::new();
         h.update(&elf);
@@ -905,8 +1092,23 @@ fn build_firmware_manifest(
             revision,
         });
     }
-    if skipped > 0 {
-        eprintln!("  ({skipped} SPRX skipped: undecryptable)");
+    if !undecryptable.is_empty() {
+        eprintln!(
+            "  ({} SPRX omitted from the manifest: undecryptable)",
+            undecryptable.len()
+        );
+        for (path, why) in &undecryptable {
+            eprintln!("    {}: {why}", path.display());
+        }
+    }
+    if !not_a_module.is_empty() {
+        eprintln!(
+            "  ({} .sprx/.prx omitted from the manifest: neither an SCE container nor an ELF)",
+            not_a_module.len()
+        );
+        for (path, len) in &not_a_module {
+            eprintln!("    {} ({len} bytes)", path.display());
+        }
     }
 
     Ok(FirmwareManifest {

@@ -91,7 +91,8 @@ fn only_with_ext_returns_the_single_match_and_names_every_other_outcome() {
             })
     };
 
-    assert!(refusal(&dir).contains("no .pkg in"));
+    let msg = refusal(&dir);
+    assert!(msg.contains("no .pkg in"), "got {msg:?}");
 
     std::fs::write(dir.join("flow.PKG"), b"x").unwrap();
     std::fs::write(dir.join("flow.rap"), b"x").unwrap();
@@ -105,7 +106,8 @@ fn only_with_ext_returns_the_single_match_and_names_every_other_outcome() {
         "got {msg:?}"
     );
 
-    assert!(refusal(&scratch.join("absent")).contains("read dir"));
+    let msg = refusal(&scratch.join("absent"));
+    assert!(msg.contains("read dir"), "got {msg:?}");
 }
 
 #[test]

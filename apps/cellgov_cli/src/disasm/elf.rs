@@ -35,6 +35,8 @@ pub(super) enum ElfError {
         ELF_PHENTSIZE
     )]
     PhentsizeTooSmall { phentsize: u16 },
+    #[error("ELF declares no program header table (e_phnum=0); nothing in this container is loadable, so no vaddr resolves to code")]
+    NoProgramHeaders,
     #[error(
         "ELF e_phnum=0x{:04X} (PN_XNUM extension) is not supported by this tool",
         ELF_PN_XNUM
@@ -136,6 +138,15 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
 
     if phnum == ELF_PN_XNUM {
         return Err(ElfError::PhdrCountExtended);
+    }
+    // A container with no program-header table writes e_phentsize=0,
+    // which is not an undersized entry -- there are no entries to size.
+    // RPCS3's `Loader/ELF.h` `elf_object::open` gates its own
+    // e_phentsize check on e_phnum being non-zero for the same reason.
+    // Naming the absent table keeps "nothing here is loadable" apart
+    // from "your entry size is wrong".
+    if phnum == 0 {
+        return Err(ElfError::NoProgramHeaders);
     }
     if (phentsize as usize) < ELF_PHENTSIZE {
         return Err(ElfError::PhentsizeTooSmall { phentsize });

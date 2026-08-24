@@ -21,8 +21,35 @@ use crate::cli::env::parse_env_bool;
 use crate::cli::exit::die;
 
 /// Default primary-thread priority when the title's `sys_proc_param`
-/// block is absent.
+/// block is absent or declares a priority the kernel will not adopt.
 const DEFAULT_PRIMARY_PRIO: u32 = 1001;
+
+use cellgov_ps3_abi::sys_process::SYS_PROCESS_PARAM_PRIO_LIMIT;
+
+/// Resolve the primary thread's priority from a `sys_proc_param`
+/// declaration.
+///
+/// An out-of-range declaration is not a load failure: the kernel keeps
+/// its own default and boots. RPCS3 `PPUModule.cpp` `ppu_load_exec`
+/// adopts the declared value only when it is below 3072 and at or
+/// above the process class's floor -- 0 for a debug/root process --
+/// and otherwise leaves its 1001 default standing.
+/// `cellgov_lv2::PpuThreadAttrs` carries an unsigned priority, so the
+/// floor here is that same 0 and a negative declaration falls back
+/// rather than booting at a wrapped value.
+fn resolve_primary_prio(declared: Option<i32>) -> u32 {
+    let Some(p) = declared else {
+        return DEFAULT_PRIMARY_PRIO;
+    };
+    if (0..SYS_PROCESS_PARAM_PRIO_LIMIT).contains(&p) {
+        return p as u32;
+    }
+    eprintln!(
+        "boot: sys_proc_param primary_prio={p} is outside 0..{SYS_PROCESS_PARAM_PRIO_LIMIT}; \
+         the kernel does not adopt it -- using the default {DEFAULT_PRIMARY_PRIO}"
+    );
+    DEFAULT_PRIMARY_PRIO
+}
 
 /// Decode a `sys_proc_param.primary_stacksize` declaration to bytes.
 ///
@@ -451,12 +478,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         );
     }
 
-    let primary_prio: u32 = match proc_param.map(|p| p.primary_prio) {
-        Some(p) => {
-            u32::try_from(p).unwrap_or_else(|_| die(&format!("primary_prio={p} is negative")))
-        }
-        None => DEFAULT_PRIMARY_PRIO,
-    };
+    let primary_prio: u32 = resolve_primary_prio(proc_param.map(|p| p.primary_prio));
     // An absent param segment leaves the kernel's own starting value,
     // the 1 MiB `SYS_PROCESS_PARAM_STACK_SIZE_MAX` (RPCS3
     // `PPUModule.cpp` `ppu_load_exec`). A present one is decoded and
@@ -792,11 +814,11 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         }
     }
 
-    // Title primary entry state. r1 = stack top, r3..r10 = PS3 LV2
-    // process-start convention args. r11 holds the OPD entry,
-    // r12 the malloc pagesize, r13 the TLS pointer. Stamped BEFORE
-    // the primary unit is registered so module_start aliases bind
-    // to the real entry state.
+    // Title primary entry state. r1 = one minimum frame below the
+    // stack top, r3..r10 = PS3 LV2 process-start convention args. r11
+    // holds the OPD entry, r12 the malloc pagesize, r13 the TLS
+    // pointer. Stamped BEFORE the primary unit is registered so
+    // module_start aliases bind to the real entry state.
     //
     // With guest args, the args block sits at the stack top and r1
     // drops below it; r3..r6 carry argc/argv/envp/envc (layout in
@@ -849,7 +871,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             state.set_gpr(5, b.envp_addr);
         }
         None => {
-            state.set_gpr(1, PS3_PRIMARY_STACK_TOP);
+            state.set_gpr(1, primary_entry_sp());
             state.set_gpr(3, 0);
             state.set_gpr(4, 0);
             state.set_gpr(5, 0);
@@ -1068,6 +1090,19 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         step_budget,
         authid_source,
     }
+}
+
+/// Primary thread r1 for a boot with no guest args.
+///
+/// [`PS3_PRIMARY_STACK_TOP`] already sits
+/// [`PS3_ABI_MIN_STACK_FRAME`](cellgov_ps3_abi::process_address_space::PS3_ABI_MIN_STACK_FRAME)
+/// below the end of the primary stack region, so the no-args entry
+/// takes it unchanged -- subtracting the reserve a second time here
+/// would drop r1 a whole frame lower than RPCS3 seeds it. The
+/// with-args arm subtracts the reserve from its own args-block base
+/// instead, which is why that arm spells it out and this one does not.
+fn primary_entry_sp() -> u64 {
+    PS3_PRIMARY_STACK_TOP
 }
 
 /// Base address recorded for the primary thread's stack of `size`

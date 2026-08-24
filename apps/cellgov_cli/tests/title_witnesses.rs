@@ -30,7 +30,7 @@ use std::process::Command;
 use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
 use cellgov_compare::witnesses::{check_all, unrecorded, TITLE_NOT_INSTALLED_SENTINEL};
 use cellgov_compare::BootSummary;
-use registry::{baseline_path, titles, workspace_root, TitleUnderTest};
+use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
 
 struct Observed {
     witnesses: ParsedWitnesses,
@@ -119,7 +119,7 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
         Boot::Ran(o) => o,
     };
 
-    let path = baseline_path(&title.content_id);
+    let path = boot_anchor_path(&title.content_id);
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Some(vec![format!(
             "{}: installed but no baseline at {}. Record it with:\n    \

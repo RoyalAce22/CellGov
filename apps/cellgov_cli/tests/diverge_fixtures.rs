@@ -321,12 +321,34 @@ fn cli_zoom_reports_missing_step_when_window_excluded_it() {
     std::fs::write(&b, &z).unwrap();
 
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
-    let out = Command::new(bin)
-        .args(["zoom", a.to_str().unwrap(), b.to_str().unwrap(), "10"])
-        .output()
-        .expect("cli runs");
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert_eq!(out.status.code(), Some(2));
+    let zoom_at = |step: &str| {
+        let out = Command::new(&bin)
+            .args(["zoom", a.to_str().unwrap(), b.to_str().unwrap(), step])
+            .output()
+            .expect("cli runs");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    };
+
+    // A snapshot pair carrying no steps at all reports MISSING_STEP for
+    // every step, so pin an in-window step that resolves first --
+    // otherwise the assertion below cannot tell an excluded step from
+    // an empty capture.
+    let (in_window_code, in_window) = zoom_at("1");
+    assert!(
+        !in_window.contains("MISSING_STEP"),
+        "step 1 is inside the recorded window (0, 2) but was reported missing: {in_window}"
+    );
+    assert_eq!(
+        in_window_code,
+        Some(0),
+        "agreeing in-window snapshots exit 0: {in_window}"
+    );
+
+    let (code, stdout) = zoom_at("10");
+    assert_eq!(code, Some(2));
     assert!(
         stdout.contains("MISSING_STEP"),
         "expected MISSING_STEP line, got: {stdout}"

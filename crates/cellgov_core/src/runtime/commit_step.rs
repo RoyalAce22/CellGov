@@ -88,6 +88,7 @@ impl Runtime {
 
         // `rsx_label_writes_committed` is threaded through CommitContext
         // so `process()` increments it adjacent to the guard it witnesses.
+        let rsx_label_base = self.resolved_rsx_label_base();
         let (space_memory, space_reservations) = crate::runtime::spaces::resolve_commit_targets(
             &mut self.memory,
             &mut self.reservations,
@@ -103,7 +104,7 @@ impl Runtime {
             dma_latency: self.dma_latency.as_ref(),
             now: self.time,
             reservations: space_reservations,
-            rsx_label_base: self.rsx_label_base,
+            rsx_label_base,
             rsx_flip: &mut self.rsx_flip,
             rsx_label_writes_committed: &mut self.rsx_label_writes_committed,
         };
@@ -204,6 +205,11 @@ impl Runtime {
             self.catch_up_cursor_get_from_mmio();
         }
         if self.rsx_cursor.get() != self.rsx_cursor.put() || !self.rsx_call_stack.is_empty() {
+            // Re-resolved rather than reusing the value the commit
+            // pipeline ran under: a `sys_rsx_context_allocate` in this
+            // same batch dispatched above, and the drain that follows
+            // it is already in the base-relative regime.
+            let advance_label_base = self.resolved_rsx_label_base();
             let rsx_ctx = self.lv2_host.sys_rsx_context();
             let iomap = crate::rsx::IoMap {
                 ea: rsx_ctx.iomap_ea,
@@ -215,6 +221,7 @@ impl Runtime {
                 &iomap,
                 &mut self.rsx_cursor,
                 &mut self.rsx_sem_offset,
+                advance_label_base,
                 &mut self.rsx_call_stack,
                 &self.rsx_methods,
                 &mut self.pending_rsx_effects,
@@ -278,6 +285,26 @@ impl Runtime {
             .notify_yielded(source, result.yield_reason, self.step_woke_others, holds_cs);
 
         outcome
+    }
+
+    /// Base every `RsxLabelWrite` offset resolves against.
+    ///
+    /// `sys_rsx_context_allocate` publishes the `RsxReports` base into
+    /// the same LV2 context this pass already reads the iomap window
+    /// from, and that base -- not the seeded field -- is what a title's
+    /// label offsets are relative to once GCM has run. RPCS3 resolves
+    /// the same family of writes the same way: `RSXThread.cpp`
+    /// `get_address` returns `label_addr + offset` for the semaphore
+    /// DMA contexts, where `label_addr` is the reports base 670 handed
+    /// out. Before 670 runs `reports_addr` is zero and
+    /// [`Runtime::set_rsx_label_base`]'s seed stands in, which is also
+    /// zero unless a scenario set one -- the absolute-offset regime the
+    /// commit pipeline documents.
+    fn resolved_rsx_label_base(&self) -> u32 {
+        match self.lv2_host.sys_rsx_context().reports_addr {
+            0 => self.rsx_label_base,
+            published => published,
+        }
     }
 
     /// Monotonic one-shot GET catch-up: advance `cursor.get` to

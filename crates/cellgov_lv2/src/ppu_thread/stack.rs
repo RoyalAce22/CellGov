@@ -1,9 +1,14 @@
 //! Child-thread stack region and its deterministic bump allocator.
 
+/// Bytes the PPC64 ELFv1 ABI reserves below the initial `r1`.
+///
+/// Re-exported so a child thread's reserve and the primary's are one
+/// value: the ABI crate owns the fact and carries its citation.
+pub use cellgov_ps3_abi::process_address_space::PS3_ABI_MIN_STACK_FRAME as ABI_MIN_STACK_FRAME;
+
 /// A reserved stack block for a child PPU thread.
 ///
-/// Construction enforces `size >= 0x10` (the ABI-required
-/// save-area reserve below `r1`).
+/// Construction enforces `size >= ABI_MIN_STACK_FRAME`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ThreadStack {
     pub(crate) base: u64,
@@ -14,11 +19,11 @@ impl ThreadStack {
     /// Construct a stack block.
     ///
     /// # Panics
-    /// If `size < 0x10`.
+    /// If `size < ABI_MIN_STACK_FRAME`.
     pub fn new(base: u64, size: u64) -> Self {
         assert!(
-            size >= 0x10,
-            "ThreadStack::new: size {size} < 0x10 would underflow initial_sp",
+            size >= ABI_MIN_STACK_FRAME,
+            "ThreadStack::new: size {size} < {ABI_MIN_STACK_FRAME} would underflow initial_sp",
         );
         Self { base, size }
     }
@@ -35,16 +40,20 @@ impl ThreadStack {
 
     /// Top-of-stack address to load into `r1`.
     ///
+    /// A whole minimum frame sits above it, matching the `r1` the
+    /// kernel hands every PPU thread (RPCS3 `PPUThread.cpp`
+    /// `ppu_thread::ppu_thread` subtracts `ppu_stack_start_offset`).
+    ///
     /// # Panics
-    /// Debug-only if `size < 0x10`; unreachable via `new` or the
-    /// allocator.
+    /// Debug-only if `size < ABI_MIN_STACK_FRAME`; unreachable via
+    /// `new` or the allocator.
     pub fn initial_sp(&self) -> u64 {
         debug_assert!(
-            self.size >= 0x10,
-            "ThreadStack::initial_sp: size {} < 0x10 would underflow",
+            self.size >= ABI_MIN_STACK_FRAME,
+            "ThreadStack::initial_sp: size {} < {ABI_MIN_STACK_FRAME} would underflow",
             self.size,
         );
-        self.base + self.size - 0x10
+        self.base + self.size - ABI_MIN_STACK_FRAME
     }
 
     /// Upper bound of the reserved block (exclusive).
@@ -74,9 +83,10 @@ impl ThreadStackAllocator {
     }
 
     /// Allocate a stack block of `size` bytes, aligned to
-    /// `max(align, 16)`; `None` on overflow or `size < 0x10`.
+    /// `max(align, 16)`; `None` on overflow or
+    /// `size < ABI_MIN_STACK_FRAME`.
     pub fn allocate(&mut self, size: u64, align: u64) -> Option<ThreadStack> {
-        if size < 0x10 {
+        if size < ABI_MIN_STACK_FRAME {
             return None;
         }
         let align = align.max(0x10);

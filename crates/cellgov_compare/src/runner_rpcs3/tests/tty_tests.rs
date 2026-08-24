@@ -30,6 +30,16 @@ fn write_tty_log(prefix: &[u8], payload: &[u8], suffix: &[u8]) -> PathBuf {
 fn tty_region(name: &str, size: u64, addr: u64) -> TtyRegion {
     TtyRegion {
         name: name.into(),
+        offset: 0,
+        size,
+        guest_addr: addr,
+    }
+}
+
+fn tty_region_at(name: &str, offset: u64, size: u64, addr: u64) -> TtyRegion {
+    TtyRegion {
+        name: name.into(),
+        offset,
         size,
         guest_addr: addr,
     }
@@ -53,8 +63,8 @@ fn parse_tty_log_extracts_multiple_regions() {
     let payload = vec![0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44];
     let path = write_tty_log(b"", &payload, b"");
     let regions = vec![
-        tty_region("status", 4, 0x500000),
-        tty_region("value", 4, 0x500004),
+        tty_region_at("status", 0, 4, 0x500000),
+        tty_region_at("value", 4, 4, 0x500004),
     ];
     let parsed = parse_tty_log(&path, &regions).expect("parse");
     assert_eq!(parsed.len(), 2);
@@ -163,4 +173,102 @@ fn observe_from_tty_builds_observation() {
     assert_eq!(obs.metadata.runner, "rpcs3-interpreter");
     assert!(obs.state_hashes.is_none());
     std::fs::remove_file(&path).ok();
+}
+
+/// A guest emits one struct and names positions inside it, so the
+/// regions can sit apart. Summing sizes would slide every region after
+/// the gap and hand back neighbouring bytes that parse as plausible.
+#[test]
+fn regions_are_sliced_at_their_offsets_across_a_gap() {
+    let mut payload = vec![0u8; 144];
+    payload[..8].copy_from_slice(&[0xAA; 8]);
+    payload[16..144].copy_from_slice(&[0xBB; 128]);
+    let path = write_tty_log(b"", &payload, b"");
+    let regions = vec![
+        tty_region_at("header", 0, 8, 0),
+        tty_region_at("data", 16, 128, 16),
+    ];
+    let parsed = parse_tty_log(&path, &regions).expect("parse");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(parsed[0].data, vec![0xAA; 8]);
+    assert_eq!(parsed[1].data, vec![0xBB; 128], "the gap was not skipped");
+    assert_eq!(parsed[1].addr, 16);
+}
+
+/// A stale log, or a guest that emitted twice, leaves two frames. The
+/// first is not necessarily the run's; picking it hands back plausible
+/// bytes from the wrong capture.
+#[test]
+fn a_second_frame_past_the_payload_is_refused_rather_than_resolved_by_position() {
+    let payload = vec![0xAAu8; 8];
+    let mut second = TTY_MAGIC.to_vec();
+    second.extend_from_slice(&8_u32.to_be_bytes());
+    second.extend_from_slice(&[0xBBu8; 8]);
+    let path = write_tty_log(b"", &payload, &second);
+    let err = parse_tty_log(&path, &[tty_region("result", 8, 0)]).expect_err("two frames");
+    std::fs::remove_file(&path).ok();
+    match err {
+        Rpcs3Error::TtyFrameAmbiguous { first, second } => {
+            assert_eq!(first, 0);
+            assert_eq!(second, 16, "the second frame starts right past the payload");
+        }
+        other => panic!("expected TtyFrameAmbiguous, got {other:?}"),
+    }
+}
+
+/// The magic is four arbitrary bytes; a region can legitimately hold
+/// them. Only an occurrence past the payload is a second frame.
+#[test]
+fn magic_bytes_inside_the_payload_are_region_data_not_a_second_frame() {
+    let mut payload = vec![0u8; 12];
+    payload[4..8].copy_from_slice(TTY_MAGIC.as_slice());
+    let path = write_tty_log(b"", &payload, b"");
+    let parsed = parse_tty_log(&path, &[tty_region("result", 12, 0)]).expect("parse");
+    std::fs::remove_file(&path).ok();
+    assert_eq!(parsed[0].data, payload);
+}
+
+/// The overflowing offset is the number the operator has to correct,
+/// so the refusal has to name it and not only the size.
+#[test]
+fn an_offset_that_overflows_is_named_alongside_its_size() {
+    let path = write_tty_log(b"", &[0u8; 8], b"");
+    let regions = vec![tty_region_at("wrap", u64::MAX, 1, 0)];
+    let err = parse_tty_log(&path, &regions).expect_err("offset + size wraps");
+    std::fs::remove_file(&path).ok();
+    match err {
+        Rpcs3Error::TtyOffsetOverflow {
+            ref region_name,
+            offset,
+            size,
+        } => {
+            assert_eq!(region_name, "wrap");
+            assert_eq!(offset, u64::MAX);
+            assert_eq!(size, 1);
+        }
+        other => panic!("expected TtyOffsetOverflow, got {other:?}"),
+    }
+    assert!(
+        err.to_string().contains(&format!("offset={}", u64::MAX)),
+        "the message names the offset: {err}"
+    );
+}
+
+#[test]
+fn a_region_running_past_the_payload_is_rejected() {
+    let payload = vec![0u8; 16];
+    let path = write_tty_log(b"", &payload, b"");
+    let regions = vec![tty_region_at("tail", 12, 8, 12)];
+    let err = parse_tty_log(&path, &regions).expect_err("past the end");
+    std::fs::remove_file(&path).ok();
+    assert!(
+        matches!(
+            err,
+            Rpcs3Error::TtyPayloadTooSmall {
+                expected: 20,
+                actual: 16
+            }
+        ),
+        "got {err:?}"
+    );
 }

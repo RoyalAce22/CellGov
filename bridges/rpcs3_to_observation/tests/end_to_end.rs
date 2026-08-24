@@ -71,7 +71,7 @@ size = "0x8"
     )
     .unwrap();
 
-    let rpcs3_obs_path = work.join("rpcs3.json");
+    let rpcs3_obs_path = work.join("rpcs3_llvm.json");
     let cfg_hash = expected_config_hash_hex();
     let status = Command::new(adapter_bin())
         .args([
@@ -81,6 +81,8 @@ size = "0x8"
             manifest_path.to_str().unwrap(),
             "--outcome",
             "completed",
+            "--decoder",
+            "llvm",
             "--output",
             rpcs3_obs_path.to_str().unwrap(),
             "--config-hash",
@@ -162,7 +164,7 @@ size = "0x4"
     )
     .unwrap();
 
-    let rpcs3_obs_path = work.join("rpcs3.json");
+    let rpcs3_obs_path = work.join("rpcs3_llvm.json");
     let cfg_hash = expected_config_hash_hex();
     let out = Command::new(adapter_bin())
         .args([
@@ -172,6 +174,8 @@ size = "0x4"
             manifest_path.to_str().unwrap(),
             "--outcome",
             "completed",
+            "--decoder",
+            "llvm",
             "--output",
             rpcs3_obs_path.to_str().unwrap(),
             "--config-hash",
@@ -254,6 +258,8 @@ size = "0x10"
             manifest_path.to_str().unwrap(),
             "--outcome",
             "completed",
+            "--decoder",
+            "llvm",
             "--output",
             out_path.to_str().unwrap(),
             "--config-hash",
@@ -267,7 +273,7 @@ size = "0x10"
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("oracle-mode config mismatch"),
+        stderr.contains("reference-mode config mismatch"),
         "diagnostic names the contract: {stderr}"
     );
     assert!(
@@ -278,6 +284,102 @@ size = "0x10"
         !out_path.exists(),
         "adapter must not emit an observation on mismatch"
     );
+}
+
+/// The per-title fixture flow in every `cross_runner/REPRODUCTION.md`
+/// writes `tests/fixtures/<id>/rpcs3/observation.json`, a fixed name
+/// `cellgov_cli fixture-gen --rpcs3` reads back. The decoder rule must
+/// not forbid it.
+#[test]
+fn adapter_accepts_the_fixture_tree_output_name() {
+    let work = tmp("fixture_name");
+
+    let dump_path = work.join("rpcs3.dump");
+    fs::write(&dump_path, [0u8; 16]).unwrap();
+
+    let manifest_path = work.join("manifest.toml");
+    fs::write(
+        &manifest_path,
+        r#"
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x10"
+"#,
+    )
+    .unwrap();
+
+    let out_path = work.join("observation.json");
+    let out = Command::new(adapter_bin())
+        .args([
+            "--dump",
+            dump_path.to_str().unwrap(),
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--outcome",
+            "completed",
+            "--decoder",
+            "llvm",
+            "--output",
+            out_path.to_str().unwrap(),
+            "--config-hash",
+            &expected_config_hash_hex(),
+        ])
+        .output()
+        .expect("adapter runs");
+    assert!(
+        out.status.success(),
+        "adapter rejected the fixture-tree name: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let obs: Observation = serde_json::from_str(&fs::read_to_string(&out_path).unwrap()).unwrap();
+    assert_eq!(obs.metadata.runner, "rpcs3-llvm");
+}
+
+#[test]
+fn adapter_rejects_an_output_named_for_the_other_decoder() {
+    let work = tmp("wrong_decoder_name");
+
+    let dump_path = work.join("rpcs3.dump");
+    fs::write(&dump_path, [0u8; 16]).unwrap();
+
+    let manifest_path = work.join("manifest.toml");
+    fs::write(
+        &manifest_path,
+        r#"
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x10"
+"#,
+    )
+    .unwrap();
+
+    let out_path = work.join("rpcs3_llvm.json");
+    let out = Command::new(adapter_bin())
+        .args([
+            "--dump",
+            dump_path.to_str().unwrap(),
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--outcome",
+            "completed",
+            "--decoder",
+            "interpreter",
+            "--output",
+            out_path.to_str().unwrap(),
+            "--config-hash",
+            &expected_config_hash_hex(),
+        ])
+        .output()
+        .expect("adapter runs");
+    assert!(!out.status.success(), "adapter must refuse the wrong name");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("interpreter") && stderr.contains("llvm"),
+        "diagnostic names both sides: {stderr}"
+    );
+    assert!(!out_path.exists(), "no observation written on refusal");
 }
 
 #[test]

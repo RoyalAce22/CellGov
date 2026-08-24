@@ -299,22 +299,51 @@ fn fcmpu_finite_equal_sets_eq_bit() {
     assert_eq!(s.cr_field(0), 0b0010);
 }
 
-#[test]
-fn fctiw_rounds_toward_zero() {
-    // Convert 3.7 to i32: round-toward-zero (FPSCR unmodeled) -> 3.
+fn conv32(xo: u16, v: f64) -> u32 {
     let mut s = PpuState::new();
-    s.set_fpr(2, f64_bits(3.7));
-    execute_fp63(&mut s, op63(14), 0, 0, 2, 0);
-    assert_eq!(s.fpr[0] & 0xFFFF_FFFF, 3);
+    s.set_fpr(2, f64_bits(v));
+    execute_fp63(&mut s, op63(xo), 0, 0, 2, 0);
+    (s.fpr[0] & 0xFFFF_FFFF) as u32
+}
+
+fn conv64(xo: u16, v: f64) -> i64 {
+    let mut s = PpuState::new();
+    s.set_fpr(2, f64_bits(v));
+    execute_fp63(&mut s, op63(xo), 0, 0, 2, 0);
+    s.fpr[0] as i64
 }
 
 #[test]
-fn fctid_converts_negative_double_to_int64() {
-    // -42.9 -> -42 (round-toward-zero, sign-extended into 64 bits).
-    let mut s = PpuState::new();
-    s.set_fpr(2, f64_bits(-42.9));
-    execute_fp63(&mut s, op63(814), 0, 0, 2, 0);
-    assert_eq!(s.fpr[0] as i64, -42);
+fn fctiw_rounds_to_nearest_even_while_fctiwz_truncates() {
+    // xo = 14 -> fctiw (FPSCR[RN], modelled as round-to-nearest-even);
+    // xo = 15 -> fctiwz (round toward zero).
+    assert_eq!(conv32(14, 3.7), 4);
+    assert_eq!(conv32(15, 3.7), 3);
+    // Ties go to the even neighbour, not away from zero.
+    assert_eq!(conv32(14, 2.5), 2);
+    assert_eq!(conv32(14, 3.5), 4);
+    assert_eq!(conv32(14, -2.5), -2i32 as u32);
+    // Negative magnitudes round the same way; the z form still truncates.
+    assert_eq!(conv32(14, -3.7), -4i32 as u32);
+    assert_eq!(conv32(15, -3.7), -3i32 as u32);
+}
+
+#[test]
+fn fctiw_saturates_past_the_signed_32_bit_endpoints() {
+    // Operand above 2^31-1 -> 0x7FFF_FFFF, below -2^31 -> 0x8000_0000.
+    assert_eq!(conv32(14, 4e9), 0x7FFF_FFFF);
+    assert_eq!(conv32(14, -4e9), 0x8000_0000);
+    assert_eq!(conv32(14, f64::INFINITY), 0x7FFF_FFFF);
+    assert_eq!(conv32(14, f64::NEG_INFINITY), 0x8000_0000);
+}
+
+#[test]
+fn fctid_rounds_to_nearest_even_while_fctidz_truncates() {
+    // xo = 814 -> fctid, xo = 815 -> fctidz.
+    assert_eq!(conv64(814, -42.9), -43);
+    assert_eq!(conv64(815, -42.9), -42);
+    assert_eq!(conv64(814, 2.5), 2);
+    assert_eq!(conv64(814, 3.5), 4);
 }
 
 // ----- single-precision (Fp59) arms -----
@@ -364,4 +393,183 @@ fn fnmsubs_negates_finite_results() {
     // -(2*3 - 1) = -5.
     let r = run59(30, 2.0, 1.0, 3.0);
     assert_eq!(r, -5.0_f32 as f64);
+}
+
+// ----- NaN operand propagation -----
+
+/// QNaN with a distinguishable payload and a clear sign bit.
+const QNAN_A: u64 = 0x7FF8_0000_0000_0AAA;
+/// A second QNaN, sign bit set, so a mis-picked operand is visible.
+const QNAN_C: u64 = 0xFFF8_0000_0000_0BBB;
+/// SNaN: maximum exponent, high-order fraction bit clear, payload set.
+const SNAN_B: u64 = 0x7FF0_0000_0000_0123;
+
+fn run63_bits(xo: u16, fra: u64, frb: u64, frc: u64) -> u64 {
+    let mut s = PpuState::new();
+    s.set_fpr(1, fra);
+    s.set_fpr(2, frb);
+    s.set_fpr(3, frc);
+    execute_fp63(&mut s, op63(xo), 0, 1, 2, 3);
+    s.fpr[0]
+}
+
+#[test]
+fn fmsub_propagates_the_frb_nan_without_flipping_its_sign() {
+    // xo5 = 28 -> fmsub. Computing FRA*FRC + (-FRB) would hand the
+    // FMA a sign-flipped NaN; the architected result is FRB verbatim.
+    let r = run63_bits(28, f64_bits(1.0), QNAN_A, f64_bits(1.0));
+    assert_eq!(r, QNAN_A);
+}
+
+#[test]
+fn fnmsub_propagates_the_frb_nan_without_flipping_its_sign() {
+    // xo5 = 30 -> fnmsub. Neither the operand negation nor the result
+    // negation may touch a propagated QNaN's sign bit.
+    let r = run63_bits(30, f64_bits(1.0), QNAN_A, f64_bits(1.0));
+    assert_eq!(r, QNAN_A);
+}
+
+#[test]
+fn a_multiply_add_picks_the_fra_nan_ahead_of_the_frc_nan() {
+    // xo = 29 -> fmadd. FRA wins the FRA/FRB/FRC precedence walk.
+    let r = run63_bits(29, QNAN_A, f64_bits(1.0), QNAN_C);
+    assert_eq!(r, QNAN_A);
+}
+
+#[test]
+fn a_multiply_add_picks_the_frb_nan_ahead_of_the_frc_nan() {
+    let r = run63_bits(29, f64_bits(1.0), QNAN_A, QNAN_C);
+    assert_eq!(r, QNAN_A);
+}
+
+#[test]
+fn a_propagated_snan_is_quieted_in_place_keeping_sign_and_payload() {
+    let r = run63_bits(29, f64_bits(1.0), SNAN_B, f64_bits(1.0));
+    assert_eq!(r, SNAN_B | 0x0008_0000_0000_0000);
+}
+
+#[test]
+fn fmsubs_propagates_the_frb_nan_at_full_double_width() {
+    // Only frsp clears the low-order bits of a propagated NaN, so the
+    // single-precision multiply-add must not narrow the payload.
+    let mut s = PpuState::new();
+    s.set_fpr(1, f64_bits(1.0));
+    s.set_fpr(2, QNAN_A);
+    s.set_fpr(3, f64_bits(1.0));
+    execute_fp59(&mut s, op59(28), 0, 1, 2, 3);
+    assert_eq!(s.fpr[0], QNAN_A);
+}
+
+// ----- square root -----
+
+#[test]
+fn fsqrt_writes_the_square_root_of_frb() {
+    // xo = 22 -> fsqrt.
+    let mut s = PpuState::new();
+    s.set_fpr(0, 0xDEAD_BEEF);
+    s.set_fpr(2, f64_bits(16.0));
+    execute_fp63(&mut s, op63(22), 0, 0, 2, 0);
+    assert_eq!(f64::from_bits(s.fpr[0]), 4.0);
+}
+
+#[test]
+fn fsqrts_rounds_the_square_root_to_single_precision() {
+    // xo = 22 -> fsqrts.
+    let r = run59(22, 0.0, 2.0, 0.0);
+    assert_eq!(r, (2.0_f32.sqrt()) as f64);
+}
+
+// ----- generated QNaN -----
+
+/// The one QNaN a disabled Invalid Operation Exception may produce.
+const GENERATED: u64 = 0x7FF8_0000_0000_0000;
+
+fn run59_bits(xo: u16, fra: u64, frb: u64, frc: u64) -> u64 {
+    let mut s = PpuState::new();
+    s.set_fpr(1, fra);
+    s.set_fpr(2, frb);
+    s.set_fpr(3, frc);
+    execute_fp59(&mut s, op59(xo), 0, 1, 2, 3);
+    s.fpr[0]
+}
+
+const INF: u64 = 0x7FF0_0000_0000_0000;
+const NEG_INF: u64 = 0xFFF0_0000_0000_0000;
+
+#[test]
+fn every_invalid_operation_yields_the_sign_clear_generated_qnan() {
+    // The host answers each of these with a sign-bit-set QNaN.
+    // xo 18 fdiv, 20 fsub, 21 fadd, 25 fmul, 22 fsqrt, 29 fmadd.
+    assert_eq!(run63_bits(18, 0, 0, 0), GENERATED, "0 / 0");
+    assert_eq!(run63_bits(18, INF, INF, 0), GENERATED, "inf / inf");
+    assert_eq!(run63_bits(20, INF, INF, 0), GENERATED, "inf - inf");
+    assert_eq!(run63_bits(21, INF, NEG_INF, 0), GENERATED, "inf + -inf");
+    assert_eq!(run63_bits(25, 0, 0, INF), GENERATED, "0 * inf");
+    assert_eq!(
+        run63_bits(22, 0, f64_bits(-1.0), 0),
+        GENERATED,
+        "sqrt of a negative"
+    );
+    assert_eq!(
+        run63_bits(29, INF, f64_bits(1.0), 0),
+        GENERATED,
+        "fmadd with an inf * 0 product"
+    );
+}
+
+#[test]
+fn a_single_precision_invalid_operation_yields_the_same_generated_qnan() {
+    // xo 18 fdivs, 21 fadds, 22 fsqrts.
+    assert_eq!(run59_bits(18, 0, 0, 0), GENERATED, "0 / 0");
+    assert_eq!(run59_bits(21, INF, NEG_INF, 0), GENERATED, "inf + -inf");
+    assert_eq!(
+        run59_bits(22, 0, f64_bits(-1.0), 0),
+        GENERATED,
+        "sqrt of a negative"
+    );
+}
+
+// ----- NaN precedence on the two-operand arms -----
+
+#[test]
+fn an_add_propagates_the_fra_nan_ahead_of_the_frb_nan() {
+    // xo = 21 -> fadd. Both orders are pinned so the answer cannot
+    // start tracking whichever operand host codegen places first.
+    assert_eq!(run63_bits(21, QNAN_C, QNAN_A, 0), QNAN_C);
+    assert_eq!(run63_bits(21, QNAN_A, QNAN_C, 0), QNAN_A);
+}
+
+#[test]
+fn a_multiply_picks_the_fra_nan_ahead_of_the_frc_nan() {
+    // xo = 25 -> fmul.
+    assert_eq!(run63_bits(25, QNAN_C, 0, QNAN_A), QNAN_C);
+    assert_eq!(run63_bits(25, QNAN_A, 0, QNAN_C), QNAN_A);
+}
+
+#[test]
+fn a_nan_in_a_reserved_register_field_never_reaches_frt() {
+    // fmul reads FRA and FRC; fdiv, fadd and fsub read FRA and FRB.
+    // The register the instruction does not name is a reserved field.
+    assert_eq!(
+        run63_bits(25, f64_bits(3.0), QNAN_A, f64_bits(4.0)),
+        f64_bits(12.0)
+    );
+    assert_eq!(
+        run63_bits(18, f64_bits(8.0), f64_bits(2.0), QNAN_A),
+        f64_bits(4.0)
+    );
+    assert_eq!(
+        run59_bits(25, f64_bits(3.0), QNAN_A, f64_bits(4.0)),
+        f64_bits(12.0)
+    );
+    assert_eq!(
+        run59_bits(18, f64_bits(8.0), f64_bits(2.0), QNAN_A),
+        f64_bits(4.0)
+    );
+}
+
+#[test]
+fn fadds_propagates_the_fra_nan_at_full_double_width() {
+    // Narrowing the operands to f32 first would truncate the payload.
+    assert_eq!(run59_bits(21, QNAN_A, f64_bits(1.0), 0), QNAN_A);
 }

@@ -51,6 +51,65 @@ pub enum ManifestError {
     },
 }
 
+/// Root-level table names the nested `[cellgov]` layout would shadow.
+/// Must stay equal to [`ManifestFile`]'s field set: a table present in
+/// the struct but missing here is read from `[cellgov]` and silently
+/// dropped from the root. `root_table_keys_cover_every_manifest_table`
+/// holds the two together.
+const ROOT_TABLE_KEYS: [&str; 6] = ["title", "checkpoint", "source", "rsx", "content", "fs"];
+
+/// Directory holding `origin`, or `.` for a bare filename. Joining
+/// onto `.` keeps a manifest-relative path relative instead of
+/// silently rooting it at the process cwd.
+fn manifest_dir(origin: &Path) -> PathBuf {
+    match origin.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p.to_path_buf(),
+        _ => PathBuf::from("."),
+    }
+}
+
+/// True when `raw` carries a drive prefix or a leading separator, i.e.
+/// when `Path::join` would drop the base it is being joined onto rather
+/// than extend it. Covers the Windows drive-relative form (`C:build`)
+/// as well as rooted (`\build`) and fully absolute paths, which
+/// `Path::is_absolute` alone does not.
+fn discards_its_base(raw: &str) -> bool {
+    use std::path::Component;
+    Path::new(raw)
+        .components()
+        .next()
+        .is_some_and(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+}
+
+/// Reject a `[source] path` that names no directory. An empty string
+/// parses as the empty path, which `join` treats as a no-op, so the
+/// executable would be looked up against whatever base happened to be
+/// there -- the process cwd for `firmware-exec`. Name the refusal
+/// instead of resolving a directory the manifest never declared.
+fn reject_empty_source_path(origin: &Path, kind: &str, raw: &str) -> Result<(), ManifestError> {
+    if raw.is_empty() {
+        return Err(ManifestError::Parse {
+            path: origin.to_path_buf(),
+            message: format!(
+                "source kind '{kind}' has an empty 'path'; an empty path names no \
+                 directory and would leave the executable to be resolved against the \
+                 process's current directory. State the directory holding it."
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Identity for a manifest-relative title: the directory the manifest
+/// sits in, so `tests/micro/<name>/manifest.toml` yields `<name>`.
+fn derive_content_id(origin: &Path) -> Option<String> {
+    origin
+        .parent()?
+        .file_name()?
+        .to_str()
+        .map(std::string::ToString::to_string)
+}
+
 fn render_files_identical_hint(files_identical: bool) -> &'static str {
     if files_identical {
         " (files are byte-identical; one is likely a stray copy)"
@@ -85,12 +144,11 @@ impl TitleManifest {
                 });
             }
             if let Some(table) = raw.as_table() {
-                let conflicting: Vec<&str> =
-                    ["title", "checkpoint", "source", "rsx", "content", "fs"]
-                        .iter()
-                        .copied()
-                        .filter(|k| table.contains_key(*k))
-                        .collect();
+                let conflicting: Vec<&str> = ROOT_TABLE_KEYS
+                    .iter()
+                    .copied()
+                    .filter(|k| table.contains_key(*k))
+                    .collect();
                 if !conflicting.is_empty() {
                     return Err(ManifestError::Parse {
                         path: origin.to_path_buf(),
@@ -152,28 +210,83 @@ impl TitleManifest {
                               derive it from"
                         .to_string(),
                 })?;
+                reject_empty_source_path(origin, "firmware-exec", &dir)?;
                 GameSource::FirmwareExec {
                     dir: PathBuf::from(dir),
+                }
+            }
+            Some("manifest-relative") => {
+                let rel = source_path.clone().ok_or_else(|| ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: "source kind 'manifest-relative' requires a 'path = \"...\"' \
+                              directory holding the executable, named relative to this \
+                              manifest"
+                        .to_string(),
+                })?;
+                reject_empty_source_path(origin, "manifest-relative", &rel)?;
+                if discards_its_base(&rel) {
+                    return Err(ManifestError::Parse {
+                        path: origin.to_path_buf(),
+                        message: format!(
+                            "source kind 'manifest-relative' path {rel:?} is rooted or \
+                             carries a drive prefix, so joining it onto the manifest's \
+                             directory would discard that directory and the reference \
+                             would not be manifest-relative at all. Name the directory \
+                             relative to this manifest, or use kind = \"firmware-exec\" \
+                             for a host-absolute one."
+                        ),
+                    });
+                }
+                GameSource::ManifestRelative {
+                    dir: manifest_dir(origin).join(rel),
                 }
             }
             Some(other) => {
                 return Err(ManifestError::Parse {
                     path: origin.to_path_buf(),
                     message: format!(
-                        "unknown source kind '{other}' (accepted: disc, hdd, firmware-exec)"
+                        "unknown source kind '{other}' \
+                         (accepted: disc, hdd, firmware-exec, manifest-relative)"
                     ),
                 });
             }
             None => GameSource::Hdd,
         };
-        if source_path.is_some() && !matches!(source, GameSource::FirmwareExec { .. }) {
+        if source_path.is_some()
+            && !matches!(
+                source,
+                GameSource::FirmwareExec { .. } | GameSource::ManifestRelative { .. }
+            )
+        {
             return Err(ManifestError::Parse {
                 path: origin.to_path_buf(),
-                message: "[source] path is only meaningful for kind = \"firmware-exec\"; \
-                          hdd and disc titles derive their directory from content_id"
+                message: "[source] path is only meaningful for kind = \"firmware-exec\" \
+                          or kind = \"manifest-relative\"; hdd and disc titles derive \
+                          their directory from content_id"
                     .to_string(),
             });
         }
+        let content_id = match file.title.content_id {
+            Some(id) => id,
+            None if matches!(source, GameSource::ManifestRelative { .. }) => {
+                derive_content_id(origin).ok_or_else(|| ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: "[title] content_id omitted and no directory name to derive \
+                              it from; give the manifest a parent directory or state a \
+                              content_id"
+                        .to_string(),
+                })?
+            }
+            None => {
+                return Err(ManifestError::Parse {
+                    path: origin.to_path_buf(),
+                    message: "[title] content_id is required: it keys the registry and \
+                              names the directory an hdd or disc title boots from. Only a \
+                              manifest-relative title, which has no PSN identity, may omit it."
+                        .to_string(),
+                });
+            }
+        };
         let (rsx_mirror, rsx_consume) = file
             .rsx
             .as_ref()
@@ -247,7 +360,7 @@ impl TitleManifest {
                 path: origin.to_path_buf(),
                 message: format!(
                     "unknown distribution {:?} \
-                     (accepted: psn-hdd, retail-hdd, disc-iso, firmware-exec)",
+                     (accepted: psn-hdd, retail-hdd, disc-iso, firmware-exec, microtest)",
                     file.title.distribution
                 ),
             }
@@ -275,7 +388,7 @@ impl TitleManifest {
             }
         }
         Ok(TitleManifest {
-            content_id: file.title.content_id,
+            content_id,
             short_name: file.title.short_name,
             display_name: file.title.display_name,
             eboot_candidates: file.title.eboot_candidates,

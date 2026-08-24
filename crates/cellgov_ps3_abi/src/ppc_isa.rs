@@ -52,3 +52,12 @@ pub const PPC_BCCTR_XO: u32 = 528;
 /// Register). Used inside the `19 << 26` major-opcode group.
 // [PPC-Book1 p:25 s:Branch Conditional to Link Register]
 pub const PPC_BCLR_XO: u32 = 16;
+
+/// High-order fraction bit that distinguishes a QNaN from an SNaN in
+/// double format; setting it quiets a propagated SNaN.
+// [PPC-Book1 p:91 s:4.3.2] An SNaN becomes a QNaN by setting the high-order fraction bit.
+pub const PPC_F64_QUIET_BIT: u64 = 0x0008_0000_0000_0000;
+
+/// The single QNaN every disabled Invalid Operation Exception yields.
+// [PPC-Book1 p:91 s:4.3.2] Generated QNaN: sign 0, exponent all 1s, high-order fraction bit 1, rest 0.
+pub const PPC_GENERATED_QNAN_F64: u64 = 0x7FF8_0000_0000_0000;

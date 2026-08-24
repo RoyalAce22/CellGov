@@ -21,7 +21,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-use super::args::{find_flag_value, parse_hex_u64};
+use super::args::{find_flag_value, has_bool_flag, parse_hex_u64};
 use super::exit::die;
 
 const HEADER_MAGIC: u32 = 0xC0E6_0001;
@@ -250,8 +250,8 @@ pub fn run(args: &[String]) {
         ));
     }
 
-    let want_list = args.iter().any(|a| a == "--list");
-    let want_ranked = args.iter().any(|a| a == "--ranked");
+    let want_list = has_bool_flag(args, "--list");
+    let want_ranked = has_bool_flag(args, "--ranked");
     let addr_arg = find_flag_value(args, "--addr");
     let name_filter = find_flag_value(args, "--name");
 

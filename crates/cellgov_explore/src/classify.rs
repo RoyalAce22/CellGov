@@ -30,6 +30,13 @@ pub struct ScheduleRecord {
     pub alternate_choice: UnitId,
     /// Final committed-memory hash after the alternate ran.
     pub memory_hash: u64,
+    /// True when this alternate's replay, or the baseline it is
+    /// measured against, stopped before the workload finished.
+    ///
+    /// `memory_hash` is then a prefix hash and comparing it to
+    /// `ExplorationResult::baseline_hash` says nothing about schedule
+    /// sensitivity.
+    pub truncated: bool,
 }
 
 /// Aggregate result of a bounded exploration run.
@@ -47,6 +54,10 @@ pub struct ExplorationResult {
     pub bounds_hit: bool,
     /// Alternates skipped by dependency pruning.
     pub schedules_pruned: usize,
+    /// Alternates whose recorded hash covers only a prefix of their
+    /// schedule, counting every record when the baseline itself
+    /// stopped short.
+    pub schedules_truncated: usize,
 }
 
 #[cfg(test)]

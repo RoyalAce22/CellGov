@@ -21,11 +21,19 @@ pub fn format_human(result: &CompareResult) -> String {
     }
 
     if let Some(d) = &result.memory_divergence {
-        let _ = writeln!(
+        let _ = write!(
             out,
             "memory: region=\"{}\" offset={} expected=0x{:02x} actual=0x{:02x}",
             d.region, d.offset, d.expected, d.actual
         );
+        match d.lengths {
+            Some((e, a)) => {
+                let _ = writeln!(out, " expected_len={e} actual_len={a}");
+            }
+            None => {
+                let _ = writeln!(out);
+            }
+        }
     }
 
     if let Some(d) = &result.event_divergence {

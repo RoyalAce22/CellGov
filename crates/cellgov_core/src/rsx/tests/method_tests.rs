@@ -258,6 +258,7 @@ fn ctx_for<'a>(
     NvDispatchContext {
         cursor,
         sem_offset,
+        label_base: 0,
         emitted,
         now: GuestTicks::ZERO,
     }
@@ -505,9 +506,20 @@ fn ctx_with_time<'a>(
     emitted: &'a mut Vec<Effect>,
     now: GuestTicks,
 ) -> NvDispatchContext<'a> {
+    ctx_with_time_and_label_base(cursor, sem_offset, emitted, now, 0)
+}
+
+fn ctx_with_time_and_label_base<'a>(
+    cursor: &'a mut RsxFifoCursor,
+    sem_offset: &'a mut u32,
+    emitted: &'a mut Vec<Effect>,
+    now: GuestTicks,
+    label_base: u32,
+) -> NvDispatchContext<'a> {
     NvDispatchContext {
         cursor,
         sem_offset,
+        label_base,
         emitted,
         now,
     }
@@ -570,6 +582,74 @@ fn nv4097_get_report_passes_full_u32_as_offset() {
         &[Effect::RsxLabelWrite {
             offset: 0xFF12_3456,
             value: 7,
+        }]
+    );
+}
+
+/// The argument's offset field is relative to the report block, so a
+/// base-relative dispatch has to clear the semaphore and notify
+/// blocks in front of it.
+#[test]
+fn a_report_offset_lands_in_the_report_block_under_a_label_base() {
+    use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
+    let mut ctx = ctx_with_time_and_label_base(
+        &mut cursor,
+        &mut sem_offset,
+        &mut emitted,
+        GuestTicks::new(9),
+        0x3020_0000,
+    );
+    nv4097_get_report(&mut ctx, &[0x30]);
+    assert_eq!(
+        emitted.as_slice(),
+        &[Effect::RsxLabelWrite {
+            offset: REPORTS_REPORT_OFFSET + 0x30,
+            value: 9,
+        }]
+    );
+}
+
+/// Report entry 0 must not resolve onto semaphore slot 0, which is
+/// what an unbased offset of zero would hit.
+#[test]
+fn report_entry_zero_does_not_alias_semaphore_slot_zero() {
+    use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
+    let mut ctx = ctx_with_time_and_label_base(
+        &mut cursor,
+        &mut sem_offset,
+        &mut emitted,
+        GuestTicks::new(3),
+        0x3020_0000,
+    );
+    nv4097_get_report(&mut ctx, &[0]);
+    let Effect::RsxLabelWrite { offset, .. } = emitted[0] else {
+        panic!("expected RsxLabelWrite");
+    };
+    assert_eq!(offset, REPORTS_REPORT_OFFSET);
+    assert_ne!(offset, 0);
+}
+
+/// The semaphore families stay base-relative with no block offset --
+/// only the report block sits behind one.
+#[test]
+fn a_semaphore_release_under_a_label_base_carries_the_bare_offset() {
+    let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
+    let mut ctx = ctx_with_time_and_label_base(
+        &mut cursor,
+        &mut sem_offset,
+        &mut emitted,
+        GuestTicks::ZERO,
+        0x3020_0000,
+    );
+    nv406e_semaphore_offset(&mut ctx, &[0x20]);
+    nv406e_semaphore_release(&mut ctx, &[0xAABB_CCDD]);
+    assert_eq!(
+        emitted.as_slice(),
+        &[Effect::RsxLabelWrite {
+            offset: 0x20,
+            value: 0xAABB_CCDD,
         }]
     );
 }

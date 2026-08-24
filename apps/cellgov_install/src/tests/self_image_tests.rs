@@ -1,3 +1,6 @@
+//! SELF-vs-plaintext detection and the key policy that decides whether
+//! an NPDRM wrapper may be opened at all.
+
 use std::borrow::Cow;
 
 use super::{into_plaintext_elf, is_sce_wrapped, to_plaintext_elf, KeyPolicy};
@@ -111,7 +114,12 @@ fn a_supplemental_chain_that_escapes_the_buffer_is_refused_by_name() {
     let err =
         to_plaintext_elf(&raw, KeyPolicy::AppOnly).expect_err("the chain runs past the buffer");
     assert!(
-        matches!(err, SceError::HeaderOffsetOutOfRange { .. }),
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "SELF supplemental headers"
+            }
+        ),
         "an unwalkable chain must surface as itself, got {err:?}"
     );
 }
@@ -151,17 +159,34 @@ fn an_npdrm_record_with_a_truncated_npd_body_is_not_retried_under_app_keys() {
     let err = to_plaintext_elf(&raw, KeyPolicy::AppOnly)
         .expect_err("an NPDRM record is present, so APP keys cannot open it");
     assert!(
-        matches!(err, SceError::HeaderOffsetOutOfRange { .. }),
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "NPDRM supplemental NPD body"
+            }
+        ),
         "a truncated NPD body must surface its own error, got {err:?}"
     );
 }
 
 #[test]
-fn an_npdrm_self_under_auto_policy_is_not_refused_for_lack_of_a_key_path() {
+fn an_npdrm_self_under_auto_policy_consults_the_klicensee_lookup_instead_of_refusing() {
     let raw = build_npdrm_eboot_header(1, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
-    let resolver = |_: &crate::npdrm::NpdHeaderInfo| Some([0u8; 16]);
+    let consulted = std::cell::Cell::new(0usize);
+    let resolver = |npd: &crate::npdrm::NpdHeaderInfo| {
+        consulted.set(consulted.get() + 1);
+        assert_eq!(npd.content_id, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
+        Some([0u8; 16])
+    };
     let err = to_plaintext_elf(&raw, KeyPolicy::Auto(&resolver))
         .expect_err("the synthetic header is not a decryptable SELF");
+    // Without the counter this passes on any early failure that never
+    // reaches a key at all.
+    assert_eq!(
+        consulted.get(),
+        1,
+        "Auto must resolve the klicensee exactly once, got {err:?}"
+    );
     assert!(
         !matches!(err, SceError::NpdrmUnderAppOnlyPolicy { .. }),
         "Auto has a klicensee path, so the APP-only refusal must not fire, got {err:?}"

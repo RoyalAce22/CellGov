@@ -1,5 +1,7 @@
 //! Regenerate `docs/dev/audits/firmware_export_conflict_census.md` from
-//! the installed firmware corpus. Run with:
+//! the installed firmware corpus. The destination is gitignored, so this
+//! writes a local-only artifact and a fresh clone will not have one. Run
+//! with:
 //!
 //! ```text
 //! cargo test -p cellgov_cli --test firmware_export_conflict_census --release \
@@ -80,30 +82,26 @@ fn regenerate_firmware_export_conflict_census() {
         .parent()
         .expect("firmware dir always has a parent")
         .join("internal");
+    // The verdict is drawn over both mounts, so an absent sibling is a
+    // corpus failure rather than a smaller census: `cellgov_install
+    // install` writes `sys/internal` alongside `sys/external`.
+    assert!(
+        internal.is_dir(),
+        "no firmware corpus at {}; the census covers both mounts. \
+         Run `cellgov_install install <PS3UPDAT.PUP>` to populate it.",
+        internal.display()
+    );
 
     let mut candidates: Vec<(&'static str, PathBuf)> = Vec::new();
     for p in sprx_paths_in(&external) {
         candidates.push(("external", p));
     }
-    if internal.is_dir() {
-        for p in sprx_paths_in(&internal) {
-            candidates.push(("internal", p));
-        }
+    for p in sprx_paths_in(&internal) {
+        candidates.push(("internal", p));
     }
 
     let mut modules: Vec<Module> = Vec::new();
     let mut skipped: Vec<(String, String)> = Vec::new();
-    // The census claims to cover the internal sibling; an absent
-    // directory must show up in the report, not shrink it silently.
-    if !internal.is_dir() {
-        skipped.push((
-            "internal/".to_string(),
-            format!(
-                "directory absent ({}); internal modules not censused",
-                internal.display()
-            ),
-        ));
-    }
 
     for (origin, path) in &candidates {
         let name = path
@@ -301,6 +299,20 @@ fn regenerate_firmware_export_conflict_census() {
     writeln!(out).expect("write to String");
     writeln!(out, "| Measurement | Count |").expect("write to String");
     writeln!(out, "|---|---:|").expect("write to String");
+    // The population the verdict is drawn over. Without it a reader
+    // cannot tell "no conflicts" from "nothing was parsed".
+    writeln!(
+        out,
+        "| Distinct exported NIDs (before shadowing) | {} |",
+        by_nid_preshadow.len()
+    )
+    .expect("write to String");
+    writeln!(
+        out,
+        "| Namespaces with a retained provider | {} |",
+        provider_of_namespace.len()
+    )
+    .expect("write to String");
     writeln!(out, "| Shadowed export libraries | {} |", shadowed.len()).expect("write to String");
     writeln!(
         out,
@@ -480,5 +492,19 @@ fn regenerate_firmware_export_conflict_census() {
         modules.len(),
         candidates.len(),
         skipped.len(),
+    );
+    // A parsed module count does not witness a single export: an
+    // export-parsing regression that returned no libraries clears the
+    // floor above and still lands on "World 0 -- no cross-module NID
+    // conflicts at all", the same verdict a healthy corpus would have
+    // to disprove.
+    assert!(
+        by_nid_preshadow.len() >= 1000 && provider_of_namespace.len() >= 50,
+        "{} distinct exported NID(s) under {} namespace(s) across {} modules; \
+         the firmware set publishes thousands under dozens of namespaces, so \
+         every conflict table above was computed over nothing",
+        by_nid_preshadow.len(),
+        provider_of_namespace.len(),
+        modules.len(),
     );
 }

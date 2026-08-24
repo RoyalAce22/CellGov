@@ -79,11 +79,26 @@ comparable. The canonical settings are checked in at
 `oracle_mode_config.yml`; `rpcs3-to-observation` refuses dumps
 whose `--config-hash` does not match the hash of that file.
 
+What that gate does and does not reach: it compares the hash the
+operator supplies against the hash of the checked-in YAML. It never
+reads the RPCS3 config the capture actually ran under, so it cannot
+tell a correctly-configured run from a misconfigured one. Its reach
+is a capture whose recorded hash predates an edit to the hashed
+block -- a capture made under an older contract. Record the hash
+once, before the run, and carry that value forward with the dump;
+re-deriving it at conversion time (`--config-hash "$(... \
+--print-expected-config-hash)"` in one shell line) makes the gate
+pass unconditionally.
+
 Single ProcessExit dump (backward-compatible with prior versions):
+
+The `addr:size` pairs below are WipEout's, copied from
+`tests/fixtures/BCES00664/checkpoint.toml`. Use the pairs from the
+manifest of the title being captured.
 
 ```bash
 export CELLGOV_DUMP_PATH=/tmp/wipeout_processexit.dump
-export CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x860000:0xd7000
+export CELLGOV_DUMP_REGIONS=0x10000:0x848e48,0x860000:0xd6f80
 ./rpcs3 path/to/EBOOT.elf
 ```
 
@@ -93,15 +108,20 @@ Triple dump (ProcessExit + RSX1 + RSX2) in one boot:
 export CELLGOV_DUMP_PATH=/tmp/wipeout_processexit.dump
 export CELLGOV_DUMP_PATH_RSX=/tmp/wipeout_rsx1.dump
 export CELLGOV_DUMP_PATH_RSX2=/tmp/wipeout_rsx2.dump
-export CELLGOV_DUMP_REGIONS=0x10000:0x800000,0x860000:0xd7000
+export CELLGOV_DUMP_REGIONS=0x10000:0x848e48,0x860000:0xd6f80
 ./rpcs3 path/to/EBOOT.elf
 ```
 
 Each region is written contiguously in declaration order. The region
 manifest passed to `rpcs3-to-observation` must list the same regions
 in the same order; the dump file has no internal structure beyond
-that contract. Each of the three output files uses the same
-region manifest.
+that contract. The bridge holds the two to that: a dump whose length
+is not exactly the manifest's declared total is refused rather than
+sliced from the wrong offsets. The hook prints the total it wrote,
+and names any `CELLGOV_DUMP_REGIONS` entry it declined -- an entry
+that is not a hex `addr:size` pair, declares zero bytes, or runs past
+the 32-bit guest address space contributes nothing and is reported on
+stderr. Each of the three output files uses the same region manifest.
 
 ## Skews and the tearing noise floor
 
@@ -147,7 +167,10 @@ The ProcessExit trigger has neither skew. CG-vs-RPCS3-at-ProcessExit
 comparisons are bit-exact aside from honestly-classified bytes.
 
 To convert the dump, ask the bridge for the expected config hash
-and pass it alongside the dump:
+and pass it alongside the dump. `--decoder` names the decoder pair
+RPCS3 ran under, taken from the `Decoders` map in
+`oracle_mode_config.yml`; it is required, and it is what the
+observation's `metadata.runner` records.
 
 ```bash
 EXPECTED=$(cargo run -q -p rpcs3_to_observation -- --print-expected-config-hash)
@@ -155,6 +178,7 @@ cargo run -q -p rpcs3_to_observation -- \
     --dump /tmp/flow_rpcs3.dump \
     --manifest tests/fixtures/NPUA80001/checkpoint.toml \
     --outcome completed \
+    --decoder llvm \
     --output /tmp/flow_rpcs3.json \
     --config-hash "$EXPECTED"
 ```
@@ -336,8 +360,8 @@ ground truth.
 CELLGOV_PPU_TRACE_PATH=/tmp/cellgov_trace.bin \
 CELLGOV_PPU_TRACE_MAX_RECORDS=1000 \
 CELLGOV_PPU_TRACE_PRIMARY=31 \
-  scripts/rpcs3-launch.sh --headless \
-    /d/cellgov/tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN
+  ./tools/rpcs3/rpcs3.exe --headless \
+    tools/rpcs3/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN
 
 # 3a. Spot-check the dump parses:
 cargo run --release -p cellgov_ppu --example parse_rpcs3_trace \

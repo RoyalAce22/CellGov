@@ -186,6 +186,38 @@ fn read_checked_reports_unmapped_with_nearest_regions() {
 }
 
 #[test]
+fn a_range_overrunning_its_region_end_faults_with_a_mapped_start_address() {
+    let mem = GuestMemory::from_regions(vec![
+        Region::new(0, 0x100, "user_heap", PageSize::Page64K),
+        Region::new(0x200, 0x100, "rsx", PageSize::Page64K),
+    ])
+    .unwrap();
+    // 0xFC is inside user_heap; the last four bytes are not.
+    let err = mem.read_checked(range(0xFC, 8)).unwrap_err();
+    match err {
+        MemError::Unmapped(ctx) => {
+            assert_eq!(ctx.addr, 0xFC);
+            assert!(
+                mem.containing_region(ctx.addr, 1).is_some(),
+                "the reported fault address is itself mapped",
+            );
+            assert_eq!(ctx.nearest_below, Some("user_heap"));
+            assert_eq!(ctx.nearest_above, Some("rsx"));
+        }
+        other => panic!("expected Unmapped, got {:?}", other),
+    }
+}
+
+#[test]
+fn a_range_ending_exactly_on_a_region_end_is_readable() {
+    let mem =
+        GuestMemory::from_regions(vec![Region::new(0, 0x100, "user_heap", PageSize::Page64K)])
+            .unwrap();
+    assert_eq!(mem.read_checked(range(0xFC, 4)).unwrap().len(), 4);
+    assert!(mem.read_checked(range(0xFC, 5)).is_err());
+}
+
+#[test]
 fn fault_context_no_regions_below_returns_none() {
     let mem =
         GuestMemory::from_regions(vec![Region::new(0x1000, 0x100, "heap", PageSize::Page64K)])
@@ -573,4 +605,50 @@ fn reset_for_reuse_panics_when_arc_is_shared() {
     mem.apply_commit(range(0, 4), &[1, 2, 3, 4]).unwrap();
     let _snap = mem.clone();
     mem.reset_for_reuse();
+}
+
+#[test]
+fn a_region_running_past_the_end_of_the_address_space_is_not_an_overlap() {
+    // Nothing is in the way; the region simply does not fit. Region::end
+    // saturates, so without the check this is admitted with an
+    // unaddressable tail.
+    let err = GuestMemory::from_regions(vec![Region::new(
+        u64::MAX - 0xFF,
+        0x200,
+        "past_the_end",
+        PageSize::Page64K,
+    )])
+    .unwrap_err();
+    assert_eq!(
+        err,
+        MemError::RegionOverflow {
+            base: u64::MAX - 0xFF,
+            size: 0x200,
+        }
+    );
+
+    let mut mem = GuestMemory::from_regions(vec![]).unwrap();
+    let err = mem
+        .install_region(u64::MAX - 0xFF, 0x200, "past_the_end", PageSize::Page64K)
+        .unwrap_err();
+    assert_eq!(
+        err,
+        MemError::RegionOverflow {
+            base: u64::MAX - 0xFF,
+            size: 0x200,
+        }
+    );
+}
+
+#[test]
+fn a_region_ending_exactly_at_the_top_of_the_address_space_is_accepted() {
+    // The exclusive end must stay representable, matching ByteRange.
+    let mem = GuestMemory::from_regions(vec![Region::new(
+        u64::MAX - 0x100,
+        0x100,
+        "top",
+        PageSize::Page64K,
+    )])
+    .unwrap();
+    assert_eq!(mem.regions().count(), 1);
 }

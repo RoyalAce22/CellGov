@@ -12,8 +12,9 @@ pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 
 /// Cell BE PPU L1/L2 cache line size in bytes. Reservation
 /// granularity for `lwarx`/`stwcx.`, dcbz target alignment, and the
-/// stride PS3 atomic primitives assume. Architecturally fixed at 128
-/// bytes by the CBE PPU specification.
+/// stride PS3 atomic primitives assume.
+// [CBE-Handbook p:135 s:6.1] The coherence block equals the 128-byte cache-line
+// size for every PPE cache, so the reservation granule is 128 bytes.
 pub const RESERVATION_LINE_BYTES: u64 = 128;
 
 /// `dcbz` block size on the Cell PPU: the implementation's data cache
@@ -23,19 +24,26 @@ pub const RESERVATION_LINE_BYTES: u64 = 128;
 pub const DCBZ_BLOCK_BYTES: usize = 128;
 
 /// Number of PPU general-purpose registers (r0..r31).
-// [PPC-Book1 p:41 s:3.2.1] 32 General Purpose Registers (GPRs).
+// [PPC-Book1 p:31 s:3.2.1] The Fixed-Point Processor's principal internal
+// storage is 32 General Purpose Registers, each 64 bits wide.
 pub const GPR_COUNT: usize = 32;
 
 /// Number of PPU floating-point registers (f0..f31).
-// [PPC-Book1 p:97 s:4.2 Figure 27] 32 Floating-Point Registers (FPRs).
+// [PPC-Book1 p:86 s:4.2.1] Implementations provide 32 floating-point registers
+// numbered 0-31, each holding 64 bits.
 pub const FPR_COUNT: usize = 32;
 
 /// Number of PPU vector (AltiVec / VMX) registers (v0..v31).
-// [AltiVec-PEM p:40 s:2.3.1] VRF: 32 vector registers, each 128 bits wide.
+// [AltiVec-PEM p:2-4 s:2.3.1] VRF: 32 vector registers, each 128 bits wide.
 pub const VR_COUNT: usize = 32;
 
-/// Cell BE effective-address space upper bound (42 bits).
-// [CBE-Handbook p:75 s:4.5.1]
+/// Highest guest address that can be backed by real storage (2^42 - 1).
+///
+/// Not a bound on address arithmetic: a program's effective addresses
+/// span the full 64-bit range. Callers use this to reject an address
+/// no PS3 storage mapping could ever satisfy.
+// [CBE-Handbook p:51 s:2.1] PPE MMU address-space sizes: real address 2^42
+// bytes, effective address 2^64 bytes, virtual address 2^65 bytes.
 pub const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
 
 /// SPU local store size in bytes (256 KiB).
@@ -43,5 +51,6 @@ pub const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
 pub const SPU_LS_SIZE: usize = 256 * 1024;
 
 /// Number of SPU general-purpose 128-bit registers (r0..r127).
-// [SPU-ISA p:5 s:1.4] 128 GPRs, each 128 bits wide.
+// [SPU-ISA p:25 s:2] The SPU architecture defines 128 general-purpose
+// registers, each holding 128 data bits.
 pub const SPU_REG_COUNT: usize = 128;

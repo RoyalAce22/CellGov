@@ -23,7 +23,17 @@ fn rs_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn check_items(items: &[syn::Item], file: &Path, violations: &mut Vec<(PathBuf, usize, String)>) {
+/// Number of `mod tests` declarations that satisfied the rule.
+///
+/// Tallied so the gate can prove it inspected something: a guard that
+/// recognises no declaration at all reports the same empty violation
+/// list as a conforming workspace.
+fn check_items(
+    items: &[syn::Item],
+    file: &Path,
+    violations: &mut Vec<(PathBuf, usize, String)>,
+) -> usize {
+    let mut conforming = 0;
     for item in items {
         let syn::Item::Mod(m) = item else { continue };
         if m.ident == "tests" {
@@ -40,12 +50,57 @@ fn check_items(items: &[syn::Item], file: &Path, violations: &mut Vec<(PathBuf, 
                     line,
                     "bare `mod tests;` without #[path]".to_string(),
                 ));
+            } else {
+                conforming += 1;
             }
         }
         if let Some((_, nested)) = &m.content {
-            check_items(nested, file, violations);
+            conforming += check_items(nested, file, violations);
         }
     }
+    conforming
+}
+
+/// Floor on the population the rule polices. Nearly every crate in the
+/// workspace declares one, so a collapse to single digits means the
+/// matcher stopped recognising the declaration.
+const MIN_CONFORMING_MODULES: usize = 150;
+
+/// Positive control: the two rejected spellings and the accepted one,
+/// checked against the matcher directly rather than through an empty
+/// violation list.
+#[test]
+fn the_matcher_separates_the_accepted_declaration_from_the_two_rejected_ones() {
+    fn run(src: &str) -> (usize, Vec<String>) {
+        let ast = syn::parse_file(src).expect("test source parses");
+        let mut v = Vec::new();
+        let n = check_items(&ast.items, Path::new("x.rs"), &mut v);
+        (n, v.into_iter().map(|(_, _, what)| what).collect())
+    }
+
+    let (n, v) = run("#[cfg(test)]
+#[path = \"tests/host_tests.rs\"]
+mod tests;
+");
+    assert_eq!((n, v.len()), (1, 0));
+
+    let (n, v) = run("#[cfg(test)]
+mod tests {
+    fn f() {}
+}
+");
+    assert_eq!(n, 0);
+    assert_eq!(v, vec!["inline `mod tests { }` body".to_string()]);
+
+    let (n, v) = run("#[cfg(test)]
+mod tests;
+");
+    assert_eq!(n, 0);
+    assert_eq!(v, vec!["bare `mod tests;` without #[path]".to_string()]);
+
+    let (n, v) = run("mod other;
+");
+    assert_eq!((n, v.len()), (0, 0), "only a module named tests is policed");
 }
 
 #[test]
@@ -77,15 +132,21 @@ fn unit_test_modules_are_external_files() {
     );
 
     let mut violations = Vec::new();
+    let mut conforming = 0usize;
     for file in &files {
         let source = fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
         match syn::parse_file(&source) {
-            Ok(ast) => check_items(&ast.items, file, &mut violations),
+            Ok(ast) => conforming += check_items(&ast.items, file, &mut violations),
             Err(e) => violations.push((file.clone(), 0, format!("parse error: {e}"))),
         }
     }
     violations.sort();
+    assert!(
+        conforming >= MIN_CONFORMING_MODULES,
+        "gate went vacuous: only {conforming} conforming `mod tests`          declaration(s) recognised across {} source files, expected at least          {MIN_CONFORMING_MODULES}",
+        files.len()
+    );
 
     let mut report = String::new();
     for (file, line, what) in &violations {

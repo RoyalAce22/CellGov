@@ -3,7 +3,7 @@ name = "rsx_label_write_poll"
 
 # Structural microtest. A PPU thread writes an
 # NV406E_SEMAPHORE_OFFSET + RELEASE pair to a FIFO buffer and
-# advances the RSX put pointer. The oracle's FIFO advance pass
+# advances the RSX put pointer. CellGov's FIFO advance pass
 # parses the pair and emits an RsxLabelWrite effect; the commit
 # pipeline lands a 4-byte big-endian write at the label address;
 # the PPU's poll loop observes the written value and reports
@@ -35,14 +35,7 @@ outcome = "completed"
 #          -v "$(pwd)/tests/micro/common:/common" \
 #          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
-#   2. Stage the ELF under dev_hdd0 at the path resolve_eboot()
-#      expects:
-#        mkdir -p vfs/dev_hdd0/game/CG_RXLBL/USRDIR
-#        cp tests/micro/rsx_label_write_poll/build/\
-#           rsx_label_write_poll.elf \
-#           vfs/dev_hdd0/game/CG_RXLBL/USRDIR/EBOOT.elf
-#
-#   3. Run:
+#   2. Run:
 #        cargo run --release -p cellgov_cli -- run-game \
 #          --title-manifest \
 # tests/micro/rsx_label_write_poll/manifest.toml --max-steps 1000000
@@ -52,14 +45,17 @@ outcome = "completed"
 #   expected=0xCAFEBABE spin_iters=<small>
 
 [cellgov.title]
-content_id = "CG_RXLBL"
 short_name = "rxlbl"
 display_name = "CellGov RSX label-write-poll microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["rsx_label_write_poll.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -68,3 +64,9 @@ kind = "process-exit"
 # Title needs the RSX region writable and the runtime's
 # writeback mirror enabled. See TitleManifest::rsx_mirror doc.
 mirror = true
+consume = true
+# The guest seeds cursor.get by storing to the MMIO GET slot, and
+# only the FIFO consumer reconciles cursor.get from MMIO
+# (mirror_rsx_control_register_writes mirrors PUT and REF, not GET).
+# Without this the drain walks from get = 0 and never reaches the
+# commands this test wrote.

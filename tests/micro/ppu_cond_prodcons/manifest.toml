@@ -30,26 +30,23 @@ outcome = "completed"
 #          -v "$(pwd)/tests/micro/common:/common" \
 #          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
-#   2. Stage:
-#        mkdir -p vfs/dev_hdd0/game/CG_COND/USRDIR
-#        cp tests/micro/ppu_cond_prodcons/build/\
-#           ppu_cond_prodcons.elf \
-#           vfs/dev_hdd0/game/CG_COND/USRDIR/EBOOT.elf
-#
-#   3. Run:
+#   2. Run:
 #        cargo run --release -p cellgov_cli -- run-game \
 #          --title-manifest tests/micro/ppu_cond_prodcons/\
 # manifest.toml --max-steps 10000000
 
 [cellgov.title]
-content_id = "CG_COND"
 short_name = "cond"
 display_name = "CellGov cond producer-consumer microtest"
-eboot_candidates = ["EBOOT.elf"]
+eboot_candidates = ["ppu_cond_prodcons.elf"]
 year = 2026
 developer = "CellGov"
 engine = "microtest"
-distribution = "retail-hdd"
+distribution = "microtest"
+
+[cellgov.source]
+kind = "manifest-relative"
+path = "build"
 
 [cellgov.checkpoint]
 kind = "process-exit"

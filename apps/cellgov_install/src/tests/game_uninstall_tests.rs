@@ -98,7 +98,18 @@ fn uninstall_round_trip_removes_tree_rap_record() {
     assert!(!installs.join("NPUA80001.install.toml").exists());
     assert!(!vfs.join("dev_hdd0/game/.uninstalling-NPUA80001").exists());
     assert_eq!(outcome.files_verified, None);
-    assert!(outcome.rap_removed.is_some());
+    assert_eq!(
+        outcome.rap_removed.as_deref(),
+        Some(
+            vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap")
+                .as_path()
+        ),
+        "the outcome names the RAP it removed, not just that it removed one"
+    );
+    assert_eq!(
+        outcome.game_dir_removed,
+        vfs.join("dev_hdd0/game/NPUA80001")
+    );
 }
 
 #[test]
@@ -152,11 +163,19 @@ fn uninstall_verify_detects_modified_tree_and_force_overrides() {
     };
     let outcome = uninstall("NPUA80001", &vfs, &installs, forced).expect("force uninstall");
     assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
-    assert_eq!(outcome.files_verified, Some(0)); // the one file mismatched
+    assert_eq!(outcome.files_verified, Some(0));
+    assert_eq!(
+        outcome.files_diverged,
+        Some(1),
+        "the tamper is counted, not just tolerated"
+    );
 }
 
+/// An intact RAP counts in `files_verified`, as a diverged one counts
+/// in `files_diverged`: the two tallies are drawn from the same set, so
+/// counting only the RAP's divergence would let `diverged` exceed it.
 #[test]
-fn verify_on_an_intact_tree_counts_every_recorded_file() {
+fn verify_on_an_intact_tree_counts_every_recorded_file_and_the_rap() {
     let out = scratch();
     let vfs = out.join("vfs");
     let installs = out.join("installs");
@@ -170,8 +189,31 @@ fn verify_on_an_intact_tree_counts_every_recorded_file() {
     );
 
     let outcome = uninstall("NPUA80001", &vfs, &installs, VERIFY).expect("intact tree verifies");
-    assert_eq!(outcome.files_verified, Some(2));
+    // Two recorded files plus the recorded RAP.
+    assert_eq!(outcome.files_verified, Some(3));
+    assert_eq!(outcome.files_diverged, Some(0));
     assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
+}
+
+/// Same two files, no RAP in the record: the count drops by exactly the
+/// RAP, so the extra unit above is the RAP and not a miscount.
+#[test]
+fn a_record_with_no_rap_verifies_only_its_files() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[("USRDIR/EBOOT.BIN", b"eboot"), ("PARAM.SFO", b"sfo")],
+        None,
+    );
+
+    let outcome = uninstall("NPUA80001", &vfs, &installs, VERIFY).expect("intact tree verifies");
+    assert_eq!(outcome.files_verified, Some(2));
+    assert_eq!(outcome.files_diverged, Some(0));
 }
 
 #[test]
@@ -318,5 +360,145 @@ fn uninstall_clears_stale_tombstone_on_entry() {
 
     uninstall("NPUA80001", &vfs, &installs, NO_VERIFY).expect("uninstall over stale tombstone");
     assert!(!tombstone.exists(), "stale tombstone swept");
+    assert!(!installs.join("NPUA80001.install.toml").exists());
+}
+
+const FORCED_VERIFY: UninstallOptions = UninstallOptions {
+    verify: true,
+    keep_rap: false,
+    force: true,
+};
+
+/// A container can carry a zero-byte entry, so the record legitimately
+/// holds the empty-bytes hash for one. Reading absence as those bytes
+/// would let a deleted placeholder pass the gate as intact.
+#[test]
+fn a_deleted_zero_byte_file_is_a_divergence_not_a_match() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[("USRDIR/EBOOT.BIN", b"eboot"), ("USRDIR/EMPTY.DAT", b"")],
+        None,
+    );
+    let empty = vfs.join("dev_hdd0/game/NPUA80001/USRDIR/EMPTY.DAT");
+    assert!(empty.is_file(), "the record covers a zero-byte entry");
+    std::fs::remove_file(&empty).unwrap();
+
+    let err = uninstall("NPUA80001", &vfs, &installs, VERIFY).unwrap_err();
+    assert!(
+        matches!(&err, GameUninstallError::RecordedFileMissing { path } if path == &empty),
+        "an absent recorded file must be named, got {err:?}"
+    );
+    assert!(vfs.join("dev_hdd0/game/NPUA80001").exists());
+}
+
+#[test]
+fn force_counts_the_divergences_it_waves_through() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[
+            ("KEPT.DAT", b"kept"),
+            ("TAMPERED.DAT", b"original"),
+            ("DELETED.DAT", b"gone"),
+        ],
+        Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
+    );
+    let game = vfs.join("dev_hdd0/game/NPUA80001");
+    std::fs::write(game.join("TAMPERED.DAT"), b"tampered").unwrap();
+    std::fs::remove_file(game.join("DELETED.DAT")).unwrap();
+    std::fs::write(
+        vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap"),
+        [8u8; 16],
+    )
+    .unwrap();
+
+    let outcome = uninstall("NPUA80001", &vfs, &installs, FORCED_VERIFY).expect("force uninstall");
+    assert_eq!(outcome.files_verified, Some(1));
+    // One tampered file, one deleted file, one tampered RAP.
+    assert_eq!(outcome.files_diverged, Some(3));
+}
+
+#[test]
+fn a_verify_that_finds_nothing_wrong_reports_zero_divergences() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(&vfs, &installs, "NPUA80001", false, &[("X", b"x")], None);
+
+    let outcome = uninstall("NPUA80001", &vfs, &installs, VERIFY).expect("intact tree");
+    assert_eq!(outcome.files_verified, Some(1));
+    assert_eq!(outcome.files_diverged, Some(0));
+}
+
+#[test]
+fn without_verify_neither_witness_is_reported() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(&vfs, &installs, "NPUA80001", false, &[("X", b"x")], None);
+
+    let outcome = uninstall("NPUA80001", &vfs, &installs, NO_VERIFY).expect("uninstall");
+    assert_eq!(outcome.files_verified, None);
+    assert_eq!(outcome.files_diverged, None);
+}
+
+/// The title-id spells a game directory, a record filename and a
+/// tombstone, so it takes the same path-component rule the install side
+/// applies before it commits under an id.
+#[test]
+fn an_unsafe_title_id_is_refused_before_any_path_is_built() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    std::fs::create_dir_all(&installs).unwrap();
+
+    for bad in [
+        "",
+        "..",
+        ".staging-NPUA80001",
+        "../NPUA80001",
+        "a/b",
+        "a\\b",
+    ] {
+        let err = uninstall(bad, &vfs, &installs, NO_VERIFY).expect_err("must be refused");
+        assert!(
+            matches!(&err, GameUninstallError::UnsafeTitleId { title_id } if title_id == bad),
+            "expected UnsafeTitleId for {bad:?}, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn a_rap_that_was_already_gone_is_not_reported_as_removed() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    let installs = out.join("installs");
+    stage_synthetic_install(
+        &vfs,
+        &installs,
+        "NPUA80001",
+        false,
+        &[("X", b"x")],
+        Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
+    );
+    let rap = vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap");
+    std::fs::remove_file(&rap).unwrap();
+
+    let outcome = uninstall("NPUA80001", &vfs, &installs, NO_VERIFY).expect("uninstall");
+    assert_eq!(
+        outcome.rap_removed, None,
+        "the outcome names what this call took away, not what the record listed"
+    );
     assert!(!installs.join("NPUA80001.install.toml").exists());
 }

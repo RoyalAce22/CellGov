@@ -14,7 +14,7 @@ use cellgov_compare::{
 };
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
-use super::args::find_flag_value;
+use super::args::{find_flag_value, has_bool_flag};
 use super::exit::{die, load_file_or_die};
 use super::title::resolve_ps3_vfs_root;
 use crate::game::manifest::TitleManifest;
@@ -52,6 +52,17 @@ pub(crate) enum ElfHeaderParseError {
         phoff: u64,
         phentsize: u64,
         phnum: u64,
+    },
+    #[error(
+        "ELF PHDR table ends at {phdr_end} but the EBOOT is only {file_len} bytes \
+         (phoff={phoff}, phentsize={phentsize}, phnum={phnum})"
+    )]
+    PhdrTableOutOfFile {
+        phoff: u64,
+        phentsize: u64,
+        phnum: u64,
+        phdr_end: u64,
+        file_len: u64,
     },
 }
 
@@ -124,7 +135,7 @@ pub(crate) fn run(args: &[String]) {
         .unwrap_or_else(|| die("fixture-gen: --rpcs3 <path> is required"));
     let output_dir = find_flag_value(args, "--output-dir")
         .unwrap_or_else(|| die("fixture-gen: --output-dir <path> is required"));
-    let allow_divergence = args.iter().any(|a| a == "--allow-divergence");
+    let allow_divergence = has_bool_flag(args, "--allow-divergence");
 
     let manifest = TitleManifest::load_from_path(Path::new(&manifest_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: load manifest: {e}")));
@@ -282,7 +293,8 @@ pub(crate) fn build_classifier_context(
 /// # Errors
 ///
 /// `TooShort`, `BadMagic`, `WrongClass` (must be ELFCLASS64),
-/// `WrongEndian` (must be ELFDATA2MSB), `PhdrTableOverflow`.
+/// `WrongEndian` (must be ELFDATA2MSB), `PhdrTableOverflow`,
+/// `PhdrTableOutOfFile`.
 fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderParseError> {
     if eboot_bytes.len() < ELF_HEADER_SIZE {
         return Err(ElfHeaderParseError::TooShort {
@@ -328,6 +340,25 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
             phentsize,
             phnum,
         })?;
+    // The PHDR table lives inside the file, so a declared end past
+    // the image is a malformed header -- and the returned value
+    // becomes a classifier range that marks every divergent byte
+    // under it non-semantic, so accepting it would let a bad header
+    // claim guest bytes the ELF header does not own. RPCS3's
+    // `Loader/ELF.h` `elf_object::open` fails the same shape with
+    // `elf_error::stream_phdrs` when the `e_phnum` entries cannot be
+    // read at `e_phoff`; `disasm::elf::parse_pt_loads` rejects it as
+    // `PhdrOutOfFile`.
+    let file_len = eboot_bytes.len() as u64;
+    if phdr_end > file_len {
+        return Err(ElfHeaderParseError::PhdrTableOutOfFile {
+            phoff,
+            phentsize,
+            phnum,
+            phdr_end,
+            file_len,
+        });
+    }
     Ok(phdr_end.max(ELF_HEADER_SIZE as u64))
 }
 

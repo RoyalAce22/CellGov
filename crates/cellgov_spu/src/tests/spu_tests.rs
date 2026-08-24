@@ -436,7 +436,7 @@ fn run_spu_fixed_value_binary() {
 fn mailbox_roundtrip_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/mailbox_roundtrip/build/spu_main.elf");
 
-    let baseline_dir = std::path::Path::new("../../baselines/mailbox_roundtrip");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/mailbox_roundtrip");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
@@ -601,7 +601,7 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
 fn atomic_reservation_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/atomic_reservation/build/spu_main.elf");
 
-    let baseline_dir = std::path::Path::new("../../baselines/atomic_reservation");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/atomic_reservation");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
@@ -673,7 +673,7 @@ fn atomic_reservation_matches_rpcs3_baseline() {
 fn barrier_wakeup_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/barrier_wakeup/build/spu_main.elf");
 
-    let baseline_dir = std::path::Path::new("../../baselines/barrier_wakeup");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/barrier_wakeup");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
@@ -756,7 +756,7 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
 fn ls_to_shared_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/ls_to_shared/build/spu_main.elf");
 
-    let baseline_dir = std::path::Path::new("../../baselines/ls_to_shared");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/ls_to_shared");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
@@ -899,7 +899,7 @@ fn dma_completion_payloads_are_correct() {
 fn dma_completion_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
 
-    let baseline_dir = std::path::Path::new("../../baselines/dma_completion");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/dma_completion");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 
@@ -971,7 +971,7 @@ fn dma_completion_matches_rpcs3_baseline() {
 fn spu_fixed_value_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");
 
-    let baseline_dir = std::path::Path::new("../../baselines/spu_fixed_value");
+    let baseline_dir = std::path::Path::new("../../tests/scenario_observations/spu_fixed_value");
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
 

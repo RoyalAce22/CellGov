@@ -277,9 +277,11 @@ fn run_reservation_alignment_witness(
 ) -> (ExecutionStepResult, Vec<Effect>) {
     let mut mem = GuestMemory::new(256);
     place_insn(&mut mem, 0, insn);
+    const CR_SENTINEL: u32 = 0x1234_5678;
     let mut unit = PpuExecutionUnit::new(UnitId::new(0));
     unit.state_mut().set_gpr(1, misaligned_ea);
     unit.state_mut().set_gpr(3, 0xDEAD_BEEF_DEAD_BEEF); // r[rt] sentinel
+    unit.state_mut().set_cr(CR_SENTINEL);
     assert!(
         unit.state().reservation().is_none(),
         "precondition: no reservation"
@@ -302,6 +304,14 @@ fn run_reservation_alignment_witness(
     assert!(
         unit.state().reservation().is_none(),
         "state.reservation() must NOT be acquired on a misaligned reservation fault"
+    );
+    // [PPC-Book2 p:25 s:3.3] stwcx./stdcx. write CR0 as part of the
+    // conditional store, so an interrupted one must leave CR alone --
+    // the result register is only half of what the encoding writes.
+    assert_eq!(
+        unit.state().cr(),
+        CR_SENTINEL,
+        "CR must NOT be written on a misaligned reservation fault"
     );
     assert!(
         !effects.iter().any(|e| matches!(
@@ -377,6 +387,19 @@ fn run_microtest_ppu(rel_path: &str) -> (YieldReason, u64, u64, u64) {
     *unit.state_mut() = state;
     let budget = Budget::new(100_000);
     let (result, _effects) = run_to_completion(&mut unit, &mem, budget);
+    if result.yield_reason == YieldReason::Finished {
+        // Every microtest's CRT0 passes main's return value to
+        // sys_process_exit, and each `fail(N)` path returns nonzero.
+        // Reaching the exit syscall is therefore not the same as
+        // passing: without this, a run that bailed out of main at its
+        // first error check still reads as "ran to process exit".
+        assert_eq!(
+            unit.state().gpr[3],
+            0,
+            "{rel_path} exited with sys_process_exit status {} -- main took a fail() path",
+            unit.state().gpr[3],
+        );
+    }
     (
         result.yield_reason,
         unit.state().gpr[11],
@@ -739,12 +762,27 @@ fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     );
 
     let mem = &result.final_memory;
-    let handle_be = 1u32.to_be_bytes();
-    let found = mem.windows(4).any(|w| w == handle_be);
-    assert!(found, "sys_spu_image_t handle (0x00000001) not in memory");
+    // The bare handle word is not a witness: `00 00 00 01` occurs all
+    // over the loaded image (e_version, PT_LOAD p_type, alignment
+    // words), so a whole-memory scan for it passes with the syscall
+    // never dispatched. Look instead for the whole 16-byte
+    // sys_spu_image_t -- handle 1 followed by the three fields LV2
+    // leaves zero -- and only inside `main`'s frame, since `image` is
+    // a stack local of the microtest and memory starts zeroed.
+    let mut image_struct = [0u8; 16];
+    image_struct[0..4].copy_from_slice(&1u32.to_be_bytes());
+    let stack_top = mem.len() - 0x1000;
+    let frame = &mem[stack_top - 0x1000..stack_top];
+    let found = frame.windows(image_struct.len()).any(|w| w == image_struct);
+    assert!(
+        found,
+        "sys_spu_image_t {image_struct:02X?} not written into the PPU stack frame \
+         [0x{:08x}, 0x{stack_top:08x})",
+        stack_top - 0x1000,
+    );
 }
 
-/// Compare an LV2-driven microtest against RPCS3 baselines and
+/// Compare an LV2-driven microtest against its scenario observations and
 /// assert expected marker patterns appear within their named
 /// regions. `region_defs` are (name, offset_from_symbol, size);
 /// `markers` are (region_name, expected_bytes).
@@ -762,7 +800,8 @@ fn run_lv2_driven_baseline_check(
         "../../tests/micro/{}/build/spu_main.elf",
         microtest
     ));
-    let baseline_dir = std::path::PathBuf::from(format!("../../baselines/{}", microtest));
+    let baseline_dir =
+        std::path::PathBuf::from(format!("../../tests/scenario_observations/{}", microtest));
     let interp_path = baseline_dir.join("rpcs3_interpreter.json");
     let llvm_path = baseline_dir.join("rpcs3_llvm.json");
     let ppu_elf = microtest_bytes(&ppu_path);
@@ -956,6 +995,29 @@ fn lv2_driven_dma_completion_is_deterministic() {
     let r2 = run_pooled_lv2_driven(build());
     let o1 = cellgov_compare::observe(&r1, &regions);
     let o2 = cellgov_compare::observe(&r2, &regions);
+
+    // Floor: two runs that both died on the way in agree on everything
+    // too, so pin that the observation being compared is of a run that
+    // reached the SPU's DMA payload.
+    assert_eq!(
+        o1.outcome,
+        cellgov_compare::ObservedOutcome::Completed,
+        "determinism is only meaningful on a run that completed"
+    );
+    let pattern = o1
+        .memory_regions
+        .iter()
+        .find(|r| r.name == "pattern")
+        .expect("observation must carry the pattern region");
+    assert!(
+        pattern
+            .data
+            .windows(4)
+            .any(|w| w == [0xDE, 0xAD, 0xBE, 0xEF]),
+        "pattern region never received the SPU payload: {:02X?}",
+        pattern.data
+    );
+
     assert_eq!(o1.outcome, o2.outcome, "engine determinism: outcome");
     assert_eq!(
         o1.memory_regions, o2.memory_regions,
