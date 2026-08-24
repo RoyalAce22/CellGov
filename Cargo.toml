@@ -85,3 +85,15 @@ unwrap_used = "deny"
 broken_intra_doc_links = "deny"
 invalid_rust_codeblocks = "deny"
 invalid_html_tags = "deny"
+
+# The debug gate is only useful if it is short enough to run. At the
+# default `opt-level = 0` the interpreter's inner loop costs ~12x what
+# it does at 1, which put the corpus suites past 25 minutes and out of
+# the habit of being run at all. `1` recovers essentially all of that
+# -- a foundation-title boot lands 10-25% off release, against 12x at
+# `0` -- and measures no slower to build.
+#
+# `debug-assertions` and `overflow-checks` stay on -- they are what the
+# debug gate exists for, and neither is a measurable share of the cost.
+[profile.dev]
+opt-level = 1
