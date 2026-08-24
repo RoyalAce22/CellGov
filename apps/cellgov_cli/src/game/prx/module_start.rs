@@ -450,6 +450,28 @@ pub(in crate::game) fn run_module_start(
         );
     }
 
+    // The transient unit must be retired before the loop moves on: a
+    // runnable one would let the scheduler resume module_start code
+    // after the module returned, under an alias that no longer exists.
+    // Scoped to this unit, not to a registry-wide count -- a
+    // `module_start` may legitimately leave PPU threads of its own
+    // running (`sys_audio_Library` creates two), and those are the
+    // guest's, not this unit.
+    //
+    // Only where the caller keeps going: a clean return, or a guest
+    // fault it records and moves past. The remaining errors stop the
+    // unit mid-execution and the caller dies on them, so asserting
+    // there would replace a named fail-fast message with an assertion
+    // panic that says less.
+    let caller_continues = matches!(result, Ok(_) | Err(ModuleStartError::Faulted { .. }));
+    debug_assert!(
+        !caller_continues
+            || rt.registry().effective_status(ms_unit_id)
+                != Some(cellgov_exec::UnitStatus::Runnable),
+        "module_start {} left its own transient unit ({ms_unit_id:?}) runnable",
+        prx_info.name,
+    );
+
     result.map(|steps| ModuleStartOutcome::Completed { steps })
 }
 

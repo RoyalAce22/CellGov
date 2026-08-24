@@ -964,7 +964,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
             let mut completed: usize = 0;
             let mut faulted: Vec<String> = Vec::new();
             for info in &prx_modules {
-                let runnable_before = rt.registry().runnable_ids().count();
                 match run_module_start(&mut rt, info, kctx_opd) {
                     Ok(ModuleStartOutcome::Completed { .. })
                     | Ok(ModuleStartOutcome::HleStubbed) => completed += 1,
@@ -979,18 +978,6 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                     }
                     Err(e) => die(&format!("{e}")),
                 }
-                // Each module_start either Skipped (no unit registered,
-                // count unchanged) or ran a transient unit that ended
-                // Faulted -- at the return sentinel (Completed) or at
-                // a real fault (Faulted) -- so the count is unchanged
-                // either way. The primary's blocked override holds, so
-                // the count never grew during the module's sub-loop.
-                debug_assert_eq!(
-                    rt.registry().runnable_ids().count(),
-                    runnable_before,
-                    "module_start {} left a runnable unit in the registry",
-                    info.name,
-                );
             }
             if !faulted.is_empty() {
                 eprintln!(
