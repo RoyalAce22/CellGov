@@ -7,7 +7,7 @@ use cellgov_testkit::runner::run;
 #[test]
 fn observe_maps_stalled_to_completed() {
     let result = run(fixtures::round_robin_fairness_scenario(2, 3));
-    let obs = observe(&result, &[]);
+    let obs = observe(&result, &[]).expect("trace decodes");
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);
     assert_eq!(obs.outcome, ObservedOutcome::Completed);
 }
@@ -15,7 +15,7 @@ fn observe_maps_stalled_to_completed() {
 #[test]
 fn observe_carries_state_hashes() {
     let result = run(fixtures::round_robin_fairness_scenario(2, 3));
-    let obs = observe(&result, &[]);
+    let obs = observe(&result, &[]).expect("trace decodes");
     let hashes = obs.state_hashes.unwrap();
     assert_eq!(hashes.memory, result.final_memory_hash);
     assert_eq!(hashes.unit_status, result.final_unit_status_hash);
@@ -25,7 +25,7 @@ fn observe_carries_state_hashes() {
 #[test]
 fn observe_metadata_says_cellgov() {
     let result = run(fixtures::round_robin_fairness_scenario(1, 1));
-    let obs = observe(&result, &[]);
+    let obs = observe(&result, &[]).expect("trace decodes");
     assert_eq!(obs.metadata.runner, "cellgov");
     assert!(obs.metadata.steps.is_some());
 }
@@ -33,7 +33,7 @@ fn observe_metadata_says_cellgov() {
 #[test]
 fn observe_extracts_events_from_mailbox_scenario() {
     let result = run(fixtures::mailbox_send_scenario(3));
-    let obs = observe(&result, &[]);
+    let obs = observe(&result, &[]).expect("trace decodes");
     assert!(
         obs.events
             .iter()
@@ -45,7 +45,7 @@ fn observe_extracts_events_from_mailbox_scenario() {
 #[test]
 fn observe_extracts_block_wake_from_dma_scenario() {
     let result = run(fixtures::dma_block_unblock_scenario());
-    let obs = observe(&result, &[]);
+    let obs = observe(&result, &[]).expect("trace decodes");
     assert!(
         obs.events
             .iter()
@@ -63,7 +63,7 @@ fn observe_extracts_block_wake_from_dma_scenario() {
 #[test]
 fn observe_event_sequences_are_monotonic() {
     let result = run(fixtures::mailbox_roundtrip_scenario(0x42));
-    let obs = observe(&result, &[]);
+    let obs = observe(&result, &[]).expect("trace decodes");
     for (i, event) in obs.events.iter().enumerate() {
         assert_eq!(event.sequence, i as u32);
     }
@@ -79,12 +79,79 @@ fn two_identical_runs_produce_identical_observations() {
         addr: 0,
         size: 8,
     }];
-    let o1 = observe(&r1, &regions);
-    let o2 = observe(&r2, &regions);
+    let o1 = observe(&r1, &regions).expect("trace decodes");
+    let o2 = observe(&r2, &regions).expect("trace decodes");
     assert_eq!(o1.outcome, o2.outcome);
     assert_eq!(o1.memory_regions, o2.memory_regions);
     assert_eq!(o1.events, o2.events);
     assert_eq!(o1.state_hashes, o2.state_hashes);
+}
+
+/// Byte offset of the `n`th record in `trace`, walking the same
+/// decoder the observer uses.
+fn record_offset(trace: &[u8], n: usize) -> usize {
+    let mut reader = cellgov_trace::TraceReader::new(trace);
+    for _ in 0..n {
+        reader
+            .next()
+            .expect("record exists")
+            .expect("record decodes");
+    }
+    reader.position()
+}
+
+#[test]
+fn a_corrupted_record_fails_observation_naming_its_index_and_offset() {
+    let mut result = run(fixtures::mailbox_roundtrip_scenario(0x42));
+    let clean = observe(&result, &[]).expect("the unmodified trace decodes");
+    assert!(
+        clean.events.len() > 2,
+        "the fixture must yield events past the corruption point for the prefix to matter"
+    );
+
+    let offset = record_offset(&result.trace_bytes, 2);
+    result.trace_bytes[offset] = 0xff;
+
+    let err = observe(&result, &[]).expect_err("a bad tag must not be flattened past");
+    assert_eq!(
+        err,
+        TraceDecodeError {
+            index: 2,
+            offset,
+            source: cellgov_trace::DecodeError::UnknownTag(0xff),
+        }
+    );
+}
+
+#[test]
+fn a_truncated_trace_fails_observation_at_the_cut_record() {
+    let mut result = run(fixtures::mailbox_roundtrip_scenario(0x42));
+    let offset = record_offset(&result.trace_bytes, 3);
+    // Keep one byte of record 3 so the stream ends mid-record rather
+    // than on a boundary, which would read as a clean end.
+    result.trace_bytes.truncate(offset + 1);
+
+    let err = observe(&result, &[]).expect_err("a mid-record end must not read as a clean end");
+    assert_eq!(err.index, 3);
+    assert_eq!(err.offset, offset);
+    assert_eq!(err.source, cellgov_trace::DecodeError::Truncated);
+}
+
+#[test]
+fn the_determinism_check_reports_a_decode_failure_before_comparing() {
+    // A factory whose runtime writes a trace record the decoder rejects
+    // is not constructible from the public fixtures, so the propagation
+    // is pinned on the error type instead: a TraceDecodeError converts
+    // into the check's own error and displays its position.
+    let err = DeterminismError::from(TraceDecodeError {
+        index: 4,
+        offset: 0x80,
+        source: cellgov_trace::DecodeError::Truncated,
+    });
+    assert!(matches!(err, DeterminismError::TraceDecode(_)));
+    let text = err.to_string();
+    assert!(text.contains("record 4"), "{text}");
+    assert!(text.contains("offset 128"), "{text}");
 }
 
 type ScenarioFactory = Box<dyn Fn() -> cellgov_testkit::ScenarioFixture>;

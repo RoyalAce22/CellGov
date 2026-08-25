@@ -4,7 +4,7 @@
 
 use cellgov_testkit::fixtures::ScenarioFixture;
 use cellgov_testkit::runner::{self, ScenarioOutcome, ScenarioResult};
-use cellgov_trace::{TraceReader, TraceRecord, TracedEffectKind, TracedWakeReason};
+use cellgov_trace::{DecodeError, TraceReader, TraceRecord, TracedEffectKind, TracedWakeReason};
 
 use crate::observation::{
     Observation, ObservationMetadata, ObservedEvent, ObservedEventKind, ObservedHashes,
@@ -13,18 +13,44 @@ use crate::observation::{
 
 use super::region::{extract_regions, RegionDescriptor};
 
+/// A record in a run's own trace stream failed to decode.
+///
+/// The stream is this workspace's encoder's output, so a bad record
+/// is a host invariant break: the events before it are a prefix, and
+/// a comparison over that prefix could mask or fabricate a divergence
+/// at the cut.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("trace record {index} at byte offset {offset} failed to decode: {source}")]
+pub struct TraceDecodeError {
+    /// Zero-based index of the record that failed.
+    pub index: usize,
+    /// Byte offset of that record's first byte in the trace stream.
+    pub offset: usize,
+    /// The decoder's own reason.
+    #[source]
+    pub source: DecodeError,
+}
+
 /// Convert a `ScenarioResult` into a normalized `Observation`.
 ///
 /// Regions that do not resolve in their space are filled with zeros;
 /// the comparison layer catches the mismatch.
-pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observation {
+///
+/// # Errors
+///
+/// [`TraceDecodeError`] when the run's trace stream does not decode
+/// end to end; no observation is produced from a partial stream.
+pub fn observe(
+    result: &ScenarioResult,
+    regions: &[RegionDescriptor],
+) -> Result<Observation, TraceDecodeError> {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
         ScenarioOutcome::MaxStepsExceeded => ObservedOutcome::Timeout,
     };
 
     let memory_regions = extract_regions(&result.final_spaces, regions);
-    let events = extract_events(&result.trace_bytes);
+    let events = extract_events(&result.trace_bytes)?;
 
     let state_hashes = Some(ObservedHashes {
         memory: result.final_memory_hash,
@@ -32,7 +58,7 @@ pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observa
         sync: result.final_sync_hash,
     });
 
-    Observation {
+    Ok(Observation {
         outcome,
         memory_regions,
         events,
@@ -43,15 +69,31 @@ pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observa
         },
         // Scenario runner has no LV2 host with a TTY surface.
         tty_log: Vec::new(),
-    }
+    })
 }
 
-/// Decode the binary trace and coalesce into semantic events.
-fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
+/// Decode the binary trace and coalesce into semantic events, stopping
+/// at the first record that does not decode.
+fn extract_events(trace_bytes: &[u8]) -> Result<Vec<ObservedEvent>, TraceDecodeError> {
     let mut events = Vec::new();
     let mut seq: u32 = 0;
 
-    for record in TraceReader::new(trace_bytes).flatten() {
+    let mut reader = TraceReader::new(trace_bytes);
+    let mut index = 0usize;
+    loop {
+        let offset = reader.position();
+        let record = match reader.next() {
+            None => break,
+            Some(Ok(record)) => record,
+            Some(Err(source)) => {
+                return Err(TraceDecodeError {
+                    index,
+                    offset,
+                    source,
+                })
+            }
+        };
+        index += 1;
         let maybe = match record {
             TraceRecord::EffectEmitted { unit, kind, .. } => match kind {
                 TracedEffectKind::MailboxSend => Some((ObservedEventKind::MailboxSend, unit.raw())),
@@ -95,12 +137,16 @@ fn extract_events(trace_bytes: &[u8]) -> Vec<ObservedEvent> {
         }
     }
 
-    events
+    Ok(events)
 }
 
 /// Why a determinism check failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeterminismError {
+    /// A run's own trace stream did not decode, so there is nothing
+    /// whole to compare.
+    #[error("trace decode: {0}")]
+    TraceDecode(#[from] TraceDecodeError),
     /// The two runs produced different outcomes.
     #[error("two runs produced different outcomes")]
     OutcomeMismatch,
@@ -117,14 +163,20 @@ pub enum DeterminismError {
 
 /// Run a scenario factory twice and verify both observations match;
 /// returns the observation, or the first field that diverged.
+///
+/// # Errors
+///
+/// [`DeterminismError::TraceDecode`] before any field comparison when
+/// either run's trace does not decode; otherwise the first field that
+/// differs between the runs.
 pub fn observe_with_determinism_check(
     factory: impl Fn() -> ScenarioFixture,
     regions: &[RegionDescriptor],
 ) -> Result<Observation, DeterminismError> {
     let r1 = runner::run(factory());
     let r2 = runner::run(factory());
-    let o1 = observe(&r1, regions);
-    let o2 = observe(&r2, regions);
+    let o1 = observe(&r1, regions)?;
+    let o2 = observe(&r2, regions)?;
 
     if o1.outcome != o2.outcome {
         return Err(DeterminismError::OutcomeMismatch);

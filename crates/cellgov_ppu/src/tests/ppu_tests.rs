@@ -821,7 +821,7 @@ fn run_lv2_driven_baseline_check(
 
     let fixture = build_lv2_driven_fixture(ppu_elf, spu_elf, Budget::new(100_000), 10_000);
     let scenario_result = run_pooled_lv2_driven(fixture);
-    let cellgov_obs = cellgov_compare::observe(&scenario_result, &regions);
+    let cellgov_obs = cellgov_compare::observe(&scenario_result, &regions).expect("trace decodes");
     assert_eq!(
         cellgov_obs.outcome,
         cellgov_compare::ObservedOutcome::Completed,
@@ -996,8 +996,8 @@ fn lv2_driven_dma_completion_is_deterministic() {
     };
     let r1 = run_pooled_lv2_driven(build());
     let r2 = run_pooled_lv2_driven(build());
-    let o1 = cellgov_compare::observe(&r1, &regions);
-    let o2 = cellgov_compare::observe(&r2, &regions);
+    let o1 = cellgov_compare::observe(&r1, &regions).expect("trace decodes");
+    let o2 = cellgov_compare::observe(&r2, &regions).expect("trace decodes");
 
     // Floor: two runs that both died on the way in agree on everything
     // too, so pin that the observation being compared is of a run that

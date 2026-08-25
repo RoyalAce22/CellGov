@@ -86,7 +86,7 @@ fn require_determinism(
     regions: &[RegionDescriptor],
 ) -> Observation {
     observe_with_determinism_check(factory, regions)
-        .unwrap_or_else(|e| die(&format!("determinism check FAILED for {name}: {e:?}")))
+        .unwrap_or_else(|e| die(&format!("determinism check FAILED for {name}: {e}")))
 }
 
 fn save_baseline(factory: &dyn Fn() -> ScenarioFixture, name: &str, path: &str) {
