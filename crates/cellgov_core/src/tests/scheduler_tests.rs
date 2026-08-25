@@ -112,6 +112,21 @@ fn all_blocked_with_cursor_set_yields_none_and_preserves_cursor() {
 }
 
 #[test]
+fn note_selected_moves_the_cursor_to_the_named_unit() {
+    let r = registry_with(&[
+        UnitStatus::Runnable,
+        UnitStatus::Runnable,
+        UnitStatus::Runnable,
+    ]);
+    let mut s = RoundRobinScheduler::new();
+    s.note_selected(UnitId::new(1));
+    assert_eq!(s.last_scheduled(), Some(UnitId::new(1)));
+    assert_eq!(s.select_next(&r), Some(UnitId::new(2)));
+    s.note_selected(UnitId::new(2));
+    assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
+}
+
+#[test]
 fn single_runnable_picks_it_repeatedly() {
     let mut s = RoundRobinScheduler::new();
     let r = registry_with(&[UnitStatus::Runnable]);

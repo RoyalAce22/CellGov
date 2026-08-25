@@ -88,6 +88,15 @@ impl RoundRobinScheduler {
     pub fn last_scheduled(&self) -> Option<UnitId> {
         self.last_scheduled
     }
+
+    /// Record that `unit` was selected on this scheduler's behalf by a
+    /// wrapping policy, so the rotation resumes after the unit that
+    /// actually ran rather than after the last unit this scheduler
+    /// picked itself.
+    #[inline]
+    pub fn note_selected(&mut self, unit: UnitId) {
+        self.last_scheduled = Some(unit);
+    }
 }
 
 impl Scheduler for RoundRobinScheduler {

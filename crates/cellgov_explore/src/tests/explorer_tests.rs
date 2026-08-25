@@ -423,36 +423,22 @@ fn max_schedules_bound_produces_inconclusive() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
-                FakeIsaUnit::new(
-                    id,
-                    vec![
-                        FakeOp::LoadImm(0xAA),
-                        FakeOp::SharedStore { addr: 0, len: 4 },
-                        FakeOp::End,
-                    ],
-                )
-            });
-            rt.registry_mut().register_with(|id| {
-                FakeIsaUnit::new(
-                    id,
-                    vec![
-                        FakeOp::LoadImm(0xBB),
-                        FakeOp::SharedStore { addr: 0, len: 4 },
-                        FakeOp::End,
-                    ],
-                )
-            });
-            rt.registry_mut().register_with(|id| {
-                FakeIsaUnit::new(
-                    id,
-                    vec![
-                        FakeOp::LoadImm(0xCC),
-                        FakeOp::SharedStore { addr: 0, len: 4 },
-                        FakeOp::End,
-                    ],
-                )
-            });
+            // Three units race on one word (so the alternate is not
+            // footprint-pruned) but store the same value, so no
+            // ordering can change the final memory: the only verdict
+            // the bound can produce is an inconclusive one.
+            for _ in 0..3 {
+                rt.registry_mut().register_with(|id| {
+                    FakeIsaUnit::new(
+                        id,
+                        vec![
+                            FakeOp::LoadImm(0xAA),
+                            FakeOp::SharedStore { addr: 0, len: 4 },
+                            FakeOp::End,
+                        ],
+                    )
+                });
+            }
             rt
         },
         &config,
@@ -461,8 +447,6 @@ fn max_schedules_bound_produces_inconclusive() {
     let r = result.expect("should have branching points");
     assert_eq!(r.schedules.len(), 1, "should stop after 1 schedule");
     assert!(r.bounds_hit);
-    // The one explored alternate swaps LoadImm order but not the
-    // last writer, so no divergence is visible.
     assert_eq!(r.outcome, OutcomeClass::Inconclusive);
 }
 
