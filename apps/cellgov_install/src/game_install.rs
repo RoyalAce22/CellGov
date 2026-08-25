@@ -102,12 +102,22 @@ struct StagedRap {
 
 /// One file or directory queued for staging, normalized across the PKG
 /// and ISO inputs so the commit machinery is container-agnostic.
-struct StagedFile {
+struct StagedFile<'a> {
     /// Target-relative path, `/`-separated.
     path: String,
     is_dir: bool,
-    /// File bytes (empty for a directory).
-    data: Vec<u8>,
+    data: StagedData<'a>,
+}
+
+/// Where a staged entry's bytes come from. [`stage_tree`] streams them
+/// to disk one entry at a time, so neither variant requires the whole
+/// tree resident -- a BD-DL disc's content exceeds host memory.
+enum StagedData<'a> {
+    /// One borrowed buffer (PKG entries; empty for a directory).
+    Bytes(&'a [u8]),
+    /// Ordered extent slices into the source disc image (ISO entries),
+    /// bounds-checked at carve time.
+    Slices(Vec<&'a [u8]>),
 }
 
 /// What a completed install produced, for the CLI to report.
@@ -354,21 +364,37 @@ fn io_err<'a>(
     }
 }
 
-/// Write `bytes` to `path`, creating parents, and `fsync` the file so
-/// the content is durable before the commit rename.
-fn write_and_sync(path: &Path, bytes: &[u8]) -> Result<(), GameInstallError> {
+/// Write `chunks` to `path` in order, creating parents, hashing the
+/// stream as it is written, and `fsync` the file so the content is
+/// durable before the commit rename. Chunks are borrowed views (of a
+/// container buffer or a mapped image), never gathered into one
+/// allocation, so residence stays bounded by the caller's chunks.
+fn write_chunks_and_sync<'c>(
+    path: &Path,
+    chunks: impl IntoIterator<Item = &'c [u8]>,
+) -> Result<HexSha256, GameInstallError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
     }
     let f = std::fs::File::create(path).map_err(io_err("create", path))?;
+    let mut hasher = Sha256::new();
     {
         use std::io::Write;
         let mut w = std::io::BufWriter::new(&f);
-        w.write_all(bytes).map_err(io_err("write", path))?;
+        for chunk in chunks {
+            hasher.update(chunk);
+            w.write_all(chunk).map_err(io_err("write", path))?;
+        }
         w.flush().map_err(io_err("flush", path))?;
     }
     f.sync_all().map_err(io_err("fsync", path))?;
-    Ok(())
+    Ok(HexSha256(hasher.finalize().into()))
+}
+
+/// Write `bytes` to `path`, creating parents, and `fsync` the file so
+/// the content is durable before the commit rename.
+fn write_and_sync(path: &Path, bytes: &[u8]) -> Result<(), GameInstallError> {
+    write_chunks_and_sync(path, std::iter::once(bytes)).map(|_| ())
 }
 
 /// Join a container-relative entry path under `base`, rejecting any
@@ -572,14 +598,14 @@ pub fn install_pkg(
         .map(|f| StagedFile {
             path: f.name.clone(),
             is_dir: f.kind == PkgEntryKind::Directory,
-            data: f.data.clone(),
+            data: StagedData::Bytes(&f.data),
         })
         .collect();
 
     // Build the whole batch (tree + RAP + proof) under the staging root.
     prepare_staging(&staging_root)?;
-    let staged_rap = run_or_clean(&staging_root, || {
-        stage_tree(&staged, &tree_staging)?;
+    let (file_digests, staged_rap) = run_or_clean(&staging_root, || {
+        let file_digests = stage_tree(&staged, &tree_staging)?;
         let staged_rap = plan_staged_rap(rap_needed, rap, &content_id, &staging_root, &exdata);
         if let Some(sr) = &staged_rap {
             let rap_bytes = rap.expect(
@@ -600,14 +626,14 @@ pub fn install_pkg(
         };
         npdrm::decrypt_self_to_elf_auto(&eboot.data, resolver)
             .map_err(GameInstallError::DecryptProof)?;
-        Ok(staged_rap)
+        Ok((file_digests, staged_rap))
     })?;
 
     let rap_installed = staged_rap.is_some();
     let record = build_record(
         "pkg",
         pkg_bytes,
-        &staged,
+        file_digests,
         TitleRecord {
             title_id: title_id.clone(),
             content_id: content_id.clone(),
@@ -657,17 +683,19 @@ pub fn install_iso(
         .iter()
         .find(|e| e.path == "PS3_GAME/PARAM.SFO")
         .ok_or(GameInstallError::NoDiscParamSfo)?;
-    let (title_id, category, title, app_version) = parse_identity(&sfo_entry.data)?;
+    let sfo_bytes = sfo_entry.read_data(image)?;
+    let (title_id, category, title, app_version) = parse_identity(&sfo_bytes)?;
     if !DISC_CATEGORIES.contains(&category.as_str()) {
         return Err(GameInstallError::NotDiscGame { category });
     }
     // The title-id becomes the dev_bdvd/<title-id> directory key.
     validate_content_id(&title_id)?;
 
-    let eboot = entries
+    let eboot_bytes = entries
         .iter()
         .find(|e| e.path == "PS3_GAME/USRDIR/EBOOT.BIN")
-        .ok_or(GameInstallError::NoDiscEboot)?;
+        .ok_or(GameInstallError::NoDiscEboot)?
+        .read_data(image)?;
 
     let dev_bdvd = output_dir.join("dev_bdvd");
     let final_dir = dev_bdvd.join(&title_id);
@@ -677,27 +705,31 @@ pub fn install_iso(
         return Err(GameInstallError::TargetExists { path: final_dir });
     }
 
+    // Each file stays in the image until stage_tree streams it to disk,
+    // so a full BD image installs in bounded memory.
     let staged: Vec<StagedFile> = entries
         .iter()
-        .map(|e| StagedFile {
-            path: e.path.clone(),
-            is_dir: e.kind == iso::IsoEntryKind::Directory,
-            data: e.data.clone(),
+        .map(|e| {
+            Ok(StagedFile {
+                path: e.path.clone(),
+                is_dir: e.kind == iso::IsoEntryKind::Directory,
+                data: StagedData::Slices(e.extent_slices(image)?),
+            })
         })
-        .collect();
+        .collect::<Result<_, iso::IsoError>>()?;
 
     prepare_staging(&staging_dir)?;
-    run_or_clean(&staging_dir, || {
-        stage_tree(&staged, &staging_dir)?;
+    let file_digests = run_or_clean(&staging_dir, || {
+        let file_digests = stage_tree(&staged, &staging_dir)?;
         // APP-keyed disc EBOOT: prove it decrypts end-to-end, discard.
-        sce::decrypt_self_to_elf(&eboot.data).map_err(GameInstallError::DecryptProof)?;
-        Ok(())
+        sce::decrypt_self_to_elf(&eboot_bytes).map_err(GameInstallError::DecryptProof)?;
+        Ok(file_digests)
     })?;
 
     let record = build_record(
         "iso",
         source_bytes,
-        &staged,
+        file_digests,
         TitleRecord {
             title_id: title_id.clone(),
             content_id: title_id.clone(),
@@ -783,21 +815,35 @@ fn run_or_clean<T>(
     }
 }
 
-/// Write every staged entry into `staging_dir`, creating directories
-/// and `fsync`-ing files.
-fn stage_tree(staged: &[StagedFile], tree_dest: &Path) -> Result<(), GameInstallError> {
+/// Write every staged entry into `tree_dest`, creating directories and
+/// `fsync`-ing files, hashing each file's bytes as they are written.
+///
+/// Returns the per-file digests keyed by normalized path, in the same
+/// order [`InstallRecord::files`] serialises them. Entries whose paths
+/// normalize to one key overwrite both the file and its digest, so the
+/// record hashes the bytes the tree ends up holding (last writer wins,
+/// matching the on-disk overwrite).
+fn stage_tree(
+    staged: &[StagedFile<'_>],
+    tree_dest: &Path,
+) -> Result<BTreeMap<String, HexSha256>, GameInstallError> {
     // Create the destination root up front so an empty tree still has a
     // directory for the commit rename to move.
     std::fs::create_dir_all(tree_dest).map_err(io_err("create dir", tree_dest))?;
+    let mut digests = BTreeMap::new();
     for f in staged {
         let dest = safe_join(tree_dest, &f.path)?;
         if f.is_dir {
             std::fs::create_dir_all(&dest).map_err(io_err("create dir", &dest))?;
         } else {
-            write_and_sync(&dest, &f.data)?;
+            let digest = match &f.data {
+                StagedData::Bytes(bytes) => write_chunks_and_sync(&dest, std::iter::once(*bytes))?,
+                StagedData::Slices(slices) => write_chunks_and_sync(&dest, slices.iter().copied())?,
+            };
+            digests.insert(normalized_rel(&f.path), digest);
         }
     }
-    Ok(())
+    Ok(digests)
 }
 
 /// Commit a proven staging batch in a fixed rename sequence: RAP into
@@ -855,22 +901,16 @@ fn commit(
     Ok(record_path)
 }
 
-/// Build the install record from a staged tree. File hashes are over
-/// the bytes as written and keyed by path -- content-only, no mtimes
-/// or permissions.
+/// Build the install record from [`stage_tree`]'s digests. File hashes
+/// are over the bytes as written and keyed by path -- content-only, no
+/// mtimes or permissions.
 fn build_record(
     kind: &str,
     source_bytes: &[u8],
-    staged: &[StagedFile],
+    files: BTreeMap<String, HexSha256>,
     title: TitleRecord,
     rap: Option<RapRecord>,
 ) -> InstallRecord {
-    let files: BTreeMap<String, HexSha256> = staged
-        .iter()
-        .filter(|f| !f.is_dir)
-        .map(|f| (normalized_rel(&f.path), sha256_of(&f.data)))
-        .collect();
-
     InstallRecord {
         format_version: INSTALL_RECORD_FORMAT_VERSION,
         source: SourceRecord {

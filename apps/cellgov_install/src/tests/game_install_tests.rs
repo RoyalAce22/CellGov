@@ -584,24 +584,26 @@ fn build_record_is_deterministic_and_sorted() {
         StagedFile {
             path: "USRDIR/EBOOT.BIN".to_string(),
             is_dir: false,
-            data: b"eboot".to_vec(),
+            data: StagedData::Bytes(b"eboot"),
         },
         StagedFile {
             path: "PARAM.SFO".to_string(),
             is_dir: false,
-            data: b"sfo".to_vec(),
+            data: StagedData::Bytes(b"sfo"),
         },
         StagedFile {
             path: "USRDIR".to_string(),
             is_dir: true,
-            data: Vec::new(),
+            data: StagedData::Bytes(&[]),
         },
     ];
-    let mk = || {
+    let out = scratch();
+    let mk = |dest: &Path| {
+        let digests = stage_tree(&staged, dest).expect("stage");
         build_record(
             "pkg",
             b"src-bytes",
-            &staged,
+            digests,
             TitleRecord {
                 title_id: "NPUA80001".to_string(),
                 content_id: "UP9000-NPUA80001_00-TEST".to_string(),
@@ -616,8 +618,8 @@ fn build_record_is_deterministic_and_sorted() {
             }),
         )
     };
-    let a = toml::to_string(&mk()).expect("serialise");
-    let b = toml::to_string(&mk()).expect("serialise");
+    let a = toml::to_string(&mk(&out.join("a"))).expect("serialise");
+    let b = toml::to_string(&mk(&out.join("b"))).expect("serialise");
     assert_eq!(a, b, "record TOML is a pure function of its inputs");
     assert!(
         a.find("\"PARAM.SFO\"").unwrap() < a.find("\"USRDIR/EBOOT.BIN\"").unwrap(),
@@ -625,12 +627,15 @@ fn build_record_is_deterministic_and_sorted() {
     );
     // Directory entries carry no bytes and are not recorded, so the
     // record stays a hash of the installed files only.
-    let record = mk();
+    let record = mk(&out.join("c"));
     assert_eq!(record.files.len(), 2, "only the two file entries recorded");
     assert!(
         !record.files.contains_key("USRDIR"),
         "the staged directory entry is not a recorded file"
     );
+    // Stream-hashed digests equal the whole-buffer hash of the same
+    // bytes, so the record schema is unchanged by the streaming write.
+    assert_eq!(record.files.get("PARAM.SFO"), Some(&sha256_of(b"sfo")));
 }
 
 /// Two container entries whose paths normalize to the same key stage
@@ -643,45 +648,54 @@ fn entries_that_normalize_to_one_path_are_one_recorded_file() {
         StagedFile {
             path: "USRDIR/EBOOT.BIN".to_string(),
             is_dir: false,
-            data: b"first".to_vec(),
+            data: StagedData::Bytes(b"first"),
         },
         StagedFile {
             path: "./USRDIR//EBOOT.BIN".to_string(),
             is_dir: false,
-            data: b"second".to_vec(),
+            data: StagedData::Bytes(b"second"),
         },
     ];
-    let record = build_record(
-        "pkg",
-        b"src-bytes",
-        &staged,
-        TitleRecord {
-            title_id: "NPUA80001".to_string(),
-            content_id: "UP9000-NPUA80001_00-TEST".to_string(),
-            category: "HG".to_string(),
-            title: "T".to_string(),
-            app_version: "01.00".to_string(),
-            distribution: "psn-hdd".to_string(),
-        },
-        None,
-    );
+    let out = scratch();
+    let digests = stage_tree(&staged, &out.join("tree")).expect("stage");
     assert_eq!(
         staged.iter().filter(|f| !f.is_dir).count(),
         2,
         "two staged entries went in"
     );
     assert_eq!(
-        record.files.len(),
+        digests.len(),
         1,
         "both entries address one file: {:?}",
-        record.files.keys().collect::<Vec<_>>()
+        digests.keys().collect::<Vec<_>>()
     );
     // The last writer wins on disk, so the record holds its bytes.
     assert_eq!(
-        record.files.get("USRDIR/EBOOT.BIN"),
+        digests.get("USRDIR/EBOOT.BIN"),
         Some(&sha256_of(b"second")),
-        "the record hashes the bytes the tree ends up holding"
+        "the digest covers the bytes the tree ends up holding"
     );
+}
+
+/// The Slices variant streams extent slices in order; the file holds
+/// their concatenation and the digest is over that concatenation.
+#[test]
+fn stage_tree_streams_extent_slices_in_order() {
+    let a = vec![0xAAu8; 3000];
+    let b = vec![0xBBu8; 500];
+    let staged = vec![StagedFile {
+        path: "DATA.BIN".to_string(),
+        is_dir: false,
+        data: StagedData::Slices(vec![&a, &b]),
+    }];
+    let out = scratch();
+    let digests = stage_tree(&staged, &out.join("tree")).expect("stage");
+
+    let mut expected = a.clone();
+    expected.extend_from_slice(&b);
+    let written = std::fs::read(out.join("tree/DATA.BIN")).expect("staged file");
+    assert_eq!(written, expected, "extent slices concatenate in order");
+    assert_eq!(digests.get("DATA.BIN"), Some(&sha256_of(&expected)));
 }
 
 #[test]
@@ -725,6 +739,43 @@ fn a_cleanup_that_succeeds_passes_the_original_fault_through_unwrapped() {
         .expect_err("the pre-commit fault fails the install");
     assert!(matches!(err, GameInstallError::NoEboot), "got {err:?}");
     assert!(!staging.exists(), "the batch was discarded whole");
+}
+
+/// A zero-length file (an empty PKG entry, or an ISO record with data
+/// length 0) is staged as an empty file and recorded under the
+/// empty-input digest; it is neither skipped nor an error.
+#[test]
+fn a_zero_length_file_stages_as_an_empty_file_with_the_empty_digest() {
+    let staged = vec![
+        StagedFile {
+            path: "EMPTY_PKG.BIN".to_string(),
+            is_dir: false,
+            data: StagedData::Bytes(&[]),
+        },
+        StagedFile {
+            path: "EMPTY_ISO.BIN".to_string(),
+            is_dir: false,
+            data: StagedData::Slices(vec![&b""[..]]),
+        },
+        StagedFile {
+            path: "NO_EXTENTS.BIN".to_string(),
+            is_dir: false,
+            data: StagedData::Slices(Vec::new()),
+        },
+    ];
+    let out = scratch();
+    let tree = out.join("tree");
+    let digests = stage_tree(&staged, &tree).expect("stage");
+    assert_eq!(digests.len(), 3, "every zero-length file is recorded");
+    for name in ["EMPTY_PKG.BIN", "EMPTY_ISO.BIN", "NO_EXTENTS.BIN"] {
+        let written = std::fs::read(tree.join(name)).expect("staged file exists");
+        assert!(written.is_empty(), "{name} holds no bytes");
+        assert_eq!(
+            digests.get(name),
+            Some(&sha256_of(b"")),
+            "{name} is recorded under the empty-input digest"
+        );
+    }
 }
 
 #[test]

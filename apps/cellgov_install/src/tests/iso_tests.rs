@@ -28,7 +28,7 @@ fn reads_nested_ps3_game_tree() {
 
     let sfb_e = find(&entries, "PS3_DISC.SFB").expect("PS3_DISC.SFB");
     assert_eq!(sfb_e.kind, IsoEntryKind::File);
-    assert_eq!(sfb_e.data, sfb);
+    assert_eq!(sfb_e.read_data(&image).unwrap(), sfb);
 
     assert_eq!(
         find(&entries, "PS3_GAME").map(|e| e.kind),
@@ -38,11 +38,18 @@ fn reads_nested_ps3_game_tree() {
         find(&entries, "PS3_GAME/USRDIR").map(|e| e.kind),
         Some(IsoEntryKind::Directory)
     );
-    assert_eq!(find(&entries, "PS3_GAME/PARAM.SFO").unwrap().data, sfo);
+    assert_eq!(
+        find(&entries, "PS3_GAME/PARAM.SFO")
+            .unwrap()
+            .read_data(&image)
+            .unwrap(),
+        sfo
+    );
 
     let eboot_e = find(&entries, "PS3_GAME/USRDIR/EBOOT.BIN").expect("EBOOT");
     assert_eq!(
-        eboot_e.data, eboot,
+        eboot_e.read_data(&image).unwrap(),
+        eboot,
         "EBOOT bytes round-trip through extents"
     );
 }
@@ -53,7 +60,13 @@ fn multi_sector_file_round_trips() {
     let big: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
     let image = build_iso(vec![Node::File("BIG.DAT", big.clone())]);
     let entries = read_iso(&image).expect("read");
-    assert_eq!(find(&entries, "BIG.DAT").unwrap().data, big);
+    assert_eq!(
+        find(&entries, "BIG.DAT")
+            .unwrap()
+            .read_data(&image)
+            .unwrap(),
+        big
+    );
 }
 
 #[test]
@@ -172,7 +185,7 @@ fn multi_extent_file_across_three_sections() {
     expected.extend_from_slice(&p2);
     let entries = read_iso(&image).expect("read");
     assert_eq!(
-        find(&entries, "F.BIN").unwrap().data,
+        find(&entries, "F.BIN").unwrap().read_data(&image).unwrap(),
         expected,
         "all three extents concatenate in order"
     );
@@ -346,9 +359,12 @@ fn directory_records_continue_across_sector_padding() {
     image[21 * SEC] = 0xBB;
 
     let entries = read_iso(&image).expect("read");
-    assert_eq!(find(&entries, "A.BIN").unwrap().data, vec![0xAA]);
     assert_eq!(
-        find(&entries, "B.BIN").unwrap().data,
+        find(&entries, "A.BIN").unwrap().read_data(&image).unwrap(),
+        vec![0xAA]
+    );
+    assert_eq!(
+        find(&entries, "B.BIN").unwrap().read_data(&image).unwrap(),
         vec![0xBB],
         "records past the sector-18 padding are read from sector 19"
     );
@@ -396,4 +412,60 @@ fn decode_name_rejects_undecodable_bytes() {
         decode_name(&[0xFF, 0xFE], false, 3).unwrap_err(),
         IsoError::UndecodableName { pos: 3 }
     ));
+}
+
+#[test]
+fn extent_slices_against_a_shorter_image_names_the_escaping_extent() {
+    // An entry resolved against an image other than the one it was
+    // read from is the one path where extent_slices / read_data can
+    // fail; the refusal carries the extent and the image length.
+    let big: Vec<u8> = (0..5000u32).map(|i| (i % 251) as u8).collect();
+    let image = build_iso(vec![Node::File("BIG.DAT", big)]);
+    let entries = read_iso(&image).expect("read");
+    let entry = find(&entries, "BIG.DAT").unwrap();
+    let (sector, size) = entry.extents[0];
+    // Cut the image one byte short of the file's last byte.
+    let short = &image[..sector as usize * SEC + size as usize - 1];
+    let err = entry.read_data(short).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            IsoError::ExtentOutOfBounds { path, sector: s, size: z, len }
+                if path == "BIG.DAT" && *s == sector && *z == size && *len == short.len()
+        ),
+        "got {err:?}"
+    );
+    assert!(entry.extent_slices(short).is_err());
+    assert_eq!(entry.read_data(&image).unwrap().len(), 5000);
+}
+
+#[test]
+fn a_zero_length_file_reads_as_empty() {
+    // ECMA-119 allows a zero data length; the record still names a
+    // start sector. The entry carries one empty extent, resolves to
+    // one empty slice, and reads as no bytes -- not an error.
+    let image = build_iso(vec![Node::File("EMPTY.BIN", Vec::new())]);
+    let entries = read_iso(&image).expect("read");
+    let entry = find(&entries, "EMPTY.BIN").unwrap();
+    assert_eq!(entry.kind, IsoEntryKind::File);
+    assert_eq!(entry.extents.len(), 1);
+    assert_eq!(entry.extents[0].1, 0);
+    let slices = entry.extent_slices(&image).unwrap();
+    assert_eq!(slices.len(), 1);
+    assert!(slices[0].is_empty());
+    assert!(entry.read_data(&image).unwrap().is_empty());
+}
+
+#[test]
+fn extent_range_is_none_past_the_image_and_inclusive_at_its_end() {
+    // Every extent this function accepts has a real byte range inside
+    // the image; the end bound is inclusive of image_len (an extent
+    // that ends exactly at the image end is in bounds), and the
+    // largest encodable extent never fits a real image.
+    assert_eq!(extent_range(2, 10, 3 * SEC), Some(2 * SEC..2 * SEC + 10));
+    assert_eq!(extent_range(2, 0, 2 * SEC), Some(2 * SEC..2 * SEC));
+    assert_eq!(extent_range(2, 1, 2 * SEC), None);
+    assert_eq!(extent_range(0, 0, 0), Some(0..0));
+    assert_eq!(extent_range(0, 1, 0), None);
+    assert_eq!(extent_range(u32::MAX, u32::MAX, 0), None);
 }

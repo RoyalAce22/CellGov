@@ -17,10 +17,11 @@
 //! Scope is deliberately narrow: directories are single-extent,
 //! Extended Attribute Records and Associated Files are rejected rather
 //! than carved, and nesting is depth-bounded -- every such case is a
-//! typed [`IsoError`], not a silent guess. The whole image stays
-//! resident and each file's bytes are copied out, so peak residence is
-//! roughly twice the carved content; revisit toward borrowed extents
-//! only when a consumer needs a file too large to hold resident.
+//! typed [`IsoError`], not a silent guess. Entries carry bounds-checked
+//! extent references; a consumer resolves each file against the image
+//! on demand ([`IsoEntry::extent_slices`] / [`IsoEntry::read_data`]),
+//! so peak residence is one file -- a BD-DL image's content does not
+//! fit in host memory.
 
 /// ISO9660 logical sector size.
 const SECTOR: usize = 2048;
@@ -47,22 +48,68 @@ const MAX_DEPTH: usize = 64;
 /// Whether an extracted entry is a file or a directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IsoEntryKind {
-    /// A regular file; [`IsoEntry::data`] holds its bytes.
+    /// A regular file; [`IsoEntry::extents`] locate its bytes.
     File,
-    /// A directory; [`IsoEntry::data`] is empty.
+    /// A directory; [`IsoEntry::extents`] is empty.
     Directory,
 }
 
-/// One extracted ISO entry: its root-relative path and, for files,
-/// the concatenated extent bytes.
+/// One extracted ISO entry: its root-relative path and, for files, the
+/// extents holding its bytes in the image the entry was read from.
 #[derive(Debug, Clone)]
 pub struct IsoEntry {
     /// Root-relative path, `/`-separated (e.g. `PS3_GAME/USRDIR/EBOOT.BIN`).
     pub path: String,
     /// File or directory.
     pub kind: IsoEntryKind,
-    /// File bytes (empty for a directory).
-    pub data: Vec<u8>,
+    /// File extents as `(start_sector, byte_size)` in content order,
+    /// bounds-checked against the source image by [`read_iso`]. Empty
+    /// for a directory. A file above the ~4 GiB single-extent ceiling
+    /// carries one pair per extent section.
+    pub extents: Vec<(u32, u32)>,
+}
+
+impl IsoEntry {
+    /// Resolve the extents into ordered byte slices of `image`.
+    ///
+    /// # Errors
+    ///
+    /// [`IsoError::ExtentOutOfBounds`] when an extent escapes `image`
+    /// -- unreachable for an entry [`read_iso`] produced over the same
+    /// image, which already validated every extent during the walk.
+    pub fn extent_slices<'i>(&self, image: &'i [u8]) -> Result<Vec<&'i [u8]>, IsoError> {
+        self.extents
+            .iter()
+            .map(|&(start, size)| {
+                let range = extent_range(start, size, image.len()).ok_or_else(|| {
+                    IsoError::ExtentOutOfBounds {
+                        path: self.path.clone(),
+                        sector: start,
+                        size,
+                        len: image.len(),
+                    }
+                })?;
+                Ok(&image[range])
+            })
+            .collect()
+    }
+
+    /// Concatenate the entry's bytes out of `image` into one owned
+    /// buffer. Sized for headers and metadata files; a content file can
+    /// exceed host memory, so bulk consumers should stream
+    /// [`Self::extent_slices`] instead.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::extent_slices`].
+    pub fn read_data(&self, image: &[u8]) -> Result<Vec<u8>, IsoError> {
+        let slices = self.extent_slices(image)?;
+        let mut out = Vec::with_capacity(slices.iter().map(|s| s.len()).sum());
+        for s in slices {
+            out.extend_from_slice(s);
+        }
+        Ok(out)
+    }
 }
 
 /// Why reading an ISO9660 image failed.
@@ -170,6 +217,18 @@ fn join_path(prefix: &str, name: &str) -> String {
     }
 }
 
+/// Byte range of the extent `(start, size)` inside an image of
+/// `image_len` bytes, or `None` when it escapes the image or its
+/// offset does not fit `usize`. The multiply is checked because on a
+/// 32-bit host `start * SECTOR` wraps for any start sector at or
+/// above 2^21 (a 4 GiB image), and a wrapped base would pass the
+/// end-bound test and alias the wrong bytes with no error.
+fn extent_range(start: u32, size: u32, image_len: usize) -> Option<std::ops::Range<usize>> {
+    let base = (start as usize).checked_mul(SECTOR)?;
+    let end = base.checked_add(size as usize)?;
+    (end <= image_len).then_some(base..end)
+}
+
 fn read_le_u32(data: &[u8], off: usize) -> u32 {
     u32::from_le_bytes(
         data[off..off + 4]
@@ -194,8 +253,9 @@ struct RootInfo {
     ucs2: bool,
 }
 
-/// Read a decrypted ISO9660 image into its extracted file tree (root's
-/// children, recursively). Prefers Joliet names when present.
+/// Read a decrypted ISO9660 image into its file tree (root's children,
+/// recursively), each file as bounds-checked extents into `image`.
+/// Prefers Joliet names when present.
 pub fn read_iso(image: &[u8]) -> Result<Vec<IsoEntry>, IsoError> {
     if image.len() < (VDS_START_SECTOR + 1) * SECTOR {
         return Err(IsoError::TooSmall { len: image.len() });
@@ -456,29 +516,27 @@ fn walk_directory(
             out.push(IsoEntry {
                 path: path.clone(),
                 kind: IsoEntryKind::Directory,
-                data: Vec::new(),
+                extents: Vec::new(),
             });
             let (sector, size) = rec.extents[0];
             walk_directory(image, sector, size, ucs2, &path, out, depth + 1)?;
         } else {
-            let mut data = Vec::new();
-            for (start, size) in &rec.extents {
-                let ext_base = (*start as usize) * SECTOR;
-                let ext_end = ext_base
-                    .checked_add(*size as usize)
-                    .filter(|&e| e <= image.len())
-                    .ok_or_else(|| IsoError::ExtentOutOfBounds {
+            // Validate every extent here so the entry's bounds are
+            // proven against this image before any consumer resolves it.
+            for &(start, size) in &rec.extents {
+                extent_range(start, size, image.len()).ok_or_else(|| {
+                    IsoError::ExtentOutOfBounds {
                         path: path.clone(),
-                        sector: *start,
-                        size: *size,
+                        sector: start,
+                        size,
                         len: image.len(),
-                    })?;
-                data.extend_from_slice(&image[ext_base..ext_end]);
+                    }
+                })?;
             }
             out.push(IsoEntry {
                 path,
                 kind: IsoEntryKind::File,
-                data,
+                extents: rec.extents,
             });
         }
     }
