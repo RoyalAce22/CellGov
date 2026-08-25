@@ -839,11 +839,13 @@ fn cmd_install_iso(args: &[String]) {
         iso_data.len() as f64 / (1024.0 * 1024.0)
     );
 
-    // With --dkey the image is encrypted: decrypt it first, then the
-    // record's source hash is over the original (encrypted) bytes. With
-    // no --dkey the image is assumed already decrypted, so the source
-    // bytes ARE the decrypted bytes and the mapping serves as both.
-    let decrypted: std::borrow::Cow<[u8]> = match &parsed.dkey_path {
+    // With --dkey the image is encrypted: stream-decrypt it into a
+    // transient file beside the VFS root and map that, so the plaintext
+    // never has to fit in memory. The record's source hash stays over
+    // the original (encrypted) bytes. With no --dkey the image is
+    // assumed already decrypted, so the source bytes ARE the decrypted
+    // bytes and the one mapping serves as both.
+    let decrypted_tmp: Option<(PathBuf, filebuffer::FileBuffer)> = match &parsed.dkey_path {
         Some(dkey_path) => {
             let dkey = std::fs::read(dkey_path).unwrap_or_else(|e| {
                 eprintln!("failed to read disc key {}: {e}", dkey_path.display());
@@ -854,25 +856,36 @@ fn cmd_install_iso(args: &[String]) {
                 std::process::exit(1);
             });
             println!("  decrypting protected sectors with supplied disc key...");
-            std::borrow::Cow::Owned(
-                disc_crypt::decrypt_disc_image(&iso_data, &dkey).unwrap_or_else(|e| {
-                    eprintln!("disc decryption failed: {e}");
-                    std::process::exit(1);
-                }),
-            )
+            let tmp_path = decrypt_iso_to_temp(&iso_data, &dkey, &parsed.output_dir);
+            let map = filebuffer::FileBuffer::open(&tmp_path).unwrap_or_else(|e| {
+                eprintln!("failed to map decrypted image {}: {e}", tmp_path.display());
+                remove_temp_decrypt(&tmp_path);
+                std::process::exit(1);
+            });
+            Some((tmp_path, map))
         }
-        None => std::borrow::Cow::Borrowed(&iso_data[..]),
+        None => None,
+    };
+    let decrypted: &[u8] = match &decrypted_tmp {
+        Some((_, map)) => &map[..],
+        None => &iso_data[..],
     };
 
     let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let outcome = game_install::install_iso(
-        &decrypted,
+        decrypted,
         &iso_data,
         &parsed.output_dir,
         &installs_dir,
         parsed.force,
-    )
-    .unwrap_or_else(|e| {
+    );
+    // The temp plaintext is spent either way; drop the mapping before
+    // removal (a mapped file cannot be deleted on Windows).
+    if let Some((tmp_path, map)) = decrypted_tmp {
+        drop(map);
+        remove_temp_decrypt(&tmp_path);
+    }
+    let outcome = outcome.unwrap_or_else(|e| {
         eprintln!("install-iso failed: {e}");
         std::process::exit(1);
     });
@@ -884,6 +897,61 @@ fn cmd_install_iso(args: &[String]) {
         outcome.game_dir.display(),
     );
     println!("  record {}", outcome.record_path.display());
+}
+
+/// Stream-decrypt `image` into a transient plaintext file under the
+/// VFS root's `.cellgov/` directory, returning its path. Peak
+/// residence is one 4 MiB batch regardless of image size; the cost of
+/// the encrypted path is transient disk instead.
+///
+/// Exits the process on any failure, removing the partial file first.
+fn decrypt_iso_to_temp(image: &[u8], dkey: &[u8; 16], output_dir: &Path) -> PathBuf {
+    let tmp_dir = output_dir.join(".cellgov");
+    std::fs::create_dir_all(&tmp_dir).unwrap_or_else(|e| {
+        eprintln!("failed to create {}: {e}", tmp_dir.display());
+        std::process::exit(1);
+    });
+    let tmp_path = temp_decrypt_path(&tmp_dir, std::process::id());
+    let file = std::fs::File::create(&tmp_path).unwrap_or_else(|e| {
+        eprintln!("failed to create {}: {e}", tmp_path.display());
+        std::process::exit(1);
+    });
+    let key = disc_crypt::decrypt_disc_key(dkey);
+    let mut writer = std::io::BufWriter::new(file);
+    let write_out = disc_crypt::decrypt_disc_image_chunks(image, &key, |chunk| {
+        std::io::Write::write_all(&mut writer, chunk)
+    })
+    .and_then(|()| {
+        std::io::Write::flush(&mut writer)
+            .map_err(|source| disc_crypt::DiscDecryptStreamError::Sink { source })
+    });
+    if let Err(e) = write_out {
+        eprintln!("disc decryption failed: {e}");
+        drop(writer);
+        remove_temp_decrypt(&tmp_path);
+        std::process::exit(1);
+    }
+    tmp_path
+}
+
+/// The transient plaintext path for this process. Keyed by process id
+/// so two `--dkey` installs into one VFS root cannot `File::create`
+/// over each other's plaintext while the other is still mapped.
+fn temp_decrypt_path(tmp_dir: &Path, pid: u32) -> PathBuf {
+    tmp_dir.join(format!("disc-decrypt-{pid}.tmp"))
+}
+
+/// Best-effort removal of the transient decrypted image; a leftover is
+/// named rather than silently kept.
+fn remove_temp_decrypt(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!(
+                "warning: could not remove transient decrypted image {}: {e}",
+                path.display()
+            );
+        }
+    }
 }
 
 /// Parsed `uninstall` subcommand arguments.

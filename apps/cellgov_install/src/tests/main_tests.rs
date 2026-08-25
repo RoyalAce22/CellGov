@@ -455,3 +455,19 @@ fn an_explicit_rap_is_used_in_place_of_the_content_id_keyed_exdata_file() {
     assert_eq!(probed, Some(npdrm::rap_to_klic(&[0u8; 16])));
     assert_eq!(named, Some(npdrm::rap_to_klic(&[0x11u8; 16])));
 }
+
+#[test]
+fn the_transient_plaintext_path_is_keyed_by_process_id() {
+    // Two --dkey installs into one VFS root must not share a temp file:
+    // File::create truncates, and the other run may still be mapped on
+    // it. The pid is what keeps them apart.
+    let dir = Path::new("vfs/.cellgov");
+    let a = temp_decrypt_path(dir, 4242);
+    let b = temp_decrypt_path(dir, 4243);
+    assert_ne!(a, b);
+    assert!(a.starts_with(dir));
+    assert_eq!(
+        a.file_name().and_then(|n| n.to_str()),
+        Some("disc-decrypt-4242.tmp")
+    );
+}

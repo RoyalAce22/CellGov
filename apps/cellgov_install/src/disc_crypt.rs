@@ -167,37 +167,101 @@ fn is_unprotected(sector: u32, regions: &[(u32, u32)]) -> bool {
 /// Decrypt an encrypted PS3 disc image with the user's `data1` (the
 /// `.dkey`). Returns the plaintext image; unprotected sectors are
 /// copied verbatim and protected sectors are CBC-decrypted.
+///
+/// Allocates the whole plaintext image; sized for tests and small
+/// images. An installer-scale consumer streams
+/// [`decrypt_disc_image_chunks`] instead -- a BD image does not fit
+/// in memory twice.
 pub fn decrypt_disc_image(image: &[u8], data1: &[u8; 16]) -> Result<Vec<u8>, DiscCryptError> {
     decrypt_disc_image_with_key(image, &decrypt_disc_key(data1))
 }
 
+/// Why streaming a decrypted disc image to its sink failed.
+#[derive(Debug, thiserror::Error)]
+pub enum DiscDecryptStreamError {
+    /// The image itself is malformed (region table / alignment).
+    #[error("disc decrypt: {0}")]
+    Crypt(#[from] DiscCryptError),
+    /// The sink refused a decrypted chunk.
+    #[error("write decrypted sectors: {source}")]
+    Sink {
+        /// Underlying sink failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// Sectors decrypted per scratch-buffer batch: 2048 sectors = 4 MiB,
+/// the whole resident cost of decrypting an image of any size.
+const BATCH_SECTORS: usize = 2048;
+
 /// Lower-level form taking the already-derived content key, so a test
-/// can drive it with an arbitrary key.
+/// can drive it with an arbitrary key. Same residence caveat as
+/// [`decrypt_disc_image`].
 pub fn decrypt_disc_image_with_key(
     image: &[u8],
     key: &[u8; 16],
 ) -> Result<Vec<u8>, DiscCryptError> {
+    let mut out = Vec::with_capacity(image.len());
+    match decrypt_disc_image_chunks(image, key, |chunk| {
+        out.extend_from_slice(chunk);
+        Ok(())
+    }) {
+        Ok(()) => Ok(out),
+        Err(DiscDecryptStreamError::Crypt(e)) => Err(e),
+        Err(DiscDecryptStreamError::Sink { .. }) => {
+            unreachable!("invariant: the Vec sink above never returns Err")
+        }
+    }
+}
+
+/// Stream-decrypt `image`, handing plaintext chunks to `sink` in image
+/// order. Unprotected sectors pass through verbatim; protected sectors
+/// are CBC-decrypted under `key` with the per-sector IV. Peak
+/// residence is one 4 MiB scratch batch regardless of image size; the
+/// chunks concatenate to exactly the image
+/// [`decrypt_disc_image_with_key`] returns.
+///
+/// # Errors
+///
+/// [`DiscDecryptStreamError::Crypt`] for a malformed image (the same
+/// refusals as the allocating form), [`DiscDecryptStreamError::Sink`]
+/// when `sink` refuses a chunk.
+pub fn decrypt_disc_image_chunks(
+    image: &[u8],
+    key: &[u8; 16],
+    mut sink: impl FnMut(&[u8]) -> std::io::Result<()>,
+) -> Result<(), DiscDecryptStreamError> {
     if !image.len().is_multiple_of(SECTOR) {
-        return Err(DiscCryptError::ImageNotSectorAligned { len: image.len() });
+        return Err(DiscCryptError::ImageNotSectorAligned { len: image.len() }.into());
     }
     let regions = read_unprotected_regions(image)?;
-    let mut out = image.to_vec();
-    let total_sectors = out.len() / SECTOR;
-    for sector in 0..total_sectors {
-        if is_unprotected(sector as u32, &regions) {
-            continue;
+    let total_sectors = image.len() / SECTOR;
+    let mut batch = vec![0u8; BATCH_SECTORS * SECTOR];
+    let mut sector = 0usize;
+    while sector < total_sectors {
+        let batch_sectors = BATCH_SECTORS.min(total_sectors - sector);
+        let batch_bytes = batch_sectors * SECTOR;
+        let image_base = sector * SECTOR;
+        batch[..batch_bytes].copy_from_slice(&image[image_base..image_base + batch_bytes]);
+        for i in 0..batch_sectors {
+            let abs = sector + i;
+            if is_unprotected(abs as u32, &regions) {
+                continue;
+            }
+            let block = &mut batch[i * SECTOR..(i + 1) * SECTOR];
+            let iv = sector_iv(abs as u64);
+            // The alignment guard above makes every block exactly
+            // SECTOR (2048) bytes -- a multiple of the 16-byte AES
+            // block -- so NoPadding can never fail here.
+            let _ = Aes128CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(&iv))
+                .decrypt_padded_mut::<NoPadding>(block)
+                .expect("invariant: sector is 2048 bytes, a multiple of the 16-byte AES block");
         }
-        let base = sector * SECTOR;
-        let block = &mut out[base..base + SECTOR];
-        let iv = sector_iv(sector as u64);
-        // The alignment guard above makes every block exactly SECTOR
-        // (2048) bytes -- a multiple of the 16-byte AES block -- so
-        // NoPadding can never fail here.
-        let _ = Aes128CbcDec::new(GenericArray::from_slice(key), GenericArray::from_slice(&iv))
-            .decrypt_padded_mut::<NoPadding>(block)
-            .expect("invariant: sector is 2048 bytes, a multiple of the 16-byte AES block");
+        sink(&batch[..batch_bytes]).map_err(|source| DiscDecryptStreamError::Sink { source })?;
+        sector += batch_sectors;
     }
-    Ok(out)
+    Ok(())
 }
 
 #[cfg(test)]

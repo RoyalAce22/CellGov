@@ -186,3 +186,64 @@ fn decrypt_disc_image_round_trips_via_data1() {
     let dec = decrypt_disc_image(&enc, &GOLDEN_DATA1).expect("decrypt via data1");
     assert_eq!(dec, plain);
 }
+
+#[test]
+fn chunked_decrypt_concatenates_to_the_allocating_form() {
+    // An image longer than one scratch batch, with a protected span
+    // straddling the batch boundary: the streamed chunks must
+    // concatenate to exactly what the allocating form returns.
+    let total = BATCH_SECTORS + 300;
+    let regions = [(0u32, 10u32), (2040u32, 2060u32)];
+    let plain = build_image(&regions, total);
+    let key = [0x42u8; 16];
+    let enc = encrypt_image(&plain, &key, &regions);
+
+    let whole = decrypt_disc_image_with_key(&enc, &key).expect("allocating decrypt");
+    let mut streamed = Vec::new();
+    let mut chunks = 0usize;
+    decrypt_disc_image_chunks(&enc, &key, |c| {
+        assert!(c.len() <= BATCH_SECTORS * SECTOR, "chunk exceeds one batch");
+        assert!(c.len().is_multiple_of(SECTOR), "chunk is whole sectors");
+        streamed.extend_from_slice(c);
+        chunks += 1;
+        Ok(())
+    })
+    .expect("streamed decrypt");
+
+    assert_eq!(
+        streamed, whole,
+        "chunks concatenate to the allocating result"
+    );
+    assert_eq!(streamed, plain, "and both recover the plaintext");
+    assert_eq!(chunks, 2, "one full batch plus the 300-sector tail");
+}
+
+#[test]
+fn chunked_decrypt_surfaces_a_sink_refusal() {
+    let regions = [(0u32, 0u32)];
+    let plain = build_image(&regions, 2);
+    let err = decrypt_disc_image_chunks(&plain, &[0u8; 16], |_| {
+        Err(std::io::Error::other("sink full"))
+    })
+    .expect_err("sink refusal must surface");
+    assert!(
+        matches!(&err, DiscDecryptStreamError::Sink { source } if source.to_string() == "sink full"),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn chunked_decrypt_rejects_unaligned_images_before_the_sink_runs() {
+    let img = vec![0u8; SECTOR + 1];
+    let mut sink_ran = false;
+    let err = decrypt_disc_image_chunks(&img, &[0u8; 16], |_| {
+        sink_ran = true;
+        Ok(())
+    })
+    .expect_err("unaligned image is refused");
+    assert!(matches!(
+        err,
+        DiscDecryptStreamError::Crypt(DiscCryptError::ImageNotSectorAligned { .. })
+    ));
+    assert!(!sink_ran, "no chunk reaches the sink of a refused image");
+}
