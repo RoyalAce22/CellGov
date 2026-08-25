@@ -129,3 +129,131 @@ fn non_state_hash_records_are_ignored() {
     let b = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xbb)]);
     assert_eq!(diverge(&a, &b), DivergeReport::Identical { count: 2 });
 }
+
+/// Byte offset of the `n`th record, walking the scanner's own decoder.
+fn record_offset(trace: &[u8], n: usize) -> usize {
+    let mut reader = cellgov_trace::TraceReader::new(trace);
+    for _ in 0..n {
+        reader
+            .next()
+            .expect("record exists")
+            .expect("record decodes");
+    }
+    reader.position()
+}
+
+fn bad_tag(trace: &mut [u8], record: usize) -> usize {
+    let offset = record_offset(trace, record);
+    trace[offset] = 0xff;
+    offset
+}
+
+#[test]
+fn a_corrupt_record_on_one_side_reports_the_cut_not_a_verdict() {
+    let clean = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xbb), h(2, 0x108, 0xcc)]);
+    let mut b = clean.clone();
+    let offset = bad_tag(&mut b, 2);
+    assert_eq!(
+        diverge(&clean, &b),
+        DivergeReport::CorruptTrace {
+            common_count: 2,
+            a_error: None,
+            b_error: Some(TraceDecodeError {
+                index: 2,
+                offset,
+                source: cellgov_trace::DecodeError::UnknownTag(0xff),
+            }),
+        }
+    );
+}
+
+#[test]
+fn a_mid_record_end_reports_truncation_at_the_cut_record() {
+    let clean = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xbb), h(2, 0x108, 0xcc)]);
+    let mut a = clean.clone();
+    let offset = record_offset(&a, 1);
+    a.truncate(offset + 1);
+    assert_eq!(
+        diverge(&a, &clean),
+        DivergeReport::CorruptTrace {
+            common_count: 1,
+            a_error: Some(TraceDecodeError {
+                index: 1,
+                offset,
+                source: cellgov_trace::DecodeError::Truncated,
+            }),
+            b_error: None,
+        }
+    );
+}
+
+#[test]
+fn a_corrupt_tail_past_the_shorter_side_is_not_a_length_difference() {
+    let mut a = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xbb), h(2, 0x108, 0xcc)]);
+    let offset = bad_tag(&mut a, 2);
+    let b = encode(&[h(0, 0x100, 0xaa)]);
+    assert_eq!(
+        diverge(&a, &b),
+        DivergeReport::CorruptTrace {
+            common_count: 1,
+            a_error: Some(TraceDecodeError {
+                index: 2,
+                offset,
+                source: cellgov_trace::DecodeError::UnknownTag(0xff),
+            }),
+            b_error: None,
+        }
+    );
+}
+
+#[test]
+fn both_sides_failing_at_the_same_pull_are_both_named() {
+    let clean = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xbb)]);
+    let mut a = clean.clone();
+    let mut b = clean.clone();
+    let a_offset = bad_tag(&mut a, 1);
+    let b_offset = record_offset(&b, 1);
+    b.truncate(b_offset + 1);
+    match diverge(&a, &b) {
+        DivergeReport::CorruptTrace {
+            common_count,
+            a_error: Some(a_error),
+            b_error: Some(b_error),
+        } => {
+            assert_eq!(common_count, 1);
+            assert_eq!(a_error.offset, a_offset);
+            assert_eq!(b_error.offset, b_offset);
+            assert_eq!(b_error.source, cellgov_trace::DecodeError::Truncated);
+        }
+        other => panic!("expected both sides corrupt, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_failing_index_counts_every_record_kind() {
+    use cellgov_trace::HashCheckpointKind;
+    let mut w = TraceWriter::new();
+    w.record(&h(0, 0x100, 0xaa));
+    w.record(&TraceRecord::StateHashCheckpoint {
+        kind: HashCheckpointKind::CommittedMemory,
+        hash: StateHash::new(0xdead),
+    });
+    w.record(&h(1, 0x104, 0xbb));
+    let mut a = w.take_bytes();
+    let offset = bad_tag(&mut a, 2);
+    let b = encode(&[h(0, 0x100, 0xaa), h(1, 0x104, 0xbb)]);
+    match diverge(&a, &b) {
+        DivergeReport::CorruptTrace {
+            common_count: 1,
+            a_error: Some(error),
+            b_error: None,
+        } => {
+            assert_eq!(
+                error.index, 2,
+                "the checkpoint record counts toward the index"
+            );
+            assert_eq!(error.offset, offset);
+        }
+        other => panic!("expected side A corrupt after one matched record, got {other:?}"),
+    }
+}

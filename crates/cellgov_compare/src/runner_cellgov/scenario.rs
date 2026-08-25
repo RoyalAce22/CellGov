@@ -4,32 +4,15 @@
 
 use cellgov_testkit::fixtures::ScenarioFixture;
 use cellgov_testkit::runner::{self, ScenarioOutcome, ScenarioResult};
-use cellgov_trace::{DecodeError, TraceReader, TraceRecord, TracedEffectKind, TracedWakeReason};
+use cellgov_trace::{TraceReader, TraceRecord, TracedEffectKind, TracedWakeReason};
 
 use crate::observation::{
     Observation, ObservationMetadata, ObservedEvent, ObservedEventKind, ObservedHashes,
     ObservedOutcome,
 };
+use crate::trace_decode::TraceDecodeError;
 
 use super::region::{extract_regions, RegionDescriptor};
-
-/// A record in a run's own trace stream failed to decode.
-///
-/// The stream is this workspace's encoder's output, so a bad record
-/// is a host invariant break: the events before it are a prefix, and
-/// a comparison over that prefix could mask or fabricate a divergence
-/// at the cut.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("trace record {index} at byte offset {offset} failed to decode: {source}")]
-pub struct TraceDecodeError {
-    /// Zero-based index of the record that failed.
-    pub index: usize,
-    /// Byte offset of that record's first byte in the trace stream.
-    pub offset: usize,
-    /// The decoder's own reason.
-    #[source]
-    pub source: DecodeError,
-}
 
 /// Convert a `ScenarioResult` into a normalized `Observation`.
 ///

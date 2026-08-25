@@ -355,6 +355,81 @@ fn cli_zoom_reports_missing_step_when_window_excluded_it() {
     );
 }
 
+/// Overwrite the tag byte of the `n`th record so the decoder rejects it,
+/// returning that record's byte offset.
+fn corrupt_record(trace: &mut [u8], n: usize) -> usize {
+    let mut reader = cellgov_trace::TraceReader::new(trace);
+    for _ in 0..n {
+        reader.next().unwrap().unwrap();
+    }
+    let offset = reader.position();
+    trace[offset] = 0xff;
+    offset
+}
+
+#[test]
+fn corrupted_b_reports_the_cut_not_a_length_mismatch() {
+    let mem = linear_addi_program(20);
+    let a = ppu_trace_bytes(&mem, 20);
+    let mut b = a.clone();
+    let offset = corrupt_record(&mut b, 7);
+
+    match diverge(&a, &b) {
+        DivergeReport::CorruptTrace {
+            common_count,
+            a_error,
+            b_error,
+        } => {
+            assert_eq!(common_count, 7);
+            assert_eq!(a_error, None);
+            let b_error = b_error.expect("side B failed");
+            assert_eq!(b_error.index, 7);
+            assert_eq!(b_error.offset, offset);
+        }
+        other => panic!("expected CorruptTrace, got {other:?}"),
+    }
+}
+
+#[test]
+fn cli_diverge_reports_corrupt_trace_instead_of_a_verdict() {
+    use std::path::PathBuf;
+    use std::process::Command;
+    let dir = ScratchDir::new("corrupt");
+    let mem = linear_addi_program(20);
+    let a_bytes = ppu_trace_bytes(&mem, 20);
+    let mut b_bytes = a_bytes.clone();
+    let offset = corrupt_record(&mut b_bytes, 7);
+
+    let a = dir.join("a.state");
+    let b = dir.join("b.state");
+    std::fs::write(&a, &a_bytes).unwrap();
+    std::fs::write(&b, &b_bytes).unwrap();
+
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let out = Command::new(bin)
+        .args(["diverge", a.to_str().unwrap(), b.to_str().unwrap()])
+        .output()
+        .expect("cli runs");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "corrupt input exits 3: {stdout}"
+    );
+    assert!(
+        stdout.contains("CORRUPT_TRACE  common=7  a: ok  b: trace record 7"),
+        "expected the cut named on side B, got: {stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("byte offset {offset}")),
+        "expected the failing record's offset, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("LENGTH_DIFFERS") && !stdout.contains("DIVERGE step="),
+        "a corrupt file must not produce a step or length verdict: {stdout}"
+    );
+}
+
 #[test]
 fn truncated_b_reports_length_mismatch_at_truncation_point() {
     // Side B halted mid-run; the common prefix matches.

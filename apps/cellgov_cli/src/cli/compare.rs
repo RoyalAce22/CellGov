@@ -413,9 +413,16 @@ pub(crate) fn run_compare_observations(args: &[String]) {
 // -- diverge --
 
 /// `cellgov_cli diverge <a.state> <b.state>` -- streaming scan of two
-/// per-step state-trace files. Exits non-zero on any non-identical outcome.
+/// per-step state-trace files.
+///
+/// # Errors
+///
+/// Exit codes: 0 when every `PpuStateHash` record matches, 1 on a step
+/// or length verdict, 3 when a trace fails to decode before the scan
+/// finishes -- no verdict is printed for a file the scanner could not
+/// read to the end.
 pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
-    use cellgov_compare::{diverge, DivergeField, DivergeReport};
+    use cellgov_compare::{diverge, DivergeField, DivergeReport, TraceDecodeError};
     let a_bytes = load_file_or_die(a_path);
     let b_bytes = load_file_or_die(b_path);
     match diverge(&a_bytes, &b_bytes) {
@@ -453,6 +460,20 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
                 "LENGTH_DIFFERS  common={common_count}  a={a_count}  b={b_count}  ({a_path} vs {b_path})"
             );
             std::process::exit(1);
+        }
+        DivergeReport::CorruptTrace {
+            common_count,
+            a_error,
+            b_error,
+        } => {
+            let describe =
+                |e: Option<TraceDecodeError>| e.map_or_else(|| "ok".into(), |e| e.to_string());
+            println!(
+                "CORRUPT_TRACE  common={common_count}  a: {}  b: {}  (a state file failed to decode; the {common_count} records before the cut matched and nothing past it was compared)",
+                describe(a_error),
+                describe(b_error)
+            );
+            std::process::exit(3);
         }
     }
 }

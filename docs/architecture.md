@@ -1416,12 +1416,16 @@ reports:
 - `cellgov_compare::diverge(a, b)` walks two trace byte buffers,
   filters each to `PpuStateHash` records, and reports the first
   index where they disagree -- first *scalar-visible* disagreement,
-  per the coverage caveat above. Three outcomes: `Identical { count }`,
-  `LengthDiffers { common_count, a_count, b_count }`, or
+  per the coverage caveat above. Four outcomes: `Identical { count }`,
+  `LengthDiffers { common_count, a_count, b_count }`,
   `Differs { step, a_pc, b_pc, a_hash, b_hash, field }` with `field`
-  in `{Pc, Hash}`. The check order is step count -> PC -> hash so
-  the report names the highest-level divergence first. Surfaced via
-  `cellgov_cli diverge <a.state> <b.state>`. Throughput is
+  in `{Pc, Hash}`, or `CorruptTrace { common_count, a_error, b_error }`
+  when a record on either side fails to decode -- not a verdict on
+  the runs, since nothing past the cut was compared. The check order
+  is step count -> PC -> hash so the report names the highest-level
+  divergence first. Surfaced via
+  `cellgov_cli diverge <a.state> <b.state>` (exit 3 on a corrupt
+  trace). Throughput is
   ~17 ns per record, so a 16M-record flOw boot scan completes in
   under 300 ms.
 - `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes

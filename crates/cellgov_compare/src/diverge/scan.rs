@@ -12,6 +12,8 @@
 
 use cellgov_trace::{TraceReader, TraceRecord};
 
+use crate::trace_decode::TraceDecodeError;
+
 /// Which field disagreed at the first differing step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DivergeField {
@@ -54,34 +56,67 @@ pub enum DivergeReport {
         /// Total `PpuStateHash` records in side B.
         b_count: u64,
     },
+    /// A trace stopped decoding before the scan finished. Not a verdict
+    /// on the runs: the `common_count` records before the failure
+    /// matched, and nothing past it was compared.
+    CorruptTrace {
+        /// Records matched before the failure.
+        common_count: u64,
+        /// Decode failure on side A, if that side failed.
+        a_error: Option<TraceDecodeError>,
+        /// Decode failure on side B, if that side failed.
+        b_error: Option<TraceDecodeError>,
+    },
 }
 
 /// Walk two trace byte slices and report the first `PpuStateHash` divergence.
 ///
-/// Decode errors truncate the affected iterator, which surfaces as a
-/// `LengthDiffers` result; callers needing to distinguish "malformed"
-/// from "ended" must validate the inputs separately.
+/// A record that fails to decode on either side ends the scan with
+/// [`DivergeReport::CorruptTrace`] rather than a step or length
+/// verdict, even when it lies past the other side's clean end.
 pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     let mut ai = state_hash_iter(a);
     let mut bi = state_hash_iter(b);
     let mut step: u64 = 0;
     loop {
-        match (ai.next(), bi.next()) {
+        let (a_next, b_next) = match (ai.next().transpose(), bi.next().transpose()) {
+            (Ok(a_next), Ok(b_next)) => (a_next, b_next),
+            (a_next, b_next) => {
+                return DivergeReport::CorruptTrace {
+                    common_count: step,
+                    a_error: a_next.err(),
+                    b_error: b_next.err(),
+                }
+            }
+        };
+        match (a_next, b_next) {
             (None, None) => return DivergeReport::Identical { count: step },
             (Some(_), None) => {
-                let a_count = step + 1 + ai.count() as u64;
-                return DivergeReport::LengthDiffers {
-                    common_count: step,
-                    a_count,
-                    b_count: step,
+                return match remaining(ai) {
+                    Ok(rest) => DivergeReport::LengthDiffers {
+                        common_count: step,
+                        a_count: step + 1 + rest,
+                        b_count: step,
+                    },
+                    Err(error) => DivergeReport::CorruptTrace {
+                        common_count: step,
+                        a_error: Some(error),
+                        b_error: None,
+                    },
                 };
             }
             (None, Some(_)) => {
-                let b_count = step + 1 + bi.count() as u64;
-                return DivergeReport::LengthDiffers {
-                    common_count: step,
-                    a_count: step,
-                    b_count,
+                return match remaining(bi) {
+                    Ok(rest) => DivergeReport::LengthDiffers {
+                        common_count: step,
+                        a_count: step,
+                        b_count: step + 1 + rest,
+                    },
+                    Err(error) => DivergeReport::CorruptTrace {
+                        common_count: step,
+                        a_error: None,
+                        b_error: Some(error),
+                    },
                 };
             }
             (Some((a_pc, a_hash)), Some((b_pc, b_hash))) => {
@@ -111,11 +146,43 @@ pub fn diverge(a: &[u8], b: &[u8]) -> DivergeReport {
     }
 }
 
-/// Iterate `PpuStateHash` records as `(pc, hash)`; other kinds and decode errors are skipped.
-fn state_hash_iter(bytes: &[u8]) -> impl Iterator<Item = (u64, u64)> + '_ {
-    TraceReader::new(bytes).filter_map(|r| match r {
-        Ok(TraceRecord::PpuStateHash { pc, hash, .. }) => Some((pc, hash.raw())),
-        _ => None,
+/// Count the `PpuStateHash` records left on one side after the other
+/// ended, failing at the first record that does not decode.
+fn remaining(
+    iter: impl Iterator<Item = Result<(u64, u64), TraceDecodeError>>,
+) -> Result<u64, TraceDecodeError> {
+    let mut count = 0;
+    for record in iter {
+        record?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Iterate `PpuStateHash` records as `(pc, hash)`, skipping other record
+/// kinds; a decode failure is yielded once, positioned by the index and
+/// byte offset of the record that failed, and then the stream ends.
+fn state_hash_iter(
+    bytes: &[u8],
+) -> impl Iterator<Item = Result<(u64, u64), TraceDecodeError>> + '_ {
+    let mut reader = TraceReader::new(bytes);
+    let mut index = 0usize;
+    std::iter::from_fn(move || loop {
+        let offset = reader.position();
+        match reader.next()? {
+            Ok(TraceRecord::PpuStateHash { pc, hash, .. }) => {
+                index += 1;
+                return Some(Ok((pc, hash.raw())));
+            }
+            Ok(_) => index += 1,
+            Err(source) => {
+                return Some(Err(TraceDecodeError {
+                    index,
+                    offset,
+                    source,
+                }))
+            }
+        }
     })
 }
 

@@ -24,6 +24,7 @@ pub mod runner_cellgov;
 pub mod runner_rpcs3;
 pub mod summary;
 pub mod sync_primitive_scan;
+pub mod trace_decode;
 pub mod witness_parse;
 pub mod witnesses;
 
@@ -52,9 +53,10 @@ pub use observation_compare::{
 pub use report::{format_human, format_json, format_multi_human, format_multi_json};
 pub use runner_cellgov::{
     observe, observe_from_boot, observe_with_determinism_check, BootOutcome, BootOutcomeParseError,
-    DeterminismError, RegionDescriptor, SpaceSnapshots, TraceDecodeError,
+    DeterminismError, RegionDescriptor, SpaceSnapshots,
 };
 pub use summary::{
     summarize, ByteParity, ByteParityDivergeReason, Convergence, ConvergenceFailure,
     CrossRunnerSummary, RegionIdent, UnclassifiedRun,
 };
+pub use trace_decode::TraceDecodeError;
