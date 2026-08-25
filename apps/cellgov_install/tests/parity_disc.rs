@@ -12,7 +12,7 @@
     reason = "integration test: unwrap on unexpected failure is correct"
 )]
 
-use cellgov_install::game_install;
+use cellgov_install::game_install::{self, InstallOptions};
 use std::path::PathBuf;
 
 #[path = "common/digests.rs"]
@@ -45,8 +45,17 @@ fn decrypted_disc_install_matches_the_rpcs3_extracted_eboot() {
 
     // install_iso runs the APP-keyed decrypt-proof internally; success
     // means the disc was decrypted and the EBOOT loads.
-    let outcome = game_install::install_iso(&iso, &iso, &vfs, &scratch.join("installs"), true)
-        .expect("decrypted-disc install (incl. decrypt-proof) must succeed");
+    let outcome = game_install::install_iso(
+        &iso,
+        &iso,
+        &vfs,
+        &scratch.join("installs"),
+        InstallOptions {
+            force: true,
+            ..Default::default()
+        },
+    )
+    .expect("decrypted-disc install (incl. decrypt-proof) must succeed");
     assert_eq!(outcome.title_id, CONTENT_ID);
 
     let installed = vfs

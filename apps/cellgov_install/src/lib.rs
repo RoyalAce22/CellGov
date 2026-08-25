@@ -28,6 +28,7 @@ pub mod manifest;
 pub mod npdrm;
 pub mod param_sfo;
 pub mod pkg;
+pub mod progress;
 pub mod pup;
 pub mod sce;
 pub mod self_image;

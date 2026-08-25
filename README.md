@@ -193,6 +193,21 @@ auto-discovers the install: `--firmware-dir` defaults to
 working directory; pass `--firmware-dir DIR` to override or set
 `CELLGOV_NO_FIRMWARE_DIR=1` to suppress the default.
 
+Titles install the same way, from your own dumps:
+
+```bash
+cargo run --release -p cellgov_install -- install-game <title>.pkg --rap <title>.rap
+cargo run --release -p cellgov_install -- install-iso <disc>.iso [--dkey <disc>.dkey]
+```
+
+A PSN package lands under `vfs/dev_hdd0/game/<title-id>/`, a disc
+image under `vfs/dev_bdvd/<title-id>/`, each with an install record
+of per-file digests. Installs stream: a dual-layer disc image installs
+in bounded memory, the EBOOT is proven to decrypt before anything is
+committed, and a progress bar tracks the write (plain log lines when
+stderr is not a terminal; `--no-progress`, `--no-color`, `--quiet`
+override it).
+
 The `cellgov_compare` crate gates the RPCS3 process-spawning runner
 behind the default-on `rpcs3-runner` Cargo feature. Importers that
 just want the `Observation` schema, `compare()`, `diverge()`, and

@@ -13,7 +13,7 @@
     reason = "integration test: unwrap on unexpected failure is correct"
 )]
 
-use cellgov_install::game_install;
+use cellgov_install::game_install::{self, InstallOptions};
 use std::path::{Path, PathBuf};
 
 #[path = "common/digests.rs"]
@@ -130,9 +130,17 @@ fn flow_pkg_install_matches_the_rpcs3_extracted_eboot() {
 
     // install_pkg runs the decrypt-proof gate internally, so a
     // successful return already proves the installed tree loads.
-    let outcome =
-        game_install::install_pkg(&pkg, Some(&rap), &vfs, &scratch.join("installs"), true)
-            .expect("flOw install (incl. decrypt-proof) must succeed");
+    let outcome = game_install::install_pkg(
+        &pkg,
+        Some(&rap),
+        &vfs,
+        &scratch.join("installs"),
+        InstallOptions {
+            force: true,
+            ..Default::default()
+        },
+    )
+    .expect("flOw install (incl. decrypt-proof) must succeed");
     assert_eq!(outcome.title_id, "NPUA80001");
     assert!(outcome.rap_installed, "license-1/2 title installs its RAP");
 

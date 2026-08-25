@@ -110,7 +110,14 @@ fn a_record_that_is_not_toml_is_refused_separately_from_a_version_mismatch() {
 fn rejects_missing_param_sfo() {
     let pkg = build_pkg(&KLIC, "NPUA80001", &[pkg_file("README.TXT", 3, b"hi")]);
     let out = scratch();
-    let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        None,
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, GameInstallError::NoParamSfo));
 }
 
@@ -122,7 +129,14 @@ fn rejects_non_hdd_category() {
         &[sfo_item(&[("TITLE_ID", "NPUA80001"), ("CATEGORY", "GD")])],
     );
     let out = scratch();
-    let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        None,
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, GameInstallError::NotHddGame { category } if category == "GD"));
 }
 
@@ -135,7 +149,14 @@ fn rejects_title_id_mismatch() {
         &[sfo_item(&[("TITLE_ID", "NPUA80068"), ("CATEGORY", "HG")])],
     );
     let out = scratch();
-    let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        None,
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, GameInstallError::TitleIdMismatch { .. }));
 }
 
@@ -147,7 +168,14 @@ fn rejects_missing_title_id() {
         &[sfo_item(&[("CATEGORY", "HG"), ("TITLE", "flOw")])],
     );
     let out = scratch();
-    let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        None,
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, GameInstallError::MissingTitleId));
 }
 
@@ -159,7 +187,14 @@ fn rejects_missing_eboot() {
         &[sfo_item(&[("TITLE_ID", "NPUA80001"), ("CATEGORY", "HG")])],
     );
     let out = scratch();
-    let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        None,
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, GameInstallError::NoEboot));
     assert!(!out.join("vfs/dev_hdd0/game/NPUA80001").exists());
 }
@@ -175,7 +210,7 @@ fn iso_rejects_missing_param_sfo() {
         &image,
         &out.join("vfs"),
         &out.join("installs"),
-        false,
+        InstallOptions::default(),
     )
     .unwrap_err();
     assert!(matches!(err, GameInstallError::NoDiscParamSfo));
@@ -196,7 +231,7 @@ fn iso_rejects_non_disc_category() {
         &image,
         &out.join("vfs"),
         &out.join("installs"),
-        false,
+        InstallOptions::default(),
     )
     .unwrap_err();
     assert!(matches!(err, GameInstallError::NotDiscGame { category } if category == "HG"));
@@ -217,7 +252,7 @@ fn iso_rejects_missing_eboot() {
         &image,
         &out.join("vfs"),
         &out.join("installs"),
-        false,
+        InstallOptions::default(),
     )
     .unwrap_err();
     assert!(matches!(err, GameInstallError::NoDiscEboot));
@@ -245,7 +280,7 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
     let out = scratch();
     let vfs = out.join("vfs");
     let installs = out.join("installs");
-    let err = install_iso(&image, &image, &vfs, &installs, false).unwrap_err();
+    let err = install_iso(&image, &image, &vfs, &installs, InstallOptions::default()).unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "synthetic disc EBOOT must fail the proof, got {err:?}"
@@ -422,7 +457,14 @@ fn pre_commit_fault_leaves_no_exdata_residue() {
     let pkg = npdrm_pkg(1);
     let out = scratch();
     let vfs = out.join("vfs");
-    let err = install_pkg(&pkg, Some(&[0u8; 16]), &vfs, &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        Some(&[0u8; 16]),
+        &vfs,
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "synthetic EBOOT must fail the proof, got {err:?}"
@@ -438,7 +480,14 @@ fn pre_commit_fault_leaves_no_exdata_residue() {
 fn rejects_rap_required_for_network_license() {
     let pkg = npdrm_pkg(1); // network
     let out = scratch();
-    let err = install_pkg(&pkg, None, &out.join("vfs"), &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        None,
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(
         matches!(err, GameInstallError::RapRequired { content_id } if content_id == NPD_CONTENT_ID)
     );
@@ -453,7 +502,7 @@ fn rejects_wrong_size_rap() {
         Some(&[0u8; 15]),
         &out.join("vfs"),
         &out.join("installs"),
-        false,
+        InstallOptions::default(),
     )
     .unwrap_err();
     assert!(matches!(err, GameInstallError::RapWrongSize { len: 15 }));
@@ -530,12 +579,29 @@ fn rejects_existing_target_without_force_and_force_bypasses() {
     std::fs::write(final_dir.join("old"), b"x").unwrap();
 
     // force=false: the non-empty target is rejected before staging.
-    let err = install_pkg(&pkg, Some(&[0u8; 16]), &vfs, &out.join("installs"), false).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        Some(&[0u8; 16]),
+        &vfs,
+        &out.join("installs"),
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(matches!(err, GameInstallError::TargetExists { .. }));
 
     // force=true: the synthetic EBOOT reaches the decrypt proof and
     // fails there.
-    let err = install_pkg(&pkg, Some(&[0u8; 16]), &vfs, &out.join("installs"), true).unwrap_err();
+    let err = install_pkg(
+        &pkg,
+        Some(&[0u8; 16]),
+        &vfs,
+        &out.join("installs"),
+        InstallOptions {
+            force: true,
+            ..Default::default()
+        },
+    )
+    .unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "force must bypass TargetExists, got {err:?}"
@@ -599,7 +665,7 @@ fn build_record_is_deterministic_and_sorted() {
     ];
     let out = scratch();
     let mk = |dest: &Path| {
-        let digests = stage_tree(&staged, dest).expect("stage");
+        let digests = stage_tree(&staged, dest, &()).expect("stage");
         build_record(
             "pkg",
             b"src-bytes",
@@ -657,7 +723,7 @@ fn entries_that_normalize_to_one_path_are_one_recorded_file() {
         },
     ];
     let out = scratch();
-    let digests = stage_tree(&staged, &out.join("tree")).expect("stage");
+    let digests = stage_tree(&staged, &out.join("tree"), &()).expect("stage");
     assert_eq!(
         staged.iter().filter(|f| !f.is_dir).count(),
         2,
@@ -689,7 +755,7 @@ fn stage_tree_streams_extent_slices_in_order() {
         data: StagedData::Slices(vec![&a, &b]),
     }];
     let out = scratch();
-    let digests = stage_tree(&staged, &out.join("tree")).expect("stage");
+    let digests = stage_tree(&staged, &out.join("tree"), &()).expect("stage");
 
     let mut expected = a.clone();
     expected.extend_from_slice(&b);
@@ -765,7 +831,7 @@ fn a_zero_length_file_stages_as_an_empty_file_with_the_empty_digest() {
     ];
     let out = scratch();
     let tree = out.join("tree");
-    let digests = stage_tree(&staged, &tree).expect("stage");
+    let digests = stage_tree(&staged, &tree, &()).expect("stage");
     assert_eq!(digests.len(), 3, "every zero-length file is recorded");
     for name in ["EMPTY_PKG.BIN", "EMPTY_ISO.BIN", "NO_EXTENTS.BIN"] {
         let written = std::fs::read(tree.join(name)).expect("staged file exists");
@@ -786,4 +852,229 @@ fn a_leading_dot_content_id_is_not_a_usable_path_component() {
     for ok in ["NPUA80001", "UP9000-NPUA80001_00-TEST", "BCES00664"] {
         assert!(content_id_is_safe(ok), "{ok:?} must be accepted");
     }
+}
+
+/// A reporter that counts everything, for the equivalence tests.
+#[derive(Default)]
+struct CountingReporter {
+    totals_bytes: std::sync::atomic::AtomicU64,
+    totals_files: std::sync::atomic::AtomicUsize,
+    bytes: std::sync::atomic::AtomicU64,
+    /// `bytes_advanced` calls: one per written piece.
+    pieces: std::sync::atomic::AtomicUsize,
+    started: std::sync::atomic::AtomicUsize,
+    finished: std::sync::atomic::AtomicUsize,
+}
+
+impl crate::progress::InstallProgress for CountingReporter {
+    fn phase(&self, _phase: crate::progress::Phase) {}
+    fn totals(&self, files: usize, bytes: u64) {
+        self.totals_files
+            .store(files, std::sync::atomic::Ordering::Relaxed);
+        self.totals_bytes
+            .store(bytes, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn file_started(&self, _path: &str) {
+        self.started
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn bytes_advanced(&self, delta: u64) {
+        self.bytes
+            .fetch_add(delta, std::sync::atomic::Ordering::Relaxed);
+        self.pieces
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn file_finished(&self) {
+        self.finished
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    fn finished(&self) {}
+}
+
+/// Instrumentation must not change the artifact: the digests staged
+/// with a live reporter equal the digests staged with the no-op one,
+/// and the counted bytes equal the emitted totals -- drift here is
+/// what makes a bar stop at 97%.
+#[test]
+fn a_live_reporter_observes_the_same_tree_the_noop_stages() {
+    use std::sync::atomic::Ordering;
+    // Cross the 1 MiB piece boundary so the sub-file split is real;
+    // sit exactly on it and at zero so the boundaries are covered too.
+    let big = vec![0xA5u8; PROGRESS_PIECE + 4096];
+    let exact = vec![0x3Cu8; PROGRESS_PIECE];
+    let small = vec![0x5Au8; 300];
+    let staged = vec![
+        StagedFile {
+            path: "USRDIR/BIG.DAT".to_string(),
+            is_dir: false,
+            data: StagedData::Bytes(&big),
+        },
+        StagedFile {
+            path: "USRDIR".to_string(),
+            is_dir: true,
+            data: StagedData::Bytes(&[]),
+        },
+        StagedFile {
+            path: "SMALL.BIN".to_string(),
+            is_dir: false,
+            data: StagedData::Slices(vec![&small, &big[..100]]),
+        },
+        StagedFile {
+            path: "EXACT.DAT".to_string(),
+            is_dir: false,
+            data: StagedData::Bytes(&exact),
+        },
+        StagedFile {
+            path: "EMPTY.DAT".to_string(),
+            is_dir: false,
+            data: StagedData::Bytes(&[]),
+        },
+    ];
+    let out = scratch();
+
+    let silent = stage_tree(&staged, &out.join("silent"), &()).expect("stage silent");
+
+    let reporter = CountingReporter::default();
+    emit_totals(&reporter, &staged);
+    let live = stage_tree(&staged, &out.join("live"), &reporter).expect("stage live");
+
+    assert_eq!(silent, live, "reporter changed the staged digests");
+    let expected_bytes = (2 * PROGRESS_PIECE + 4096 + 300 + 100) as u64;
+    assert_eq!(
+        reporter.totals_bytes.load(Ordering::Relaxed),
+        expected_bytes,
+        "totals must sum every non-directory entry's bytes"
+    );
+    assert_eq!(
+        reporter.bytes.load(Ordering::Relaxed),
+        expected_bytes,
+        "advanced bytes must land exactly on the emitted total"
+    );
+    // big: 2 pieces; small: one per slice; exact: 1; empty: none.
+    assert_eq!(
+        reporter.pieces.load(Ordering::Relaxed),
+        2 + 2 + 1,
+        "a chunk is reported once per PROGRESS_PIECE sub-slice"
+    );
+    assert_eq!(reporter.totals_files.load(Ordering::Relaxed), 4);
+    assert_eq!(reporter.started.load(Ordering::Relaxed), 4);
+    assert_eq!(reporter.finished.load(Ordering::Relaxed), 4);
+    assert_eq!(
+        std::fs::metadata(out.join("live/EMPTY.DAT"))
+            .expect("empty file staged")
+            .len(),
+        0
+    );
+}
+
+/// Records the phase sequence and the completion flag; the sequencing
+/// tests read it back after the install returns, so a plain `Mutex`
+/// over the `Vec` is all the sharing the `Sync` bound needs.
+#[derive(Default)]
+struct RecordingReporter {
+    phases: std::sync::Mutex<Vec<crate::progress::Phase>>,
+    finished: std::sync::atomic::AtomicBool,
+}
+
+impl RecordingReporter {
+    fn phases(&self) -> Vec<crate::progress::Phase> {
+        self.phases.lock().unwrap().clone()
+    }
+}
+
+impl crate::progress::InstallProgress for RecordingReporter {
+    fn phase(&self, phase: crate::progress::Phase) {
+        self.phases.lock().unwrap().push(phase);
+    }
+    fn totals(&self, _files: usize, _bytes: u64) {}
+    fn file_started(&self, _path: &str) {}
+    fn bytes_advanced(&self, _delta: u64) {}
+    fn file_finished(&self) {}
+    fn finished(&self) {
+        self.finished
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// `finished` means the install completed; a renderer draws its 100%
+/// frame on it. A pre-commit fault must therefore leave it unset, and
+/// the phase trail must stop at the phase that faulted.
+#[test]
+fn a_pre_commit_fault_never_reports_finished() {
+    use crate::progress::Phase;
+    let pkg = npdrm_pkg(1);
+    let out = scratch();
+    let reporter = RecordingReporter::default();
+    let err = install_pkg(
+        &pkg,
+        Some(&[0u8; 16]),
+        &out.join("vfs"),
+        &out.join("installs"),
+        InstallOptions {
+            force: false,
+            progress: &reporter,
+        },
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, GameInstallError::DecryptProof(_)),
+        "synthetic EBOOT must fail the proof, got {err:?}"
+    );
+    assert_eq!(
+        reporter.phases(),
+        vec![Phase::Reading, Phase::Staging, Phase::Proving]
+    );
+    assert!(
+        !reporter.finished.load(std::sync::atomic::Ordering::Relaxed),
+        "a faulted install reported finished"
+    );
+}
+
+/// `Clearing` brackets the `remove_dir_all` of an existing target and
+/// nothing else: a fresh target sees a single `Committing`, a forced
+/// overwrite sees `Committing -> Clearing -> Committing`.
+#[test]
+fn commit_reports_clearing_only_when_a_target_already_exists() {
+    use crate::progress::Phase;
+    let out = scratch();
+    let record = sample_record(None);
+    let installs = out.join("installs");
+    let run = |final_dir: &Path, staging_root: &Path| {
+        let tree = staging_root.join("tree");
+        std::fs::create_dir_all(&tree).unwrap();
+        std::fs::write(tree.join("new"), b"n").unwrap();
+        let reporter = RecordingReporter::default();
+        commit(
+            staging_root,
+            &tree,
+            final_dir,
+            None,
+            &installs,
+            SYNTHETIC_TITLE_ID,
+            &record,
+            &reporter,
+        )
+        .expect("commit");
+        reporter.phases()
+    };
+
+    let fresh = out.join("fresh");
+    assert_eq!(
+        run(&fresh, &out.join(".staging-fresh")),
+        vec![Phase::Committing]
+    );
+    assert!(fresh.join("new").exists());
+
+    let existing = out.join("existing");
+    std::fs::create_dir_all(&existing).unwrap();
+    std::fs::write(existing.join("old"), b"o").unwrap();
+    assert_eq!(
+        run(&existing, &out.join(".staging-existing")),
+        vec![Phase::Committing, Phase::Clearing, Phase::Committing]
+    );
+    assert!(
+        !existing.join("old").exists(),
+        "old target content survived"
+    );
+    assert!(existing.join("new").exists());
 }

@@ -10,13 +10,17 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+mod progress_render;
+
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
+use cellgov_install::game_install::InstallOptions;
 use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
 use cellgov_install::npdrm::{self, NpdHeaderInfo};
 use cellgov_install::{disc_crypt, game_install, game_uninstall, pup, sce, self_image, tar};
+use progress_render::{ProgressBar, TermCaps};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -50,12 +54,14 @@ fn print_usage() {
     eprintln!(
         "  cellgov_install install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
     );
+    eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    --rap: required for license-1/2 NPDRM titles, optional for license-3");
     eprintln!("    --force: overwrite an existing game directory");
     eprintln!(
         "  cellgov_install install-iso <ISO_PATH> [--dkey <DKEY_PATH>] [--output <dir>] [--force]"
     );
+    eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    --dkey: 16-byte disc key for an encrypted image; omit for a decrypted one");
     eprintln!("    extracts the disc tree to dev_bdvd/");
@@ -674,6 +680,33 @@ struct InstallGameArgs {
     rap_path: Option<PathBuf>,
     output_dir: PathBuf,
     force: bool,
+    render: RenderFlags,
+}
+
+/// The three progress-rendering overrides shared by the two game
+/// installers. Flags beat environment; see `progress_render::detect`.
+#[derive(Default, Clone, Copy)]
+struct RenderFlags {
+    no_progress: bool,
+    no_color: bool,
+    quiet: bool,
+}
+
+impl RenderFlags {
+    /// Absorb a render flag, reporting whether `arg` was one.
+    fn accept(&mut self, arg: &str) -> bool {
+        match arg {
+            "--no-progress" => self.no_progress = true,
+            "--no-color" => self.no_color = true,
+            "--quiet" => self.quiet = true,
+            _ => return false,
+        }
+        true
+    }
+
+    fn caps(self) -> TermCaps {
+        progress_render::detect(self.no_progress, self.no_color, self.quiet)
+    }
 }
 
 const DEFAULT_GAME_INSTALL_OUTPUT: &str = game_install::DEFAULT_VFS_ROOT;
@@ -686,6 +719,7 @@ fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareC
     let mut rap_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
     let mut force = false;
+    let mut render = RenderFlags::default();
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -704,6 +738,7 @@ fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareC
                 output_dir = Some(PathBuf::from(&args[i]));
             }
             "--force" => force = true,
+            other if render.accept(other) => {}
             other => return Err(FirmwareCliError::UnknownArgument(other.to_string())),
         }
         i += 1;
@@ -713,7 +748,15 @@ fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareC
         rap_path,
         output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
         force,
+        render,
     })
+}
+
+/// The container's filename, for the progress bar's title line.
+fn container_label(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 fn cmd_install_game(args: &[String]) {
@@ -744,17 +787,29 @@ fn cmd_install_game(args: &[String]) {
     );
 
     let installs_dir = game_install::installs_dir(&parsed.output_dir);
+    let bar = ProgressBar::start(parsed.render.caps(), &container_label(&parsed.pkg_path));
+    let reporter = bar.state();
     let outcome = game_install::install_pkg(
         &pkg_data,
         rap_data.as_deref(),
         &parsed.output_dir,
         &installs_dir,
-        parsed.force,
-    )
-    .unwrap_or_else(|e| {
-        eprintln!("install-game failed: {e}");
-        std::process::exit(1);
-    });
+        InstallOptions {
+            force: parsed.force,
+            progress: &*reporter,
+        },
+    );
+    let outcome = match outcome {
+        Ok(o) => {
+            bar.finish();
+            o
+        }
+        Err(e) => {
+            bar.abort();
+            eprintln!("install-game failed: {e}");
+            std::process::exit(1);
+        }
+    };
 
     println!(
         "  title {} (content {}): {} files -> {}",
@@ -780,6 +835,7 @@ struct InstallIsoArgs {
     dkey_path: Option<PathBuf>,
     output_dir: PathBuf,
     force: bool,
+    render: RenderFlags,
 }
 
 fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCliError> {
@@ -790,6 +846,7 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
     let mut dkey_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
     let mut force = false;
+    let mut render = RenderFlags::default();
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
@@ -808,6 +865,7 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
                 output_dir = Some(PathBuf::from(&args[i]));
             }
             "--force" => force = true,
+            other if render.accept(other) => {}
             other => return Err(FirmwareCliError::UnknownArgument(other.to_string())),
         }
         i += 1;
@@ -817,6 +875,7 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
         dkey_path,
         output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
         force,
+        render,
     })
 }
 
@@ -875,13 +934,30 @@ fn cmd_install_iso(args: &[String]) {
     };
 
     let installs_dir = game_install::installs_dir(&parsed.output_dir);
+    let bar = ProgressBar::start(parsed.render.caps(), &container_label(&parsed.iso_path));
+    let reporter = bar.state();
     let outcome = game_install::install_iso(
         decrypted,
         &iso_data,
         &parsed.output_dir,
         &installs_dir,
-        parsed.force,
+        InstallOptions {
+            force: parsed.force,
+            progress: &*reporter,
+        },
     );
+    // Bar down first: the render thread owns stderr while it runs, and
+    // its next frame would cursor-up over the removal warning below.
+    let outcome = match outcome {
+        Ok(o) => {
+            bar.finish();
+            Ok(o)
+        }
+        Err(e) => {
+            bar.abort();
+            Err(e)
+        }
+    };
     // The temp plaintext is spent either way; drop the mapping before
     // removal (a mapped file cannot be deleted on Windows).
     if let Some((tmp_path, map)) = decrypted_tmp {

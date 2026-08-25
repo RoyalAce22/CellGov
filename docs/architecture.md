@@ -117,9 +117,12 @@ Four structural rules worth calling out:
 - `cellgov_explore` lives above `cellgov_core` and drives the runtime
   externally through `Runtime::step` / `commit_step` /
   `set_scheduler`. It never modifies the runtime model.
-- `cellgov_install` is a lib+bin: the binary exposes the `install`
-  and `decrypt-self` subcommands; the library exposes the same PUP
-  / SCE / SELF / TAR / APP-key primitives. `cellgov_cli` takes a
+- `cellgov_install` is a lib+bin: the binary exposes the `install`,
+  `install-game`, `install-iso`, `uninstall` and `decrypt-self`
+  subcommands; the library exposes the same PUP / SCE / SELF / TAR /
+  APP-key primitives and the game installers, which report progress
+  through a reporter trait the binary alone renders (the library
+  never learns what a terminal is). `cellgov_cli` takes a
   library dependency to decrypt SCE-wrapped SELFs on the fly at
   boot time, through `self_image::to_plaintext_elf` -- the one
   place that probes for the SCE wrapper and routes to the APP-keyed
