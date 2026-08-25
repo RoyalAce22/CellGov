@@ -164,18 +164,6 @@ fn is_unprotected(sector: u32, regions: &[(u32, u32)]) -> bool {
     regions.iter().any(|&(s, e)| s <= sector && sector <= e)
 }
 
-/// Decrypt an encrypted PS3 disc image with the user's `data1` (the
-/// `.dkey`). Returns the plaintext image; unprotected sectors are
-/// copied verbatim and protected sectors are CBC-decrypted.
-///
-/// Allocates the whole plaintext image; sized for tests and small
-/// images. An installer-scale consumer streams
-/// [`decrypt_disc_image_chunks`] instead -- a BD image does not fit
-/// in memory twice.
-pub fn decrypt_disc_image(image: &[u8], data1: &[u8; 16]) -> Result<Vec<u8>, DiscCryptError> {
-    decrypt_disc_image_with_key(image, &decrypt_disc_key(data1))
-}
-
 /// Why streaming a decrypted disc image to its sink failed.
 #[derive(Debug, thiserror::Error)]
 pub enum DiscDecryptStreamError {
@@ -195,38 +183,16 @@ pub enum DiscDecryptStreamError {
 /// the whole resident cost of decrypting an image of any size.
 const BATCH_SECTORS: usize = 2048;
 
-/// Lower-level form taking the already-derived content key, so a test
-/// can drive it with an arbitrary key. Same residence caveat as
-/// [`decrypt_disc_image`].
-pub fn decrypt_disc_image_with_key(
-    image: &[u8],
-    key: &[u8; 16],
-) -> Result<Vec<u8>, DiscCryptError> {
-    let mut out = Vec::with_capacity(image.len());
-    match decrypt_disc_image_chunks(image, key, |chunk| {
-        out.extend_from_slice(chunk);
-        Ok(())
-    }) {
-        Ok(()) => Ok(out),
-        Err(DiscDecryptStreamError::Crypt(e)) => Err(e),
-        Err(DiscDecryptStreamError::Sink { .. }) => {
-            unreachable!("invariant: the Vec sink above never returns Err")
-        }
-    }
-}
-
 /// Stream-decrypt `image`, handing plaintext chunks to `sink` in image
 /// order. Unprotected sectors pass through verbatim; protected sectors
-/// are CBC-decrypted under `key` with the per-sector IV. Peak
-/// residence is one 4 MiB scratch batch regardless of image size; the
-/// chunks concatenate to exactly the image
-/// [`decrypt_disc_image_with_key`] returns.
+/// are CBC-decrypted under `key` (from [`decrypt_disc_key`]) with the
+/// per-sector IV. Peak residence is one 4 MiB scratch batch regardless
+/// of image size.
 ///
 /// # Errors
 ///
-/// [`DiscDecryptStreamError::Crypt`] for a malformed image (the same
-/// refusals as the allocating form), [`DiscDecryptStreamError::Sink`]
-/// when `sink` refuses a chunk.
+/// [`DiscDecryptStreamError::Crypt`] for a malformed image,
+/// [`DiscDecryptStreamError::Sink`] when `sink` refuses a chunk.
 pub fn decrypt_disc_image_chunks(
     image: &[u8],
     key: &[u8; 16],

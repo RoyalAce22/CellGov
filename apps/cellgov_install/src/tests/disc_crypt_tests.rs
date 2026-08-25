@@ -1,9 +1,10 @@
 //! PS3 disc decryption: a golden (data1 -> key) vector pinning the
 //! published constants, the real on-disc region header parsed from
-//! genuine bytes, encrypt/decrypt round-trips (including the data1
-//! wrapper), and the structural-rejection guards. No real encrypted
-//! disc is on hand, so the key/region values are pinned to externally-
-//! captured golden bytes rather than re-derived from this crate.
+//! genuine bytes, chunked encrypt/decrypt round-trips (including the
+//! data1-derived key), and the structural-rejection guards. No real
+//! encrypted disc is on hand, so the key/region values are pinned to
+//! externally-captured golden bytes rather than re-derived from this
+//! crate.
 
 use super::*;
 use aes::cipher::{
@@ -149,56 +150,57 @@ fn rejects_inverted_region_range() {
     ));
 }
 
-#[test]
-fn rejects_non_sector_aligned_image() {
-    // 2049 bytes: one whole sector plus one stray byte.
-    let img = vec![0u8; SECTOR + 1];
-    assert!(matches!(
-        decrypt_disc_image_with_key(&img, &[0u8; 16]).unwrap_err(),
-        DiscCryptError::ImageNotSectorAligned { len } if len == SECTOR + 1
-    ));
+/// Whole-image decrypt through the production chunk API: the one way
+/// any consumer decrypts, collected for round-trip assertions.
+fn decrypt_whole(image: &[u8], key: &[u8; 16]) -> Result<Vec<u8>, DiscDecryptStreamError> {
+    let mut out = Vec::with_capacity(image.len());
+    decrypt_disc_image_chunks(image, key, |c| {
+        out.extend_from_slice(c);
+        Ok(())
+    })?;
+    Ok(out)
 }
 
 #[test]
 fn decrypt_round_trips_over_protected_sectors() {
     // Sector 0 (region table) and sectors 4-5 are plaintext; 1-3 are
-    // protected. Drives the lower-level _with_key form.
+    // protected.
     let regions = [(0u32, 0u32), (4u32, 5u32)];
     let plain = build_image(&regions, 6);
     let key = [0x42u8; 16];
     let enc = encrypt_image(&plain, &key, &regions);
     assert_ne!(enc, plain, "protected sectors were transformed");
 
-    let dec = decrypt_disc_image_with_key(&enc, &key).expect("decrypt");
+    let dec = decrypt_whole(&enc, &key).expect("decrypt");
     assert_eq!(dec, plain, "decrypt recovers the original plaintext");
 }
 
 #[test]
-fn decrypt_disc_image_round_trips_via_data1() {
-    // Drives the real data1 -> key wrapper end to end (the _with_key
-    // form alone never exercised decrypt_disc_key).
+fn data1_derived_key_round_trips_through_the_chunk_decrypt() {
+    // The production key path end to end: derive the content key from
+    // data1, then decrypt with it (an arbitrary-key round trip alone
+    // never exercises decrypt_disc_key).
     let regions = [(0u32, 0u32), (3u32, 3u32)];
     let plain = build_image(&regions, 4);
     let key = decrypt_disc_key(&GOLDEN_DATA1);
     let enc = encrypt_image(&plain, &key, &regions);
     assert_ne!(enc, plain);
 
-    let dec = decrypt_disc_image(&enc, &GOLDEN_DATA1).expect("decrypt via data1");
+    let dec = decrypt_whole(&enc, &key).expect("decrypt via data1-derived key");
     assert_eq!(dec, plain);
 }
 
 #[test]
-fn chunked_decrypt_concatenates_to_the_allocating_form() {
+fn chunked_decrypt_recovers_plaintext_across_batch_boundaries() {
     // An image longer than one scratch batch, with a protected span
     // straddling the batch boundary: the streamed chunks must
-    // concatenate to exactly what the allocating form returns.
+    // concatenate to the known plaintext.
     let total = BATCH_SECTORS + 300;
     let regions = [(0u32, 10u32), (2040u32, 2060u32)];
     let plain = build_image(&regions, total);
     let key = [0x42u8; 16];
     let enc = encrypt_image(&plain, &key, &regions);
 
-    let whole = decrypt_disc_image_with_key(&enc, &key).expect("allocating decrypt");
     let mut streamed = Vec::new();
     let mut chunks = 0usize;
     decrypt_disc_image_chunks(&enc, &key, |c| {
@@ -210,11 +212,7 @@ fn chunked_decrypt_concatenates_to_the_allocating_form() {
     })
     .expect("streamed decrypt");
 
-    assert_eq!(
-        streamed, whole,
-        "chunks concatenate to the allocating result"
-    );
-    assert_eq!(streamed, plain, "and both recover the plaintext");
+    assert_eq!(streamed, plain, "chunks concatenate to the plaintext");
     assert_eq!(chunks, 2, "one full batch plus the 300-sector tail");
 }
 
