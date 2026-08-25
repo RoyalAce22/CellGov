@@ -175,6 +175,11 @@ impl GeneratedFields {
         if let Some(rap) = &self.rap_filename {
             s.push_str(&format!("rap_filename = \"{}\"\n", toml_escape(rap)));
         }
+        // The loader's `[source]` default is hdd; a disc title left on
+        // that default resolves under dev_hdd0 and never finds its EBOOT.
+        if self.distribution == "disc-iso" {
+            s.push_str("\n[source]\nkind = \"disc\"\n");
+        }
         s.push_str("\n[checkpoint]\nkind = \"process-exit\"\n");
         s.push_str("\n[rsx]\nmirror = false\nconsume = false\n");
         s

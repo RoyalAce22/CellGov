@@ -1502,6 +1502,11 @@ NPUA80068`), or explicit manifest path (`--title-manifest
   `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead
   of the PSN HDD layout. The encrypted `EBOOT.BIN` is decrypted
   in memory at boot through `cellgov_install::sce::decrypt_self_to_elf`.
+- **Uncharted: Drake's Fortune** (BCUS98103): disc ISO, APP-keyed,
+  resolved and decrypted the same way as WipEout, with the same
+  `first-rsx-write` checkpoint kind. Its EBOOT carries four
+  loadable segments, so the checkpoint manifest names two code
+  and two data regions (`code`, `data`, `code_hi`, `data_hi`).
 - **System shell** (`vsh`): not a game. A `[source] kind =
   "firmware-exec"` block points the resolver at the firmware image
   itself (`vfs/dev_flash/vsh/module/vsh.self`) rather than at any
@@ -1718,6 +1723,20 @@ cross-runner byte parity at `975 non-semantic + 1 pending`. The
 checkpoint is the title's first label write, which resolves
 against the reports base the LV2 RSX context supplies. See
 [tests/fixtures/BCES00664/cross_runner/NOTES.md](../tests/fixtures/BCES00664/cross_runner/NOTES.md).
+
+**Uncharted: Drake's Fortune (BCUS98103).** Disc ISO title whose
+EBOOT carries four loadable segments; the engine's data lives in
+the second RW segment at `0x100a0000`. Past the seeded
+`cellSysutil_Library` `module_start`, it reaches its
+`FirstRsxWrite` checkpoint at step 7,119 and converges with RPCS3
+there (`Yes`), with cross-runner byte parity at
+`666 non-semantic + 57 pending`. 164 of 172 imports resolve to
+firmware OPDs; the eight `libvdec` imports sit on the
+unresolved-import trampoline because the firmware `libvdec.sprx`
+is pruned from the load set (its own `libdivx311dec` import has no
+provider). Every pending byte sits in the high data segment and is
+not read on the path to the checkpoint on either runner. See
+[tests/fixtures/BCUS98103/cross_runner/NOTES.md](../tests/fixtures/BCUS98103/cross_runner/NOTES.md).
 
 **System shell (vsh).** Boots straight out of the firmware image
 with no install step, under the full derived load set (130 of

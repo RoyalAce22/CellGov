@@ -1,0 +1,15 @@
+[title]
+content_id = "BCUS98103"
+short_name = "uncharted"
+display_name = "Uncharted: Drake's Fortune"
+eboot_candidates = ["EBOOT.BIN", "EBOOT.elf"]
+year = 2007
+developer = "Naughty Dog"
+engine = "Naughty Dog proprietary"
+distribution = "disc-iso"
+
+[source]
+kind = "disc"
+
+[checkpoint]
+kind = "first-rsx-write"

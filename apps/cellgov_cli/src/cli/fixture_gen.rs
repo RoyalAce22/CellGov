@@ -265,17 +265,19 @@ pub(crate) fn build_classifier_context(
 
     let hle_opd_ranges = compute_hle_opd_ranges(eboot_bytes)?;
 
-    // sys_lwmutex_t handle-slot scan runs on the runtime data snapshot
-    // (not the EBOOT) because the lwmutex_free sentinel and attribute
-    // field are only populated post-init.
+    // sys_lwmutex_t handle-slot scan runs on the runtime snapshot (not
+    // the EBOOT) because the lwmutex_free sentinel and attribute field
+    // are only populated post-init. Every captured region is walked: a
+    // title with several writable PT_LOADs keeps its lwmutexes in
+    // whichever one the linker chose; the preamble match guards
+    // against false positives.
     let sync_primitive_id_ranges = observation
         .memory_regions
         .iter()
-        .find(|r| r.name == "data")
-        .map(|r| {
+        .flat_map(|r| {
             cellgov_compare::sync_primitive_scan::find_sys_lwmutex_handle_slots(&r.data, r.addr)
         })
-        .unwrap_or_default();
+        .collect();
 
     let ctx = ClassifierContext {
         elf_header_range,

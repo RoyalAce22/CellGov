@@ -1,0 +1,136 @@
+{
+  "convergence": {
+    "kind": "yes"
+  },
+  "byte_parity": {
+    "kind": "pending",
+    "non_semantic_bytes": 666,
+    "unclassified_bytes": 57
+  },
+  "per_class_bytes": {
+    "hle_opd_slot": 657,
+    "sync_primitive_id": 9,
+    "unclassified": 57
+  },
+  "unclassified_bytes": 57,
+  "unclassified_runs": [
+    {
+      "region_name": "data_hi",
+      "offset": 339,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 343,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 347,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 351,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 355,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 359,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 479,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 491,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 495,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 499,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 619,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 631,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 635,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 639,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 10933,
+      "length": 7
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 10941,
+      "length": 3
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 75213,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 926196,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 926419,
+      "length": 1
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 926544,
+      "length": 2
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 926552,
+      "length": 20
+    },
+    {
+      "region_name": "data_hi",
+      "offset": 926588,
+      "length": 8
+    }
+  ],
+  "lowest_offset_class": [
+    "hle_opd_slot",
+    {
+      "name": "data",
+      "addr": 7864320
+    },
+    9600
+  ]
+}

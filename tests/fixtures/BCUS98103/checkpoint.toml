@@ -1,0 +1,43 @@
+# Region manifest for the Uncharted: Drake's Fortune boot checkpoint.
+#
+# Shared by three producers, all of which must read it the same way:
+#
+#   - the RPCS3 dump-hook patch (CELLGOV_DUMP_REGIONS env var, same
+#     addr and size expressed as hex pairs in declaration order),
+#   - apps/rpcs3_to_observation, which reads this file to slice the
+#     RPCS3 dump into named Observation regions, and
+#   - the CellGov `run-game --save-observation` path with the
+#     `--observation-manifest` flag, which uses the same region
+#     names and addresses.
+#
+# Regions appear in declaration order in the dump file. Do not
+# reorder without updating every producer. Sizes are in bytes.
+#
+# Segment addresses come from the decrypted EBOOT's PT_LOAD headers:
+#   PT_LOAD vaddr=0x10000    filesz=0x76c530 memsz=0x76c530 RX
+#   PT_LOAD vaddr=0x780000   filesz=0x4db80  memsz=0x4db80  RW
+#   PT_LOAD vaddr=0x10000000 filesz=0x91e80  memsz=0x91e80  RX
+#   PT_LOAD vaddr=0x100a0000 filesz=0xe2abc  memsz=0x9b7708 RW
+#
+# BSS (0x100a0000+0xe2abc through 0x10a57708) excluded: zero-initialized
+# on both runners. The high data region uses filesz to skip BSS.
+
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x76c530"
+
+[[regions]]
+name = "data"
+addr = "0x780000"
+size = "0x4db80"
+
+[[regions]]
+name = "code_hi"
+addr = "0x10000000"
+size = "0x91e80"
+
+[[regions]]
+name = "data_hi"
+addr = "0x100a0000"
+size = "0xe2abc"

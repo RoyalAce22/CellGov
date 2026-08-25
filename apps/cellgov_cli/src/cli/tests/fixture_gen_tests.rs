@@ -181,6 +181,33 @@ fn elf_header_plus_phdr_helper_rejects_phdr_overflow() {
     ));
 }
 
+/// An initialized `sys_lwmutex_t`: free sentinel, no waiter, a valid
+/// attribute, zero recursion, the kernel id, zero pad.
+fn lwmutex_bytes(sleep_queue: u32) -> Vec<u8> {
+    let mut b = Vec::new();
+    for w in [0xffff_ffffu32, 0, 0x22, 0, sleep_queue, 0, 0, 0] {
+        b.extend_from_slice(&w.to_be_bytes());
+    }
+    b
+}
+
+#[test]
+fn build_classifier_context_scans_every_region_for_lwmutex_slots() {
+    let observation = obs(
+        ObservedOutcome::Completed,
+        vec![
+            region("data", 0x80000, lwmutex_bytes(7)),
+            region("data_hi", 0x1000_0000, lwmutex_bytes(8)),
+        ],
+    );
+    let eboot = synthetic_elf64_be(0, 0, 0);
+    let ctx = build_classifier_context(&eboot, &observation).unwrap();
+    assert_eq!(
+        ctx.sync_primitive_id_ranges,
+        vec![0x80010..0x80014, 0x1000_0010..0x1000_0014]
+    );
+}
+
 #[test]
 fn build_classifier_context_with_no_code_region_leaves_header_none() {
     let observation = obs(

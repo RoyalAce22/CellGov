@@ -76,10 +76,11 @@ CellGov answers that question:
 
 Pre-Alpha. What works today:
 
-- 3 games boot to deterministic checkpoints past the
-  firmware `cellSysutil` init. WipEout HD Fury reaches
-  `FirstRsxWrite` and converges with RPCS3 at that
-  checkpoint (byte parity `975 non-semantic + 1 pending`);
+- 4 games boot to deterministic checkpoints past the
+  firmware `cellSysutil` init. WipEout HD Fury and Uncharted:
+  Drake's Fortune reach `FirstRsxWrite` and converge with RPCS3
+  at that checkpoint (byte parity `975 non-semantic + 1 pending`
+  and `666 non-semantic + 57 pending`);
   flOw runs the full firmware-set boot to `sys_process_exit`,
   and Super Stardust HD runs to a `MaxSteps` budget cap.
   flOw and Super Stardust HD diverge from RPCS3, which keeps

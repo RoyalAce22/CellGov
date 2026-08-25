@@ -72,6 +72,7 @@ Column definitions:
 | Serial | Title | Year | Developer | Engine | Format | Checkpoint | Steps | Insns | Convergence | Byte parity |
 | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
 | BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 43,040 | 11,018,240 | Yes | 975 non-semantic + 1 pending |
+| BCUS98103 | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 7,119 | 1,822,464 | Yes | 666 non-semantic + 57 pending |
 | NPUA80001 | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | ProcessExit -> ProcessExit | 11,212 | 2,870,272 | No (outcome: ProcessExit vs Completed) | -- |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | FirstRsxWrite -> MaxSteps | 390,435 | 99,951,360 | No (outcome: Timeout vs Completed) | -- |
 | VSH | PS3 System Software (vsh) | 2025 | Sony Interactive Entertainment | PAF | Firmware Exec | ProcessExit -> MaxSteps | 390,099 | 99,865,344 | -- | -- |
