@@ -526,7 +526,7 @@ pub fn install_pkg(
         .iter()
         .find(|f| f.name == "PARAM.SFO")
         .ok_or(GameInstallError::NoParamSfo)?;
-    let (title_id, category, title, app_version) = parse_identity(&sfo_file.data)?;
+    let (title_id, category, title, app_version) = parse_identity(archive.file_data(sfo_file))?;
     if category != "HG" {
         return Err(GameInstallError::NotHddGame { category });
     }
@@ -546,7 +546,8 @@ pub fn install_pkg(
         .iter()
         .find(|f| f.name == "USRDIR/EBOOT.BIN")
         .ok_or(GameInstallError::NoEboot)?;
-    let npd = npdrm::find_npd_header_info(&eboot.data).map_err(GameInstallError::Npd)?;
+    let eboot_data = archive.file_data(eboot);
+    let npd = npdrm::find_npd_header_info(eboot_data).map_err(GameInstallError::Npd)?;
     // The EBOOT's NPD content-id must also embed the title-id, tying
     // the executable's own identity to the PARAM.SFO / header.
     if let Some(n) = &npd {
@@ -598,7 +599,7 @@ pub fn install_pkg(
         .map(|f| StagedFile {
             path: f.name.clone(),
             is_dir: f.kind == PkgEntryKind::Directory,
-            data: StagedData::Bytes(&f.data),
+            data: StagedData::Bytes(archive.file_data(f)),
         })
         .collect();
 
@@ -624,7 +625,7 @@ pub fn install_pkg(
             let arr: [u8; 16] = bytes.as_slice().try_into().ok()?;
             Some(npdrm::rap_to_klic(&arr))
         };
-        npdrm::decrypt_self_to_elf_auto(&eboot.data, resolver)
+        npdrm::decrypt_self_to_elf_auto(eboot_data, resolver)
             .map_err(GameInstallError::DecryptProof)?;
         Ok((file_digests, staged_rap))
     })?;

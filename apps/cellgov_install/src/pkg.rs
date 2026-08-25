@@ -67,32 +67,56 @@ pub struct PkgHeader {
 /// Whether an extracted item is a regular file or a directory.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PkgEntryKind {
-    /// A regular file; [`PkgFile::data`] holds its verbatim bytes.
+    /// A regular file; [`PkgArchive::file_data`] resolves its bytes.
     File,
-    /// A directory; [`PkgFile::data`] is empty.
+    /// A directory; [`PkgArchive::file_data`] resolves empty.
     Directory,
 }
 
 /// One extracted package item: its package-relative path and, for
-/// files, the decrypted bytes exactly as they should land on disk.
+/// files, where its decrypted bytes sit in the archive's region.
 #[derive(Debug, Clone)]
 pub struct PkgFile {
     /// Package-relative path, `/`-separated (e.g. `USRDIR/EBOOT.BIN`).
     pub name: String,
     /// File or directory.
     pub kind: PkgEntryKind,
-    /// Verbatim bytes for a file; empty for a directory.
-    pub data: Vec<u8>,
+    /// Byte range in the owning archive's decrypted region (empty for
+    /// a directory). Bounds-proved by [`extract`], which is the only
+    /// constructor.
+    region_range: core::ops::Range<usize>,
 }
 
 /// A fully parsed and decrypted package: its header plus every
 /// in-scope item, in container declaration order.
+///
+/// The decrypted data region is held once, here; items carry ranges
+/// into it, so peak residence is one region no matter how many
+/// consumers read the files.
 #[derive(Debug, Clone)]
 pub struct PkgArchive {
     /// Parsed header.
     pub header: PkgHeader,
     /// Extracted items (EDAT/SDAT skipped), in record order.
     pub files: Vec<PkgFile>,
+    /// The CTR-decrypted data region every item's range points into.
+    region: Vec<u8>,
+}
+
+impl PkgArchive {
+    /// The decrypted bytes of one of this archive's items (empty for a
+    /// directory).
+    ///
+    /// # Panics
+    ///
+    /// If `file` belongs to a different archive and its range escapes
+    /// this archive's region.
+    #[must_use]
+    pub fn file_data(&self, file: &PkgFile) -> &[u8] {
+        self.region
+            .get(file.region_range.clone())
+            .expect("invariant: extract bounds-proved every item range against its own region")
+    }
 }
 
 /// Why parsing or extracting a retail PKG failed. Every variant is
@@ -325,8 +349,9 @@ fn validate_item_name(index: usize, name: &str) -> Result<(), PkgError> {
 
 /// Parse, decrypt, and extract every in-scope item from a retail PKG.
 ///
-/// The whole data region is CTR-decrypted once and each item's name
-/// and data are sliced out of it; this is byte-equivalent to RPCS3's
+/// The whole data region is CTR-decrypted once; names are decoded out
+/// of it and each item keeps a bounds-proved range into it (resolved
+/// via [`PkgArchive::file_data`]). Byte-equivalent to RPCS3's
 /// per-region decrypt because PKG item offsets are 16-byte aligned.
 /// EDAT and SDAT items are skipped (out of scope). Folder items become
 /// [`PkgEntryKind::Directory`] entries.
@@ -387,7 +412,7 @@ pub fn extract(data: &[u8]) -> Result<PkgArchive, PkgError> {
                 files.push(PkgFile {
                     name,
                     kind: PkgEntryKind::Directory,
-                    data: Vec::new(),
+                    region_range: 0..0,
                 });
             }
             ENTRY_KIND_EDAT | ENTRY_KIND_SDAT => {
@@ -404,17 +429,20 @@ pub fn extract(data: &[u8]) -> Result<PkgArchive, PkgError> {
                         size: file_size,
                         region: region_len,
                     })?;
-                let bytes = region[file_offset as usize..file_end as usize].to_vec();
                 files.push(PkgFile {
                     name,
                     kind: PkgEntryKind::File,
-                    data: bytes,
+                    region_range: file_offset as usize..file_end as usize,
                 });
             }
         }
     }
 
-    Ok(PkgArchive { header, files })
+    Ok(PkgArchive {
+        header,
+        files,
+        region,
+    })
 }
 
 #[cfg(test)]

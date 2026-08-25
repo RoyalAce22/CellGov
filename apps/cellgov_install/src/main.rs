@@ -723,8 +723,11 @@ fn cmd_install_game(args: &[String]) {
         std::process::exit(1);
     });
 
-    let pkg_data = std::fs::read(&parsed.pkg_path).unwrap_or_else(|e| {
-        eprintln!("failed to read {}: {e}", parsed.pkg_path.display());
+    // Map the package instead of reading it, as install-iso does: the
+    // install reads it sequentially (header, one CTR pass, the source
+    // hash), so pages stream in and are evicted rather than committed.
+    let pkg_data = filebuffer::FileBuffer::open(&parsed.pkg_path).unwrap_or_else(|e| {
+        eprintln!("failed to map {}: {e}", parsed.pkg_path.display());
         std::process::exit(1);
     });
     let rap_data = parsed.rap_path.as_ref().map(|p| {

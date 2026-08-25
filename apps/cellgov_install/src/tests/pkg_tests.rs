@@ -123,15 +123,19 @@ fn extract_round_trips_files_and_dirs() {
 
     let sfo_file = find(&archive, "PARAM.SFO").expect("PARAM.SFO present");
     assert_eq!(sfo_file.kind, PkgEntryKind::File);
-    assert_eq!(sfo_file.data, sfo);
+    assert_eq!(archive.file_data(sfo_file), sfo);
 
     let dir = find(&archive, "USRDIR").expect("USRDIR present");
     assert_eq!(dir.kind, PkgEntryKind::Directory);
-    assert!(dir.data.is_empty());
+    assert!(archive.file_data(dir).is_empty());
 
     let eboot_file = find(&archive, "USRDIR/EBOOT.BIN").expect("EBOOT present");
     assert_eq!(eboot_file.kind, PkgEntryKind::File);
-    assert_eq!(eboot_file.data, eboot, "EBOOT bytes survive CTR round-trip");
+    assert_eq!(
+        archive.file_data(eboot_file),
+        eboot,
+        "EBOOT bytes survive CTR round-trip"
+    );
 }
 
 #[test]
@@ -266,4 +270,68 @@ fn rejects_too_small() {
         parse_header(&[0u8; 0x10]).unwrap_err(),
         PkgError::TooSmall { .. }
     ));
+}
+
+/// Hand-build a one-file region: entry table, 16-aligned name, then
+/// `data` placed at `file_offset` with the given `file_size` and NO
+/// trailing alignment pad, so the region ends where the data does.
+fn one_file_region(name: &[u8], data: &[u8], file_size: u64) -> Vec<u8> {
+    let mut region = vec![0u8; 0x20];
+    let name_off = 0x20u32;
+    region[0..4].copy_from_slice(&name_off.to_be_bytes());
+    region[4..8].copy_from_slice(&(name.len() as u32).to_be_bytes());
+    region[24..28].copy_from_slice(&3u32.to_be_bytes());
+    region.extend_from_slice(name);
+    region.resize(align16(region.len()), 0);
+    let file_off = region.len() as u64;
+    region[8..16].copy_from_slice(&file_off.to_be_bytes());
+    region[16..24].copy_from_slice(&file_size.to_be_bytes());
+    region.extend_from_slice(data);
+    region
+}
+
+// RPCS3 `Crypto/unpkg.cpp` `package_reader::read_entries` rejects an
+// item only when `fsz - file_size < file_offset`, so an item whose
+// last byte is the last byte of the region is accepted; the range
+// must resolve it without an off-by-one at the region end.
+#[test]
+fn file_ending_exactly_at_region_end_resolves() {
+    let data = b"tailend";
+    let region = one_file_region(b"T.BIN", data, data.len() as u64);
+    assert_eq!(region.len() % 16, 7, "region end is left unaligned");
+    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+
+    let archive = extract(&pkg).expect("file ending at region end extracts");
+    let file = find(&archive, "T.BIN").expect("T.BIN present");
+    assert_eq!(archive.file_data(file), data);
+}
+
+// RPCS3 `read_entries` skips the data bound when `file_size == 0`; the
+// range for such an item is empty and must resolve even when its
+// offset is the region length itself.
+#[test]
+fn zero_length_file_at_region_end_resolves_empty() {
+    let region = one_file_region(b"Z.BIN", b"", 0);
+    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+
+    let archive = extract(&pkg).expect("zero-length file extracts");
+    let file = find(&archive, "Z.BIN").expect("Z.BIN present");
+    assert_eq!(file.kind, PkgEntryKind::File);
+    assert!(archive.file_data(file).is_empty());
+}
+
+#[test]
+#[should_panic(expected = "invariant: extract bounds-proved every item range")]
+fn file_data_from_a_foreign_archive_that_escapes_the_region_panics() {
+    let big = build_pkg(
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("BIG.BIN", 3, &[0xAAu8; 64])],
+    );
+    let small = build_pkg(&TEST_KLIC, "NPUA80002", &[file_item("S", 3, b"s")]);
+    let big_archive = extract(&big).expect("big extracts");
+    let small_archive = extract(&small).expect("small extracts");
+    let foreign = find(&big_archive, "BIG.BIN").expect("BIG.BIN present");
+
+    let _ = small_archive.file_data(foreign);
 }
