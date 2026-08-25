@@ -22,6 +22,11 @@ hmac = "0.12"
 sha1 = "0.10"
 sha2 = "0.10"
 flate2 = "1"
+# Read-only file mapping with a safe API, for disc images too large to
+# hold resident (a BD-DL ISO is up to 50 GB; fs::read commits it all).
+# Chosen over memmap2 because its map call is not `unsafe fn`, keeping
+# the workspace's forbid(unsafe_code) intact.
+filebuffer = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 thiserror = "2"

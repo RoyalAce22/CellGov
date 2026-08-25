@@ -125,11 +125,14 @@ Four structural rules worth calling out:
   place that probes for the SCE wrapper and routes to the APP-keyed
   or klicensee-resolving decrypt according to the caller's declared
   `KeyPolicy`. The crypto crates (`aes`, `cbc`, `ctr`, `hmac`,
-  `sha1`, `sha2`, `flate2`) are pulled by `cellgov_install` alone.
+  `sha1`, `sha2`, `flate2`) are pulled by `cellgov_install` alone, as
+  is `filebuffer`, whose safe read-only file mapping lets the
+  installer walk disc images larger than host memory.
 
 External dependencies are minimal: `serde`, `serde_json`, and `toml`
 in `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore`
-and `cellgov_cli`; crypto crates in `cellgov_install` only.
+and `cellgov_cli`; crypto crates and `filebuffer` in
+`cellgov_install` only.
 Everything else is workspace-internal. The workspace compiles under
 `unsafe_code = "forbid"`.
 

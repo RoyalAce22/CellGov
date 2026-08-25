@@ -824,8 +824,12 @@ fn cmd_install_iso(args: &[String]) {
         std::process::exit(1);
     });
 
-    let iso_data = std::fs::read(&parsed.iso_path).unwrap_or_else(|e| {
-        eprintln!("failed to read {}: {e}", parsed.iso_path.display());
+    // Map the image instead of reading it: a disc image can exceed
+    // host RAM, and the install only ever reads it (twice, both
+    // sequentially -- the carve and the source hash), so pages stream
+    // in and are evicted rather than committed all at once.
+    let iso_data = filebuffer::FileBuffer::open(&parsed.iso_path).unwrap_or_else(|e| {
+        eprintln!("failed to map {}: {e}", parsed.iso_path.display());
         std::process::exit(1);
     });
 
@@ -837,8 +841,9 @@ fn cmd_install_iso(args: &[String]) {
 
     // With --dkey the image is encrypted: decrypt it first, then the
     // record's source hash is over the original (encrypted) bytes. With
-    // no --dkey the image is assumed already decrypted.
-    let decrypted = match &parsed.dkey_path {
+    // no --dkey the image is assumed already decrypted, so the source
+    // bytes ARE the decrypted bytes and the mapping serves as both.
+    let decrypted: std::borrow::Cow<[u8]> = match &parsed.dkey_path {
         Some(dkey_path) => {
             let dkey = std::fs::read(dkey_path).unwrap_or_else(|e| {
                 eprintln!("failed to read disc key {}: {e}", dkey_path.display());
@@ -849,12 +854,14 @@ fn cmd_install_iso(args: &[String]) {
                 std::process::exit(1);
             });
             println!("  decrypting protected sectors with supplied disc key...");
-            disc_crypt::decrypt_disc_image(&iso_data, &dkey).unwrap_or_else(|e| {
-                eprintln!("disc decryption failed: {e}");
-                std::process::exit(1);
-            })
+            std::borrow::Cow::Owned(
+                disc_crypt::decrypt_disc_image(&iso_data, &dkey).unwrap_or_else(|e| {
+                    eprintln!("disc decryption failed: {e}");
+                    std::process::exit(1);
+                }),
+            )
         }
-        None => iso_data.clone(),
+        None => std::borrow::Cow::Borrowed(&iso_data[..]),
     };
 
     let installs_dir = game_install::installs_dir(&parsed.output_dir);

@@ -209,6 +209,7 @@ dependencies = [
  "cbc",
  "cellgov_ps3_abi",
  "ctr",
+ "filebuffer",
  "flate2",
  "hmac",
  "serde",
@@ -576,6 +577,16 @@ name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f"
+
+[[package]]
+name = "filebuffer"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6549ad04d0b7f431a60cbcf1c3b211f1d3bdfc98e3009c6d8e3ba11cb49d764"
+dependencies = [
+ "libc",
+ "winapi",
+]
 
 [[package]]
 name = "flate2"
