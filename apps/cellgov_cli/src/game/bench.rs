@@ -386,7 +386,8 @@ pub fn bench_boot(
     eprintln!(
         "BENCH_SYSTEM_IPC_WITNESS: shm_creates={} shm_attaches={} shm_maps={} shm_writes={} \
          cond_creates={} cond_waits={} cond_signals={} event_queue_creates={} \
-         event_queue_references={} event_queue_enqueues={} distinct_keys={}",
+         event_queue_references={} event_queue_enqueues={} event_port_connects={} \
+         distinct_keys={}",
         ipc.shm_creates,
         ipc.shm_attaches,
         ipc.shm_maps,
@@ -397,6 +398,7 @@ pub fn bench_boot(
         ipc.event_queue_creates,
         ipc.event_queue_references,
         ipc.event_queue_enqueues,
+        ipc.event_port_connects,
         ipc.keys_touched.len(),
     );
     if !ipc.keys_touched.is_empty() {

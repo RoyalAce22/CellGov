@@ -1542,7 +1542,12 @@ checker also verifies each recorded witness's emitting line
 actually appeared in the boot output, so deleting an emitter
 cannot leave an `absent`-class witness vacuously green, and the
 parser rejects unknown keys and duplicate lines rather than
-guessing. `record-anchors` is the only writer: it re-measures,
+guessing. Every `BENCH_*` line the boot path emits is either
+tracked in that line table or listed as diagnostic-only with the
+reason it carries no witness (a run-dependent key set, a line
+repeated per module, a line suppressed on the quiet path), and a
+test holds the emitters to that split. `record-anchors` is the
+only writer: it re-measures,
 rewrites the baseline (outcome included), and appends one line to
 the title's append-only `boot_history.jsonl` per real move, so
 blessing a change is a reviewable data diff. The title suites

@@ -60,8 +60,15 @@ impl WitnessClass {
     }
 
     /// Witnesses whose every movement is a finding.
+    ///
+    /// The unsupported-syscall count is the null-backend frontier row:
+    /// a new syscall reached and one newly modeled are both findings,
+    /// so neither direction may pass as growth.
     pub fn is_exact_by_default(name: &str) -> bool {
-        matches!(name, "host_invariant_breaks" | "vrsave_written")
+        matches!(
+            name,
+            "host_invariant_breaks" | "vrsave_written" | "unsupported_syscalls_distinct"
+        )
     }
 
     /// Check one observation, returning why it failed.

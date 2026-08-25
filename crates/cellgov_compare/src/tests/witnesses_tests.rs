@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use crate::boot_history::{parse, render_line, BootHistoryEntry};
-use crate::witness_parse::{known_witness_names, line_of, parse_witness_lines, ParsedWitnesses};
+use crate::witness_parse::{
+    diagnostic_lines, known_witness_names, line_of, parse_witness_lines, tracked_line_prefixes,
+    ParsedWitnesses,
+};
 use crate::witnesses::{
     check_all, record, unrecorded, Witness, WitnessClass, WitnessFailure, WitnessSet,
 };
@@ -172,6 +175,11 @@ BENCH_SPU_IMAGE_REGISTER_WITNESS: count=10
 BENCH_SPU_THREAD_INIT_WITNESS: count=11
 BENCH_LWMUTEX_COND_WITNESS: lwmutex_acquires=12 lwmutex_releases=13 cond_reacquires=14
 BENCH_AUTHORITY_ID_WITNESS: program_authority_id=0x1010000001000003 lwmutex_unknown_locks=15
+BENCH_MUTEX_UNLOCK_WITNESS: not_owner=19
+BENCH_REGISTER_MODULE_WITNESS: calls=20 manual=21 linked_slots=22 unresolved_nids=23
+BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts=24 ipc_connect_bound=25 keyed_queues=26
+BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct=2 12=3 900=1
+BENCH_SYSTEM_IPC_WITNESS: shm_creates=27 shm_attaches=28 shm_maps=29 shm_writes=30 cond_creates=31 cond_waits=32 cond_signals=33 event_queue_creates=34 event_queue_references=35 event_queue_enqueues=36 event_port_connects=37 distinct_keys=38
 BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
 ";
     let w = parse_witness_lines(stderr).expect("all lines are well formed");
@@ -184,6 +192,12 @@ BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
     assert_eq!(w.values["lwmutex_unknown_locks"], 15);
     assert_eq!(w.values["prx_load_hle_stubs"], 16);
     assert_eq!(w.values["prx_load_not_found"], 17);
+    assert_eq!(w.values["mutex_unlock_not_owner"], 19);
+    assert_eq!(w.values["register_module_unresolved_nids"], 23);
+    assert_eq!(w.values["event_port_keyed_queues"], 26);
+    assert_eq!(w.values["unsupported_syscalls_distinct"], 2);
+    assert_eq!(w.values["system_ipc_event_port_connects"], 37);
+    assert_eq!(w.values["system_ipc_distinct_keys"], 38);
     assert_eq!(
         w.values.len(),
         known_witness_names().len(),
@@ -191,12 +205,75 @@ BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
     );
     assert_eq!(
         w.seen_lines.len(),
-        13,
+        18,
         "every emitted line is remembered for the presence check"
     );
     assert!(
         !w.values.contains_key("program_authority_id"),
         "ignored fields on a tracked line are skipped, not recorded"
+    );
+    assert!(
+        !w.values.contains_key("12") && !w.values.contains_key("900"),
+        "the per-syscall inventory tail is admitted, not recorded"
+    );
+}
+
+#[test]
+fn the_unsupported_syscall_tail_admits_integer_keys_only() {
+    let w = parse_witness_lines("BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct=1 4096=7\n")
+        .expect("a syscall-number key is the inventory tail");
+    assert_eq!(w.values["unsupported_syscalls_distinct"], 1);
+    assert_eq!(w.values.len(), 1);
+
+    let errs = parse_witness_lines("BENCH_UNSUPPORTED_SYSCALL_WITNESS: count=1 4096=7\n")
+        .expect_err("a renamed scalar must not hide in the inventory tail");
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0].to_string().contains("count"), "{}", errs[0]);
+}
+
+#[test]
+fn a_system_ipc_line_missing_event_port_connects_is_still_a_full_parse() {
+    // The field is a tracked scalar like any other: its absence is a
+    // line that parses to fewer witnesses, which the anchor check then
+    // reports as a recorded witness with no value.
+    let w = parse_witness_lines(
+        "BENCH_SYSTEM_IPC_WITNESS: shm_creates=0 shm_attaches=0 shm_maps=0 shm_writes=0 \
+         cond_creates=0 cond_waits=0 cond_signals=0 event_queue_creates=0 \
+         event_queue_references=0 event_queue_enqueues=0 distinct_keys=0\n",
+    )
+    .expect("every key on the line is tracked");
+    assert_eq!(w.values.len(), 11);
+    assert!(!w.values.contains_key("system_ipc_event_port_connects"));
+}
+
+#[test]
+fn tracked_and_diagnostic_lines_are_disjoint_and_reasoned() {
+    let tracked = tracked_line_prefixes();
+    for (prefix, reason) in diagnostic_lines() {
+        assert!(
+            !tracked.contains(prefix),
+            "{prefix} is both tracked and diagnostic"
+        );
+        assert!(
+            prefix.starts_with("BENCH_") && prefix.ends_with(':'),
+            "{prefix} is not a line prefix"
+        );
+        assert!(!reason.is_empty(), "{prefix} states no reason");
+    }
+}
+
+#[test]
+fn the_unsupported_syscall_count_is_exact_on_first_record() {
+    let r = record(None, &obs(&[("unsupported_syscalls_distinct", 3)]));
+    assert_eq!(
+        r["unsupported_syscalls_distinct"].class,
+        WitnessClass::Exact
+    );
+    let r = record(None, &obs(&[("unsupported_syscalls_distinct", 0)]));
+    assert_eq!(
+        r["unsupported_syscalls_distinct"].class,
+        WitnessClass::Exact,
+        "a zero frontier row is held at zero, not merely Absent"
     );
 }
 

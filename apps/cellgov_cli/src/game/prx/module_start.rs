@@ -326,7 +326,8 @@ pub(in crate::game) fn run_module_start(
     }
     // Namespace witnesses, reported here as well as at bench close
     // because a module_start that stalls never reaches the step loop.
-    // Counters are cumulative across every module_start so far.
+    // Counters are cumulative across every module_start so far. Field
+    // order mirrors the bench-close line, which owns the grammar.
     let host = rt.lv2_host();
     let ipc = &host.observability().system_ipc_witness;
     if !ipc.is_silent() {
@@ -334,7 +335,7 @@ pub(in crate::game) fn run_module_start(
             "BENCH_SYSTEM_IPC_WITNESS_AT_MODULE_START: module={} shm_creates={} \
              shm_attaches={} shm_maps={} shm_writes={} cond_creates={} cond_waits={} \
              cond_signals={} event_queue_creates={} event_queue_references={} \
-             event_queue_enqueues={} distinct_keys={}",
+             event_queue_enqueues={} event_port_connects={} distinct_keys={}",
             prx_info.name,
             ipc.shm_creates,
             ipc.shm_attaches,
@@ -346,6 +347,7 @@ pub(in crate::game) fn run_module_start(
             ipc.event_queue_creates,
             ipc.event_queue_references,
             ipc.event_queue_enqueues,
+            ipc.event_port_connects,
             ipc.keys_touched.len(),
         );
         let inventory: Vec<String> = ipc

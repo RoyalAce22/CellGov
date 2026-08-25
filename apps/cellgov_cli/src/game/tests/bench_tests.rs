@@ -1,6 +1,8 @@
 //! Bench-result line parsing, wall-clock disagreement math, and the
 //! anchor comparison the pair gate runs.
 
+use std::collections::BTreeSet;
+
 use super::*;
 
 #[test]
@@ -680,4 +682,69 @@ fn a_malformed_witness_line_in_either_run_is_a_disagreement() {
     let bad = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=lots\n";
     assert!(witness_disagreements(good, bad)[0].starts_with("run 2 witness line did not parse"));
     assert!(witness_disagreements(bad, good)[0].starts_with("run 1 witness line did not parse"));
+}
+
+/// Every `"BENCH_<NAME>:` string literal in `source`: the prefixes of
+/// the stderr lines the boot path emits. A literal inside an
+/// `#[error(...)]` attribute is an error's Display text, not a line.
+fn emitted_bench_prefixes(source: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    for (start, _) in source.match_indices("\"BENCH_") {
+        if source[..start].trim_end().ends_with("#[error(") {
+            continue;
+        }
+        let body = &source[start + 1..];
+        let name_len = body
+            .bytes()
+            .take_while(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'_')
+            .count();
+        if body[name_len..].starts_with(':') {
+            out.insert(body[..=name_len].to_string());
+        }
+    }
+    out
+}
+
+#[test]
+fn every_emitted_bench_line_is_tracked_or_reasoned_diagnostic() {
+    let mut emitted = BTreeSet::new();
+    for source in [
+        include_str!("../bench.rs"),
+        include_str!("../boot.rs"),
+        include_str!("../prx/module_start.rs"),
+    ] {
+        emitted.extend(emitted_bench_prefixes(source));
+    }
+    assert!(
+        emitted.len() > 20,
+        "the scan found only {emitted:?}; the literal shape it keys on has moved"
+    );
+
+    let tracked: BTreeSet<String> = cellgov_compare::witness_parse::tracked_line_prefixes()
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    let diagnostic: BTreeSet<String> = cellgov_compare::witness_parse::diagnostic_lines()
+        .iter()
+        .map(|(p, _)| (*p).to_string())
+        .collect();
+
+    let unclassified: Vec<&String> = emitted
+        .iter()
+        .filter(|p| !tracked.contains(*p) && !diagnostic.contains(*p))
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "emitted BENCH_ lines with no witness and no stated diagnostic-only reason: {unclassified:?}"
+    );
+
+    let stale: Vec<&String> = tracked
+        .iter()
+        .chain(diagnostic.iter())
+        .filter(|p| !emitted.contains(*p))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "line-table rows no emitter produces: {stale:?}"
+    );
 }
