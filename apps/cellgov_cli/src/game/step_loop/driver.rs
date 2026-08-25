@@ -132,7 +132,11 @@ pub(in crate::game) fn step_loop(
 
                 if let Some(args) = &step.result.syscall_args {
                     let pc = step.result.local_diagnostics.pc.unwrap_or(0);
-                    let mem = rt.memory().as_bytes();
+                    // The buffer is read through the caller's own space:
+                    // a child process passes child-space addresses.
+                    let mem = rt
+                        .space_memory(rt.unit_space(step.unit))
+                        .expect("a unit that just stepped executes in a live space");
                     handle_syscall_args(args, ctx, pc, mem);
                 }
 
@@ -209,7 +213,12 @@ pub(in crate::game) fn step_loop(
     }
 }
 
-fn handle_syscall_args(args: &[u64; 9], ctx: &mut StepLoopCtx<'_>, pc: u64, mem: &[u8]) {
+fn handle_syscall_args(
+    args: &[u64; 9],
+    ctx: &mut StepLoopCtx<'_>,
+    pc: u64,
+    mem: &cellgov_mem::GuestMemory,
+) {
     if args[0] >= 0x10000 {
         let idx = (args[0] - 0x10000) as u32;
         *ctx.hle_calls.entry(idx).or_insert(0) += 1;
@@ -227,7 +236,12 @@ fn handle_syscall_args(args: &[u64; 9], ctx: &mut StepLoopCtx<'_>, pc: u64, mem:
     ctx.syscall_ring[sc_idx] = (args[0], pc);
 }
 
-fn handle_tty_capture(args: &[u64; 9], ctx: &mut StepLoopCtx<'_>, pc: u64, mem: &[u8]) {
+fn handle_tty_capture(
+    args: &[u64; 9],
+    ctx: &mut StepLoopCtx<'_>,
+    pc: u64,
+    mem: &cellgov_mem::GuestMemory,
+) {
     match classify_tty_capture(args, mem) {
         TtyCaptureDecision::InBounds {
             fd,
@@ -256,10 +270,10 @@ fn handle_tty_capture(args: &[u64; 9], ctx: &mut StepLoopCtx<'_>, pc: u64, mem: 
                 call_pc: pc,
             });
         }
-        TtyCaptureDecision::Oob { buf, len, mem_len } => {
+        TtyCaptureDecision::Oob { buf, len, reason } => {
             ctx.tty_oob_count += 1;
             eprintln!(
-                "  tty_oob: sys_tty_write buf=0x{buf:x}+0x{len:x} exceeds guest memory (0x{mem_len:x}); capture dropped at step {}",
+                "  tty_oob: sys_tty_write buf=0x{buf:x}+0x{len:x}: {reason}; capture dropped at step {}",
                 *ctx.steps
             );
         }

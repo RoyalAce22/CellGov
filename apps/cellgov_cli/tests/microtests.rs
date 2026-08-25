@@ -295,6 +295,16 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         panic!("{}: cellgov_cli run-game exited non-zero", case.name);
     }
 
+    // Every microtest writes its CGOV length word from a stack buffer;
+    // a dropped capture means the driver refused a mapped address.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if let Some(line) = stdout
+        .lines()
+        .find(|l| l.starts_with("tty_oob_captures_dropped:"))
+    {
+        panic!("{}: run-game dropped TTY captures: {line}", case.name);
+    }
+
     let json = std::fs::read_to_string(&observation_path).unwrap_or_else(|e| {
         panic!(
             "{}: read {}: {e}\nthe microtests feature declares the corpus built; \
