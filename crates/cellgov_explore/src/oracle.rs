@@ -6,7 +6,7 @@ use crate::config::ExplorationConfig;
 use crate::observer::observe_decisions_with_snapshots;
 use crate::prescribed::PrescribedScheduler;
 use crate::util::{classify_iteration, for_each_alternate, run_to_stall};
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 use cellgov_mem::{ByteRange, GuestAddr};
 
 /// One named memory region to capture after each run.
@@ -14,6 +14,9 @@ use cellgov_mem::{ByteRange, GuestAddr};
 pub struct MemoryRegionSpec {
     /// Human-readable region name.
     pub name: String,
+    /// Address space the region lives in; equal numeric addresses in
+    /// different spaces name different memory.
+    pub space: AddressSpaceId,
     /// Guest address of the region start.
     pub addr: u64,
     /// Size in bytes.
@@ -28,7 +31,8 @@ pub struct CapturedRegion {
     /// Raw bytes from committed memory; empty when `resolved` is false.
     pub data: Vec<u8>,
     /// False when the spec's range could not be read from this run's
-    /// committed memory (unmapped address or overflowing range).
+    /// committed memory: a space the run never created, an unmapped
+    /// address, or an overflowing range.
     pub resolved: bool,
 }
 
@@ -71,7 +75,7 @@ where
     let mut rt_baseline = make_runtime();
     let (log, snapshots, baseline_stop) = observe_decisions_with_snapshots(&mut rt_baseline, true);
     let baseline_hash = rt_baseline.committed_memory_hash();
-    let baseline_regions = extract_regions(rt_baseline.memory(), regions);
+    let baseline_regions = extract_regions(&rt_baseline, regions);
 
     let total_branching_points = log.branching_count();
     if total_branching_points == 0 {
@@ -87,7 +91,7 @@ where
         rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
         let stop = run_to_stall(&mut rt_baseline, config.max_steps_per_run);
         let hash = rt_baseline.committed_memory_hash();
-        let captured = extract_regions(rt_baseline.memory(), regions);
+        let captured = extract_regions(&rt_baseline, regions);
         alternates.push(ScheduleSnapshot {
             memory_hash: hash,
             regions: captured,
@@ -110,16 +114,15 @@ where
     })
 }
 
-fn extract_regions(
-    memory: &cellgov_mem::GuestMemory,
-    specs: &[MemoryRegionSpec],
-) -> Vec<CapturedRegion> {
+fn extract_regions(rt: &Runtime, specs: &[MemoryRegionSpec]) -> Vec<CapturedRegion> {
     specs
         .iter()
         .map(|spec| {
-            match ByteRange::new(GuestAddr::new(spec.addr), spec.size)
-                .and_then(|range| memory.read(range))
-            {
+            let bytes = rt.space_memory(spec.space).ok().and_then(|memory| {
+                ByteRange::new(GuestAddr::new(spec.addr), spec.size)
+                    .and_then(|range| memory.read(range))
+            });
+            match bytes {
                 Some(bytes) => CapturedRegion {
                     name: spec.name.clone(),
                     data: bytes.to_vec(),
@@ -153,6 +156,7 @@ mod capture_tests {
         // spec's range cannot be read from any run's committed memory.
         let specs = vec![MemoryRegionSpec {
             name: "outside".into(),
+            space: AddressSpaceId::BOOT,
             addr: 0x1_0000,
             size: 4,
         }];
@@ -203,6 +207,7 @@ mod capture_tests {
     fn a_mapped_region_spec_is_captured_resolved() {
         let specs = vec![MemoryRegionSpec {
             name: "inside".into(),
+            space: AddressSpaceId::BOOT,
             addr: 0,
             size: 4,
         }];

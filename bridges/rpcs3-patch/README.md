@@ -62,6 +62,13 @@ Each fires at most once per process; one-shot guard is a per-site
 `std::atomic_flag`. All triggers are no-ops when their path env
 var is unset.
 
+Every pair names the one flat guest address space RPCS3 emulates.
+A region manifest's `space` field (space 0 is the boot process's;
+CellGov numbers a spawned child's from 1) has no RPCS3 counterpart:
+`rpcs3_to_observation` refuses a manifest whose region names any
+other space rather than reading the same address out of the boot
+process. Child-space regions are observable on the CellGov side only.
+
 ## Applying the patch
 
 ```bash

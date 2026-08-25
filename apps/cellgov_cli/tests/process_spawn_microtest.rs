@@ -276,6 +276,49 @@ fn parent_spawns_child_and_observes_exit_bit_identically_twice() {
 }
 
 #[test]
+fn a_child_space_region_captures_the_child_image_not_the_parent() {
+    use cellgov_compare::{observe_from_boot, BootOutcome, RegionDescriptor, SpaceSnapshots};
+
+    let parent_elf = microtest_bytes(PARENT_ELF);
+    let child_elf = microtest_bytes(CHILD_ELF);
+    assert_ne!(
+        &parent_elf[..0x40],
+        &child_elf[..0x40],
+        "the two ELF headers must differ for the capture to be evidence"
+    );
+
+    let mut rt = build_runtime(&parent_elf, &child_elf);
+    let terminal = loop {
+        match rt.step() {
+            Ok(s) => {
+                rt.commit_step(&s.result, &s.effects)
+                    .expect("microtest commits never fail validation");
+            }
+            Err(e) => break e,
+        }
+    };
+    assert_eq!(terminal, StepError::NoRunnableUnit);
+
+    let spaces: SpaceSnapshots = rt
+        .address_spaces()
+        .map(|(id, mem)| (id, mem.clone()))
+        .collect();
+    let header_at = |name: &str, space: AddressSpaceId| RegionDescriptor {
+        name: name.into(),
+        space,
+        addr: 0x10000,
+        size: 0x40,
+    };
+    let regions = [
+        header_at("parent_hdr", AddressSpaceId::BOOT),
+        header_at("child_hdr", AddressSpaceId::new(1)),
+    ];
+    let obs = observe_from_boot(&spaces, BootOutcome::ProcessExit, 0, &regions, &[]);
+    assert_eq!(&obs.memory_regions[0].data[..], &parent_elf[..0x40]);
+    assert_eq!(&obs.memory_regions[1].data[..], &child_elf[..0x40]);
+}
+
+#[test]
 fn parent_spawns_a_genuinely_sce_wrapped_child_self() {
     let parent_elf = microtest_bytes(PARENT_ELF);
     let child_self = microtest_bytes(CHILD_SELF);

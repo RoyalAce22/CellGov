@@ -103,7 +103,8 @@ cargo run -p rpcs3_to_observation --   --tty /tmp/<scenario>.tty   --manifest <r
 
 `<regions.toml>` uses the bridge's own format: one `[[regions]]` entry
 per region with `name`, `addr`, and `size`, the last two as hex
-strings. Copy them from the scenario's
+strings, plus an optional `space` that must be 0 (RPCS3 runs one
+guest process; the bridge refuses any other value). Copy them from the scenario's
 `tests/micro/<scenario>/manifest.toml` `[observe] memory_regions`.
 `addr` is the region's offset inside the emitted struct and the address
 the observation reports, so regions can sit apart where the struct has

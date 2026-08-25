@@ -75,6 +75,7 @@ fn two_identical_runs_produce_identical_observations() {
     let r2 = run(fixtures::fake_isa_scenario());
     let regions = vec![RegionDescriptor {
         name: "shared".into(),
+        space: cellgov_core::AddressSpaceId::BOOT,
         addr: 0,
         size: 8,
     }];

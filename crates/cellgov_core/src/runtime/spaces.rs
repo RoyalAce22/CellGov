@@ -254,6 +254,13 @@ impl Runtime {
         Ok(())
     }
 
+    /// Every address space with its memory, space 0 first, then child
+    /// spaces in id order.
+    pub fn address_spaces(&self) -> impl Iterator<Item = (AddressSpaceId, &GuestMemory)> {
+        std::iter::once((AddressSpaceId::BOOT, &self.memory))
+            .chain(self.spaces.extra.iter().map(|(id, mem)| (*id, mem)))
+    }
+
     /// Read view of `space`'s memory.
     ///
     /// # Errors

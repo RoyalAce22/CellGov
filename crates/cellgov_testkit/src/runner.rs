@@ -8,9 +8,11 @@
 //! abort the run. Stepping ends when the scheduler returns
 //! `NoRunnableUnit`/`AllBlocked` (stall) or `MaxStepsExceeded`.
 
+use std::collections::BTreeMap;
+
 use crate::fixtures::ScenarioFixture;
-use cellgov_core::{Runtime, StepError};
-use cellgov_mem::GuestMemory;
+use cellgov_core::{AddressSpaceId, Runtime, StepError};
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, Region, RegionAccess};
 use cellgov_trace::StateHash;
 
 /// How a scenario run terminated.
@@ -40,6 +42,48 @@ pub struct ScenarioResult {
     pub final_sync_hash: StateHash,
     /// Base-0 region bytes at end of run. Auxiliary regions not included.
     pub final_memory: Vec<u8>,
+    /// Every address space at end of run as independent copies; they
+    /// share no backing with the runtime's memory, so holding a result
+    /// never blocks a pooled memory's reset.
+    pub final_spaces: BTreeMap<AddressSpaceId, GuestMemory>,
+}
+
+/// Copy a space's regions into fresh backing, keeping each region's
+/// access mode so a read through the copy resolves as it does in the
+/// source.
+fn deep_copy(mem: &GuestMemory) -> GuestMemory {
+    let regions = mem
+        .regions()
+        .map(|r| {
+            Region::with_access(
+                r.base(),
+                r.bytes().len(),
+                r.label(),
+                r.page_size(),
+                r.access(),
+            )
+        })
+        .collect();
+    let mut copy =
+        GuestMemory::from_regions(regions).expect("copying non-overlapping regions cannot overlap");
+    for r in mem.regions() {
+        if r.access() != RegionAccess::ReadWrite {
+            // `apply_commit` refuses reserved regions, so their backing
+            // never left the zeros construction gave it; the copy's
+            // fresh zeros already match.
+            debug_assert!(
+                r.bytes().iter().all(|&b| b == 0),
+                "reserved region {} holds non-zero bytes",
+                r.label()
+            );
+            continue;
+        }
+        let range = ByteRange::new(GuestAddr::new(r.base()), r.size())
+            .expect("a mapped region's range fits the address space");
+        copy.apply_commit(range, r.bytes())
+            .expect("the copy maps every range the source does");
+    }
+    copy
 }
 
 /// Drive a scenario fixture to completion via the canonical path.
@@ -127,6 +171,10 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
         final_unit_status_hash: StateHash::new(rt.registry().status_hash()),
         final_sync_hash: StateHash::new(rt.sync_state_hash()),
         final_memory: rt.memory().as_bytes().to_vec(),
+        final_spaces: rt
+            .address_spaces()
+            .map(|(id, mem)| (id, deep_copy(mem)))
+            .collect(),
     };
     let mem = rt.into_memory();
     (result, mem)
@@ -135,3 +183,105 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
 #[cfg(test)]
 #[path = "tests/runner_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod deep_copy_tests {
+    use super::*;
+    use crate::world::WritingUnit;
+    use cellgov_mem::PageSize;
+    use cellgov_time::Budget;
+
+    const CHILD: AddressSpaceId = AddressSpaceId::new(1);
+
+    fn two_space_fixture() -> ScenarioFixture {
+        ScenarioFixture::builder()
+            .memory_size(16)
+            .budget(Budget::new(1))
+            .max_steps(10)
+            .register(|rt: &mut Runtime| {
+                rt.create_address_space(CHILD).unwrap();
+                let mem = rt.space_memory_mut(CHILD).unwrap();
+                *mem = GuestMemory::from_regions(vec![
+                    Region::new(0, 16, "child_main", PageSize::Page4K),
+                    Region::with_access(
+                        0x1000,
+                        16,
+                        "zero_readable",
+                        PageSize::Page4K,
+                        RegionAccess::ReservedZeroReadable,
+                    ),
+                    Region::with_access(
+                        0x2000,
+                        16,
+                        "strict",
+                        PageSize::Page4K,
+                        RegionAccess::ReservedStrict,
+                    ),
+                ])
+                .unwrap();
+                let seed = ByteRange::new(GuestAddr::new(0), 4).unwrap();
+                mem.apply_commit(seed, &[1, 2, 3, 4]).unwrap();
+                rt.registry_mut()
+                    .register_with(|id| WritingUnit::at_zero(id, 2));
+            })
+            .build()
+    }
+
+    fn head(mem: &GuestMemory, addr: u64) -> Option<Vec<u8>> {
+        mem.read(ByteRange::new(GuestAddr::new(addr), 4).unwrap())
+            .map(<[u8]>::to_vec)
+    }
+
+    #[test]
+    fn the_boot_copy_holds_the_last_committed_write() {
+        let result = run(two_space_fixture());
+        let boot = &result.final_spaces[&AddressSpaceId::BOOT];
+        assert_eq!(head(boot, 0), Some(vec![2, 2, 2, 2]));
+        assert_eq!(&result.final_memory[..4], &[2, 2, 2, 2]);
+    }
+
+    #[test]
+    fn a_child_copy_keeps_every_region_access_mode() {
+        let result = run(two_space_fixture());
+        let child = &result.final_spaces[&CHILD];
+        let modes: Vec<(&str, RegionAccess)> =
+            child.regions().map(|r| (r.label(), r.access())).collect();
+        assert_eq!(
+            modes,
+            vec![
+                ("child_main", RegionAccess::ReadWrite),
+                ("zero_readable", RegionAccess::ReservedZeroReadable),
+                ("strict", RegionAccess::ReservedStrict),
+            ]
+        );
+        assert_eq!(head(child, 0), Some(vec![1, 2, 3, 4]));
+        assert_eq!(head(child, 0x1000), Some(vec![0; 4]));
+        assert_eq!(head(child, 0x2000), None);
+    }
+
+    #[test]
+    fn a_single_space_copy_hashes_like_the_runtime_memory() {
+        let result = run(ScenarioFixture::builder()
+            .memory_size(16)
+            .budget(Budget::new(1))
+            .max_steps(10)
+            .register(|rt: &mut Runtime| {
+                rt.registry_mut()
+                    .register_with(|id| WritingUnit::at_zero(id, 3));
+            })
+            .build());
+        assert_eq!(result.final_spaces.len(), 1);
+        let boot = &result.final_spaces[&AddressSpaceId::BOOT];
+        assert_eq!(boot.content_hash(), result.final_memory_hash.raw());
+    }
+
+    #[test]
+    fn a_pooled_rerun_resets_while_an_earlier_result_is_still_held() {
+        let mut pool = MemoryPool::new();
+        let first = run_pooled(two_space_fixture(), &mut pool);
+        let second = run_pooled(two_space_fixture(), &mut pool);
+        let boot = &first.final_spaces[&AddressSpaceId::BOOT];
+        assert_eq!(head(boot, 0), Some(vec![2, 2, 2, 2]));
+        assert_eq!(first.final_memory_hash, second.final_memory_hash);
+    }
+}

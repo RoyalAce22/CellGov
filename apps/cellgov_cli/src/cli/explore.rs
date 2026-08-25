@@ -124,6 +124,8 @@ fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFo
         .iter()
         .map(|(rname, offset, size)| cellgov_explore::MemoryRegionSpec {
             name: (*rname).into(),
+            // Every registered microtest is single-process.
+            space: cellgov_core::AddressSpaceId::BOOT,
             addr: base_addr + offset,
             size: *size,
         })
@@ -146,10 +148,9 @@ fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFo
         return;
     };
 
-    // An unresolved capture is an unmapped or overflowing region spec,
-    // not a divergence: its bytes are empty regardless of what the run
-    // produced, so comparing it would report a harness fault as an
-    // oracle mismatch.
+    // An unresolved capture (see `CapturedRegion::resolved`) holds
+    // empty bytes regardless of what the run produced, so comparing it
+    // would report a harness fault as an oracle mismatch.
     let unresolved = unresolved_region_names(&r.baseline, &r.alternates);
     if !unresolved.is_empty() {
         die(&format!(

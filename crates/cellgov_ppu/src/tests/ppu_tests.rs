@@ -813,6 +813,7 @@ fn run_lv2_driven_baseline_check(
         .iter()
         .map(|(name, offset, size)| cellgov_compare::RegionDescriptor {
             name: (*name).into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: base_addr + offset,
             size: *size,
         })
@@ -973,11 +974,13 @@ fn lv2_driven_dma_completion_is_deterministic() {
     let regions = vec![
         cellgov_compare::RegionDescriptor {
             name: "header".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: base_addr,
             size: 8,
         },
         cellgov_compare::RegionDescriptor {
             name: "pattern".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: base_addr + 16,
             size: 128,
         },

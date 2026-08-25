@@ -14,6 +14,10 @@ pub(super) struct CheckpointManifest {
 #[derive(Debug, Deserialize)]
 pub(super) struct CheckpointRegion {
     pub(super) name: String,
+    /// Address space the region lives in; 0 (the default) is the boot
+    /// process's, a spawned child's is numbered from 1 in spawn order.
+    #[serde(default)]
+    pub(super) space: u32,
     #[serde(deserialize_with = "de_hex_u64")]
     pub(super) addr: u64,
     #[serde(deserialize_with = "de_hex_u64")]
@@ -148,6 +152,19 @@ pub enum ObservationSaveError {
     /// checkpoint/outcome/steps tuple.
     #[error("invalid boot summary: {0}")]
     InvalidBootSummary(#[source] cellgov_compare::BootSummaryError),
+    /// A manifest region names an address space this run never
+    /// created.
+    #[error(
+        "region {region} names address space {space}, but this run created \
+         only spaces {present:?}; a spawned child's space is numbered from 1 \
+         in spawn order, so either the title never spawned or the manifest \
+         names the wrong space"
+    )]
+    RegionSpaceMissing {
+        region: String,
+        space: u32,
+        present: Vec<u32>,
+    },
 }
 
 /// Build a boot-checkpoint observation and write it as JSON.
@@ -160,12 +177,12 @@ pub enum ObservationSaveError {
 /// # Errors
 ///
 /// Returns [`ObservationSaveError`] on any I/O, parse, or
-/// serialization failure so the caller can translate it to a
-/// non-zero exit.
+/// serialization failure, or when a manifest region names an address
+/// space the run never created.
 pub(super) fn save_boot_observation(
     path: &str,
     elf_data: &[u8],
-    final_memory: &[u8],
+    final_spaces: &cellgov_compare::SpaceSnapshots,
     outcome: cellgov_compare::BootOutcome,
     steps: usize,
     manifest_path: Option<&str>,
@@ -189,6 +206,7 @@ pub(super) fn save_boot_observation(
                 .into_iter()
                 .map(|r| cellgov_compare::RegionDescriptor {
                     name: r.name,
+                    space: cellgov_compare::AddressSpaceId::new(r.space),
                     addr: r.addr,
                     size: r.size,
                 })
@@ -203,6 +221,7 @@ pub(super) fn save_boot_observation(
                     let kind = if s.writable { "rw" } else { "ro" };
                     cellgov_compare::RegionDescriptor {
                         name: format!("seg{}_{kind}", s.index),
+                        space: cellgov_compare::AddressSpaceId::BOOT,
                         addr: s.vaddr,
                         size: s.memsz,
                     }
@@ -210,8 +229,22 @@ pub(super) fn save_boot_observation(
                 .collect()
         }
     };
+    // The extractor zero-fills a region whose space is absent, and a
+    // second CellGov run zero-fills it identically, so the only place
+    // this misconfiguration can surface is here, before anything is
+    // written.
+    if let Some(r) = regions
+        .iter()
+        .find(|r| !final_spaces.contains_key(&r.space))
+    {
+        return Err(ObservationSaveError::RegionSpaceMissing {
+            region: r.name.clone(),
+            space: r.space.raw(),
+            present: final_spaces.keys().map(|s| s.raw()).collect(),
+        });
+    }
     let observation =
-        cellgov_compare::observe_from_boot(final_memory, outcome, steps, &regions, tty_log);
+        cellgov_compare::observe_from_boot(final_spaces, outcome, steps, &regions, tty_log);
     // Pretty-print matches `rpcs3_to_observation`'s shape so the two
     // observation files diff cleanly under line-diff tools.
     let file =

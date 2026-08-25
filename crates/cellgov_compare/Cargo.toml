@@ -17,6 +17,8 @@ default = ["rpcs3-runner"]
 rpcs3-runner = []
 
 [dependencies]
+# Region descriptors name the address space they read from.
+cellgov_core = { path = "../cellgov_core" }
 cellgov_event = { path = "../cellgov_event" }
 cellgov_mem = { path = "../cellgov_mem" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }

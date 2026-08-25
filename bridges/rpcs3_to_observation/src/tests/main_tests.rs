@@ -8,16 +8,63 @@ fn manifest_fixture() -> Manifest {
         regions: vec![
             ManifestRegion {
                 name: "first".into(),
+                space: 0,
                 addr: 0x10000,
                 size: 4,
             },
             ManifestRegion {
                 name: "second".into(),
+                space: 0,
                 addr: 0x20000,
                 size: 8,
             },
         ],
     }
+}
+
+#[test]
+fn a_region_outside_space_zero_is_refused_by_name() {
+    let mut manifest = manifest_fixture();
+    manifest.regions[1].space = 1;
+    match check_manifest(&manifest).expect_err("RPCS3 holds no child space") {
+        Rpcs3BridgeError::ChildSpaceRegion { region, space } => {
+            assert_eq!(region, "second");
+            assert_eq!(space, 1);
+        }
+        other => panic!("expected ChildSpaceRegion, got {other:?}"),
+    }
+}
+
+#[test]
+fn the_space_field_defaults_to_zero_when_absent() {
+    let manifest: Manifest = toml::from_str(
+        r#"
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x10"
+"#,
+    )
+    .expect("parses without a space field");
+    assert_eq!(manifest.regions[0].space, 0);
+    check_manifest(&manifest).expect("space 0 is capturable");
+}
+
+#[test]
+fn a_negative_space_is_a_parse_error_not_space_zero() {
+    let bad = toml::from_str::<Manifest>(
+        r#"
+[[regions]]
+name = "code"
+space = -1
+addr = "0x10000"
+size = "0x10"
+"#,
+    );
+    assert!(
+        bad.is_err(),
+        "a negative space names nothing and must not default to the boot space"
+    );
 }
 
 #[test]
@@ -343,11 +390,13 @@ fn a_manifest_that_repeats_a_region_name_is_rejected() {
         regions: vec![
             ManifestRegion {
                 name: "result".into(),
+                space: 0,
                 addr: 0,
                 size: 4,
             },
             ManifestRegion {
                 name: "result".into(),
+                space: 0,
                 addr: 16,
                 size: 4,
             },

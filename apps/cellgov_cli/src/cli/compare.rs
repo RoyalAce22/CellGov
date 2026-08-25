@@ -196,6 +196,7 @@ fn run_manifest_compare(
         .iter()
         .map(|r| RegionDescriptor {
             name: r.name.clone(),
+            space: cellgov_compare::AddressSpaceId::new(r.space),
             addr: r.addr,
             size: r.size,
         })

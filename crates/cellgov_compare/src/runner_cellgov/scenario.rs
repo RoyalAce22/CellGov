@@ -15,15 +15,15 @@ use super::region::{extract_regions, RegionDescriptor};
 
 /// Convert a `ScenarioResult` into a normalized `Observation`.
 ///
-/// Out-of-bounds regions are filled with zeros; the comparison layer
-/// catches the mismatch.
+/// Regions that do not resolve in their space are filled with zeros;
+/// the comparison layer catches the mismatch.
 pub fn observe(result: &ScenarioResult, regions: &[RegionDescriptor]) -> Observation {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
         ScenarioOutcome::MaxStepsExceeded => ObservedOutcome::Timeout,
     };
 
-    let memory_regions = extract_regions(&result.final_memory, regions);
+    let memory_regions = extract_regions(&result.final_spaces, regions);
     let events = extract_events(&result.trace_bytes);
 
     let state_hashes = Some(ObservedHashes {

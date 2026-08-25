@@ -39,6 +39,10 @@ struct Manifest {
 #[derive(Debug, Deserialize)]
 struct ManifestRegion {
     name: String,
+    /// Address space; RPCS3 runs one guest process, so only space 0 is
+    /// capturable.
+    #[serde(default)]
+    space: u32,
     #[serde(deserialize_with = "de_hex_u64")]
     addr: u64,
     #[serde(deserialize_with = "de_hex_u64")]
@@ -196,6 +200,13 @@ enum Rpcs3BridgeError {
          guest-visible state and compare as a match against anything"
     )]
     ManifestHasNoRegions,
+    /// A region names an address space no RPCS3 capture can hold.
+    #[error(
+        "region {region} names address space {space}, but RPCS3 emulates one \
+         guest process in one flat address space, so no RPCS3 capture holds a \
+         child space; observe it on the CellGov side, or move it to space 0"
+    )]
+    ChildSpaceRegion { region: String, space: u32 },
     /// Dump longer than the regions the manifest declares.
     #[error(
         "dump has {dump_len} bytes but the manifest declares {declared}; the \
@@ -367,14 +378,20 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
 ///
 /// # Errors
 ///
-/// Returns `Err` on an empty region list, or on two regions sharing a
-/// name.
+/// Returns `Err` on an empty region list, on two regions sharing a
+/// name, or on a region outside space 0.
 fn check_manifest(manifest: &Manifest) -> Result<(), Rpcs3BridgeError> {
     if manifest.regions.is_empty() {
         return Err(Rpcs3BridgeError::ManifestHasNoRegions);
     }
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     for r in &manifest.regions {
+        if r.space != 0 {
+            return Err(Rpcs3BridgeError::ChildSpaceRegion {
+                region: r.name.clone(),
+                space: r.space,
+            });
+        }
         // `find_memory_divergence` in cellgov_compare pairs regions by
         // name and takes the first match, so a repeated name hides the
         // later region from every comparison.

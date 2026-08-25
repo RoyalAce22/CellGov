@@ -90,6 +90,11 @@ pub struct ExpectSection {
 pub struct MemoryRegionSpec {
     /// Region name (used in reports and baseline keys).
     pub name: String,
+    /// Address space the region lives in; 0 is the boot process's
+    /// space and the default. A spawned child's space is numbered in
+    /// spawn order from 1. RPCS3 captures hold space 0 only.
+    #[serde(default)]
+    pub space: u32,
     /// Guest address of the region start.
     pub addr: u64,
     /// Size in bytes.

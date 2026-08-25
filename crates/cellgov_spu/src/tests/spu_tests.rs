@@ -479,6 +479,7 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
 
     let regions = vec![cellgov_compare::RegionDescriptor {
         name: "result".into(),
+        space: cellgov_compare::AddressSpaceId::BOOT,
         addr: result_ea,
         size: 8,
     }];
@@ -631,11 +632,13 @@ fn atomic_reservation_matches_rpcs3_baseline() {
     let regions = vec![
         cellgov_compare::RegionDescriptor {
             name: "header".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: result_ea,
             size: 8,
         },
         cellgov_compare::RegionDescriptor {
             name: "data".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: result_ea + 16,
             size: 128,
         },
@@ -714,11 +717,13 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
     let regions = vec![
         cellgov_compare::RegionDescriptor {
             name: "spu0_result".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: base_ea,
             size: 8,
         },
         cellgov_compare::RegionDescriptor {
             name: "spu1_result".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: base_ea + 16,
             size: 8,
         },
@@ -786,11 +791,13 @@ fn ls_to_shared_matches_rpcs3_baseline() {
     let regions = vec![
         cellgov_compare::RegionDescriptor {
             name: "header".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: result_ea,
             size: 8,
         },
         cellgov_compare::RegionDescriptor {
             name: "data".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: result_ea + 16,
             size: 128,
         },
@@ -929,11 +936,13 @@ fn dma_completion_matches_rpcs3_baseline() {
     let regions = vec![
         cellgov_compare::RegionDescriptor {
             name: "header".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: result_ea,
             size: 8,
         },
         cellgov_compare::RegionDescriptor {
             name: "pattern".into(),
+            space: cellgov_compare::AddressSpaceId::BOOT,
             addr: result_ea + 16,
             size: 128,
         },
@@ -1000,6 +1009,7 @@ fn spu_fixed_value_matches_rpcs3_baseline() {
 
     let regions = vec![cellgov_compare::RegionDescriptor {
         name: "result".into(),
+        space: cellgov_compare::AddressSpaceId::BOOT,
         addr: result_ea,
         size: 8,
     }];

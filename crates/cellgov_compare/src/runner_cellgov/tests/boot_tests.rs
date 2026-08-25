@@ -1,10 +1,17 @@
 //! BootOutcome mapping into observations and Display/FromStr round-trips.
 
 use super::*;
+use crate::runner_cellgov::region::SpaceSnapshots;
+use cellgov_core::AddressSpaceId;
+use cellgov_mem::GuestMemory;
+
+fn boot_only(size: usize) -> SpaceSnapshots {
+    SpaceSnapshots::from([(AddressSpaceId::BOOT, GuestMemory::new(size))])
+}
 
 #[test]
 fn observe_from_boot_maps_process_exit_to_process_exit() {
-    let mem = vec![0u8; 16];
+    let mem = boot_only(16);
     let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1000, &[], &[]);
     assert_eq!(obs.outcome, ObservedOutcome::ProcessExit);
     assert_eq!(obs.metadata.runner, "cellgov-boot");
@@ -15,7 +22,7 @@ fn observe_from_boot_maps_process_exit_to_process_exit() {
 
 #[test]
 fn observe_from_boot_maps_fault_and_max_steps() {
-    let mem = vec![0u8; 16];
+    let mem = boot_only(16);
     let fault = observe_from_boot(&mem, BootOutcome::Fault, 50, &[], &[]);
     assert_eq!(fault.outcome, ObservedOutcome::Fault);
     let timeout = observe_from_boot(&mem, BootOutcome::MaxSteps, 100_000, &[], &[]);
@@ -24,7 +31,7 @@ fn observe_from_boot_maps_fault_and_max_steps() {
 
 #[test]
 fn observe_from_boot_maps_pc_reached_to_completed() {
-    let mem = vec![0u8; 16];
+    let mem = boot_only(16);
     let obs = observe_from_boot(&mem, BootOutcome::PcReached(0x10381ce8), 1402388, &[], &[]);
     assert_eq!(obs.outcome, ObservedOutcome::Completed);
     assert_eq!(obs.metadata.steps, Some(1402388));
@@ -32,7 +39,7 @@ fn observe_from_boot_maps_pc_reached_to_completed() {
 
 #[test]
 fn observe_from_boot_maps_rsx_write_checkpoint_to_completed() {
-    let mem = vec![0u8; 16];
+    let mem = boot_only(16);
     let obs = observe_from_boot(&mem, BootOutcome::RsxWriteCheckpoint, 12_345, &[], &[]);
     assert_eq!(obs.outcome, ObservedOutcome::Completed);
     assert_eq!(obs.metadata.steps, Some(12_345));
@@ -40,7 +47,7 @@ fn observe_from_boot_maps_rsx_write_checkpoint_to_completed() {
 
 #[test]
 fn observe_from_boot_passes_tty_log_through() {
-    let mem = vec![0u8; 16];
+    let mem = boot_only(16);
     let tty = b"hello world\n";
     let obs = observe_from_boot(&mem, BootOutcome::ProcessExit, 1, &[], tty);
     assert_eq!(obs.tty_log, tty);

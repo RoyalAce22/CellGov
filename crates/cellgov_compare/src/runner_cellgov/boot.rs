@@ -93,7 +93,7 @@ impl std::str::FromStr for BootOutcome {
 /// - `MaxSteps`, `TimeOverflow` -> `Timeout`.
 /// - `Fault` -> `Fault`.
 pub fn observe_from_boot(
-    final_memory: &[u8],
+    final_spaces: &super::region::SpaceSnapshots,
     outcome: BootOutcome,
     steps_taken: usize,
     regions: &[RegionDescriptor],
@@ -110,7 +110,7 @@ pub fn observe_from_boot(
 
     Observation {
         outcome: observed_outcome,
-        memory_regions: extract_regions(final_memory, regions),
+        memory_regions: extract_regions(final_spaces, regions),
         events: Vec::new(),
         state_hashes: None,
         metadata: ObservationMetadata {

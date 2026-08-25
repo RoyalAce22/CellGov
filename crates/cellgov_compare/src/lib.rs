@@ -32,6 +32,7 @@ pub mod witnesses;
 mod test_support;
 
 pub use boot_summary::{BootSummary, BootSummaryError, CheckpointKind};
+pub use cellgov_core::AddressSpaceId;
 pub use classify::{classify, ClassifierContext, DivergenceClass, ELF_HEADER_SIZE};
 pub use compare::{
     compare, compare_multi, Classification, CompareMode, CompareResult, EventDivergence,
@@ -51,7 +52,7 @@ pub use observation_compare::{
 pub use report::{format_human, format_json, format_multi_human, format_multi_json};
 pub use runner_cellgov::{
     observe, observe_from_boot, observe_with_determinism_check, BootOutcome, BootOutcomeParseError,
-    DeterminismError, RegionDescriptor,
+    DeterminismError, RegionDescriptor, SpaceSnapshots,
 };
 pub use summary::{
     summarize, ByteParity, ByteParityDivergeReason, Convergence, ConvergenceFailure,

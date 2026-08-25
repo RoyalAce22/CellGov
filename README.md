@@ -112,7 +112,9 @@ Pre-Alpha. What works today:
 - Multi-process: `sys_process_spawn` creates a real child process in
   its own address space, decrypting a child that ships as an
   encrypted SELF rather than a plain ELF, with per-process identity
-  (getpid/getppid/exit status). Memory two processes map under the
+  (getpid/getppid/exit status), and a checkpoint manifest can name
+  the child's address space to capture its memory alongside the
+  parent's. Memory two processes map under the
   same IPC key is one segment -- a write through either mapping is
   visible through the other, and the mapping forms from the guest's
   own `sys_mmapper` calls with nothing declared on the host side.

@@ -89,6 +89,7 @@ graph BT
   core --> explore
 
   testkit --> compare
+  core --> compare
   trace --> compare
   event --> compare
   time --> compare
@@ -1389,7 +1390,12 @@ comparison loudly instead of matching zeros.
 `cellgov_compare` reduces a run of any runner (CellGov, RPCS3, future
 recompiled output) to a normalized `Observation` (outcome, named
 memory regions, ordered events, optional state hashes, runner
-metadata). The comparison layer diffs two observations field by
+metadata). Each named region carries the address space it is read
+from (`AddressSpaceId`, space 0 for the boot process, a spawned
+child's numbered from 1 in spawn order), so a checkpoint manifest can
+observe a child's memory; RPCS3 captures hold space 0 only and the
+bridge refuses a manifest naming any other. The comparison layer
+diffs two observations field by
 field. Modes: strict (outcome + memory + events), memory-only,
 events-only, prefix. Multi-baseline mode validates oracle agreement
 across e.g. RPCS3 interpreter and LLVM before declaring a CellGov

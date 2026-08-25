@@ -321,10 +321,16 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     }
 
     if let Some(path) = save_observation {
+        // Every space, so a checkpoint manifest can name a spawned
+        // child's memory; a `GuestMemory` clone is a refcount bump.
+        let final_spaces: cellgov_compare::SpaceSnapshots = rt
+            .address_spaces()
+            .map(|(id, mem)| (id, mem.clone()))
+            .collect();
         save_boot_observation(
             path,
             &elf_data,
-            rt.memory().as_bytes(),
+            &final_spaces,
             boot_outcome,
             steps,
             observation_manifest,
