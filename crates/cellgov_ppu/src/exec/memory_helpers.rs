@@ -43,6 +43,32 @@ fn unmapped(ea: u64) -> cellgov_mem::MemError {
     })
 }
 
+/// The widths a fixed-point load can ask for. Typed so a helper is
+/// never handed a size it has no arm for: a caller mistake is a
+/// compile error, not a fabricated unmapped fault at run time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadWidth {
+    /// One byte.
+    B1,
+    /// Halfword.
+    B2,
+    /// Word.
+    B4,
+    /// Doubleword.
+    B8,
+}
+
+impl LoadWidth {
+    pub(crate) const fn bytes(self) -> u8 {
+        match self {
+            Self::B1 => 1,
+            Self::B2 => 2,
+            Self::B4 => 4,
+            Self::B8 => 8,
+        }
+    }
+}
+
 /// Zero-extending load with store-buffer forwarding.
 ///
 /// Slow path overlays buffered stores onto the region view, so
@@ -53,8 +79,9 @@ pub(crate) fn load_ze(
     region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     ea: u64,
-    size: u8,
+    width: LoadWidth,
 ) -> Result<u64, cellgov_mem::MemError> {
+    let size = width.bytes();
     if let Some(val) = store_buf.forward(ea, size) {
         return Ok(val as u64);
     }
@@ -63,15 +90,11 @@ pub(crate) fn load_ze(
     let n = size as usize;
     bytes[..n].copy_from_slice(&slice[..n]);
     store_buf.overlay_range(ea, &mut bytes[..n]);
-    Ok(match size {
-        1 => bytes[0] as u64,
-        2 => u16::from_be_bytes([bytes[0], bytes[1]]) as u64,
-        4 => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64,
-        8 => u64::from_be_bytes(bytes),
-        _ => {
-            debug_assert!(false, "load_ze: unexpected size {size}");
-            return Err(unmapped(ea));
-        }
+    Ok(match width {
+        LoadWidth::B1 => bytes[0] as u64,
+        LoadWidth::B2 => u16::from_be_bytes([bytes[0], bytes[1]]) as u64,
+        LoadWidth::B4 => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64,
+        LoadWidth::B8 => u64::from_be_bytes(bytes),
     })
 }
 
@@ -81,20 +104,17 @@ pub(crate) fn load_se(
     region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     ea: u64,
-    size: u8,
+    width: LoadWidth,
 ) -> Result<u64, cellgov_mem::MemError> {
+    let size = width.bytes();
     if let Some(val) = store_buf.forward(ea, size) {
         // `forward` right-aligns `size` bytes; sign must come from
         // the size's MSB, not u64 bit 63 (always 0 for sub-doubleword).
-        return Ok(match size {
-            1 => (val as u8 as i8) as i64 as u64,
-            2 => (val as u16 as i16) as i64 as u64,
-            4 => (val as u32 as i32) as i64 as u64,
-            8 => val as u64,
-            _ => {
-                debug_assert!(false, "load_se: unexpected size {size}");
-                return Err(unmapped(ea));
-            }
+        return Ok(match width {
+            LoadWidth::B1 => (val as u8 as i8) as i64 as u64,
+            LoadWidth::B2 => (val as u16 as i16) as i64 as u64,
+            LoadWidth::B4 => (val as u32 as i32) as i64 as u64,
+            LoadWidth::B8 => val as u64,
         });
     }
     let slice = load_slice(region_views, ea, size as usize).ok_or_else(|| unmapped(ea))?;
@@ -102,15 +122,11 @@ pub(crate) fn load_se(
     let n = size as usize;
     bytes[..n].copy_from_slice(&slice[..n]);
     store_buf.overlay_range(ea, &mut bytes[..n]);
-    Ok(match size {
-        1 => (bytes[0] as i8) as i64 as u64,
-        2 => i16::from_be_bytes([bytes[0], bytes[1]]) as i64 as u64,
-        4 => i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64 as u64,
-        8 => u64::from_be_bytes(bytes),
-        _ => {
-            debug_assert!(false, "load_se: unexpected size {size}");
-            return Err(unmapped(ea));
-        }
+    Ok(match width {
+        LoadWidth::B1 => (bytes[0] as i8) as i64 as u64,
+        LoadWidth::B2 => i16::from_be_bytes([bytes[0], bytes[1]]) as i64 as u64,
+        LoadWidth::B4 => i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64 as u64,
+        LoadWidth::B8 => u64::from_be_bytes(bytes),
     })
 }
 

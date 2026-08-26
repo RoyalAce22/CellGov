@@ -3,7 +3,7 @@
 //! `buffer_store` / `load_slice` helpers from the parent module so the
 //! reservation clear-sweep stays consistent across them.
 
-use crate::exec::memory_helpers::{buffer_store, load_se, load_slice, load_ze};
+use crate::exec::memory_helpers::{buffer_store, load_se, load_slice, load_ze, LoadWidth};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
@@ -33,7 +33,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:39 s:3.3] Load Doubleword (ld, DS-form): MEM(EA,8) -> RT.
         PpuInstruction::Lwz { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -43,7 +43,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lbz { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 1) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B1) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -53,7 +53,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lhz { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 2) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -63,7 +63,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lha { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_se(region_views, store_buf, ea, 2) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -75,7 +75,7 @@ pub(crate) fn execute(
         PpuInstruction::Lhau { rt, ra, imm } => {
             debug_assert_load_with_update("lhau", ra, rt);
             let ea = state.ea_d_form(ra, imm);
-            match load_se(region_views, store_buf, ea, 2) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -99,7 +99,7 @@ pub(crate) fn execute(
             );
             let mut ea = state.ea_d_form(ra, imm);
             for r in (rt as usize)..32 {
-                match load_ze(region_views, store_buf, ea, 4) {
+                match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                     Ok(val) => {
                         state.set_gpr(r, val);
                         ea = ea.wrapping_add(4);
@@ -112,7 +112,7 @@ pub(crate) fn execute(
         PpuInstruction::Lwzu { rt, ra, imm } => {
             debug_assert_load_with_update("lwzu", ra, rt);
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -124,7 +124,7 @@ pub(crate) fn execute(
         PpuInstruction::Lbzu { rt, ra, imm } => {
             debug_assert_load_with_update("lbzu", ra, rt);
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 1) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B1) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -136,7 +136,7 @@ pub(crate) fn execute(
         PpuInstruction::Lhzu { rt, ra, imm } => {
             debug_assert_load_with_update("lhzu", ra, rt);
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 2) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -148,7 +148,7 @@ pub(crate) fn execute(
         PpuInstruction::Ldu { rt, ra, imm } => {
             debug_assert_load_with_update("ldu", ra, rt);
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -159,7 +159,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Ld { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -169,7 +169,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lwa { rt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_se(region_views, store_buf, ea, 4) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -180,7 +180,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:34 s:3.3] X-form indexed load variants (lbzx/lhzx/lwzx/ldx): EA = (RA|0)+(RB).
         PpuInstruction::Lwzx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -190,7 +190,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lbzx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 1) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B1) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -200,7 +200,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Ldx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -210,7 +210,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lhzx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 2) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -222,7 +222,7 @@ pub(crate) fn execute(
         PpuInstruction::Lwzux { rt, ra, rb } => {
             debug_assert_load_with_update("lwzux", ra, rt);
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -234,7 +234,7 @@ pub(crate) fn execute(
         PpuInstruction::Lbzux { rt, ra, rb } => {
             debug_assert_load_with_update("lbzux", ra, rt);
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 1) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B1) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -246,7 +246,7 @@ pub(crate) fn execute(
         PpuInstruction::Lhzux { rt, ra, rb } => {
             debug_assert_load_with_update("lhzux", ra, rt);
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 2) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -258,7 +258,7 @@ pub(crate) fn execute(
         PpuInstruction::Ldux { rt, ra, rb } => {
             debug_assert_load_with_update("ldux", ra, rt);
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -270,7 +270,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:36 s:3.3] lhax / lhaux: load halfword algebraic (sign-extend 16->64).
         PpuInstruction::Lhax { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_se(region_views, store_buf, ea, 2) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -281,7 +281,7 @@ pub(crate) fn execute(
         PpuInstruction::Lhaux { rt, ra, rb } => {
             debug_assert_load_with_update("lhaux", ra, rt);
             let ea = state.ea_x_form(ra, rb);
-            match load_se(region_views, store_buf, ea, 2) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -293,7 +293,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:38 s:3.3] lwax / lwaux: load word algebraic (sign-extend 32->64).
         PpuInstruction::Lwax { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_se(region_views, store_buf, ea, 4) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     ExecuteVerdict::Continue
@@ -304,7 +304,7 @@ pub(crate) fn execute(
         PpuInstruction::Lwaux { rt, ra, rb } => {
             debug_assert_load_with_update("lwaux", ra, rt);
             let ea = state.ea_x_form(ra, rb);
-            match load_se(region_views, store_buf, ea, 4) {
+            match load_se(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_gpr(ra as usize, ea);
@@ -482,7 +482,7 @@ pub(crate) fn execute(
         // [CBE-Handbook p:734 s:A.2.1] sdbrx (CG name): low-64 byte-reverse store.
         PpuInstruction::Ldbrx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val.swap_bytes());
                     ExecuteVerdict::Continue
@@ -492,7 +492,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lwbrx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, (val as u32).swap_bytes() as u64);
                     ExecuteVerdict::Continue
@@ -502,7 +502,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lhbrx { rt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 2) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, (val as u16).swap_bytes() as u64);
                     ExecuteVerdict::Continue
@@ -534,7 +534,7 @@ pub(crate) fn execute(
             if ea & 7 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     let line = ReservedLine::containing(ea);
@@ -606,7 +606,7 @@ pub(crate) fn execute(
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     let line = ReservedLine::containing(ea);
@@ -782,7 +782,7 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]);
             let m = (ea & 0xF) as usize;
-            let byte = match load_ze(region_views, store_buf, ea, 1) {
+            let byte = match load_ze(region_views, store_buf, ea, LoadWidth::B1) {
                 Ok(v) => v as u8,
                 Err(e) => return ExecuteVerdict::MemFault(e),
             };
@@ -797,7 +797,7 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !1u64;
             let m = (ea & 0xF) as usize;
-            let val = match load_ze(region_views, store_buf, ea, 2) {
+            let val = match load_ze(region_views, store_buf, ea, LoadWidth::B2) {
                 Ok(v) => v as u16,
                 Err(e) => return ExecuteVerdict::MemFault(e),
             };
@@ -814,7 +814,7 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !3u64;
             let m = (ea & 0xF) as usize;
-            let val = match load_ze(region_views, store_buf, ea, 4) {
+            let val = match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(v) => v as u32,
                 Err(e) => return ExecuteVerdict::MemFault(e),
             };
@@ -1022,7 +1022,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:108 s:4.6] Store Floating-Point Double (stfd, D-form): FRS -> MEM(EA,8).
         PpuInstruction::Lfs { frt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, double_word(bits as u32));
                     ExecuteVerdict::Continue
@@ -1034,7 +1034,7 @@ pub(crate) fn execute(
         PpuInstruction::Lfsu { frt, ra, imm } => {
             debug_assert_store_with_update("lfsu", ra);
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, double_word(bits as u32));
                     state.set_gpr(ra as usize, ea);
@@ -1045,7 +1045,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lfd { frt, ra, imm } => {
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, bits);
                     ExecuteVerdict::Continue
@@ -1057,7 +1057,7 @@ pub(crate) fn execute(
         PpuInstruction::Lfdu { frt, ra, imm } => {
             debug_assert_store_with_update("lfdu", ra);
             let ea = state.ea_d_form(ra, imm);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, bits);
                     state.set_gpr(ra as usize, ea);
@@ -1117,7 +1117,7 @@ pub(crate) fn execute(
         // [PPC-Book1 p:108 s:4.6] stfdx / stfdux: X-form double-precision store.
         PpuInstruction::Lfsx { frt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, double_word(bits as u32));
                     ExecuteVerdict::Continue
@@ -1128,7 +1128,7 @@ pub(crate) fn execute(
         PpuInstruction::Lfsux { frt, ra, rb } => {
             debug_assert_load_with_update("lfsux", ra, frt);
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 4) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, double_word(bits as u32));
                     state.set_gpr(ra as usize, ea);
@@ -1139,7 +1139,7 @@ pub(crate) fn execute(
         }
         PpuInstruction::Lfdx { frt, ra, rb } => {
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, bits);
                     ExecuteVerdict::Continue
@@ -1150,7 +1150,7 @@ pub(crate) fn execute(
         PpuInstruction::Lfdux { frt, ra, rb } => {
             debug_assert_load_with_update("lfdux", ra, frt);
             let ea = state.ea_x_form(ra, rb);
-            match load_ze(region_views, store_buf, ea, 8) {
+            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
                 Ok(bits) => {
                     state.set_fpr(frt as usize, bits);
                     state.set_gpr(ra as usize, ea);
@@ -1302,7 +1302,7 @@ fn string_load(
     state.set_gpr(reg, 0);
     for i in 0..n {
         let ea = base.wrapping_add(i as u64);
-        let byte = match load_ze(region_views, store_buf, ea, 1) {
+        let byte = match load_ze(region_views, store_buf, ea, LoadWidth::B1) {
             Ok(v) => v as u8,
             Err(e) => return ExecuteVerdict::MemFault(e),
         };

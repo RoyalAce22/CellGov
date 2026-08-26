@@ -806,3 +806,33 @@ fn lwaux_sign_extends_and_writes_back_ra() {
     assert_eq!(s.gpr[3], 0xFFFF_FFFF_8000_0000);
     assert_eq!(s.gpr[4], 0x20);
 }
+
+#[test]
+fn every_load_width_reads_its_own_span_zero_and_sign_extended() {
+    use crate::exec::memory_helpers::{load_se, load_ze, LoadWidth};
+    let mut mem = vec![0u8; 0x100];
+    mem[0x10..0x18].copy_from_slice(&0xF1F2_F3F4_F5F6_F7F8u64.to_be_bytes());
+    let views = [cellgov_mem::RegionView::plain(0, &mem)];
+    let store_buf = StoreBuffer::new();
+    for (width, ze, se) in [
+        (LoadWidth::B1, 0xF1u64, 0xFFFF_FFFF_FFFF_FFF1u64),
+        (LoadWidth::B2, 0xF1F2, 0xFFFF_FFFF_FFFF_F1F2),
+        (LoadWidth::B4, 0xF1F2_F3F4, 0xFFFF_FFFF_F1F2_F3F4),
+        (LoadWidth::B8, 0xF1F2_F3F4_F5F6_F7F8, 0xF1F2_F3F4_F5F6_F7F8),
+    ] {
+        assert_eq!(
+            width.bytes() as u64,
+            ze.to_be_bytes().iter().skip_while(|b| **b == 0).count() as u64
+        );
+        assert_eq!(
+            load_ze(&views, &store_buf, 0x10, width),
+            Ok(ze),
+            "{width:?}"
+        );
+        assert_eq!(
+            load_se(&views, &store_buf, 0x10, width),
+            Ok(se),
+            "{width:?}"
+        );
+    }
+}
