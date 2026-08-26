@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="340" viewBox="0 0 680 170" role="img" aria-label="CellGov">
+<title>CellGov</title>
+<desc>Six input lanes of ticks move at staggered tempos into a bright vertical gate and leave as one evenly paced lane beside the CellGov wordmark.</desc>
+<style>
+@media (prefers-reduced-motion: no-preference) {
+@keyframes march {
+0%{stroke-dashoffset:0}8%{stroke-dashoffset:-8}14%{stroke-dashoffset:-12}
+22%{stroke-dashoffset:-70}28%{stroke-dashoffset:-78}38%{stroke-dashoffset:-84}
+46%{stroke-dashoffset:-140}54%{stroke-dashoffset:-148}62%{stroke-dashoffset:-152}
+72%{stroke-dashoffset:-205}80%{stroke-dashoffset:-212}90%{stroke-dashoffset:-218}
+100%{stroke-dashoffset:-240}
+}
+@keyframes mout{to{stroke-dashoffset:-198}}
+@keyframes gpulse{0%,100%{opacity:.6}50%{opacity:1}}
+.lane{animation-name:march;animation-timing-function:linear;animation-iteration-count:infinite}
+.l1{animation-duration:15s;animation-delay:-0s}
+.l2{animation-duration:16s;animation-delay:-3.5s}
+.l3{animation-duration:17s;animation-delay:-9s}
+.l4{animation-duration:18.5s;animation-delay:-13s}
+.l5{animation-duration:19s;animation-delay:-5.5s}
+.l6{animation-duration:21s;animation-delay:-17.5s}
+.out{animation-name:mout;animation-duration:3.6s}
+.gate{animation:gpulse 2.8s ease-in-out infinite}
+}
+.b{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px;letter-spacing:.8px;fill:#4E7F7A}
+</style>
+<rect width="680" height="170" fill="#080B0C"/>
+<circle cx="164" cy="85" r="88" fill="none" stroke="#3FD8C8" stroke-width=".5" opacity=".13"/>
+<circle cx="164" cy="85" r="62" fill="none" stroke="#3FD8C8" stroke-width=".5" opacity=".09"/>
+<path d="M16 30V16H30" fill="none" stroke="#3FD8C8" opacity=".45"/>
+<path d="M664 30V16H650" fill="none" stroke="#3FD8C8" opacity=".45"/>
+<path d="M16 140V154H30" fill="none" stroke="#3FD8C8" opacity=".45"/>
+<path d="M664 140V154H650" fill="none" stroke="#3FD8C8" opacity=".45"/>
+<line class="lane l1" x1="44" y1="37.5" x2="152" y2="37.5" stroke="#5E9691" stroke-width="6" stroke-dasharray="3 13"/>
+<line class="lane l2" x1="44" y1="56.5" x2="152" y2="56.5" stroke="#5E9691" stroke-width="6" stroke-dasharray="3 21"/>
+<line class="lane l3" x1="44" y1="75.5" x2="152" y2="75.5" stroke="#5E9691" stroke-width="6" stroke-dasharray="3 7"/>
+<line class="lane l4" x1="44" y1="94.5" x2="152" y2="94.5" stroke="#5E9691" stroke-width="6" stroke-dasharray="3 17"/>
+<line class="lane l5" x1="44" y1="113.5" x2="152" y2="113.5" stroke="#5E9691" stroke-width="6" stroke-dasharray="3 9"/>
+<line class="lane l6" x1="44" y1="132.5" x2="152" y2="132.5" stroke="#5E9691" stroke-width="6" stroke-dasharray="3 12"/>
+<line class="gate" x1="164" y1="32" x2="164" y2="138" stroke="#9BFAEC" stroke-width="2"/>
+<line x1="157" y1="32" x2="171" y2="32" stroke="#9BFAEC" opacity=".7"/>
+<line x1="157" y1="138" x2="171" y2="138" stroke="#9BFAEC" opacity=".7"/>
+<line class="lane out" x1="178" y1="85" x2="270" y2="85" stroke="#3FD8C8" stroke-width="14" stroke-dasharray="4 14"/>
+<path fill="#EAF6F4" d="M312 93.4Q311 93.8 309.9 94.2Q308.9 94.6 307.8 94.8Q306.7 95.1 305.4 95.2Q304.2 95.4 302.8 95.4Q301 95.4 299.3 95.1Q297.7 94.8 296.3 94.2Q294.8 93.6 293.7 92.8Q292.5 91.9 291.7 90.7Q290.9 89.6 290.4 88.1Q290 86.7 290 85Q290 83.2 290.4 81.8Q290.9 80.3 291.7 79.2Q292.5 78 293.7 77.1Q294.8 76.3 296.3 75.7Q297.7 75.1 299.3 74.8Q301 74.5 302.8 74.5Q304.2 74.5 305.4 74.7Q306.7 74.8 307.8 75.1Q308.9 75.3 309.9 75.7Q311 76 312 76.5V78.7Q311.2 78.2 310.2 77.7Q309.3 77.2 308.2 76.9Q307.1 76.5 305.8 76.3Q304.6 76.1 303.1 76.1Q300.2 76.1 298.1 76.7Q296 77.4 294.6 78.5Q293.2 79.7 292.5 81.3Q291.9 82.9 291.9 85Q291.9 87 292.5 88.6Q293.2 90.2 294.6 91.4Q296 92.5 298.1 93.1Q300.2 93.8 303.1 93.8Q304.6 93.8 305.8 93.6Q307.1 93.4 308.2 93Q309.4 92.7 310.3 92.2Q311.2 91.7 312 91.2V93.4Z M340.7 93.9Q339.5 94.3 338.5 94.6Q337.4 94.9 336.4 95Q335.4 95.2 334.3 95.3Q333.2 95.4 332 95.4Q329 95.4 326.6 94.6Q324.2 93.9 322.5 92.6Q320.9 91.2 320 89.3Q319.1 87.4 319.1 85.1Q319.1 82.8 319.9 80.8Q320.8 78.9 322.4 77.6Q323.9 76.2 326.1 75.4Q328.3 74.7 330.9 74.7Q333.7 74.7 335.8 75.4Q337.9 76.1 339.4 77.5Q340.9 78.8 341.6 80.8Q342.4 82.7 342.4 85.2V85.6H320.9Q321.1 87.5 321.9 89Q322.7 90.5 324.1 91.6Q325.5 92.6 327.6 93.2Q329.7 93.7 332.5 93.7Q333.7 93.7 334.9 93.6Q336.1 93.4 337.2 93.1Q338.3 92.9 339.2 92.5Q340.2 92.2 340.7 91.8ZM340.6 84Q340.5 82.5 339.9 81.1Q339.3 79.7 338.2 78.6Q337 77.5 335.2 76.9Q333.4 76.3 330.9 76.3Q328.5 76.3 326.8 76.9Q325 77.5 323.8 78.6Q322.5 79.7 321.8 81.1Q321.1 82.5 320.9 84Z M352.6 88Q352.6 89.4 352.8 90.4Q353 91.4 353.7 92Q354.4 92.6 355.8 92.9Q357.1 93.2 359.3 93.2H368.4V95H358.9Q356.5 95 354.9 94.6Q353.4 94.2 352.4 93.4Q351.5 92.6 351.1 91.4Q350.8 90.1 350.8 88.4V74.9H352.6Z M376.9 88Q376.9 89.4 377.1 90.4Q377.3 91.4 378 92Q378.7 92.6 380.1 92.9Q381.4 93.2 383.6 93.2H392.7V95H383.2Q380.8 95 379.2 94.6Q377.7 94.2 376.7 93.4Q375.8 92.6 375.4 91.4Q375.1 90.1 375.1 88.4V74.9H376.9Z M411.2 74.5Q412.6 74.5 413.8 74.6Q415 74.8 416.1 75Q417.2 75.3 418.2 75.7Q419.3 76 420.3 76.5V78.7Q419.5 78.2 418.6 77.7Q417.6 77.2 416.5 76.9Q415.4 76.5 414.2 76.3Q412.9 76.1 411.5 76.1Q408.6 76.1 406.4 76.7Q404.2 77.3 402.7 78.5Q401.3 79.6 400.6 81.3Q399.8 82.9 399.8 85Q399.8 86.9 400.6 88.5Q401.3 90.1 402.7 91.3Q404.2 92.5 406.3 93.1Q408.5 93.8 411.4 93.8Q412.5 93.8 413.7 93.7Q414.8 93.6 415.8 93.5Q416.8 93.3 417.6 93.1Q418.4 93 419 92.8V86.7H410.8V85H420.8V93.8Q419.7 94.2 418.6 94.5Q417.5 94.8 416.3 95Q415.2 95.2 413.9 95.3Q412.6 95.4 411.2 95.4Q408.4 95.4 406 94.8Q403.5 94.1 401.8 92.8Q400 91.5 399 89.6Q398 87.6 398 85Q398 83.2 398.4 81.7Q398.9 80.3 399.7 79.1Q400.6 77.9 401.8 77.1Q403 76.2 404.5 75.6Q406 75.1 407.7 74.8Q409.4 74.5 411.2 74.5Z M453.8 85Q453.8 87.7 452.8 89.6Q451.9 91.6 450.1 92.9Q448.4 94.2 446.1 94.8Q443.8 95.4 441.1 95.4Q438.4 95.4 436 94.8Q433.7 94.2 432 92.9Q430.2 91.6 429.2 89.6Q428.3 87.7 428.3 85Q428.3 83.1 428.7 81.7Q429.2 80.2 430 79Q430.8 77.9 432 77Q433.1 76.2 434.6 75.6Q436 75 437.6 74.8Q439.3 74.5 441.1 74.5Q443.8 74.5 446.1 75.1Q448.4 75.7 450.1 77Q451.9 78.3 452.8 80.3Q453.8 82.2 453.8 85ZM451.9 85Q451.9 82.8 451.2 81.2Q450.5 79.5 449.2 78.4Q447.8 77.3 445.8 76.7Q443.8 76.1 441.1 76.1Q438.4 76.1 436.4 76.7Q434.3 77.3 432.9 78.4Q431.6 79.5 430.9 81.2Q430.1 82.8 430.1 85Q430.1 87.1 430.9 88.7Q431.6 90.4 432.9 91.5Q434.3 92.6 436.4 93.2Q438.4 93.8 441.1 93.8Q443.8 93.8 445.8 93.2Q447.8 92.6 449.2 91.5Q450.5 90.4 451.2 88.7Q451.9 87.1 451.9 85Z M472.4 95H469.7L459.6 74.9H461.7L471.1 93.7L480.5 74.9H482.5Z"/>
+<line x1="508" y1="50" x2="508" y2="120" stroke="#3FD8C8" stroke-width=".5" opacity=".35"/>
+<text x="646" y="80" text-anchor="end" class="b">7f 45 4c 46 02 02</text>
+<text x="646" y="99" text-anchor="end" class="b">7f 45 4c 46 02 02</text>
+</svg>

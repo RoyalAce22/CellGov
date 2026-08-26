@@ -14,17 +14,17 @@ divergence, as the next implementation target. CellGov's null
 backend guarantees that every such `No` reflects an honest
 "not modeled" report and not a fabricated success the guest
 consumed as truth -- see
-[concepts.md "The null backend"](concepts.md) for the honest /
+[concepts/ "The null backend"](concepts/README.md#the-null-backend-honest-vs-contaminating-divergence) for the honest /
 contaminating / convergent / divergent vocabulary the
 Convergence column is read through.
 
-See [architecture.md](architecture.md) for what CellGov does and
+See [architecture/](architecture/README.md) for what CellGov does and
 does not model.
 
 ## Reading the table
 
 Terminology used in the Convergence and Byte parity columns comes
-from [concepts.md](concepts.md). In brief:
+from [concepts/](concepts/README.md). In brief:
 
 - **Convergence**: whether CellGov reaches the same architectural
   state as RPCS3 (same outcome, same captured regions, same step
@@ -36,7 +36,7 @@ from [concepts.md](concepts.md). In brief:
   "not modeled" on syscalls the title's boot path consumed) is
   the matrix working as a frontier map -- it names the next
   implementation target rather than flagging a broken title.
-  See [concepts.md](concepts.md).
+  See [concepts/](concepts/README.md).
 
 - **Byte parity**: whether the memory state at that checkpoint is
   byte-identical between runners.

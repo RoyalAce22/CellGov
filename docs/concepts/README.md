@@ -1,8 +1,10 @@
 # Concepts
 
 The vocabulary you need to read the rest of CellGov's docs without
-being surprised by contradictions. Read this before [titles.md](titles.md)
-or [architecture.md](architecture.md).
+being surprised by contradictions. Read this before
+[titles.md](../titles.md) or [architecture/](../architecture/README.md).
+For a term-by-term lookup, see the [glossary](glossary.md); this page
+is the narrative.
 
 Six ideas. Thirty minutes.
 
@@ -42,7 +44,7 @@ rendering has no exit; it stops at its first write to the RSX
 command register, which is the earliest point that is both
 deterministic and post-boot-useful.
 
-The two checkpoints CellGov currently recognises:
+The checkpoint kinds:
 
 - **`ProcessExit`** -- the guest called `sys_process_exit`. Used
   for titles that reach a natural shutdown during the captured
@@ -50,23 +52,20 @@ The two checkpoints CellGov currently recognises:
 - **`FirstRsxWrite`** -- the first PPU write to guest address
   `0xC0000040` (the RSX control register put-pointer, typically
   inside `_cellGcmInitBody`). Used for titles that proceed past
-  init into an RSX command stream. SSHD currently stops here.
+  init into an RSX command stream.
+- **`PcReached`** -- a specific PC address. Exists for
+  manifest-driven frontier exploration, not for the default
+  compatibility matrix.
 
-A third checkpoint kind, `PcReached`, stops at a specific PC
-address and exists for manifest-driven frontier exploration, not
-for the default compatibility matrix. The `[rsx] mirror = true`
-manifest flag changes what "past FirstRsxWrite" means for a title
-by mapping the RSX region read/write so the put-pointer write
-lands instead of tripping the checkpoint.
+The `[rsx] mirror = true` manifest flag changes what "past
+FirstRsxWrite" means for a title by mapping the RSX region read/write
+so the put-pointer write lands instead of tripping the checkpoint.
 
 A title that exits its budget cap without hitting any of the above
-has no checkpoint observation; cross-runner comparison for it is
-queued pending boot advancement to a deterministic stopping point.
-The three titles in the current matrix all reach a checkpoint
-(flOw at ProcessExit, WipEout HD Fury and Super Stardust HD at
-their first RSX writes or the fault downstream of it); whether
-they CONVERGE with RPCS3 at that checkpoint is a separate
-question, addressed in the convergence sections below.
+has no checkpoint observation; cross-runner comparison for it waits
+on boot advancement to a deterministic stopping point. Reaching a
+checkpoint and CONVERGING with RPCS3 at it are separate questions;
+convergence is addressed in the sections below.
 
 The point of a checkpoint is: at this specific deterministic event,
 capture the observable state, stop the run, emit the observation.
@@ -77,11 +76,10 @@ byte-identical observations. That is the determinism anchor.
 
 CellGov's central claim is fidelity: every observable the
 guest sees should match what a real PS3 (or RPCS3, as the
-closest faithful reference) would produce. The corpus of
-syscalls a loaded PRX exercises is large; not all of them
-are modeled yet. CellGov's policy for the unmodeled gap is
-the **null backend**: every syscall a loaded PRX makes that
-CellGov has not modeled yet returns an ABI-honest,
+closest faithful reference) would produce. Not every syscall
+a loaded PRX exercises is modeled. CellGov's policy for the
+unmodeled gap is the **null backend**: every syscall a loaded
+PRX makes that CellGov has not modeled returns an ABI-honest,
 per-syscall, traced "not implemented" response (typically
 `CELL_ENOSYS` for routes without a specific contract,
 `CELL_EINVAL` where the RPCS3 reference returns that for
@@ -93,7 +91,7 @@ kinds:
 
 - **Honest divergence.** CellGov faithfully reports "not
   modeled" via the null backend and diverges from RPCS3
-  because RPCS3 has implemented what CellGov has not yet.
+  because RPCS3 has implemented what CellGov has not.
   The divergence is traced and the gap is named. Two
   sub-kinds:
   - **Divergent honest gap.** RPCS3 delivers a real result
@@ -124,9 +122,9 @@ standards:
   per-syscall, traced "not implemented" response. Enforced by
   the dispatcher's structure, uniformly.
 - **Per-arm fidelity** -- how much real LV2 behavior each
-  modeled arm reproduces. A per-arm property, individually
-  auditable: the map is code (`cellgov_lv2::request::fidelity`)
-  rendered to [lv2_fidelity.md](lv2_fidelity.md), and arms
+  modeled arm reproduces. A per-arm property, checkable arm by
+  arm: the map is code (`cellgov_lv2::request::fidelity`)
+  rendered to [lv2_fidelity.md](../lv2_fidelity.md), and arms
   tagged `abi-only` return plausible values without backing
   state -- the first suspects in any divergence investigation.
 
@@ -244,7 +242,7 @@ Byte-parity vocabulary (only meaningful when convergence is `Yes`):
 - `M non-semantic + N pending` -- some bytes classified, some
   awaiting a new structurally-grounded class. The pending bytes
   are visible in `compare_report.txt` and `cross_runner_summary.
-  json` (`unclassified_runs`). The verdict moves to `equivalent`
+json` (`unclassified_runs`). The verdict moves to `equivalent`
   only when a new `DivergenceClass` lands that covers the bytes;
   investigation continues in `NOTES.md`.
 - `--` -- byte parity is undefined because convergence is `No`.
@@ -267,15 +265,9 @@ Convergence-failure reasons render inline in the matrix:
 
 ### Worked example: what a converged row would look like
 
-No title in the current matrix converges yet (see
-[titles.md](titles.md) -- all three rows render `No (outcome:
-... vs Completed)`). This example is therefore illustrative:
-it describes what a fixture would carry once a title's
-divergent-honest-gap count reaches zero and convergence
-becomes possible. Treat it as a teaching shape, not a
-present verdict.
-
-A converged row's cross-runner fixture would record:
+The numbers below are illustrative; the live verdicts are in
+[titles.md](../titles.md). A converged row's cross-runner fixture
+records, for instance:
 
 ```
 Convergence: Yes
@@ -330,8 +322,8 @@ The verdict vocabulary appears in three places:
 - This document.
 
 `CrossRunnerSummary::display_matrix_columns()` is the source of
-truth for the wording. If concepts.md disagrees with the code,
-fix concepts.md.
+truth for the wording. If this document disagrees with the code,
+fix this document.
 
 ## Why this matters for static recomp
 

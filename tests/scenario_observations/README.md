@@ -3,7 +3,7 @@
 RPCS3's recorded answers for the synthetic SPU scenarios.
 
 Each file is an **observation** as
-[`docs/concepts.md`](../../docs/concepts.md) defines it: a typed JSON
+[`docs/concepts/`](../../docs/concepts/README.md) defines it: a typed JSON
 snapshot of guest-visible state at a checkpoint.
 
 Boot anchors are a separate tree. An anchor holds CellGov's own
