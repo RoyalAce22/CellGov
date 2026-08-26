@@ -1,4 +1,4 @@
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 
 use super::{fetch_raw_at, format_hle_idx};
 
@@ -64,25 +64,42 @@ pub(in crate::game) fn print_shadow_stats(rt: &mut Runtime) {
     }
 }
 
-pub(in crate::game) fn print_top_pcs(rt: &Runtime, pc_hits: &std::collections::BTreeMap<u64, u64>) {
+pub(in crate::game) fn print_top_pcs(
+    rt: &Runtime,
+    pc_hits: &std::collections::BTreeMap<(AddressSpaceId, u64), u64>,
+) {
     if pc_hits.is_empty() {
         return;
     }
     let mut sorted: Vec<_> = pc_hits.iter().collect();
-    // Tie-break by PC so the ranking is independent of iteration order.
-    sorted.sort_by(|&(pc_a, c_a), &(pc_b, c_b)| c_b.cmp(c_a).then(pc_a.cmp(pc_b)));
+    // Tie-break by (space, PC) so the ranking is independent of iteration order.
+    sorted.sort_by(|&(key_a, c_a), &(key_b, c_b)| c_b.cmp(c_a).then(key_a.cmp(key_b)));
     println!("top_pcs_by_hit_count:");
-    for (pc, count) in sorted.iter().take(20) {
-        let (raw, disasm) = match fetch_raw_at(rt, **pc) {
-            Some(w) => (
-                format!("0x{w:08x}"),
-                cellgov_ppu::decode::decode(w)
-                    .ok()
-                    .map(|insn| <&'static str>::from(&insn).to_string())
-                    .unwrap_or_else(|| "<baddec>".into()),
+    for (key, count) in sorted.iter().take(20) {
+        let (space, pc) = **key;
+        let (raw, disasm) = match rt.space_memory(space) {
+            // A unit that stepped executes in a live space; a miss here
+            // is runtime-state corruption and is named, not blanked.
+            Err(e) => (
+                format!("<space {} missing: {e}>", space.raw()),
+                String::new(),
             ),
-            None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+            Ok(mem) => match fetch_raw_at(mem, pc) {
+                Some(w) => (
+                    format!("0x{w:08x}"),
+                    cellgov_ppu::decode::decode(w)
+                        .ok()
+                        .map(|insn| <&'static str>::from(&insn).to_string())
+                        .unwrap_or_else(|| "<baddec>".into()),
+                ),
+                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+            },
         };
-        println!("  {count:>10}x  PC=0x{:08x}  raw={raw}  {disasm}", **pc);
+        let space_tag = if space == AddressSpaceId::BOOT {
+            String::new()
+        } else {
+            format!("  space={}", space.raw())
+        };
+        println!("  {count:>10}x  PC=0x{pc:08x}  raw={raw}  {disasm}{space_tag}");
     }
 }

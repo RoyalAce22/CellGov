@@ -8,8 +8,8 @@
 //! walker reads saved LR at `next_sp + 16` where
 //! `next_sp = *(sp+0)`.
 
-use cellgov_core::Runtime;
 use cellgov_exec::FaultRegisterDump;
+use cellgov_mem::GuestMemory;
 use cellgov_ppu::decode;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ps3_abi::ppc_isa::PPC_BO_BIT2;
@@ -18,13 +18,13 @@ use cellgov_ps3_abi::process_address_space::PS3_USER_TEXT_FLOOR;
 const MAX_BACK_CHAIN_FRAMES: usize = 32;
 
 /// Empty output means r1 sits below the user-text floor (NULL or trampoline-scratch).
-pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegisterDump) {
+pub(super) fn append_stack_walk(out: &mut String, mem: &GuestMemory, regs: &FaultRegisterDump) {
     let r1 = regs.gprs[1];
     if r1 < PS3_USER_TEXT_FLOOR {
         return;
     }
 
-    let walk = walk_back_chain(rt, r1);
+    let walk = walk_back_chain(mem, r1);
     if walk.frames.is_empty() {
         out.push_str(&format!(
             "\n  stack walk skipped: r1=0x{r1:016x} -- {}",
@@ -32,7 +32,7 @@ pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegi
         ));
         if walk.terminated == Termination::InvalidBackChain {
             if let Some(sp) = walk.last_sp_visited {
-                append_back_chain_byte_dump(out, rt, sp);
+                append_back_chain_byte_dump(out, mem, sp);
             }
         }
         return;
@@ -51,18 +51,18 @@ pub(super) fn append_stack_walk(out: &mut String, rt: &Runtime, regs: &FaultRegi
     }
     if walk.terminated == Termination::InvalidBackChain {
         if let Some(sp) = walk.last_sp_visited {
-            append_back_chain_byte_dump(out, rt, sp);
+            append_back_chain_byte_dump(out, mem, sp);
         }
     }
 }
 
 /// 16 quadwords (128 bytes) at `sp`; silent on read failure.
-fn append_back_chain_byte_dump(out: &mut String, rt: &Runtime, sp: u64) {
+fn append_back_chain_byte_dump(out: &mut String, mem: &GuestMemory, sp: u64) {
     const DUMP_LEN: u64 = 128;
     let Some(range) = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(sp), DUMP_LEN) else {
         return;
     };
-    let Some(slice) = rt.memory().read(range) else {
+    let Some(slice) = mem.read(range) else {
         return;
     };
     out.push_str(&format!(
@@ -136,11 +136,11 @@ struct BackChainWalk {
 
 /// Walk PPC64 ELFv1 back-chain anchored at `r1`; the initial frame
 /// (NULL back-chain) is pushed with `saved_lr = 0` / `call_kind = None`.
-fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
+fn walk_back_chain(mem: &GuestMemory, mut sp: u64) -> BackChainWalk {
     let mut frames: Vec<BackChainFrame> = Vec::new();
 
     for _ in 0..MAX_BACK_CHAIN_FRAMES {
-        let Some(next_sp) = read_u64(rt, sp) else {
+        let Some(next_sp) = read_u64(mem, sp) else {
             return BackChainWalk {
                 frames,
                 terminated: Termination::UnmappedRead,
@@ -175,7 +175,7 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
                 last_sp_visited: Some(sp),
             };
         };
-        let Some(saved_lr_raw) = read_u64(rt, saved_lr_addr) else {
+        let Some(saved_lr_raw) = read_u64(mem, saved_lr_addr) else {
             return BackChainWalk {
                 frames,
                 terminated: Termination::UnmappedRead,
@@ -183,7 +183,7 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
             };
         };
 
-        let call_kind = saved_lr_call_kind(rt, saved_lr_raw);
+        let call_kind = saved_lr_call_kind(mem, saved_lr_raw);
         // Raw u64 so corrupt high bits print in full; `via not-a-call` flags them.
         frames.push(BackChainFrame {
             sp,
@@ -202,7 +202,7 @@ fn walk_back_chain(rt: &Runtime, mut sp: u64) -> BackChainWalk {
 
 /// Rejects high-32-bit-set, misaligned, below-floor, and values whose
 /// preceding word does not decode to a call-with-link.
-fn saved_lr_call_kind(rt: &Runtime, saved_lr_raw: u64) -> Option<CallKind> {
+fn saved_lr_call_kind(mem: &GuestMemory, saved_lr_raw: u64) -> Option<CallKind> {
     if saved_lr_raw >> 32 != 0 {
         return None;
     }
@@ -210,31 +210,31 @@ fn saved_lr_call_kind(rt: &Runtime, saved_lr_raw: u64) -> Option<CallKind> {
     if saved_lr < PS3_USER_TEXT_FLOOR || saved_lr & 3 != 0 {
         return None;
     }
-    classify_call_at(rt, saved_lr.wrapping_sub(4))
+    classify_call_at(mem, saved_lr.wrapping_sub(4))
 }
 
-fn read_u64(rt: &Runtime, addr: u64) -> Option<u64> {
+fn read_u64(mem: &GuestMemory, addr: u64) -> Option<u64> {
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 8)?;
-    let bytes = rt.memory().read(range)?;
+    let bytes = mem.read(range)?;
     Some(u64::from_be_bytes([
         bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ]))
 }
 
-fn read_u32(rt: &Runtime, addr: u64) -> Option<u32> {
+fn read_u32(mem: &GuestMemory, addr: u64) -> Option<u32> {
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4)?;
-    let bytes = rt.memory().read(range)?;
+    let bytes = mem.read(range)?;
     Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 /// Rejects bcctr's invalid form (BO2=0) per
 /// [PPC-Book1 p:25 s:Branch Conditional to Count Register].
-fn classify_call_at(rt: &Runtime, addr: u64) -> Option<CallKind> {
+fn classify_call_at(mem: &GuestMemory, addr: u64) -> Option<CallKind> {
     debug_assert!(
         addr & 3 == 0,
         "classify_call_at called with misaligned addr=0x{addr:x}"
     );
-    let raw = read_u32(rt, addr)?;
+    let raw = read_u32(mem, addr)?;
     let insn = decode::decode(raw).ok()?;
     match insn {
         PpuInstruction::B { link: true, .. } => Some(CallKind::Bl),

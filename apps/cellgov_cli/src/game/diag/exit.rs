@@ -1,7 +1,7 @@
 use cellgov_core::Runtime;
 use cellgov_lv2::PpuThreadState;
 
-use crate::game::step_loop::{block_reason_label, RingCursor, PC_RING_SIZE, SYSCALL_RING_SIZE};
+use crate::game::step_loop::{block_reason_label, PcRing, SyscallRing};
 
 use super::ascii_safe_preview;
 use super::rings::{append_pc_ring_terse, append_syscall_ring};
@@ -17,15 +17,12 @@ pub(in crate::game) struct ProcessExitInfo {
     pub(in crate::game) call_pc: u64,
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(in crate::game) fn format_process_exit(
     exit: &ProcessExitInfo,
     last_tty: Option<&TtyCapture>,
     steps: usize,
-    pc_ring: &[u64; PC_RING_SIZE],
-    pc_cursor: &RingCursor,
-    syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
-    syscall_cursor: &RingCursor,
+    pc_ring: &PcRing,
+    syscall_ring: &SyscallRing,
 ) -> String {
     let mut out = format!(
         "PROCESS_EXIT(code={}) at step {} (PC=0x{:08x})",
@@ -62,23 +59,21 @@ pub(in crate::game) fn format_process_exit(
         }
     }
 
-    append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
-    append_syscall_ring(&mut out, syscall_ring, syscall_cursor);
+    append_pc_ring_terse(&mut out, pc_ring);
+    append_syscall_ring(&mut out, syscall_ring);
     out
 }
 
 pub(in crate::game) fn format_max_steps(
     rt: &Runtime,
     steps: usize,
-    pc_ring: &[u64; PC_RING_SIZE],
-    pc_cursor: &RingCursor,
-    syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
-    syscall_cursor: &RingCursor,
+    pc_ring: &PcRing,
+    syscall_ring: &SyscallRing,
 ) -> String {
     let mut out = format!("MAX_STEPS after {} steps", steps);
     append_unit_state_summary(&mut out, rt);
-    append_pc_ring_terse(&mut out, pc_ring, pc_cursor);
-    append_syscall_ring(&mut out, syscall_ring, syscall_cursor);
+    append_pc_ring_terse(&mut out, pc_ring);
+    append_syscall_ring(&mut out, syscall_ring);
     out
 }
 

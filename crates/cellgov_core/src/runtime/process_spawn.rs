@@ -175,6 +175,22 @@ impl Runtime {
             return fail(self, pid, CELL_ENOMEM.into());
         }
 
+        // A loader that staged an init pass (firmware module_starts
+        // inside the child) parks the primary until the host has run
+        // it: the kernel starts a process's primary thread only after
+        // its resident modules initialised.
+        if let Some(init_token) = image.init_token {
+            self.registry
+                .set_status_override(child_unit, UnitStatus::Blocked);
+            self.pending_child_inits
+                .push(super::types::PendingChildInit {
+                    pid,
+                    space,
+                    primary_unit: child_unit,
+                    init_token,
+                });
+        }
+
         // Pid writeback lands in the CALLER's space.
         // Lv2Host::dispatch_process_spawn already rejected an
         // unwritable pid_out_ptr with CELL_EFAULT, so a failure inside
@@ -182,6 +198,27 @@ impl Runtime {
         self.commit_bytes_at(caller_space, u64::from(pid_out_ptr), &pid.to_be_bytes());
         self.step_woke_others = true;
         self.deliver_syscall_return(source, 0);
+    }
+
+    /// Unpark a child's primary thread after its init pass.
+    ///
+    /// Only a primary still parked `Blocked` is released. A `Finished`
+    /// override means the child exited during its own init pass (a
+    /// module_start unit bound to the pid called `sys_process_exit`),
+    /// and clearing it would resume a thread of a process whose exit
+    /// status is already recorded (RPCS3 `sys_process.cpp`
+    /// `_sys_process_exit`: an exited process never resumes).
+    pub fn release_child_init(&mut self, primary_unit: UnitId) {
+        match self.registry.status_override(primary_unit) {
+            Some(UnitStatus::Blocked) => self.registry.clear_status_override(primary_unit),
+            other => self.lv2_host.log_invariant_break(
+                "runtime.child_init_release_of_unparked_primary",
+                format_args!(
+                    "release_child_init({primary_unit:?}) found status override {other:?} \
+                     where the spawn's Blocked park was expected; left as is",
+                ),
+            ),
+        }
     }
 
     /// Finish exactly `pid`'s units and record its exit status; the
@@ -231,3 +268,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/process_spawn_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/process_spawn_init_tests.rs"]
+mod init_tests;

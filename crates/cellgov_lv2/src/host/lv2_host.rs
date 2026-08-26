@@ -873,7 +873,19 @@ impl Lv2Host {
             .alias_unit(unit_id, PpuThreadId::PRIMARY)
     }
 
-    /// Drop an alias previously installed via [`Self::alias_unit_to_primary`].
+    /// Alias a transient unit (a spawned child's module_start unit) to
+    /// the PPU thread `owner` runs as; see
+    /// [`Self::alias_unit_to_primary`]. `false` when `owner` has no
+    /// thread record or `unit_id` is already mapped.
+    pub fn alias_unit_to_thread_of(&mut self, unit_id: UnitId, owner: UnitId) -> bool {
+        let Some(thread) = self.state.ppu_threads.thread_id_for_unit(owner) else {
+            return false;
+        };
+        self.state.ppu_threads.alias_unit(unit_id, thread)
+    }
+
+    /// Drop an alias previously installed via [`Self::alias_unit_to_primary`]
+    /// or [`Self::alias_unit_to_thread_of`].
     pub fn drop_ppu_thread_alias(&mut self, unit_id: UnitId) -> bool {
         self.state.ppu_threads.drop_alias(unit_id)
     }
@@ -1012,3 +1024,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/lv2_host_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/child_alias_tests.rs"]
+mod child_alias_tests;

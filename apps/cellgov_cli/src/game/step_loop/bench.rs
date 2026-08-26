@@ -13,6 +13,7 @@ pub(in crate::game) fn bench_step_loop(
     rt: &mut Runtime,
     checkpoint: manifest::CheckpointTrigger,
     steps: &mut usize,
+    child_init: &crate::game::child_init::ChildInitPlans,
 ) -> cellgov_compare::BootOutcome {
     use cellgov_compare::BootOutcome;
     use manifest::CheckpointTrigger;
@@ -21,6 +22,10 @@ pub(in crate::game) fn bench_step_loop(
         _ => None,
     };
     loop {
+        // Same placement as `super::driver`; see the comment there.
+        if rt.has_pending_child_init() {
+            crate::game::child_init::run_pending_child_inits(rt, child_init);
+        }
         match rt.step() {
             Ok(step) => {
                 *steps += 1;

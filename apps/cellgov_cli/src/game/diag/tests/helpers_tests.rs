@@ -1,6 +1,7 @@
 //! Region labelling and longest-readable-prefix probing over guest memory.
 
 use super::*;
+use cellgov_core::Runtime;
 use cellgov_mem::{GuestMemory, PageSize, Region};
 use cellgov_time::Budget;
 
@@ -16,19 +17,19 @@ fn rt_with_layout() -> Runtime {
 #[test]
 fn region_label_at_names_stack_region() {
     let rt = rt_with_layout();
-    assert_eq!(region_label_at(&rt, 0xD000_FFF0, 4), "stack");
+    assert_eq!(region_label_at(rt.memory(), 0xD000_FFF0, 4), "stack");
 }
 
 #[test]
 fn region_label_at_names_main_region() {
     let rt = rt_with_layout();
-    assert_eq!(region_label_at(&rt, 0x0010_0000, 4), "main");
+    assert_eq!(region_label_at(rt.memory(), 0x0010_0000, 4), "main");
 }
 
 #[test]
 fn region_label_at_unmapped_addr_is_not_misattributed() {
     let rt = rt_with_layout();
-    assert_eq!(region_label_at(&rt, 0x8000_0000, 4), "<unmapped>");
+    assert_eq!(region_label_at(rt.memory(), 0x8000_0000, 4), "<unmapped>");
 }
 
 #[test]

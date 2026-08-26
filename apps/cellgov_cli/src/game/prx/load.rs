@@ -236,6 +236,105 @@ pub(in crate::game) fn install_unresolved_trampolines_only(
     (Some(info), stats.unresolved_requesters)
 }
 
+/// The firmware module universe one selection runs over: every
+/// `.sprx` under the firmware directory (plus, for a firmware
+/// executable, `sys/internal/`), decrypted once, with the manifest
+/// that vouches for it.
+pub(in crate::game) struct FirmwareCandidates {
+    root: PathBuf,
+    manifest: cellgov_install::manifest::FirmwareManifest,
+    /// Path -> post-decrypt ELF bytes.
+    modules: BTreeMap<String, Vec<u8>>,
+    /// `(stem, path)` of the sys/internal modules a firmware executable
+    /// cannot boot without; empty unless `include_internal`.
+    internal_paths: Vec<(&'static str, String)>,
+    /// Whether the load set is every viable candidate (a firmware
+    /// executable builds its import tables at runtime and names no
+    /// roots) or the closure of the image's own import table.
+    include_internal: bool,
+}
+
+impl FirmwareCandidates {
+    /// Scan and decrypt `dir`; every failure dies with its path.
+    pub(in crate::game) fn scan(dir: &str, include_internal: bool) -> Self {
+        let dir_path = std::path::PathBuf::from(dir);
+        let (fw_root, fw_manifest) = locate_and_parse_manifest(&dir_path);
+
+        // Candidate universe: every module in the firmware directory,
+        // plus -- for a firmware executable -- the sys/internal stems the
+        // shell loads by path at runtime. Their imports participate in
+        // viability like anyone else's.
+        let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for path in scan_sprx_files(&dir_path) {
+            let elf = match read_firmware_module_elf(&path) {
+                Ok(d) => d,
+                Err(e) => die(&format!("prx: {e}")),
+            };
+            let path_str = match path.to_str() {
+                Some(s) => s.to_string(),
+                None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
+            };
+            candidates.insert(path_str, elf);
+        }
+        if candidates.is_empty() {
+            die(&format!(
+                "prx: firmware-set mode: no .sprx modules under {}",
+                dir_path.display()
+            ));
+        }
+        let mut internal_paths: Vec<(&str, String)> = Vec::new();
+        if include_internal {
+            let internal_dir = fw_root.join("sys").join("internal");
+            // The shell loads internal modules by guest path at runtime
+            // (sc 480), so the whole directory is candidate material;
+            // viability prunes what does not close, with the reason
+            // printed. A prune is fatal only for the
+            // FIRMWARE_INTERNAL_PRX_STEMS entries, which the shell cannot
+            // boot without.
+            for path in scan_sprx_files(&internal_dir) {
+                let elf = match read_firmware_module_elf(&path) {
+                    Ok(d) => d,
+                    Err(e) => die(&format!("prx: {e}")),
+                };
+                let path_str = match path.to_str() {
+                    Some(s) => s.to_string(),
+                    None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
+                };
+                candidates.insert(path_str, elf);
+            }
+            for stem in FIRMWARE_INTERNAL_PRX_STEMS {
+                let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
+                    die(&format!(
+                        "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
+                        internal_dir.display()
+                    ))
+                });
+                let path_str = match path.to_str() {
+                    Some(s) => s.to_string(),
+                    None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
+                };
+                // The directory scan covers .sprx; a pre-decrypted .prx
+                // resolved by the stem walk still needs its bytes read.
+                if !candidates.contains_key(&path_str) {
+                    let elf = match read_firmware_module_elf(&path) {
+                        Ok(d) => d,
+                        Err(e) => die(&format!("prx: {e}")),
+                    };
+                    candidates.insert(path_str.clone(), elf);
+                }
+                internal_paths.push((stem, path_str));
+            }
+        }
+        Self {
+            root: fw_root,
+            manifest: fw_manifest,
+            modules: candidates,
+            internal_paths,
+            include_internal,
+        }
+    }
+}
+
 /// Load the title's derived firmware set -- import-closure selection
 /// over the candidate universe, then
 /// [`cellgov_ppu::prx_loader::load_firmware_set`] -- patch the game
@@ -260,93 +359,45 @@ pub(in crate::game) fn load_firmware_set_bound(
         println!("prx: firmware-set mode requires --firmware-dir");
         return (Vec::new(), None, HostLinkMaps::default());
     };
-    let dir_path = std::path::PathBuf::from(dir);
-    let (fw_root, fw_manifest) = locate_and_parse_manifest(&dir_path);
+    let candidates = FirmwareCandidates::scan(dir, include_internal);
+    let (loaded, identity, host_link) =
+        load_firmware_set_from(&candidates, modules, mem, code_floor);
+    (loaded, Some(identity), host_link)
+}
 
-    // Candidate universe: every module in the firmware directory,
-    // plus -- for a firmware executable -- the sys/internal stems the
-    // shell loads by path at runtime. Their imports participate in
-    // viability like anyone else's.
-    let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-    for path in scan_sprx_files(&dir_path) {
-        let elf = match read_firmware_module_elf(&path) {
-            Ok(d) => d,
-            Err(e) => die(&format!("prx: {e}")),
-        };
-        let path_str = match path.to_str() {
-            Some(s) => s.to_string(),
-            None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
-        };
-        candidates.insert(path_str, elf);
-    }
-    if candidates.is_empty() {
-        die(&format!(
-            "prx: firmware-set mode: no .sprx modules under {}",
-            dir_path.display()
-        ));
-    }
-    let mut internal_paths: Vec<(&str, String)> = Vec::new();
-    if include_internal {
-        let internal_dir = fw_root.join("sys").join("internal");
-        // The shell loads internal modules by guest path at runtime
-        // (sc 480), so the whole directory is candidate material;
-        // viability prunes what does not close, with the reason
-        // printed. A prune is fatal only for the
-        // FIRMWARE_INTERNAL_PRX_STEMS entries, which the shell cannot
-        // boot without.
-        for path in scan_sprx_files(&internal_dir) {
-            let elf = match read_firmware_module_elf(&path) {
-                Ok(d) => d,
-                Err(e) => die(&format!("prx: {e}")),
-            };
-            let path_str = match path.to_str() {
-                Some(s) => s.to_string(),
-                None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
-            };
-            candidates.insert(path_str, elf);
-        }
-        for stem in FIRMWARE_INTERNAL_PRX_STEMS {
-            let path = find_firmware_module(&internal_dir, stem).unwrap_or_else(|| {
-                die(&format!(
-                    "prx: firmware-exec boot needs sys/internal/{stem}, absent under {}",
-                    internal_dir.display()
-                ))
-            });
-            let path_str = match path.to_str() {
-                Some(s) => s.to_string(),
-                None => die(&format!("prx: non-utf8 firmware path: {}", path.display())),
-            };
-            // The directory scan covers .sprx; a pre-decrypted .prx
-            // resolved by the stem walk still needs its bytes read.
-            if !candidates.contains_key(&path_str) {
-                let elf = match read_firmware_module_elf(&path) {
-                    Ok(d) => d,
-                    Err(e) => die(&format!("prx: {e}")),
-                };
-                candidates.insert(path_str.clone(), elf);
-            }
-            internal_paths.push((stem, path_str));
-        }
-    }
+/// [`load_firmware_set_bound`] over an already-scanned universe, into
+/// any address space: the boot's, or a spawned child's. Selection
+/// runs against `modules`, the image's own import table, unless the
+/// universe was scanned for a firmware executable.
+pub(in crate::game) fn load_firmware_set_from(
+    candidates: &FirmwareCandidates,
+    modules: &[cellgov_ppu::prx::ImportedModule],
+    mem: &mut GuestMemory,
+    code_floor: u32,
+) -> (Vec<PrxLoadInfo>, VerifiedFirmware, HostLinkMaps) {
+    let fw_root = &candidates.root;
+    let fw_manifest = &candidates.manifest;
 
     // A game names its roots in its own import table; a firmware
     // executable builds its import tables at runtime and names none,
     // so its load set is every viable candidate.
-    let root_namespaces: Option<std::collections::BTreeSet<String>> = if include_internal {
+    let root_namespaces: Option<std::collections::BTreeSet<String>> = if candidates.include_internal
+    {
         None
     } else {
         Some(modules.iter().map(|m| m.name.clone()).collect())
     };
-    let selection =
-        match cellgov_ppu::prx_loader::select_import_closure(&candidates, root_namespaces.as_ref())
-        {
-            Ok(s) => s,
-            Err(e) => die(&format!("prx: firmware-set selection failed: {e}")),
-        };
+    let selection = match cellgov_ppu::prx_loader::select_import_closure(
+        &candidates.modules,
+        root_namespaces.as_ref(),
+    ) {
+        Ok(s) => s,
+        Err(e) => die(&format!("prx: firmware-set selection failed: {e}")),
+    };
     println!(
         "prx: import-closure selection: {} of {} candidate module(s) selected",
         selection.selected.len(),
-        candidates.len(),
+        candidates.modules.len(),
     );
     for (path, reason) in &selection.pruned {
         println!("prx: pruned {path}: {reason}");
@@ -357,7 +408,7 @@ pub(in crate::game) fn load_firmware_set_bound(
     // A stem present but dropped by selection leaves the shell's
     // runtime load-by-path unbacked, so it is fatal like an absent
     // stem.
-    for (stem, path) in &internal_paths {
+    for (stem, path) in &candidates.internal_paths {
         if selection.selected.contains(path) {
             continue;
         }
@@ -380,10 +431,12 @@ pub(in crate::game) fn load_firmware_set_bound(
     let mut id_to_stem: BTreeMap<cellgov_ppu::prx_loader::PrxModuleId, String> = BTreeMap::new();
     for path_str in &selection.selected {
         let elf = candidates
-            .remove(path_str)
-            .expect("selection only returns candidate paths");
+            .modules
+            .get(path_str)
+            .expect("selection only returns candidate paths")
+            .clone();
         let path = std::path::Path::new(path_str);
-        verify_against_manifest(&fw_manifest, &fw_root, path, &elf);
+        verify_against_manifest(fw_manifest, fw_root, path, &elf);
         let stem = match path.file_stem().and_then(|s| s.to_str()) {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => die(&format!("prx: cannot derive a module stem from {path_str}")),
@@ -525,5 +578,5 @@ pub(in crate::game) fn load_firmware_set_bound(
         image_version: fw_manifest.firmware.image_version.clone(),
         pup_sha256: fw_manifest.firmware.pup_sha256.0,
     };
-    (out, Some(identity), host_link)
+    (out, identity, host_link)
 }

@@ -3,7 +3,7 @@
 //! and HLE-index formatter. Shared across the fault / exit / max-step
 //! formatters in sibling submodules.
 
-use cellgov_core::Runtime;
+use cellgov_mem::GuestMemory;
 
 pub(in crate::game) fn ascii_safe_preview(bytes: &[u8]) -> String {
     bytes
@@ -18,17 +18,17 @@ pub(in crate::game) fn ascii_safe_preview(bytes: &[u8]) -> String {
         .collect()
 }
 
-pub(in crate::game) fn fetch_raw_at(rt: &Runtime, pc: u64) -> Option<u32> {
+/// `mem` must be the space the PC executed in.
+pub(in crate::game) fn fetch_raw_at(mem: &GuestMemory, pc: u64) -> Option<u32> {
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(pc), 4)?;
-    let b = rt.memory().read(range)?;
+    let b = mem.read(range)?;
     Some(u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 /// `len` must match the caller's read width; querying with `len=1` mislabels
 /// a PC 1-3 bytes before a boundary as mapped when a 4-byte fetch would fail.
-pub(in crate::game) fn region_label_at(rt: &Runtime, addr: u64, len: u64) -> &'static str {
-    rt.memory()
-        .containing_region(addr, len)
+pub(in crate::game) fn region_label_at(mem: &GuestMemory, addr: u64, len: u64) -> &'static str {
+    mem.containing_region(addr, len)
         .map(|r| r.label())
         .unwrap_or("<unmapped>")
 }

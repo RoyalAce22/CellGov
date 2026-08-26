@@ -1,5 +1,6 @@
 //! Boot preparation shared between `run-game` and `bench-boot`.
 
+use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use cellgov_core::{default_budget_for_mode, Runtime, RuntimeMode};
@@ -14,8 +15,8 @@ use cellgov_ps3_abi::process_address_space::{
 
 use super::manifest::TitleManifest;
 use super::prx::{
-    install_kernel_context_opd, load_firmware_set_bound, pre_init_tls, run_module_start,
-    ModuleStartOutcome,
+    install_kernel_context_opd, load_firmware_set_bound, load_firmware_set_from, pre_init_tls,
+    run_module_start, FirmwareCandidates, ModuleStartEnv, ModuleStartOutcome,
 };
 use crate::cli::env::parse_env_bool;
 use crate::cli::exit::die;
@@ -196,6 +197,9 @@ pub(super) struct PreparedBoot {
     pub elf_data: Vec<u8>,
     pub timings: StartupTimings,
     pub step_budget: Budget,
+    /// Init plans the spawn loader stages for children; the step
+    /// loop runs them as the runtime parks each child.
+    pub child_init: super::child_init::ChildInitPlans,
     /// Where the served program-authority-id came from: `"self"`
     /// (SELF identification header), `"fallback"` (raw-ELF retail
     /// fallback), or `"forced"` (the adversarial env knob).
@@ -687,10 +691,17 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     });
 
     // Spawned-child image loads (`_sys_process_spawn` /
-    // `sys_process_spawns_a_self2`): install a self-contained child
-    // space and load the ELF the same way the microtest harness
-    // does. SELF paths resolve through the LV2 content store.
-    rt.set_process_spawn_loader(|elf_bytes, mem| {
+    // `sys_process_spawns_a_self2`). The runtime is mid-step here, so
+    // the child's module_starts cannot run yet: they are staged as a
+    // plan the step loop runs before the child's primary thread is
+    // released. SELF paths resolve through the LV2 content store.
+    let child_init = super::child_init::ChildInitPlans::default();
+    let spawn_firmware_dir: Option<String> = opts.firmware_dir.map(str::to_string);
+    // Scanned and decrypted on the first spawn; a boot that never
+    // spawns pays nothing.
+    let spawn_candidates: RefCell<Option<FirmwareCandidates>> = RefCell::new(None);
+    let loader_plans = child_init.clone();
+    rt.set_process_spawn_loader(move |elf_bytes, mem| {
         // A child image may arrive SCE-wrapped (vsh spawns SELFs, not
         // raw ELFs). The spawn loader is APP-keyed: klicensee
         // resolution belongs to the title-install layer, which is not
@@ -732,11 +743,76 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
                 detail: e.to_string(),
             }
         })?;
+
+        let imports = cellgov_ppu::prx::parse_imports(elf_bytes).map_err(|e| {
+            cellgov_core::ProcessSpawnLoadError::ImageParse {
+                detail: format!("child imports: {e:?}"),
+            }
+        })?;
+        let code_floor = u32::try_from(spawned_child_code_floor(required)).map_err(|_| {
+            cellgov_core::ProcessSpawnLoadError::RegionSize {
+                detail: format!("required_size=0x{required:x} leaves no 32-bit code floor"),
+            }
+        })?;
+        let mut prx_modules = match spawn_firmware_dir.as_deref() {
+            Some(dir) => {
+                let mut cache = spawn_candidates.borrow_mut();
+                let candidates = cache.get_or_insert_with(|| FirmwareCandidates::scan(dir, false));
+                let (modules, _identity, _host_link) =
+                    load_firmware_set_from(candidates, &imports, mem, code_floor);
+                modules
+            }
+            None => Vec::new(),
+        };
+        if prx_modules.is_empty() {
+            let (info, _requesters) = super::prx::install_unresolved_trampolines_only(
+                &imports,
+                mem,
+                u64::from(code_floor),
+            );
+            if let Some(info) = info {
+                prx_modules.push(info);
+            }
+        }
+        // TLS, the kernel-context OPD and the HLE heap sit at fixed
+        // addresses above `TLS_BASE` in every process; an image or
+        // firmware set reaching them cannot be initialised there.
+        // The exit stub counts as image: the 0x30 bytes at `TLS_BASE`
+        // are the per-thread TLS header `sys_initialize_tls` writes.
+        let image_end = prx_modules
+            .iter()
+            .map(|p| p.data_end)
+            .max()
+            .unwrap_or(0)
+            .max(required as u64)
+            .max(exit_stub_addr + 8);
+        if image_end > super::prx::TLS_BASE {
+            return Err(cellgov_core::ProcessSpawnLoadError::RegionSize {
+                detail: format!(
+                    "child image and firmware set end at 0x{image_end:x}, past the TLS \
+                     reservation at 0x{:x}",
+                    super::prx::TLS_BASE
+                ),
+            });
+        }
+        pre_init_tls(elf_bytes, mem);
+        let kctx_opd = install_kernel_context_opd(mem);
+
+        let stack_top = (child_mem_size as u64) - 0x1000;
+        let init_token = loader_plans.stage(super::child_init::ChildInitPlan {
+            prx_modules,
+            kctx_opd,
+            // A full primary-stack reservation below the child's SP:
+            // the child's own stack grows down from `stack_top`, the
+            // transient module_start stacks from here.
+            stack_pointer: stack_top - PS3_PRIMARY_STACK_SIZE as u64,
+        });
         Ok(cellgov_core::SpawnedProcessImage {
             entry_code: state.pc,
             entry_toc: state.gpr[2],
-            stack_top: (child_mem_size as u64) - 0x1000,
+            stack_top,
             lr_sentinel: exit_stub_addr,
+            init_token: Some(init_token),
         })
     });
 
@@ -959,12 +1035,21 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         .filter(|p| p.module_start.is_some())
         .count();
     let skip_ms = parse_env_bool("CELLGOV_SKIP_MODULE_START");
+    let boot_env = ModuleStartEnv {
+        space: cellgov_core::AddressSpaceId::BOOT,
+        thread_owner: primary_unit_id,
+        pid: None,
+        kctx_opd,
+        // Offset below the game's stack_top so the two stacks cannot
+        // collide.
+        stack_pointer: PS3_PRIMARY_STACK_BASE + 0x8000,
+    };
     let (modules_started, modules_faulted) = match (prx_modules.is_empty(), skip_ms) {
         (false, false) => {
             let mut completed: usize = 0;
             let mut faulted: Vec<String> = Vec::new();
             for info in &prx_modules {
-                match run_module_start(&mut rt, info, kctx_opd) {
+                match run_module_start(&mut rt, info, boot_env) {
                     Ok(ModuleStartOutcome::Completed { .. })
                     | Ok(ModuleStartOutcome::HleStubbed) => completed += 1,
                     Ok(ModuleStartOutcome::Skipped) => {}
@@ -1068,6 +1153,7 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     PreparedBoot {
         rt,
         elf_data,
+        child_init,
         timings: StartupTimings {
             mem_alloc: t_mem_alloc,
             elf_load: t_elf_load - t_mem_alloc,
@@ -1162,36 +1248,49 @@ fn child_exit_stub_addr(required: usize) -> u64 {
     (required as u64).next_multiple_of(16).max(STUB_MIN_ADDR)
 }
 
-/// Sizes a spawned child's address-space region from its ELF's
-/// required memory.
+/// First page past a spawned child's image *and* its exit stub: the
+/// floor its firmware set (`resolve_prx_base`) and unresolved-import
+/// trampolines (`patch_got_atomic` at exactly this address) are placed
+/// from.
 ///
-/// The floor covers a PSL1GHT child's user region plus its
-/// SYS_PROCESS_PARAM segment at 0x1000_0000 (the microtest harness
-/// sizing). The child's initial SP sits one page below the region
-/// end and its stack grows down toward the image, so the floor is
-/// kept only when at least the 0x4000 ABI stack floor (back chain +
-/// register save area, the same minimum `dispatch_ppu_thread_create`
-/// enforces for child-thread stacks) fits between the image end and
-/// the SP; a child that would squeeze that gap -- or whose PT_LOADs
-/// reach past the floor entirely -- gets the required-size-plus-
-/// headroom sizing the parent boot uses (64K alignment, 128K above
-/// the image).
+/// A page-aligned image end puts the stub at `required` itself, so a
+/// floor rounded from `required` would let the first trampoline OPD
+/// overwrite the `li r11, 22; sc` the child returns into.
+fn spawned_child_code_floor(required: usize) -> u64 {
+    // `required_memory_size` caps every segment end at the 4 GiB EA
+    // ceiling, so the stub end and this round-up stay far inside u64.
+    (child_exit_stub_addr(required) + 8).next_multiple_of(0x1000)
+}
+
+/// Sizes a spawned child's address-space region from its ELF's
+/// required memory by the rule the boot's own main region uses.
+///
+/// The floor is what lets the child share the boot's fixed layout:
+/// TLS at `TLS_BASE`, the kernel-context OPD and HLE heap above it,
+/// and a firmware set placed past the image all sit far below 1 GiB.
+/// The child's initial SP is one page below the region end.
 fn spawned_child_region_size(
     required: usize,
 ) -> Result<usize, cellgov_core::ProcessSpawnLoadError> {
-    const CHILD_MEM_FLOOR: usize = 0x1002_0000;
-    const STACK_TOP_PAD: usize = 0x1000;
-    const MIN_CHILD_STACK: usize = 0x4000;
-    if required.saturating_add(STACK_TOP_PAD + MIN_CHILD_STACK) <= CHILD_MEM_FLOOR {
-        return Ok(CHILD_MEM_FLOOR);
-    }
-    required
+    const PRX_HEADROOM: usize = 0x20_0000;
+    const CHILD_MEM_FLOOR: usize = 0x4000_0000;
+    let size = required
         .checked_add(0xFFFF)
         .map(|v| v & !0xFFFF)
-        .and_then(|v| v.checked_add(0x2_0000))
+        .and_then(|v| v.checked_add(PRX_HEADROOM))
         .ok_or_else(|| cellgov_core::ProcessSpawnLoadError::RegionSize {
             detail: format!("required_size=0x{required:x} overflows usize"),
-        })
+        })?
+        .max(CHILD_MEM_FLOOR);
+    if size as u64 > PS3_RSX_IOMAP_BASE {
+        return Err(cellgov_core::ProcessSpawnLoadError::RegionSize {
+            detail: format!(
+                "required_size=0x{required:x} needs a 0x{size:x} region, past \
+                 PS3_RSX_IOMAP_BASE 0x{PS3_RSX_IOMAP_BASE:x}"
+            ),
+        });
+    }
+    Ok(size)
 }
 
 /// Liblv2's once-mutex slot.

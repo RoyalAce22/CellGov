@@ -126,6 +126,7 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
             entry_toc: state.gpr[2],
             stack_top: STACK_TOP,
             lr_sentinel: child_stub,
+            init_token: None,
         })
     });
     rt.lv2_host_mut()

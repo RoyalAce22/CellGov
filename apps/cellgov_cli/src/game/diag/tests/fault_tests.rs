@@ -34,20 +34,11 @@ fn fault_regs() -> FaultRegisterDump {
 fn format_commit_fault_includes_error_and_step_and_pc_ring() {
     let rt = rt_with_layout();
     let err = CommitError::PayloadLengthMismatch { effect_index: 3 };
-    let mut cursor = RingCursor::new(PC_RING_SIZE);
-    let mut ring = [0u64; PC_RING_SIZE];
+    let mut ring = PcRing::new();
     for pc in [0x0010_0000u64, 0x0010_0004, 0x0010_0008] {
-        let idx = cursor.record();
-        ring[idx] = pc;
+        ring.push((cellgov_core::AddressSpaceId::BOOT, pc));
     }
-    let out = format_commit_fault(
-        &rt,
-        &err,
-        1234,
-        cellgov_event::UnitId::new(0),
-        &ring,
-        &cursor,
-    );
+    let out = format_commit_fault(&rt, &err, 1234, cellgov_event::UnitId::new(0), &ring);
     assert!(out.starts_with("COMMIT_FAULT at step 1234"), "got {out}");
     assert!(out.contains("PayloadLengthMismatch"), "got {out}");
     assert!(out.contains("last 3 PCs:"), "got {out}");
@@ -57,9 +48,7 @@ fn format_commit_fault_includes_error_and_step_and_pc_ring() {
 #[test]
 fn format_deadlock_with_empty_registry_flags_drift() {
     let rt = rt_with_layout();
-    let cursor = RingCursor::new(PC_RING_SIZE);
-    let ring = [0u64; PC_RING_SIZE];
-    let out = format_deadlock(&rt, 99, &ring, &cursor);
+    let out = format_deadlock(&rt, 99, &PcRing::new());
     assert!(out.starts_with("DEADLOCK after 99 steps:"), "got {out}");
     assert!(
         out.contains("no Blocked units in registry") && out.contains("AllBlocked"),
@@ -105,9 +94,7 @@ fn format_deadlock_dumps_ppu_unit_with_lv2_reason_and_spu_unit_without() {
         .state = PpuThreadState::Blocked(GuestBlockReason::WaitingOnLwMutex { id: 7 });
     // unit_b has no PpuThread record (models SPU/non-PPU shape).
 
-    let cursor = RingCursor::new(PC_RING_SIZE);
-    let ring = [0u64; PC_RING_SIZE];
-    let out = format_deadlock(&rt, 42, &ring, &cursor);
+    let out = format_deadlock(&rt, 42, &PcRing::new());
     assert!(out.contains("DEADLOCK after 42 steps:"), "got {out}");
     assert!(
         out.contains(&format!("unit {} (PPU thread", unit_a.raw())),
@@ -130,7 +117,7 @@ fn append_register_pointer_dump_emits_for_pointer_gprs_and_skips_zero() {
     regs.gprs[4] = 0;
 
     let mut out = String::new();
-    append_register_pointer_dump(&mut out, &rt, &regs);
+    append_register_pointer_dump(&mut out, rt.memory(), &regs);
     assert!(out.contains("register pointers:"), "got {out}");
     assert!(out.contains("[r3=0x0000000000100000 (main)]"), "got {out}");
     assert!(out.contains("\"hello world\""), "got {out}");
@@ -144,7 +131,7 @@ fn append_register_pointer_dump_handles_unmapped_pointer() {
     regs.gprs[7] = 0x8000_0000;
 
     let mut out = String::new();
-    append_register_pointer_dump(&mut out, &rt, &regs);
+    append_register_pointer_dump(&mut out, rt.memory(), &regs);
     assert!(out.contains("[r7=0x0000000080000000"), "got {out}");
     assert!(out.contains("<unreadable>"), "got {out}");
 }
@@ -158,7 +145,7 @@ fn append_register_pointer_dump_includes_lr_and_ctr() {
     regs.ctr = 0x0020_0000;
 
     let mut out = String::new();
-    append_register_pointer_dump(&mut out, &rt, &regs);
+    append_register_pointer_dump(&mut out, rt.memory(), &regs);
     assert!(out.contains("[LR=0x0000000000200000"), "got {out}");
     assert!(out.contains("[CTR=0x0000000000200000"), "got {out}");
 }
@@ -169,7 +156,7 @@ fn append_register_pointer_dump_emits_nothing_when_no_pointers() {
     let regs = fault_regs();
 
     let mut out = String::new();
-    append_register_pointer_dump(&mut out, &rt, &regs);
+    append_register_pointer_dump(&mut out, rt.memory(), &regs);
     assert!(out.is_empty(), "expected silence, got {out}");
 }
 
@@ -180,7 +167,7 @@ fn append_explicit_mem_dump_renders_hex_and_ascii() {
     let ranges = [(0x0010_0000u64, 20u64)];
 
     let mut out = String::new();
-    append_explicit_mem_dump(&mut out, &rt, &ranges);
+    append_explicit_mem_dump(&mut out, rt.memory(), &ranges);
     assert!(out.contains("explicit mem dumps:"), "got {out}");
     assert!(
         out.contains("mem[0x0000000000100000 (main), 20 bytes]:"),
@@ -200,7 +187,7 @@ fn append_explicit_mem_dump_invalid_range_does_not_panic() {
     let ranges = [(u64::MAX, 64u64)];
 
     let mut out = String::new();
-    append_explicit_mem_dump(&mut out, &rt, &ranges);
+    append_explicit_mem_dump(&mut out, rt.memory(), &ranges);
     assert!(out.contains("explicit mem dumps:"), "got {out}");
     assert!(out.contains("<invalid address range>"), "got {out}");
 }
@@ -211,7 +198,7 @@ fn append_explicit_mem_dump_unmapped_falls_back_to_unmapped_marker() {
     let ranges = [(0x8000_0000u64, 64u64)];
 
     let mut out = String::new();
-    append_explicit_mem_dump(&mut out, &rt, &ranges);
+    append_explicit_mem_dump(&mut out, rt.memory(), &ranges);
     assert!(out.contains("<unmapped>"), "got {out}");
 }
 
@@ -223,7 +210,7 @@ fn append_explicit_mem_dump_partial_straddle_shows_prefix() {
     let ranges = [(buf, 32u64)];
 
     let mut out = String::new();
-    append_explicit_mem_dump(&mut out, &rt, &ranges);
+    append_explicit_mem_dump(&mut out, rt.memory(), &ranges);
     assert!(out.contains("8/32 bytes (tail 24 unmapped)"), "got {out}");
     assert!(out.contains("55 55 55 55 55 55 55 55"), "got {out}");
 }
@@ -232,6 +219,87 @@ fn append_explicit_mem_dump_partial_straddle_shows_prefix() {
 fn append_explicit_mem_dump_empty_ranges_emits_nothing() {
     let rt = rt_with_layout();
     let mut out = String::new();
-    append_explicit_mem_dump(&mut out, &rt, &[]);
+    append_explicit_mem_dump(&mut out, rt.memory(), &[]);
     assert!(out.is_empty(), "expected silence on empty, got {out}");
+}
+
+const CHILD_PC: u64 = 0x0010_0000;
+const BOOT_WORD: u32 = 0x6000_0000; // nop
+const CHILD_WORD: u32 = 0x4E80_0020; // blr
+
+/// Boot and child spaces both map `CHILD_PC`, holding different words.
+fn rt_with_child_space(child_unit: cellgov_event::UnitId) -> Runtime {
+    let mut rt = rt_with_layout();
+    write_bytes(&mut rt, CHILD_PC, &BOOT_WORD.to_be_bytes());
+
+    let space = cellgov_core::AddressSpaceId::new(1);
+    rt.create_address_space(space).unwrap();
+    let child_mem = rt.space_memory_mut(space).unwrap();
+    child_mem
+        .install_region(CHILD_PC, 0x1000, "child-main", PageSize::Page4K)
+        .unwrap();
+    let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(CHILD_PC), 4).unwrap();
+    child_mem
+        .apply_commit(range, &CHILD_WORD.to_be_bytes())
+        .unwrap();
+    rt.assign_unit_space(child_unit, space).unwrap();
+    rt
+}
+
+#[test]
+fn unit_memory_resolves_a_child_unit_to_its_own_space() {
+    let child_unit = cellgov_event::UnitId::new(5);
+    let boot_unit = cellgov_event::UnitId::new(0);
+    let rt = rt_with_child_space(child_unit);
+
+    assert_eq!(
+        fetch_raw_at(unit_memory(&rt, child_unit), CHILD_PC),
+        Some(CHILD_WORD)
+    );
+    assert_eq!(
+        fetch_raw_at(unit_memory(&rt, boot_unit), CHILD_PC),
+        Some(BOOT_WORD)
+    );
+    assert!(
+        std::ptr::eq(unit_memory(&rt, boot_unit), rt.memory()),
+        "an untagged unit resolves to the boot space"
+    );
+}
+
+#[test]
+fn the_pc_ring_decodes_each_entry_through_its_own_space() {
+    let child_unit = cellgov_event::UnitId::new(5);
+    let rt = rt_with_child_space(child_unit);
+    let err = CommitError::PayloadLengthMismatch { effect_index: 0 };
+    let mut ring = PcRing::new();
+    ring.push((cellgov_core::AddressSpaceId::BOOT, CHILD_PC));
+    ring.push((cellgov_core::AddressSpaceId::new(1), CHILD_PC));
+
+    let out = format_commit_fault(&rt, &err, 7, child_unit, &ring);
+    let boot_line = "0x00100000  raw=0x60000000  Ori";
+    let child_line = "0x00100000  raw=0x4e800020  Bclr  space=1";
+    assert!(
+        out.contains(boot_line),
+        "boot entry must decode through the boot space with no tag, got {out}"
+    );
+    assert!(
+        out.contains(child_line),
+        "child entry must decode through space 1 and say so, got {out}"
+    );
+    assert!(
+        out.find(boot_line) < out.find(child_line),
+        "oldest first: {out}"
+    );
+}
+
+#[test]
+fn a_ring_entry_in_a_missing_space_is_named_not_blanked() {
+    let rt = rt_with_layout();
+    let err = CommitError::PayloadLengthMismatch { effect_index: 0 };
+    let mut ring = PcRing::new();
+    ring.push((cellgov_core::AddressSpaceId::new(9), CHILD_PC));
+
+    let out = format_commit_fault(&rt, &err, 7, cellgov_event::UnitId::new(0), &ring);
+    assert!(out.contains("<space 9 missing:"), "got {out}");
+    assert!(out.contains("space=9"), "got {out}");
 }

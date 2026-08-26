@@ -127,6 +127,18 @@ flowchart TD
   ms --> crt0["CRT0 from the ELF entry point"]
 ```
 
+A process the title spawns runs steps 1-5 again in its own address
+space: the spawn loader parses the child's import table, loads its
+closure from the same verified candidate set (decrypted once per
+boot that spawns, on the first spawn), patches its GOT, seeds TLS,
+and stages the `module_start` pass; the runtime parks the child's
+primary unit until the step loop has run that pass
+([lv2_host.md](lv2_host.md), "Process model and spawn"). The child's
+region is sized by the boot's `main` rule with the same 1 GiB floor,
+so the fixed TLS, kernel-context and HLE-heap addresses exist in
+every process. Fault and stack-walk diagnostics read every byte
+through the faulting unit's own space.
+
 Title boot exercises the firmware modules end-to-end, and the
 firmware-set boot is unconditional. The synthetic harness
 `ps3autotests` runs with `CELLGOV_NO_FIRMWARE_DIR=1`; those ELFs

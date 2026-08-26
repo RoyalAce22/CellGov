@@ -8,9 +8,10 @@ pub(in crate::game) fn print_trace_line(
     result: &cellgov_exec::ExecutionStepResult,
     steps: usize,
 ) {
+    let mem = super::unit_memory(rt, unit);
     if let Some(pc) = result.local_diagnostics.pc {
         // Zero decodes as a valid PPC instruction; distinguish unmapped from a real zero word.
-        let raw = fetch_raw_at(rt, pc)
+        let raw = fetch_raw_at(mem, pc)
             .map(|w| format!("0x{w:08x}"))
             .unwrap_or_else(|| "<unmapped>".to_string());
         println!(
@@ -27,7 +28,7 @@ pub(in crate::game) fn print_trace_line(
             let buf = args[2];
             let len = args[3];
             let full = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(buf), len)
-                .and_then(|r| rt.memory().read(r));
+                .and_then(|r| mem.read(r));
             match full {
                 Some(slice) => {
                     let text = String::from_utf8_lossy(slice);
@@ -36,7 +37,7 @@ pub(in crate::game) fn print_trace_line(
                         println!();
                     }
                 }
-                None => match longest_readable_prefix(rt.memory(), buf, len) {
+                None => match longest_readable_prefix(mem, buf, len) {
                     Some((n, bytes)) => {
                         let text = ascii_safe_preview(&bytes);
                         println!("       -> tty (partial {n}/{len}): {text}");

@@ -106,6 +106,7 @@ fn build_spawn_ready() -> Runtime {
             entry_toc: 0x200,
             stack_top: 0xF00,
             lr_sentinel: 0,
+            init_token: None,
         })
     });
     rt

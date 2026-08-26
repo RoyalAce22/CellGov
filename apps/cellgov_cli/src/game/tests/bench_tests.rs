@@ -776,6 +776,7 @@ fn every_emitted_bench_line_is_tracked_or_reasoned_diagnostic() {
     for source in [
         include_str!("../bench.rs"),
         include_str!("../boot.rs"),
+        include_str!("../child_init.rs"),
         include_str!("../prx/module_start.rs"),
     ] {
         emitted.extend(emitted_bench_prefixes(source));

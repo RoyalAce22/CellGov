@@ -154,6 +154,20 @@ impl Runtime {
         self.process_spawn_loader = Some(Box::new(loader));
     }
 
+    /// True when a spawned child is parked behind a loader-staged init
+    /// pass the host has not run yet.
+    #[inline]
+    pub fn has_pending_child_init(&self) -> bool {
+        !self.pending_child_inits.is_empty()
+    }
+
+    /// Take every parked child, in spawn order. The caller runs each
+    /// child's init pass and then calls [`Self::release_child_init`];
+    /// a child taken and never released stays parked.
+    pub fn take_pending_child_inits(&mut self) -> Vec<super::types::PendingChildInit> {
+        std::mem::take(&mut self.pending_child_inits)
+    }
+
     /// Immutable view of the syscall response table.
     #[inline]
     pub fn syscall_responses(&self) -> &SyscallResponseTable {

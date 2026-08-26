@@ -74,6 +74,28 @@ pub struct SpawnedProcessImage {
     pub stack_top: u64,
     /// Initial LR; entered if the entry function returns.
     pub lr_sentinel: u64,
+    /// `Some` when the loader staged an init pass (firmware
+    /// module_starts) the host must run inside the child before its
+    /// primary thread may execute; the runtime parks the primary
+    /// behind a [`PendingChildInit`] until then.
+    pub init_token: Option<u64>,
+}
+
+/// A spawned child whose primary thread is parked until the host runs
+/// the init pass its loader staged under `init_token`; see
+/// [`Runtime::take_pending_child_inits`] for the handshake.
+///
+/// [`Runtime::take_pending_child_inits`]: crate::Runtime::take_pending_child_inits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingChildInit {
+    /// Kernel pid minted for the child.
+    pub pid: u32,
+    /// The child's address space.
+    pub space: crate::runtime::spaces::AddressSpaceId,
+    /// The child's primary-thread unit, held `Blocked` by override.
+    pub primary_unit: UnitId,
+    /// The loader's token for the staged init pass.
+    pub init_token: u64,
 }
 
 /// Failure surface of a [`ProcessSpawnLoader`].

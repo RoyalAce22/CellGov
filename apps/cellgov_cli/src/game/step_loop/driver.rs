@@ -8,7 +8,8 @@ use cellgov_core::{Runtime, StepError};
 
 use crate::game::diag::{
     append_orphan_exit_info, fetch_raw_at, format_commit_fault, format_deadlock, format_fault,
-    format_max_steps, format_process_exit, print_trace_line, ProcessExitInfo, TtyCapture,
+    format_max_steps, format_process_exit, print_trace_line, unit_memory, ProcessExitInfo,
+    TtyCapture,
 };
 use crate::game::step_loop::ctx::StepLoopCtx;
 use crate::game::step_loop::timing::compute_untracked;
@@ -21,6 +22,13 @@ pub(in crate::game) fn step_loop(
 ) -> (String, cellgov_compare::BootOutcome) {
     use cellgov_compare::BootOutcome;
     loop {
+        // A parked child's staged init pass runs before the scheduler
+        // sees it: an entry still pending at `rt.step()` reads as
+        // AllBlocked once every other unit blocks.
+        if rt.has_pending_child_init() {
+            crate::game::child_init::run_pending_child_inits(rt, ctx.child_init);
+        }
+
         let t0 = Instant::now();
         let step_result = rt.step();
         let t1 = Instant::now();
@@ -32,9 +40,9 @@ pub(in crate::game) fn step_loop(
                 // PC ring and distinct-PC set track attempted execution;
                 // they advance before commit (kept on a discarded batch).
                 if let Some(pc) = step.result.local_diagnostics.pc {
-                    ctx.distinct_pcs.insert(pc);
-                    let idx = ctx.pc_ring_cursor.record();
-                    ctx.pc_ring[idx] = pc;
+                    let space = rt.unit_space(step.unit);
+                    ctx.distinct_pcs.insert((space, pc));
+                    ctx.pc_ring.push((space, pc));
                 }
 
                 if (*ctx.steps).is_multiple_of(10_000) {
@@ -78,14 +86,8 @@ pub(in crate::game) fn step_loop(
                         let err = commit_result
                             .as_ref()
                             .expect_err("classified as CommitFault implies Err");
-                        let mut diag = format_commit_fault(
-                            rt,
-                            err,
-                            *ctx.steps,
-                            step.unit,
-                            &ctx.pc_ring,
-                            &ctx.pc_ring_cursor,
-                        );
+                        let mut diag =
+                            format_commit_fault(rt, err, *ctx.steps, step.unit, &ctx.pc_ring);
                         append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                         break (diag, BootOutcome::Fault);
                     }
@@ -97,11 +99,11 @@ pub(in crate::game) fn step_loop(
                             .expect("classified as StepFault implies Some");
                         let mut diag = format_fault(
                             rt,
+                            step.unit,
                             &step.result,
                             fault,
                             *ctx.steps,
                             &ctx.pc_ring,
-                            &ctx.pc_ring_cursor,
                             ctx.dump_mem_fault_ranges,
                         );
                         append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
@@ -115,12 +117,14 @@ pub(in crate::game) fn step_loop(
 
                 // Post-commit counters: only advance when the batch was applied.
                 if let Some(pc) = step.result.local_diagnostics.pc {
-                    *ctx.pc_hits.entry(pc).or_insert(0) += 1;
+                    *ctx.pc_hits
+                        .entry((rt.unit_space(step.unit), pc))
+                        .or_insert(0) += 1;
                 }
 
                 let t_cov_start = Instant::now();
                 if let Some(pc) = step.result.local_diagnostics.pc {
-                    if let Some(raw) = fetch_raw_at(rt, pc) {
+                    if let Some(raw) = fetch_raw_at(unit_memory(rt, step.unit), pc) {
                         let name = match cellgov_ppu::decode::decode(raw) {
                             Ok(insn) => <&'static str>::from(&insn),
                             Err(_) => "DECODE_ERROR",
@@ -165,9 +169,7 @@ pub(in crate::game) fn step_loop(
                             ctx.last_tty.as_ref(),
                             *ctx.steps,
                             &ctx.pc_ring,
-                            &ctx.pc_ring_cursor,
                             &ctx.syscall_ring,
-                            &ctx.syscall_ring_cursor,
                         ),
                         BootOutcome::ProcessExit,
                     );
@@ -181,19 +183,12 @@ pub(in crate::game) fn step_loop(
                 );
             }
             Err(StepError::AllBlocked) => {
-                let mut diag = format_deadlock(rt, *ctx.steps, &ctx.pc_ring, &ctx.pc_ring_cursor);
+                let mut diag = format_deadlock(rt, *ctx.steps, &ctx.pc_ring);
                 append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                 break (diag, BootOutcome::Fault);
             }
             Err(StepError::MaxStepsExceeded) => {
-                let mut diag = format_max_steps(
-                    rt,
-                    *ctx.steps,
-                    &ctx.pc_ring,
-                    &ctx.pc_ring_cursor,
-                    &ctx.syscall_ring,
-                    &ctx.syscall_ring_cursor,
-                );
+                let mut diag = format_max_steps(rt, *ctx.steps, &ctx.pc_ring, &ctx.syscall_ring);
                 append_orphan_exit_info(&mut diag, ctx.last_exit.as_ref());
                 break (diag, BootOutcome::MaxSteps);
             }
@@ -232,8 +227,7 @@ fn handle_syscall_args(
             call_pc: pc,
         });
     }
-    let sc_idx = ctx.syscall_ring_cursor.record();
-    ctx.syscall_ring[sc_idx] = (args[0], pc);
+    ctx.syscall_ring.push((args[0], pc));
 }
 
 fn handle_tty_capture(

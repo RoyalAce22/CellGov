@@ -11,7 +11,7 @@ mod summary;
 mod trace;
 
 pub(super) use exit::{format_max_steps, format_process_exit, ProcessExitInfo, TtyCapture};
-pub(super) use fault::{format_commit_fault, format_deadlock, format_fault};
+pub(super) use fault::{format_commit_fault, format_deadlock, format_fault, unit_memory};
 pub(super) use helpers::{
     ascii_safe_preview, fetch_raw_at, format_hle_idx, longest_readable_prefix, region_label_at,
 };

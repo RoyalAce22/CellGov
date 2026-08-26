@@ -246,8 +246,8 @@ mod child_exit_stub_addr_tests {
     fn the_stub_fits_inside_the_region_the_caller_sizes() {
         // Pairing with the sizing rule is the contract that keeps the
         // stub write in bounds and below the initial SP. The last
-        // entry is the 4 GiB EA ceiling `required_memory_size` caps
-        // every segment end at, so nothing larger can reach here.
+        // entry is the largest image the sizing accepts under the RSX
+        // iomap cap.
         for required in [
             0,
             0x1001_0010,
@@ -255,7 +255,7 @@ mod child_exit_stub_addr_tests {
             0x1001_b001,
             0x1002_0001,
             0x2000_0000,
-            0x1_0000_0000,
+            0x3fd0_0000,
         ] {
             let size = spawned_child_region_size(required).expect("sizable child");
             let stub_end = child_exit_stub_addr(required) + 8;
@@ -276,32 +276,31 @@ mod spawned_child_region_size_tests {
     use super::spawned_child_region_size;
 
     #[test]
-    fn a_psl1ght_shaped_child_keeps_the_microtest_floor() {
-        // The committed process_spawn_wait child: PT_LOADs end at
-        // 0x1001_0010, well under the floor minus the SP pad and the
-        // minimum stack.
-        assert_eq!(spawned_child_region_size(0x1001_0010), Ok(0x1002_0000));
-        assert_eq!(spawned_child_region_size(0), Ok(0x1002_0000));
-        // Boundary: image end exactly MIN_CHILD_STACK below the SP.
-        assert_eq!(spawned_child_region_size(0x1001_b000), Ok(0x1002_0000));
+    fn a_child_below_the_floor_gets_the_boot_sized_region() {
+        // The committed process_spawn_wait child (PT_LOADs end at
+        // 0x1001_0010), an empty image, and a game-sized image all
+        // take the 1 GiB floor, so TLS_BASE and the fixed layout above
+        // it are inside the region.
+        assert_eq!(spawned_child_region_size(0x1001_0010), Ok(0x4000_0000));
+        assert_eq!(spawned_child_region_size(0), Ok(0x4000_0000));
+        assert_eq!(spawned_child_region_size(0x2000_0000), Ok(0x4000_0000));
+        // Aligned image plus 2 MiB headroom exactly at the floor.
+        assert_eq!(spawned_child_region_size(0x3fe0_0000), Ok(0x4000_0000));
     }
 
     #[test]
-    fn a_child_larger_than_the_floor_grows_instead_of_failing() {
-        // 64K-aligned required plus 128K headroom.
-        assert_eq!(spawned_child_region_size(0x1002_0001), Ok(0x1005_0000));
-        assert_eq!(spawned_child_region_size(0x2000_0000), Ok(0x2002_0000));
-    }
-
-    #[test]
-    fn a_child_that_would_squeeze_the_stack_grows_instead_of_colliding() {
-        // One byte past the floor's minimum-stack boundary: keeping
-        // the floor would leave the SP less than 0x4000 above the
-        // image end, so the sizing grows the region instead.
-        assert_eq!(spawned_child_region_size(0x1001_b001), Ok(0x1004_0000));
-        // Image end flush against the SP: keeping the floor would leave
-        // zero stack depth.
-        assert_eq!(spawned_child_region_size(0x1001_f000), Ok(0x1004_0000));
+    fn a_child_whose_image_reaches_the_rsx_iomap_window_is_refused() {
+        // One byte over: 64K alignment plus headroom crosses the cap.
+        let err = spawned_child_region_size(0x3fe0_0001).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                cellgov_core::ProcessSpawnLoadError::RegionSize { detail }
+                    if detail.contains("PS3_RSX_IOMAP_BASE")
+            ),
+            "got: {err}"
+        );
+        assert!(spawned_child_region_size(0x1_0000_0000).is_err());
     }
 
     #[test]
@@ -315,6 +314,58 @@ mod spawned_child_region_size_tests {
             ),
             "got: {err}"
         );
+    }
+}
+
+mod spawned_child_code_floor_tests {
+    use super::super::{child_exit_stub_addr, spawned_child_code_floor, spawned_child_region_size};
+
+    #[test]
+    fn the_code_floor_clears_the_exit_stub_at_every_alignment() {
+        // A page-aligned image end (the shape `p_align` gives real
+        // SELFs) puts the stub at `required` itself; the 64K-aligned
+        // end is the firmware-set placement boundary; the near-boundary
+        // values sit in the last 16 bytes before a page.
+        for required in [
+            0,
+            1,
+            0xFF9,
+            0xFFF9,
+            0x1000,
+            0x1001_0000,
+            0x1001_0010,
+            0x1001_0ff8,
+            0x1002_0000,
+            0x1002_fff0,
+            0x3fe0_0000,
+        ] {
+            let stub_end = child_exit_stub_addr(required) + 8;
+            let floor = spawned_child_code_floor(required);
+            assert!(
+                floor >= stub_end,
+                "required=0x{required:x}: code floor 0x{floor:x} sits on the stub ending \
+                 at 0x{stub_end:x}",
+            );
+            assert_eq!(
+                floor % 0x1000,
+                0,
+                "required=0x{required:x}: floor is page-aligned"
+            );
+            let size = spawned_child_region_size(required).expect("sizable child");
+            assert!(
+                floor < size as u64,
+                "required=0x{required:x}: floor 0x{floor:x} inside the 0x{size:x} region",
+            );
+        }
+    }
+
+    #[test]
+    fn a_page_aligned_image_end_moves_the_floor_one_page_up() {
+        // The stub occupies [0x1001_0000, 0x1001_0008); a floor rounded
+        // from `required` alone would be 0x1001_0000.
+        assert_eq!(spawned_child_code_floor(0x1001_0000), 0x1001_1000);
+        // An unaligned end keeps the floor at the next page.
+        assert_eq!(spawned_child_code_floor(0x1001_0010), 0x1001_1000);
     }
 }
 

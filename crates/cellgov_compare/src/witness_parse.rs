@@ -235,6 +235,10 @@ const DIAGNOSTIC_LINES: &[(&str, &str)] = &[
         "BENCH_CELLSYSUTIL_SEED_WITNESS:",
         "per-module stall signature read by the cellSysutil tripwire, repeated once per seeded module_start",
     ),
+    (
+        "BENCH_CHILD_MODULE_START_FAULTS:",
+        "emitted once per spawned child whose module_start pass faulted; keyed by pid, so a baseline could not hold it Absent",
+    ),
 ];
 
 /// A token that did not parse as a witness value.

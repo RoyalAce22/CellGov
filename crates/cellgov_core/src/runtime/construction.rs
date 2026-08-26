@@ -72,6 +72,7 @@ impl Runtime {
             spu_factory: None,
             ppu_factory: None,
             process_spawn_loader: None,
+            pending_child_inits: Vec::new(),
             scheduler: Box::new(RoundRobinScheduler::new()),
             commit_pipeline: CommitPipeline::new(),
             memory,

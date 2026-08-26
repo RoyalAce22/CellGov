@@ -31,8 +31,8 @@ pub use snapshot::RuntimeSnapshot;
 pub use spaces::{AddressSpaceId, SpaceError};
 pub use state::Runtime;
 pub use types::{
-    default_budget_for_mode, PpuFactory, ProcessSpawnLoadError, ProcessSpawnLoader, RuntimeMode,
-    RuntimeStep, SpawnedProcessImage, SpuFactory, StepError,
+    default_budget_for_mode, PendingChildInit, PpuFactory, ProcessSpawnLoadError,
+    ProcessSpawnLoader, RuntimeMode, RuntimeStep, SpawnedProcessImage, SpuFactory, StepError,
 };
 
 #[cfg(test)]

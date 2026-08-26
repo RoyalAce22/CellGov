@@ -7,8 +7,13 @@ mod module_start;
 mod tls;
 mod types;
 
-pub(super) use load::{install_unresolved_trampolines_only, load_firmware_set_bound};
-pub(super) use module_start::{run_module_start, ModuleStartError, ModuleStartOutcome};
+pub(super) use load::{
+    install_unresolved_trampolines_only, load_firmware_set_bound, load_firmware_set_from,
+    FirmwareCandidates,
+};
+pub(super) use module_start::{
+    run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome,
+};
 pub(super) use tls::{install_kernel_context_opd, pre_init_tls, TLS_BASE};
 // Re-exported so callers in `game/` can name the type directly even
 // though current call sites only see it through return-type inference.

@@ -5,16 +5,17 @@
 use std::collections::BTreeMap;
 use std::time::Instant;
 
-use cellgov_core::{Runtime, StepError};
+use cellgov_core::{AddressSpaceId, Runtime, StepError};
+use cellgov_event::UnitId;
+use cellgov_mem::GuestMemory;
 use cellgov_ppu::PpuExecutionUnit;
-use cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_BASE;
 
 use crate::cli::exit::die;
 use crate::game::diag::{
     append_pc_ring_with_decode, append_syscall_ring, fetch_raw_at, format_fault,
 };
 use crate::game::step_loop::tty::{classify_tty_capture, TtyCaptureDecision};
-use crate::game::step_loop::{RingCursor, PC_RING_SIZE, SYSCALL_RING_SIZE};
+use crate::game::step_loop::{PcRing, SyscallRing};
 
 use super::tls::TLS_BASE;
 use super::types::PrxLoadInfo;
@@ -90,28 +91,50 @@ pub(in crate::game) enum ModuleStartError {
     },
 }
 
-fn stall_detail(
-    rt: &Runtime,
-    pc_ring: &[u64; PC_RING_SIZE],
-    pc_cursor: &RingCursor,
-    sc_ring: &[(u64, u64); SYSCALL_RING_SIZE],
-    sc_cursor: &RingCursor,
-) -> String {
+fn stall_detail(rt: &Runtime, pc_ring: &PcRing, sc_ring: &SyscallRing) -> String {
     let mut text = String::new();
-    append_pc_ring_with_decode(&mut text, rt, pc_ring, pc_cursor);
-    append_syscall_ring(&mut text, sc_ring, sc_cursor);
+    append_pc_ring_with_decode(&mut text, rt, pc_ring);
+    append_syscall_ring(&mut text, sc_ring);
     text
+}
+
+/// Where a module_start runs: the process it belongs to and the
+/// register seeds that differ between the boot process and a spawned
+/// child.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::game) struct ModuleStartEnv {
+    /// Address space the module was loaded into.
+    pub(in crate::game) space: AddressSpaceId,
+    /// Unit whose PPU thread the transient unit dispatches as: the
+    /// boot primary, or a spawned child's primary.
+    pub(in crate::game) thread_owner: UnitId,
+    /// Pid the transient unit is bound to; `None` for the boot
+    /// process, whose units stay unbound.
+    pub(in crate::game) pid: Option<u32>,
+    /// Synthetic kernel-context OPD in `space` (r11 / r12).
+    pub(in crate::game) kctx_opd: u64,
+    /// Initial r1, inside a stack region of `space`.
+    pub(in crate::game) stack_pointer: u64,
+}
+
+fn space_memory(rt: &Runtime, space: AddressSpaceId) -> &GuestMemory {
+    rt.space_memory(space).unwrap_or_else(|e| {
+        die(&format!(
+            "module_start: address space {} vanished mid-pass: {e}",
+            space.raw()
+        ))
+    })
 }
 
 /// Drive a single PRX's `module_start` on the supplied `Runtime`.
 ///
 /// Mutex / TLS state created here persists in the caller's
 /// `Runtime` / `Lv2Host` / `GuestMemory` and is visible to every
-/// later module_start and to the title.
+/// later module_start and to the process `env` names.
 pub(in crate::game) fn run_module_start(
     rt: &mut Runtime,
     prx_info: &PrxLoadInfo,
-    kctx_opd: u64,
+    env: ModuleStartEnv,
 ) -> Result<ModuleStartOutcome, ModuleStartError> {
     let ms = match prx_info.module_start {
         Some(opd) => opd,
@@ -149,11 +172,9 @@ pub(in crate::game) fn run_module_start(
     let mut ms_state = cellgov_ppu::state::PpuState::new();
     ms_state.pc = ms.code;
     ms_state.set_gpr(2, ms.toc);
-    // Offset below the game's stack_top so the two stacks cannot
-    // collide.
-    ms_state.set_gpr(1, PS3_PRIMARY_STACK_BASE + 0x8000);
-    ms_state.set_gpr(11, kctx_opd);
-    ms_state.set_gpr(12, kctx_opd);
+    ms_state.set_gpr(1, env.stack_pointer);
+    ms_state.set_gpr(11, env.kctx_opd);
+    ms_state.set_gpr(12, env.kctx_opd);
     // PPC64 convention: r13 = TLS_area + 0x7030.
     ms_state.set_gpr(13, TLS_BASE + 0x30 + 0x7000);
     // LR=0 sentinel: blr from module_start jumps to PC=0, where the
@@ -165,18 +186,36 @@ pub(in crate::game) fn run_module_start(
         *unit.state_mut() = ms_state;
         unit
     });
-    // Cross-module contract: the transient module_start unit shares
-    // the primary thread's PpuThreadId so sync syscalls resolve their
-    // caller. Real LV2 routes module_start through the calling thread
-    // (sys_prx.cpp `_sys_prx_start_module`). Alias is dropped after the unit retires so
-    // post-boot lookups against this UnitId fall through to the
-    // strict ESRCH path.
-    if !rt.lv2_host_mut().alias_unit_to_primary(ms_unit_id) {
+    // A child's module_start executes and faults in the child's
+    // space; every memory consumer resolves through the unit's tag.
+    if let Err(e) = rt.assign_unit_space(ms_unit_id, env.space) {
         die(&format!(
-            "module_start: alias_unit_to_primary for {} (UnitId {ms_unit_id:?}) failed; \
-             primary PPU thread was not seeded before the module_start loop began",
+            "module_start: cannot tag {} (UnitId {ms_unit_id:?}) to address space {}: {e}",
             prx_info.name,
+            env.space.raw(),
         ));
+    }
+    // Cross-module contract: the transient module_start unit shares
+    // its process's primary-thread PpuThreadId so sync syscalls
+    // resolve their caller. Real LV2 routes module_start through the
+    // calling thread (sys_prx.cpp `_sys_prx_start_module`). Alias is
+    // dropped after the unit retires so later lookups against this
+    // UnitId fall through to the strict ESRCH path.
+    if !rt
+        .lv2_host_mut()
+        .alias_unit_to_thread_of(ms_unit_id, env.thread_owner)
+    {
+        die(&format!(
+            "module_start: aliasing {} (UnitId {ms_unit_id:?}) to the thread of unit {:?} \
+             failed; that process's primary PPU thread was not seeded before its \
+             module_start pass began",
+            prx_info.name, env.thread_owner,
+        ));
+    }
+    // Spawned-process units are bound to their pid so process-scoped
+    // dispatch (getpid, exit sweeps) attributes them correctly.
+    if let Some(pid) = env.pid {
+        rt.lv2_host_mut().bind_unit_process(ms_unit_id, pid);
     }
 
     // Wall-clock display only, not ordering: never feeds
@@ -187,10 +226,8 @@ pub(in crate::game) fn run_module_start(
     let mut hle_calls: BTreeMap<u32, usize> = BTreeMap::new();
     let mut lv2_calls: BTreeMap<u64, usize> = BTreeMap::new();
     let mut pc_hits: BTreeMap<u64, u64> = BTreeMap::new();
-    let mut pc_ring: [u64; PC_RING_SIZE] = [0; PC_RING_SIZE];
-    let mut pc_cursor = RingCursor::new(PC_RING_SIZE);
-    let mut sc_ring: [(u64, u64); SYSCALL_RING_SIZE] = [(0, 0); SYSCALL_RING_SIZE];
-    let mut sc_cursor = RingCursor::new(SYSCALL_RING_SIZE);
+    let mut pc_ring = PcRing::new();
+    let mut sc_ring = SyscallRing::new();
     let mut last_pc: u64 = ms.code;
 
     let result: Result<usize, ModuleStartError> = loop {
@@ -199,7 +236,7 @@ pub(in crate::game) fn run_module_start(
                 module: prx_info.name.clone(),
                 budget: PER_MODULE_STEP_BUDGET,
                 last_pc,
-                detail: stall_detail(rt, &pc_ring, &pc_cursor, &sc_ring, &sc_cursor),
+                detail: stall_detail(rt, &pc_ring, &sc_ring),
             });
         }
         match rt.step() {
@@ -210,8 +247,7 @@ pub(in crate::game) fn run_module_start(
                     last_pc = pc;
                     distinct_pcs.insert(pc);
                     *pc_hits.entry(pc).or_insert(0) += 1;
-                    let idx = pc_cursor.record();
-                    pc_ring[idx] = pc;
+                    pc_ring.push((env.space, pc));
                 }
 
                 if let Some(args) = &step.result.syscall_args {
@@ -222,11 +258,10 @@ pub(in crate::game) fn run_module_start(
                         *lv2_calls.entry(args[0]).or_insert(0) += 1;
                     }
                     let sc_pc = step.result.local_diagnostics.pc.unwrap_or(0);
-                    let idx = sc_cursor.record();
-                    sc_ring[idx] = (args[0], sc_pc);
+                    sc_ring.push((args[0], sc_pc));
 
                     if args[0] == cellgov_ps3_abi::syscall::TTY_WRITE {
-                        handle_module_start_tty(args, rt.memory());
+                        handle_module_start_tty(args, space_memory(rt, env.space));
                     }
                 }
 
@@ -274,13 +309,13 @@ pub(in crate::game) fn run_module_start(
                         break Ok(steps);
                     }
                     let mut fault_text =
-                        format_fault(rt, &step.result, fault, steps, &pc_ring, &pc_cursor, &[]);
-                    append_syscall_ring(&mut fault_text, &sc_ring, &sc_cursor);
+                        format_fault(rt, ms_unit_id, &step.result, fault, steps, &pc_ring, &[]);
+                    append_syscall_ring(&mut fault_text, &sc_ring);
                     eprintln!("module_start {fault_text}");
                     let code_str = guest_code
                         .map(|c| format!("0x{c:08x}"))
                         .unwrap_or_else(|| format!("{fault:?}"));
-                    let raw_str = match fetch_raw_at(rt, fault_pc) {
+                    let raw_str = match fetch_raw_at(space_memory(rt, env.space), fault_pc) {
                         Some(w) => format!("0x{w:08x}"),
                         None => "<unmapped>".to_string(),
                     };
@@ -305,7 +340,7 @@ pub(in crate::game) fn run_module_start(
                     module: prx_info.name.clone(),
                     steps,
                     reason,
-                    detail: stall_detail(rt, &pc_ring, &pc_cursor, &sc_ring, &sc_cursor),
+                    detail: stall_detail(rt, &pc_ring, &sc_ring),
                 });
             }
         }
@@ -440,8 +475,9 @@ pub(in crate::game) fn run_module_start(
         println!("  module_start top PCs by hit count:");
         let mut sorted: Vec<_> = pc_hits.iter().collect();
         sorted.sort_by(|&(pc_a, c_a), &(pc_b, c_b)| c_b.cmp(c_a).then(pc_a.cmp(pc_b)));
+        let mem = space_memory(rt, env.space);
         for (pc, count) in sorted.iter().take(20) {
-            let (raw, disasm) = match fetch_raw_at(rt, **pc) {
+            let (raw, disasm) = match fetch_raw_at(mem, **pc) {
                 Some(w) => (
                     format!("0x{w:08x}"),
                     cellgov_ppu::decode::decode(w)

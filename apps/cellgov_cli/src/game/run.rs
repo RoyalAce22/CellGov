@@ -13,8 +13,7 @@ use crate::game::diag::{
 use crate::game::manifest::TitleManifest;
 use crate::game::observation::{self, save_boot_observation};
 use crate::game::step_loop::{
-    compute_untracked, pct, step_loop, RingCursor, StepLoopCtx, StepTiming, PC_RING_SIZE,
-    SYSCALL_RING_SIZE,
+    compute_untracked, pct, step_loop, PcRing, StepLoopCtx, StepTiming, SyscallRing,
 };
 
 pub struct RunGameOptions<'a> {
@@ -151,6 +150,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         elf_data,
         timings: st,
         step_budget,
+        child_init,
         ..
     } = prepared;
 
@@ -167,7 +167,8 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     }
 
     let mut steps: usize = 0;
-    let mut distinct_pcs: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    let mut distinct_pcs: std::collections::BTreeSet<(cellgov_core::AddressSpaceId, u64)> =
+        std::collections::BTreeSet::new();
     let mut hle_calls: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
     let mut insn_coverage: std::collections::BTreeMap<&'static str, usize> =
         std::collections::BTreeMap::new();
@@ -177,7 +178,8 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         None
     };
 
-    let mut pc_hits: std::collections::BTreeMap<u64, u64> = std::collections::BTreeMap::new();
+    let mut pc_hits: std::collections::BTreeMap<(cellgov_core::AddressSpaceId, u64), u64> =
+        std::collections::BTreeMap::new();
     let mut loop_ctx = StepLoopCtx {
         steps: &mut steps,
         distinct_pcs: &mut distinct_pcs,
@@ -186,18 +188,17 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         trace,
         timing: &mut timing,
         loop_start: Instant::now(),
-        pc_ring: [0; PC_RING_SIZE],
-        pc_ring_cursor: RingCursor::new(PC_RING_SIZE),
+        pc_ring: PcRing::new(),
         last_tty: None,
         last_exit: None,
-        syscall_ring: [(0, 0); SYSCALL_RING_SIZE],
-        syscall_ring_cursor: RingCursor::new(SYSCALL_RING_SIZE),
+        syscall_ring: SyscallRing::new(),
         pc_hits: &mut pc_hits,
         checkpoint: title.checkpoint_trigger(),
         tty_oob_count: 0,
         bogus_fd_count: 0,
         dump_mem_fault_ranges,
         obs_null_sink: crate::cli::env::parse_env_bool("CELLGOV_OBS_NULL_SINK"),
+        child_init: &child_init,
     };
     let t_loop_start = Instant::now();
     loop_ctx.loop_start = t_loop_start;

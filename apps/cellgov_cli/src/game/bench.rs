@@ -153,6 +153,7 @@ pub fn bench_boot(
     });
     let mut rt = prepared.rt;
     let authid_source = prepared.authid_source;
+    let child_init = prepared.child_init;
     let active_checkpoint = opts
         .checkpoint_override
         .unwrap_or_else(|| opts.title.checkpoint_trigger());
@@ -160,7 +161,7 @@ pub fn bench_boot(
 
     let mut steps: usize = 0;
     let t0 = Instant::now();
-    let outcome = bench_step_loop(&mut rt, active_checkpoint, &mut steps);
+    let outcome = bench_step_loop(&mut rt, active_checkpoint, &mut steps, &child_init);
     let wall = t0.elapsed();
 
     // VRSAVE liveness witness: sum mfvrsave_executed across every

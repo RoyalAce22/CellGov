@@ -3,6 +3,7 @@
 
 mod bench;
 mod boot;
+mod child_init;
 mod content;
 mod diag;
 mod guest_args;

@@ -281,6 +281,27 @@ spawn path. Every failure arm unwinds the whole spawn -- space,
 reservations, unit tags, and pid -- and the syscall fails with its
 honest errno.
 
+The loader also gives the child its firmware: it parses the child's
+import table, selects and loads the import closure into the child
+space through the same selection, relocation and GOT-patch pipeline
+the boot uses ([boot.md](boot.md)), falls back to unresolved-import
+trampolines when nothing loads, and pre-initializes TLS and the
+kernel-context OPD there. Each child carries its own relocated
+copies of its modules; a shared mapping stays the only channel
+through which two spaces see the same bytes
+([guest_memory.md](guest_memory.md)). A loader that stages this init pass returns an init
+token; the runtime then parks the child's primary unit `Blocked`
+behind a `PendingChildInit` and the host drains it after the
+committed step, running every module's `module_start` in the
+child's space on transient units aliased to the child's primary PPU
+thread and bound to its pid, with every other runnable unit held
+`Blocked` for the duration. A faulting child `module_start` is
+skipped with a witness; a stalled or over-budget one is fatal, as it
+is for the boot. The child's modules are not entered in the
+process-shared PRX registry, and each spawn that loaded real modules
+logs `process.child_prx_registry_shared` naming the pid, space and
+module count.
+
 The child's primary thread enters through a PPU factory unit with
 its own stack inside the child space; its LR sentinel points at an
 8-byte exit stub (`li r11, 22; sc`) that runs if the entry point

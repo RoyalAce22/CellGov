@@ -45,6 +45,10 @@ pub struct Runtime {
     pub(super) spu_factory: Option<SpuFactory>,
     pub(super) ppu_factory: Option<PpuFactory>,
     pub(super) process_spawn_loader: Option<crate::runtime::types::ProcessSpawnLoader>,
+    /// Spawned children parked behind a loader-staged init pass, in
+    /// spawn order; drained by the host between steps. Snapshot-
+    /// captured with the `Blocked` override it pairs with.
+    pub(super) pending_child_inits: Vec<crate::runtime::types::PendingChildInit>,
     pub(super) scheduler: Box<dyn Scheduler>,
     pub(super) commit_pipeline: CommitPipeline,
     /// Space 0: the boot process's address space.

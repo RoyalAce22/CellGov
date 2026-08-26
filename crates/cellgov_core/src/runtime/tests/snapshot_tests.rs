@@ -96,6 +96,7 @@ fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
         step_woke_others: _,
         per_step_index: _,
         pending_tag_completions: _,
+        pending_child_inits: _,
         rsx_call_stack: _,
         rsx_consume_fifo: _,
         rsx_label_base: _,

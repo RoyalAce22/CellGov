@@ -1,65 +1,73 @@
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 
-use crate::game::step_loop::{RingCursor, PC_RING_SIZE, SYSCALL_RING_SIZE};
+use crate::game::step_loop::{PcRing, SyscallRing};
 
 use super::exit::ProcessExitInfo;
 use super::{fetch_raw_at, format_hle_idx};
 
+/// Empty for the boot space, so a single-process report is unchanged.
+fn space_tag(space: AddressSpaceId) -> String {
+    if space == AddressSpaceId::BOOT {
+        String::new()
+    } else {
+        format!("  space={}", space.raw())
+    }
+}
+
 pub(in crate::game) fn append_pc_ring_with_decode(
     out: &mut String,
     rt: &Runtime,
-    pc_ring: &[u64; PC_RING_SIZE],
-    pc_cursor: &RingCursor,
+    pc_ring: &PcRing,
 ) {
-    let filled = pc_cursor.filled();
+    let filled = pc_ring.filled();
     if filled == 0 {
         return;
     }
     out.push_str(&format!("\n  last {filled} PCs:"));
-    for i in pc_cursor.iter_indices() {
-        let pc = pc_ring[i];
-        let (raw, name) = match fetch_raw_at(rt, pc) {
-            Some(w) => (
-                format!("0x{w:08x}"),
-                cellgov_ppu::decode::decode(w)
-                    .ok()
-                    .map(|insn| <&'static str>::from(&insn).to_string())
-                    .unwrap_or_else(|| "<baddec>".into()),
+    for (space, pc) in pc_ring.iter() {
+        let (raw, name) = match rt.space_memory(space) {
+            // A unit that stepped executes in a live space; a miss is
+            // runtime-state corruption and is named, not blanked.
+            Err(e) => (
+                format!("<space {} missing: {e}>", space.raw()),
+                String::new(),
             ),
-            None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+            Ok(mem) => match fetch_raw_at(mem, pc) {
+                Some(w) => (
+                    format!("0x{w:08x}"),
+                    cellgov_ppu::decode::decode(w)
+                        .ok()
+                        .map(|insn| <&'static str>::from(&insn).to_string())
+                        .unwrap_or_else(|| "<baddec>".into()),
+                ),
+                None => ("<unmapped>".to_string(), "<unmapped>".to_string()),
+            },
         };
-        out.push_str(&format!("\n    0x{pc:08x}  raw={raw}  {name}"));
+        out.push_str(&format!(
+            "\n    0x{pc:08x}  raw={raw}  {name}{}",
+            space_tag(space)
+        ));
     }
 }
 
-pub(in crate::game) fn append_pc_ring_terse(
-    out: &mut String,
-    pc_ring: &[u64; PC_RING_SIZE],
-    pc_cursor: &RingCursor,
-) {
-    let filled = pc_cursor.filled();
+pub(in crate::game) fn append_pc_ring_terse(out: &mut String, pc_ring: &PcRing) {
+    let filled = pc_ring.filled();
     if filled == 0 {
         return;
     }
     out.push_str(&format!("\n  last {filled} PCs:"));
-    for i in pc_cursor.iter_indices() {
-        let pc = pc_ring[i];
-        out.push_str(&format!("\n    0x{pc:08x}"));
+    for (space, pc) in pc_ring.iter() {
+        out.push_str(&format!("\n    0x{pc:08x}{}", space_tag(space)));
     }
 }
 
-pub(in crate::game) fn append_syscall_ring(
-    out: &mut String,
-    syscall_ring: &[(u64, u64); SYSCALL_RING_SIZE],
-    syscall_cursor: &RingCursor,
-) {
-    let filled = syscall_cursor.filled();
+pub(in crate::game) fn append_syscall_ring(out: &mut String, syscall_ring: &SyscallRing) {
+    let filled = syscall_ring.filled();
     if filled == 0 {
         return;
     }
     out.push_str(&format!("\n  last {filled} syscalls:"));
-    for i in syscall_cursor.iter_indices() {
-        let (nr, pc) = syscall_ring[i];
+    for (nr, pc) in syscall_ring.iter() {
         if nr >= 0x10000 {
             let idx = (nr - 0x10000) as u32;
             let name = format_hle_idx(idx);

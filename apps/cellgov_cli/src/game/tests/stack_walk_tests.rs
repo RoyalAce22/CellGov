@@ -1,6 +1,7 @@
 //! Guest stack-walk caller classification and branch-encoding round-trips.
 
 use super::*;
+use cellgov_core::Runtime;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
 use cellgov_ps3_abi::ppc_isa::{PPC_BCCTR_XO, PPC_BCLR_XO};
 use cellgov_time::Budget;
@@ -91,24 +92,27 @@ fn user_text_floor_const_matches_callback_dispatch_zone() {
 #[test]
 fn saved_lr_call_kind_rejects_high_half() {
     let rt = rt_with_layout();
-    assert_eq!(saved_lr_call_kind(&rt, 0x1_0000_0000), None);
-    assert_eq!(saved_lr_call_kind(&rt, 0xDEAD_BEEF_0010_0004), None);
+    assert_eq!(saved_lr_call_kind(rt.memory(), 0x1_0000_0000), None);
+    assert_eq!(saved_lr_call_kind(rt.memory(), 0xDEAD_BEEF_0010_0004), None);
 }
 
 #[test]
 fn saved_lr_call_kind_rejects_misaligned() {
     let rt = rt_with_layout();
     for off in 1..=3 {
-        assert_eq!(saved_lr_call_kind(&rt, 0x0010_0000 + off), None);
+        assert_eq!(saved_lr_call_kind(rt.memory(), 0x0010_0000 + off), None);
     }
 }
 
 #[test]
 fn saved_lr_call_kind_rejects_below_text_floor() {
     let rt = rt_with_layout();
-    assert_eq!(saved_lr_call_kind(&rt, 0), None);
-    assert_eq!(saved_lr_call_kind(&rt, 0xFFFC), None);
-    assert_eq!(saved_lr_call_kind(&rt, PS3_USER_TEXT_FLOOR - 4), None);
+    assert_eq!(saved_lr_call_kind(rt.memory(), 0), None);
+    assert_eq!(saved_lr_call_kind(rt.memory(), 0xFFFC), None);
+    assert_eq!(
+        saved_lr_call_kind(rt.memory(), PS3_USER_TEXT_FLOOR - 4),
+        None
+    );
 }
 
 #[test]
@@ -116,7 +120,10 @@ fn saved_lr_call_kind_classifies_real_bl_caller() {
     let mut rt = rt_with_layout();
     let call_pc = 0x0010_0000u64;
     write_u32_be(&mut rt, call_pc, encode_bl(0x100));
-    assert_eq!(saved_lr_call_kind(&rt, call_pc + 4), Some(CallKind::Bl));
+    assert_eq!(
+        saved_lr_call_kind(rt.memory(), call_pc + 4),
+        Some(CallKind::Bl)
+    );
 }
 
 #[test]
@@ -147,14 +154,20 @@ fn encode_bcctrl_with_valid_bo_roundtrips() {
 fn classify_call_at_recognizes_bl() {
     let mut rt = rt_with_layout();
     write_u32_be(&mut rt, 0x0010_0000, encode_bl(0x100));
-    assert_eq!(classify_call_at(&rt, 0x0010_0000), Some(CallKind::Bl));
+    assert_eq!(
+        classify_call_at(rt.memory(), 0x0010_0000),
+        Some(CallKind::Bl)
+    );
 }
 
 #[test]
 fn classify_call_at_recognizes_valid_bcctrl() {
     let mut rt = rt_with_layout();
     write_u32_be(&mut rt, 0x0010_0000, encode_bcctrl(20, 0));
-    assert_eq!(classify_call_at(&rt, 0x0010_0000), Some(CallKind::Bcctrl));
+    assert_eq!(
+        classify_call_at(rt.memory(), 0x0010_0000),
+        Some(CallKind::Bcctrl)
+    );
 }
 
 #[test]
@@ -163,7 +176,7 @@ fn classify_call_at_rejects_invalid_form_bcctrl() {
     for bo in [0u8, 16, 8, 24] {
         write_u32_be(&mut rt, 0x0010_0000, encode_bcctrl(bo, 0));
         assert_eq!(
-            classify_call_at(&rt, 0x0010_0000),
+            classify_call_at(rt.memory(), 0x0010_0000),
             None,
             "BO={bo:#b} should be invalid (BO2=0)"
         );
@@ -174,26 +187,29 @@ fn classify_call_at_rejects_invalid_form_bcctrl() {
 fn classify_call_at_recognizes_blrl() {
     let mut rt = rt_with_layout();
     write_u32_be(&mut rt, 0x0010_0000, encode_blrl());
-    assert_eq!(classify_call_at(&rt, 0x0010_0000), Some(CallKind::Bclrl));
+    assert_eq!(
+        classify_call_at(rt.memory(), 0x0010_0000),
+        Some(CallKind::Bclrl)
+    );
 }
 
 #[test]
 fn classify_call_at_rejects_non_link_branch() {
     let mut rt = rt_with_layout();
     write_u32_be(&mut rt, 0x0010_0000, encode_b_nolink(0x100));
-    assert_eq!(classify_call_at(&rt, 0x0010_0000), None);
+    assert_eq!(classify_call_at(rt.memory(), 0x0010_0000), None);
 }
 
 #[test]
 fn classify_call_at_rejects_zero_word() {
     let rt = rt_with_layout();
-    assert_eq!(classify_call_at(&rt, 0x0010_0000), None);
+    assert_eq!(classify_call_at(rt.memory(), 0x0010_0000), None);
 }
 
 #[test]
 fn classify_call_at_returns_none_on_unmapped() {
     let rt = rt_with_layout();
-    assert_eq!(classify_call_at(&rt, 0x8000_0000), None);
+    assert_eq!(classify_call_at(rt.memory(), 0x8000_0000), None);
 }
 
 #[test]
@@ -201,7 +217,7 @@ fn classify_call_at_returns_none_on_unmapped() {
 #[should_panic(expected = "misaligned")]
 fn classify_call_at_debug_asserts_alignment() {
     let rt = rt_with_layout();
-    let _ = classify_call_at(&rt, 0x0010_0001);
+    let _ = classify_call_at(rt.memory(), 0x0010_0001);
 }
 
 /// Layout per [AltiVec-PIM p:34 s:3]:
@@ -225,7 +241,7 @@ fn back_chain_walk_recovers_callers_after_null_bcctr() {
     write_u64_be(&mut rt, sp_c + 16, outer_caller_pc + 4);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp_a));
 
     assert!(out.contains("back-chain walk"), "expected block in {out}");
     assert!(
@@ -253,7 +269,7 @@ fn back_chain_walk_terminates_on_non_increasing_sp() {
     write_u64_be(&mut rt, sp_a, sp_b);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp_a));
     assert!(
         out.contains("stack walk skipped")
             && out.contains("implausible")
@@ -269,7 +285,7 @@ fn back_chain_walk_terminates_on_below_floor_back_chain() {
     write_u64_be(&mut rt, sp, 0x42);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp));
     assert!(
         out.contains("stack walk skipped") && out.contains("implausible"),
         "expected skipped-implausible annotation, got {out}",
@@ -284,7 +300,7 @@ fn append_stack_walk_dumps_bytes_on_invalid_back_chain_frame_0() {
     write_u64_be(&mut rt, sp + 16, 0xDEAD_BEEF_0000_0001);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp));
     assert!(out.contains("stack walk skipped"), "got {out}");
     assert!(
         out.contains(&format!("bytes at sp=0x{sp:016x} (back-chain at +0):")),
@@ -306,7 +322,7 @@ fn append_stack_walk_dumps_bytes_on_invalid_back_chain_mid_walk() {
     write_u64_be(&mut rt, sp_b, 0x10);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp_a));
     assert!(out.contains("back-chain walk"), "got {out}");
     assert!(out.contains("via bl"), "got {out}");
     assert!(out.contains("implausible"), "got {out}");
@@ -321,7 +337,7 @@ fn append_stack_walk_omits_byte_dump_on_unmapped_r1() {
     let rt = rt_with_layout();
     let r1 = 0x8000_0000u64;
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(r1));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(r1));
     assert!(out.contains("stack walk skipped"), "got {out}");
     assert!(!out.contains("bytes at sp="), "unexpected dump in {out}");
 }
@@ -340,7 +356,7 @@ fn back_chain_walk_caps_at_max_frames() {
         write_u64_be(&mut rt, sp + 16, bl_pc + 4);
     }
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(base));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(base));
     assert!(
         out.contains("max frames reached"),
         "expected max-frames termination, got {out}",
@@ -357,7 +373,7 @@ fn back_chain_walk_skipped_message_on_unmapped_r1() {
     let rt = rt_with_layout();
     let r1 = 0x8000_0000u64;
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(r1));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(r1));
     assert!(
         out.contains("stack walk skipped") && out.contains("unmapped"),
         "expected skipped-unmapped annotation, got {out}",
@@ -368,7 +384,7 @@ fn back_chain_walk_skipped_message_on_unmapped_r1() {
 fn append_stack_walk_skips_when_r1_below_text_floor() {
     let rt = rt_with_layout();
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(0xFFF));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(0xFFF));
     assert!(
         out.is_empty(),
         "expected silence below text floor, got {out}"
@@ -379,7 +395,7 @@ fn append_stack_walk_skips_when_r1_below_text_floor() {
 fn append_stack_walk_skips_when_r1_is_zero() {
     let rt = rt_with_layout();
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(0));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(0));
     assert!(out.is_empty(), "expected silence on r1=0, got {out}");
 }
 
@@ -393,7 +409,7 @@ fn back_chain_walk_reports_frame_with_not_a_call_when_saved_lr_is_junk() {
     write_u64_be(&mut rt, sp_b + 16, 0x0010_0000);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp_a));
     assert_eq!(count_frame_lines(&out), 2, "got {out}");
     assert!(out.contains("via not-a-call"), "got {out}");
     assert!(out.contains("saved_lr=0x0000000000100000"), "got {out}");
@@ -409,7 +425,7 @@ fn back_chain_walk_preserves_high_half_in_corrupt_saved_lr() {
     write_u64_be(&mut rt, sp_b + 16, 0xDEAD_BEEF_0010_0004);
 
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(sp_a));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(sp_a));
     assert_eq!(count_frame_lines(&out), 2);
     assert!(out.contains("via not-a-call"), "got {out}");
     assert!(
@@ -438,7 +454,7 @@ fn back_chain_walk_traverses_realistic_5_frame_chain_to_null() {
         write_u64_be(&mut rt, sp + 16, bl_pc + 4);
     }
     let mut out = String::new();
-    append_stack_walk(&mut out, &rt, &fault_regs_with_r1(base));
+    append_stack_walk(&mut out, rt.memory(), &fault_regs_with_r1(base));
     assert!(out.contains("NULL back-chain"), "got {out}");
     assert_eq!(count_frame_lines(&out), N as usize, "got {out}");
     assert_eq!(out.matches("via bl").count(), (N - 1) as usize, "got {out}");

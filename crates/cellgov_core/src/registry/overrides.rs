@@ -22,6 +22,11 @@ impl UnitRegistry {
         )
     }
 
+    /// The runtime-side override on `id`, if one is set.
+    pub fn status_override(&self, id: UnitId) -> Option<UnitStatus> {
+        self.status_overrides.get(&id).copied()
+    }
+
     /// Set a runtime-side status override. No-op for unknown ids.
     pub fn set_status_override(&mut self, id: UnitId, status: UnitStatus) {
         if self.units.contains_key(&id) {
