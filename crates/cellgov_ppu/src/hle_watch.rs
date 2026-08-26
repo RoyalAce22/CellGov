@@ -19,10 +19,8 @@
 //!
 //! File format (little-endian, no padding inside records): a "CGHW"
 //! version-1 header carrying the watched-ID directory (raw-PC
-//! synthetic IDs are `pc | 0x80000000`), then tagged records --
-//! kind=3 NID resolution, kind=1 function entry (args r3..r10),
-//! kind=2 exit (return value r3, paired to its entry's record_no).
-//! Exact field layout is the write order in the emit fns below.
+//! synthetic IDs are `pc | 0x80000000`), then the records `wire`
+//! builds, one builder per record kind.
 
 #![allow(clippy::print_stderr)]
 
@@ -33,15 +31,163 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::sync::{Mutex, OnceLock};
 
-const KIND_ENTRY: u8 = 1;
-const KIND_EXIT: u8 = 2;
-const KIND_RESOLUTION: u8 = 3;
-/// Body-event `sc` inside a watched function (r11 + r3..r10).
-const KIND_BODY_SYSCALL: u8 = 4;
-/// Paired syscall-return point (r3 + entry record number).
-const KIND_BODY_SYSCALL_RETURN: u8 = 5;
-/// Body-event `bl` / `bctrl` / `blrl` inside a watched function.
-const KIND_BODY_CALL: u8 = 6;
+/// Record layouts: one builder per kind returns the complete record,
+/// kind byte first, every field little-endian, no padding. A layout
+/// change is a change here and in the reader.
+mod wire {
+    pub(super) const KIND_ENTRY: u8 = 1;
+    pub(super) const KIND_EXIT: u8 = 2;
+    pub(super) const KIND_RESOLUTION: u8 = 3;
+    /// Body-event `sc` inside a watched function.
+    pub(super) const KIND_BODY_SYSCALL: u8 = 4;
+    /// Return point of a body-event `sc`, paired to its entry record.
+    pub(super) const KIND_BODY_SYSCALL_RETURN: u8 = 5;
+    /// Body-event `bl` / `bctrl` / `blrl` inside a watched function.
+    pub(super) const KIND_BODY_CALL: u8 = 6;
+
+    /// r3..r10 as eight u64s.
+    const ARGS_LEN: usize = 8 * 8;
+    pub(super) const ENTRY_LEN: usize = 1 + 8 + 4 + 4 + 4 + 4 + ARGS_LEN;
+    pub(super) const EXIT_LEN: usize = 1 + 8 + 4 + 8 + 4 + 8;
+    pub(super) const BODY_SYSCALL_LEN: usize = 1 + 8 + 4 + 8 + 4 + 4 + ARGS_LEN;
+    pub(super) const BODY_SYSCALL_RETURN_LEN: usize = 1 + 8 + 4 + 8 + 4 + 4 + 8;
+    pub(super) const BODY_CALL_LEN: usize = 1 + 8 + 4 + 8 + 4 + 4 + ARGS_LEN;
+    /// Fixed part of a resolution record; the name follows, at most
+    /// 255 bytes behind its 1-byte length.
+    pub(super) const RESOLUTION_HEAD_LEN: usize = 1 + 4 + 4 + 1;
+
+    struct Rec(Vec<u8>);
+
+    impl Rec {
+        fn new(kind: u8, len: usize) -> Self {
+            let mut v = Vec::with_capacity(len);
+            v.push(kind);
+            Rec(v)
+        }
+        fn u8(mut self, v: u8) -> Self {
+            self.0.push(v);
+            self
+        }
+        fn u32(mut self, v: u32) -> Self {
+            self.0.extend_from_slice(&v.to_le_bytes());
+            self
+        }
+        fn u64(mut self, v: u64) -> Self {
+            self.0.extend_from_slice(&v.to_le_bytes());
+            self
+        }
+        fn args(mut self, gpr: &[u64; 32]) -> Self {
+            for r in &gpr[3..=10] {
+                self.0.extend_from_slice(&r.to_le_bytes());
+            }
+            self
+        }
+        fn finish(self, len: usize) -> Vec<u8> {
+            debug_assert_eq!(self.0.len(), len, "record kind {}", self.0[0]);
+            self.0
+        }
+    }
+
+    /// Watched ID resolved to an entry PC; carries no record number.
+    pub(super) fn resolution(on_wire_nid: u32, entry_pc: u32, name: &str) -> Vec<u8> {
+        let name = &name.as_bytes()[..name.len().min(255)];
+        let mut rec = Rec::new(KIND_RESOLUTION, RESOLUTION_HEAD_LEN + name.len())
+            .u32(on_wire_nid)
+            .u32(entry_pc)
+            .u8(name.len() as u8)
+            .0;
+        rec.extend_from_slice(name);
+        rec
+    }
+
+    pub(super) fn entry(
+        record_no: u64,
+        on_wire_nid: u32,
+        entry_pc: u32,
+        pc: u32,
+        lr: u32,
+        gpr: &[u64; 32],
+    ) -> Vec<u8> {
+        Rec::new(KIND_ENTRY, ENTRY_LEN)
+            .u64(record_no)
+            .u32(on_wire_nid)
+            .u32(entry_pc)
+            .u32(pc)
+            .u32(lr)
+            .args(gpr)
+            .finish(ENTRY_LEN)
+    }
+
+    pub(super) fn exit(
+        record_no: u64,
+        on_wire_nid: u32,
+        entry_record_no: u64,
+        pc: u32,
+        r3: u64,
+    ) -> Vec<u8> {
+        Rec::new(KIND_EXIT, EXIT_LEN)
+            .u64(record_no)
+            .u32(on_wire_nid)
+            .u64(entry_record_no)
+            .u32(pc)
+            .u64(r3)
+            .finish(EXIT_LEN)
+    }
+
+    pub(super) fn body_syscall(
+        record_no: u64,
+        on_wire_nid: u32,
+        entry_record_no: u64,
+        syscall_num: u32,
+        pc: u32,
+        gpr: &[u64; 32],
+    ) -> Vec<u8> {
+        Rec::new(KIND_BODY_SYSCALL, BODY_SYSCALL_LEN)
+            .u64(record_no)
+            .u32(on_wire_nid)
+            .u64(entry_record_no)
+            .u32(syscall_num)
+            .u32(pc)
+            .args(gpr)
+            .finish(BODY_SYSCALL_LEN)
+    }
+
+    pub(super) fn body_syscall_return(
+        record_no: u64,
+        on_wire_nid: u32,
+        entry_record_no: u64,
+        syscall_num: u32,
+        pc: u32,
+        r3: u64,
+    ) -> Vec<u8> {
+        Rec::new(KIND_BODY_SYSCALL_RETURN, BODY_SYSCALL_RETURN_LEN)
+            .u64(record_no)
+            .u32(on_wire_nid)
+            .u64(entry_record_no)
+            .u32(syscall_num)
+            .u32(pc)
+            .u64(r3)
+            .finish(BODY_SYSCALL_RETURN_LEN)
+    }
+
+    pub(super) fn body_call(
+        record_no: u64,
+        on_wire_nid: u32,
+        entry_record_no: u64,
+        pc: u32,
+        target: u32,
+        gpr: &[u64; 32],
+    ) -> Vec<u8> {
+        Rec::new(KIND_BODY_CALL, BODY_CALL_LEN)
+            .u64(record_no)
+            .u32(on_wire_nid)
+            .u64(entry_record_no)
+            .u32(pc)
+            .u32(target)
+            .args(gpr)
+            .finish(BODY_CALL_LEN)
+    }
+}
 
 /// In-memory key for the resolved-entries map; Raw-PC and NID
 /// keyspaces are disjoint.
@@ -62,6 +208,18 @@ struct WriterState {
     /// Body events executed outside any watched scope. Non-zero
     /// proves the hook reached dispatch even when `entry_total == 0`.
     dropped_body_events: u64,
+}
+
+impl WriterState {
+    /// Assign the next record number, build the record with it, and
+    /// append it; returns the number so a later record can pair to it.
+    fn append(&mut self, build: impl FnOnce(u64) -> Vec<u8>) -> u64 {
+        let record_no = self.record_counter;
+        self.record_counter = self.record_counter.wrapping_add(1);
+        let _ = self.writer.write_all(&build(record_no));
+        let _ = self.writer.flush();
+        record_no
+    }
 }
 
 struct WatchState {
@@ -208,15 +366,7 @@ fn init() -> Option<WatchState> {
         eprintln!(
             "[cellgov] hle-return-watch raw-PC entry registered: 0x{pc:08x} ({name}) on_wire=0x{on_wire:08x}"
         );
-        let name_bytes = name.as_bytes();
-        let name_len = name_bytes.len().min(255) as u8;
-        let mut rec: Vec<u8> = Vec::with_capacity(1 + 4 + 4 + 1 + usize::from(name_len));
-        rec.push(KIND_RESOLUTION);
-        rec.extend_from_slice(&on_wire.to_le_bytes());
-        rec.extend_from_slice(&pc.to_le_bytes());
-        rec.push(name_len);
-        rec.extend_from_slice(&name_bytes[..usize::from(name_len)]);
-        if let Err(e) = writer.write_all(&rec) {
+        if let Err(e) = writer.write_all(&wire::resolution(on_wire, *pc, name)) {
             eprintln!("[cellgov] hle-return-watch: raw-PC resolution write to {path} failed: {e}");
             return None;
         }
@@ -281,13 +431,7 @@ pub fn register_nid_resolution(nid: u32, name: &str, entry_pc: u32) {
         "[cellgov] hle-return-watch resolved NID 0x{nid:08x} ({name}) entry_pc=0x{entry_pc:08x}"
     );
     let mut w = s.writer.lock().expect("hle_watch writer");
-    let _ = w.writer.write_all(&[KIND_RESOLUTION]);
-    let _ = w.writer.write_all(&nid.to_le_bytes());
-    let _ = w.writer.write_all(&entry_pc.to_le_bytes());
-    let name_bytes = name.as_bytes();
-    let name_len = name_bytes.len().min(255) as u8;
-    let _ = w.writer.write_all(&[name_len]);
-    let _ = w.writer.write_all(&name_bytes[..usize::from(name_len)]);
+    let _ = w.writer.write_all(&wire::resolution(nid, entry_pc, name));
     let _ = w.writer.flush();
 }
 
@@ -328,16 +472,16 @@ fn on_dispatch_slow(pc: u32, gpr: &[u64; 32], lr: u64) {
 
     if let Some(call) = exit_match {
         let mut w = s.writer.lock().expect("hle_watch writer");
-        let record_no = w.record_counter;
-        w.record_counter = w.record_counter.wrapping_add(1);
         w.exit_total = w.exit_total.wrapping_add(1);
-        let _ = w.writer.write_all(&[KIND_EXIT]);
-        let _ = w.writer.write_all(&record_no.to_le_bytes());
-        let _ = w.writer.write_all(&call.on_wire_nid.to_le_bytes());
-        let _ = w.writer.write_all(&call.entry_record_no.to_le_bytes());
-        let _ = w.writer.write_all(&pc.to_le_bytes());
-        let _ = w.writer.write_all(&gpr[3].to_le_bytes());
-        let _ = w.writer.flush();
+        w.append(|record_no| {
+            wire::exit(
+                record_no,
+                call.on_wire_nid,
+                call.entry_record_no,
+                pc,
+                gpr[3],
+            )
+        });
         drop(w);
         IN_FLIGHT.with(|stack| {
             stack.borrow_mut().pop();
@@ -353,19 +497,9 @@ fn on_dispatch_slow(pc: u32, gpr: &[u64; 32], lr: u64) {
         );
         let lr32 = lr as u32;
         let mut w = s.writer.lock().expect("hle_watch writer");
-        let record_no = w.record_counter;
-        w.record_counter = w.record_counter.wrapping_add(1);
         w.entry_total = w.entry_total.wrapping_add(1);
-        let _ = w.writer.write_all(&[KIND_ENTRY]);
-        let _ = w.writer.write_all(&record_no.to_le_bytes());
-        let _ = w.writer.write_all(&on_wire_nid.to_le_bytes());
-        let _ = w.writer.write_all(&entry_pc.to_le_bytes());
-        let _ = w.writer.write_all(&pc.to_le_bytes());
-        let _ = w.writer.write_all(&lr32.to_le_bytes());
-        for r in &gpr[3..=10] {
-            let _ = w.writer.write_all(&r.to_le_bytes());
-        }
-        let _ = w.writer.flush();
+        let record_no =
+            w.append(|record_no| wire::entry(record_no, on_wire_nid, entry_pc, pc, lr32, gpr));
         drop(w);
         IN_FLIGHT.with(|stack| {
             stack.borrow_mut().push(InFlightCall {
@@ -382,18 +516,16 @@ fn on_dispatch_slow(pc: u32, gpr: &[u64; 32], lr: u64) {
     });
     if let Some(pending) = pending_return {
         let mut w = s.writer.lock().expect("hle_watch writer");
-        let record_no = w.record_counter;
-        w.record_counter = w.record_counter.wrapping_add(1);
-        let _ = w.writer.write_all(&[KIND_BODY_SYSCALL_RETURN]);
-        let _ = w.writer.write_all(&record_no.to_le_bytes());
-        let _ = w
-            .writer
-            .write_all(&pending.in_flight_on_wire_nid.to_le_bytes());
-        let _ = w.writer.write_all(&pending.entry_record_no.to_le_bytes());
-        let _ = w.writer.write_all(&pending.syscall_num.to_le_bytes());
-        let _ = w.writer.write_all(&pc.to_le_bytes());
-        let _ = w.writer.write_all(&gpr[3].to_le_bytes());
-        let _ = w.writer.flush();
+        w.append(|record_no| {
+            wire::body_syscall_return(
+                record_no,
+                pending.in_flight_on_wire_nid,
+                pending.entry_record_no,
+                pending.syscall_num,
+                pc,
+                gpr[3],
+            )
+        });
         drop(w);
         PENDING_SYSCALL_RETURNS.with(|stack| {
             stack.borrow_mut().pop();
@@ -423,18 +555,16 @@ fn on_syscall_slow(pc: u32, gpr: &[u64; 32]) {
     };
     let syscall_num = gpr[11] as u32;
     let mut w = s.writer.lock().expect("hle_watch writer");
-    let record_no = w.record_counter;
-    w.record_counter = w.record_counter.wrapping_add(1);
-    let _ = w.writer.write_all(&[KIND_BODY_SYSCALL]);
-    let _ = w.writer.write_all(&record_no.to_le_bytes());
-    let _ = w.writer.write_all(&call.on_wire_nid.to_le_bytes());
-    let _ = w.writer.write_all(&call.entry_record_no.to_le_bytes());
-    let _ = w.writer.write_all(&syscall_num.to_le_bytes());
-    let _ = w.writer.write_all(&pc.to_le_bytes());
-    for r in &gpr[3..=10] {
-        let _ = w.writer.write_all(&r.to_le_bytes());
-    }
-    let _ = w.writer.flush();
+    w.append(|record_no| {
+        wire::body_syscall(
+            record_no,
+            call.on_wire_nid,
+            call.entry_record_no,
+            syscall_num,
+            pc,
+            gpr,
+        )
+    });
     drop(w);
     PENDING_SYSCALL_RETURNS.with(|stack| {
         stack.borrow_mut().push(PendingSyscallReturn {
@@ -466,18 +596,16 @@ fn on_branch_link_slow(pc: u32, gpr: &[u64; 32], target: u32) {
         return;
     };
     let mut w = s.writer.lock().expect("hle_watch writer");
-    let record_no = w.record_counter;
-    w.record_counter = w.record_counter.wrapping_add(1);
-    let _ = w.writer.write_all(&[KIND_BODY_CALL]);
-    let _ = w.writer.write_all(&record_no.to_le_bytes());
-    let _ = w.writer.write_all(&call.on_wire_nid.to_le_bytes());
-    let _ = w.writer.write_all(&call.entry_record_no.to_le_bytes());
-    let _ = w.writer.write_all(&pc.to_le_bytes());
-    let _ = w.writer.write_all(&target.to_le_bytes());
-    for r in &gpr[3..=10] {
-        let _ = w.writer.write_all(&r.to_le_bytes());
-    }
-    let _ = w.writer.flush();
+    w.append(|record_no| {
+        wire::body_call(
+            record_no,
+            call.on_wire_nid,
+            call.entry_record_no,
+            pc,
+            target,
+            gpr,
+        )
+    });
 }
 
 /// End-of-run `(entry_total, exit_total, dropped_body_events)`; `None`
@@ -487,3 +615,7 @@ pub fn totals() -> Option<(u64, u64, u64)> {
     let w = s.writer.lock().expect("hle_watch writer");
     Some((w.entry_total, w.exit_total, w.dropped_body_events))
 }
+
+#[cfg(test)]
+#[path = "tests/hle_watch_wire_tests.rs"]
+mod wire_tests;

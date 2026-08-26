@@ -430,6 +430,48 @@ const TAG_RESERVED_REGION_READ: u8 = 0x0b;
 const TAG_SYSCALL_RETURNED: u8 = 0x0c;
 
 impl TraceRecord {
+    /// Tag byte that leads this record on the wire.
+    pub fn tag(&self) -> u8 {
+        match self {
+            TraceRecord::UnitScheduled { .. } => TAG_UNIT_SCHEDULED,
+            TraceRecord::StepCompleted { .. } => TAG_STEP_COMPLETED,
+            TraceRecord::CommitApplied { .. } => TAG_COMMIT_APPLIED,
+            TraceRecord::StateHashCheckpoint { .. } => TAG_STATE_HASH_CHECKPOINT,
+            TraceRecord::EffectEmitted { .. } => TAG_EFFECT_EMITTED,
+            TraceRecord::UnitBlocked { .. } => TAG_UNIT_BLOCKED,
+            TraceRecord::UnitWoken { .. } => TAG_UNIT_WOKEN,
+            TraceRecord::PpuStateHash { .. } => TAG_PPU_STATE_HASH,
+            TraceRecord::PpuStateFull { .. } => TAG_PPU_STATE_FULL,
+            TraceRecord::HostInvariantBreak { .. } => TAG_HOST_INVARIANT_BREAK,
+            TraceRecord::SyscallEntered { .. } => TAG_SYSCALL_ENTERED,
+            TraceRecord::ReservedRegionRead { .. } => TAG_RESERVED_REGION_READ,
+            TraceRecord::SyscallReturned { .. } => TAG_SYSCALL_RETURNED,
+        }
+    }
+
+    /// Encoded length, tag byte included, of a record led by `tag`;
+    /// `None` for a tag no variant owns. The single statement of each
+    /// variant's wire size: `encode` asserts against it and `decode`
+    /// bounds-checks with it before reading a field.
+    pub const fn encoded_len(tag: u8) -> Option<usize> {
+        Some(match tag {
+            TAG_UNIT_SCHEDULED => 1 + 8 * 4,
+            TAG_STEP_COMPLETED => 1 + 8 + 1 + 8 + 8,
+            TAG_COMMIT_APPLIED => 1 + 8 + 4 + 4 + 1 + 8,
+            TAG_STATE_HASH_CHECKPOINT => 1 + 1 + 8,
+            TAG_EFFECT_EMITTED => 1 + 8 + 4 + 1,
+            TAG_UNIT_BLOCKED => 1 + 8 + 1,
+            TAG_UNIT_WOKEN => 1 + 8 + 1,
+            TAG_PPU_STATE_HASH => 1 + 8 * 3,
+            TAG_PPU_STATE_FULL => 1 + 8 + 8 + 8 * 32 + 8 * 3 + 4 + 1 + 8,
+            TAG_HOST_INVARIANT_BREAK => 1 + 1,
+            TAG_SYSCALL_ENTERED => 1 + 8 + 8 + 8 * 8 + 1,
+            TAG_RESERVED_REGION_READ => 1 + 8 * 3 + 4 + 4,
+            TAG_SYSCALL_RETURNED => 1 + 8 * 3,
+            _ => return None,
+        })
+    }
+
     /// Trace level this record belongs to.
     pub fn level(&self) -> TraceLevel {
         match self {
@@ -451,6 +493,8 @@ impl TraceRecord {
 
     /// Append the binary encoding to `buf`.
     pub fn encode(&self, buf: &mut Vec<u8>) {
+        let start = buf.len();
+        buf.push(self.tag());
         match self {
             TraceRecord::UnitScheduled {
                 unit,
@@ -458,7 +502,6 @@ impl TraceRecord {
                 time,
                 epoch,
             } => {
-                buf.push(TAG_UNIT_SCHEDULED);
                 write_u64(buf, unit.raw());
                 write_u64(buf, granted_budget.raw());
                 write_u64(buf, time.raw());
@@ -470,7 +513,6 @@ impl TraceRecord {
                 consumed_cost,
                 time_after,
             } => {
-                buf.push(TAG_STEP_COMPLETED);
                 write_u64(buf, unit.raw());
                 buf.push(u8::from(*yield_reason));
                 write_u64(buf, consumed_cost.raw());
@@ -483,7 +525,6 @@ impl TraceRecord {
                 fault_discarded,
                 epoch_after,
             } => {
-                buf.push(TAG_COMMIT_APPLIED);
                 write_u64(buf, unit.raw());
                 write_u32(buf, *writes_committed);
                 write_u32(buf, *effects_deferred);
@@ -491,7 +532,6 @@ impl TraceRecord {
                 write_u64(buf, epoch_after.raw());
             }
             TraceRecord::StateHashCheckpoint { kind, hash } => {
-                buf.push(TAG_STATE_HASH_CHECKPOINT);
                 buf.push(u8::from(*kind));
                 write_u64(buf, hash.raw());
             }
@@ -500,23 +540,19 @@ impl TraceRecord {
                 sequence,
                 kind,
             } => {
-                buf.push(TAG_EFFECT_EMITTED);
                 write_u64(buf, unit.raw());
                 write_u32(buf, *sequence);
                 buf.push(u8::from(*kind));
             }
             TraceRecord::UnitBlocked { unit, reason } => {
-                buf.push(TAG_UNIT_BLOCKED);
                 write_u64(buf, unit.raw());
                 buf.push(u8::from(*reason));
             }
             TraceRecord::UnitWoken { unit, reason } => {
-                buf.push(TAG_UNIT_WOKEN);
                 write_u64(buf, unit.raw());
                 buf.push(u8::from(*reason));
             }
             TraceRecord::PpuStateHash { step, pc, hash } => {
-                buf.push(TAG_PPU_STATE_HASH);
                 write_u64(buf, *step);
                 write_u64(buf, *pc);
                 write_u64(buf, hash.raw());
@@ -531,7 +567,6 @@ impl TraceRecord {
                 cr,
                 reservation_line,
             } => {
-                buf.push(TAG_PPU_STATE_FULL);
                 write_u64(buf, *step);
                 write_u64(buf, *pc);
                 for r in gpr.iter() {
@@ -553,7 +588,6 @@ impl TraceRecord {
                 }
             }
             TraceRecord::HostInvariantBreak { reason } => {
-                buf.push(TAG_HOST_INVARIANT_BREAK);
                 buf.push(u8::from(*reason));
             }
             TraceRecord::SyscallEntered {
@@ -562,7 +596,6 @@ impl TraceRecord {
                 args,
                 disposition,
             } => {
-                buf.push(TAG_SYSCALL_ENTERED);
                 write_u64(buf, unit.raw());
                 write_u64(buf, *num);
                 for a in args.iter() {
@@ -577,7 +610,6 @@ impl TraceRecord {
                 len,
                 hits,
             } => {
-                buf.push(TAG_RESERVED_REGION_READ);
                 write_u64(buf, unit.raw());
                 write_u64(buf, *step);
                 write_u64(buf, *addr);
@@ -585,18 +617,36 @@ impl TraceRecord {
                 write_u32(buf, *hits);
             }
             TraceRecord::SyscallReturned { unit, code, time } => {
-                buf.push(TAG_SYSCALL_RETURNED);
                 write_u64(buf, unit.raw());
                 write_u64(buf, *code);
                 write_u64(buf, time.raw());
             }
         }
+        debug_assert_eq!(
+            Some(buf.len() - start),
+            Self::encoded_len(self.tag()),
+            "encode wrote a different length than encoded_len declares for tag 0x{:02x}",
+            self.tag()
+        );
     }
 
     /// Decode the next record from `bytes`, returning the record and bytes consumed.
+    ///
+    /// # Errors
+    ///
+    /// [`DecodeError::UnknownTag`] for a tag no variant owns,
+    /// [`DecodeError::Truncated`] when `bytes` is shorter than that
+    /// tag's [`encoded_len`](Self::encoded_len), and the per-field
+    /// variants when a byte inside the record is out of range.
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize), DecodeError> {
         let mut pos = 0usize;
         let tag = read_u8(bytes, &mut pos)?;
+        let Some(len) = Self::encoded_len(tag) else {
+            return Err(DecodeError::UnknownTag(tag));
+        };
+        if bytes.len() < len {
+            return Err(DecodeError::Truncated);
+        }
         let record = match tag {
             TAG_UNIT_SCHEDULED => {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
@@ -790,3 +840,7 @@ fn read_u64(bytes: &[u8], pos: &mut usize) -> Result<u64, DecodeError> {
 #[cfg(test)]
 #[path = "tests/record_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/record_len_tests.rs"]
+mod len_tests;

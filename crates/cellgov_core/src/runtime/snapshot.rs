@@ -1,11 +1,8 @@
 //! `RuntimeSnapshot`: data-only capture of every cloneable
 //! [`Runtime`] field, used by [`Runtime::snapshot`] /
-//! [`Runtime::restore_into`]. Fields absent from the struct survive a
-//! restore untouched: the unit factories, the spawn loader, the
-//! [`cellgov_dma::DmaLatencyModel`], the
-//! [`Scheduler`](crate::scheduler::Scheduler), the audit counters, and
-//! the per-step scratch buffers. The two
-//! [`cellgov_trace::TraceWriter`]s are cleared instead.
+//! [`Runtime::restore_into`]. Which fields a restore leaves untouched
+//! is decided in [`snapshot_field_categories`], the compile-time
+//! destructure beside the struct.
 //!
 //! # Cost
 //!
@@ -52,7 +49,7 @@ use cellgov_time::Budget;
 use super::{Runtime, RuntimeMode};
 
 /// Cloneable capture of a [`Runtime`]'s mutable state at a single
-/// step boundary. See module doc for excluded fields.
+/// step boundary; `snapshot_field_categories` lists what it leaves out.
 #[derive(Clone)]
 pub struct RuntimeSnapshot {
     pub(super) registry: UnitRegistry,
@@ -90,6 +87,63 @@ pub struct RuntimeSnapshot {
     captured_max_steps: usize,
     captured_mode: RuntimeMode,
 }
+
+/// Every [`Runtime`] field, sorted into captured, asserted-unchanged,
+/// and left alone by a restore. A field added to `Runtime` fails to
+/// compile here until it is placed in one of the three groups.
+fn snapshot_field_categories(rt: &Runtime) {
+    let Runtime {
+        // --- captured and restored ---
+        registry: _,
+        mailbox_registry: _,
+        signal_registry: _,
+        reservations: _,
+        rsx_cursor: _,
+        rsx_sem_offset: _,
+        rsx_mirror_writes: _,
+        rsx_flip: _,
+        rsx_methods: _,
+        pending_rsx_effects: _,
+        dma_queue: _,
+        timer_wakes: _,
+        lv2_host: _,
+        syscall_responses: _,
+        commit_pipeline: _,
+        memory: _,
+        spaces: _,
+        time: _,
+        epoch: _,
+        steps_taken: _,
+        last_scheduled_unit: _,
+        step_woke_others: _,
+        per_step_index: _,
+        pending_tag_completions: _,
+        pending_child_inits: _,
+        rsx_call_stack: _,
+        rsx_consume_fifo: _,
+        rsx_label_base: _,
+        // --- captured for assert-unchanged, not restored ---
+        budget_per_step: _,
+        max_steps: _,
+        mode: _,
+        // --- left alone by a restore ---
+        dma_latency: _,                   // set once at construction
+        spu_factory: _,                   // set once at construction
+        ppu_factory: _,                   // set once at construction
+        process_spawn_loader: _,          // host-installed closure, like the factories
+        scheduler: _,                     // caller reinstalls after restore
+        trace: _,                         // cleared on restore
+        zoom_trace: _,                    // cleared on restore
+        effects_buf: _,                   // cleared on restore (per-step scratch)
+        scheduler_dirty_after_restore: _, // set true by restore
+        rsx_label_writes_committed: _,    // audit counter, host-side only
+        rsx_set_reference_dispatches: _,  // audit counter, host-side only
+        timer_sleep_dispatches: _,        // audit counter, host-side only
+        lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
+    } = rt;
+}
+
+const _: fn(&Runtime) = snapshot_field_categories;
 
 impl Runtime {
     /// Capture a deep clone of this runtime's mutable state. See

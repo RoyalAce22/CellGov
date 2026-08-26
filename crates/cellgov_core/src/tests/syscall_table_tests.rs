@@ -769,7 +769,7 @@ fn state_hash_wire_bytes_match_the_hash() {
                 mutex_id,
                 mutex_kind,
             } => {
-                b.push(4);
+                b.push(5);
                 b.extend_from_slice(&mutex_id.to_le_bytes());
                 // Pins the impl's `*mutex_kind as u8`: prepending a
                 // CondMutexKind variant would silently renumber it.
@@ -782,7 +782,7 @@ fn state_hash_wire_bytes_match_the_hash() {
                 result_ptr,
                 observed,
             } => {
-                b.push(5);
+                b.push(4);
                 b.extend_from_slice(&result_ptr.to_le_bytes());
                 b.extend_from_slice(&observed.to_le_bytes());
             }
@@ -951,7 +951,7 @@ fn state_hash_wire_format_golden() {
             caller: 0x0100_0001,
         },
     );
-    const EXPECTED: u64 = 17_424_432_054_441_055_533;
+    const EXPECTED: u64 = 4_393_602_243_601_789_630;
     let h = t.state_hash();
     assert_eq!(
         h, EXPECTED,
@@ -976,7 +976,7 @@ fn state_hash_wire_format_golden_event_flag_cancel_wake() {
             observed: 0x0F0F_0F0F,
         },
     );
-    const EXPECTED: u64 = 10_832_948_308_064_764_049;
+    const EXPECTED: u64 = 16_294_822_156_021_057_518;
     let h = t.state_hash();
     assert_eq!(
         h, EXPECTED,

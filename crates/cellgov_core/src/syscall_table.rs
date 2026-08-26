@@ -26,9 +26,9 @@ pub struct SyscallResponseTable {
 const MAX_PENDING_RESPONSES: usize = 65_536;
 
 /// Wire-format version prepended to [`SyscallResponseTable::state_hash`].
-/// Bumping this constant requires updating
-/// `tests::state_hash_wire_format_golden`'s `EXPECTED` in the same commit.
-const STATE_HASH_FORMAT_VERSION: u64 = 4;
+/// Bumping this constant requires updating the `EXPECTED` of both
+/// `tests::state_hash_wire_format_golden*` tests in the same commit.
+const STATE_HASH_FORMAT_VERSION: u64 = 5;
 
 impl SyscallResponseTable {
     /// Construct an empty table.
@@ -148,13 +148,12 @@ impl SyscallResponseTable {
     ///
     /// Wire format: `STATE_HASH_FORMAT_VERSION` (u64 LE), entry count
     /// (u64 LE), then for each `(UnitId, PendingResponse)` pair in
-    /// ascending id order the id's u64 LE bytes, a 1-byte variant tag
-    /// (0..=7), and the variant's fixed-size fields. A variable-length
-    /// field added to a variant requires a new format version; a new
-    /// fixed-size variant takes the next free tag and leaves existing
-    /// encodings byte-identical. The tags are a private wire alphabet
-    /// independent of [`PendingResponse::variant_tag`]; this hash
-    /// folds into `Runtime::sync_state_hash` and every recorded
+    /// ascending id order the id's u64 LE bytes, the variant's
+    /// [`PendingResponse::variant_tag`] byte, and its fixed-size
+    /// fields. A variable-length field added to a variant requires a
+    /// new format version; a new fixed-size variant takes the next
+    /// `variant_tag` and leaves existing encodings byte-identical. This
+    /// hash folds into `Runtime::sync_state_hash` and every recorded
     /// state-hash stream.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
@@ -162,9 +161,9 @@ impl SyscallResponseTable {
         hasher.write(&(self.pending.len() as u64).to_le_bytes());
         for (unit, response) in &self.pending {
             hasher.write(&unit.raw().to_le_bytes());
+            hasher.write(&[response.variant_tag()]);
             match response {
                 PendingResponse::ReturnCode { code } => {
-                    hasher.write(&[0u8]);
                     hasher.write(&code.to_le_bytes());
                 }
                 PendingResponse::ThreadGroupJoin {
@@ -175,7 +174,6 @@ impl SyscallResponseTable {
                     cause,
                     status,
                 } => {
-                    hasher.write(&[1u8]);
                     hasher.write(&group_id.to_le_bytes());
                     hasher.write(&code.to_le_bytes());
                     hasher.write(&cause_ptr.to_le_bytes());
@@ -187,12 +185,10 @@ impl SyscallResponseTable {
                     target,
                     status_out_ptr,
                 } => {
-                    hasher.write(&[2u8]);
                     hasher.write(&target.to_le_bytes());
                     hasher.write(&status_out_ptr.to_le_bytes());
                 }
                 PendingResponse::EventQueueReceive { out_ptr, payload } => {
-                    hasher.write(&[3u8]);
                     hasher.write(&out_ptr.to_le_bytes());
                     match payload {
                         None => hasher.write(&[0u8]),
@@ -209,7 +205,6 @@ impl SyscallResponseTable {
                     mutex_id,
                     mutex_kind,
                 } => {
-                    hasher.write(&[4u8]);
                     hasher.write(&mutex_id.to_le_bytes());
                     hasher.write(&[*mutex_kind as u8]);
                 }
@@ -217,12 +212,10 @@ impl SyscallResponseTable {
                     result_ptr,
                     observed,
                 } => {
-                    hasher.write(&[5u8]);
                     hasher.write(&result_ptr.to_le_bytes());
                     hasher.write(&observed.to_le_bytes());
                 }
                 PendingResponse::LwMutexWake { mutex_ptr, caller } => {
-                    hasher.write(&[6u8]);
                     hasher.write(&mutex_ptr.to_le_bytes());
                     hasher.write(&caller.to_le_bytes());
                 }
@@ -230,7 +223,6 @@ impl SyscallResponseTable {
                     result_ptr,
                     observed,
                 } => {
-                    hasher.write(&[7u8]);
                     hasher.write(&result_ptr.to_le_bytes());
                     hasher.write(&observed.to_le_bytes());
                 }

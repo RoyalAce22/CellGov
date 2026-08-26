@@ -60,65 +60,8 @@ fn snapshot_then_restore_replays_to_same_terminal_state() {
         original_hash, restored_hash,
         "terminal memory hash diverged after snapshot/restore replay",
     );
-    // Field completeness is guarded by
-    // `_snapshot_field_exhaustiveness_compile_guard`, not this replay.
-}
-
-/// Compile-time field-completeness guard: a no-rest destructure of
-/// every [`Runtime`] field, so adding a field breaks compilation here
-/// until it is categorized as snapshot-captured, excluded, or
-/// asserted-unchanged. Never called.
-#[allow(dead_code)]
-fn _snapshot_field_exhaustiveness_compile_guard(rt: &Runtime) {
-    let Runtime {
-        // --- snapshot-captured ---
-        registry: _,
-        mailbox_registry: _,
-        signal_registry: _,
-        reservations: _,
-        rsx_cursor: _,
-        rsx_sem_offset: _,
-        rsx_mirror_writes: _,
-        rsx_flip: _,
-        rsx_methods: _,
-        pending_rsx_effects: _,
-        dma_queue: _,
-        timer_wakes: _,
-        lv2_host: _,
-        syscall_responses: _,
-        commit_pipeline: _,
-        memory: _,
-        spaces: _,
-        time: _,
-        epoch: _,
-        steps_taken: _,
-        last_scheduled_unit: _,
-        step_woke_others: _,
-        per_step_index: _,
-        pending_tag_completions: _,
-        pending_child_inits: _,
-        rsx_call_stack: _,
-        rsx_consume_fifo: _,
-        rsx_label_base: _,
-        // --- captured for assert-unchanged, not restored ---
-        budget_per_step: _,
-        max_steps: _,
-        mode: _,
-        // --- excluded from restore; see module doc for category ---
-        dma_latency: _,                   // set-once at construction
-        spu_factory: _,                   // set-once at construction
-        ppu_factory: _,                   // set-once at construction
-        scheduler: _,                     // caller-replaced post-restore
-        trace: _,                         // cleared on restore
-        zoom_trace: _,                    // cleared on restore
-        effects_buf: _,                   // cleared on restore (per-step scratch)
-        scheduler_dirty_after_restore: _, // set true by restore
-        rsx_label_writes_committed: _,    // audit counter, host-side only
-        rsx_set_reference_dispatches: _,  // audit counter, host-side only
-        timer_sleep_dispatches: _,        // audit counter, host-side only
-        lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
-        process_spawn_loader: _,          // host-installed closure, like the factories
-    } = rt;
+    // Field completeness is guarded by `snapshot_field_categories`
+    // beside the struct, not this replay.
 }
 
 #[test]
