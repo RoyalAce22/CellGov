@@ -26,8 +26,6 @@ pub struct SyscallResponseTable {
 const MAX_PENDING_RESPONSES: usize = 65_536;
 
 /// Wire-format version prepended to [`SyscallResponseTable::state_hash`].
-/// Bumping this constant requires updating the `EXPECTED` of both
-/// `tests::state_hash_wire_format_golden*` tests in the same commit.
 const STATE_HASH_FORMAT_VERSION: u64 = 5;
 
 impl SyscallResponseTable {
@@ -150,11 +148,8 @@ impl SyscallResponseTable {
     /// (u64 LE), then for each `(UnitId, PendingResponse)` pair in
     /// ascending id order the id's u64 LE bytes, the variant's
     /// [`PendingResponse::variant_tag`] byte, and its fixed-size
-    /// fields. A variable-length field added to a variant requires a
-    /// new format version; a new fixed-size variant takes the next
-    /// `variant_tag` and leaves existing encodings byte-identical. This
-    /// hash folds into `Runtime::sync_state_hash` and every recorded
-    /// state-hash stream.
+    /// fields. This hash folds into `Runtime::sync_state_hash` and
+    /// every recorded state-hash stream.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
         hasher.write(&STATE_HASH_FORMAT_VERSION.to_le_bytes());

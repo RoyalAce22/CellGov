@@ -585,7 +585,7 @@ pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
 /// runtime; the cross-runner classifier covers them under the same
 /// `HleOpdSlot` rule as the primary table.
 ///
-/// Observed layout (SSHD NPUA80068, WipEout BCES00664): header
+/// Observed layout in two retail title executables: header
 /// `04 02 NN 00  00 NN 00 00` with NN a sequence-number byte, then
 /// 0x60 bytes of slots; two adjacent tables per title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

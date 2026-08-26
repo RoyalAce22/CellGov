@@ -1,4 +1,4 @@
-//! Snapshot/restore replay fidelity, container independence, and field-completeness guards.
+//! Snapshot/restore replay fidelity and container independence.
 
 use super::*;
 use crate::scheduler::RoundRobinScheduler;
@@ -60,8 +60,6 @@ fn snapshot_then_restore_replays_to_same_terminal_state() {
         original_hash, restored_hash,
         "terminal memory hash diverged after snapshot/restore replay",
     );
-    // Field completeness is guarded by `snapshot_field_categories`
-    // beside the struct, not this replay.
 }
 
 #[test]
@@ -280,7 +278,7 @@ fn a_pending_timer_wake_alone_shifts_sync_state_hash() {
 #[test]
 fn restore_into_carries_audit_counters_forward() {
     // Audit counters are cumulative host-side instruments that never
-    // feed the commit pipeline; see the snapshot.rs module doc.
+    // feed the commit pipeline.
     let mut rt = make_runtime_with_two_writers();
     let snap = rt.snapshot();
 

@@ -426,9 +426,7 @@ impl Lv2Host {
     /// inside the mmapper window, push a `PendingRegionInstall`,
     /// write the actual mapped address back to `*alloc_addr_ptr`.
     ///
-    /// Oracle: RPCS3
-    /// `tools/rpcs3-src/rpcs3/Emu/Cell/lv2/sys_mmapper.cpp`
-    /// `sys_mmapper_search_and_map`.
+    /// Oracle: RPCS3 `sys_mmapper.cpp` `sys_mmapper_search_and_map`.
     /// RPCS3 calls `area->alloc(...)` which searches the area; the
     /// out-pointer receives the actually mapped address, not the
     /// caller's hint.

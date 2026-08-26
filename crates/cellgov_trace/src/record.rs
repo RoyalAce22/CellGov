@@ -450,9 +450,7 @@ impl TraceRecord {
     }
 
     /// Encoded length, tag byte included, of a record led by `tag`;
-    /// `None` for a tag no variant owns. The single statement of each
-    /// variant's wire size: `encode` asserts against it and `decode`
-    /// bounds-checks with it before reading a field.
+    /// `None` for a tag no variant owns.
     pub const fn encoded_len(tag: u8) -> Option<usize> {
         Some(match tag {
             TAG_UNIT_SCHEDULED => 1 + 8 * 4,

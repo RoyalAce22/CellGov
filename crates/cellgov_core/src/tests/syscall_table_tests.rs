@@ -960,10 +960,9 @@ fn state_hash_wire_format_golden() {
     );
 }
 
-/// Golden for the cancel-wake variant (tag 7). Separate from
-/// [`state_hash_wire_format_golden`] so that golden's unchanged
-/// `EXPECTED` keeps proving the pre-existing encodings did not move
-/// when this variant was added.
+/// Golden for the cancel-wake variant (tag 7), separate from
+/// [`state_hash_wire_format_golden`] so adding a variant leaves that
+/// golden's `EXPECTED` untouched.
 #[test]
 fn state_hash_wire_format_golden_event_flag_cancel_wake() {
     use cellgov_event::UnitId;

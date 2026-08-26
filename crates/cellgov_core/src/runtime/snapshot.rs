@@ -136,9 +136,9 @@ fn snapshot_field_categories(rt: &Runtime) {
         zoom_trace: _,                    // cleared on restore
         effects_buf: _,                   // cleared on restore (per-step scratch)
         scheduler_dirty_after_restore: _, // set true by restore
-        rsx_label_writes_committed: _,    // audit counter, host-side only
-        rsx_set_reference_dispatches: _,  // audit counter, host-side only
-        timer_sleep_dispatches: _,        // audit counter, host-side only
+        rsx_label_writes_committed: _,    // host-side counter only
+        rsx_set_reference_dispatches: _,  // host-side counter only
+        timer_sleep_dispatches: _,        // host-side counter only
         lv2_direct_committed_writes: _,   // staging-bypass witness, host-side only
     } = rt;
 }
@@ -147,7 +147,7 @@ const _: fn(&Runtime) = snapshot_field_categories;
 
 impl Runtime {
     /// Capture a deep clone of this runtime's mutable state. See
-    /// the module doc for excluded fields and cost notes.
+    /// the module doc for cost notes.
     ///
     /// # Panics
     ///

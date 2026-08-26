@@ -5,8 +5,7 @@ use std::collections::BTreeSet;
 
 use super::*;
 
-/// One instance of every variant; a new variant must be added here
-/// or `every_known_tag_has_a_sample` fails.
+/// One instance of every variant.
 fn one_of_each() -> Vec<TraceRecord> {
     vec![
         TraceRecord::UnitScheduled {
