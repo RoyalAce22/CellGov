@@ -37,7 +37,9 @@ pub struct RunGameOptions<'a> {
     pub dump_mem_boot_addrs: &'a [u64],
     pub dump_mem_fault_ranges: &'a [(u64, u64)],
     pub save_observation: Option<&'a str>,
-    pub observation_manifest: Option<&'a str>,
+    /// Regions from a `--observation-manifest` the caller already
+    /// parsed; `None` captures one region per PT_LOAD segment.
+    pub observation_regions: Option<&'a [cellgov_compare::RegionDescriptor]>,
     pub save_boot_summary: Option<&'a str>,
     pub save_state_trace: Option<&'a str>,
     pub strict_reserved: bool,
@@ -97,7 +99,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         dump_mem_boot_addrs,
         dump_mem_fault_ranges,
         save_observation,
-        observation_manifest,
+        observation_regions,
         save_boot_summary,
         save_state_trace,
         strict_reserved,
@@ -333,7 +335,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             &final_spaces,
             boot_outcome,
             steps,
-            observation_manifest,
+            observation_regions,
             &rt.lv2_host().observability().tty_log,
         )
         .map_err(RunError::SaveObservation)?;

@@ -1,28 +1,8 @@
 //! Checkpoint observation capture for `run-game --save-observation`.
 //!
-//! `CheckpointManifest` shares the schema `bridges/rpcs3_to_observation/`
-//! consumes so both runners read the same TOML when comparing runs.
-
-use serde::Deserialize;
-
-/// Region list in a checkpoint observation manifest.
-#[derive(Debug, Deserialize)]
-pub(super) struct CheckpointManifest {
-    pub(super) regions: Vec<CheckpointRegion>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(super) struct CheckpointRegion {
-    pub(super) name: String,
-    /// Address space the region lives in; 0 (the default) is the boot
-    /// process's, a spawned child's is numbered from 1 in spawn order.
-    #[serde(default)]
-    pub(super) space: u32,
-    #[serde(deserialize_with = "de_hex_u64")]
-    pub(super) addr: u64,
-    #[serde(deserialize_with = "de_hex_u64")]
-    pub(super) size: u64,
-}
+//! The region manifest is `cellgov_compare::CheckpointManifest`, the
+//! schema the RPCS3 bridge reads too, and the caller parses it before
+//! the boot starts.
 
 /// Highest end address of any PT_LOAD segment whose vaddr falls in
 /// `[0x00010000, 0x10000000)`. Segments above that range share no
@@ -95,29 +75,9 @@ pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
     max_end
 }
 
-fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
-    let s = String::deserialize(d)?;
-    let trimmed = s.strip_prefix("0x").unwrap_or(&s);
-    u64::from_str_radix(trimmed, 16).map_err(serde::de::Error::custom)
-}
-
 /// Why writing the boot-checkpoint observation JSON failed.
 #[derive(Debug, thiserror::Error)]
 pub enum ObservationSaveError {
-    /// Reading the region manifest failed.
-    #[error("read {path}: {source}")]
-    ManifestRead {
-        path: String,
-        #[source]
-        source: std::io::Error,
-    },
-    /// Parsing the region manifest TOML failed.
-    #[error("parse {path}: {source}")]
-    ManifestParse {
-        path: String,
-        #[source]
-        source: toml::de::Error,
-    },
     /// Enumerating PT_LOAD segments from the ELF failed.
     #[error("failed to enumerate PT_LOAD: {source}")]
     PtLoadEnum {
@@ -170,48 +130,26 @@ pub enum ObservationSaveError {
 /// Build a boot-checkpoint observation and write it as JSON.
 ///
 /// Regions default to one per PT_LOAD segment, named
-/// `seg{index}_{ro|rw}`. With `manifest_path`, regions come from
-/// the TOML manifest instead -- cross-runner comparison relies on
+/// `seg{index}_{ro|rw}`. With `manifest_regions`, the caller's parsed
+/// manifest names them instead -- cross-runner comparison relies on
 /// both runners reading the same file for matching region names.
 ///
 /// # Errors
 ///
-/// Returns [`ObservationSaveError`] on any I/O, parse, or
-/// serialization failure, or when a manifest region names an address
-/// space the run never created.
+/// Returns [`ObservationSaveError`] on any I/O or serialization
+/// failure, or when a manifest region names an address space the run
+/// never created.
 pub(super) fn save_boot_observation(
     path: &str,
     elf_data: &[u8],
     final_spaces: &cellgov_compare::SpaceSnapshots,
     outcome: cellgov_compare::BootOutcome,
     steps: usize,
-    manifest_path: Option<&str>,
+    manifest_regions: Option<&[cellgov_compare::RegionDescriptor]>,
     tty_log: &[u8],
 ) -> Result<(), ObservationSaveError> {
-    let regions: Vec<cellgov_compare::RegionDescriptor> = match manifest_path {
-        Some(mp) => {
-            let text = std::fs::read_to_string(mp).map_err(|source| {
-                ObservationSaveError::ManifestRead {
-                    path: mp.to_string(),
-                    source,
-                }
-            })?;
-            let manifest: CheckpointManifest =
-                toml::from_str(&text).map_err(|source| ObservationSaveError::ManifestParse {
-                    path: mp.to_string(),
-                    source,
-                })?;
-            manifest
-                .regions
-                .into_iter()
-                .map(|r| cellgov_compare::RegionDescriptor {
-                    name: r.name,
-                    space: cellgov_compare::AddressSpaceId::new(r.space),
-                    addr: r.addr,
-                    size: r.size,
-                })
-                .collect()
-        }
+    let regions: Vec<cellgov_compare::RegionDescriptor> = match manifest_regions {
+        Some(named) => named.to_vec(),
         None => {
             let segments = cellgov_ppu::loader::pt_load_segments(elf_data)
                 .map_err(|source| ObservationSaveError::PtLoadEnum { source })?;

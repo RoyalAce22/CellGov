@@ -1,18 +1,19 @@
 //! Observation assembly from raw RPCS3 dumps: manifest-ordered slicing, truncation rejection, and outcome parsing.
 
 use super::*;
+use cellgov_compare::checkpoint_manifest::CheckpointRegion;
 use cellgov_compare::observation::ObservedOutcome;
 
-fn manifest_fixture() -> Manifest {
-    Manifest {
+fn manifest_fixture() -> CheckpointManifest {
+    CheckpointManifest {
         regions: vec![
-            ManifestRegion {
+            CheckpointRegion {
                 name: "first".into(),
                 space: 0,
                 addr: 0x10000,
                 size: 4,
             },
-            ManifestRegion {
+            CheckpointRegion {
                 name: "second".into(),
                 space: 0,
                 addr: 0x20000,
@@ -37,7 +38,7 @@ fn a_region_outside_space_zero_is_refused_by_name() {
 
 #[test]
 fn the_space_field_defaults_to_zero_when_absent() {
-    let manifest: Manifest = toml::from_str(
+    let manifest: CheckpointManifest = toml::from_str(
         r#"
 [[regions]]
 name = "code"
@@ -52,7 +53,7 @@ size = "0x10"
 
 #[test]
 fn a_negative_space_is_a_parse_error_not_space_zero() {
-    let bad = toml::from_str::<Manifest>(
+    let bad = toml::from_str::<CheckpointManifest>(
         r#"
 [[regions]]
 name = "code"
@@ -167,7 +168,7 @@ fn checkpoint_manifest_parses_and_fits_guest_memory() {
         .join("checkpoint.toml");
     let text =
         std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let m: Manifest = toml::from_str(&text).expect("manifest parses");
+    let m: CheckpointManifest = toml::from_str(&text).expect("manifest parses");
     check_manifest(&m).expect("the committed checkpoint manifest passes the gate");
 
     const GUEST_MEM: u64 = 0x4000_0000;
@@ -194,7 +195,7 @@ fn manifest_parses_hex_addresses() {
         addr = "0x10000"
         size = "0x800000"
     "#;
-    let m: Manifest = toml::from_str(toml).unwrap();
+    let m: CheckpointManifest = toml::from_str(toml).unwrap();
     assert_eq!(m.regions[0].addr, 0x10000);
     assert_eq!(m.regions[0].size, 0x800000);
 }
@@ -386,15 +387,15 @@ fn a_dump_longer_than_the_manifest_is_rejected() {
 
 #[test]
 fn a_manifest_that_repeats_a_region_name_is_rejected() {
-    let manifest = Manifest {
+    let manifest = CheckpointManifest {
         regions: vec![
-            ManifestRegion {
+            CheckpointRegion {
                 name: "result".into(),
                 space: 0,
                 addr: 0,
                 size: 4,
             },
-            ManifestRegion {
+            CheckpointRegion {
                 name: "result".into(),
                 space: 0,
                 addr: 16,
@@ -410,7 +411,7 @@ fn a_manifest_that_repeats_a_region_name_is_rejected() {
 
 #[test]
 fn a_manifest_with_no_regions_is_rejected() {
-    let manifest = Manifest { regions: vec![] };
+    let manifest = CheckpointManifest { regions: vec![] };
     assert!(matches!(
         check_manifest(&manifest).expect_err("nothing to extract"),
         Rpcs3BridgeError::ManifestHasNoRegions

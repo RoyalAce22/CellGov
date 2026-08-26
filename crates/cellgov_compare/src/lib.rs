@@ -11,6 +11,7 @@
 pub mod baseline;
 pub mod boot_history;
 pub mod boot_summary;
+pub mod checkpoint_manifest;
 pub mod classify;
 pub mod compare;
 pub mod diverge;
@@ -34,6 +35,7 @@ mod test_support;
 
 pub use boot_summary::{BootSummary, BootSummaryError, CheckpointKind};
 pub use cellgov_core::AddressSpaceId;
+pub use checkpoint_manifest::{CheckpointManifest, CheckpointManifestError, CheckpointRegion};
 pub use classify::{classify, ClassifierContext, DivergenceClass, ELF_HEADER_SIZE};
 pub use compare::{
     compare, compare_multi, Classification, CompareMode, CompareResult, EventDivergence,

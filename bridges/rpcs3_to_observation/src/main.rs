@@ -20,40 +20,15 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+use cellgov_compare::checkpoint_manifest::{self, CheckpointManifest, CheckpointManifestError};
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedOutcome,
 };
 use cellgov_compare::runner_rpcs3::{parse_tty_log, TtyRegion};
-use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-
-/// Region list in dump order; the RPCS3 patch writes regions in the same order.
-#[derive(Debug, Deserialize)]
-struct Manifest {
-    regions: Vec<ManifestRegion>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ManifestRegion {
-    name: String,
-    /// Address space; RPCS3 runs one guest process, so only space 0 is
-    /// capturable.
-    #[serde(default)]
-    space: u32,
-    #[serde(deserialize_with = "de_hex_u64")]
-    addr: u64,
-    #[serde(deserialize_with = "de_hex_u64")]
-    size: u64,
-}
-
-fn de_hex_u64<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
-    let s = String::deserialize(d)?;
-    let trimmed = s.strip_prefix("0x").unwrap_or(&s);
-    u64::from_str_radix(trimmed, 16).map_err(serde::de::Error::custom)
-}
 
 /// Where the region bytes come from. RPCS3 produces one or the
 /// other: a binary memory dump from the checkpoint hook, or its
@@ -249,16 +224,9 @@ enum Rpcs3BridgeError {
          sits outside the hash -- pass it as --decoder instead."
     )]
     ConfigHashMismatch { supplied: u64, expected: u64 },
-    /// Reading the manifest file failed.
-    #[error("read manifest {}: {source}", path.display())]
-    ManifestRead {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    /// Parsing the manifest TOML failed.
-    #[error("parse manifest: {0}")]
-    ManifestParse(#[source] toml::de::Error),
+    /// The manifest file could not be read or is not a manifest.
+    #[error("manifest: {0}")]
+    Manifest(#[from] CheckpointManifestError),
     /// Reading the dump file failed.
     #[error("read dump {}: {source}", path.display())]
     DumpRead {
@@ -380,7 +348,7 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
 ///
 /// Returns `Err` on an empty region list, on two regions sharing a
 /// name, or on a region outside space 0.
-fn check_manifest(manifest: &Manifest) -> Result<(), Rpcs3BridgeError> {
+fn check_manifest(manifest: &CheckpointManifest) -> Result<(), Rpcs3BridgeError> {
     if manifest.regions.is_empty() {
         return Err(Rpcs3BridgeError::ManifestHasNoRegions);
     }
@@ -413,7 +381,7 @@ fn check_manifest(manifest: &Manifest) -> Result<(), Rpcs3BridgeError> {
 /// regions: short of them, or longer than their total.
 fn slice_dump(
     dump: &[u8],
-    manifest: &Manifest,
+    manifest: &CheckpointManifest,
 ) -> Result<Vec<NamedMemoryRegion>, Rpcs3BridgeError> {
     let mut cursor: usize = 0;
     let mut regions = Vec::with_capacity(manifest.regions.len());
@@ -508,13 +476,7 @@ fn run(args: Args) -> Result<(), Rpcs3BridgeError> {
     check_config_hash(args.config_hash)?;
     check_output_names_decoder(&args.output, args.decoder)?;
 
-    let manifest_text =
-        fs::read_to_string(&args.manifest).map_err(|source| Rpcs3BridgeError::ManifestRead {
-            path: args.manifest.clone(),
-            source,
-        })?;
-    let manifest: Manifest =
-        toml::from_str(&manifest_text).map_err(Rpcs3BridgeError::ManifestParse)?;
+    let manifest = checkpoint_manifest::load(&args.manifest)?;
     check_manifest(&manifest)?;
 
     let regions = match &args.capture {

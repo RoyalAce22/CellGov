@@ -157,7 +157,20 @@ pub(crate) fn run_game(args: &[String]) {
     // the host-side scans below.
     let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
     let args = &args[..];
-    let inputs = resolve_boot_inputs(args, "run-game", true);
+    // Every flag is parsed before the boot inputs resolve: a malformed
+    // artifact request must cost seconds, not the run it would have
+    // saved.
+    let save_observation = find_flag_value(args, "--save-observation");
+    let observation_manifest = find_flag_value(args, "--observation-manifest");
+    if observation_manifest.is_some() && save_observation.is_none() {
+        die("--observation-manifest is meaningless without --save-observation");
+    }
+    let observation_regions: Option<Vec<cellgov_compare::RegionDescriptor>> =
+        observation_manifest.as_deref().map(|path| {
+            cellgov_compare::checkpoint_manifest::load(std::path::Path::new(path))
+                .unwrap_or_else(|e| die(&format!("--observation-manifest: {e}")))
+                .region_descriptors()
+        });
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000);
     let trace = has_bool_flag(args, "--trace");
     let profile = has_bool_flag(args, "--profile");
@@ -176,8 +189,6 @@ pub(crate) fn run_game(args: &[String]) {
     let patch_bytes: Vec<(u64, u8)> = find_flag_value(args, "--patch-byte")
         .map(|v| parse_patch_byte_csv(&v))
         .unwrap_or_default();
-    let save_observation = find_flag_value(args, "--save-observation");
-    let observation_manifest = find_flag_value(args, "--observation-manifest");
     let save_boot_summary = find_flag_value(args, "--save-boot-summary");
     let save_state_trace = find_flag_value(args, "--save-state-trace");
     let strict_reserved = has_bool_flag(args, "--strict-reserved");
@@ -185,6 +196,7 @@ pub(crate) fn run_game(args: &[String]) {
     let budget_override: Option<Budget> =
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
     let prescan = has_bool_flag(args, "--prescan");
+    let inputs = resolve_boot_inputs(args, "run-game", true);
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -201,7 +213,7 @@ pub(crate) fn run_game(args: &[String]) {
         dump_mem_boot_addrs: &dump_mem_boot_addrs,
         dump_mem_fault_ranges: &dump_mem_fault_ranges,
         save_observation: save_observation.as_deref(),
-        observation_manifest: observation_manifest.as_deref(),
+        observation_regions: observation_regions.as_deref(),
         save_boot_summary: save_boot_summary.as_deref(),
         save_state_trace: save_state_trace.as_deref(),
         strict_reserved,

@@ -1,4 +1,4 @@
-//! ELF user-region sizing, checkpoint-manifest parsing, and boot-summary wire shape.
+//! ELF user-region sizing and boot-summary wire shape.
 
 use super::*;
 
@@ -57,78 +57,6 @@ fn elf_user_region_end_rejects_non_elf_input() {
     assert_eq!(elf_user_region_end(&[0u8; 4]), 0);
 }
 
-fn parse(text: &str) -> CheckpointManifest {
-    toml::from_str(text).expect("parses")
-}
-
-#[test]
-fn checkpoint_manifest_parses_hex_addresses() {
-    let m = parse(
-        r#"
-        [[regions]]
-        name = "code"
-        addr = "0x10000"
-        size = "0x800000"
-
-        [[regions]]
-        name = "rodata"
-        addr = "0x10000000"
-        size = "0x40000"
-        "#,
-    );
-    assert_eq!(m.regions.len(), 2);
-    let CheckpointRegion {
-        ref name,
-        space,
-        addr,
-        size,
-    } = m.regions[0];
-    assert_eq!(name, "code");
-    assert_eq!(space, 0, "an absent space field means the boot space");
-    assert_eq!(addr, 0x10000);
-    assert_eq!(size, 0x800000);
-    assert_eq!(m.regions[1].addr, 0x1000_0000);
-    assert_eq!(m.regions[1].size, 0x40000);
-}
-
-#[test]
-fn checkpoint_manifest_carries_a_child_space() {
-    let m = parse(
-        r#"
-        [[regions]]
-        name = "child_result"
-        space = 1
-        addr = "0x100"
-        size = "0x10"
-        "#,
-    );
-    assert_eq!(m.regions[0].space, 1);
-}
-
-#[test]
-fn checkpoint_manifest_rejects_a_negative_space() {
-    let bad = toml::from_str::<CheckpointManifest>(
-        r#"
-        [[regions]]
-        name = "r"
-        space = -1
-        addr = "0x100"
-        size = "0x10"
-        "#,
-    );
-    assert!(
-        bad.is_err(),
-        "a negative space cannot name any address space and must not wrap"
-    );
-}
-
-fn temp_path(name: &str, ext: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "cellgov_observation_{name}_{}.{ext}",
-        std::process::id()
-    ))
-}
-
 fn snapshots_with(spaces: &[(u32, cellgov_mem::GuestMemory)]) -> cellgov_compare::SpaceSnapshots {
     spaces
         .iter()
@@ -136,19 +64,25 @@ fn snapshots_with(spaces: &[(u32, cellgov_mem::GuestMemory)]) -> cellgov_compare
         .collect()
 }
 
-const CHILD_REGION_MANIFEST: &str = r#"
-[[regions]]
-name = "child_result"
-space = 1
-addr = "0x100"
-size = "0x4"
-"#;
+fn child_result_region() -> Vec<cellgov_compare::RegionDescriptor> {
+    vec![cellgov_compare::RegionDescriptor {
+        name: "child_result".into(),
+        space: cellgov_compare::AddressSpaceId::new(1),
+        addr: 0x100,
+        size: 4,
+    }]
+}
+
+fn temp_path(name: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "cellgov_observation_{name}_{}.json",
+        std::process::id()
+    ))
+}
 
 #[test]
 fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
-    let manifest = temp_path("missing_space", "toml");
-    std::fs::write(&manifest, CHILD_REGION_MANIFEST).expect("write manifest");
-    let out = temp_path("missing_space", "json");
+    let out = temp_path("missing_space");
     let spaces = snapshots_with(&[(0, cellgov_mem::GuestMemory::new(0x1000))]);
 
     let err = save_boot_observation(
@@ -157,7 +91,7 @@ fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
         &spaces,
         cellgov_compare::BootOutcome::ProcessExit,
         0,
-        Some(manifest.to_str().unwrap()),
+        Some(&child_result_region()),
         &[],
     )
     .expect_err("space 1 was never created");
@@ -177,14 +111,11 @@ fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
         !out.exists(),
         "a refused manifest must not leave a zero-filled observation behind"
     );
-    std::fs::remove_file(&manifest).expect("remove temp manifest");
 }
 
 #[test]
 fn a_region_in_a_created_child_space_captures_that_space() {
-    let manifest = temp_path("child_space", "toml");
-    std::fs::write(&manifest, CHILD_REGION_MANIFEST).expect("write manifest");
-    let out = temp_path("child_space", "json");
+    let out = temp_path("child_space");
     let mut child = cellgov_mem::GuestMemory::new(0x1000);
     let range =
         cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x100), 4).expect("4-byte range");
@@ -199,7 +130,7 @@ fn a_region_in_a_created_child_space_captures_that_space() {
         &spaces,
         cellgov_compare::BootOutcome::ProcessExit,
         0,
-        Some(manifest.to_str().unwrap()),
+        Some(&child_result_region()),
         &[],
     )
     .expect("space 1 exists");
@@ -212,50 +143,7 @@ fn a_region_in_a_created_child_space_captures_that_space() {
         vec![0xDE, 0xAD, 0xBE, 0xEF],
         "the bytes come from space 1, whose boot-space twin at the same address is zero"
     );
-    std::fs::remove_file(&manifest).expect("remove temp manifest");
     std::fs::remove_file(&out).expect("remove temp observation");
-}
-
-#[test]
-fn checkpoint_manifest_accepts_unprefixed_hex() {
-    let m = parse(
-        r#"
-        [[regions]]
-        name = "r"
-        addr = "1000"
-        size = "10"
-        "#,
-    );
-    assert_eq!(m.regions[0].addr, 0x1000);
-    assert_eq!(m.regions[0].size, 0x10);
-}
-
-#[test]
-fn checkpoint_manifest_rejects_non_hex_value() {
-    let bad = toml::from_str::<CheckpointManifest>(
-        r#"
-        [[regions]]
-        name = "r"
-        addr = "not-hex"
-        size = "10"
-        "#,
-    );
-    assert!(bad.is_err(), "non-hex addr must fail");
-}
-
-#[test]
-fn checkpoint_manifest_loads_committed_fixture() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("tests")
-        .join("fixtures")
-        .join("NPUA80001")
-        .join("checkpoint.toml");
-    let text = std::fs::read_to_string(&path).expect("read");
-    let m: CheckpointManifest = toml::from_str(&text).expect("parses");
-    assert!(!m.regions.is_empty());
-    assert!(m.regions.iter().any(|r| r.name == "code"));
 }
 
 mod boot_summary_cross_check {
