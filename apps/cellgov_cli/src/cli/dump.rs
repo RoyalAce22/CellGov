@@ -174,6 +174,13 @@ fn dump_trace(result: &ScenarioResult) {
                     unit.raw(),
                 );
             }
+            TraceRecord::SyscallReturned { unit, code, time } => {
+                println!(
+                    "{i:4}  SyscallReturned    unit={} code=0x{code:x} time={}",
+                    unit.raw(),
+                    time.raw()
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

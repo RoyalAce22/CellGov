@@ -36,7 +36,7 @@ impl Runtime {
 
         let fail = |rt: &mut Self, pid: u32, code: u64| {
             rt.lv2_host.unbind_spawned_process(pid);
-            rt.registry.set_syscall_return(source, code);
+            rt.deliver_syscall_return(source, code);
         };
 
         if self.process_spawn_loader.is_none() || self.ppu_factory.is_none() {
@@ -181,7 +181,7 @@ impl Runtime {
         // commit_bytes_at is host-state corruption.
         self.commit_bytes_at(caller_space, u64::from(pid_out_ptr), &pid.to_be_bytes());
         self.step_woke_others = true;
-        self.registry.set_syscall_return(source, 0);
+        self.deliver_syscall_return(source, 0);
     }
 
     /// Finish exactly `pid`'s units and record its exit status; the

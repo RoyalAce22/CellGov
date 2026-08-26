@@ -696,3 +696,30 @@ fn reserved_region_read_tag_is_0x0b() {
     );
     assert_eq!(r.level(), TraceLevel::Hashes);
 }
+
+#[test]
+fn syscall_returned_encode_decode_roundtrip() {
+    roundtrip(TraceRecord::SyscallReturned {
+        unit: UnitId::new(5),
+        code: 0x8001_0002,
+        time: GuestTicks::new(123_456),
+    });
+}
+
+#[test]
+fn syscall_returned_tag_is_0x0c() {
+    let r = TraceRecord::SyscallReturned {
+        unit: UnitId::new(0),
+        code: 0,
+        time: GuestTicks::ZERO,
+    };
+    let mut buf = Vec::new();
+    r.encode(&mut buf);
+    assert_eq!(buf[0], 0x0c);
+    assert_eq!(
+        buf.len(),
+        25,
+        "documented wire size: 1 tag + unit, code, time as u64"
+    );
+    assert_eq!(r.level(), TraceLevel::Scheduling);
+}

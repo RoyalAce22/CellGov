@@ -55,7 +55,7 @@ impl Runtime {
             let pending = self.syscall_responses.try_take(waiter);
             match pending {
                 Some(PendingResponse::ReturnCode { code }) => {
-                    self.registry.set_syscall_return(waiter, code);
+                    self.deliver_syscall_return(waiter, code);
                 }
                 Some(PendingResponse::EventQueueReceive { out_ptr, payload }) => {
                     let payload = payload.unwrap_or_else(|| {
@@ -70,7 +70,7 @@ impl Runtime {
                     buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
                     buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
                     self.commit_bytes_at(waiter_space, out_ptr as u64, &buf);
-                    self.registry.set_syscall_return(waiter, 0);
+                    self.deliver_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::EventFlagWake {
                     result_ptr,
@@ -87,7 +87,7 @@ impl Runtime {
                             &observed.to_be_bytes(),
                         );
                     }
-                    self.registry.set_syscall_return(waiter, 0);
+                    self.deliver_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::EventFlagCancelWake {
                     result_ptr,
@@ -104,7 +104,7 @@ impl Runtime {
                             &observed.to_be_bytes(),
                         );
                     }
-                    self.registry.set_syscall_return(
+                    self.deliver_syscall_return(
                         waiter,
                         cellgov_ps3_abi::cell_errors::CELL_ECANCELED.into(),
                     );
@@ -157,7 +157,7 @@ impl Runtime {
                     if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
                         self.lv2_host.lwmutex_holds_inc(tid);
                     }
-                    self.registry.set_syscall_return(waiter, 0);
+                    self.deliver_syscall_return(waiter, 0);
                 }
                 Some(PendingResponse::CondWakeReacquire { .. }) => {
                     unreachable!(
@@ -290,7 +290,7 @@ impl Runtime {
                     code
                 }
             };
-            self.registry.set_syscall_return(waiter_id, code);
+            self.deliver_syscall_return(waiter_id, code);
             self.registry
                 .set_status_override(waiter_id, UnitStatus::Runnable);
         }

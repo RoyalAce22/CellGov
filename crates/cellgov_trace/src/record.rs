@@ -419,6 +419,19 @@ pub enum TraceRecord {
         /// Reads of exactly this `(addr, len)` since the previous drain.
         hits: u32,
     },
+    /// The value a syscall handed back to its caller, emitted when the
+    /// runtime stores it for the caller's next step: in the dispatching
+    /// commit for an immediate return, at wake time for a call that
+    /// blocked. Pairs with the caller's most recent
+    /// [`SyscallEntered`](Self::SyscallEntered).
+    SyscallReturned {
+        /// Caller the value is delivered to.
+        unit: UnitId,
+        /// Value written to the caller's `r3`.
+        code: u64,
+        /// Guest-time clock when the value was delivered.
+        time: GuestTicks,
+    },
 }
 
 const TAG_UNIT_SCHEDULED: u8 = 0x00;
@@ -433,6 +446,7 @@ const TAG_PPU_STATE_FULL: u8 = 0x08;
 const TAG_HOST_INVARIANT_BREAK: u8 = 0x09;
 const TAG_SYSCALL_ENTERED: u8 = 0x0a;
 const TAG_RESERVED_REGION_READ: u8 = 0x0b;
+const TAG_SYSCALL_RETURNED: u8 = 0x0c;
 
 impl TraceRecord {
     /// Trace level this record belongs to.
@@ -450,6 +464,7 @@ impl TraceRecord {
             TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
             TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,
+            TraceRecord::SyscallReturned { .. } => TraceLevel::Scheduling,
         }
     }
 
@@ -587,6 +602,12 @@ impl TraceRecord {
                 write_u64(buf, *addr);
                 write_u32(buf, *len);
                 write_u32(buf, *hits);
+            }
+            TraceRecord::SyscallReturned { unit, code, time } => {
+                buf.push(TAG_SYSCALL_RETURNED);
+                write_u64(buf, unit.raw());
+                write_u64(buf, *code);
+                write_u64(buf, time.raw());
             }
         }
     }
@@ -738,6 +759,12 @@ impl TraceRecord {
                     len,
                     hits,
                 }
+            }
+            TAG_SYSCALL_RETURNED => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let code = read_u64(bytes, &mut pos)?;
+                let time = GuestTicks::new(read_u64(bytes, &mut pos)?);
+                TraceRecord::SyscallReturned { unit, code, time }
             }
             other => return Err(DecodeError::UnknownTag(other)),
         };

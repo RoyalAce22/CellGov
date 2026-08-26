@@ -36,7 +36,7 @@ impl Runtime {
                      install one via set_ppu_factory. No thread created",
                 ),
             );
-            self.registry.set_syscall_return(source, CELL_E2BIG.into());
+            self.deliver_syscall_return(source, CELL_E2BIG.into());
             return;
         };
         let seed: PpuThreadInitState = init.clone();
@@ -70,7 +70,7 @@ impl Runtime {
                      child unit {child_unit_id:?} left registered as Finished",
                 ),
             );
-            self.registry.set_syscall_return(source, CELL_ENOMEM.into());
+            self.deliver_syscall_return(source, CELL_ENOMEM.into());
             return;
         };
 
@@ -117,7 +117,7 @@ impl Runtime {
                         caller_space.raw(),
                     ),
                 );
-                self.registry.set_syscall_return(source, CELL_ENOMEM.into());
+                self.deliver_syscall_return(source, CELL_ENOMEM.into());
                 return;
             }
             self.assign_unit_space(child_unit_id, caller_space)
@@ -135,6 +135,6 @@ impl Runtime {
             u64::from(id_ptr),
             &thread_id.raw().to_be_bytes(),
         );
-        self.registry.set_syscall_return(source, 0);
+        self.deliver_syscall_return(source, 0);
     }
 }

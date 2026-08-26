@@ -855,3 +855,163 @@ fn a_faulting_step_still_traces_the_reserved_reads_it_consumed_before_the_fault(
         "the commit adds no reads of its own"
     );
 }
+
+fn syscall_records(rt: &Runtime) -> Vec<(bool, u64, u64, u64)> {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    TraceReader::new(rt.trace().bytes())
+        .map(|r| r.expect("decode"))
+        .filter_map(|r| match r {
+            TraceRecord::SyscallEntered { unit, num, .. } => Some((true, unit.raw(), num, 0)),
+            TraceRecord::SyscallReturned { unit, code, time } => {
+                Some((false, unit.raw(), code, time.raw()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn an_immediate_syscall_return_is_traced_in_the_dispatching_commit() {
+    let mut rt = build(4096, 4, 100);
+    let mut args = [0u64; 9];
+    args[0] = 999;
+    let unit_id = rt.registry_mut().register_with(|id| Lv2SyscallEmitterUnit {
+        id,
+        steps: Cell::new(0),
+        syscall_args: args,
+    });
+    let s = rt.step().unwrap();
+    assert!(
+        syscall_records(&rt).iter().all(|r| r.0),
+        "nothing is returned before the commit dispatches the call"
+    );
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    let records = syscall_records(&rt);
+    assert_eq!(records.len(), 2, "one entry and one return: {records:?}");
+    assert_eq!(records[0], (true, unit_id.raw(), 999, 0));
+    let (is_entry, unit, code, time) = records[1];
+    assert!(!is_entry);
+    assert_eq!(unit, unit_id.raw());
+    assert_eq!(
+        time,
+        rt.time().raw(),
+        "delivered at the dispatching commit's clock"
+    );
+    let delivered = rt
+        .registry_mut()
+        .drain_syscall_return(unit_id)
+        .expect("the value is pending for the caller's next step");
+    assert_eq!(
+        code, delivered,
+        "the traced value is the one the caller will see in r3"
+    );
+}
+
+/// Parks on `sys_timer_usleep(50)` and finishes on its next scheduling.
+#[derive(Clone)]
+struct ParkingUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+}
+
+impl ExecutionUnit for ParkingUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 2 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        if n == 1 {
+            let mut args = [0u64; 9];
+            args[0] = cellgov_ps3_abi::syscall::TIMER_USLEEP;
+            args[1] = 50;
+            ExecutionStepResult {
+                yield_reason: YieldReason::Syscall,
+                consumed_cost: InstructionCost::new(budget.raw()),
+                local_diagnostics: LocalDiagnostics::with_pc(0x1000),
+                fault: None,
+                syscall_args: Some(args),
+            }
+        } else {
+            ExecutionStepResult {
+                yield_reason: YieldReason::Finished,
+                consumed_cost: InstructionCost::new(1),
+                local_diagnostics: LocalDiagnostics::empty(),
+                fault: None,
+                syscall_args: None,
+            }
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn a_blocked_syscall_traces_its_return_at_wake_time_not_at_dispatch() {
+    let mut rt = build(4096, 16, 100);
+    let unit_id = rt.registry_mut().register_with(|id| ParkingUnit {
+        id,
+        steps: Cell::new(0),
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    let park_time = rt.time();
+    assert!(
+        syscall_records(&rt).iter().all(|r| r.0),
+        "a parked call has no return to trace yet"
+    );
+
+    // Everything is parked: this step time-warps to the deadline,
+    // fires the wake, and delivers r3 before the sleeper runs.
+    let s2 = rt.step().unwrap();
+    assert_eq!(s2.unit, unit_id);
+    let returns: Vec<_> = syscall_records(&rt).into_iter().filter(|r| !r.0).collect();
+    assert_eq!(returns.len(), 1, "{returns:?}");
+    let (_, unit, code, time) = returns[0];
+    assert_eq!(unit, unit_id.raw());
+    assert_eq!(code, 0, "usleep completes with CELL_OK");
+    assert_eq!(
+        time,
+        park_time.raw() + 50_000,
+        "delivered at the deadline the time-warp jumped to"
+    );
+}
+
+#[test]
+fn fault_driven_mode_delivers_syscall_returns_without_tracing_them() {
+    let mut rt = build(4096, 4, 100);
+    rt.set_mode(RuntimeMode::FaultDriven);
+    let mut args = [0u64; 9];
+    args[0] = 999;
+    let unit_id = rt.registry_mut().register_with(|id| Lv2SyscallEmitterUnit {
+        id,
+        steps: Cell::new(0),
+        syscall_args: args,
+    });
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+    assert!(syscall_records(&rt).is_empty());
+    assert!(
+        rt.registry_mut().drain_syscall_return(unit_id).is_some(),
+        "the value still reaches the caller"
+    );
+}

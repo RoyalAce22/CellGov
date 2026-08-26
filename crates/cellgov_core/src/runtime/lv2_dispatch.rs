@@ -345,7 +345,7 @@ impl Runtime {
         self.timer_sleep_dispatches = self.timer_sleep_dispatches.saturating_add(1);
         if usec == 0 {
             // Zero-interval sleep is a yield, not a park.
-            self.registry.set_syscall_return(source, 0);
+            self.deliver_syscall_return(source, 0);
             return;
         }
         let deadline = self.deadline_after_usec(usec);
@@ -360,6 +360,21 @@ impl Runtime {
             .insert(deadline, source, crate::timer_queue::TimerWakeKind::Sleep);
         self.registry
             .set_status_override(source, UnitStatus::Blocked);
+    }
+
+    /// Store a syscall's return value for `unit`'s next step and trace
+    /// it. Every path that resolves a syscall -- immediate, wake, timer
+    /// -- delivers through here, so the stream carries one
+    /// `SyscallReturned` per value the guest sees in `r3`.
+    pub(super) fn deliver_syscall_return(&mut self, unit: UnitId, code: u64) {
+        if self.mode != RuntimeMode::FaultDriven {
+            self.trace.record(&TraceRecord::SyscallReturned {
+                unit,
+                code,
+                time: self.time,
+            });
+        }
+        self.registry.set_syscall_return(unit, code);
     }
 
     /// Drain buffered LV2 invariant breaks at the boundary that
@@ -607,7 +622,7 @@ impl Runtime {
                 let _ = self.syscall_responses.try_take(*uid);
             }
         } else {
-            self.registry.set_syscall_return(source, code);
+            self.deliver_syscall_return(source, code);
         }
     }
 
@@ -667,7 +682,7 @@ impl Runtime {
                 }
             }
         }
-        self.registry.set_syscall_return(source, code);
+        self.deliver_syscall_return(source, code);
     }
 
     fn handle_block(&mut self, source: UnitId, pending: PendingResponse, effects: Vec<Effect>) {
@@ -727,7 +742,7 @@ impl Runtime {
                         status_out_ptr as u64,
                         &exit_value.to_be_bytes(),
                     );
-                    self.registry.set_syscall_return(waiter, 0);
+                    self.deliver_syscall_return(waiter, 0);
                 } else {
                     // A NULL out-pointer is never written -- the join
                     // itself still completes (the target is reaped),
@@ -735,13 +750,13 @@ impl Runtime {
                     // success (RPCS3 sys_ppu_thread.cpp
                     // sys_ppu_thread_join checks vptr only after the
                     // wait resolves and returns CELL_EFAULT for null).
-                    self.registry.set_syscall_return(
+                    self.deliver_syscall_return(
                         waiter,
                         cellgov_ps3_abi::cell_errors::CELL_EFAULT.into(),
                     );
                 }
             } else {
-                self.registry.set_syscall_return(waiter, exit_value);
+                self.deliver_syscall_return(waiter, exit_value);
             }
             self.registry
                 .set_status_override(waiter, UnitStatus::Runnable);
@@ -774,7 +789,7 @@ impl Runtime {
     ) {
         let caller_space = self.spaces.space_of(source);
         self.apply_lv2_effects(&effects, caller_space);
-        self.registry.set_syscall_return(source, code);
+        self.deliver_syscall_return(source, code);
         self.assert_response_updates_valid(
             "handle_wake_and_return",
             &woken_unit_ids,
