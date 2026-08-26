@@ -10,7 +10,9 @@ use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_BASE;
 
 use crate::cli::exit::die;
-use crate::game::diag::{append_syscall_ring, fetch_raw_at, format_fault};
+use crate::game::diag::{
+    append_pc_ring_with_decode, append_syscall_ring, fetch_raw_at, format_fault,
+};
 use crate::game::step_loop::tty::{classify_tty_capture, TtyCaptureDecision};
 use crate::game::step_loop::{RingCursor, PC_RING_SIZE, SYSCALL_RING_SIZE};
 
@@ -46,14 +48,17 @@ const HLE_STUBBED_MODULE_STARTS: &[&str] = &["cellSysutil_Library"];
 #[derive(Debug, thiserror::Error)]
 pub(in crate::game) enum ModuleStartError {
     /// Per-module step cap reached without the LR=0 return sentinel.
+    /// `detail` carries the same rings as [`Self::Stalled`]: a spin
+    /// names the dependency it polled through its syscall ring.
     #[error(
         "module_start: {module} did not return within {budget} steps \
-         (last pc=0x{last_pc:016x}); init likely spun on a missing dependency"
+         (last pc=0x{last_pc:016x}); init likely spun on a missing dependency{detail}"
     )]
     Incomplete {
         module: String,
         budget: usize,
         last_pc: u64,
+        detail: String,
     },
     /// The unit faulted at something other than the LR=0 sentinel.
     #[error("module_start: {module} faulted after {steps} steps:\n{detail}")]
@@ -71,15 +76,31 @@ pub(in crate::game) enum ModuleStartError {
     },
     /// Runtime scheduler reached a non-runnable state (stall / max-
     /// steps from `rt.max_steps`) before the module returned.
+    /// `detail` carries the last-PC and syscall rings so the stall
+    /// names the wait site it parked at.
     #[error(
         "module_start: {module} stalled after {steps} steps ({reason}); \
-         under unified runtime this is fail-fast"
+         under unified runtime this is fail-fast{detail}"
     )]
     Stalled {
         module: String,
         steps: usize,
         reason: String,
+        detail: String,
     },
+}
+
+fn stall_detail(
+    rt: &Runtime,
+    pc_ring: &[u64; PC_RING_SIZE],
+    pc_cursor: &RingCursor,
+    sc_ring: &[(u64, u64); SYSCALL_RING_SIZE],
+    sc_cursor: &RingCursor,
+) -> String {
+    let mut text = String::new();
+    append_pc_ring_with_decode(&mut text, rt, pc_ring, pc_cursor);
+    append_syscall_ring(&mut text, sc_ring, sc_cursor);
+    text
 }
 
 /// Drive a single PRX's `module_start` on the supplied `Runtime`.
@@ -178,6 +199,7 @@ pub(in crate::game) fn run_module_start(
                 module: prx_info.name.clone(),
                 budget: PER_MODULE_STEP_BUDGET,
                 last_pc,
+                detail: stall_detail(rt, &pc_ring, &pc_cursor, &sc_ring, &sc_cursor),
             });
         }
         match rt.step() {
@@ -271,25 +293,19 @@ pub(in crate::game) fn run_module_start(
                     });
                 }
             }
-            Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
-                break Err(ModuleStartError::Stalled {
-                    module: prx_info.name.clone(),
-                    steps,
-                    reason: "NoRunnableUnit/AllBlocked".to_string(),
-                });
-            }
-            Err(StepError::MaxStepsExceeded) => {
-                break Err(ModuleStartError::Stalled {
-                    module: prx_info.name.clone(),
-                    steps,
-                    reason: "MaxStepsExceeded (runtime cap)".to_string(),
-                });
-            }
             Err(e) => {
+                let reason = match e {
+                    StepError::NoRunnableUnit | StepError::AllBlocked => {
+                        "NoRunnableUnit/AllBlocked".to_string()
+                    }
+                    StepError::MaxStepsExceeded => "MaxStepsExceeded (runtime cap)".to_string(),
+                    other => format!("{other:?}"),
+                };
                 break Err(ModuleStartError::Stalled {
                     module: prx_info.name.clone(),
                     steps,
-                    reason: format!("{e:?}"),
+                    reason,
+                    detail: stall_detail(rt, &pc_ring, &pc_cursor, &sc_ring, &sc_cursor),
                 });
             }
         }
@@ -489,3 +505,7 @@ fn handle_module_start_tty(args: &[u64; 9], mem: &cellgov_mem::GuestMemory) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/module_start_tests.rs"]
+mod tests;

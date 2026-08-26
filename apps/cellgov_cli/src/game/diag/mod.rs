@@ -15,7 +15,7 @@ pub(super) use fault::{format_commit_fault, format_deadlock, format_fault};
 pub(super) use helpers::{
     ascii_safe_preview, fetch_raw_at, format_hle_idx, longest_readable_prefix, region_label_at,
 };
-pub(super) use rings::{append_orphan_exit_info, append_syscall_ring};
+pub(super) use rings::{append_orphan_exit_info, append_pc_ring_with_decode, append_syscall_ring};
 pub(super) use summary::{
     print_hle_summary, print_insn_coverage, print_shadow_stats, print_top_pcs,
 };
