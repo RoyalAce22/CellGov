@@ -52,6 +52,8 @@ default-members = [
 edition = "2021"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
+authors = ["Aidan Bennie / RoyalAce"]
+repository = "https://github.com/RoyalAce22/CellGov"
 
 [workspace.dependencies]
 criterion = { version = "0.5", default-features = false }

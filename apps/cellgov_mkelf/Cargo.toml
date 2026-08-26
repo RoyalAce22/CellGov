@@ -4,6 +4,8 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+authors.workspace = true
+repository.workspace = true
 
 [dependencies]
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
