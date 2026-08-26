@@ -406,3 +406,61 @@ fn inverted_range_panics_disjoint_check_in_debug() {
     };
     ctx.debug_assert_disjoint();
 }
+
+fn region_with_word(addr: u64, offset: usize, word: u32) -> NamedMemoryRegion {
+    let mut r = region("data", addr, 0x100);
+    r.data[offset..offset + 4].copy_from_slice(&word.to_be_bytes());
+    r
+}
+
+#[test]
+fn a_word_holding_each_runners_kernel_id_shape_classifies_without_a_populated_range() {
+    let a = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
+    let b = region_with_word(0x860000, 0x40, 0x8500_0300);
+    let ctx = ClassifierContext::default();
+    // The bytes differ at 0x40 (0x40 vs 0x85), agree at 0x41 (0x00),
+    // and differ at 0x42..0x44: two runs on one word.
+    assert_eq!(
+        classify(&div(0x40, 1), a.addr, &ctx, &a.data, &b.data),
+        DivergenceClass::SyncPrimitiveId
+    );
+    assert_eq!(
+        classify(&div(0x42, 2), a.addr, &ctx, &a.data, &b.data),
+        DivergenceClass::SyncPrimitiveId
+    );
+    assert_eq!(
+        classify(&div(0x40, 4), b.addr, &ctx, &b.data, &a.data),
+        DivergenceClass::SyncPrimitiveId,
+        "sides may arrive in either order"
+    );
+}
+
+#[test]
+fn a_word_with_only_one_kernel_id_shape_stays_unclassified() {
+    let ctx = ClassifierContext::default();
+    let cg = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
+    let zero = region_with_word(0x860000, 0x40, 0);
+    assert_eq!(
+        classify(&div(0x40, 4), cg.addr, &ctx, &cg.data, &zero.data),
+        DivergenceClass::Unclassified,
+        "a handle CellGov minted against nothing on the other side is a real gap"
+    );
+    let rpcs3 = region_with_word(0x860000, 0x40, 0x8500_0300);
+    assert_eq!(
+        classify(&div(0x40, 4), rpcs3.addr, &ctx, &rpcs3.data, &zero.data),
+        DivergenceClass::Unclassified
+    );
+}
+
+#[test]
+fn a_run_crossing_a_word_boundary_is_not_a_handle_pair() {
+    let ctx = ClassifierContext::default();
+    let mut a = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
+    let mut b = region_with_word(0x860000, 0x40, 0x8500_0300);
+    a.data[0x44] = 1;
+    b.data[0x44] = 2;
+    assert_eq!(
+        classify(&div(0x40, 5), a.addr, &ctx, &a.data, &b.data),
+        DivergenceClass::Unclassified
+    );
+}

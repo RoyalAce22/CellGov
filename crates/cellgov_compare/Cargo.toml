@@ -20,6 +20,9 @@ rpcs3-runner = []
 # Region descriptors name the address space they read from.
 cellgov_core = { path = "../cellgov_core" }
 cellgov_event = { path = "../cellgov_event" }
+# The sync-primitive classifier recognises CellGov's own kernel-id
+# shape by the allocator's first id.
+cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_mem = { path = "../cellgov_mem" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_testkit = { path = "../cellgov_testkit" }

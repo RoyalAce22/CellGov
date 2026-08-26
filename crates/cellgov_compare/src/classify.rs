@@ -52,13 +52,17 @@ pub enum DivergenceClass {
     /// cannot see.
     #[error("HleOpdSlot")]
     HleOpdSlot,
-    /// Bytes inside an LV2 sync-primitive user-side handle slot
-    /// (e.g. `sys_lwmutex_t::sleep_queue`). The field carries an
+    /// Bytes of an LV2 sync-primitive kernel handle. The value is an
     /// ABI-opaque kernel-allocated id consumed only through
     /// sync-primitive syscalls, so per-runner values differ (the two
     /// kernels run independent allocators) while every read resolves
-    /// to the same logical sync object. The populator must key only
-    /// on slots whose layout proves the field is a kernel handle.
+    /// to the same logical sync object. A handle is recognised two
+    /// ways: by a struct layout that proves the slot holds one
+    /// (`sys_lwmutex_t::sleep_queue`, `sys_lwcond_t::lwcond_queue`,
+    /// populated into `sync_primitive_id_ranges`), or by the 4-byte
+    /// word carrying each runner's allocator shape on its side
+    /// ([`kernel_handle_pair`](crate::sync_primitive_scan::kernel_handle_pair)),
+    /// which covers the by-value handles a title stores anywhere.
     #[error("SyncPrimitiveId")]
     SyncPrimitiveId,
     /// No populated context range contained this divergence run.
@@ -294,7 +298,42 @@ pub fn classify(
             return DivergenceClass::SyncPrimitiveId;
         }
     }
+    if let Some((a, b)) = word_pair_containing(start, end, region_addr, a_data, b_data) {
+        if crate::sync_primitive_scan::kernel_handle_pair(a, b).is_some() {
+            return DivergenceClass::SyncPrimitiveId;
+        }
+    }
     DivergenceClass::Unclassified
+}
+
+/// The aligned 4-byte word `[start, end)` lies inside, read from both
+/// regions, or `None` when the run crosses a word boundary or either
+/// region does not hold the word.
+///
+/// A run is a maximal span of differing bytes, so one differing word
+/// whose middle byte happens to agree arrives as two runs; both land
+/// on the same word and classify alike.
+fn word_pair_containing(
+    start: u64,
+    end: u64,
+    region_addr: u64,
+    a: &[u8],
+    b: &[u8],
+) -> Option<(u32, u32)> {
+    if start >= end {
+        return None;
+    }
+    let word = start & !3;
+    if (end - 1) & !3 != word {
+        return None;
+    }
+    let off = word.checked_sub(region_addr)? as usize;
+    let a4 = a.get(off..off + 4)?;
+    let b4 = b.get(off..off + 4)?;
+    Some((
+        u32::from_be_bytes(a4.try_into().expect("4-byte slice")),
+        u32::from_be_bytes(b4.try_into().expect("4-byte slice")),
+    ))
 }
 
 #[cfg(test)]

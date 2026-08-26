@@ -17,6 +17,15 @@ use super::mmapper::MmapperHandleTable;
 use super::process;
 use super::rsx::SysRsxContext;
 
+/// First id the shared kernel-id allocator hands out; every id the
+/// host mints outside `lwmutexes` (mutex, cond, semaphore, rwlock,
+/// timer, event queue / port / flag, memory container, mmapper
+/// handle, RSX event queue) is this plus a count. Non-zero so an
+/// uninitialised handle reads as unknown, and above every address
+/// this host maps (RSX window below, mmapper handouts above) so a
+/// handle never looks like a pointer.
+pub const FIRST_KERNEL_ID: u32 = 0x4000_0001;
+
 /// Guest-visible LV2 state; every field folds into the host state
 /// hash per [`Self::state_hash`]'s exhaustive-destructure contract.
 #[derive(Debug, Clone)]

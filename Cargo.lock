@@ -112,6 +112,7 @@ version = "0.0.0"
 dependencies = [
  "cellgov_core",
  "cellgov_event",
+ "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_testkit",

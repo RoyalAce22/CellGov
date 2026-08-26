@@ -50,4 +50,5 @@ pub use rsx::{
     PACKAGE_CELLGOV_SET_VBLANK_HANDLER,
 };
 pub use runtime::Lv2Runtime;
+pub use state::FIRST_KERNEL_ID;
 pub use system_ipc_witness::{is_system_ipc_key, SystemIpcWitness};

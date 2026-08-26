@@ -271,13 +271,27 @@ pub(crate) fn build_classifier_context(
     // title with several writable PT_LOADs keeps its lwmutexes in
     // whichever one the linker chose; the preamble match guards
     // against false positives.
-    let sync_primitive_id_ranges = observation
+    let mut sync_primitive_id_ranges: Vec<std::ops::Range<u64>> = observation
         .memory_regions
         .iter()
         .flat_map(|r| {
             cellgov_compare::sync_primitive_scan::find_sys_lwmutex_handle_slots(&r.data, r.addr)
         })
         .collect();
+    // An lwcond names the lwmutex it binds, so its slots are found
+    // against the lwmutex set of the same snapshot.
+    let lwcond_slots: Vec<std::ops::Range<u64>> = observation
+        .memory_regions
+        .iter()
+        .flat_map(|r| {
+            cellgov_compare::sync_primitive_scan::find_sys_lwcond_handle_slots(
+                &r.data,
+                r.addr,
+                &sync_primitive_id_ranges,
+            )
+        })
+        .collect();
+    sync_primitive_id_ranges.extend(lwcond_slots);
 
     let ctx = ClassifierContext {
         elf_header_range,

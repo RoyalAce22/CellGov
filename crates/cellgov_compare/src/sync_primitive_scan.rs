@@ -1,22 +1,36 @@
 //! Structural scan for LV2 sync-primitive handle slots in CG's
-//! runtime data snapshot.
+//! runtime data snapshot, plus the value-shape test for the handles
+//! no struct layout locates.
 //!
 //! The user-space `sys_lwmutex_t` carries a `sleep_queue` field at
 //! +0x10 that the firmware sysPrxForUser wrapper fills with the
-//! kernel-allocated lwmutex id after `_sys_lwmutex_create` returns.
-//! Two runners' id allocators produce different bytes for the same
-//! logical object. See
+//! kernel-allocated lwmutex id after `_sys_lwmutex_create` returns,
+//! and `sys_lwcond_t` carries its `lwcond_queue` id at +0x04 behind
+//! a pointer to the lwmutex it binds. Two runners' id allocators
+//! produce different bytes for the same logical object. See
 //! [`crate::classify::DivergenceClass::SyncPrimitiveId`] for the
 //! inertness warrant.
 //!
-//! The scanner walks a runtime data segment for the `sys_lwmutex_t`
-//! preamble and yields the 4-byte `sleep_queue` range per match.
-//! It runs against CG's snapshot, not the EBOOT: the preamble's
-//! `lwmutex_free` sentinel and `attribute` value are only present
-//! after the title's user-space init has run.
+//! The scanners walk a runtime data segment for those preambles and
+//! yield the 4-byte handle range per match. They run against CG's
+//! snapshot, not the EBOOT: the preamble's `lwmutex_free` sentinel
+//! and `attribute` value are only present after the title's
+//! user-space init has run.
+//!
+//! Every other LV2 primitive (mutex, cond, semaphore, event queue,
+//! event port, event flag, rwlock, timer) hands the title a bare
+//! `u32` id it stores wherever it likes, so no layout finds those.
+//! [`kernel_handle_pair`] recognises one instead by the value shape
+//! both runners' allocators impose: CellGov's ids count up from
+//! [`FIRST_KERNEL_ID`], RPCS3's are a per-kind base plus an index
+//! step (RPCS3 `Emu/IdManager.h` `id_traits`, `Emu/Cell/lv2/sys_sync.h`
+//! `lv2_obj`). A word carrying one shape per side is a handle.
 
-use cellgov_mem::be::read_u32;
+use std::collections::BTreeSet;
 use std::ops::Range;
+
+use cellgov_lv2::FIRST_KERNEL_ID;
+use cellgov_mem::be::read_u32;
 
 /// Byte offset of the `sleep_queue` field within `sys_lwmutex_t`.
 /// Matches RPCS3's `sys_lwmutex.h` struct layout.
@@ -96,6 +110,148 @@ pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u
         i += 4;
     }
     out
+}
+
+/// Byte offset of the `lwcond_queue` field within `sys_lwcond_t`.
+/// Matches RPCS3's `sys_lwcond.h` struct layout: a pointer to the
+/// bound `sys_lwmutex_t`, then the lwcond pseudo-id.
+pub const LWCOND_QUEUE_OFFSET: usize = 0x4;
+
+/// Total size of `sys_lwcond_t`.
+pub const SYS_LWCOND_T_SIZE: usize = 0x8;
+
+/// Ids CellGov's shared kernel-id allocator can have handed out in a
+/// boot; titles create well under this many objects.
+const CELLGOV_KERNEL_ID_MAX_PLAUSIBLE_COUNT: u32 = 0x0001_0000;
+
+/// `true` when `w` is a handle CellGov's shared allocator minted.
+fn is_cellgov_kernel_id(w: u32) -> bool {
+    (FIRST_KERNEL_ID..FIRST_KERNEL_ID.saturating_add(CELLGOV_KERNEL_ID_MAX_PLAUSIBLE_COUNT))
+        .contains(&w)
+}
+
+/// `true` when `w` is a handle CellGov's lwmutex allocator minted
+/// (that allocator counts from 1).
+fn is_cellgov_lwmutex_id(w: u32) -> bool {
+    (1..SLEEP_QUEUE_MAX_PLAUSIBLE).contains(&w)
+}
+
+/// Walk `data` for `sys_lwcond_t` instances bound to an lwmutex the
+/// lwmutex scan found, returning the guest-address range of each
+/// instance's `lwcond_queue` field.
+///
+/// `lwmutex_slots` is [`find_sys_lwmutex_handle_slots`]'s output for
+/// the same snapshot; an instance qualifies only when its `lwmutex`
+/// pointer names one of those structs and its `lwcond_queue` holds a
+/// CellGov kernel id, so a stray pointer-shaped word never matches.
+///
+/// # Panics
+///
+/// When a slot in `lwmutex_slots` starts below [`SLEEP_QUEUE_OFFSET`]:
+/// no `sys_lwmutex_t` can hold it, so the slot did not come from the
+/// lwmutex scan.
+pub fn find_sys_lwcond_handle_slots(
+    data: &[u8],
+    data_base: u64,
+    lwmutex_slots: &[Range<u64>],
+) -> Vec<Range<u64>> {
+    let lwmutex_bases: BTreeSet<u64> = lwmutex_slots
+        .iter()
+        .map(|slot| {
+            slot.start
+                .checked_sub(SLEEP_QUEUE_OFFSET as u64)
+                .unwrap_or_else(|| {
+                    panic!("lwmutex handle slot {slot:#x?} starts below its struct base")
+                })
+        })
+        .collect();
+    let mut out = Vec::new();
+    if lwmutex_bases.is_empty() || data.len() < SYS_LWCOND_T_SIZE {
+        return out;
+    }
+    let mut i = 0usize;
+    while i + SYS_LWCOND_T_SIZE <= data.len() {
+        let lwmutex_ptr = u64::from(read_u32(data, i));
+        if lwmutex_bases.contains(&lwmutex_ptr) && is_cellgov_kernel_id(read_u32(data, i + 4)) {
+            let slot_addr = data_base + i as u64 + LWCOND_QUEUE_OFFSET as u64;
+            out.push(slot_addr..slot_addr + 4);
+            i += SYS_LWCOND_T_SIZE;
+            continue;
+        }
+        i += 4;
+    }
+    out
+}
+
+/// Which LV2 object an RPCS3 kernel id names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KernelHandleKind {
+    /// `sys_mutex`.
+    Mutex,
+    /// `sys_cond`.
+    Cond,
+    /// `sys_rwlock`.
+    RwLock,
+    /// `sys_event_queue`.
+    EventQueue,
+    /// `sys_lwmutex` (kernel side of the lightweight mutex).
+    LwMutex,
+    /// `sys_semaphore`.
+    Semaphore,
+    /// `sys_lwcond` (kernel side of the lightweight cond).
+    LwCond,
+    /// `sys_event_flag`.
+    EventFlag,
+}
+
+/// RPCS3's per-kind id bases: `id_base` in each `Emu/Cell/lv2/sys_*.h`
+/// object. Every kind shares `lv2_obj`'s `id_step = 0x100` and
+/// `id_count = 8192`, with the low byte reserved for the id manager's
+/// reuse counter (`sys_sync.h` `lv2_obj::id_invl_range`).
+///
+/// Only kinds whose id window lies outside memory a guest can map on
+/// either runner are listed. `sys_event_port` (base 0x0e) and
+/// `sys_timer` (base 0x11) sit inside RPCS3's main and user areas
+/// (RPCS3 `vm.cpp` `vm::init` block layout and `_find_map`), so a heap
+/// pointer there would pass as a handle and hide a real pointer
+/// divergence; those two kinds stay unclassified.
+const RPCS3_ID_BASES: &[(u32, KernelHandleKind)] = &[
+    (0x8500_0000, KernelHandleKind::Mutex),
+    (0x8600_0000, KernelHandleKind::Cond),
+    (0x8800_0000, KernelHandleKind::RwLock),
+    (0x8d00_0000, KernelHandleKind::EventQueue),
+    (0x9500_0000, KernelHandleKind::LwMutex),
+    (0x9600_0000, KernelHandleKind::Semaphore),
+    (0x9700_0000, KernelHandleKind::LwCond),
+    (0x9800_0000, KernelHandleKind::EventFlag),
+];
+const RPCS3_ID_STEP: u32 = 0x100;
+const RPCS3_ID_COUNT: u32 = 8192;
+
+/// The kind of LV2 object `w` names if it has RPCS3's kernel-id shape.
+pub fn rpcs3_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
+    let base = w & 0xff00_0000;
+    let (_, kind) = RPCS3_ID_BASES.iter().find(|(b, _)| *b == base)?;
+    let index = (w - base) / RPCS3_ID_STEP;
+    (index < RPCS3_ID_COUNT).then_some(*kind)
+}
+
+/// The kind of LV2 object a 4-byte word holds when one side carries
+/// RPCS3's kernel-id shape and the other CellGov's, in either order.
+///
+/// Two CellGov-shaped or two RPCS3-shaped words are not a pair: the
+/// comparison is then between like runners, where the same allocator
+/// produced both values and a difference is real.
+pub fn kernel_handle_pair(a: u32, b: u32) -> Option<KernelHandleKind> {
+    let pair = |rpcs3: u32, cellgov: u32| {
+        let kind = rpcs3_kernel_handle_kind(rpcs3)?;
+        let cellgov_shaped = match kind {
+            KernelHandleKind::LwMutex => is_cellgov_lwmutex_id(cellgov),
+            _ => is_cellgov_kernel_id(cellgov),
+        };
+        cellgov_shaped.then_some(kind)
+    };
+    pair(a, b).or_else(|| pair(b, a))
 }
 
 #[cfg(test)]

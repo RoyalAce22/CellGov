@@ -18,6 +18,7 @@ pub use dispatch::{
     SpuInitState,
 };
 pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
+pub use host::FIRST_KERNEL_ID;
 pub use host::{
     InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, ProcessEntry, ProcessTable,
     SystemStateSeed,

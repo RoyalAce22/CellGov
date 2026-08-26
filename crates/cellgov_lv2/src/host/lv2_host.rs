@@ -98,8 +98,8 @@ impl Lv2Host {
                 groups: ThreadGroupTable::new(),
                 ppu_threads: PpuThreadTable::new(),
                 stack_allocator: ThreadStackAllocator::new(),
-                next_kernel_id: 0x4000_0001, // non-zero to catch uninitialized use
-                mem_alloc_ptr: 0x0001_0000,  // PS3 user-memory region start
+                next_kernel_id: super::state::FIRST_KERNEL_ID,
+                mem_alloc_ptr: 0x0001_0000, // PS3 user-memory region start
                 mmapper_addr_cursor: Self::MMAPPER_REGION_START,
                 rsx_mem_alloc_ptr: Self::SYS_RSX_MEM_BASE,
                 rsx_mem_handle_counter: 1,

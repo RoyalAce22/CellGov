@@ -90,6 +90,7 @@ graph BT
 
   testkit --> compare
   core --> compare
+  lv2 --> compare
   trace --> compare
   event --> compare
   time --> compare
