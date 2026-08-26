@@ -5,21 +5,9 @@
 //! descriptor `{ u32 code, u32 toc }`. Starts are discovered in
 //! confidence order: anchor OPDs (the entry descriptor for a main
 //! ELF; every export descriptor for a PRX), a bidirectional grow
-//! scan around each anchor's descriptor, then a sweep of all
-//! non-executable file-backed bytes validated against the anchor
-//! TOC set. Prologue heuristics are not used: they miss every leaf
-//! function and misfire on mid-function LR saves.
-//!
-//! Scope: PPU OPD discovery only. Embedded SPU ELFs (EM_SPU,
-//! ELF32-BE) in non-exec segments are not mapped -- they fall
-//! through the OPD sweep silently. No producer reaches SPU
-//! dispatch yet, so SPU function discovery is deferred until a
-//! title drives it.
-//!
-//! A span's `end` is the next function start, clamped to the
-//! containing executable segment's file-backed range. Functions
-//! with multiple returns and tail calls make `blr`-scanning a
-//! heuristic; span-until-next-start is the honest contract.
+//! scan around each anchor, then a sweep of all non-executable
+//! file-backed bytes validated against the anchor TOC set. Embedded
+//! SPU ELFs in non-exec segments are not mapped.
 
 use core::fmt;
 

@@ -1,29 +1,11 @@
 //! Super-pairing pass: fuse adjacent decoded instructions into a
-//! single super-instruction variant when an idiom matches. Pure
-//! function; the shadow's `super_pair` method walks slot pairs and
-//! applies this, replacing the second slot with `Consumed`.
+//! single super-instruction variant when an idiom matches. Called by
+//! the shadow's `super_pair` walk, which is left-to-right and
+//! first-pair-wins: `lwz; cmpwi; bc` fuses to `LwzCmpwi + bc`, never
+//! `lwz + CmpwiBc`.
 //!
 //! [ErtlGregg2003 p:20 s:6.3] super-instruction fusion eliminates one dispatch per pair.
 //! [ErtlGregg2003 p:19 s:5.2.7] empirical effectiveness of super-instructions.
-//!
-//! # Pairing priority
-//!
-//! The walk is left-to-right and first-pair-wins: if slot k can fuse
-//! with slot k+1, the fusion takes slot k+2 out of any subsequent
-//! pairing decision involving k+1. The common three-instruction
-//! prologue `lwz; cmpwi; bc` therefore fuses to `LwzCmpwi + bc`
-//! rather than `lwz + CmpwiBc`. Both fusions remove one dispatch;
-//! the choice between them would require profiling data this pass
-//! does not have.
-//!
-//! # Variants not fused
-//!
-//! `cmplwi` (unsigned immediate compare) and `cmplw` (unsigned
-//! register compare) before a non-linking `bc` would mirror the
-//! `Cmpwi`/`Cmpw` paths but no fused variant exists yet -- the
-//! signed compares were profiled first. Adding `CmplwiBc` /
-//! `CmplwBc` would be a mechanical extension once profiling shows
-//! the unsigned forms above the project's >1% threshold.
 
 use crate::instruction::PpuInstruction;
 

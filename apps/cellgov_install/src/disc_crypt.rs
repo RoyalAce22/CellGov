@@ -1,23 +1,13 @@
-//! PS3 encrypted-disc (3k3y/redump) decryption: turn an encrypted
-//! BD-ROM image plus the user's disc key into a plaintext image the
-//! ISO9660 reader ([`crate::iso`]) can walk.
-//!
-//! A PS3 disc splits its sectors into unprotected (plaintext) and
-//! protected (AES-128-CBC encrypted) regions. The region table sits in
-//! cleartext at the head of the image. The content key is derived from
-//! the 16-byte `data1` -- the redump `.dkey` -- by a single-block
-//! AES-128-CBC encryption under a fixed secret/IV; each protected
-//! sector is then CBC-decrypted under that key with an IV carrying the
-//! big-endian sector number.
-//!
-//! RPCS3 has no disc-decryption path, reference here is the open-source
-//! PS3 Disc Dumper (`13xforever/ps3-disc-dumper`). Two files of that
-//! repo are the sources: `Decrypter.cs` for the key derivation,
-//! per-sector IV, and CBC decrypt (the fixed secret/IV are its
-//! published constants), and `IrdLibraryClient/IrdFormat/
-//! IsoHeaderParser.cs` `GetUnprotectedRegions` for the region-table
-//! layout at the image head (big-endian count, a reserved word, then
-//! `count` `(start, end)` sector pairs).
+//! PS3 encrypted-disc (3k3y/redump) decryption: turns an encrypted
+//! BD-ROM image plus its disc key into the plaintext image
+//! [`crate::iso`] walks. Protected sectors are AES-128-CBC under a
+//! key derived from the redump `.dkey` ([`decrypt_disc_key`]); the
+//! unprotected-region table at the image head is cleartext
+//! ([`read_unprotected_regions`]). RPCS3 has no disc-decryption path;
+//! the reference is the open-source PS3 Disc Dumper
+//! (`13xforever/ps3-disc-dumper`: `Decrypter.cs` for the key
+//! derivation and per-sector IV, `IsoHeaderParser.cs`
+//! `GetUnprotectedRegions` for the region table).
 
 use aes::cipher::{
     block_padding::NoPadding, generic_array::GenericArray, BlockDecryptMut, BlockEncryptMut,

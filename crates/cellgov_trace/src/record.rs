@@ -1,30 +1,11 @@
 //! Structured trace record types and their binary encoding.
 //!
-//! # Wire format
-//!
-//! Each record is a 1-byte tag followed by a fixed-length variant payload, all
-//! multi-byte integers little-endian. Tags, per-variant field layouts, and the
-//! discriminants of `TracedYieldReason`, `HashCheckpointKind`,
-//! `TracedEffectKind`, `TracedBlockReason`, `TracedWakeReason`,
-//! `TracedInvariantBreakReason`, and `TracedSyscallDisposition` are part of
-//! the binary trace contract; new record variants append with strictly greater
-//! tags. The current set is fixed-size, so there is no length field after the
-//! tag.
-//!
-//! | Tag    | Variant               | Bytes                                  |
-//! |--------|-----------------------|----------------------------------------|
-//! | `0x00` | `UnitScheduled`       | 1 + 8 + 8 + 8 + 8 = 33                 |
-//! | `0x01` | `StepCompleted`       | 1 + 8 + 1 + 8 + 8 = 26                 |
-//! | `0x02` | `CommitApplied`       | 1 + 8 + 4 + 4 + 1 + 8 = 26             |
-//! | `0x03` | `StateHashCheckpoint` | 1 + 1 + 8 = 10                         |
-//! | `0x04` | `EffectEmitted`       | 1 + 8 + 4 + 1 = 14                     |
-//! | `0x05` | `UnitBlocked`         | 1 + 8 + 1 = 10                         |
-//! | `0x06` | `UnitWoken`           | 1 + 8 + 1 = 10                         |
-//! | `0x07` | `PpuStateHash`        | 1 + 8 + 8 + 8 = 25                     |
-//! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 + 1 + 8 = 310 |
-//! | `0x09` | `HostInvariantBreak`  | 1 + 1 = 2                              |
-//! | `0x0a` | `SyscallEntered`      | 1 + 8 + 8 + 8*8 + 1 = 82               |
-//! | `0x0b` | `ReservedRegionRead`  | 1 + 8 + 8 + 8 + 4 + 4 = 33             |
+//! Each record is a 1-byte tag followed by a fixed-length variant
+//! payload, all multi-byte integers little-endian; there is no length
+//! field after the tag. Tags, per-variant field layouts, and the
+//! discriminants of every `Traced*` mirror enum and
+//! `HashCheckpointKind` are part of the binary trace contract; new
+//! record variants append with strictly greater tags.
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;

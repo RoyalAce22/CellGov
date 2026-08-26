@@ -20,49 +20,36 @@ use super::{
 };
 
 impl Runtime {
-    /// Apply an `Lv2Dispatch` effects batch by direct commit,
-    /// bypassing the commit pipeline's [`StagingMemory`].
+    /// Apply an `Lv2Dispatch` effects batch by direct commit into
+    /// `space`, bypassing the commit pipeline's [`StagingMemory`].
     ///
     /// The `SharedWriteIntent` subset commits all-or-none: a
-    /// validation failure logs a `dispatch.lv2_effect_apply_failed`
-    /// invariant break and lands none of the writes, while non-memory
-    /// effects still apply. A requested flip transitions
-    /// WAITING -> DONE on the next `commit_step` boundary, not during
-    /// the dispatching batch. Variants with no LV2 producer (e.g.
-    /// `RsxLabelWrite`, `DmaEnqueue`) are dropped with a named
-    /// invariant break; they belong to the unit-effect path through
-    /// `commit_pipeline.process`.
+    /// validation failure logs `dispatch.lv2_effect_apply_failed` and
+    /// lands none of the writes, while non-memory effects still apply.
+    /// A requested flip transitions on the next `commit_step`
+    /// boundary. Variants with no LV2 producer are dropped with a
+    /// named invariant break.
+    ///
+    /// These mutations do not participate in atomic-batch
+    /// discard-on-fault: the syscall has already returned its result
+    /// to the guest by the time the containing batch finalizes, so
+    /// syscall-side state persists even when the batch's unit-staged
+    /// effects are discarded. `Runtime::commit_step` drains staged
+    /// unit effects first and calls this function second, so an LV2
+    /// write lands after any same-batch unit store to the same range.
     ///
     /// [`StagingMemory`]: cellgov_mem::StagingMemory
     ///
-    /// # Atomic-batch discard semantics
-    ///
-    /// These mutations DO NOT participate in atomic-batch
-    /// discard-on-fault: by the time the containing batch finalizes,
-    /// the syscall has already returned its result to the guest, so
-    /// syscall-side state persists even when the batch's unit-staged
-    /// effects are discarded.
-    ///
-    /// # Ordering against unit `SharedWriteIntent`s
-    ///
-    /// `Runtime::commit_step` drains staged unit effects first and
-    /// calls this function second, so an LV2 write deterministically
-    /// lands after any same-batch unit store to the same range.
-    ///
     /// # Cross-module contract
     ///
-    /// LV2 handlers must not emit a non-memory effect whose
-    /// semantics depend on a co-batched `SharedWriteIntent` having
-    /// committed; a `debug_assert!` below traps that condition.
-    ///
-    /// `space` is the address space the memory subset commits into:
-    /// the syscall CALLER's space for dispatch-time effects, the
-    /// expiring waiter's space for `expire_wait` effects. LV2 handlers
+    /// LV2 handlers must not emit a non-memory effect whose semantics
+    /// depend on a co-batched `SharedWriteIntent` having committed;
+    /// the `debug_assert!` below traps that condition. `space` is the
+    /// syscall caller's space for dispatch-time effects and the
+    /// expiring waiter's space for `expire_wait` effects, so a handler
     /// must emit only intents whose pointers were decoded from that
-    /// unit's own syscall, so every intent is an address in `space`
-    /// (a handler emitting another unit's parked pointer as an effect
-    /// would commit into the wrong space; waiter-side payloads belong
-    /// on `PendingResponse` / `response_updates` instead).
+    /// unit's own syscall; waiter-side payloads belong on
+    /// `PendingResponse` / `response_updates`.
     pub(super) fn apply_lv2_effects(&mut self, effects: &[Effect], space: AddressSpaceId) {
         let memory_failure = self.validate_lv2_memory_subset(effects, space);
         debug_assert!(

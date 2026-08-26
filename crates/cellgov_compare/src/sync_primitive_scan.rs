@@ -2,29 +2,16 @@
 //! runtime data snapshot, plus the value-shape test for the handles
 //! no struct layout locates.
 //!
-//! The user-space `sys_lwmutex_t` carries a `sleep_queue` field at
-//! +0x10 that the firmware sysPrxForUser wrapper fills with the
-//! kernel-allocated lwmutex id after `_sys_lwmutex_create` returns,
-//! and `sys_lwcond_t` carries its `lwcond_queue` id at +0x04 behind
-//! a pointer to the lwmutex it binds. Two runners' id allocators
-//! produce different bytes for the same logical object. See
-//! [`crate::classify::DivergenceClass::SyncPrimitiveId`] for the
-//! inertness warrant.
-//!
-//! The scanners walk a runtime data segment for those preambles and
-//! yield the 4-byte handle range per match. They run against CG's
-//! snapshot, not the EBOOT: the preamble's `lwmutex_free` sentinel
-//! and `attribute` value are only present after the title's
-//! user-space init has run.
-//!
-//! Every other LV2 primitive (mutex, cond, semaphore, event queue,
-//! event port, event flag, rwlock, timer) hands the title a bare
-//! `u32` id it stores wherever it likes, so no layout finds those.
-//! [`kernel_handle_pair`] recognises one instead by the value shape
-//! both runners' allocators impose: CellGov's ids count up from
-//! [`FIRST_KERNEL_ID`], RPCS3's are a per-kind base plus an index
-//! step (RPCS3 `Emu/IdManager.h` `id_traits`, `Emu/Cell/lv2/sys_sync.h`
-//! `lv2_obj`). A word carrying one shape per side is a handle.
+//! The layout scanners run against CG's runtime snapshot: the
+//! `sys_lwmutex_t` preamble they match exists only after the title's
+//! user-space init has run. Every other LV2 primitive hands the title
+//! a bare `u32` id it stores anywhere, so [`kernel_handle_pair`]
+//! recognises one by the value shape each runner's allocator imposes
+//! (CellGov counts up from [`FIRST_KERNEL_ID`]; RPCS3 uses a per-kind
+//! base plus an index step, RPCS3 `Emu/IdManager.h` `id_traits`,
+//! `Emu/Cell/lv2/sys_sync.h` `lv2_obj`). See
+//! [`crate::classify::DivergenceClass::SyncPrimitiveId`] for why a
+//! differing handle is inert.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -64,8 +51,8 @@ const SLEEP_QUEUE_MAX_PLAUSIBLE: u32 = 0x0001_0000;
 /// address range of each instance's `sleep_queue` field.
 ///
 /// `data_base` is the guest address of `data[0]` (the region's `addr`).
-///
-/// The scan is 4-byte aligned and matches the `sys_lwmutex_t` preamble:
+/// The scan is 4-byte aligned and matches this `sys_lwmutex_t`
+/// preamble:
 ///
 /// ```text
 /// +0x00: 0xffffffff   (lock_var.owner = lwmutex_free)
@@ -75,12 +62,6 @@ const SLEEP_QUEUE_MAX_PLAUSIBLE: u32 = 0x0001_0000;
 /// +0x10: <sleep_queue>  (small int, the allocator id; THE claimed range)
 /// +0x14: 0x00000000   (pad)
 /// ```
-///
-/// The sleep_queue field is validated to be 0 (uninitialized) or
-/// below an internal plausibility cap, and the pad at +0x14 must
-/// be zero. Together these constraints make false positives on
-/// random data vanishingly unlikely while admitting every
-/// well-formed lwmutex slot the title initializes.
 pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u64>> {
     let mut out = Vec::new();
     if data.len() < SYS_LWMUTEX_T_SIZE {

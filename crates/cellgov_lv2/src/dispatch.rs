@@ -77,23 +77,20 @@ pub enum Lv2Dispatch {
     /// Emitted by lwmutex/mutex unlock, semaphore post, event-queue
     /// send, event-flag set, and cond signal. `response_updates`
     /// carries per-waiter overrides for primitives whose wake payload
-    /// is known only at release time (`sys_event_queue_send`,
-    /// `sys_event_flag_set`).
+    /// is known only at release time.
     ///
     /// # Invariants
-    /// - Every `response_updates` key MUST be in `woken_unit_ids` or
-    ///   still parked with a staged response -- cond signal restages
-    ///   a contended waiter's response as the mutex-grant response
-    ///   without waking it. A unit in neither set could never receive
-    ///   the update.
+    /// - Every `response_updates` key is in `woken_unit_ids` or still
+    ///   parked with a staged response (cond signal restages a
+    ///   contended waiter's response as the mutex-grant response
+    ///   without waking it).
     /// - A non-[`PendingResponse::ReturnCode`] update's
-    ///   [`PendingResponse::variant_tag`] MUST match the existing
-    ///   entry's tag -- those updates are partial fills. `ReturnCode`
-    ///   may replace any variant; it is the universal cancel/timeout
-    ///   override. The one payload-carrying exception is
-    ///   [`PendingResponse::EventFlagWake`] refined to
-    ///   [`PendingResponse::EventFlagCancelWake`], which
-    ///   `sys_event_flag_cancel` stages over a parked eflag wait.
+    ///   [`PendingResponse::variant_tag`] matches the existing entry's
+    ///   tag; `ReturnCode` may replace any variant as the
+    ///   cancel/timeout override. The one payload-carrying exception
+    ///   is [`PendingResponse::EventFlagWake`] refined to
+    ///   [`PendingResponse::EventFlagCancelWake`] by
+    ///   `sys_event_flag_cancel`.
     WakeAndReturn {
         /// Return code written to the source's r3.
         code: u64,

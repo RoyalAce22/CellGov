@@ -1,31 +1,11 @@
 //! `RuntimeSnapshot`: data-only capture of every cloneable
 //! [`Runtime`] field, used by [`Runtime::snapshot`] /
-//! [`Runtime::restore_into`].
-//!
-//! # Excluded fields
-//!
-//! Set-once or caller-replaced; the host `Runtime` retains them
-//! across restores:
-//!
-//! - `spu_factory`, `ppu_factory`, `process_spawn_loader`,
-//!   [`cellgov_dma::DmaLatencyModel`] -- installed at construction,
-//!   never mutated.
-//! - [`Box<dyn Scheduler>`](crate::scheduler::Scheduler) -- caller
-//!   replaces via [`Runtime::set_scheduler`] (contract 3).
-//! - [`cellgov_trace::TraceWriter`] (main + zoom) -- cleared on
-//!   `restore_into` (contract 2).
-//! - Audit counters (`rsx_label_writes_committed`,
-//!   `rsx_set_reference_dispatches`, `timer_sleep_dispatches`,
-//!   `lv2_direct_committed_writes`) -- cumulative instruments; never
-//!   feed the commit pipeline or FIFO advance, and carry their
-//!   pre-restore values forward.
-//! - `effects_buf`, `scheduler_dirty_after_restore` -- per-step
-//!   scratch / restore-tracking state (contracts 3, 5).
-//!
-//! Construction params (`budget_per_step`, `max_steps`, `mode`) are
-//! NOT restored; [`Runtime::restore_into`] asserts them unchanged
-//! since the snapshot (release-active, because [`Runtime::set_budget`]
-//! and [`Runtime::set_mode`] are public setters).
+//! [`Runtime::restore_into`]. Fields absent from the struct survive a
+//! restore untouched: the unit factories, the spawn loader, the
+//! [`cellgov_dma::DmaLatencyModel`], the
+//! [`Scheduler`](crate::scheduler::Scheduler), the audit counters, and
+//! the per-step scratch buffers. The two
+//! [`cellgov_trace::TraceWriter`]s are cleared instead.
 //!
 //! # Cost
 //!
@@ -36,29 +16,22 @@
 //!
 //! # Cross-module contracts
 //!
-//! 1. `restore_into` rewinds [`cellgov_time::Epoch`]. Stale `Epoch`
-//!    values held outside the runtime no longer index into anything
-//!    live.
+//! 1. `restore_into` rewinds [`cellgov_time::Epoch`]; `Epoch` values
+//!    held outside the runtime no longer index into anything live.
 //!
-//! 2. `restore_into` rewinds `per_step_index` AND clears both
-//!    `TraceWriter`s; otherwise post-restore records would collide
-//!    with pre-snapshot records on the same index. Capture via
-//!    [`TraceWriter::take_bytes`] before `restore_into` to keep the
-//!    pre-restore trace.
+//! 2. `restore_into` rewinds `per_step_index` and clears both
+//!    `TraceWriter`s so post-restore records cannot collide with
+//!    pre-snapshot records on the same index. Capture via
+//!    [`cellgov_trace::TraceWriter::take_bytes`] before `restore_into`
+//!    to keep the pre-restore trace.
 //!
-//! 3. The scheduler is NOT in the snapshot, but the runtime-side
+//! 3. The scheduler is not in the snapshot, but the runtime-side
 //!    fields it consumes (`last_scheduled_unit`, `step_woke_others`)
-//!    ARE restored. The caller MUST install a scheduler consistent
-//!    with `snap`; until then [`Runtime::step`] returns
-//!    [`super::StepError::SchedulerNotReinstalled`]. Only the
-//!    *presence* of a fresh scheduler is mechanically checked.
-//!
-//! 4. Effect payloads deep-clone through `Vec<u8>`; no captured path
-//!    holds `Arc` / `Rc`, so a snapshot never aliases live state.
-//!
-//! 5. `restore_into` clears `effects_buf` (a restore is a reset;
-//!    in-flight effects are discarded). `snapshot` asserts the
-//!    buffer empty so captures happen only at step boundaries.
+//!    are restored. The caller must install a scheduler consistent
+//!    with `snap` via [`Runtime::set_scheduler`]; until then
+//!    [`Runtime::step`] returns
+//!    [`super::StepError::SchedulerNotReinstalled`]. Only the presence
+//!    of a fresh scheduler is checked.
 
 use cellgov_dma::DmaQueue;
 use cellgov_effects::Effect;

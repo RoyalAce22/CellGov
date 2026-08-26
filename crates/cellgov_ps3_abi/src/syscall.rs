@@ -7,9 +7,7 @@
 //! declarative source.
 
 /// Emit a group of LV2 syscall `pub const`s plus a derived number
-/// array and a test-only named array, from a single declarative list.
-///
-/// Grammar:
+/// array and a test-only `(name, number)` array, from one list.
 ///
 /// ```text
 /// lv2_syscalls! {
@@ -18,15 +16,6 @@
 ///     $( /// docs. NAME = number; )*
 /// }
 /// ```
-///
-/// Emits:
-///
-/// - `pub const NAME: u64 = number;` for each entry, with its docs.
-/// - `pub const NUMBERS_ARRAY: &[u64] = &[NAME, ...];` for the
-///   collected numbers in declaration order.
-/// - `#[cfg(test)] const NAMED_ARRAY: &[(&'static str, u64)] = &[
-///   (stringify!(NAME), NAME), ...];` for the collision tests
-///   that need to refer to each constant by both symbol and value.
 macro_rules! lv2_syscalls {
     (
         $(#[$arr_attr:meta])*

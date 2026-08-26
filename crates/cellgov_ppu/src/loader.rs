@@ -579,27 +579,15 @@ pub fn find_sys_process_param(data: &[u8]) -> Option<SysProcessParam> {
 
 /// Secondary OPD pointer table located by 8-byte header signature.
 ///
-/// The PRX-link CRT0 walker patches these tables at runtime with
-/// HLE OPD addresses from the same address space as the primary
-/// import-stub table; the cross-runner classifier treats bytes
-/// inside these tables under the same `HleOpdSlot` rule that covers
-/// the primary table. Located by scan because the tables sit in the
-/// title's `.data` section, outside the SCE PRX_PARAM-described
-/// `lib_stub_start..lib_stub_end` primary import area.
+/// The tables sit in the title's `.data`, outside the PRX_PARAM
+/// `lib_stub_start..lib_stub_end` import area, so no header locates
+/// them. The CRT0 walker patches each slot with an HLE OPD address at
+/// runtime; the cross-runner classifier covers them under the same
+/// `HleOpdSlot` rule as the primary table.
 ///
-/// Observed on SSHD (NPUA80068) and WipEout (BCES00664):
-///
-/// - 8-byte header: `04 02 NN 00  00 NN 00 00` where NN is a
-///   sequence-number byte (`01` on the first table, `02` on the
-///   second; identical across both titles).
-/// - 0x60 bytes of slot data following the header.
-/// - Two tables per title, adjacent in the data segment (second
-///   table's `guest_addr` equals first's `guest_addr + 0x68`).
-///
-/// Writer attribution: SSHD's PC 0x4dec64 is an FNID-lookup loop
-/// over `ppu_prx_module_info` nodes; the loop runs during CRT0 and
-/// rewrites each slot's static self-referential `.data` trampoline
-/// address with the loader's HLE OPD address.
+/// Observed layout (SSHD NPUA80068, WipEout BCES00664): header
+/// `04 02 NN 00  00 NN 00 00` with NN a sequence-number byte, then
+/// 0x60 bytes of slots; two adjacent tables per title.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SecondaryOpdTable {
     /// Guest virtual address of the table's first byte (header).

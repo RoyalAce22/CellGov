@@ -1,27 +1,11 @@
 //! Spec-citation directory for decoder fall-through diagnostics.
 //!
-//! [`crate::instruction::PpuDecodeError`] distinguishes "documented
-//! PPU instruction this decoder does not yet implement" from "no
-//! documented instruction matches". Telling those apart at the
-//! rejection site requires knowing *which* documented instruction a
-//! `(primary, xo)` pair names; this module is that answer: sorted
-//! const directories of named-but-unimplemented encodings,
-//! transcribed once against PPC v2.02 + AltiVec PEM + CBE Handbook.
-//! The directories only shrink, as instructions land in the decoder.
-//!
-//! - [`OPCODE_GAPS`] is keyed `(primary, xo)` for instructions
-//!   whose 32-bit encoding has no decoder arm.
-//! - [`MFSPR_GAPS`] / [`MFTB_GAPS`] / [`MTSPR_GAPS`] are keyed on
-//!   the post-half-swap SPR / TBR number; the XFX opcodes themselves
-//!   decode, only specific register selectors are unwired. Three
-//!   sub-tables resolve the read-vs-write ambiguity (SPR 1 is
-//!   `mfxer` under [`MFSPR_GAPS`], `mtxer` under [`MTSPR_GAPS`]).
-//!
-//! Lookups are binary searches over sorted const slices -- no heap
-//! traffic on the hot decode-error path. A `None` from
-//! [`opcode_gap`] / [`spr_gap`] is itself the diagnostic for
-//! `EncodingNotRecognized`. The sort-order and table-vs-decoder
-//! disjointness invariants are test-asserted.
+//! Sorted const tables of documented-but-unimplemented encodings, so
+//! [`crate::instruction::PpuDecodeError`] can tell "documented PPU
+//! instruction this decoder does not yet implement" from "no
+//! documented instruction matches" at the rejection site. Keyed by
+//! `(primary, xo)` for [`OPCODE_GAPS`] and by the post-half-swap SPR /
+//! TBR number for [`MFSPR_GAPS`] / [`MFTB_GAPS`] / [`MTSPR_GAPS`].
 
 /// A documented encoding the decoder cannot yet turn into a
 /// [`crate::instruction::PpuInstruction`] variant.

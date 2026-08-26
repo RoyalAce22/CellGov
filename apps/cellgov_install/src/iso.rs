@@ -1,26 +1,14 @@
-//! Hand-rolled ISO9660 (ECMA-119) reader for PS3 BD-ROM images.
+//! ISO9660 (ECMA-119) reader for PS3 BD-ROM images.
 //!
-//! PS3 game discs are UDF-Bridge images carrying both a UDF and an
-//! ISO9660 filesystem over the same `PS3_GAME/` content. RPCS3 reads
-//! them entirely through the ISO9660 bridge and parses zero UDF
-//! descriptors, so this reader targets the same subset: the volume
-//! descriptor set at sector 16, the Primary (and optional Joliet)
-//! descriptors, and recursive directory-record traversal. There is no
-//! AVDP / LVD / File Entry handling -- that is UDF, which the PS3 disc
-//! path never touches.
-//!
-//! This module is a pure function from a *decrypted* image to its
-//! extracted file tree; an encrypted disc is decrypted first (the
-//! disc-key pass), then read here. Format facts come from public
-//! sources only (ECMA-119 and RPCS3's `Loader/ISO.cpp`).
-//!
-//! Scope is deliberately narrow: directories are single-extent,
-//! Extended Attribute Records and Associated Files are rejected rather
-//! than carved, and nesting is depth-bounded -- every such case is a
-//! typed [`IsoError`], not a silent guess. Entries carry bounds-checked
-//! extent references; a consumer resolves each file against the image
-//! on demand ([`IsoEntry::extent_slices`] / [`IsoEntry::read_data`]),
-//! so peak residence is one file -- a BD-DL image's content does not
+//! PS3 discs are UDF-Bridge images; RPCS3 reads them through the
+//! ISO9660 side only (`Loader/ISO.cpp`), and this reader covers the
+//! same subset: the volume descriptor set at sector 16, the Primary
+//! and optional Joliet descriptors, and recursive directory records.
+//! No UDF structures are parsed. Input is a decrypted image (see
+//! [`crate::disc_crypt`]); output is a file tree of bounds-checked
+//! extent references that a consumer resolves against the image one
+//! file at a time ([`IsoEntry::extent_slices`] /
+//! [`IsoEntry::read_data`]), because a BD-DL image's content does not
 //! fit in host memory.
 
 /// ISO9660 logical sector size.

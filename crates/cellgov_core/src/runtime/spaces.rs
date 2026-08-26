@@ -6,28 +6,22 @@
 //! step's execution context, syscall-parameter reads, and commit batch
 //! all resolve through the unit's space.
 //!
-//! Sharing model: a shared segment is registered under an IPC key with
-//! one or more `(space, base)` views; a space may map the segment at
-//! several bases (the kernel admits repeated maps of one shared
-//! segment -- RPCS3 `sys_mmapper.cpp` `sys_mmapper_map_shared_memory`
-//! counts maps rather than rejecting a second one). Registration
-//! installs a zero-filled region in each view's space; the commit
-//! pipeline then keeps the views coherent by replicating committed
-//! writes that land in one view into every sibling view -- same-space
-//! aliases included -- within the same commit batch (views iterate in
-//! registration order, so the replication order is deterministic).
+//! A shared segment is registered under an IPC key with one or more
+//! `(space, base)` views; a space may map the segment at several bases
+//! (RPCS3 `sys_mmapper.cpp` `sys_mmapper_map_shared_memory` counts
+//! maps of one shared segment). Registration installs a zero-filled
+//! region in each view's space, and the commit pipeline replicates a
+//! committed write landing in one view into every sibling view,
+//! same-space aliases included, within the same commit batch.
 //!
 //! Reservations are space-scoped: space 0's table is
 //! `Runtime::reservations`, each child space owns its own
 //! [`ReservationTable`], and the commit pipeline's clear-sweeps run
-//! against the emitting unit's table only -- equal numeric addresses
-//! in different spaces are different memory and never alias. The one
-//! cross-space path is a shared mapping: both replicating a committed
-//! write into a sibling view and seeding a view when the segment
-//! promotes clear reservations covering the translated range in that
-//! view's space. DMA stays space 0 end to
-//! end (payloads land in `Runtime::memory`, the completion sweep
-//! hits the space-0 table).
+//! against the emitting unit's table only. The one cross-space path
+//! is a shared mapping: replicating a write into a sibling view and
+//! seeding a view at promotion both clear reservations covering the
+//! translated range in that view's space. DMA stays space 0 end to
+//! end.
 
 use std::collections::BTreeMap;
 

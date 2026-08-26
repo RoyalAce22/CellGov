@@ -691,22 +691,16 @@ impl Lv2Host {
     /// LV2 waiter list: the six sync-primitive tables plus per-thread
     /// join-waiter lists.
     ///
-    /// A parked thread of an exited process must never be granted a
-    /// resource or handed an exit value: the runtime finishes every
-    /// one of the pid's units at the same exit, so a grant handed to
-    /// one of them is a resource no thread will ever consume or
-    /// release. RPCS3 is not an oracle for the per-process case --
-    /// its `sys_process.cpp` `_sys_process_exit` kills the whole
-    /// emulator rather than one process's threads.
+    /// The runtime finishes every one of the pid's units at the same
+    /// exit, so a grant handed to a parked thread of an exited process
+    /// is a resource no thread will ever consume or release. RPCS3 is
+    /// not an oracle for the per-process case: its `sys_process.cpp`
+    /// `_sys_process_exit` tears down the whole emulator.
     ///
-    /// Mutex ownership held by a dead thread is retained and
-    /// witnessed in `process_exit_retained_mutex_owners`. LV2
-    /// reclaims a terminating process's own sync primitives at exit;
-    /// reclaiming here needs creator attribution the shared object
-    /// namespace does not record yet, and the process-shared case
-    /// with surviving attachments has no oracle (RPCS3
-    /// sys_process.cpp _sys_process_exit tears down the whole
-    /// emulator), so retained-locked is the interim for both.
+    /// Mutex ownership held by a dead thread is retained and witnessed
+    /// in `process_exit_retained_mutex_owners`; reclaiming it needs
+    /// creator attribution the shared object namespace does not
+    /// record.
     fn purge_exited_process_waiters(&mut self, pid: u32) {
         let threads: std::collections::BTreeSet<crate::ppu_thread::PpuThreadId> = self
             .state

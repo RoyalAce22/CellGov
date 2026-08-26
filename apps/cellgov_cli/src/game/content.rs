@@ -88,28 +88,18 @@ fn all_entries_resolve_under(base: &Path, manifest: &ContentManifest) -> bool {
 }
 
 /// Read each manifest entry off disk and register the bytes in
-/// `host.fs_store_mut`. Relative `host_path`s are resolved against
-/// the resolved base; relative `base` is resolved against
-/// `workspace_root`.
+/// `host.fs_store_mut`.
 ///
-/// # Resolution priority
-///
-/// 1. `override_base` (when `Some`) -- explicit override via env
-///    var. Hard-fail on any missing file with a diagnostic that
-///    names the env var.
-/// 2. `usrdir_base` (when `Some` AND every manifest entry resolves
-///    under it) -- auto-discovered EBOOT-adjacent USRDIR. Soft
-///    probe: if any file is missing the whole tier is skipped and
-///    the resolution falls through to (3).
-/// 3. `manifest.base` -- the checked-in fallback (synthetic stubs
-///    in the public test suite). Hard-fail on any missing file.
+/// Base directory, first match wins: `override_base`, then
+/// `usrdir_base` when every manifest entry resolves under it, then
+/// `manifest.base`. A relative base resolves against
+/// `workspace_root`; a relative `host_path` resolves against the
+/// chosen base.
 ///
 /// # Errors
 ///
-/// Surfaces on first failure; later entries are not attempted, and
-/// the FsStore is left in whatever partial state earlier entries
-/// produced. The caller (boot pipeline) treats this as a fatal
-/// startup error.
+/// Stops at the first failure; the `FsStore` keeps whatever earlier
+/// entries registered.
 pub fn register_content_blobs(
     manifest: &ContentManifest,
     workspace_root: &Path,

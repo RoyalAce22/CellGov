@@ -1,17 +1,13 @@
 //! Env-gated per-call HLE return watch on guest PPU function entries.
 //!
-//! After PRX load, [`register_nid_resolution`] resolves each watched
-//! NID to its OPD entry PC. The PPU dispatch calls [`on_dispatch`]
-//! per instruction; `state.pc` matches drive entry/exit records via
-//! a per-thread in-flight stack of return PCs (`lr` at entry).
+//! PRX load resolves watched NIDs to entry PCs through
+//! [`register_nid_resolution`]; PPU dispatch calls [`on_dispatch`]
+//! per instruction, and a per-thread stack of return PCs pairs each
+//! exit with its entry.
 //!
 //! Caller contract: invoke [`is_active`] (or any state-touching API)
 //! before the first dispatch so the [`OnceLock`] initializes and the
 //! first watched instruction is not missed.
-//!
-//! [`totals`] surfaces `dropped_body_events` -- non-zero
-//! distinguishes "hook fired but never inside a watched scope" from
-//! "hook never fired."
 //!
 //! Env vars:
 //!

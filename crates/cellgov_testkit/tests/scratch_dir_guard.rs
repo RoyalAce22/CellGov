@@ -2,22 +2,11 @@
 //!
 //! `cargo test` and `cargo test --release` are separate processes over
 //! one `std::env::temp_dir()`, so a scratch path fixed at compile time
-//! resolves to the same directory in both and one process's
-//! `remove_dir_all` races the other's writes.
-//!
-//! Every `std::env::temp_dir()` call under `crates/`, `apps/`, and
-//! `bridges/` must therefore reach `std::process::id()` -- inline in
-//! the same statement, or through a `let pid = std::process::id();`
-//! binding written in that exact form earlier in the same function and
-//! interpolated as `{pid}` inside that same statement. A pid reached
-//! any other way (a differently spelled binding, a positional
-//! `format!` argument, a name assembled over several statements) is
-//! reported; the failure message names the two accepted forms.
-//!
-//! The scan reads code only: comment bodies and string/char-literal
-//! contents are blanked before matching, so neither a `temp_dir()`
-//! written in prose nor a `process::id()` written in a comment can
-//! stand in for the call the rule is about.
+//! is shared by both and one process's `remove_dir_all` races the
+//! other's writes. Every `std::env::temp_dir()` call under `crates/`,
+//! `apps/`, and `bridges/` must reach `std::process::id()` in the same
+//! statement, or through a `let pid = std::process::id();` binding in
+//! the same function interpolated as `{pid}`.
 
 use std::fs;
 use std::path::{Path, PathBuf};

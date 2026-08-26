@@ -1,38 +1,14 @@
 //! Guard-liveness gate for the divergence-classifier cluster in
-//! `cellgov_compare`. The invariant: whenever
-//! `compare_observations` runs on a pair of observations that
-//! produce at least one byte divergence, four guarded paths fire
-//! as a unit:
-//!
-//! - the `collect_byte_divergences` producer
-//!   (`observation_compare.rs:499`) populates one `ByteDivergence`
-//!   per run, with `length > 0`.
-//! - the `classify` consumer (`classify.rs:232`) runs on each
-//!   `ByteDivergence`.
-//! - the `format_observation_compare_human` render-time offset
-//!   guard (`observation_compare.rs:633`) walks the same runs to
-//!   produce DIVERGE lines.
-//! - the `summarize` lowest-offset non-overlap guard
-//!   (`summary.rs:486`) is reached when more than one run crosses
-//!   the summarizer.
-//!
-//! The fixture is constructed in-test from `cellgov_compare`'s
-//! public types so this test never re-bakes a particular title or
-//! corpus snapshot. A correctness-improving trajectory shift in
-//! any title -- new byte divergences appearing, old ones being
-//! reclassified, the corpus being re-decrypted -- does not break
-//! this test, by design. It breaks only when the producer /
-//! consumer wiring breaks: a guarded function dropped from the
-//! pipeline, a `debug_assert!` removed, or an arm renamed without
-//! updating downstream.
-//!
-//! The two OneMissing-shape guards
-//! (`observation_compare.rs:544/572`) sit on
-//! `StateHashCompare::OneMissing` and `StepCompare::OneMissing`
-//! paths and are exercised in `cellgov_compare`'s in-crate unit
-//! tests (`compare_state_hashes`/`compare_steps` over a Some/None
-//! pair); the bucket-B treatment here covers the divergence-
-//! classifier cluster specifically.
+//! `cellgov_compare`: on any observation pair with at least one byte
+//! divergence, `collect_byte_divergences`, `classify`,
+//! `format_observation_compare_human` and `summarize` all fire, so
+//! the `debug_assert!`s on those paths are evaluated. The fixture is
+//! built in-test from `cellgov_compare`'s public types and carries no
+//! title or corpus state; the gate is honest only while the pair
+//! stays divergent, which
+//! `synthetic_pair_is_constructed_divergent_not_identical` pins. The
+//! `OneMissing` guards are covered by `cellgov_compare`'s in-crate
+//! unit tests.
 
 #![allow(
     clippy::unwrap_used,

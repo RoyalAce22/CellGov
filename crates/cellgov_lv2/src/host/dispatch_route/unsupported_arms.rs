@@ -58,25 +58,18 @@ impl Lv2Host {
     /// it to `*cid`.
     ///
     /// Serves syscalls 324 and 341, which RPCS3's syscall table binds
-    /// to this one kernel entry point, so both answer identically.
-    ///
-    /// Physical-memory budgets are not tracked, so the only refusal
-    /// modelled from the container size is the one that does not need
-    /// a budget. Oracle: RPCS3's `sys_memory.cpp`.
+    /// to one kernel entry point. Physical-memory budgets are not
+    /// tracked. Oracle: RPCS3's `sys_memory.cpp`.
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire, which is the order RPCS3 checks
-    /// them.
+    /// Listed in the order they fire.
     ///
-    /// - `CELL_ENOMEM` when `size` rounds down to zero. The kernel
+    /// - `CELL_ENOMEM` when `size` rounds down to zero: the kernel
     ///   truncates the request to the 1 MiB granule and refuses what
     ///   is left of a sub-granule request (RPCS3
     ///   `sys_memory_container_create`).
-    /// - `CELL_EFAULT` when `cid` is null. RPCS3 has no such gate --
-    ///   it writes through the pointer once the container exists --
-    ///   so the gate sits after the size refusal and before the id is
-    ///   minted.
+    /// - `CELL_EFAULT` when `cid` is null; RPCS3 has no such gate.
     pub(super) fn dispatch_memory_container_create(
         &mut self,
         cid_ptr: u32,
@@ -112,21 +105,16 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire, which is the order RPCS3 checks
-    /// them: the argument gates precede the `alloc_addr` gate, so a
-    /// call that is wrong in two ways answers for its `size` or
-    /// `alignment` first.
+    /// Listed in the order they fire; the argument gates precede the
+    /// `alloc_addr` gate as in RPCS3.
     ///
     /// - `CELL_EALIGN` when `size` is not a multiple of the 256 MiB
-    ///   VM-area granule. A misaligned request is refused, never
-    ///   rounded up to the next granule.
+    ///   VM-area granule; a misaligned request is never rounded up.
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
     /// - `CELL_EALIGN` when `alignment` is not one of the four area
     ///   sizes the kernel accepts.
-    /// - `CELL_EFAULT` when `alloc_addr` is null. RPCS3 has no such
-    ///   gate -- it reserves the area and then writes through the
-    ///   pointer -- so the gate sits as late as it can without
-    ///   consuming a VM area the caller can never read back.
+    /// - `CELL_EFAULT` when `alloc_addr` is null; RPCS3 has no such
+    ///   gate.
     /// - `CELL_ENOMEM` when the VM window is exhausted.
     pub(super) fn dispatch_mmapper_allocate_address(
         &mut self,
@@ -187,9 +175,8 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire. The argument gates precede the
-    /// `mem_id` gate, matching RPCS3's order; a call that is wrong in
-    /// two ways answers for its `size` or `flags` first.
+    /// Listed in the order they fire; the argument gates precede the
+    /// `mem_id` gate as in RPCS3.
     ///
     /// - `CELL_EALIGN` when `size` is zero.
     /// - `CELL_EINVAL` when the `flags` granularity field carries an
@@ -197,10 +184,8 @@ impl Lv2Host {
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
     /// - `CELL_EALIGN` when `size` is not a multiple of the granule
     ///   the `flags` field selects.
-    /// - `CELL_EFAULT` when `mem_id_ptr` is null. RPCS3 has no such
-    ///   gate -- it writes through the pointer once the shm exists --
-    ///   so the gate sits after the argument refusals and before any
-    ///   id or ipc-key registration.
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null; RPCS3 has no such
+    ///   gate.
     pub(super) fn dispatch_mmapper_allocate_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -592,17 +577,13 @@ impl Lv2Host {
     ///
     /// `pOpt->cmd & 0xF` selects the phase. Phase 1 hands the caller
     /// the entry to invoke; phase 2 reports what that entry returned.
-    ///
     /// CellGov runs every firmware module's `module_start` itself at
-    /// boot, in dependency order, so phase 1 reports `NO_ENTRY`
-    /// rather than the real OPD -- handing back the real address
-    /// would run `module_start` a second time. Phase 2 reporting
-    /// `SYS_PRX_RESIDENT` marks the module started, which is what
-    /// makes a later unload answer `NOT_REMOVABLE`.
-    ///
-    /// `pOpt->size` is never validated -- RPCS3's handler reads the
-    /// fields unconditionally and consults `size` only to decide
-    /// whether `entry2` exists (`sys_prx.cpp`).
+    /// boot, so phase 1 reports `NO_ENTRY`; phase 2 reporting
+    /// `SYS_PRX_RESIDENT` marks the module started, which makes a
+    /// later unload answer `NOT_REMOVABLE`. `pOpt->size` is never
+    /// validated: RPCS3's handler reads the fields unconditionally and
+    /// consults `size` only to decide whether `entry2` exists
+    /// (`sys_prx.cpp`).
     ///
     /// # Errors
     ///
@@ -746,16 +727,10 @@ impl Lv2Host {
     /// moves a `Started` module to `Stopping` and hands the caller
     /// the entry to invoke; phase 2 reporting `res == 0` completes
     /// `Stopping -> Stopped`, after which unload withdraws the
-    /// module.
-    ///
-    /// CellGov never runs guest `module_stop` (modules were started
-    /// host-side at boot without running guest code), so phase 1
-    /// reports `NO_ENTRY` exactly as sc 481 does; liblv2 then skips
-    /// the call and reports zero.
-    ///
-    /// Unlike sc 481, the id lookup precedes the null-`pOpt` gate:
-    /// RPCS3's 482 orders ESRCH before EINVAL (`sys_prx.cpp`), and a
-    /// zero id is just an id the lookup misses.
+    /// module. CellGov never runs guest `module_stop`, so phase 1
+    /// reports `NO_ENTRY` as sc 481 does; liblv2 then skips the call
+    /// and reports zero. The id lookup precedes the null-`pOpt` gate:
+    /// RPCS3's 482 orders ESRCH before EINVAL (`sys_prx.cpp`).
     ///
     /// # Errors
     ///

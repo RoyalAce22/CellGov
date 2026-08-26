@@ -317,14 +317,12 @@ fn addresses_mount_root(clean: &str, mount: &str) -> bool {
 /// VFS-root-relative destination for one archive entry name, or
 /// `None` when the name resolves to no file (empty, or a mount root).
 ///
-/// A leading `/` and the `000/` packaging artefact are stripped; each
-/// [`SIBLING_MOUNTS`] prefix is kept, and everything else is dev_flash
-/// content, so a `dev_flash/`-prefixed name and a prefixless one
-/// resolve to the same place.
+/// A leading `/` and the `000/` packaging artefact are stripped; a
+/// name without a [`SIBLING_MOUNTS`] prefix is dev_flash content
+/// whether or not it spells `dev_flash/` out.
 ///
-/// The result always starts with a mount component and is therefore
-/// relative, but it is NOT traversal-checked -- a caller that joins it
-/// onto a real directory must reject `..` itself.
+/// The result is relative but not traversal-checked: a caller that
+/// joins it onto a real directory must reject `..` itself.
 ///
 /// # Examples
 ///

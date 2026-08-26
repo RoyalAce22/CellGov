@@ -1,33 +1,11 @@
-//! Foundation-scenario liveness gate for the
-//! `Runtime::snapshot()` `effects_buf` empty debug assert at
-//! `crates/cellgov_core/src/runtime/snapshot.rs:118`. The assert
-//! protects an at-batch-boundary invariant: a snapshot taken
-//! mid-batch would diverge from a fresh-built runtime on restore.
-//! It is conditional on `snapshot()` actually being called, which
-//! the per-step loop never does -- only the schedule-exploration
+//! Liveness gate for the `effects_buf`-empty debug assert in
+//! `Runtime::snapshot()`, which holds only at a batch boundary. The
+//! per-step loop never snapshots; only the schedule-exploration
 //! observer (`cellgov_explore::observe_decisions_with_snapshots`)
-//! invokes it, and only at branching points.
-//!
-//! The liveness witness for this guard is the count of
-//! snapshots taken during a run; this equals
-//! `ExplorationResult::total_branching_points` by construction
-//! because the observer snapshots exactly when
-//! `runnable.len() >= 2`. The field is plumbed end-to-end via
-//! `cellgov_explore::report::format_json` (under the
-//! `branching_points` key), so the witness IS readable at the
-//! integration boundary. Readability check: YES.
-//!
-//! The shape matches `vrsave_tripwire`: per-scenario status
-//! declared explicitly, gate trips on mismatch. The witness count
-//! is a lower bound documented for regression visibility; the
-//! assertion is "count > 0" only, because the gate's purpose is
-//! "did `Runtime::snapshot` get called at least once," not
-//! exact-anchor measurement.
-//!
-//! This test uses cellgov_explore's library API directly; it does
-//! not require fixtures or subprocess invocation. Synthetic
-//! scenarios are always available, so unlike the corpus-gated
-//! tripwires there is no fixture-absent skip path.
+//! does, once per branching point, so the assert is evaluated
+//! exactly `ExplorationResult::total_branching_points` times. Each
+//! foundation scenario must report that count > 0 or the assert's
+//! silence is vacuous; the declared lower bounds are diagnostic only.
 
 #![allow(
     clippy::print_stderr,

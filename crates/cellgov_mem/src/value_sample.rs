@@ -1,11 +1,9 @@
 //! Env-gated per-step value sample on guest memory.
 //!
-//! Reads a fixed byte range at periodic CG-step boundaries. The
-//! clock is step-gated, NOT commit-gated: the sample sees the
-//! current region state regardless of which path wrote it, so a
-//! byte that is zero at every sample was written non-zero by no
-//! path at all. Complements [`super::store_watch`], which answers
-//! "what writes address X via the commit pipeline."
+//! Reads a fixed byte range at periodic CG-step boundaries. Sampling
+//! is gated on the step clock, so it sees the region's current bytes
+//! whichever path wrote them; [`super::store_watch`] answers which
+//! commits wrote an address.
 //!
 //! Env vars:
 //!
