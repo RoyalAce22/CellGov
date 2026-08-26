@@ -1,7 +1,7 @@
 //! Baseline save/load round-trips and the save-load-compare pipeline across runners.
 
 use super::*;
-use crate::observation::{ObservationMetadata, ObservedOutcome};
+use crate::observation::ObservedOutcome;
 use crate::test_support::{sample_observation, TempDir};
 
 #[test]
@@ -81,6 +81,7 @@ fn multi_baseline_pipeline() {
 #[cfg(feature = "rpcs3-runner")]
 #[test]
 fn rpcs3_tty_baseline_roundtrip() {
+    use crate::observation::ObservationMetadata;
     use crate::runner_rpcs3::TtyRegion;
 
     // A captured .tty is gitignored, so this writes the framed log

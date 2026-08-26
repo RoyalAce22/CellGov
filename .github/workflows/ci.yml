@@ -73,6 +73,11 @@ jobs:
       - name: cargo clippy (corpus suites)
         run: cargo clippy --workspace --all-targets --locked --features "$CORPUS_FEATURES" -- -D warnings
 
+      # The README promises importers can drop the RPCS3 runner with
+      # default-features = false; this is the only build that proves it.
+      - name: cargo clippy (cellgov_compare without rpcs3-runner)
+        run: cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
+
       - name: cargo doc
         env:
           RUSTDOCFLAGS: -D warnings
@@ -113,6 +118,9 @@ jobs:
 
       - name: cargo clippy (corpus suites)
         run: cargo clippy --workspace --all-targets --locked --features "$CORPUS_FEATURES" -- -D warnings
+
+      - name: cargo clippy (cellgov_compare without rpcs3-runner)
+        run: cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
 
       - name: cargo doc
         env:
@@ -168,6 +176,9 @@ jobs:
 
       - name: cargo test --release
         run: cargo test --workspace --release --locked
+
+      - name: cargo test (cellgov_compare without rpcs3-runner)
+        run: cargo test -p cellgov_compare --locked --no-default-features
 
       - name: cargo bench --no-run --benches
         run: cargo bench --workspace --no-run --benches --locked
