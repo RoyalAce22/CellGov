@@ -66,7 +66,7 @@ cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --outp
 \t\t(defaults: CELLGOV_PS3_VFS_ROOT env, then vfs/dev_hdd0)";
 const USAGE_TITLES_GEN: &str = "\
 cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
-\t\t(defaults: docs/title_manifests, tests/fixtures, docs/titles.md)";
+\t\t(defaults: titles, tests/fixtures, docs/titles.md)";
 const USAGE_GEN_MANIFEST: &str = "\
 cellgov_cli gen-manifest <--record PATH | --title-id ID> [--registry DIR] [--installs DIR] [--force]
 \t\temit a title-manifest stub from an install record; never overwrites an
@@ -76,7 +76,7 @@ cellgov_cli record-anchors <--all | --title NAME> [--registry DIR]
 \t\tre-measure each title and rewrite its committed boot_summary.json
 \t\tbaseline; appends to boot_history.jsonl only when a value moved.
 \t\tWitness classes already set in the baseline are preserved.
-\t\t--registry must name the default docs/title_manifests: the boot is
+\t\t--registry must name the default titles: the boot is
 \t\tre-entered as `bench-boot-once --title NAME`, which reads only that
 \t\tdirectory, so any other DIR is refused rather than measured wrong.";
 

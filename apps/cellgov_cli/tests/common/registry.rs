@@ -32,7 +32,7 @@ pub struct TitleUnderTest {
 /// Read every registered title, accepting both manifest layouts and
 /// failing loudly on duplicates or missing identity fields.
 pub fn titles() -> Vec<TitleUnderTest> {
-    let dir = workspace_root().join("docs/title_manifests");
+    let dir = workspace_root().join("titles");
     let mut out = Vec::new();
     let mut short_names: BTreeMap<String, PathBuf> = BTreeMap::new();
     let mut content_ids: BTreeMap<String, PathBuf> = BTreeMap::new();

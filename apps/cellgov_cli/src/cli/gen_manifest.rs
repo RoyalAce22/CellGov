@@ -18,7 +18,7 @@ use cellgov_install::game_install::InstallRecord;
 use crate::cli::args::{find_flag_value, has_bool_flag, reject_flag_here, require_at_most_one};
 use crate::cli::exit::die;
 
-const DEFAULT_REGISTRY: &str = "docs/title_manifests";
+const DEFAULT_REGISTRY: &str = "titles";
 
 /// Records for the default VFS root, matching where `cellgov_install`
 /// writes them. `--installs` names the directory directly, for a VFS

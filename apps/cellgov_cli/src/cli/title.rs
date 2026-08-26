@@ -8,7 +8,7 @@ use crate::game;
 /// Registry directory every title-driven subcommand resolves
 /// `--title` / `--content-id` against, relative to the working
 /// directory.
-pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "docs/title_manifests";
+pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "titles";
 
 /// Resolve the active [`game::manifest::TitleManifest`] for a
 /// subcommand, in priority order: `--title-manifest <path>`,

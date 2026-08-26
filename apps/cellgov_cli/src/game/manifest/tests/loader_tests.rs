@@ -1058,7 +1058,7 @@ fn committed_vsh_manifest_declares_no_game_requirements() {
         .parent()
         .and_then(Path::parent)
         .expect("workspace root two levels up");
-    let path = root.join("docs/title_manifests/VSH.toml");
+    let path = root.join("titles/VSH.toml");
     let m = TitleManifest::load_from_path(&path).expect("committed vsh manifest loads");
     assert_eq!(m.short_name, "vsh");
     assert_eq!(m.distribution, Distribution::FirmwareExec);

@@ -1,4 +1,4 @@
-//! Title registry driven by TOML manifests under `docs/title_manifests/`.
+//! Title registry driven by TOML manifests under `titles/`.
 //! One TOML file per title.
 
 mod checkpoint;

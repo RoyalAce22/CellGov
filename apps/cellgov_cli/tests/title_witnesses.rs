@@ -1,7 +1,7 @@
 //! Every installed title in the registry must reproduce its recorded
 //! baseline.
 //!
-//! Titles come from `docs/title_manifests/`; expectations come from
+//! Titles come from `titles/`; expectations come from
 //! each title's committed `boot_summary.json`. Adding a title needs no
 //! change here -- drop in a manifest, record it, commit the baseline.
 //!
