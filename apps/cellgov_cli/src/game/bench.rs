@@ -484,18 +484,24 @@ pub fn bench_boot_one_run(
     control_flags1: Option<u32>,
 ) -> BenchBootResult {
     let r = bench_boot(opts, elf_data, authority_id, control_flags1);
-    // wall_us, not wall_ms: the parent reconstructs the Duration from
-    // this token, and millisecond truncation made the parent's
-    // steps_per_sec disagree with the one printed here (and zeroed
-    // the wall entirely on a sub-millisecond run).
-    println!(
-        "BENCH_RESULT steps={} wall_us={} steps_per_sec={:.0} outcome={}",
+    println!("{}", format_bench_result(&r));
+    r
+}
+
+/// The `BENCH_RESULT` line, the child's only channel to the parent.
+///
+/// Wall time travels in nanoseconds, `Duration`'s own resolution, so
+/// the parent reconstructs exactly what the clock returned and
+/// recomputes `steps_per_sec` from the same inputs this line was
+/// printed from; `steps_per_sec` itself is carried for readers.
+fn format_bench_result(r: &BenchBootResult) -> String {
+    format!(
+        "BENCH_RESULT steps={} wall_ns={} steps_per_sec={:.0} outcome={}",
         r.steps,
-        r.wall.as_micros(),
+        r.wall.as_nanos(),
         r.steps_per_sec(),
         r.outcome,
-    );
-    r
+    )
 }
 
 /// Subprocess invocation failure surfaced by [`spawn_one_run`].
@@ -927,10 +933,10 @@ pub enum ParseBenchError {
     MissingSteps,
     #[error("BENCH_RESULT: malformed steps={0:?}")]
     MalformedSteps(String),
-    #[error("BENCH_RESULT: missing wall_us= field")]
-    MissingWallUs,
-    #[error("BENCH_RESULT: malformed wall_us={0:?}")]
-    MalformedWallUs(String),
+    #[error("BENCH_RESULT: missing wall_ns= field")]
+    MissingWallNs,
+    #[error("BENCH_RESULT: malformed wall_ns={0:?}")]
+    MalformedWallNs(String),
     #[error("BENCH_RESULT: missing outcome= field")]
     MissingOutcome,
     #[error("BENCH_RESULT: malformed outcome={token:?}: {source}")]
@@ -941,8 +947,12 @@ pub enum ParseBenchError {
     },
 }
 
-/// Parse the `BENCH_RESULT steps=N wall_us=M steps_per_sec=X outcome=O`
+/// Parse the `BENCH_RESULT steps=N wall_ns=M steps_per_sec=X outcome=O`
 /// line out of captured stdout.
+///
+/// `wall_ns` must fit a `u64` (about 584 years); the child's `u128`
+/// print never exceeds that for a real run, and a larger value is
+/// reported as malformed rather than clamped.
 pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseBenchError> {
     let mut iter = stdout.lines().filter(|l| l.starts_with("BENCH_RESULT "));
     let line = iter.next().ok_or(ParseBenchError::NoResultLine)?;
@@ -950,7 +960,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
         return Err(ParseBenchError::DuplicateResultLine);
     }
     let mut steps: Option<usize> = None;
-    let mut wall_us: Option<u64> = None;
+    let mut wall_ns: Option<u64> = None;
     let mut outcome_token: Option<String> = None;
     let mut reported_sps: Option<f64> = None;
     for tok in line.split_whitespace().skip(1) {
@@ -959,10 +969,10 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
                 v.parse()
                     .map_err(|_| ParseBenchError::MalformedSteps(v.to_string()))?,
             );
-        } else if let Some(v) = tok.strip_prefix("wall_us=") {
-            wall_us = Some(
+        } else if let Some(v) = tok.strip_prefix("wall_ns=") {
+            wall_ns = Some(
                 v.parse()
-                    .map_err(|_| ParseBenchError::MalformedWallUs(v.to_string()))?,
+                    .map_err(|_| ParseBenchError::MalformedWallNs(v.to_string()))?,
             );
         } else if let Some(v) = tok.strip_prefix("steps_per_sec=") {
             reported_sps = v.parse().ok();
@@ -975,7 +985,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
         }
     }
     let steps = steps.ok_or(ParseBenchError::MissingSteps)?;
-    let wall_us = wall_us.ok_or(ParseBenchError::MissingWallUs)?;
+    let wall_ns = wall_ns.ok_or(ParseBenchError::MissingWallNs)?;
     let outcome_token = outcome_token.ok_or(ParseBenchError::MissingOutcome)?;
     let outcome = BootOutcome::from_str(&outcome_token).map_err(|source| {
         ParseBenchError::UnparseableOutcome {
@@ -983,25 +993,24 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
             source,
         }
     })?;
-    let wall = std::time::Duration::from_micros(wall_us);
+    let wall = std::time::Duration::from_nanos(wall_ns);
     let result = BenchBootResult {
         steps,
         wall,
         outcome,
     };
-    // Drift beyond rounding tolerance means the formatter and the
-    // recomputation of (steps, wall_us) have gone out of sync. A zero
-    // wall is unmeasurable, not drifted -- the pair gate rejects it
-    // separately via `wall_disagreement_percent`.
+    // The transport is lossless, so the parent recomputes
+    // steps_per_sec from exactly the child's inputs and the only
+    // admissible difference is the child's `{:.0}` print rounding.
+    // Anything wider means the writer and this reader disagree on
+    // the line's units.
     if let Some(reported) = reported_sps {
-        if wall_us > 0 {
-            let computed = result.steps_per_sec();
-            let tolerance = (computed * 0.01).max(1.0);
-            debug_assert!(
-                (reported - computed).abs() <= tolerance,
-                "BENCH_RESULT steps_per_sec drift: reported={reported} computed={computed} (tolerance={tolerance})"
-            );
-        }
+        let computed = result.steps_per_sec();
+        let tolerance = 0.5 + computed.abs() * f64::EPSILON;
+        debug_assert!(
+            (reported - computed).abs() <= tolerance,
+            "BENCH_RESULT steps_per_sec drift: reported={reported} computed={computed} (tolerance={tolerance})"
+        );
     }
     Ok(result)
 }
