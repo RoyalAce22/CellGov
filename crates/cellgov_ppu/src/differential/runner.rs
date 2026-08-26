@@ -111,7 +111,7 @@ fn execute_snapshot(
     let mut effects: Vec<Effect> = Vec::new();
     let mut store_buf = StoreBuffer::new();
     let verdict = {
-        let views: [(u64, &[u8]); 1] = [(base, &memory)];
+        let views = [cellgov_mem::RegionView::plain(base, &memory)];
         execute(
             &inst,
             &mut state,

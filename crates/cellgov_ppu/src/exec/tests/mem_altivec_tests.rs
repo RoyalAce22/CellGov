@@ -180,7 +180,7 @@ fn stvx_pre_checks_capacity_for_both_halves() {
         },
         &mut s,
         UnitId::new(0),
-        &[(0, &[0u8; 0x2000])],
+        &[cellgov_mem::RegionView::plain(0, &[0u8; 0x2000])],
         &mut effects,
         &mut store_buf,
     );
@@ -216,7 +216,7 @@ fn lvlx_partial_overlap_merges_buffered_bytes_with_region() {
         },
         &mut s,
         UnitId::new(0),
-        &[(0, &mem)],
+        &[cellgov_mem::RegionView::plain(0, &mem)],
         &mut effects,
         &mut store_buf,
     );
@@ -250,7 +250,7 @@ fn lvlx_full_overlap_forwards_without_yielding() {
         },
         &mut s,
         UnitId::new(0),
-        &[(0, &[0u8; 0x2000])],
+        &[cellgov_mem::RegionView::plain(0, &[0u8; 0x2000])],
         &mut effects,
         &mut store_buf,
     );
@@ -313,6 +313,54 @@ fn lvxl_matches_lvx_semantics() {
         &mut effects,
     );
     assert_eq!(s.vr[4], u128::from_be_bytes(pattern));
+}
+
+#[test]
+fn lvx_from_a_reserved_zero_region_logs_one_sixteen_byte_line_read() {
+    use cellgov_mem::{GuestMemory, PageSize, ProvisionalRead, Region, RegionAccess};
+    let mem = GuestMemory::from_regions(vec![
+        Region::new(0, 0x100, "flat", PageSize::Page64K),
+        Region::with_access(
+            0x1_0000,
+            0x1000,
+            "rsx",
+            PageSize::Page64K,
+            RegionAccess::ReservedZeroReadable,
+        ),
+    ])
+    .unwrap();
+    let views: Vec<cellgov_mem::RegionView<'_>> = mem.region_views().collect();
+    let mut s = PpuState::new();
+    s.set_gpr(1, 0x1_0010);
+    s.set_gpr(2, 0x7); // EA = 0x1_0017 -> the line at 0x1_0010
+    s.set_vr(3, u128::MAX);
+    let mut effects = Vec::new();
+    let mut store_buf = StoreBuffer::new();
+    let v = execute(
+        &PpuInstruction::Lvx {
+            vt: 3,
+            ra: 1,
+            rb: 2,
+        },
+        &mut s,
+        UnitId::new(0),
+        &views,
+        &mut effects,
+        &mut store_buf,
+    );
+    assert_eq!(v, ExecuteVerdict::Continue);
+    assert_eq!(s.vr[3], 0, "a reserved-zero line reads as zero");
+    // The log records the aligned line the interpreter read, not the
+    // unaligned EA the instruction was given.
+    assert_eq!(
+        mem.drain_provisional_reads(),
+        vec![ProvisionalRead {
+            addr: 0x1_0010,
+            len: 16,
+            hits: 1,
+        }]
+    );
+    assert_eq!(mem.provisional_read_count(), 1);
 }
 
 #[test]

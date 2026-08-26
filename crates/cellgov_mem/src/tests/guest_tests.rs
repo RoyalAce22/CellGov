@@ -652,3 +652,110 @@ fn a_region_ending_exactly_at_the_top_of_the_address_space_is_accepted() {
     .unwrap();
     assert_eq!(mem.regions().count(), 1);
 }
+
+fn reserved_layout() -> GuestMemory {
+    GuestMemory::from_regions(vec![
+        Region::new(0, 0x100, "flat", PageSize::Page64K),
+        Region::with_access(
+            0xC000_0000,
+            0x1000,
+            "rsx",
+            PageSize::Page64K,
+            RegionAccess::ReservedZeroReadable,
+        ),
+    ])
+    .unwrap()
+}
+
+#[test]
+fn a_reserved_read_is_logged_by_address_and_drained_once() {
+    let mem = reserved_layout();
+    let word = ByteRange::new(GuestAddr::new(0xC000_0010), 4).unwrap();
+    let dword = ByteRange::new(GuestAddr::new(0xC000_0020), 8).unwrap();
+    let ordinary = ByteRange::new(GuestAddr::new(0), 4).unwrap();
+    mem.read(word);
+    mem.read(word);
+    mem.read(dword);
+    mem.read(ordinary);
+    assert_eq!(mem.provisional_read_count(), 3);
+    assert_eq!(
+        mem.drain_provisional_reads(),
+        vec![
+            ProvisionalRead {
+                addr: 0xC000_0010,
+                len: 4,
+                hits: 2,
+            },
+            ProvisionalRead {
+                addr: 0xC000_0020,
+                len: 8,
+                hits: 1,
+            },
+        ]
+    );
+    assert!(
+        mem.drain_provisional_reads().is_empty(),
+        "a drain empties the log"
+    );
+    assert_eq!(
+        mem.provisional_read_count(),
+        3,
+        "the running count survives the drain"
+    );
+}
+
+#[test]
+fn a_region_view_logs_reads_only_when_its_region_is_provisional() {
+    let mem = reserved_layout();
+    let views: Vec<RegionView<'_>> = mem.region_views().collect();
+    assert_eq!(views.len(), 2);
+    assert!(
+        views[0].provisional.is_none(),
+        "ReadWrite views are unlogged"
+    );
+    assert!(views[1].provisional.is_some());
+    views[0].note_read(0x10, 4);
+    views[1].note_read(0xC000_0100, 4);
+    assert_eq!(
+        mem.drain_provisional_reads(),
+        vec![ProvisionalRead {
+            addr: 0xC000_0100,
+            len: 4,
+            hits: 1,
+        }]
+    );
+    assert_eq!(mem.provisional_read_count(), 1);
+}
+
+#[test]
+fn a_provisional_read_of_four_gib_or_more_logs_a_saturated_length_rather_than_wrapping() {
+    let mem = reserved_layout();
+    // 0x1_0000_0004 wraps to 4 under `as u32`; a saturated length is
+    // distinguishable from a genuine 4-byte read.
+    mem.note_provisional_read(0xC000_0000, u64::from(u32::MAX) + 5);
+    mem.note_provisional_read(0xC000_0000, 4);
+    assert_eq!(
+        mem.drain_provisional_reads(),
+        vec![
+            ProvisionalRead {
+                addr: 0xC000_0000,
+                len: 4,
+                hits: 1,
+            },
+            ProvisionalRead {
+                addr: 0xC000_0000,
+                len: u32::MAX,
+                hits: 1,
+            },
+        ]
+    );
+}
+
+#[test]
+fn reset_for_reuse_clears_the_provisional_log_and_count() {
+    let mut mem = reserved_layout();
+    mem.read(ByteRange::new(GuestAddr::new(0xC000_0000), 4).unwrap());
+    mem.reset_for_reuse();
+    assert!(mem.drain_provisional_reads().is_empty());
+    assert_eq!(mem.provisional_read_count(), 0);
+}

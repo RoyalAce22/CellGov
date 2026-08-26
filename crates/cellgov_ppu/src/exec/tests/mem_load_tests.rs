@@ -66,6 +66,55 @@ fn lwz_mem_fault_on_bad_address() {
 }
 
 #[test]
+fn a_load_straddling_a_plain_view_and_a_reserved_view_is_unmapped_and_unlogged() {
+    use cellgov_mem::{GuestMemory, PageSize, Region, RegionAccess};
+    let mem = GuestMemory::from_regions(vec![
+        Region::new(0, 0x1_0000, "flat", PageSize::Page64K),
+        Region::with_access(
+            0x1_0000,
+            0x1000,
+            "rsx",
+            PageSize::Page64K,
+            RegionAccess::ReservedZeroReadable,
+        ),
+    ])
+    .unwrap();
+    let views: Vec<cellgov_mem::RegionView<'_>> = mem.region_views().collect();
+    let mut s = PpuState::new();
+    s.set_gpr(1, 0xFFFC);
+    s.set_gpr(3, 0xDEAD_BEEF);
+    let mut effects = Vec::new();
+    let mut store_buf = StoreBuffer::new();
+    // Bytes 0xFFFC..0x1_0004 cross the region boundary; no single view
+    // covers them, which is the same answer `GuestMemory::read` gives.
+    let v = execute(
+        &PpuInstruction::Ld {
+            rt: 3,
+            ra: 1,
+            imm: 0,
+        },
+        &mut s,
+        UnitId::new(0),
+        &views,
+        &mut effects,
+        &mut store_buf,
+    );
+    assert!(
+        matches!(
+            v,
+            ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(ctx)) if ctx.addr == 0xFFFC
+        ),
+        "got {v:?}"
+    );
+    assert_eq!(s.gpr[3], 0xDEAD_BEEF, "a faulting load leaves RT alone");
+    assert!(
+        mem.drain_provisional_reads().is_empty(),
+        "a miss on the reserved view is not a read of it"
+    );
+    assert_eq!(mem.provisional_read_count(), 0);
+}
+
+#[test]
 fn lha_sign_extends_halfword() {
     // 0xFF80 == -128 as i16; lha sign-extends to the full GPR width.
     let mut mem = vec![0u8; 0x2000];
@@ -124,7 +173,7 @@ fn lwa_sign_extends_through_store_buffer_forward() {
     s.set_gpr(5, 0xFFFF_FFFE);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
-    let region_views: [(u64, &[u8]); 1] = [(0, &[0u8; 0x2000])];
+    let region_views = [cellgov_mem::RegionView::plain(0, &[0u8; 0x2000])];
     let v_stw = execute(
         &PpuInstruction::Stw {
             rs: 5,
@@ -162,7 +211,7 @@ fn lha_sign_extends_through_store_buffer_forward() {
     s.set_gpr(5, 0xFF80);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
-    let region_views: [(u64, &[u8]); 1] = [(0, &[0u8; 0x2000])];
+    let region_views = [cellgov_mem::RegionView::plain(0, &[0u8; 0x2000])];
     let v_sth = execute(
         &PpuInstruction::Sth {
             rs: 5,

@@ -20,7 +20,7 @@ pub(crate) fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
     unit_id: UnitId,
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     effects: &mut Vec<Effect>,
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
@@ -1228,7 +1228,7 @@ pub(crate) fn execute(
 /// Returns an `Unmapped` `MemError` when no region view covers the line.
 fn read_aligned_16(
     aligned: u64,
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
 ) -> Result<u128, cellgov_mem::MemError> {
     if let Some(v) = store_buf.forward(aligned, 16) {
@@ -1288,7 +1288,7 @@ fn single_frs(d: u64) -> u32 {
 /// `rt_start`, wrapping at r31 -> r0. Zero-length is a no-op.
 fn string_load(
     state: &mut PpuState,
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     rt_start: usize,
     base: u64,

@@ -24,6 +24,7 @@
 //! | `0x08` | `PpuStateFull`        | 1 + 8 + 8 + 32*8 + 8 + 8 + 8 + 4 + 1 + 8 = 310 |
 //! | `0x09` | `HostInvariantBreak`  | 1 + 1 = 2                              |
 //! | `0x0a` | `SyscallEntered`      | 1 + 8 + 8 + 8*8 + 1 = 82               |
+//! | `0x0b` | `ReservedRegionRead`  | 1 + 8 + 8 + 8 + 4 + 4 = 33             |
 
 use crate::hash::StateHash;
 use crate::level::TraceLevel;
@@ -401,6 +402,23 @@ pub enum TraceRecord {
         /// Classified dispatch arm.
         disposition: TracedSyscallDisposition,
     },
+    /// Reads of a reserved-zero-readable region (RSX / SPU ranges the
+    /// runtime models as provisional zeros), one record per distinct
+    /// `(addr, len)` drained after a step or commit. The zeros the
+    /// guest saw were a modeling choice, so a replay comparison can
+    /// find where that choice touched the run.
+    ReservedRegionRead {
+        /// Unit whose step (or commit) the reads are attributed to.
+        unit: UnitId,
+        /// Runtime step count at the drain.
+        step: u64,
+        /// Guest address of the first byte read.
+        addr: u64,
+        /// Bytes read.
+        len: u32,
+        /// Reads of exactly this `(addr, len)` since the previous drain.
+        hits: u32,
+    },
 }
 
 const TAG_UNIT_SCHEDULED: u8 = 0x00;
@@ -414,6 +432,7 @@ const TAG_PPU_STATE_HASH: u8 = 0x07;
 const TAG_PPU_STATE_FULL: u8 = 0x08;
 const TAG_HOST_INVARIANT_BREAK: u8 = 0x09;
 const TAG_SYSCALL_ENTERED: u8 = 0x0a;
+const TAG_RESERVED_REGION_READ: u8 = 0x0b;
 
 impl TraceRecord {
     /// Trace level this record belongs to.
@@ -430,6 +449,7 @@ impl TraceRecord {
             TraceRecord::EffectEmitted { .. } => TraceLevel::Effects,
             TraceRecord::HostInvariantBreak { .. } => TraceLevel::Scheduling,
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
+            TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,
         }
     }
 
@@ -553,6 +573,20 @@ impl TraceRecord {
                     write_u64(buf, *a);
                 }
                 buf.push(u8::from(*disposition));
+            }
+            TraceRecord::ReservedRegionRead {
+                unit,
+                step,
+                addr,
+                len,
+                hits,
+            } => {
+                buf.push(TAG_RESERVED_REGION_READ);
+                write_u64(buf, unit.raw());
+                write_u64(buf, *step);
+                write_u64(buf, *addr);
+                write_u32(buf, *len);
+                write_u32(buf, *hits);
             }
         }
     }
@@ -689,6 +723,20 @@ impl TraceRecord {
                     num,
                     args,
                     disposition,
+                }
+            }
+            TAG_RESERVED_REGION_READ => {
+                let unit = UnitId::new(read_u64(bytes, &mut pos)?);
+                let step = read_u64(bytes, &mut pos)?;
+                let addr = read_u64(bytes, &mut pos)?;
+                let len = read_u32(bytes, &mut pos)?;
+                let hits = read_u32(bytes, &mut pos)?;
+                TraceRecord::ReservedRegionRead {
+                    unit,
+                    step,
+                    addr,
+                    len,
+                    hits,
                 }
             }
             other => return Err(DecodeError::UnknownTag(other)),

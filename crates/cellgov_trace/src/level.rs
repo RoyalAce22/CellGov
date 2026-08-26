@@ -16,7 +16,8 @@ pub enum TraceLevel {
     Effects = 1,
     /// Commit pipeline activity.
     Commits = 2,
-    /// State-hash checkpoints used for replay comparison.
+    /// State-hash checkpoints used for replay comparison, and the
+    /// per-step records a comparison locates against them.
     Hashes = 3,
 }
 

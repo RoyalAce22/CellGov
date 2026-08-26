@@ -220,7 +220,7 @@ fn dcbz_pre_checks_capacity_for_full_block() {
         &PpuInstruction::Dcbz { ra: 1, rb: 2 },
         &mut s,
         UnitId::new(0),
-        &[(0, &[0u8; 0x4000])],
+        &[cellgov_mem::RegionView::plain(0, &[0u8; 0x4000])],
         &mut effects,
         &mut store_buf,
     );

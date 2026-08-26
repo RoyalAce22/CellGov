@@ -7,22 +7,25 @@
 use crate::exec::verdict::ExecuteVerdict;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
+use cellgov_mem::RegionView;
 
 /// Linear search for `[ea, ea+len)` covered by one region view.
 ///
 /// O(n) over `region_views`; n is small (single-digit) per dispatch.
+/// A hit on a provisional view is logged with that view's memory.
 #[inline]
 pub(crate) fn load_slice<'a>(
-    region_views: &[(u64, &'a [u8])],
+    region_views: &[RegionView<'a>],
     ea: u64,
     len: usize,
 ) -> Option<&'a [u8]> {
     let end = ea.checked_add(len as u64)?;
-    for &(base, bytes) in region_views {
-        let region_end = base + bytes.len() as u64;
-        if ea >= base && end <= region_end {
-            let offset = (ea - base) as usize;
-            return Some(&bytes[offset..offset + len]);
+    for view in region_views {
+        let region_end = view.base + view.bytes.len() as u64;
+        if ea >= view.base && end <= region_end {
+            view.note_read(ea, len as u32);
+            let offset = (ea - view.base) as usize;
+            return Some(&view.bytes[offset..offset + len]);
         }
     }
     None
@@ -47,7 +50,7 @@ fn unmapped(ea: u64) -> cellgov_mem::MemError {
 /// overlaps with pre-block memory both resolve correctly.
 #[inline]
 pub(crate) fn load_ze(
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     ea: u64,
     size: u8,
@@ -75,7 +78,7 @@ pub(crate) fn load_ze(
 /// Sign-extending load with store-buffer forwarding. See [`load_ze`].
 #[inline]
 pub(crate) fn load_se(
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     ea: u64,
     size: u8,

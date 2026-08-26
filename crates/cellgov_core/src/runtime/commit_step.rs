@@ -278,6 +278,10 @@ impl Runtime {
         // when its queue is non-empty, and on a process-exit final commit
         // there is no later boundary to pick them up.
         self.drain_invariant_breaks_to_trace();
+        // Host-side reads of a reserved region during this commit (an
+        // LV2 arm or the RSX model reading guest memory) attribute to
+        // the committing unit.
+        self.drain_provisional_reads_to_trace(source);
         self.emit_commit_trace(source, &outcome, &due, &timer_due);
 
         let holds_cs = self.lv2_host.unit_holds_lwmutex(source);

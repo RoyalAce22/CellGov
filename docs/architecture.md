@@ -152,7 +152,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_dma`                  | DMA completion queue with pluggable latency models.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_effects`              | The 13-variant `Effect` enum and inline `WritePayload` (16-byte stack buffer, heap fallback above).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_exec`                 | `ExecutionUnit` trait, `ExecutionContext`, `ExecutionStepResult`. The boundary between architecture interpreters and the runtime. Effects flow through a caller-owned `&mut Vec<Effect>` passed to `run_until_yield`, not on the result struct.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `cellgov_trace`                | Binary trace format: 11 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace + `HostInvariantBreak` side-channel + `SyscallEntered` syscall-entry record).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `cellgov_trace`                | Binary trace format: 12 record variants with strict tag/layout contract (7 decision-level + `PpuStateHash` + `PpuStateFull` for per-step divergence trace + `HostInvariantBreak` side-channel + `SyscallEntered` syscall-entry record + `ReservedRegionRead` locating each provisional zero-read by step and address).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `cellgov_lv2`                  | LV2 model: image / content registry, loaded-PRX registry, thread-group table, PPU thread table, in-memory filesystem store, LV2 sync primitives (mutex, cond, semaphore, lwmutex, event-flag, event-queue), syscall classification (`Lv2Request`) and dispatch (`Lv2Dispatch`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution. The NID lookup database itself lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -230,14 +230,18 @@ The PPU interpreter's fetch path uses `GuestMemory::as_bytes()`, a
 legacy accessor that returns the base-0 region's bytes -- code
 always lives in `main`, so this is safe. Load paths (`ld`, `lwz`,
 `lfs`, `lvx`, etc.) go through the `load_slice` helper, which scans
-a stack-allocated region-view table built at the top of
-`run_until_yield`: a `[(u64, &[u8]); 8]` snapshot (`MAX_REGIONS = 8`)
-of every region's base and bytes, sliced to the active region count
-per dispatch. Linear scan wins over `BTreeMap` lookup
+a region-view table built at the top of `run_until_yield` from
+`GuestMemory::region_views()`: one `RegionView` (base, bytes, and
+the memory that logs a read when the region is
+`ReservedZeroReadable`) per region, held in an eight-slot stack
+table that spills to the heap when a guest maps more regions than
+that. Every hit on a provisional view is logged, so a raw-slice
+read of the reserved-zero RSX / SPU ranges reaches the trace as a
+`ReservedRegionRead` record like a host-side `GuestMemory::read`
+does. Linear scan wins over `BTreeMap` lookup
 because the region count stays single-digit under the current PS3
-layout (main, rsx_iomap, stack, child_stacks, rsx, spu_reserved); if many more mappings are
-later added, a two-tier fast-path is the natural next
-step. Stores go through `Effect::SharedWriteIntent`
+layout (main, rsx_iomap, stack, child_stacks, rsx, spu_reserved,
+plus one region per shared-memory mapping). Stores go through `Effect::SharedWriteIntent`
 effects -- the commit pipeline's `apply_commit` is region-aware, so
 stores to any mapped region land correctly.
 
@@ -452,14 +456,18 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`.
-- **11 trace record variants** in `cellgov_trace::TraceRecord` --
+- **12 trace record variants** in `cellgov_trace::TraceRecord` --
   seven decision-level (`UnitScheduled`, `StepCompleted`,
   `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
   `UnitBlocked`, `UnitWoken`), two per-step variants for the
   divergence trace (`PpuStateHash`, `PpuStateFull`), one
   diagnostic side-channel for host-side invariant breaks
-  (`HostInvariantBreak`), and one syscall-entry record
-  (`SyscallEntered`) emitted before `Lv2Host::dispatch` runs.
+  (`HostInvariantBreak`), one syscall-entry record
+  (`SyscallEntered`) emitted before `Lv2Host::dispatch` runs, and
+  one locator for reads of the reserved-zero RSX / SPU ranges
+  (`ReservedRegionRead`: unit, step, address, length, hits),
+  drained after every step and commit so a zero the guest saw from
+  a provisional region can be found in the replay comparison.
 
 Trace emission is gated by `RuntimeMode` (`FaultDriven` /
 `DeterminismCheck` / `FullTrace`). Fault-driven boot pays no trace

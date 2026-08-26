@@ -318,20 +318,31 @@ impl ExecutionUnit for PpuExecutionUnit {
 
         let mem = ctx.memory().as_bytes();
         // Stack-allocated region table avoids per-call heap alloc on the
-        // Budget=1 hot path.
+        // Budget=1 hot path. The boot layout installs six regions and
+        // each shared-memory mapping adds one (RPCS3 sys_mmapper.cpp
+        // sys_mmapper_map_shared_memory), so a larger layout spills to
+        // the heap.
         const MAX_REGIONS: usize = 8;
-        let mut region_views_storage: [(u64, &[u8]); MAX_REGIONS] =
-            [(0, &[] as &[u8]); MAX_REGIONS];
+        let mut region_views_storage: [cellgov_mem::RegionView<'_>; MAX_REGIONS] =
+            [cellgov_mem::RegionView::plain(0, &[]); MAX_REGIONS];
+        let mut region_views_spill: Vec<cellgov_mem::RegionView<'_>> = Vec::new();
         let mut n_regions = 0usize;
-        for r in ctx.memory().regions() {
-            assert!(
-                n_regions < MAX_REGIONS,
-                "region_views table too small; bump MAX_REGIONS"
-            );
-            region_views_storage[n_regions] = (r.base(), r.bytes());
+        for view in ctx.memory().region_views() {
+            if n_regions < MAX_REGIONS {
+                region_views_storage[n_regions] = view;
+            } else {
+                if region_views_spill.is_empty() {
+                    region_views_spill.extend_from_slice(&region_views_storage);
+                }
+                region_views_spill.push(view);
+            }
             n_regions += 1;
         }
-        let region_views = &region_views_storage[..n_regions];
+        let region_views: &[cellgov_mem::RegionView<'_>] = if n_regions <= MAX_REGIONS {
+            &region_views_storage[..n_regions]
+        } else {
+            &region_views_spill
+        };
 
         loop {
             let step_pc = self.state.pc;

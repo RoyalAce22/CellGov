@@ -626,3 +626,232 @@ fn runtime_routes_full_states_to_zoom_trace_not_main_trace() {
         other => panic!("expected PpuStateFull, got {other:?}"),
     }
 }
+
+/// Reads the reserved-zero region at `0xC000_0010` twice and
+/// `0xC000_0020` once per step through the frozen context. With
+/// `faults` set, every step yields `Fault` after those reads.
+#[derive(Clone)]
+struct ReservedReadingUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    max: u64,
+    faults: bool,
+}
+
+impl ExecutionUnit for ReservedReadingUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= self.max {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        use cellgov_mem::{ByteRange, GuestAddr};
+        let word = ByteRange::new(GuestAddr::new(0xC000_0010), 4).unwrap();
+        let dword = ByteRange::new(GuestAddr::new(0xC000_0020), 8).unwrap();
+        assert_eq!(ctx.memory().read(word), Some(&[0u8; 4][..]));
+        assert_eq!(ctx.memory().read(word), Some(&[0u8; 4][..]));
+        assert_eq!(ctx.memory().read(dword), Some(&[0u8; 8][..]));
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        if self.faults {
+            return ExecutionStepResult {
+                yield_reason: YieldReason::Fault,
+                consumed_cost: InstructionCost::ZERO,
+                local_diagnostics: LocalDiagnostics::empty(),
+                fault: Some(cellgov_effects::FaultKind::Guest(0x700)),
+                syscall_args: None,
+            };
+        }
+        ExecutionStepResult {
+            yield_reason: if n >= self.max {
+                YieldReason::Finished
+            } else {
+                YieldReason::BudgetExhausted
+            },
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+fn reserved_runtime(mode: RuntimeMode) -> Runtime {
+    reserved_runtime_with(mode, false)
+}
+
+fn reserved_runtime_with(mode: RuntimeMode, faults: bool) -> Runtime {
+    use cellgov_mem::{PageSize, Region, RegionAccess};
+    let mem = GuestMemory::from_regions(vec![
+        Region::new(0, 0x100, "flat", PageSize::Page64K),
+        Region::with_access(
+            0xC000_0000,
+            0x1000,
+            "rsx",
+            PageSize::Page64K,
+            RegionAccess::ReservedZeroReadable,
+        ),
+    ])
+    .unwrap();
+    let mut rt = Runtime::new(mem, Budget::new(4), 100);
+    rt.set_mode(mode);
+    rt.registry_mut().register_with(|id| ReservedReadingUnit {
+        id,
+        steps: Cell::new(0),
+        max: 2,
+        faults,
+    });
+    rt
+}
+
+fn reserved_reads(rt: &Runtime) -> Vec<(u64, u64, u64, u32, u32)> {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    TraceReader::new(rt.trace().bytes())
+        .map(|r| r.expect("decode"))
+        .filter_map(|r| match r {
+            TraceRecord::ReservedRegionRead {
+                unit,
+                step,
+                addr,
+                len,
+                hits,
+            } => Some((unit.raw(), step, addr, len, hits)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_reserved_read_during_a_step_is_traced_by_unit_step_address_and_hits() {
+    let mut rt = reserved_runtime(RuntimeMode::FullTrace);
+    rt.step().unwrap();
+    assert_eq!(
+        reserved_reads(&rt),
+        vec![(0, 1, 0xC000_0010, 4, 2), (0, 1, 0xC000_0020, 8, 1)]
+    );
+    assert!(
+        rt.memory().drain_provisional_reads().is_empty(),
+        "the step drained the log; nothing leaks into the next step"
+    );
+    rt.step().unwrap();
+    assert_eq!(
+        reserved_reads(&rt).len(),
+        4,
+        "the second step traces its own reads under step 2"
+    );
+    assert_eq!(reserved_reads(&rt)[2], (0, 2, 0xC000_0010, 4, 2));
+}
+
+#[test]
+fn determinism_check_mode_traces_reserved_reads_beside_the_hash_stream() {
+    let mut rt = reserved_runtime(RuntimeMode::DeterminismCheck);
+    rt.step().unwrap();
+    assert_eq!(reserved_reads(&rt).len(), 2);
+}
+
+#[test]
+fn fault_driven_mode_drains_reserved_reads_without_tracing_them() {
+    let mut rt = reserved_runtime(RuntimeMode::FaultDriven);
+    rt.step().unwrap();
+    assert!(reserved_reads(&rt).is_empty());
+    assert!(
+        rt.memory().drain_provisional_reads().is_empty(),
+        "the log is drained even when nothing is traced"
+    );
+    assert_eq!(
+        rt.memory().provisional_read_count(),
+        3,
+        "the running count still reports the reads"
+    );
+}
+
+#[test]
+fn a_host_side_read_between_step_and_commit_is_traced_at_the_commit_under_the_committing_unit() {
+    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_trace::{TraceReader, TraceRecord};
+    let mut rt = reserved_runtime(RuntimeMode::FullTrace);
+    let s1 = rt.step().unwrap();
+    let step_reads = reserved_reads(&rt).len();
+    // An LV2 arm or the RSX model reading on the committing unit's
+    // behalf goes through the same `GuestMemory::read` path.
+    let host = ByteRange::new(GuestAddr::new(0xC000_0040), 16).unwrap();
+    assert_eq!(rt.memory().read(host), Some(&[0u8; 16][..]));
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    let reads = reserved_reads(&rt);
+    assert_eq!(reads.len(), step_reads + 1);
+    assert_eq!(
+        reads[step_reads],
+        (0, 1, 0xC000_0040, 16, 1),
+        "attributed to the committing unit at the step count the commit closes"
+    );
+    let records: Vec<TraceRecord> = TraceReader::new(rt.trace().bytes())
+        .map(|r| r.expect("decode"))
+        .collect();
+    let commit_pos = records
+        .iter()
+        .position(|r| matches!(r, TraceRecord::CommitApplied { .. }))
+        .expect("CommitApplied present");
+    let host_read_pos = records
+        .iter()
+        .position(|r| {
+            matches!(
+                r,
+                TraceRecord::ReservedRegionRead {
+                    addr: 0xC000_0040,
+                    ..
+                }
+            )
+        })
+        .expect("host-side read traced");
+    assert!(
+        host_read_pos < commit_pos,
+        "the read lands inside the commit's window, before CommitApplied"
+    );
+}
+
+#[test]
+fn a_faulting_step_still_traces_the_reserved_reads_it_consumed_before_the_fault() {
+    use cellgov_trace::{TraceReader, TraceRecord};
+    let mut rt = reserved_runtime_with(RuntimeMode::FullTrace, true);
+    let s1 = rt.step().unwrap();
+    assert_eq!(
+        reserved_reads(&rt),
+        vec![(0, 1, 0xC000_0010, 4, 2), (0, 1, 0xC000_0020, 8, 1)],
+        "fault-discards-all covers the batch's effects; the zeros the unit \
+         consumed before faulting are part of the run and stay located"
+    );
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    let fault_discarded = TraceReader::new(rt.trace().bytes())
+        .map(|r| r.expect("decode"))
+        .find_map(|r| match r {
+            TraceRecord::CommitApplied {
+                fault_discarded, ..
+            } => Some(fault_discarded),
+            _ => None,
+        })
+        .expect("CommitApplied present");
+    assert!(fault_discarded);
+    assert_eq!(
+        reserved_reads(&rt).len(),
+        2,
+        "the commit adds no reads of its own"
+    );
+}

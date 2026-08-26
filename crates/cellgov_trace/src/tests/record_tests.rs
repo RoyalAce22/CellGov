@@ -665,3 +665,34 @@ fn syscall_entered_truncated_input_is_rejected() {
         );
     }
 }
+
+#[test]
+fn reserved_region_read_encode_decode_roundtrip() {
+    roundtrip(TraceRecord::ReservedRegionRead {
+        unit: UnitId::new(3),
+        step: 77,
+        addr: 0xC000_0010,
+        len: 4,
+        hits: 9,
+    });
+}
+
+#[test]
+fn reserved_region_read_tag_is_0x0b() {
+    let r = TraceRecord::ReservedRegionRead {
+        unit: UnitId::new(0),
+        step: 0,
+        addr: 0,
+        len: 0,
+        hits: 0,
+    };
+    let mut buf = Vec::new();
+    r.encode(&mut buf);
+    assert_eq!(buf[0], 0x0b);
+    assert_eq!(
+        buf.len(),
+        33,
+        "documented wire size: 1 tag + unit, step, addr as u64 + len, hits as u32"
+    );
+    assert_eq!(r.level(), TraceLevel::Hashes);
+}

@@ -50,7 +50,7 @@ pub(crate) fn exec_with_mem(
     mem: &[u8],
     effects: &mut Vec<Effect>,
 ) -> ExecuteVerdict {
-    let views: [(u64, &[u8]); 1] = [(base, mem)];
+    let views = [cellgov_mem::RegionView::plain(base, mem)];
     let mut store_buf = StoreBuffer::new();
     let v = execute(insn, s, uid(), &views, effects, &mut store_buf);
     store_buf.flush(effects, uid());

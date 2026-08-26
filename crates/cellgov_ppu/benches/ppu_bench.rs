@@ -136,7 +136,7 @@ fn bench_execute_lwz(c: &mut Criterion) {
     c.bench_function("execute/lwz", |b| {
         let mut state = PpuState::new();
         state.set_gpr(1, 0x1000);
-        let views: [(u64, &[u8]); 1] = [(0, &mem)];
+        let views = [cellgov_mem::RegionView::plain(0, &mem)];
         let mut effects = Vec::new();
         let mut store_buf = StoreBuffer::new();
         b.iter(|| {

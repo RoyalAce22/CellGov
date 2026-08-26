@@ -926,7 +926,7 @@ fn stdstd_no_partial_commit_on_buffer_full() {
         },
         &mut s,
         uid(),
-        &[(0u64, &[0u8; 0x2000][..])],
+        &[cellgov_mem::RegionView::plain(0u64, &[0u8; 0x2000][..])],
         &mut effects,
         &mut store_buf,
     );

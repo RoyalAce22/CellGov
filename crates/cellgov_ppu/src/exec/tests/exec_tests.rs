@@ -479,7 +479,7 @@ fn ld_stitches_eight_byte_stbs_in_store_buffer() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0x1000);
     let mem = vec![0u8; 0x100];
-    let views: [(u64, &[u8]); 1] = [(0x1000, &mem)];
+    let views = [cellgov_mem::RegionView::plain(0x1000, &mem)];
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
 
@@ -527,7 +527,7 @@ fn ld_overlays_partial_store_onto_pre_block_memory() {
     s.set_gpr(1, 0x1000);
     let mut mem = vec![0u8; 0x100];
     mem[0..8].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44]);
-    let views: [(u64, &[u8]); 1] = [(0x1000, &mem)];
+    let views = [cellgov_mem::RegionView::plain(0x1000, &mem)];
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
 

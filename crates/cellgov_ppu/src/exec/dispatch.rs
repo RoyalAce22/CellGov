@@ -18,7 +18,7 @@ pub fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
     unit_id: UnitId,
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     effects: &mut Vec<Effect>,
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {

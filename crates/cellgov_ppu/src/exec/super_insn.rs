@@ -18,7 +18,7 @@ use crate::store_buffer::StoreBuffer;
 pub(crate) fn execute(
     insn: &PpuInstruction,
     state: &mut PpuState,
-    region_views: &[(u64, &[u8])],
+    region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &mut StoreBuffer,
 ) -> ExecuteVerdict {
     match *insn {

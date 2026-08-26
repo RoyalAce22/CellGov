@@ -827,7 +827,7 @@ fn stdcx_misaligned_ea_raises_alignment_fault() {
 #[test]
 fn stwcx_does_not_drain_plain_stores_mid_batch() {
     let mem = vec![0u8; 0x2000];
-    let views: [(u64, &[u8]); 1] = [(0, &mem)];
+    let views = [cellgov_mem::RegionView::plain(0, &mem)];
     let mut s = PpuState::new();
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
@@ -921,7 +921,7 @@ fn stwcx_does_not_drain_plain_stores_mid_batch() {
 #[test]
 fn stdcx_does_not_drain_plain_stores_mid_batch() {
     let mem = vec![0u8; 0x2000];
-    let views: [(u64, &[u8]); 1] = [(0, &mem)];
+    let views = [cellgov_mem::RegionView::plain(0, &mem)];
     let mut s = PpuState::new();
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();

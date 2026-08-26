@@ -16,7 +16,10 @@ pub mod store_watch;
 pub mod value_sample;
 
 pub use addr::GuestAddr;
-pub use guest::{FaultContext, GuestMemory, MemError, PageSize, Region, RegionAccess};
+pub use guest::{
+    FaultContext, GuestMemory, MemError, PageSize, ProvisionalRead, Region, RegionAccess,
+    RegionView,
+};
 pub use hash::{fnv1a, Fnv1aHasher};
 pub use range::ByteRange;
 pub use staging::{StagedWrite, StagingMemory};

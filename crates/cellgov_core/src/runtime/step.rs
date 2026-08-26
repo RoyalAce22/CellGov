@@ -1,6 +1,7 @@
 //! [`Runtime::step`] -- select a unit, grant budget, run it to yield,
 //! advance guest time, emit trace records.
 
+use cellgov_event::UnitId;
 use cellgov_exec::ExecutionContext;
 use cellgov_time::GuestTicks;
 use cellgov_trace::TraceRecord;
@@ -179,6 +180,7 @@ impl Runtime {
         self.time = time_after;
         self.steps_taken += 1;
         self.last_scheduled_unit = Some(unit_id);
+        self.drain_provisional_reads_to_trace(unit_id);
 
         if let Some((addr, width)) = cellgov_mem::value_sample::pending(self.steps_taken as u64) {
             let bytes =
@@ -217,5 +219,30 @@ impl Runtime {
             time_after,
             epoch_after: self.epoch,
         })
+    }
+
+    /// Trace the reserved-zero reads every address space logged since
+    /// the previous drain, attributed to `unit` at the current step.
+    ///
+    /// Drained in every mode so the per-memory log never outlives one
+    /// step; recorded only when the run is tracing.
+    pub(super) fn drain_provisional_reads_to_trace(&mut self, unit: UnitId) {
+        let mut reads = Vec::new();
+        for (_, mem) in self.address_spaces() {
+            reads.extend(mem.drain_provisional_reads());
+        }
+        if self.mode == RuntimeMode::FaultDriven {
+            return;
+        }
+        let step = self.steps_taken as u64;
+        for read in reads {
+            self.trace.record(&TraceRecord::ReservedRegionRead {
+                unit,
+                step,
+                addr: read.addr,
+                len: read.len,
+                hits: read.hits,
+            });
+        }
     }
 }

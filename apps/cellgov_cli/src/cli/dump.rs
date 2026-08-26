@@ -162,6 +162,18 @@ fn dump_trace(result: &ScenarioResult) {
                     args[7],
                 );
             }
+            TraceRecord::ReservedRegionRead {
+                unit,
+                step,
+                addr,
+                len,
+                hits,
+            } => {
+                println!(
+                    "{i:4}  ReservedRegionRead unit={} step={step} addr=0x{addr:x} len={len} hits={hits}",
+                    unit.raw(),
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

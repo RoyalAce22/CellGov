@@ -1963,3 +1963,87 @@ mod fault_class_tests {
         }
     }
 }
+
+#[test]
+fn a_load_from_a_reserved_zero_region_reads_zero_and_is_logged() {
+    use cellgov_mem::{PageSize, ProvisionalRead, Region, RegionAccess};
+    let mut mem = GuestMemory::from_regions(vec![
+        Region::new(0, 256, "flat", PageSize::Page64K),
+        Region::with_access(
+            0xC000_0000,
+            0x1000,
+            "rsx",
+            PageSize::Page64K,
+            RegionAccess::ReservedZeroReadable,
+        ),
+    ])
+    .unwrap();
+    // lwz r3, 0x10(r4) twice, then exit; r4 points into the reserved
+    // region so both loads read the provisional zero.
+    let lwz: u32 = (32 << 26) | (3 << 21) | (4 << 16) | 0x10;
+    place_insn(&mut mem, 0, lwz);
+    place_insn(&mut mem, 4, lwz);
+    let li_exit: u32 = (14 << 26) | (11 << 21) | 22;
+    place_insn(&mut mem, 8, li_exit);
+    place_insn(&mut mem, 12, 0x4400_0002);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().set_gpr(3, 0xDEAD_BEEF);
+    unit.state_mut().set_gpr(4, 0xC000_0000);
+    let (result, _effects) = run_to_completion(&mut unit, &mem, Budget::new(100));
+    assert_eq!(result.yield_reason, YieldReason::Finished);
+    assert_eq!(
+        unit.state().gpr[3],
+        0,
+        "a reserved-zero region reads as zero"
+    );
+    assert_eq!(
+        mem.provisional_read_count(),
+        2,
+        "a guest load through the region view counts like a host read"
+    );
+    assert_eq!(
+        mem.drain_provisional_reads(),
+        vec![ProvisionalRead {
+            addr: 0xC000_0010,
+            len: 4,
+            hits: 2,
+        }]
+    );
+}
+
+#[test]
+fn a_load_resolves_through_the_ninth_region_of_a_layout() {
+    use cellgov_mem::{PageSize, Region};
+    // Nine regions: one more than the stack-allocated view table holds,
+    // as a title reaches after three shared-memory mappings on top of
+    // the six-region boot layout.
+    let mut regions = vec![Region::new(0, 256, "flat", PageSize::Page64K)];
+    for i in 0..8u64 {
+        regions.push(Region::new(
+            0x1_0000 + i * 0x1000,
+            0x1000,
+            "shm",
+            PageSize::Page64K,
+        ));
+    }
+    let last_base = 0x1_0000 + 7 * 0x1000;
+    let mut mem = GuestMemory::from_regions(regions).unwrap();
+    assert_eq!(mem.regions().count(), 9);
+    mem.apply_commit(
+        ByteRange::new(GuestAddr::new(last_base + 0x10), 4).unwrap(),
+        &0xCAFE_F00Du32.to_be_bytes(),
+    )
+    .unwrap();
+    let lwz: u32 = (32 << 26) | (3 << 21) | (4 << 16) | 0x10;
+    place_insn(&mut mem, 0, lwz);
+    let li_exit: u32 = (14 << 26) | (11 << 21) | 22;
+    place_insn(&mut mem, 4, li_exit);
+    place_insn(&mut mem, 8, 0x4400_0002);
+
+    let mut unit = PpuExecutionUnit::new(UnitId::new(0));
+    unit.state_mut().set_gpr(4, last_base);
+    let (result, _effects) = run_to_completion(&mut unit, &mem, Budget::new(100));
+    assert_eq!(result.yield_reason, YieldReason::Finished);
+    assert_eq!(unit.state().gpr[3], 0xCAFE_F00D);
+}

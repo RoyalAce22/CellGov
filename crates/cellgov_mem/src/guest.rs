@@ -4,7 +4,8 @@
 //! commit pipeline in `cellgov_core` after it validates a batch of
 //! `SharedWriteIntent` effects. Execution units must not call it directly.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use crate::range::ByteRange;
@@ -189,6 +190,52 @@ impl Region {
     }
 }
 
+/// A region as an execution unit sees it during one step.
+///
+/// `provisional` is `Some` for a [`RegionAccess::ReservedZeroReadable`]
+/// region and names the memory that logs reads of it, so a unit's raw
+/// slice reads still reach [`GuestMemory::note_provisional_read`].
+#[derive(Debug, Clone, Copy)]
+pub struct RegionView<'a> {
+    /// Base guest address.
+    pub base: u64,
+    /// Backing bytes.
+    pub bytes: &'a [u8],
+    /// Where a read of this view is logged, if it is provisional.
+    pub provisional: Option<&'a GuestMemory>,
+}
+
+impl<'a> RegionView<'a> {
+    /// A `ReadWrite` view: reads are ordinary and unlogged.
+    #[inline]
+    pub const fn plain(base: u64, bytes: &'a [u8]) -> Self {
+        Self {
+            base,
+            bytes,
+            provisional: None,
+        }
+    }
+
+    /// Log a read of `len` bytes at `ea` if this view is provisional.
+    #[inline]
+    pub fn note_read(&self, ea: u64, len: u32) {
+        if let Some(mem) = self.provisional {
+            mem.note_provisional_read(ea, u64::from(len));
+        }
+    }
+}
+
+/// One distinct provisional read since the previous drain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProvisionalRead {
+    /// Guest address of the first byte read.
+    pub addr: u64,
+    /// Bytes read.
+    pub len: u32,
+    /// Reads of exactly this `(addr, len)` since the previous drain.
+    pub hits: u32,
+}
+
 /// Committed globally visible guest memory.
 ///
 /// Out-of-region reads via [`GuestMemory::read`] return `None` rather than
@@ -204,6 +251,11 @@ pub struct GuestMemory {
     /// region. Inherited by `clone()`; reset only by constructing a new
     /// `GuestMemory`.
     provisional_read_count: Cell<u64>,
+    /// Provisional reads since the previous
+    /// [`drain_provisional_reads`](Self::drain_provisional_reads),
+    /// keyed `(addr, len)`. Bounded by the distinct addresses one step
+    /// touches, provided the runtime drains it every step.
+    provisional_reads: RefCell<BTreeMap<(u64, u32), u32>>,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -313,6 +365,7 @@ impl GuestMemory {
             regions,
             cached_hash: Cell::new(None),
             provisional_read_count: Cell::new(0),
+            provisional_reads: RefCell::new(BTreeMap::new()),
         })
     }
 
@@ -361,6 +414,42 @@ impl GuestMemory {
     #[inline]
     pub fn provisional_read_count(&self) -> u64 {
         self.provisional_read_count.get()
+    }
+
+    /// Record one provisional read in the running count and the
+    /// since-last-drain log.
+    ///
+    /// A read of 4 GiB or more logs its length as `u32::MAX`, the
+    /// trace record's field width, so the overflow stays visible.
+    pub fn note_provisional_read(&self, addr: u64, len: u64) {
+        let len = u32::try_from(len).unwrap_or(u32::MAX);
+        self.provisional_read_count
+            .set(self.provisional_read_count.get().saturating_add(1));
+        let mut log = self.provisional_reads.borrow_mut();
+        let hits = log.entry((addr, len)).or_insert(0);
+        *hits = hits.saturating_add(1);
+    }
+
+    /// Take the provisional reads logged since the previous drain, in
+    /// `(addr, len)` order. The running count is untouched.
+    pub fn drain_provisional_reads(&self) -> Vec<ProvisionalRead> {
+        let mut log = self.provisional_reads.borrow_mut();
+        if log.is_empty() {
+            return Vec::new();
+        }
+        std::mem::take(&mut *log)
+            .into_iter()
+            .map(|((addr, len), hits)| ProvisionalRead { addr, len, hits })
+            .collect()
+    }
+
+    /// Every region as a [`RegionView`], in base-address order.
+    pub fn region_views(&self) -> impl Iterator<Item = RegionView<'_>> {
+        self.regions.iter().map(move |r| RegionView {
+            base: r.base(),
+            bytes: r.bytes(),
+            provisional: (r.access() == RegionAccess::ReservedZeroReadable).then_some(self),
+        })
     }
 
     /// Number of 4 KiB pages currently marked dirty across every region.
@@ -415,8 +504,7 @@ impl GuestMemory {
         match region.access {
             RegionAccess::ReadWrite => {}
             RegionAccess::ReservedZeroReadable => {
-                self.provisional_read_count
-                    .set(self.provisional_read_count.get().saturating_add(1));
+                self.note_provisional_read(start, length);
             }
             RegionAccess::ReservedStrict => {
                 return Err(MemError::ReservedStrictRead {
@@ -517,6 +605,7 @@ impl GuestMemory {
         }
         self.cached_hash.set(None);
         self.provisional_read_count.set(0);
+        self.provisional_reads.borrow_mut().clear();
     }
 
     /// Force the next [`content_hash`](Self::content_hash) call to re-walk
