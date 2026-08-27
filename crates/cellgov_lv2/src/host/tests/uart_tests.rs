@@ -222,7 +222,7 @@ fn a_blocking_receive_parks_and_the_next_send_wakes_it_with_the_reply() {
         ),
         "got {parked:?}"
     );
-    assert!(host.state.uart.reader().is_some());
+    assert_eq!(host.state.uart.readers().len(), 1);
     let second = host.dispatch(
         Lv2Request::UartReceive {
             buf_ptr: RX_PTR + 0x100,
@@ -269,7 +269,7 @@ fn a_blocking_receive_parks_and_the_next_send_wakes_it_with_the_reply() {
         }
         other => panic!("expected WakeAndReturn, got {other:?}"),
     }
-    assert!(host.state.uart.reader().is_none());
+    assert!(host.state.uart.readers().is_empty());
     assert!(host.state.uart.pending_bytes().is_empty());
 }
 

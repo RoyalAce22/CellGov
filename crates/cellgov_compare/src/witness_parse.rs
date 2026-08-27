@@ -185,6 +185,7 @@ const LINE_TABLE: &[LineSpec] = &[
             ("unknown", "uart_unknown_cids"),
             ("events_gated", "uart_events_gated"),
             ("rx_overflow_bytes", "uart_rx_overflow_bytes"),
+            ("readers_queued", "uart_readers_queued"),
         ],
         Extra::None,
     ),

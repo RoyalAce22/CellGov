@@ -427,11 +427,12 @@ pub fn bench_boot(
             .map(|(cid, hits)| format!("0x{cid:08x}={hits}"))
             .collect();
         eprintln!(
-            "BENCH_UART_WITNESS: distinct={} unknown={} events_gated={} rx_overflow_bytes={}",
+            "BENCH_UART_WITNESS: distinct={} unknown={} events_gated={} rx_overflow_bytes={} readers_queued={}",
             sent.len(),
             unknown.len(),
             obs.uart_events_gated,
             obs.uart_rx_overflow_bytes,
+            obs.uart_readers_queued,
         );
         eprintln!("BENCH_UART_CIDS: {}", sent.join(" "));
         if !unknown.is_empty() {

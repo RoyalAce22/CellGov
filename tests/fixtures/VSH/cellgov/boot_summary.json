@@ -175,6 +175,10 @@
       "value": 0,
       "class": "absent"
     },
+    "uart_readers_queued": {
+      "value": 0,
+      "class": "absent"
+    },
     "uart_rx_overflow_bytes": {
       "value": 0,
       "class": "absent"

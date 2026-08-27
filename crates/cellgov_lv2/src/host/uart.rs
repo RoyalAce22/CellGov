@@ -3,7 +3,8 @@
 //!
 //! `sys_uart_send` parses every packet in the buffer at dispatch and
 //! stages the replies; `sys_uart_receive` hands the reply stream back,
-//! parking a blocking caller until a send stages bytes. HDMI plug and
+//! parking a blocking caller until a send stages bytes; several may
+//! park, and bytes go to them in park order. HDMI plug and
 //! HDCP events follow their triggering command's replies in the
 //! stream and are gated by the enabled-event mask at that moment. The
 //! monitor on HDMI 0 and the AV-multi port are fixed fixtures; audio
@@ -11,6 +12,8 @@
 //! Oracle: RPCS3 `sys_uart.cpp`, whose AV thread answers a batch after
 //! a wall-clock pause and delivers events on a timer; here the same
 //! bytes appear in the same order with no latency.
+
+use std::collections::VecDeque;
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -37,13 +40,18 @@ pub(crate) struct UartReader {
     pub size: u64,
 }
 
-/// Reply stream, parked reader, and the AV manager's HDMI state.
+/// Reply stream, parked readers, and the AV manager's HDMI state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UartState {
     initialized: bool,
     /// Undelivered reply and event bytes, oldest first.
     rx: Vec<u8>,
-    reader: Option<UartReader>,
+    /// Blocking readers in park order; the front takes the next
+    /// bytes. The kernel's blocking readers all retry against one
+    /// lock, so which of several wins a send is a race there; park
+    /// order is the deterministic stand-in (RPCS3 `sys_uart.cpp`
+    /// `sys_uart_receive`, BLOCKING_BIG_OP arm).
+    readers: VecDeque<UartReader>,
     /// Version the last AV_INIT carried; events echo it.
     av_cmd_ver: u16,
     /// Enabled-event mask (`PS3AV_EVENT_BIT_*`).
@@ -63,7 +71,7 @@ impl UartState {
         Self {
             initialized: false,
             rx: Vec::new(),
-            reader: None,
+            readers: VecDeque::new(),
             av_cmd_ver: 0,
             hdmi_events: 0,
             hdmi_behavior: av::PS3AV_HDMI_BEHAVIOR_NORMAL,
@@ -86,8 +94,8 @@ impl UartState {
     }
 
     #[cfg(test)]
-    pub(crate) fn reader(&self) -> Option<UartReader> {
-        self.reader
+    pub(crate) fn readers(&self) -> &VecDeque<UartReader> {
+        &self.readers
     }
 
     #[cfg(test)]
@@ -101,7 +109,7 @@ impl UartState {
         let Self {
             initialized,
             rx,
-            reader,
+            readers,
             av_cmd_ver,
             hdmi_events,
             hdmi_behavior,
@@ -114,14 +122,11 @@ impl UartState {
         hasher.write(&[u8::from(*initialized)]);
         hasher.write(&(rx.len() as u64).to_le_bytes());
         hasher.write(rx);
-        match reader {
-            Some(r) => {
-                hasher.write(&[1u8]);
-                hasher.write(&r.thread.raw().to_le_bytes());
-                hasher.write(&r.buf_ptr.to_le_bytes());
-                hasher.write(&r.size.to_le_bytes());
-            }
-            None => hasher.write(&[0u8]),
+        hasher.write(&(readers.len() as u64).to_le_bytes());
+        for r in readers {
+            hasher.write(&r.thread.raw().to_le_bytes());
+            hasher.write(&r.buf_ptr.to_le_bytes());
+            hasher.write(&r.size.to_le_bytes());
         }
         hasher.write(&av_cmd_ver.to_le_bytes());
         hasher.write(&hdmi_events.to_le_bytes());
@@ -712,7 +717,13 @@ impl Lv2Host {
     /// `sys_uart_receive` (368): pops up to `size` bytes of the reply
     /// stream into `buf_ptr` and returns the count. An empty stream
     /// returns 0 in non-blocking mode and parks a blocking caller
-    /// until a send stages bytes.
+    /// behind any readers already parked, until sends stage enough
+    /// bytes to reach it.
+    ///
+    /// The kernel's non-blocking arm answers `CELL_EBUSY` only while
+    /// another reader holds the receive lock mid-copy; a dispatch
+    /// here is atomic, so that window does not exist and no arm
+    /// returns `CELL_EBUSY`.
     ///
     /// # Errors
     ///
@@ -721,7 +732,6 @@ impl Lv2Host {
     ///   [`av::SYS_UART_MAX_TRANSFER`] (named break; the oracle aborts).
     /// - `CELL_ESRCH` before `sys_uart_initialize`, or for a caller
     ///   with no PPU thread record.
-    /// - `CELL_EBUSY` when another reader is already parked.
     /// - `CELL_EFAULT` for an unwritable buffer, checked before any
     ///   byte leaves the stream.
     pub(super) fn dispatch_uart_receive(
@@ -764,16 +774,28 @@ impl Lv2Host {
             let Some(thread) = self.state.ppu_threads.thread_id_for_unit(requester) else {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
             };
-            if self.state.uart.reader.is_some() {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
-            }
             if !rt.writable(
                 u64::from(buf_ptr),
                 size.min(av::PS3AV_RX_BUF_SIZE as u64) as usize,
             ) {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
-            self.state.uart.reader = Some(UartReader {
+            if self.state.uart.readers.iter().any(|r| r.thread == thread) {
+                // A parked thread cannot dispatch; two records for
+                // one thread would wake it twice.
+                self.log_invariant_break(
+                    "dispatch.uart_reader_reparked",
+                    format_args!(
+                        "sys_uart_receive: {thread:?} is already parked on the reply stream; \
+                         returning CELL_ESRCH"
+                    ),
+                );
+                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            }
+            if !self.state.uart.readers.is_empty() {
+                self.obs.uart_readers_queued += 1;
+            }
+            self.state.uart.readers.push_back(UartReader {
                 thread,
                 buf_ptr,
                 size,
@@ -803,7 +825,8 @@ impl Lv2Host {
 
     /// `sys_uart_send` (369): parses every packet in the buffer,
     /// stages the replies and any events they trigger, and hands the
-    /// stream to a parked reader.
+    /// stream to the parked readers in park order, each taking up to
+    /// its own size while bytes remain.
     ///
     /// Mode 2 refuses a buffer larger than the TX ring with
     /// `CELL_EAGAIN`; the other modes accept it and the AV manager
@@ -876,14 +899,23 @@ impl Lv2Host {
         let mut batch = ReplyBatch::default();
         self.uart_parse(&tx, &mut batch);
         self.uart_commit(batch);
-        match self.uart_deliver_to_reader(requester, tick) {
-            Some((unit, effect, code)) => Lv2Dispatch::WakeAndReturn {
-                code: sent,
-                woken_unit_ids: vec![unit],
-                response_updates: vec![(unit, PendingResponse::ReturnCode { code })],
-                effects: vec![effect],
-            },
-            None => Lv2Dispatch::immediate(sent),
+        let deliveries = self.uart_deliver_to_readers(requester, tick);
+        if deliveries.is_empty() {
+            return Lv2Dispatch::immediate(sent);
+        }
+        let mut woken_unit_ids = Vec::with_capacity(deliveries.len());
+        let mut response_updates = Vec::with_capacity(deliveries.len());
+        let mut effects = Vec::with_capacity(deliveries.len());
+        for (unit, effect, code) in deliveries {
+            woken_unit_ids.push(unit);
+            response_updates.push((unit, PendingResponse::ReturnCode { code }));
+            effects.push(effect);
+        }
+        Lv2Dispatch::WakeAndReturn {
+            code: sent,
+            woken_unit_ids,
+            response_updates,
+            effects,
         }
     }
 
@@ -899,28 +931,38 @@ impl Lv2Host {
         }
     }
 
-    /// Hand the stream to a parked reader: `(unit, write, count)`.
-    fn uart_deliver_to_reader(
+    /// Hand the stream to the parked readers, front first, while
+    /// bytes remain: one `(unit, write, count)` per reader served.
+    /// A reader whose thread record is gone is dropped from the
+    /// queue (named break) without consuming bytes.
+    fn uart_deliver_to_readers(
         &mut self,
         requester: UnitId,
         tick: GuestTicks,
-    ) -> Option<(UnitId, Effect, u64)> {
-        let reader = self.state.uart.reader?;
-        if self.state.uart.rx.is_empty() {
-            return None;
+    ) -> Vec<(UnitId, Effect, u64)> {
+        let mut served = Vec::new();
+        while !self.state.uart.rx.is_empty() {
+            let Some(reader) = self.state.uart.readers.pop_front() else {
+                break;
+            };
+            let Some(unit) = self.resolve_wake_thread(reader.thread, "uart_deliver.reader") else {
+                continue;
+            };
+            let n = (reader.size as usize).min(self.state.uart.rx.len());
+            let bytes: Vec<u8> = self.state.uart.rx.drain(..n).collect();
+            served.push((
+                unit,
+                Effect::SharedWriteIntent {
+                    range: ByteRange::contiguous_u32(reader.buf_ptr, n as u32),
+                    bytes: WritePayload::from_slice(&bytes),
+                    ordering: PriorityClass::Normal,
+                    source: requester,
+                    source_time: tick,
+                },
+                n as u64,
+            ));
         }
-        let unit = self.resolve_wake_thread(reader.thread, "uart_deliver.reader")?;
-        self.state.uart.reader = None;
-        let n = (reader.size as usize).min(self.state.uart.rx.len());
-        let bytes: Vec<u8> = self.state.uart.rx.drain(..n).collect();
-        let effect = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(reader.buf_ptr, n as u32),
-            bytes: WritePayload::from_slice(&bytes),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
-        Some((unit, effect, n as u64))
+        served
     }
 
     /// Walk the packets in one send (RPCS3 `parse_tx_buffer`).
@@ -1461,3 +1503,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/uart_reader_queue_tests.rs"]
+mod reader_queue_tests;

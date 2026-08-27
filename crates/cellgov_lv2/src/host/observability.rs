@@ -53,6 +53,10 @@ pub struct Lv2Observability {
     /// Witness: HDMI events suppressed because the guest had not
     /// enabled their bit when they fired.
     pub uart_events_gated: u64,
+    /// Witness: blocking `sys_uart_receive` calls that arrived while
+    /// another reader was already parked. Non-zero means the guest
+    /// has more than one thread waiting on the AV manager at once.
+    pub uart_readers_queued: u64,
     /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
     /// hit counts. The key set names which modules a title asks for
     /// that the corpus cannot serve.

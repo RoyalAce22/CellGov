@@ -170,7 +170,11 @@ fn both_uart_command_inventories_are_exact_frontier_rows() {
         record(Some(&prev), &obs(&[("uart_unknown_cids", 2)]))["uart_unknown_cids"].class,
         WitnessClass::Exact
     );
-    for name in ["uart_events_gated", "uart_rx_overflow_bytes"] {
+    for name in [
+        "uart_events_gated",
+        "uart_rx_overflow_bytes",
+        "uart_readers_queued",
+    ] {
         assert!(
             !WitnessClass::is_exact_by_default(name),
             "{name} is a plain counter"
@@ -218,7 +222,7 @@ BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts=24 ipc_connect_bound=25 keyed_que
 BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct=2 12=3 900=1
 BENCH_SYSTEM_IPC_WITNESS: shm_creates=27 shm_attaches=28 shm_maps=29 shm_writes=30 cond_creates=31 cond_waits=32 cond_signals=33 event_queue_creates=34 event_queue_references=35 event_queue_enqueues=36 event_port_connects=37 distinct_keys=38
 BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
-BENCH_UART_WITNESS: distinct=39 unknown=40 events_gated=41 rx_overflow_bytes=42
+BENCH_UART_WITNESS: distinct=39 unknown=40 events_gated=41 rx_overflow_bytes=42 readers_queued=44
 ";
     let w = parse_witness_lines(stderr).expect("all lines are well formed");
     assert_eq!(w.values["mfvrsave_executed"], 4);
@@ -238,6 +242,7 @@ BENCH_UART_WITNESS: distinct=39 unknown=40 events_gated=41 rx_overflow_bytes=42
     assert_eq!(w.values["system_ipc_distinct_keys"], 38);
     assert_eq!(w.values["uart_cids_distinct"], 39);
     assert_eq!(w.values["uart_rx_overflow_bytes"], 42);
+    assert_eq!(w.values["uart_readers_queued"], 44);
     assert_eq!(
         w.values.len(),
         known_witness_names().len(),
