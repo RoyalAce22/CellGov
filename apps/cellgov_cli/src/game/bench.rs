@@ -411,6 +411,34 @@ pub fn bench_boot(
         eprintln!("BENCH_SYSTEM_IPC_KEYS: {}", inventory.join(" "));
     }
 
+    // Virtual-UART witnesses: the PS3AV command inventory the boot
+    // sent, the ids nothing answered, and the events and bytes the
+    // AV manager could not deliver. Silent until the first send.
+    let obs = rt.lv2_host().observability();
+    if !obs.uart_cids.is_empty() {
+        let sent: Vec<String> = obs
+            .uart_cids
+            .iter()
+            .map(|(cid, hits)| format!("0x{cid:08x}={hits}"))
+            .collect();
+        let unknown: Vec<String> = obs
+            .uart_unknown_cids
+            .iter()
+            .map(|(cid, hits)| format!("0x{cid:08x}={hits}"))
+            .collect();
+        eprintln!(
+            "BENCH_UART_WITNESS: distinct={} unknown={} events_gated={} rx_overflow_bytes={}",
+            sent.len(),
+            unknown.len(),
+            obs.uart_events_gated,
+            obs.uart_rx_overflow_bytes,
+        );
+        eprintln!("BENCH_UART_CIDS: {}", sent.join(" "));
+        if !unknown.is_empty() {
+            eprintln!("BENCH_UART_UNKNOWN_CIDS: {}", unknown.join(" "));
+        }
+    }
+
     // PRX load-miss witnesses: firmware misses stubbed with a real
     // kernel id vs loads reported CELL_ENOENT. Non-vacuity evidence
     // for the sc 480 miss arms.

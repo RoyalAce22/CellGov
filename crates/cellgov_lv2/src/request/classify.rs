@@ -385,6 +385,18 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             out_ptr: p!(1),
             timeout: args[2],
         },
+        syscall::UART_INITIALIZE => Lv2Request::UartInitialize,
+        syscall::UART_RECEIVE => Lv2Request::UartReceive {
+            buf_ptr: p!(0),
+            size: args[1],
+            mode: p!(2),
+        },
+        syscall::UART_SEND => Lv2Request::UartSend {
+            buf_ptr: p!(0),
+            size: args[1],
+            mode: p!(2),
+        },
+        syscall::UART_GET_PARAMS => Lv2Request::UartGetParams { params_ptr: p!(0) },
         syscall::CONFIG_OPEN => Lv2Request::ConfigOpen {
             equeue_id: p!(0),
             out_handle_ptr: p!(1),

@@ -176,6 +176,18 @@ const LINE_TABLE: &[LineSpec] = &[
         ],
         Extra::None,
     ),
+    (
+        // Emitted only once the guest has sent a PS3AV command, so a
+        // title that never touches the virtual UART records nothing.
+        "BENCH_UART_WITNESS:",
+        &[
+            ("distinct", "uart_cids_distinct"),
+            ("unknown", "uart_unknown_cids"),
+            ("events_gated", "uart_events_gated"),
+            ("rx_overflow_bytes", "uart_rx_overflow_bytes"),
+        ],
+        Extra::None,
+    ),
 ];
 
 /// `BENCH_*` lines the boot path emits that no witness is recorded
@@ -238,6 +250,14 @@ const DIAGNOSTIC_LINES: &[(&str, &str)] = &[
     (
         "BENCH_CHILD_MODULE_START_FAULTS:",
         "emitted once per spawned child whose module_start pass faulted; keyed by pid, so a baseline could not hold it Absent",
+    ),
+    (
+        "BENCH_UART_CIDS:",
+        "per-command inventory with a run-dependent key set; its size is tracked as uart_cids_distinct",
+    ),
+    (
+        "BENCH_UART_UNKNOWN_CIDS:",
+        "per-command inventory, suppressed when empty; its size is tracked as uart_unknown_cids",
     ),
 ];
 

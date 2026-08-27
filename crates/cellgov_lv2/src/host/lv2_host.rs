@@ -107,6 +107,7 @@ impl Lv2Host {
                 mmapper_handles: MmapperHandleTable::new(),
                 mmapper_ipc: BTreeMap::new(),
                 config: super::config::ConfigTable::new(),
+                uart: super::uart::UartState::new(),
                 lwmutexes: LwMutexTable::new(),
                 mutexes: MutexTable::new(),
                 semaphores: SemaphoreTable::new(),

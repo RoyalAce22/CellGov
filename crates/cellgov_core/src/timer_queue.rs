@@ -248,6 +248,7 @@ fn hash_block_reason(hasher: &mut cellgov_mem::Fnv1aHasher, reason: Lv2BlockReas
             hasher.write(&mutex_id.to_le_bytes());
             hasher.write(&[mutex_kind as u8]);
         }
+        Lv2BlockReason::Uart => hasher.write(&[8u8]),
     }
 }
 

@@ -117,12 +117,15 @@ impl Lv2Host {
                 mutex_id,
                 mutex_kind,
             } => self.expire_cond_wait(id, mutex_id, mutex_kind, requester, thread),
-            Lv2BlockReason::ThreadGroupJoin { .. } | Lv2BlockReason::PpuThreadJoin { .. } => {
+            Lv2BlockReason::ThreadGroupJoin { .. }
+            | Lv2BlockReason::PpuThreadJoin { .. }
+            | Lv2BlockReason::Uart => {
                 self.record_invariant_break(
                     "expire_wait.untimed_reason",
                     format_args!(
-                        "timer entry fired for join-family reason {reason:?} on {requester:?}; \
-                         join requests carry no timeout and must never register a deadline"
+                        "timer entry fired for untimed reason {reason:?} on {requester:?}; \
+                         join and uart-receive requests carry no timeout and must never \
+                         register a deadline"
                     ),
                 );
                 ExpiredWait::default()
@@ -231,3 +234,44 @@ fn coded_wake(unit: UnitId, code: u64) -> ExpiredWait {
 #[cfg(test)]
 #[path = "tests/expire_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod uart_expiry_tests {
+    use super::*;
+    use crate::host::test_support::seed_primary_ppu;
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "expire_wait.untimed_reason")]
+    fn a_uart_timer_entry_is_refused_as_an_untimed_reason() {
+        let mut host = Lv2Host::new();
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        host.expire_wait(Lv2BlockReason::Uart, src, GuestTicks::ZERO);
+    }
+
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn a_uart_timer_entry_is_refused_without_a_wake_in_release() {
+        let mut host = Lv2Host::new();
+        let src = UnitId::new(0);
+        seed_primary_ppu(&mut host, src);
+        let out = host.expire_wait(Lv2BlockReason::Uart, src, GuestTicks::ZERO);
+        assert!(
+            out.woken_unit_ids.is_empty(),
+            "no ETIMEDOUT for an untimed park"
+        );
+        assert!(out.response_updates.is_empty());
+        assert!(out.effects.is_empty());
+        assert_eq!(
+            host.observability()
+                .invariant_break_sites
+                .get("expire_wait.untimed_reason"),
+            Some(&1)
+        );
+        assert!(
+            host.observability().wait_timeout_expiries.is_empty(),
+            "a refused expiry is not a timeout"
+        );
+    }
+}

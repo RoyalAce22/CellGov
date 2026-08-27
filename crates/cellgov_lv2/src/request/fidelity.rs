@@ -252,6 +252,12 @@ impl Lv2RequestKind {
             | Lv2RequestKind::LwMutexUnlock
             | Lv2RequestKind::LwMutexTryLock => Modeled,
 
+            // Virtual UART: the AV manager answers from a fixed monitor
+            // fixture; audio and video packets are validated and
+            // acknowledged but drive no output.
+            Lv2RequestKind::UartInitialize | Lv2RequestKind::UartGetParams => Modeled,
+            Lv2RequestKind::UartReceive | Lv2RequestKind::UartSend => PartialState,
+
             // Config store: handle and listener lifecycle on the
             // event-queue send path.
             Lv2RequestKind::ConfigOpen

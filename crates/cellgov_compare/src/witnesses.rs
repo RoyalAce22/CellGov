@@ -63,11 +63,18 @@ impl WitnessClass {
     ///
     /// The unsupported-syscall count is the null-backend frontier row:
     /// a new syscall reached and one newly modeled are both findings,
-    /// so neither direction may pass as growth.
+    /// so neither direction may pass as growth. The PS3AV command
+    /// counts are the same row for the AV manager: the ids sent, and
+    /// the ids no handler answers -- a newly answered command shrinks
+    /// the second and is as much a finding as a new unanswered one.
     pub fn is_exact_by_default(name: &str) -> bool {
         matches!(
             name,
-            "host_invariant_breaks" | "vrsave_written" | "unsupported_syscalls_distinct"
+            "host_invariant_breaks"
+                | "vrsave_written"
+                | "unsupported_syscalls_distinct"
+                | "uart_cids_distinct"
+                | "uart_unknown_cids"
         )
     }
 

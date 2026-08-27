@@ -17,6 +17,7 @@ use super::lv2_host::FirmwareIdentity;
 use super::mmapper::MmapperHandleTable;
 use super::process;
 use super::rsx::SysRsxContext;
+use super::uart::UartState;
 
 /// First id the shared kernel-id allocator hands out; every id the
 /// host mints outside `lwmutexes` (mutex, cond, semaphore, rwlock,
@@ -56,6 +57,9 @@ pub(in crate::host) struct Lv2State {
     /// `sys_config` handles, services, listeners, and the events a
     /// listener may still read back (516-522).
     pub(in crate::host) config: ConfigTable,
+    /// The AV manager's virtual UART: reply stream, parked reader, and
+    /// HDMI state (367-370).
+    pub(in crate::host) uart: UartState,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,

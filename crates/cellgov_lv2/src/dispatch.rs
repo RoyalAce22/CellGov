@@ -269,6 +269,9 @@ pub enum Lv2BlockReason {
         /// Target event flag id.
         id: u32,
     },
+    /// Blocking `sys_uart_receive` on an empty reply stream; the next
+    /// `sys_uart_send` that stages bytes wakes it. Untimed.
+    Uart,
     /// `sys_cond_wait`. Caller released `mutex_id` on entry and
     /// re-acquires on wake via [`PendingResponse::CondWakeReacquire`].
     Cond {

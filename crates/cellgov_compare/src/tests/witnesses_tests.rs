@@ -142,6 +142,43 @@ fn first_record_classifies_by_observed_value() {
 }
 
 #[test]
+fn both_uart_command_inventories_are_exact_frontier_rows() {
+    // Both directions are findings: a new command id reached, and a
+    // command id newly answered. An AtLeast floor would let the
+    // unknown count shrink unnoticed.
+    for name in ["uart_cids_distinct", "uart_unknown_cids"] {
+        assert!(WitnessClass::is_exact_by_default(name), "{name}");
+        assert_eq!(
+            WitnessClass::classify_on_record(name, 3),
+            WitnessClass::Exact
+        );
+        assert_eq!(
+            WitnessClass::classify_on_record(name, 0),
+            WitnessClass::Exact
+        );
+        assert!(WitnessClass::Exact.check(name, 3, 2).is_err());
+        assert!(WitnessClass::Exact.check(name, 3, 4).is_err());
+    }
+    // A baseline recorded before this rule keeps its class: an Absent
+    // row still holds at 0 and reclassifies to Exact once it fires.
+    let prev = baseline(&[("uart_unknown_cids", 0, WitnessClass::Absent)]);
+    assert_eq!(
+        record(Some(&prev), &obs(&[("uart_unknown_cids", 0)]))["uart_unknown_cids"].class,
+        WitnessClass::Absent
+    );
+    assert_eq!(
+        record(Some(&prev), &obs(&[("uart_unknown_cids", 2)]))["uart_unknown_cids"].class,
+        WitnessClass::Exact
+    );
+    for name in ["uart_events_gated", "uart_rx_overflow_bytes"] {
+        assert!(
+            !WitnessClass::is_exact_by_default(name),
+            "{name} is a plain counter"
+        );
+    }
+}
+
+#[test]
 fn re_record_preserves_a_promoted_class() {
     let promoted = baseline(&[("ldarx", 5, WitnessClass::Exact)]);
     let r = record(Some(&promoted), &obs(&[("ldarx", 9)]));
@@ -181,6 +218,7 @@ BENCH_EVENT_PORT_WITNESS: ipc_connect_attempts=24 ipc_connect_bound=25 keyed_que
 BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct=2 12=3 900=1
 BENCH_SYSTEM_IPC_WITNESS: shm_creates=27 shm_attaches=28 shm_maps=29 shm_writes=30 cond_creates=31 cond_waits=32 cond_signals=33 event_queue_creates=34 event_queue_references=35 event_queue_enqueues=36 event_port_connects=37 distinct_keys=38
 BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
+BENCH_UART_WITNESS: distinct=39 unknown=40 events_gated=41 rx_overflow_bytes=42
 ";
     let w = parse_witness_lines(stderr).expect("all lines are well formed");
     assert_eq!(w.values["mfvrsave_executed"], 4);
@@ -198,6 +236,8 @@ BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
     assert_eq!(w.values["unsupported_syscalls_distinct"], 2);
     assert_eq!(w.values["system_ipc_event_port_connects"], 37);
     assert_eq!(w.values["system_ipc_distinct_keys"], 38);
+    assert_eq!(w.values["uart_cids_distinct"], 39);
+    assert_eq!(w.values["uart_rx_overflow_bytes"], 42);
     assert_eq!(
         w.values.len(),
         known_witness_names().len(),
@@ -205,7 +245,7 @@ BENCH_PRX_LOAD_WITNESS: hle_stubs=16 not_found=17
     );
     assert_eq!(
         w.seen_lines.len(),
-        18,
+        19,
         "every emitted line is remembered for the presence check"
     );
     assert!(

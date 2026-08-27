@@ -786,6 +786,10 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::EVENT_QUEUE_CREATE, &[0, 1, 3]),
     (syscall::EVENT_QUEUE_DESTROY, &[0]),
     (syscall::EVENT_QUEUE_RECEIVE, &[0, 1]),
+    (syscall::UART_INITIALIZE, &[]),
+    (syscall::UART_RECEIVE, &[0, 2]),
+    (syscall::UART_SEND, &[0, 2]),
+    (syscall::UART_GET_PARAMS, &[0]),
     (syscall::CONFIG_OPEN, &[0, 1]),
     (syscall::CONFIG_CLOSE, &[0]),
     (syscall::CONFIG_GET_SERVICE_EVENT, &[0, 1, 2]),
@@ -831,6 +835,64 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SYS_RSX_CONTEXT_IOMAP, &[0, 1, 2, 3]),
     (syscall::SYS_RSX_DEVICE_MAP, &[0, 1, 2]),
 ];
+
+/// Register positions per RPCS3 `sys_uart.h`: `(buffer, size u64,
+/// mode u32)` for receive and send, `(buffer)` for get_params, none
+/// for initialize.
+#[test]
+fn classify_uart_family_reads_each_register_position() {
+    assert_eq!(
+        classify(syscall::UART_INITIALIZE, &[0x11, 0x22, 0x33, 0, 0, 0, 0, 0]),
+        Lv2Request::UartInitialize,
+        "initialize takes no arguments; stray registers are ignored"
+    );
+    assert_eq!(
+        classify(syscall::UART_RECEIVE, &[0x3000, 0x800, 1, 0x77, 0, 0, 0, 0]),
+        Lv2Request::UartReceive {
+            buf_ptr: 0x3000,
+            size: 0x800,
+            mode: 1,
+        }
+    );
+    assert_eq!(
+        classify(syscall::UART_SEND, &[0x1000, 0x10, 2, 0x77, 0, 0, 0, 0]),
+        Lv2Request::UartSend {
+            buf_ptr: 0x1000,
+            size: 0x10,
+            mode: 2,
+        }
+    );
+    assert_eq!(
+        classify(syscall::UART_GET_PARAMS, &[0x5000, 0x77, 0, 0, 0, 0, 0, 0]),
+        Lv2Request::UartGetParams { params_ptr: 0x5000 }
+    );
+}
+
+#[test]
+fn uart_size_is_a_full_u64_and_reaches_the_arm_unnarrowed() {
+    // `size` is u64 in the oracle signature; a value past u32 is the
+    // arm's transfer-cap refusal to make, not a classifier EINVAL.
+    for num in [syscall::UART_RECEIVE, syscall::UART_SEND] {
+        let args = [0x1000, 0x1_0000_0000, 0, 0, 0, 0, 0, 0];
+        match classify(num, &args) {
+            Lv2Request::UartReceive { size, .. } | Lv2Request::UartSend { size, .. } => {
+                assert_eq!(size, 0x1_0000_0000, "syscall {num}");
+            }
+            other => panic!("syscall {num}: expected a uart arm, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_blocking_uart_receive_carries_no_timeout() {
+    // The runtime arms a wake deadline only through
+    // `wait_timeout_usec`; `None` here is what keeps a parked
+    // `Lv2BlockReason::Uart` out of the timer queue, where its expiry
+    // would be refused as an untimed reason.
+    let req = classify(syscall::UART_RECEIVE, &[0x3000, 0x100, 1, 0, 0, 0, 0, 0]);
+    assert!(matches!(req, Lv2Request::UartReceive { mode: 1, .. }));
+    assert_eq!(req.wait_timeout_usec(), None);
+}
 
 #[test]
 fn every_u32_slot_rejects_high_bits() {

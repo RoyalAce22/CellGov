@@ -315,6 +315,15 @@ lv2_syscalls! {
     /// `sys_rsx_device_map`.
     SYS_RSX_DEVICE_MAP = 675;
 
+    /// `sys_uart_initialize`.
+    UART_INITIALIZE = 367;
+    /// `sys_uart_receive`.
+    UART_RECEIVE = 368;
+    /// `sys_uart_send`.
+    UART_SEND = 369;
+    /// `sys_uart_get_params`.
+    UART_GET_PARAMS = 370;
+
     /// `sys_config_open`.
     CONFIG_OPEN = 516;
     /// `sys_config_close`.

@@ -32,6 +32,7 @@ mod spu;
 mod state;
 mod state_hash;
 mod system_ipc_witness;
+mod uart;
 
 #[cfg(test)]
 #[path = "tests/test_support.rs"]

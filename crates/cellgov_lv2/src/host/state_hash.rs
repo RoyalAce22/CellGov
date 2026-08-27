@@ -52,6 +52,7 @@ impl Lv2State {
             mmapper_handles,
             mmapper_ipc,
             config,
+            uart,
             lwmutexes,
             mutexes,
             semaphores,
@@ -130,6 +131,9 @@ impl Lv2State {
         }
         if !config.is_pristine() {
             hasher.write(&config.state_hash().to_le_bytes());
+        }
+        if !uart.is_pristine() {
+            hasher.write(&uart.state_hash().to_le_bytes());
         }
         if !prx_registry.is_empty() {
             hasher.write(&(prx_registry.len() as u64).to_le_bytes());

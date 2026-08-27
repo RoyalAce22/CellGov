@@ -227,6 +227,34 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
+    /// `sys_uart_initialize`: claims the AV manager's virtual UART.
+    UartInitialize,
+    /// `sys_uart_receive`: reads replies and events from the UART.
+    UartReceive {
+        /// Out: byte buffer.
+        buf_ptr: u32,
+        /// In: buffer size in bytes.
+        size: u64,
+        /// In: 0 = return what is queued, 1 = block until any bytes
+        /// are queued. Neither waits for the whole `size`: RPCS3
+        /// `sys_uart.cpp` `sys_uart_receive` leaves its blocking loop
+        /// on the first non-empty read and returns that count.
+        mode: u32,
+    },
+    /// `sys_uart_send`: writes PS3AV command packets to the UART.
+    UartSend {
+        /// In: packet buffer.
+        buf_ptr: u32,
+        /// In: buffer size in bytes.
+        size: u64,
+        /// In: 0 = non-blocking chunks, 1 = block, 2 = whole or refuse.
+        mode: u32,
+    },
+    /// `sys_uart_get_params`: reports the two ring sizes.
+    UartGetParams {
+        /// Out: `rx_buf_size u64, tx_buf_size u64`.
+        params_ptr: u32,
+    },
     /// `sys_config_open`: binds a config handle to the event queue
     /// that receives its service events.
     ConfigOpen {

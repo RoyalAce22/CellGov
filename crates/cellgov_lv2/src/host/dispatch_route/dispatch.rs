@@ -186,6 +186,20 @@ impl Lv2Host {
             Lv2Request::EventQueueReceive {
                 queue_id, out_ptr, ..
             } => self.dispatch_event_queue_receive(queue_id, out_ptr, requester, tick),
+            Lv2Request::UartInitialize => self.dispatch_uart_initialize(),
+            Lv2Request::UartReceive {
+                buf_ptr,
+                size,
+                mode,
+            } => self.dispatch_uart_receive(buf_ptr, size, mode, requester, rt, tick),
+            Lv2Request::UartSend {
+                buf_ptr,
+                size,
+                mode,
+            } => self.dispatch_uart_send(buf_ptr, size, mode, requester, rt, tick),
+            Lv2Request::UartGetParams { params_ptr } => {
+                self.dispatch_uart_get_params(params_ptr, requester, rt, tick)
+            }
             Lv2Request::ConfigOpen {
                 equeue_id,
                 out_handle_ptr,

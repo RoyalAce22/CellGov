@@ -40,6 +40,19 @@ pub struct Lv2Observability {
     /// queue refused; each one is a record the guest was never told
     /// about.
     pub config_events_dropped: u64,
+    /// Witness: PS3AV command ids the guest sent over the virtual
+    /// UART, with hit counts. The key set is the AV-manager surface
+    /// the boot exercises.
+    pub uart_cids: BTreeMap<u32, u64>,
+    /// Witness: PS3AV command ids no handler answers, with hit counts.
+    /// Each is a reply the guest waits for and never gets.
+    pub uart_unknown_cids: BTreeMap<u32, u64>,
+    /// Witness: replies and events the 2 KiB reply ring could not
+    /// hold, in bytes.
+    pub uart_rx_overflow_bytes: u64,
+    /// Witness: HDMI events suppressed because the guest had not
+    /// enabled their bit when they fired.
+    pub uart_events_gated: u64,
     /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
     /// hit counts. The key set names which modules a title asks for
     /// that the corpus cannot serve.
