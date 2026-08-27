@@ -57,7 +57,7 @@ pub(in crate::host) struct Lv2State {
     /// `sys_config` handles, services, listeners, and the events a
     /// listener may still read back (516-522).
     pub(in crate::host) config: ConfigTable,
-    /// The AV manager's virtual UART: reply stream, parked reader, and
+    /// The AV manager's virtual UART: reply stream, parked readers, and
     /// HDMI state (367-370).
     pub(in crate::host) uart: UartState,
     pub(in crate::host) lwmutexes: LwMutexTable,

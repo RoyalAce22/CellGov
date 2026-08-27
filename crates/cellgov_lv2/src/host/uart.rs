@@ -98,6 +98,28 @@ impl UartState {
         &self.readers
     }
 
+    /// Remove every parked reader whose thread is in `threads`,
+    /// preserving the order of survivors; returns the removed
+    /// records. Process-exit purge: a reader of an exited process
+    /// would otherwise be served first and its bytes dropped with
+    /// the wake, ahead of a live reader behind it.
+    #[must_use = "the purged readers are the only witness that these wakes were cancelled"]
+    pub(crate) fn purge_readers_of(
+        &mut self,
+        threads: &std::collections::BTreeSet<PpuThreadId>,
+    ) -> Vec<UartReader> {
+        let mut removed = Vec::new();
+        self.readers.retain(|r| {
+            if threads.contains(&r.thread) {
+                removed.push(*r);
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    }
+
     #[cfg(test)]
     pub(crate) fn hdmi_events(&self) -> u32 {
         self.hdmi_events
@@ -1507,3 +1529,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/uart_reader_queue_tests.rs"]
 mod reader_queue_tests;
+
+#[cfg(test)]
+#[path = "tests/uart_purge_tests.rs"]
+mod purge_tests;
