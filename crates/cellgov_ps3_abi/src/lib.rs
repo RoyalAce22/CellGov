@@ -13,6 +13,7 @@ pub mod process_address_space;
 pub mod sce;
 pub mod sha1;
 pub mod spu_channels;
+pub mod sys_config;
 pub mod sys_fs;
 pub mod sys_memory;
 pub mod sys_process;

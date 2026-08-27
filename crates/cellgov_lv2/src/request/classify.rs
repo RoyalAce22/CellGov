@@ -385,6 +385,43 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             out_ptr: p!(1),
             timeout: args[2],
         },
+        syscall::CONFIG_OPEN => Lv2Request::ConfigOpen {
+            equeue_id: p!(0),
+            out_handle_ptr: p!(1),
+        },
+        syscall::CONFIG_CLOSE => Lv2Request::ConfigClose { handle: p!(0) },
+        syscall::CONFIG_GET_SERVICE_EVENT => Lv2Request::ConfigGetServiceEvent {
+            handle: p!(0),
+            event_id: p!(1),
+            dst_ptr: p!(2),
+            size: args[3],
+        },
+        syscall::CONFIG_ADD_SERVICE_LISTENER => Lv2Request::ConfigAddServiceListener {
+            handle: p!(0),
+            service_id: args[1],
+            min_verbosity: args[2],
+            in_ptr: p!(3),
+            size: args[4],
+            listener_type: p!(5),
+            out_listener_ptr: p!(6),
+        },
+        syscall::CONFIG_REMOVE_SERVICE_LISTENER => Lv2Request::ConfigRemoveServiceListener {
+            handle: p!(0),
+            listener: p!(1),
+        },
+        syscall::CONFIG_REGISTER_SERVICE => Lv2Request::ConfigRegisterService {
+            handle: p!(0),
+            service_id: args[1],
+            user_id: args[2],
+            verbosity: args[3],
+            data_ptr: p!(4),
+            size: args[5],
+            out_service_ptr: p!(6),
+        },
+        syscall::CONFIG_UNREGISTER_SERVICE => Lv2Request::ConfigUnregisterService {
+            handle: p!(0),
+            service: p!(1),
+        },
         syscall::EVENT_FLAG_CREATE => Lv2Request::EventFlagCreate {
             id_ptr: p!(0),
             attr_ptr: p!(1),

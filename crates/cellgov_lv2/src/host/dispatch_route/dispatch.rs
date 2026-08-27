@@ -186,6 +186,69 @@ impl Lv2Host {
             Lv2Request::EventQueueReceive {
                 queue_id, out_ptr, ..
             } => self.dispatch_event_queue_receive(queue_id, out_ptr, requester, tick),
+            Lv2Request::ConfigOpen {
+                equeue_id,
+                out_handle_ptr,
+            } => self.dispatch_config_open(equeue_id, out_handle_ptr, requester, tick),
+            Lv2Request::ConfigClose { handle } => self.dispatch_config_close(handle),
+            Lv2Request::ConfigGetServiceEvent {
+                handle,
+                event_id,
+                dst_ptr,
+                size,
+            } => self.dispatch_config_get_service_event(
+                handle, event_id, dst_ptr, size, requester, tick,
+            ),
+            Lv2Request::ConfigAddServiceListener {
+                handle,
+                service_id,
+                min_verbosity,
+                in_ptr,
+                size,
+                listener_type,
+                out_listener_ptr,
+            } => self.dispatch_config_add_service_listener(
+                handle,
+                crate::host::config::ListenerSpec {
+                    service_id,
+                    min_verbosity,
+                    in_ptr,
+                    size,
+                    listener_type,
+                },
+                out_listener_ptr,
+                requester,
+                rt,
+                tick,
+            ),
+            Lv2Request::ConfigRemoveServiceListener { handle, listener } => {
+                self.dispatch_config_remove_service_listener(handle, listener)
+            }
+            Lv2Request::ConfigRegisterService {
+                handle,
+                service_id,
+                user_id,
+                verbosity,
+                data_ptr,
+                size,
+                out_service_ptr,
+            } => self.dispatch_config_register_service(
+                handle,
+                crate::host::config::ServiceSpec {
+                    service_id,
+                    user_id,
+                    verbosity,
+                    data_ptr,
+                    size,
+                },
+                out_service_ptr,
+                requester,
+                rt,
+                tick,
+            ),
+            Lv2Request::ConfigUnregisterService { handle, service } => {
+                self.dispatch_config_unregister_service(handle, service)
+            }
             Lv2Request::EventPortSend {
                 port_id,
                 data1,

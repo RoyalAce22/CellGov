@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/artwork/cellgov-banner.svg" alt="CellGov" width="680">
+  <img src="docs/artwork/cellgov-banner.svg" alt="CellGov" width="850">
 </p>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)

@@ -106,6 +106,7 @@ impl Lv2Host {
                 rsx_context: SysRsxContext::new(),
                 mmapper_handles: MmapperHandleTable::new(),
                 mmapper_ipc: BTreeMap::new(),
+                config: super::config::ConfigTable::new(),
                 lwmutexes: LwMutexTable::new(),
                 mutexes: MutexTable::new(),
                 semaphores: SemaphoreTable::new(),

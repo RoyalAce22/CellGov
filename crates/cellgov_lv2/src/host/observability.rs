@@ -36,6 +36,10 @@ pub struct Lv2Observability {
     /// across every namespace. A gap between the two is the count of
     /// connects that named a key no queue is registered under.
     pub event_port_ipc_connects: (u64, u64),
+    /// Witness: `sys_config` service events a full or destroyed
+    /// queue refused; each one is a record the guest was never told
+    /// about.
+    pub config_events_dropped: u64,
     /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
     /// hit counts. The key set names which modules a title asks for
     /// that the corpus cannot serve.

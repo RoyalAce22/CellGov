@@ -4,9 +4,9 @@
 `cargo test -p cellgov_lv2 --test fidelity_doc -- --ignored regenerate`.
 Do not edit by hand: the non-ignored test in the same file fails on drift. -->
 
-Of LV2's 1024 syscall slots, 94 classify to a typed arm
+Of LV2's 1024 syscall slots, 101 classify to a typed arm
 and 23 route to a dedicated arm inside `Unsupported`;
-the remaining **907 slots are the null backend** --
+the remaining **900 slots are the null backend** --
 the honest traced `CELL_ENOSYS` refusal is the default, not
 the exception. The `null-backend` rows below are the handful
 of syscalls given _dedicated_ routing or diagnostics that
@@ -62,6 +62,13 @@ Per-arm rationale lives on each dispatch method's rustdoc in
 | `EventQueueCreate` | modeled |
 | `EventQueueDestroy` | modeled |
 | `EventQueueReceive` | modeled |
+| `ConfigOpen` | modeled |
+| `ConfigClose` | modeled |
+| `ConfigGetServiceEvent` | partial-state |
+| `ConfigAddServiceListener` | partial-state |
+| `ConfigRemoveServiceListener` | modeled |
+| `ConfigRegisterService` | partial-state |
+| `ConfigUnregisterService` | modeled |
 | `EventPortSend` | modeled |
 | `EventFlagCreate` | modeled |
 | `EventFlagDestroy` | modeled |

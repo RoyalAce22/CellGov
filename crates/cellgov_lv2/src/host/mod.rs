@@ -9,6 +9,7 @@
 //! back to the runtime as an `Effect` so the commit pipeline orders it.
 
 mod cond;
+mod config;
 mod derived;
 pub mod diagnostics;
 mod dispatch_route;

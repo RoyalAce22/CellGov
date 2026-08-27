@@ -315,6 +315,21 @@ lv2_syscalls! {
     /// `sys_rsx_device_map`.
     SYS_RSX_DEVICE_MAP = 675;
 
+    /// `sys_config_open`.
+    CONFIG_OPEN = 516;
+    /// `sys_config_close`.
+    CONFIG_CLOSE = 517;
+    /// `sys_config_get_service_event`.
+    CONFIG_GET_SERVICE_EVENT = 518;
+    /// `sys_config_add_service_listener`.
+    CONFIG_ADD_SERVICE_LISTENER = 519;
+    /// `sys_config_remove_service_listener`.
+    CONFIG_REMOVE_SERVICE_LISTENER = 520;
+    /// `sys_config_register_service`.
+    CONFIG_REGISTER_SERVICE = 521;
+    /// `sys_config_unregister_service`.
+    CONFIG_UNREGISTER_SERVICE = 522;
+
     /// `sys_ss_access_control_engine` -- privileged authority/identity
     /// gate used during user-PRX init to query the caller's SELF
     /// program-authority-id. Behavioral oracle: RPCS3's `sys_ss.cpp`.

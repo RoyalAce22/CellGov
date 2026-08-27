@@ -252,6 +252,18 @@ impl Lv2RequestKind {
             | Lv2RequestKind::LwMutexUnlock
             | Lv2RequestKind::LwMutexTryLock => Modeled,
 
+            // Config store: handle and listener lifecycle on the
+            // event-queue send path.
+            Lv2RequestKind::ConfigOpen
+            | Lv2RequestKind::ConfigClose
+            | Lv2RequestKind::ConfigRemoveServiceListener
+            | Lv2RequestKind::ConfigUnregisterService => Modeled,
+            // Matching rules and the seeded pad-manager descriptor
+            // follow RPCS3's reading of real hardware, not a spec.
+            Lv2RequestKind::ConfigGetServiceEvent
+            | Lv2RequestKind::ConfigAddServiceListener
+            | Lv2RequestKind::ConfigRegisterService => PartialState,
+
             // Memory: bump allocator with no reclamation.
             Lv2RequestKind::MemoryAllocate => PartialState,
             Lv2RequestKind::MemoryFree => AbiOnly,

@@ -12,6 +12,7 @@ use crate::sync_primitives::{
 };
 use crate::thread_group::ThreadGroupTable;
 
+use super::config::ConfigTable;
 use super::lv2_host::FirmwareIdentity;
 use super::mmapper::MmapperHandleTable;
 use super::process;
@@ -52,6 +53,9 @@ pub(in crate::host) struct Lv2State {
     /// registers. The association steers a future 332's answer and is
     /// recorded nowhere else.
     pub(in crate::host) mmapper_ipc: BTreeMap<u64, u32>,
+    /// `sys_config` handles, services, listeners, and the events a
+    /// listener may still read back (516-522).
+    pub(in crate::host) config: ConfigTable,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,

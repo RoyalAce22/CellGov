@@ -496,6 +496,112 @@ fn classify_event_queue_create_destroy() {
     );
 }
 
+/// Register positions follow the RPCS3 `sys_config.h` prototypes.
+/// Every slot carries a distinct value so a transposed field cannot
+/// pass, the wide slots carry values above `u32::MAX` to show they
+/// are not narrowed, and the slot past each prototype's last
+/// argument is non-zero to show it is ignored.
+#[test]
+fn classify_config_family_reads_each_register_position() {
+    use cellgov_ps3_abi::sys_config::SYS_CONFIG_SERVICE_USER_LIBPAD;
+    assert_eq!(
+        classify(syscall::CONFIG_OPEN, &[0x11, 0x2000, 0x77, 0, 0, 0, 0, 0]),
+        Lv2Request::ConfigOpen {
+            equeue_id: 0x11,
+            out_handle_ptr: 0x2000,
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::CONFIG_CLOSE,
+            &[0x4100_0000, 0x77, 0, 0, 0, 0, 0, 0]
+        ),
+        Lv2Request::ConfigClose {
+            handle: 0x4100_0000
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::CONFIG_GET_SERVICE_EVENT,
+            &[0x41, 7, 0x3000, 0x1_0000_0049, 0x77, 0, 0, 0]
+        ),
+        Lv2Request::ConfigGetServiceEvent {
+            handle: 0x41,
+            event_id: 7,
+            dst_ptr: 0x3000,
+            size: 0x1_0000_0049,
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::CONFIG_ADD_SERVICE_LISTENER,
+            &[
+                0x41,
+                SYS_CONFIG_SERVICE_USER_LIBPAD,
+                0x1_0000_0002,
+                0x4000,
+                0x1_0000_0004,
+                1,
+                0x5000,
+                0x77,
+            ]
+        ),
+        Lv2Request::ConfigAddServiceListener {
+            handle: 0x41,
+            service_id: SYS_CONFIG_SERVICE_USER_LIBPAD,
+            min_verbosity: 0x1_0000_0002,
+            in_ptr: 0x4000,
+            size: 0x1_0000_0004,
+            listener_type: 1,
+            out_listener_ptr: 0x5000,
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::CONFIG_REMOVE_SERVICE_LISTENER,
+            &[0x41, 0x42, 0x77, 0, 0, 0, 0, 0]
+        ),
+        Lv2Request::ConfigRemoveServiceListener {
+            handle: 0x41,
+            listener: 0x42,
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::CONFIG_REGISTER_SERVICE,
+            &[
+                0x41,
+                SYS_CONFIG_SERVICE_USER_LIBPAD,
+                0x1_0000_0002,
+                0x1_0000_0003,
+                0x4000,
+                0x1_0000_0005,
+                0x5000,
+                0x77,
+            ]
+        ),
+        Lv2Request::ConfigRegisterService {
+            handle: 0x41,
+            service_id: SYS_CONFIG_SERVICE_USER_LIBPAD,
+            user_id: 0x1_0000_0002,
+            verbosity: 0x1_0000_0003,
+            data_ptr: 0x4000,
+            size: 0x1_0000_0005,
+            out_service_ptr: 0x5000,
+        }
+    );
+    assert_eq!(
+        classify(
+            syscall::CONFIG_UNREGISTER_SERVICE,
+            &[0x41, 0x43, 0x77, 0, 0, 0, 0, 0]
+        ),
+        Lv2Request::ConfigUnregisterService {
+            handle: 0x41,
+            service: 0x43,
+        }
+    );
+}
+
 #[test]
 fn classify_cond_create_destroy_wait() {
     assert_eq!(
@@ -680,6 +786,13 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::EVENT_QUEUE_CREATE, &[0, 1, 3]),
     (syscall::EVENT_QUEUE_DESTROY, &[0]),
     (syscall::EVENT_QUEUE_RECEIVE, &[0, 1]),
+    (syscall::CONFIG_OPEN, &[0, 1]),
+    (syscall::CONFIG_CLOSE, &[0]),
+    (syscall::CONFIG_GET_SERVICE_EVENT, &[0, 1, 2]),
+    (syscall::CONFIG_ADD_SERVICE_LISTENER, &[0, 3, 5, 6]),
+    (syscall::CONFIG_REMOVE_SERVICE_LISTENER, &[0, 1]),
+    (syscall::CONFIG_REGISTER_SERVICE, &[0, 4, 6]),
+    (syscall::CONFIG_UNREGISTER_SERVICE, &[0, 1]),
     (syscall::EVENT_QUEUE_TRY_RECEIVE, &[0, 1, 2, 3]),
     (syscall::EVENT_FLAG_CANCEL, &[0, 1]),
     (syscall::EVENT_PORT_SEND, &[0]),

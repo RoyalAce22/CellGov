@@ -227,6 +227,79 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
+    /// `sys_config_open`: binds a config handle to the event queue
+    /// that receives its service events.
+    ConfigOpen {
+        /// In: event queue id.
+        equeue_id: u32,
+        /// Out: config handle.
+        out_handle_ptr: u32,
+    },
+    /// `sys_config_close`.
+    ConfigClose {
+        /// In: config handle.
+        handle: u32,
+    },
+    /// `sys_config_get_service_event`: copies the record behind a
+    /// queued service event into the caller's buffer.
+    ConfigGetServiceEvent {
+        /// In: config handle.
+        handle: u32,
+        /// In: event id, the low word of the queued event's `data2`.
+        event_id: u32,
+        /// Out: `sys_config_service_event_t` buffer.
+        dst_ptr: u32,
+        /// In: buffer size in bytes.
+        size: u64,
+    },
+    /// `sys_config_add_service_listener`.
+    ConfigAddServiceListener {
+        /// In: config handle.
+        handle: u32,
+        /// In: service id; user services carry the top bit.
+        service_id: u64,
+        /// In: lowest service verbosity the listener accepts.
+        min_verbosity: u64,
+        /// In: listener data buffer.
+        in_ptr: u32,
+        /// In: listener data size in bytes.
+        size: u64,
+        /// In: 0 = once, otherwise repeating.
+        listener_type: u32,
+        /// Out: listener handle.
+        out_listener_ptr: u32,
+    },
+    /// `sys_config_remove_service_listener`.
+    ConfigRemoveServiceListener {
+        /// In: config handle.
+        handle: u32,
+        /// In: listener handle.
+        listener: u32,
+    },
+    /// `sys_config_register_service`.
+    ConfigRegisterService {
+        /// In: config handle.
+        handle: u32,
+        /// In: service id; user services carry the top bit.
+        service_id: u64,
+        /// In: caller-chosen id echoed in every event for the service.
+        user_id: u64,
+        /// In: service verbosity.
+        verbosity: u64,
+        /// In: service data buffer.
+        data_ptr: u32,
+        /// In: service data size in bytes.
+        size: u64,
+        /// Out: service handle.
+        out_service_ptr: u32,
+    },
+    /// `sys_config_unregister_service`.
+    ConfigUnregisterService {
+        /// In: config handle.
+        handle: u32,
+        /// In: service handle.
+        service: u32,
+    },
     /// A port with no binding or a non-1:1 binding routes to ESRCH.
     EventPortSend {
         /// In: port id.

@@ -3,9 +3,9 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 390099,
+  "steps": 390085,
   "budget": 256,
-  "host_invariant_breaks": 77,
+  "host_invariant_breaks": 88,
   "witnesses": {
     "cond_reacquires": {
       "value": 1,
@@ -28,23 +28,23 @@
       "class": "at-least"
     },
     "host_invariant_breaks": {
-      "value": 77,
+      "value": 88,
       "class": "exact"
     },
     "ldarx": {
-      "value": 161132,
+      "value": 338,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 107547,
+      "value": 388890,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 53619,
+      "value": 20,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 53626,
+      "value": 27,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -108,11 +108,11 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 107506,
+      "value": 311,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 309,
+      "value": 324,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 7,
+      "value": 388544,
       "class": "at-least"
     },
     "unsupported_syscalls_distinct": {

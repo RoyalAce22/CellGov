@@ -51,6 +51,7 @@ impl Lv2State {
             rsx_context,
             mmapper_handles,
             mmapper_ipc,
+            config,
             lwmutexes,
             mutexes,
             semaphores,
@@ -126,6 +127,9 @@ impl Lv2State {
         }
         if !process_counts.is_empty() {
             hasher.write(&process_counts.state_hash().to_le_bytes());
+        }
+        if !config.is_pristine() {
+            hasher.write(&config.state_hash().to_le_bytes());
         }
         if !prx_registry.is_empty() {
             hasher.write(&(prx_registry.len() as u64).to_le_bytes());
