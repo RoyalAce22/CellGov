@@ -18,6 +18,8 @@ mod atomics;
 mod floats;
 #[path = "mem_load_tests.rs"]
 mod loads;
+#[path = "mem_store_order_tests.rs"]
+mod store_order;
 #[path = "mem_store_tests.rs"]
 mod stores;
 #[path = "mem_string_tests.rs"]

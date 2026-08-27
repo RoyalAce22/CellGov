@@ -211,20 +211,16 @@ fn insert_u16_vector_store() {
 }
 
 #[test]
-fn flush_skips_conditional_entries() {
-    // A conditional entry must never produce a `SharedWriteIntent`
-    // -- `stwcx`/`stdcx` already emitted its own `ConditionalStore`
-    // effect, and double-emission would re-run the reservation
-    // clear-sweep against the same write.
+fn flush_emits_conditional_entries_in_program_order() {
     let mut buf = StoreBuffer::new();
     assert!(buf.insert(0x100, 4, 0xAABBCCDD));
-    assert!(buf.insert_conditional(0x200, 4, 0x11223344));
+    assert!(buf.insert_conditional(0x200, 4, 0x11223344, 0));
     assert!(buf.insert(0x300, 2, 0xEEFF));
 
     let mut effects = Vec::new();
     buf.flush(&mut effects, UnitId::new(0));
     assert!(buf.is_empty());
-    assert_eq!(effects.len(), 2);
+    assert_eq!(effects.len(), 3);
     match &effects[0] {
         Effect::SharedWriteIntent { range, .. } => {
             assert_eq!(range.start().raw(), 0x100);
@@ -232,11 +228,100 @@ fn flush_skips_conditional_entries() {
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
     match &effects[1] {
+        Effect::ConditionalStore { range, bytes, .. } => {
+            assert_eq!(range.start().raw(), 0x200);
+            assert_eq!(bytes.bytes(), &0x11223344u32.to_be_bytes());
+        }
+        other => panic!("expected ConditionalStore, got {other:?}"),
+    }
+    match &effects[2] {
         Effect::SharedWriteIntent { range, .. } => {
             assert_eq!(range.start().raw(), 0x300);
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
+}
+
+fn acquire(line_addr: u64) -> Effect {
+    Effect::ReservationAcquire {
+        line_addr,
+        source: UnitId::new(0),
+    }
+}
+
+fn kind(e: &Effect) -> &'static str {
+    match e {
+        Effect::ReservationAcquire { .. } => "acquire",
+        Effect::ConditionalStore { .. } => "conditional",
+        Effect::SharedWriteIntent { .. } => "plain",
+        _ => "other",
+    }
+}
+
+#[test]
+fn flush_places_a_conditional_entry_before_effects_emitted_after_it() {
+    let mut buf = StoreBuffer::new();
+    let mut effects = vec![acquire(0x200)];
+    assert!(buf.insert(0x100, 4, 0xAABBCCDD));
+    assert!(buf.insert_conditional(0x200, 4, 0x11223344, effects.len()));
+    // A later lwarx in the same block: pushed straight into the
+    // vector, after the conditional store's recorded slot.
+    effects.push(acquire(0x300));
+    assert!(buf.insert(0x300, 2, 0xEEFF));
+
+    buf.flush(&mut effects, UnitId::new(0));
+    assert!(buf.is_empty());
+    let kinds: Vec<_> = effects.iter().map(kind).collect();
+    assert_eq!(
+        kinds,
+        ["acquire", "plain", "conditional", "acquire", "plain"],
+        "{effects:?}"
+    );
+    match &effects[2] {
+        Effect::ConditionalStore { range, bytes, .. } => {
+            assert_eq!(range.start().raw(), 0x200);
+            assert_eq!(bytes.bytes(), &0x11223344u32.to_be_bytes());
+        }
+        other => panic!("expected ConditionalStore, got {other:?}"),
+    }
+}
+
+#[test]
+fn flush_shifts_a_second_conditional_slot_by_the_first_group() {
+    let mut buf = StoreBuffer::new();
+    let mut effects = Vec::new();
+    assert!(buf.insert_conditional(0x100, 4, 0x1, effects.len()));
+    effects.push(acquire(0x200));
+    assert!(buf.insert(0x180, 4, 0x2));
+    assert!(buf.insert_conditional(0x200, 4, 0x3, effects.len()));
+    effects.push(acquire(0x300));
+    assert!(buf.insert(0x280, 4, 0x4));
+
+    buf.flush(&mut effects, UnitId::new(0));
+    let kinds: Vec<_> = effects.iter().map(kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            "conditional",
+            "acquire",
+            "plain",
+            "conditional",
+            "acquire",
+            "plain"
+        ],
+        "{effects:?}"
+    );
+    let addrs: Vec<u64> = effects
+        .iter()
+        .map(|e| match e {
+            Effect::ReservationAcquire { line_addr, .. } => *line_addr,
+            Effect::SharedWriteIntent { range, .. } | Effect::ConditionalStore { range, .. } => {
+                range.start().raw()
+            }
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(addrs, [0x100u64, 0x200, 0x180, 0x200, 0x300, 0x280]);
 }
 
 #[test]
@@ -247,7 +332,7 @@ fn overlay_range_applies_conditional_entry() {
     // of those bytes -- a vector load overlapping the range must
     // see them.
     let mut buf = StoreBuffer::new();
-    assert!(buf.insert_conditional(0x104, 4, 0xCAFE_BABE_u128));
+    assert!(buf.insert_conditional(0x104, 4, 0xCAFE_BABE_u128, 0));
     let mut out = [0xAAu8; 16];
     buf.overlay_range(0x100, &mut out);
     assert_eq!(out[0..4], [0xAA, 0xAA, 0xAA, 0xAA]);

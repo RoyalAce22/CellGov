@@ -16,22 +16,62 @@ const CAPACITY: usize = 64;
 
 /// A single pending store entry.
 ///
-/// `conditional == true` entries are visible to [`StoreBuffer::forward`]
-/// but skipped by [`StoreBuffer::flush`] -- the `ConditionalStore`
-/// effect is emitted directly by `stwcx`/`stdcx`, so flushing again
-/// would double-commit.
+/// `emit_at == Some(n)` marks a successful `stwcx`/`stdcx`; `n` is
+/// how many effects the block had emitted when it executed.
+/// [`StoreBuffer::flush`] emits it as `ConditionalStore` at that
+/// slot, so it lands after every plain store buffered before it,
+/// before every plain store buffered after it, and -- because
+/// `ReservationAcquire` is emitted straight into the effect vector
+/// at `lwarx`/`ldarx` time -- before any acquire that followed it
+/// in program order. The commit pipeline drops the emitter's
+/// reservation entry when it applies a `ConditionalStore`, so a
+/// later acquire must already sit behind it or the block's second
+/// LL/SC sequence loses its reservation before it is used.
 ///
 /// `len` is the architectural store width in bytes and must satisfy
 /// `1 <= len <= 16`. The lower bound rules out zero-byte stores
 /// (no PPC store instruction has zero width); the upper bound is the
 /// `value: u128` payload's capacity (`stvx`/`dcbz`-by-granule peak at
 /// 16 bytes per entry).
+// [PPC-Book2 p:10 s:1.7.3.1 Reservations] a later lwarx/ldarx clears the earlier reservation and establishes a new one; a stwcx./stdcx. clears only the reservation that precedes it.
 #[derive(Clone, Copy)]
 struct StoreEntry {
     addr: u64,
     len: u8,
-    conditional: bool,
+    emit_at: Option<usize>,
     value: u128,
+}
+
+impl StoreEntry {
+    fn effect(&self, source: UnitId) -> Effect {
+        let bytes = &self.value.to_be_bytes();
+        let offset = 16 - self.len as usize;
+        let payload = WritePayload::from_slice(&bytes[offset..]);
+        // The insert paths reject any (addr, len) that would
+        // overflow on `addr + len`, so `ByteRange::new` cannot
+        // fail here; a `None` would be an invariant breach, and
+        // panicking surfaces it rather than silently dropping a
+        // guest store.
+        let range = ByteRange::new(GuestAddr::new(self.addr), self.len as u64)
+            .expect("store buffer entry violates addr+len invariant; insert should reject");
+        if self.emit_at.is_some() {
+            Effect::ConditionalStore {
+                range,
+                bytes: payload,
+                ordering: PriorityClass::Normal,
+                source,
+                source_time: GuestTicks::ZERO,
+            }
+        } else {
+            Effect::SharedWriteIntent {
+                range,
+                bytes: payload,
+                ordering: PriorityClass::Normal,
+                source,
+                source_time: GuestTicks::ZERO,
+            }
+        }
+    }
 }
 
 /// Fixed-capacity (64-entry) store-forwarding buffer.
@@ -111,19 +151,23 @@ impl StoreBuffer {
         self.entries.push(StoreEntry {
             addr,
             len,
-            conditional: false,
+            emit_at: None,
             value,
         });
         true
     }
 
-    /// Insert a successful `stwcx` / `stdcx` for forwarding only.
-    ///
-    /// Flush skips this entry (see `StoreEntry`). Returns `false`
-    /// when the buffer is full.
-    // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; this entry exists only so intra-block loads forward the reserved bytes.
+    /// Insert a successful `stwcx` / `stdcx`: forwarded to later loads
+    /// in the block and emitted by [`Self::flush`] as a
+    /// `ConditionalStore` in program order. `emit_at` is the effect
+    /// vector's length when the instruction executed; flush places
+    /// the entry there so it precedes any `ReservationAcquire` the
+    /// block emits after it (see `StoreEntry`). Returns `false`
+    /// when the buffer is full; the caller yields the block before
+    /// retrying the instruction.
+    // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; the entry keeps their bytes in program order with the block's plain stores.
     #[inline]
-    pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128) -> bool {
+    pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128, emit_at: usize) -> bool {
         debug_assert!(
             len > 0 && len <= 16,
             "conditional store width out of range: len={len}"
@@ -138,7 +182,7 @@ impl StoreBuffer {
         self.entries.push(StoreEntry {
             addr,
             len,
-            conditional: true,
+            emit_at: Some(emit_at),
             value,
         });
         true
@@ -172,33 +216,51 @@ impl StoreBuffer {
         None
     }
 
-    /// Emit pending stores as `SharedWriteIntent` effects in program
-    /// order and clear the buffer. Conditional entries are skipped.
+    /// Emit pending stores in program order -- `SharedWriteIntent`
+    /// for plain entries, `ConditionalStore` for successful
+    /// `stwcx`/`stdcx` -- and clear the buffer.
+    ///
+    /// Each conditional entry, together with the plain entries
+    /// buffered before it that are not yet emitted, is inserted at
+    /// the entry's recorded `emit_at` slot (shifted by whatever this
+    /// flush already inserted); entries after the last conditional
+    /// one are appended. A block without a conditional store takes
+    /// the append-only path.
+    ///
+    /// # Panics
+    ///
+    /// If `effects` was truncated below a recorded `emit_at` since
+    /// the conditional store executed. The caller keeps the vector
+    /// append-only between execute and flush; a fault clears both
+    /// the vector and this buffer together.
     // [PPC-Book2 p:28 s:3.3 eieio] block-boundary flush models the memory-barrier ordering of Load/Store accesses with respect to other processors.
     pub fn flush(&mut self, effects: &mut Vec<Effect>, source: UnitId) {
+        let mut next = 0usize;
+        let mut inserted = 0usize;
         for i in 0..self.entries.len() {
-            let e = &self.entries[i];
-            if e.conditional {
+            let Some(at) = self.entries[i].emit_at else {
                 continue;
+            };
+            let pos = at + inserted;
+            assert!(
+                pos <= effects.len(),
+                "conditional store recorded effect slot {at} (+{inserted} inserted by this \
+                 flush) but the effect vector holds only {} entries; it was truncated between \
+                 execute and flush",
+                effects.len()
+            );
+            let group = self.entries[next..=i].iter().map(|e| e.effect(source));
+            if pos == effects.len() {
+                effects.extend(group);
+            } else {
+                let tail = effects.split_off(pos);
+                effects.extend(group);
+                effects.extend(tail);
             }
-            let bytes = &e.value.to_be_bytes();
-            let offset = 16 - e.len as usize;
-            let payload = WritePayload::from_slice(&bytes[offset..]);
-            // The insert paths reject any (addr, len) that would
-            // overflow on `addr + len`, so `ByteRange::new` cannot
-            // fail here; a `None` would be an invariant breach, and
-            // panicking surfaces it rather than silently dropping a
-            // guest store.
-            let range = ByteRange::new(GuestAddr::new(e.addr), e.len as u64)
-                .expect("store buffer entry violates addr+len invariant; insert should reject");
-            effects.push(Effect::SharedWriteIntent {
-                range,
-                bytes: payload,
-                ordering: PriorityClass::Normal,
-                source,
-                source_time: GuestTicks::ZERO,
-            });
+            inserted += i + 1 - next;
+            next = i + 1;
         }
+        effects.extend(self.entries[next..].iter().map(|e| e.effect(source)));
         self.entries.clear();
     }
 

@@ -251,16 +251,20 @@ pub fn run_corpus(cases: &[InstructionCase]) -> CorpusReport {
     report
 }
 
-/// Walk `effects` and apply each [`Effect::SharedWriteIntent`] that
-/// falls inside the `[base, base + memory.len())` window to
-/// `memory`. Writes straddling the window edge are clamped to the
+/// Walk `effects` and apply each [`Effect::SharedWriteIntent`] and
+/// [`Effect::ConditionalStore`], in vector order as the commit
+/// pipeline stages them, that falls inside the
+/// `[base, base + memory.len())` window to `memory`.
+/// Writes straddling the window edge are clamped to the
 /// in-window portion; out-of-window writes are silently dropped so
 /// the harness stays robust to executors that touch addresses the
 /// case did not map.
 fn apply_shared_writes(memory: &mut [u8], base: u64, effects: &[Effect]) {
     let mem_end = base.saturating_add(memory.len() as u64);
     for effect in effects {
-        if let Effect::SharedWriteIntent { range, bytes, .. } = effect {
+        if let Effect::SharedWriteIntent { range, bytes, .. }
+        | Effect::ConditionalStore { range, bytes, .. } = effect
+        {
             let write_start = range.start().raw();
             let write_end = write_start.saturating_add(range.length());
             if write_end <= base || write_start >= mem_end {

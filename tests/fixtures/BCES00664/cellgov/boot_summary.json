@@ -32,7 +32,7 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 11779,
+      "value": 11780,
       "class": "at-least"
     },
     "lwarx": {
@@ -108,7 +108,7 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 10797,
+      "value": 10798,
       "class": "at-least"
     },
     "stwcx": {

@@ -818,12 +818,12 @@ fn stdcx_misaligned_ea_raises_alignment_fault() {
     assert!(effects.is_empty());
 }
 
-/// A conditional store must not drain the plain-store buffer: the
-/// commit pipeline stages every SharedWriteIntent before
-/// ConditionalStore, and a mid-batch flush would discard entries a
-/// later same-batch load still forwards from. The
-/// buffer-level tests cannot catch this -- they exercise the buffer
-/// under flush, not the executor's discipline of not calling it.
+/// A conditional store must not drain the plain-store buffer: a
+/// mid-batch flush would discard entries a later same-batch load
+/// still forwards from, and would commit the conditional store out
+/// of program order with them. The buffer-level tests cannot catch
+/// this -- they exercise the buffer under flush, not the executor's
+/// discipline of not calling it.
 #[test]
 fn stwcx_does_not_drain_plain_stores_mid_batch() {
     let mem = vec![0u8; 0x2000];
@@ -902,18 +902,17 @@ fn stwcx_does_not_drain_plain_stores_mid_batch() {
         "reload must forward the buffered plain store; memory still holds zeros"
     );
 
-    // Plain stores emit their SharedWriteIntent at end-of-batch
-    // flush, not at execute time -- so ANY SharedWriteIntent in the
-    // mid-batch effects is proof the buffer was drained early.
-    let shared = effects
-        .iter()
-        .filter(|e| matches!(e, Effect::SharedWriteIntent { .. }))
-        .count();
-    let conditional = effects
-        .iter()
-        .filter(|e| matches!(e, Effect::ConditionalStore { .. }))
-        .count();
-    assert_eq!((shared, conditional), (0, 1));
+    // Every store emits at end-of-batch flush, not at execute time --
+    // so ANY write effect in the mid-batch effects is proof the buffer
+    // was drained early.
+    assert!(
+        !effects.iter().any(|e| matches!(
+            e,
+            Effect::SharedWriteIntent { .. } | Effect::ConditionalStore { .. }
+        )),
+        "no write may be emitted mid-batch: {effects:?}"
+    );
+    assert_eq!(store_buf.len(), 2, "plain entry and conditional entry");
 }
 
 /// Doubleword twin of
@@ -989,13 +988,12 @@ fn stdcx_does_not_drain_plain_stores_mid_batch() {
     assert_eq!(v, ExecuteVerdict::Continue);
     assert_eq!(s.gpr[11], 0x1122_3344_5566_7788);
 
-    let shared = effects
-        .iter()
-        .filter(|e| matches!(e, Effect::SharedWriteIntent { .. }))
-        .count();
-    let conditional = effects
-        .iter()
-        .filter(|e| matches!(e, Effect::ConditionalStore { .. }))
-        .count();
-    assert_eq!((shared, conditional), (0, 1));
+    assert!(
+        !effects.iter().any(|e| matches!(
+            e,
+            Effect::SharedWriteIntent { .. } | Effect::ConditionalStore { .. }
+        )),
+        "no write may be emitted mid-batch: {effects:?}"
+    );
+    assert_eq!(store_buf.len(), 2, "plain entry and conditional entry");
 }

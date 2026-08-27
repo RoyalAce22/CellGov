@@ -8,11 +8,10 @@ use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
 use crate::store_buffer::StoreBuffer;
-use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_effects::Effect;
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
-use cellgov_time::GuestTicks;
 
 use cellgov_ps3_abi::hardware::DCBZ_BLOCK_BYTES;
 
@@ -565,35 +564,28 @@ pub(crate) fn execute(
             // [PPC-Book2 p:25 s:3.3.2 Atomic Update Primitives] CR0 = 0b00 || n || XER[SO].
             let so = u8::from(state.xer_so());
             if success {
+                if ByteRange::new(GuestAddr::new(ea), 8).is_none() {
+                    return ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(
+                        cellgov_mem::FaultContext {
+                            addr: ea,
+                            nearest_below: None,
+                            nearest_above: None,
+                        },
+                    ));
+                }
+                // The store goes through the buffer so its
+                // `ConditionalStore` is emitted in program order with
+                // the block's plain stores and ahead of any later
+                // `ReservationAcquire` (`effects.len()` records the
+                // slot); a full buffer retries the instruction next
+                // block with CR0 and the reservation untouched.
+                if !store_buf.has_capacity_for(1) {
+                    return ExecuteVerdict::BufferFull;
+                }
                 state.set_cr_field(0, 0b0010 | so);
-                let range = match ByteRange::new(GuestAddr::new(ea), 8) {
-                    Some(r) => r,
-                    None => {
-                        return ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(
-                            cellgov_mem::FaultContext {
-                                addr: ea,
-                                nearest_below: None,
-                                nearest_above: None,
-                            },
-                        ));
-                    }
-                };
                 let value = state.gpr[rs as usize];
-                let bytes = value.to_be_bytes();
-                // The commit pipeline stages every SharedWriteIntent
-                // before ConditionalStore; draining the buffer here
-                // would discard plain-store entries needed for
-                // intra-batch load forwarding.
-                effects.push(Effect::ConditionalStore {
-                    range,
-                    bytes: WritePayload::from_slice(&bytes),
-                    ordering: PriorityClass::Normal,
-                    source: unit_id,
-                    source_time: GuestTicks::ZERO,
-                });
-                // Forwarding-only entry: same-step loads see the
-                // committed bytes. Flush skips conditional entries.
-                store_buf.insert_conditional(ea, 8, value as u128);
+                let staged = store_buf.insert_conditional(ea, 8, value as u128, effects.len());
+                debug_assert!(staged, "stdcx. insert after has_capacity_for(1) passed");
             } else {
                 state.set_cr_field(0, so);
             }
@@ -633,29 +625,22 @@ pub(crate) fn execute(
             };
             let so = u8::from(state.xer_so());
             if success {
+                if ByteRange::new(GuestAddr::new(ea), 4).is_none() {
+                    return ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(
+                        cellgov_mem::FaultContext {
+                            addr: ea,
+                            nearest_below: None,
+                            nearest_above: None,
+                        },
+                    ));
+                }
+                if !store_buf.has_capacity_for(1) {
+                    return ExecuteVerdict::BufferFull;
+                }
                 state.set_cr_field(0, 0b0010 | so);
-                let range = match ByteRange::new(GuestAddr::new(ea), 4) {
-                    Some(r) => r,
-                    None => {
-                        return ExecuteVerdict::MemFault(cellgov_mem::MemError::Unmapped(
-                            cellgov_mem::FaultContext {
-                                addr: ea,
-                                nearest_below: None,
-                                nearest_above: None,
-                            },
-                        ));
-                    }
-                };
                 let value32 = state.gpr[rs as usize] as u32;
-                let bytes = value32.to_be_bytes();
-                effects.push(Effect::ConditionalStore {
-                    range,
-                    bytes: WritePayload::from_slice(&bytes),
-                    ordering: PriorityClass::Normal,
-                    source: unit_id,
-                    source_time: GuestTicks::ZERO,
-                });
-                store_buf.insert_conditional(ea, 4, value32 as u128);
+                let staged = store_buf.insert_conditional(ea, 4, value32 as u128, effects.len());
+                debug_assert!(staged, "stwcx. insert after has_capacity_for(1) passed");
             } else {
                 state.set_cr_field(0, so);
             }

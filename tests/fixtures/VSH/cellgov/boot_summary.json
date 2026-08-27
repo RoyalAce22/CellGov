@@ -3,7 +3,7 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 390085,
+  "steps": 390095,
   "budget": 256,
   "host_invariant_breaks": 112,
   "witnesses": {
@@ -16,7 +16,7 @@
       "class": "absent"
     },
     "event_port_ipc_connect_attempts": {
-      "value": 31574,
+      "value": 31576,
       "class": "at-least"
     },
     "event_port_ipc_connect_bound": {
@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 32107,
+      "value": 32110,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 95237,
+      "value": 95240,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -108,11 +108,11 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 32041,
+      "value": 32044,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 95118,
+      "value": 95121,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 31594,
+      "value": 31596,
       "class": "at-least"
     },
     "uart_cids_distinct": {
