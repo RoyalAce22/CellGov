@@ -434,8 +434,6 @@ fn a_full_buffer_makes_a_stdcx_yield_before_it_takes_the_reservation() {
     );
 }
 
-/// The capacity check asks for exactly one slot, so a conditional
-/// store may fill the buffer; the next plain store is what yields.
 #[test]
 fn a_stwcx_may_take_the_last_buffer_slot() {
     let mem = vec![0u8; 0x2000];

@@ -123,7 +123,7 @@ flowchart TD
   reloc --> got["resolve GOT slots against (namespace, NID) exports; misses to the trampoline"]
   tramp --> tls
   got --> tls["pre-initialize TLS from PT_TLS"]
-  tls --> ms["module_start per module in topo order (cellSysutil seeded; a faulting start is skipped with a witness)"]
+  tls --> ms["module_start per module in topo order (cellSysutil seeded; a faulting start is skipped with a witness; a fault in a thread the start spawned is logged and the start continues)"]
   ms --> crt0["CRT0 from the ELF entry point"]
 ```
 

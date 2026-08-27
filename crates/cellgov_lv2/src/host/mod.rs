@@ -33,6 +33,7 @@ mod state;
 mod state_hash;
 mod system_ipc_witness;
 mod uart;
+mod usbd;
 
 #[cfg(test)]
 #[path = "tests/test_support.rs"]

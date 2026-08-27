@@ -40,9 +40,12 @@ fn image_import_registers_distinct_entries_per_type_id_img_ptr() {
             let Effect::SharedWriteIntent { bytes: b2, .. } = &e2[0] else {
                 panic!("e2");
             };
+            // Kernel-shaped record: type word first, the id in entry_point.
+            assert_eq!(u32::from_be_bytes(b1.bytes()[..4].try_into().unwrap()), 1);
+            assert_eq!(u32::from_be_bytes(b2.bytes()[..4].try_into().unwrap()), 1);
             (
-                u32::from_be_bytes(b1.bytes()[..4].try_into().unwrap()),
-                u32::from_be_bytes(b2.bytes()[..4].try_into().unwrap()),
+                u32::from_be_bytes(b1.bytes()[4..8].try_into().unwrap()),
+                u32::from_be_bytes(b2.bytes()[4..8].try_into().unwrap()),
             )
         }
         other => panic!("expected two Immediate code=0, got {other:?}"),
@@ -214,10 +217,12 @@ fn thread_initialize_records_slot() {
     let mut host = Lv2Host::new();
     host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
 
-    // img_ptr at 0x200: handle=1 pre-populated (as image_open would write).
+    // img_ptr at 0x200: the kernel-shaped record image_open writes,
+    // type KERNEL with image id 1 in entry_point.
     let mut mem = GuestMemory::new(0x4000);
-    let img_range = ByteRange::new(GuestAddr::new(0x200), 4).unwrap();
-    mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
+    let img_range = ByteRange::new(GuestAddr::new(0x200), 8).unwrap();
+    mem.apply_commit(img_range, &[0, 0, 0, 1, 0, 0, 0, 1])
+        .unwrap();
     let rt = FakeRuntime::with_memory(mem);
 
     host.dispatch(
@@ -431,8 +436,10 @@ fn group_start_returns_register_spu_with_inits() {
     let path = b"/spu.elf\0";
     let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
     mem.apply_commit(path_range, path).unwrap();
-    let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
-    mem.apply_commit(img_range, &1u32.to_be_bytes()).unwrap();
+    // Kernel-shaped record: type KERNEL, image id 1 in entry_point.
+    let img_range = ByteRange::new(GuestAddr::new(0x300), 8).unwrap();
+    mem.apply_commit(img_range, &[0, 0, 0, 1, 0, 0, 0, 1])
+        .unwrap();
 
     // sys_spu_thread_argument: 4 x u64 big-endian; arg0 = 0x1000.
     let mut arg_bytes = [0u8; 32];
@@ -486,7 +493,10 @@ fn group_start_returns_register_spu_with_inits() {
             assert_eq!(code, 0);
             assert_eq!(inits.len(), 1);
             let init = inits.get(&0).expect("slot 0 init");
-            assert_eq!(init.ls_bytes, vec![0xAA, 0xBB]);
+            assert_eq!(
+                init.image,
+                crate::dispatch::SpuLoadImage::Elf(vec![0xAA, 0xBB])
+            );
             assert_eq!(init.entry_pc, 0x80);
             assert_eq!(init.stack_ptr, 0x3FFF0);
             assert_eq!(init.args[0], 0x1000);
@@ -696,9 +706,11 @@ fn initializing_a_thread_in_a_started_group_is_rejected_as_ebusy() {
     let handle = host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
 
     let mut mem = GuestMemory::new(0x4000);
-    let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
-    mem.apply_commit(img_range, &handle.raw().to_be_bytes())
-        .unwrap();
+    let mut record = [0u8; 8];
+    record[3] = 1;
+    record[4..8].copy_from_slice(&handle.raw().to_be_bytes());
+    let img_range = ByteRange::new(GuestAddr::new(0x300), 8).unwrap();
+    mem.apply_commit(img_range, &record).unwrap();
     let rt = FakeRuntime::with_memory(mem);
 
     host.dispatch(
@@ -735,14 +747,16 @@ fn initializing_a_thread_in_a_started_group_is_rejected_as_ebusy() {
 }
 
 #[test]
-fn initializing_a_slot_past_the_declared_thread_count_is_rejected_as_einval() {
+fn a_slot_index_past_the_declared_count_is_accepted_and_a_full_group_is_ebusy() {
     let mut host = Lv2Host::new();
     let handle = host.content_store_mut().register(b"/spu.elf", vec![0xAA]);
 
     let mut mem = GuestMemory::new(0x4000);
-    let img_range = ByteRange::new(GuestAddr::new(0x300), 4).unwrap();
-    mem.apply_commit(img_range, &handle.raw().to_be_bytes())
-        .unwrap();
+    let mut record = [0u8; 8];
+    record[3] = 1;
+    record[4..8].copy_from_slice(&handle.raw().to_be_bytes());
+    let img_range = ByteRange::new(GuestAddr::new(0x300), 8).unwrap();
+    mem.apply_commit(img_range, &record).unwrap();
     let rt = FakeRuntime::with_memory(mem);
 
     host.dispatch(
@@ -770,9 +784,28 @@ fn initializing_a_slot_past_the_declared_thread_count_is_rejected_as_einval() {
     );
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, 0, "slot 1 of a one-thread group is a legal index");
         }
-        other => panic!("expected Immediate EINVAL, got {other:?}"),
+        other => panic!("expected Immediate, got {other:?}"),
+    }
+    let result = host.dispatch(
+        Lv2Request::SpuThreadInitialize {
+            thread_ptr: 0x500,
+            group_id: 1,
+            thread_num: 0,
+            img_ptr: 0x300,
+            attr_ptr: 0,
+            arg_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    match result {
+        Lv2Dispatch::Immediate { code, effects } => {
+            assert_eq!(code, cell_errors::CELL_EBUSY.into());
+            assert!(effects.is_empty());
+        }
+        other => panic!("expected Immediate EBUSY, got {other:?}"),
     }
 }
 

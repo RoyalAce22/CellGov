@@ -242,6 +242,9 @@ pub(super) struct PrepareOptions<'a> {
     /// title's primary unit registers.
     pub patch_bytes: &'a [(u64, u8)],
     pub dump_mem_boot_addrs: &'a [u64],
+    /// `--dump-mem-fault` ranges, hex-dumped when a module_start unit
+    /// faults or hits `--dump-at-pc`.
+    pub dump_mem_fault_ranges: &'a [(u64, u64)],
     pub budget_override: Option<Budget>,
     /// When true, switch runtime mode to `DeterminismCheck` so
     /// per-step `PpuStateHash` records land in the trace buffer.
@@ -679,8 +682,20 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
     rt.set_spu_factory(|id, init| {
         use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
         let mut unit = SpuExecutionUnit::new(id);
-        spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut())
-            .expect("game boot: load_spu_elf on title-provided ELF; failure indicates a bad LV2 thread init");
+        match &init.image {
+            cellgov_lv2::SpuLoadImage::Elf(bytes) => {
+                spu_loader::load_spu_elf(bytes, unit.state_mut())
+                    .expect("game boot: load_spu_elf on title-provided ELF; failure indicates a bad LV2 thread init");
+            }
+            cellgov_lv2::SpuLoadImage::Segments(segments) => {
+                let placed: Vec<(u32, &[u8])> = segments
+                    .iter()
+                    .map(|s| (s.ls_start, s.bytes.as_slice()))
+                    .collect();
+                spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut())
+                    .expect("game boot: load_ls_segments on segments sys_spu_thread_initialize already bounded");
+            }
+        }
         unit.state_mut().pc = init.entry_pc;
         unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
         unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);
@@ -1043,13 +1058,15 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         // Offset below the game's stack_top so the two stacks cannot
         // collide.
         stack_pointer: PS3_PRIMARY_STACK_BASE + 0x8000,
+        break_pc: opts.dump_at_pc.map(|pc| (pc, opts.dump_skip)),
+        dump_mem_fault_ranges: opts.dump_mem_fault_ranges.to_vec(),
     };
     let (modules_started, modules_faulted) = match (prx_modules.is_empty(), skip_ms) {
         (false, false) => {
             let mut completed: usize = 0;
             let mut faulted: Vec<String> = Vec::new();
             for info in &prx_modules {
-                match run_module_start(&mut rt, info, boot_env) {
+                match run_module_start(&mut rt, info, &boot_env) {
                     Ok(ModuleStartOutcome::Completed { .. })
                     | Ok(ModuleStartOutcome::HleStubbed) => completed += 1,
                     Ok(ModuleStartOutcome::Skipped) => {}

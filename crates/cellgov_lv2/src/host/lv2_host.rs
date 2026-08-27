@@ -108,6 +108,8 @@ impl Lv2Host {
                 mmapper_ipc: BTreeMap::new(),
                 config: super::config::ConfigTable::new(),
                 uart: super::uart::UartState::new(),
+                usbd: super::usbd::UsbdState::new(),
+                memory_containers: std::collections::BTreeSet::new(),
                 lwmutexes: LwMutexTable::new(),
                 mutexes: MutexTable::new(),
                 semaphores: SemaphoreTable::new(),
@@ -691,7 +693,8 @@ impl Lv2Host {
 
     /// Remove every waiter record owned by `pid`'s threads from every
     /// LV2 waiter list: the six sync-primitive tables, per-thread
-    /// join-waiter lists, and the virtual UART's reader queue.
+    /// join-waiter lists, the virtual UART's reader queue, and the USB
+    /// driver's event readers.
     ///
     /// The runtime finishes every one of the pid's units at the same
     /// exit, so a grant handed to a parked thread of an exited process
@@ -714,7 +717,7 @@ impl Lv2Host {
         if threads.is_empty() {
             return;
         }
-        let purges: [(&'static str, usize); 8] = [
+        let purges: [(&'static str, usize); 9] = [
             ("mutex", self.state.mutexes.purge_waiters_of(&threads).len()),
             (
                 "lwmutex",
@@ -738,6 +741,7 @@ impl Lv2Host {
                 self.state.ppu_threads.purge_join_waiters_of(&threads).len(),
             ),
             ("uart", self.state.uart.purge_readers_of(&threads).len()),
+            ("usbd", self.state.usbd.purge_waiters_of(&threads).len()),
         ];
         for (primitive, count) in purges {
             if count > 0 {

@@ -286,8 +286,7 @@ pub const PS3AV_MONITOR_INFO_LEN: usize = 208;
 /// Bytes of monitor info the HDMI reply and the plugged event carry.
 pub const PS3AV_MONITOR_INFO_HDMI_LEN: usize = 204;
 
-/// HDCP key-selection vectors the AV manager reports: the transmitter
-/// (AKSV) and the single sink (BKSV).
+/// KSV of the HDMI transmitter, as GET_AKSV reports it.
 pub const PS3AV_AKSV_VALUE: [u8; 5] = [0x00, 0x00, 0x0F, 0xFF, 0xFF];
 /// KSV of the single HDCP sink, as BKSV lists and HDCP events report it.
 pub const PS3AV_BKSV_VALUE: [u8; 5] = [0xFF, 0xFF, 0xF0, 0x00, 0x00];
@@ -313,65 +312,65 @@ pub const PS3AV_AUDIO_PORT_SPDIF_1: u32 = 1 << 21;
 // Fixed packet sizes the parser checks a command against (header
 // included); a command whose size is data-dependent or unchecked is
 // absent here.
-/// Size of the `AV_INIT_LEN` command packet, header included.
+/// Size of the `AV_INIT` command packet, header included.
 pub const PS3AV_PKT_AV_INIT_LEN: usize = 12;
-/// Size of the `GET_MONITOR_INFO_LEN` command packet, header included.
+/// Size of the `GET_MONITOR_INFO` command packet, header included.
 pub const PS3AV_PKT_GET_MONITOR_INFO_LEN: usize = 12;
-/// Size of the `GET_BKSV_LEN` command packet, header included.
+/// Size of the `GET_BKSV` command packet, header included.
 pub const PS3AV_PKT_GET_BKSV_LEN: usize = 12;
-/// Size of the `ENABLE_EVENT_LEN` command packet, header included.
+/// Size of the `ENABLE_EVENT` command packet, header included.
 pub const PS3AV_PKT_ENABLE_EVENT_LEN: usize = 12;
-/// Size of the `AV_AUDIO_MUTE_LEN` command packet, header included.
+/// Size of the `AV_AUDIO_MUTE` command packet, header included.
 pub const PS3AV_PKT_AV_AUDIO_MUTE_LEN: usize = 12;
-/// Size of the `NULL_CMD_LEN` command packet, header included.
+/// Size of the `NULL_CMD` command packet, header included.
 pub const PS3AV_PKT_NULL_CMD_LEN: usize = 12;
-/// Size of the `VIDEO_DISABLE_SIG_LEN` command packet, header included.
+/// Size of the `VIDEO_DISABLE_SIG` command packet, header included.
 pub const PS3AV_PKT_VIDEO_DISABLE_SIG_LEN: usize = 12;
-/// Size of the `YTRAPCONTROL_LEN` command packet, header included.
+/// Size of the `YTRAPCONTROL` command packet, header included.
 pub const PS3AV_PKT_YTRAPCONTROL_LEN: usize = 12;
-/// Size of the `ACP_CTRL_LEN` command packet, header included.
+/// Size of the `ACP_CTRL` command packet, header included.
 pub const PS3AV_PKT_ACP_CTRL_LEN: usize = 12;
-/// Size of the `SET_ACP_PACKET_LEN` command packet, header included.
+/// Size of the `SET_ACP_PACKET` command packet, header included.
 pub const PS3AV_PKT_SET_ACP_PACKET_LEN: usize = 44;
-/// Size of the `ADD_SIGNAL_CTL_LEN` command packet, header included.
+/// Size of the `ADD_SIGNAL_CTL` command packet, header included.
 pub const PS3AV_PKT_ADD_SIGNAL_CTL_LEN: usize = 12;
-/// Size of the `SET_CGMS_WSS_LEN` command packet, header included.
+/// Size of the `SET_CGMS_WSS` command packet, header included.
 pub const PS3AV_PKT_SET_CGMS_WSS_LEN: usize = 16;
-/// Size of the `SET_HDMI_MODE_LEN` command packet, header included.
+/// Size of the `SET_HDMI_MODE` command packet, header included.
 pub const PS3AV_PKT_SET_HDMI_MODE_LEN: usize = 12;
-/// Size of the `VIDEO_FORMAT_LEN` command packet, header included.
+/// Size of the `VIDEO_FORMAT` command packet, header included.
 pub const PS3AV_PKT_VIDEO_FORMAT_LEN: usize = 20;
-/// Size of the `VIDEO_ROUTE_LEN` command packet, header included.
+/// Size of the `VIDEO_ROUTE` command packet, header included.
 pub const PS3AV_PKT_VIDEO_ROUTE_LEN: usize = 24;
-/// Size of the `VIDEO_PITCH_LEN` command packet, header included.
+/// Size of the `VIDEO_PITCH` command packet, header included.
 pub const PS3AV_PKT_VIDEO_PITCH_LEN: usize = 16;
-/// Size of the `AUDIO_MODE_LEN` command packet, header included.
+/// Size of the `AUDIO_MODE` command packet, header included.
 pub const PS3AV_PKT_AUDIO_MODE_LEN: usize = 68;
-/// Size of the `AUDIO_SET_ACTIVE_LEN` command packet, header included.
+/// Size of the `AUDIO_SET_ACTIVE` command packet, header included.
 pub const PS3AV_PKT_AUDIO_SET_ACTIVE_LEN: usize = 12;
-/// Size of the `AUDIO_SPDIF_BIT_LEN` command packet, header included.
+/// Size of the `AUDIO_SPDIF_BIT` command packet, header included.
 pub const PS3AV_PKT_AUDIO_SPDIF_BIT_LEN: usize = 64;
-/// Size of the `AUDIO_CTRL_LEN` command packet, header included.
+/// Size of the `AUDIO_CTRL` command packet, header included.
 pub const PS3AV_PKT_AUDIO_CTRL_LEN: usize = 28;
-/// Size of the `INC_AVSET_LEN` command packet, header included.
+/// Size of the `INC_AVSET` command packet, header included.
 pub const PS3AV_PKT_INC_AVSET_LEN: usize = 16;
-/// Size of the `VIDEO_MODE_LEN` command packet, header included.
+/// Size of the `VIDEO_MODE` command packet, header included.
 pub const PS3AV_PKT_VIDEO_MODE_LEN: usize = 48;
-/// Size of the `AV_VIDEO_CS_LEN` command packet, header included.
+/// Size of the `AV_VIDEO_CS` command packet, header included.
 pub const PS3AV_PKT_AV_VIDEO_CS_LEN: usize = 24;
-/// Size of the `AV_AUDIO_PARAM_LEN` command packet, header included.
+/// Size of the `AV_AUDIO_PARAM` command packet, header included.
 pub const PS3AV_PKT_AV_AUDIO_PARAM_LEN: usize = 32;
 
 // Reply body sizes.
-/// Length of the `AV_INIT_LEN` reply body.
+/// Length of the `AV_INIT` reply body.
 pub const PS3AV_REPLY_AV_INIT_LEN: usize = 4;
-/// Length of the `GET_HW_CONF_LEN` reply body.
+/// Length of the `GET_HW_CONF` reply body.
 pub const PS3AV_REPLY_GET_HW_CONF_LEN: usize = 8;
-/// Length of the `GET_AKSV_LEN` reply body.
+/// Length of the `GET_AKSV` reply body.
 pub const PS3AV_REPLY_GET_AKSV_LEN: usize = 16;
-/// Length of the `VIDEO_GET_HW_CONF_LEN` reply body.
+/// Length of the `VIDEO_GET_HW_CONF` reply body.
 pub const PS3AV_REPLY_VIDEO_GET_HW_CONF_LEN: usize = 4;
-/// Length of the `GET_CEC_CONFIG_LEN` reply body.
+/// Length of the `GET_CEC_CONFIG` reply body.
 pub const PS3AV_REPLY_GET_CEC_CONFIG_LEN: usize = 4;
 /// `ps3av_pkt_get_bksv_reply` ahead of its KSV array.
 pub const PS3AV_REPLY_GET_BKSV_HEAD_LEN: usize = 8;

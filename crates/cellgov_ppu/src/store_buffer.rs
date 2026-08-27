@@ -16,17 +16,13 @@ const CAPACITY: usize = 64;
 
 /// A single pending store entry.
 ///
-/// `emit_at == Some(n)` marks a successful `stwcx`/`stdcx`; `n` is
-/// how many effects the block had emitted when it executed.
-/// [`StoreBuffer::flush`] emits it as `ConditionalStore` at that
-/// slot, so it lands after every plain store buffered before it,
-/// before every plain store buffered after it, and -- because
-/// `ReservationAcquire` is emitted straight into the effect vector
-/// at `lwarx`/`ldarx` time -- before any acquire that followed it
-/// in program order. The commit pipeline drops the emitter's
-/// reservation entry when it applies a `ConditionalStore`, so a
-/// later acquire must already sit behind it or the block's second
-/// LL/SC sequence loses its reservation before it is used.
+/// `emit_at == Some(n)` marks a successful `stwcx`/`stdcx`, with `n`
+/// the effect-vector length when it executed. [`StoreBuffer::flush`]
+/// emits it as `ConditionalStore` at that slot, ahead of any
+/// `ReservationAcquire` pushed straight into the vector afterwards:
+/// the commit pipeline drops the emitter's reservation when it
+/// applies a `ConditionalStore`, so an acquire that committed first
+/// would be lost before its own `stwcx` used it.
 ///
 /// `len` is the architectural store width in bytes and must satisfy
 /// `1 <= len <= 16`. The lower bound rules out zero-byte stores
@@ -157,14 +153,10 @@ impl StoreBuffer {
         true
     }
 
-    /// Insert a successful `stwcx` / `stdcx`: forwarded to later loads
+    /// Insert a successful `stwcx` / `stdcx`, forwarded to later loads
     /// in the block and emitted by [`Self::flush`] as a
-    /// `ConditionalStore` in program order. `emit_at` is the effect
-    /// vector's length when the instruction executed; flush places
-    /// the entry there so it precedes any `ReservationAcquire` the
-    /// block emits after it (see `StoreEntry`). Returns `false`
-    /// when the buffer is full; the caller yields the block before
-    /// retrying the instruction.
+    /// `ConditionalStore` at effect slot `emit_at` (see `StoreEntry`).
+    /// Returns `false` when the buffer is full.
     // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; the entry keeps their bytes in program order with the block's plain stores.
     #[inline]
     pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128, emit_at: usize) -> bool {
@@ -219,13 +211,6 @@ impl StoreBuffer {
     /// Emit pending stores in program order -- `SharedWriteIntent`
     /// for plain entries, `ConditionalStore` for successful
     /// `stwcx`/`stdcx` -- and clear the buffer.
-    ///
-    /// Each conditional entry, together with the plain entries
-    /// buffered before it that are not yet emitted, is inserted at
-    /// the entry's recorded `emit_at` slot (shifted by whatever this
-    /// flush already inserted); entries after the last conditional
-    /// one are appended. A block without a conditional store takes
-    /// the append-only path.
     ///
     /// # Panics
     ///

@@ -64,11 +64,12 @@ pub enum InitializeThreadError {
         /// Current group state.
         state: GroupState,
     },
-    /// Slot index is `>= num_threads` declared at create time.
-    #[error("slot {slot} out of bounds (group declared {num_threads} threads)")]
-    SlotOutOfBounds {
-        /// The rejected slot index.
-        slot: u32,
+    /// Every one of the `num_threads` slots declared at create time
+    /// is already populated; the slot index itself may be any value
+    /// below [`MAX_SLOTS_PER_GROUP`], the size of RPCS3's
+    /// `lv2_spu_group::threads_map` (`sys_spu.h`).
+    #[error("thread group full (declared {num_threads} threads)")]
+    GroupFull {
         /// The group's declared slot count.
         num_threads: u32,
     },
@@ -216,14 +217,16 @@ impl ThreadGroupTable {
         if slot >= MAX_SLOTS_PER_GROUP {
             return Err(InitializeThreadError::SlotOutOfRange);
         }
-        if slot >= group.num_threads {
-            return Err(InitializeThreadError::SlotOutOfBounds {
-                slot,
-                num_threads: group.num_threads,
-            });
-        }
         if group.slots.contains_key(&slot) {
             return Err(InitializeThreadError::SlotAlreadyInitialized);
+        }
+        // Only the populated count is capped: RPCS3 `sys_spu.cpp`
+        // `sys_spu_thread_initialize` accepts any slot index within
+        // `threads_map`.
+        if group.slots.len() as u32 >= group.num_threads {
+            return Err(InitializeThreadError::GroupFull {
+                num_threads: group.num_threads,
+            });
         }
         group.slots.insert(
             slot,
@@ -425,8 +428,22 @@ impl ThreadGroupTable {
                     None => hasher.write(&[0u8]),
                     Some(init) => {
                         hasher.write(&[1u8]);
-                        hasher.write(&(init.ls_bytes.len() as u64).to_le_bytes());
-                        hasher.write(&init.ls_bytes);
+                        match &init.image {
+                            crate::dispatch::SpuLoadImage::Elf(bytes) => {
+                                hasher.write(&[0u8]);
+                                hasher.write(&(bytes.len() as u64).to_le_bytes());
+                                hasher.write(bytes);
+                            }
+                            crate::dispatch::SpuLoadImage::Segments(segments) => {
+                                hasher.write(&[1u8]);
+                                hasher.write(&(segments.len() as u64).to_le_bytes());
+                                for seg in segments {
+                                    hasher.write(&seg.ls_start.to_le_bytes());
+                                    hasher.write(&(seg.bytes.len() as u64).to_le_bytes());
+                                    hasher.write(&seg.bytes);
+                                }
+                            }
+                        }
                         hasher.write(&init.entry_pc.to_le_bytes());
                         hasher.write(&init.stack_ptr.to_le_bytes());
                         for a in &init.args {

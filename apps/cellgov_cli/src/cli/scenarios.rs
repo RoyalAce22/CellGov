@@ -115,8 +115,20 @@ pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> Sce
 
             rt.set_spu_factory(move |id, init| {
                 let mut unit = SpuExecutionUnit::new(id);
-                spu_loader::load_spu_elf(&init.ls_bytes, unit.state_mut())
-                    .expect("scenario register: load_spu_elf on bundled microtest ELF");
+                match &init.image {
+                    cellgov_lv2::SpuLoadImage::Elf(bytes) => {
+                        spu_loader::load_spu_elf(bytes, unit.state_mut())
+                            .expect("scenario register: load_spu_elf on bundled microtest ELF");
+                    }
+                    cellgov_lv2::SpuLoadImage::Segments(segments) => {
+                        let placed: Vec<(u32, &[u8])> = segments
+                            .iter()
+                            .map(|s| (s.ls_start, s.bytes.as_slice()))
+                            .collect();
+                        spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut())
+                            .expect("scenario register: load_ls_segments on bounded segments");
+                    }
+                }
                 unit.state_mut().pc = init.entry_pc;
                 unit.state_mut().set_reg_word_splat(1, init.stack_ptr);
                 unit.state_mut().set_reg_word_splat(3, init.args[0] as u32);

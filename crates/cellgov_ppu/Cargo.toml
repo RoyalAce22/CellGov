@@ -39,6 +39,7 @@ rpcs3-src = []
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }
+cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_spu = { path = "../cellgov_spu" }
 cellgov_testkit = { path = "../cellgov_testkit" }
 cellgov_trace = { path = "../cellgov_trace" }

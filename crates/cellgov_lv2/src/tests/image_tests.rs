@@ -152,6 +152,52 @@ fn state_hash_empty_vs_populated_differ() {
     assert_ne!(empty.state_hash(), populated.state_hash());
 }
 
+fn seg(ls_start: u32, bytes: Vec<u8>) -> LsSegment {
+    LsSegment { ls_start, bytes }
+}
+
+#[test]
+fn state_hash_folds_user_images() {
+    let hash_of = |entry: u32, segments: Vec<LsSegment>| {
+        let mut s = ContentStore::new();
+        s.register_user_image(entry, segments);
+        s.state_hash()
+    };
+    let base = hash_of(0x80, vec![seg(0x100, vec![1, 2])]);
+    assert_eq!(base, hash_of(0x80, vec![seg(0x100, vec![1, 2])]));
+    assert_ne!(base, hash_of(0x80, vec![seg(0x100, vec![1, 3])]));
+    assert_ne!(base, hash_of(0x84, vec![seg(0x100, vec![1, 2])]));
+    assert_ne!(base, hash_of(0x80, vec![seg(0x110, vec![1, 2])]));
+    assert_ne!(base, ContentStore::new().state_hash());
+}
+
+#[test]
+fn withdraw_user_image_removes_it_and_never_reuses_the_handle() {
+    let mut s = ContentStore::new();
+    let h = s.register_user_image(0x80, vec![seg(0, vec![1])]);
+    assert_eq!(s.user_image_count(), 1);
+    assert!(s.withdraw_user_image(h).is_some());
+    assert!(s.lookup_user_image(h).is_none());
+    assert!(s.withdraw_user_image(h).is_none());
+    assert_eq!(s.user_image_count(), 0);
+    let again = s.register_user_image(0x80, vec![seg(0, vec![1])]);
+    assert!(again > h);
+    assert!(s.lookup_user_image(h).is_none());
+}
+
+#[test]
+fn user_and_path_handles_share_one_counter_and_resolve_in_one_map() {
+    let mut s = ContentStore::new();
+    let p = s.register(b"/a.elf", vec![]);
+    let u = s.register_user_image(0, vec![seg(0, vec![])]);
+    let p2 = s.register(b"/b.elf", vec![]);
+    assert_eq!((p.raw(), u.raw(), p2.raw()), (1, 2, 3));
+    assert!(s.lookup_by_handle(u).is_none());
+    assert!(s.lookup_user_image(p).is_none());
+    assert_eq!(s.len(), 2);
+    assert_eq!(s.user_image_count(), 1);
+}
+
 #[test]
 fn handle_zero_is_never_allocated() {
     let mut s = ContentStore::new();
@@ -202,6 +248,7 @@ impl ContentStore {
         Self {
             by_path: BTreeMap::new(),
             by_handle: BTreeMap::new(),
+            user_images: BTreeMap::new(),
             next_handle,
             register_invocations: 0,
         }

@@ -1,4 +1,5 @@
-//! Path-keyed SPU image registry returning monotonic non-zero handles.
+//! SPU image registry: path-keyed ELF records and user-type segment
+//! images, sharing one monotonic non-zero handle counter.
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
@@ -33,7 +34,32 @@ pub struct SpuImageRecord {
     pub elf_bytes: Vec<u8>,
 }
 
-/// Path-keyed store for registered SPU images.
+/// One resolved local-store segment of a user image: `bytes` land at
+/// `ls_start`. FILL segments are expanded to bytes when the record is
+/// built.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LsSegment {
+    /// Local-store destination.
+    pub ls_start: u32,
+    /// Bytes to place there.
+    pub bytes: Vec<u8>,
+}
+
+/// A user-type SPU image: the caller laid out its segments itself
+/// (`sys_spu_image` with `type == SYS_SPU_IMAGE_TYPE_USER`), so there
+/// is no ELF and no path, only the entry and the resolved segments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserSpuImage {
+    /// Allocated at registration time; non-zero, disjoint from the
+    /// path-keyed handles.
+    pub handle: SpuImageHandle,
+    /// Local-store entry point.
+    pub entry: u32,
+    /// Segments in table order.
+    pub segments: Vec<LsSegment>,
+}
+
+/// Store for registered SPU images.
 ///
 /// # Invariants
 /// - `by_path` and `by_handle` agree: every handle in either map
@@ -41,15 +67,17 @@ pub struct SpuImageRecord {
 ///   `lookup_by_handle`, `len`, and `is_empty` guard the pairing.
 /// - No host filesystem access; lookup is byte-exact, so `/a.elf`,
 ///   `/a.elf/`, and `//a.elf` are three distinct entries.
+/// - `user_images` handles come from the same counter as path-keyed
+///   handles, so a handle resolves in at most one of the two maps.
 #[derive(Debug, Clone)]
 pub struct ContentStore {
     by_path: BTreeMap<Vec<u8>, SpuImageRecord>,
     by_handle: BTreeMap<SpuImageHandle, Vec<u8>>,
+    user_images: BTreeMap<SpuImageHandle, UserSpuImage>,
     next_handle: u32,
     /// Cumulative count of [`Self::register`] invocations.
     /// Non-vacuity witness: the path-shape `debug_assert!`s in `register`
-    /// (lines 74/79, 107/112/128 of this file) are conditional on
-    /// register being called; this counter makes their silence
+    /// are conditional on register being called; this counter makes their silence
     /// non-vacuous. Increments per call regardless of whether the
     /// registration was novel or matched an existing path. Not
     /// snapshot/restore-captured: instrument state only.
@@ -68,9 +96,54 @@ impl ContentStore {
         Self {
             by_path: BTreeMap::new(),
             by_handle: BTreeMap::new(),
+            user_images: BTreeMap::new(),
             next_handle: 1,
             register_invocations: 0,
         }
+    }
+
+    /// Register a user-type image and return its handle. Every call
+    /// mints a new handle: user images carry no key to dedupe on.
+    ///
+    /// # Panics
+    /// The monotonic handle counter wraps past `u32::MAX`.
+    pub fn register_user_image(&mut self, entry: u32, segments: Vec<LsSegment>) -> SpuImageHandle {
+        let raw = self.next_handle;
+        let handle = SpuImageHandle::new(raw)
+            .expect("ContentStore::register_user_image: next_handle reached 0");
+        self.next_handle = raw
+            .checked_add(1)
+            .expect("ContentStore handle counter exhausted (u32::MAX images)");
+        let prev = self.user_images.insert(
+            handle,
+            UserSpuImage {
+                handle,
+                entry,
+                segments,
+            },
+        );
+        debug_assert!(
+            prev.is_none(),
+            "user_images collision on freshly-allocated handle"
+        );
+        handle
+    }
+
+    /// Look up a user-type image by handle.
+    pub fn lookup_user_image(&self, handle: SpuImageHandle) -> Option<&UserSpuImage> {
+        self.user_images.get(&handle)
+    }
+
+    /// Drop a user-type image registered by [`Self::register_user_image`]
+    /// whose thread initialize was refused after registration. The
+    /// handle is not reused.
+    pub fn withdraw_user_image(&mut self, handle: SpuImageHandle) -> Option<UserSpuImage> {
+        self.user_images.remove(&handle)
+    }
+
+    /// Number of registered user-type images.
+    pub fn user_image_count(&self) -> usize {
+        self.user_images.len()
     }
 
     /// Non-vacuity witness: cumulative count of `register` calls.
@@ -149,20 +222,22 @@ impl ContentStore {
         record
     }
 
-    /// Number of registered images.
+    /// Number of path-keyed images; user images are counted by
+    /// [`Self::user_image_count`].
     pub fn len(&self) -> usize {
         debug_assert_eq!(self.by_path.len(), self.by_handle.len());
         self.by_path.len()
     }
 
-    /// Whether the store is empty.
+    /// Whether the path-keyed map is empty; user images are not counted.
     pub fn is_empty(&self) -> bool {
         debug_assert_eq!(self.by_path.is_empty(), self.by_handle.is_empty());
         self.by_path.is_empty()
     }
 
     /// Length-prefixed FNV-1a over `(path, handle, elf_bytes)` in
-    /// path order; prefixes prevent boundary collisions between
+    /// path order, then `(handle, entry, segments)` of each user image
+    /// in handle order; prefixes prevent boundary collisions between
     /// adjacent fields.
     pub fn state_hash(&self) -> u64 {
         let mut hasher = cellgov_mem::Fnv1aHasher::new();
@@ -172,6 +247,16 @@ impl ContentStore {
             hasher.write(&record.handle.raw().to_le_bytes());
             hasher.write(&(record.elf_bytes.len() as u64).to_le_bytes());
             hasher.write(&record.elf_bytes);
+        }
+        for (handle, image) in &self.user_images {
+            hasher.write(&handle.raw().to_le_bytes());
+            hasher.write(&image.entry.to_le_bytes());
+            hasher.write(&(image.segments.len() as u64).to_le_bytes());
+            for seg in &image.segments {
+                hasher.write(&seg.ls_start.to_le_bytes());
+                hasher.write(&(seg.bytes.len() as u64).to_le_bytes());
+                hasher.write(&seg.bytes);
+            }
         }
         hasher.finish()
     }

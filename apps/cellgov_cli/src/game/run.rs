@@ -138,6 +138,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         runtime_max_steps: max_steps,
         patch_bytes,
         dump_mem_boot_addrs,
+        dump_mem_fault_ranges,
         profile_pairs,
         budget_override,
         capture_state_trace: save_state_trace.is_some(),

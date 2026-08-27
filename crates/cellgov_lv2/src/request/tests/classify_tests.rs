@@ -496,11 +496,9 @@ fn classify_event_queue_create_destroy() {
     );
 }
 
-/// Register positions follow the RPCS3 `sys_config.h` prototypes.
-/// Every slot carries a distinct value so a transposed field cannot
-/// pass, the wide slots carry values above `u32::MAX` to show they
-/// are not narrowed, and the slot past each prototype's last
-/// argument is non-zero to show it is ignored.
+/// Register positions per RPCS3 `sys_config.h`; wide slots carry
+/// values above `u32::MAX`, and the slot past each prototype's last
+/// argument is non-zero.
 #[test]
 fn classify_config_family_reads_each_register_position() {
     use cellgov_ps3_abi::sys_config::SYS_CONFIG_SERVICE_USER_LIBPAD;
@@ -790,6 +788,18 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::UART_RECEIVE, &[0, 2]),
     (syscall::UART_SEND, &[0, 2]),
     (syscall::UART_GET_PARAMS, &[0]),
+    (syscall::USBD_INITIALIZE, &[0]),
+    (syscall::USBD_FINALIZE, &[0]),
+    (syscall::USBD_GET_DEVICE_LIST, &[0, 1, 2]),
+    (syscall::USBD_GET_DESCRIPTOR_SIZE, &[0, 1]),
+    (syscall::USBD_GET_DESCRIPTOR, &[0, 1, 2, 3]),
+    (syscall::USBD_REGISTER_LDD, &[0, 1, 2]),
+    (syscall::USBD_UNREGISTER_LDD, &[0, 1, 2]),
+    (syscall::USBD_OPEN_PIPE, &[0, 1, 5]),
+    (syscall::USBD_OPEN_DEFAULT_PIPE, &[0, 1]),
+    (syscall::USBD_CLOSE_PIPE, &[0, 1]),
+    (syscall::USBD_RECEIVE_EVENT, &[0, 1, 2, 3]),
+    (syscall::USBD_DETECT_EVENT, &[]),
     (syscall::CONFIG_OPEN, &[0, 1]),
     (syscall::CONFIG_CLOSE, &[0]),
     (syscall::CONFIG_GET_SERVICE_EVENT, &[0, 1, 2]),
@@ -814,6 +824,7 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SPU_THREAD_WRITE_MB, &[0, 1]),
     (syscall::MEMORY_CONTAINER_CREATE, &[0]),
     (syscall::MEMORY_ALLOCATE, &[2]),
+    (syscall::MEMORY_ALLOCATE_FROM_CONTAINER, &[1, 3]),
     (syscall::MEMORY_FREE, &[0]),
     (syscall::MEMORY_GET_USER_MEMORY_SIZE, &[0]),
     (syscall::TTY_WRITE, &[0, 1, 2, 3]),
@@ -870,8 +881,8 @@ fn classify_uart_family_reads_each_register_position() {
 
 #[test]
 fn uart_size_is_a_full_u64_and_reaches_the_arm_unnarrowed() {
-    // `size` is u64 in the oracle signature; a value past u32 is the
-    // arm's transfer-cap refusal to make, not a classifier EINVAL.
+    // `size` is u64 in RPCS3 `sys_uart.h`; the transfer cap is the
+    // arm's to enforce.
     for num in [syscall::UART_RECEIVE, syscall::UART_SEND] {
         let args = [0x1000, 0x1_0000_0000, 0, 0, 0, 0, 0, 0];
         match classify(num, &args) {

@@ -30,6 +30,30 @@ pub const VM_AREA_ALIGNMENTS: [u64; 4] = [0x1000_0000, 0x2000_0000, 0x4000_0000,
 /// `sys_memory_container_create`.
 pub const CONTAINER_GRANULE: u64 = 0x10_0000;
 
+/// The per-entry attribute table `sys_mmapper_allocate_shared_memory_ext`
+/// (339) and its container variant take alongside the key. Only the
+/// `type` word is understood. Cross-reference: RPCS3's `sys_mmapper.h`
+/// `mmapper_unk_entry_struct0`.
+pub mod ext_entry {
+    /// Byte length of one entry.
+    pub const LEN: u32 = 0x18;
+
+    /// Offset of the 64-bit `type` word inside an entry.
+    pub const TYPE_OFFSET: u32 = 0x10;
+
+    /// Largest `entry_count` the kernel accepts; zero and negative
+    /// counts are refused as well.
+    pub const MAX_COUNT: i32 = 0x10;
+
+    /// Entry types accepted without further checks. Cross-reference:
+    /// RPCS3's `sys_mmapper.cpp` `sys_mmapper_allocate_shared_memory_ext`.
+    pub const PLAIN_TYPES: [u64; 3] = [0, 1, 3];
+
+    /// Entry type that additionally requires 64 KiB pages and a root
+    /// or debug process.
+    pub const PRIVILEGED_TYPE: u64 = 5;
+}
+
 /// `flags` bits selecting the page granule for shared-memory and
 /// mmapper-allocated regions. Cross-reference: RPCS3's `sys_memory.h`.
 pub mod page_size {

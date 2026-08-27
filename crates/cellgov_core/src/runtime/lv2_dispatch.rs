@@ -477,6 +477,16 @@ impl Runtime {
                 }
                 self.handle_immediate(source, code, effects, is_process_exit);
             }
+            Lv2Dispatch::ImmediateRegisters {
+                code,
+                effects,
+                registers,
+            } => {
+                self.handle_immediate(source, code, effects, false);
+                for (reg, value) in registers {
+                    self.registry.push_register_write(source, reg, value);
+                }
+            }
             Lv2Dispatch::RegisterSpu {
                 inits,
                 effects,

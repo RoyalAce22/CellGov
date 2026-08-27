@@ -131,7 +131,7 @@ fn lv2_dispatch_immediate() {
 #[test]
 fn spu_init_state_fields() {
     let init = SpuInitState {
-        ls_bytes: vec![0; 256],
+        image: crate::dispatch::SpuLoadImage::Elf(vec![0; 256]),
         entry_pc: 0x100,
         stack_ptr: 0x3FFF0,
         args: [1, 2, 3, 4],

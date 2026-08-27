@@ -179,8 +179,6 @@ impl ReplyBatch {
         av::PS3AV_RX_BUF_SIZE.saturating_sub(self.plain.len())
     }
 
-    /// Stage a BUFFER_OVERFLOW reply and return true when the plain
-    /// buffer cannot take a reply header plus `body_len` more bytes.
     fn refuse_if_full(&mut self, cid: u32, body_len: usize) -> bool {
         if self.free() < av::PS3AV_REPLY_HEADER_LEN + body_len {
             self.reply(false, cid, av::PS3AV_STATUS_BUFFER_OVERFLOW, &[]);
@@ -235,18 +233,14 @@ fn padded(tx: &[u8], off: usize, len: usize) -> Vec<u8> {
 enum SizeRule {
     /// The packet must be exactly this long, header included.
     Exact(usize),
-    /// The AV manager does not check this command's size.
     Unchecked,
-    /// The size follows from the packet's own contents.
     Computed(fn(&[u8]) -> usize),
 }
 
 type CidHandler = fn(&mut Lv2Host, u32, &[u8], &mut ReplyBatch);
 
 /// One row per command the AV manager answers: the size rule the
-/// parser applies and the handler that runs when it passes. Both
-/// facts about a cid live in this table and nowhere else, so a cid
-/// cannot be parsed without a handler or handled without a size rule.
+/// parser applies and the handler that runs when it passes.
 struct CidSpec {
     cid: u32,
     size: SizeRule,
@@ -849,12 +843,6 @@ impl Lv2Host {
     /// stages the replies and any events they trigger, and hands the
     /// stream to the parked readers in park order, each taking up to
     /// its own size while bytes remain.
-    ///
-    /// Mode 2 refuses a buffer larger than the TX ring with
-    /// `CELL_EAGAIN`; the other modes accept it and the AV manager
-    /// answers a single BUFFER_OVERFLOW instead of parsing. Mode 0
-    /// then reports at most one [`av::SYS_UART_CHUNK`] as sent; mode 1
-    /// reports the whole buffer.
     ///
     /// # Errors
     ///

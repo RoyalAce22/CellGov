@@ -216,30 +216,29 @@ impl Lv2Host {
         id: u32,
         out_ptr: u32,
         requester: UnitId,
-        tick: GuestTicks,
+        _tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
+            // A unit without a PPU thread record is a host bookkeeping
+            // gap; the ESRCH alone would read as an unknown queue id.
+            self.log_invariant_break(
+                "dispatch.event_queue_receive_caller_without_thread_record",
+                format_args!("equeue 0x{id:08x}: unit {requester:?} has no PPU thread record"),
+            );
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self.state.event_queues.try_receive(id) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
-                // sys_event_t: four big-endian u64s at out_ptr.
-                let mut buf = [0u8; 32];
-                buf[0..8].copy_from_slice(&payload.source.to_be_bytes());
-                buf[8..16].copy_from_slice(&payload.data1.to_be_bytes());
-                buf[16..24].copy_from_slice(&payload.data2.to_be_bytes());
-                buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
-                let write = Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(out_ptr, 32),
-                    bytes: WritePayload::from_slice(&buf),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                };
-                Lv2Dispatch::Immediate {
+                // The event returns in r4..=r7; the pointer argument
+                // is a dummy the kernel never writes (RPCS3
+                // `sys_event.cpp` `sys_event_queue_receive`), and the
+                // guest's own stub stores the registers where it
+                // wants them.
+                Lv2Dispatch::ImmediateRegisters {
                     code: 0,
-                    effects: vec![write],
+                    effects: vec![],
+                    registers: crate::dispatch::event_registers(&payload),
                 }
             }
             Some(crate::sync_primitives::EventQueueReceive::Empty) => {

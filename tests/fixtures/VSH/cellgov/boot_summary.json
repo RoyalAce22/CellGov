@@ -3,9 +3,9 @@
     "kind": "process_exit"
   },
   "outcome": "MaxSteps",
-  "steps": 390095,
+  "steps": 389859,
   "budget": 256,
-  "host_invariant_breaks": 112,
+  "host_invariant_breaks": 119,
   "witnesses": {
     "cond_reacquires": {
       "value": 1,
@@ -16,27 +16,27 @@
       "class": "absent"
     },
     "event_port_ipc_connect_attempts": {
-      "value": 31576,
+      "value": 8,
       "class": "at-least"
     },
     "event_port_ipc_connect_bound": {
-      "value": 5,
+      "value": 8,
       "class": "at-least"
     },
     "event_port_keyed_queues": {
-      "value": 10,
+      "value": 12,
       "class": "at-least"
     },
     "host_invariant_breaks": {
-      "value": 112,
+      "value": 119,
       "class": "exact"
     },
     "ldarx": {
-      "value": 32110,
+      "value": 21786,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 95240,
+      "value": 106583,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -64,7 +64,7 @@
       "class": "absent"
     },
     "mutex_unlock_not_owner": {
-      "value": 315,
+      "value": 211,
       "class": "at-least"
     },
     "prx_load_hle_stubs": {
@@ -104,15 +104,15 @@
       "class": "absent"
     },
     "spu_thread_init": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "stdcx": {
-      "value": 32044,
+      "value": 21720,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 95121,
+      "value": 106464,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 31596,
+      "value": 21220,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -188,7 +188,7 @@
       "class": "absent"
     },
     "unsupported_syscalls_distinct": {
-      "value": 20,
+      "value": 21,
       "class": "exact"
     },
     "vrsave_written": {

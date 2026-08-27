@@ -264,6 +264,7 @@ dependencies = [
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",
+ "cellgov_lv2",
  "cellgov_mem",
  "cellgov_ps3_abi",
  "cellgov_spu",

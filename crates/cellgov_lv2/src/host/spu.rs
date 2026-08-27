@@ -9,13 +9,151 @@ use cellgov_sync::MailboxId;
 use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_spu;
 
-use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState};
+use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState, SpuLoadImage};
 use crate::host::{Lv2Host, Lv2Runtime};
+use crate::image::LsSegment;
 use crate::request::Lv2Request;
 use crate::thread_group::{DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
 use cellgov_time::GuestTicks;
 
+/// The `sys_spu_image` record the kernel hands back: `type` KERNEL with
+/// the image id in `entry_point` (RPCS3 `sys_spu.cpp`
+/// `sys_spu_thread_initialize`, `SYS_SPU_IMAGE_TYPE_KERNEL` arm).
+fn kernel_image_struct(handle: crate::image::SpuImageHandle) -> [u8; 16] {
+    let mut img_struct = [0u8; 16];
+    img_struct[0..4].copy_from_slice(&sys_spu::image::TYPE_KERNEL.to_be_bytes());
+    img_struct[4..8].copy_from_slice(&handle.raw().to_be_bytes());
+    img_struct
+}
+
+/// Why a user-type `sys_spu_image` was refused at thread initialize.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserImageRefusal {
+    /// A record or segment table word could not be read.
+    Unreadable,
+    /// The record or a segment breaks a documented bound; the payload
+    /// is the diagnostic site naming which one.
+    Invalid(&'static str),
+}
+
 impl Lv2Host {
+    /// Parse a user-type `sys_spu_image` into its entry and local-store segments.
+    ///
+    /// The gates mirror RPCS3's `sys_spu.cpp` `sys_spu_thread_initialize`
+    /// (`SYS_SPU_IMAGE_TYPE_USER` arm). Segment bytes are snapshotted
+    /// here rather than at group start, which has no guest-memory access.
+    fn parse_user_image(
+        &self,
+        img_ptr: u32,
+        rt: &dyn Lv2Runtime,
+    ) -> Result<(u32, Vec<LsSegment>), UserImageRefusal> {
+        use sys_spu::{image, segment, LS_SIZE};
+        // Field addresses are formed in u64: a record or table row at
+        // the top of the 32-bit space reads as unmapped (CELL_EFAULT)
+        // instead of wrapping the guest pointer.
+        let word = |addr: u64| -> Result<u32, UserImageRefusal> {
+            let bytes = rt
+                .read_committed(addr, 4)
+                .ok_or(UserImageRefusal::Unreadable)?;
+            Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        };
+        let record = u64::from(img_ptr);
+        let entry = word(record + u64::from(image::ENTRY_OFFSET))?;
+        let segs_ptr = word(record + u64::from(image::SEGS_OFFSET))?;
+        let nsegs = word(record + u64::from(image::NSEGS_OFFSET))? as i32;
+        if entry > image::ENTRY_MAX || nsegs <= 0 || nsegs > image::NSEGS_MAX {
+            return Err(UserImageRefusal::Invalid(
+                "dispatch.spu_user_image_record_bounds",
+            ));
+        }
+        let mut segments: Vec<LsSegment> = Vec::new();
+        let mut placed: Vec<(u32, u32)> = Vec::new();
+        let mut found_info = false;
+        let mut found_copy = false;
+        for i in 0..nsegs as u32 {
+            let base = segs_ptr
+                .checked_add(i * segment::LEN)
+                .ok_or(UserImageRefusal::Invalid(
+                    "dispatch.spu_user_image_table_wraps",
+                ))?;
+            let row = u64::from(base);
+            let seg_type = word(row + u64::from(segment::TYPE_OFFSET))?;
+            let ls = word(row + u64::from(segment::LS_OFFSET))?;
+            let size = word(row + u64::from(segment::SIZE_OFFSET))?;
+            let addr = word(row + u64::from(segment::ADDR_OFFSET))?;
+            match seg_type {
+                segment::TYPE_INFO => {
+                    if size > segment::INFO_SIZE_MAX || found_info {
+                        return Err(UserImageRefusal::Invalid(
+                            "dispatch.spu_user_image_info_segment",
+                        ));
+                    }
+                    found_info = true;
+                    continue;
+                }
+                segment::TYPE_COPY => {
+                    if !addr.is_multiple_of(4) {
+                        return Err(UserImageRefusal::Invalid(
+                            "dispatch.spu_user_image_copy_source_unaligned",
+                        ));
+                    }
+                    found_copy = true;
+                }
+                segment::TYPE_FILL => {}
+                _ => {
+                    return Err(UserImageRefusal::Invalid(
+                        "dispatch.spu_user_image_segment_type",
+                    ))
+                }
+            }
+            // The end check is this model's own: the oracle stops at
+            // `ls < LS_SIZE && size <= LS_SIZE` and would copy past
+            // local store, while the loader here refuses the segment
+            // at group start, where nothing can answer the guest.
+            if size == 0
+                || !(ls | size).is_multiple_of(segment::LOAD_ALIGN)
+                || ls >= LS_SIZE
+                || size > LS_SIZE
+                || ls + size > LS_SIZE
+            {
+                return Err(UserImageRefusal::Invalid(
+                    "dispatch.spu_user_image_segment_bounds",
+                ));
+            }
+            if placed
+                .iter()
+                .any(|&(p_ls, p_size)| ls + size > p_ls && p_ls + p_size > ls)
+            {
+                return Err(UserImageRefusal::Invalid(
+                    "dispatch.spu_user_image_segment_overlap",
+                ));
+            }
+            placed.push((ls, size));
+            let bytes = if seg_type == segment::TYPE_COPY {
+                rt.read_committed(u64::from(addr), size as usize)
+                    .ok_or(UserImageRefusal::Unreadable)?
+                    .to_vec()
+            } else {
+                addr.to_be_bytes()
+                    .iter()
+                    .copied()
+                    .cycle()
+                    .take(size as usize)
+                    .collect()
+            };
+            segments.push(LsSegment {
+                ls_start: ls,
+                bytes,
+            });
+        }
+        if !found_copy {
+            return Err(UserImageRefusal::Invalid(
+                "dispatch.spu_user_image_no_copy_segment",
+            ));
+        }
+        Ok((entry, segments))
+    }
+
     /// `sys_spu_image_import`: register `size` bytes at `img_ptr` in
     /// [`crate::image::ContentStore`] under a synthetic path and write the
     /// handle into the SPU image struct at `handle_out`.
@@ -59,8 +197,7 @@ impl Lv2Host {
             .content_store_mut()
             .register(path.as_bytes(), img_bytes.to_vec());
 
-        let mut img_struct = [0u8; 16];
-        img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
+        let img_struct = kernel_image_struct(handle);
         let range = ByteRange::contiguous_u32(handle_out, 16);
         let effect = Effect::SharedWriteIntent {
             range,
@@ -105,14 +242,7 @@ impl Lv2Host {
             }
         };
 
-        // sys_spu_image_t (16 bytes, big-endian):
-        //   [0..4]   type/handle (u32)
-        //   [4..8]   entry point (u32) -- resolved at thread init
-        //   [8..12]  segments addr (u32) -- opaque, unused
-        //   [12..16] nsegs (i32)
-        let handle = record.handle;
-        let mut img_struct = [0u8; 16];
-        img_struct[0..4].copy_from_slice(&handle.raw().to_be_bytes());
+        let img_struct = kernel_image_struct(record.handle);
 
         let range = ByteRange::contiguous_u32(img_ptr, 16);
         let effect = Effect::SharedWriteIntent {
@@ -170,8 +300,23 @@ impl Lv2Host {
     /// not [`GroupState::Running`]. Unknown id -> CELL_ESRCH; running
     /// group -> CELL_EBUSY (the title must terminate or join first).
     pub(super) fn dispatch_group_destroy(&mut self, group_id: u32) -> Lv2Dispatch {
+        // A user image lives as long as the slot that registered it:
+        // RPCS3 `sys_spu.h` keeps `lv2_spu_group::imgs` inside the
+        // group, so its segments go when the group does. Kernel
+        // handles are not in the user map and pass through untouched.
+        let slot_handles: Vec<_> = self
+            .state
+            .groups
+            .get(group_id)
+            .map(|g| g.slots.values().map(|s| s.image_handle).collect())
+            .unwrap_or_default();
         let code = match self.state.groups.destroy(group_id) {
-            Ok(()) => 0,
+            Ok(()) => {
+                for handle in slot_handles {
+                    self.content_store_mut().withdraw_user_image(handle);
+                }
+                0
+            }
             Err(DestroyGroupError::Unknown) => cell_errors::CELL_ESRCH.into(),
             Err(DestroyGroupError::Busy) => cell_errors::CELL_EBUSY.into(),
         };
@@ -179,6 +324,19 @@ impl Lv2Host {
             code,
             effects: vec![],
         }
+    }
+
+    /// Resolve an image handle to what group start loads and where it
+    /// enters. A kernel image reports 0x80 and the SPU factories pin
+    /// `pc` to it after the ELF loads, so the ELF's own `e_entry` is
+    /// not consulted (RPCS3 `sys_spu_thread_group_start` enters at
+    /// `e_entry`); a user image enters where its record says.
+    fn load_image_for(&self, handle: crate::image::SpuImageHandle) -> Option<(SpuLoadImage, u32)> {
+        if let Some(record) = self.state.content.lookup_by_handle(handle) {
+            return Some((SpuLoadImage::Elf(record.elf_bytes.clone()), 0x80));
+        }
+        let user = self.state.content.lookup_user_image(handle)?;
+        Some((SpuLoadImage::Segments(user.segments.clone()), user.entry))
     }
 
     /// `sys_spu_thread_group_start`: register every initialized slot's
@@ -202,31 +360,24 @@ impl Lv2Host {
         }
 
         // Two-pass: validate every handle, then build `inits`. The second
-        // pass's `expect` requires `lookup_by_handle` to be a pure read.
+        // pass's `expect` requires the lookups to be pure reads.
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
-            if self
-                .state
-                .content
-                .lookup_by_handle(slot.image_handle)
-                .is_none()
-            {
+            if self.load_image_for(slot.image_handle).is_none() {
                 return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
             }
         }
 
         let mut inits = std::collections::BTreeMap::new();
         for (slot_idx, slot) in &slot_entries {
-            let record = self
-                .state
-                .content
-                .lookup_by_handle(slot.image_handle)
+            let (image, entry_pc) = self
+                .load_image_for(slot.image_handle)
                 .expect("handle validated above");
             inits.insert(
                 *slot_idx,
                 SpuInitState {
-                    ls_bytes: record.elf_bytes.clone(),
-                    entry_pc: 0x80,
+                    image,
+                    entry_pc,
                     stack_ptr: 0x3FFF0,
                     args: slot.args,
                     group_id,
@@ -283,14 +434,38 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
 
-        let image_handle = match rt.read_committed(img_ptr as u64, 4) {
-            Some(bytes) if bytes.len() >= 4 => {
-                let fixed: [u8; 4] = bytes[0..4].try_into().expect("slice length checked above");
-                u32::from_be_bytes(fixed)
+        // A kernel record carries the image id in `entry_point`.
+        let image_word = |offset: u32| -> Option<u32> {
+            let bytes = rt.read_committed(u64::from(img_ptr) + u64::from(offset), 4)?;
+            Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+        };
+        let Some(image_type) = image_word(sys_spu::image::TYPE_OFFSET) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        let (kernel_handle, user_image) = match image_type {
+            sys_spu::image::TYPE_KERNEL => {
+                let Some(handle) = image_word(sys_spu::image::ENTRY_OFFSET) else {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                };
+                (handle, None)
             }
-            _ => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
-            }
+            sys_spu::image::TYPE_USER => match self.parse_user_image(img_ptr, rt) {
+                Ok(parsed) => (0, Some(parsed)),
+                Err(UserImageRefusal::Unreadable) => {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                }
+                Err(UserImageRefusal::Invalid(site)) => {
+                    self.log_invariant_break(
+                        site,
+                        format_args!(
+                            "sys_spu_thread_initialize refused the user image record at \
+                             0x{img_ptr:08x}"
+                        ),
+                    );
+                    return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                }
+            },
+            _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
         };
 
         // Args snapshot at initialize time, not at group_start: the PPU
@@ -323,37 +498,64 @@ impl Lv2Host {
             }
         };
 
-        // ContentStore never allocates handle 0; guest-supplied 0 -> ESRCH.
-        let Some(handle) = crate::image::SpuImageHandle::new(image_handle) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        let (handle, registered_user) = match user_image {
+            Some((entry, segments)) => {
+                let handle = self
+                    .content_store_mut()
+                    .register_user_image(entry, segments);
+                (handle, Some(handle))
+            }
+            None => {
+                // ContentStore never allocates handle 0; guest-supplied 0 -> ESRCH.
+                let Some(handle) = crate::image::SpuImageHandle::new(kernel_handle) else {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                };
+                // The id must name an image the kernel holds: RPCS3
+                // `sys_spu.cpp` `sys_spu_thread_initialize` answers
+                // CELL_ESRCH when the KERNEL arm's id lookup fails.
+                // User-image handles are not kernel ids, so a forged
+                // kernel record cannot alias one at group start.
+                if self.state.content.lookup_by_handle(handle).is_none() {
+                    return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                }
+                (handle, None)
+            }
         };
-        match self
+        let refusal = match self
             .state
             .groups
             .initialize_thread(group_id, thread_num, handle, args)
         {
-            Ok(()) => {}
+            Ok(()) => None,
             Err(crate::thread_group::InitializeThreadError::UnknownGroup) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                Some(cell_errors::CELL_ESRCH)
             }
             Err(crate::thread_group::InitializeThreadError::SlotAlreadyInitialized) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+                Some(cell_errors::CELL_EBUSY)
             }
             // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` answers
             // CELL_EBUSY once the group has left its not-initialized
             // state, the same code it uses for an occupied slot.
             Err(crate::thread_group::InitializeThreadError::GroupAlreadyStarted { .. }) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+                Some(cell_errors::CELL_EBUSY)
+            }
+            // A fully populated group has left its not-initialized
+            // state too, so it takes the same arm.
+            Err(crate::thread_group::InitializeThreadError::GroupFull { .. }) => {
+                Some(cell_errors::CELL_EBUSY)
             }
             // A slot index past the thread map is the bad-argument arm
             // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` answers
-            // CELL_EINVAL for. `SlotOutOfBounds` is this model's own
-            // denser rule -- slots must fall inside the count the group
-            // declared -- and takes the same code.
-            Err(crate::thread_group::InitializeThreadError::SlotOutOfBounds { .. })
-            | Err(crate::thread_group::InitializeThreadError::SlotOutOfRange) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            // CELL_EINVAL for.
+            Err(crate::thread_group::InitializeThreadError::SlotOutOfRange) => {
+                Some(cell_errors::CELL_EINVAL)
             }
+        };
+        if let Some(code) = refusal {
+            if let Some(user) = registered_user {
+                self.content_store_mut().withdraw_user_image(user);
+            }
+            return Lv2Dispatch::immediate(code.into());
         }
 
         let range = ByteRange::contiguous_u32(thread_ptr, 4);
@@ -469,3 +671,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/spu_user_image_tests.rs"]
+mod user_image_tests;

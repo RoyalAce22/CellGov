@@ -9,6 +9,36 @@ use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
 use crate::request::Lv2Request;
 
 #[test]
+fn a_mutex_call_from_a_unit_without_a_thread_record_is_esrch_and_logged() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let src = UnitId::new(0);
+    seed_primary_ppu(&mut host, src);
+    let id = create_mutex_host(&mut host, src, &rt);
+    let esrch = Lv2Dispatch::immediate(u64::from(cellgov_ps3_abi::cell_errors::CELL_ESRCH));
+    let stranger = UnitId::new(7);
+    let requests = [
+        Lv2Request::MutexLock {
+            mutex_id: id,
+            timeout: 0,
+        },
+        Lv2Request::MutexTryLock { mutex_id: id },
+        Lv2Request::MutexUnlock { mutex_id: id },
+    ];
+    for req in requests {
+        let breaks_before = host.observability().invariant_break_count;
+        assert_eq!(host.dispatch(req, stranger, &rt), esrch, "{req:?}");
+        assert!(
+            host.observability().invariant_break_count > breaks_before,
+            "{req:?} must log the missing thread record"
+        );
+    }
+    let entry = host.mutexes().lookup(id).unwrap();
+    assert_eq!(entry.owner(), None);
+    assert!(entry.waiters().is_empty());
+}
+
+#[test]
 fn lwmutex_and_mutex_id_spaces_are_independent() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
@@ -326,6 +356,7 @@ fn multi_primitive_determinism_canary() {
             let d = host.dispatch(req, unit, &rt);
             let tag = match &d {
                 Lv2Dispatch::Immediate { code, .. } => format!("Imm({code:#x})"),
+                Lv2Dispatch::ImmediateRegisters { code, .. } => format!("ImmRegs({code:#x})"),
                 Lv2Dispatch::Block { .. } => "Block".into(),
                 Lv2Dispatch::BlockAndWake { woken_unit_ids, .. } => {
                     format!("BlockAndWake({})", woken_unit_ids.len())
@@ -610,8 +641,8 @@ fn lost_wake_event_queue_send_before_receive_delivers_buffered_payload() {
         &rt,
     );
     match recv {
-        Lv2Dispatch::Immediate { code: 0, .. } => {}
-        other => panic!("expected Immediate(0), got {other:?}"),
+        Lv2Dispatch::ImmediateRegisters { code: 0, .. } => {}
+        other => panic!("expected ImmediateRegisters(0), got {other:?}"),
     }
     assert!(host.event_queues().lookup(q_id).unwrap().is_empty());
 }

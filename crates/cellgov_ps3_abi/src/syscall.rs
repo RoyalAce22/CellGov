@@ -257,6 +257,8 @@ lv2_syscalls! {
     MEMORY_ALLOCATE = 348;
     /// `sys_memory_free`.
     MEMORY_FREE = 349;
+    /// `sys_memory_allocate_from_container`.
+    MEMORY_ALLOCATE_FROM_CONTAINER = 350;
     /// `sys_memory_get_user_memory_size`.
     MEMORY_GET_USER_MEMORY_SIZE = 352;
 
@@ -339,6 +341,31 @@ lv2_syscalls! {
     /// `sys_config_unregister_service`.
     CONFIG_UNREGISTER_SERVICE = 522;
 
+    /// `sys_usbd_initialize`.
+    USBD_INITIALIZE = 530;
+    /// `sys_usbd_finalize`.
+    USBD_FINALIZE = 531;
+    /// `sys_usbd_get_device_list`.
+    USBD_GET_DEVICE_LIST = 532;
+    /// `sys_usbd_get_descriptor_size`.
+    USBD_GET_DESCRIPTOR_SIZE = 533;
+    /// `sys_usbd_get_descriptor`.
+    USBD_GET_DESCRIPTOR = 534;
+    /// `sys_usbd_register_ldd`.
+    USBD_REGISTER_LDD = 535;
+    /// `sys_usbd_unregister_ldd`.
+    USBD_UNREGISTER_LDD = 536;
+    /// `sys_usbd_open_pipe`.
+    USBD_OPEN_PIPE = 537;
+    /// `sys_usbd_open_default_pipe`.
+    USBD_OPEN_DEFAULT_PIPE = 538;
+    /// `sys_usbd_close_pipe`.
+    USBD_CLOSE_PIPE = 539;
+    /// `sys_usbd_receive_event`.
+    USBD_RECEIVE_EVENT = 540;
+    /// `sys_usbd_detect_event`.
+    USBD_DETECT_EVENT = 541;
+
     /// `sys_ss_access_control_engine` -- privileged authority/identity
     /// gate used during user-PRX init to query the caller's SELF
     /// program-authority-id. Behavioral oracle: RPCS3's `sys_ss.cpp`.
@@ -391,6 +418,8 @@ lv2_syscalls! {
     SYS_PRX_REGISTER_MODULE = 484;
     /// `sys_prx_register_library`.
     SYS_PRX_REGISTER_LIBRARY = 486;
+    /// `sys_ppu_thread_set_priority`.
+    PPU_THREAD_SET_PRIORITY = 47;
     /// `sys_ppu_thread_get_priority`.
     PPU_THREAD_GET_PRIORITY = 48;
     /// `sys_prx_get_module_list`.
@@ -419,6 +448,8 @@ lv2_syscalls! {
     MMAPPER_SEARCH_AND_MAP = 337;
     /// `sys_mmapper_allocate_shared_memory_from_container`.
     MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER = 362;
+    /// `sys_mmapper_allocate_shared_memory_ext`.
+    MMAPPER_ALLOCATE_SHARED_MEMORY_EXT = 339;
     /// `sys_mmapper_allocate_shared_memory`.
     MMAPPER_ALLOCATE_SHARED_MEMORY = 332;
 }

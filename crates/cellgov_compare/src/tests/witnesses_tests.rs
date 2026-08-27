@@ -144,8 +144,7 @@ fn first_record_classifies_by_observed_value() {
 #[test]
 fn both_uart_command_inventories_are_exact_frontier_rows() {
     // Both directions are findings: a new command id reached, and a
-    // command id newly answered. An AtLeast floor would let the
-    // unknown count shrink unnoticed.
+    // command id newly answered.
     for name in ["uart_cids_distinct", "uart_unknown_cids"] {
         assert!(WitnessClass::is_exact_by_default(name), "{name}");
         assert_eq!(
@@ -159,8 +158,8 @@ fn both_uart_command_inventories_are_exact_frontier_rows() {
         assert!(WitnessClass::Exact.check(name, 3, 2).is_err());
         assert!(WitnessClass::Exact.check(name, 3, 4).is_err());
     }
-    // A baseline recorded before this rule keeps its class: an Absent
-    // row still holds at 0 and reclassifies to Exact once it fires.
+    // A baseline already holding the row Absent keeps it at 0 and
+    // reclassifies to Exact once it fires.
     let prev = baseline(&[("uart_unknown_cids", 0, WitnessClass::Absent)]);
     assert_eq!(
         record(Some(&prev), &obs(&[("uart_unknown_cids", 0)]))["uart_unknown_cids"].class,

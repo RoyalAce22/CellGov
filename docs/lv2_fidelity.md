@@ -4,9 +4,9 @@
 `cargo test -p cellgov_lv2 --test fidelity_doc -- --ignored regenerate`.
 Do not edit by hand: the non-ignored test in the same file fails on drift. -->
 
-Of LV2's 1024 syscall slots, 105 classify to a typed arm
-and 23 route to a dedicated arm inside `Unsupported`;
-the remaining **896 slots are the null backend** --
+Of LV2's 1024 syscall slots, 118 classify to a typed arm
+and 25 route to a dedicated arm inside `Unsupported`;
+the remaining **881 slots are the null backend** --
 the honest traced `CELL_ENOSYS` refusal is the default, not
 the exception. The `null-backend` rows below are the handful
 of syscalls given _dedicated_ routing or diagnostics that
@@ -66,6 +66,18 @@ Per-arm rationale lives on each dispatch method's rustdoc in
 | `UartReceive` | partial-state |
 | `UartSend` | partial-state |
 | `UartGetParams` | modeled |
+| `UsbdInitialize` | partial-state |
+| `UsbdFinalize` | modeled |
+| `UsbdGetDeviceList` | partial-state |
+| `UsbdGetDescriptorSize` | partial-state |
+| `UsbdGetDescriptor` | partial-state |
+| `UsbdRegisterLdd` | partial-state |
+| `UsbdUnregisterLdd` | partial-state |
+| `UsbdOpenPipe` | partial-state |
+| `UsbdOpenDefaultPipe` | partial-state |
+| `UsbdClosePipe` | partial-state |
+| `UsbdReceiveEvent` | partial-state |
+| `UsbdDetectEvent` | abi-only |
 | `ConfigOpen` | modeled |
 | `ConfigClose` | modeled |
 | `ConfigGetServiceEvent` | partial-state |
@@ -87,6 +99,7 @@ Per-arm rationale lives on each dispatch method's rustdoc in
 | `MemoryFree` | abi-only |
 | `MemoryGetUserMemorySize` | partial-state |
 | `MemoryContainerCreate` | abi-only |
+| `MemoryAllocateFromContainer` | partial-state |
 | `ProcessExit` | modeled |
 | `ProcessSpawn` | partial-state |
 | `ProcessExit2` | partial-state |
@@ -148,6 +161,7 @@ arm. Any number not listed dispatches to the null backend.
 
 | Syscall | Name | Fidelity |
 | --- | --- | --- |
+| 47 | `sys_ppu_thread_set_priority` | partial-state |
 | 48 | `sys_ppu_thread_get_priority` | modeled |
 | 136 | `sys_event_port_connect_local` | modeled |
 | 137 | `sys_event_port_disconnect` | modeled |
@@ -158,6 +172,7 @@ arm. Any number not listed dispatches to the null backend.
 | 334 | `sys_mmapper_map_shared_memory` | partial-state |
 | 337 | `sys_mmapper_search_and_map` | partial-state |
 | 362 | `sys_mmapper_allocate_shared_memory_from_container` | partial-state |
+| 339 | `sys_mmapper_allocate_shared_memory_ext` | partial-state |
 | 402 | `sys_tty_read` | modeled |
 | 462 | `uns_func slot 462 (DEX-only)` | modeled |
 | 480 | `_sys_prx_load_module` | partial-state |

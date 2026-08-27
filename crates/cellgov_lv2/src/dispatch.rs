@@ -175,6 +175,18 @@ pub enum Lv2Dispatch {
         /// Effects committed at create time.
         effects: Vec<Effect>,
     },
+    /// [`Self::Immediate`] whose result also lands in GPRs beyond
+    /// r3: `registers` are `(gpr, value)` pairs the caller sees
+    /// alongside `code`. `sys_event_queue_receive` returns the event
+    /// in r4..=r7 this way; its pointer argument is never written.
+    ImmediateRegisters {
+        /// Return code written to r3 (0 = `CELL_OK`).
+        code: u64,
+        /// Effects committed before the return code is written.
+        effects: Vec<Effect>,
+        /// GPR writes applied with the return code.
+        registers: Vec<(u8, u64)>,
+    },
 }
 
 impl Lv2Dispatch {
@@ -185,6 +197,18 @@ impl Lv2Dispatch {
             effects: vec![],
         }
     }
+}
+
+/// The GPR image of a received event: `source` in r4, then `data1`,
+/// `data2`, `data3` in r5..=r7, as `sys_event_queue_receive` returns
+/// it (RPCS3 `sys_event.cpp` `sys_event_queue_receive`).
+pub fn event_registers(payload: &crate::sync_primitives::EventPayload) -> Vec<(u8, u64)> {
+    vec![
+        (4, payload.source),
+        (5, payload.data1),
+        (6, payload.data2),
+        (7, payload.data3),
+    ]
 }
 
 /// PPC64-ABI seed values for a new child PPU thread.
@@ -215,12 +239,22 @@ pub struct PpuThreadInitState {
     pub lr_sentinel: u64,
 }
 
+/// What fills an SPU's local store at group start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpuLoadImage {
+    /// A kernel-held image: the ELF the loader parses into local store.
+    Elf(Vec<u8>),
+    /// A user-type image: segments already resolved to local-store
+    /// placements, in table order.
+    Segments(Vec<crate::image::LsSegment>),
+}
+
 /// Per-slot SPU init state; the slot index is the
 /// [`Lv2Dispatch::RegisterSpu`]`::inits` key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpuInitState {
-    /// Bytes to copy into the SPU's local store.
-    pub ls_bytes: Vec<u8>,
+    /// What to place in the SPU's local store.
+    pub image: SpuLoadImage,
     /// Entry PC within the local store.
     pub entry_pc: u32,
     /// r1.
@@ -272,6 +306,13 @@ pub enum Lv2BlockReason {
     /// Blocking `sys_uart_receive` on an empty reply stream; the next
     /// `sys_uart_send` that stages bytes wakes it. Untimed.
     Uart,
+    /// `sys_usbd_receive_event` with no event queued; only
+    /// `sys_usbd_finalize` wakes it, with the terminate triple.
+    /// Untimed.
+    UsbdEvent {
+        /// Driver handle the wait was issued on.
+        handle: u32,
+    },
     /// `sys_cond_wait`. Caller released `mutex_id` on entry and
     /// re-acquires on wake via [`PendingResponse::CondWakeReacquire`].
     Cond {
@@ -338,9 +379,10 @@ pub enum PendingResponse {
         /// Guest out-pointer receiving the exit value (u64 BE).
         status_out_ptr: u32,
     },
-    /// On wake, write the event payload (4x u64 BE matching the PS3
-    /// `sys_event_t` ABI: offsets 0 / 8 / 16 / 24 =
-    /// source / data1 / data2 / data3) to `out_ptr` and set r3 = 0.
+    /// On wake, stage the event as the [`event_registers`] image
+    /// (r4..=r7 = source / data1 / data2 / data3) and set r3 = 0. The
+    /// kernel never writes `out_ptr`; the guest's stub stores the
+    /// registers there itself.
     ///
     /// # Panics
     /// `payload = None` at wake time: the send-side dispatch forgot a
@@ -348,7 +390,8 @@ pub enum PendingResponse {
     /// deliver zero u64s the guest cannot distinguish from a real
     /// event.
     EventQueueReceive {
-        /// Guest out-pointer receiving the 4x u64 BE event payload.
+        /// The caller's `sys_event_t *` argument, kept for the
+        /// response hash and diagnostics; never written.
         out_ptr: u32,
         /// Filled in at wake time by the send side.
         payload: Option<EventPayload>,

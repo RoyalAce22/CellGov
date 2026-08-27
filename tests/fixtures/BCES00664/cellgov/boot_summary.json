@@ -3,9 +3,9 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 43040,
+  "steps": 43055,
   "budget": 256,
-  "host_invariant_breaks": 2,
+  "host_invariant_breaks": 3,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
@@ -28,7 +28,7 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 2,
+      "value": 3,
       "class": "exact"
     },
     "ldarx": {
@@ -36,7 +36,7 @@
       "class": "at-least"
     },
     "lwarx": {
-      "value": 10797,
+      "value": 10798,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -104,7 +104,7 @@
       "class": "absent"
     },
     "spu_thread_init": {
-      "value": 1,
+      "value": 5,
       "class": "at-least"
     },
     "stdcx": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 8832,
+      "value": 8833,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -168,7 +168,7 @@
       "class": "at-least"
     },
     "unsupported_syscalls_distinct": {
-      "value": 0,
+      "value": 1,
       "class": "exact"
     },
     "vrsave_written": {

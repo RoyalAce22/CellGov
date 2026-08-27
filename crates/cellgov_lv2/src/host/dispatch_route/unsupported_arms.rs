@@ -6,13 +6,17 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::cell_errors;
 use cellgov_ps3_abi::sys_memory::{
-    page_size, CONTAINER_GRANULE, SYS_MMAPPER_NO_SHM_KEY, VM_AREA_ALIGNMENTS, VM_AREA_GRANULE,
+    ext_entry, page_size, CONTAINER_GRANULE, SYS_MMAPPER_NO_SHM_KEY, VM_AREA_ALIGNMENTS,
+    VM_AREA_GRANULE,
 };
 
 use crate::dispatch::Lv2Dispatch;
 
 use crate::host::mmapper::{MmapperHandle, PendingRegionInstall};
 use crate::host::{Lv2Host, Lv2Runtime};
+use cellgov_ps3_abi::sys_ppu_thread::{
+    PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN, PPU_THREAD_PRIORITY_MIN_ROOT,
+};
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
@@ -54,6 +58,39 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_ppu_thread_set_priority` (47): stores `prio` in the
+    /// target's attrs; the round-robin scheduler does not consult it.
+    ///
+    /// The window is `0..=3071` for a user process and `-512..=3071`
+    /// under debug-or-root capability, the floor
+    /// `_sys_ppu_thread_create` applies. Oracle: RPCS3's
+    /// `sys_ppu_thread.cpp` `sys_ppu_thread_set_priority`.
+    ///
+    /// # Errors
+    ///
+    /// Listed in the order they fire.
+    ///
+    /// - `CELL_EINVAL` when `prio` is outside the window.
+    /// - `CELL_ESRCH` when `thread_id` is absent from the thread table.
+    pub(super) fn dispatch_ppu_thread_set_priority(&mut self, args: [u64; 8]) -> Lv2Dispatch {
+        let thread_id = args[0] as u32;
+        let prio = args[1] as i32;
+        let floor = if self.debug_or_root() {
+            PPU_THREAD_PRIORITY_MIN_ROOT
+        } else {
+            PPU_THREAD_PRIORITY_MIN
+        };
+        if !(floor..=PPU_THREAD_PRIORITY_MAX).contains(&prio) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        let id = crate::ppu_thread::PpuThreadId::new(thread_id as u64);
+        let Some(thread) = self.state.ppu_threads.get_mut(id) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+        };
+        thread.attrs.priority = prio as u32;
+        Lv2Dispatch::immediate(0)
+    }
+
     /// `sys_memory_container_create`: mints a container id and writes
     /// it to `*cid`.
     ///
@@ -84,6 +121,7 @@ impl Lv2Host {
             return d;
         }
         let cid = self.alloc_id();
+        self.state.memory_containers.insert(cid);
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(cid_ptr, 4),
             bytes: WritePayload::from_slice(&cid.to_be_bytes()),
@@ -546,6 +584,119 @@ impl Lv2Host {
                 align,
             },
         );
+        let write = Effect::SharedWriteIntent {
+            range: ByteRange::contiguous_u32(mem_id_ptr, 4),
+            bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
+            ordering: PriorityClass::Normal,
+            source: requester,
+            source_time: tick,
+        };
+        Lv2Dispatch::Immediate {
+            code: 0,
+            effects: vec![write],
+        }
+    }
+
+    /// `sys_mmapper_allocate_shared_memory_ext` (339): exclusive keyed
+    /// variant of 332 with a per-entry attribute table at r6/r7 and
+    /// the `mem_id` out-pointer at r8.
+    ///
+    /// A key already registered answers `CELL_EEXIST` where 332 would
+    /// attach; callers probe a key range on that answer. Every key
+    /// registers, including zero and `SYS_MMAPPER_NO_SHM_KEY`, so each
+    /// collides with itself on the next call. Oracle: RPCS3's
+    /// `sys_mmapper.cpp` `sys_mmapper_allocate_shared_memory_ext` and
+    /// `create_lv2_shm`.
+    ///
+    /// # Errors
+    ///
+    /// Listed in the order they fire.
+    ///
+    /// - `CELL_EALIGN` when `size` is zero.
+    /// - `CELL_EINVAL` when the `flags` granularity field carries an
+    ///   encoding the kernel does not accept.
+    /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
+    /// - `CELL_EALIGN` when `size` is not a multiple of the granule.
+    /// - `CELL_EINVAL` when `flags` carries bits outside the
+    ///   granularity field.
+    /// - `CELL_EINVAL` when `entry_count` is outside `1..=16`.
+    /// - `CELL_EFAULT` when an entry's `type` word is unreadable.
+    /// - `CELL_EPERM` when an entry type is unknown, or privileged
+    ///   without 64 KiB pages and debug-or-root capability.
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null.
+    /// - `CELL_EEXIST` when `ipc_key` is already registered.
+    pub(super) fn dispatch_mmapper_allocate_shared_memory_ext(
+        &mut self,
+        args: [u64; 8],
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+        tick: GuestTicks,
+    ) -> Lv2Dispatch {
+        let ipc_key = args[0];
+        let size = args[1];
+        let flags = u64::from(args[2] as u32);
+        let entries_ptr = args[3] as u32;
+        let entry_count = args[4] as i32;
+        let mem_id_ptr = args[5] as u32;
+        if size == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
+        let Some(align) = accepted_granule(flags) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        };
+        let Ok(size_u32) = u32::try_from(size) else {
+            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+        };
+        if !size_u32.is_multiple_of(align) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+        }
+        if flags & !page_size::GRANULARITY_FIELD != 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        if entry_count <= 0 || entry_count > ext_entry::MAX_COUNT {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        for i in 0..entry_count as u32 {
+            let Some(type_addr) = entries_ptr
+                .checked_add(i * ext_entry::LEN)
+                .and_then(|e| e.checked_add(ext_entry::TYPE_OFFSET))
+            else {
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            };
+            let Some(entry_type) = read_be_u64(rt, u64::from(type_addr)) else {
+                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            };
+            let admitted = ext_entry::PLAIN_TYPES.contains(&entry_type)
+                || (entry_type == ext_entry::PRIVILEGED_TYPE
+                    && flags == page_size::FLAG_64K
+                    && self.debug_or_root());
+            if !admitted {
+                return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
+            }
+        }
+        if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
+            return d;
+        }
+        // RPCS3 `create_lv2_shm<true>(true, ipc_key, ..)`: the segment
+        // is always process-shared, the zero-key refusal is waived,
+        // and the create is exclusive -- so the key itself, including
+        // the sentinel 332 treats as keyless, is what collides.
+        if self.state.mmapper_ipc.contains_key(&ipc_key) {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
+        }
+        let mem_id = self.alloc_id();
+        self.state.mmapper_handles.insert(
+            mem_id,
+            MmapperHandle {
+                size: size_u32,
+                align,
+            },
+        );
+        self.state.mmapper_ipc.insert(ipc_key, mem_id);
+        if crate::host::is_system_ipc_key(ipc_key) {
+            self.obs.system_ipc_witness.shm_creates += 1;
+            self.obs.system_ipc_witness.note_key(ipc_key);
+        }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_id_ptr, 4),
             bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
@@ -1421,3 +1572,7 @@ fn read_be_u64(rt: &dyn Lv2Runtime, addr: u64) -> Option<u64> {
         b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
     ]))
 }
+
+#[cfg(test)]
+#[path = "../tests/ppu_thread_priority_tests.rs"]
+mod ppu_thread_priority_tests;

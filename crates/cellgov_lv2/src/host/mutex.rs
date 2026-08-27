@@ -128,6 +128,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_mutex_lock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
+            self.log_invariant_break(
+                "dispatch.mutex_caller_without_thread_record",
+                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
+            );
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self.state.mutexes.acquire_or_enqueue(id, caller) {
@@ -154,6 +158,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_mutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
+            self.log_invariant_break(
+                "dispatch.mutex_caller_without_thread_record",
+                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
+            );
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         match self.state.mutexes.try_acquire(id, caller) {
@@ -167,6 +175,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_mutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
+            self.log_invariant_break(
+                "dispatch.mutex_caller_without_thread_record",
+                format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
+            );
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
         // An owner unlock with recursive holds outstanding consumes

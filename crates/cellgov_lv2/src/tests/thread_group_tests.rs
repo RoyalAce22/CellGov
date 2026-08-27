@@ -55,17 +55,20 @@ fn initialize_thread_unknown_group_returns_err() {
 }
 
 #[test]
-fn initialize_thread_rejects_slot_out_of_bounds() {
+fn initialize_thread_accepts_any_slot_index_until_the_declared_count_is_populated() {
     let mut t = ThreadGroupTable::new();
     let gid = t.create(2).unwrap();
+    assert_eq!(t.initialize_thread(gid, 5, img(1), [0; 4]), Ok(()));
+    assert_eq!(t.initialize_thread(gid, 3, img(1), [0; 4]), Ok(()));
+    assert_eq!(
+        t.initialize_thread(gid, 0, img(1), [0; 4]),
+        Err(InitializeThreadError::GroupFull { num_threads: 2 }),
+    );
     assert_eq!(
         t.initialize_thread(gid, 5, img(1), [0; 4]),
-        Err(InitializeThreadError::SlotOutOfBounds {
-            slot: 5,
-            num_threads: 2,
-        }),
+        Err(InitializeThreadError::SlotAlreadyInitialized),
     );
-    assert!(t.get(gid).unwrap().slots.is_empty());
+    assert_eq!(t.get(gid).unwrap().slots.len(), 2);
 }
 
 #[test]
@@ -150,14 +153,14 @@ fn state_hash_folds_slot_args() {
 #[test]
 fn state_hash_folds_slot_init() {
     let init_a = SpuInitState {
-        ls_bytes: vec![0xAA; 16],
+        image: crate::dispatch::SpuLoadImage::Elf(vec![0xAA; 16]),
         entry_pc: 0,
         stack_ptr: 0,
         args: [0; 4],
         group_id: 1,
     };
     let init_b = SpuInitState {
-        ls_bytes: vec![0xBB; 16],
+        image: crate::dispatch::SpuLoadImage::Elf(vec![0xBB; 16]),
         ..init_a.clone()
     };
     let mut a = ThreadGroupTable::new();
@@ -169,6 +172,38 @@ fn state_hash_folds_slot_init() {
     a.get_mut(ga).unwrap().slots.get_mut(&0).unwrap().init = Some(init_a);
     b.get_mut(gb).unwrap().slots.get_mut(&0).unwrap().init = Some(init_b);
     assert_ne!(a.state_hash(), b.state_hash());
+}
+
+#[test]
+fn state_hash_folds_segment_images() {
+    use crate::dispatch::SpuLoadImage;
+    use crate::image::LsSegment;
+    let seg = |ls_start: u32, bytes: Vec<u8>| LsSegment { ls_start, bytes };
+    let base = SpuInitState {
+        image: SpuLoadImage::Segments(vec![seg(0x100, vec![0xAA; 16])]),
+        entry_pc: 0,
+        stack_ptr: 0,
+        args: [0; 4],
+        group_id: 1,
+    };
+    let moved = SpuInitState {
+        image: SpuLoadImage::Segments(vec![seg(0x110, vec![0xAA; 16])]),
+        ..base.clone()
+    };
+    let as_elf = SpuInitState {
+        image: SpuLoadImage::Elf(vec![0xAA; 16]),
+        ..base.clone()
+    };
+    let hash_of = |init: SpuInitState| {
+        let mut t = ThreadGroupTable::new();
+        let g = t.create(1).unwrap();
+        t.initialize_thread(g, 0, img(1), [0; 4]).unwrap();
+        t.get_mut(g).unwrap().slots.get_mut(&0).unwrap().init = Some(init);
+        t.state_hash()
+    };
+    assert_eq!(hash_of(base.clone()), hash_of(base.clone()));
+    assert_ne!(hash_of(base.clone()), hash_of(moved));
+    assert_ne!(hash_of(base), hash_of(as_elf));
 }
 
 #[test]

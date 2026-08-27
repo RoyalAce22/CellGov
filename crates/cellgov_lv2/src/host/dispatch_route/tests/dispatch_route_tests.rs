@@ -20,6 +20,8 @@ use crate::request::Lv2Request;
 mod io_time;
 #[path = "route_memory_tests.rs"]
 mod memory;
+#[path = "route_mmapper_ext_tests.rs"]
+mod mmapper_ext;
 #[path = "route_process_spu_tests.rs"]
 mod process_spu;
 #[path = "route_prx_tests.rs"]

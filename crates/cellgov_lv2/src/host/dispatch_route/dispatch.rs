@@ -32,7 +32,9 @@ impl Lv2Host {
         let wait_timeout = request.wait_timeout_usec();
         let out = self.dispatch_routed(request, requester, rt);
         match &out {
-            Lv2Dispatch::Immediate { code, .. } if *code != 0 => {
+            Lv2Dispatch::Immediate { code, .. } | Lv2Dispatch::ImmediateRegisters { code, .. }
+                if *code != 0 =>
+            {
                 *self.obs.dispatch_nonzero_returns.entry(*code).or_insert(0) += 1;
                 *self
                     .obs
@@ -200,6 +202,44 @@ impl Lv2Host {
             Lv2Request::UartGetParams { params_ptr } => {
                 self.dispatch_uart_get_params(params_ptr, requester, rt, tick)
             }
+            Lv2Request::UsbdInitialize { handle_ptr } => {
+                self.dispatch_usbd_initialize(handle_ptr, requester, tick)
+            }
+            Lv2Request::UsbdFinalize { handle } => {
+                self.dispatch_usbd_finalize(handle, requester, tick)
+            }
+            Lv2Request::UsbdGetDeviceList { handle, .. } => {
+                self.dispatch_usbd_get_device_list(handle)
+            }
+            Lv2Request::UsbdGetDescriptor {
+                handle, desc_ptr, ..
+            } => self.dispatch_usbd_get_descriptor(handle, desc_ptr),
+            Lv2Request::UsbdGetDescriptorSize { handle, .. }
+            | Lv2Request::UsbdOpenPipe { handle, .. }
+            | Lv2Request::UsbdOpenDefaultPipe { handle, .. }
+            | Lv2Request::UsbdClosePipe { handle, .. } => self.dispatch_usbd_no_device(handle),
+            Lv2Request::UsbdRegisterLdd {
+                handle,
+                product_ptr,
+                product_len,
+            } => self.dispatch_usbd_register_ldd(handle, product_ptr, product_len, rt),
+            Lv2Request::UsbdUnregisterLdd {
+                handle,
+                product_ptr,
+                product_len,
+            } => self.dispatch_usbd_unregister_ldd(handle, product_ptr, product_len, rt),
+            Lv2Request::UsbdReceiveEvent {
+                handle,
+                arg1_ptr,
+                arg2_ptr,
+                arg3_ptr,
+            } => self.dispatch_usbd_receive_event(
+                handle,
+                [arg1_ptr, arg2_ptr, arg3_ptr],
+                requester,
+                rt,
+            ),
+            Lv2Request::UsbdDetectEvent => self.dispatch_usbd_detect_event(),
             Lv2Request::ConfigOpen {
                 equeue_id,
                 out_handle_ptr,
@@ -330,6 +370,19 @@ impl Lv2Host {
             Lv2Request::MemoryContainerCreate { cid_ptr, size } => {
                 self.dispatch_memory_container_create(cid_ptr, size, requester, tick)
             }
+            Lv2Request::MemoryAllocateFromContainer {
+                size,
+                cid,
+                flags,
+                alloc_addr_ptr,
+            } => self.dispatch_memory_allocate_from_container(
+                size,
+                cid,
+                flags,
+                alloc_addr_ptr,
+                requester,
+                tick,
+            ),
             Lv2Request::PpuThreadYield => self.dispatch_ppu_thread_yield(),
             Lv2Request::PpuThreadStart { target } => self.dispatch_ppu_thread_start(target),
             Lv2Request::TimeGetTimebaseFrequency => self.dispatch_time_get_timebase_frequency(),
@@ -466,6 +519,10 @@ impl Lv2Host {
                 args,
             } => self.dispatch_prx_register_library(args, rt),
             Lv2Request::Unsupported {
+                number: syscall::PPU_THREAD_SET_PRIORITY,
+                args,
+            } => self.dispatch_ppu_thread_set_priority(args),
+            Lv2Request::Unsupported {
                 number: syscall::PPU_THREAD_GET_PRIORITY,
                 args,
             } => self.dispatch_ppu_thread_get_priority(args, requester, tick),
@@ -517,6 +574,10 @@ impl Lv2Host {
                 number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
                 args,
             } => self.dispatch_mmapper_allocate_shared_memory_from_container(args, requester, tick),
+            Lv2Request::Unsupported {
+                number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT,
+                args,
+            } => self.dispatch_mmapper_allocate_shared_memory_ext(args, requester, rt, tick),
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
                 args,

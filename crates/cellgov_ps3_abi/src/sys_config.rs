@@ -45,18 +45,16 @@ pub const SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN: usize = 24;
 
 /// `sizeof(sys_config_service_event_t)` as RPCS3 lays it out: the
 /// 40-byte head, one byte of `data`, and seven bytes of tail padding
-/// from the struct's 8-byte alignment (`util/endian.hpp` `se_t` is
-/// `alignas` its width). RPCS3 `lv2_config_service::get_size`
+/// from 8-byte alignment. RPCS3 `lv2_config_service::get_size`
 /// announces `SIZEOF - 1 + data.len()` in the queued event's `data3`
 /// and `sys_config_get_service_event` refuses a smaller buffer with
-/// `CELL_EAGAIN`, so the length the oracle demands runs seven bytes
-/// past the bytes it writes.
+/// `CELL_EAGAIN`, so the demanded length runs seven bytes past the
+/// bytes written.
 pub const SYS_CONFIG_SERVICE_EVENT_SIZEOF: usize = 48;
 
 /// Bytes the queued event's `data3` announces ahead of the service
-/// data, and the `sys_config_get_service_event` buffer floor: seven
-/// more than [`SYS_CONFIG_SERVICE_EVENT_HEAD_LEN`], the bytes the
-/// record actually carries.
+/// data, and the `sys_config_get_service_event` buffer floor; see
+/// [`SYS_CONFIG_SERVICE_EVENT_SIZEOF`].
 pub const SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN: usize = SYS_CONFIG_SERVICE_EVENT_SIZEOF - 1;
 
 /// Descriptor RPCS3 registers on both pad-manager services for port

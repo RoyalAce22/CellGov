@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use cellgov_core::{AddressSpaceId, Runtime, StepError};
 use cellgov_event::UnitId;
-use cellgov_mem::GuestMemory;
+use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::PpuExecutionUnit;
 
 use crate::cli::exit::die;
@@ -101,7 +101,7 @@ fn stall_detail(rt: &Runtime, pc_ring: &PcRing, sc_ring: &SyscallRing) -> String
 /// Where a module_start runs: the process it belongs to and the
 /// register seeds that differ between the boot process and a spawned
 /// child.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(in crate::game) struct ModuleStartEnv {
     /// Address space the module was loaded into.
     pub(in crate::game) space: AddressSpaceId,
@@ -115,6 +115,52 @@ pub(in crate::game) struct ModuleStartEnv {
     pub(in crate::game) kctx_opd: u64,
     /// Initial r1, inside a stack region of `space`.
     pub(in crate::game) stack_pointer: u64,
+    /// `--dump-at-pc` / `--dump-skip`: the transient unit faults with
+    /// a register dump when it reaches the PC, like a title unit.
+    pub(in crate::game) break_pc: Option<(u64, u32)>,
+    /// `--dump-mem-fault`: guest ranges hex-dumped alongside the
+    /// register dump when the transient unit faults or breaks.
+    pub(in crate::game) dump_mem_fault_ranges: Vec<(u64, u64)>,
+}
+
+/// Guest address of the thread-id word liblv2 reads back through
+/// `r13 - 0x7030` for the module_start units of every process.
+pub(in crate::game) const MODULE_START_TLS_THREAD_ID_ADDR: u64 = TLS_BASE;
+
+/// Write the id of the thread the transient unit dispatches as into
+/// its TLS header, as LV2 does for every thread it starts.
+///
+/// liblv2's lwmutex fast path stores that word as the owner and its
+/// unlock checks the owner against it (vsh `sys_lwmutex_lock` /
+/// `sys_lwmutex_unlock`); a kernel-granted lock writes the owner as
+/// the primary's `PpuThreadId`, which is what the header must read
+/// back or the unlock is refused with `CELL_EPERM`.
+fn seed_tls_thread_id(rt: &mut Runtime, env: &ModuleStartEnv) {
+    let tid = rt
+        .lv2_host()
+        .ppu_thread_id_for_unit(env.thread_owner)
+        .unwrap_or_else(|| {
+            die(&format!(
+                "module_start: unit {:?} has no PPU thread record to seed the TLS header from",
+                env.thread_owner,
+            ))
+        })
+        .raw();
+    let range = ByteRange::new(GuestAddr::new(MODULE_START_TLS_THREAD_ID_ADDR), 8)
+        .expect("the TLS header word is a fixed in-range address");
+    let mem = rt.space_memory_mut(env.space).unwrap_or_else(|e| {
+        die(&format!(
+            "module_start: address space {} vanished before the TLS seed: {e}",
+            env.space.raw()
+        ))
+    });
+    mem.apply_commit(range, &tid.to_be_bytes())
+        .unwrap_or_else(|e| {
+            die(&format!(
+                "module_start: TLS thread-id seed at 0x{MODULE_START_TLS_THREAD_ID_ADDR:x} \
+                 FAILED ({e:?})"
+            ))
+        });
 }
 
 fn space_memory(rt: &Runtime, space: AddressSpaceId) -> &GuestMemory {
@@ -134,7 +180,7 @@ fn space_memory(rt: &Runtime, space: AddressSpaceId) -> &GuestMemory {
 pub(in crate::game) fn run_module_start(
     rt: &mut Runtime,
     prx_info: &PrxLoadInfo,
-    env: ModuleStartEnv,
+    env: &ModuleStartEnv,
 ) -> Result<ModuleStartOutcome, ModuleStartError> {
     let ms = match prx_info.module_start {
         Some(opd) => opd,
@@ -180,10 +226,14 @@ pub(in crate::game) fn run_module_start(
     // LR=0 sentinel: blr from module_start jumps to PC=0, where the
     // all-zero word fails to decode and the fault signals a return.
     ms_state.set_lr(0);
+    seed_tls_thread_id(rt, env);
 
     let ms_unit_id = rt.registry_mut().register_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = ms_state;
+        if let Some((pc, skip)) = env.break_pc {
+            unit.set_break_pc(pc, skip);
+        }
         unit
     });
     // A child's module_start executes and faults in the child's
@@ -293,6 +343,33 @@ pub(in crate::game) fn run_module_start(
                         _ => None,
                     };
 
+                    // The scheduler runs every runnable unit here, so a
+                    // thread this or an earlier module_start spawned
+                    // (`sys_audio_Library` leaves two running) can fault
+                    // while the transient unit waits on it. That thread
+                    // stays Faulted in the registry like any title
+                    // thread; the module_start itself is judged only by
+                    // its own unit.
+                    if step.unit != ms_unit_id {
+                        let mut fault_text = format_fault(
+                            rt,
+                            step.unit,
+                            &step.result,
+                            fault,
+                            steps,
+                            &pc_ring,
+                            &env.dump_mem_fault_ranges,
+                        );
+                        append_syscall_ring(&mut fault_text, &sc_ring);
+                        eprintln!(
+                            "module_start: {}: unit {:?} (not the module_start unit \
+                             {ms_unit_id:?}) faulted while the module_start was in \
+                             flight; the pass continues\n{fault_text}",
+                            prx_info.name, step.unit,
+                        );
+                        continue;
+                    }
+
                     // LR=0 sentinel guards against a corrupted call
                     // target that happens to jump to PC=0 mid-run.
                     let lr_at_fault = step
@@ -308,8 +385,15 @@ pub(in crate::game) fn run_module_start(
                     {
                         break Ok(steps);
                     }
-                    let mut fault_text =
-                        format_fault(rt, ms_unit_id, &step.result, fault, steps, &pc_ring, &[]);
+                    let mut fault_text = format_fault(
+                        rt,
+                        ms_unit_id,
+                        &step.result,
+                        fault,
+                        steps,
+                        &pc_ring,
+                        &env.dump_mem_fault_ranges,
+                    );
                     append_syscall_ring(&mut fault_text, &sc_ring);
                     eprintln!("module_start {fault_text}");
                     let code_str = guest_code

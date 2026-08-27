@@ -53,6 +53,8 @@ impl Lv2State {
             mmapper_ipc,
             config,
             uart,
+            usbd,
+            memory_containers,
             lwmutexes,
             mutexes,
             semaphores,
@@ -134,6 +136,15 @@ impl Lv2State {
         }
         if !uart.is_pristine() {
             hasher.write(&uart.state_hash().to_le_bytes());
+        }
+        if !usbd.is_pristine() {
+            hasher.write(&usbd.state_hash().to_le_bytes());
+        }
+        if !memory_containers.is_empty() {
+            hasher.write(&(memory_containers.len() as u64).to_le_bytes());
+            for cid in memory_containers {
+                hasher.write(&cid.to_le_bytes());
+            }
         }
         if !prx_registry.is_empty() {
             hasher.write(&(prx_registry.len() as u64).to_le_bytes());

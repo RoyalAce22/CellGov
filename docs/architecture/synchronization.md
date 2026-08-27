@@ -152,8 +152,9 @@ granule is 128 bytes (a Cell BE cache line) on both sides.
 
 **Two pieces of state.** Every execution unit carries a local
 register -- `Option<ReservedLine>` on `PpuState` / `SpuState` --
-set by an atomic load and cleared by a same-unit overlapping
-store or a conditional-store retirement. The committed
+set by an atomic load and cleared by a conditional-store
+retirement or by another unit's write to the line; the holder's
+own plain stores leave it in place. The committed
 cross-unit view is `cellgov_sync::ReservationTable`, a
 `BTreeMap<UnitId, ReservedLine>` owned by the commit pipeline
 and folded into `sync_state_hash` with mailboxes, signals, LV2
@@ -172,7 +173,7 @@ intra-step verdicts trust the local register alone.
 flowchart TD
   ld["lwarx / ldarx / MFC_GETLLAR"] -->|Effect ReservationAcquire| tbl["ReservationTable entry (committed)"]
   ld --> loc["local register = Some(line)"]
-  wr["any committed write: SharedWriteIntent, ConditionalStore, DMA completion"] -->|clear_covering| tbl
+  wr["any committed write from another unit: SharedWriteIntent, ConditionalStore, DMA completion"] -->|clear_covering| tbl
   start["step start: local is Some but reservation_held is false"] --> clr["local register cleared"]
   st["stwcx. / stdcx. / MFC_PUTLLC"] --> v{"local Some AND line matches the store?"}
   v -->|no| nope["conditional store fails"]
@@ -189,7 +190,12 @@ source_time }` commits the success path of `stwcx.` / `stdcx.`
   / `MFC_PUTLLC`. The commit pipeline applies the bytes through
   the normal staging / drain path, drops the emitter's own
   reservation entry, and runs the clear sweep against all other
-  entries covering the line.
+  entries covering the line. On the PPU side the conditional
+  store goes through the store buffer, so its effect is emitted
+  in program order with the block's plain stores and ahead of any
+  later `ReservationAcquire` in the same block; a full buffer
+  retries the instruction next block with CR0 and the reservation
+  untouched.
 
 **Clear-sweep contract.** Every write path that commits bytes to
 main memory fires the clear sweep. The lost-reservation

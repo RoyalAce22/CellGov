@@ -301,21 +301,6 @@ impl ExecutionUnit for PpuExecutionUnit {
         let entry_fulls = self.per_step_full_states.len();
         let entry_retired = self.retirement_counter;
 
-        if self.break_pc == Some(self.state.pc) {
-            if self.break_skip > 0 {
-                self.break_skip -= 1;
-            } else {
-                self.break_pc = None;
-                return ExecutionStepResult {
-                    yield_reason: YieldReason::Fault,
-                    consumed_cost: InstructionCost::ZERO,
-                    local_diagnostics: self.fault_diag(self.state.pc),
-                    fault: Some(FaultKind::Guest(FAULT_DEBUG_BREAK)),
-                    syscall_args: None,
-                };
-            }
-        }
-
         let mem = ctx.memory().as_bytes();
         // Stack-allocated region table avoids per-call heap alloc on the
         // Budget=1 hot path. The boot layout installs six regions and
@@ -346,6 +331,32 @@ impl ExecutionUnit for PpuExecutionUnit {
 
         loop {
             let step_pc = self.state.pc;
+
+            // Diagnostics are taken before the rollback so they carry
+            // the registers at the break; the window's effects are
+            // discarded like any other mid-window fault.
+            if self.break_pc == Some(step_pc) {
+                if self.break_skip > 0 {
+                    self.break_skip -= 1;
+                } else {
+                    self.break_pc = None;
+                    let diag = self.fault_diag(step_pc);
+                    self.discard_batch(
+                        &snapshot,
+                        entry_hashes,
+                        entry_fulls,
+                        entry_retired,
+                        effects,
+                    );
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::Fault,
+                        consumed_cost: InstructionCost::ZERO,
+                        local_diagnostics: diag,
+                        fault: Some(FaultKind::Guest(FAULT_DEBUG_BREAK)),
+                        syscall_args: None,
+                    };
+                }
+            }
 
             let insn = if let Some(cached) = self
                 .instruction_shadow
@@ -557,6 +568,12 @@ impl ExecutionUnit for PpuExecutionUnit {
                 }
                 ExecuteVerdict::BufferFull => {
                     // PC stays at the failing store; retries next step.
+                    // Break skips count retirements, and nothing retired,
+                    // so a skip spent at the top of this iteration is
+                    // handed back.
+                    if self.break_pc == Some(step_pc) {
+                        self.break_skip += 1;
+                    }
                     self.store_buf.flush(effects, self.id);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
@@ -670,3 +687,7 @@ impl ExecutionUnit for PpuExecutionUnit {
 #[cfg(test)]
 #[path = "tests/ppu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/break_pc_tests.rs"]
+mod break_pc_tests;

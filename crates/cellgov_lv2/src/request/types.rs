@@ -216,13 +216,14 @@ pub enum Lv2Request {
         /// In: queue id.
         queue_id: u32,
     },
-    /// `out_ptr` receives 32 bytes: source / data1 / data2 / data3,
-    /// each u64 BE. Timeout semantics in
-    /// [`Lv2Request::wait_timeout_usec`].
+    /// The event returns in r4..=r7 (source / data1 / data2 / data3);
+    /// `out_ptr` is the dummy pointer the kernel never writes. Timeout
+    /// semantics in [`Lv2Request::wait_timeout_usec`].
     EventQueueReceive {
         /// In: queue id.
         queue_id: u32,
-        /// Out: event packet.
+        /// In: dummy event pointer, kept for the pending-response
+        /// hash; never written.
         out_ptr: u32,
         /// In: timeout in microseconds.
         timeout: u64,
@@ -255,6 +256,101 @@ pub enum Lv2Request {
         /// Out: `rx_buf_size u64, tx_buf_size u64`.
         params_ptr: u32,
     },
+    /// `sys_usbd_initialize`: claims a USB host-driver handle.
+    UsbdInitialize {
+        /// Out: driver handle.
+        handle_ptr: u32,
+    },
+    /// `sys_usbd_finalize`: releases the driver and terminates every
+    /// parked event reader.
+    UsbdFinalize {
+        /// In: driver handle.
+        handle: u32,
+    },
+    /// `sys_usbd_get_device_list`: copies the attached-device records.
+    UsbdGetDeviceList {
+        /// In: driver handle.
+        handle: u32,
+        /// Out: 4-byte device records.
+        list_ptr: u32,
+        /// In: record capacity of `list_ptr`.
+        max_devices: u32,
+    },
+    /// `sys_usbd_get_descriptor_size`.
+    UsbdGetDescriptorSize {
+        /// In: driver handle.
+        handle: u32,
+        /// In: device handle.
+        device: u32,
+    },
+    /// `sys_usbd_get_descriptor`.
+    UsbdGetDescriptor {
+        /// In: driver handle.
+        handle: u32,
+        /// In: device handle.
+        device: u32,
+        /// Out: descriptor bytes.
+        desc_ptr: u32,
+        /// In: capacity of `desc_ptr`.
+        desc_size: u32,
+    },
+    /// `sys_usbd_register_ldd`: names a logical device driver by
+    /// product string.
+    UsbdRegisterLdd {
+        /// In: driver handle.
+        handle: u32,
+        /// In: product string.
+        product_ptr: u32,
+        /// In: product string length (a `u16` in the kernel signature).
+        product_len: u32,
+    },
+    /// `sys_usbd_unregister_ldd`.
+    UsbdUnregisterLdd {
+        /// In: driver handle.
+        handle: u32,
+        /// In: product string.
+        product_ptr: u32,
+        /// In: product string length (a `u16` in the kernel signature).
+        product_len: u32,
+    },
+    /// `sys_usbd_open_pipe`: the three unknown middle arguments and
+    /// the trailing attributes are not decoded.
+    UsbdOpenPipe {
+        /// In: driver handle.
+        handle: u32,
+        /// In: device handle.
+        device: u32,
+        /// In: endpoint number.
+        endpoint: u32,
+    },
+    /// `sys_usbd_open_default_pipe`.
+    UsbdOpenDefaultPipe {
+        /// In: driver handle.
+        handle: u32,
+        /// In: device handle.
+        device: u32,
+    },
+    /// `sys_usbd_close_pipe`.
+    UsbdClosePipe {
+        /// In: driver handle.
+        handle: u32,
+        /// In: pipe handle.
+        pipe: u32,
+    },
+    /// `sys_usbd_receive_event`: parks until the driver has an event
+    /// for this handle; `sys_usbd_finalize` is the only producer here.
+    UsbdReceiveEvent {
+        /// In: driver handle.
+        handle: u32,
+        /// Out: event code (`SYS_USBD_*`), u64.
+        arg1_ptr: u32,
+        /// Out: event payload, u64.
+        arg2_ptr: u32,
+        /// Out: event payload, u64.
+        arg3_ptr: u32,
+    },
+    /// `sys_usbd_detect_event`.
+    UsbdDetectEvent,
     /// `sys_config_open`: binds a config handle to the event queue
     /// that receives its service events.
     ConfigOpen {
@@ -444,6 +540,18 @@ pub enum Lv2Request {
         cid_ptr: u32,
         /// In: container size in bytes.
         size: u64,
+    },
+    /// `sys_memory_allocate_from_container`: `flags` as for
+    /// [`Self::MemoryAllocate`].
+    MemoryAllocateFromContainer {
+        /// In: allocation size in bytes.
+        size: u64,
+        /// In: container id from `sys_memory_container_create`.
+        cid: u32,
+        /// In: page-size flags.
+        flags: u64,
+        /// Out: allocated address.
+        alloc_addr_ptr: u32,
     },
     /// `sys_process_exit`.
     ProcessExit {

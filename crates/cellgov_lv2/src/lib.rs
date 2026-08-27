@@ -14,8 +14,8 @@ pub mod syscall_classification;
 pub mod thread_group;
 
 pub use dispatch::{
-    CondMutexKind, ExpiredWait, Lv2BlockReason, Lv2Dispatch, PendingResponse, PpuThreadInitState,
-    SpuInitState,
+    event_registers, CondMutexKind, ExpiredWait, Lv2BlockReason, Lv2Dispatch, PendingResponse,
+    PpuThreadInitState, SpuInitState, SpuLoadImage,
 };
 pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
 pub use host::FIRST_KERNEL_ID;
@@ -23,7 +23,7 @@ pub use host::{
     InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, ProcessEntry, ProcessTable,
     SystemStateSeed,
 };
-pub use image::{ContentStore, SpuImageHandle, SpuImageRecord};
+pub use image::{ContentStore, LsSegment, SpuImageHandle, SpuImageRecord, UserSpuImage};
 pub use ppu_thread::{
     AddJoinWaiter, EventFlagWaitMode, GuestBlockReason, PpuThread, PpuThreadAttrs, PpuThreadId,
     PpuThreadIdAllocator, PpuThreadState, PpuThreadTable, ThreadStack, ThreadStackAllocator,

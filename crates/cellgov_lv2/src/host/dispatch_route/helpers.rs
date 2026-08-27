@@ -113,7 +113,7 @@ impl Lv2Host {
         }
     }
 
-    pub(super) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
+    pub(in crate::host) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
         if ptrs.contains(&0) {
             Some(Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()))
         } else {

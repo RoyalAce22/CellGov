@@ -6,6 +6,27 @@ use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
 use crate::request::Lv2Request;
 
 #[test]
+fn a_receive_from_a_unit_without_a_thread_record_is_esrch_and_logged() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let breaks_before = host.observability().invariant_break_count;
+    let d = host.dispatch(
+        Lv2Request::EventQueueReceive {
+            queue_id: 0x4000_0001,
+            out_ptr: 0x2000,
+            timeout: 0,
+        },
+        UnitId::new(9),
+        &rt,
+    );
+    assert_eq!(
+        d,
+        Lv2Dispatch::immediate(u64::from(cellgov_ps3_abi::cell_errors::CELL_ESRCH))
+    );
+    assert!(host.observability().invariant_break_count > breaks_before);
+}
+
+#[test]
 fn event_queue_create_allocates_id() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
@@ -130,26 +151,21 @@ fn event_queue_receive_with_buffered_payload_delivers_immediately() {
         &rt,
     );
     match recv {
-        Lv2Dispatch::Immediate {
+        Lv2Dispatch::ImmediateRegisters {
             code: 0,
-            effects: e,
-        } => match &e[0] {
-            Effect::SharedWriteIntent { range, bytes, .. } => {
-                assert_eq!(range.start().raw(), 0x2000);
-                assert_eq!(range.length(), 32);
-                let payload_bytes = bytes.bytes();
-                assert_eq!(
-                    u64::from_be_bytes(payload_bytes[0..8].try_into().unwrap()),
-                    0x11
-                );
-                assert_eq!(
-                    u64::from_be_bytes(payload_bytes[8..16].try_into().unwrap()),
-                    0x22
-                );
-            }
-            other => panic!("expected SharedWriteIntent, got {other:?}"),
-        },
-        other => panic!("expected Immediate(0), got {other:?}"),
+            effects,
+            registers,
+        } => {
+            // The event lands in r4..=r7; the out-pointer is never written.
+            assert!(
+                effects.is_empty(),
+                "no guest memory is written: {effects:?}"
+            );
+            assert_eq!(registers[0], (4, 0x11));
+            assert_eq!(registers[1], (5, 0x22));
+            assert_eq!(registers.len(), 4);
+        }
+        other => panic!("expected ImmediateRegisters(0), got {other:?}"),
     }
     assert!(host.event_queues().lookup(id).unwrap().is_empty());
 }

@@ -397,6 +397,53 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             mode: p!(2),
         },
         syscall::UART_GET_PARAMS => Lv2Request::UartGetParams { params_ptr: p!(0) },
+        syscall::USBD_INITIALIZE => Lv2Request::UsbdInitialize { handle_ptr: p!(0) },
+        syscall::USBD_FINALIZE => Lv2Request::UsbdFinalize { handle: p!(0) },
+        syscall::USBD_GET_DEVICE_LIST => Lv2Request::UsbdGetDeviceList {
+            handle: p!(0),
+            list_ptr: p!(1),
+            max_devices: p!(2),
+        },
+        syscall::USBD_GET_DESCRIPTOR_SIZE => Lv2Request::UsbdGetDescriptorSize {
+            handle: p!(0),
+            device: p!(1),
+        },
+        syscall::USBD_GET_DESCRIPTOR => Lv2Request::UsbdGetDescriptor {
+            handle: p!(0),
+            device: p!(1),
+            desc_ptr: p!(2),
+            desc_size: p!(3),
+        },
+        syscall::USBD_REGISTER_LDD => Lv2Request::UsbdRegisterLdd {
+            handle: p!(0),
+            product_ptr: p!(1),
+            product_len: p!(2),
+        },
+        syscall::USBD_UNREGISTER_LDD => Lv2Request::UsbdUnregisterLdd {
+            handle: p!(0),
+            product_ptr: p!(1),
+            product_len: p!(2),
+        },
+        syscall::USBD_OPEN_PIPE => Lv2Request::UsbdOpenPipe {
+            handle: p!(0),
+            device: p!(1),
+            endpoint: p!(5),
+        },
+        syscall::USBD_OPEN_DEFAULT_PIPE => Lv2Request::UsbdOpenDefaultPipe {
+            handle: p!(0),
+            device: p!(1),
+        },
+        syscall::USBD_CLOSE_PIPE => Lv2Request::UsbdClosePipe {
+            handle: p!(0),
+            pipe: p!(1),
+        },
+        syscall::USBD_RECEIVE_EVENT => Lv2Request::UsbdReceiveEvent {
+            handle: p!(0),
+            arg1_ptr: p!(1),
+            arg2_ptr: p!(2),
+            arg3_ptr: p!(3),
+        },
+        syscall::USBD_DETECT_EVENT => Lv2Request::UsbdDetectEvent,
         syscall::CONFIG_OPEN => Lv2Request::ConfigOpen {
             equeue_id: p!(0),
             out_handle_ptr: p!(1),
@@ -510,6 +557,12 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
             cid_ptr: p!(0),
             size: args[1],
         },
+        syscall::MEMORY_ALLOCATE_FROM_CONTAINER => Lv2Request::MemoryAllocateFromContainer {
+            size: args[0],
+            cid: p!(1),
+            flags: args[2],
+            alloc_addr_ptr: p!(3),
+        },
         n => Lv2Request::Unsupported {
             number: n,
             args: *args,
@@ -520,3 +573,7 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
 #[cfg(test)]
 #[path = "tests/classify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/classify_usbd_tests.rs"]
+mod usbd_tests;

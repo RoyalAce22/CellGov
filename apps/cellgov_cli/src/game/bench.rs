@@ -141,6 +141,7 @@ pub fn bench_boot(
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
         dump_skip: 0,
+        dump_mem_fault_ranges: &[],
         print_banner: false,
         runtime_max_steps: opts.max_steps,
         patch_bytes: &[],
@@ -413,7 +414,7 @@ pub fn bench_boot(
 
     // Virtual-UART witnesses: the PS3AV command inventory the boot
     // sent, the ids nothing answered, and the events and bytes the
-    // AV manager could not deliver. Silent until the first send.
+    // AV manager could not deliver.
     let obs = rt.lv2_host().observability();
     if !obs.uart_cids.is_empty() {
         let sent: Vec<String> = obs

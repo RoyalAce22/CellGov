@@ -53,6 +53,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
     use cellgov_ps3_abi::syscall;
     &[
         (
+            syscall::PPU_THREAD_SET_PRIORITY,
+            "sys_ppu_thread_set_priority",
+            ArmFidelity::PartialState,
+        ),
+        (
             syscall::PPU_THREAD_GET_PRIORITY,
             "sys_ppu_thread_get_priority",
             ArmFidelity::Modeled,
@@ -100,6 +105,11 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
         (
             syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
             "sys_mmapper_allocate_shared_memory_from_container",
+            ArmFidelity::PartialState,
+        ),
+        (
+            syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT,
+            "sys_mmapper_allocate_shared_memory_ext",
             ArmFidelity::PartialState,
         ),
         (syscall::TTY_READ, "sys_tty_read", ArmFidelity::Modeled),
@@ -258,6 +268,26 @@ impl Lv2RequestKind {
             Lv2RequestKind::UartInitialize | Lv2RequestKind::UartGetParams => Modeled,
             Lv2RequestKind::UartReceive | Lv2RequestKind::UartSend => PartialState,
 
+            // USB host driver with no device ever attached: handles
+            // and the finalize-terminates-readers contract are
+            // modeled; the handle value and the empty event stream
+            // are the simplifications.
+            Lv2RequestKind::UsbdFinalize => Modeled,
+            Lv2RequestKind::UsbdInitialize
+            | Lv2RequestKind::UsbdGetDeviceList
+            | Lv2RequestKind::UsbdReceiveEvent => PartialState,
+            // Device- and pipe-scoped arms answer the no-such-device
+            // refusal an empty bus gives.
+            Lv2RequestKind::UsbdGetDescriptorSize
+            | Lv2RequestKind::UsbdGetDescriptor
+            | Lv2RequestKind::UsbdOpenPipe
+            | Lv2RequestKind::UsbdOpenDefaultPipe
+            | Lv2RequestKind::UsbdClosePipe => PartialState,
+            // The product table is kept; no device ever matches it.
+            Lv2RequestKind::UsbdRegisterLdd | Lv2RequestKind::UsbdUnregisterLdd => PartialState,
+            // The oracle acknowledges this without state.
+            Lv2RequestKind::UsbdDetectEvent => AbiOnly,
+
             // Config store: handle and listener lifecycle on the
             // event-queue send path.
             Lv2RequestKind::ConfigOpen
@@ -265,7 +295,7 @@ impl Lv2RequestKind {
             | Lv2RequestKind::ConfigRemoveServiceListener
             | Lv2RequestKind::ConfigUnregisterService => Modeled,
             // Matching rules and the seeded pad-manager descriptor
-            // follow RPCS3's reading of real hardware, not a spec.
+            // follow RPCS3's reading of real hardware.
             Lv2RequestKind::ConfigGetServiceEvent
             | Lv2RequestKind::ConfigAddServiceListener
             | Lv2RequestKind::ConfigRegisterService => PartialState,
@@ -277,6 +307,8 @@ impl Lv2RequestKind {
             // the game-mode cap constant.
             Lv2RequestKind::MemoryGetUserMemorySize => PartialState,
             Lv2RequestKind::MemoryContainerCreate => AbiOnly,
+            // Container ids are checked; container budgets are not.
+            Lv2RequestKind::MemoryAllocateFromContainer => PartialState,
 
             // Process.
             Lv2RequestKind::ProcessExit

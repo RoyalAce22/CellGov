@@ -5,10 +5,9 @@
 //! service id; every registered service a listener matches is
 //! replayed to the handle's queue as a service event, and the guest
 //! reads the record behind an event with
-//! `sys_config_get_service_event`. Oracle: RPCS3 `sys_config.cpp`.
-//!
-//! Ids for handles, listeners, and services come from the shared
-//! kernel-id allocator; event ids count from zero per RPCS3.
+//! `sys_config_get_service_event`. Ids for handles, listeners, and
+//! services come from the shared kernel-id allocator; event ids count
+//! from zero. Oracle: RPCS3 `sys_config.cpp`.
 
 use std::collections::BTreeMap;
 
@@ -340,8 +339,7 @@ impl ConfigTable {
     /// side of the event is gone.
     ///
     /// The `registered` field and the record's length follow the
-    /// service's state at read time, not the state the queued event
-    /// announced (RPCS3 `sys_config.cpp`
+    /// service's state at read time (RPCS3 `sys_config.cpp`
     /// `lv2_config_service_event::write`).
     fn record(&self, event: u32) -> Option<Vec<u8>> {
         let ev = self.events.get(&event)?;
@@ -367,8 +365,6 @@ impl ConfigTable {
     /// and the seed flag, via raw little-endian bytes per the host
     /// state-hash contract.
     pub(crate) fn state_hash(&self) -> u64 {
-        // Exhaustive destructure: a field added later must be folded
-        // in or named here.
         let Self {
             handles,
             services,
@@ -433,8 +429,7 @@ impl Lv2Host {
     /// `sys_config_open` (516).
     ///
     /// The first open registers the two pad-manager services with the
-    /// DUALSHOCK 3 descriptor (RPCS3 `lv2_config::initialize`), so a
-    /// boot that never opens a handle hashes as before.
+    /// DUALSHOCK 3 descriptor (RPCS3 `lv2_config::initialize`).
     ///
     /// # Errors
     ///

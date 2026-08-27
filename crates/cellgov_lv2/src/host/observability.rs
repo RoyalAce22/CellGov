@@ -57,6 +57,10 @@ pub struct Lv2Observability {
     /// another reader was already parked. Non-zero means the guest
     /// has more than one thread waiting on the AV manager at once.
     pub uart_readers_queued: u64,
+    /// Witness: device- or pipe-scoped `sys_usbd` calls on a live
+    /// handle, each refused because no device is ever attached. A
+    /// guest driving these expects hardware the model does not have.
+    pub usbd_no_device_refusals: u64,
     /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
     /// hit counts. The key set names which modules a title asks for
     /// that the corpus cannot serve.

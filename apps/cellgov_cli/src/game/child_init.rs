@@ -100,11 +100,13 @@ pub(in crate::game) fn run_pending_child_inits(rt: &mut Runtime, plans: &ChildIn
             pid: Some(pending.pid),
             kctx_opd: plan.kctx_opd,
             stack_pointer: plan.stack_pointer,
+            break_pc: None,
+            dump_mem_fault_ranges: Vec::new(),
         };
         let mut completed: usize = 0;
         let mut faulted: Vec<String> = Vec::new();
         for info in &plan.prx_modules {
-            match run_module_start(rt, info, env) {
+            match run_module_start(rt, info, &env) {
                 Ok(ModuleStartOutcome::Completed { .. }) | Ok(ModuleStartOutcome::HleStubbed) => {
                     completed += 1;
                 }

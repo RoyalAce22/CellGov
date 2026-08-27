@@ -1,6 +1,6 @@
 //! [`Lv2State`]: the hashed partition of [`super::Lv2Host`].
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::fs_store::FsStore;
 use crate::image::ContentStore;
@@ -18,6 +18,7 @@ use super::mmapper::MmapperHandleTable;
 use super::process;
 use super::rsx::SysRsxContext;
 use super::uart::UartState;
+use super::usbd::UsbdState;
 
 /// First id the shared kernel-id allocator hands out; every id the
 /// host mints outside `lwmutexes` (mutex, cond, semaphore, rwlock,
@@ -60,6 +61,12 @@ pub(in crate::host) struct Lv2State {
     /// The AV manager's virtual UART: reply stream, parked readers, and
     /// HDMI state (367-370).
     pub(in crate::host) uart: UartState,
+    /// The USB host driver: handles and parked event readers
+    /// (530-541).
+    pub(in crate::host) usbd: UsbdState,
+    /// Container ids minted by `sys_memory_container_create`; the
+    /// membership `sys_memory_allocate_from_container` checks.
+    pub(in crate::host) memory_containers: BTreeSet<u32>,
     pub(in crate::host) lwmutexes: LwMutexTable,
     pub(in crate::host) mutexes: MutexTable,
     pub(in crate::host) semaphores: SemaphoreTable,

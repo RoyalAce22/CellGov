@@ -161,6 +161,45 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
     Ok(())
 }
 
+/// Load pre-laid-out `(ls_start, bytes)` segments into `state` and set
+/// `state.pc` to `entry`; the user-image shape of `sys_spu_image`,
+/// whose segments the caller already resolved.
+///
+/// # Errors
+///
+/// [`LoadError::SegmentOutOfRange`] when a segment ends past local
+/// store, [`LoadError::EntryOutOfRange`] when `entry` leaves no whole
+/// instruction word inside it.
+pub fn load_ls_segments(
+    segments: &[(u32, &[u8])],
+    entry: u32,
+    state: &mut SpuState,
+) -> Result<(), LoadError> {
+    for &(ls_start, bytes) in segments {
+        let start = ls_start as usize;
+        // [CBE-Handbook p:64 s:3.1.1] Local Store is 256 KB; segments must fit.
+        let Some(end) = start
+            .checked_add(bytes.len())
+            .filter(|&e| e <= state.ls.len())
+        else {
+            return Err(LoadError::SegmentOutOfRange {
+                vaddr: ls_start,
+                memsz: bytes.len() as u32,
+            });
+        };
+        state.ls[start..end].copy_from_slice(bytes);
+    }
+    if entry as usize + 4 > state.ls.len() {
+        return Err(LoadError::EntryOutOfRange { entry });
+    }
+    state.pc = entry;
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "tests/loader_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/loader_segments_tests.rs"]
+mod segments_tests;

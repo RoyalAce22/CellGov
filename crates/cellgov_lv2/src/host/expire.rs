@@ -119,13 +119,14 @@ impl Lv2Host {
             } => self.expire_cond_wait(id, mutex_id, mutex_kind, requester, thread),
             Lv2BlockReason::ThreadGroupJoin { .. }
             | Lv2BlockReason::PpuThreadJoin { .. }
-            | Lv2BlockReason::Uart => {
+            | Lv2BlockReason::Uart
+            | Lv2BlockReason::UsbdEvent { .. } => {
                 self.record_invariant_break(
                     "expire_wait.untimed_reason",
                     format_args!(
                         "timer entry fired for untimed reason {reason:?} on {requester:?}; \
-                         join and uart-receive requests carry no timeout and must never \
-                         register a deadline"
+                         join, uart-receive and usbd-event requests carry no timeout and \
+                         must never register a deadline"
                     ),
                 );
                 ExpiredWait::default()

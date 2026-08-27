@@ -721,9 +721,6 @@ fn the_cid_table_names_each_command_once() {
     assert!(cid_spec(av::PS3AV_CID_AV_GET_PORT_STATE).is_none());
 }
 
-/// Every row's handler answers a packet of the row's own declared
-/// size with all-zero fields, so a row that passes the parser is a
-/// row that replies: the size rule and the handler cannot disagree.
 #[test]
 fn every_cid_table_row_answers_a_packet_of_its_declared_size() {
     for spec in CID_TABLE {
