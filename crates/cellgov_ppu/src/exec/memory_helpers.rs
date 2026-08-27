@@ -130,25 +130,18 @@ pub(crate) fn load_se(
     })
 }
 
-/// Stage a store and drop any same-unit reservation overlapping
-/// the written range.
-///
-/// Reservation clearing is intra-step so a later `stwcx` in the
-/// same block observes the invalidation pre-commit.
-// [PPC-Book2 p:10 s:1.7.3.1] reservation lost when any store hits the reservation granule.
+/// Stage a store. The unit's own reservation survives it: only a
+/// store from another processor or mechanism to the granule clears
+/// a reservation, so `lwarx; stw <neighbour>; stwcx.` succeeds.
+// [PPC-Book2 p:10 s:1.7.3.1] a reservation is lost to another processor's store or dcbz to the granule, not to the holder's own stores.
 #[inline]
 pub(crate) fn buffer_store(
     store_buf: &mut StoreBuffer,
-    state: &mut PpuState,
+    _state: &mut PpuState,
     ea: u64,
     size: u8,
     value: u64,
 ) -> ExecuteVerdict {
-    if let Some(line) = state.reservation() {
-        if line.overlaps_range(ea, size as u64) {
-            state.set_reservation(None);
-        }
-    }
     if store_buf.insert(ea, size, value as u128) {
         ExecuteVerdict::Continue
     } else {

@@ -550,8 +550,7 @@ pub(crate) fn execute(
         // [PPC-Book2 p:25 s:3.3] stwcx./stdcx.: if RESERVE && RESERVE_ADDR == real_addr(EA) then store + CR0 = 0b00||1||XER[SO], else CR0 = 0b00||0||XER[SO]; reservation cleared.
         PpuInstruction::Stdcx { rs, ra, rb } => {
             // Local reservation is authoritative: cross-unit clears
-            // happen at step start; same-unit overlap clears in
-            // `buffer_store`.
+            // happen at step start; the unit's own stores leave it.
             let ea = state.ea_x_form(ra, rb);
             state.stdcx_executed = state.stdcx_executed.wrapping_add(1);
             if ea & 7 != 0 {
@@ -573,12 +572,10 @@ pub(crate) fn execute(
                         },
                     ));
                 }
-                // The store goes through the buffer so its
-                // `ConditionalStore` is emitted in program order with
-                // the block's plain stores and ahead of any later
-                // `ReservationAcquire` (`effects.len()` records the
-                // slot); a full buffer retries the instruction next
-                // block with CR0 and the reservation untouched.
+                // Buffered so the `ConditionalStore` lands in program
+                // order (see `StoreBuffer::insert_conditional`); the
+                // capacity check comes before CR0 so a full buffer
+                // retries with CR0 and the reservation untouched.
                 if !store_buf.has_capacity_for(1) {
                     return ExecuteVerdict::BufferFull;
                 }

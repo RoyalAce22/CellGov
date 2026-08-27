@@ -109,7 +109,7 @@ fn stwcx_with_reservation_on_different_line_fails() {
 }
 
 #[test]
-fn same_unit_store_to_reserved_line_clears_local_reservation() {
+fn same_unit_store_to_reserved_line_keeps_local_reservation() {
     let mut mem = vec![0u8; 0x2000];
     mem[0x1000..0x1004].copy_from_slice(&0xdeadbeefu32.to_be_bytes());
     let mut s = PpuState::new();
@@ -144,9 +144,10 @@ fn same_unit_store_to_reserved_line_clears_local_reservation() {
         &mem,
         &mut effects2,
     );
-    assert!(
-        s.reservation().is_none(),
-        "same-unit store to reserved line must drop the local reservation"
+    assert_eq!(
+        s.reservation().map(|l| l.addr()),
+        Some(0x1000),
+        "the holder's own store leaves its reservation in place"
     );
 
     s.set_gpr(3, 0x1000);
@@ -165,11 +166,14 @@ fn same_unit_store_to_reserved_line_clears_local_reservation() {
         &mut effects3,
     );
     assert_eq!(
-        s.cr_field(0),
-        0b0000,
-        "stwcx must fail after self-invalidation"
+        s.cr_field(0) & 0b0010,
+        0b0010,
+        "stwcx succeeds after the holder's own store to the line"
     );
-    assert!(effects3.is_empty());
+    assert!(
+        s.reservation().is_none(),
+        "the stwcx itself retires the reservation"
+    );
 }
 
 #[test]
@@ -428,7 +432,7 @@ fn stwcx_increments_counter_on_each_execution() {
 }
 
 #[test]
-fn stvx_clears_overlapping_reservation() {
+fn stvx_over_the_reserved_line_keeps_the_holders_reservation() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0x1000);
     s.set_gpr(8, 0);
@@ -446,14 +450,15 @@ fn stvx_clears_overlapping_reservation() {
         &[0u8; 0x2000],
         &mut effects,
     );
-    assert!(
-        s.reservation().is_none(),
-        "stvx covering the reserved line must drop the reservation"
+    assert_eq!(
+        s.reservation().map(|l| l.addr()),
+        Some(0x1000),
+        "the holder's own stvx leaves its reservation in place"
     );
 }
 
 #[test]
-fn stfd_clears_overlapping_reservation() {
+fn stfd_over_the_reserved_line_keeps_the_holders_reservation() {
     let mut s = PpuState::new();
     s.set_gpr(1, 0x1000);
     s.set_fpr(5, 0xDEAD_BEEF_CAFE_F00Du64);
@@ -470,9 +475,10 @@ fn stfd_clears_overlapping_reservation() {
         &[0u8; 0x2000],
         &mut effects,
     );
-    assert!(
-        s.reservation().is_none(),
-        "stfd covering the reserved line must drop the reservation"
+    assert_eq!(
+        s.reservation().map(|l| l.addr()),
+        Some(0x1000),
+        "the holder's own stfd leaves its reservation in place"
     );
 }
 
@@ -821,9 +827,7 @@ fn stdcx_misaligned_ea_raises_alignment_fault() {
 /// A conditional store must not drain the plain-store buffer: a
 /// mid-batch flush would discard entries a later same-batch load
 /// still forwards from, and would commit the conditional store out
-/// of program order with them. The buffer-level tests cannot catch
-/// this -- they exercise the buffer under flush, not the executor's
-/// discipline of not calling it.
+/// of program order with them.
 #[test]
 fn stwcx_does_not_drain_plain_stores_mid_batch() {
     let mem = vec![0u8; 0x2000];
@@ -902,9 +906,8 @@ fn stwcx_does_not_drain_plain_stores_mid_batch() {
         "reload must forward the buffered plain store; memory still holds zeros"
     );
 
-    // Every store emits at end-of-batch flush, not at execute time --
-    // so ANY write effect in the mid-batch effects is proof the buffer
-    // was drained early.
+    // Stores emit only at the end-of-batch flush, so any write effect
+    // mid-batch is proof the buffer was drained early.
     assert!(
         !effects.iter().any(|e| matches!(
             e,
