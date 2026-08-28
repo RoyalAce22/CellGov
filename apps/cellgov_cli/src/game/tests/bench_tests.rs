@@ -770,15 +770,62 @@ fn emitted_bench_prefixes(source: &str) -> BTreeSet<String> {
     out
 }
 
+/// The boot stage modules the `BENCH_` scan reads.
+///
+/// `include_str!` takes a literal path, so the list is hand-written;
+/// [`the_bench_line_scan_reads_every_boot_stage_module`] holds it
+/// against the directory.
+const BOOT_SOURCES: [(&str, &str); 11] = [
+    ("entry.rs", include_str!("../boot/entry.rs")),
+    ("finish.rs", include_str!("../boot/finish.rs")),
+    ("firmware.rs", include_str!("../boot/firmware.rs")),
+    ("host.rs", include_str!("../boot/host.rs")),
+    ("image.rs", include_str!("../boot/image.rs")),
+    ("loaders.rs", include_str!("../boot/loaders.rs")),
+    ("module_start.rs", include_str!("../boot/module_start.rs")),
+    ("params.rs", include_str!("../boot/params.rs")),
+    ("prepare.rs", include_str!("../boot/prepare.rs")),
+    ("providers.rs", include_str!("../boot/providers.rs")),
+    ("types.rs", include_str!("../boot/types.rs")),
+];
+
+#[test]
+fn the_bench_line_scan_reads_every_boot_stage_module() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/game/boot");
+    let mut on_disk: BTreeSet<String> = BTreeSet::new();
+    for entry in std::fs::read_dir(&dir).expect("boot stage directory") {
+        let path = entry.expect("boot stage directory entry").path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("boot stage module file name")
+            .to_string();
+        // mod.rs carries module declarations and re-exports only.
+        if name != "mod.rs" {
+            on_disk.insert(name);
+        }
+    }
+    let scanned: BTreeSet<String> = BOOT_SOURCES.iter().map(|(n, _)| (*n).to_string()).collect();
+    assert_eq!(
+        on_disk, scanned,
+        "boot stage modules the BENCH_ line scan does not read"
+    );
+}
+
 #[test]
 fn every_emitted_bench_line_is_tracked_or_reasoned_diagnostic() {
     let mut emitted = BTreeSet::new();
     for source in [
         include_str!("../bench.rs"),
-        include_str!("../boot.rs"),
         include_str!("../child_init.rs"),
         include_str!("../prx/module_start.rs"),
-    ] {
+    ]
+    .into_iter()
+    .chain(BOOT_SOURCES.iter().map(|(_, source)| *source))
+    {
         emitted.extend(emitted_bench_prefixes(source));
     }
     assert!(

@@ -15,4 +15,4 @@ pub(super) use module_start::{
     run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome,
 };
 pub(super) use tls::{install_kernel_context_opd, pre_init_tls, TLS_BASE};
-pub(super) use types::PrxLoadInfo;
+pub(super) use types::{HostLinkMaps, PrxLoadInfo, VerifiedFirmware};
