@@ -40,10 +40,8 @@ fn resolve_ps3_vfs_root_prefers_cli_flag() {
         "--vfs-root",
         "/custom/path",
     ]);
-    assert_eq!(
-        resolve_ps3_vfs_root(&args),
-        std::path::PathBuf::from("/custom/path")
-    );
+    let got = resolve_ps3_vfs_root_inner(&args, None).expect("flag names a root");
+    assert_eq!(got, std::path::PathBuf::from("/custom/path"));
 }
 
 #[test]
@@ -52,6 +50,13 @@ fn resolve_ps3_vfs_root_default_is_project_relative() {
     let args = sv(&["cli", "run-game", "--title", "flow"]);
     let got = resolve_ps3_vfs_root(&args);
     assert_eq!(got, std::path::PathBuf::from("vfs/dev_hdd0"));
+    assert_eq!(
+        crate::cli::keys::fixed_vault_root(),
+        Some(std::path::Path::new(
+            cellgov_install::game_install::DEFAULT_VFS_ROOT
+        )),
+        "the vault is read beside dev_hdd0, where `cellgov_install` writes it",
+    );
 }
 
 #[test]

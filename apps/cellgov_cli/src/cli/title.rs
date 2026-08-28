@@ -70,9 +70,17 @@ pub(crate) fn resolve_checkpoint_override(
 /// populate). An empty value from either override is refused rather
 /// than resolved against the current directory. Existence is not
 /// verified here.
+///
+/// Also fixes the root the operator's key vault is read under
+/// ([`super::keys::fix_vault_root`]), so a subcommand that names a
+/// relocated VFS decrypts under that VFS's imported vault. Resolve
+/// the root before opening any guest image: the vault loads once, on
+/// the first SCE-wrapped one.
 pub(crate) fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
-    resolve_ps3_vfs_root_inner(args, std::env::var_os("CELLGOV_PS3_VFS_ROOT"))
-        .unwrap_or_else(|msg| die(&msg))
+    let root = resolve_ps3_vfs_root_inner(args, std::env::var_os("CELLGOV_PS3_VFS_ROOT"))
+        .unwrap_or_else(|msg| die(&msg));
+    super::keys::fix_vault_root(&root);
+    root
 }
 
 /// # Errors

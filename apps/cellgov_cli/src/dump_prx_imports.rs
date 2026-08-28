@@ -92,7 +92,8 @@ fn try_parse_args(args: &[String]) -> Result<Args, String> {
                 i += 2;
             }
             // Consumed so it is not rejected as unknown; re-read by
-            // `resolve_ps3_vfs_root` for NPDRM RAP resolution.
+            // `resolve_ps3_vfs_root` for NPDRM RAP resolution and the
+            // key vault.
             "--vfs-root" => {
                 value_after(args, i, "--vfs-root", "a path")?;
                 i += 2;

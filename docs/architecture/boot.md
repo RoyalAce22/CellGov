@@ -133,8 +133,10 @@ no key material and exposes no decrypt entry point: it boots plaintext
 ELFs and PRXes and refuses an SCE-wrapped executable or module with
 `SceError::DecryptFeatureDisabled`, naming the feature. The key
 material is not in the binary either: decryption reads the operator's
-`KeyVault` (`CELLGOV_KEYS`, or the imported
-`vfs/.cellgov/keys/keys.toml`), loaded once per process on the first
+`KeyVault` (`CELLGOV_KEYS`, or the vault imported beside the VFS root
+the run names -- `.cellgov/keys/keys.toml` in the directory holding
+`--vfs-root`'s `dev_hdd0`, so `vfs/.cellgov/keys/keys.toml` by
+default), loaded once per process on the first
 SCE-wrapped image, and a run with no vault refuses that first SELF by
 name (`SceError::Keys`). An NPDRM image met under an APP-only key
 policy keeps its own refusal in either build, since no build could

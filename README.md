@@ -81,6 +81,9 @@ CELLGOV_KEYS=<file-or-dir> target/release/cellgov_cli run-game --title <name>   
 cargo run --release -p cellgov_install -- keys import <file-or-dir>            # normalized into vfs/.cellgov/keys/keys.toml
 ```
 
+An import under a non-default root (`keys import --output <root>`) is
+read back by a run that names the matching `--vfs-root <root>/dev_hdd0`.
+
 `keys show` prints the vault's inventory and what a decrypt would
 still be missing; `keys remove` deletes the imported vault. The
 import reads these forms:

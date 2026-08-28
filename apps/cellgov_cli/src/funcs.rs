@@ -14,7 +14,8 @@ use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
 use crate::cli::title::resolve_ps3_vfs_root;
 
 const USAGE: &str = "cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]\n\
-     \t(NPDRM EBOOTs resolve their RAP from <vfs-root>/home/00000001/exdata/;\n\
+     \t(NPDRM EBOOTs resolve their RAP from <vfs-root>/home/00000001/exdata/\n\
+     \t and the key vault from CELLGOV_KEYS, else <vfs-root>/../.cellgov/keys/;\n\
      \t vfs-root defaults to CELLGOV_PS3_VFS_ROOT, then vfs/dev_hdd0)";
 
 #[derive(Debug)]
