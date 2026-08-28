@@ -1,3 +1,21 @@
+SPDX-License-Identifier: GPL-2.0-only
+Copyright (C) 2026 Aidan Bennie
+
+From: CellGov <noreply@cellgov.local>
+Subject: [PATCH] cellgov: env-var-gated per-PPU-instruction trace
+
+Adds an opt-in per-instruction trace used by the CellGov
+differential harness. No behavior change when
+CELLGOV_PPU_TRACE_PATH is unset.
+
+Target files: rpcs3/Emu/CMakeLists.txt,
+              rpcs3/Emu/Cell/PPUThread.cpp.
+
+The C++ sources live in bridges/rpcs3-patch/files/Emu/Cell/ and
+must be copied into rpcs3/Emu/Cell/ before applying this patch.
+
+---
+
 diff --git a/rpcs3/Emu/CMakeLists.txt b/rpcs3/Emu/CMakeLists.txt
 --- a/rpcs3/Emu/CMakeLists.txt
 +++ b/rpcs3/Emu/CMakeLists.txt

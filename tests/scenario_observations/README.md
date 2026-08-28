@@ -67,7 +67,7 @@ Three steps. The whole set takes about twenty minutes, most of it
 waiting on RPCS3.
 
 **1. Configure RPCS3.** Apply every setting in the hashed block of
-[`bridges/rpcs3-patch/oracle_mode_config.yml`](../../bridges/rpcs3-patch/oracle_mode_config.yml)
+[`bridges/rpcs3_to_observation/oracle_mode_config.yml`](../../bridges/rpcs3_to_observation/oracle_mode_config.yml)
 to `tools/rpcs3/config/config.yml`, then one decoder pair from the
 `Decoders` map below it. Step 3 rejects a capture made under other
 settings.

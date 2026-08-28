@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Aidan Bennie
+
 // See cellgov_ppu_trace.h for the public contract and file format.
 
 #include "stdafx.h"

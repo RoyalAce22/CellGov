@@ -4,4 +4,7 @@ Copyright 2026 Aidan Bennie / RoyalAce <https://github.com/RoyalAce22>
 Licensed under either the Apache License, Version 2.0 (LICENSE-APACHE)
 or the MIT license (LICENSE-MIT), at your option.
 
+Except for bridges/rpcs3-patch/, which is licensed GPL-2.0-only as
+modifications to RPCS3. See bridges/rpcs3-patch/COPYING.
+
 Acknowledgements are in ACKNOWLEDGEMENTS.md.

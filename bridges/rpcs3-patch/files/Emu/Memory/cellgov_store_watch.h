@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Aidan Bennie
+
 // CellGov store-watch hook (patch 0003 surface). Per-store
 // instruction-level watch on a configured guest EA range. Every PPU
 // store landing in [addr, addr+len) is recorded as

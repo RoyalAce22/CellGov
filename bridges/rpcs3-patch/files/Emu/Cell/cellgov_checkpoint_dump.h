@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Aidan Bennie
+
 // CellGov checkpoint-dump hook (header-only). Env-var-gated dump of
 // configured guest-memory regions to a host file. Two call sites use
 // this body: the existing _sys_process_exit trigger and the new

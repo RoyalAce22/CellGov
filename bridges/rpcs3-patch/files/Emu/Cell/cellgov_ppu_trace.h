@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Aidan Bennie
+
 // CellGov PPU instruction trace hook. Env-var-gated
 // capture of (pre_state, instruction, post_state, mem_pre, mem_post)
 // tuples for every PPU instruction in a configurable filter window.

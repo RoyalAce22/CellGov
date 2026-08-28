@@ -9,7 +9,55 @@ investigation. There are currently three:
 | `0002-cellgov-hle-trace.patch`       | Per-HLE-call trace stream with watch-address diff. Lets `cellgov_cli rpcs3-attribute` answer "which HLE call wrote this guest address?" in one run.                                                |
 | `0003-cellgov-ppu-trace.patch`       | Per-PPU-instruction trace stream for the differential harness. Captures (pre_state, instruction, post_state, mem_diff) tuples that `cellgov_ppu::differential` replays against CellGov's executor. |
 
-Apply both:
+## License
+
+Everything in this directory is **GPL-2.0-only**, mirroring RPCS3's
+own terms. The `.patch` diffs modify RPCS3 source files, and the
+sources under `files/` include RPCS3 headers, call its internals, and
+exist only to be compiled into the RPCS3 binary; combined with RPCS3
+they are covered by its license. Full text in [COPYING](COPYING);
+every file here carries an `SPDX-License-Identifier: GPL-2.0-only`
+header.
+
+This directory is the one exception to CellGov's Apache-2.0 / MIT
+dual license, which does not reach it. Contributions here are
+GPL-2.0-only rather than the project default.
+
+The boundary is structural: no CellGov crate compiles,
+links, or `include!`s anything under this directory. `cellgov_compare`
+and `bridges/rpcs3_to_observation` reach RPCS3 only by spawning
+`rpcs3.exe` as a separate process and reading the files it writes.
+`gpl_boundary_guard` in `cellgov_testkit` fails if that stops holding.
+
+## Upstream base revision
+
+The patches apply against RPCS3 commit
+`09554c43baaad391b8679fe6d55a23babbd2dec8` (2026-04-10). Verify before
+trusting a build:
+
+```bash
+cd tools/rpcs3-src
+git rev-parse HEAD    # expect 09554c43baaad391b8679fe6d55a23babbd2dec8
+```
+
+Apply order matters: 0001 before 0002 (both add entries to the same
+`emucore.vcxproj` list), and 0002 before 0003 (0003's `CMakeLists.txt`
+hunk has 0002's added line in its context).
+
+### Bumping the base
+
+When moving to a newer RPCS3, re-cut the diffs rather than hand-editing
+the hunk headers -- a hunk whose declared line counts disagree with its
+body is silently truncated by `git apply`, which drops the tail of the
+change without failing. Apply the current set to the old base, copy the
+`files/` sources into the new checkout, re-apply by hand where the
+context moved, then regenerate with `git diff` per patch and update the
+commit above. Check the result with `git apply --check` against a clean
+checkout of the new base before committing.
+
+## Applying
+
+Apply all three, in order:
 
 ```bash
 cd tools/rpcs3-src
@@ -83,8 +131,9 @@ Rebuild RPCS3 per its normal build instructions.
 
 RPCS3 must be configured in oracle mode before any dump is
 comparable. The canonical settings are checked in at
-`oracle_mode_config.yml`; `rpcs3-to-observation` refuses dumps
-whose `--config-hash` does not match the hash of that file.
+`../rpcs3_to_observation/oracle_mode_config.yml`;
+`rpcs3-to-observation` refuses dumps whose `--config-hash` does not
+match the hash of that file.
 
 What that gate does and does not reach: it compares the hash the
 operator supplies against the hash of the checked-in YAML. It never
@@ -176,8 +225,8 @@ comparisons are bit-exact aside from honestly-classified bytes.
 To convert the dump, ask the bridge for the expected config hash
 and pass it alongside the dump. `--decoder` names the decoder pair
 RPCS3 ran under, taken from the `Decoders` map in
-`oracle_mode_config.yml`; it is required, and it is what the
-observation's `metadata.runner` records.
+`../rpcs3_to_observation/oracle_mode_config.yml`; it is required, and
+it is what the observation's `metadata.runner` records.
 
 ```bash
 EXPECTED=$(cargo run -q -p rpcs3_to_observation -- --print-expected-config-hash)

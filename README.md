@@ -169,12 +169,20 @@ Licensed under either of
 
 at your option.
 
+One directory is excepted. The contents of
+[bridges/rpcs3-patch/](bridges/rpcs3-patch/README.md) are licensed
+GPL-2.0-only as modifications to RPCS3, and the dual license above does
+not apply there. Nothing in that directory is compiled or linked into
+any CellGov crate; CellGov invokes RPCS3 only as a separate process.
+
 ### Contribution
 
 Unless you explicitly state otherwise, any contribution intentionally
 submitted for inclusion in CellGov by you, as defined in the
 Apache-2.0 license, shall be dual licensed as above, without any
-additional terms or conditions.
+additional terms or conditions. Contributions under
+`bridges/rpcs3-patch/` are the exception: they are GPL-2.0-only, on the
+same terms as the rest of that directory.
 
 Copyright (c) 2026 Aidan Bennie / RoyalAce. See
 [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md) for the projects CellGov

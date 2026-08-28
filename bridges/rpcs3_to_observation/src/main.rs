@@ -51,7 +51,10 @@ struct Args {
 /// Canonical RPCS3 reference-mode config. Dumps produced under other
 /// settings compare against nothing meaningful and are rejected at
 /// conversion time.
-const REFERENCE_MODE_CONFIG_YAML: &str = include_str!("../../rpcs3-patch/oracle_mode_config.yml");
+///
+/// Kept beside this crate: `bridges/rpcs3-patch/` is GPL-2.0-only and
+/// this binary is Apache-2.0 / MIT.
+const REFERENCE_MODE_CONFIG_YAML: &str = include_str!("../oracle_mode_config.yml");
 
 const HASHED_BEGIN: &str = "# --- BEGIN HASHED ---";
 const HASHED_END: &str = "# --- END HASHED ---";
@@ -218,7 +221,7 @@ enum Rpcs3BridgeError {
     #[error(
         "rpcs3 reference-mode config mismatch: supplied 0x{supplied:016x}, expected 0x{expected:016x}. \
          The dump was produced under RPCS3 settings that differ from the \
-         hashed block of bridges/rpcs3-patch/oracle_mode_config.yml. \
+         hashed block of bridges/rpcs3_to_observation/oracle_mode_config.yml. \
          Captures made under different settings compare against nothing \
          meaningful; re-run RPCS3 with those settings. The decoder pair \
          sits outside the hash -- pass it as --decoder instead."

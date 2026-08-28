@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
+// Copyright (C) 2026 Aidan Bennie
+
 // CellGov HLE-trace hook. Env-var-gated capture of every BIND_FUNC
 // HLE call entry/exit, with optional watch-address diff so an
 // investigator can ask "which NID wrote this guest address?" in one
