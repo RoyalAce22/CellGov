@@ -36,19 +36,27 @@ strum = { version = "0.26", default-features = false, features = ["derive"] }
 sysinfo = "0.32"
 
 [features]
+# SCE/SELF decryption at load time (`cellgov_install/decrypt`). Off by
+# default: the CLI then boots and inspects plaintext ELFs only, and an
+# SCE-wrapped input is refused by name. Installed firmware and titles
+# stay SCE-wrapped on disk, so booting a real corpus needs it.
+decrypt = ["cellgov_install/decrypt"]
+
 # Suites that read the operator's local PS3 corpus. Firmware comes from
 # a console update package; titles come from owned game dumps. Both are
 # gitignored and cannot exist on a hosted runner, so the targets below
 # are not built unless the operator opts in -- a bare `cargo test` then
-# reports green only for gates that actually ran.
-firmware-corpus = []
+# reports green only for gates that actually ran. The corpus is
+# SCE-wrapped, so both imply `decrypt`.
+firmware-corpus = ["decrypt"]
 title-corpus = ["firmware-corpus"]
 
 # Suites that boot the micro-test ELFs built by tests/micro/*/build.sh.
 # The C sources are committed and the toolchain instructions ship with
 # them, but the build output is gitignored, so opting in declares the
-# corpus built and a missing artifact is a hard error.
-microtests = []
+# corpus built and a missing artifact is a hard error. The spawn suite
+# wraps a child in a real SCE container, so it needs `decrypt`.
+microtests = ["decrypt"]
 
 # Suite that boots the ps3autotests corpus -- a GPLv2 tree the
 # developer clones locally (tests/ps3autotests.README.md), never
@@ -57,6 +65,13 @@ ps3autotests = []
 
 [[test]]
 name = "firmware_set_load"
+required-features = ["firmware-corpus"]
+
+# firmware_reloc_census is not listed here: its regenerator is gated
+# inside the file so the corpus-free companion test it carries still
+# runs in a default build.
+[[test]]
+name = "firmware_export_conflict_census"
 required-features = ["firmware-corpus"]
 
 [[test]]

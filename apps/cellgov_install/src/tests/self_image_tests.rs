@@ -7,7 +7,9 @@ use super::{into_plaintext_elf, is_sce_wrapped, to_plaintext_elf, KeyPolicy};
 use crate::sce::SceError;
 use crate::test_support::build_npdrm_eboot_header;
 use cellgov_ps3_abi::elf::ELF_MAGIC;
-use cellgov_ps3_abi::sce::{SCE_MAGIC, SCE_SUPPLEMENTAL_KIND_NPDRM};
+use cellgov_ps3_abi::sce::SCE_MAGIC;
+#[cfg(feature = "decrypt")]
+use cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
 
 fn plaintext_image() -> Vec<u8> {
     let mut v = vec![0u8; 64];
@@ -15,6 +17,7 @@ fn plaintext_image() -> Vec<u8> {
     v
 }
 
+#[cfg(feature = "decrypt")]
 /// SCE wrapper carrying one supplemental record of `kind` with a
 /// `body_len`-byte body. `body_len` under 0x80 truncates an NPD body;
 /// `kind` other than NPDRM exercises the no-NPDRM-record walk.
@@ -55,6 +58,7 @@ fn into_plaintext_elf_moves_a_plaintext_image_without_reallocating() {
     assert_eq!(out.as_ptr(), addr);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_npdrm_self_under_app_only_policy_is_refused_by_name() {
     let raw = build_npdrm_eboot_header(1, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
@@ -71,6 +75,7 @@ fn an_npdrm_self_under_app_only_policy_is_refused_by_name() {
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_wrapper_with_an_empty_supplemental_chain_under_app_only_policy_reaches_the_decrypt() {
     // Extended header present, supplemental_hdr_size = 0: the walk
@@ -86,6 +91,7 @@ fn a_wrapper_with_an_empty_supplemental_chain_under_app_only_policy_reaches_the_
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_wrapper_too_short_for_the_extended_header_is_refused_by_name() {
     // The chain cannot be read at all, so nothing establishes the key
@@ -105,6 +111,7 @@ fn a_wrapper_too_short_for_the_extended_header_is_refused_by_name() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_supplemental_chain_that_escapes_the_buffer_is_refused_by_name() {
     let mut raw = vec![0u8; 0x100];
@@ -124,6 +131,7 @@ fn a_supplemental_chain_that_escapes_the_buffer_is_refused_by_name() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_walkable_chain_with_no_npdrm_record_under_app_only_policy_reaches_the_decrypt() {
     let raw = sce_wrapper_with_supplemental(
@@ -138,6 +146,7 @@ fn a_walkable_chain_with_no_npdrm_record_under_app_only_policy_reaches_the_decry
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_npdrm_record_with_an_unrecognized_license_is_not_retried_under_app_keys() {
     for wire in [0u32, 4, u32::MAX] {
@@ -151,6 +160,7 @@ fn an_npdrm_record_with_an_unrecognized_license_is_not_retried_under_app_keys() 
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_npdrm_record_with_a_truncated_npd_body_is_not_retried_under_app_keys() {
     // Record body 0x10 bytes: the NPD needs 0x80, so the body parse
@@ -169,14 +179,15 @@ fn an_npdrm_record_with_a_truncated_npd_body_is_not_retried_under_app_keys() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
-fn an_npdrm_self_under_auto_policy_consults_the_klicensee_lookup_instead_of_refusing() {
+fn an_npdrm_self_under_auto_policy_consults_the_rap_lookup_instead_of_refusing() {
     let raw = build_npdrm_eboot_header(1, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
     let consulted = std::cell::Cell::new(0usize);
     let resolver = |npd: &crate::npdrm::NpdHeaderInfo| {
         consulted.set(consulted.get() + 1);
         assert_eq!(npd.content_id, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
-        Some([0u8; 16])
+        Some(crate::npdrm::Rap([0u8; 16]))
     };
     let err = to_plaintext_elf(&raw, KeyPolicy::Auto(&resolver))
         .expect_err("the synthetic header is not a decryptable SELF");
@@ -185,10 +196,78 @@ fn an_npdrm_self_under_auto_policy_consults_the_klicensee_lookup_instead_of_refu
     assert_eq!(
         consulted.get(),
         1,
-        "Auto must resolve the klicensee exactly once, got {err:?}"
+        "Auto must resolve the RAP exactly once, got {err:?}"
     );
     assert!(
         !matches!(err, SceError::NpdrmUnderAppOnlyPolicy { .. }),
         "Auto has a klicensee path, so the APP-only refusal must not fire, got {err:?}"
     );
+}
+
+#[test]
+fn a_plaintext_image_under_auto_policy_is_borrowed_through_without_consulting_the_rap_lookup() {
+    // The RAP lookup is reached only through an NPDRM record, and a
+    // plaintext image has none.
+    let raw = plaintext_image();
+    let consulted = std::cell::Cell::new(0usize);
+    let resolver = |_: &crate::npdrm::NpdHeaderInfo| {
+        consulted.set(consulted.get() + 1);
+        Some(crate::npdrm::Rap([0u8; 16]))
+    };
+    let out = to_plaintext_elf(&raw, KeyPolicy::Auto(&resolver)).expect("plaintext passes through");
+    assert!(matches!(out, Cow::Borrowed(_)));
+    assert_eq!(&*out, raw.as_slice());
+    assert_eq!(
+        consulted.get(),
+        0,
+        "no RAP is asked for on a plaintext image"
+    );
+}
+
+#[cfg(not(feature = "decrypt"))]
+#[test]
+fn without_the_decrypt_feature_every_sce_wrapper_is_refused_naming_the_feature() {
+    let consulted = std::cell::Cell::new(0usize);
+    let resolver = |_: &crate::npdrm::NpdHeaderInfo| {
+        consulted.set(consulted.get() + 1);
+        Some(crate::npdrm::Rap([0u8; 16]))
+    };
+    let npdrm = build_npdrm_eboot_header(1, "UP0001-CGOV00001_00-TESTTESTTESTTEST");
+    let mut app_keyed = vec![0u8; 0x68];
+    app_keyed[0..4].copy_from_slice(&SCE_MAGIC);
+    // The shortest buffer `is_sce_wrapped` accepts: the magic alone.
+    // The decrypt build would name it `TooSmall`; this build must not
+    // read past the magic before refusing.
+    let magic_only = SCE_MAGIC.to_vec();
+    for raw in [&npdrm, &app_keyed, &magic_only] {
+        for policy in [KeyPolicy::AppOnly, KeyPolicy::Auto(&resolver)] {
+            // An NPDRM image under APP-only keys is refused by its own
+            // name in every build; a rebuild would not open it.
+            let npdrm_under_app_only =
+                std::ptr::eq(raw, &npdrm) && matches!(policy, KeyPolicy::AppOnly);
+            let err = to_plaintext_elf(raw, policy).expect_err("no decrypt path in this build");
+            if npdrm_under_app_only {
+                assert!(
+                    matches!(err, SceError::NpdrmUnderAppOnlyPolicy { license: 1, .. }),
+                    "expected NpdrmUnderAppOnlyPolicy, got {err:?}"
+                );
+                continue;
+            }
+            assert!(
+                matches!(err, SceError::DecryptFeatureDisabled),
+                "expected DecryptFeatureDisabled, got {err:?}"
+            );
+            assert!(
+                err.to_string().contains("`decrypt`"),
+                "the refusal names the feature: {err}"
+            );
+        }
+        let err =
+            into_plaintext_elf(raw.clone(), KeyPolicy::Auto(&resolver)).expect_err("owned path");
+        assert!(
+            matches!(err, SceError::DecryptFeatureDisabled),
+            "the owned path shares the refusal, got {err:?}"
+        );
+    }
+    assert_eq!(consulted.get(), 0, "no RAP is ever asked for");
 }

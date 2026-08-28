@@ -117,9 +117,11 @@ Four structural rules:
   for the SCE wrapper and routes to the APP-keyed or
   klicensee-resolving decrypt per the caller's `KeyPolicy`. Only
   `cellgov_install` pulls the crypto crates (`aes`, `cbc`, `ctr`,
-  `hmac`, `sha1`, `sha2`, `flate2`) and `filebuffer`, whose safe
+  `hmac`, `sha1`, `flate2` -- optional, linked by the default-off
+  `decrypt` feature that also gates every key-consuming path;
+  `sha2` for hashing in every build) and `filebuffer`, whose safe
   read-only file mapping lets the installer walk disc images larger
-  than host memory.
+  than host memory. `cellgov_cli/decrypt` forwards to it.
 
 External dependencies: `serde`, `serde_json`, and `toml` in
 `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and

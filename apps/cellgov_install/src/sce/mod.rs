@@ -1,15 +1,18 @@
-//! SCE/SELF package decrypter for PS3 firmware and game binaries.
+//! SCE/SELF container parsing, and the package decrypter for PS3
+//! firmware and game binaries behind the `decrypt` feature.
 //!
-//! All SCE/SELF headers are big-endian. [`decrypt_self_to_elf`] emits a
+//! All SCE/SELF headers are big-endian. `decrypt_self_to_elf` emits a
 //! plaintext ELF with both per-segment and outer SCE signatures
 //! stripped; the result must not be re-signed or fed to anything that
 //! verifies signatures.
 
+#[cfg(feature = "decrypt")]
 mod decrypt;
 mod elf;
 mod error;
 mod raw;
 
+#[cfg(feature = "decrypt")]
 pub use decrypt::{decrypt_package, decrypt_sce_sections, decrypt_self_to_elf};
 pub use elf::mask_non_semantic_elf_bytes;
 pub use error::SceError;
@@ -18,7 +21,9 @@ pub use raw::{
     EncryptedSectionDescriptor, MetadataKeyEnvelope, SceContainerHeader,
 };
 
+#[cfg(feature = "decrypt")]
 pub(crate) use decrypt::{decrypt_envelope, decrypt_sections_from_envelope};
+#[cfg(feature = "decrypt")]
 pub(crate) use elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 pub(crate) use raw::find_supplemental_body;
 

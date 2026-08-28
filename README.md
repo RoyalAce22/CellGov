@@ -56,6 +56,19 @@ process-spawning runner behind the default-on `rpcs3-runner`
 feature; importers that want only the `Observation` schema and the
 comparison functions build with `default-features = false`.
 
+A default build contains no decryption. SCE/SELF, PKG, and PUP
+decryption -- every path that consumes a key -- sits behind the
+default-off `decrypt` feature of `cellgov_install` and
+`cellgov_cli`. Without it the tools parse containers and boot
+plaintext ELFs, and refuse an SCE-wrapped input by name; installed
+firmware and titles stay SCE-wrapped on disk, so booting a real
+corpus needs it:
+
+```bash
+cargo build --release -p cellgov_cli --features decrypt
+cargo build --release -p cellgov_install --features decrypt
+```
+
 ## Installing firmware and titles
 
 Booting anything real needs PS3 system firmware. Download the
@@ -64,7 +77,7 @@ official update (`PS3UPDAT.PUP`) from
 and install it:
 
 ```bash
-cargo run --release -p cellgov_install -- install /path/to/PS3UPDAT.PUP
+cargo run --release -p cellgov_install --features decrypt -- install /path/to/PS3UPDAT.PUP
 ```
 
 The install unwraps the SCE/PUP envelope and writes per-module SELFs
@@ -76,8 +89,8 @@ succeed; a failure names what it dropped and exits nonzero.
 Titles install from your own dumps:
 
 ```bash
-cargo run --release -p cellgov_install -- install-game <title>.pkg --rap <title>.rap
-cargo run --release -p cellgov_install -- install-iso <disc>.iso [--dkey <disc>.dkey]
+cargo run --release -p cellgov_install --features decrypt -- install-game <title>.pkg --rap <title>.rap
+cargo run --release -p cellgov_install --features decrypt -- install-iso <disc>.iso [--dkey <disc>.dkey]
 ```
 
 A PSN package lands under `vfs/dev_hdd0/game/<title-id>/`, a disc
@@ -90,7 +103,7 @@ install record.
 ## Running
 
 ```bash
-cargo build --release -p cellgov_cli
+cargo build --release -p cellgov_cli --features decrypt
 target/release/cellgov_cli run-game --title <name>       # boot to the manifest's checkpoint
 target/release/cellgov_cli bench-boot --title <name>     # boot twice, check the committed anchor
 target/release/cellgov_cli dump-prx-imports <path>       # inspect a PRX / SPRX / EBOOT
@@ -109,7 +122,10 @@ firmware image, an owned title dump, compiled micro-test ELFs) sit
 behind cargo features rather than environment variables: with the
 feature off the target is not built; with it on, a missing fixture
 is a hard error. Nothing skips silently, so `cargo test` on a fresh
-clone reports green only for gates that ran.
+clone reports green only for gates that ran. A corpus feature whose
+inputs are SCE-wrapped implies `decrypt`; the decrypt pipeline's own
+synthetic-fixture tests run with
+`cargo test -p cellgov_install --features decrypt`.
 
 ## License
 

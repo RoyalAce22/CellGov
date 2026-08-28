@@ -17,6 +17,19 @@
 //!   renames -- a tree-rename failure leaves an inert, content-id-keyed
 //!   RAP with no game directory, read only when that title's EBOOT is
 //!   decrypted and overwritten identically on retry.
+//!
+//! Both installers run the decrypt-proof, so they exist only with the
+//! `decrypt` feature; the record types, [`installs_dir`], and the
+//! uninstall side stay available in every build.
+
+#![cfg_attr(
+    not(feature = "decrypt"),
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the staging helpers are reachable only from the gated installers; the feature-on build lints them"
+    )
+)]
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -56,7 +69,7 @@ pub fn installs_dir(vfs_root: &Path) -> PathBuf {
 /// different roots.
 pub const DEFAULT_VFS_ROOT: &str = "vfs";
 
-/// Knobs shared by [`install_pkg`] and [`install_iso`].
+/// Knobs shared by `install_pkg` and `install_iso`.
 #[derive(Clone, Copy)]
 pub struct InstallOptions<'a> {
     /// Overwrite a non-empty target directory.
@@ -558,6 +571,7 @@ fn dir_non_empty(path: &Path) -> Result<bool, GameInstallError> {
 /// Install a retail PKG (PSN/retail HDD title) into `output_dir`'s
 /// `dev_hdd0` tree, installing the RAP and writing a record into
 /// `installs_dir`.
+#[cfg(feature = "decrypt")]
 pub fn install_pkg(
     pkg_bytes: &[u8],
     rap: Option<&[u8]>,
@@ -666,15 +680,14 @@ pub fn install_pkg(
             write_and_sync(&sr.staged_path, rap_bytes)?;
         }
         // The proof resolves the RAP the way the load path will -- a
-        // content-id-keyed read followed by `rap_to_klic` -- but
-        // against the staged copy, so a fault before commit touches no
-        // live exdata.
+        // content-id-keyed read -- but against the staged copy, so a
+        // fault before commit touches no live exdata.
         let rap_staging = staging_root.join("rap");
-        let resolver = move |n: &NpdHeaderInfo| -> Option<[u8; 16]> {
+        let resolver = move |n: &NpdHeaderInfo| -> Option<npdrm::Rap> {
             let rap_path = rap_staging.join(format!("{}.rap", n.content_id));
             let bytes = std::fs::read(&rap_path).ok()?;
             let arr: [u8; 16] = bytes.as_slice().try_into().ok()?;
-            Some(npdrm::rap_to_klic(&arr))
+            Some(npdrm::Rap(arr))
         };
         progress.phase(Phase::Proving);
         npdrm::decrypt_self_to_elf_auto(eboot_data, resolver)
@@ -728,7 +741,8 @@ pub fn install_pkg(
 ///
 /// The image is already decrypted (the encrypted-disc key pass runs
 /// upstream). There is no RAP -- disc EBOOTs are APP-keyed -- so the
-/// decrypt-proof runs through [`sce::decrypt_self_to_elf`].
+/// decrypt-proof runs through `sce::decrypt_self_to_elf`.
+#[cfg(feature = "decrypt")]
 pub fn install_iso(
     image: &[u8],
     source_bytes: &[u8],

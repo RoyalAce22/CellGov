@@ -1,8 +1,11 @@
 //! Synthetic-fixture builders shared across the crate's unit tests:
 //! a minimal PARAM.SFO emitter and a retail-PKG emitter. Compiled
-//! only under `cfg(test)`.
+//! only under `cfg(test)`; the PKG emitter needs the package key and
+//! so rides with the `decrypt` feature.
 
+#[cfg(feature = "decrypt")]
 use aes::cipher::{BlockEncrypt, KeyInit};
+#[cfg(feature = "decrypt")]
 use cellgov_ps3_abi::sce::PKG_AES_KEY;
 
 /// `format::string` tag.
@@ -59,6 +62,7 @@ pub fn build_param_sfo(entries: &[(&str, &str)]) -> Vec<u8> {
 }
 
 /// One item in a synthetic PKG.
+#[cfg(feature = "decrypt")]
 pub struct PkgItem {
     /// Package-relative name.
     pub name: String,
@@ -69,6 +73,7 @@ pub struct PkgItem {
 }
 
 /// A regular-file item with the given raw type.
+#[cfg(feature = "decrypt")]
 pub fn pkg_file(name: &str, raw_type: u32, data: &[u8]) -> PkgItem {
     PkgItem {
         name: name.to_string(),
@@ -77,12 +82,14 @@ pub fn pkg_file(name: &str, raw_type: u32, data: &[u8]) -> PkgItem {
     }
 }
 
+#[cfg(feature = "decrypt")]
 fn align16(n: usize) -> usize {
     n.div_ceil(16) * 16
 }
 
 /// CTR keystream XOR (symmetric encrypt/decrypt) over a PKG data
-/// region, mirroring the production decrypt.
+/// region, the same stream the production decrypt applies.
+#[cfg(feature = "decrypt")]
 fn pkg_ctr(klic: &[u8; 16], region: &mut [u8]) {
     let cipher = aes::Aes128::new_from_slice(&PKG_AES_KEY).expect("PKG_AES_KEY is 16 bytes");
     let mut counter = u128::from_be_bytes(*klic);
@@ -97,6 +104,7 @@ fn pkg_ctr(klic: &[u8; 16], region: &mut [u8]) {
 }
 
 /// Build a full retail PKG (data_offset 0x80) carrying `items`.
+#[cfg(feature = "decrypt")]
 pub fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[PkgItem]) -> Vec<u8> {
     let n = items.len();
     let table_len = n * 0x20;

@@ -16,7 +16,7 @@ env:
   # operator files, so enabling it without them is a compile error rather
   # than a lint. See CellGov-Dev #247.
   CORPUS_FEATURES: >-
-    cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
+    cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
 jobs:
   # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix
@@ -176,6 +176,15 @@ jobs:
 
       - name: cargo test --release
         run: cargo test --workspace --release --locked
+
+      # `decrypt` is not a corpus feature: the SCE/NPDRM/PKG/PUP tests
+      # behind it build their fixtures in-process. A default run compiles
+      # none of them, so they get their own run in both profiles.
+      - name: cargo test (cellgov_install with decrypt)
+        run: cargo test -p cellgov_install --locked --features decrypt
+
+      - name: cargo test --release (cellgov_install with decrypt)
+        run: cargo test -p cellgov_install --release --locked --features decrypt
 
       - name: cargo test (cellgov_compare without rpcs3-runner)
         run: cargo test -p cellgov_compare --locked --no-default-features

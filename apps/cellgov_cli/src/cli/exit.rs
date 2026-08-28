@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_install::npdrm::NpdHeaderInfo;
+use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
 use cellgov_install::sce::SceError;
 use cellgov_install::self_image::{is_sce_wrapped, to_plaintext_elf, KeyPolicy};
 use cellgov_ps3_abi::elf::ELF_MAGIC;
@@ -24,7 +24,7 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// Plaintext-ize a PPU image: pass non-SCE bytes (plaintext ELF /
 /// PRX) through unchanged, and decrypt an SCE/SELF wrapper.
 ///
-/// NPDRM titles resolve their klicensee from the RAP at
+/// NPDRM titles resolve their RAP at
 /// `<vfs_root>/home/00000001/exdata/<content_id>.rap` -- the same
 /// exdata layout RPCS3 reads on boot, so a once-installed RAP is
 /// found by content id with no per-invocation `--rap` or `--title`.
@@ -33,7 +33,7 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.
 pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path) -> Vec<u8> {
     let exdata = vfs_root.join("home").join("00000001").join("exdata");
-    let resolver = |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
+    let resolver = |npd: &NpdHeaderInfo| -> Option<Rap> {
         let rap_path = exdata.join(format!("{}.rap", npd.content_id));
         // Only "no such file" is an absent RAP. Any other read failure
         // (permissions, a directory in its place) would otherwise take
@@ -55,7 +55,7 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
                 rap_bytes.len(),
             ))
         });
-        Some(cellgov_install::npdrm::rap_to_klic(&rap_arr))
+        Some(Rap(rap_arr))
     };
     match to_plaintext_elf(bytes, KeyPolicy::Auto(&resolver)) {
         Ok(elf) => elf.into_owned(),
@@ -78,12 +78,12 @@ enum LoadCandidateError {
 }
 
 /// RAP path layout is `<vfs_root>/home/00000001/exdata/<rap>`.
-fn klicensee_resolver(
+fn rap_resolver(
     title: &TitleManifest,
     vfs_root: PathBuf,
-) -> impl Fn(&NpdHeaderInfo) -> Option<[u8; 16]> {
+) -> impl Fn(&NpdHeaderInfo) -> Option<Rap> {
     let rap_filename = title.rap_filename.clone();
-    move |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
+    move |npd: &NpdHeaderInfo| -> Option<Rap> {
         // license 3 (free) falls back to NP_KLIC_FREE downstream when None.
         let rap_filename = rap_filename.as_ref()?;
         let rap_path = vfs_root
@@ -108,7 +108,7 @@ fn klicensee_resolver(
                 rap_bytes.len(),
             ))
         });
-        Some(cellgov_install::npdrm::rap_to_klic(&rap_arr))
+        Some(Rap(rap_arr))
     }
 }
 
@@ -123,8 +123,8 @@ pub(crate) struct LoadedPpuImage {
     pub control_flags1: Option<u32>,
 }
 
-/// Read a PPU image at an explicit path, resolving the klicensee for
-/// NPDRM titles from the manifest's `rap_filename`.
+/// Read a PPU image at an explicit path, resolving the RAP for NPDRM
+/// titles from the manifest's `rap_filename`.
 pub(crate) fn load_ppu_image_with_title_or_die(
     path: &str,
     title: &TitleManifest,
@@ -144,7 +144,7 @@ pub(crate) fn load_ppu_image_with_title_or_die(
     );
     let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
         .unwrap_or_else(|e| die(&format!("SELF {path}: capability header: {e}")));
-    let resolver = klicensee_resolver(title, vfs_root.to_path_buf());
+    let resolver = rap_resolver(title, vfs_root.to_path_buf());
     let elf_data = to_plaintext_elf(&bytes, KeyPolicy::Auto(&resolver))
         .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")))
         .into_owned();
@@ -180,7 +180,7 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
         .unwrap_or_else(|| die("load ppu image: resolved EBOOT has no parent directory"))
         .to_path_buf();
 
-    let resolver = klicensee_resolver(title, vfs_root.to_path_buf());
+    let resolver = rap_resolver(title, vfs_root.to_path_buf());
     let mut attempts: Vec<(String, LoadCandidateError)> = Vec::new();
     for candidate in &title.eboot_candidates {
         let path = usrdir.join(candidate);
@@ -228,6 +228,15 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                         path,
                     )
                 }
+                // The next candidate answers the same if it is
+                // SCE-wrapped, and a plaintext one would boot in place
+                // of the canonical binary without a word.
+                Err(e @ SceError::DecryptFeatureDisabled) => die(&format!(
+                    "load ppu image: {}: {e}; no later eboot_candidate is tried \
+                     for title {}",
+                    path.display(),
+                    title.name(),
+                )),
                 Err(e) => {
                     attempts.push((candidate.clone(), LoadCandidateError::Decrypt(e)));
                     continue;

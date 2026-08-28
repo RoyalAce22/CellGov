@@ -1,11 +1,16 @@
 //! PUP (PlayStation Update Package) container parser.
 //!
 //! All multi-byte fields are big-endian. Payloads are themselves SCE-encrypted;
-//! decryption is the caller's responsibility (see `sce`).
+//! decryption is the caller's responsibility (see `sce`). Payload HMAC
+//! validation runs under the update key, so it sits behind the
+//! `decrypt` feature; parsing does not.
 
+#[cfg(feature = "decrypt")]
 use hmac::{Hmac, Mac};
+#[cfg(feature = "decrypt")]
 use sha1::Sha1;
 
+#[cfg(feature = "decrypt")]
 use crate::crypto::PUP_KEY;
 
 /// On-disk PUP header at file offset 0, 0x30 bytes, all fields big-endian.
@@ -120,6 +125,7 @@ pub enum PupError {
         entry_id: u64,
     },
     /// HMAC-SHA1 initialization failed (wrong key length).
+    #[cfg(feature = "decrypt")]
     #[error("HMAC init: {0}")]
     HmacInit(#[source] hmac::digest::InvalidLength),
     /// HMAC-SHA1 mismatch between computed and recorded hash.
@@ -185,9 +191,11 @@ pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
     })
 }
 
+#[cfg(feature = "decrypt")]
 type HmacSha1 = Hmac<Sha1>;
 
 /// Recompute HMAC-SHA1 of each payload under `PUP_KEY` and compare against the recorded hash.
+#[cfg(feature = "decrypt")]
 pub fn validate_hashes(data: &[u8], pup: &Pup) -> Result<(), PupError> {
     if pup.entries.len() != pup.hashes.len() {
         return Err(PupError::TableLengthMismatch {

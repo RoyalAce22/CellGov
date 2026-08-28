@@ -22,6 +22,7 @@ fn parse_accepts_valid_empty_pup() {
     assert_eq!(pup.entries.len(), 0);
 }
 
+#[cfg(feature = "decrypt")]
 /// Build a single-entry PUP with a matching HMAC. Returns the
 /// assembled buffer and the computed hash.
 fn build_one_entry_pup(entry_id: u64, payload: &[u8]) -> (Vec<u8>, [u8; 20]) {
@@ -55,6 +56,7 @@ fn build_one_entry_pup(entry_id: u64, payload: &[u8]) -> (Vec<u8>, [u8; 20]) {
     (buf, hash)
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn validate_hashes_accepts_correct_hmac() {
     let (data, _) = build_one_entry_pup(0x300, b"payload bytes here");
@@ -62,6 +64,7 @@ fn validate_hashes_accepts_correct_hmac() {
     validate_hashes(&data, &pup).expect("HMAC valid");
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn validate_hashes_rejects_corrupted_hash() {
     let (mut data, _) = build_one_entry_pup(0x300, b"payload bytes here");
@@ -72,6 +75,7 @@ fn validate_hashes_rejects_corrupted_hash() {
     assert!(matches!(err, PupError::HmacMismatch { .. }));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn validate_hashes_rejects_hash_record_with_wrong_index() {
     let (mut data, _) = build_one_entry_pup(0x300, b"payload bytes here");

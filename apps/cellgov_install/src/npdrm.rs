@@ -6,21 +6,26 @@
 //! This module owns that derivation, the NPD header interpretation
 //! ([`find_npd_header_info`] over the generic supplemental walk in
 //! [`crate::sce`]), and the prefix decrypt; the post-envelope flow
-//! rejoins [`crate::sce::decrypt_self_to_elf`]'s shared CTR path.
+//! rejoins `crate::sce::decrypt_self_to_elf`'s shared CTR path.
 //!
+//! The NPD header interpretation is available in every build; the
+//! derivation and the decrypt are behind the `decrypt` feature.
 //! Fixture-dependent tests (`include_bytes!` of operator-supplied
 //! RAP and EBOOT files under `vfs/dev_hdd0/`) live behind
 //! the `npdrm-oracle-vectors` feature.
 
+#[cfg(feature = "decrypt")]
 use aes::cipher::{BlockDecrypt, KeyInit};
-use cellgov_ps3_abi::sce::{
-    NP_KLIC_FREE, NP_KLIC_KEY, RAP_E1, RAP_E2, RAP_KEY, RAP_PBOX, SCE_SUPPLEMENTAL_KIND_NPDRM,
-};
+use cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
+#[cfg(feature = "decrypt")]
+use cellgov_ps3_abi::sce::{NP_KLIC_FREE, NP_KLIC_KEY, RAP_E1, RAP_E2, RAP_KEY, RAP_PBOX};
 
+#[cfg(feature = "decrypt")]
 use crate::sce::{
     assemble_elf_from_sections, decrypt_envelope, decrypt_sections_from_envelope,
-    find_supplemental_body, inner_elf_segment_file_sizes, parse_sce_header, SceError,
+    inner_elf_segment_file_sizes, parse_sce_header,
 };
+use crate::sce::{find_supplemental_body, SceError};
 
 /// Validated NPDRM license type; discriminants match the u32 BE wire
 /// encoding, and any other wire value is rejected with
@@ -60,6 +65,10 @@ pub struct NpdHeaderInfo {
     pub license: NpdLicense,
 }
 
+/// The 16 bytes of one title's RAP file, as read from disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rap(pub [u8; 16]);
+
 /// Find and interpret an SELF's NPDRM (type 3) supplemental header.
 ///
 /// Returns `Ok(None)` for SELFs that have no NPDRM supplemental
@@ -94,6 +103,7 @@ pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceErr
 ///
 /// The envelope-peel step further ECB-decrypts the output with
 /// `NP_KLIC_KEY` to produce the layer key.
+#[cfg(feature = "decrypt")]
 #[must_use]
 pub fn rap_to_klic(rap: &[u8; 16]) -> [u8; 16] {
     let cipher = aes::Aes128::new_from_slice(&RAP_KEY).expect("RAP_KEY is 16 bytes");
@@ -133,6 +143,7 @@ pub fn rap_to_klic(rap: &[u8; 16]) -> [u8; 16] {
 
 /// Derive the AES-128 layer key (which decrypts the NPDRM-wrapped
 /// metadata-info envelope) by ECB-decrypting `klicensee` with `NP_KLIC_KEY`.
+#[cfg(feature = "decrypt")]
 fn klicensee_to_layer_key(klicensee: &[u8; 16]) -> [u8; 16] {
     let cipher = aes::Aes128::new_from_slice(&NP_KLIC_KEY).expect("NP_KLIC_KEY is 16 bytes");
     let mut layer_key = [0u8; 16];
@@ -149,6 +160,7 @@ fn klicensee_to_layer_key(klicensee: &[u8; 16]) -> [u8; 16] {
 /// Returns [`SceError::AesCbcDecryptFailed`] or
 /// [`SceError::KeyEnvelopePadding`] when either layer key is wrong --
 /// envelope zero-padding self-certifies a correct decrypt.
+#[cfg(feature = "decrypt")]
 pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
     // High bit of revision_flags marks an unencrypted debug SELF.
@@ -171,37 +183,39 @@ pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Ve
 /// Decrypt a SELF whose key class is not known up-front, dispatching
 /// APP-keyed vs NPDRM via the presence of a type-3 supplemental header.
 ///
-/// `klicensee_lookup` is invoked only for NPDRM-wrapped SELFs; the
-/// caller is responsible for running [`rap_to_klic`] on the RAP
-/// material first. Returning `None` errors with
-/// [`SceError::NoRapForNpdrmTitle`] naming the `content_id`.
-/// License-3 (free) titles fall back to `NP_KLIC_FREE` when the
-/// lookup returns `None`.
+/// `rap_lookup` is invoked only for NPDRM-wrapped SELFs and returns
+/// the title's [`Rap`]; the klicensee is derived here. Returning
+/// `None` errors with [`SceError::NoRapForNpdrmTitle`] naming the
+/// `content_id`. License-3 (free) titles fall back to `NP_KLIC_FREE`
+/// when the lookup returns `None`.
+#[cfg(feature = "decrypt")]
 pub fn decrypt_self_to_elf_auto(
     data: &[u8],
-    klicensee_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<[u8; 16]>,
+    rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<Rap>,
 ) -> Result<Vec<u8>, SceError> {
     match find_npd_header_info(data)? {
         None => crate::sce::decrypt_self_to_elf(data),
         Some(npd) => {
-            let klicensee = resolve_npdrm_klicensee(&npd, klicensee_lookup)?;
+            let klicensee = resolve_npdrm_klicensee(&npd, rap_lookup)?;
             decrypt_self_to_elf_npdrm(data, &klicensee)
         }
     }
 }
 
 /// Resolve the klicensee bytes for an NPDRM SELF given its NPD header.
+#[cfg(feature = "decrypt")]
 fn resolve_npdrm_klicensee(
     npd: &NpdHeaderInfo,
-    klicensee_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<[u8; 16]>,
+    rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<Rap>,
 ) -> Result<[u8; 16], SceError> {
+    let klicensee = rap_lookup(npd).map(|rap| rap_to_klic(&rap.0));
     match npd.license {
         NpdLicense::Network | NpdLicense::Local => {
-            klicensee_lookup(npd).ok_or_else(|| SceError::NoRapForNpdrmTitle {
+            klicensee.ok_or_else(|| SceError::NoRapForNpdrmTitle {
                 content_id: npd.content_id.clone(),
             })
         }
-        NpdLicense::Free => Ok(klicensee_lookup(npd).unwrap_or(NP_KLIC_FREE)),
+        NpdLicense::Free => Ok(klicensee.unwrap_or(NP_KLIC_FREE)),
     }
 }
 

@@ -34,6 +34,7 @@ fn parse_sce_header_accepts_valid() {
     assert_eq!(hdr.header_size, 256);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn decrypt_package_rejects_truncated() {
     assert!(matches!(
@@ -46,6 +47,7 @@ fn decrypt_package_rejects_truncated() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 /// 0x100-byte SCE container with `metadata_offset` 0x20, so the key
 /// envelope sits at 0x40..0x80 and the metadata directory starts at
 /// 0x80.
@@ -58,6 +60,7 @@ fn build_sce_container(revision_flags: u16, header_size: u64) -> Vec<u8> {
     data
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_debug_container_whose_envelope_padding_is_not_zero_is_named() {
     let mut data = build_sce_container(0x8000, 0x100);
@@ -71,6 +74,7 @@ fn a_debug_container_whose_envelope_padding_is_not_zero_is_named() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_debug_container_whose_envelope_padding_is_zero_passes_through_unpeeled() {
     let mut data = build_sce_container(0x8000, 0x100);
@@ -83,6 +87,7 @@ fn a_debug_container_whose_envelope_padding_is_zero_passes_through_unpeeled() {
     assert_eq!(&envelope[0x20..0x30], &[0xCDu8; 16]);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_header_size_at_or_below_the_metadata_directory_start_is_not_reported_as_a_short_file() {
     // header_size 0x40 ends the directory before its 0x80 start while
@@ -102,6 +107,7 @@ fn a_header_size_at_or_below_the_metadata_directory_start_is_not_reported_as_a_s
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_header_size_past_the_buffer_is_still_reported_as_a_short_file() {
     let data = build_sce_container(0x0001, 0x200);
@@ -120,6 +126,7 @@ fn a_header_size_past_the_buffer_is_still_reported_as_a_short_file() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 fn zlib_compress(plain: &[u8]) -> Vec<u8> {
     use std::io::Write;
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
@@ -127,6 +134,7 @@ fn zlib_compress(plain: &[u8]) -> Vec<u8> {
     encoder.finish().unwrap()
 }
 
+#[cfg(feature = "decrypt")]
 /// SCE container holding one PHDR-kind, plaintext, zlib-compressed
 /// section that targets program-header row 0.
 ///
@@ -163,6 +171,7 @@ fn build_container_with_one_zlib_section(compressed: &[u8]) -> Vec<u8> {
     data
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_zlib_section_inflating_past_its_segment_filesz_is_named() {
     let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
@@ -182,6 +191,7 @@ fn a_zlib_section_inflating_past_its_segment_filesz_is_named() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_zlib_section_inflating_to_exactly_its_segment_filesz_is_accepted() {
     let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
@@ -191,6 +201,7 @@ fn a_zlib_section_inflating_to_exactly_its_segment_filesz_is_accepted() {
     assert_eq!(sections[0].1, vec![0xAAu8; 0x400]);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_zlib_section_naming_a_program_index_past_the_phdr_table_cannot_escape_the_inflate_bound() {
     let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
@@ -208,6 +219,7 @@ fn a_zlib_section_naming_a_program_index_past_the_phdr_table_cannot_escape_the_i
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_segment_declaring_the_widest_possible_filesz_does_not_overflow_the_inflate_bound() {
     // The bound is the declared size plus one, so a `p_filesz` of
@@ -219,6 +231,7 @@ fn a_segment_declaring_the_widest_possible_filesz_does_not_overflow_the_inflate_
     assert_eq!(sections[0].1.len(), 0x400);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_zlib_section_in_a_container_with_no_inner_elf_inflates_unbounded() {
     // The firmware-update PKG path wraps no ELF, so no program header
@@ -380,6 +393,7 @@ fn mask_non_semantic_elf_bytes_is_noop_on_short_input() {
     assert_eq!(elf, before);
 }
 
+#[cfg(feature = "decrypt")]
 /// Craft a minimal SELF buffer that satisfies the early
 /// fixed-position bounds checks in `assemble_elf_from_sections`:
 /// ehdr at 0x100 with valid magic + ELFCLASS64 + ELF64 entsize
@@ -402,6 +416,7 @@ fn build_synthetic_self() -> Vec<u8> {
     data
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn assemble_ehdr_offset_overflow_returns_typed_error() {
     let mut data = vec![0u8; 0x100];
@@ -410,6 +425,7 @@ fn assemble_ehdr_offset_overflow_returns_typed_error() {
     assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn assemble_phdr_table_extent_overflow_returns_typed_error() {
     let mut data = build_synthetic_self();
@@ -421,6 +437,7 @@ fn assemble_phdr_table_extent_overflow_returns_typed_error() {
     assert!(matches!(err, SceError::HeaderOffsetOutOfRange { .. }));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_null_section_header_offset_does_not_overwrite_the_elf_header() {
     let mut data = build_synthetic_self();
@@ -437,6 +454,7 @@ fn a_null_section_header_offset_does_not_overwrite_the_elf_header() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn the_section_header_table_lands_on_top_of_an_overlapping_segment_payload() {
     // RPCS3 `unself.h` `SELFDecrypter::WriteElf` writes the ehdr, the
@@ -479,6 +497,7 @@ fn the_section_header_table_lands_on_top_of_an_overlapping_segment_payload() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 /// PHDR-kind descriptor naming program-header row `prog_idx`. The
 /// payload fields go unread: `assemble_elf_from_sections` takes the
 /// already-decrypted bytes from its `sections` argument.
@@ -497,6 +516,7 @@ fn phdr_section(prog_idx: u32) -> EncryptedSectionDescriptor {
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_empty_payload_against_a_non_zero_filesz_is_named_rather_than_left_as_zeroes() {
     let mut data = build_synthetic_self();
@@ -520,6 +540,7 @@ fn an_empty_payload_against_a_non_zero_filesz_is_named_rather_than_left_as_zeroe
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_empty_payload_against_a_zero_filesz_segment_still_assembles() {
     let mut data = build_synthetic_self();
@@ -534,6 +555,7 @@ fn an_empty_payload_against_a_zero_filesz_segment_still_assembles() {
     assert_eq!(&elf[0..4], &0x7F45_4C46u32.to_be_bytes());
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_empty_payload_naming_a_program_index_past_e_phnum_is_still_rejected() {
     let mut data = build_synthetic_self();
@@ -553,6 +575,7 @@ fn an_empty_payload_naming_a_program_index_past_e_phnum_is_still_rejected() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_program_segment_extent_too_large_to_allocate_is_named_rather_than_aborting() {
     let mut data = build_synthetic_self();
@@ -571,6 +594,7 @@ fn a_program_segment_extent_too_large_to_allocate_is_named_rather_than_aborting(
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn assemble_inner_elf_bad_magic_returns_typed_error() {
     let mut data = build_synthetic_self();
@@ -582,6 +606,7 @@ fn assemble_inner_elf_bad_magic_returns_typed_error() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn assemble_bad_phentsize_returns_typed_error() {
     let mut data = build_synthetic_self();
@@ -600,6 +625,7 @@ fn assemble_bad_phentsize_returns_typed_error() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn assemble_bad_shentsize_returns_typed_error() {
     let mut data = build_synthetic_self();
@@ -619,6 +645,7 @@ fn assemble_bad_shentsize_returns_typed_error() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_sprx_shape_with_zero_counts_and_zero_entsizes_assembles_to_a_bare_elf_header() {
     // SPRX shape: e_phnum = e_shnum = 0, entsize fields zero. The

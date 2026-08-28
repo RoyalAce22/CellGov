@@ -3,17 +3,20 @@
 //! happy path is covered by the presence-gated real-dump parity test
 //! in `tests/parity_pkg.rs`).
 
+#![cfg_attr(not(feature = "decrypt"), allow(unused_imports, dead_code))]
+
 use super::*;
 use crate::scratch_dir::scratch;
-use crate::test_support::{
-    build_iso, build_npdrm_eboot_header, build_param_sfo, build_pkg, pkg_file, IsoNode, PkgItem,
-};
+use crate::test_support::{build_iso, build_npdrm_eboot_header, build_param_sfo, IsoNode};
+#[cfg(feature = "decrypt")]
+use crate::test_support::{build_pkg, pkg_file, PkgItem};
 use std::path::PathBuf;
 
 const KLIC: [u8; 16] = [
     0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0, 0x01,
 ];
 
+#[cfg(feature = "decrypt")]
 fn sfo_item(entries: &[(&str, &str)]) -> PkgItem {
     pkg_file("PARAM.SFO", 3, &build_param_sfo(entries))
 }
@@ -106,6 +109,7 @@ fn a_record_that_is_not_toml_is_refused_separately_from_a_version_mismatch() {
     assert!(matches!(err, InstallRecordParseError::Toml(_)), "{err:?}");
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_missing_param_sfo() {
     let pkg = build_pkg(&KLIC, "NPUA80001", &[pkg_file("README.TXT", 3, b"hi")]);
@@ -121,6 +125,7 @@ fn rejects_missing_param_sfo() {
     assert!(matches!(err, GameInstallError::NoParamSfo));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_non_hdd_category() {
     let pkg = build_pkg(
@@ -140,6 +145,7 @@ fn rejects_non_hdd_category() {
     assert!(matches!(err, GameInstallError::NotHddGame { category } if category == "GD"));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_title_id_mismatch() {
     // Header title-id NPUA80001, but PARAM.SFO claims NPUA80068.
@@ -160,6 +166,7 @@ fn rejects_title_id_mismatch() {
     assert!(matches!(err, GameInstallError::TitleIdMismatch { .. }));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_missing_title_id() {
     let pkg = build_pkg(
@@ -179,6 +186,7 @@ fn rejects_missing_title_id() {
     assert!(matches!(err, GameInstallError::MissingTitleId));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_missing_eboot() {
     let pkg = build_pkg(
@@ -199,8 +207,43 @@ fn rejects_missing_eboot() {
     assert!(!out.join("vfs/dev_hdd0/game/NPUA80001").exists());
 }
 
+#[test]
+fn parse_identity_requires_title_id_and_prefers_app_ver_over_version() {
+    let err = parse_identity(&build_param_sfo(&[("CATEGORY", "HG")])).unwrap_err();
+    assert!(matches!(err, GameInstallError::MissingTitleId), "{err:?}");
+
+    let (title_id, category, title, app_version) = parse_identity(&build_param_sfo(&[
+        ("TITLE_ID", "NPUA80001"),
+        ("CATEGORY", "HG"),
+        ("TITLE", "flOw"),
+        ("VERSION", "01.02"),
+    ]))
+    .unwrap();
+    assert_eq!(title_id, "NPUA80001");
+    assert_eq!(category, "HG");
+    assert_eq!(title, "flOw");
+    assert_eq!(
+        app_version, "01.02",
+        "VERSION stands in when APP_VER is absent"
+    );
+
+    let (_, category, title, app_version) = parse_identity(&build_param_sfo(&[
+        ("TITLE_ID", "NPUA80001"),
+        ("APP_VER", "01.05"),
+        ("VERSION", "01.02"),
+    ]))
+    .unwrap();
+    assert_eq!(app_version, "01.05", "APP_VER wins over VERSION");
+    assert_eq!(
+        category, "",
+        "an absent CATEGORY reads as empty; the category gate refuses it downstream"
+    );
+    assert_eq!(title, "");
+}
+
 // --- Disc (ISO) install rejection paths -------------------------------
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn iso_rejects_missing_param_sfo() {
     let image = build_iso(vec![IsoNode::File("PS3_DISC.SFB", b"sfb".to_vec())]);
@@ -216,6 +259,7 @@ fn iso_rejects_missing_param_sfo() {
     assert!(matches!(err, GameInstallError::NoDiscParamSfo));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn iso_rejects_non_disc_category() {
     let image = build_iso(vec![IsoNode::Dir(
@@ -237,6 +281,7 @@ fn iso_rejects_non_disc_category() {
     assert!(matches!(err, GameInstallError::NotDiscGame { category } if category == "HG"));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn iso_rejects_missing_eboot() {
     let image = build_iso(vec![IsoNode::Dir(
@@ -259,6 +304,7 @@ fn iso_rejects_missing_eboot() {
     assert!(!out.join("vfs/dev_bdvd/BCES00664").exists());
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn iso_pre_commit_fault_leaves_no_staging_residue() {
     // On the disc path the staging root *is* the tree (no `tree/`
@@ -430,6 +476,7 @@ const NPD_CONTENT_ID: &str = "UP9000-NPUA80001_00-TEST";
 /// A synthetic HG PKG whose EBOOT carries an NPD header of `license`.
 /// The EBOOT is not a real SELF, so the decrypt-proof fails -- which is
 /// what the residue assertions rely on (a pre-commit fault).
+#[cfg(feature = "decrypt")]
 fn npdrm_pkg(license: u32) -> Vec<u8> {
     let sfo = build_param_sfo(&[("TITLE_ID", NPD_TITLE_ID), ("CATEGORY", "HG")]);
     let eboot = build_npdrm_eboot_header(license, NPD_CONTENT_ID);
@@ -449,6 +496,7 @@ fn exdata_rap(vfs: &Path) -> PathBuf {
     ))
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn pre_commit_fault_leaves_no_exdata_residue() {
     // Network license + a 16-byte RAP: the RAP stages under the root,
@@ -476,6 +524,7 @@ fn pre_commit_fault_leaves_no_exdata_residue() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_rap_required_for_network_license() {
     let pkg = npdrm_pkg(1); // network
@@ -493,6 +542,7 @@ fn rejects_rap_required_for_network_license() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_wrong_size_rap() {
     let pkg = npdrm_pkg(1);
@@ -569,6 +619,7 @@ fn a_consuming_license_with_no_rap_is_the_callers_invariant_to_have_refused() {
     let _ = plan_for(Some(crate::npdrm::NpdLicense::Network), None);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_existing_target_without_force_and_force_bypasses() {
     let pkg = npdrm_pkg(1);
@@ -999,6 +1050,7 @@ impl crate::progress::InstallProgress for RecordingReporter {
 /// `finished` means the install completed; a renderer draws its 100%
 /// frame on it. A pre-commit fault must therefore leave it unset, and
 /// the phase trail must stop at the phase that faulted.
+#[cfg(feature = "decrypt")]
 #[test]
 fn a_pre_commit_fault_never_reports_finished() {
     use crate::progress::Phase;

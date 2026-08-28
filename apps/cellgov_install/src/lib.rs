@@ -4,9 +4,16 @@
 //! `install` subcommand peels the outer SCE/PUP wrapping at install
 //! time, and `cellgov_cli`'s boot path calls
 //! [`self_image::to_plaintext_elf`] to peel the inner SELF at load
-//! time. That wrapper routes to [`sce::decrypt_self_to_elf`]
-//! (APP-keyed) or [`npdrm::decrypt_self_to_elf_auto`] (auto-detect
+//! time. That wrapper routes to `sce::decrypt_self_to_elf`
+//! (APP-keyed) or `npdrm::decrypt_self_to_elf_auto` (auto-detect
 //! APP vs NPDRM) according to the caller's declared key policy.
+//!
+//! Every key-consuming path -- the SCE decrypt pipeline, the NPDRM
+//! klicensee derivation, PKG content decryption, PUP HMAC validation,
+//! and the encrypted-disc pass -- is behind the `decrypt` cargo
+//! feature, off by default. Without it the crate parses containers
+//! and passes plaintext images through, and an SCE-wrapped input is
+//! refused with [`sce::SceError::DecryptFeatureDisabled`].
 //!
 //! APP-keyed firmware SELFs and RAP-driven NPDRM SELFs are in scope.
 //! RIF-only paths (act.dat / IDPS console-identity derivation) and
@@ -19,7 +26,9 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+#[cfg(feature = "decrypt")]
 pub mod crypto;
+#[cfg(feature = "decrypt")]
 pub mod disc_crypt;
 pub mod game_install;
 pub mod game_uninstall;

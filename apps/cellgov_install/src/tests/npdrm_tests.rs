@@ -3,6 +3,7 @@
 
 use super::*;
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rap_to_klic_is_pure() {
     let rap = [0x42u8; 16];
@@ -11,6 +12,7 @@ fn rap_to_klic_is_pure() {
     assert_eq!(a, b);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rap_to_klic_is_not_a_constant_or_the_identity() {
     let a = rap_to_klic(&[0x42u8; 16]);
@@ -19,6 +21,7 @@ fn rap_to_klic_is_not_a_constant_or_the_identity() {
     assert_ne!(a, [0x42u8; 16], "the RAP is transformed, not echoed");
 }
 
+#[cfg(feature = "decrypt")]
 fn npd(license: NpdLicense, content_id: &str) -> NpdHeaderInfo {
     NpdHeaderInfo {
         license,
@@ -26,22 +29,25 @@ fn npd(license: NpdLicense, content_id: &str) -> NpdHeaderInfo {
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
-fn resolve_klicensee_license_network_with_rap_returns_klic() {
-    let want = [0xABu8; 16];
-    let got =
-        resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| Some(want)).unwrap();
-    assert_eq!(got, want);
+fn resolve_klicensee_license_network_with_rap_derives_the_klic() {
+    let rap = [0xABu8; 16];
+    let got = resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| Some(Rap(rap)))
+        .unwrap();
+    assert_eq!(got, rap_to_klic(&rap));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
-fn resolve_klicensee_license_local_with_rap_returns_klic() {
-    let want = [0xCDu8; 16];
+fn resolve_klicensee_license_local_with_rap_derives_the_klic() {
+    let rap = [0xCDu8; 16];
     let got =
-        resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| Some(want)).unwrap();
-    assert_eq!(got, want);
+        resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| Some(Rap(rap))).unwrap();
+    assert_eq!(got, rap_to_klic(&rap));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
     let err =
@@ -54,6 +60,7 @@ fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
     let err = resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| None).unwrap_err();
@@ -65,19 +72,24 @@ fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_free_without_rap_returns_np_klic_free() {
     let got = resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| None).unwrap();
     assert_eq!(got, NP_KLIC_FREE);
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
-fn resolve_klicensee_license_free_with_rap_returns_supplied_klic() {
-    let want = [0x77u8; 16];
-    let got = resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| Some(want)).unwrap();
-    assert_eq!(got, want);
+fn resolve_klicensee_license_free_with_rap_derives_the_supplied_rap() {
+    let rap = [0x77u8; 16];
+    let got =
+        resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| Some(Rap(rap))).unwrap();
+    assert_eq!(got, rap_to_klic(&rap));
+    assert_ne!(got, NP_KLIC_FREE, "a supplied RAP wins over the free key");
 }
 
+#[cfg(feature = "decrypt")]
 /// Minimal SCE header (0x20 bytes) carrying the given
 /// `revision_flags`. Satisfies `parse_sce_header`'s magic check
 /// so the debug guard can run; all other fields are zero.
@@ -88,6 +100,7 @@ fn synthetic_sce_header_with_revision_flags(revision_flags: u16) -> Vec<u8> {
     data
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn the_app_decrypt_path_rejects_a_debug_self_by_name() {
     let data = synthetic_sce_header_with_revision_flags(0x8000);
@@ -100,6 +113,7 @@ fn the_app_decrypt_path_rejects_a_debug_self_by_name() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_high_bit_set() {
     let data = synthetic_sce_header_with_revision_flags(0x8000);
@@ -113,6 +127,7 @@ fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_high_bit_set() {
     }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_both_bits_set() {
     // High bit AND a non-zero revision in the low 15 bits:
@@ -128,6 +143,7 @@ fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_both_bits_set() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn decrypt_self_to_elf_npdrm_does_not_treat_high_revision_as_debug() {
     // 0x7FFF: highest non-debug revision. It clears the debug guard

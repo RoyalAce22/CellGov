@@ -127,6 +127,14 @@ flowchart TD
   ms --> crt0["CRT0 from the ELF entry point"]
 ```
 
+The decrypt node exists only in a build with the `decrypt` cargo
+feature of `cellgov_install` / `cellgov_cli`. A default build links
+no key material and exposes no decrypt entry point: it boots plaintext
+ELFs and PRXes and refuses an SCE-wrapped executable or module with
+`SceError::DecryptFeatureDisabled`, naming the feature. An NPDRM image
+met under an APP-only key policy keeps its own refusal in either
+build, since no build could open it.
+
 A process the title spawns runs steps 1-5 again in its own address
 space: the spawn loader parses the child's import table, loads its
 closure from the same verified candidate set (decrypted once per

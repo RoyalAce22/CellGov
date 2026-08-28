@@ -10,9 +10,13 @@
 //! files. It never touches the filesystem; the install orchestration
 //! ([`crate::game_install`]) stages and commits the returned tree. The
 //! EBOOT comes out still SCE/NPDRM-wrapped -- extraction is not
-//! executable decryption.
+//! executable decryption. Header parsing is available in every build;
+//! content extraction consumes the package key and sits behind the
+//! `decrypt` feature.
 
+#[cfg(feature = "decrypt")]
 use aes::cipher::{BlockEncrypt, KeyInit};
+#[cfg(feature = "decrypt")]
 use cellgov_ps3_abi::sce::PKG_AES_KEY;
 
 /// Retail release type (`pkg_type == 0x8000`).
@@ -30,12 +34,16 @@ const ENTRY_LEN: usize = 0x20;
 const MAX_NAME_LEN: u32 = 256;
 
 /// Low byte of `PKGEntry::type`: a directory.
+#[cfg(feature = "decrypt")]
 const ENTRY_KIND_FOLDER: u8 = 4;
 /// Low byte of `PKGEntry::type`: alternate directory tag (`0x12`).
+#[cfg(feature = "decrypt")]
 const ENTRY_KIND_FOLDER_ALT: u8 = 0x12;
 /// Low byte of `PKGEntry::type`: NPDRM-EDAT (out of scope, skipped).
+#[cfg(feature = "decrypt")]
 const ENTRY_KIND_EDAT: u8 = 2;
 /// Low byte of `PKGEntry::type`: SDAT (out of scope, skipped).
+#[cfg(feature = "decrypt")]
 const ENTRY_KIND_SDAT: u8 = 9;
 
 /// Parsed retail PKG header. Only the fields the installer consumes
@@ -318,6 +326,7 @@ fn trim_fixed_str(bytes: &[u8]) -> String {
 /// Decrypt `region` in place with the package CTR stream: block `b`
 /// is XORed with `AES-ECB(PKG_AES_KEY, klicensee + b)`, the counter
 /// incrementing per 16-byte block from the data-region start.
+#[cfg(feature = "decrypt")]
 fn ctr_decrypt(klicensee: &[u8; 16], region: &mut [u8]) {
     let cipher =
         aes::Aes128::new_from_slice(&PKG_AES_KEY).expect("PKG_AES_KEY is exactly 16 bytes");
@@ -333,6 +342,7 @@ fn ctr_decrypt(klicensee: &[u8; 16], region: &mut [u8]) {
 }
 
 /// Reject any name whose components would escape the install root.
+#[cfg(feature = "decrypt")]
 fn validate_item_name(index: usize, name: &str) -> Result<(), PkgError> {
     let unsafe_path = name.starts_with('/')
         || name.starts_with('\\')
@@ -355,6 +365,7 @@ fn validate_item_name(index: usize, name: &str) -> Result<(), PkgError> {
 /// per-region decrypt because PKG item offsets are 16-byte aligned.
 /// EDAT and SDAT items are skipped (out of scope). Folder items become
 /// [`PkgEntryKind::Directory`] entries.
+#[cfg(feature = "decrypt")]
 pub fn extract(data: &[u8]) -> Result<PkgArchive, PkgError> {
     let header = parse_header(data)?;
 

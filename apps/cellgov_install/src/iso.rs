@@ -5,7 +5,7 @@
 //! same subset: the volume descriptor set at sector 16, the Primary
 //! and optional Joliet descriptors, and recursive directory records.
 //! No UDF structures are parsed. Input is a decrypted image (see
-//! [`crate::disc_crypt`]); output is a file tree of bounds-checked
+//! `crate::disc_crypt`); output is a file tree of bounds-checked
 //! extent references that a consumer resolves against the image one
 //! file at a time ([`IsoEntry::extent_slices`] /
 //! [`IsoEntry::read_data`]), because a BD-DL image's content does not

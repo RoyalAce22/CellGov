@@ -196,4 +196,7 @@ pub enum SceError {
         /// Raw `revision_flags` field from the SCE container header.
         revision_flags: u16,
     },
+    /// SCE-wrapped input in a build compiled without the `decrypt` feature.
+    #[error("SCE: the image is SCE-wrapped, and this build was compiled without the `decrypt` cargo feature; supply a plaintext ELF or rebuild with `--features decrypt`")]
+    DecryptFeatureDisabled,
 }

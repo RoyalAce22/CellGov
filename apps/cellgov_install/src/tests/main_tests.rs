@@ -176,6 +176,7 @@ fn preflight_ignores_mounts_a_firmware_install_does_not_write() {
     assert!(dir.join("dev_bdvd/PS3_DISC.SFB").is_file());
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn an_unreadable_firmware_tree_is_named_rather_than_yielding_a_short_manifest() {
     let dir = scratch();
@@ -193,6 +194,7 @@ fn an_unreadable_firmware_tree_is_named_rather_than_yielding_a_short_manifest() 
     ));
 }
 
+#[cfg(feature = "decrypt")]
 /// Real PS3 firmware ships a zero-byte `.sprx` placeholder. Hashing it
 /// as a pre-decrypted module would put the empty-bytes digest in the
 /// manifest under revision 0, so the boot verifier would be handed an
@@ -325,7 +327,7 @@ fn a_rap_that_is_not_sixteen_bytes_is_refused_by_name() {
     let dir = scratch();
     let rap = dir.join("short.rap");
     std::fs::write(&rap, b"nope").unwrap();
-    let err = klicensee_from_rap(&rap).expect_err("wrong size");
+    let err = rap_from_file(&rap).expect_err("wrong size");
     assert!(
         matches!(err, FirmwareCliError::RapWrongSize { len: 4, .. }),
         "expected RapWrongSize, got {err:?}"
@@ -350,24 +352,21 @@ fn a_rap_that_is_not_sixteen_bytes_is_refused_by_name() {
 #[test]
 fn an_absent_rap_resolves_to_no_key_rather_than_an_error() {
     let dir = scratch();
-    assert_eq!(klicensee_from_rap(&dir.join("absent.rap")).unwrap(), None);
+    assert_eq!(rap_from_file(&dir.join("absent.rap")).unwrap(), None);
 }
 
 #[test]
-fn a_sixteen_byte_rap_derives_the_klicensee_for_the_bytes_on_disk() {
+fn a_sixteen_byte_rap_is_read_verbatim_from_disk() {
     let dir = scratch();
     let zeroes = dir.join("zeroes.rap");
     let ones = dir.join("ones.rap");
     std::fs::write(&zeroes, [0u8; 16]).unwrap();
     std::fs::write(&ones, [0x11u8; 16]).unwrap();
 
-    let from_zeroes = klicensee_from_rap(&zeroes).unwrap().expect("derived");
-    let from_ones = klicensee_from_rap(&ones).unwrap().expect("derived");
-    assert_eq!(from_zeroes, npdrm::rap_to_klic(&[0u8; 16]));
-    assert_eq!(from_ones, npdrm::rap_to_klic(&[0x11u8; 16]));
-    // Two files, two keys: the file's contents reach the derivation
-    // rather than a constant or a path-derived answer.
-    assert_ne!(from_zeroes, from_ones);
+    let from_zeroes = rap_from_file(&zeroes).unwrap().expect("read");
+    let from_ones = rap_from_file(&ones).unwrap().expect("read");
+    assert_eq!(from_zeroes, Rap([0u8; 16]));
+    assert_eq!(from_ones, Rap([0x11u8; 16]));
 }
 
 #[test]
@@ -405,7 +404,7 @@ fn a_rap_that_is_present_but_unreadable_is_named_rather_than_read_as_absent() {
     let not_a_file = dir.join("a_directory.rap");
     std::fs::create_dir_all(&not_a_file).unwrap();
 
-    let err = klicensee_from_rap(&not_a_file).expect_err("an unreadable RAP is not absence");
+    let err = rap_from_file(&not_a_file).expect_err("an unreadable RAP is not absence");
     assert!(
         matches!(err, FirmwareCliError::RapReadFailed { .. }),
         "expected RapReadFailed, got {err:?}"
@@ -421,7 +420,7 @@ fn an_explicit_rap_that_does_not_exist_is_refused_rather_than_resolved_to_no_key
     let dir = scratch();
     let named = dir.join("absent.rap");
 
-    let err = resolve_rap_klicensee(Some(&named), &dir, "UP9000-NPUA80001_00-XXXX")
+    let err = resolve_rap(Some(&named), &dir, "UP9000-NPUA80001_00-XXXX")
         .expect_err("a named --rap that is not there is a refusal");
     let FirmwareCliError::ExplicitRapMissing { path } = &err else {
         panic!("expected ExplicitRapMissing, got {err:?}");
@@ -436,7 +435,7 @@ fn an_explicit_rap_that_does_not_exist_is_refused_rather_than_resolved_to_no_key
 fn an_exdata_probe_that_misses_is_the_uninstalled_case_not_a_refusal() {
     let dir = scratch();
     assert_eq!(
-        resolve_rap_klicensee(None, &dir, "UP9000-NPUA80001_00-XXXX").unwrap(),
+        resolve_rap(None, &dir, "UP9000-NPUA80001_00-XXXX").unwrap(),
         None
     );
 }
@@ -450,10 +449,29 @@ fn an_explicit_rap_is_used_in_place_of_the_content_id_keyed_exdata_file() {
     let explicit = dir.join("other.rap");
     std::fs::write(&explicit, [0x11u8; 16]).unwrap();
 
-    let probed = resolve_rap_klicensee(None, &exdata, "CID").unwrap();
-    let named = resolve_rap_klicensee(Some(&explicit), &exdata, "CID").unwrap();
-    assert_eq!(probed, Some(npdrm::rap_to_klic(&[0u8; 16])));
-    assert_eq!(named, Some(npdrm::rap_to_klic(&[0x11u8; 16])));
+    let probed = resolve_rap(None, &exdata, "CID").unwrap();
+    let named = resolve_rap(Some(&explicit), &exdata, "CID").unwrap();
+    assert_eq!(probed, Some(Rap([0u8; 16])));
+    assert_eq!(named, Some(Rap([0x11u8; 16])));
+}
+
+#[cfg(not(feature = "decrypt"))]
+#[test]
+fn a_decrypting_subcommand_on_a_build_without_decrypt_is_refused_naming_both() {
+    for sub in ["install", "install-game", "install-iso", "decrypt-self"] {
+        let rendered = FirmwareCliError::DecryptFeatureDisabled {
+            subcommand: sub.to_string(),
+        }
+        .to_string();
+        assert!(
+            rendered.starts_with(sub),
+            "names the subcommand: {rendered}"
+        );
+        assert!(
+            rendered.contains("--features decrypt"),
+            "names the rebuild: {rendered}"
+        );
+    }
 }
 
 #[test]

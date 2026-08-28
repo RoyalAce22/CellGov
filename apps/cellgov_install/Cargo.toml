@@ -17,13 +17,15 @@ path = "src/main.rs"
 
 [dependencies]
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
-aes = "0.8"
-cbc = "0.1"
-ctr = "0.9"
-hmac = "0.12"
-sha1 = "0.10"
+# The cipher, MAC, and inflate crates serve only the key-consuming
+# decrypt paths, so they enter the build with the `decrypt` feature.
+aes = { version = "0.8", optional = true }
+cbc = { version = "0.1", optional = true }
+ctr = { version = "0.9", optional = true }
+hmac = { version = "0.12", optional = true }
+sha1 = { version = "0.10", optional = true }
 sha2 = "0.10"
-flate2 = "1"
+flate2 = { version = "1", optional = true }
 # Read-only file mapping with a safe API, for disc images too large to
 # hold resident (a BD-DL ISO is up to 50 GB; fs::read commits it all).
 # Chosen over memmap2 because its map call is not `unsafe fn`, keeping
@@ -34,37 +36,50 @@ toml = "0.8"
 thiserror = "2"
 
 [features]
+# Every key-consuming path: the SCE/SELF decrypt pipeline, the NPDRM
+# klicensee derivation, PKG content decryption, PUP HMAC validation,
+# and the encrypted-disc pass. Off by default: the crate then parses
+# containers (SCE / PUP / PKG headers, ISO9660) and hands plaintext
+# images through, and every SCE-wrapped input is refused with
+# `SceError::DecryptFeatureDisabled`. A build without it links no
+# cipher crate and references no key constant (the constants stay in
+# source until they move to an operator-supplied vault).
+decrypt = ["dep:aes", "dep:cbc", "dep:ctr", "dep:hmac", "dep:sha1", "dep:flate2"]
+
 # Enable the npdrm oracle vector tests that include_bytes!() the
 # operator-supplied RAP and EBOOT files from the installed corpus
 # under vfs/dev_hdd0/. Off by default so a fresh checkout without
 # those license files compiles cleanly; CI enables it on the host
 # that carries them to run the 16-byte-boundary regression anchors.
-# The rap_to_klic_is_pure test (no fixture dependency) stays
-# unconditional.
-npdrm-oracle-vectors = []
+# The rap_to_klic_is_pure test (no fixture dependency) rides with
+# `decrypt`.
+npdrm-oracle-vectors = ["decrypt"]
 
 # Suites that install a title from an operator-owned raw dump: a
 # retail PKG plus its RAP, or a ~2GB decrypted disc image, read from
 # the dump root. Distinct from title-corpus: owning the installed
 # result under vfs/ does not mean the raw dump was kept, and these
-# suites install from scratch.
-title-dumps = []
+# suites install from scratch. An install runs the decrypt-proof, so
+# the feature implies `decrypt`.
+title-dumps = ["decrypt"]
 
 # Suites that read titles already installed under vfs/. Off by default
 # so a fresh checkout neither builds nor silently skips them; on, they
 # hard-assert. CI type-checks and lints them so they cannot bitrot.
-title-corpus = []
+# The installed EBOOTs are SELFs, so the suites need `decrypt`.
+title-corpus = ["decrypt"]
 
 # Suites that read firmware already installed under vfs/dev_flash.
 # Same contract as title-corpus: off means not built, on means
-# hard-assert.
-firmware-corpus = []
+# hard-assert. The installed modules stay SCE-wrapped on disk, so the
+# suites need `decrypt`.
+firmware-corpus = ["decrypt"]
 
 # Suite that installs firmware from an operator-owned PS3UPDAT.PUP in
 # the dump root. Distinct from firmware-corpus for the same reason
 # title-dumps is distinct from title-corpus: having the installed
 # result under vfs/ does not mean the update package was kept.
-firmware-dumps = []
+firmware-dumps = ["decrypt"]
 
 [[test]]
 name = "parity_pkg"

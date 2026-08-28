@@ -1,7 +1,9 @@
 //! PS3 firmware and SELF decryption CLI.
 //!
 //! Exposes [`cellgov_install`]'s library as `install` and
-//! `decrypt-self` subcommands.
+//! `decrypt-self` subcommands. Every subcommand but `uninstall`
+//! decrypts, so a binary built without the `decrypt` feature refuses
+//! them by name.
 
 #![allow(
     clippy::print_stdout,
@@ -9,17 +11,27 @@
     reason = "CLI binary: stdout/stderr are the user-facing output channel"
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(feature = "decrypt"),
+    allow(
+        dead_code,
+        unused_imports,
+        reason = "the argument parsers are reachable only from the gated subcommands; the feature-on build lints them"
+    )
+)]
 
 mod progress_render;
 
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
+#[cfg(feature = "decrypt")]
+use cellgov_install::disc_crypt;
 use cellgov_install::game_install::InstallOptions;
 use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
-use cellgov_install::npdrm::{self, NpdHeaderInfo};
-use cellgov_install::{disc_crypt, game_install, game_uninstall, pup, sce, self_image, tar};
+use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
+use cellgov_install::{game_install, game_uninstall, pup, sce, self_image, tar};
 use progress_render::{ProgressBar, TermCaps};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
@@ -33,11 +45,25 @@ fn main() {
     }
 
     match args[1].as_str() {
+        #[cfg(feature = "decrypt")]
         "install" => cmd_install(&args),
+        #[cfg(feature = "decrypt")]
         "install-game" => cmd_install_game(&args),
+        #[cfg(feature = "decrypt")]
         "install-iso" => cmd_install_iso(&args),
         "uninstall" => cmd_uninstall(&args),
+        #[cfg(feature = "decrypt")]
         "decrypt-self" => cmd_decrypt_self(&args),
+        #[cfg(not(feature = "decrypt"))]
+        sub @ ("install" | "install-game" | "install-iso" | "decrypt-self") => {
+            eprintln!(
+                "{}",
+                FirmwareCliError::DecryptFeatureDisabled {
+                    subcommand: sub.to_string(),
+                }
+            );
+            std::process::exit(1);
+        }
         _ => {
             print_usage();
             std::process::exit(1);
@@ -47,6 +73,9 @@ fn main() {
 
 fn print_usage() {
     eprintln!("usage:");
+    if cfg!(not(feature = "decrypt")) {
+        eprintln!("  (this build has no decrypt support: only `uninstall` runs; rebuild with `--features decrypt` for the rest)");
+    }
     eprintln!("  cellgov_install install <PUP_PATH> [--output <dir>] [--force]");
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    extracts the firmware image to dev_flash/ (+ dev_flash2/, dev_flash3/)");
@@ -113,6 +142,11 @@ enum FirmwareCliError {
     /// `decrypt-self` invoked without a SELF path.
     #[error("decrypt-self requires a SELF path")]
     MissingSelfPath,
+    /// A decrypting subcommand on a binary built without the
+    /// `decrypt` cargo feature.
+    #[cfg(not(feature = "decrypt"))]
+    #[error("{subcommand} decrypts, and this cellgov_install was built without the `decrypt` cargo feature; rebuild with `cargo build -p cellgov_install --features decrypt`")]
+    DecryptFeatureDisabled { subcommand: String },
     /// `--output` flag with no following argument.
     #[error("--output requires a {kind} argument")]
     OutputFlagMissingValue { kind: &'static str },
@@ -288,7 +322,7 @@ fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareC
     })
 }
 
-/// Read a 16-byte RAP and derive its klicensee.
+/// Read a 16-byte RAP file.
 ///
 /// # Errors
 ///
@@ -299,7 +333,7 @@ fn parse_decrypt_self_args(args: &[String]) -> Result<DecryptSelfArgs, FirmwareC
 /// either the license-3 free-key fallback or a named refusal. Any other
 /// read failure would otherwise be indistinguishable from absence and
 /// slip through as the free key.
-fn klicensee_from_rap(path: &Path) -> Result<Option<[u8; 16]>, FirmwareCliError> {
+fn rap_from_file(path: &Path) -> Result<Option<Rap>, FirmwareCliError> {
     let bytes = match std::fs::read(path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -318,36 +352,37 @@ fn klicensee_from_rap(path: &Path) -> Result<Option<[u8; 16]>, FirmwareCliError>
                 path: path.to_path_buf(),
                 len: bytes.len(),
             })?;
-    Ok(Some(npdrm::rap_to_klic(&arr)))
+    Ok(Some(Rap(arr)))
 }
 
-/// Resolve the klicensee for one NPDRM content id: from `explicit`
-/// when `--rap` named a file, otherwise from `<exdata>/<id>.rap`.
+/// Resolve the RAP for one NPDRM content id: from `explicit` when
+/// `--rap` named a file, otherwise from `<exdata>/<id>.rap`.
 ///
 /// # Errors
 ///
-/// Everything [`klicensee_from_rap`] refuses, plus
+/// Everything [`rap_from_file`] refuses, plus
 /// [`FirmwareCliError::ExplicitRapMissing`] when `--rap` named a file
 /// that is not there. Only the exdata probe may miss quietly -- an
 /// explicit flag that resolved to nothing would otherwise be indis-
 /// tinguishable from not passing it, and license-3 titles decrypt on
 /// the free-key fallback either way.
-fn resolve_rap_klicensee(
+fn resolve_rap(
     explicit: Option<&Path>,
     exdata: &Path,
     content_id: &str,
-) -> Result<Option<[u8; 16]>, FirmwareCliError> {
+) -> Result<Option<Rap>, FirmwareCliError> {
     let rap = match explicit {
         Some(p) => p.to_path_buf(),
         None => exdata.join(format!("{content_id}.rap")),
     };
-    match klicensee_from_rap(&rap)? {
+    match rap_from_file(&rap)? {
         Some(k) => Ok(Some(k)),
         None if explicit.is_some() => Err(FirmwareCliError::ExplicitRapMissing { path: rap }),
         None => Ok(None),
     }
 }
 
+#[cfg(feature = "decrypt")]
 fn cmd_decrypt_self(args: &[String]) {
     let parsed = parse_decrypt_self_args(args).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -375,8 +410,8 @@ fn cmd_decrypt_self(args: &[String]) {
     // its klicensee the way the boot path does.
     let exdata = game_install::exdata_dir(&parsed.vfs_root.join("dev_hdd0"));
     let resolve_error: RefCell<Option<FirmwareCliError>> = RefCell::new(None);
-    let resolver = |npd: &NpdHeaderInfo| -> Option<[u8; 16]> {
-        match resolve_rap_klicensee(parsed.rap_path.as_deref(), &exdata, &npd.content_id) {
+    let resolver = |npd: &NpdHeaderInfo| -> Option<Rap> {
+        match resolve_rap(parsed.rap_path.as_deref(), &exdata, &npd.content_id) {
             Ok(k) => k,
             Err(e) => {
                 // A refused RAP is a hard error, but the resolver
@@ -476,6 +511,7 @@ fn preflight_firmware_mounts(output_dir: &Path, force: bool) -> Result<(), Firmw
     Ok(())
 }
 
+#[cfg(feature = "decrypt")]
 fn cmd_install(args: &[String]) {
     let install_args = parse_install_args(args).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -759,6 +795,7 @@ fn container_label(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+#[cfg(feature = "decrypt")]
 fn cmd_install_game(args: &[String]) {
     let parsed = parse_install_game_args(args).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -879,6 +916,7 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
     })
 }
 
+#[cfg(feature = "decrypt")]
 fn cmd_install_iso(args: &[String]) {
     let parsed = parse_install_iso_args(args).unwrap_or_else(|e| {
         eprintln!("{e}");
@@ -984,6 +1022,7 @@ fn cmd_install_iso(args: &[String]) {
 /// the encrypted path is transient disk instead.
 ///
 /// Exits the process on any failure, removing the partial file first.
+#[cfg(feature = "decrypt")]
 fn decrypt_iso_to_temp(image: &[u8], dkey: &[u8; 16], output_dir: &Path) -> PathBuf {
     let tmp_dir = output_dir.join(".cellgov");
     std::fs::create_dir_all(&tmp_dir).unwrap_or_else(|e| {
@@ -1167,6 +1206,7 @@ fn collect_sprx_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), Firmwa
 /// [`FirmwareCliError::FirmwareTreeReadFailed`] when the walk cannot
 /// list part of the tree, plus the per-file read / strip_prefix /
 /// non-UTF-8 refusals.
+#[cfg(feature = "decrypt")]
 fn build_firmware_manifest(
     pup_data: &[u8],
     pup_image_version: u64,

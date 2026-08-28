@@ -3,14 +3,17 @@
 
 use super::*;
 
+#[cfg(feature = "decrypt")]
 const TEST_KLIC: [u8; 16] = [
     0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00,
 ];
 
+#[cfg(feature = "decrypt")]
 fn align16(n: usize) -> usize {
     n.div_ceil(16) * 16
 }
 
+#[cfg(feature = "decrypt")]
 /// Wrap an already-laid-out plaintext data region into a full retail
 /// PKG: build the header, CTR-encrypt the region, and append it at
 /// `data_offset` (0x80). `pkg_size`/`data_size` are derived to match.
@@ -38,12 +41,14 @@ fn wrap_region(klic: &[u8; 16], title_id: &str, file_count: u32, plaintext: &[u8
 }
 
 /// A spec for one item in a synthetic package.
+#[cfg(feature = "decrypt")]
 struct ItemSpec {
     name: &'static str,
     raw_type: u32,
     data: Vec<u8>,
 }
 
+#[cfg(feature = "decrypt")]
 fn file_item(name: &'static str, raw_type: u32, data: &[u8]) -> ItemSpec {
     ItemSpec {
         name,
@@ -52,6 +57,7 @@ fn file_item(name: &'static str, raw_type: u32, data: &[u8]) -> ItemSpec {
     }
 }
 
+#[cfg(feature = "decrypt")]
 fn dir_item(name: &'static str) -> ItemSpec {
     ItemSpec {
         name,
@@ -60,6 +66,7 @@ fn dir_item(name: &'static str) -> ItemSpec {
     }
 }
 
+#[cfg(feature = "decrypt")]
 /// Lay out a plaintext data region for `items` (entry table, then
 /// 16-aligned name and data blobs) and wrap it into a full PKG.
 fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[ItemSpec]) -> Vec<u8> {
@@ -99,10 +106,12 @@ fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[ItemSpec]) -> Vec<u8> {
     wrap_region(klic, title_id, n as u32, &region)
 }
 
+#[cfg(feature = "decrypt")]
 fn find<'a>(archive: &'a PkgArchive, name: &str) -> Option<&'a PkgFile> {
     archive.files.iter().find(|f| f.name == name)
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn extract_round_trips_files_and_dirs() {
     let eboot = b"\x53\x43\x45\x00 fake encrypted eboot bytes ........";
@@ -138,6 +147,7 @@ fn extract_round_trips_files_and_dirs() {
     );
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn skips_edat_and_sdat_items() {
     let pkg = build_pkg(
@@ -155,6 +165,7 @@ fn skips_edat_and_sdat_items() {
     assert!(find(&archive, "USRDIR/SAVE.SDAT").is_none(), "SDAT skipped");
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_bad_magic() {
     let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
@@ -162,6 +173,7 @@ fn rejects_bad_magic() {
     assert!(matches!(extract(&pkg).unwrap_err(), PkgError::BadMagic(_)));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_debug_package() {
     let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
@@ -169,6 +181,7 @@ fn rejects_debug_package() {
     assert!(matches!(extract(&pkg).unwrap_err(), PkgError::DebugPackage));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_non_ps3_platform() {
     let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
@@ -179,6 +192,7 @@ fn rejects_non_ps3_platform() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_pkg_size_over_file_length() {
     let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
@@ -190,6 +204,7 @@ fn rejects_pkg_size_over_file_length() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_data_region_escaping_pkg_size() {
     let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
@@ -201,6 +216,7 @@ fn rejects_data_region_escaping_pkg_size() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_name_too_long() {
     // Hand-build a one-entry region with name_size > MAX_NAME_LEN.
@@ -218,6 +234,7 @@ fn rejects_name_too_long() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_name_escaping_region() {
     let mut region = vec![0u8; 0x20];
@@ -231,6 +248,7 @@ fn rejects_name_escaping_region() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_file_data_escaping_region() {
     // One entry: a valid name, but file_offset/size run off the region.
@@ -251,6 +269,7 @@ fn rejects_file_data_escaping_region() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 fn rejects_unsafe_traversal_name() {
     let pkg = build_pkg(
@@ -272,6 +291,7 @@ fn rejects_too_small() {
     ));
 }
 
+#[cfg(feature = "decrypt")]
 /// Hand-build a one-file region: entry table, 16-aligned name, then
 /// `data` placed at `file_offset` with the given `file_size` and NO
 /// trailing alignment pad, so the region ends where the data does.
@@ -294,6 +314,7 @@ fn one_file_region(name: &[u8], data: &[u8], file_size: u64) -> Vec<u8> {
 // item only when `fsz - file_size < file_offset`, so an item whose
 // last byte is the last byte of the region is accepted; the range
 // must resolve it without an off-by-one at the region end.
+#[cfg(feature = "decrypt")]
 #[test]
 fn file_ending_exactly_at_region_end_resolves() {
     let data = b"tailend";
@@ -309,6 +330,7 @@ fn file_ending_exactly_at_region_end_resolves() {
 // RPCS3 `read_entries` skips the data bound when `file_size == 0`; the
 // range for such an item is empty and must resolve even when its
 // offset is the region length itself.
+#[cfg(feature = "decrypt")]
 #[test]
 fn zero_length_file_at_region_end_resolves_empty() {
     let region = one_file_region(b"Z.BIN", b"", 0);
@@ -320,6 +342,7 @@ fn zero_length_file_at_region_end_resolves_empty() {
     assert!(archive.file_data(file).is_empty());
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
 #[should_panic(expected = "invariant: extract bounds-proved every item range")]
 fn file_data_from_a_foreign_archive_that_escapes_the_region_panics() {

@@ -124,6 +124,7 @@ pub(super) fn checked_add_oob(a: usize, b: usize, what: &'static str) -> Result<
 /// Checked multiplication routed to [`SceError::HeaderOffsetOutOfRange`].
 /// Used on counts-times-element-size products derived from file
 /// bytes (e.g. `e_phnum * e_phentsize`, `section_count * 0x30`).
+#[cfg(feature = "decrypt")]
 pub(super) fn checked_mul_oob(a: usize, b: usize, what: &'static str) -> Result<usize, SceError> {
     a.checked_mul(b)
         .ok_or(SceError::HeaderOffsetOutOfRange { what })

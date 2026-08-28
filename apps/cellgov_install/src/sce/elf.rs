@@ -1,9 +1,14 @@
-//! Decrypted-sections -> plaintext run-image assembly.
+//! Decrypted-sections -> plaintext run-image assembly, plus the
+//! section-header mask.
 
+#[cfg(feature = "decrypt")]
 use cellgov_ps3_abi::elf::ELF_MAGIC_U32;
+#[cfg(feature = "decrypt")]
 use cellgov_ps3_abi::sce::SCE_SECTION_KIND_PHDR;
 
+#[cfg(feature = "decrypt")]
 use super::error::SceError;
+#[cfg(feature = "decrypt")]
 use super::raw::{
     checked_add_oob, checked_mul_oob, read_be_u16, read_be_u32, read_be_u64,
     EncryptedSectionDescriptor,
@@ -11,6 +16,7 @@ use super::raw::{
 
 /// Plaintext geometry of a SELF's inner ELF, read from the SELF
 /// extended header and the ELF header it points at.
+#[cfg(feature = "decrypt")]
 struct InnerElf {
     ehdr_offset: usize,
     phdr_offset: usize,
@@ -22,6 +28,7 @@ struct InnerElf {
     segments: Vec<(usize, usize)>,
 }
 
+#[cfg(feature = "decrypt")]
 fn parse_inner_elf(data: &[u8]) -> Result<InnerElf, SceError> {
     if data.len() < 0x68 {
         return Err(SceError::TooSmall {
@@ -109,6 +116,7 @@ fn parse_inner_elf(data: &[u8]) -> Result<InnerElf, SceError> {
 /// its destination segment declares; RPCS3 `unself.h`
 /// `SELFDecrypter::WriteElf` sizes that inflate buffer at exactly
 /// `phdr[program_idx].p_filesz`.
+#[cfg(feature = "decrypt")]
 pub(crate) fn inner_elf_segment_file_sizes(data: &[u8]) -> Result<Vec<usize>, SceError> {
     Ok(parse_inner_elf(data)?
         .segments
@@ -124,6 +132,7 @@ pub(crate) fn inner_elf_segment_file_sizes(data: &[u8]) -> Result<Vec<usize>, Sc
 /// last -- if the SELF's `shdr_offset` and the inner ELF's `e_shoff`
 /// are both non-zero -- the original section-header table copied to
 /// `e_shoff`.
+#[cfg(feature = "decrypt")]
 pub(crate) fn assemble_elf_from_sections(
     data: &[u8],
     sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
