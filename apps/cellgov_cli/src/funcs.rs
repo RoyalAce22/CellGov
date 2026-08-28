@@ -2,21 +2,23 @@
 //! main ELF or PRX.
 //!
 //! Accepts the same input forms as `dump-prx-imports`: a plaintext
-//! ELF / PRX, an APP-keyed SCE wrapper, or an NPDRM SELF (retail
-//! EBOOT). NPDRM titles resolve their RAP from the standard vfs
-//! exdata directory by content id; see [`decrypt_ppu_self_or_die`].
+//! ELF / PRX and, in a build with the `decrypt` feature, an APP-keyed
+//! SCE wrapper or an NPDRM SELF (retail EBOOT). NPDRM titles resolve
+//! their RAP from the standard vfs exdata directory by content id;
+//! see [`decrypt_ppu_self_or_die`].
 //! Human output is one row per function; `--json` emits the map for
 //! tooling.
 
 use cellgov_ppu::funcmap::{self, FunctionMap, FunctionName};
 
-use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
+use crate::cli::exit::{
+    decrypt_ppu_self_or_die, die, load_file_or_die, SCE_INPUT_USAGE_NOTE as SCE_NOTE,
+};
 use crate::cli::title::resolve_ps3_vfs_root;
 
-const USAGE: &str = "cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]\n\
-     \t(NPDRM EBOOTs resolve their RAP from <vfs-root>/home/00000001/exdata/\n\
-     \t and the key vault from CELLGOV_KEYS, else <vfs-root>/../.cellgov/keys/;\n\
-     \t vfs-root defaults to CELLGOV_PS3_VFS_ROOT, then vfs/dev_hdd0)";
+pub(crate) fn usage() -> String {
+    format!("cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]\n{SCE_NOTE}")
+}
 
 #[derive(Debug)]
 struct FuncsArgs<'a> {
@@ -38,22 +40,22 @@ fn parse_args(args: &[String]) -> Result<FuncsArgs<'_>, String> {
             // value is re-read by `resolve_ps3_vfs_root`.
             "--vfs-root" => {
                 if args.get(i + 1).is_none() {
-                    return Err(format!("funcs: --vfs-root requires a path\n{USAGE}"));
+                    return Err(format!("funcs: --vfs-root requires a path\n{}", usage()));
                 }
                 i += 2;
             }
             flag if flag.starts_with("--") => {
-                return Err(format!("funcs: unknown flag {flag}\n{USAGE}"));
+                return Err(format!("funcs: unknown flag {flag}\n{}", usage()));
             }
             positional => {
                 if path.replace(positional).is_some() {
-                    return Err(format!("funcs: more than one path argument\n{USAGE}"));
+                    return Err(format!("funcs: more than one path argument\n{}", usage()));
                 }
                 i += 1;
             }
         }
     }
-    let path = path.ok_or_else(|| format!("funcs: missing <elf-path>\n{USAGE}"))?;
+    let path = path.ok_or_else(|| format!("funcs: missing <elf-path>\n{}", usage()))?;
     Ok(FuncsArgs { path, json })
 }
 

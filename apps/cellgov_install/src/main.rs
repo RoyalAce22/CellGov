@@ -77,29 +77,34 @@ fn main() {
 
 fn print_usage() {
     eprintln!("usage:");
-    if cfg!(not(feature = "decrypt")) {
-        eprintln!("  (this build has no decrypt support: only `uninstall` and `keys` run; rebuild with `--features decrypt` for the rest)");
+    if cfg!(feature = "decrypt") {
+        eprintln!(
+            "  every decrypting subcommand reads the operator's key vault: {ENV_KEYS}=<file-or-dir>,"
+        );
+        eprintln!("    or the vault `keys import` wrote under <vfs>/.cellgov/keys/");
+        eprintln!("  cellgov_install install <PUP_PATH> [--output <dir>] [--force]");
+        eprintln!("    default --output: vfs/ (at the current working directory)");
+        eprintln!("    extracts the firmware image to dev_flash/ (+ dev_flash2/, dev_flash3/)");
+        eprintln!("    --force: overwrite a non-empty dev_flash/, dev_flash2/ or dev_flash3/");
+        eprintln!(
+            "  cellgov_install install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
+        );
+        eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
+        eprintln!("    default --output: vfs/ (at the current working directory)");
+        eprintln!("    --rap: required for license-1/2 NPDRM titles, optional for license-3");
+        eprintln!("    --force: overwrite an existing game directory");
+        eprintln!("  cellgov_install install-iso <ISO_PATH> [--output <dir>] [--force]");
+        eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
+        eprintln!("    default --output: vfs/ (at the current working directory)");
+        eprintln!("    takes a decrypted dump of a disc you own; an encrypted image is refused");
+        eprintln!("    extracts the disc tree to dev_bdvd/");
+    } else {
+        eprintln!("  this build has no decrypt support: only `uninstall` and `keys` run.");
+        eprintln!(
+            "    `install`, `install-game`, `install-iso` and `decrypt-self` are refused by name;"
+        );
+        eprintln!("    rebuild with `--features decrypt` to get them.");
     }
-    eprintln!(
-        "  every decrypting subcommand reads the operator's key vault: {ENV_KEYS}=<file-or-dir>,"
-    );
-    eprintln!("    or the vault `keys import` wrote under <vfs>/.cellgov/keys/");
-    eprintln!("  cellgov_install install <PUP_PATH> [--output <dir>] [--force]");
-    eprintln!("    default --output: vfs/ (at the current working directory)");
-    eprintln!("    extracts the firmware image to dev_flash/ (+ dev_flash2/, dev_flash3/)");
-    eprintln!("    --force: overwrite a non-empty dev_flash/, dev_flash2/ or dev_flash3/");
-    eprintln!(
-        "  cellgov_install install-game <PKG_PATH> [--rap <RAP_PATH>] [--output <dir>] [--force]"
-    );
-    eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
-    eprintln!("    default --output: vfs/ (at the current working directory)");
-    eprintln!("    --rap: required for license-1/2 NPDRM titles, optional for license-3");
-    eprintln!("    --force: overwrite an existing game directory");
-    eprintln!("  cellgov_install install-iso <ISO_PATH> [--output <dir>] [--force]");
-    eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
-    eprintln!("    default --output: vfs/ (at the current working directory)");
-    eprintln!("    takes a decrypted dump of a disc you own; an encrypted image is refused");
-    eprintln!("    extracts the disc tree to dev_bdvd/");
     eprintln!(
         "  cellgov_install uninstall <TITLE_ID> [--output <dir>] [--verify] [--keep-rap] [--force]"
     );
@@ -107,12 +112,16 @@ fn print_usage() {
     eprintln!("    --verify: re-hash the live tree against the install record first");
     eprintln!("    --keep-rap: leave the RAP in exdata/ (another title may share it)");
     eprintln!("    --force: uninstall even if --verify finds a modified tree");
-    eprintln!(
-        "  cellgov_install decrypt-self <SELF_PATH> [--output <path>] [--rap <RAP_PATH>] [--vfs-root <dir>]"
-    );
-    eprintln!("    NPDRM SELFs resolve their RAP from <vfs-root>/dev_hdd0/home/00000001/exdata/");
-    eprintln!("    --rap: use this RAP instead, for a title that is not installed");
-    eprintln!("    default --vfs-root: vfs/ (at the current working directory)");
+    if cfg!(feature = "decrypt") {
+        eprintln!(
+            "  cellgov_install decrypt-self <SELF_PATH> [--output <path>] [--rap <RAP_PATH>] [--vfs-root <dir>]"
+        );
+        eprintln!(
+            "    NPDRM SELFs resolve their RAP from <vfs-root>/dev_hdd0/home/00000001/exdata/"
+        );
+        eprintln!("    --rap: use this RAP instead, for a title that is not installed");
+        eprintln!("    default --vfs-root: vfs/ (at the current working directory)");
+    }
     eprintln!("  cellgov_install keys show [PATH] [--output <vfs>]");
     eprintln!("    inventory of the vault at PATH, else of {ENV_KEYS} / the imported one");
     eprintln!("    exits 2 when a decrypt path would find a key missing");

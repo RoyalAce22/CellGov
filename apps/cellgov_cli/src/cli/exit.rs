@@ -16,6 +16,28 @@ pub(crate) fn die(msg: &str) -> ! {
     std::process::exit(1)
 }
 
+/// The `--vfs-root` clause for the usage text of every subcommand that
+/// accepts an SCE-wrapped path. Tab-indented to splice under a synopsis
+/// line.
+pub(crate) const SCE_INPUT_USAGE_NOTE: &str = if cfg!(feature = "decrypt") {
+    "\t--vfs-root   PS3 vfs root: NPDRM EBOOTs resolve their RAP from\n\
+     \t             <vfs-root>/home/00000001/exdata/, the key vault from\n\
+     \t             CELLGOV_KEYS, else <vfs-root>/../.cellgov/keys/\n\
+     \t             (default: CELLGOV_PS3_VFS_ROOT, then vfs/dev_hdd0)"
+} else {
+    // `--vfs-root` is still parsed, and an empty value still refused
+    // (`super::title::resolve_ps3_vfs_root`); only what it names is unread.
+    "\t(this build has no decrypt support: plaintext ELF / PRX only. An\n\
+     \t SCE-wrapped input is refused by name, and --vfs-root names no path\n\
+     \t this build reads; rebuild with --features decrypt to read one.)"
+};
+
+/// The decrypt-capability words a usage text may carry only in a build
+/// that has the feature. `decrypt` itself is not one of them: the
+/// feature-off note names it in its rebuild hint.
+#[cfg(test)]
+pub(crate) const DECRYPTION_CLAIMS: [&str; 3] = ["exdata", "RAP", "key vault"];
+
 /// Read a file or die with a context-rich error.
 pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| die(&format!("failed to read {path}: {e}")))
@@ -336,3 +358,7 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
 #[cfg(test)]
 #[path = "tests/exit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/usage_note_tests.rs"]
+mod usage_note_tests;

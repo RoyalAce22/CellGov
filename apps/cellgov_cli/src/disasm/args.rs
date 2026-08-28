@@ -10,13 +10,15 @@
 /// investigation this tool exists to support.
 pub(super) const MAX_COUNT: usize = 1 << 16;
 
-pub(super) fn usage() -> &'static str {
-    "usage: cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize] [--vfs-root PATH]\n\
-     \t--vaddr      hex address (with or without 0x prefix); must be 4-byte aligned\n\
-     \t--count      decimal instruction count, 1..=65536, default 16\n\
-     \t--symbolize  build the OPD function map and annotate branch targets\n\
-     \t--vfs-root   PS3 vfs root for NPDRM RAP lookup and, one level up,\n\
-     \t             the imported key vault (default: vfs/dev_hdd0)"
+pub(super) fn usage() -> String {
+    format!(
+        "usage: cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize] [--vfs-root PATH]\n\
+         \t--vaddr      hex address (with or without 0x prefix); must be 4-byte aligned\n\
+         \t--count      decimal instruction count, 1..=65536, default 16\n\
+         \t--symbolize  build the OPD function map and annotate branch targets\n\
+         {}",
+        crate::cli::exit::SCE_INPUT_USAGE_NOTE,
+    )
 }
 
 #[derive(Debug)]
@@ -123,3 +125,9 @@ pub(super) fn parse_hex_u64(s: &str) -> Option<u64> {
 #[cfg(test)]
 #[path = "tests/args_tests.rs"]
 mod tests;
+
+// `args` is private to `disasm`, so the shared usage-note pin in
+// `cli::tests::usage_note_tests` cannot reach this `usage`.
+#[cfg(test)]
+#[path = "tests/usage_note_tests.rs"]
+mod usage_note_tests;
