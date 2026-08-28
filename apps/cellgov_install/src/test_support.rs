@@ -1,12 +1,44 @@
 //! Synthetic-fixture builders shared across the crate's unit tests:
-//! a minimal PARAM.SFO emitter and a retail-PKG emitter. Compiled
-//! only under `cfg(test)`; the PKG emitter needs the package key and
-//! so rides with the `decrypt` feature.
+//! a synthetic key vault, a minimal PARAM.SFO emitter, and a
+//! retail-PKG emitter. Compiled only under `cfg(test)`; the PKG
+//! emitter encrypts and so rides with the `decrypt` feature.
 
-#[cfg(feature = "decrypt")]
-use aes::cipher::{BlockEncrypt, KeyInit};
-#[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::sce::PKG_AES_KEY;
+use std::path::Path;
+
+use crate::keys::KeyVault;
+
+/// A vault of made-up values in every slot, one keyset per class at
+/// revision 0x0001 and an SCE package keyset; enough for every
+/// synthetic decrypt path, and nothing a real container opens under.
+#[cfg_attr(not(feature = "decrypt"), allow(dead_code))]
+pub fn synthetic_vault() -> KeyVault {
+    fn rep(byte: u8, len: usize) -> String {
+        format!("{byte:02x}").repeat(len)
+    }
+    let toml = format!(
+        "pup_hmac = \"{}\"\npkg_aes = \"{}\"\nnp_klic_key = \"{}\"\nnp_klic_free = \"{}\"\n\
+         rap_key = \"{}\"\nrap_pbox = \"000102030405060708090a0b0c0d0e0f\"\n\
+         rap_e1 = \"{}\"\nrap_e2 = \"{}\"\n\
+         [[scepkg]]\nerk = \"{}\"\nriv = \"{}\"\n\
+         [[app]]\nrevision = 0x0001\nerk = \"{}\"\nriv = \"{}\"\n\
+         [[npdrm]]\nrevision = 0x0001\nerk = \"{}\"\nriv = \"{}\"\n",
+        rep(0x51, 64),
+        rep(0x52, 16),
+        rep(0x53, 16),
+        rep(0x54, 16),
+        rep(0x55, 16),
+        rep(0x57, 16),
+        rep(0x58, 16),
+        rep(0x61, 32),
+        rep(0x62, 16),
+        rep(0x71, 32),
+        rep(0x72, 16),
+        rep(0x81, 32),
+        rep(0x82, 16),
+    );
+    KeyVault::parse(Path::new("synthetic-keys.toml"), toml.as_bytes())
+        .expect("the synthetic vault is well-formed")
+}
 
 /// `format::string` tag.
 const SFO_FMT_STRING: u16 = 0x0204;
@@ -87,25 +119,11 @@ fn align16(n: usize) -> usize {
     n.div_ceil(16) * 16
 }
 
-/// CTR keystream XOR (symmetric encrypt/decrypt) over a PKG data
-/// region, the same stream the production decrypt applies.
+/// Build a full retail PKG (data_offset 0x80) carrying `items`,
+/// encrypted under `keys`' PKG AES key (CTR is its own inverse, so the
+/// production decrypt is the encryptor).
 #[cfg(feature = "decrypt")]
-fn pkg_ctr(klic: &[u8; 16], region: &mut [u8]) {
-    let cipher = aes::Aes128::new_from_slice(&PKG_AES_KEY).expect("PKG_AES_KEY is 16 bytes");
-    let mut counter = u128::from_be_bytes(*klic);
-    for block in region.chunks_mut(16) {
-        let mut ks = counter.to_be_bytes();
-        cipher.encrypt_block((&mut ks).into());
-        for (c, k) in block.iter_mut().zip(ks.iter()) {
-            *c ^= *k;
-        }
-        counter = counter.wrapping_add(1);
-    }
-}
-
-/// Build a full retail PKG (data_offset 0x80) carrying `items`.
-#[cfg(feature = "decrypt")]
-pub fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[PkgItem]) -> Vec<u8> {
+pub fn build_pkg(keys: &KeyVault, klic: &[u8; 16], title_id: &str, items: &[PkgItem]) -> Vec<u8> {
     let n = items.len();
     let table_len = n * 0x20;
 
@@ -140,7 +158,11 @@ pub fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[PkgItem]) -> Vec<u8> 
     region.extend_from_slice(&blob);
 
     let data_offset: u64 = 0x80;
-    pkg_ctr(klic, &mut region);
+    crate::pkg::ctr_decrypt(
+        keys.pkg_aes().expect("the synthetic vault holds a PKG key"),
+        klic,
+        &mut region,
+    );
     let data_size = region.len() as u64;
     let pkg_size = data_offset + data_size;
 

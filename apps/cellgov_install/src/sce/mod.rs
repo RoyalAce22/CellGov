@@ -21,8 +21,10 @@ pub use raw::{
     EncryptedSectionDescriptor, MetadataKeyEnvelope, SceContainerHeader,
 };
 
+#[cfg(all(test, feature = "decrypt"))]
+pub(crate) use decrypt::decrypt_envelope;
 #[cfg(feature = "decrypt")]
-pub(crate) use decrypt::{decrypt_envelope, decrypt_sections_from_envelope};
+pub(crate) use decrypt::{decrypt_sections_from_envelope, open_envelope_with};
 #[cfg(feature = "decrypt")]
 pub(crate) use elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 pub(crate) use raw::find_supplemental_body;

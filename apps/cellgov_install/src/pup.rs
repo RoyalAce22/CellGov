@@ -2,8 +2,8 @@
 //!
 //! All multi-byte fields are big-endian. Payloads are themselves SCE-encrypted;
 //! decryption is the caller's responsibility (see `sce`). Payload HMAC
-//! validation runs under the update key, so it sits behind the
-//! `decrypt` feature; parsing does not.
+//! validation runs under the vault's PUP HMAC key, so it sits behind
+//! the `decrypt` feature; parsing does not.
 
 #[cfg(feature = "decrypt")]
 use hmac::{Hmac, Mac};
@@ -11,7 +11,7 @@ use hmac::{Hmac, Mac};
 use sha1::Sha1;
 
 #[cfg(feature = "decrypt")]
-use crate::crypto::PUP_KEY;
+use crate::keys::KeyVault;
 
 /// On-disk PUP header at file offset 0, 0x30 bytes, all fields big-endian.
 #[derive(Debug)]
@@ -55,7 +55,7 @@ pub struct PupFileEntry {
 pub struct PupHashEntry {
     /// Offset 0x00: this record's positional index, must equal its slot number.
     pub index: u64,
-    /// Offset 0x08: HMAC-SHA1 of the referenced payload under `PUP_KEY`.
+    /// Offset 0x08: HMAC-SHA1 of the referenced payload under the PUP HMAC key.
     pub hash: [u8; 20],
     /// Offset 0x1C: 4 reserved bytes, observed zero.
     pub _padding: [u8; 4],
@@ -136,6 +136,9 @@ pub enum PupError {
         /// `entry_id` field of the failing entry.
         entry_id: u64,
     },
+    /// The key vault holds no PUP HMAC key.
+    #[error("{0}")]
+    Keys(#[from] crate::keys::KeyVaultError),
 }
 
 /// Parse a PUP buffer into its header tables; does not verify payload hashes.
@@ -194,9 +197,16 @@ pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
 #[cfg(feature = "decrypt")]
 type HmacSha1 = Hmac<Sha1>;
 
-/// Recompute HMAC-SHA1 of each payload under `PUP_KEY` and compare against the recorded hash.
+/// Recompute HMAC-SHA1 of each payload under the vault's PUP HMAC key
+/// and compare against the recorded hash.
+///
+/// # Errors
+///
+/// [`PupError::Keys`] when the vault has no PUP HMAC key, before any
+/// payload is hashed.
 #[cfg(feature = "decrypt")]
-pub fn validate_hashes(data: &[u8], pup: &Pup) -> Result<(), PupError> {
+pub fn validate_hashes(data: &[u8], pup: &Pup, keys: &KeyVault) -> Result<(), PupError> {
+    let pup_key = keys.pup_hmac()?;
     if pup.entries.len() != pup.hashes.len() {
         return Err(PupError::TableLengthMismatch {
             entries: pup.entries.len(),
@@ -218,7 +228,7 @@ pub fn validate_hashes(data: &[u8], pup: &Pup) -> Result<(), PupError> {
                 entry_id: entry.entry_id,
             });
         }
-        let mut mac = HmacSha1::new_from_slice(&PUP_KEY).map_err(PupError::HmacInit)?;
+        let mut mac = HmacSha1::new_from_slice(pup_key).map_err(PupError::HmacInit)?;
         mac.update(&data[start..end]);
         let result = mac.finalize().into_bytes();
         if result.as_slice() != pup.hashes[i].hash {

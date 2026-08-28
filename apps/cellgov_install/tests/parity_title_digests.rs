@@ -23,10 +23,13 @@
 
 use std::path::{Path, PathBuf};
 
+use cellgov_install::keys::KeyVault;
 use sha2::{Digest, Sha256};
 
 #[path = "common/digests.rs"]
 mod digests;
+#[path = "common/keys.rs"]
+mod keys;
 #[path = "common/title_digests.rs"]
 mod title_digests;
 
@@ -95,7 +98,7 @@ fn rap_path_for(rap_filename: &str) -> PathBuf {
 /// section-vs-segment split.
 ///
 /// Returns `true` when the title was actually compared.
-fn run_npdrm_digest_check(entry: &TitleDigest) -> bool {
+fn run_npdrm_digest_check(entry: &TitleDigest, keys: &KeyVault) -> bool {
     let title = &entry.display;
     let bin_path = bin_path_for(&entry.content_id, &entry.key);
     let rap_filename = entry.rap_filename.as_ref().unwrap_or_else(|| {
@@ -139,8 +142,9 @@ fn run_npdrm_digest_check(entry: &TitleDigest) -> bool {
             rap.len()
         )
     });
-    let klic = cellgov_install::npdrm::rap_to_klic(&rap_arr);
-    let mut elf = cellgov_install::npdrm::decrypt_self_to_elf_npdrm(&bin, &klic)
+    let klic = cellgov_install::npdrm::rap_to_klic(keys, &rap_arr)
+        .unwrap_or_else(|e| panic!("{title}: klicensee derivation failed: {e}"));
+    let mut elf = cellgov_install::npdrm::decrypt_self_to_elf_npdrm(&bin, keys, &klic)
         .unwrap_or_else(|e| panic!("{title}: NPDRM decrypt failed: {e}"));
     assert!(
         elf.len() >= 0x40,
@@ -173,7 +177,7 @@ fn run_npdrm_digest_check(entry: &TitleDigest) -> bool {
 }
 
 /// Returns `true` when the title was actually compared.
-fn run_app_digest_check(entry: &TitleDigest) -> bool {
+fn run_app_digest_check(entry: &TitleDigest, keys: &KeyVault) -> bool {
     let title = &entry.display;
     let bin_path = bin_path_for(&entry.content_id, &entry.key);
     if !bin_path.is_file() {
@@ -186,7 +190,7 @@ fn run_app_digest_check(entry: &TitleDigest) -> bool {
     }
     let expected = hex_to_bytes32(&entry.unmasked_sha256, &format!("{title} unmasked"));
     let bin = std::fs::read(&bin_path).unwrap();
-    let elf = cellgov_install::sce::decrypt_self_to_elf(&bin)
+    let elf = cellgov_install::sce::decrypt_self_to_elf(&bin, keys)
         .unwrap_or_else(|e| panic!("{title}: APP decrypt failed: {e}"));
     assert!(
         elf.len() >= 0x40,
@@ -213,12 +217,13 @@ fn hex_str(bytes: &[u8]) -> String {
 fn eboot_byte_identity_against_committed_digests() {
     let titles = title_digests::load();
     title_digests::assert_well_formed(&titles);
+    let keys = keys::vault();
     let mut compared = 0usize;
     let mut against_rpcs3 = 0usize;
     for entry in &titles {
         let checked = match entry.key.as_str() {
-            "npdrm" => run_npdrm_digest_check(entry),
-            "app" => run_app_digest_check(entry),
+            "npdrm" => run_npdrm_digest_check(entry, &keys),
+            "app" => run_app_digest_check(entry, &keys),
             other => panic!(
                 "{}: unknown key {:?} in parity_digests.toml",
                 entry.content_id, other

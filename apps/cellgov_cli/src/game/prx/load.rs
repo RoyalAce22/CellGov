@@ -135,8 +135,10 @@ fn read_firmware_module_elf(path: &Path) -> Result<Vec<u8>, PrxLoadStageError> {
     })?;
     // A firmware tree carries no NPDRM content and no RAP to resolve
     // against, so its SELFs are APP-keyed by construction.
+    let keys = crate::cli::keys::key_vault_for(&raw);
     cellgov_install::self_image::into_plaintext_elf(
         raw,
+        keys,
         cellgov_install::self_image::KeyPolicy::AppOnly,
     )
     .map_err(|source| PrxLoadStageError::Decrypt {

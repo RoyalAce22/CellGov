@@ -105,7 +105,7 @@ pub struct TitleManifest {
     /// RAP filename under `<vfs_root>/home/00000001/exdata/` for
     /// NPDRM titles. Required when `EBOOT.BIN` is NPDRM-wrapped
     /// (license 1/2); omitted for APP-keyed disc titles and free
-    /// (license 3) NPDRM titles that use `NP_KLIC_FREE`.
+    /// (license 3) NPDRM titles, which use the vault's free klicensee.
     pub rap_filename: Option<String>,
     /// Instruction cap the witness suite boots this title under.
     /// `None` uses the recorder's 100M-instruction default.

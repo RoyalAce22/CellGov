@@ -102,6 +102,8 @@ fn regenerate_firmware_export_conflict_census() {
 
     let mut modules: Vec<Module> = Vec::new();
     let mut skipped: Vec<(String, String)> = Vec::new();
+    let keys = cellgov_install::keys::KeyVault::load_for_vfs(&corpus::workspace_root().join("vfs"))
+        .unwrap_or_else(|e| panic!("firmware-corpus: {e}"));
 
     for (origin, path) in &candidates {
         let name = path
@@ -121,8 +123,16 @@ fn regenerate_firmware_export_conflict_census() {
                 continue;
             }
         };
-        let elf = match cellgov_install::sce::decrypt_self_to_elf(&raw) {
+        let elf = match cellgov_install::sce::decrypt_self_to_elf(&raw, &keys) {
             Ok(e) => e,
+            // A missing keyset refuses every module the same way;
+            // skipping it would regenerate the census from whatever
+            // subset the vault opens and still clear the module-count
+            // floor.
+            Err(
+                e @ (cellgov_install::sce::SceError::NoAppKey { .. }
+                | cellgov_install::sce::SceError::Keys(_)),
+            ) => panic!("firmware-corpus: {label}: {e}"),
             Err(e) => {
                 skipped.push((label, format!("decrypt: {e}")));
                 continue;

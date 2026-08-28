@@ -69,6 +69,35 @@ cargo build --release -p cellgov_cli --features decrypt
 cargo build --release -p cellgov_install --features decrypt
 ```
 
+### Keys
+
+CellGov ships no key values. Every decrypt path reads an
+operator-supplied key vault, loaded once per process on the first
+SCE-wrapped image, and a run with no vault refuses that image by
+name. Supply the vault one of two ways:
+
+```bash
+CELLGOV_KEYS=<file-or-dir> target/release/cellgov_cli run-game --title <name>   # used in place
+cargo run --release -p cellgov_install -- keys import <file-or-dir>            # normalized into vfs/.cellgov/keys/keys.toml
+```
+
+`keys show` prints the vault's inventory and what a decrypt would
+still be missing; `keys remove` deletes the imported vault. The
+import reads these forms:
+
+- `keys.toml`: CellGov's own schema, what `keys import` writes.
+- scetool-style `[keyset]` files: `type` / `self_type` / `revision`
+  plus `erk` or `key` and `riv` or `iv` per block.
+- `name: HEX` and `name = HEX` lines, and pasted key tables, one key
+  per row.
+- Per-key files named `app-key-0A` / `app-iv-0A` / `npdrm-...` /
+  `pkg-key` / `pup-hmac`, holding hex text or the raw bytes.
+- `.dkey` / `.key` files: per-disc keys, indexed by file stem.
+
+Reading the loose forms is best effort; `keys show` lists whatever
+the import could not place, and `keys.toml` is the exact form to fall
+back on. Vault files are gitignored and never vendored.
+
 ## Installing firmware and titles
 
 Booting anything real needs PS3 system firmware. Download the

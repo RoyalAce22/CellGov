@@ -17,12 +17,41 @@ pub enum SceError {
         /// Magic word actually read at file offset 0.
         got: u32,
     },
-    /// No APP key registered for the SELF revision.
-    #[error("SCE: no APP key for SELF revision 0x{revision:04x}")]
+    /// The key vault holds no APP keyset for the SELF revision.
+    #[error("SCE: no APP key configured for SELF revision 0x{revision:04x}; check `cellgov_install keys show`")]
     NoAppKey {
-        /// SELF revision (low 15 bits of `revision_flags`) for which no APP key is known.
+        /// SELF revision (low 15 bits of `revision_flags`) the vault has no APP key for.
         revision: u16,
     },
+    /// The key vault holds no NPDRM keyset for the SELF revision.
+    #[error("SCE: no NPDRM key configured for SELF revision 0x{revision:04x}; check `cellgov_install keys show`")]
+    NoNpdrmKey {
+        /// SELF revision (low 15 bits of `revision_flags`) the vault has no NPDRM key for.
+        revision: u16,
+    },
+    /// Several vault keysets were tried for the revision and none
+    /// passed the envelope's padding self-check.
+    #[error("SCE: none of the {tried} {class} keysets in the vault opens the envelope of the container at key revision 0x{revision:04x} (wrong key material, or a wrong RAP for an NPDRM title)")]
+    NoCandidateOpensEnvelope {
+        /// `APP`, `NPDRM`, or `SCE package`.
+        class: &'static str,
+        /// Key revision (low 15 bits of `revision_flags`) the
+        /// candidates were tried against.
+        revision: u16,
+        /// How many keysets were tried.
+        tried: usize,
+    },
+    /// The vault's RAP permutation table is not a permutation of
+    /// 0..15, so no klicensee can be derived through it.
+    #[error("SCE: the vault's rap_pbox is not a permutation of 0..15 (entry {index} is past 15 or repeats an earlier entry); check `cellgov_install keys show`")]
+    RapPboxNotAPermutation {
+        /// Zero-based position of the first entry that breaks the
+        /// permutation.
+        index: usize,
+    },
+    /// The key vault lacks a value this decrypt needs.
+    #[error("{0}")]
+    Keys(#[source] Box<crate::keys::KeyVaultError>),
     /// SELF's ELF header offset is outside the buffer.
     #[error("SCE: {what} offset out of range")]
     HeaderOffsetOutOfRange {
@@ -199,4 +228,10 @@ pub enum SceError {
     /// SCE-wrapped input in a build compiled without the `decrypt` feature.
     #[error("SCE: the image is SCE-wrapped, and this build was compiled without the `decrypt` cargo feature; supply a plaintext ELF or rebuild with `--features decrypt`")]
     DecryptFeatureDisabled,
+}
+
+impl From<crate::keys::KeyVaultError> for SceError {
+    fn from(e: crate::keys::KeyVaultError) -> Self {
+        SceError::Keys(Box::new(e))
+    }
 }

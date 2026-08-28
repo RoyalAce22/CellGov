@@ -48,10 +48,12 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         "expected a full retail install (100+ modules), found {} -- wrong directory?",
         sprx_paths.len()
     );
+    let keys = cellgov_install::keys::KeyVault::load_for_vfs(&corpus::workspace_root().join("vfs"))
+        .unwrap_or_else(|e| panic!("firmware-corpus: {e}"));
     for sprx_path in &sprx_paths {
         let raw = std::fs::read(sprx_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", sprx_path.display()));
-        let elf = cellgov_install::sce::decrypt_self_to_elf(&raw)
+        let elf = cellgov_install::sce::decrypt_self_to_elf(&raw, &keys)
             .unwrap_or_else(|e| panic!("decrypt {}: {e}", sprx_path.display()));
         let path_str = sprx_path
             .to_str()

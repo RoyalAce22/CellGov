@@ -39,6 +39,19 @@ fn exit_stub_addr_for(required: usize) -> u64 {
     (required as u64).next_multiple_of(16).max(16)
 }
 
+/// The spawn-loader closure is `'static`, so the vault is loaded once
+/// per process.
+fn key_vault() -> &'static cellgov_install::keys::KeyVault {
+    static VAULT: std::sync::OnceLock<cellgov_install::keys::KeyVault> = std::sync::OnceLock::new();
+    VAULT.get_or_init(|| {
+        // Integration tests run from the crate directory; the vault
+        // lives under the workspace's `vfs/`.
+        let vfs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vfs");
+        cellgov_install::keys::KeyVault::load_for_vfs(&vfs)
+            .unwrap_or_else(|e| panic!("microtests: {e}"))
+    })
+}
+
 fn microtest_bytes(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| {
         panic!(
@@ -100,6 +113,7 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
         // child.self decrypts here rather than at staging time.
         let plaintext = cellgov_install::self_image::to_plaintext_elf(
             elf_bytes,
+            key_vault(),
             cellgov_install::self_image::KeyPolicy::AppOnly,
         )
         .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageParse {

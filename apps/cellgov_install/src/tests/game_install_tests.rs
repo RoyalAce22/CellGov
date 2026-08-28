@@ -21,6 +21,11 @@ fn sfo_item(entries: &[(&str, &str)]) -> PkgItem {
     pkg_file("PARAM.SFO", 3, &build_param_sfo(entries))
 }
 
+#[cfg(feature = "decrypt")]
+fn keys() -> KeyVault {
+    crate::test_support::synthetic_vault()
+}
+
 #[test]
 fn install_records_resolve_inside_the_vfs_root_they_describe() {
     for root in ["vfs", "relative/nested/vfs", "/tmp/other-vfs"] {
@@ -112,11 +117,17 @@ fn a_record_that_is_not_toml_is_refused_separately_from_a_version_mismatch() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_missing_param_sfo() {
-    let pkg = build_pkg(&KLIC, "NPUA80001", &[pkg_file("README.TXT", 3, b"hi")]);
+    let pkg = build_pkg(
+        &keys(),
+        &KLIC,
+        "NPUA80001",
+        &[pkg_file("README.TXT", 3, b"hi")],
+    );
     let out = scratch();
     let err = install_pkg(
         &pkg,
         None,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -129,6 +140,7 @@ fn rejects_missing_param_sfo() {
 #[test]
 fn rejects_non_hdd_category() {
     let pkg = build_pkg(
+        &keys(),
         &KLIC,
         "NPUA80001",
         &[sfo_item(&[("TITLE_ID", "NPUA80001"), ("CATEGORY", "GD")])],
@@ -137,6 +149,7 @@ fn rejects_non_hdd_category() {
     let err = install_pkg(
         &pkg,
         None,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -150,6 +163,7 @@ fn rejects_non_hdd_category() {
 fn rejects_title_id_mismatch() {
     // Header title-id NPUA80001, but PARAM.SFO claims NPUA80068.
     let pkg = build_pkg(
+        &keys(),
         &KLIC,
         "NPUA80001",
         &[sfo_item(&[("TITLE_ID", "NPUA80068"), ("CATEGORY", "HG")])],
@@ -158,6 +172,7 @@ fn rejects_title_id_mismatch() {
     let err = install_pkg(
         &pkg,
         None,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -170,6 +185,7 @@ fn rejects_title_id_mismatch() {
 #[test]
 fn rejects_missing_title_id() {
     let pkg = build_pkg(
+        &keys(),
         &KLIC,
         "NPUA80001",
         &[sfo_item(&[("CATEGORY", "HG"), ("TITLE", "flOw")])],
@@ -178,6 +194,7 @@ fn rejects_missing_title_id() {
     let err = install_pkg(
         &pkg,
         None,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -190,6 +207,7 @@ fn rejects_missing_title_id() {
 #[test]
 fn rejects_missing_eboot() {
     let pkg = build_pkg(
+        &keys(),
         &KLIC,
         "NPUA80001",
         &[sfo_item(&[("TITLE_ID", "NPUA80001"), ("CATEGORY", "HG")])],
@@ -198,6 +216,7 @@ fn rejects_missing_eboot() {
     let err = install_pkg(
         &pkg,
         None,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -251,6 +270,7 @@ fn iso_rejects_missing_param_sfo() {
     let err = install_iso(
         &image,
         &image,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -273,6 +293,7 @@ fn iso_rejects_non_disc_category() {
     let err = install_iso(
         &image,
         &image,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -295,6 +316,7 @@ fn iso_rejects_missing_eboot() {
     let err = install_iso(
         &image,
         &image,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -326,7 +348,15 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
     let out = scratch();
     let vfs = out.join("vfs");
     let installs = out.join("installs");
-    let err = install_iso(&image, &image, &vfs, &installs, InstallOptions::default()).unwrap_err();
+    let err = install_iso(
+        &image,
+        &image,
+        &keys(),
+        &vfs,
+        &installs,
+        InstallOptions::default(),
+    )
+    .unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "synthetic disc EBOOT must fail the proof, got {err:?}"
@@ -481,6 +511,7 @@ fn npdrm_pkg(license: u32) -> Vec<u8> {
     let sfo = build_param_sfo(&[("TITLE_ID", NPD_TITLE_ID), ("CATEGORY", "HG")]);
     let eboot = build_npdrm_eboot_header(license, NPD_CONTENT_ID);
     build_pkg(
+        &keys(),
         &KLIC,
         NPD_CONTENT_ID,
         &[
@@ -508,6 +539,7 @@ fn pre_commit_fault_leaves_no_exdata_residue() {
     let err = install_pkg(
         &pkg,
         Some(&[0u8; 16]),
+        &keys(),
         &vfs,
         &out.join("installs"),
         InstallOptions::default(),
@@ -532,6 +564,7 @@ fn rejects_rap_required_for_network_license() {
     let err = install_pkg(
         &pkg,
         None,
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -550,6 +583,7 @@ fn rejects_wrong_size_rap() {
     let err = install_pkg(
         &pkg,
         Some(&[0u8; 15]),
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions::default(),
@@ -562,7 +596,7 @@ fn rejects_wrong_size_rap() {
 fn rap_consumed_only_for_network_and_local() {
     use crate::npdrm::NpdLicense;
     assert!(!rap_consumed(None)); // APP-keyed, no NPD header
-    assert!(!rap_consumed(Some(NpdLicense::Free))); // NP_KLIC_FREE fallback
+    assert!(!rap_consumed(Some(NpdLicense::Free))); // free-klicensee fallback
     assert!(rap_consumed(Some(NpdLicense::Network)));
     assert!(rap_consumed(Some(NpdLicense::Local)));
 }
@@ -581,8 +615,9 @@ fn plan_for(license: Option<crate::npdrm::NpdLicense>, rap: Option<&[u8]>) -> Op
 
 #[test]
 fn a_free_license_plans_no_rap_even_when_one_is_supplied() {
-    // A free title resolves through NP_KLIC_FREE, so a supplied RAP is
-    // dropped at the plan and never staged, committed, or recorded.
+    // A free title resolves through the vault's free klicensee, so a
+    // supplied RAP is dropped at the plan and never staged, committed,
+    // or recorded.
     let plan = plan_for(Some(crate::npdrm::NpdLicense::Free), Some(&[0u8; 16]));
     assert!(plan.is_none(), "free license plans no staged RAP");
 }
@@ -633,6 +668,7 @@ fn rejects_existing_target_without_force_and_force_bypasses() {
     let err = install_pkg(
         &pkg,
         Some(&[0u8; 16]),
+        &keys(),
         &vfs,
         &out.join("installs"),
         InstallOptions::default(),
@@ -645,6 +681,7 @@ fn rejects_existing_target_without_force_and_force_bypasses() {
     let err = install_pkg(
         &pkg,
         Some(&[0u8; 16]),
+        &keys(),
         &vfs,
         &out.join("installs"),
         InstallOptions {
@@ -1060,6 +1097,7 @@ fn a_pre_commit_fault_never_reports_finished() {
     let err = install_pkg(
         &pkg,
         Some(&[0u8; 16]),
+        &keys(),
         &out.join("vfs"),
         &out.join("installs"),
         InstallOptions {

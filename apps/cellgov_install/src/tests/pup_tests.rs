@@ -1,6 +1,10 @@
 //! PUP container parsing and per-entry HMAC-SHA1 hash validation.
 
 use super::*;
+#[cfg(feature = "decrypt")]
+use crate::keys::{KeyVault, KeyVaultError, Slot};
+#[cfg(feature = "decrypt")]
+use crate::test_support::synthetic_vault;
 
 #[test]
 fn parse_rejects_short_data() {
@@ -23,9 +27,9 @@ fn parse_accepts_valid_empty_pup() {
 }
 
 #[cfg(feature = "decrypt")]
-/// Build a single-entry PUP with a matching HMAC. Returns the
-/// assembled buffer and the computed hash.
-fn build_one_entry_pup(entry_id: u64, payload: &[u8]) -> (Vec<u8>, [u8; 20]) {
+/// Build a single-entry PUP whose HMAC is computed under `keys`' PUP
+/// key. Returns the assembled buffer and the computed hash.
+fn build_one_entry_pup(keys: &KeyVault, entry_id: u64, payload: &[u8]) -> (Vec<u8>, [u8; 20]) {
     let entry_table_start = 0x30usize;
     let hash_table_start = entry_table_start + 0x20;
     let payload_offset = hash_table_start + 0x20;
@@ -43,7 +47,7 @@ fn build_one_entry_pup(entry_id: u64, payload: &[u8]) -> (Vec<u8>, [u8; 20]) {
 
     buf[payload_offset..payload_offset + payload.len()].copy_from_slice(payload);
 
-    let mut mac = HmacSha1::new_from_slice(&PUP_KEY).expect("HMAC init");
+    let mut mac = HmacSha1::new_from_slice(keys.pup_hmac().unwrap()).expect("HMAC init");
     mac.update(payload);
     let mac_out = mac.finalize().into_bytes();
     let mut hash = [0u8; 20];
@@ -59,29 +63,50 @@ fn build_one_entry_pup(entry_id: u64, payload: &[u8]) -> (Vec<u8>, [u8; 20]) {
 #[cfg(feature = "decrypt")]
 #[test]
 fn validate_hashes_accepts_correct_hmac() {
-    let (data, _) = build_one_entry_pup(0x300, b"payload bytes here");
+    let keys = synthetic_vault();
+    let (data, _) = build_one_entry_pup(&keys, 0x300, b"payload bytes here");
     let pup = parse(&data).expect("parse");
-    validate_hashes(&data, &pup).expect("HMAC valid");
+    validate_hashes(&data, &pup, &keys).expect("HMAC valid");
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn validate_hashes_rejects_corrupted_hash() {
-    let (mut data, _) = build_one_entry_pup(0x300, b"payload bytes here");
+    let keys = synthetic_vault();
+    let (mut data, _) = build_one_entry_pup(&keys, 0x300, b"payload bytes here");
     let hash_table_start = 0x30 + 0x20;
     data[hash_table_start + 8] ^= 0xFF;
     let pup = parse(&data).expect("parse");
-    let err = validate_hashes(&data, &pup).unwrap_err();
+    let err = validate_hashes(&data, &pup, &keys).unwrap_err();
     assert!(matches!(err, PupError::HmacMismatch { .. }));
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn validate_hashes_rejects_hash_record_with_wrong_index() {
-    let (mut data, _) = build_one_entry_pup(0x300, b"payload bytes here");
+    let keys = synthetic_vault();
+    let (mut data, _) = build_one_entry_pup(&keys, 0x300, b"payload bytes here");
     let hash_table_start = 0x30 + 0x20;
     data[hash_table_start..hash_table_start + 8].copy_from_slice(&5u64.to_be_bytes());
     let pup = parse(&data).expect("parse");
-    let err = validate_hashes(&data, &pup).unwrap_err();
+    let err = validate_hashes(&data, &pup, &keys).unwrap_err();
     assert!(matches!(err, PupError::HashIndexMismatch { .. }));
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn validate_hashes_on_an_empty_vault_refuses_naming_the_pup_hmac_slot() {
+    let (data, _) = build_one_entry_pup(&synthetic_vault(), 0x300, b"payload bytes here");
+    let pup = parse(&data).expect("parse");
+    let err = validate_hashes(&data, &pup, &KeyVault::empty()).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            PupError::Keys(KeyVaultError::MissingSlot {
+                slot: Slot::PupHmac
+            })
+        ),
+        "got {err:?}"
+    );
+    assert!(err.to_string().contains("pup_hmac"), "{err}");
 }

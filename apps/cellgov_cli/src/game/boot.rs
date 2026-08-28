@@ -721,8 +721,19 @@ pub(super) fn prepare(opts: PrepareOptions<'_>) -> PreparedBoot {
         // raw ELFs). The spawn loader is APP-keyed: klicensee
         // resolution belongs to the title-install layer, which is not
         // reachable from inside the runtime.
+        //
+        // A vault refusal is returned as the loader's error: the loader
+        // runs inside `Runtime::step`, whose `Err` rolls the spawn
+        // back, fails the syscall, and logs the cause (`cellgov_core`
+        // `process_spawn.rs` `runtime.process_spawn_image_load_failed`).
+        let keys = crate::cli::keys::try_key_vault_for(elf_bytes).map_err(|e| {
+            cellgov_core::ProcessSpawnLoadError::ImageParse {
+                detail: format!("child SELF: key vault: {e}"),
+            }
+        })?;
         let plaintext = cellgov_install::self_image::to_plaintext_elf(
             elf_bytes,
+            keys,
             cellgov_install::self_image::KeyPolicy::AppOnly,
         )
         .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageParse {

@@ -23,6 +23,8 @@ use std::process::Command;
 mod digests;
 #[path = "common/dumps.rs"]
 mod dumps;
+#[path = "common/keys.rs"]
+mod keys;
 #[path = "common/scratch.rs"]
 mod scratch;
 
@@ -52,7 +54,10 @@ fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::p
     cmd.arg("install")
         .arg(pup)
         .arg("--output")
-        .arg(vfs_root.as_os_str());
+        .arg(vfs_root.as_os_str())
+        // The binary resolves its vault relative to `--output`, a
+        // scratch root where nothing was imported.
+        .env(cellgov_install::keys::ENV_KEYS, keys::location());
     if force {
         cmd.arg("--force");
     }

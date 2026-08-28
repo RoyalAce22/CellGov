@@ -2,6 +2,13 @@
 //! debug / non-PS3 / out-of-bounds packages.
 
 use super::*;
+#[cfg(feature = "decrypt")]
+use crate::keys::KeyVault;
+
+#[cfg(feature = "decrypt")]
+fn keys() -> KeyVault {
+    crate::test_support::synthetic_vault()
+}
 
 #[cfg(feature = "decrypt")]
 const TEST_KLIC: [u8; 16] = [
@@ -15,12 +22,20 @@ fn align16(n: usize) -> usize {
 
 #[cfg(feature = "decrypt")]
 /// Wrap an already-laid-out plaintext data region into a full retail
-/// PKG: build the header, CTR-encrypt the region, and append it at
-/// `data_offset` (0x80). `pkg_size`/`data_size` are derived to match.
-fn wrap_region(klic: &[u8; 16], title_id: &str, file_count: u32, plaintext: &[u8]) -> Vec<u8> {
+/// PKG: build the header, CTR-encrypt the region under `keys`' PKG
+/// key, and append it at `data_offset` (0x80). `pkg_size`/`data_size`
+/// are derived to match.
+fn wrap_region(
+    keys: &KeyVault,
+    klic: &[u8; 16],
+    title_id: &str,
+    file_count: u32,
+    plaintext: &[u8],
+) -> Vec<u8> {
     let data_offset: u64 = 0x80;
     let mut region = plaintext.to_vec();
-    super::ctr_decrypt(klic, &mut region); // symmetric: encrypts here
+    // CTR is symmetric, so the decrypt encrypts here.
+    super::ctr_decrypt(keys.pkg_aes().unwrap(), klic, &mut region);
     let data_size = region.len() as u64;
     let pkg_size = data_offset + data_size;
 
@@ -69,7 +84,7 @@ fn dir_item(name: &'static str) -> ItemSpec {
 #[cfg(feature = "decrypt")]
 /// Lay out a plaintext data region for `items` (entry table, then
 /// 16-aligned name and data blobs) and wrap it into a full PKG.
-fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[ItemSpec]) -> Vec<u8> {
+fn build_pkg(keys: &KeyVault, klic: &[u8; 16], title_id: &str, items: &[ItemSpec]) -> Vec<u8> {
     let n = items.len();
     let table_len = n * 0x20;
     // First pass: place names and data, recording offsets.
@@ -103,7 +118,7 @@ fn build_pkg(klic: &[u8; 16], title_id: &str, items: &[ItemSpec]) -> Vec<u8> {
     }
     region.extend_from_slice(&blob);
 
-    wrap_region(klic, title_id, n as u32, &region)
+    wrap_region(keys, klic, title_id, n as u32, &region)
 }
 
 #[cfg(feature = "decrypt")]
@@ -117,6 +132,7 @@ fn extract_round_trips_files_and_dirs() {
     let eboot = b"\x53\x43\x45\x00 fake encrypted eboot bytes ........";
     let sfo = b"\x00PSF fake param sfo blob";
     let pkg = build_pkg(
+        &keys(),
         &TEST_KLIC,
         "NPUA80001",
         &[
@@ -126,7 +142,7 @@ fn extract_round_trips_files_and_dirs() {
         ],
     );
 
-    let archive = extract(&pkg).expect("well-formed PKG extracts");
+    let archive = extract(&pkg, &keys()).expect("well-formed PKG extracts");
     assert_eq!(archive.header.content_id, "NPUA80001");
     assert_eq!(archive.header.klicensee, TEST_KLIC);
 
@@ -151,6 +167,7 @@ fn extract_round_trips_files_and_dirs() {
 #[test]
 fn skips_edat_and_sdat_items() {
     let pkg = build_pkg(
+        &keys(),
         &TEST_KLIC,
         "NPUA80001",
         &[
@@ -159,7 +176,7 @@ fn skips_edat_and_sdat_items() {
             file_item("USRDIR/SAVE.SDAT", 9, b"sdat-bytes"),
         ],
     );
-    let archive = extract(&pkg).expect("extract");
+    let archive = extract(&pkg, &keys()).expect("extract");
     assert!(find(&archive, "PARAM.SFO").is_some());
     assert!(find(&archive, "USRDIR/DATA.EDAT").is_none(), "EDAT skipped");
     assert!(find(&archive, "USRDIR/SAVE.SDAT").is_none(), "SDAT skipped");
@@ -168,26 +185,47 @@ fn skips_edat_and_sdat_items() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_bad_magic() {
-    let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
+    let mut pkg = build_pkg(
+        &keys(),
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("PARAM.SFO", 3, b"x")],
+    );
     pkg[1] ^= 0xFF;
-    assert!(matches!(extract(&pkg).unwrap_err(), PkgError::BadMagic(_)));
+    assert!(matches!(
+        extract(&pkg, &keys()).unwrap_err(),
+        PkgError::BadMagic(_)
+    ));
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_debug_package() {
-    let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
+    let mut pkg = build_pkg(
+        &keys(),
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("PARAM.SFO", 3, b"x")],
+    );
     pkg[0x04..0x06].copy_from_slice(&PKG_TYPE_DEBUG.to_be_bytes());
-    assert!(matches!(extract(&pkg).unwrap_err(), PkgError::DebugPackage));
+    assert!(matches!(
+        extract(&pkg, &keys()).unwrap_err(),
+        PkgError::DebugPackage
+    ));
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_non_ps3_platform() {
-    let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
+    let mut pkg = build_pkg(
+        &keys(),
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("PARAM.SFO", 3, b"x")],
+    );
     pkg[0x06..0x08].copy_from_slice(&2u16.to_be_bytes());
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::NonPs3Platform(2)
     ));
 }
@@ -195,11 +233,16 @@ fn rejects_non_ps3_platform() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_pkg_size_over_file_length() {
-    let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
+    let mut pkg = build_pkg(
+        &keys(),
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("PARAM.SFO", 3, b"x")],
+    );
     let bogus = (pkg.len() as u64) + 0x1000;
     pkg[0x18..0x20].copy_from_slice(&bogus.to_be_bytes());
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::SizeMismatch { .. }
     ));
 }
@@ -207,11 +250,16 @@ fn rejects_pkg_size_over_file_length() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_data_region_escaping_pkg_size() {
-    let mut pkg = build_pkg(&TEST_KLIC, "NPUA80001", &[file_item("PARAM.SFO", 3, b"x")]);
+    let mut pkg = build_pkg(
+        &keys(),
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("PARAM.SFO", 3, b"x")],
+    );
     // data_size far larger than pkg_size permits.
     pkg[0x28..0x30].copy_from_slice(&0xFFFF_FFFFu64.to_be_bytes());
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::DataRegionOutOfBounds { .. }
     ));
 }
@@ -227,9 +275,9 @@ fn rejects_name_too_long() {
     region[4..8].copy_from_slice(&name_size.to_be_bytes());
     region[24..28].copy_from_slice(&3u32.to_be_bytes());
     region.resize(0x20 + name_size as usize, b'A');
-    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+    let pkg = wrap_region(&keys(), &TEST_KLIC, "NPUA80001", 1, &region);
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::NameTooLong { .. }
     ));
 }
@@ -241,9 +289,9 @@ fn rejects_name_escaping_region() {
     region[0..4].copy_from_slice(&0xFFFFu32.to_be_bytes()); // name_offset
     region[4..8].copy_from_slice(&4u32.to_be_bytes()); // name_size
     region[24..28].copy_from_slice(&3u32.to_be_bytes());
-    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+    let pkg = wrap_region(&keys(), &TEST_KLIC, "NPUA80001", 1, &region);
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::NameOutOfBounds { .. }
     ));
 }
@@ -262,9 +310,9 @@ fn rejects_file_data_escaping_region() {
     region[24..28].copy_from_slice(&3u32.to_be_bytes());
     region.extend_from_slice(name);
     region.resize(align16(region.len()), 0);
-    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+    let pkg = wrap_region(&keys(), &TEST_KLIC, "NPUA80001", 1, &region);
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::FileDataOutOfBounds { .. }
     ));
 }
@@ -273,12 +321,13 @@ fn rejects_file_data_escaping_region() {
 #[test]
 fn rejects_unsafe_traversal_name() {
     let pkg = build_pkg(
+        &keys(),
         &TEST_KLIC,
         "NPUA80001",
         &[file_item("../escape.bin", 3, b"x")],
     );
     assert!(matches!(
-        extract(&pkg).unwrap_err(),
+        extract(&pkg, &keys()).unwrap_err(),
         PkgError::UnsafePath { .. }
     ));
 }
@@ -289,6 +338,28 @@ fn rejects_too_small() {
         parse_header(&[0u8; 0x10]).unwrap_err(),
         PkgError::TooSmall { .. }
     ));
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn extract_on_an_empty_vault_refuses_naming_the_pkg_key_slot() {
+    let pkg = build_pkg(
+        &keys(),
+        &TEST_KLIC,
+        "NPUA80001",
+        &[file_item("PARAM.SFO", 3, b"x")],
+    );
+    let err = extract(&pkg, &KeyVault::empty()).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            PkgError::Keys(crate::keys::KeyVaultError::MissingSlot {
+                slot: crate::keys::Slot::PkgAes
+            })
+        ),
+        "got {err:?}"
+    );
+    assert!(err.to_string().contains("pkg_aes"), "{err}");
 }
 
 #[cfg(feature = "decrypt")]
@@ -320,9 +391,9 @@ fn file_ending_exactly_at_region_end_resolves() {
     let data = b"tailend";
     let region = one_file_region(b"T.BIN", data, data.len() as u64);
     assert_eq!(region.len() % 16, 7, "region end is left unaligned");
-    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+    let pkg = wrap_region(&keys(), &TEST_KLIC, "NPUA80001", 1, &region);
 
-    let archive = extract(&pkg).expect("file ending at region end extracts");
+    let archive = extract(&pkg, &keys()).expect("file ending at region end extracts");
     let file = find(&archive, "T.BIN").expect("T.BIN present");
     assert_eq!(archive.file_data(file), data);
 }
@@ -334,9 +405,9 @@ fn file_ending_exactly_at_region_end_resolves() {
 #[test]
 fn zero_length_file_at_region_end_resolves_empty() {
     let region = one_file_region(b"Z.BIN", b"", 0);
-    let pkg = wrap_region(&TEST_KLIC, "NPUA80001", 1, &region);
+    let pkg = wrap_region(&keys(), &TEST_KLIC, "NPUA80001", 1, &region);
 
-    let archive = extract(&pkg).expect("zero-length file extracts");
+    let archive = extract(&pkg, &keys()).expect("zero-length file extracts");
     let file = find(&archive, "Z.BIN").expect("Z.BIN present");
     assert_eq!(file.kind, PkgEntryKind::File);
     assert!(archive.file_data(file).is_empty());
@@ -347,13 +418,14 @@ fn zero_length_file_at_region_end_resolves_empty() {
 #[should_panic(expected = "invariant: extract bounds-proved every item range")]
 fn file_data_from_a_foreign_archive_that_escapes_the_region_panics() {
     let big = build_pkg(
+        &keys(),
         &TEST_KLIC,
         "NPUA80001",
         &[file_item("BIG.BIN", 3, &[0xAAu8; 64])],
     );
-    let small = build_pkg(&TEST_KLIC, "NPUA80002", &[file_item("S", 3, b"s")]);
-    let big_archive = extract(&big).expect("big extracts");
-    let small_archive = extract(&small).expect("small extracts");
+    let small = build_pkg(&keys(), &TEST_KLIC, "NPUA80002", &[file_item("S", 3, b"s")]);
+    let big_archive = extract(&big, &keys()).expect("big extracts");
+    let small_archive = extract(&small, &keys()).expect("small extracts");
     let foreign = find(&big_archive, "BIG.BIN").expect("BIG.BIN present");
 
     let _ = small_archive.file_data(foreign);

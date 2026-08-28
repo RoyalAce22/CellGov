@@ -1,9 +1,11 @@
 //! PS3 firmware and SELF decryption CLI.
 //!
 //! Exposes [`cellgov_install`]'s library as `install` and
-//! `decrypt-self` subcommands. Every subcommand but `uninstall`
-//! decrypts, so a binary built without the `decrypt` feature refuses
-//! them by name.
+//! `decrypt-self` subcommands. Every subcommand but `uninstall` and
+//! `keys` decrypts, so a binary built without the `decrypt` feature
+//! refuses them by name. The decrypting ones read their key material
+//! from the operator's vault (`CELLGOV_KEYS`, or the one `keys import`
+//! normalized under the VFS root).
 
 #![allow(
     clippy::print_stdout,
@@ -27,6 +29,9 @@ use cellgov_ps3_abi::elf::ELF_MAGIC;
 #[cfg(feature = "decrypt")]
 use cellgov_install::disc_crypt;
 use cellgov_install::game_install::InstallOptions;
+use cellgov_install::keys::{
+    installed_keys_dir, KeyVault, KeyVaultError, SelfClass, Slot, ENV_KEYS, INSTALLED_KEYS_FILE,
+};
 use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
@@ -52,6 +57,7 @@ fn main() {
         #[cfg(feature = "decrypt")]
         "install-iso" => cmd_install_iso(&args),
         "uninstall" => cmd_uninstall(&args),
+        "keys" => cmd_keys(&args),
         #[cfg(feature = "decrypt")]
         "decrypt-self" => cmd_decrypt_self(&args),
         #[cfg(not(feature = "decrypt"))]
@@ -74,8 +80,12 @@ fn main() {
 fn print_usage() {
     eprintln!("usage:");
     if cfg!(not(feature = "decrypt")) {
-        eprintln!("  (this build has no decrypt support: only `uninstall` runs; rebuild with `--features decrypt` for the rest)");
+        eprintln!("  (this build has no decrypt support: only `uninstall` and `keys` run; rebuild with `--features decrypt` for the rest)");
     }
+    eprintln!(
+        "  every decrypting subcommand reads the operator's key vault: {ENV_KEYS}=<file-or-dir>,"
+    );
+    eprintln!("    or the vault `keys import` wrote under <vfs>/.cellgov/keys/");
     eprintln!("  cellgov_install install <PUP_PATH> [--output <dir>] [--force]");
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    extracts the firmware image to dev_flash/ (+ dev_flash2/, dev_flash3/)");
@@ -107,6 +117,15 @@ fn print_usage() {
     eprintln!("    NPDRM SELFs resolve their RAP from <vfs-root>/dev_hdd0/home/00000001/exdata/");
     eprintln!("    --rap: use this RAP instead, for a title that is not installed");
     eprintln!("    default --vfs-root: vfs/ (at the current working directory)");
+    eprintln!("  cellgov_install keys show [PATH] [--output <vfs>]");
+    eprintln!("    inventory of the vault at PATH, else of {ENV_KEYS} / the imported one");
+    eprintln!("    exits 2 when a decrypt path would find a key missing");
+    eprintln!("  cellgov_install keys import <PATH> [--output <vfs>] [--replace]");
+    eprintln!("    normalizes a keys file or directory into <vfs>/.cellgov/keys/keys.toml");
+    eprintln!("    --replace: drop the imported vault already there instead of merging into it");
+    eprintln!("  cellgov_install keys remove [--output <vfs>]");
+    eprintln!("    deletes <vfs>/.cellgov/keys/");
+    eprintln!("    default --output: vfs/ (at the current working directory)");
 }
 
 /// Parsed `install` subcommand arguments.
@@ -142,6 +161,50 @@ enum FirmwareCliError {
     /// `decrypt-self` invoked without a SELF path.
     #[error("decrypt-self requires a SELF path")]
     MissingSelfPath,
+    /// `keys` invoked without `show`, `import`, or `remove`.
+    #[error("keys requires a subcommand: show, import, or remove")]
+    KeysMissingSubcommand,
+    /// `keys import` invoked without a keys file or directory.
+    #[error("keys import requires the path of a keys file or directory")]
+    KeysImportMissingPath,
+    /// `keys` invoked with a subcommand it does not have.
+    #[error("unknown keys subcommand: {0} (expected show, import, or remove)")]
+    KeysUnknownSubcommand(String),
+    /// A keys subcommand given a second positional argument.
+    #[error("keys {subcommand} takes at most one path; unexpected argument: {extra}")]
+    KeysExtraPositional {
+        subcommand: &'static str,
+        extra: String,
+    },
+    /// Loading, merging, or locating a vault failed.
+    #[error("{0}")]
+    Keys(#[from] KeyVaultError),
+    /// `keys import`: the imported file or directory held no key the
+    /// decrypt paths could use.
+    #[error("keys import: {} holds no scalar key, SCE package keyset, APP or NPDRM keyset, or disc key; nothing to import (run `keys show {}` to see what was read and set aside)", path.display(), path.display())]
+    KeysNothingUsable { path: PathBuf },
+    /// `keys import`: the installed-vault directory could not be created.
+    #[error("create {}: {source}", path.display())]
+    KeysDirCreateFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// `keys import`: `keys.toml` could not be written.
+    #[error("write {}: {source}", path.display())]
+    KeysWriteFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// `keys remove`: the installed-vault directory exists and could
+    /// not be deleted.
+    #[error("remove {}: {source}", path.display())]
+    KeysRemoveFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     /// A decrypting subcommand on a binary built without the
     /// `decrypt` cargo feature.
     #[cfg(not(feature = "decrypt"))]
@@ -395,6 +458,11 @@ fn cmd_decrypt_self(args: &[String]) {
         self_path.with_file_name(format!("{stem}.elf"))
     });
 
+    let keys = KeyVault::load_for_vfs(&parsed.vfs_root).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
+
     let data = std::fs::read(&self_path).unwrap_or_else(|e| {
         eprintln!("failed to read {}: {e}", self_path.display());
         std::process::exit(1);
@@ -423,10 +491,11 @@ fn cmd_decrypt_self(args: &[String]) {
         }
     };
 
-    let decrypted = self_image::to_plaintext_elf(&data, self_image::KeyPolicy::Auto(&resolver));
+    let decrypted =
+        self_image::to_plaintext_elf(&data, &keys, self_image::KeyPolicy::Auto(&resolver));
 
     // Checked whichever way the decrypt went. A license-3 SELF falls
-    // back to NP_KLIC_FREE when the resolver yields no key, so a
+    // back to the vault's free klicensee when the resolver yields no key, so a
     // refused RAP would otherwise be swallowed by a "successful"
     // free-key decrypt that ignored the RAP the caller supplied.
     if let Some(rap_err) = resolve_error.borrow_mut().take() {
@@ -529,6 +598,10 @@ fn cmd_install(args: &[String]) {
         eprintln!("{e}");
         std::process::exit(1);
     });
+    let keys = KeyVault::load_for_vfs(&output_dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
 
     let pup_data = std::fs::read(&pup_path).unwrap_or_else(|e| {
         eprintln!("failed to read {}: {e}", pup_path.display());
@@ -552,7 +625,7 @@ fn cmd_install(args: &[String]) {
     );
 
     println!("  validating HMAC...");
-    pup::validate_hashes(&pup_data, &pup).unwrap_or_else(|e| {
+    pup::validate_hashes(&pup_data, &pup, &keys).unwrap_or_else(|e| {
         eprintln!("PUP hash validation failed: {e}");
         std::process::exit(1);
     });
@@ -597,7 +670,7 @@ fn cmd_install(args: &[String]) {
         packages_attempted += 1;
         let short = entry.name.rsplit('/').next().unwrap_or(&entry.name);
         print!("  decrypting {short}...");
-        match sce::decrypt_package(&entry.data) {
+        match sce::decrypt_package(&entry.data, &keys) {
             Ok(inner_tar_data) => match tar::parse(&inner_tar_data) {
                 Ok(inner_files) => {
                     let packaged = inner_files.len();
@@ -684,13 +757,14 @@ fn cmd_install(args: &[String]) {
     // Rooted at the dev_flash mount so entry paths stay
     // `sys/external/...` and `cellgov_cli`'s walk-up from the firmware
     // dir finds the manifest beside the tree it covers.
-    let manifest = match build_firmware_manifest(&pup_data, pup.image_version, &dev_flash_dir) {
-        Ok(m) => m,
-        Err(e) => {
-            println!(" FAILED ({e})");
-            std::process::exit(1);
-        }
-    };
+    let manifest =
+        match build_firmware_manifest(&pup_data, pup.image_version, &dev_flash_dir, &keys) {
+            Ok(m) => m,
+            Err(e) => {
+                println!(" FAILED ({e})");
+                std::process::exit(1);
+            }
+        };
     let manifest_path = dev_flash_dir.join("firmware.toml");
     let text = manifest::serialize_manifest(&manifest).unwrap_or_else(|e| {
         eprintln!("\nfirmware.toml serialise failed: {e}");
@@ -816,6 +890,10 @@ fn cmd_install_game(args: &[String]) {
             std::process::exit(1);
         })
     });
+    let keys = KeyVault::load_for_vfs(&parsed.output_dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
 
     println!(
         "cellgov_install: installing game from {} ({:.1} MB)",
@@ -829,6 +907,7 @@ fn cmd_install_game(args: &[String]) {
     let outcome = game_install::install_pkg(
         &pkg_data,
         rap_data.as_deref(),
+        &keys,
         &parsed.output_dir,
         &installs_dir,
         InstallOptions {
@@ -932,6 +1011,12 @@ fn cmd_install_iso(args: &[String]) {
         eprintln!("failed to map {}: {e}", parsed.iso_path.display());
         std::process::exit(1);
     });
+    // Before the disc pass: a missing vault should not cost a full
+    // image decrypt first.
+    let keys = KeyVault::load_for_vfs(&parsed.output_dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
 
     println!(
         "cellgov_install: installing disc from {} ({:.1} MB)",
@@ -977,6 +1062,7 @@ fn cmd_install_iso(args: &[String]) {
     let outcome = game_install::install_iso(
         decrypted,
         &iso_data,
+        &keys,
         &parsed.output_dir,
         &installs_dir,
         InstallOptions {
@@ -1211,6 +1297,7 @@ fn build_firmware_manifest(
     pup_data: &[u8],
     pup_image_version: u64,
     output_dir: &Path,
+    keys: &KeyVault,
 ) -> Result<FirmwareManifest, FirmwareCliError> {
     let mut pup_hasher = Sha256::new();
     pup_hasher.update(pup_data);
@@ -1228,7 +1315,7 @@ fn build_firmware_manifest(
             source,
         })?;
         let (elf, revision) = if self_image::is_sce_wrapped(&raw) {
-            let elf = match sce::decrypt_self_to_elf(&raw) {
+            let elf = match sce::decrypt_self_to_elf(&raw, keys) {
                 Ok(e) => e,
                 // The module is omitted from the manifest either way,
                 // but the omission carries its cause: a bare tally
@@ -1314,6 +1401,256 @@ fn build_firmware_manifest(
         },
         files,
     })
+}
+
+/// Parsed `keys` subcommand arguments.
+#[derive(Debug, PartialEq, Eq)]
+enum KeysCommand {
+    /// Inventory of the vault at `path`, or of the one the decrypting
+    /// subcommands would read for `vfs_root`.
+    Show {
+        path: Option<PathBuf>,
+        vfs_root: PathBuf,
+    },
+    /// Normalize `path` into `<vfs_root>/.cellgov/keys/keys.toml`.
+    Import {
+        path: PathBuf,
+        vfs_root: PathBuf,
+        replace: bool,
+    },
+    /// Delete `<vfs_root>/.cellgov/keys/`.
+    Remove { vfs_root: PathBuf },
+}
+
+fn parse_keys_args(args: &[String]) -> Result<KeysCommand, FirmwareCliError> {
+    if args.len() < 3 {
+        return Err(FirmwareCliError::KeysMissingSubcommand);
+    }
+    let subcommand: &'static str = match args[2].as_str() {
+        "show" => "show",
+        "import" => "import",
+        "remove" => "remove",
+        other => return Err(FirmwareCliError::KeysUnknownSubcommand(other.to_string())),
+    };
+    let mut positional: Option<PathBuf> = None;
+    let mut output_dir: Option<PathBuf> = None;
+    let mut replace = false;
+    let mut i = 3;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--output" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(FirmwareCliError::OutputFlagMissingValue { kind: "directory" });
+                }
+                output_dir = Some(PathBuf::from(&args[i]));
+            }
+            "--replace" if subcommand == "import" => replace = true,
+            other if other.starts_with("--") => {
+                return Err(FirmwareCliError::UnknownArgument(other.to_string()));
+            }
+            other if subcommand == "remove" || positional.is_some() => {
+                return Err(FirmwareCliError::KeysExtraPositional {
+                    subcommand,
+                    extra: other.to_string(),
+                });
+            }
+            other => positional = Some(PathBuf::from(other)),
+        }
+        i += 1;
+    }
+    let vfs_root = output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_INSTALL_OUTPUT));
+    Ok(match subcommand {
+        "show" => KeysCommand::Show {
+            path: positional,
+            vfs_root,
+        },
+        "import" => KeysCommand::Import {
+            path: positional.ok_or(FirmwareCliError::KeysImportMissingPath)?,
+            vfs_root,
+            replace,
+        },
+        _ => KeysCommand::Remove { vfs_root },
+    })
+}
+
+fn cmd_keys(args: &[String]) {
+    let parsed = parse_keys_args(args).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        print_usage();
+        std::process::exit(1);
+    });
+    match parsed {
+        KeysCommand::Show { path, vfs_root } => {
+            let location = match path {
+                Some(p) => p,
+                None => KeyVault::locate_from(std::env::var_os(ENV_KEYS), &vfs_root)
+                    .unwrap_or_else(|e| {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }),
+            };
+            let vault = KeyVault::load_from_path(&location).unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(1);
+            });
+            print!("{}", render_key_inventory(&location, &vault));
+            if !vault.missing_for_decrypt().is_empty() {
+                std::process::exit(2);
+            }
+        }
+        KeysCommand::Import {
+            path,
+            vfs_root,
+            replace,
+        } => {
+            let file = installed_keys_dir(&vfs_root).join(INSTALLED_KEYS_FILE);
+            // Decided before the import writes: "merged" is only true
+            // when a vault was already there to merge into.
+            let merged = !replace && file.is_file();
+            let vault = import_keys(&path, &vfs_root, replace).unwrap_or_else(|e| {
+                eprintln!("{e}");
+                std::process::exit(1);
+            });
+            println!(
+                "cellgov_install: {} {} into {}",
+                if merged { "merged" } else { "wrote" },
+                path.display(),
+                file.display()
+            );
+            println!("  {}", vault.summary());
+            for ignored in vault.ignored() {
+                println!("  set aside {}: {}", ignored.at, ignored.reason);
+            }
+            let missing = vault.missing_for_decrypt();
+            if missing.is_empty() {
+                println!("  decrypt paths: ready");
+            } else {
+                println!("  missing for decrypt: {}", missing.join(", "));
+            }
+        }
+        KeysCommand::Remove { vfs_root } => {
+            let dir = installed_keys_dir(&vfs_root);
+            match remove_keys(&vfs_root) {
+                Ok(true) => println!("cellgov_install: removed {}", dir.display()),
+                Ok(false) => println!("cellgov_install: nothing installed at {}", dir.display()),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+/// The `keys show` report for the vault loaded from `location`.
+fn render_key_inventory(location: &Path, vault: &KeyVault) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(format!("key vault: {}", location.display()));
+    lines.push(format!("  sources: {} file(s)", vault.sources().len()));
+    for slot in Slot::ALL {
+        lines.push(match vault.slot_provenance(slot) {
+            Some(at) => format!("  {}: {} bytes, from {at}", slot.name(), slot.byte_len()),
+            None => format!("  {}: missing", slot.name()),
+        });
+    }
+    let scepkg = vault.scepkg_keys().map(Iterator::count).unwrap_or(0);
+    lines.push(format!("  scepkg: {scepkg} keyset(s)"));
+    for class in [SelfClass::App, SelfClass::Npdrm] {
+        let revisions: Vec<String> = vault
+            .labeled_revisions(class)
+            .map(|r| format!("0x{r:04x}"))
+            .collect();
+        let labeled = if revisions.is_empty() {
+            "(none)".to_string()
+        } else {
+            revisions.join(", ")
+        };
+        lines.push(format!(
+            "  {class}: revisions {labeled}, {} unlabeled",
+            vault.unlabeled_count(class)
+        ));
+    }
+    lines.push(format!("  disc keys: {}", vault.disc_key_count()));
+    if !vault.ignored().is_empty() {
+        lines.push("  set aside:".to_string());
+        for ignored in vault.ignored() {
+            lines.push(format!("    {}: {}", ignored.at, ignored.reason));
+        }
+    }
+    let missing = vault.missing_for_decrypt();
+    if missing.is_empty() {
+        lines.push("  decrypt paths: ready".to_string());
+    } else {
+        lines.push(format!("  missing for decrypt: {}", missing.join(", ")));
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// Whether `vault` holds any value a decrypt path could use.
+fn holds_any_key(vault: &KeyVault) -> bool {
+    Slot::ALL
+        .iter()
+        .any(|s| vault.slot_provenance(*s).is_some())
+        || vault.scepkg_keys().is_ok()
+        || [SelfClass::App, SelfClass::Npdrm]
+            .iter()
+            .any(|c| vault.labeled_revisions(*c).next().is_some() || vault.unlabeled_count(*c) > 0)
+        || vault.disc_key_count() > 0
+}
+
+/// Normalize the vault at `path` into `<vfs_root>/.cellgov/keys/keys.toml`,
+/// merging into the vault already there unless `replace`.
+///
+/// # Errors
+///
+/// [`FirmwareCliError::Keys`] for a vault that will not load, or a
+/// merge whose two definitions of one key disagree (the refusal names
+/// both); [`FirmwareCliError::KeysNothingUsable`] when `path` held no
+/// key at all; and the directory / file write refusals.
+fn import_keys(path: &Path, vfs_root: &Path, replace: bool) -> Result<KeyVault, FirmwareCliError> {
+    let imported = KeyVault::load_from_path(path)?;
+    if !holds_any_key(&imported) {
+        return Err(FirmwareCliError::KeysNothingUsable {
+            path: path.to_path_buf(),
+        });
+    }
+    let dir = installed_keys_dir(vfs_root);
+    let file = dir.join(INSTALLED_KEYS_FILE);
+    let vault = if !replace && file.is_file() {
+        let mut existing = KeyVault::load_from_path(&file)?;
+        existing.merge(imported)?;
+        existing
+    } else {
+        imported
+    };
+    std::fs::create_dir_all(&dir).map_err(|source| FirmwareCliError::KeysDirCreateFailed {
+        path: dir.clone(),
+        source,
+    })?;
+    std::fs::write(&file, vault.to_toml()).map_err(|source| FirmwareCliError::KeysWriteFailed {
+        path: file.clone(),
+        source,
+    })?;
+    Ok(vault)
+}
+
+/// Delete `<vfs_root>/.cellgov/keys/`; `Ok(false)` when there was
+/// nothing to delete.
+///
+/// # Errors
+///
+/// [`FirmwareCliError::KeysRemoveFailed`] for any refusal other than
+/// absence.
+fn remove_keys(vfs_root: &Path) -> Result<bool, FirmwareCliError> {
+    let dir = installed_keys_dir(vfs_root);
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(source) => Err(FirmwareCliError::KeysRemoveFailed { path: dir, source }),
+    }
 }
 
 #[cfg(test)]

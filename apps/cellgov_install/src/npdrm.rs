@@ -17,13 +17,13 @@
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockDecrypt, KeyInit};
 use cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
-#[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::sce::{NP_KLIC_FREE, NP_KLIC_KEY, RAP_E1, RAP_E2, RAP_KEY, RAP_PBOX};
 
 #[cfg(feature = "decrypt")]
+use crate::keys::{KeyVault, KeyVaultError, SelfClass};
+#[cfg(feature = "decrypt")]
 use crate::sce::{
-    assemble_elf_from_sections, decrypt_envelope, decrypt_sections_from_envelope,
-    inner_elf_segment_file_sizes, parse_sce_header,
+    assemble_elf_from_sections, decrypt_sections_from_envelope, inner_elf_segment_file_sizes,
+    open_envelope_with, parse_sce_header,
 };
 use crate::sce::{find_supplemental_body, SceError};
 
@@ -39,8 +39,8 @@ pub enum NpdLicense {
     /// License type 2: local license, klicensee derived from a
     /// per-account RAP file.
     Local = 2,
-    /// License type 3: free license; klicensee defaults to
-    /// `NP_KLIC_FREE` when no RAP is supplied.
+    /// License type 3: free license; klicensee defaults to the vault's
+    /// free klicensee when no RAP is supplied.
     Free = 3,
 }
 
@@ -99,69 +99,101 @@ pub fn find_npd_header_info(data: &[u8]) -> Result<Option<NpdHeaderInfo>, SceErr
     }))
 }
 
-/// Derive the 16-byte intermediate klicensee (RIF key) from a 16-byte RAP.
+/// Derive the 16-byte intermediate klicensee (RIF key) from a 16-byte
+/// RAP under the vault's RAP key and round tables.
 ///
-/// The envelope-peel step further ECB-decrypts the output with
-/// `NP_KLIC_KEY` to produce the layer key.
+/// The envelope-peel step further ECB-decrypts the output with the
+/// vault's klicensee key to produce the layer key.
+///
+/// # Errors
+///
+/// [`SceError::Keys`] naming the first of the four RAP slots the vault
+/// lacks, and [`SceError::RapPboxNotAPermutation`] when the vault's
+/// permutation table is not one.
 #[cfg(feature = "decrypt")]
-#[must_use]
-pub fn rap_to_klic(rap: &[u8; 16]) -> [u8; 16] {
-    let cipher = aes::Aes128::new_from_slice(&RAP_KEY).expect("RAP_KEY is 16 bytes");
+pub fn rap_to_klic(keys: &KeyVault, rap: &[u8; 16]) -> Result<[u8; 16], SceError> {
+    let rap_key = keys.rap_key()?;
+    let pbox = keys.rap_pbox()?;
+    let e1 = keys.rap_e1()?;
+    let e2 = keys.rap_e2()?;
+    // RPCS3 `key_vault.cpp` `rap_to_rif` indexes the round tables
+    // through a fixed permutation of 0..15, and the E1 / cascade /
+    // borrow sweeps rely on every position being visited exactly
+    // once (the repository's `oracle/rap_to_klic_oracle.py` asserts
+    // the same). A vault table that is not a permutation would derive
+    // a wrong klicensee that only fails, later, as an envelope
+    // padding mismatch, so it is refused here by name.
+    let mut seen = [false; 16];
+    for (index, &p) in pbox.iter().enumerate() {
+        let p = usize::from(p);
+        if p >= 16 || seen[p] {
+            return Err(SceError::RapPboxNotAPermutation { index });
+        }
+        seen[p] = true;
+    }
+    let cipher = aes::Aes128::new_from_slice(rap_key).expect("invariant: the slot is 16 bytes");
     let mut key = [0u8; 16];
     key.copy_from_slice(rap);
     cipher.decrypt_block((&mut key).into());
 
+    let at = |i: usize| usize::from(pbox[i]);
     for _round in 0..5 {
-        for &p in RAP_PBOX.iter() {
-            let p = p as usize;
-            key[p] ^= RAP_E1[p];
+        for i in 0..16 {
+            let p = at(i);
+            key[p] ^= e1[p];
         }
         for i in (1..16).rev() {
-            let p = RAP_PBOX[i] as usize;
-            let pp = RAP_PBOX[i - 1] as usize;
+            let p = at(i);
+            let pp = at(i - 1);
             key[p] ^= key[pp];
         }
-        let mut o: u8 = 0;
-        for &pi in RAP_PBOX.iter() {
-            let p = pi as usize;
-            let kc = key[p].wrapping_sub(o);
-            let ec2 = RAP_E2[p];
-            if o != 1 || kc != 0xFF {
-                o = u8::from(kc < ec2);
-                key[p] = kc.wrapping_sub(ec2);
-            } else {
-                // The C reference's else-if chain collapses here:
-                // reaching this branch requires o==1 && kc==0xFF, so
-                // only the kc-ec2 arm (no `o` update) survives.
-                key[p] = kc.wrapping_sub(ec2);
+        let mut borrow: u8 = 0;
+        for i in 0..16 {
+            let p = at(i);
+            let kc = key[p].wrapping_sub(borrow);
+            let ec2 = e2[p];
+            if borrow != 1 || kc != 0xFF {
+                borrow = u8::from(kc < ec2);
             }
+            key[p] = kc.wrapping_sub(ec2);
         }
     }
 
-    key
+    Ok(key)
 }
 
 /// Derive the AES-128 layer key (which decrypts the NPDRM-wrapped
-/// metadata-info envelope) by ECB-decrypting `klicensee` with `NP_KLIC_KEY`.
+/// metadata-info envelope) by ECB-decrypting `klicensee` with the
+/// vault's klicensee key.
 #[cfg(feature = "decrypt")]
-fn klicensee_to_layer_key(klicensee: &[u8; 16]) -> [u8; 16] {
-    let cipher = aes::Aes128::new_from_slice(&NP_KLIC_KEY).expect("NP_KLIC_KEY is 16 bytes");
+fn klicensee_to_layer_key(
+    keys: &KeyVault,
+    klicensee: &[u8; 16],
+) -> Result<[u8; 16], KeyVaultError> {
+    let cipher =
+        aes::Aes128::new_from_slice(keys.np_klic_key()?).expect("invariant: the slot is 16 bytes");
     let mut layer_key = [0u8; 16];
     layer_key.copy_from_slice(klicensee);
     cipher.decrypt_block((&mut layer_key).into());
-    layer_key
+    Ok(layer_key)
 }
 
 /// Decrypt an NPDRM-wrapped SELF using the supplied 16-byte klicensee
-/// and reconstruct the plaintext ELF.
+/// and the vault's NPDRM keysets, and reconstruct the plaintext ELF.
 ///
 /// # Errors
 ///
-/// Returns [`SceError::AesCbcDecryptFailed`] or
-/// [`SceError::KeyEnvelopePadding`] when either layer key is wrong --
-/// envelope zero-padding self-certifies a correct decrypt.
+/// [`SceError::NoNpdrmKey`] when the vault has no keyset for the
+/// revision; [`SceError::KeyEnvelopePadding`] when the one keyset or
+/// the klicensee is wrong -- envelope zero-padding self-certifies a
+/// correct decrypt -- and [`SceError::NoCandidateOpensEnvelope`] when
+/// several keysets were tried.
 #[cfg(feature = "decrypt")]
-pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Vec<u8>, SceError> {
+pub fn decrypt_self_to_elf_npdrm(
+    data: &[u8],
+    keys: &KeyVault,
+    klicensee: &[u8; 16],
+) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
     // High bit of revision_flags marks an unencrypted debug SELF.
     if hdr.revision_flags & 0x8000 != 0 {
@@ -170,10 +202,16 @@ pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Ve
         });
     }
     let revision = hdr.revision_flags & 0x7FFF;
-    let key =
-        crate::crypto::npdrm_key_for_revision(revision).ok_or(SceError::NoAppKey { revision })?;
-    let layer_key = klicensee_to_layer_key(klicensee);
-    let envelope = decrypt_envelope(data, &hdr, &key.erk, &key.riv, Some(&layer_key))?;
+    let layer_key = klicensee_to_layer_key(keys, klicensee)?;
+    let envelope = open_envelope_with(
+        data,
+        &hdr,
+        keys.self_key_candidates(SelfClass::Npdrm, revision),
+        Some(&layer_key),
+        "NPDRM",
+        revision,
+        || SceError::NoNpdrmKey { revision },
+    )?;
     let segment_file_sizes = inner_elf_segment_file_sizes(data)?;
     let sections =
         decrypt_sections_from_envelope(data, &hdr, &envelope, Some(&segment_file_sizes))?;
@@ -186,18 +224,19 @@ pub fn decrypt_self_to_elf_npdrm(data: &[u8], klicensee: &[u8; 16]) -> Result<Ve
 /// `rap_lookup` is invoked only for NPDRM-wrapped SELFs and returns
 /// the title's [`Rap`]; the klicensee is derived here. Returning
 /// `None` errors with [`SceError::NoRapForNpdrmTitle`] naming the
-/// `content_id`. License-3 (free) titles fall back to `NP_KLIC_FREE`
-/// when the lookup returns `None`.
+/// `content_id`. License-3 (free) titles fall back to the vault's
+/// free klicensee when the lookup returns `None`.
 #[cfg(feature = "decrypt")]
 pub fn decrypt_self_to_elf_auto(
     data: &[u8],
+    keys: &KeyVault,
     rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<Rap>,
 ) -> Result<Vec<u8>, SceError> {
     match find_npd_header_info(data)? {
-        None => crate::sce::decrypt_self_to_elf(data),
+        None => crate::sce::decrypt_self_to_elf(data, keys),
         Some(npd) => {
-            let klicensee = resolve_npdrm_klicensee(&npd, rap_lookup)?;
-            decrypt_self_to_elf_npdrm(data, &klicensee)
+            let klicensee = resolve_npdrm_klicensee(keys, &npd, rap_lookup)?;
+            decrypt_self_to_elf_npdrm(data, keys, &klicensee)
         }
     }
 }
@@ -205,17 +244,24 @@ pub fn decrypt_self_to_elf_auto(
 /// Resolve the klicensee bytes for an NPDRM SELF given its NPD header.
 #[cfg(feature = "decrypt")]
 fn resolve_npdrm_klicensee(
+    keys: &KeyVault,
     npd: &NpdHeaderInfo,
     rap_lookup: impl FnOnce(&NpdHeaderInfo) -> Option<Rap>,
 ) -> Result<[u8; 16], SceError> {
-    let klicensee = rap_lookup(npd).map(|rap| rap_to_klic(&rap.0));
+    let klicensee = match rap_lookup(npd) {
+        Some(rap) => Some(rap_to_klic(keys, &rap.0)?),
+        None => None,
+    };
     match npd.license {
         NpdLicense::Network | NpdLicense::Local => {
             klicensee.ok_or_else(|| SceError::NoRapForNpdrmTitle {
                 content_id: npd.content_id.clone(),
             })
         }
-        NpdLicense::Free => Ok(klicensee.unwrap_or(NP_KLIC_FREE)),
+        NpdLicense::Free => match klicensee {
+            Some(k) => Ok(k),
+            None => Ok(*keys.np_klic_free()?),
+        },
     }
 }
 
@@ -226,6 +272,19 @@ mod tests;
 #[cfg(all(test, feature = "npdrm-oracle-vectors"))]
 mod oracle_vectors {
     use super::*;
+
+    /// The vault under the workspace `vfs/`, where the `include_bytes!`
+    /// fixtures below also live; `cargo test` runs with the crate
+    /// directory as the working directory, so [`KeyVault::load`]'s
+    /// relative `vfs` would look two levels too deep.
+    fn vault() -> KeyVault {
+        let mut vfs = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        vfs.pop();
+        vfs.pop();
+        vfs.push("vfs");
+        KeyVault::load_for_vfs(&vfs)
+            .expect("npdrm-oracle-vectors: the operator's key vault must load")
+    }
 
     const FLOW_RAP: [u8; 16] = include_bytes_array_flow_rap();
     /// flOw klic witness, frozen against `FLOW_RAP`.
@@ -292,28 +351,30 @@ mod oracle_vectors {
 
     #[test]
     fn rap_to_klic_matches_witness_flow() {
-        let got = rap_to_klic(&FLOW_RAP);
+        let got = rap_to_klic(&vault(), &FLOW_RAP).unwrap();
         assert_eq!(got, FLOW_EXPECTED_KLIC, "flOw klic drift");
     }
 
     #[test]
     fn rap_to_klic_matches_witness_sshd() {
-        let got = rap_to_klic(&SSHD_RAP);
+        let got = rap_to_klic(&vault(), &SSHD_RAP).unwrap();
         assert_eq!(got, SSHD_EXPECTED_KLIC, "SSHD klic drift");
     }
 
     #[test]
     fn flow_eboot_decrypts_to_parseable_elf() {
-        let klic = rap_to_klic(&FLOW_RAP);
-        let elf = decrypt_self_to_elf_npdrm(FLOW_EBOOT, &klic)
+        let keys = vault();
+        let klic = rap_to_klic(&keys, &FLOW_RAP).unwrap();
+        let elf = decrypt_self_to_elf_npdrm(FLOW_EBOOT, &keys, &klic)
             .expect("flOw NPDRM decrypt: padding + section hashes self-certify");
         assert_is_ps3_ppc64_elf(&elf);
     }
 
     #[test]
     fn sshd_eboot_decrypts_to_parseable_elf() {
-        let klic = rap_to_klic(&SSHD_RAP);
-        let elf = decrypt_self_to_elf_npdrm(SSHD_EBOOT, &klic)
+        let keys = vault();
+        let klic = rap_to_klic(&keys, &SSHD_RAP).unwrap();
+        let elf = decrypt_self_to_elf_npdrm(SSHD_EBOOT, &keys, &klic)
             .expect("SSHD NPDRM decrypt: padding + section hashes self-certify");
         assert_is_ps3_ppc64_elf(&elf);
     }

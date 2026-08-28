@@ -29,7 +29,7 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// exdata layout RPCS3 reads on boot, so a once-installed RAP is
 /// found by content id with no per-invocation `--rap` or `--title`.
 /// An absent RAP returns `None`: license-3 (free) titles fall back
-/// to `NP_KLIC_FREE`, Network / Local titles surface
+/// to the vault's free klicensee, Network / Local titles surface
 /// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.
 pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path) -> Vec<u8> {
     let exdata = vfs_root.join("home").join("00000001").join("exdata");
@@ -37,7 +37,8 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
         let rap_path = exdata.join(format!("{}.rap", npd.content_id));
         // Only "no such file" is an absent RAP. Any other read failure
         // (permissions, a directory in its place) would otherwise take
-        // the same silent path and boot the title on NP_KLIC_FREE.
+        // the same silent path and boot the title on the vault's free
+        // klicensee.
         let rap_bytes = match std::fs::read(&rap_path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
@@ -57,14 +58,38 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
         });
         Some(Rap(rap_arr))
     };
-    match to_plaintext_elf(bytes, KeyPolicy::Auto(&resolver)) {
+    match to_plaintext_elf(
+        bytes,
+        super::keys::key_vault_for(bytes),
+        KeyPolicy::Auto(&resolver),
+    ) {
         Ok(elf) => elf.into_owned(),
         Err(e @ SceError::NoRapForNpdrmTitle { .. }) => die(&format!(
             "{e}; expected its RAP at {}/<content_id>.rap",
             exdata.display()
         )),
+        Err(e) if is_key_vault_refusal(&e) => {
+            die(&format!("failed to decrypt SELF {path}: {e}\n{KEYS_HINT}"))
+        }
         Err(e) => die(&format!("failed to decrypt SELF {path}: {e}")),
     }
+}
+
+/// The one line every vault refusal ends with.
+const KEYS_HINT: &str = "supply keys with CELLGOV_KEYS=<file-or-dir> or \
+                         `cellgov_install keys import <file-or-dir>`";
+
+/// A refusal every SCE-wrapped image in the run answers the same: the
+/// vault did not load, or holds no keyset for the image's class and
+/// revision.
+fn is_key_vault_refusal(e: &SceError) -> bool {
+    matches!(
+        e,
+        SceError::Keys(_)
+            | SceError::NoAppKey { .. }
+            | SceError::NoNpdrmKey { .. }
+            | SceError::RapPboxNotAPermutation { .. }
+    )
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -84,7 +109,8 @@ fn rap_resolver(
 ) -> impl Fn(&NpdHeaderInfo) -> Option<Rap> {
     let rap_filename = title.rap_filename.clone();
     move |npd: &NpdHeaderInfo| -> Option<Rap> {
-        // license 3 (free) falls back to NP_KLIC_FREE downstream when None.
+        // license 3 (free) falls back to the vault's free klicensee
+        // downstream when None.
         let rap_filename = rap_filename.as_ref()?;
         let rap_path = vfs_root
             .join("home")
@@ -145,9 +171,18 @@ pub(crate) fn load_ppu_image_with_title_or_die(
     let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
         .unwrap_or_else(|e| die(&format!("SELF {path}: capability header: {e}")));
     let resolver = rap_resolver(title, vfs_root.to_path_buf());
-    let elf_data = to_plaintext_elf(&bytes, KeyPolicy::Auto(&resolver))
-        .unwrap_or_else(|e| die(&format!("failed to decrypt SELF {path}: {e}")))
-        .into_owned();
+    let elf_data = to_plaintext_elf(
+        &bytes,
+        super::keys::key_vault_for(&bytes),
+        KeyPolicy::Auto(&resolver),
+    )
+    .unwrap_or_else(|e| {
+        if is_key_vault_refusal(&e) {
+            die(&format!("failed to decrypt SELF {path}: {e}\n{KEYS_HINT}"))
+        }
+        die(&format!("failed to decrypt SELF {path}: {e}"))
+    })
+    .into_owned();
     LoadedPpuImage {
         elf_data,
         authority_id,
@@ -157,7 +192,12 @@ pub(crate) fn load_ppu_image_with_title_or_die(
 
 /// Walk `eboot_candidates` in declaration order, returning the first
 /// plaintext ELF that loads. The die-message enumerates each
-/// candidate's typed cause when every candidate fails.
+/// candidate's typed cause when every candidate fails. A build without
+/// the `decrypt` feature, or a run whose key vault is missing or lacks
+/// the keyset, dies at the first SCE-wrapped candidate: the manifest
+/// lists the SCE-wrapped binary first so an in-tree plaintext copy
+/// cannot shadow it (`titles/manifest_template.README.md`,
+/// `eboot_candidates`).
 pub(crate) fn load_ppu_image_walk_candidates_or_die(
     title: &TitleManifest,
     vfs_root: &Path,
@@ -217,7 +257,11 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                     None
                 }
             };
-            match to_plaintext_elf(&bytes, KeyPolicy::Auto(&resolver)) {
+            match to_plaintext_elf(
+                &bytes,
+                super::keys::key_vault_for(&bytes),
+                KeyPolicy::Auto(&resolver),
+            ) {
                 Ok(elf) => {
                     return (
                         LoadedPpuImage {
@@ -234,6 +278,13 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                 Err(e @ SceError::DecryptFeatureDisabled) => die(&format!(
                     "load ppu image: {}: {e}; no later eboot_candidate is tried \
                      for title {}",
+                    path.display(),
+                    title.name(),
+                )),
+                // Same reasoning; see `is_key_vault_refusal`.
+                Err(e) if is_key_vault_refusal(&e) => die(&format!(
+                    "load ppu image: {}: {e}; no later eboot_candidate is tried \
+                     for title {}\n{KEYS_HINT}",
                     path.display(),
                     title.name(),
                 )),

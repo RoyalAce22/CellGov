@@ -4,9 +4,11 @@
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
 use cellgov_ps3_abi::sce::{
-    SCEPKG_ERK, SCEPKG_RIV, SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR,
-    SCE_ENC_KIND_PLAIN, SCE_SECTION_KIND_PHDR,
+    SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR, SCE_ENC_KIND_PLAIN,
+    SCE_SECTION_KIND_PHDR,
 };
+
+use crate::keys::{KeyVault, SelfClass, SelfKey};
 
 use super::elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 use super::error::SceError;
@@ -18,17 +20,48 @@ use super::raw::{
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
 type Aes128Ctr = ctr::Ctr128BE<aes::Aes128>;
 
-/// Decrypt an SCE package (PUP-style PKG) using the firmware-update ERK/RIV
-/// and return the most-likely payload (TAR if present, else largest section).
-pub fn decrypt_package(data: &[u8]) -> Result<Vec<u8>, SceError> {
-    decrypt_sce(data, &SCEPKG_ERK, &SCEPKG_RIV)
+/// Decrypt an SCE package (PUP-style PKG) under the vault's SCE
+/// package keysets and return the most-likely payload (TAR if present,
+/// else largest section).
+///
+/// # Errors
+///
+/// [`SceError::Keys`] when the vault holds no package keyset; when it
+/// holds several, the first whose envelope padding checks is used and
+/// [`SceError::NoCandidateOpensEnvelope`] names the count when none
+/// does.
+pub fn decrypt_package(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError> {
+    let hdr = parse_sce_header(data)?;
+    let revision = hdr.revision_flags & 0x7FFF;
+    let mut tried = 0usize;
+    let mut last = None;
+    for key in keys.scepkg_keys()? {
+        tried += 1;
+        match decrypt_sce(data, &key.erk, &key.riv) {
+            Ok(payload) => return Ok(payload),
+            Err(e @ (SceError::KeyEnvelopePadding | SceError::AesCbcDecryptFailed)) => {
+                last = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(no_candidate_fits("SCE package", revision, tried, last))
 }
 
-/// Decrypt a SELF container and reconstruct a plaintext ELF64 image.
+/// Decrypt a SELF container under the vault's APP keysets and
+/// reconstruct a plaintext ELF64 image.
 ///
 /// The returned ELF carries none of the SELF's signature material; it
 /// must not be handed to anything that verifies signatures.
-pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
+///
+/// # Errors
+///
+/// [`SceError::NoAppKey`] when the vault has no APP keyset for the
+/// revision and no unlabeled candidate; every candidate is tried and
+/// [`SceError::NoCandidateOpensEnvelope`] reports when none fits. A
+/// lone candidate that does not fit is reported as its own
+/// [`SceError::KeyEnvelopePadding`].
+pub fn decrypt_self_to_elf(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
     // High bit of revision_flags marks an unencrypted debug SELF;
     // `decrypt_envelope` skips the key peel for one. The NPDRM entry
@@ -39,14 +72,69 @@ pub fn decrypt_self_to_elf(data: &[u8]) -> Result<Vec<u8>, SceError> {
         });
     }
     let revision = hdr.revision_flags & 0x7FFF;
-    let key =
-        crate::crypto::app_key_for_revision(revision).ok_or(SceError::NoAppKey { revision })?;
-
-    let envelope = decrypt_envelope_app_keyed(data, &hdr, &key.erk, &key.riv)?;
+    let envelope = open_envelope_with(
+        data,
+        &hdr,
+        keys.self_key_candidates(SelfClass::App, revision),
+        None,
+        "APP",
+        revision,
+        || SceError::NoAppKey { revision },
+    )?;
     let segment_file_sizes = inner_elf_segment_file_sizes(data)?;
     let sections =
         decrypt_sections_from_envelope(data, &hdr, &envelope, Some(&segment_file_sizes))?;
     assemble_elf_from_sections(data, &sections)
+}
+
+/// Open the key envelope with the first of `candidates` that fits.
+///
+/// A wrong keyset fails the envelope's zero-padding self-check, so the
+/// next is tried; any other refusal is the container's and stops the
+/// walk. With exactly one candidate its own refusal is returned, so a
+/// labeled key that does not fit still reads as the padding failure
+/// it is.
+pub(crate) fn open_envelope_with<'k>(
+    data: &[u8],
+    hdr: &SceContainerHeader,
+    candidates: impl Iterator<Item = &'k SelfKey>,
+    npdrm_layer_key: Option<&[u8; 0x10]>,
+    class: &'static str,
+    revision: u16,
+    on_none: impl FnOnce() -> SceError,
+) -> Result<[u8; 0x40], SceError> {
+    let mut tried = 0usize;
+    let mut last = None;
+    for key in candidates {
+        tried += 1;
+        match decrypt_envelope(data, hdr, &key.erk, &key.riv, npdrm_layer_key) {
+            Ok(envelope) => return Ok(envelope),
+            Err(e @ (SceError::KeyEnvelopePadding | SceError::AesCbcDecryptFailed)) => {
+                last = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    if tried == 0 {
+        return Err(on_none());
+    }
+    Err(no_candidate_fits(class, revision, tried, last))
+}
+
+fn no_candidate_fits(
+    class: &'static str,
+    revision: u16,
+    tried: usize,
+    last: Option<SceError>,
+) -> SceError {
+    match (tried, last) {
+        (1, Some(e)) => e,
+        _ => SceError::NoCandidateOpensEnvelope {
+            class,
+            revision,
+            tried,
+        },
+    }
 }
 
 fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8>, SceError> {

@@ -131,9 +131,14 @@ The decrypt node exists only in a build with the `decrypt` cargo
 feature of `cellgov_install` / `cellgov_cli`. A default build links
 no key material and exposes no decrypt entry point: it boots plaintext
 ELFs and PRXes and refuses an SCE-wrapped executable or module with
-`SceError::DecryptFeatureDisabled`, naming the feature. An NPDRM image
-met under an APP-only key policy keeps its own refusal in either
-build, since no build could open it.
+`SceError::DecryptFeatureDisabled`, naming the feature. The key
+material is not in the binary either: decryption reads the operator's
+`KeyVault` (`CELLGOV_KEYS`, or the imported
+`vfs/.cellgov/keys/keys.toml`), loaded once per process on the first
+SCE-wrapped image, and a run with no vault refuses that first SELF by
+name (`SceError::Keys`). An NPDRM image met under an APP-only key
+policy keeps its own refusal in either build, since no build could
+open it.
 
 A process the title spawns runs steps 1-5 again in its own address
 space: the spawn loader parses the child's import table, loads its

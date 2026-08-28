@@ -19,6 +19,8 @@ use std::path::PathBuf;
 mod digests;
 #[path = "common/dumps.rs"]
 mod dumps;
+#[path = "common/keys.rs"]
+mod keys;
 #[path = "common/scratch.rs"]
 mod scratch;
 
@@ -48,6 +50,7 @@ fn decrypted_disc_install_matches_the_rpcs3_extracted_eboot() {
     let outcome = game_install::install_iso(
         &iso,
         &iso,
+        &keys::vault(),
         &vfs,
         &scratch.join("installs"),
         InstallOptions {

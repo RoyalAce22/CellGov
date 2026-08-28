@@ -44,6 +44,10 @@ tests/fixtures/*/rpcs3/*.dump
 # The CellGov VFS, install records included (vfs/.cellgov/installs/)
 vfs/
 
+# operator key vaults: never vendored
+/keys/
+keys.toml
+
 # AI tooling
 .claude/
 CLAUDE.local.md

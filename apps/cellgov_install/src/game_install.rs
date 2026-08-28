@@ -38,6 +38,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::iso;
+use crate::keys::KeyVault;
 use crate::manifest::Sha256 as HexSha256;
 use crate::npdrm::{self, NpdHeaderInfo, NpdLicense};
 use crate::param_sfo;
@@ -525,7 +526,7 @@ fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
 
 /// Whether a license consumes a RAP. Only network/local do; free and
 /// APP-keyed (no NPD header) titles resolve their klicensee without one
-/// (free falls back to `NP_KLIC_FREE`).
+/// (free falls back to the vault's free klicensee).
 fn rap_consumed(license: Option<NpdLicense>) -> bool {
     match license {
         Some(NpdLicense::Network) | Some(NpdLicense::Local) => true,
@@ -575,13 +576,14 @@ fn dir_non_empty(path: &Path) -> Result<bool, GameInstallError> {
 pub fn install_pkg(
     pkg_bytes: &[u8],
     rap: Option<&[u8]>,
+    keys: &KeyVault,
     output_dir: &Path,
     installs_dir: &Path,
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
     let progress = opts.progress;
     progress.phase(Phase::Reading);
-    let archive = pkg::extract(pkg_bytes)?;
+    let archive = pkg::extract(pkg_bytes, keys)?;
 
     // PARAM.SFO -> identity + HDD-game gate.
     let sfo_file = archive
@@ -690,7 +692,7 @@ pub fn install_pkg(
             Some(npdrm::Rap(arr))
         };
         progress.phase(Phase::Proving);
-        npdrm::decrypt_self_to_elf_auto(eboot_data, resolver)
+        npdrm::decrypt_self_to_elf_auto(eboot_data, keys, resolver)
             .map_err(GameInstallError::DecryptProof)?;
         Ok((file_digests, staged_rap))
     })?;
@@ -741,11 +743,12 @@ pub fn install_pkg(
 ///
 /// The image is already decrypted (the encrypted-disc key pass runs
 /// upstream). There is no RAP -- disc EBOOTs are APP-keyed -- so the
-/// decrypt-proof runs through `sce::decrypt_self_to_elf`.
+/// decrypt-proof runs through `sce::decrypt_self_to_elf` under `keys`.
 #[cfg(feature = "decrypt")]
 pub fn install_iso(
     image: &[u8],
     source_bytes: &[u8],
+    keys: &KeyVault,
     output_dir: &Path,
     installs_dir: &Path,
     opts: InstallOptions<'_>,
@@ -800,7 +803,7 @@ pub fn install_iso(
         let file_digests = stage_tree(&staged, &staging_dir, progress)?;
         // APP-keyed disc EBOOT: prove it decrypts end-to-end, discard.
         progress.phase(Phase::Proving);
-        sce::decrypt_self_to_elf(&eboot_bytes).map_err(GameInstallError::DecryptProof)?;
+        sce::decrypt_self_to_elf(&eboot_bytes, keys).map_err(GameInstallError::DecryptProof)?;
         Ok(file_digests)
     })?;
 

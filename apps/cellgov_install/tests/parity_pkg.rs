@@ -20,6 +20,8 @@ use std::path::{Path, PathBuf};
 mod digests;
 #[path = "common/dumps.rs"]
 mod dumps;
+#[path = "common/keys.rs"]
+mod keys;
 #[path = "common/scratch.rs"]
 mod scratch;
 
@@ -133,6 +135,7 @@ fn flow_pkg_install_matches_the_rpcs3_extracted_eboot() {
     let outcome = game_install::install_pkg(
         &pkg,
         Some(&rap),
+        &keys::vault(),
         &vfs,
         &scratch.join("installs"),
         InstallOptions {

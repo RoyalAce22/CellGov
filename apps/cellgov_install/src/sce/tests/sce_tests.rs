@@ -1,6 +1,8 @@
 //! SCE container header parsing, ELF reassembly bounds checks, and non-semantic ELF byte masking.
 
 use super::*;
+#[cfg(feature = "decrypt")]
+use crate::keys::{KeyVault, KeyVaultError};
 
 #[test]
 fn parse_sce_header_rejects_short() {
@@ -38,13 +40,99 @@ fn parse_sce_header_accepts_valid() {
 #[test]
 fn decrypt_package_rejects_truncated() {
     assert!(matches!(
-        decrypt_package(&[0u8; 8]).unwrap_err(),
+        decrypt_package(&[0u8; 8], &crate::test_support::synthetic_vault()).unwrap_err(),
         SceError::TooSmall {
             what: "SCE header",
             got: 8,
             need: 0x20
         }
     ));
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn decrypt_package_on_a_vault_with_no_package_keyset_refuses_by_name() {
+    // The header parses, so the vault is the first thing to refuse.
+    let data = build_sce_container(0x0001, 0x100);
+    let err = decrypt_package(&data, &KeyVault::empty()).unwrap_err();
+    assert!(
+        matches!(&err, SceError::Keys(e) if matches!(**e, KeyVaultError::MissingScepkg)),
+        "got {err:?}"
+    );
+    assert!(err.to_string().contains("scepkg"), "{err}");
+}
+
+#[cfg(feature = "decrypt")]
+fn keyset_toml(section: &str, label: Option<&str>, erk_byte: u8, riv_byte: u8) -> String {
+    let label = label.map_or(String::new(), |l| format!("label = \"{l}\"\n"));
+    let erk = format!("{erk_byte:02x}").repeat(32);
+    let riv = format!("{riv_byte:02x}").repeat(16);
+    format!("[[{section}]]\n{label}erk = \"{erk}\"\nriv = \"{riv}\"\n")
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn decrypt_package_names_the_count_when_no_package_keyset_opens_the_envelope() {
+    // A zeroed envelope decrypts to non-zero padding under any made-up
+    // keyset, so both candidates are walked and neither fits.
+    let toml = format!(
+        "{}{}",
+        keyset_toml("scepkg", None, 0x61, 0x62),
+        keyset_toml("scepkg", None, 0x63, 0x64)
+    );
+    let keys = KeyVault::parse(std::path::Path::new("two.toml"), toml.as_bytes()).unwrap();
+    let data = build_sce_container(0x0001, 0x100);
+    let err = decrypt_package(&data, &keys).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::NoCandidateOpensEnvelope {
+                class: "SCE package",
+                revision: 1,
+                tried: 2
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn decrypt_self_to_elf_walks_every_unlabeled_app_candidate_before_refusing() {
+    let toml = format!(
+        "{}{}",
+        keyset_toml("app", Some("first"), 0x71, 0x72),
+        keyset_toml("app", Some("second"), 0x73, 0x74)
+    );
+    let keys = KeyVault::parse(std::path::Path::new("two.toml"), toml.as_bytes()).unwrap();
+    // No labeled keyset for revision 2, so both unlabeled ones are
+    // candidates.
+    let data = build_sce_container(0x0002, 0x100);
+    let err = decrypt_self_to_elf(&data, &keys).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::NoCandidateOpensEnvelope {
+                class: "APP",
+                revision: 2,
+                tried: 2
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn decrypt_self_to_elf_with_one_candidate_returns_its_own_padding_refusal() {
+    let toml = keyset_toml("app", Some("only"), 0x71, 0x72);
+    let keys = KeyVault::parse(std::path::Path::new("one.toml"), toml.as_bytes()).unwrap();
+    let data = build_sce_container(0x0002, 0x100);
+    let err = decrypt_self_to_elf(&data, &keys).unwrap_err();
+    assert!(
+        matches!(err, SceError::KeyEnvelopePadding),
+        "a single candidate's refusal is not wrapped in a count, got {err:?}"
+    );
 }
 
 #[cfg(feature = "decrypt")]

@@ -2,9 +2,7 @@
 //!
 //! For each module in [`MODULES`], decrypt `<name>.sprx` from the
 //! CellGov firmware install and compare against the committed RPCS3
-//! reference digest in `tests/fixtures/rpcs3_digests/digests.txt`, so
-//! the only fixture a run needs is the encrypted firmware CellGov
-//! installed itself.
+//! reference digest in `tests/fixtures/rpcs3_digests/digests.txt`.
 //!
 //! Compiled only under `firmware-corpus`, which declares that install
 //! present: every module is asserted, never skipped.
@@ -21,8 +19,12 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use cellgov_install::keys::KeyVault;
+
 #[path = "common/digests.rs"]
 mod digests;
+#[path = "common/keys.rs"]
+mod keys;
 
 /// The mount `cellgov_install install` populates with firmware.
 const FIRMWARE_EXTERNAL: &str = "vfs/dev_flash/sys/external";
@@ -63,6 +65,7 @@ fn firmware_external_dir() -> PathBuf {
 fn decrypt_and_compare(
     stem: &str,
     encrypted_dir: &Path,
+    keys: &KeyVault,
     references: &BTreeMap<String, digests::Reference>,
 ) {
     let sprx_path = encrypted_dir.join(format!("{stem}.sprx"));
@@ -81,7 +84,7 @@ fn decrypt_and_compare(
         sprx_path.display(),
     );
     let encrypted_bytes = std::fs::read(&sprx_path).unwrap();
-    let mut decrypted = cellgov_install::sce::decrypt_self_to_elf(&encrypted_bytes)
+    let mut decrypted = cellgov_install::sce::decrypt_self_to_elf(&encrypted_bytes, keys)
         .unwrap_or_else(|e| panic!("{stem}: decrypt failed: {e}"));
     assert!(
         decrypted.len() >= 0x40,
@@ -128,9 +131,10 @@ fn decrypt_and_compare(
 #[test]
 fn firmware_prx_decrypt_matches_the_committed_rpcs3_reference() {
     let encrypted_dir = firmware_external_dir();
+    let keys = keys::vault();
     let references = digests::table();
     for stem in MODULES {
-        decrypt_and_compare(stem, &encrypted_dir, &references);
+        decrypt_and_compare(stem, &encrypted_dir, &keys, &references);
     }
     eprintln!(
         "cellgov_install parity: compared {} module digests",

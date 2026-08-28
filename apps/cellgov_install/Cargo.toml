@@ -42,8 +42,8 @@ thiserror = "2"
 # containers (SCE / PUP / PKG headers, ISO9660) and hands plaintext
 # images through, and every SCE-wrapped input is refused with
 # `SceError::DecryptFeatureDisabled`. A build without it links no
-# cipher crate and references no key constant (the constants stay in
-# source until they move to an operator-supplied vault).
+# cipher crate. No build carries key material: the decrypt paths read
+# the operator's vault (`keys` module) at run time.
 decrypt = ["dep:aes", "dep:cbc", "dep:ctr", "dep:hmac", "dep:sha1", "dep:flate2"]
 
 # Enable the npdrm oracle vector tests that include_bytes!() the

@@ -2,9 +2,9 @@
 //!
 //! A finalized retail package is a big-endian header, an AES-128-CTR
 //! encrypted item-record table, and the CTR-encrypted item data. The
-//! key is the published retail `PKG_AES_KEY` used directly; the
-//! per-block CTR counter is the header `klicensee` nonce plus the
-//! 16-byte block index (mirroring RPCS3's `unpkg.cpp`).
+//! key is the vault's retail PKG AES key used directly; the per-block
+//! CTR counter is the header `klicensee` nonce plus the 16-byte block
+//! index (mirroring RPCS3's `unpkg.cpp`).
 //!
 //! This module is a pure function from package bytes to extracted
 //! files. It never touches the filesystem; the install orchestration
@@ -16,8 +16,9 @@
 
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockEncrypt, KeyInit};
+
 #[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::sce::PKG_AES_KEY;
+use crate::keys::KeyVault;
 
 /// Retail release type (`pkg_type == 0x8000`).
 const PKG_TYPE_RELEASE: u16 = 0x8000;
@@ -225,6 +226,9 @@ pub enum PkgError {
         /// The offending decoded name.
         name: String,
     },
+    /// The key vault holds no PKG AES key.
+    #[error("{0}")]
+    Keys(#[from] crate::keys::KeyVaultError),
 }
 
 fn read_be_u16(data: &[u8], off: usize) -> u16 {
@@ -324,12 +328,11 @@ fn trim_fixed_str(bytes: &[u8]) -> String {
 }
 
 /// Decrypt `region` in place with the package CTR stream: block `b`
-/// is XORed with `AES-ECB(PKG_AES_KEY, klicensee + b)`, the counter
+/// is XORed with `AES-ECB(pkg_key, klicensee + b)`, the counter
 /// incrementing per 16-byte block from the data-region start.
 #[cfg(feature = "decrypt")]
-fn ctr_decrypt(klicensee: &[u8; 16], region: &mut [u8]) {
-    let cipher =
-        aes::Aes128::new_from_slice(&PKG_AES_KEY).expect("PKG_AES_KEY is exactly 16 bytes");
+pub(crate) fn ctr_decrypt(pkg_key: &[u8; 16], klicensee: &[u8; 16], region: &mut [u8]) {
+    let cipher = aes::Aes128::new_from_slice(pkg_key).expect("invariant: the slot is 16 bytes");
     let mut counter = u128::from_be_bytes(*klicensee);
     for block in region.chunks_mut(16) {
         let mut ks = counter.to_be_bytes();
@@ -357,7 +360,8 @@ fn validate_item_name(index: usize, name: &str) -> Result<(), PkgError> {
     Ok(())
 }
 
-/// Parse, decrypt, and extract every in-scope item from a retail PKG.
+/// Parse, decrypt under the vault's PKG AES key, and extract every
+/// in-scope item from a retail PKG.
 ///
 /// The whole data region is CTR-decrypted once; names are decoded out
 /// of it and each item keeps a bounds-proved range into it (resolved
@@ -365,16 +369,22 @@ fn validate_item_name(index: usize, name: &str) -> Result<(), PkgError> {
 /// per-region decrypt because PKG item offsets are 16-byte aligned.
 /// EDAT and SDAT items are skipped (out of scope). Folder items become
 /// [`PkgEntryKind::Directory`] entries.
+///
+/// # Errors
+///
+/// [`PkgError::Keys`] when the vault has no PKG AES key, before any
+/// byte is read past the header.
 #[cfg(feature = "decrypt")]
-pub fn extract(data: &[u8]) -> Result<PkgArchive, PkgError> {
+pub fn extract(data: &[u8], keys: &KeyVault) -> Result<PkgArchive, PkgError> {
     let header = parse_header(data)?;
+    let pkg_key = keys.pkg_aes()?;
 
     // Decrypt the data region in one CTR pass. `fsz` bounds names and
     // data against the actual file extent from `data_offset`, matching
     // RPCS3's `m_file.size() - data_offset`.
     let region_start = header.data_offset as usize;
     let mut region = data[region_start..].to_vec();
-    ctr_decrypt(&header.klicensee, &mut region);
+    ctr_decrypt(pkg_key, &header.klicensee, &mut region);
     let region_len = region.len();
 
     let entry_table_len = (header.file_count as usize) * ENTRY_LEN;

@@ -2,23 +2,97 @@
 //! over the supplemental-header walk, and debug-SELF rejection.
 
 use super::*;
+#[cfg(feature = "decrypt")]
+use crate::keys::Slot;
+#[cfg(feature = "decrypt")]
+use crate::test_support::synthetic_vault;
+#[cfg(feature = "decrypt")]
+use std::path::Path;
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn rap_to_klic_is_pure() {
+    let keys = synthetic_vault();
     let rap = [0x42u8; 16];
-    let a = rap_to_klic(&rap);
-    let b = rap_to_klic(&rap);
+    let a = rap_to_klic(&keys, &rap).unwrap();
+    let b = rap_to_klic(&keys, &rap).unwrap();
     assert_eq!(a, b);
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn rap_to_klic_is_not_a_constant_or_the_identity() {
-    let a = rap_to_klic(&[0x42u8; 16]);
-    let b = rap_to_klic(&[0x43u8; 16]);
+    let keys = synthetic_vault();
+    let a = rap_to_klic(&keys, &[0x42u8; 16]).unwrap();
+    let b = rap_to_klic(&keys, &[0x43u8; 16]).unwrap();
     assert_ne!(a, b, "distinct RAPs derive distinct klics");
     assert_ne!(a, [0x42u8; 16], "the RAP is transformed, not echoed");
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn rap_to_klic_on_a_vault_missing_a_rap_slot_refuses_naming_that_slot() {
+    let rep = |byte: u8| format!("{byte:02x}").repeat(16);
+    let toml = format!(
+        "rap_key = \"{}\"\nrap_pbox = \"000102030405060708090a0b0c0d0e0f\"\nrap_e2 = \"{}\"\n",
+        rep(0x55),
+        rep(0x58)
+    );
+    let keys = KeyVault::parse(Path::new("partial.toml"), toml.as_bytes()).unwrap();
+    let err = rap_to_klic(&keys, &[0x42u8; 16]).unwrap_err();
+    let SceError::Keys(inner) = &err else {
+        panic!("expected the vault's refusal, got {err:?}");
+    };
+    assert!(
+        matches!(**inner, KeyVaultError::MissingSlot { slot: Slot::RapE1 }),
+        "expected the first absent RAP slot to be named, got {inner:?}"
+    );
+    assert!(err.to_string().contains("rap_e1"), "{err}");
+}
+
+#[cfg(feature = "decrypt")]
+fn vault_with_pbox(pbox_hex: &str) -> KeyVault {
+    let rep = |byte: u8| format!("{byte:02x}").repeat(16);
+    let toml = format!(
+        "rap_key = \"{}\"\nrap_pbox = \"{pbox_hex}\"\nrap_e1 = \"{}\"\nrap_e2 = \"{}\"\n",
+        rep(0x55),
+        rep(0x57),
+        rep(0x58)
+    );
+    KeyVault::parse(Path::new("pbox.toml"), toml.as_bytes()).unwrap()
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn rap_to_klic_refuses_a_pbox_entry_past_15_instead_of_masking_it() {
+    // Entry 3 is 0x13, past the last table index.
+    let keys = vault_with_pbox("000102130405060708090a0b0c0d0e0f");
+    let err = rap_to_klic(&keys, &[0x42u8; 16]).unwrap_err();
+    assert!(
+        matches!(err, SceError::RapPboxNotAPermutation { index: 3 }),
+        "got {err:?}"
+    );
+    assert!(err.to_string().contains("rap_pbox"), "{err}");
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn rap_to_klic_refuses_a_pbox_that_repeats_an_index() {
+    // Every entry is in range; entry 5 revisits position 2, so
+    // position 5 is never touched by any round.
+    let keys = vault_with_pbox("000102030402060708090a0b0c0d0e0f");
+    let err = rap_to_klic(&keys, &[0x42u8; 16]).unwrap_err();
+    assert!(
+        matches!(err, SceError::RapPboxNotAPermutation { index: 5 }),
+        "got {err:?}"
+    );
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn rap_to_klic_accepts_a_pbox_that_permutes_out_of_order() {
+    let keys = vault_with_pbox("0f0e0d0c0b0a09080706050403020100");
+    rap_to_klic(&keys, &[0x42u8; 16]).expect("a reversed permutation is still a permutation");
 }
 
 #[cfg(feature = "decrypt")]
@@ -32,26 +106,33 @@ fn npd(license: NpdLicense, content_id: &str) -> NpdHeaderInfo {
 #[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_network_with_rap_derives_the_klic() {
+    let keys = synthetic_vault();
     let rap = [0xABu8; 16];
-    let got = resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| Some(Rap(rap)))
-        .unwrap();
-    assert_eq!(got, rap_to_klic(&rap));
+    let got = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Network, "NPUA80001"), |_| {
+        Some(Rap(rap))
+    })
+    .unwrap();
+    assert_eq!(got, rap_to_klic(&keys, &rap).unwrap());
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_local_with_rap_derives_the_klic() {
+    let keys = synthetic_vault();
     let rap = [0xCDu8; 16];
-    let got =
-        resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| Some(Rap(rap))).unwrap();
-    assert_eq!(got, rap_to_klic(&rap));
+    let got = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Local, "NPUA80068"), |_| {
+        Some(Rap(rap))
+    })
+    .unwrap();
+    assert_eq!(got, rap_to_klic(&keys, &rap).unwrap());
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
-    let err =
-        resolve_npdrm_klicensee(&npd(NpdLicense::Network, "NPUA80001"), |_| None).unwrap_err();
+    let keys = synthetic_vault();
+    let err = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Network, "NPUA80001"), |_| None)
+        .unwrap_err();
     match err {
         SceError::NoRapForNpdrmTitle { content_id } => {
             assert_eq!(content_id, "NPUA80001");
@@ -63,7 +144,9 @@ fn resolve_klicensee_license_network_without_rap_errors_with_content_id() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
-    let err = resolve_npdrm_klicensee(&npd(NpdLicense::Local, "NPUA80068"), |_| None).unwrap_err();
+    let keys = synthetic_vault();
+    let err =
+        resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Local, "NPUA80068"), |_| None).unwrap_err();
     match err {
         SceError::NoRapForNpdrmTitle { content_id } => {
             assert_eq!(content_id, "NPUA80068");
@@ -74,19 +157,28 @@ fn resolve_klicensee_license_local_without_rap_errors_with_content_id() {
 
 #[cfg(feature = "decrypt")]
 #[test]
-fn resolve_klicensee_license_free_without_rap_returns_np_klic_free() {
-    let got = resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| None).unwrap();
-    assert_eq!(got, NP_KLIC_FREE);
+fn resolve_klicensee_license_free_without_rap_returns_the_vaults_free_klicensee() {
+    let keys = synthetic_vault();
+    let got =
+        resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Free, "NPEA00000"), |_| None).unwrap();
+    assert_eq!(got, *keys.np_klic_free().unwrap());
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
 fn resolve_klicensee_license_free_with_rap_derives_the_supplied_rap() {
+    let keys = synthetic_vault();
     let rap = [0x77u8; 16];
-    let got =
-        resolve_npdrm_klicensee(&npd(NpdLicense::Free, "NPEA00000"), |_| Some(Rap(rap))).unwrap();
-    assert_eq!(got, rap_to_klic(&rap));
-    assert_ne!(got, NP_KLIC_FREE, "a supplied RAP wins over the free key");
+    let got = resolve_npdrm_klicensee(&keys, &npd(NpdLicense::Free, "NPEA00000"), |_| {
+        Some(Rap(rap))
+    })
+    .unwrap();
+    assert_eq!(got, rap_to_klic(&keys, &rap).unwrap());
+    assert_ne!(
+        got,
+        *keys.np_klic_free().unwrap(),
+        "a supplied RAP wins over the free key"
+    );
 }
 
 #[cfg(feature = "decrypt")]
@@ -103,8 +195,9 @@ fn synthetic_sce_header_with_revision_flags(revision_flags: u16) -> Vec<u8> {
 #[cfg(feature = "decrypt")]
 #[test]
 fn the_app_decrypt_path_rejects_a_debug_self_by_name() {
+    let keys = synthetic_vault();
     let data = synthetic_sce_header_with_revision_flags(0x8000);
-    let err = crate::sce::decrypt_self_to_elf(&data).unwrap_err();
+    let err = crate::sce::decrypt_self_to_elf(&data, &keys).unwrap_err();
     assert!(matches!(
         err,
         SceError::DebugSelfUnsupported {
@@ -115,10 +208,27 @@ fn the_app_decrypt_path_rejects_a_debug_self_by_name() {
 
 #[cfg(feature = "decrypt")]
 #[test]
+fn the_app_decrypt_path_names_a_revision_the_vault_has_no_keyset_for() {
+    let keys = synthetic_vault();
+    // The synthetic vault labels revision 0x0001 only and holds no
+    // unlabeled candidate, so 0x0002 reaches the key lookup with
+    // nothing to try.
+    let data = synthetic_sce_header_with_revision_flags(0x0002);
+    let err = crate::sce::decrypt_self_to_elf(&data, &keys).unwrap_err();
+    assert!(
+        matches!(err, SceError::NoAppKey { revision: 2 }),
+        "expected NoAppKey for revision 2, got {err:?}"
+    );
+    assert!(err.to_string().contains("0x0002"), "{err}");
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
 fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_high_bit_set() {
+    let keys = synthetic_vault();
     let data = synthetic_sce_header_with_revision_flags(0x8000);
     let dummy_klic = [0u8; 16];
-    let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
+    let err = decrypt_self_to_elf_npdrm(&data, &keys, &dummy_klic).unwrap_err();
     match err {
         SceError::DebugSelfUnsupported { revision_flags } => {
             assert_eq!(revision_flags, 0x8000);
@@ -132,9 +242,10 @@ fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_high_bit_set() {
 fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_both_bits_set() {
     // High bit AND a non-zero revision in the low 15 bits:
     // guard must fire on the raw value, error carries it whole.
+    let keys = synthetic_vault();
     let data = synthetic_sce_header_with_revision_flags(0xC042);
     let dummy_klic = [0u8; 16];
-    let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
+    let err = decrypt_self_to_elf_npdrm(&data, &keys, &dummy_klic).unwrap_err();
     assert!(matches!(
         err,
         SceError::DebugSelfUnsupported {
@@ -147,14 +258,15 @@ fn decrypt_self_to_elf_npdrm_rejects_debug_self_with_both_bits_set() {
 #[test]
 fn decrypt_self_to_elf_npdrm_does_not_treat_high_revision_as_debug() {
     // 0x7FFF: highest non-debug revision. It clears the debug guard
-    // and reaches the key lookup, which has no key for that revision.
-    // Pinning the variant keeps this from passing on any failure that
-    // never got past the guard at all.
+    // and reaches the key lookup, which has no NPDRM keyset for that
+    // revision. Pinning the variant keeps this from passing on any
+    // failure that never got past the guard at all.
+    let keys = synthetic_vault();
     let data = synthetic_sce_header_with_revision_flags(0x7FFF);
     let dummy_klic = [0u8; 16];
-    let err = decrypt_self_to_elf_npdrm(&data, &dummy_klic).unwrap_err();
+    let err = decrypt_self_to_elf_npdrm(&data, &keys, &dummy_klic).unwrap_err();
     assert!(
-        matches!(err, SceError::NoAppKey { revision: 0x7FFF }),
+        matches!(err, SceError::NoNpdrmKey { revision: 0x7FFF }),
         "expected the key lookup to be reached, got {err:?}"
     );
 }
