@@ -4,12 +4,11 @@
 //! ISO9660 side only (`Loader/ISO.cpp`), and this reader covers the
 //! same subset: the volume descriptor set at sector 16, the Primary
 //! and optional Joliet descriptors, and recursive directory records.
-//! No UDF structures are parsed. Input is a decrypted image (see
-//! `crate::disc_crypt`); output is a file tree of bounds-checked
-//! extent references that a consumer resolves against the image one
-//! file at a time ([`IsoEntry::extent_slices`] /
-//! [`IsoEntry::read_data`]), because a BD-DL image's content does not
-//! fit in host memory.
+//! No UDF structures are parsed. Input is a decrypted image; output is
+//! a file tree of bounds-checked extent references that a consumer
+//! resolves against the image one file at a time
+//! ([`IsoEntry::extent_slices`] / [`IsoEntry::read_data`]), because a
+//! BD-DL image's content does not fit in host memory.
 
 /// ISO9660 logical sector size.
 const SECTOR: usize = 2048;

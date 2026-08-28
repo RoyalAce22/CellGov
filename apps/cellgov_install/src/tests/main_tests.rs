@@ -66,6 +66,41 @@ fn parse_unknown_flag_errors() {
 }
 
 #[test]
+fn install_iso_refuses_the_retired_dkey_flag_by_name() {
+    let args: Vec<String> = [
+        "cellgov_install",
+        "install-iso",
+        "x.iso",
+        "--dkey",
+        "x.dkey",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let r = parse_install_iso_args(&args);
+    assert!(matches!(r, Err(FirmwareCliError::UnknownArgument(ref a)) if a == "--dkey"));
+}
+
+#[test]
+fn install_iso_parses_output_and_force() {
+    let args: Vec<String> = [
+        "cellgov_install",
+        "install-iso",
+        "x.iso",
+        "--output",
+        "/d",
+        "--force",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    let a = parse_install_iso_args(&args).expect("parse");
+    assert_eq!(a.iso_path, PathBuf::from("x.iso"));
+    assert_eq!(a.output_dir, PathBuf::from("/d"));
+    assert!(a.force);
+}
+
+#[test]
 fn check_output_dir_missing_is_ok() {
     let dir = scratch();
     assert!(check_output_dir(&dir.join("absent"), false).is_ok());
@@ -472,22 +507,6 @@ fn a_decrypting_subcommand_on_a_build_without_decrypt_is_refused_naming_both() {
             "names the rebuild: {rendered}"
         );
     }
-}
-
-#[test]
-fn the_transient_plaintext_path_is_keyed_by_process_id() {
-    // Two --dkey installs into one VFS root must not share a temp file:
-    // File::create truncates, and the other run may still be mapped on
-    // it. The pid is what keeps them apart.
-    let dir = Path::new("vfs/.cellgov");
-    let a = temp_decrypt_path(dir, 4242);
-    let b = temp_decrypt_path(dir, 4243);
-    assert_ne!(a, b);
-    assert!(a.starts_with(dir));
-    assert_eq!(
-        a.file_name().and_then(|n| n.to_str()),
-        Some("disc-decrypt-4242.tmp")
-    );
 }
 
 fn keys_argv(parts: &[&str]) -> Vec<String> {

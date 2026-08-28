@@ -199,8 +199,8 @@ unpopulated out-params and bails.
 ## Adding a new title
 
 1. Install the title with `cellgov_install install-game <pkg> --rap <rap>`
-   (PSN/HDD) or `cellgov_install install-iso <iso> [--dkey <key>]`
-   (disc), which populates `vfs/dev_hdd0/game/<content_id>/USRDIR/`
+   (PSN/HDD) or `cellgov_install install-iso <iso>` (a decrypted
+   disc dump), which populates `vfs/dev_hdd0/game/<content_id>/USRDIR/`
    or `vfs/dev_bdvd/<content_id>/PS3_GAME/USRDIR/` respectively (both
    gitignored). `gen-manifest` can then emit a stub of this file.
 2. Confirm `EBOOT.BIN` is present. CellGov decrypts it in

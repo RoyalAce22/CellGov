@@ -45,6 +45,8 @@ use crate::param_sfo;
 use crate::pkg::{self, PkgEntryKind};
 use crate::progress::{InstallProgress, Phase};
 use crate::sce;
+use crate::self_image::is_sce_wrapped;
+use cellgov_ps3_abi::elf::ELF_MAGIC;
 
 /// Install-record schema version. A record declaring anything else is
 /// refused by [`InstallRecord::parse`] rather than read as current.
@@ -214,6 +216,19 @@ pub enum GameInstallError {
     /// The disc carried no `PS3_GAME/USRDIR/EBOOT.BIN`.
     #[error("ISO has no PS3_GAME/USRDIR/EBOOT.BIN")]
     NoDiscEboot,
+    /// A file the disc tree names does not open with its format's
+    /// magic: the image is still carrying its disc encryption.
+    #[error(
+        "ISO {path} opens with 0x{:02x}{:02x}{:02x}{:02x} rather than its format's magic; \
+         install-iso takes a decrypted dump of a disc you own, and this image reads as still encrypted",
+        head[0], head[1], head[2], head[3]
+    )]
+    DiscImageEncrypted {
+        /// Disc-relative path of the file that did not open.
+        path: &'static str,
+        /// Its first four bytes.
+        head: [u8; 4],
+    },
     /// Header content-id does not embed the PARAM.SFO `TITLE_ID`.
     #[error("title-id mismatch: header content-id {header:?} does not contain PARAM.SFO TITLE_ID {sfo:?}")]
     TitleIdMismatch {
@@ -741,13 +756,18 @@ pub fn install_pkg(
 /// Install a decrypted disc image's `PS3_GAME/` tree (an APP-keyed
 /// disc title) into `output_dir`'s `dev_bdvd/<title-id>/` tree.
 ///
-/// The image is already decrypted (the encrypted-disc key pass runs
-/// upstream). There is no RAP -- disc EBOOTs are APP-keyed -- so the
-/// decrypt-proof runs through `sce::decrypt_self_to_elf` under `keys`.
+/// The record's source hash is over `image` itself, so the image must
+/// already be plaintext. There is no RAP -- disc EBOOTs are APP-keyed
+/// -- so the decrypt-proof runs through `sce::decrypt_self_to_elf`
+/// under `keys`.
+///
+/// # Errors
+///
+/// [`GameInstallError::DiscImageEncrypted`] for an image still carrying
+/// its disc encryption, refused before anything is staged.
 #[cfg(feature = "decrypt")]
 pub fn install_iso(
     image: &[u8],
-    source_bytes: &[u8],
     keys: &KeyVault,
     output_dir: &Path,
     installs_dir: &Path,
@@ -762,7 +782,15 @@ pub fn install_iso(
         .find(|e| e.path == "PS3_GAME/PARAM.SFO")
         .ok_or(GameInstallError::NoDiscParamSfo)?;
     let sfo_bytes = sfo_entry.read_data(image)?;
-    let (title_id, category, title, app_version) = parse_identity(&sfo_bytes)?;
+    let (title_id, category, title, app_version) = match parse_identity(&sfo_bytes) {
+        Err(GameInstallError::Sfo(param_sfo::SfoError::BadMagic(head))) => {
+            return Err(GameInstallError::DiscImageEncrypted {
+                path: "PS3_GAME/PARAM.SFO",
+                head,
+            });
+        }
+        other => other?,
+    };
     if !DISC_CATEGORIES.contains(&category.as_str()) {
         return Err(GameInstallError::NotDiscGame { category });
     }
@@ -774,6 +802,21 @@ pub fn install_iso(
         .find(|e| e.path == "PS3_GAME/USRDIR/EBOOT.BIN")
         .ok_or(GameInstallError::NoDiscEboot)?
         .read_data(image)?;
+    // Metadata files can sit in a plaintext region of an otherwise
+    // encrypted disc, so the EBOOT settles whether the image is
+    // decrypted, before the tree is streamed to disk. Disc encryption
+    // is an unpadded per-sector block cipher and keeps every file's
+    // length, so an EBOOT too short to hold a magic is left for the
+    // proof to refuse by length. (RPCS3 `Loader/ISO.cpp` reads
+    // plaintext images only.)
+    if let Some(&head) = eboot_bytes.first_chunk::<4>() {
+        if !is_sce_wrapped(&eboot_bytes) && head != ELF_MAGIC {
+            return Err(GameInstallError::DiscImageEncrypted {
+                path: "PS3_GAME/USRDIR/EBOOT.BIN",
+                head,
+            });
+        }
+    }
 
     let dev_bdvd = output_dir.join("dev_bdvd");
     let final_dir = dev_bdvd.join(&title_id);
@@ -810,7 +853,7 @@ pub fn install_iso(
     progress.phase(Phase::Hashing);
     let record = build_record(
         "iso",
-        source_bytes,
+        image,
         file_digests,
         TitleRecord {
             title_id: title_id.clone(),
@@ -1026,3 +1069,7 @@ fn build_record(
 #[cfg(test)]
 #[path = "tests/game_install_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/game_install_disc_tests.rs"]
+mod disc_tests;

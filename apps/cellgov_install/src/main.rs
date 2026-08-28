@@ -26,8 +26,6 @@ mod progress_render;
 
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
-#[cfg(feature = "decrypt")]
-use cellgov_install::disc_crypt;
 use cellgov_install::game_install::InstallOptions;
 use cellgov_install::keys::{
     installed_keys_dir, KeyVault, KeyVaultError, SelfClass, Slot, ENV_KEYS, INSTALLED_KEYS_FILE,
@@ -97,12 +95,10 @@ fn print_usage() {
     eprintln!("    default --output: vfs/ (at the current working directory)");
     eprintln!("    --rap: required for license-1/2 NPDRM titles, optional for license-3");
     eprintln!("    --force: overwrite an existing game directory");
-    eprintln!(
-        "  cellgov_install install-iso <ISO_PATH> [--dkey <DKEY_PATH>] [--output <dir>] [--force]"
-    );
+    eprintln!("  cellgov_install install-iso <ISO_PATH> [--output <dir>] [--force]");
     eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
     eprintln!("    default --output: vfs/ (at the current working directory)");
-    eprintln!("    --dkey: 16-byte disc key for an encrypted image; omit for a decrypted one");
+    eprintln!("    takes a decrypted dump of a disc you own; an encrypted image is refused");
     eprintln!("    extracts the disc tree to dev_bdvd/");
     eprintln!(
         "  cellgov_install uninstall <TITLE_ID> [--output <dir>] [--verify] [--keep-rap] [--force]"
@@ -216,9 +212,6 @@ enum FirmwareCliError {
     /// `--rap` flag with no following argument.
     #[error("--rap requires a path argument")]
     RapFlagMissingValue,
-    /// `--dkey` flag with no following argument.
-    #[error("--dkey requires a path argument")]
-    DkeyFlagMissingValue,
     /// `--vfs-root` flag with no following argument.
     #[error("--vfs-root requires a directory argument")]
     VfsRootFlagMissingValue,
@@ -948,7 +941,6 @@ fn cmd_install_game(args: &[String]) {
 /// Parsed `install-iso` subcommand arguments.
 struct InstallIsoArgs {
     iso_path: PathBuf,
-    dkey_path: Option<PathBuf>,
     output_dir: PathBuf,
     force: bool,
     render: RenderFlags,
@@ -959,20 +951,12 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
         return Err(FirmwareCliError::MissingIsoPath);
     }
     let iso_path = PathBuf::from(&args[2]);
-    let mut dkey_path: Option<PathBuf> = None;
     let mut output_dir: Option<PathBuf> = None;
     let mut force = false;
     let mut render = RenderFlags::default();
     let mut i = 3;
     while i < args.len() {
         match args[i].as_str() {
-            "--dkey" => {
-                i += 1;
-                if i >= args.len() {
-                    return Err(FirmwareCliError::DkeyFlagMissingValue);
-                }
-                dkey_path = Some(PathBuf::from(&args[i]));
-            }
             "--output" => {
                 i += 1;
                 if i >= args.len() {
@@ -988,7 +972,6 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
     }
     Ok(InstallIsoArgs {
         iso_path,
-        dkey_path,
         output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
         force,
         render,
@@ -1011,8 +994,8 @@ fn cmd_install_iso(args: &[String]) {
         eprintln!("failed to map {}: {e}", parsed.iso_path.display());
         std::process::exit(1);
     });
-    // Before the disc pass: a missing vault should not cost a full
-    // image decrypt first.
+    // Vault before install: a missing one should not cost a full image
+    // read first.
     let keys = KeyVault::load_for_vfs(&parsed.output_dir).unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1);
@@ -1024,43 +1007,10 @@ fn cmd_install_iso(args: &[String]) {
         iso_data.len() as f64 / (1024.0 * 1024.0)
     );
 
-    // With --dkey the image is encrypted: stream-decrypt it into a
-    // transient file beside the VFS root and map that, so the plaintext
-    // never has to fit in memory. The record's source hash stays over
-    // the original (encrypted) bytes. With no --dkey the image is
-    // assumed already decrypted, so the source bytes ARE the decrypted
-    // bytes and the one mapping serves as both.
-    let decrypted_tmp: Option<(PathBuf, filebuffer::FileBuffer)> = match &parsed.dkey_path {
-        Some(dkey_path) => {
-            let dkey = std::fs::read(dkey_path).unwrap_or_else(|e| {
-                eprintln!("failed to read disc key {}: {e}", dkey_path.display());
-                std::process::exit(1);
-            });
-            let dkey: [u8; 16] = dkey.as_slice().try_into().unwrap_or_else(|_| {
-                eprintln!("disc key must be exactly 16 bytes, got {}", dkey.len());
-                std::process::exit(1);
-            });
-            println!("  decrypting protected sectors with supplied disc key...");
-            let tmp_path = decrypt_iso_to_temp(&iso_data, &dkey, &parsed.output_dir);
-            let map = filebuffer::FileBuffer::open(&tmp_path).unwrap_or_else(|e| {
-                eprintln!("failed to map decrypted image {}: {e}", tmp_path.display());
-                remove_temp_decrypt(&tmp_path);
-                std::process::exit(1);
-            });
-            Some((tmp_path, map))
-        }
-        None => None,
-    };
-    let decrypted: &[u8] = match &decrypted_tmp {
-        Some((_, map)) => &map[..],
-        None => &iso_data[..],
-    };
-
     let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let bar = ProgressBar::start(parsed.render.caps(), &container_label(&parsed.iso_path));
     let reporter = bar.state();
     let outcome = game_install::install_iso(
-        decrypted,
         &iso_data,
         &keys,
         &parsed.output_dir,
@@ -1071,27 +1021,18 @@ fn cmd_install_iso(args: &[String]) {
         },
     );
     // Bar down first: the render thread owns stderr while it runs, and
-    // its next frame would cursor-up over the removal warning below.
+    // its next frame would cursor-up over the failure line below.
     let outcome = match outcome {
         Ok(o) => {
             bar.finish();
-            Ok(o)
+            o
         }
         Err(e) => {
             bar.abort();
-            Err(e)
+            eprintln!("install-iso failed: {e}");
+            std::process::exit(1);
         }
     };
-    // The temp plaintext is spent either way; drop the mapping before
-    // removal (a mapped file cannot be deleted on Windows).
-    if let Some((tmp_path, map)) = decrypted_tmp {
-        drop(map);
-        remove_temp_decrypt(&tmp_path);
-    }
-    let outcome = outcome.unwrap_or_else(|e| {
-        eprintln!("install-iso failed: {e}");
-        std::process::exit(1);
-    });
 
     println!(
         "  title {}: {} files -> {}",
@@ -1100,62 +1041,6 @@ fn cmd_install_iso(args: &[String]) {
         outcome.game_dir.display(),
     );
     println!("  record {}", outcome.record_path.display());
-}
-
-/// Stream-decrypt `image` into a transient plaintext file under the
-/// VFS root's `.cellgov/` directory, returning its path. Peak
-/// residence is one 4 MiB batch regardless of image size; the cost of
-/// the encrypted path is transient disk instead.
-///
-/// Exits the process on any failure, removing the partial file first.
-#[cfg(feature = "decrypt")]
-fn decrypt_iso_to_temp(image: &[u8], dkey: &[u8; 16], output_dir: &Path) -> PathBuf {
-    let tmp_dir = output_dir.join(".cellgov");
-    std::fs::create_dir_all(&tmp_dir).unwrap_or_else(|e| {
-        eprintln!("failed to create {}: {e}", tmp_dir.display());
-        std::process::exit(1);
-    });
-    let tmp_path = temp_decrypt_path(&tmp_dir, std::process::id());
-    let file = std::fs::File::create(&tmp_path).unwrap_or_else(|e| {
-        eprintln!("failed to create {}: {e}", tmp_path.display());
-        std::process::exit(1);
-    });
-    let key = disc_crypt::decrypt_disc_key(dkey);
-    let mut writer = std::io::BufWriter::new(file);
-    let write_out = disc_crypt::decrypt_disc_image_chunks(image, &key, |chunk| {
-        std::io::Write::write_all(&mut writer, chunk)
-    })
-    .and_then(|()| {
-        std::io::Write::flush(&mut writer)
-            .map_err(|source| disc_crypt::DiscDecryptStreamError::Sink { source })
-    });
-    if let Err(e) = write_out {
-        eprintln!("disc decryption failed: {e}");
-        drop(writer);
-        remove_temp_decrypt(&tmp_path);
-        std::process::exit(1);
-    }
-    tmp_path
-}
-
-/// The transient plaintext path for this process. Keyed by process id
-/// so two `--dkey` installs into one VFS root cannot `File::create`
-/// over each other's plaintext while the other is still mapped.
-fn temp_decrypt_path(tmp_dir: &Path, pid: u32) -> PathBuf {
-    tmp_dir.join(format!("disc-decrypt-{pid}.tmp"))
-}
-
-/// Best-effort removal of the transient decrypted image; a leftover is
-/// named rather than silently kept.
-fn remove_temp_decrypt(path: &Path) {
-    if let Err(e) = std::fs::remove_file(path) {
-        if e.kind() != std::io::ErrorKind::NotFound {
-            eprintln!(
-                "warning: could not remove transient decrypted image {}: {e}",
-                path.display()
-            );
-        }
-    }
 }
 
 /// Parsed `uninstall` subcommand arguments.

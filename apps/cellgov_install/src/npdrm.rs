@@ -119,10 +119,9 @@ pub fn rap_to_klic(keys: &KeyVault, rap: &[u8; 16]) -> Result<[u8; 16], SceError
     // RPCS3 `key_vault.cpp` `rap_to_rif` indexes the round tables
     // through a fixed permutation of 0..15, and the E1 / cascade /
     // borrow sweeps rely on every position being visited exactly
-    // once (the repository's `oracle/rap_to_klic_oracle.py` asserts
-    // the same). A vault table that is not a permutation would derive
-    // a wrong klicensee that only fails, later, as an envelope
-    // padding mismatch, so it is refused here by name.
+    // once. A vault table that is not a permutation would derive a
+    // wrong klicensee that only fails, later, as an envelope padding
+    // mismatch, so it is refused here by name.
     let mut seen = [false; 16];
     for (index, &p) in pbox.iter().enumerate() {
         let p = usize::from(p);

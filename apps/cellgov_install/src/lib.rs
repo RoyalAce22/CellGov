@@ -9,12 +9,12 @@
 //! APP vs NPDRM) according to the caller's declared key policy.
 //!
 //! Every key-consuming path -- the SCE decrypt pipeline, the NPDRM
-//! klicensee derivation, PKG content decryption, PUP HMAC validation,
-//! and the encrypted-disc pass -- is behind the `decrypt` cargo
-//! feature, off by default. Without it the crate parses containers
-//! and passes plaintext images through, and an SCE-wrapped input is
-//! refused with [`sce::SceError::DecryptFeatureDisabled`]. The key
-//! material itself is the operator's: every decrypt path takes a
+//! klicensee derivation, PKG content decryption, and PUP HMAC
+//! validation -- is behind the `decrypt` cargo feature, off by
+//! default. Without it the crate parses containers and passes
+//! plaintext images through, and an SCE-wrapped input is refused
+//! with [`sce::SceError::DecryptFeatureDisabled`]. The key material
+//! itself is the operator's: every decrypt path takes a
 //! [`keys::KeyVault`] loaded from a keyfile the operator supplies, and
 //! the crate ships no key value.
 //!
@@ -29,8 +29,6 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-#[cfg(feature = "decrypt")]
-pub mod disc_crypt;
 pub mod game_install;
 pub mod game_uninstall;
 pub mod iso;

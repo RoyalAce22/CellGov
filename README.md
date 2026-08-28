@@ -119,12 +119,14 @@ Titles install from your own dumps:
 
 ```bash
 cargo run --release -p cellgov_install --features decrypt -- install-game <title>.pkg --rap <title>.rap
-cargo run --release -p cellgov_install --features decrypt -- install-iso <disc>.iso [--dkey <disc>.dkey]
+cargo run --release -p cellgov_install --features decrypt -- install-iso <disc>.iso
 ```
 
-A PSN package lands under `vfs/dev_hdd0/game/<title-id>/`, a disc
-image under `vfs/dev_bdvd/<title-id>/`, each with an install record
-of per-file digests. A title becomes bootable once it has a manifest
+`install-iso` takes a decrypted dump of a disc you own; an image still
+carrying its disc encryption is refused. A PSN package lands under
+`vfs/dev_hdd0/game/<title-id>/`, a disc image under
+`vfs/dev_bdvd/<title-id>/`, each with an install record of per-file
+digests. A title becomes bootable once it has a manifest
 under [titles/](titles/manifest_template.README.md);
 `cellgov_cli gen-manifest --title-id <id>` writes the stub from the
 install record.

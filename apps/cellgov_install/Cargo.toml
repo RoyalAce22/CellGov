@@ -37,10 +37,10 @@ thiserror = "2"
 
 [features]
 # Every key-consuming path: the SCE/SELF decrypt pipeline, the NPDRM
-# klicensee derivation, PKG content decryption, PUP HMAC validation,
-# and the encrypted-disc pass. Off by default: the crate then parses
-# containers (SCE / PUP / PKG headers, ISO9660) and hands plaintext
-# images through, and every SCE-wrapped input is refused with
+# klicensee derivation, PKG content decryption, and PUP HMAC
+# validation. Off by default: the crate then parses containers (SCE /
+# PUP / PKG headers, ISO9660) and hands plaintext images through, and
+# every SCE-wrapped input is refused with
 # `SceError::DecryptFeatureDisabled`. A build without it links no
 # cipher crate. No build carries key material: the decrypt paths read
 # the operator's vault (`keys` module) at run time.

@@ -46,9 +46,8 @@ fn decrypted_disc_install_matches_the_rpcs3_extracted_eboot() {
     let vfs = scratch.join("vfs");
 
     // install_iso runs the APP-keyed decrypt-proof internally; success
-    // means the disc was decrypted and the EBOOT loads.
+    // means the EBOOT loads.
     let outcome = game_install::install_iso(
-        &iso,
         &iso,
         &keys::vault(),
         &vfs,

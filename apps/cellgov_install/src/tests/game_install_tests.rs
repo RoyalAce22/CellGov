@@ -269,7 +269,6 @@ fn iso_rejects_missing_param_sfo() {
     let out = scratch();
     let err = install_iso(
         &image,
-        &image,
         &keys(),
         &out.join("vfs"),
         &out.join("installs"),
@@ -291,7 +290,6 @@ fn iso_rejects_non_disc_category() {
     )]);
     let out = scratch();
     let err = install_iso(
-        &image,
         &image,
         &keys(),
         &out.join("vfs"),
@@ -315,7 +313,6 @@ fn iso_rejects_missing_eboot() {
     let out = scratch();
     let err = install_iso(
         &image,
-        &image,
         &keys(),
         &out.join("vfs"),
         &out.join("installs"),
@@ -331,7 +328,10 @@ fn iso_rejects_missing_eboot() {
 fn iso_pre_commit_fault_leaves_no_staging_residue() {
     // On the disc path the staging root *is* the tree (no `tree/`
     // nesting), so a failed decrypt-proof has to discard the root
-    // itself. The EBOOT is not a SELF, so the proof faults.
+    // itself. The EBOOT opens with the SCE magic (so it passes the
+    // encrypted-image check) but is no SELF, so the proof faults.
+    let mut eboot = cellgov_ps3_abi::sce::SCE_MAGIC.to_vec();
+    eboot.extend_from_slice(b" not a SELF");
     let image = build_iso(vec![IsoNode::Dir(
         "PS3_GAME",
         vec![
@@ -339,24 +339,13 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
                 "PARAM.SFO",
                 build_param_sfo(&[("TITLE_ID", "BCES00664"), ("CATEGORY", "DG")]),
             ),
-            IsoNode::Dir(
-                "USRDIR",
-                vec![IsoNode::File("EBOOT.BIN", b"not a SELF".to_vec())],
-            ),
+            IsoNode::Dir("USRDIR", vec![IsoNode::File("EBOOT.BIN", eboot)]),
         ],
     )]);
     let out = scratch();
     let vfs = out.join("vfs");
     let installs = out.join("installs");
-    let err = install_iso(
-        &image,
-        &image,
-        &keys(),
-        &vfs,
-        &installs,
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err = install_iso(&image, &keys(), &vfs, &installs, InstallOptions::default()).unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "synthetic disc EBOOT must fail the proof, got {err:?}"
