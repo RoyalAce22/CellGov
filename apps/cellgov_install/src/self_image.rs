@@ -85,8 +85,7 @@ fn open_sce_wrapper(
                 // clears the image for APP keys. A present record whose
                 // body will not parse has already settled the key
                 // class, and a chain that will not walk is a hard load
-                // failure in RPCS3 `unself.cpp`
-                // `SELFDecrypter::LoadHeaders` too.
+                // failure.
                 Err(e) => Err(e),
             }
         }

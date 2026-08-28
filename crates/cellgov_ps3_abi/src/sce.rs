@@ -43,7 +43,6 @@ pub const SCE_SUPPLEMENTAL_KIND_NPDRM: u32 = 3;
 pub const RETAIL_APP_PROGRAM_AUTHORITY_ID: u64 = 0x1010_0000_0100_0003;
 
 /// Program authority id of the bdj.self (BD-J / system-process) SELF.
-/// Mirrors the PAID_44 value in RPCS3's `unself.h`.
 pub const BDJ_SELF_PROGRAM_AUTHORITY_ID: u64 = 0x1070_0000_3A00_0001;
 
 /// `supplemental_header.type == 1` marks the plaintext capability

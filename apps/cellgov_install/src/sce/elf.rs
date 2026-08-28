@@ -113,9 +113,7 @@ fn parse_inner_elf(data: &[u8]) -> Result<InnerElf, SceError> {
 /// `p_filesz` per program header of `data`'s inner ELF, in table order.
 ///
 /// The decrypt pass bounds a zlib section's inflate output at the size
-/// its destination segment declares; RPCS3 `unself.h`
-/// `SELFDecrypter::WriteElf` sizes that inflate buffer at exactly
-/// `phdr[program_idx].p_filesz`.
+/// its destination segment declares.
 #[cfg(feature = "decrypt")]
 pub(crate) fn inner_elf_segment_file_sizes(data: &[u8]) -> Result<Vec<usize>, SceError> {
     Ok(parse_inner_elf(data)?
@@ -160,8 +158,7 @@ pub(crate) fn assemble_elf_from_sections(
     // A null `e_shoff` with a non-zero `e_shnum` leaves the
     // section-header table nowhere to land. The table is no part of
     // the run image (see [`mask_non_semantic_elf_bytes`]), so the
-    // shape is dropped, matching RPCS3 `unself.cpp`
-    // `SELFDecrypter::LoadHeaders`.
+    // shape is dropped.
     let place_shdr_table = shdr_offset_in_self != 0 && e_shnum > 0 && e_shoff != 0;
     if place_shdr_table {
         let shdr_end = checked_add_oob(e_shoff, shdr_table_bytes, "SELF section headers")?;
@@ -236,13 +233,10 @@ pub(crate) fn assemble_elf_from_sections(
         elf[p_offset..write_end].copy_from_slice(sec_data);
     }
 
-    // Placed after the segment payloads: RPCS3 `unself.h`
-    // `SELFDecrypter::WriteElf` emits the ehdr, the program headers,
-    // every PHDR-kind section payload, and only then seeks to
-    // `e_shoff` for the section-header table. A SELF whose `e_shoff`
-    // falls inside a segment's `[p_offset, p_offset + p_filesz)`
-    // therefore resolves to the section headers in the oracle's
-    // output.
+    // Placed after the segment payloads, so a section-header table
+    // whose `e_shoff` falls inside a segment's
+    // `[p_offset, p_offset + p_filesz)` overwrites that part of the
+    // payload.
     if place_shdr_table {
         elf[e_shoff..e_shoff + shdr_table_bytes]
             .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_table_bytes]);

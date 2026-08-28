@@ -16,7 +16,7 @@ use cellgov_install::keys::{KeyVault, ENV_KEYS};
 /// The workspace `vfs/`, where the installed corpus and an imported
 /// vault live; the test binary's working directory is the crate, not
 /// the workspace.
-fn workspace_vfs() -> PathBuf {
+pub fn workspace_vfs() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     p.pop();
     p.pop();

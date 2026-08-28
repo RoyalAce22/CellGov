@@ -159,9 +159,9 @@ pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, SceError> {
 ///
 /// The extended header at file offset 0x20 carries
 /// `program_identification_hdr_offset` (u64 BE at offset 0x28); the
-/// authority id is the first u64 of that header. Field layout per
-/// RPCS3 `unself.h` / `unself.cpp`. Both headers are plaintext, so the
-/// id is readable from NPDRM-wrapped SELFs without RAP material.
+/// authority id is the first u64 of that header. Both headers are
+/// plaintext, so the id is readable from NPDRM-wrapped SELFs without
+/// RAP material.
 ///
 /// # Errors
 ///

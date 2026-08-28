@@ -576,10 +576,9 @@ impl Loader {
                 Some(_) => r,
                 // scetool keeps a `revision=8000` keyset for debug
                 // SELFs. Bit 15 of the SCE header's revision word marks
-                // an unencrypted debug image (RPCS3 `unself.cpp`
-                // `SELFDecrypter::LoadMetadata` skips the key peel), and
-                // `sce::decrypt_self_to_elf` refuses one before the
-                // vault is consulted, so the keyset is never used.
+                // an unencrypted debug image, which
+                // `sce::decrypt_self_to_elf` refuses before the vault is
+                // consulted, so the keyset is never used.
                 None if is_debug_revision(&r) => {
                     self.vault
                         .ignore(at, IgnoreReason::UnusedKeyset { name: shown });

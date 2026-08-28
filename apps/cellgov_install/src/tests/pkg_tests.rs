@@ -381,10 +381,6 @@ fn one_file_region(name: &[u8], data: &[u8], file_size: u64) -> Vec<u8> {
     region
 }
 
-// RPCS3 `Crypto/unpkg.cpp` `package_reader::read_entries` rejects an
-// item only when `fsz - file_size < file_offset`, so an item whose
-// last byte is the last byte of the region is accepted; the range
-// must resolve it without an off-by-one at the region end.
 #[cfg(feature = "decrypt")]
 #[test]
 fn file_ending_exactly_at_region_end_resolves() {
@@ -398,9 +394,6 @@ fn file_ending_exactly_at_region_end_resolves() {
     assert_eq!(archive.file_data(file), data);
 }
 
-// RPCS3 `read_entries` skips the data bound when `file_size == 0`; the
-// range for such an item is empty and must resolve even when its
-// offset is the region length itself.
 #[cfg(feature = "decrypt")]
 #[test]
 fn zero_length_file_at_region_end_resolves_empty() {

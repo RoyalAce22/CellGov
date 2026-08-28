@@ -11,12 +11,9 @@ env:
   # RUSTFLAGS is per-job: `-D warnings` on a floating channel lets a new
   # compiler fail a branch that did not change.
   #
-  # Corpus suites are type-checked and linted here, never run. Absent
-  # from the list: cellgov_install/npdrm-oracle-vectors include_bytes!()s
-  # operator files, so enabling it without them is a compile error rather
-  # than a lint. See CellGov-Dev #247.
+  # Corpus suites are type-checked and linted here, never run.
   CORPUS_FEATURES: >-
-    cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
+    cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
 jobs:
   # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix

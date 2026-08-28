@@ -4,7 +4,7 @@
 //! encrypted item-record table, and the CTR-encrypted item data. The
 //! key is the vault's retail PKG AES key used directly; the per-block
 //! CTR counter is the header `klicensee` nonce plus the 16-byte block
-//! index (mirroring RPCS3's `unpkg.cpp`).
+//! index.
 //!
 //! This module is a pure function from package bytes to extracted
 //! files. It never touches the filesystem; the install orchestration
@@ -66,8 +66,9 @@ pub struct PkgHeader {
     /// Full content id from the 48-byte header field, NUL/space-
     /// trimmed. Despite the field being named `title_id` in the on-disk struct, it
     /// carries the full content id; the 9-char title-id is embedded at
-    /// byte 7 (`UP9000-` prefix + title-id), which RPCS3 reads as the
-    /// install directory.
+    /// byte 7 (`UP9000-` prefix + title-id). The install directory is
+    /// named by PARAM.SFO's TITLE_ID; [`crate::game_install`] checks a
+    /// non-empty value here contains it.
     pub content_id: String,
     /// 16-byte CTR nonce.
     pub klicensee: [u8; 16],
@@ -365,8 +366,7 @@ fn validate_item_name(index: usize, name: &str) -> Result<(), PkgError> {
 ///
 /// The whole data region is CTR-decrypted once; names are decoded out
 /// of it and each item keeps a bounds-proved range into it (resolved
-/// via [`PkgArchive::file_data`]). Byte-equivalent to RPCS3's
-/// per-region decrypt because PKG item offsets are 16-byte aligned.
+/// via [`PkgArchive::file_data`]).
 /// EDAT and SDAT items are skipped (out of scope). Folder items become
 /// [`PkgEntryKind::Directory`] entries.
 ///
@@ -379,9 +379,6 @@ pub fn extract(data: &[u8], keys: &KeyVault) -> Result<PkgArchive, PkgError> {
     let header = parse_header(data)?;
     let pkg_key = keys.pkg_aes()?;
 
-    // Decrypt the data region in one CTR pass. `fsz` bounds names and
-    // data against the actual file extent from `data_offset`, matching
-    // RPCS3's `m_file.size() - data_offset`.
     let region_start = header.data_offset as usize;
     let mut region = data[region_start..].to_vec();
     ctr_decrypt(pkg_key, &header.klicensee, &mut region);

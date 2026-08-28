@@ -10,9 +10,9 @@
 //!
 //! The NPD header interpretation is available in every build; the
 //! derivation and the decrypt are behind the `decrypt` feature.
-//! Fixture-dependent tests (`include_bytes!` of operator-supplied
-//! RAP and EBOOT files under `vfs/dev_hdd0/`) live behind
-//! the `npdrm-oracle-vectors` feature.
+//! Witness vectors over the operator's installed corpus live in
+//! `tests/npdrm_oracle_vectors.rs` behind the `npdrm-oracle-vectors`
+//! feature.
 
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockDecrypt, KeyInit};
@@ -116,11 +116,8 @@ pub fn rap_to_klic(keys: &KeyVault, rap: &[u8; 16]) -> Result<[u8; 16], SceError
     let pbox = keys.rap_pbox()?;
     let e1 = keys.rap_e1()?;
     let e2 = keys.rap_e2()?;
-    // RPCS3 `key_vault.cpp` `rap_to_rif` indexes the round tables
-    // through a fixed permutation of 0..15, and the E1 / cascade /
-    // borrow sweeps rely on every position being visited exactly
-    // once. A vault table that is not a permutation would derive a
-    // wrong klicensee that only fails, later, as an envelope padding
+    // A digit order that skips or repeats a byte would derive a wrong
+    // klicensee that only fails, later, as an envelope padding
     // mismatch, so it is refused here by name.
     let mut seen = [false; 16];
     for (index, &p) in pbox.iter().enumerate() {
@@ -131,34 +128,44 @@ pub fn rap_to_klic(keys: &KeyVault, rap: &[u8; 16]) -> Result<[u8; 16], SceError
         seen[p] = true;
     }
     let cipher = aes::Aes128::new_from_slice(rap_key).expect("invariant: the slot is 16 bytes");
-    let mut key = [0u8; 16];
-    key.copy_from_slice(rap);
-    cipher.decrypt_block((&mut key).into());
+    let mut state = *rap;
+    cipher.decrypt_block((&mut state).into());
 
-    let at = |i: usize| usize::from(pbox[i]);
+    let e1 = to_digits(e1, pbox);
+    let e2 = u128::from_le_bytes(to_digits(e2, pbox));
+    let mut digits = to_digits(&state, pbox);
     for _round in 0..5 {
-        for i in 0..16 {
-            let p = at(i);
-            key[p] ^= e1[p];
+        for (digit, e) in digits.iter_mut().zip(&e1) {
+            *digit ^= e;
         }
-        for i in (1..16).rev() {
-            let p = at(i);
-            let pp = at(i - 1);
-            key[p] ^= key[pp];
+        let before = digits;
+        for (i, digit) in digits.iter_mut().enumerate().skip(1) {
+            *digit = before[i] ^ before[i - 1];
         }
-        let mut borrow: u8 = 0;
-        for i in 0..16 {
-            let p = at(i);
-            let kc = key[p].wrapping_sub(borrow);
-            let ec2 = e2[p];
-            if borrow != 1 || kc != 0xFF {
-                borrow = u8::from(kc < ec2);
-            }
-            key[p] = kc.wrapping_sub(ec2);
-        }
+        digits = u128::from_le_bytes(digits).wrapping_sub(e2).to_le_bytes();
     }
+    Ok(from_digits(&digits, pbox))
+}
 
-    Ok(key)
+/// `bytes` in the RAP derivation's digit order: digit `i` is byte
+/// `pbox[i]`, least significant first.
+#[cfg(feature = "decrypt")]
+fn to_digits(bytes: &[u8; 16], pbox: &[u8; 16]) -> [u8; 16] {
+    let mut digits = [0u8; 16];
+    for (digit, &p) in digits.iter_mut().zip(pbox) {
+        *digit = bytes[usize::from(p)];
+    }
+    digits
+}
+
+/// Inverse of [`to_digits`] for a `pbox` that is a permutation.
+#[cfg(feature = "decrypt")]
+fn from_digits(digits: &[u8; 16], pbox: &[u8; 16]) -> [u8; 16] {
+    let mut bytes = [0u8; 16];
+    for (&digit, &p) in digits.iter().zip(pbox) {
+        bytes[usize::from(p)] = digit;
+    }
+    bytes
 }
 
 /// Derive the AES-128 layer key (which decrypts the NPDRM-wrapped
@@ -268,113 +275,6 @@ fn resolve_npdrm_klicensee(
 #[path = "tests/npdrm_tests.rs"]
 mod tests;
 
-#[cfg(all(test, feature = "npdrm-oracle-vectors"))]
-mod oracle_vectors {
-    use super::*;
-
-    /// The vault under the workspace `vfs/`, where the `include_bytes!`
-    /// fixtures below also live; `cargo test` runs with the crate
-    /// directory as the working directory, so [`KeyVault::load`]'s
-    /// relative `vfs` would look two levels too deep.
-    fn vault() -> KeyVault {
-        let mut vfs = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        vfs.pop();
-        vfs.pop();
-        vfs.push("vfs");
-        KeyVault::load_for_vfs(&vfs)
-            .expect("npdrm-oracle-vectors: the operator's key vault must load")
-    }
-
-    const FLOW_RAP: [u8; 16] = include_bytes_array_flow_rap();
-    /// flOw klic witness, frozen against `FLOW_RAP`.
-    const FLOW_EXPECTED_KLIC: [u8; 16] = [
-        CELLGOV-REDACTED-KEY
-        0xC1,
-    ];
-
-    const SSHD_RAP: [u8; 16] = include_bytes_array_sshd_rap();
-    const SSHD_EXPECTED_KLIC: [u8; 16] = [
-        CELLGOV-REDACTED-KEY
-        0x47,
-    ];
-
-    const FLOW_EBOOT: &[u8] =
-        include_bytes!("../../../vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN");
-    const SSHD_EBOOT: &[u8] =
-        include_bytes!("../../../vfs/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN");
-
-    const fn include_bytes_array_flow_rap() -> [u8; 16] {
-        *include_bytes!(
-            "../../../vfs/dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap"
-        )
-    }
-
-    const fn include_bytes_array_sshd_rap() -> [u8; 16] {
-        *include_bytes!(
-            "../../../vfs/dev_hdd0/home/00000001/exdata/UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
-        )
-    }
-
-    /// Assert that `elf` is a 64-bit big-endian PS3 ELF whose declared
-    /// phdr table fits within the buffer.
-    fn assert_is_ps3_ppc64_elf(elf: &[u8]) {
-        assert!(elf.len() >= 0x40, "ELF shorter than ehdr");
-        assert_eq!(&elf[..4], b"\x7fELF", "ELF magic");
-        assert_eq!(elf[4], 2, "EI_CLASS must be ELFCLASS64");
-        assert_eq!(elf[5], 2, "EI_DATA must be ELFDATA2MSB (big-endian)");
-        let e_machine = u16::from_be_bytes([elf[0x12], elf[0x13]]);
-        assert_eq!(e_machine, 21, "e_machine must be EM_PPC64 (21)");
-        let e_phoff = u64::from_be_bytes(
-            elf[0x20..0x28]
-                .try_into()
-                .expect("invariant: 8-byte slice converts to [u8; 8]"),
-        ) as usize;
-        let e_phentsize = u16::from_be_bytes([elf[0x36], elf[0x37]]) as usize;
-        let e_phnum = u16::from_be_bytes([elf[0x38], elf[0x39]]) as usize;
-        assert!(e_phnum > 0, "ELF must have at least one program header");
-        let phdr_table_end = e_phoff
-            .checked_add(
-                e_phnum
-                    .checked_mul(e_phentsize)
-                    .expect("phdr size overflow"),
-            )
-            .expect("phdr offset overflow");
-        assert!(
-            phdr_table_end <= elf.len(),
-            "phdr table extends past ELF buffer: e_phoff=0x{e_phoff:x} + \
-             e_phnum={e_phnum} * e_phentsize={e_phentsize} = {phdr_table_end} \
-             > {} (ELF length)",
-            elf.len(),
-        );
-    }
-
-    #[test]
-    fn rap_to_klic_matches_witness_flow() {
-        let got = rap_to_klic(&vault(), &FLOW_RAP).unwrap();
-        assert_eq!(got, FLOW_EXPECTED_KLIC, "flOw klic drift");
-    }
-
-    #[test]
-    fn rap_to_klic_matches_witness_sshd() {
-        let got = rap_to_klic(&vault(), &SSHD_RAP).unwrap();
-        assert_eq!(got, SSHD_EXPECTED_KLIC, "SSHD klic drift");
-    }
-
-    #[test]
-    fn flow_eboot_decrypts_to_parseable_elf() {
-        let keys = vault();
-        let klic = rap_to_klic(&keys, &FLOW_RAP).unwrap();
-        let elf = decrypt_self_to_elf_npdrm(FLOW_EBOOT, &keys, &klic)
-            .expect("flOw NPDRM decrypt: padding + section hashes self-certify");
-        assert_is_ps3_ppc64_elf(&elf);
-    }
-
-    #[test]
-    fn sshd_eboot_decrypts_to_parseable_elf() {
-        let keys = vault();
-        let klic = rap_to_klic(&keys, &SSHD_RAP).unwrap();
-        let elf = decrypt_self_to_elf_npdrm(SSHD_EBOOT, &keys, &klic)
-            .expect("SSHD NPDRM decrypt: padding + section hashes self-certify");
-        assert_is_ps3_ppc64_elf(&elf);
-    }
-}
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/npdrm_klic_tests.rs"]
+mod klic_known_answer_tests;

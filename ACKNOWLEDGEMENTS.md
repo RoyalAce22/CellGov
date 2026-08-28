@@ -22,11 +22,22 @@ Specifically, CellGov has benefited from RPCS3 in the following ways:
 - The CellGov dump hook used for cross-runner observation is
   implemented as a patch against RPCS3 (bridges/rpcs3-patch/).
 
-CellGov does not vendor or copy RPCS3 source code. RPCS3 is licensed
-GPL v2; CellGov is dual-licensed Apache-2.0 / MIT. The relationship
-is one of independent reimplementation informed by RPCS3 as a
-behavioral reference, with attribution preserved both here and in
-the in-source comments that cite RPCS3 directly.
+CellGov does not vendor RPCS3 source code. Its own code is written
+using RPCS3 as a behavioral reference: where CellGov must agree with
+the PS3 on what a syscall returns, how a container is laid out, or
+which inputs a loader accepts, RPCS3's source was often the clearest
+description of the expected behavior, and CellGov's code and fixtures
+are checked against it. In-source notes name the RPCS3 file and
+function whose behavior they match, and the cross-runner fixtures
+under `tests/` hold CellGov's output against RPCS3's.
+
+CellGov invokes RPCS3 only as a separate process and never links it.
+The one place CellGov modifies RPCS3 itself -- the dump-hook and
+trace patch set under `bridges/rpcs3-patch/` -- is a change to RPCS3,
+licensed GPL v2 to match it. That subtree is self-contained: it is
+not compiled into or linked by any CellGov crate, so its GPL v2 terms
+do not extend to the rest of CellGov, which stays dual-licensed
+Apache-2.0 / MIT.
 
 I would like to extend a personal thank you to everyone who has
 contributed to RPCS3 over the years. The work you have done
@@ -39,9 +50,13 @@ acknowledged:
   homebrew SDK. CellGov's microtests are built with PSL1GHT.
 - scetool / sceutils -- early PS3 RE tooling that established much
   of the SCE format vocabulary.
+- PS3 Developer Wiki (https://www.psdevwiki.com/ps3/) -- the
+  community's written record of the PS3: container formats (SCE /
+  SELF / PKG / PUP), the LV2 syscall table, error codes, firmware
+  layout, and hardware registers.
 - The IBM Cell Broadband Engine Handbook authors and the SPU/PPU
   ISA reference manuals: the public spec that makes any of this
   possible at the instruction level.
 
 If your work informed CellGov and you are not listed here, that is
-an oversight, not an intent. Please open an issue or PR.
+an oversight and not an intent. Please open an issue or PR.

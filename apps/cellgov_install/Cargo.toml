@@ -46,13 +46,11 @@ thiserror = "2"
 # the operator's vault (`keys` module) at run time.
 decrypt = ["dep:aes", "dep:cbc", "dep:ctr", "dep:hmac", "dep:sha1", "dep:flate2"]
 
-# Enable the npdrm oracle vector tests that include_bytes!() the
-# operator-supplied RAP and EBOOT files from the installed corpus
-# under vfs/dev_hdd0/. Off by default so a fresh checkout without
-# those license files compiles cleanly; CI enables it on the host
-# that carries them to run the 16-byte-boundary regression anchors.
-# The rap_to_klic_is_pure test (no fixture dependency) rides with
-# `decrypt`.
+# The NPDRM witness suite: RAP -> klicensee derivations and the EBOOT
+# decrypts they open, read at run time from the operator's manifest at
+# vfs/.cellgov/npdrm_oracle_vectors.toml. Same contract as the corpus
+# features: off means not built, on means a missing manifest is a hard
+# failure. The manifest names the titles, so the source names none.
 npdrm-oracle-vectors = ["decrypt"]
 
 # Suites that install a title from an operator-owned raw dump: a
@@ -80,6 +78,10 @@ firmware-corpus = ["decrypt"]
 # title-dumps is distinct from title-corpus: having the installed
 # result under vfs/ does not mean the update package was kept.
 firmware-dumps = ["decrypt"]
+
+[[test]]
+name = "npdrm_oracle_vectors"
+required-features = ["npdrm-oracle-vectors"]
 
 [[test]]
 name = "parity_pkg"

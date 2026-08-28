@@ -191,10 +191,10 @@ pub fn decrypt_sce_sections(
     decrypt_sections_from_envelope(data, &hdr, &envelope, None)
 }
 
-/// Decrypt the 0x40-byte [`super::MetadataKeyEnvelope`] using the
-/// AES-256-CBC ERK/RIV pair (the APP-keyed path RPCS3 takes for
-/// retail SELFs). Returns the plaintext envelope, with padding
-/// regions validated to be zero.
+/// Decrypt the 0x40-byte [`super::MetadataKeyEnvelope`] with a single
+/// AES-256-CBC ERK/RIV peel and no NPDRM layer. The pair is whichever
+/// keyset the caller resolved: APP for a SELF, SCE package for a
+/// PUP-style PKG.
 fn decrypt_envelope_app_keyed(
     data: &[u8],
     hdr: &SceContainerHeader,
@@ -255,9 +255,7 @@ pub(crate) fn decrypt_envelope(
             .map_err(|_| SceError::AesCbcDecryptFailed)?;
     }
 
-    // The padding self-check runs for a debug container too. RPCS3
-    // `unself.cpp` `SELFDecrypter::LoadMetadata` validates the key and
-    // IV pad bytes after the debug branch closes, not inside it, so a
+    // The padding self-check runs for a debug container too, so a
     // container that claims to be plaintext but is not gets named here
     // instead of carrying a garbage AES key into the CTR pass.
     if envelope[0x10..0x20].iter().any(|&b| b != 0) || envelope[0x30..0x40].iter().any(|&b| b != 0)
@@ -418,16 +416,11 @@ pub(crate) fn decrypt_sections_from_envelope(
             SCE_COMP_KIND_ZLIB => {
                 use flate2::read::ZlibDecoder;
                 use std::io::Read;
-                // RPCS3 `unself.h` `SELFDecrypter::WriteElf` sizes the
-                // inflate output buffer at exactly
-                // `phdr[program_idx].p_filesz`, so a stream that wants
-                // more bytes than its destination segment declares is
-                // not a stream this container describes. Reading one
-                // byte past that size separates the two without
-                // letting a crafted stream drive the allocation; the
-                // oracle logs zlib's buffer error and writes the
-                // truncated buffer anyway, which is the silent half of
-                // the behaviour, so the overrun is named here.
+                // A stream that inflates to more bytes than its
+                // destination segment's `p_filesz` declares is not a
+                // stream this container describes. Reading one byte
+                // past that size separates the two without letting a
+                // crafted stream drive the allocation.
                 let cap = match segment_file_sizes {
                     Some(sizes) if sec.section_kind == SCE_SECTION_KIND_PHDR => {
                         let prog_idx = sec.program_segment_index as usize;

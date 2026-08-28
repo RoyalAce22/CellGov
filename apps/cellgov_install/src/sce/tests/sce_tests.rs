@@ -545,10 +545,6 @@ fn a_null_section_header_offset_does_not_overwrite_the_elf_header() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn the_section_header_table_lands_on_top_of_an_overlapping_segment_payload() {
-    // RPCS3 `unself.h` `SELFDecrypter::WriteElf` writes the ehdr, the
-    // program headers, every PHDR-kind payload, and only then seeks
-    // to `e_shoff` for the section-header table, so the table wins an
-    // overlap.
     let mut data = build_synthetic_self();
     // Section-header table lives at SELF offset 0x300, one 0x40-byte
     // entry, and the inner ELF places it at e_shoff = 0x80.
