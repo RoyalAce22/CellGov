@@ -719,6 +719,34 @@ fn keys_import_of_a_file_holding_no_key_is_refused_and_writes_nothing() {
 }
 
 #[test]
+fn keys_import_of_a_directory_of_disc_keys_is_refused_and_names_them_set_aside() {
+    let dir = scratch();
+    let source = dir.join("dkeys");
+    std::fs::create_dir(&source).unwrap();
+    std::fs::write(source.join("Some Game (USA).dkey"), hex_of(0xD1, 16)).unwrap();
+    std::fs::write(source.join("Other Game (Japan).key"), [0xD2u8; 16]).unwrap();
+    let vfs = dir.join("vfs");
+
+    let err = import_keys(&source, &vfs, false).expect_err("no slot takes a disc key");
+    assert!(
+        matches!(err, FirmwareCliError::KeysNothingUsable { .. }),
+        "got {err:?}"
+    );
+    assert!(!err.to_string().contains("disc key"), "{err}");
+    assert!(!installed_keys_dir(&vfs).exists());
+
+    let reasons: Vec<String> = KeyVault::load_from_path(&source)
+        .expect("load")
+        .ignored()
+        .iter()
+        .map(|i| format!("{}: {}", i.at, i.reason))
+        .collect();
+    assert_eq!(reasons.len(), 2, "{reasons:?}");
+    assert!(reasons.iter().any(|r| r.contains(".dkey")), "{reasons:?}");
+    assert!(reasons.iter().any(|r| r.contains(".key")), "{reasons:?}");
+}
+
+#[test]
 fn keys_import_of_an_absent_path_is_refused_by_name() {
     let dir = scratch();
     let err = import_keys(&dir.join("absent"), &dir.join("vfs"), false).expect_err("absent");
@@ -757,7 +785,7 @@ fn the_key_inventory_names_every_slot_and_what_the_decrypt_paths_still_lack() {
         report.contains("app: revisions (none), 0 unlabeled"),
         "{report}"
     );
-    assert!(report.contains("disc keys: 0"), "{report}");
+    assert!(!report.contains("disc"), "{report}");
     assert!(report.contains("k.txt:2: name \"frobnicate\""), "{report}");
     assert!(
         report.contains("missing for decrypt: pup_hmac, "),

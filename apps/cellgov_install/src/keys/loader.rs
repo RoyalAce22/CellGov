@@ -260,22 +260,8 @@ impl Loader {
             .unwrap_or("")
             .to_string();
         self.vault.note_source(path);
-        match extension_of(path).as_str() {
-            "dkey" | "key" => {
-                let key = value_bytes(bytes);
-                let key: [u8; 16] =
-                    key.as_slice()
-                        .try_into()
-                        .map_err(|_| KeyVaultError::WrongLength {
-                            at: at.clone(),
-                            what: format!("disc key {stem:?}"),
-                            got: key.len(),
-                            want: 16,
-                        })?;
-                return self.vault.set_disc(stem, key, at);
-            }
-            "toml" => return self.ingest_toml(at, bytes),
-            _ => {}
+        if extension_of(path) == "toml" {
+            return self.ingest_toml(at, bytes);
         }
         // A per-key file holds one value and nothing else; anything
         // with another shape is a keyfile to read line by line.

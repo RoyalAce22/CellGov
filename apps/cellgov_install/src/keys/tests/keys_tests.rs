@@ -52,10 +52,6 @@ fn full_toml() -> String {
         h(0xC1, 32),
         h(0xC2, 16)
     ));
-    t.push_str(&format!(
-        "[disc]\n\"Some Game (USA)\" = \"{}\"\n",
-        h(0xD1, 16)
-    ));
     t
 }
 
@@ -86,7 +82,6 @@ fn assert_full(v: &KeyVault) {
     assert_eq!(v.unlabeled_count(SelfClass::App), 1);
     let npdrm = v.self_key(SelfClass::Npdrm, 0x0A).unwrap();
     assert_eq!(npdrm.erk, [0xC1u8; 32]);
-    assert_eq!(v.disc_key("Some Game (USA)").unwrap(), &[0xD1u8; 16]);
     assert!(
         v.missing_for_decrypt().is_empty(),
         "{:?}",
@@ -356,7 +351,7 @@ fn a_reported_name_never_carries_the_hex_it_swallowed() {
 }
 
 #[test]
-fn a_directory_of_per_key_files_pairs_halves_by_label_and_indexes_disc_keys() {
+fn a_directory_of_per_key_files_pairs_halves_by_label_and_sets_disc_keys_aside() {
     let dir = scratch();
     let w = |name: &str, bytes: &[u8]| std::fs::write(dir.join(name), bytes).unwrap();
     w("app-key-0a", h(0xB1, 32).as_bytes());
@@ -401,11 +396,12 @@ fn a_directory_of_per_key_files_pairs_halves_by_label_and_indexes_disc_keys() {
     assert_eq!(v.pup_hmac().unwrap(), &[0x11u8; 64]);
     assert_eq!(v.np_klic_free().unwrap(), &[0x44u8; 16]);
     assert_eq!(v.rap_e1().unwrap(), &[0x77u8; 16]);
-    assert_eq!(v.disc_key("Some Game (Europe)").unwrap(), &[0xD1u8; 16]);
-    assert_eq!(v.disc_key("Other Game (Japan)").unwrap(), &[0xD2u8; 16]);
-    assert_eq!(v.disc_key_count(), 2);
-    let reasons: Vec<String> = v.ignored().iter().map(|i| i.reason.to_string()).collect();
-    assert_eq!(reasons.len(), 4, "{reasons:?}");
+    let reasons: Vec<String> = v
+        .ignored()
+        .iter()
+        .map(|i| format!("{}: {}", i.at, i.reason))
+        .collect();
+    assert_eq!(reasons.len(), 6, "{reasons:?}");
     assert!(reasons.iter().any(|r| r.contains("hidden")), "{reasons:?}");
     assert!(
         reasons
@@ -415,6 +411,18 @@ fn a_directory_of_per_key_files_pairs_halves_by_label_and_indexes_disc_keys() {
     );
     assert!(reasons.iter().any(|r| r.contains(".pdf")), "{reasons:?}");
     assert!(reasons.iter().any(|r| r.contains("RAP")), "{reasons:?}");
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.contains(".dkey") && r.contains("16-byte value with no name")),
+        "{reasons:?}"
+    );
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.contains("Other Game (Japan)") && r.contains("binary content")),
+        "{reasons:?}"
+    );
 }
 
 #[test]
@@ -678,27 +686,23 @@ fn a_raw_key_made_of_hex_digit_bytes_is_read_as_the_bytes_it_is() {
         vec![0xD1u8; 16]
     );
     assert_eq!(value_bytes(&[0xD2u8; 16]), vec![0xD2u8; 16]);
-
-    let dir = scratch();
-    std::fs::write(dir.join("Hexish (USA).key"), raw).unwrap();
-    let v = KeyVault::load_from_path(&dir).unwrap();
-    assert_eq!(v.disc_key("Hexish (USA)").unwrap(), &raw);
 }
 
 #[test]
-fn an_empty_disc_key_file_is_refused_by_length() {
-    let err = KeyVault::parse(Path::new("Empty (USA).dkey"), b"").unwrap_err();
+fn a_disc_table_in_a_keys_toml_is_refused_by_name() {
+    let text = format!("[disc]\n\"Some Game (USA)\" = \"{}\"\n", h(0xD1, 16));
+    let err = parse_toml(&text).unwrap_err();
     assert!(
-        matches!(
-            err,
-            KeyVaultError::WrongLength {
-                got: 0,
-                want: 16,
-                ..
-            }
-        ),
+        matches!(err, KeyVaultError::UnknownName { ref name, .. } if name == "disc"),
         "{err}"
     );
+}
+
+#[test]
+fn an_empty_key_file_is_set_aside_as_holding_no_key() {
+    let v = KeyVault::parse(Path::new("Empty (USA).dkey"), b"").expect("empty file loads");
+    assert_eq!(v.ignored().len(), 1, "{:?}", v.ignored());
+    assert!(matches!(v.ignored()[0].reason, IgnoreReason::NothingFound));
 }
 
 #[test]
@@ -806,32 +810,32 @@ fn a_candidate_that_is_later_labeled_stops_being_a_candidate() {
 }
 
 #[test]
-fn disc_key_names_with_quotes_backslashes_controls_and_non_ascii_round_trip() {
-    let names = [
-        "Game \"Quoted\" (USA)",
-        "Back\\slash (Europe)",
-        "Tab\there",
-        "Line\nbreak",
-        "Caf\u{e9} (France)",
-        "A.B [C] = D",
-        "Del\u{7f}ete",
+fn keyset_labels_with_quotes_backslashes_controls_and_non_ascii_round_trip() {
+    let labels = [
+        r#""Keyset \"Quoted\"""#,
+        r#""Back\\slash""#,
+        r#""Tab\u0009here""#,
+        r#""Line\u000Abreak""#,
+        r#""Caf\u00E9""#,
+        r#""A.B [C] = D""#,
+        r#""Del\u007Fete""#,
     ];
-    let mut v = KeyVault::empty();
-    for (i, name) in names.iter().enumerate() {
+    let mut toml = String::new();
+    for (i, label) in labels.iter().enumerate() {
         let fill = u8::try_from(i).unwrap() + 1;
-        v.set_disc(
-            (*name).to_string(),
-            [fill; 16],
-            Provenance::file(Path::new("keys.toml")),
-        )
-        .unwrap();
+        toml.push_str(&format!(
+            "\n[[app]]\nlabel = {label}\nerk = \"{}\"\nriv = \"{}\"\n",
+            h(fill, 32),
+            h(fill, 16)
+        ));
+    }
+    let v = parse_toml(&toml).unwrap();
+    assert_eq!(v.unlabeled_count(SelfClass::App), labels.len());
+    let written = v.to_toml();
+    for escape in [r#"\""#, r#"\\"#, r#"\u0009"#, r#"\u000A"#, r#"\u007F"#] {
+        assert!(written.contains(escape), "{escape}: {written}");
     }
     let again = parse_toml(&v.to_toml()).unwrap();
-    assert_eq!(again.disc_key_count(), names.len());
-    for (i, name) in names.iter().enumerate() {
-        let fill = u8::try_from(i).unwrap() + 1;
-        assert_eq!(again.disc_key(name), Some(&[fill; 16]), "{name:?}");
-    }
     assert_eq!(again.to_toml(), v.to_toml());
 }
 

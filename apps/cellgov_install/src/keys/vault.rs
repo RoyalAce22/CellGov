@@ -52,7 +52,6 @@ pub struct KeyVault {
     pub(super) scepkg: Vec<SelfEntry>,
     pub(super) app: SelfTable,
     pub(super) npdrm: SelfTable,
-    pub(super) disc: BTreeMap<String, ([u8; 16], Provenance)>,
     pub(super) ignored: Vec<Ignored>,
     pub(super) sources: Vec<PathBuf>,
 }
@@ -72,7 +71,6 @@ impl KeyVault {
             scepkg: Vec::new(),
             app: SelfTable::new(),
             npdrm: SelfTable::new(),
-            disc: BTreeMap::new(),
             ignored: Vec::new(),
             sources: Vec::new(),
         }
@@ -192,9 +190,6 @@ impl KeyVault {
                 self.push_unlabeled(class, entry);
             }
         }
-        for (name, (key, at)) in other.disc {
-            self.set_disc(name, key, at)?;
-        }
         self.ignored.extend(other.ignored);
         self.sources.extend(other.sources);
         Ok(())
@@ -285,26 +280,6 @@ impl KeyVault {
         if !known {
             table.unlabeled.push(entry);
         }
-    }
-
-    pub(super) fn set_disc(
-        &mut self,
-        name: String,
-        key: [u8; 16],
-        at: Provenance,
-    ) -> Result<(), KeyVaultError> {
-        if let Some((existing, first)) = self.disc.get(&name) {
-            if *existing != key {
-                return Err(KeyVaultError::Conflict {
-                    what: format!("disc key {name:?}"),
-                    first: first.clone(),
-                    second: at,
-                });
-            }
-            return Ok(());
-        }
-        self.disc.insert(name, (key, at));
-        Ok(())
     }
 
     pub(super) fn scalar(&self, slot: Slot) -> Result<&[u8], KeyVaultError> {
@@ -442,18 +417,6 @@ impl KeyVault {
         self.table(class).unlabeled.len()
     }
 
-    /// Per-disc key indexed by its file stem (the redump name).
-    #[must_use]
-    pub fn disc_key(&self, name: &str) -> Option<&[u8; 16]> {
-        self.disc.get(name).map(|(k, _)| k)
-    }
-
-    /// Number of per-disc keys held.
-    #[must_use]
-    pub fn disc_key_count(&self) -> usize {
-        self.disc.len()
-    }
-
     /// Everything the loader read and set aside, with the reason.
     #[must_use]
     pub fn ignored(&self) -> &[Ignored] {
@@ -496,7 +459,7 @@ impl KeyVault {
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
-            "{} of {} scalar slots, {} scepkg, app {}+{}, npdrm {}+{}, {} disc keys, {} ignored",
+            "{} of {} scalar slots, {} scepkg, app {}+{}, npdrm {}+{}, {} ignored",
             self.scalars.len(),
             Slot::ALL.len(),
             self.scepkg.len(),
@@ -504,7 +467,6 @@ impl KeyVault {
             self.app.unlabeled.len(),
             self.npdrm.labeled.len(),
             self.npdrm.unlabeled.len(),
-            self.disc.len(),
             self.ignored.len(),
         )
     }

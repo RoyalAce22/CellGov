@@ -92,7 +92,6 @@ import reads these forms:
   per row.
 - Per-key files named `app-key-0A` / `app-iv-0A` / `npdrm-...` /
   `pkg-key` / `pup-hmac`, holding hex text or the raw bytes.
-- `.dkey` / `.key` files: per-disc keys, indexed by file stem.
 
 Reading the loose forms is best effort; `keys show` lists whatever
 the import could not place, and `keys.toml` is the exact form to fall

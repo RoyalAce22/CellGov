@@ -18,8 +18,6 @@
 //! - Per-key files named `<class>-<part>-<suffix>` (`app-key-0A`,
 //!   `npdrm-iv-0A`, `pkg-key`, `pup-hmac`, `np-klic-free`), holding hex
 //!   text or the raw bytes.
-//! - `*.dkey` (32 hex characters) and `*.key` (16 bytes): per-disc
-//!   keys indexed by file stem.
 //!
 //! A SELF keyset whose revision is not stated is kept as an unlabeled
 //! candidate; the decrypt paths try every candidate for a revision the

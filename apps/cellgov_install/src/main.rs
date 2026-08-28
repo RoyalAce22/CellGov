@@ -177,7 +177,7 @@ enum FirmwareCliError {
     Keys(#[from] KeyVaultError),
     /// `keys import`: the imported file or directory held no key the
     /// decrypt paths could use.
-    #[error("keys import: {} holds no scalar key, SCE package keyset, APP or NPDRM keyset, or disc key; nothing to import (run `keys show {}` to see what was read and set aside)", path.display(), path.display())]
+    #[error("keys import: {} holds no scalar key, SCE package keyset, or APP/NPDRM keyset; nothing to import (run `keys show {}` to see what was read and set aside)", path.display(), path.display())]
     KeysNothingUsable { path: PathBuf },
     /// `keys import`: the installed-vault directory could not be created.
     #[error("create {}: {source}", path.display())]
@@ -1456,7 +1456,6 @@ fn render_key_inventory(location: &Path, vault: &KeyVault) -> String {
             vault.unlabeled_count(class)
         ));
     }
-    lines.push(format!("  disc keys: {}", vault.disc_key_count()));
     if !vault.ignored().is_empty() {
         lines.push("  set aside:".to_string());
         for ignored in vault.ignored() {
@@ -1483,7 +1482,6 @@ fn holds_any_key(vault: &KeyVault) -> bool {
         || [SelfClass::App, SelfClass::Npdrm]
             .iter()
             .any(|c| vault.labeled_revisions(*c).next().is_some() || vault.unlabeled_count(*c) > 0)
-        || vault.disc_key_count() > 0
 }
 
 /// Normalize the vault at `path` into `<vfs_root>/.cellgov/keys/keys.toml`,

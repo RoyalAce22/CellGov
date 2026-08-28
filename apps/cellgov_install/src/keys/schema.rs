@@ -35,8 +35,6 @@ struct TomlVault {
     app: Vec<TomlSelfKey>,
     #[serde(default)]
     npdrm: Vec<TomlSelfKey>,
-    #[serde(default)]
-    disc: BTreeMap<String, String>,
     #[serde(flatten)]
     scalars: BTreeMap<String, toml::Value>,
 }
@@ -146,10 +144,6 @@ impl Loader {
                 self.add_keyset(kind, Some(&label), key, at.clone())?;
             }
         }
-        for (name, value) in parsed.disc {
-            let key = fixed(&at, &format!("disc key {name:?}"), &value)?;
-            self.vault.set_disc(name, key, at.clone())?;
-        }
         Ok(())
     }
 }
@@ -205,12 +199,6 @@ impl KeyVault {
                     toml_string(&entry.label)
                 ));
                 push_self_key_body(&mut out, &entry.key);
-            }
-        }
-        if !self.disc.is_empty() {
-            out.push_str("\n[disc]\n");
-            for (name, (key, _)) in &self.disc {
-                out.push_str(&format!("{} = \"{}\"\n", toml_string(name), hex(key)));
             }
         }
         out
