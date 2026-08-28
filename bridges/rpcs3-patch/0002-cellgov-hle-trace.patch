@@ -75,29 +75,26 @@ the patch is applied. Reproducing the patch by hand:
 diff --git a/rpcs3/Emu/Cell/PPUFunction.h b/rpcs3/Emu/Cell/PPUFunction.h
 --- a/rpcs3/Emu/Cell/PPUFunction.h
 +++ b/rpcs3/Emu/Cell/PPUFunction.h
-@@ -1,7 +1,8 @@
- #pragma once
-
+@@ -2,6 +2,7 @@
+ 
  #include "PPUThread.h"
  #include "PPUInterpreter.h"
 +#include "cellgov_hle_trace.h"
-
+ 
  #include "util/v128.hpp"
-
- // BIND_FUNC macro "converts" any appropriate HLE function to ppu_intrp_func_t, binding it to PPU thread context.
- #define BIND_FUNC(func, ...) (static_cast<ppu_intrp_func_t>([](ppu_thread& ppu, ppu_opcode_t, be_t<u32>* this_op, ppu_intrp_func*) {\
-        const auto old_f = ppu.current_function;\
-        if (!old_f) ppu.last_function = #func;\
-        ppu.current_function = #func;\
-        ppu.cia = vm::get_addr(this_op); \
-        std::memcpy(ppu.syscall_args, ppu.gpr + 3, sizeof(ppu.syscall_args)); \
-+       cellgov_hle_trace::ensure_initialized();\
-+       const bool _cellgov_trace = cellgov_hle_trace::is_active();\
-+       if (_cellgov_trace) cellgov_hle_trace::enter(ppu, #func, ppu.syscall_args);\
-        ppu_func_detail::do_call(ppu, func);\
-+       if (_cellgov_trace) cellgov_hle_trace::exit(ppu, ppu.gpr[3]);\
-        static_cast<void>(ppu.test_stopped());\
-        auto& history = ppu.syscall_history.data[ppu.syscall_history.index++ % ppu.syscall_history.data.size()];\
+ 
+@@ -12,7 +13,11 @@
+ 	ppu.current_function = #func;\
+ 	ppu.cia = vm::get_addr(this_op); \
+ 	std::memcpy(ppu.syscall_args, ppu.gpr + 3, sizeof(ppu.syscall_args)); \
++	cellgov_hle_trace::ensure_initialized();\
++	const bool _cellgov_trace = cellgov_hle_trace::is_active();\
++	if (_cellgov_trace) cellgov_hle_trace::enter(ppu, #func, ppu.syscall_args);\
+ 	ppu_func_detail::do_call(ppu, func);\
++	if (_cellgov_trace) cellgov_hle_trace::exit(ppu, ppu.gpr[3]);\
+ 	static_cast<void>(ppu.test_stopped());\
+ 	auto& history = ppu.syscall_history.data[ppu.syscall_history.index++ % ppu.syscall_history.data.size()];\
+ 	history.cia = ppu.cia;\
 
 diff --git a/rpcs3/Emu/CMakeLists.txt b/rpcs3/Emu/CMakeLists.txt
 --- a/rpcs3/Emu/CMakeLists.txt
@@ -119,11 +116,17 @@ diff --git a/rpcs3/emucore.vcxproj b/rpcs3/emucore.vcxproj
      <ClCompile Include="Emu\Cell\PPUFunction.cpp" />
 +    <ClCompile Include="Emu\Cell\cellgov_hle_trace.cpp" />
      <ClCompile Include="Emu\Cell\PPUInterpreter.cpp" />
-@@ -972,6 +973,7 @@
+     <ClCompile Include="Emu\Cell\SPUAnalyser.cpp" />
+     <ClCompile Include="Emu\Cell\SPUASMJITRecompiler.cpp" />
+     <ClCompile Include="Emu\Cell\SPUDisAsm.cpp" />
+@@ -971,6 +972,7 @@
      <ClInclude Include="Emu\Cell\PPUDisAsm.h" />
      <ClInclude Include="Emu\Cell\PPUFunction.h" />
+     <ClInclude Include="Emu\Cell\cellgov_checkpoint_dump.h" />
 +    <ClInclude Include="Emu\Cell\cellgov_hle_trace.h" />
      <ClInclude Include="Emu\Cell\PPUInterpreter.h" />
+     <ClInclude Include="Emu\Cell\PPUOpcodes.h" />
+     <ClInclude Include="Emu\Cell\PPUThread.h" />
 
 (new files cellgov_hle_trace.h and cellgov_hle_trace.cpp are not
 included as a unified diff. They are tracked at

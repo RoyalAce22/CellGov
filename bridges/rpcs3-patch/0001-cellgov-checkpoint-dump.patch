@@ -105,7 +105,7 @@ diff --git a/rpcs3/Emu/RSX/RSXThread.cpp b/rpcs3/Emu/RSX/RSXThread.cpp
  #include "Capture/rsx_capture.h"
  #include "Common/surface_store.h"
  #include "Core/RSXReservationLock.hpp"
-@@ -1122,6 +1125,44 @@ namespace rsx
+@@ -1122,6 +1125,45 @@ namespace rsx
 
  		while (!test_stopped())
  		{
