@@ -66,6 +66,21 @@ pub fn format_human(result: &CompareResult) -> String {
         }
     }
 
+    if let Some(d) = &result.state_hash_divergence {
+        let _ = writeln!(
+            out,
+            "state_hashes: memory expected=0x{:016x} actual=0x{:016x} \
+             unit_status expected=0x{:016x} actual=0x{:016x} \
+             sync expected=0x{:016x} actual=0x{:016x}",
+            d.expected.memory.raw(),
+            d.actual.memory.raw(),
+            d.expected.unit_status.raw(),
+            d.actual.unit_status.raw(),
+            d.expected.sync.raw(),
+            d.actual.sync.raw(),
+        );
+    }
+
     out
 }
 

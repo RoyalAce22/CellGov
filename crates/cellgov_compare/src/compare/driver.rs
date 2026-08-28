@@ -4,7 +4,9 @@
 
 use crate::compare::events::find_event_divergence;
 use crate::compare::memory::find_memory_divergence;
-use crate::compare::types::{Classification, CompareMode, CompareResult, MultiCompareResult};
+use crate::compare::types::{
+    Classification, CompareMode, CompareResult, MultiCompareResult, StateHashDivergence,
+};
 use crate::observation::Observation;
 
 /// Compare two observations under `mode`, returning the first differing field.
@@ -30,9 +32,12 @@ pub fn compare(expected: &Observation, actual: &Observation, mode: CompareMode) 
         CompareMode::Memory => None,
     };
 
+    let state_hash_divergence = find_state_hash_divergence(expected, actual);
+
     let classification = if outcome_mismatch.is_none()
         && memory_divergence.is_none()
         && event_divergence.is_none()
+        && state_hash_divergence.is_none()
     {
         Classification::Match
     } else {
@@ -45,7 +50,23 @@ pub fn compare(expected: &Observation, actual: &Observation, mode: CompareMode) 
         outcome_mismatch,
         memory_divergence,
         event_divergence,
+        state_hash_divergence,
     }
+}
+
+/// Same-runner pairs only; see [`StateHashDivergence`].
+fn find_state_hash_divergence(
+    expected: &Observation,
+    actual: &Observation,
+) -> Option<StateHashDivergence> {
+    let (e, a) = (expected.state_hashes?, actual.state_hashes?);
+    if expected.metadata.runner != actual.metadata.runner || e == a {
+        return None;
+    }
+    Some(StateHashDivergence {
+        expected: e,
+        actual: a,
+    })
 }
 
 /// Compare a CellGov observation against multiple baselines.
@@ -85,3 +106,7 @@ pub fn compare_multi(
 #[cfg(test)]
 #[path = "tests/driver_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/state_hash_driver_tests.rs"]
+mod state_hash_tests;

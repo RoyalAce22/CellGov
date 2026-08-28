@@ -3,15 +3,16 @@
 use serde::Serialize;
 
 use crate::compare::{CompareResult, MultiCompareResult};
-use crate::observation::{Observation, ObservedEventKind, ObservedOutcome};
+use crate::observation::{Observation, ObservedEventKind, ObservedHashes, ObservedOutcome};
 
 use super::labels::{classification_slug, mode_str};
 
 /// Serialize a comparison result plus both full observations as pretty JSON.
 ///
 /// Top-level shape: `classification`, `mode`, optional `outcome_mismatch`,
-/// optional `memory_divergence`, optional `event_divergence`, `expected`,
-/// `actual`. Consumers rely on this schema.
+/// optional `memory_divergence`, optional `event_divergence`, optional
+/// `state_hash_divergence`, `expected`, `actual`. Consumers rely on this
+/// schema.
 pub fn format_json(
     result: &CompareResult,
     expected: &Observation,
@@ -74,6 +75,10 @@ fn build_body(result: &CompareResult) -> CompareReportBody<'_> {
                 unit: a.unit,
             }),
         }),
+        state_hash_divergence: result.state_hash_divergence.map(|d| StateHashDiv {
+            expected: d.expected,
+            actual: d.actual,
+        }),
     }
 }
 
@@ -91,6 +96,16 @@ struct CompareReportBody<'a> {
     memory_divergence: Option<MemoryDiv<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     event_divergence: Option<EventDiv>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state_hash_divergence: Option<StateHashDiv>,
+}
+
+/// `ObservedHashes` serializes each hash as a raw `u64`, matching the
+/// embedded `Observation`'s `state_hashes` wire form.
+#[derive(Serialize)]
+struct StateHashDiv {
+    expected: ObservedHashes,
+    actual: ObservedHashes,
 }
 
 #[derive(Serialize)]
@@ -152,3 +167,7 @@ struct MultiJsonReport<'a> {
 #[cfg(test)]
 #[path = "tests/json_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/state_hash_report_tests.rs"]
+mod state_hash_tests;

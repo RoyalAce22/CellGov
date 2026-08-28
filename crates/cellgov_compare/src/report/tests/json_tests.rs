@@ -19,6 +19,7 @@ fn json_match_report_roundtrips() {
         mode: CompareMode::Memory,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let a = obs(ObservedOutcome::Completed);
@@ -42,6 +43,7 @@ fn json_divergence_includes_details() {
             actual: 2,
             lengths: None,
         }),
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let mut a = obs(ObservedOutcome::Completed);
@@ -70,6 +72,7 @@ fn json_is_valid_json() {
         mode: CompareMode::Prefix,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let a = obs(ObservedOutcome::Completed);
@@ -86,6 +89,7 @@ fn json_unsupported_classification() {
         mode: CompareMode::Memory,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let a = obs(ObservedOutcome::Completed);
@@ -104,6 +108,7 @@ fn multi_json_settled() {
             mode: CompareMode::Memory,
             outcome_mismatch: None,
             memory_divergence: None,
+            state_hash_divergence: None,
             event_divergence: None,
         }),
     };
@@ -124,6 +129,7 @@ fn multi_json_unsettled() {
             mode: CompareMode::Strict,
             outcome_mismatch: None,
             memory_divergence: None,
+            state_hash_divergence: None,
             event_divergence: None,
         }),
         cellgov_result: None,
@@ -153,6 +159,7 @@ fn multi_json_settled_includes_cellgov_result_details() {
                 actual: 0xBB,
                 lengths: None,
             }),
+            state_hash_divergence: None,
             event_divergence: None,
         }),
     };
@@ -178,6 +185,7 @@ fn multi_json_unsettled_includes_oracle_divergence_details() {
             mode: CompareMode::Events,
             outcome_mismatch: None,
             memory_divergence: None,
+            state_hash_divergence: None,
             event_divergence: Some(EventDivergence {
                 index: 3,
                 expected: Some(ObservedEvent {
@@ -210,6 +218,7 @@ fn json_outcome_serialization_matches_observation_schema() {
         mode: CompareMode::Strict,
         outcome_mismatch: Some((ObservedOutcome::Completed, ObservedOutcome::Fault)),
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let a = obs(ObservedOutcome::Completed);

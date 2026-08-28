@@ -39,7 +39,7 @@ pub use checkpoint_manifest::{CheckpointManifest, CheckpointManifestError, Check
 pub use classify::{classify, ClassifierContext, DivergenceClass, ELF_HEADER_SIZE};
 pub use compare::{
     compare, compare_multi, Classification, CompareMode, CompareResult, EventDivergence,
-    MemoryDivergence, MultiCompareResult,
+    MemoryDivergence, MultiCompareResult, StateHashDivergence,
 };
 pub use diverge::{diverge, zoom_lookup, DivergeField, DivergeReport, RegDiff, ZoomLookup};
 pub use format::format_with_commas;

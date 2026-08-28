@@ -1,8 +1,11 @@
 //! Public vocabulary for comparison results.
 
-use crate::observation::{ObservedEvent, ObservedOutcome};
+use crate::observation::{ObservedEvent, ObservedHashes, ObservedOutcome};
 
-/// Which fields to compare.
+/// Which observable fields to compare.
+///
+/// Same-runner state hashes are compared under every mode; see
+/// [`StateHashDivergence`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum CompareMode {
     /// Outcome + memory + full event sequence.
@@ -74,6 +77,19 @@ pub struct EventDivergence {
     pub actual: Option<ObservedEvent>,
 }
 
+/// Same-runner state hashes that disagree.
+///
+/// Only a pair produced by the same runner is comparable: the hash
+/// layout is CellGov-defined, so a cross-runner pair (or a side without
+/// hashes, as the RPCS3 adapter records none) is never reported here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StateHashDivergence {
+    /// Hashes in the expected observation.
+    pub expected: ObservedHashes,
+    /// Hashes in the actual observation.
+    pub actual: ObservedHashes,
+}
+
 /// Structured result of comparing two observations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompareResult {
@@ -87,6 +103,8 @@ pub struct CompareResult {
     pub memory_divergence: Option<MemoryDivergence>,
     /// First event divergence, if any.
     pub event_divergence: Option<EventDivergence>,
+    /// Same-runner state-hash mismatch; checked under every mode.
+    pub state_hash_divergence: Option<StateHashDivergence>,
 }
 
 /// Result of comparing CellGov against multiple baselines.

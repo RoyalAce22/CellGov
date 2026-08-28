@@ -12,5 +12,5 @@ mod types;
 pub use driver::{compare, compare_multi};
 pub use types::{
     Classification, CompareMode, CompareResult, EventDivergence, MemoryDivergence,
-    MultiCompareResult,
+    MultiCompareResult, StateHashDivergence,
 };

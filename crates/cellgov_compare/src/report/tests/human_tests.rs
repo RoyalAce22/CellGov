@@ -14,6 +14,7 @@ fn human_match_report() {
         mode: CompareMode::Memory,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let text = format_human(&result);
@@ -29,6 +30,7 @@ fn human_divergence_with_outcome() {
         mode: CompareMode::Strict,
         outcome_mismatch: Some((ObservedOutcome::Completed, ObservedOutcome::Fault)),
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let text = format_human(&result);
@@ -50,6 +52,7 @@ fn human_divergence_with_memory() {
             actual: 0xBB,
             lengths: None,
         }),
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let text = format_human(&result);
@@ -74,6 +77,7 @@ fn human_memory_divergence_names_both_lengths_when_they_differ() {
             actual: 0,
             lengths: Some((2, 4)),
         }),
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let text = format_human(&result);
@@ -88,6 +92,7 @@ fn human_divergence_with_events() {
         mode: CompareMode::Events,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: Some(EventDivergence {
             index: 1,
             expected: Some(ObservedEvent {
@@ -115,6 +120,7 @@ fn human_event_divergence_with_missing_actual() {
         mode: CompareMode::Strict,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: Some(EventDivergence {
             index: 2,
             expected: Some(ObservedEvent {
@@ -136,6 +142,7 @@ fn human_unsupported_report() {
         mode: CompareMode::Memory,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let text = format_human(&result);
@@ -149,6 +156,7 @@ fn human_unsettled_oracle_report() {
         mode: CompareMode::Strict,
         outcome_mismatch: None,
         memory_divergence: None,
+        state_hash_divergence: None,
         event_divergence: None,
     };
     let text = format_human(&result);
@@ -166,6 +174,7 @@ fn multi_human_match() {
             mode: CompareMode::Memory,
             outcome_mismatch: None,
             memory_divergence: None,
+            state_hash_divergence: None,
             event_divergence: None,
         }),
     };
@@ -185,6 +194,7 @@ fn multi_human_unsettled() {
             mode: CompareMode::Strict,
             outcome_mismatch: Some((ObservedOutcome::Completed, ObservedOutcome::Fault)),
             memory_divergence: None,
+            state_hash_divergence: None,
             event_divergence: None,
         }),
         cellgov_result: None,
