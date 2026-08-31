@@ -797,6 +797,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // UnimplementedInstruction(19) to keep the differential
         // harness divergence loud rather than silently masquerading
         // as mfcr.
+        // [PowerISA-3.1 p:I128 s:3.3 Fixed-Point Facility Instructions] mfocrf: when FXM is not exactly one-hot the contents of RT are undefined.
         PpuInstruction::Mfocrf { rt, crm } => {
             if crm == 0 || crm.count_ones() != 1 {
                 return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(19));
@@ -817,6 +818,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // differential harness matches and the executor is NOT a
         // passthrough to mtcrf (which would update every selected
         // field, not just one).
+        // [PPC-Book1 p:124 s:5.1.1] mtocrf: when FXM is not exactly one-hot the whole Condition Register is undefined.
         PpuInstruction::Mtocrf { rs, crm } => {
             if crm == 0 {
                 // No CRM bit selected: nothing to write. Distinct

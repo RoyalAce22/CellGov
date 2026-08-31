@@ -1,4 +1,4 @@
-//! Install-subcommand argument parsing and output-directory preflight checks.
+//! Subcommand argument parsing and the CLI's RAP resolution.
 
 use super::*;
 use crate::scratch_dir::scratch;
@@ -42,6 +42,77 @@ fn parse_force_and_output_in_either_order() {
         .expect("parse output-first");
     assert_eq!(a.output_dir, PathBuf::from("/d"));
     assert!(a.force);
+}
+
+#[test]
+fn parse_verbose_accepts_both_spellings() {
+    for flag in ["-v", "--verbose"] {
+        let a = parse_install_args(&argv(&["x.pup", flag])).expect("parse");
+        assert!(a.verbose, "{flag} sets verbose");
+    }
+    assert!(
+        !parse_install_args(&argv(&["x.pup"]))
+            .expect("parse")
+            .verbose
+    );
+}
+
+#[test]
+fn parse_absorbs_the_render_flags() {
+    let a = parse_install_args(&argv(&["x.pup", "--no-progress", "--no-color", "--quiet"]))
+        .expect("parse");
+    assert!(a.render.no_progress);
+    assert!(a.render.no_color);
+    assert!(a.render.quiet);
+}
+
+/// A PUP carries 20-odd packages and almost none of them prune or skip
+/// anything, so a line that spells the zeros out on every one buries
+/// the packages that did something.
+#[cfg(feature = "decrypt")]
+#[test]
+fn a_package_summary_names_only_the_counts_it_has() {
+    let mut p = PackageSummary {
+        package: "dev_flash_013.tar".to_string(),
+        written: 104,
+        pruned: 0,
+        skipped: 0,
+    };
+    assert_eq!(package_summary_line(&p), "dev_flash_013.tar: 104 files");
+
+    p.pruned = 75;
+    assert_eq!(
+        package_summary_line(&p),
+        "dev_flash_013.tar: 104 files, 75 pruned"
+    );
+
+    p.skipped = 2;
+    assert_eq!(
+        package_summary_line(&p),
+        "dev_flash_013.tar: 104 files, 75 pruned, 2 entries addressing no file"
+    );
+}
+
+/// A package that legitimately carries no dev_flash content is a real
+/// case: `dev_flash_000` of retail 4.93 extracts zero files.
+#[cfg(feature = "decrypt")]
+#[test]
+fn a_package_that_extracted_nothing_still_reports_its_zero() {
+    let p = PackageSummary {
+        package: "dev_flash_000.tar".to_string(),
+        written: 0,
+        pruned: 0,
+        skipped: 0,
+    };
+    assert_eq!(package_summary_line(&p), "dev_flash_000.tar: 0 files");
+}
+
+#[cfg(feature = "decrypt")]
+#[test]
+fn a_single_omission_does_not_read_as_a_plural() {
+    assert_eq!(plural(1, "file", "files"), "1 file");
+    assert_eq!(plural(0, "file", "files"), "0 files");
+    assert_eq!(plural(2, "file", "files"), "2 files");
 }
 
 #[test]
@@ -120,192 +191,55 @@ fn install_iso_defaults_its_output_to_the_vfs_root() {
     assert!(!a.force);
 }
 
-#[test]
-fn check_output_dir_missing_is_ok() {
-    let dir = scratch();
-    assert!(check_output_dir(&dir.join("absent"), false).is_ok());
+/// A partial install with one failed package and one failed entry.
+#[cfg(feature = "decrypt")]
+fn partial_install() -> FirmwareInstallError {
+    use cellgov_install::firmware_install::PackageFailure;
+    use cellgov_install::tar::{ExtractError, TarParseError};
+
+    FirmwareInstallError::PartialInstall {
+        files: 3,
+        packages: 2,
+        packages_failed: vec![PackageFailure::InnerTar {
+            package: "dev_flash_010.tar".to_string(),
+            source: TarParseError::NotUstarHeader { offset: 0x200 },
+        }],
+        extract_errors: vec![ExtractError::PathTraversal {
+            guest_path: "../escape.self".to_string(),
+            host_path: PathBuf::from("escape.self"),
+        }],
+    }
 }
 
+#[cfg(feature = "decrypt")]
 #[test]
-fn check_output_dir_empty_is_ok() {
-    let dir = scratch();
-    assert!(check_output_dir(&dir, false).is_ok());
+fn a_partial_install_names_every_package_and_entry_it_lost() {
+    let lines = install_failure_detail(&partial_install());
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].contains("dev_flash_010.tar"), "{lines:?}");
+    assert!(lines[1].contains("escape.self"), "{lines:?}");
 }
 
+/// A cleanup that cannot discard the staging root renders only the
+/// wrapped fault's summary counts -- and that is the case where the
+/// operator has residue on disk and most needs the names.
+#[cfg(feature = "decrypt")]
 #[test]
-fn check_output_dir_nonempty_without_force_errors() {
-    let dir = scratch();
-    std::fs::write(dir.join("preexisting.txt"), b"x").unwrap();
-    assert!(matches!(
-        check_output_dir(&dir, false),
-        Err(FirmwareCliError::OutputDirNotEmpty { .. })
-    ));
-}
-
-#[test]
-fn check_output_dir_on_a_non_directory_reports_the_read_failure() {
-    let dir = scratch();
-    let file = dir.join("not_a_dir");
-    std::fs::write(&file, b"x").unwrap();
-    // The path exists, so the preflight gets past the `exists` arm and
-    // has to name the `read_dir` refusal rather than treat it as empty.
-    assert!(matches!(
-        check_output_dir(&file, false),
-        Err(FirmwareCliError::OutputDirReadFailed { .. })
-    ));
-}
-
-#[test]
-fn check_output_dir_nonempty_with_force_is_ok() {
-    let dir = scratch();
-    std::fs::write(dir.join("preexisting.txt"), b"x").unwrap();
-    assert!(check_output_dir(&dir, true).is_ok());
-}
-
-#[test]
-fn install_exclusion_prunes_emulators_and_dollar_entries() {
-    assert!(is_install_excluded("dev_flash/ps1emu/ps1_emu.self"));
-    assert!(is_install_excluded("dev_flash/ps2emu/ps2_emu.self"));
-    assert!(is_install_excluded("dev_flash/pspemu/flash0/font/x.pgf"));
-    assert!(is_install_excluded("ps2emu/ps2_netemu.self"));
-    // Fullwidth-dollar (U+FF04) dead-entry marker is dropped.
-    assert!(is_install_excluded("dev_flash/vsh/\u{ff04}dead.self"));
-}
-
-#[test]
-fn install_exclusion_keeps_real_firmware_paths() {
-    assert!(!is_install_excluded("dev_flash/sys/external/liblv2.sprx"));
-    assert!(!is_install_excluded("dev_flash/vsh/module/mcore_tk.self"));
-    // A plain ASCII '$' must not trip the fullwidth-dollar gate.
-    assert!(!is_install_excluded("dev_flash/vsh/resource/a$b.txt"));
-    // "pspemu" matches only as a leading path component, not a substring.
-    assert!(!is_install_excluded("dev_flash/data/pspemu_notes.txt"));
-    // A sibling mount is not dev_flash content, so the dev_flash-rooted
-    // prune list must not reach into it.
-    assert!(!is_install_excluded("dev_flash2/ps2emu/x.self"));
-}
-
-#[test]
-fn install_exclusion_prunes_through_the_packaging_prefixes_the_extractor_strips() {
-    // The extractor routes all four of these to dev_flash/ps2emu/...,
-    // so the prune has to see them as the same entry.
-    assert!(is_install_excluded("ps2emu/ps2_netemu.self"));
-    assert!(is_install_excluded("/ps2emu/ps2_netemu.self"));
-    assert!(is_install_excluded("000/ps2emu/ps2_netemu.self"));
-    assert!(is_install_excluded("000/dev_flash/ps2emu/ps2_netemu.self"));
-}
-
-#[test]
-fn firmware_mounts_covers_dev_flash_and_both_siblings() {
-    let mounts: Vec<&str> = firmware_mounts().collect();
-    assert_eq!(mounts, vec!["dev_flash", "dev_flash2", "dev_flash3"]);
-}
-
-#[test]
-fn preflight_refuses_an_occupied_sibling_mount_and_names_it() {
-    let dir = scratch();
-    // dev_flash itself is empty; only the sibling mount is occupied.
-    std::fs::create_dir_all(dir.join("dev_flash3")).unwrap();
-    std::fs::write(dir.join("dev_flash3/leftover.bin"), b"x").unwrap();
-
-    let err = preflight_firmware_mounts(&dir, false).expect_err("refuses");
-    let FirmwareCliError::OutputDirNotEmpty { path } = &err else {
-        panic!("expected OutputDirNotEmpty, got {err}");
+fn staging_residue_does_not_swallow_the_partial_install_it_wraps() {
+    let expected = install_failure_detail(&partial_install());
+    let wrapped = FirmwareInstallError::StagingResidue {
+        path: PathBuf::from("vfs/firmware/.firmware-staging"),
+        source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        cause: Box::new(partial_install()),
     };
-    assert!(
-        path.ends_with("dev_flash3"),
-        "the refusal must name the occupied mount, got {}",
-        path.display()
-    );
-}
-
-#[test]
-fn preflight_ignores_mounts_a_firmware_install_does_not_write() {
-    let dir = scratch();
-    std::fs::create_dir_all(dir.join("dev_hdd0/game/NPUA80001")).unwrap();
-    std::fs::write(dir.join("dev_hdd0/game/NPUA80001/x.bin"), b"g").unwrap();
-    std::fs::create_dir_all(dir.join("dev_bdvd")).unwrap();
-    std::fs::write(dir.join("dev_bdvd/PS3_DISC.SFB"), b"d").unwrap();
-    assert!(preflight_firmware_mounts(&dir, false).is_ok());
-    assert!(dir.join("dev_hdd0/game/NPUA80001/x.bin").is_file());
-    assert!(dir.join("dev_bdvd/PS3_DISC.SFB").is_file());
+    assert_eq!(install_failure_detail(&wrapped), expected);
 }
 
 #[cfg(feature = "decrypt")]
 #[test]
-fn an_unreadable_firmware_tree_is_named_rather_than_yielding_a_short_manifest() {
-    let dir = scratch();
-    let absent = dir.join("dev_flash");
-    assert!(matches!(
-        build_firmware_manifest(b"pup", 0, &absent, &KeyVault::empty()),
-        Err(FirmwareCliError::FirmwareTreeReadFailed { .. })
-    ));
-
-    let not_a_dir = dir.join("dev_flash.txt");
-    std::fs::write(&not_a_dir, b"x").unwrap();
-    assert!(matches!(
-        build_firmware_manifest(b"pup", 0, &not_a_dir, &KeyVault::empty()),
-        Err(FirmwareCliError::FirmwareTreeReadFailed { .. })
-    ));
-}
-
-#[cfg(feature = "decrypt")]
-/// Real PS3 firmware ships a zero-byte `.sprx` placeholder. Hashing it
-/// as a pre-decrypted module would put the empty-bytes digest in the
-/// manifest under revision 0, so the boot verifier would be handed an
-/// empty file described as a loadable module.
-#[test]
-fn a_sprx_that_is_neither_an_sce_container_nor_an_elf_is_left_out_of_the_manifest() {
-    let dir = scratch();
-    std::fs::create_dir_all(dir.join("vsh/module")).unwrap();
-    std::fs::write(dir.join("vsh/module/placeholder.sprx"), b"").unwrap();
-    std::fs::write(dir.join("vsh/module/garbage.sprx"), b"not a module").unwrap();
-    let mut bare_elf = ELF_MAGIC.to_vec();
-    bare_elf.extend_from_slice(b"pre-decrypted body");
-    std::fs::write(dir.join("vsh/module/plain.prx"), &bare_elf).unwrap();
-
-    let manifest = build_firmware_manifest(b"pup", 0, &dir, &KeyVault::empty()).expect("manifest");
-    let paths: Vec<&str> = manifest.files.iter().map(|f| f.path.as_str()).collect();
-    assert_eq!(
-        paths,
-        vec!["vsh/module/plain.prx"],
-        "only the bare ELF is a module"
-    );
-
-    // The one entry is the ELF's own bytes, not the empty-bytes hash a
-    // recorded placeholder would carry.
-    let empty_digest = manifest::Sha256(Sha256::digest(b"").into());
-    assert_ne!(manifest.files[0].sha256, empty_digest);
-    assert_eq!(
-        manifest.files[0].sha256,
-        manifest::Sha256(Sha256::digest(&bare_elf).into())
-    );
-}
-
-#[test]
-fn the_manifest_walk_collects_prx_and_sprx_from_every_depth_in_sorted_order() {
-    let dir = scratch();
-    std::fs::create_dir_all(dir.join("sys/external")).unwrap();
-    std::fs::write(dir.join("sys/external/b.sprx"), b"B").unwrap();
-    std::fs::write(dir.join("sys/external/a.PRX"), b"A").unwrap();
-    std::fs::write(dir.join("sys/external/notes.txt"), b"N").unwrap();
-    std::fs::write(dir.join("top.prx"), b"T").unwrap();
-
-    let mut paths = Vec::new();
-    collect_sprx_paths(&dir, &mut paths).expect("walk");
-    let rel: Vec<String> = paths
-        .iter()
-        .map(|p| {
-            p.strip_prefix(&*dir)
-                .unwrap()
-                .to_string_lossy()
-                .replace('\\', "/")
-        })
-        .collect();
-    assert_eq!(
-        rel,
-        vec!["sys/external/a.PRX", "sys/external/b.sprx", "top.prx"]
-    );
+fn a_failure_that_renders_its_own_cause_adds_no_detail_lines() {
+    let e = FirmwareInstallError::ProducedNothing { packages: 4 };
+    assert!(install_failure_detail(&e).is_empty());
 }
 
 fn decrypt_argv(parts: &[&str]) -> Vec<String> {
@@ -422,32 +356,6 @@ fn a_sixteen_byte_rap_is_read_verbatim_from_disk() {
     let from_ones = rap_from_file(&ones).unwrap().expect("read");
     assert_eq!(from_zeroes, Rap([0u8; 16]));
     assert_eq!(from_ones, Rap([0x11u8; 16]));
-}
-
-#[test]
-fn preflight_guards_every_firmware_mount_and_force_waives_the_guard() {
-    for occupied in ["dev_flash", "dev_flash2", "dev_flash3"] {
-        let dir = scratch();
-        let leftover = dir.join(occupied).join("leftover.bin");
-        std::fs::create_dir_all(dir.join(occupied)).unwrap();
-        std::fs::write(&leftover, b"x").unwrap();
-
-        let err = preflight_firmware_mounts(&dir, false)
-            .expect_err("an occupied mount must block without --force");
-        let FirmwareCliError::OutputDirNotEmpty { path } = &err else {
-            panic!("expected OutputDirNotEmpty for {occupied}, got {err}");
-        };
-        assert!(path.ends_with(occupied), "the refusal names {occupied}");
-
-        assert!(
-            preflight_firmware_mounts(&dir, true).is_ok(),
-            "--force must waive the guard on {occupied}"
-        );
-        // The preflight only decides whether the install may proceed.
-        // It removes nothing, so --force waives the guard rather than
-        // clearing the mount.
-        assert!(leftover.is_file(), "{occupied} left untouched by preflight");
-    }
 }
 
 /// Only absence may resolve to "no key". Any other read failure looks

@@ -8,6 +8,16 @@
 //! thread's r1 lands [`ENTRY_FRAME_RESERVE`] below the block, and
 //! the entry receives r3=argc, r4=argv, r5=envp, r6=envp count.
 
+// [CBE-Handbook p:397 s:14.3] The PPE 64-bit initial stack frame carries an
+// argument-pointer array and an environment-pointer array, each closed by a
+// NULL pointer, below an information block holding the strings they point
+// into; R4 names the argument array and R5 the environment array.
+//
+// That citation covers r4 and r5 only. It does not cover the even-slot-count
+// padding of the pointer table, the 0x10 string granule, or r6. Figure 14-2
+// on the cited page assigns R6 the auxiliary-vector pointer, so the r6 above
+// disagrees with the figure.
+
 /// One u64 pointer slot in the table.
 const SLOT: u64 = 8;
 
@@ -25,6 +35,9 @@ const STRING_ALIGN: u64 = 0x10;
 /// `gpr[1] = stack top - ppu_stack_start_offset`
 /// (`rpcs3/Emu/Cell/PPUThread.cpp`, `ppu_thread::ppu_thread`) by the
 /// block size.
+// [CBE-Handbook p:398 s:14.3] A callee reaches its caller's parameter save
+// area 48 bytes off the back chain, and that area is at least 64 bytes, so
+// the smallest frame a caller must have provided is 0x70.
 const ENTRY_FRAME_RESERVE: u64 = 0x70;
 
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]

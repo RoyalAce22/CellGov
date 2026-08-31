@@ -10,6 +10,7 @@ pub mod hardware;
 pub mod nid;
 pub mod ppc_isa;
 pub mod process_address_space;
+pub mod pup;
 pub mod sce;
 pub mod sha1;
 pub mod spu_channels;

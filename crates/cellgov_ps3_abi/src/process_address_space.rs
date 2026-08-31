@@ -32,6 +32,9 @@ pub const PS3_ABI_MIN_STACK_FRAME: u64 = 0x70;
 /// seeds every PPU thread the same way -- `PPUThread.cpp`
 /// `ppu_thread::ppu_thread` sets `gpr[1]` to `stack_addr + stack_size`
 /// less its `ppu_stack_start_offset`, which is also 0x70.
+// [CBE-Handbook p:396 s:14.3.1.3] The loader hands the entry point an R1 that
+// is quadword-aligned and already points at a reserved initial frame carrying a
+// null back chain, so the top of the stack region is never itself the SP.
 pub const PS3_PRIMARY_STACK_TOP: u64 =
     PS3_PRIMARY_STACK_BASE + PS3_PRIMARY_STACK_SIZE as u64 - PS3_ABI_MIN_STACK_FRAME;
 

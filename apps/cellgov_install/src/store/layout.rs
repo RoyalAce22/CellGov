@@ -260,6 +260,14 @@ pub fn staging_sibling(final_dir: &Path) -> PathBuf {
     hidden_sibling(final_dir, "staging")
 }
 
+/// Directory a firmware install stages into, under the firmware root.
+///
+/// Outside [`hidden_sibling`]'s `.staging-<name>` / `.uninstalling-<name>`
+/// namespace, so it cannot alias the residue of any one version:
+/// `.staging-fw` would be [`staging_sibling`] of a firmware entry keyed
+/// `fw`, which [`VersionKey`] accepts.
+const FIRMWARE_STAGING_DIR: &str = ".firmware-staging";
+
 /// The tombstone sibling of `final_dir`: `<parent>/.uninstalling-<name>`.
 #[must_use]
 pub fn tombstone_sibling(final_dir: &Path) -> PathBuf {
@@ -334,6 +342,16 @@ impl StoreLayout {
     #[must_use]
     pub fn firmware_root(&self) -> PathBuf {
         self.root.join("firmware")
+    }
+
+    /// Where a firmware install stages before it knows its version.
+    ///
+    /// One fixed name under [`Self::firmware_root`], so the commit is a
+    /// rename within that one directory, and the next firmware install
+    /// sweeps an interrupted one's residue by name.
+    #[must_use]
+    pub fn firmware_staging_dir(&self) -> PathBuf {
+        self.firmware_root().join(FIRMWARE_STAGING_DIR)
     }
 
     /// Root of the versioned title entries.

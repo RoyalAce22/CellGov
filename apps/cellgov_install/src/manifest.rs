@@ -6,6 +6,8 @@
 //! # Invariants enforced at parse time
 //!
 //! - `format_version` matches [`SUPPORTED_FORMAT_VERSION`].
+//! - `version` is a usable store directory name -- it is the key the
+//!   firmware entry is installed under.
 //! - Every `sha256` field is 64 lowercase hex chars (32 bytes).
 //! - `[[files]]` has no duplicate `path` entries.
 //!
@@ -19,9 +21,10 @@
 use serde::de::Error as DeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-/// Schema version this build understands; any other value is
-/// rejected at parse time.
-pub const SUPPORTED_FORMAT_VERSION: u32 = 1;
+use crate::store::layout::is_safe_component;
+
+/// The only schema this build reads or writes.
+pub const SUPPORTED_FORMAT_VERSION: u32 = 2;
 
 /// Fixed-width SHA-256 digest. On-disk form is 64 lowercase hex
 /// chars; in-memory form is `[u8; 32]`.
@@ -90,8 +93,12 @@ pub struct FirmwareManifest {
 /// Identifies the PUP a firmware install came from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirmwareIdentity {
-    /// Human-readable image version string from the PUP (e.g., `"4.85"`).
+    /// PUP-header `image_version`, an opaque identifier rendered as
+    /// zero-padded hex (`"0x0004008200000000"`).
     pub image_version: String,
+    /// The version the console shows and the store keys the entry on,
+    /// read from `vsh/etc/version.txt` (`"4.91"`).
+    pub version: String,
     /// SHA-256 over the source PUP file bytes.
     pub pup_sha256: Sha256,
 }
@@ -127,6 +134,9 @@ impl TryFrom<RawManifest> for FirmwareManifest {
                 expected: SUPPORTED_FORMAT_VERSION,
             });
         }
+        if !is_safe_component(&raw.firmware.version) {
+            return Err(ManifestError::UnsafeVersion(raw.firmware.version));
+        }
         let mut seen = std::collections::BTreeSet::new();
         for e in &raw.files {
             if !seen.insert(e.path.as_str()) {
@@ -145,13 +155,20 @@ impl TryFrom<RawManifest> for FirmwareManifest {
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
     /// `format_version` field did not equal [`SUPPORTED_FORMAT_VERSION`].
-    #[error("unsupported firmware.toml format_version {found} (expected {expected})")]
+    #[error(
+        "unsupported firmware.toml format_version {found} (expected {expected}); \
+         reinstall the PUP to regenerate it"
+    )]
     UnsupportedFormatVersion {
         /// `format_version` value read from the manifest.
         found: u32,
-        /// Schema version this build understands.
+        /// The only schema version this build reads.
         expected: u32,
     },
+    /// A `[firmware] version` that is not usable as a store directory
+    /// name.
+    #[error("firmware.toml [firmware] version {0:?} is not usable as a store directory name")]
+    UnsafeVersion(String),
     /// Two `[[files]]` entries shared the same `path`.
     #[error("firmware.toml has duplicate [[files]].path: {0:?}")]
     DuplicatePath(String),

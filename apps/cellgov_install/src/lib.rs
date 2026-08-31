@@ -29,6 +29,7 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+pub mod firmware_install;
 pub mod game_install;
 pub mod game_uninstall;
 pub mod iso;

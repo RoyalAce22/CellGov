@@ -16,7 +16,7 @@ distribution = "firmware-exec"
 # rather than NPDRM-wrapped.
 [source]
 kind = "firmware-exec"
-path = "vfs/dev_flash/vsh/module"
+path = "vfs/firmware/4.93/dev_flash/vsh/module"
 
 [checkpoint]
 kind = "process-exit"

@@ -112,7 +112,8 @@ cargo run --release -p cellgov_install --features decrypt -- install /path/to/PS
 ```
 
 The install unwraps the SCE/PUP envelope and writes per-module SELFs
-under `vfs/dev_flash/` (gitignored; firmware bytes are never
+under `vfs/firmware/<version>/dev_flash/`, keyed on the version the
+extracted image names (gitignored; firmware bytes are never
 vendored). SELFs stay encrypted on disk and decrypt at boot. Every
 package must decrypt and every entry must extract for the install to
 succeed; a failure names what it dropped and exits nonzero.

@@ -1,5 +1,13 @@
 //! Retail firmware (`dev_flash`) content facts.
 
+/// Path components of the version file, relative to the `dev_flash`
+/// mount root.
+///
+/// Every retail firmware image carries it, and it is where the console
+/// and RPCS3 (`util/sysinfo.cpp`, `utils::get_firmware_version`) both
+/// read the version a user sees.
+pub const VERSION_TXT_COMPONENTS: [&str; 3] = ["vsh", "etc", "version.txt"];
+
 /// Module stems shipped in retail firmware's `sys/external/`.
 ///
 /// Externally defined by the firmware distribution: the set is

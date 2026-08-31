@@ -1,0 +1,33 @@
+//! Which dev_flash entries an install drops before they reach disk.
+
+use crate::tar;
+
+/// dev_flash subtrees CellGov never loads and prunes at install time:
+/// the PS1 / PS2 / PSP backward-compat emulators, which a CBE
+/// execution oracle never runs.
+const PRUNED_DEV_FLASH_DIRS: [&str; 3] = ["ps1emu/", "ps2emu/", "pspemu/"];
+
+/// Whether an inner dev_flash entry is dropped at install time.
+///
+/// A fullwidth-dollar (`U+FF04`) name is RPCS3's backwards-compat
+/// dead-entry marker, never written to disk (`tar_object::extract`).
+///
+/// The prune decides on [`tar::route_entry_path`]'s output so it sees
+/// the exact path the extractor would write, whatever the `000/`
+/// packaging or leading slash the raw name carries.
+pub(super) fn is_install_excluded(entry_name: &str) -> bool {
+    if entry_name.contains('\u{ff04}') {
+        return true;
+    }
+    let Some(routed) = tar::route_entry_path(entry_name) else {
+        return false;
+    };
+    let Some(rel) = routed.strip_prefix("dev_flash/") else {
+        return false;
+    };
+    PRUNED_DEV_FLASH_DIRS.iter().any(|d| rel.starts_with(d))
+}
+
+#[cfg(test)]
+#[path = "tests/prune_tests.rs"]
+mod tests;

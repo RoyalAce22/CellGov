@@ -13,7 +13,8 @@ fn sample_manifest() -> FirmwareManifest {
     FirmwareManifest {
         format_version: SUPPORTED_FORMAT_VERSION,
         firmware: FirmwareIdentity {
-            image_version: "4.85".into(),
+            image_version: "0x0004008500000000".into(),
+            version: "4.85".into(),
             pup_sha256: sha(0x00),
         },
         files: vec![
@@ -63,7 +64,7 @@ fn serialise_sorts_files_by_path_regardless_of_input_order() {
 #[test]
 fn unsupported_format_version_errors_via_parse_manifest() {
     let mut m = sample_manifest();
-    m.format_version = 2;
+    m.format_version = SUPPORTED_FORMAT_VERSION + 1;
     // Bypass the try_from gate by serialising the raw form
     // through toml::to_string against a struct that mirrors
     // RawManifest's shape.
@@ -85,22 +86,58 @@ fn unsupported_format_version_errors_via_parse_manifest() {
         other => panic!("expected Toml-wrapped UnsupportedFormatVersion, got {other:?}"),
     };
     assert!(
-        inner.contains("unsupported firmware.toml format_version 2"),
+        inner.contains(&format!(
+            "unsupported firmware.toml format_version {}",
+            SUPPORTED_FORMAT_VERSION + 1
+        )),
         "wrong inner message: {inner}"
     );
 }
 
 #[test]
-fn forged_future_version_via_direct_from_str_is_also_rejected() {
+fn forged_other_version_via_direct_from_str_is_also_rejected() {
     // The try_from attribute makes the version check structural;
     // a caller bypassing parse_manifest and reaching for
     // toml::from_str directly gets the same rejection.
-    let text = "format_version = 2\n[firmware]\nimage_version = \"x\"\npup_sha256 = \"00000000000000000000000000000000000000000000000000000000000000ff\"\n";
+    let text = "format_version = 1\n[firmware]\nimage_version = \"x\"\nversion = \"4.85\"\npup_sha256 = \"00000000000000000000000000000000000000000000000000000000000000ff\"\n";
     let err = toml::from_str::<FirmwareManifest>(text).unwrap_err();
     assert!(
         err.to_string().contains("unsupported"),
         "expected version rejection from direct toml::from_str, got: {err}"
     );
+}
+
+#[test]
+fn a_manifest_with_no_version_is_refused_by_name() {
+    // The version is the key its store entry is installed under, so a
+    // manifest that omits it names no entry.
+    let text = format!(
+        "format_version = {SUPPORTED_FORMAT_VERSION}\n[firmware]\nimage_version = \"x\"\npup_sha256 = \"{}\"\n",
+        "00".repeat(32),
+    );
+    let err = parse_manifest(&text).unwrap_err();
+    assert!(matches!(err, ManifestError::Toml(_)), "got {err:?}");
+}
+
+#[test]
+fn a_version_that_is_not_a_store_directory_name_is_refused() {
+    // A trailing dot is the Win32 case: `4.91.` and `4.91` would
+    // normalize to one directory, so the two keys must not both parse.
+    for bad in ["", ".4.91", "4.91.", "4 91", "4.91/x", "../4.91"] {
+        let text = format!(
+            "format_version = {SUPPORTED_FORMAT_VERSION}\n[firmware]\nimage_version = \"x\"\nversion = \"{bad}\"\npup_sha256 = \"{}\"\n",
+            "00".repeat(32),
+        );
+        let err = parse_manifest(&text).unwrap_err();
+        let inner = match err {
+            ManifestError::Toml(e) => e.to_string(),
+            other => panic!("expected a Toml-wrapped UnsafeVersion for {bad:?}, got {other:?}"),
+        };
+        assert!(
+            inner.contains("is not usable as a store directory name"),
+            "wrong message for {bad:?}: {inner}"
+        );
+    }
 }
 
 #[test]
@@ -111,7 +148,7 @@ fn malformed_toml_surfaces_as_toml_error() {
 
 #[test]
 fn missing_required_field_surfaces_as_toml_error() {
-    let text = "format_version = 1\n";
+    let text = "format_version = 2\n";
     let err = parse_manifest(text).unwrap_err();
     assert!(matches!(err, ManifestError::Toml(_)));
 }
@@ -120,10 +157,11 @@ fn missing_required_field_surfaces_as_toml_error() {
 fn duplicate_path_is_rejected_at_parse_time() {
     let dup = "ee".repeat(32);
     let text = format!(
-        r#"format_version = 1
+        r#"format_version = 2
 
 [firmware]
 image_version = "x"
+version = "4.85"
 pup_sha256 = "{}"
 
 [[files]]
@@ -149,7 +187,7 @@ revision = 0
 #[test]
 fn uppercase_hex_is_rejected_at_parse_time() {
     let text = format!(
-        "format_version = 1\n[firmware]\nimage_version = \"x\"\npup_sha256 = \"{}\"\n",
+        "format_version = 2\n[firmware]\nimage_version = \"x\"\nversion = \"4.85\"\npup_sha256 = \"{}\"\n",
         "AA".repeat(32),
     );
     let err = parse_manifest(&text).unwrap_err();
@@ -158,7 +196,7 @@ fn uppercase_hex_is_rejected_at_parse_time() {
 
 #[test]
 fn short_hex_is_rejected_at_parse_time() {
-    let text = "format_version = 1\n[firmware]\nimage_version = \"x\"\npup_sha256 = \"deadbeef\"\n";
+    let text = "format_version = 2\n[firmware]\nimage_version = \"x\"\nversion = \"4.85\"\npup_sha256 = \"deadbeef\"\n";
     let err = parse_manifest(text).unwrap_err();
     assert!(matches!(err, ManifestError::Toml(_)));
 }
@@ -166,7 +204,7 @@ fn short_hex_is_rejected_at_parse_time() {
 #[test]
 fn non_hex_chars_are_rejected_at_parse_time() {
     let text = format!(
-        "format_version = 1\n[firmware]\nimage_version = \"x\"\npup_sha256 = \"{}\"\n",
+        "format_version = 2\n[firmware]\nimage_version = \"x\"\nversion = \"4.85\"\npup_sha256 = \"{}\"\n",
         "g0".repeat(32),
     );
     let err = parse_manifest(&text).unwrap_err();
@@ -209,7 +247,8 @@ fn files_table_can_be_empty() {
     let m = FirmwareManifest {
         format_version: SUPPORTED_FORMAT_VERSION,
         firmware: FirmwareIdentity {
-            image_version: "1.00".into(),
+            image_version: "0x0001000000000000".into(),
+            version: "1.00".into(),
             pup_sha256: sha(0x00),
         },
         files: Vec::new(),
@@ -227,7 +266,8 @@ fn manifest_verifier_rejects_empty_manifest() {
     let m = FirmwareManifest {
         format_version: SUPPORTED_FORMAT_VERSION,
         firmware: FirmwareIdentity {
-            image_version: "1.00".into(),
+            image_version: "0x0001000000000000".into(),
+            version: "1.00".into(),
             pup_sha256: sha(0x00),
         },
         files: Vec::new(),

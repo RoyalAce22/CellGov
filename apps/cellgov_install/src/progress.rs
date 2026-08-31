@@ -41,6 +41,60 @@ impl Phase {
     }
 }
 
+/// A coarse stage of a firmware install.
+///
+/// [`Self::Extracting`] is the measured stage, denominated in the
+/// dev_flash packages' payload bytes; the others are indeterminate. It
+/// covers each package's decrypt as well as its write, since a renderer
+/// draws a determinate bar only while the measured phase is current.
+/// The discriminants index [`FIRMWARE_TASK`]'s label table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum FirmwarePhase {
+    /// Parsing the PUP container's tables.
+    Reading = 0,
+    /// Recomputing every payload's HMAC.
+    ValidatingHmac = 1,
+    /// Removing the staging tree an interrupted install left behind.
+    ClearingStaging = 2,
+    /// Opening each dev_flash package and writing its files into the
+    /// staging tree.
+    Extracting = 3,
+    /// Hashing the staged modules into `firmware.toml`.
+    BuildingManifest = 4,
+    /// Clearing an existing entry directory (`force` overwrite).
+    Clearing = 5,
+    /// The commit rename sequence.
+    Committing = 6,
+}
+
+impl FirmwarePhase {
+    /// The code a [`ProgressSink`] stores.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
+}
+
+/// How a renderer presents a firmware install.
+pub const FIRMWARE_TASK: Task = Task {
+    verb: "Installing",
+    tag: "firmware",
+    phases: &[
+        "reading PUP",
+        "validating HMAC",
+        "clearing staging",
+        "decrypting packages",
+        "building manifest",
+        "clearing old install",
+        "committing",
+    ],
+    measured: FirmwarePhase::Extracting as u8,
+    unit: Unit::Bytes,
+    items: "packages",
+    streaming: false,
+};
+
 /// How a renderer presents an install.
 pub const INSTALL_TASK: Task = Task {
     verb: "Installing",

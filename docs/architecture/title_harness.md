@@ -14,10 +14,12 @@ manifest path (`--title-manifest <file>`). A manifest declares:
   `resolve_eboot` look under
   `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead,
   APP-keyed (no RAP). `[source] kind = "firmware-exec"` points the
-  resolver at a firmware image itself (the system shell,
-  `vfs/dev_flash/vsh/module/vsh.self`), which boots as an ordinary
-  guest process with no install step and exercises the privileged
-  paths under [Process privilege](lv2_host.md#process-privilege).
+  resolver at a module directory inside an installed firmware image,
+  where the manifest's `path` names the tree and `eboot_candidates`
+  names the executable (the system shell is `vsh/module/vsh.self`).
+  It boots as an ordinary guest process with no install step and
+  exercises the privileged paths under
+  [Process privilege](lv2_host.md#process-privilege).
 - **Checkpoint kind.** `process-exit` for a title that calls
   `sys_process_exit` inside the captured window; `first-rsx-write`
   for one whose main loop never exits, so the first PPU write into
@@ -118,7 +120,7 @@ flowchart TD
   reg --> kind{"source kind"}
   kind -->|"PSN HDD (default)"| hdd["vfs-root/game/ID/USRDIR/ + eboot_candidates, EBOOT.BIN first"]
   kind -->|disc| bd["vfs-parent/dev_bdvd/ID/PS3_GAME/USRDIR/"]
-  kind -->|firmware-exec| vsh["vfs/dev_flash/vsh/module/vsh.self"]
+  kind -->|firmware-exec| vsh["manifest path/ + eboot_candidates, inside an installed firmware"]
   hdd --> sce{"SCE-wrapped?"}
   bd --> sce
   vsh --> sce

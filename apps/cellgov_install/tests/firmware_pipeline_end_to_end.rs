@@ -1,9 +1,9 @@
 //! Integration tests for `cellgov_install install` against a real
 //! PS3UPDAT.PUP.
 //!
-//! `--output` names the VFS root, so the firmware lands in its
-//! `dev_flash` mount beside whatever `install-game` put in
-//! `dev_hdd0` / `dev_bdvd`.
+//! `--output` names the VFS root; the firmware lands in the store entry
+//! its own `vsh/etc/version.txt` names, beside whatever `install-game`
+//! put in `dev_hdd0` / `dev_bdvd`.
 //!
 //! The PUP is operator-owned and read from the dump root
 //! (`common/dumps.rs`); nothing in the repo ships one. This suite is
@@ -16,8 +16,11 @@
     reason = "integration test: unwrap on unexpected failure is correct"
 )]
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+
+use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
+use cellgov_install::store::{Artifact, ArtifactKind, InstallRecord, StoreLayout, VersionKey};
 
 #[path = "common/digests.rs"]
 mod digests;
@@ -27,9 +30,6 @@ mod dumps;
 mod keys;
 #[path = "common/scratch.rs"]
 mod scratch;
-
-/// Mount the firmware lands in under the VFS root `--output` names.
-const DEV_FLASH: &str = "dev_flash";
 
 /// The PUP under test.
 ///
@@ -48,7 +48,7 @@ fn locate_pup() -> PathBuf {
     p
 }
 
-fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::process::Output {
+fn run_install(pup: &PathBuf, vfs_root: &Path, force: bool) -> std::process::Output {
     let bin = env!("CARGO_BIN_EXE_cellgov_install");
     let mut cmd = Command::new(bin);
     cmd.arg("install")
@@ -64,6 +64,47 @@ fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::p
     cmd.output().expect("spawn cellgov_install install")
 }
 
+/// # Panics
+///
+/// If the run exited non-zero, dumping both streams.
+fn assert_succeeded(result: &std::process::Output, what: &str) {
+    assert!(
+        result.status.success(),
+        "{what} failed.\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr),
+    );
+}
+
+/// The single firmware entry under `vfs_root`, and the version keying
+/// it.
+///
+/// # Panics
+///
+/// Unless exactly one version directory is there -- an install that
+/// wrote two entries, or none, is a failure this suite must not read
+/// past.
+fn sole_entry(vfs_root: &Path) -> (String, PathBuf) {
+    let layout = StoreLayout::new(vfs_root);
+    let root = layout.firmware_root();
+    let mut versions: Vec<String> = std::fs::read_dir(&root)
+        .unwrap_or_else(|e| panic!("read {}: {e}", root.display()))
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    versions.sort();
+    assert_eq!(
+        versions.len(),
+        1,
+        "expected exactly one firmware entry under {}, found {versions:?}",
+        root.display(),
+    );
+    let version = versions.remove(0);
+    let entry = layout.entry_dir(&Artifact::Firmware {
+        version: VersionKey::new(&version).expect("the install wrote a usable version key"),
+    });
+    (version, entry)
+}
+
 /// Every module the committed digest table pins is present in `dir`.
 ///
 /// "At least one file with a module extension" would pass an install
@@ -75,7 +116,7 @@ fn run_install(pup: &PathBuf, vfs_root: &std::path::Path, force: bool) -> std::p
 ///
 /// If a pinned module is absent, or the table pins none -- a table
 /// with no such row would make this check assert nothing.
-fn assert_pinned_modules_present(dir: &std::path::Path) {
+fn assert_pinned_modules_present(dir: &Path) {
     let mut pinned = 0usize;
     for key in digests::table().keys() {
         let Some(stem) = key.strip_prefix("decrypted_masked/") else {
@@ -98,56 +139,113 @@ fn assert_pinned_modules_present(dir: &std::path::Path) {
     );
 }
 
-#[test]
-fn install_with_an_empty_vfs_populates_dev_flash_sys_external() {
-    let pup = locate_pup();
-    let output = scratch::ScratchDir::new("fw_happy");
-    let result = run_install(&pup, &output, false);
-    assert!(
-        result.status.success(),
-        "install failed.\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr),
-    );
-
-    let sys_external = output.join(DEV_FLASH).join("sys").join("external");
-    assert!(
-        sys_external.is_dir(),
-        "expected {} after install",
-        sys_external.display(),
-    );
-    assert_pinned_modules_present(&sys_external);
-    // The manifest describes the firmware image, so it sits in the
-    // mount it covers rather than at the VFS root.
-    assert!(
-        output.join(DEV_FLASH).join("firmware.toml").is_file(),
-        "expected firmware.toml inside the dev_flash mount"
-    );
+/// `sys/external` under a firmware entry, where the pinned modules land.
+fn sys_external(entry: &Path) -> PathBuf {
+    entry.join(DEV_FLASH_MOUNT).join("sys").join("external")
 }
 
 #[test]
-fn install_refuses_a_non_empty_dev_flash_without_force() {
+fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
+    let pup = locate_pup();
+    let output = scratch::ScratchDir::new("fw_happy");
+    assert_succeeded(&run_install(&pup, &output, false), "install");
+
+    let (version, entry) = sole_entry(&output);
+    assert_pinned_modules_present(&sys_external(&entry));
+
+    // The key is the user-facing version (`4.91`), not the zero-padded
+    // field version.txt carries (`04.9100`) nor the PUP header's opaque
+    // image_version -- and the file it was read from is in the committed
+    // tree, so a reader can re-derive the key from the entry alone.
+    assert!(
+        entry
+            .join(DEV_FLASH_MOUNT)
+            .join("vsh/etc/version.txt")
+            .is_file(),
+        "the tree the version key was read from must be the committed one",
+    );
+    let (major, minor) = version
+        .split_once('.')
+        .unwrap_or_else(|| panic!("version key {version:?} is not <major>.<minor>"));
+    for part in [major, minor] {
+        assert!(
+            !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()),
+            "version key {version:?} has a non-numeric part",
+        );
+    }
+
+    // The manifest describes the firmware image, so it sits in the
+    // mount it covers rather than at the entry root, and it declares
+    // the same version the directory is named after.
+    let manifest_path = entry.join(DEV_FLASH_MOUNT).join("firmware.toml");
+    let manifest = cellgov_install::manifest::parse_manifest(
+        &std::fs::read_to_string(&manifest_path).unwrap(),
+    )
+    .expect("the install wrote a manifest this build reads");
+    assert_eq!(manifest.firmware.version, version);
+
+    // Records are the store's index, so an installed version is one
+    // that has one.
+    let layout = StoreLayout::new(&*output);
+    let record_path = layout.record_path(&Artifact::Firmware {
+        version: VersionKey::new(&version).unwrap(),
+    });
+    let record = InstallRecord::parse(&std::fs::read_to_string(&record_path).unwrap())
+        .expect("the install wrote a record this build reads");
+    assert_eq!(record.artifact.kind, ArtifactKind::Firmware);
+    assert_eq!(record.artifact.version, version);
+    // The record is what a reader resolves the tree through, so a
+    // store_path naming anything but the committed entry is an index
+    // pointing away from its own install.
+    assert_eq!(
+        layout.resolve_store_path(&record.artifact.store_path),
+        entry,
+        "the record must resolve back to the entry it describes",
+    );
+    assert_eq!(record.source.kind, "pup");
+    assert_eq!(record.source.sha256, manifest.firmware.pup_sha256);
+    assert!(record.title.is_none(), "a firmware record names no title");
+}
+
+#[test]
+fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
     let pup = locate_pup();
     let output = scratch::ScratchDir::new("fw_refuse");
-    // The preflight is scoped to the mount the install writes, so the
-    // decoy has to live there -- a file at the VFS root is legitimate
-    // (dev_hdd0 and friends) and must not block a firmware install.
-    let dev_flash = output.join(DEV_FLASH);
-    std::fs::create_dir_all(&dev_flash).unwrap();
-    std::fs::write(dev_flash.join("decoy.txt"), b"existing").unwrap();
+    assert_succeeded(&run_install(&pup, &output, false), "first install");
+    let (_, entry) = sole_entry(&output);
+    let before = std::fs::read_dir(entry.join(DEV_FLASH_MOUNT))
+        .unwrap()
+        .count();
 
     let result = run_install(&pup, &output, false);
     assert!(
         !result.status.success(),
-        "expected install to refuse a non-empty dev_flash without --force\n\
+        "expected the second install to refuse an installed version\n\
          stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr),
     );
     let stderr = String::from_utf8_lossy(&result.stderr);
+    // The same PUP twice has its own refusal, distinct from the one for
+    // a second PUP claiming the same version; a bare "already installed"
+    // would pass on either.
     assert!(
-        stderr.contains("exists and is non-empty"),
-        "expected the refuse-overwrite message in stderr, got:\n{stderr}",
+        stderr.contains("is already installed, from this same PUP"),
+        "expected the same-PUP duplicate refusal in stderr, got:\n{stderr}",
+    );
+
+    // The version cannot be read before the tree is extracted, so a
+    // refusal always has a full staging tree to discard.
+    assert!(
+        !StoreLayout::new(&*output).firmware_staging_dir().exists(),
+        "a refused install must discard its staging tree"
+    );
+    assert_eq!(
+        std::fs::read_dir(entry.join(DEV_FLASH_MOUNT))
+            .unwrap()
+            .count(),
+        before,
+        "the installed entry is untouched by the refused install"
     );
 }
 
@@ -158,45 +256,36 @@ fn a_populated_vfs_root_does_not_block_a_firmware_install() {
     std::fs::create_dir_all(output.join("dev_hdd0/game/NPUA80001")).unwrap();
     std::fs::write(output.join("dev_hdd0/game/NPUA80001/x.bin"), b"game").unwrap();
 
-    let result = run_install(&pup, &output, false);
-    assert!(
-        result.status.success(),
-        "a populated dev_hdd0 must not block a firmware install.\n\
-         stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr),
-    );
+    assert_succeeded(&run_install(&pup, &output, false), "install");
     assert!(
         output.join("dev_hdd0/game/NPUA80001/x.bin").is_file(),
         "the firmware install must not disturb a sibling mount"
     );
-    // A zero-exit install that wrote nothing would satisfy both
-    // assertions above, so hold this run to the same output floor as
-    // the empty-VFS one.
-    assert_pinned_modules_present(&output.join(DEV_FLASH).join("sys").join("external"));
+    // A zero-exit install that wrote nothing would satisfy the
+    // assertion above, so hold this run to the same output floor as the
+    // empty-VFS one.
+    let (_, entry) = sole_entry(&output);
+    assert_pinned_modules_present(&sys_external(&entry));
 }
 
 #[test]
-fn force_allows_a_non_empty_dev_flash() {
+fn force_replaces_an_installed_version_whole() {
     let pup = locate_pup();
     let output = scratch::ScratchDir::new("fw_force");
-    let dev_flash = output.join(DEV_FLASH);
-    std::fs::create_dir_all(&dev_flash).unwrap();
-    std::fs::write(dev_flash.join("decoy.txt"), b"existing").unwrap();
+    assert_succeeded(&run_install(&pup, &output, false), "first install");
+    let (_, entry) = sole_entry(&output);
+    let stale = entry.join(DEV_FLASH_MOUNT).join("stale.bin");
+    std::fs::write(&stale, b"left over from the previous install").unwrap();
 
-    let result = run_install(&pup, &output, true);
+    assert_succeeded(&run_install(&pup, &output, true), "install --force");
     assert!(
-        result.status.success(),
-        "install --force failed.\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr),
+        !stale.exists(),
+        "--force replaces the entry whole rather than merging into it"
     );
-    let sys_external = dev_flash.join("sys").join("external");
-    assert!(
-        sys_external.is_dir(),
-        "expected dev_flash/sys/external after --force install",
-    );
-    // An empty sys_external would satisfy the directory check, so
-    // --force is held to the same output floor as a clean install.
-    assert_pinned_modules_present(&sys_external);
+    // An empty entry would satisfy the check above, so --force is held
+    // to the same output floor as a clean install.
+    assert_pinned_modules_present(&sys_external(&entry));
+    // Replacement, not a second entry beside the first, and no staging
+    // tree left under the firmware root.
+    assert_eq!(sole_entry(&output).1, entry);
 }

@@ -62,3 +62,63 @@ fn the_measured_phase_is_the_one_with_a_byte_denominator() {
         "the measured phase must name a label"
     );
 }
+
+const ALL_FIRMWARE: [FirmwarePhase; 7] = [
+    FirmwarePhase::Reading,
+    FirmwarePhase::ValidatingHmac,
+    FirmwarePhase::ClearingStaging,
+    FirmwarePhase::Extracting,
+    FirmwarePhase::BuildingManifest,
+    FirmwarePhase::Clearing,
+    FirmwarePhase::Committing,
+];
+
+/// The label each variant must carry.
+///
+/// Exhaustive by construction: a variant added to [`FirmwarePhase`]
+/// fails to compile until it is answered here.
+fn expected_firmware_label(phase: FirmwarePhase) -> &'static str {
+    match phase {
+        FirmwarePhase::Reading => "reading PUP",
+        FirmwarePhase::ValidatingHmac => "validating HMAC",
+        FirmwarePhase::ClearingStaging => "clearing staging",
+        FirmwarePhase::Extracting => "decrypting packages",
+        FirmwarePhase::BuildingManifest => "building manifest",
+        FirmwarePhase::Clearing => "clearing old install",
+        FirmwarePhase::Committing => "committing",
+    }
+}
+
+#[test]
+fn every_firmware_phase_indexes_its_own_label() {
+    assert_eq!(FIRMWARE_TASK.phases.len(), ALL_FIRMWARE.len());
+    for phase in ALL_FIRMWARE {
+        assert_eq!(
+            FIRMWARE_TASK.phases.get(phase.code() as usize).copied(),
+            Some(expected_firmware_label(phase)),
+            "{phase:?}"
+        );
+    }
+}
+
+#[test]
+fn no_firmware_label_is_left_unclaimed_by_a_phase() {
+    let claimed: std::collections::BTreeSet<usize> =
+        ALL_FIRMWARE.iter().map(|p| p.code() as usize).collect();
+    for (i, label) in FIRMWARE_TASK.phases.iter().enumerate() {
+        assert!(
+            claimed.contains(&i),
+            "no phase claims phases[{i}] ({label})"
+        );
+    }
+}
+
+#[test]
+fn the_measured_firmware_phase_is_the_one_the_package_loop_runs_under() {
+    assert_eq!(FIRMWARE_TASK.measured, FirmwarePhase::Extracting.code());
+    assert_eq!(FIRMWARE_TASK.unit, Unit::Bytes);
+    assert!(
+        (FIRMWARE_TASK.measured as usize) < FIRMWARE_TASK.phases.len(),
+        "the measured phase must name a label"
+    );
+}
