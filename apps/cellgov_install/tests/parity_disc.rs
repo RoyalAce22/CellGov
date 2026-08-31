@@ -51,7 +51,6 @@ fn decrypted_disc_install_matches_the_rpcs3_extracted_eboot() {
         &iso,
         &keys::vault(),
         &vfs,
-        &scratch.join("installs"),
         InstallOptions {
             force: true,
             ..Default::default()

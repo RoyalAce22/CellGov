@@ -13,7 +13,9 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_install::game_install::InstallRecord;
+use cellgov_install::store::{
+    record_rel_path, Artifact, InstallRecord, StoreLayout, TitleId, TitleRecord, DEFAULT_VFS_ROOT,
+};
 
 use crate::cli::args::{find_flag_value, has_bool_flag, reject_flag_here, require_at_most_one};
 use crate::cli::exit::die;
@@ -24,9 +26,18 @@ const DEFAULT_REGISTRY: &str = "titles";
 /// writes them. `--installs` names the directory directly, for a VFS
 /// rooted elsewhere.
 fn default_installs() -> PathBuf {
-    cellgov_install::game_install::installs_dir(Path::new(
-        cellgov_install::game_install::DEFAULT_VFS_ROOT,
-    ))
+    StoreLayout::new(DEFAULT_VFS_ROOT).installs_dir()
+}
+
+/// The base record for `title_id` under an `installs/` directory.
+///
+/// `--installs` names the record directory itself, so the path is built
+/// from the same relative arithmetic [`StoreLayout::record_path`] uses
+/// below a VFS root.
+fn base_record_under(installs: &Path, title_id: &str) -> PathBuf {
+    let title_id =
+        TitleId::new(title_id).unwrap_or_else(|e| die(&format!("gen-manifest --title-id: {e}")));
+    installs.join(record_rel_path(&Artifact::TitleBase { title_id }))
 }
 
 /// Escape a string for a double-quoted TOML basic string.
@@ -49,9 +60,11 @@ pub(crate) fn run(args: &[String]) {
             reject_flag_here(args, "--installs", "a --title-id lookup");
             PathBuf::from(p)
         }
-        (None, Some(id)) => find_flag_value(args, "--installs")
-            .map_or_else(default_installs, PathBuf::from)
-            .join(format!("{id}.install.toml")),
+        (None, Some(id)) => {
+            let installs =
+                find_flag_value(args, "--installs").map_or_else(default_installs, PathBuf::from);
+            base_record_under(&installs, &id)
+        }
         (None, None) => die("gen-manifest requires --record <path> or --title-id <id>"),
     };
     let registry = PathBuf::from(
@@ -64,7 +77,14 @@ pub(crate) fn run(args: &[String]) {
     let record = InstallRecord::parse(&text)
         .unwrap_or_else(|e| die(&format!("parse {}: {e}", record_path.display())));
 
-    let gen = GeneratedFields::from_record(&record);
+    let title = record.title.as_ref().unwrap_or_else(|| {
+        die(&format!(
+            "{} describes a {} entry, which names no title",
+            record_path.display(),
+            record.artifact.kind.as_str()
+        ))
+    });
+    let gen = GeneratedFields::from_record(&record, title);
     let manifest_path = registry.join(format!("{}.toml", gen.content_id));
 
     if manifest_path.exists() && !force {
@@ -99,28 +119,38 @@ struct GeneratedFields {
 }
 
 impl GeneratedFields {
-    fn from_record(record: &InstallRecord) -> Self {
+    fn from_record(record: &InstallRecord, title: &TitleRecord) -> Self {
         // The manifest's `content_id` directory key holds the title-id
         // value (a pre-existing field-name misnomer); the RAP, by
         // contrast, is keyed by the full NPD content id.
-        let dir_key = record.title.title_id.clone();
+        let dir_key = title.title_id.clone();
         let eboot_candidate = record
             .files
             .keys()
             .find(|p| p.ends_with("EBOOT.BIN"))
             .and_then(|p| p.rsplit('/').next())
-            .unwrap_or("EBOOT.BIN")
-            .to_string();
-        // An NPDRM HDD title carries a full NPD content id distinct from
-        // the title-id; its RAP is named by that content id. Disc and
-        // bare-title-id records have no RAP.
-        let rap_filename = (record.title.distribution == "psn-hdd"
-            && record.title.content_id != dir_key)
-            .then(|| format!("{}.rap", record.title.content_id));
+            .map_or_else(
+                || {
+                    // A v3 record may carry no `[files]` at all, so an
+                    // EBOOT-less record reaches here and the stub still
+                    // needs a candidate.
+                    eprintln!(
+                        "gen-manifest: record for {} lists no EBOOT.BIN; \
+                         eboot_candidates falls back to the conventional name",
+                        title.title_id,
+                    );
+                    "EBOOT.BIN".to_string()
+                },
+                |p| p.to_string(),
+            );
+        // The record names the RAP the install committed; a psn-hdd
+        // record carrying none is a title that consumes none, since only
+        // network/local licenses do (`game_install::rap_consumed`).
+        let rap_filename = record.rap.as_ref().map(|r| r.filename.clone());
         Self {
             content_id: dir_key,
-            display_name: record.title.title.clone(),
-            distribution: record.title.distribution.clone(),
+            display_name: title.title.clone(),
+            distribution: title.distribution.clone(),
             eboot_candidate,
             rap_filename,
         }

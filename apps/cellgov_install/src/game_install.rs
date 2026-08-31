@@ -1,6 +1,6 @@
 //! Game-install orchestration: turn a retail PKG or disc image into a
-//! `dev_hdd0`/`dev_bdvd` tree, an installed RAP, and an install
-//! record under [`installs_dir`].
+//! `dev_hdd0`/`dev_bdvd` tree, an installed RAP, and a
+//! [`crate::store`] record naming all three.
 //!
 //! The pure container work lives in [`crate::pkg`] / [`crate::iso`];
 //! this module owns the filesystem shell.
@@ -8,8 +8,8 @@
 //! # Invariants
 //!
 //! - The whole pre-commit batch -- game tree, staged RAP, and the
-//!   decrypt-proof -- lives under one staging root
-//!   (`.staging-<title-id>/`); a fault before commit discards it whole.
+//!   decrypt-proof -- lives under one [`staging_sibling`] of the target
+//!   directory; a fault before commit discards it whole.
 //! - Commit runs only after the decrypt-proof passes, as a fixed
 //!   rename sequence: the staged RAP into `exdata/` first, then the
 //!   game tree into its final directory (the commit point), then the
@@ -19,7 +19,7 @@
 //!   decrypted and overwritten identically on retry.
 //!
 //! Both installers run the decrypt-proof, so they exist only with the
-//! `decrypt` feature; the record types, [`installs_dir`], and the
+//! `decrypt` feature; the record types, the store layout, and the
 //! uninstall side stay available in every build.
 
 #![cfg_attr(
@@ -34,7 +34,6 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::iso;
@@ -46,31 +45,12 @@ use crate::pkg::{self, PkgEntryKind};
 use crate::progress::{Phase, ProgressSink};
 use crate::sce;
 use crate::self_image::is_sce_wrapped;
+use crate::store::layout::{is_safe_component, staging_sibling, Artifact, StoreLayout, TitleId};
+use crate::store::record::{
+    tree_rel_path_is_safe, ArtifactRecord, InstallRecord, RapRecord, SourceRecord, TitleRecord,
+    INSTALL_RECORD_FORMAT_VERSION,
+};
 use cellgov_ps3_abi::elf::ELF_MAGIC;
-
-/// Install-record schema version. A record declaring anything else is
-/// refused by [`InstallRecord::parse`] rather than read as current.
-pub const INSTALL_RECORD_FORMAT_VERSION: u32 = 2;
-
-/// Directory holding the install records for the VFS rooted at
-/// `vfs_root`, as `<title-id>.install.toml` files.
-///
-/// The records describe that root, so they live inside it: a caller
-/// that relocates the VFS carries them along instead of leaving them
-/// behind to be read against some other tree. The leading dot keeps
-/// them out of the PS3-shaped mount names beside them; mounts are
-/// registered one explicit `(prefix, host_path)` pair at a time, so
-/// nothing here reaches a guest unless a title manifest names this
-/// directory as a mount host.
-pub fn installs_dir(vfs_root: &Path) -> PathBuf {
-    vfs_root.join(".cellgov").join("installs")
-}
-
-/// Where `install-game` / `install-iso` land a title tree when no
-/// `--output-dir` is given, and where a reader looks for the matching
-/// records. Shared so the writer and the reader cannot drift onto
-/// different roots.
-pub const DEFAULT_VFS_ROOT: &str = "vfs";
 
 /// Knobs shared by `install_pkg` and `install_iso`.
 #[derive(Clone, Copy)]
@@ -88,37 +68,6 @@ impl Default for InstallOptions<'_> {
             progress: &(),
         }
     }
-}
-
-/// Why an install record could not be loaded.
-#[derive(Debug, thiserror::Error)]
-pub enum InstallRecordParseError {
-    /// The file is not valid TOML, or does not match the record shape.
-    #[error("install record is not valid TOML: {0}")]
-    Toml(#[from] toml::de::Error),
-    /// The record declares a schema this build does not read.
-    #[error(
-        "install record declares format_version {found}, this build reads {supported}; \
-         reinstall the title to regenerate it"
-    )]
-    UnsupportedFormatVersion {
-        /// Version the record declared.
-        found: u32,
-        /// The only version this build accepts.
-        supported: u32,
-    },
-}
-
-/// The single modeled user profile, matching the boot path's
-/// `home/00000001/exdata` RAP lookup. Shared with [`crate::game_uninstall`].
-pub(crate) const HDD0_USER: &str = "00000001";
-
-/// Where installed RAPs live under a `dev_hdd0` mount, keyed by
-/// `<content-id>.rap`. RPCS3 reads the same layout on boot, so a RAP
-/// installed once is found by content id with nothing else to pass.
-#[must_use]
-pub fn exdata_dir(dev_hdd0: &Path) -> PathBuf {
-    dev_hdd0.join("home").join(HDD0_USER).join("exdata")
 }
 
 /// PARAM.SFO categories that mark a disc title (`DG` disc game,
@@ -299,6 +248,14 @@ pub enum GameInstallError {
         /// The offending content-id.
         content_id: String,
     },
+    /// A store key -- the title id that names the store directory --
+    /// is not usable as a directory name.
+    #[error("store key: {0}")]
+    StoreKey(#[from] crate::store::layout::StoreKeyError),
+    /// The installed tree could not be expressed as a record
+    /// `store_path` under the VFS root the record lives in.
+    #[error("record store path: {0}")]
+    StorePath(#[from] crate::store::layout::StorePathError),
     /// A pre-commit fault was followed by a cleanup that could not
     /// discard the staging root, so residue outlived the failed install.
     #[error("{cause}; the staging root {} could not be discarded: {source}", path.display())]
@@ -311,88 +268,6 @@ pub enum GameInstallError {
         /// The pre-commit fault that triggered the cleanup.
         cause: Box<GameInstallError>,
     },
-}
-
-/// Source-container provenance for an install record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourceRecord {
-    /// Container kind: `pkg` or `iso`.
-    pub kind: String,
-    /// SHA-256 over the source container bytes.
-    pub sha256: HexSha256,
-}
-
-/// The RAP installed for an NPDRM title, recorded so uninstall can
-/// locate and verify it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RapRecord {
-    /// RAP filename under `home/00000001/exdata/` (the full NPD
-    /// content-id plus `.rap`).
-    pub filename: String,
-    /// SHA-256 over the installed RAP bytes.
-    pub sha256: HexSha256,
-}
-
-/// Title identity for an install record, all PARAM.SFO-derived.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TitleRecord {
-    /// PARAM.SFO `TITLE_ID` (game-directory key).
-    pub title_id: String,
-    /// Full NPD content id (RAP-filename key) or the title-id.
-    pub content_id: String,
-    /// PARAM.SFO `CATEGORY`.
-    pub category: String,
-    /// PARAM.SFO `TITLE`.
-    pub title: String,
-    /// PARAM.SFO `APP_VER` (falling back to `VERSION`).
-    pub app_version: String,
-    /// Install distribution tag (`psn-hdd` / `disc-iso`).
-    pub distribution: String,
-}
-
-/// A `<title-id>.install.toml` record under [`installs_dir`]: enough
-/// to verify a reinstall reproduces the same tree from the same source.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InstallRecord {
-    /// Schema version.
-    pub format_version: u32,
-    /// Source container provenance.
-    pub source: SourceRecord,
-    /// Title identity.
-    pub title: TitleRecord,
-    /// Per-file SHA-256, keyed by game-tree-relative path; the
-    /// `BTreeMap` order makes the serialised `[files]` table a pure
-    /// function of the tree.
-    pub files: BTreeMap<String, HexSha256>,
-    /// The installed RAP, when the title is NPDRM with a network/local
-    /// license. Absent (and omitted from the TOML) for disc, free, and
-    /// no-RAP titles.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub rap: Option<RapRecord>,
-}
-
-impl InstallRecord {
-    /// Parse a record, refusing one this build does not read.
-    ///
-    /// # Errors
-    ///
-    /// [`InstallRecordParseError::UnsupportedFormatVersion`] when
-    /// `format_version` is not [`INSTALL_RECORD_FORMAT_VERSION`], and
-    /// [`InstallRecordParseError::Toml`] when the text does not
-    /// deserialize. Every reader goes through here, so a stale record
-    /// is named rather than read as current -- `rap` is
-    /// `#[serde(default)]`, so an older record would otherwise load as
-    /// a title with no RAP.
-    pub fn parse(text: &str) -> Result<Self, InstallRecordParseError> {
-        let record: Self = toml::from_str(text)?;
-        if record.format_version != INSTALL_RECORD_FORMAT_VERSION {
-            return Err(InstallRecordParseError::UnsupportedFormatVersion {
-                found: record.format_version,
-                supported: INSTALL_RECORD_FORMAT_VERSION,
-            });
-        }
-        Ok(record)
-    }
 }
 
 pub(crate) fn sha256_of(bytes: &[u8]) -> HexSha256 {
@@ -489,12 +364,23 @@ fn safe_join(base: &Path, rel: &str) -> Result<PathBuf, GameInstallError> {
             }
         }
     }
+    // The same entry becomes a record key, and the record gate refuses
+    // a key it could not resolve back onto the tree.
+    if !tree_rel_path_is_safe(&normalized_rel(rel)) {
+        return Err(GameInstallError::UnsafeEntryPath {
+            path: rel.to_string(),
+        });
+    }
     Ok(out)
 }
 
 /// The staging-relative path a staged entry lands at, as a
 /// `/`-separated string built from the same `Normal` components
 /// [`safe_join`] keeps, so the record key equals the on-disk path.
+///
+/// `Path::components` splits on the host's separators, so a container
+/// entry carrying `\` or `:` normalizes to two keys on Win32 and one
+/// on a POSIX host; [`safe_join`] refuses those names.
 fn normalized_rel(rel: &str) -> String {
     Path::new(rel)
         .components()
@@ -506,31 +392,10 @@ fn normalized_rel(rel: &str) -> String {
         .join("/")
 }
 
-/// Whether an id is safe to use as a single path component under a
-/// mount root: non-empty, no leading dot, and `[A-Za-z0-9._-]` only.
-///
-/// Shared with [`crate::game_uninstall`], which joins an
-/// operator-supplied title-id onto the same mount roots and so needs
-/// the identical rule.
-// The id comes from the package's own PARAM.SFO (or, on the uninstall
-// side, the command line) and is joined onto the mount root as a single
-// path component. A leading dot makes it resolve somewhere other than a
-// fresh sibling: `..` walks up to the mount itself, which `commit` would
-// then `remove_dir_all`, and `.staging-*` / `.uninstalling-*` collide
-// with in-progress residue. The boot side refuses the same shape
-// (`ResolveEbootError::HiddenContentId`).
-pub(crate) fn content_id_is_safe(id: &str) -> bool {
-    !id.is_empty()
-        && !id.starts_with('.')
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
-}
-
-/// Reject a content-id [`content_id_is_safe`] refuses, before it is used
+/// Reject a content-id [`is_safe_component`] refuses, before it is used
 /// to build a game-directory or RAP-file path.
 fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
-    if content_id_is_safe(id) {
+    if is_safe_component(id) {
         Ok(())
     } else {
         Err(GameInstallError::UnsafeContentId {
@@ -585,15 +450,14 @@ fn dir_non_empty(path: &Path) -> Result<bool, GameInstallError> {
 }
 
 /// Install a retail PKG (PSN/retail HDD title) into `output_dir`'s
-/// `dev_hdd0` tree, installing the RAP and writing a record into
-/// `installs_dir`.
+/// `dev_hdd0` tree, installing the RAP and writing the title-base
+/// record for that root.
 #[cfg(feature = "decrypt")]
 pub fn install_pkg(
     pkg_bytes: &[u8],
     rap: Option<&[u8]>,
     keys: &KeyVault,
     output_dir: &Path,
-    installs_dir: &Path,
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
     let progress = opts.progress;
@@ -650,12 +514,18 @@ pub fn install_pkg(
 
     // Layout. The pre-commit batch lives under one staging root:
     // `tree/` is the game tree, `rap/` holds the staged RAP.
-    let dev_hdd0 = output_dir.join("dev_hdd0");
-    let exdata = exdata_dir(&dev_hdd0);
-    let game_root = dev_hdd0.join("game");
-    let final_dir = game_root.join(&title_id);
-    let staging_root = game_root.join(format!(".staging-{title_id}"));
+    let layout = StoreLayout::new(output_dir);
+    let exdata = layout.live_exdata_dir();
+    let final_dir = output_dir.join("dev_hdd0").join("game").join(&title_id);
+    let staging_root = staging_sibling(&final_dir);
     let tree_staging = staging_root.join("tree");
+    // Resolved before staging: only `run_or_clean` discards the staging
+    // root, so a fallible step between it and `commit` would leave the
+    // staged tree behind.
+    let artifact = Artifact::TitleBase {
+        title_id: TitleId::new(&title_id)?,
+    };
+    let store_path = layout.store_path_of(&final_dir)?;
 
     if dir_non_empty(&final_dir)? && !opts.force {
         return Err(GameInstallError::TargetExists { path: final_dir });
@@ -720,13 +590,17 @@ pub fn install_pkg(
     let record = build_record(
         "pkg",
         pkg_bytes,
+        ArtifactRecord {
+            kind: artifact.kind(),
+            version: app_version,
+            store_path,
+        },
         file_digests,
         TitleRecord {
             title_id: title_id.clone(),
             content_id: content_id.clone(),
             category,
             title,
-            app_version,
             distribution: "psn-hdd".to_string(),
         },
         staged_rap.as_ref().map(|r| r.record.clone()),
@@ -736,8 +610,7 @@ pub fn install_pkg(
         &tree_staging,
         &final_dir,
         staged_rap.as_ref(),
-        installs_dir,
-        &title_id,
+        &layout.record_path(&artifact),
         &record,
         progress,
     )?;
@@ -770,7 +643,6 @@ pub fn install_iso(
     image: &[u8],
     keys: &KeyVault,
     output_dir: &Path,
-    installs_dir: &Path,
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
     let progress = opts.progress;
@@ -818,9 +690,14 @@ pub fn install_iso(
         }
     }
 
-    let dev_bdvd = output_dir.join("dev_bdvd");
-    let final_dir = dev_bdvd.join(&title_id);
-    let staging_dir = dev_bdvd.join(format!(".staging-{title_id}"));
+    let layout = StoreLayout::new(output_dir);
+    let final_dir = output_dir.join("dev_bdvd").join(&title_id);
+    let staging_dir = staging_sibling(&final_dir);
+    // Resolved before staging, as in `install_pkg`.
+    let artifact = Artifact::TitleBase {
+        title_id: TitleId::new(&title_id)?,
+    };
+    let store_path = layout.store_path_of(&final_dir)?;
 
     if dir_non_empty(&final_dir)? && !opts.force {
         return Err(GameInstallError::TargetExists { path: final_dir });
@@ -854,13 +731,17 @@ pub fn install_iso(
     let record = build_record(
         "iso",
         image,
+        ArtifactRecord {
+            kind: artifact.kind(),
+            version: app_version,
+            store_path,
+        },
         file_digests,
         TitleRecord {
             title_id: title_id.clone(),
             content_id: title_id.clone(),
             category,
             title,
-            app_version,
             distribution: "disc-iso".to_string(),
         },
         None,
@@ -872,8 +753,7 @@ pub fn install_iso(
         &staging_dir,
         &final_dir,
         None,
-        installs_dir,
-        &title_id,
+        &layout.record_path(&artifact),
         &record,
         progress,
     )?;
@@ -1002,8 +882,7 @@ fn commit(
     tree_staging: &Path,
     final_dir: &Path,
     staged_rap: Option<&StagedRap>,
-    installs_dir: &Path,
-    title_id: &str,
+    record_path: &Path,
     record: &InstallRecord,
     progress: &dyn ProgressSink,
 ) -> Result<PathBuf, GameInstallError> {
@@ -1046,11 +925,12 @@ fn commit(
     std::fs::remove_dir_all(staging_root).ok();
 
     // Record last: a record never points at an absent tree.
-    let record_path = installs_dir.join(format!("{title_id}.install.toml"));
-    std::fs::create_dir_all(installs_dir).map_err(io_err("create dir", installs_dir))?;
-    let text = toml::to_string(record)?;
-    std::fs::write(&record_path, text).map_err(io_err("write", &record_path))?;
-    Ok(record_path)
+    if let Some(parent) = record_path.parent() {
+        std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
+    }
+    let text = record.to_toml()?;
+    std::fs::write(record_path, text).map_err(io_err("write", record_path))?;
+    Ok(record_path.to_path_buf())
 }
 
 /// Build the install record from [`stage_tree`]'s digests. File hashes
@@ -1059,17 +939,16 @@ fn commit(
 fn build_record(
     kind: &str,
     source_bytes: &[u8],
+    artifact: ArtifactRecord,
     files: BTreeMap<String, HexSha256>,
     title: TitleRecord,
     rap: Option<RapRecord>,
 ) -> InstallRecord {
     InstallRecord {
         format_version: INSTALL_RECORD_FORMAT_VERSION,
-        source: SourceRecord {
-            kind: kind.to_string(),
-            sha256: sha256_of(source_bytes),
-        },
-        title,
+        artifact,
+        source: SourceRecord::local(kind, sha256_of(source_bytes)),
+        title: Some(title),
         files,
         rap,
     }

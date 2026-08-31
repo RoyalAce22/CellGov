@@ -7,6 +7,7 @@
 
 use super::*;
 use crate::scratch_dir::scratch;
+use crate::store::{ArtifactKind, ArtifactRecord};
 use crate::test_support::{build_iso, build_npdrm_eboot_header, build_param_sfo, IsoNode};
 #[cfg(feature = "decrypt")]
 use crate::test_support::{build_pkg, pkg_file, PkgItem};
@@ -26,94 +27,6 @@ fn keys() -> KeyVault {
     crate::test_support::synthetic_vault()
 }
 
-#[test]
-fn install_records_resolve_inside_the_vfs_root_they_describe() {
-    for root in ["vfs", "relative/nested/vfs", "/tmp/other-vfs"] {
-        let root = Path::new(root);
-        let dir = installs_dir(root);
-        assert!(
-            dir.starts_with(root),
-            "{} escaped the root it describes",
-            dir.display()
-        );
-    }
-}
-
-#[test]
-fn two_vfs_roots_do_not_share_one_record_directory() {
-    assert_ne!(
-        installs_dir(Path::new("vfs-a")),
-        installs_dir(Path::new("vfs-b"))
-    );
-}
-
-/// The install side writes under this root and `cellgov_cli
-/// gen-manifest` reads from it; a second literal in either crate would
-/// send the reader somewhere the writer never wrote.
-#[test]
-fn the_default_vfs_root_is_the_directory_the_installers_write_into() {
-    assert_eq!(DEFAULT_VFS_ROOT, "vfs");
-    assert_eq!(
-        installs_dir(Path::new(DEFAULT_VFS_ROOT)),
-        Path::new("vfs").join(".cellgov").join("installs")
-    );
-}
-
-/// Placeholder identity: the version gate runs before a caller reads
-/// any of it, so these name no real title and no installed corpus.
-const SYNTHETIC_TITLE_ID: &str = "TEST00000";
-const SYNTHETIC_CONTENT_ID: &str = "TT0000-TEST00000_00-SYNTHETICRECORD0";
-
-fn record_toml(format_version: u32) -> String {
-    let record = InstallRecord {
-        format_version,
-        source: SourceRecord {
-            kind: "pkg".to_string(),
-            sha256: sha256_of(b"src"),
-        },
-        title: TitleRecord {
-            title_id: SYNTHETIC_TITLE_ID.to_string(),
-            content_id: SYNTHETIC_CONTENT_ID.to_string(),
-            category: "HG".to_string(),
-            title: "synthetic record".to_string(),
-            app_version: "01.00".to_string(),
-            distribution: "psn-hdd".to_string(),
-        },
-        files: BTreeMap::new(),
-        rap: None,
-    };
-    toml::to_string(&record).unwrap()
-}
-
-#[test]
-fn a_record_declaring_another_schema_version_is_refused_by_name() {
-    for found in [0, 1, INSTALL_RECORD_FORMAT_VERSION + 1] {
-        let err = InstallRecord::parse(&record_toml(found)).unwrap_err();
-        assert!(
-            matches!(
-                err,
-                InstallRecordParseError::UnsupportedFormatVersion { found: f, supported }
-                    if f == found && supported == INSTALL_RECORD_FORMAT_VERSION
-            ),
-            "format_version {found} produced {err:?}"
-        );
-    }
-}
-
-#[test]
-fn a_record_at_the_current_schema_version_parses() {
-    let record = InstallRecord::parse(&record_toml(INSTALL_RECORD_FORMAT_VERSION)).unwrap();
-    assert_eq!(record.format_version, INSTALL_RECORD_FORMAT_VERSION);
-    assert_eq!(record.title.title_id, SYNTHETIC_TITLE_ID);
-    assert_eq!(record.title.content_id, SYNTHETIC_CONTENT_ID);
-}
-
-#[test]
-fn a_record_that_is_not_toml_is_refused_separately_from_a_version_mismatch() {
-    let err = InstallRecord::parse("this is not toml {{{").unwrap_err();
-    assert!(matches!(err, InstallRecordParseError::Toml(_)), "{err:?}");
-}
-
 #[cfg(feature = "decrypt")]
 #[test]
 fn rejects_missing_param_sfo() {
@@ -129,7 +42,6 @@ fn rejects_missing_param_sfo() {
         None,
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -151,7 +63,6 @@ fn rejects_non_hdd_category() {
         None,
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -174,7 +85,6 @@ fn rejects_title_id_mismatch() {
         None,
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -196,7 +106,6 @@ fn rejects_missing_title_id() {
         None,
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -218,7 +127,6 @@ fn rejects_missing_eboot() {
         None,
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -267,14 +175,8 @@ fn parse_identity_requires_title_id_and_prefers_app_ver_over_version() {
 fn iso_rejects_missing_param_sfo() {
     let image = build_iso(vec![IsoNode::File("PS3_DISC.SFB", b"sfb".to_vec())]);
     let out = scratch();
-    let err = install_iso(
-        &image,
-        &keys(),
-        &out.join("vfs"),
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err =
+        install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
     assert!(matches!(err, GameInstallError::NoDiscParamSfo));
 }
 
@@ -289,14 +191,8 @@ fn iso_rejects_non_disc_category() {
         )],
     )]);
     let out = scratch();
-    let err = install_iso(
-        &image,
-        &keys(),
-        &out.join("vfs"),
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err =
+        install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
     assert!(matches!(err, GameInstallError::NotDiscGame { category } if category == "HG"));
 }
 
@@ -311,14 +207,8 @@ fn iso_rejects_missing_eboot() {
         )],
     )]);
     let out = scratch();
-    let err = install_iso(
-        &image,
-        &keys(),
-        &out.join("vfs"),
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err =
+        install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
     assert!(matches!(err, GameInstallError::NoDiscEboot));
     assert!(!out.join("vfs/dev_bdvd/BCES00664").exists());
 }
@@ -344,8 +234,7 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
     )]);
     let out = scratch();
     let vfs = out.join("vfs");
-    let installs = out.join("installs");
-    let err = install_iso(&image, &keys(), &vfs, &installs, InstallOptions::default()).unwrap_err();
+    let err = install_iso(&image, &keys(), &vfs, InstallOptions::default()).unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "synthetic disc EBOOT must fail the proof, got {err:?}"
@@ -359,12 +248,43 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
         "nothing committed"
     );
     assert!(
-        !installs.join("BCES00664.install.toml").exists(),
+        !vfs.join(".cellgov").exists(),
         "no record for a failed install"
     );
 }
 
 // --- Input sanitizers -------------------------------------------------
+
+/// Whatever an entry stages as, its `[files]` key has to be one the
+/// record gate accepts -- otherwise an install writes a record it
+/// cannot read back. `Path::components` splits `\` and a drive prefix
+/// on Win32 and not on a POSIX host, so which names reach the gate is
+/// host-dependent.
+#[test]
+fn every_entry_staging_accepts_yields_a_record_key_the_gate_accepts() {
+    let base = Path::new("base");
+    for entry in [
+        "PARAM.SFO",
+        "USRDIR/EBOOT.BIN",
+        "USRDIR//EBOOT.BIN",
+        "USRDIR/./EBOOT.BIN",
+        "USRDIR/a b/c.dat",
+        r"USRDIR\EBOOT.BIN",
+        "USRDIR/a:stream",
+        "C:/absolute",
+        "../escape",
+        "/rooted",
+        "",
+    ] {
+        if safe_join(base, entry).is_ok() {
+            let key = normalized_rel(entry);
+            assert!(
+                crate::store::record::tree_rel_path_is_safe(&key),
+                "{entry:?} staged as key {key:?}, which the record gate refuses"
+            );
+        }
+    }
+}
 
 #[test]
 fn safe_join_accepts_normal_nested_path() {
@@ -428,65 +348,6 @@ fn validate_content_id_rejects_a_dot_prefixed_id_that_would_escape_the_mount() {
     }
 }
 
-/// A base v2 record with the given `rap`, for round-trip tests.
-fn sample_record(rap: Option<RapRecord>) -> InstallRecord {
-    InstallRecord {
-        format_version: INSTALL_RECORD_FORMAT_VERSION,
-        source: SourceRecord {
-            kind: "pkg".to_string(),
-            sha256: sha256_of(b"source bytes"),
-        },
-        title: TitleRecord {
-            title_id: "NPUA80001".to_string(),
-            content_id: "UP9000-NPUA80001_00-FLOWPS3PROMOTION".to_string(),
-            category: "HG".to_string(),
-            title: "flOw".to_string(),
-            app_version: "01.00".to_string(),
-            distribution: "psn-hdd".to_string(),
-        },
-        files: std::collections::BTreeMap::from([(
-            "USRDIR/EBOOT.BIN".to_string(),
-            sha256_of(b"eboot bytes"),
-        )]),
-        rap,
-    }
-}
-
-#[test]
-fn install_record_round_trips_with_rap_present() {
-    let record = sample_record(Some(RapRecord {
-        filename: "UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap".to_string(),
-        sha256: sha256_of(b"rap bytes"),
-    }));
-    let text = toml::to_string(&record).expect("serialise");
-    assert!(text.contains("[files]"));
-    assert!(!text.contains("[[files]]"));
-    assert!(
-        text.contains("[rap]"),
-        "RAP-present record emits a [rap] table"
-    );
-    let back: InstallRecord = toml::from_str(&text).expect("parse");
-    assert_eq!(back.title.title_id, "NPUA80001");
-    assert_eq!(back.files.len(), 1);
-    assert!(back.files.contains_key("USRDIR/EBOOT.BIN"));
-    assert_eq!(
-        back.rap.as_ref().map(|r| r.filename.as_str()),
-        Some("UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap")
-    );
-}
-
-#[test]
-fn install_record_round_trips_with_rap_absent() {
-    let record = sample_record(None);
-    let text = toml::to_string(&record).expect("serialise");
-    assert!(
-        !text.contains("[rap]"),
-        "RAP-absent record has no [rap] table"
-    );
-    let back: InstallRecord = toml::from_str(&text).expect("parse");
-    assert!(back.rap.is_none());
-}
-
 // --- RAP contract + pre-commit residue (NPDRM EBOOT fixtures) ---------
 
 const NPD_TITLE_ID: &str = "NPUA80001";
@@ -530,7 +391,6 @@ fn pre_commit_fault_leaves_no_exdata_residue() {
         Some(&[0u8; 16]),
         &keys(),
         &vfs,
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -555,7 +415,6 @@ fn rejects_rap_required_for_network_license() {
         None,
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -574,7 +433,6 @@ fn rejects_wrong_size_rap() {
         Some(&[0u8; 15]),
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -659,7 +517,6 @@ fn rejects_existing_target_without_force_and_force_bypasses() {
         Some(&[0u8; 16]),
         &keys(),
         &vfs,
-        &out.join("installs"),
         InstallOptions::default(),
     )
     .unwrap_err();
@@ -672,7 +529,6 @@ fn rejects_existing_target_without_force_and_force_bypasses() {
         Some(&[0u8; 16]),
         &keys(),
         &vfs,
-        &out.join("installs"),
         InstallOptions {
             force: true,
             ..Default::default()
@@ -770,13 +626,17 @@ fn build_record_is_deterministic_and_sorted() {
         build_record(
             "pkg",
             b"src-bytes",
+            ArtifactRecord {
+                kind: ArtifactKind::TitleBase,
+                version: "01.00".to_string(),
+                store_path: "dev_hdd0/game/NPUA80001".to_string(),
+            },
             digests,
             TitleRecord {
                 title_id: "NPUA80001".to_string(),
                 content_id: "UP9000-NPUA80001_00-TEST".to_string(),
                 category: "HG".to_string(),
                 title: "T".to_string(),
-                app_version: "01.00".to_string(),
                 distribution: "psn-hdd".to_string(),
             },
             Some(RapRecord {
@@ -785,8 +645,8 @@ fn build_record_is_deterministic_and_sorted() {
             }),
         )
     };
-    let a = toml::to_string(&mk(&out.join("a"))).expect("serialise");
-    let b = toml::to_string(&mk(&out.join("b"))).expect("serialise");
+    let a = mk(&out.join("a")).to_toml().expect("serialise");
+    let b = mk(&out.join("b")).to_toml().expect("serialise");
     assert_eq!(a, b, "record TOML is a pure function of its inputs");
     assert!(
         a.find("\"PARAM.SFO\"").unwrap() < a.find("\"USRDIR/EBOOT.BIN\"").unwrap(),
@@ -948,10 +808,10 @@ fn a_zero_length_file_stages_as_an_empty_file_with_the_empty_digest() {
 #[test]
 fn a_leading_dot_content_id_is_not_a_usable_path_component() {
     for bad in ["", ".", "..", ".staging-NPUA80001", "a/b", "a\\b", "a b"] {
-        assert!(!content_id_is_safe(bad), "{bad:?} must be refused");
+        assert!(!is_safe_component(bad), "{bad:?} must be refused");
     }
     for ok in ["NPUA80001", "UP9000-NPUA80001_00-TEST", "BCES00664"] {
-        assert!(content_id_is_safe(ok), "{ok:?} must be accepted");
+        assert!(is_safe_component(ok), "{ok:?} must be accepted");
     }
 }
 
@@ -1118,7 +978,6 @@ fn a_pre_commit_fault_never_reports_finished() {
         Some(&[0u8; 16]),
         &keys(),
         &out.join("vfs"),
-        &out.join("installs"),
         InstallOptions {
             force: false,
             progress: &reporter,
@@ -1146,8 +1005,29 @@ fn a_pre_commit_fault_never_reports_finished() {
 fn commit_reports_clearing_only_when_a_target_already_exists() {
     use crate::progress::Phase;
     let out = scratch();
-    let record = sample_record(None);
-    let installs = out.join("installs");
+    let layout = StoreLayout::new(&*out);
+    let artifact = Artifact::TitleBase {
+        title_id: TitleId::new("NPUA80001").expect("synthetic title id"),
+    };
+    let record = build_record(
+        "pkg",
+        b"src",
+        ArtifactRecord {
+            kind: artifact.kind(),
+            version: "01.00".to_string(),
+            store_path: "dev_hdd0/game/NPUA80001".to_string(),
+        },
+        BTreeMap::new(),
+        TitleRecord {
+            title_id: "NPUA80001".to_string(),
+            content_id: "NPUA80001".to_string(),
+            category: "HG".to_string(),
+            title: "T".to_string(),
+            distribution: "psn-hdd".to_string(),
+        },
+        None,
+    );
+    let record_path = layout.record_path(&artifact);
     let run = |final_dir: &Path, staging_root: &Path| {
         let tree = staging_root.join("tree");
         std::fs::create_dir_all(&tree).unwrap();
@@ -1158,8 +1038,7 @@ fn commit_reports_clearing_only_when_a_target_already_exists() {
             &tree,
             final_dir,
             None,
-            &installs,
-            SYNTHETIC_TITLE_ID,
+            &record_path,
             &record,
             &reporter,
         )
@@ -1186,4 +1065,61 @@ fn commit_reports_clearing_only_when_a_target_already_exists() {
         "old target content survived"
     );
     assert!(existing.join("new").exists());
+}
+
+/// The store nests a record several directories below a `.cellgov` root
+/// a fresh VFS has not got yet, so `commit` creates the chain.
+#[test]
+fn commit_writes_the_record_where_the_store_says_it_lives() {
+    let out = scratch();
+    let layout = StoreLayout::new(&*out);
+    let artifact = Artifact::TitleBase {
+        title_id: TitleId::new("NPUA80001").expect("synthetic title id"),
+    };
+    let record = build_record(
+        "pkg",
+        b"src",
+        ArtifactRecord {
+            kind: artifact.kind(),
+            version: "01.00".to_string(),
+            store_path: "dev_hdd0/game/NPUA80001".to_string(),
+        },
+        BTreeMap::new(),
+        TitleRecord {
+            title_id: "NPUA80001".to_string(),
+            content_id: "NPUA80001".to_string(),
+            category: "HG".to_string(),
+            title: "T".to_string(),
+            distribution: "psn-hdd".to_string(),
+        },
+        None,
+    );
+    let expected = layout.record_path(&artifact);
+    assert!(
+        !expected
+            .parent()
+            .expect("a record is never a root")
+            .exists(),
+        "the record directory starts absent"
+    );
+
+    let staging = out.join(".staging-NPUA80001");
+    let tree = staging.join("tree");
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::write(tree.join("new"), b"n").unwrap();
+    let written = commit(
+        &staging,
+        &tree,
+        &out.join("dev_hdd0").join("game").join("NPUA80001"),
+        None,
+        &expected,
+        &record,
+        &(),
+    )
+    .expect("commit");
+
+    assert_eq!(written, expected);
+    let text = std::fs::read_to_string(&expected).expect("the record was written");
+    let back = InstallRecord::parse(&text).expect("the committed record parses");
+    assert_eq!(back.artifact.store_path, "dev_hdd0/game/NPUA80001");
 }

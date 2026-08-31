@@ -41,6 +41,7 @@ pub mod progress;
 pub mod pup;
 pub mod sce;
 pub mod self_image;
+pub mod store;
 pub mod tar;
 
 #[cfg(test)]

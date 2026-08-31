@@ -351,8 +351,8 @@ fn decrypt_self_flags_without_a_value_are_refused_by_name() {
 /// directory has to match what `install-game` wrote and what the boot
 /// path reads.
 #[test]
-fn exdata_dir_is_the_layout_install_game_commits_into() {
-    let d = game_install::exdata_dir(Path::new("vfs/dev_hdd0"));
+fn the_rap_probe_reads_the_directory_install_game_commits_into() {
+    let d = cellgov_install::store::StoreLayout::new("vfs").live_exdata_dir();
     let rendered = d.to_string_lossy().replace('\\', "/");
     assert_eq!(rendered, "vfs/dev_hdd0/home/00000001/exdata");
 }

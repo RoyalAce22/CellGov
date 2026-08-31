@@ -7,7 +7,7 @@ use super::*;
 fn the_default_vfs_root_lands_on_the_install_root_cellgov_install_writes() {
     assert_eq!(
         install_root_of(Path::new("vfs/dev_hdd0")),
-        PathBuf::from(cellgov_install::game_install::DEFAULT_VFS_ROOT),
+        PathBuf::from(cellgov_install::store::DEFAULT_VFS_ROOT),
     );
 }
 

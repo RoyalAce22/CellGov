@@ -33,14 +33,7 @@ fn an_eboot_without_an_sce_or_elf_magic_is_refused_as_still_encrypted_before_sta
     let image = disc_with_eboot(vec![0x8a, 0x3f, 0xc1, 0x07, 0x55, 0x19]);
     let out = scratch();
     let vfs = out.join("vfs");
-    let err = install_iso(
-        &image,
-        &keys(),
-        &vfs,
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err = install_iso(&image, &keys(), &vfs, InstallOptions::default()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -74,14 +67,8 @@ fn a_param_sfo_without_its_magic_is_refused_as_still_encrypted() {
         })],
     )]);
     let out = scratch();
-    let err = install_iso(
-        &image,
-        &keys(),
-        &out.join("vfs"),
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err =
+        install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -102,14 +89,8 @@ fn a_param_sfo_that_is_plaintext_but_malformed_keeps_its_own_error() {
         vec![IsoNode::File("PARAM.SFO", b"\0PSF".to_vec())],
     )]);
     let out = scratch();
-    let err = install_iso(
-        &image,
-        &keys(),
-        &out.join("vfs"),
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err =
+        install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
     assert!(
         matches!(
             err,
@@ -126,14 +107,8 @@ fn a_plain_elf_eboot_passes_the_encryption_check_and_reaches_the_proof() {
     eboot.extend_from_slice(b" not a SELF either");
     let image = disc_with_eboot(eboot);
     let out = scratch();
-    let err = install_iso(
-        &image,
-        &keys(),
-        &out.join("vfs"),
-        &out.join("installs"),
-        InstallOptions::default(),
-    )
-    .unwrap_err();
+    let err =
+        install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
     assert!(
         matches!(err, GameInstallError::DecryptProof(_)),
         "a plaintext ELF is not an encrypted image; the proof decides it: {err:?}"
@@ -148,14 +123,8 @@ fn an_eboot_shorter_than_a_magic_is_truncated_not_encrypted() {
     for eboot in [Vec::new(), vec![0x8a, 0x3f, 0xc1]] {
         let image = disc_with_eboot(eboot);
         let out = scratch();
-        let err = install_iso(
-            &image,
-            &keys(),
-            &out.join("vfs"),
-            &out.join("installs"),
-            InstallOptions::default(),
-        )
-        .unwrap_err();
+        let err =
+            install_iso(&image, &keys(), &out.join("vfs"), InstallOptions::default()).unwrap_err();
         assert!(
             matches!(
                 err,

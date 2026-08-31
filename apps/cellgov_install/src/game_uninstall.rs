@@ -1,15 +1,17 @@
 //! Record-driven game uninstall, the inverse of [`crate::game_install`].
 //!
-//! The install record (`installs/<title-id>.install.toml`) is the
-//! source of truth for what to remove. An optional verify gate
-//! re-hashes the live tree against the record -- the destroy analog of
-//! the install decrypt-proof -- before anything is touched.
+//! The install record is the source of truth for what to remove: its
+//! `store_path` names the tree. An optional verify gate re-hashes the
+//! live tree against the record -- the destroy analog of the install
+//! decrypt-proof -- before anything is touched.
 //!
 //! # Invariants
 //!
-//! - The live game directory is renamed to a `.uninstalling-<title-id>`
-//!   tombstone (the atomic point) before RAP, record, and tombstone are
-//!   removed.
+//! - A record steers nothing until it is checked against the title the
+//!   caller named: the right entry kind, and a `store_path` on the way
+//!   to that title's own tree.
+//! - The live game directory is renamed to a hidden sibling tombstone
+//!   (the atomic point) before RAP, record, and tombstone are removed.
 //! - The record is removed *before* the tombstone is deleted, so a
 //!   crash mid-teardown leaves at most an orphan `.uninstalling-*`
 //!   tombstone -- off the boot path, swept on the next uninstall of
@@ -17,8 +19,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::game_install::{content_id_is_safe, exdata_dir, sha256_of, InstallRecord};
+use crate::game_install::sha256_of;
 use crate::manifest::Sha256 as HexSha256;
+use crate::store::layout::{tombstone_sibling, Artifact, ArtifactKind, StoreLayout, TitleId};
+use crate::store::record::InstallRecord;
 
 /// Options for [`uninstall`].
 #[derive(Debug, Clone, Copy)]
@@ -75,14 +79,35 @@ pub enum GameUninstallError {
     /// Loading the install record failed: bad TOML, or a schema this
     /// build does not read.
     #[error("parse install record: {0}")]
-    RecordParse(#[from] crate::game_install::InstallRecordParseError),
+    RecordParse(#[from] crate::store::record::InstallRecordParseError),
     /// The operator-supplied title-id is not usable as a single path
-    /// component under the mount roots (see
-    /// `game_install::content_id_is_safe`).
+    /// component under the store roots, so it names no record.
     #[error("unsafe title-id {title_id:?}")]
     UnsafeTitleId {
         /// The offending title-id.
         title_id: String,
+        /// Which rule it broke.
+        #[source]
+        source: crate::store::layout::StoreKeyError,
+    },
+    /// The record filed under this title describes some other kind of
+    /// store entry, so nothing here names a title tree to remove.
+    #[error("install record for {title_id:?} describes a {} entry, not a title base", kind.as_str())]
+    RecordKindMismatch {
+        /// The requested title-id.
+        title_id: String,
+        /// The kind the record declared.
+        kind: ArtifactKind,
+    },
+    /// The record's `store_path` names a tree that is not this title's.
+    #[error(
+        "install record for {title_id:?} names the tree {store_path:?}, which is not this title's"
+    )]
+    RecordTreeForeign {
+        /// The requested title-id.
+        title_id: String,
+        /// The `store_path` the record declared.
+        store_path: String,
     },
     /// A file the record lists is absent from the live tree; pass
     /// `force` to uninstall anyway.
@@ -209,6 +234,38 @@ fn verify_against_record(
     Ok((verified, diverged))
 }
 
+/// Refuse a record that does not describe the title the caller named.
+///
+/// The parse gate proves `store_path` stays under the VFS root, but not
+/// whose tree it names: under that root it is free to name another
+/// title's tree, or a whole mount, and it steers the tombstone rename
+/// and the `remove_dir_all` below.
+fn check_record_describes(
+    title_id: &str,
+    record: &InstallRecord,
+) -> Result<(), GameUninstallError> {
+    if record.artifact.kind != ArtifactKind::TitleBase {
+        return Err(GameUninstallError::RecordKindMismatch {
+            title_id: title_id.to_string(),
+            kind: record.artifact.kind,
+        });
+    }
+    // Which component carries the id is the store layout's business;
+    // every layout puts it somewhere on the path to a title's own tree.
+    if !record
+        .artifact
+        .store_path
+        .split('/')
+        .any(|part| part == title_id)
+    {
+        return Err(GameUninstallError::RecordTreeForeign {
+            title_id: title_id.to_string(),
+            store_path: record.artifact.store_path.clone(),
+        });
+    }
+    Ok(())
+}
+
 /// Remove an installed title named by its record. See the module
 /// invariants for the rename-then-teardown ordering.
 ///
@@ -218,20 +275,16 @@ fn verify_against_record(
 pub fn uninstall(
     title_id: &str,
     output_dir: &Path,
-    installs_dir: &Path,
     opts: UninstallOptions,
 ) -> Result<GameUninstallOutcome, GameUninstallError> {
-    // The title-id is joined onto the record dir and both mount roots
-    // and spells the tombstone, so it takes the same path-component rule
-    // the install side applies to the id it commits under.
-    if !content_id_is_safe(title_id) {
-        return Err(GameUninstallError::UnsafeTitleId {
-            title_id: title_id.to_string(),
-        });
-    }
+    let key = TitleId::new(title_id).map_err(|source| GameUninstallError::UnsafeTitleId {
+        title_id: title_id.to_string(),
+        source,
+    })?;
 
     // Load the record (the source of truth for what to remove).
-    let record_path = installs_dir.join(format!("{title_id}.install.toml"));
+    let layout = StoreLayout::new(output_dir);
+    let record_path = layout.record_path(&Artifact::TitleBase { title_id: key });
     let text = match std::fs::read_to_string(&record_path) {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -247,18 +300,16 @@ pub fn uninstall(
         }
     };
     let record = InstallRecord::parse(&text)?;
+    check_record_describes(title_id, &record)?;
 
-    // Resolve targets from the recorded distribution / source kind.
-    let dev_hdd0 = output_dir.join("dev_hdd0");
-    let is_disc = record.title.distribution == "disc-iso" || record.source.kind == "iso";
-    let (game_dir, rap_path) = if is_disc {
-        (output_dir.join("dev_bdvd").join(title_id), None)
-    } else {
-        let exdata = exdata_dir(&dev_hdd0);
-        let rap = record.rap.as_ref().map(|r| exdata.join(&r.filename));
-        (dev_hdd0.join("game").join(title_id), rap)
-    };
-    let tombstone = game_dir.with_file_name(format!(".uninstalling-{title_id}"));
+    let game_dir = layout.resolve_store_path(&record.artifact.store_path);
+    // The RAP is keyed by content id in the live exdata directory,
+    // which no store entry owns.
+    let rap_path = record
+        .rap
+        .as_ref()
+        .map(|r| layout.live_exdata_dir().join(&r.filename));
+    let tombstone = tombstone_sibling(&game_dir);
 
     // Clear any stale tombstone left by a prior interrupted uninstall.
     remove_dir_if_present(&tombstone)?;

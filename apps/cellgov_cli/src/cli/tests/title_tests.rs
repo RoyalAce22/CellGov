@@ -53,7 +53,7 @@ fn resolve_ps3_vfs_root_default_is_project_relative() {
     assert_eq!(
         crate::cli::keys::fixed_vault_root(),
         Some(std::path::Path::new(
-            cellgov_install::game_install::DEFAULT_VFS_ROOT
+            cellgov_install::store::DEFAULT_VFS_ROOT
         )),
         "the vault is read beside dev_hdd0, where `cellgov_install` writes it",
     );

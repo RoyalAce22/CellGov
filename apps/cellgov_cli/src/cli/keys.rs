@@ -116,7 +116,7 @@ fn key_vault() -> Result<&'static KeyVault, &'static KeyVaultError> {
     static VAULT: OnceLock<Result<KeyVault, KeyVaultError>> = OnceLock::new();
     VAULT
         .get_or_init(|| {
-            let default = || PathBuf::from(cellgov_install::game_install::DEFAULT_VFS_ROOT);
+            let default = || PathBuf::from(cellgov_install::store::DEFAULT_VFS_ROOT);
             KeyVault::load_for_vfs(VAULT_ROOT.get_or_init(default))
         })
         .as_ref()

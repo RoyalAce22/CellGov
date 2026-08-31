@@ -84,7 +84,7 @@ impl KeyVault {
     /// [`KeyVaultError::NotConfigured`] when neither exists, plus every
     /// parse refusal of the one that does.
     pub fn load() -> Result<Self, KeyVaultError> {
-        Self::load_for_vfs(Path::new(crate::game_install::DEFAULT_VFS_ROOT))
+        Self::load_for_vfs(Path::new(crate::store::DEFAULT_VFS_ROOT))
     }
 
     /// [`KeyVault::load`] with an explicit VFS root for the installed

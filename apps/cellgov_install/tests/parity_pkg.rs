@@ -137,7 +137,6 @@ fn flow_pkg_install_matches_the_rpcs3_extracted_eboot() {
         Some(&rap),
         &keys::vault(),
         &vfs,
-        &scratch.join("installs"),
         InstallOptions {
             force: true,
             ..Default::default()

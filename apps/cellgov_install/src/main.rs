@@ -478,7 +478,7 @@ fn cmd_decrypt_self(args: &[String]) {
     // Auto, not AppOnly: firmware and disc SELFs are APP-keyed and
     // take the same path they always did, while an NPDRM title finds
     // its klicensee the way the boot path does.
-    let exdata = game_install::exdata_dir(&parsed.vfs_root.join("dev_hdd0"));
+    let exdata = cellgov_install::store::StoreLayout::new(&parsed.vfs_root).live_exdata_dir();
     let resolve_error: RefCell<Option<FirmwareCliError>> = RefCell::new(None);
     let resolver = |npd: &NpdHeaderInfo| -> Option<Rap> {
         match resolve_rap(parsed.rap_path.as_deref(), &exdata, &npd.content_id) {
@@ -795,7 +795,7 @@ struct InstallGameArgs {
     render: RenderFlags,
 }
 
-const DEFAULT_GAME_INSTALL_OUTPUT: &str = game_install::DEFAULT_VFS_ROOT;
+const DEFAULT_GAME_INSTALL_OUTPUT: &str = cellgov_install::store::DEFAULT_VFS_ROOT;
 
 fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareCliError> {
     if args.len() < 3 {
@@ -877,7 +877,6 @@ fn cmd_install_game(args: &[String]) {
         pkg_data.len() as f64 / (1024.0 * 1024.0)
     );
 
-    let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let bar = ProgressBar::start(
         parsed.render.caps(),
         &INSTALL_TASK,
@@ -889,7 +888,6 @@ fn cmd_install_game(args: &[String]) {
         rap_data.as_deref(),
         &keys,
         &parsed.output_dir,
-        &installs_dir,
         InstallOptions {
             force: parsed.force,
             progress: &*reporter,
@@ -994,7 +992,6 @@ fn cmd_install_iso(args: &[String]) {
         iso_data.len() as f64 / (1024.0 * 1024.0)
     );
 
-    let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let bar = ProgressBar::start(
         parsed.render.caps(),
         &INSTALL_TASK,
@@ -1005,7 +1002,6 @@ fn cmd_install_iso(args: &[String]) {
         &iso_data,
         &keys,
         &parsed.output_dir,
-        &installs_dir,
         InstallOptions {
             force: parsed.force,
             progress: &*reporter,
@@ -1085,18 +1081,16 @@ fn cmd_uninstall(args: &[String]) {
         std::process::exit(1);
     });
 
-    let installs_dir = game_install::installs_dir(&parsed.output_dir);
     let opts = game_uninstall::UninstallOptions {
         verify: parsed.verify,
         keep_rap: parsed.keep_rap,
         force: parsed.force,
     };
-    let outcome =
-        game_uninstall::uninstall(&parsed.title_id, &parsed.output_dir, &installs_dir, opts)
-            .unwrap_or_else(|e| {
-                eprintln!("uninstall failed: {e}");
-                std::process::exit(1);
-            });
+    let outcome = game_uninstall::uninstall(&parsed.title_id, &parsed.output_dir, opts)
+        .unwrap_or_else(|e| {
+            eprintln!("uninstall failed: {e}");
+            std::process::exit(1);
+        });
 
     println!("cellgov_install: uninstalled {}", outcome.title_id);
     println!("  removed game dir {}", outcome.game_dir_removed.display());
