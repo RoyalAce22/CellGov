@@ -27,6 +27,11 @@ use std::ops::Range;
 
 use cellgov_lv2::FIRST_KERNEL_ID;
 use cellgov_mem::be::read_u32;
+use cellgov_ps3_abi::sys_process::{
+    ProcessObjectClassId, SYS_COND_OBJECT, SYS_EVENT_FLAG_OBJECT, SYS_EVENT_QUEUE_OBJECT,
+    SYS_LWCOND_OBJECT, SYS_LWMUTEX_OBJECT, SYS_MUTEX_OBJECT, SYS_RWLOCK_OBJECT,
+    SYS_SEMAPHORE_OBJECT,
+};
 
 /// Byte offset of the `sleep_queue` field within `sys_lwmutex_t`.
 /// The fields run lock_var (owner, waiter), attribute,
@@ -195,38 +200,47 @@ pub enum KernelHandleKind {
     EventFlag,
 }
 
-/// Per-kind id bases the comparison runner's allocator produces:
-/// `id_base` in each RPCS3 `Emu/Cell/lv2/sys_*.h` object. Every kind
-/// shares `lv2_obj`'s `id_step = 0x100` and `id_count = 8192`, and
-/// the low byte holds that id manager's reuse counter (`sys_sync.h`
-/// `lv2_obj::id_invl_range`).
+/// The sync-primitive classes this recogniser reads out of a
+/// comparison runner's dump, keyed by the [`ProcessObjectClassId`]
+/// each one's ids carry in their top byte.
 ///
-/// The table lists only kinds whose id window lies outside memory a
-/// guest can map on either runner. `sys_event_port` (base 0x0e) and
-/// `sys_timer` (base 0x11) sit inside that runner's main and user
-/// areas (`vm.cpp` `vm::init` block layout and `_find_map`). A heap
-/// pointer there would pass as a handle and hide a real pointer
-/// divergence, so those two kinds stay unclassified.
-const RPCS3_ID_BASES: &[(u32, KernelHandleKind)] = &[
-    (0x8500_0000, KernelHandleKind::Mutex),
-    (0x8600_0000, KernelHandleKind::Cond),
-    (0x8800_0000, KernelHandleKind::RwLock),
-    (0x8d00_0000, KernelHandleKind::EventQueue),
-    (0x9500_0000, KernelHandleKind::LwMutex),
-    (0x9600_0000, KernelHandleKind::Semaphore),
-    (0x9700_0000, KernelHandleKind::LwCond),
-    (0x9800_0000, KernelHandleKind::EventFlag),
+/// The table lists only the classes whose id window falls outside the
+/// addresses guest allocations come from. `SYS_EVENT_PORT_OBJECT`
+/// (0x0e) and `SYS_TIMER_OBJECT` (0x11) put theirs at the bottom of
+/// the address space. A heap pointer there would pass as a handle and
+/// hide a real pointer divergence, so those two stay unclassified.
+/// [`FIRST_KERNEL_ID`] states the same rule for CellGov's own ids.
+const RUNNER_ID_CLASSES: &[(ProcessObjectClassId, KernelHandleKind)] = &[
+    (SYS_MUTEX_OBJECT, KernelHandleKind::Mutex),
+    (SYS_COND_OBJECT, KernelHandleKind::Cond),
+    (SYS_RWLOCK_OBJECT, KernelHandleKind::RwLock),
+    (SYS_EVENT_QUEUE_OBJECT, KernelHandleKind::EventQueue),
+    (SYS_LWMUTEX_OBJECT, KernelHandleKind::LwMutex),
+    (SYS_SEMAPHORE_OBJECT, KernelHandleKind::Semaphore),
+    (SYS_LWCOND_OBJECT, KernelHandleKind::LwCond),
+    (SYS_EVENT_FLAG_OBJECT, KernelHandleKind::EventFlag),
 ];
-const RPCS3_ID_STEP: u32 = 0x100;
-const RPCS3_ID_COUNT: u32 = 8192;
+
+/// Bits below the class id in a handle the comparison runner minted.
+const RUNNER_ID_CLASS_SHIFT: u32 = 24;
+
+/// Stride between consecutive ids of one class in that runner's
+/// dumps. The bytes under it hold its allocator's reuse counter.
+const RUNNER_ID_STEP: u32 = 0x100;
+
+/// Ids that runner's allocator hands out per class.
+const RUNNER_ID_COUNT: u32 = 8192;
 
 /// The kind of LV2 object `w` names, when the comparison runner's
 /// allocator minted it.
-pub fn rpcs3_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
-    let base = w & 0xff00_0000;
-    let (_, kind) = RPCS3_ID_BASES.iter().find(|(b, _)| *b == base)?;
-    let index = (w - base) / RPCS3_ID_STEP;
-    (index < RPCS3_ID_COUNT).then_some(*kind)
+///
+/// The stride and the per-class count belong to that runner. Only the
+/// class id in the top byte is a constant CellGov holds itself.
+pub fn runner_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
+    let class = w >> RUNNER_ID_CLASS_SHIFT;
+    let (_, kind) = RUNNER_ID_CLASSES.iter().find(|(c, _)| *c == class)?;
+    let index = (w & ((1 << RUNNER_ID_CLASS_SHIFT) - 1)) / RUNNER_ID_STEP;
+    (index < RUNNER_ID_COUNT).then_some(*kind)
 }
 
 /// The kind of LV2 object a 4-byte word holds when each allocator
@@ -236,8 +250,8 @@ pub fn rpcs3_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
 /// between like runners: one allocator produced both values, so a
 /// difference is real.
 pub fn kernel_handle_pair(a: u32, b: u32) -> Option<KernelHandleKind> {
-    let pair = |rpcs3: u32, cellgov: u32| {
-        let kind = rpcs3_kernel_handle_kind(rpcs3)?;
+    let pair = |runner: u32, cellgov: u32| {
+        let kind = runner_kernel_handle_kind(runner)?;
         let cellgov_shaped = match kind {
             KernelHandleKind::LwMutex => is_cellgov_lwmutex_id(cellgov),
             _ => is_cellgov_kernel_id(cellgov),

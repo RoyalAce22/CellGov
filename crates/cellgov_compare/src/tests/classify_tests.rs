@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::observation::{NamedMemoryRegion, ObservationMetadata, ObservedOutcome};
+use cellgov_ps3_abi::sys_process::SYS_MUTEX_OBJECT;
 use strum::VariantArray;
 
 #[test]
@@ -413,13 +414,19 @@ fn region_with_word(addr: u64, offset: usize, word: u32) -> NamedMemoryRegion {
     r
 }
 
+/// A `sys_mutex` id as the comparison runner's dumps spell one: the
+/// [`SYS_MUTEX_OBJECT`] class id in the top byte over that runner's
+/// own per-class index.
+const RUNNER_MUTEX_ID: u32 = (SYS_MUTEX_OBJECT << 24) | 0x300;
+
 #[test]
 fn a_word_holding_each_runners_kernel_id_shape_classifies_without_a_populated_range() {
     let a = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
-    let b = region_with_word(0x860000, 0x40, 0x8500_0300);
+    let b = region_with_word(0x860000, 0x40, RUNNER_MUTEX_ID);
     let ctx = ClassifierContext::default();
-    // The bytes differ at 0x40 (0x40 vs 0x85), agree at 0x41 (0x00),
-    // and differ at 0x42..0x44: two runs on one word.
+    // The bytes differ at 0x40 (CellGov's top byte against the class
+    // id), agree at 0x41 (0x00), and differ at 0x42..0x44: two runs
+    // on one word.
     assert_eq!(
         classify(&div(0x40, 1), a.addr, &ctx, &a.data, &b.data),
         DivergenceClass::SyncPrimitiveId
@@ -445,9 +452,9 @@ fn a_word_with_only_one_kernel_id_shape_stays_unclassified() {
         DivergenceClass::Unclassified,
         "a handle CellGov minted against nothing on the other side is a real gap"
     );
-    let rpcs3 = region_with_word(0x860000, 0x40, 0x8500_0300);
+    let runner = region_with_word(0x860000, 0x40, RUNNER_MUTEX_ID);
     assert_eq!(
-        classify(&div(0x40, 4), rpcs3.addr, &ctx, &rpcs3.data, &zero.data),
+        classify(&div(0x40, 4), runner.addr, &ctx, &runner.data, &zero.data),
         DivergenceClass::Unclassified
     );
 }
@@ -456,7 +463,7 @@ fn a_word_with_only_one_kernel_id_shape_stays_unclassified() {
 fn a_run_crossing_a_word_boundary_is_not_a_handle_pair() {
     let ctx = ClassifierContext::default();
     let mut a = region_with_word(0x860000, 0x40, cellgov_lv2::FIRST_KERNEL_ID + 2);
-    let mut b = region_with_word(0x860000, 0x40, 0x8500_0300);
+    let mut b = region_with_word(0x860000, 0x40, RUNNER_MUTEX_ID);
     a.data[0x44] = 1;
     b.data[0x44] = 2;
     assert_eq!(

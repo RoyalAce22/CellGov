@@ -1,6 +1,9 @@
 //! Heuristic scanning of guest data for sys_lwmutex handle slots, with sentinel and field validation.
 
 use super::*;
+use cellgov_ps3_abi::sys_process::{
+    ALL_PROCESS_OBJECT_CLASS_IDS, SYS_EVENT_PORT_OBJECT, SYS_FS_FD_OBJECT, SYS_TIMER_OBJECT,
+};
 
 fn emit_lwmutex(buf: &mut Vec<u8>, attribute: u32, sleep_queue: u32) {
     buf.extend_from_slice(&LWMUTEX_FREE.to_be_bytes());
@@ -73,8 +76,9 @@ fn rejects_nonzero_pad() {
 #[test]
 fn rejects_large_sleep_queue_value() {
     let mut data = Vec::new();
-    // sleep_queue = 0x95002000 (RPCS3-style id, larger than CG's plausible cap).
-    emit_lwmutex(&mut data, 0x22, 0x95002000);
+    // A handle shaped the way the comparison runner mints one, which
+    // is far past CG's own plausible cap.
+    emit_lwmutex(&mut data, 0x22, runner_id(SYS_LWMUTEX_OBJECT, 32, 0));
     let ranges = find_sys_lwmutex_handle_slots(&data, 0x860000);
     // CG's snapshot should never carry an id this large.
     assert!(ranges.is_empty());
@@ -124,7 +128,12 @@ fn an_lwcond_pointing_elsewhere_or_holding_no_kernel_id_is_skipped() {
     emit_lwmutex(&mut data, 0x22, 13);
     emit_lwcond(&mut data, 0x860040, FIRST_KERNEL_ID + 4); // no lwmutex at 0x860040
     emit_lwcond(&mut data, 0x860000, 0); // never created: queue id still zero
-    emit_lwcond(&mut data, 0x860000, 0x9700_0100); // an RPCS3-shaped id has no place in CG's snapshot
+                                         // The other runner's id shape has no place in CG's own snapshot.
+    emit_lwcond(
+        &mut data,
+        0x860000,
+        (cellgov_ps3_abi::sys_process::SYS_LWCOND_OBJECT << 24) | 0x100,
+    );
     let lwmutex = find_sys_lwmutex_handle_slots(&data, base);
     assert!(find_sys_lwcond_handle_slots(&data, base, &lwmutex).is_empty());
 }
@@ -145,59 +154,91 @@ fn an_lwmutex_slot_that_no_struct_can_hold_is_refused() {
     find_sys_lwcond_handle_slots(&data, 0, &[below_any_sleep_queue]);
 }
 
+/// An id of `class` at `index` in the comparison runner's per-class
+/// window, spelled the way its dumps carry one.
+fn runner_id(class: ProcessObjectClassId, index: u32, reuse: u32) -> u32 {
+    (class << 24) | (index * 0x100) | reuse
+}
+
 #[test]
-fn rpcs3_ids_are_recognised_by_kind_and_bounded_by_index() {
+fn a_runner_id_is_recognised_by_class_and_bounded_by_index() {
     assert_eq!(
-        rpcs3_kernel_handle_kind(0x8500_0100),
+        runner_kernel_handle_kind(runner_id(SYS_MUTEX_OBJECT, 1, 0)),
         Some(KernelHandleKind::Mutex)
     );
     assert_eq!(
-        rpcs3_kernel_handle_kind(0x8600_0203),
+        runner_kernel_handle_kind(runner_id(SYS_COND_OBJECT, 2, 3)),
         Some(KernelHandleKind::Cond),
-        "the low byte is the id manager's reuse counter"
+        "the bytes under the stride are the allocator's reuse counter"
     );
     assert_eq!(
-        rpcs3_kernel_handle_kind(0x9800_0000),
+        runner_kernel_handle_kind(runner_id(SYS_EVENT_FLAG_OBJECT, 0, 0)),
         Some(KernelHandleKind::EventFlag)
     );
     assert_eq!(
-        rpcs3_kernel_handle_kind(0x8500_0000 + 8191 * 0x100),
+        runner_kernel_handle_kind(runner_id(SYS_MUTEX_OBJECT, 8191, 0)),
         Some(KernelHandleKind::Mutex)
     );
     assert_eq!(
-        rpcs3_kernel_handle_kind(0x8500_0000 + 8192 * 0x100),
+        runner_kernel_handle_kind(runner_id(SYS_MUTEX_OBJECT, 8192, 0)),
         None,
-        "past id_count is not an id"
+        "past the per-class count is not an id"
     );
-    assert_eq!(rpcs3_kernel_handle_kind(0x0001_0000), None);
-    assert_eq!(rpcs3_kernel_handle_kind(FIRST_KERNEL_ID), None);
+    assert_eq!(runner_kernel_handle_kind(0x0001_0000), None);
+    assert_eq!(runner_kernel_handle_kind(FIRST_KERNEL_ID), None);
+}
+
+#[test]
+fn every_recognised_class_is_a_sync_primitive_the_host_counts() {
+    // A word the recogniser accepts always names a class CellGov
+    // itself models. The two the table leaves out have their own
+    // test below.
+    let sync_classes: Vec<ProcessObjectClassId> = ALL_PROCESS_OBJECT_CLASS_IDS
+        .iter()
+        .copied()
+        .filter(|c| ![SYS_EVENT_PORT_OBJECT, SYS_TIMER_OBJECT, SYS_FS_FD_OBJECT].contains(c))
+        .collect();
+    for class in sync_classes {
+        assert!(
+            runner_kernel_handle_kind(runner_id(class, 0, 0)).is_some(),
+            "class {class:#x} is in the ABI list and the recogniser drops it: \
+             add it to RUNNER_ID_CLASSES, or to this test's exclusions if its \
+             id window can collide with a guest address"
+        );
+    }
 }
 
 #[test]
 fn a_kernel_handle_pair_needs_one_shape_per_side_in_either_order() {
     let cg = FIRST_KERNEL_ID + 7;
     assert_eq!(
-        kernel_handle_pair(0x8500_0300, cg),
+        kernel_handle_pair(runner_id(SYS_MUTEX_OBJECT, 3, 0), cg),
         Some(KernelHandleKind::Mutex)
     );
     assert_eq!(
-        kernel_handle_pair(cg, 0x9600_0100),
+        kernel_handle_pair(cg, runner_id(SYS_SEMAPHORE_OBJECT, 1, 0)),
         Some(KernelHandleKind::Semaphore)
     );
     assert_eq!(
-        kernel_handle_pair(0x9500_0200, 3),
+        kernel_handle_pair(runner_id(SYS_LWMUTEX_OBJECT, 2, 0), 3),
         Some(KernelHandleKind::LwMutex),
         "lwmutex ids count from 1 on the CellGov side"
     );
-    assert_eq!(kernel_handle_pair(0x9500_0200, cg), None);
+    assert_eq!(
+        kernel_handle_pair(runner_id(SYS_LWMUTEX_OBJECT, 2, 0), cg),
+        None
+    );
     assert_eq!(kernel_handle_pair(cg, cg + 1), None, "two CellGov ids");
     assert_eq!(
-        kernel_handle_pair(0x8500_0100, 0x8500_0200),
+        kernel_handle_pair(
+            runner_id(SYS_MUTEX_OBJECT, 1, 0),
+            runner_id(SYS_MUTEX_OBJECT, 2, 0)
+        ),
         None,
-        "two RPCS3 ids"
+        "two ids from the same runner"
     );
     assert_eq!(
-        kernel_handle_pair(0x8500_0100, 0),
+        kernel_handle_pair(runner_id(SYS_MUTEX_OBJECT, 1, 0), 0),
         None,
         "never created on the CellGov side"
     );
@@ -211,8 +252,11 @@ fn a_kernel_handle_pair_needs_one_shape_per_side_in_either_order() {
 #[test]
 fn a_kind_whose_id_window_lies_in_guest_memory_is_never_paired() {
     let cg = FIRST_KERNEL_ID + 3;
-    for word in [0x0e00_0100, 0x1100_0200] {
-        assert_eq!(rpcs3_kernel_handle_kind(word), None, "{word:#x}");
+    for word in [
+        runner_id(SYS_EVENT_PORT_OBJECT, 1, 0),
+        runner_id(SYS_TIMER_OBJECT, 2, 0),
+    ] {
+        assert_eq!(runner_kernel_handle_kind(word), None, "{word:#x}");
         assert_eq!(kernel_handle_pair(word, cg), None, "{word:#x}");
         assert_eq!(kernel_handle_pair(cg, word), None, "{word:#x}");
     }
