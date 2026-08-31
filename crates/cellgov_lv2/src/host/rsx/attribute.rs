@@ -138,10 +138,13 @@ impl Lv2Host {
 
     /// FLIP_BUFFER (0x102): emits [`Effect::RsxFlipRequest`].
     ///
-    /// - Queued path (`flip_target & 0x8000_0000` set): low 4 bits
-    ///   carry the buffer index. Nibbles >= `COUNT_MAX` clamp to 0
-    ///   with a `log_invariant_break` (RPCS3's `lastQueuedBufferId`
-    ///   fallback is not modeled).
+    /// Firmware always sets bit 31 and masks the buffer id to three
+    /// bits. Both clamp-to-0 fallbacks below are CellGov's own answer
+    /// for a guest that builds `flip_target` itself.
+    ///
+    /// - Queued path (`flip_target & 0x8000_0000` set): the low nibble
+    ///   carries the buffer index. Values at or above `COUNT_MAX`
+    ///   clamp to 0 with a `log_invariant_break`.
     /// - Direct path: `flip_target` is a display-buffer offset; the
     ///   first slot in `display_buffers[0..display_buffers_count]`
     ///   whose `offset == flip_target` wins. No match clamps to 0
@@ -168,10 +171,10 @@ impl Lv2Host {
             "dispatch.sys_rsx_context_attribute_flip_queued_nibble_out_of_range",
             format_args!(
                 "FLIP_BUFFER queued path: low-nibble buffer index {nibble} \
-                 is out of range (COUNT_MAX={cap}); RPCS3 would substitute \
-                 lastQueuedBufferId here. Falling back to buffer_index=0 \
-                 (no consumer for lastQueuedBufferId yet; the witness keeps \
-                 the gap loud).",
+                 is out of range (COUNT_MAX={cap}); falling back to \
+                 buffer_index=0. No firmware caller can produce this -- gcm \
+                 masks the id to three bits -- so what the kernel does with \
+                 it is unknown.",
                 cap = display_buffer::COUNT_MAX,
             ),
         );
@@ -195,21 +198,26 @@ impl Lv2Host {
             format_args!(
                 "FLIP_BUFFER direct path: no display_buffers[i].offset == \
                  0x{target_offset:08x} for i in 0..{count}; falling back to \
-                 buffer_index=0 (matches RPCS3's case-0x102 else-branch error path)",
+                 buffer_index=0",
             ),
         );
         0
     }
 
-    /// Fallback for unknown `package_id`: logs once via
+    /// Fallback for a `package_id` with no arm: logs once via
     /// [`Lv2Host::log_invariant_break`], returns `CELL_EINVAL`.
+    ///
+    /// Firmware sends package ids that have no arm here, among them
+    /// the cursor set (`0x10B`-`0x10D`) and the tile set
+    /// (`0x300`-`0x302`). The errno stands in for behaviour CellGov
+    /// does not implement.
     fn sys_rsx_attribute_unknown(&mut self, package_id: u32) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.sys_rsx_context_attribute_unsupported_package",
             format_args!(
                 "sys_rsx_context_attribute package_id {package_id:#x} not yet wired; \
-                 returning CELL_EINVAL (matches RPCS3 default-arm errno). \
-                 Honest not-implemented, not an internal-invariant violation."
+                 returning CELL_EINVAL. Honest not-implemented, not an \
+                 internal-invariant violation."
             ),
         );
         Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())

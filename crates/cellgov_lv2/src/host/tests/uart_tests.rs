@@ -316,9 +316,40 @@ fn syscon_replies_follow_plain_replies_and_hdmi_0_monitor_info_is_204_bytes() {
     );
     let info = &monitor[12..];
     assert_eq!(info[11], av::PS3AV_MONITOR_TYPE_HDMI);
-    assert_eq!(&info[12..25], b"RPCS3 VirtMon");
-    assert_eq!(rd32(info, 32), av::PS3AV_RESBIT_1280X720P, "native 60 Hz");
+    assert_eq!(&info[12..24], b"CellGov HDMI");
+    assert_eq!(&info[24..28], &[0u8; 4], "the name field is NUL-padded");
+    assert_eq!(rd32(info, 32), av::PS3AV_RESBIT_1920X1080P, "native 60 Hz");
+    assert_eq!(rd32(info, 40), 0, "the 50 Hz table has no native timing");
+    assert_eq!(rd32(info, 52), 0, "an HDTV carries no VESA mode");
     assert_eq!(rd16(info, 86), 7, "audio blocks");
+}
+
+#[test]
+fn the_hdmi_monitor_advertises_only_cea_modes_and_its_native_timing_is_among_them() {
+    let mut host = root_host();
+    let stream = roundtrip(
+        &mut host,
+        &pkt(av::PS3AV_CID_AV_GET_MONITOR_INFO, &[0, 0, 0, 0]),
+    );
+    assert_eq!(stream.len(), 12 + av::PS3AV_MONITOR_INFO_HDMI_LEN);
+    let info = &stream[12..];
+    let hd = av::PS3AV_RESBIT_1280X720P | av::PS3AV_RESBIT_1920X1080I | av::PS3AV_RESBIT_1920X1080P;
+    let res_60 = rd32(info, 28);
+    let res_50 = rd32(info, 36);
+    assert_eq!(res_60, av::PS3AV_RESBIT_720X480P | hd);
+    assert_eq!(res_50, av::PS3AV_RESBIT_720X576P | hd);
+    assert_eq!(
+        res_60 & rd32(info, 32),
+        rd32(info, 32),
+        "the native timing must be one of the modes the same table advertises"
+    );
+    assert_eq!(rd32(info, 44), 0, "no res_other table");
+    assert_eq!(rd32(info, 52), 0, "no VESA table");
+    assert_eq!(
+        &info[160..200],
+        &[0u8; 40],
+        "the five 3D resolution blocks stay empty"
+    );
 }
 
 #[test]

@@ -612,8 +612,10 @@ pub enum Lv2Request {
         /// via a named invariant-break at dispatch.
         arg4: u64,
     },
-    /// `sys_process_get_status`. RPCS3 stubs it (todo, CELL_OK);
-    /// CellGov models a minimal liveness poll keyed by pid.
+    /// `sys_process_get_status`: the status comes back as the
+    /// syscall's return value, so the request carries only `pid`.
+    /// CellGov's liveness codes do not match the ones firmware waits
+    /// on; see `Lv2Host::dispatch_process_get_status`.
     ProcessGetStatus {
         /// In: target pid.
         pid: u32,
@@ -840,10 +842,10 @@ pub enum Lv2Request {
         /// In: directory fd to close.
         fd: u32,
     },
-    /// `sys_fs_write` request. The FS model is read-side only, so
-    /// the dispatcher mirrors RPCS3 `sys_fs_write` and returns
-    /// `CELL_EBADF` for any non-zero write. All four fields ride
-    /// to the dispatcher intact (no truncation at classification).
+    /// `sys_fs_write` request. The FS model is read-side only, so the
+    /// dispatcher answers `CELL_EBADF` for any non-zero write,
+    /// whatever mode opened the fd. All four fields reach the
+    /// dispatcher intact (no truncation at classification).
     FsWrite {
         /// In: fd.
         fd: u32,

@@ -25,12 +25,16 @@ impl Lv2Host {
     }
 
     /// `sys_gamepad_ycon_if` (621): stub returning CELL_OK.
+    ///
+    /// CELL_OK reports success for a YCON operation this arm never
+    /// performs. Nothing establishes what the kernel answers instead.
+    /// The break records each call.
     pub(in crate::host::dispatch_route) fn dispatch_gamepad_ycon_if(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.gamepad_ycon_if_stub",
             format_args!(
-                "sys_gamepad_ycon_if: stub returning CELL_OK; matches RPCS3's \
-                 todo-and-OK stub"
+                "sys_gamepad_ycon_if: unmodelled, returning CELL_OK without \
+                 touching the YCON interface"
             ),
         );
         Lv2Dispatch::immediate(0)

@@ -10,6 +10,11 @@ use std::collections::BTreeMap;
 
 /// Cap on slots per group; the `group_id * 256 + slot` thread-id
 /// encoding aliases adjacent groups' ranges above this.
+///
+/// The kernel's own limit on `sys_spu_thread_group_create`'s `num` is
+/// unestablished, so this cap is CellGov's. No firmware caller comes
+/// near it: every literal `num` in installed firmware is 1, and no
+/// module announces more than 3 SPUs through `sys_spu_initialize`.
 pub const MAX_SLOTS_PER_GROUP: u32 = 256;
 
 /// A single slot within a thread group.
@@ -66,8 +71,7 @@ pub enum InitializeThreadError {
     },
     /// Every one of the `num_threads` slots declared at create time
     /// is already populated; the slot index itself may be any value
-    /// below [`MAX_SLOTS_PER_GROUP`], the size of RPCS3's
-    /// `lv2_spu_group::threads_map` (`sys_spu.h`).
+    /// below [`MAX_SLOTS_PER_GROUP`].
     #[error("thread group full (declared {num_threads} threads)")]
     GroupFull {
         /// The group's declared slot count.
@@ -220,9 +224,8 @@ impl ThreadGroupTable {
         if group.slots.contains_key(&slot) {
             return Err(InitializeThreadError::SlotAlreadyInitialized);
         }
-        // Only the populated count is capped: RPCS3 `sys_spu.cpp`
-        // `sys_spu_thread_initialize` accepts any slot index within
-        // `threads_map`.
+        // Only the populated count is capped; any slot index the
+        // thread-id encoding can carry is accepted.
         if group.slots.len() as u32 >= group.num_threads {
             return Err(InitializeThreadError::GroupFull {
                 num_threads: group.num_threads,

@@ -1,10 +1,21 @@
 //! sys_rsx committed-state layouts.
 //!
-//! Mirrors RPCS3's `Emu/Cell/lv2/sys_rsx.h`: `RsxDmaControl`,
-//! `RsxDriverInfo`, `RsxReports`. The Rust structs are layout
-//! descriptors; the bytes live in guest memory and are covered by
-//! the memory-state hash. Only [`RsxContext`]'s base addresses and
-//! allocation flags fold into the sync-state hash.
+//! `sys_rsx_context_allocate` hands the guest three regions:
+//!
+//! - the DMA control block, which the guest drives the FIFO through;
+//! - the driver info block, which the guest reads device parameters
+//!   from;
+//! - the reports block, holding the semaphore, notify and report
+//!   arrays.
+//!
+//! The Rust structs are layout descriptors; the bytes live in guest
+//! memory and are covered by the memory-state hash. Only
+//! [`RsxContext`]'s base addresses and allocation flags fold into the
+//! sync-state hash.
+//!
+//! Field names follow libgcm's published structures where one covers
+//! the same bytes: `gcmControlRegister`, `gcmReportData` and
+//! `gcmNotifyData`.
 
 use core::mem::size_of;
 
@@ -12,41 +23,41 @@ use core::mem::size_of;
 /// [`RsxContext::state_hash`] changes.
 pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
-pub use cellgov_lv2::host::rsx::{RSX_CONTEXT_ID, SEMAPHORE_INIT_PATTERN};
+pub use cellgov_lv2::host::rsx::RSX_CONTEXT_ID;
 pub use cellgov_ps3_abi::sys_rsx::{control_register, driver_info_init, region};
 
 /// BE u32 semaphore slot.
 pub type RsxSemaphore = u32;
 
-/// Notify entry; 16-byte aligned.
+/// Notify entry; 16-byte aligned. libgcm's `gcmNotifyData`.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxNotify {
     /// Notify timestamp.
-    pub timestamp: u64,
-    /// Reserved; RPCS3 writes zero.
+    pub timer: u64,
+    /// Reserved doubleword; always zero.
     pub zero: u64,
 }
 
-/// Report entry; 16-byte aligned.
+/// Report entry; 16-byte aligned. libgcm's `gcmReportData`.
 #[repr(C, align(16))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RsxReport {
     /// Report timestamp.
-    pub timestamp: u64,
+    pub timer: u64,
     /// Report value.
-    pub val: u32,
-    /// Padding.
-    pub pad: u32,
+    pub value: u32,
+    /// Trailing word, `zero` in libgcm. Context-allocate init leaves
+    /// it all-ones, along with `timer`; only `value` starts at zero.
+    pub zero: u32,
 }
 
 /// Reports region: 1024 semaphore + 64 notify + 2048 report entries.
 ///
 /// Label addressing strides 16 bytes: label `i` lands on
-/// `semaphore[i * 4]` and overlaps the three trailing sentinels of
-/// the init pattern until a guest NV method overwrites them. Label
-/// 255 lands on semaphore index 1020, which LV2 init seeds with the
-/// sentinel value.
+/// `semaphore[i * 4]`. No label reaches the three slots after it;
+/// only a guest NV method writes those. Label 255 lands on semaphore
+/// index 1020, the last slot a label reaches.
 #[repr(C)]
 pub struct RsxReports {
     /// Semaphore slots.
@@ -59,8 +70,8 @@ pub struct RsxReports {
 
 pub use cellgov_ps3_abi::rsx_nv_hardware::{LABEL_COUNT, LABEL_STRIDE};
 
-/// DMA-control region. Put / get / ref live at +0x40 / +0x44 / +0x48;
-/// total 0x58 bytes.
+/// DMA-control region; 0x58 bytes. libgcm hands a title the
+/// put / get / ref triple at +0x40 as `gcmControlRegister`.
 #[repr(C)]
 pub struct RsxDmaControl {
     /// Reserved prefix.
@@ -69,7 +80,7 @@ pub struct RsxDmaControl {
     pub put: u32,
     /// Get pointer.
     pub get: u32,
-    /// Reference value.
+    /// Reference value; `ref` in libgcm.
     pub ref_value: u32,
     /// Reserved.
     pub unk: [u32; 2],
@@ -127,14 +138,12 @@ pub struct RsxDriverInfo {
     pub unk1: [u32; 4],
     /// Reserved.
     pub unk2: u32,
-    /// Guest-visible offset from reports_base to the notify array.
-    pub reports_notify_offset: u32,
-    /// Guest-visible offset from reports_base to the semaphore block.
-    /// Name is RPCS3's `reportsOffset`; "reports" is overloaded across
-    /// three regions.
-    pub reports_offset: u32,
-    /// Guest-visible offset from reports_base to the report entries.
-    pub reports_report_offset: u32,
+    /// Offset from the reports base to the notify array.
+    pub notify_array_offset: u32,
+    /// Offset from the reports base to the semaphore block.
+    pub semaphore_block_offset: u32,
+    /// Offset from the reports base to the report array.
+    pub report_array_offset: u32,
     /// Reserved.
     pub unk3: [u32; 6],
     /// System-mode flags.

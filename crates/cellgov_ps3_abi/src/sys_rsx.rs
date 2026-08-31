@@ -16,7 +16,7 @@ pub mod region {
 
 /// `sys_rsx_device_map` (675) OUT-pointer value and its kernel reservation.
 /// `RESERVATION_SIZE` is the PS3 ABI reservation; `ADDR` is a deterministic
-/// pick from the documented `0x40000000..0xB0000000` range.
+/// pick from the range the asserts below bound.
 pub mod device_map {
     /// `dev_addr` OUT for `dev_id == 8`.
     pub const ADDR: u32 = 0x4000_0000;
@@ -24,6 +24,13 @@ pub mod device_map {
     /// Size of the kernel `rsx_context` reservation holding [`ADDR`]; the
     /// mmapper allocator skips `[ADDR, ADDR + RESERVATION_SIZE)` to avoid alias.
     pub const RESERVATION_SIZE: u32 = 0x1000_0000;
+
+    // ADDR sits at or above the IO window base a title's own
+    // sys_rsx_context_iomap call asks for, and clear of the control
+    // region, whose slots a guest reaches by fixed offsets.
+    const _: () = assert!(ADDR as u64 >= crate::process_address_space::PS3_RSX_IOMAP_BASE);
+    const _: () =
+        assert!(ADDR.saturating_add(RESERVATION_SIZE) <= super::control_register::DMA_CONTROL_BASE);
 }
 
 /// `sys_rsx_context_iomap` (672) argument-validation constants.

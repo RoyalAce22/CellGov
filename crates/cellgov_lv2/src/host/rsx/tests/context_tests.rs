@@ -48,8 +48,7 @@ fn sys_rsx_context_allocate_writes_four_out_pointers_and_reports_init() {
     );
     let b = bytes.bytes();
     assert_eq!(b.len(), reports::SIZE);
-    let sentinel = u32::from_be_bytes([b[0xFF0], b[0xFF1], b[0xFF2], b[0xFF3]]);
-    assert_eq!(sentinel, 0x1337_C0D3);
+    assert_eq!(&b[0x0FF0..0x1000], &[0x00; 16]);
     assert_eq!(&b[0x1000..0x1008], &[0xFF; 8]);
     assert_eq!(&b[0x140C..0x1410], &[0xFF; 4]);
 

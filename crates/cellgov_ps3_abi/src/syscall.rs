@@ -60,8 +60,7 @@ lv2_syscalls! {
     /// `sys_process_getpid`.
     PROCESS_GETPID = 1;
 
-    /// `sys_process_get_status`. RPCS3 stubs it; CellGov models a
-    /// minimal liveness poll (see the dispatch handler).
+    /// `sys_process_get_status`; the status is the return value.
     PROCESS_GET_STATUS = 4;
 
     /// `sys_process_get_number_of_object`.

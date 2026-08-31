@@ -48,7 +48,7 @@ impl Lv2Host {
                 format_args!(
                     "sys_rsx_device_map dev_addr OUT pointer is null; the 8-byte \
                      device address write at addr 0 would silently clobber the readable \
-                     main region. Returning CELL_EFAULT (vm::ptr<u64> rejects null in RPCS3)."
+                     main region. Returning CELL_EFAULT."
                 ),
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());

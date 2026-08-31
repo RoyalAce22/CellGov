@@ -1,11 +1,13 @@
 //! `sys_fs_write` host dispatch.
 //!
 //! The `FsStore` model is read-only: every `sys_fs_open` returns a
-//! read-side fd. `sys_fs_write` is therefore the null-backend arm of
-//! the FS surface -- there is no legitimate writer for any fd in the
-//! store. Precedence and errno choices mirror RPCS3 `sys_fs.cpp`
-//! `sys_fs_write` so the response is observably identical to the
-//! oracle for the same guest input.
+//! read-side fd, so no fd in the store could accept a write and this
+//! is the null-backend arm of the FS surface.
+//!
+//! `CELL_EBADF` is the errno a non-writable fd earns, and CellGov
+//! answers it for every write, so a guest cannot tell a read-only fd
+//! from the absent write side. A title that opens a file for writing
+//! diverges at its first write.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -19,21 +21,17 @@ use cellgov_time::GuestTicks;
 impl Lv2Host {
     /// `sys_fs_write` -- no writable fd in the FS model.
     ///
-    /// # Errors (precedence mirrors RPCS3 `sys_fs_write`)
+    /// # Errors
     ///
     /// 1. `nwrite_ptr == 0` -> `CELL_EFAULT`, no effects.
     /// 2. `buf_ptr == 0` -> `CELL_EFAULT`, 8-byte zero write to `nwrite_ptr`.
     /// 3. fd not in FsStore -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`.
-    ///    Matches the `!file` half of `sys_fs_write`'s fd gate, which runs BEFORE
-    ///    the `!nbytes` short-circuit -- a bad fd is EBADF even when
-    ///    `size == 0`.
-    /// 4. fd valid, `size == 0` -> `CELL_OK`, 8-byte zero write to `nwrite_ptr`
-    ///    (RPCS3 `sys_fs_write`; our model never sets `file->lock`,
-    ///    so the EBUSY arm is dead).
+    ///    The fd gate runs BEFORE the zero-size short-circuit, so a bad
+    ///    fd is EBADF even when `size == 0`.
+    /// 4. fd valid, `size == 0` -> `CELL_OK`, 8-byte zero write to `nwrite_ptr`.
     /// 5. fd valid, `size > 0` -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`,
-    ///    plus `log_invariant_break` documenting the read-only-model rejection.
-    ///    Matches the `(nbytes && !(file->flags & CELL_FS_O_ACCMODE))` half of
-    ///    `sys_fs_write` for a read-only-opened file.
+    ///    plus `log_invariant_break`. This arm is the divergence the
+    ///    module docs describe.
     pub(in crate::host) fn dispatch_fs_write(
         &mut self,
         fd: u32,
@@ -59,13 +57,9 @@ impl Lv2Host {
                 effects: vec![nwrite_zero],
             };
         }
-        // fd resolution precedes the `!nbytes` short-circuit per
-        // sys_fs.cpp, so an unknown fd is EBADF regardless
-        // of `size`. FsStore discriminates file vs dir fds at the
-        // data-structure level (`open_fds` vs `open_dirs`); `fstat`
-        // only looks up `open_fds`, so a dir fd reads as UnknownFd
-        // here -- the same outcome RPCS3 produces via the
-        // `idm::get_unlocked<lv2_fs_object, lv2_file>(fd)` downcast.
+        // FsStore keeps file and dir fds in separate maps (`open_fds`
+        // vs `open_dirs`) and `fstat` looks up only the first, so a dir
+        // fd reads as UnknownFd here.
         if self.fs_store().fstat(fd).is_err() {
             return Lv2Dispatch::Immediate {
                 code: cell_errors::CELL_EBADF.into(),
@@ -83,8 +77,8 @@ impl Lv2Host {
             format_args!(
                 "sys_fs_write(fd={fd}, buf={buf_ptr:#010x}, size={size:#x}, \
                  nwrite={nwrite_ptr:#010x}): FsStore is read-only so no fd carries \
-                 write access; returning CELL_EBADF (mirrors RPCS3 sys_fs.cpp \
-                 for files without CELL_FS_O_ACCMODE access)"
+                 write access; returning CELL_EBADF, the code for an fd opened \
+                 without write access"
             ),
         );
         Lv2Dispatch::Immediate {

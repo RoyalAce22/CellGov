@@ -295,6 +295,48 @@ fn rejects_duplicate_name_in_directory() {
 }
 
 #[test]
+fn two_versions_of_one_file_are_a_named_duplicate_not_a_silent_collapse() {
+    // ECMA-119 lets a directory hold several versions of one file. The
+    // version field is not part of the name, so both records land on
+    // the same path.
+    let mut image = vec![0u8; 22 * SEC];
+    put_descriptor(&mut image, 16, 1, 18);
+    image[17 * SEC] = 255;
+    image[17 * SEC + 1..17 * SEC + 6].copy_from_slice(b"CD001");
+    let mut dir = Vec::new();
+    dir.extend(rec(&[0], 18, SEC as u32, FLAG_DIR));
+    dir.extend(rec(&[1], 18, SEC as u32, FLAG_DIR));
+    dir.extend(rec(b"OLD.BIN;1", 20, 4, 0));
+    dir.extend(rec(b"OLD.BIN;2", 21, 4, 0));
+    image[18 * SEC..18 * SEC + dir.len()].copy_from_slice(&dir);
+    let err = read_iso(&image).unwrap_err();
+    assert!(
+        matches!(&err, IsoError::DuplicateName { path } if path == "OLD.BIN"),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_record_naming_no_entry_is_refused_during_the_walk() {
+    // A zero-length identifier would otherwise reach join_path and emit
+    // a path with an empty final component.
+    let mut image = vec![0u8; 21 * SEC];
+    put_descriptor(&mut image, 16, 1, 18);
+    image[17 * SEC] = 255;
+    image[17 * SEC + 1..17 * SEC + 6].copy_from_slice(b"CD001");
+    let mut dir = Vec::new();
+    dir.extend(rec(&[0], 18, SEC as u32, FLAG_DIR));
+    dir.extend(rec(&[1], 18, SEC as u32, FLAG_DIR));
+    dir.extend(rec(b"", 20, 4, 0));
+    image[18 * SEC..18 * SEC + dir.len()].copy_from_slice(&dir);
+    let err = read_iso(&image).unwrap_err();
+    assert!(
+        matches!(&err, IsoError::NotAnEntryName { decoded, .. } if decoded.is_empty()),
+        "got {err:?}"
+    );
+}
+
+#[test]
 fn rejects_truncated_record() {
     let mut image = build_iso(vec![Node::File("X.BIN", b"hi".to_vec())]);
     let root = 18 * SEC;
@@ -373,28 +415,109 @@ fn directory_records_continue_across_sector_padding() {
 // --- Name normalization (decode_name unit) ---------------------------
 
 #[test]
-fn decode_name_matches_rpcs3_identifier_handling() {
+fn decode_name_strips_the_version_field_and_the_empty_extension() {
     assert_eq!(decode_name(b"BAR.TXT;1", false, 0).unwrap(), "BAR.TXT");
     assert_eq!(decode_name(b"FOO.;1", false, 0).unwrap(), "FOO");
     assert_eq!(decode_name(b"README;1", false, 0).unwrap(), "README");
-    // RPCS3 strips only the literal ";1", never a general ";N" -- so a
-    // higher version is left intact, and we match the oracle.
-    assert_eq!(decode_name(b"FILE.TXT;2", false, 0).unwrap(), "FILE.TXT;2");
+}
+
+#[test]
+fn decode_name_strips_every_version_the_standard_permits() {
+    assert_eq!(decode_name(b"FILE.TXT;2", false, 0).unwrap(), "FILE.TXT");
+    assert_eq!(decode_name(b"FILE.TXT;15", false, 0).unwrap(), "FILE.TXT");
     assert_eq!(
-        decode_name(b"FILE.TXT;15", false, 0).unwrap(),
-        "FILE.TXT;15"
+        decode_name(b"FILE.TXT;32767", false, 0).unwrap(),
+        "FILE.TXT"
     );
 }
 
 #[test]
+fn decode_name_keeps_a_tail_that_is_not_a_version_field() {
+    // None of these tails is the field the standard describes, so each
+    // belongs to the name: out of range, not a digit run, empty, and a
+    // zero version.
+    assert_eq!(decode_name(b"FILE;32768", false, 0).unwrap(), "FILE;32768");
+    assert_eq!(
+        decode_name(b"FILE;123456", false, 0).unwrap(),
+        "FILE;123456"
+    );
+    assert_eq!(decode_name(b"FILE;A", false, 0).unwrap(), "FILE;A");
+    assert_eq!(decode_name(b"FILE;", false, 0).unwrap(), "FILE;");
+    assert_eq!(decode_name(b"FILE;0", false, 0).unwrap(), "FILE;0");
+}
+
+#[test]
+fn an_identifier_left_with_no_name_is_refused_rather_than_emitted_empty() {
+    // ECMA-119 gives an identifier at least one character, and never an
+    // empty name and extension together.
+    for (bytes, ucs2) in [
+        (Vec::new(), false),
+        (Vec::new(), true),
+        (b";1".to_vec(), false),
+        (ucs2be(";1"), true),
+    ] {
+        let err = decode_name(&bytes, ucs2, 9).unwrap_err();
+        assert!(
+            matches!(&err, IsoError::NotAnEntryName { pos: 9, decoded } if decoded.is_empty()),
+            "got {err:?} for {bytes:?}"
+        );
+    }
+}
+
+#[test]
+fn an_identifier_spelling_out_a_directory_special_is_refused() {
+    // ECMA-119 writes the current and parent directory only as the
+    // one-byte (00) and (01) identifiers. The walk drops a spelled-out
+    // one with no trace, so decode_name refuses it.
+    for (bytes, ucs2, want) in [
+        (b".".to_vec(), false, "."),
+        (ucs2be("."), true, "."),
+        (b".;1".to_vec(), false, "."),
+        (b"..".to_vec(), false, ".."),
+        (ucs2be(".."), true, ".."),
+        (b"..;1".to_vec(), false, ".."),
+    ] {
+        let err = decode_name(&bytes, ucs2, 4).unwrap_err();
+        assert!(
+            matches!(&err, IsoError::NotAnEntryName { pos: 4, decoded } if decoded == want),
+            "got {err:?} for {bytes:?}"
+        );
+    }
+    // The one-byte forms still decode to the specials themselves.
+    assert_eq!(decode_name(&[0], false, 0).unwrap(), ".");
+    assert_eq!(decode_name(&[1], true, 0).unwrap(), "..");
+}
+
+#[test]
+fn a_single_character_name_survives_both_strips() {
+    assert_eq!(decode_name(b"D", false, 0).unwrap(), "D");
+    assert_eq!(decode_name(b"A.;1", false, 0).unwrap(), "A");
+    assert_eq!(decode_name(&ucs2be("A.;1"), true, 0).unwrap(), "A");
+}
+
+#[test]
 fn decode_name_strips_version_and_dot_for_joliet_too() {
-    // RPCS3 runs the ";1" and trailing-"." strips after the UTF-16
-    // decode, ungated by encoding -- so Joliet names get them as well.
+    // Both strips run after the UTF-16 decode, ungated by encoding.
     assert_eq!(
         decode_name(&ucs2be("EBOOT.BIN;1"), true, 0).unwrap(),
         "EBOOT.BIN"
     );
     assert_eq!(decode_name(&ucs2be("NAME.;1"), true, 0).unwrap(), "NAME");
+    assert_eq!(
+        decode_name(&ucs2be("FILE.TXT;32767"), true, 0).unwrap(),
+        "FILE.TXT"
+    );
+}
+
+#[test]
+fn a_joliet_code_unit_whose_low_byte_is_the_separator_is_not_a_version_field() {
+    // The low byte of U+013B is the byte that encodes SEPARATOR 2, so a
+    // raw-byte search for ";" would cut this name short. The strips run
+    // on the decoded characters, where the separator is one code unit.
+    let name = "FILE\u{13b}";
+    assert_eq!(decode_name(&ucs2be(name), true, 0).unwrap(), name);
+    let versioned = "FILE\u{13b};1";
+    assert_eq!(decode_name(&ucs2be(versioned), true, 0).unwrap(), name);
 }
 
 #[test]

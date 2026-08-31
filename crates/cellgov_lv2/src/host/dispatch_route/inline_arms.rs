@@ -100,13 +100,11 @@ impl Lv2Host {
     /// subtracts what the bump allocator has handed out this boot
     /// (`sys_memory_free` is a no-op, so consumption is monotonic).
     ///
-    /// Known divergence from the oracle (RPCS3 reports
-    /// `container.size - container.used`): real LV2 charges the
-    /// loaded image and every thread stack to the same container, so
-    /// its first-read `available` is already below `total`. CellGov's
-    /// counter starts at the post-image allocator base and thread
-    /// stacks live in a separate region, so `available` over-reports
-    /// by the image size plus stack usage.
+    /// `available` over-reports. Real LV2 charges the loaded image and
+    /// every thread stack to the same container, so its first read is
+    /// already below `total`. CellGov's counter starts at the
+    /// post-image allocator base and holds thread stacks in a separate
+    /// region, so the gap is the image size plus the stack usage.
     pub(super) fn dispatch_memory_get_user_memory_size(
         &self,
         mem_info_ptr: u32,

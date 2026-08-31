@@ -3,11 +3,6 @@
 
 use cellgov_ps3_abi::sys_rsx::{driver_info, driver_info_init, reports};
 
-/// Semaphore init sentinel pattern, repeated across all 1024 slots.
-/// CellGov-picked debug-friendly bytes -- the actual PS3 init pattern
-/// is not specified.
-pub const SEMAPHORE_INIT_PATTERN: [u32; 4] = [0x1337_C0D3, 0x1337_BABE, 0x1337_BEEF, 0x1337_F001];
-
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
 /// the driver-info region.
 ///
@@ -45,6 +40,10 @@ pub fn write_rsx_driver_info_init(
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
 /// the reports region.
 ///
+/// The semaphore block keeps the zero fill. No public source states
+/// what the kernel leaves there, so CellGov synthesises nothing for
+/// it.
+///
 /// # Panics
 ///
 /// Panics if `buf.len() != reports::SIZE`.
@@ -55,11 +54,6 @@ pub fn write_rsx_reports_init(buf: &mut [u8]) {
         "write_rsx_reports_init expects an reports::SIZE-byte buffer"
     );
     buf.fill(0);
-
-    for i in 0..1024 {
-        let offset = i * 4;
-        buf[offset..offset + 4].copy_from_slice(&SEMAPHORE_INIT_PATTERN[i % 4].to_be_bytes());
-    }
 
     let ts_be = u64::MAX.to_be_bytes();
     for i in 0..64 {

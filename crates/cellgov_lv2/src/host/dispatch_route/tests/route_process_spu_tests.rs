@@ -81,7 +81,7 @@ fn syscall_48_unknown_id_beats_null_priop() {
     assert_eq!(
         result,
         Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into()),
-        "id lookup precedes the priop null gate, matching RPCS3's order"
+        "id lookup precedes the priop null gate"
     );
 }
 

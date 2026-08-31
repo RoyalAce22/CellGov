@@ -1,18 +1,21 @@
 //! The firmware version key, read out of the extracted tree.
 //!
-//! `vsh/etc/version.txt` is what the console and RPCS3 both read, so
-//! the key a store entry is named after is the same string a user sees
-//! in the XMB: `release:04.9100:` becomes `4.91`.
+//! `vsh/etc/version.txt` is the file the console reads, so the key a
+//! store entry is named after is the same string a user sees in the
+//! XMB: `release:04.9100:` becomes `4.91`.
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::dev_flash::VERSION_TXT_COMPONENTS;
+use cellgov_ps3_abi::dev_flash::{
+    VERSION_TXT_COMPONENTS, VERSION_TXT_MAJOR_DIGITS, VERSION_TXT_MINOR_DIGITS,
+    VERSION_TXT_RELEASE_FIELD,
+};
 
 use super::error::FirmwareInstallError;
 
-/// Digits the minor part keeps even when they are trailing zeros, so
-/// `04.9000` reads as `4.90` rather than `4.9`.
-const MINOR_DIGITS: usize = 2;
+/// Minor digits the displayed version keeps. The rest are a
+/// sub-revision, `00` in every firmware revision on hand.
+const MINOR_DIGITS_SHOWN: usize = 2;
 
 fn version_txt_path(dev_flash_dir: &Path) -> PathBuf {
     let mut p = dev_flash_dir.to_path_buf();
@@ -42,41 +45,32 @@ pub(super) fn read_version(dev_flash_dir: &Path) -> Result<String, FirmwareInsta
 
 /// Extract the user-facing version from `version.txt`'s text.
 ///
-/// The file opens with a `<field>:<version>:` record whose version is
-/// zero-padded to a fixed width (`04.9100`).
+/// The file opens with a `release:<version>:` record whose version is
+/// fixed-width and zero-padded: two major digits, a dot, then four
+/// minor digits.
 ///
-/// Over that fixed-width field -- the only shape a shipped
-/// `version.txt` carries -- this is the string RPCS3 arrives at in
-/// `utils::get_firmware_version` (`rpcs3/util/sysinfo.cpp`), so a tree
-/// the two runners share resolves to one key. RPCS3 measures the kept
-/// length from the start of the padded field rather than from the first
-/// surviving digit, so the two agree only while exactly one leading
-/// zero comes off; an unpadded `4.91` reads there as `4.9`. This port
-/// also refuses field shapes RPCS3 would turn into an unusable
-/// directory name, such as one carrying spaces or a second dot.
-///
-/// `None` unless the delimited field is `<digits>.<digits>`.
+/// `None` unless the leading record is `release` and its delimited
+/// field carries exactly that shape.
 fn parse_version(text: &str) -> Option<String> {
-    let start = text.find(':')? + 1;
-    let rest = text.get(start..)?;
+    let (record, rest) = text.split_once(':')?;
+    if record != VERSION_TXT_RELEASE_FIELD {
+        return None;
+    }
     let field = rest.get(..rest.find(':')?)?;
 
     let (major, minor) = field.split_once('.')?;
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    if !digits(major) || !digits(minor) {
+    let fixed_width = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
+    if !fixed_width(major, VERSION_TXT_MAJOR_DIGITS)
+        || !fixed_width(minor, VERSION_TXT_MINOR_DIGITS)
+    {
         return None;
     }
 
     let major = major.trim_start_matches('0');
-    let kept = minor
-        .trim_end_matches('0')
-        .len()
-        .max(MINOR_DIGITS)
-        .min(minor.len());
     Some(format!(
         "{}.{}",
         if major.is_empty() { "0" } else { major },
-        &minor[..kept]
+        &minor[..MINOR_DIGITS_SHOWN]
     ))
 }
 

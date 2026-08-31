@@ -294,8 +294,9 @@ impl Lv2RequestKind {
             | Lv2RequestKind::ConfigClose
             | Lv2RequestKind::ConfigRemoveServiceListener
             | Lv2RequestKind::ConfigUnregisterService => Modeled,
-            // Matching rules and the seeded pad-manager descriptor
-            // follow RPCS3's reading of real hardware.
+            // The pad-manager descriptor is synthetic: a console reads
+            // it from the attached device, so a title reading past its
+            // first byte gets invented bytes.
             Lv2RequestKind::ConfigGetServiceEvent
             | Lv2RequestKind::ConfigAddServiceListener
             | Lv2RequestKind::ConfigRegisterService => PartialState,
@@ -325,8 +326,9 @@ impl Lv2RequestKind {
             // Exitspawn re-spawn (non-empty argv) is witnessed, not
             // performed; the empty-argv path is a full process exit.
             Lv2RequestKind::ProcessExit2 => PartialState,
-            // Real status encoding unknown (RPCS3 stubs it);
-            // CellGov-decided liveness poll.
+            // Firmware re-polls while the status reads 1 or 2; CellGov
+            // answers 0 or CELL_ESRCH, so a wait loop leaves on the
+            // first poll.
             Lv2RequestKind::ProcessGetStatus => PartialState,
             // Real counts for modeled classes only.
             Lv2RequestKind::ProcessGetNumberOfObject => PartialState,

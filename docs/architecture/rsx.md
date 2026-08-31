@@ -166,9 +166,10 @@ The iomap region `[PS3_RSX_IOMAP_BASE, +PS3_RSX_IOMAP_SIZE)`
 (85 MiB from `0x4000_0000`) is composed at boot as ReadWrite
 (see [Guest memory layout](guest_memory.md)) so the IO offsets
 `sys_rsx_context_iomap` records back the title's later writes.
-Init-time fills follow real LV2: semaphore sentinel 0x1337C0D3
-at index 1020, companion sentinels at 1021--1023, zeroed notify
-and report tables.
+The init-time fill zeroes the whole region, then stamps every
+notify and report entry's timestamp field with `u64::MAX` and each
+report entry's trailing word with `u32::MAX`. What hardware leaves
+in the semaphore block is undocumented, so it keeps the zero fill.
 
 | Syscall | Request                  | Behaviour                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | ------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

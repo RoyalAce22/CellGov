@@ -15,10 +15,9 @@ impl Lv2Host {
     /// write `nwritten` back.
     ///
     /// An unmapped buffer skips the append and still reports `len`
-    /// written: RPCS3's `sys_tty_write` (`sys_tty.cpp`) errors on a
-    /// bad buffer only under `debug_console_mode`; with it off (CEX)
-    /// the write is discarded and `len` is reported through
-    /// `pwritelen` with CELL_OK.
+    /// written through `pwritelen` with CELL_OK. No established kernel
+    /// behaviour decides that answer: it is CellGov's own choice.
+    /// `dispatch.tty_write_buffer_unmapped` records each occurrence.
     pub(super) fn dispatch_tty_write(
         &mut self,
         buf_ptr: u32,
@@ -31,6 +30,14 @@ impl Lv2Host {
         if len > 0 {
             if let Some(bytes) = rt.read_committed(buf_ptr as u64, len as usize) {
                 self.obs.tty_log.extend_from_slice(bytes);
+            } else {
+                self.log_invariant_break(
+                    "dispatch.tty_write_buffer_unmapped",
+                    format_args!(
+                        "sys_tty_write buf={buf_ptr:#010x} len={len} is unreadable; the \
+                         bytes are discarded and CELL_OK still reports {len} written"
+                    ),
+                );
             }
         }
         self.immediate_write_u32(len, nwritten_ptr, requester, tick)
@@ -43,11 +50,13 @@ impl Lv2Host {
     /// names a module retail firmware ships (see
     /// `firmware_modules::FIRMWARE_MODULE_STEMS`) but is absent from
     /// the loaded corpus registers a stub entry under a real kernel
-    /// id. RPCS3 forces the same fallback only for its whitelisted
-    /// firmware names (`sys_prx.cpp`, `hle_load` on ENOENT); a name
-    /// outside the whitelist gets `CELL_ENOENT` there and here. A
-    /// repeat load of the same missing module resolves the stub by
-    /// stem and returns the same id.
+    /// id, and a repeat load resolves that stub by stem and returns
+    /// the same id. Any other miss is `CELL_ENOENT`.
+    ///
+    /// The stub models no kernel behaviour. A console's `dev_flash`
+    /// always holds the module, so the case cannot arise there. The
+    /// stub keeps a boot moving when CellGov's corpus lacks the
+    /// module, and `prx_load_hle_stub_count` counts each one.
     ///
     /// # Errors
     ///

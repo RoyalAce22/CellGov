@@ -2,13 +2,15 @@
 //! event sources, and the service-event record layout.
 //!
 //! Behaviour (the subscription store) lives in
-//! `cellgov_lv2::host::config`; this module is data only. Oracle:
-//! RPCS3 `sys_config.h`.
+//! `cellgov_lv2::host::config`; this module is data only.
+//!
+//! libio.sprx, sys_audio.self and vsh.self all call sys_config, so the
+//! syscalls have firmware callers. Those callers are clients: nothing
+//! in dev_flash states the record layout or the buffer floor below,
+//! which are the kernel's side.
 
 /// LV2-provided pad-manager service; the listener's data buffer must
-/// lead with `0x01` to receive its events (RPCS3 `sys_config.cpp`
-/// `lv2_config_service_listener::check_service`, from real-hardware
-/// observation).
+/// lead with `0x01` to receive its events.
 pub const SYS_CONFIG_SERVICE_PADMANAGER: u64 = 0x11;
 
 /// Second pad-manager service id; LV2 mirrors pad events to both.
@@ -43,13 +45,14 @@ pub const SYS_CONFIG_SERVICE_EVENT_HEAD_LEN: usize = 40;
 /// ends after `user_id`.
 pub const SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN: usize = 24;
 
-/// `sizeof(sys_config_service_event_t)` as RPCS3 lays it out: the
-/// 40-byte head, one byte of `data`, and seven bytes of tail padding
-/// from 8-byte alignment. RPCS3 `lv2_config_service::get_size`
-/// announces `SIZEOF - 1 + data.len()` in the queued event's `data3`
-/// and `sys_config_get_service_event` refuses a smaller buffer with
-/// `CELL_EAGAIN`, so the demanded length runs seven bytes past the
-/// bytes written.
+/// `sizeof(sys_config_service_event_t)`: the 40-byte head, one byte of
+/// `data`, and seven bytes of tail padding from 8-byte alignment.
+///
+/// The queued event's `data3` announces `SIZEOF - 1 + data.len()`, and
+/// `sys_config_get_service_event` refuses anything smaller with
+/// `CELL_EAGAIN`. The demanded length therefore runs seven bytes past
+/// the bytes the kernel writes. No firmware caller witnesses that gap:
+/// libio's sc 518 call site never sizes a buffer to the bytes written.
 pub const SYS_CONFIG_SERVICE_EVENT_SIZEOF: usize = 48;
 
 /// Bytes the queued event's `data3` announces ahead of the service
@@ -57,10 +60,14 @@ pub const SYS_CONFIG_SERVICE_EVENT_SIZEOF: usize = 48;
 /// [`SYS_CONFIG_SERVICE_EVENT_SIZEOF`].
 pub const SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN: usize = SYS_CONFIG_SERVICE_EVENT_SIZEOF - 1;
 
-/// Descriptor RPCS3 registers on both pad-manager services for port
-/// 0 at first `sys_config_open` (`sys_config.cpp`
-/// `lv2_config::initialize`): a DUALSHOCK 3, vid `0x054c` pid
-/// `0x0268`, so the shell sees one connected controller.
+/// Synthetic pad-manager descriptor registered on both services for
+/// port 0 at first `sys_config_open`, so the shell sees one connected
+/// controller: a DUALSHOCK 3, vid `0x054c` pid `0x0268`.
+///
+/// CellGov invents these bytes. A console reads them from the attached
+/// device, so no descriptor in dev_flash carries this vid/pid pair.
+/// CellGov acts on no byte of the descriptor: event delivery is gated
+/// on the listener's own data buffer, not on this one.
 pub const SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR: [u8; 26] = [
     0x01, 0x01, 0x02, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x05, 0x4c, 0x02, 0x68, 0x00, 0x10,
     0x91, 0x88, 0x04, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00,

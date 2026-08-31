@@ -1,14 +1,14 @@
 //! ISO9660 (ECMA-119) reader for PS3 BD-ROM images.
 //!
-//! PS3 discs are UDF-Bridge images; RPCS3 reads them through the
-//! ISO9660 side only (`Loader/ISO.cpp`), and this reader covers the
-//! same subset: the volume descriptor set at sector 16, the Primary
-//! and optional Joliet descriptors, and recursive directory records.
-//! No UDF structures are parsed. Input is a decrypted image; output is
-//! a file tree of bounds-checked extent references that a consumer
-//! resolves against the image one file at a time
-//! ([`IsoEntry::extent_slices`] / [`IsoEntry::read_data`]), because a
-//! BD-DL image's content does not fit in host memory.
+//! PS3 discs are UDF-Bridge images, so either filesystem reaches the
+//! same content. This reader takes the ISO9660 side and parses no UDF
+//! structures. It covers the volume descriptor set at sector 16, the
+//! Primary and optional Joliet descriptors, and recursive directory
+//! records. Input is a decrypted image; output is a file tree of
+//! bounds-checked extent references that a consumer resolves against
+//! the image one file at a time ([`IsoEntry::extent_slices`] /
+//! [`IsoEntry::read_data`]), because a BD-DL image's content does not
+//! fit in host memory.
 
 /// ISO9660 logical sector size.
 const SECTOR: usize = 2048;
@@ -172,6 +172,17 @@ pub enum IsoError {
     UndecodableName {
         /// Absolute byte offset of the owning record.
         pos: usize,
+    },
+    /// An identifier decoded to no name at all, or to the `.` / `..`
+    /// that ECMA-119 records only as the one-byte `(00)` / `(01)`
+    /// identifiers. Neither can name a path component.
+    #[error("ISO identifier at 0x{pos:x} decodes to {decoded:?}, which names no entry")]
+    NotAnEntryName {
+        /// Absolute byte offset of the owning record.
+        pos: usize,
+        /// The decoded identifier, after the reader removes the version
+        /// field and the empty-extension separator.
+        decoded: String,
     },
     /// A directory spanned more than one extent. PS3 directories are
     /// single-extent; multi-extent directory carving is unimplemented.
@@ -376,20 +387,25 @@ fn parse_dir_record(image: &[u8], pos: usize, ucs2: bool) -> Result<Option<DirRe
     }))
 }
 
-/// Decode a directory-record name to match RPCS3's ISO loader exactly,
-/// so extracted paths agree with the oracle (`Loader/ISO.cpp`):
+/// Decode a directory-record identifier into the name it stands for,
+/// per ECMA-119's identifier grammar:
 ///
-/// - `.`/`..` specials,
-/// - Joliet big-endian UCS-2 when `ucs2`, else ISO9660 d-characters,
-/// - strip a trailing `;1` -- the literal version 1 only, for both
-///   ISO9660 and Joliet names. RPCS3 does not strip a general `;N`, so
-///   neither do we; `FILE.TXT;2` stays `FILE.TXT;2`.
-/// - strip one trailing `.` when the raw name is longer than one byte.
+/// - the `(00)` and `(01)` directory identifiers are `.` and `..`,
+/// - Joliet big-endian UCS-2 when `ucs2`, else the bytes as UTF-8
+///   (ECMA-119 d-characters are ASCII),
+/// - strip the version field ([`strip_version`]),
+/// - strip the separator before an empty extension.
 ///
-/// The one intentional departure: RPCS3 decodes UTF-8/UTF-16 lossily,
-/// while an undecodable name here is a typed error. PS3 names are valid,
-/// so this diverges only on already-corrupt bytes -- which an oracle
-/// should reject, not paper over with `U+FFFD`.
+/// # Errors
+///
+/// - [`IsoError::MalformedJolietName`] on an odd byte length under
+///   `ucs2`.
+/// - [`IsoError::UndecodableName`] when the bytes are not valid UTF-16
+///   (Joliet) or UTF-8.
+/// - [`IsoError::NotAnEntryName`] when the strips leave the identifier
+///   empty, or when it spells out `.` or `..`. ECMA-119 gives every
+///   identifier at least one character, and writes the two directory
+///   specials only as `(00)` and `(01)`.
 fn decode_name(bytes: &[u8], ucs2: bool, pos: usize) -> Result<String, IsoError> {
     if bytes == [0] {
         return Ok(".".to_string());
@@ -414,17 +430,36 @@ fn decode_name(bytes: &[u8], ucs2: bool, pos: usize) -> Result<String, IsoError>
             .map_err(|_| IsoError::UndecodableName { pos })?
             .to_string()
     };
-    if let Some(stripped) = name.strip_suffix(";1") {
-        name = stripped.to_string();
+    if let Some(stem) = strip_version(&name) {
+        name = stem.to_string();
     }
-    // Guard on the raw name length, as RPCS3 does (`file_name_length`);
-    // only the `.`/`..` specials are one byte and they returned above.
-    if bytes.len() > 1 {
-        if let Some(stripped) = name.strip_suffix('.') {
-            name = stripped.to_string();
-        }
+    // Spelled out, either would alias the `(00)` / `(01)` records the
+    // walk drops.
+    if name == "." || name == ".." {
+        return Err(IsoError::NotAnEntryName { pos, decoded: name });
+    }
+    // An identifier carries the separator even when the extension is
+    // empty, so a trailing one is not part of the name.
+    if let Some(stem) = name.strip_suffix('.') {
+        name = stem.to_string();
+    }
+    if name.is_empty() {
+        return Err(IsoError::NotAnEntryName { pos, decoded: name });
     }
     Ok(name)
+}
+
+/// The ECMA-119 version field: `;` then the digits of a version in
+/// `1..=32767`. Returns the identifier without it, or `None` when the
+/// tail is not a version field and so belongs to the name.
+fn strip_version(name: &str) -> Option<&str> {
+    let (stem, version) = name.rsplit_once(';')?;
+    if version.is_empty() || version.len() > 5 || !version.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    (1..=32767)
+        .contains(&version.parse::<u32>().ok()?)
+        .then_some(stem)
 }
 
 /// Recursively walk a directory extent, emitting its children (and

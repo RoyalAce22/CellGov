@@ -20,7 +20,13 @@ fn syscall_494_flags_without_bit2_returns_ok_no_effects() {
 #[test]
 fn syscall_494_flags_with_bit2_writes_zero_count_at_offset_0x10() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    mem.apply_commit(
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x9000), 8).unwrap(),
+        &0x20u64.to_be_bytes(),
+    )
+    .unwrap();
+    let rt = FakeRuntime::with_memory(mem);
     let result = host.dispatch(
         Lv2Request::Unsupported {
             number: 494,
@@ -576,10 +582,56 @@ fn prx_start_module_cmd2_non_resident_echoes_res_and_logs_break() {
     assert_eq!(host.observability().invariant_break_count - before, 1);
 }
 
+/// `res` carries the `s32` a module entry returned, sign-extended to
+/// 64 bits, so a negative result arrives with every high bit set.
+#[test]
+fn prx_start_module_cmd2_echoes_a_sign_extended_negative_res_as_its_low_word() {
+    for (res, expected) in [
+        (0xFFFF_FFFF_8001_0002u64, 0x8001_0002u64),
+        (0xFFFF_FFFF_8000_0000, 0x8000_0000),
+        (u64::MAX, 0xFFFF_FFFF),
+    ] {
+        let (mut host, id) = host_with_one_prx();
+        let p_opt: u32 = 0x4000;
+        let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, res));
+        let before = host.observability().invariant_break_count;
+        assert_eq!(
+            start_module(&mut host, id, p_opt, &rt),
+            Lv2Dispatch::immediate(expected),
+            "res={res:#018x}"
+        );
+        assert_eq!(
+            host.observability().invariant_break_count - before,
+            1,
+            "res={res:#018x}"
+        );
+    }
+}
+
+/// A nonzero high word over a zero low word is not a sign-extended
+/// `s32`, so the break is the only record of the collapse.
+#[test]
+fn prx_start_module_cmd2_res_with_only_a_high_word_collapses_to_ok_with_a_break() {
+    let (mut host, id) = host_with_one_prx();
+    let p_opt: u32 = 0x4000;
+    let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0x0000_0001_0000_0000));
+    let before = host.observability().invariant_break_count;
+    assert_eq!(
+        start_module(&mut host, id, p_opt, &rt),
+        Lv2Dispatch::immediate(0)
+    );
+    assert_eq!(host.observability().invariant_break_count - before, 1);
+    assert_eq!(
+        host.prx_registry().lookup_by_id(id).unwrap().state(),
+        crate::prx_registry::PrxState::Initialized,
+        "only res == SYS_PRX_RESIDENT marks the module started"
+    );
+}
+
 #[test]
 fn prx_start_module_unknown_cmd_returns_prx_error_and_logs_break() {
-    // RPCS3's default arm answers CELL_PRX_ERROR_ERROR, not an LV2
-    // errno -- liblv2's dispatcher branches on the 0x8001_1xxx class.
+    // CELL_PRX_ERROR_ERROR lies in the 0x8001_1xxx class that
+    // liblv2's dispatcher branches on.
     use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ERROR;
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
@@ -692,12 +744,10 @@ fn prx_unload_rejection_witness_starts_at_zero() {
     assert_eq!(host.observability().prx_unload_rejections, 0);
 }
 
-/// RPCS3 never validates `pOpt->size`; it only compares `size != 0x20`
-/// to decide whether `entry2` exists. A sub-0x20 size therefore
-/// proceeds (and, matching the oracle's comparison, counts as an
-/// extended struct writing both entry sentinels).
+/// `pOpt->size` is never validated. The arm compares it against
+/// `MIN_SIZE` only to decide whether `entry2` exists.
 #[test]
-fn syscall_481_accepts_size_below_0x20_like_the_oracle() {
+fn syscall_481_accepts_size_below_the_minimum_as_an_extended_struct() {
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x1F, 1, 0));
@@ -797,8 +847,8 @@ fn host_with_one_started_prx() -> (Lv2Host, u32) {
     (host, id)
 }
 
-/// RPCS3's 482 looks the id up before the null-pOpt gate -- the
-/// reverse of 481's EINVAL-first order.
+/// The reverse of 481's EINVAL-first order. What the kernel answers
+/// when both apply is unestablished. This pins CellGov's order.
 #[test]
 fn syscall_482_esrch_precedes_einval() {
     let (mut host, id) = host_with_one_started_prx();
@@ -937,9 +987,8 @@ fn syscall_482_stopping_module_still_refuses_unload() {
     );
 }
 
-/// cmd=2 res=0 without an accepted phase 1: RPCS3 hard-asserts, so
-/// there is no oracle behaviour; CellGov logs the break, returns
-/// CELL_OK, and leaves the state alone.
+/// No firmware caller issues the report phase without an accepted
+/// phase 1, so no established kernel answer covers this case.
 #[test]
 fn syscall_482_cmd2_without_phase1_logs_break_and_keeps_state() {
     use crate::prx_registry::PrxState;
@@ -992,7 +1041,7 @@ fn syscall_482_cmd2_other_res_returns_ok_without_transition() {
     assert_eq!(
         stop_module(&mut host, id, p_opt, &rt),
         Lv2Dispatch::immediate(0),
-        "RPCS3's default res arm returns CELL_OK"
+        "an unrecognised res value is a no-op returning CELL_OK"
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
@@ -1027,8 +1076,9 @@ fn syscall_482_cmd4_writes_entries_and_keeps_started() {
     ));
 }
 
-/// cmd=8 (and any nibble-4/8 value that is not exactly 4, e.g. 0x14)
-/// takes RPCS3's todo arm: CELL_OK, no writes, no state change.
+/// cmd=8 is the teardown handshake's report phase, which CellGov does
+/// not consume. Any nibble-4/8 value other than exactly 4 (e.g. 0x14)
+/// takes the same arm.
 #[test]
 fn syscall_482_cmd8_is_a_no_op_stub_that_logs_break() {
     use crate::prx_registry::PrxState;
@@ -1112,21 +1162,41 @@ fn syscall_494_rejects_null_p_info_with_efault() {
     );
 }
 
+/// A 0x10000-byte space carrying only the `size` word of a
+/// module-list option at `p_info`. The size gate passes, and a
+/// `p_info` near the top of the space puts one later field past the
+/// end.
+fn module_list_runtime_with_size_only(p_info: u32, size: u64) -> FakeRuntime {
+    let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+    mem.apply_commit(
+        ByteRange::new(cellgov_mem::GuestAddr::new(u64::from(p_info)), 8).unwrap(),
+        &size.to_be_bytes(),
+    )
+    .unwrap();
+    FakeRuntime::with_memory(mem)
+}
+
+fn get_module_list(host: &mut Lv2Host, p_info: u32, rt: &FakeRuntime) -> Lv2Dispatch {
+    host.dispatch(
+        Lv2Request::Unsupported {
+            number: 494,
+            args: [0x2, u64::from(p_info), 0, 0, 0, 0, 0, 0],
+        },
+        UnitId::new(0),
+        rt,
+    )
+}
+
 #[test]
 fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    // max sits at p_info+0x0C, so this struct's max read runs past the
+    // 0x10000-byte address space while its size word stays readable.
+    let p_info: u32 = 0xFFF1;
+    let rt = module_list_runtime_with_size_only(p_info, 0x20);
     let breaks_before = host.observability().invariant_break_count;
-    let result = host.dispatch(
-        Lv2Request::Unsupported {
-            number: 494,
-            args: [0x2, 0xFFF1, 0, 0, 0, 0, 0, 0],
-        },
-        UnitId::new(0),
-        &rt,
-    );
     assert_eq!(
-        result,
+        get_module_list(&mut host, p_info, &rt),
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
     assert_eq!(
@@ -1138,24 +1208,73 @@ fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
 #[test]
 fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
     let mut host = Lv2Host::new();
-    let rt = FakeRuntime::new(0x10000);
+    // idlist sits at p_info+0x14: max still reads, idlist does not.
+    let p_info: u32 = 0xFFEC;
+    let rt = module_list_runtime_with_size_only(p_info, 0x20);
     let breaks_before = host.observability().invariant_break_count;
-    let result = host.dispatch(
-        Lv2Request::Unsupported {
-            number: 494,
-            args: [0x2, 0xFFEC, 0, 0, 0, 0, 0, 0],
-        },
-        UnitId::new(0),
-        &rt,
-    );
     assert_eq!(
-        result,
+        get_module_list(&mut host, p_info, &rt),
         Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
         1
     );
+}
+
+#[test]
+fn syscall_494_unreadable_size_field_returns_efault_and_logs_break() {
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::new(0x10000);
+    let breaks_before = host.observability().invariant_break_count;
+    assert_eq!(
+        get_module_list(&mut host, 0xFFFC, &rt),
+        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+    );
+    assert_eq!(
+        host.observability().invariant_break_count - breaks_before,
+        1
+    );
+}
+
+/// `size` selects the layout, so the `0x20` offsets name real fields
+/// only in a struct that declares `0x20`.
+#[test]
+fn syscall_494_unknown_struct_size_fills_nothing_and_returns_ok() {
+    for size in [0u64, 0x18, 0x21, 0x30, u64::MAX] {
+        let mut host = Lv2Host::new();
+        host.prx_registry_mut().register(
+            "libaudio".into(),
+            "cellAudio_Library".into(),
+            0x0147_0000,
+            0x0148_0000,
+            0x0147_da30,
+            None,
+            None,
+        );
+        let mut mem = cellgov_mem::GuestMemory::new(0x10000);
+        let mut p_info = [0u8; 0x20];
+        p_info[0..8].copy_from_slice(&size.to_be_bytes());
+        p_info[0x0C..0x10].copy_from_slice(&4u32.to_be_bytes());
+        p_info[0x14..0x18].copy_from_slice(&0x4040u32.to_be_bytes());
+        mem.apply_commit(
+            ByteRange::new(cellgov_mem::GuestAddr::new(0x4000), p_info.len() as u64).unwrap(),
+            &p_info,
+        )
+        .unwrap();
+        let rt = FakeRuntime::with_memory(mem);
+        let breaks_before = host.observability().invariant_break_count;
+        assert_eq!(
+            get_module_list(&mut host, 0x4000, &rt),
+            Lv2Dispatch::immediate(0),
+            "size={size:#x} must fill nothing rather than write the 0x20 offsets"
+        );
+        assert_eq!(
+            host.observability().invariant_break_count - breaks_before,
+            1,
+            "size={size:#x}"
+        );
+    }
 }
 
 #[test]
@@ -1340,8 +1459,8 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
         }
     }
     // A registered id is required: the ESRCH lookup precedes the
-    // wrap check, matching RPCS3's order, so an unknown id would
-    // never reach the path under test.
+    // wrap check, so an unknown id would never reach the path
+    // under test.
     let (mut host, id) = host_with_one_prx();
     let breaks_before = host.observability().invariant_break_count;
     let rt = WrapMock {

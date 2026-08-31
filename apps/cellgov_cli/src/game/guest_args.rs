@@ -1,22 +1,27 @@
 //! PS3 process-start argument block for the primary PPU thread.
 //!
-//! Mirrors the args layout RPCS3 builds in `ppu_load_exec`
-//! (`rpcs3/Emu/Cell/PPUModule.cpp`): a pointer table carved off the
-//! top of the primary stack -- argv pointers, NULL, envp pointers,
-//! NULL, padded to an even slot count -- followed by the NUL-
-//! terminated strings, each padded to 16 bytes. The primary
-//! thread's r1 lands [`ENTRY_FRAME_RESERVE`] below the block, and
-//! the entry receives r3=argc, r4=argv, r5=envp, r6=envp count.
+//! The block is a pointer table carved off the top of the primary
+//! stack -- argv pointers, NULL, envp pointers, NULL -- followed by
+//! the NUL-terminated strings those pointers name. The primary
+//! thread's r1 lands [`ENTRY_FRAME_RESERVE`] below the block, and the
+//! entry receives r3=argc, r4=argv, r5=envp.
 
 // [CBE-Handbook p:397 s:14.3] The PPE 64-bit initial stack frame carries an
 // argument-pointer array and an environment-pointer array, each closed by a
 // NULL pointer, below an information block holding the strings they point
 // into; R4 names the argument array and R5 the environment array.
 //
-// That citation covers r4 and r5 only. It does not cover the even-slot-count
-// padding of the pointer table, the 0x10 string granule, or r6. Figure 14-2
-// on the cited page assigns R6 the auxiliary-vector pointer, so the r6 above
-// disagrees with the figure.
+// The figure places an "Unspecified Padding" region of variable size between
+// the pointer arrays and the information block, and says nothing about how
+// the strings inside that block are packed. This port picks the even-slot
+// table padding and the 0x10 string granule for those two.
+//
+// [CBE-Handbook p:396 s:14.3.1.2] Table 14-7 assigns R6 the auxiliary-vector
+// pointer and requires that vector to hold at least an AT_NULL terminating
+// entry; the same table says R4 points at a NULL pointer when there are no
+// arguments, and R5 at one when there is no environment.
+//
+// This port builds no auxiliary vector, so R6 stays null at entry.
 
 /// One u64 pointer slot in the table.
 const SLOT: u64 = 8;
@@ -24,17 +29,11 @@ const SLOT: u64 = 8;
 /// String storage granule.
 const STRING_ALIGN: u64 = 0x10;
 
-/// Gap between the entry r1 and the block base. A callee stores CR
-/// at 8(r1), LR at 16(r1), and may spill into the rest of its
-/// caller's 0x70-byte minimum frame (header plus parameter save
-/// area), so r1 == block base would let the entry function's
-/// prologue overwrite the argv pointer table. RPCS3 gets the same
-/// gap from `ppu_stack_start_offset` (0x70): `ppu_load_exec`
-/// (`rpcs3/Emu/Cell/PPUModule.cpp`) places the block at the stack
-/// top and lowers the constructor-seeded
-/// `gpr[1] = stack top - ppu_stack_start_offset`
-/// (`rpcs3/Emu/Cell/PPUThread.cpp`, `ppu_thread::ppu_thread`) by the
-/// block size.
+/// Gap between the entry r1 and the block base. A callee stores CR at
+/// 8(r1) and LR at 16(r1), and may spill into the rest of its caller's
+/// 0x70-byte minimum frame -- the header plus the parameter save area.
+/// With r1 == block base, the entry function's prologue would overwrite
+/// the argv pointer table.
 // [CBE-Handbook p:398 s:14.3] A callee reaches its caller's parameter save
 // area 48 bytes off the back chain, and that area is at least 64 bytes, so
 // the smallest frame a caller must have provided is 0x70.

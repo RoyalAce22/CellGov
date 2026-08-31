@@ -8,7 +8,7 @@ fn be64(bytes: &[u8], off: usize) -> u64 {
 }
 
 #[test]
-fn single_arg_layout_matches_the_rpcs3_shape() {
+fn a_single_arg_lays_out_both_pointer_arrays_and_its_string() {
     let block = build_args_block(TOP, SIZE, &["abc".to_string()]).unwrap();
     // 1 argv ptr + argv NULL + envp NULL -> 3 slots, padded to 4;
     // "abc\0" pads to 16.
@@ -46,6 +46,23 @@ fn two_args_use_all_four_slots_and_stack_16_byte_string_chunks() {
     assert_eq!(be64(&block.bytes, 24), 0);
     let o1 = (s1 - block.base) as usize;
     assert_eq!(&block.bytes[o1..o1 + 16], b"--mode=gametool\0");
+}
+
+#[test]
+fn a_zero_arg_block_points_both_arrays_at_a_null_pointer() {
+    // [CBE-Handbook p:396 s:14.3.1.2] With no arguments R4 names a NULL
+    // pointer, and with no environment R5 names one too.
+    let block = build_args_block(TOP, SIZE, &[]).unwrap();
+    assert_eq!(block.argc, 0);
+    // argv NULL + envp NULL -> 2 slots, no string storage.
+    assert_eq!(block.bytes.len(), 2 * 8);
+    assert_eq!(block.base, TOP - 16);
+    assert_eq!(block.base % 16, 0);
+    assert_eq!(block.initial_r1 % 16, 0);
+    assert_eq!(block.argv_addr, block.base);
+    assert_eq!(block.envp_addr, block.base + 8);
+    assert_eq!(be64(&block.bytes, 0), 0, "argv array is a bare NULL");
+    assert_eq!(be64(&block.bytes, 8), 0, "envp array is a bare NULL");
 }
 
 #[test]

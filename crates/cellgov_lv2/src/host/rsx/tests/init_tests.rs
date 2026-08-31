@@ -3,12 +3,8 @@
 use super::*;
 
 #[test]
-fn write_rsx_reports_init_matches_rpcs3_pattern() {
+fn reports_init_zeroes_the_semaphore_block_and_stamps_the_timestamps() {
     let mut expected = vec![0u8; reports::SIZE];
-    for i in 0..1024 {
-        let offset = i * 4;
-        expected[offset..offset + 4].copy_from_slice(&SEMAPHORE_INIT_PATTERN[i % 4].to_be_bytes());
-    }
     for i in 0..64 {
         let offset = 0x1000 + i * 16;
         expected[offset..offset + 8].copy_from_slice(&u64::MAX.to_be_bytes());

@@ -1,5 +1,5 @@
-//! `sys_fs_write` dispatch tests: read-only-model null-backend
-//! responses pinned per RPCS3 `sys_fs.cpp` `sys_fs_write` precedence.
+//! `sys_fs_write` dispatch tests: the read-only model's null-backend
+//! responses, and the order the gates fire in.
 
 use cellgov_effects::Effect;
 use cellgov_ps3_abi::cell_errors;
@@ -38,10 +38,7 @@ fn null_nwrite_ptr_returns_efault_and_emits_no_effects() {
         panic!("expected Immediate, got {d:?}");
     };
     assert_eq!(code, u64::from(cell_errors::CELL_EFAULT));
-    assert!(
-        effects.is_empty(),
-        "null nwrite_ptr must emit zero effects (RPCS3 sys_fs_write)"
-    );
+    assert!(effects.is_empty(), "null nwrite_ptr must emit zero effects");
 }
 
 #[test]
@@ -58,10 +55,8 @@ fn null_buf_ptr_returns_efault_and_zeros_nwrite() {
 
 #[test]
 fn zero_size_with_valid_fd_returns_ok_with_nwrite_zero_and_no_break() {
-    // RPCS3 sys_fs_write: nbytes == 0 reaches the OK arm only
-    // after the file-existence check passes. Our model never sets
-    // file->lock, so the EBUSY sub-arm is dead; a valid fd with
-    // size==0 returns CELL_OK + nwrite=0.
+    // A zero-byte write reaches the OK arm only after the
+    // file-existence check passes.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"hello".to_vec())
@@ -83,14 +78,8 @@ fn zero_size_with_valid_fd_returns_ok_with_nwrite_zero_and_no_break() {
 
 #[test]
 fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
-    // RPCS3 sys_fs_write does a typed downcast:
-    //   const auto file = idm::get_unlocked<lv2_fs_object, lv2_file>(fd);
-    // A dir fd (lv2_dir, not lv2_file) yields a null and lands at the
-    // !file arm -> CELL_EBADF. The CellGov mirror discriminates at the
-    // data-structure level: FsStore keeps file fds in `open_fds` and
-    // dir fds in a separate `open_dirs` map, and `fstat` only looks up
-    // `open_fds`, so a dir fd reads as UnknownFd and arm 3's
-    // CELL_EBADF fires.
+    // A dir fd never reaches `open_fds`, so `fstat` reports UnknownFd
+    // and arm 3 fires ahead of any size check.
     let mut host = Lv2Host::new();
     let dir_fd = host
         .fs_store_mut()
@@ -105,9 +94,8 @@ fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
         assert_eq!(
             code,
             u64::from(cell_errors::CELL_EBADF),
-            "sys_fs_write(dir_fd, _, {size:#x}, _) must yield CELL_EBADF \
-             (RPCS3 sys_fs_write downcast to lv2_file returns null for a dir fd, \
-             firing the !file arm before any size check)"
+            "sys_fs_write(dir_fd, _, {size:#x}, _) must yield CELL_EBADF: a dir fd \
+             is not a file, and that arm fires before any size check"
         );
         extract_nwrite_zero(&effects, 0x2000);
     }
@@ -115,10 +103,6 @@ fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
 
 #[test]
 fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
-    // RPCS3 sys_fs_write -- ordering matters: fd resolution (the
-    // downcast) and the `!file` arm run BEFORE the `!nbytes`
-    // short-circuit. A zero-byte write to a bogus fd is CELL_EBADF,
-    // not CELL_OK.
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x10000);
     // fd=99 is not registered; FsStore::fstat returns Err.
@@ -129,17 +113,15 @@ fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
     assert_eq!(
         code,
         u64::from(cell_errors::CELL_EBADF),
-        "bad fd at size==0 must yield CELL_EBADF per RPCS3 sys_fs_write \
-         (file-existence check precedes the size==0 short-circuit)"
+        "bad fd at size==0 must yield CELL_EBADF: the file-existence check \
+         precedes the size==0 short-circuit"
     );
     extract_nwrite_zero(&effects, 0x2000);
 }
 
 #[test]
 fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
-    // The fd is registered so the rejection is specifically the
-    // access-mode arm (RPCS3 sys_fs_write, second condition), not
-    // the file-existence arm (covered separately).
+    // The fd is registered, so this exercises the access-mode arm.
     let mut host = Lv2Host::new();
     host.fs_store_mut()
         .register_blob("/foo".into(), b"hello".to_vec())

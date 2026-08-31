@@ -64,10 +64,6 @@ pub(super) fn seed_primary_entry_state(
     };
     match &args_block {
         Some(b) => {
-            // r1 sits a full linkage frame below the block (RPCS3
-            // `PPUModule.cpp` `ppu_load_exec`): with r1 == block
-            // base, the entry's CR/LR saves at 8(r1)/16(r1) would
-            // land inside the argv pointer table.
             state.set_gpr(1, b.initial_r1);
             state.set_gpr(3, b.argc);
             state.set_gpr(4, b.argv_addr);

@@ -14,22 +14,26 @@ use super::be::{read_be_u32, read_be_u64};
 impl Lv2Host {
     /// `_sys_prx_start_module` (481): the two-phase start handshake.
     ///
-    /// `pOpt->cmd & 0xF` selects the phase. Phase 1 hands the caller
-    /// the entry to invoke; phase 2 reports what that entry returned.
-    /// CellGov runs every firmware module's `module_start` itself at
-    /// boot, so phase 1 reports `NO_ENTRY`; phase 2 reporting
-    /// `SYS_PRX_RESIDENT` marks the module started, which makes a
-    /// later unload answer `NOT_REMOVABLE`. `pOpt->size` is never
-    /// validated: RPCS3's handler reads the fields unconditionally and
-    /// consults `size` only to decide whether `entry2` exists
-    /// (`sys_prx.cpp`).
+    /// `pOpt->cmd & 0xF` selects the phase:
+    ///
+    /// 1. Phase 1 hands the caller the entry to invoke. CellGov runs
+    ///    every firmware module's `module_start` itself at boot, so
+    ///    this phase reports `NO_ENTRY`.
+    /// 2. Phase 2 reports what that entry returned. A report of
+    ///    `SYS_PRX_RESIDENT` marks the module started, and a later
+    ///    unload then answers `NOT_REMOVABLE`.
+    ///
+    /// `pOpt->size` is never validated. The arm compares it against
+    /// `MIN_SIZE` only to decide whether `entry2` exists. liblv2.sprx
+    /// always declares the extended `0x28` form, so a firmware caller
+    /// always has both slots.
     ///
     /// # Errors
     ///
     /// - `CELL_EINVAL` for null `id` or null `pOpt`.
     /// - `CELL_ESRCH` when `id` names no loaded module.
-    /// - `CELL_PRX_ERROR_ERROR` for an unrecognised command nibble
-    ///   (RPCS3's default arm).
+    /// - `CELL_PRX_ERROR_ERROR` for a command nibble that is neither
+    ///   1 nor 2.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
     ///   not fit inside the 32-bit guest address space.
     pub(in crate::host::dispatch_route) fn dispatch_prx_start_module(
@@ -132,10 +136,11 @@ impl Lv2Host {
                     self.state.prx_registry.mark_started(id);
                     return Lv2Dispatch::immediate(0);
                 }
-                // Phase 1 handed back NO_ENTRY, so the guest called
-                // nothing and cannot have a real result to report.
-                // Mirroring RPCS3, the low 32 bits come back as the
-                // error; a zero low word therefore returns CELL_OK.
+                // Phase 1 handed back NO_ENTRY. liblv2.sprx reports
+                // res = 0 when it finds neither entry callable, so no
+                // firmware caller arrives here with another value.
+                // `res` carries the sign-extended s32 a module_start
+                // returned, so its low 32 bits are that code.
                 self.log_invariant_break(
                     "dispatch.prx_start_module_unexpected_res",
                     format_args!(
@@ -151,8 +156,7 @@ impl Lv2Host {
                     "dispatch.prx_start_module_unknown_cmd",
                     format_args!(
                         "_sys_prx_start_module id={id:#010x} cmd nibble {other:#x} is not \
-                         GET_ENTRY(1) or REPORT_RESULT(2); returning CELL_PRX_ERROR_ERROR \
-                         (RPCS3's default arm)"
+                         GET_ENTRY(1) or REPORT_RESULT(2); returning CELL_PRX_ERROR_ERROR"
                     ),
                 );
                 Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
@@ -162,14 +166,18 @@ impl Lv2Host {
 
     /// `_sys_prx_stop_module` (482): the two-phase stop handshake.
     ///
-    /// `pOpt->cmd & 0xF` selects the arm, mirroring sc 481. Phase 1
-    /// moves a `Started` module to `Stopping` and hands the caller
-    /// the entry to invoke; phase 2 reporting `res == 0` completes
-    /// `Stopping -> Stopped`, after which unload withdraws the
-    /// module. CellGov never runs guest `module_stop`, so phase 1
-    /// reports `NO_ENTRY` as sc 481 does; liblv2 then skips the call
-    /// and reports zero. The id lookup precedes the null-`pOpt` gate:
-    /// RPCS3's 482 orders ESRCH before EINVAL (`sys_prx.cpp`).
+    /// `pOpt->cmd & 0xF` selects the arm, as sc 481 does:
+    ///
+    /// 1. Phase 1 moves a `Started` module to `Stopping` and hands
+    ///    the caller the entry to invoke. CellGov never runs guest
+    ///    `module_stop`, so this phase reports `NO_ENTRY`. liblv2
+    ///    then skips the call and reports zero.
+    /// 2. Phase 2 with `res == 0` completes `Stopping -> Stopped`,
+    ///    and a later unload withdraws the module.
+    ///
+    /// An unknown `id` together with a null `pOpt` answers
+    /// `CELL_ESRCH`. The kernel's own precedence between the two is
+    /// unestablished.
     ///
     /// # Errors
     ///
@@ -179,8 +187,8 @@ impl Lv2Host {
     ///   `ALREADY_STOPPING` when cmd 1 / 4 / 8 finds the module in
     ///   the wrong state.
     /// - `CELL_PRX_ERROR_CAN_NOT_STOP` when phase 2 reports `res == 1`.
-    /// - `CELL_PRX_ERROR_ERROR` for an unrecognised command nibble
-    ///   (RPCS3's default arm).
+    /// - `CELL_PRX_ERROR_ERROR` for a command nibble outside
+    ///   1 / 2 / 4 / 8.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
     ///   not fit inside the 32-bit guest address space.
     pub(in crate::host::dispatch_route) fn dispatch_prx_stop_module(
@@ -301,9 +309,12 @@ impl Lv2Host {
                 match res {
                     0 => {
                         if !self.state.prx_registry.finish_stop(id) {
-                            // RPCS3 hard-asserts STOPPING here; a
-                            // phase 2 with no accepted phase 1 has no
-                            // oracle behaviour to mirror.
+                            // liblv2.sprx issues phase 2 only straight
+                            // after an accepted phase 1, so no
+                            // firmware caller produces this and the
+                            // kernel's answer is unknown. CELL_OK
+                            // without a transition leaves the registry
+                            // consistent.
                             self.log_invariant_break(
                                 "dispatch.prx_stop_module_unexpected_state",
                                 format_args!(
@@ -330,21 +341,24 @@ impl Lv2Host {
                         Lv2Dispatch::immediate(CELL_PRX_ERROR_CAN_NOT_STOP.into())
                     }
                     other => {
-                        // RPCS3: "Nothing happens (probably
-                        // unexpected value)".
+                        // `res` carries the sign-extended s32 a
+                        // module_stop returned, so any value can
+                        // arrive here. Only 0 and 1 have a known
+                        // meaning. CELL_OK for the rest is CellGov's
+                        // own answer.
                         self.log_invariant_break(
                             "dispatch.prx_stop_module_unexpected_res",
                             format_args!(
                                 "_sys_prx_stop_module id={id:#010x} cmd=2 reported \
                                  res={other:#018x} after phase 1 returned NO_ENTRY; returning \
-                                 CELL_OK with no state change (RPCS3's default arm)"
+                                 CELL_OK with no state change"
                             ),
                         );
                         Lv2Dispatch::immediate(0)
                     }
                 }
             }
-            stop_cmd::GET_ENTRIES | stop_cmd::DISABLE_STOP => {
+            stop_cmd::GET_ENTRIES | stop_cmd::REPORT_ENTRIES_RESULT => {
                 let state = self
                     .state
                     .prx_registry
@@ -354,9 +368,10 @@ impl Lv2Host {
                 if let Some(err) = wrong_state(state) {
                     return Lv2Dispatch::immediate(err.into());
                 }
-                // RPCS3 selects the arm by nibble but branches on the
-                // FULL cmd value: only exactly 4 reads the entries;
-                // 8, 0x14, 0x18, ... all take the disable-stop path.
+                // The nibble selects this arm, but the branch below
+                // tests the FULL cmd value: only exactly 4 hands back
+                // the entries. 8, 0x14, 0x18, ... all fall through.
+                // liblv2.sprx writes only 4 and 8.
                 if cmd == stop_cmd::GET_ENTRIES {
                     return Lv2Dispatch::Immediate {
                         code: 0,
@@ -364,10 +379,12 @@ impl Lv2Host {
                     };
                 }
                 self.log_invariant_break(
-                    "dispatch.prx_stop_module_disable_stop_stub",
+                    "dispatch.prx_stop_module_teardown_report_unmodelled",
                     format_args!(
-                        "_sys_prx_stop_module id={id:#010x} cmd={cmd:#x} disable-stop is a \
-                         no-op stub returning CELL_OK; matches RPCS3's todo arm"
+                        "_sys_prx_stop_module id={id:#010x} cmd={cmd:#x} is not exactly \
+                         GET_ENTRIES(4); cmd 8 is the teardown handshake's report phase \
+                         and any other nibble-4/8 value has no known meaning. Returning \
+                         CELL_OK without reading res or completing Stopping -> Stopped"
                     ),
                 );
                 Lv2Dispatch::immediate(0)
@@ -377,7 +394,7 @@ impl Lv2Host {
                     "dispatch.prx_stop_module_unknown_cmd",
                     format_args!(
                         "_sys_prx_stop_module id={id:#010x} cmd nibble {other:#x} is not 1, 2, \
-                         4, or 8; returning CELL_PRX_ERROR_ERROR (RPCS3's default arm)"
+                         4, or 8; returning CELL_PRX_ERROR_ERROR"
                     ),
                 );
                 Lv2Dispatch::immediate(CELL_PRX_ERROR_ERROR.into())
@@ -388,14 +405,11 @@ impl Lv2Host {
     /// `_sys_prx_unload_module` (483): withdraw an `Initialized` or
     /// `Stopped` module, refuse a `Started` / `Stopping` one.
     ///
-    /// LV2 (and RPCS3's `_sys_prx_unload_module`) withdraws a module
-    /// in `INITIALIZED` or `STOPPED` state and answers
-    /// `CELL_PRX_ERROR_NOT_REMOVABLE` otherwise. Boot-loaded firmware
-    /// modules are started (their images back the GOT slots the title
-    /// calls through), so they refuse until the guest completes the
-    /// sc 482 stop handshake; an sc 480 miss stub the guest never
-    /// started withdraws with `CELL_OK` and frees its id, exactly as
-    /// a real never-started module would.
+    /// Boot-loaded firmware modules are started, since their images
+    /// back the GOT slots the title calls through. They refuse until
+    /// the guest completes the sc 482 stop handshake. An sc 480 miss
+    /// stub the guest never started withdraws with `CELL_OK` and frees
+    /// its id.
     ///
     /// # Errors
     ///
@@ -471,9 +485,9 @@ impl Lv2Host {
         let Some(size) = read_be_u64(rt, opt) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         };
-        // 0x1c / 0x20 are the legacy option forms. The oracle rebuilds
-        // them with type = 0, which skips the branch entirely, so they
-        // need no field reads here.
+        // 0x1c / 0x20 are the legacy option forms, which carry no
+        // type word; treating them as type = 0 skips the branch
+        // entirely, so they need no field reads here.
         let (module_type, stub_ea, stub_size) = match size {
             0x1c | 0x20 => (0u64, 0u32, 0u32),
             0x30 => {
@@ -678,9 +692,8 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// - `CELL_EFAULT` when `library` is null or unmapped. RPCS3's
-    ///   `sys_prx.cpp` `_sys_prx_register_library` refuses an address
-    ///   that fails its mapping check before touching the descriptor.
+    /// - `CELL_EFAULT` when `library` is null or unmapped; the address
+    ///   is checked before the descriptor is touched.
     pub(in crate::host::dispatch_route) fn dispatch_prx_register_library(
         &self,
         args: [u64; 8],
@@ -696,12 +709,18 @@ impl Lv2Host {
     /// `_sys_prx_get_module_list` (494): fills `pInfo->idlist` and
     /// writes `pInfo->count`, filtering liblv2.sprx.
     ///
-    /// Struct layout (RPCS3 `sys_prx.h`
-    /// `sys_prx_get_module_list_option_t`): `size@0` (u64), `pad@8`,
-    /// `max@0xC`, `count@0x10`, `idlist@0x14`, `unk@0x18`, tail
-    /// padding to 0x20. Only `[p_info, p_info+0x18)` is touched.
-    /// `flags & 0x2 == 0` short-circuits to CELL_OK. CELL_EFAULT on
-    /// null `pInfo`.
+    /// Struct layout, as liblv2.sprx's `sys_prx_get_module_list`
+    /// builds it on its own stack: `size@0` (u64, declared `0x20`),
+    /// `pad@8` (never written), `max@0xC`, `count@0x10`,
+    /// `idlist@0x14`, `unk@0x18`, tail padding to `0x20`. Only
+    /// `[p_info, p_info+0x18)` is touched. liblv2.sprx always passes
+    /// `flags = 2`; `flags & 0x2 == 0` short-circuits to CELL_OK.
+    /// CELL_EFAULT on null `pInfo`.
+    ///
+    /// `size` selects the layout. A value other than `0x20` names a
+    /// struct whose `max` / `count` / `idlist` sit elsewhere, and that
+    /// layout is not modelled: the call fills nothing, answers
+    /// CELL_OK, and logs a break.
     ///
     /// # Cross-module contract
     ///
@@ -715,6 +734,8 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        let modelled_size = cellgov_ps3_abi::sys_prx::get_module_list_option::SIZE;
+
         let flags = args[0];
         let p_info = args[1] as u32;
         if flags & 0x2 == 0 {
@@ -733,6 +754,28 @@ impl Lv2Host {
                 ),
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        }
+        let Some(declared_size) = self.read_be_u64(rt, p_info) else {
+            self.log_invariant_break(
+                "dispatch.prx_module_list_unreadable_pinfo",
+                format_args!(
+                    "sys_prx_get_module_list pInfo={p_info:#010x} size field unreadable; \
+                     returning CELL_EFAULT"
+                ),
+            );
+            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        };
+        if declared_size != modelled_size {
+            self.log_invariant_break(
+                "dispatch.prx_module_list_unknown_struct_size",
+                format_args!(
+                    "sys_prx_get_module_list pInfo={p_info:#010x} declares \
+                     size={declared_size:#x}, not {modelled_size:#x}; the other \
+                     layout is not modelled, so nothing is filled in and CELL_OK is \
+                     returned"
+                ),
+            );
+            return Lv2Dispatch::immediate(0);
         }
         let mut effects = Vec::new();
         let max_addr = p_info.wrapping_add(0x0C);

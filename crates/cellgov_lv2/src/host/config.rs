@@ -6,8 +6,9 @@
 //! replayed to the handle's queue as a service event, and the guest
 //! reads the record behind an event with
 //! `sys_config_get_service_event`. Ids for handles, listeners, and
-//! services come from the shared kernel-id allocator; event ids count
-//! from zero. Oracle: RPCS3 `sys_config.cpp`.
+//! services come from the shared kernel-id allocator. Event ids count
+//! from zero, which is CellGov's own scheme; the kernel's own
+//! numbering is guest-visible and nothing in dev_flash states it.
 
 use std::collections::BTreeMap;
 
@@ -50,8 +51,9 @@ pub(crate) struct ConfigService {
 impl ConfigService {
     /// Buffer a `sys_config_get_service_event` call must offer;
     /// reported in the queued event's `data3` whether or not the
-    /// service is still registered (RPCS3 `sys_config.h`
-    /// `lv2_config_service::get_size`, `check_buffer_size`).
+    /// service is still registered. It overstates both record lengths:
+    /// see [`Self::record_len`] and
+    /// [`SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN`].
     fn announced_len(&self) -> usize {
         SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN + self.data.len()
     }
@@ -78,9 +80,8 @@ pub(crate) struct ConfigListener {
 }
 
 impl ConfigListener {
-    /// RPCS3 `lv2_config_service_listener::check_service`: a once
-    /// listener fires a single time, the id and verbosity must fit,
-    /// and pad-manager events reach only listeners whose buffer
+    /// A once listener fires a single time, the id and verbosity must
+    /// fit, and pad-manager events reach only listeners whose buffer
     /// leads with `0x01`.
     fn matches(&self, service: &ConfigService) -> bool {
         if self.listener_type == SYS_CONFIG_SERVICE_LISTENER_ONCE && self.delivered > 0 {
@@ -103,7 +104,7 @@ pub(crate) struct ConfigEvent {
     pub service: u32,
     /// Registration state the queued event's `data2` announced. The
     /// record read back later reports the service's live state
-    /// instead (RPCS3 `sys_config.cpp` `lv2_config_service_event::write`).
+    /// instead.
     pub registered: bool,
 }
 
@@ -210,11 +211,11 @@ impl ConfigTable {
     }
 
     /// Registered services `listener` matches, oldest registration
-    /// first. A service unregistered but still held by another
-    /// listener's events is not replayed: RPCS3 `sys_config.cpp`
-    /// `lv2_config_service_listener::notify_all` selects from the id
-    /// manager, and `sys_config_unregister_service` withdraws the
-    /// service from it before notifying.
+    /// first.
+    ///
+    /// An unregistered service is never replayed, even while another
+    /// listener still holds events for it. Unregistering withdraws the
+    /// service before any notification goes out.
     fn matching_services(&self, listener: u32) -> Vec<u32> {
         let Some(l) = self.listeners.get(&listener) else {
             return vec![];
@@ -339,8 +340,7 @@ impl ConfigTable {
     /// side of the event is gone.
     ///
     /// The `registered` field and the record's length follow the
-    /// service's state at read time (RPCS3 `sys_config.cpp`
-    /// `lv2_config_service_event::write`).
+    /// service's state at read time; see `ConfigEvent::registered`.
     fn record(&self, event: u32) -> Option<Vec<u8>> {
         let ev = self.events.get(&event)?;
         let s = self.services.get(&ev.service)?;
@@ -429,7 +429,7 @@ impl Lv2Host {
     /// `sys_config_open` (516).
     ///
     /// The first open registers the two pad-manager services with the
-    /// DUALSHOCK 3 descriptor (RPCS3 `lv2_config::initialize`).
+    /// synthetic DUALSHOCK 3 descriptor.
     ///
     /// # Errors
     ///
@@ -590,8 +590,7 @@ impl Lv2Host {
     }
 
     /// `sys_config_remove_service_listener` (520). The handle is not
-    /// consulted, as in the oracle; the listener's undelivered records
-    /// go with it.
+    /// consulted; the listener's undelivered records go with it.
     ///
     /// # Errors
     ///
@@ -644,8 +643,7 @@ impl Lv2Host {
 
     /// `sys_config_unregister_service` (522): flips the service to
     /// unregistered and notifies matching listeners with a
-    /// `registered = 0` event. The handle is not consulted, as in the
-    /// oracle.
+    /// `registered = 0` event. The handle is not consulted.
     ///
     /// # Errors
     ///
@@ -711,8 +709,8 @@ impl Lv2Host {
                     out_ptr,
                     payload,
                 }),
-            // A refused send is not a delivery: the oracle drops the
-            // event rather than leave a record no queue announced.
+            // A refused send is not a delivery: the event is dropped
+            // rather than leaving a record no queue announced.
             EventQueueSend::Unknown | EventQueueSend::Full => {
                 self.obs.config_events_dropped += 1;
                 self.state.config.discard_event(event);

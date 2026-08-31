@@ -243,10 +243,13 @@ impl Lv2Host {
 
     /// `sys_process_get_status`: minimal liveness poll.
     ///
-    /// CellGov-decided semantics: CELL_OK while `pid` names a live
-    /// process, CELL_ESRCH once it has exited or never existed. The
-    /// real LV2 encoding is undecoded (RPCS3 todo-stubs the call);
-    /// revisit when a capture pins it.
+    /// CELL_OK while `pid` names a live process, CELL_ESRCH after it
+    /// exits or when it never existed.
+    ///
+    /// Known divergence: the status comes back as the syscall's return
+    /// value, and firmware re-polls while it reads 1 or 2. Neither
+    /// CELL_OK nor CELL_ESRCH means "not finished", so a guest wait
+    /// loop on this call leaves on the first poll.
     pub(in crate::host) fn dispatch_process_get_status(&self, pid: u32) -> Lv2Dispatch {
         let code = match self.state.processes.get(pid) {
             Some(entry) if entry.exit_status.is_none() => 0u64,

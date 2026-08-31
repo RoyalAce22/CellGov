@@ -594,8 +594,7 @@ impl Lv2Host {
                         "process.exit2_unconsumed_arg4",
                         format_args!(
                             "process exit2 carried nonzero fourth arg \
-                             {arg4:#x} (RPCS3 sys_game_.cpp exitspawn \
-                             passes 0x1000_0000); not consumed",
+                             {arg4:#x}; not consumed",
                         ),
                     );
                 }

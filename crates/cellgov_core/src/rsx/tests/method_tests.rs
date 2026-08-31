@@ -158,6 +158,9 @@ fn malformed_with_reserved_bit_16_set() {
     }
 }
 
+// The pusher tests only the low two bits for a new JUMP, so it reads
+// this word as a new JUMP to 0x2000_0000. The narrower bits 31..=29
+// screen in `decode_header` refuses it.
 #[test]
 fn jump_plus_new_jump_is_malformed() {
     let h = hdr(NV_FLAG_JUMP | NV_FLAG_NEW_JUMP);
@@ -190,7 +193,7 @@ fn return_plus_new_jump_decodes_as_new_jump_per_hardware() {
 }
 
 #[test]
-fn call_with_bit_31_set_decodes_as_call_per_hardware() {
+fn call_with_bit_31_set_decodes_as_call_with_the_high_bit_dropped() {
     let h = hdr(0x8000_0000 | NV_FLAG_CALL);
     match h.kind {
         NvCommandKind::Call { offset } => {
@@ -201,7 +204,7 @@ fn call_with_bit_31_set_decodes_as_call_per_hardware() {
 }
 
 #[test]
-fn call_with_jump_flag_decodes_as_call_per_hardware() {
+fn call_with_jump_flag_decodes_as_call_with_the_jump_bit_dropped() {
     let h = hdr(NV_FLAG_JUMP | NV_FLAG_CALL);
     match h.kind {
         NvCommandKind::Call { offset } => {
@@ -872,7 +875,7 @@ fn register_nv406e_label_handlers_surfaces_release_collision() {
 }
 
 #[test]
-fn nv_constant_values_pin_rpcs3_lineage() {
+fn nv_constant_values_pin_the_pusher_encoding_and_class_method_addresses() {
     assert_eq!(NV406E_SET_REFERENCE, 0x0050);
     assert_eq!(NV406E_SEMAPHORE_OFFSET, 0x0064);
     assert_eq!(NV406E_SEMAPHORE_ACQUIRE, 0x0068);

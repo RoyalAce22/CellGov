@@ -144,8 +144,10 @@ impl Lv2Host {
 
     /// `sys_usbd_finalize` (531): drops the handle and wakes every
     /// parked event reader with `(SYS_USBD_TERMINATE, 0, 0)`, in park
-    /// order (RPCS3 `sys_usbd_finalize`, which wakes the whole sleep
-    /// queue regardless of handle).
+    /// order.
+    ///
+    /// Readers parked on another handle wake too. Park order is
+    /// CellGov's own; the kernel's drain order has no witness here.
     ///
     /// # Errors
     ///

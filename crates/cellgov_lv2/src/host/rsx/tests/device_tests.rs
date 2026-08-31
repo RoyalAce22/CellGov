@@ -38,11 +38,9 @@ fn sys_rsx_device_map_dev_id_8_writes_rsx_device_addr_only_and_returns_ok() {
 #[test]
 fn sys_rsx_device_map_never_writes_a2_regardless_of_pointer() {
     let mut host = Lv2Host::new();
-    // 0xd003ed48 is the real-libgcm value observed in
-    // RPCS3 issue #2401; pinning it guards against a future
-    // change adding an a2 write because the title's pointer
-    // happens to look "valid."
-    for a2_ptr in [0, 0x1008, 0xd003ed48_u64 as u32] {
+    // Null, a mapped address, and an unmapped address that still
+    // looks like a plausible guest pointer.
+    for a2_ptr in [0, 0x1008, 0xD003_ED48_u32] {
         let d = dispatch_device_map(&mut host, 0x1000, a2_ptr, 8);
         let Lv2Dispatch::Immediate { effects, .. } = d else {
             panic!("expected Immediate, got {d:?}");
@@ -105,15 +103,6 @@ fn sys_rsx_device_map_dev_id_not_8_returns_einval_and_bumps_count() {
         host.observability().invariant_break_count - breaks_before,
         6
     );
-}
-
-#[test]
-fn rsx_device_addr_value_is_within_rpcs3_documented_range() {
-    // RPCS3's sys_rsx.cpp documents dev_addr in
-    // 0x40000000..0xB0000000; this anchor catches a future
-    // change that moves it out of the range libgcm expects.
-    assert_ne!(device_map::ADDR, 0);
-    assert!((0x4000_0000..0xB000_0000).contains(&device_map::ADDR));
 }
 
 #[test]

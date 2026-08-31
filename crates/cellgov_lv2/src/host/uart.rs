@@ -9,9 +9,11 @@
 //! stream and are gated by the enabled-event mask at that moment. The
 //! monitor on HDMI 0 and the AV-multi port are fixed fixtures; audio
 //! and video packets are validated and acknowledged but drive nothing.
-//! Oracle: RPCS3 `sys_uart.cpp`, whose AV thread answers a batch after
-//! a wall-clock pause and delivers events on a timer; here the same
-//! bytes appear in the same order with no latency.
+//!
+//! On a console the far end of this UART is the system controller,
+//! which answers on its own schedule. Its firmware is not part of
+//! dev_flash, so nothing here has a witness: the host stages every
+//! reply at dispatch, in one order, with no latency.
 
 use std::collections::VecDeque;
 
@@ -47,10 +49,8 @@ pub(crate) struct UartState {
     /// Undelivered reply and event bytes, oldest first.
     rx: Vec<u8>,
     /// Blocking readers in park order; the front takes the next
-    /// bytes. The kernel's blocking readers all retry against one
-    /// lock, so which of several wins a send is a race there; park
-    /// order is the deterministic stand-in (RPCS3 `sys_uart.cpp`
-    /// `sys_uart_receive`, BLOCKING_BIG_OP arm).
+    /// bytes. Which of several parked readers wins a send is a race on
+    /// a console, so park order here is CellGov's own.
     readers: VecDeque<UartReader>,
     /// Version the last AV_INIT carried; events echo it.
     av_cmd_ver: u16,
@@ -164,7 +164,7 @@ impl UartState {
 /// keeps two staging buffers and commits the plain one before the
 /// system-controller one; events go straight to the stream after
 /// both. The overflow checks every command makes look at the plain
-/// buffer only, as in the oracle.
+/// buffer only.
 #[derive(Debug, Default)]
 struct ReplyBatch {
     plain: Vec<u8>,
@@ -435,8 +435,10 @@ const IMPOSSIBLE_PKT_SIZE: usize = usize::MAX;
 /// Size of an AVB_PARAM packet from its sub-packet counts and each
 /// sub-packet's own header. A packet too short to hold the counts, an
 /// over-count, or a sub-packet header past the declared end reads as
-/// an impossible size so the parser refuses it; the oracle reads past
-/// its buffer in those cases (RPCS3 `inc_avset_cmd::get_size`).
+/// an impossible size so the parser refuses it.
+///
+/// What the system controller does with an over-count has no witness
+/// here.
 fn inc_avset_size(pkt: &[u8]) -> usize {
     if pkt.len() < av::PS3AV_PKT_INC_AVSET_LEN {
         return IMPOSSIBLE_PKT_SIZE;
@@ -457,8 +459,8 @@ fn inc_avset_size(pkt: &[u8]) -> usize {
     size
 }
 
-/// Video-mode bounds table indexed by the vid map below (RPCS3
-/// `inc_avset_cmd::video_pkt_parse`): `(width_div, width, height)`.
+/// Video-mode bounds table indexed by the vid map below:
+/// `(width_div, width, height)`.
 const VIDEO_SCE_PARAMS: [(u32, u32, u32); 28] = [
     (0, 0, 0),
     (4, 2880, 480),
@@ -522,7 +524,12 @@ fn video_sce_index(vid: u32) -> Option<usize> {
     })
 }
 
-/// Validate one `ps3av_pkt_video_mode` (RPCS3 `video_pkt_parse`).
+/// Validate one `ps3av_pkt_video_mode`.
+///
+/// The system controller decides the accepted set, and its firmware is
+/// not in dev_flash. The bounds table above, the `0x1CE07`
+/// `out_format` mask, and the `unk2` and `pitch` limits have no
+/// witness, so a rejection here is a guess.
 fn video_mode_status(v: &[u8]) -> u32 {
     let head = rd32(v, 8);
     let unk2 = rd16(v, 14);
@@ -556,11 +563,20 @@ fn video_mode_status(v: &[u8]) -> u32 {
     }
 }
 
-/// The fixed HDMI 0 monitor: every resolution bit, 720p native, RGB
-/// and YCbCr with 12-bit colour, seven audio formats, 16:9 27-inch.
-/// Values follow RPCS3's virtual monitor so the two runners agree
-/// byte for byte; an EDID pass-through behaviour mode reports only
-/// the monitor type.
+/// `monitor_name`, NUL-padded into the descriptor's 16-byte field.
+const MONITOR_NAME: &[u8] = b"CellGov HDMI";
+
+/// The name field runs from offset 12 to the `res_60` bits at 28.
+const MONITOR_NAME_FIELD_LEN: usize = 16;
+const _: () = assert!(MONITOR_NAME.len() <= MONITOR_NAME_FIELD_LEN);
+
+/// The fixed HDMI 0 monitor: a 27-inch 16:9 1080p panel.
+///
+/// CellGov synthesises these bytes; on a console they come from the
+/// EDID of the attached display. The descriptor names an ordinary
+/// HDTV: the CEA modes and nothing else, 1080p60 native, Rec.709
+/// colour. An EDID pass-through behaviour mode reports only the
+/// monitor type.
 fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LEN] {
     let mut m = [0u8; av::PS3AV_MONITOR_INFO_LEN];
     if behavior != av::PS3AV_HDMI_BEHAVIOR_NORMAL
@@ -576,14 +592,19 @@ fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LE
     m[0] = avport;
     m[1..11].copy_from_slice(&[0x4A, 0x13, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x15]);
     m[11] = av::PS3AV_MONITOR_TYPE_HDMI;
-    m[12..25].copy_from_slice(b"RPCS3 VirtMon");
-    let native = av::PS3AV_RESBIT_1280X720P;
+    m[12..12 + MONITOR_NAME.len()].copy_from_slice(MONITOR_NAME);
+    // The CEA modes an HDTV carries, per refresh table. 480p and 576p
+    // share a bit position, read against whichever table holds it.
+    let hd = av::PS3AV_RESBIT_1280X720P | av::PS3AV_RESBIT_1920X1080I | av::PS3AV_RESBIT_1920X1080P;
+    let native = av::PS3AV_RESBIT_1920X1080P;
     // res_60, res_50, res_other, res_vesa: (res_bits, native) each.
+    // The native timing is 60 Hz, so the 50 Hz table lists modes with
+    // no native entry; a TV carries no VESA mode.
     for (i, (bits, nat)) in [
-        (u32::MAX, native),
-        (u32::MAX, native),
-        (u32::MAX, 0),
-        (1, 0),
+        (av::PS3AV_RESBIT_720X480P | hd, native),
+        (av::PS3AV_RESBIT_720X576P | hd, 0),
+        (0, 0),
+        (0, 0),
     ]
     .into_iter()
     .enumerate()
@@ -602,9 +623,10 @@ fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LE
         | av::PS3AV_COLORIMETRY_MD0
         | av::PS3AV_COLORIMETRY_MD1
         | av::PS3AV_COLORIMETRY_MD2;
-    // Colour: red (1023, 0), green (0, 1023), blue (0, 0), white
-    // (341, 341), gamma 100.
-    for (i, v) in [1023u16, 0, 0, 1023, 0, 0, 341, 341]
+    // Rec.709 primaries and a D65 white point, as 10-bit fractions of
+    // the CIE x/y unit square: red (0.640, 0.330), green (0.300,
+    // 0.600), blue (0.150, 0.060), white (0.3127, 0.3290).
+    for (i, v) in [655u16, 338, 307, 614, 154, 61, 320, 337]
         .into_iter()
         .enumerate()
     {
@@ -627,14 +649,13 @@ fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LE
         let at = 88 + i * 4;
         m[at..at + 4].copy_from_slice(&[ty, ch, fs, sbit]);
     }
+    // 60 cm by 34 cm: a 27-inch panel at 16:9.
     m[152..154].copy_from_slice(&60u16.to_be_bytes()); // hor_screen_size
     m[154..156].copy_from_slice(&34u16.to_be_bytes()); // ver_screen_size
     m[156] = 0b1111; // supported_content_types
-                     // Five 3D resolution blocks: all bits, no native.
-    for i in 0..5 {
-        let at = 160 + i * 8;
-        m[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
-    }
+
+    // The five 3D resolution blocks at 160..200 stay zero: a plain
+    // HDTV carries no stereoscopic timing.
     m
 }
 
@@ -745,7 +766,7 @@ impl Lv2Host {
     ///
     /// - `CELL_ENOSYS` without root privilege.
     /// - `CELL_EINVAL` for a mode other than 0 / 1, or a transfer over
-    ///   [`av::SYS_UART_MAX_TRANSFER`] (named break; the oracle aborts).
+    ///   [`av::SYS_UART_MAX_TRANSFER`], which draws a named break.
     /// - `CELL_ESRCH` before `sys_uart_initialize`, or for a caller
     ///   with no PPU thread record.
     /// - `CELL_EFAULT` for an unwritable buffer, checked before any
@@ -848,7 +869,7 @@ impl Lv2Host {
     ///
     /// - `CELL_ENOSYS` without root privilege.
     /// - `CELL_EINVAL` for a mode above 3, or a transfer over
-    ///   [`av::SYS_UART_MAX_TRANSFER`] (named break; the oracle aborts).
+    ///   [`av::SYS_UART_MAX_TRANSFER`], which draws a named break.
     /// - `CELL_ESRCH` before `sys_uart_initialize`.
     /// - `CELL_EFAULT` for an unreadable buffer.
     /// - `CELL_EAGAIN` in mode 2 when the buffer exceeds the TX ring.
@@ -896,8 +917,7 @@ impl Lv2Host {
         }
         // Mode 0 pushes its first chunk and, when the ring cannot take
         // that chunk whole, reports the chunk's size rather than the
-        // ring's; the bytes past the ring are dropped either way
-        // (RPCS3 `sys_uart_send`, NOT_BLOCKING_BIG_OP arm).
+        // ring's; the bytes past the ring are dropped either way.
         let sent = if mode == av::SYS_UART_MODE_NOT_BLOCKING_BIG_OP
             && size > av::PS3AV_TX_BUF_SIZE as u64
         {
@@ -975,11 +995,11 @@ impl Lv2Host {
         served
     }
 
-    /// Walk the packets in one send (RPCS3 `parse_tx_buffer`).
+    /// Walk the packets in one send.
     fn uart_parse(&mut self, tx: &[u8], batch: &mut ReplyBatch) {
         if tx.len() >= av::PS3AV_TX_BUF_SIZE {
-            // The oracle answers an overfull ring with one overflow
-            // reply addressed by the low half of the first cid.
+            // An overfull ring draws one overflow reply, addressed
+            // by the low half of the first cid.
             let cid = u32::from(rd16(&padded(tx, 0, 8), 6));
             batch.reply(false, cid, av::PS3AV_STATUS_BUFFER_OVERFLOW, &[]);
             return;
@@ -992,8 +1012,7 @@ impl Lv2Host {
             let cid = rd32(&hdr, 4);
             // The AV manager sizes a packet in 16-bit arithmetic and
             // walks by that size however small it is; the poison
-            // length is the one value that would walk zero bytes
-            // (RPCS3 `parse_tx_buffer`).
+            // length is the one value that would walk zero bytes.
             let pkt_size = usize::from(length.wrapping_add(4));
             if length == av::PS3AV_LENGTH_POISON {
                 batch.reply(
@@ -1051,8 +1070,8 @@ impl Lv2Host {
         batch.reply(false, cid, av::PS3AV_STATUS_SUCCESS, &[]);
     }
 
-    /// Acknowledge a command the oracle answers without a model
-    /// either; the break names the fabricated success.
+    /// Acknowledge a command nothing here models; the break names
+    /// the fabricated success.
     fn cid_blind_ack(&mut self, cid: u32, _pkt: &[u8], batch: &mut ReplyBatch) {
         if batch.refuse_if_full(cid, 0) {
             return;
@@ -1192,8 +1211,8 @@ impl Lv2Host {
             self.state.uart.hdmi_res_set[usize::from(avport)] = false;
             batch.reply(true, cid, av::PS3AV_STATUS_SUCCESS, &[]);
         } else if avport == av::PS3AV_AVPORT_AVMULTI_0 {
-            // The oracle answers only once head B has been
-            // configured; before that the command is silent.
+            // The reply comes only after head B is configured; before
+            // that the command is silent.
             if self.state.uart.head_b_initialized {
                 batch.reply(true, cid, av::PS3AV_STATUS_SUCCESS, &[]);
             }
@@ -1348,7 +1367,7 @@ impl Lv2Host {
     }
 
     /// AVB_PARAM: a video-mode section, an AV-video section, and an
-    /// AV-audio section, each validated in turn (RPCS3 `inc_avset_cmd`).
+    /// AV-audio section, each validated in turn.
     fn uart_inc_avset(&mut self, cid: u32, pkt: &[u8], batch: &mut ReplyBatch) {
         if batch.refuse_if_full(cid, 0) {
             return;
@@ -1441,8 +1460,7 @@ impl Lv2Host {
 
     /// Drive the HDMI 0 link from one step below `first` (or the last
     /// scripted state, whichever is lower) up to `last`, staging one
-    /// event per step the guest has enabled (RPCS3
-    /// `vuart_hdmi_event_handler`).
+    /// event per step the guest has enabled.
     fn uart_hdmi_script(&mut self, first: u8, last: u8, batch: &mut ReplyBatch) {
         let base = (first - 1).min(self.state.uart.hdmi_to_state);
         self.state.uart.hdmi_to_state = last;

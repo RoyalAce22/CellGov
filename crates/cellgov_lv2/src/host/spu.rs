@@ -266,12 +266,28 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // A zero-thread group is refused before anything is allocated:
-        // RPCS3 `sys_spu.cpp` `sys_spu_thread_group_create` rejects
-        // `!num` with CELL_EINVAL, and a slotless group could never
-        // reach the fully-initialized state that
-        // `sys_spu_thread_group_start` requires.
-        if num_threads == 0 || num_threads > MAX_SLOTS_PER_GROUP {
+        // A zero-thread group is refused before anything is
+        // allocated: a slotless group could never reach the
+        // fully-initialized state `sys_spu_thread_group_start`
+        // requires.
+        if num_threads == 0 {
+            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+        }
+        // `MAX_SLOTS_PER_GROUP` bounds CellGov's thread-id encoding.
+        // The kernel's own limit on `num` is unestablished, so this
+        // errno is CellGov's own refusal.
+        if num_threads > MAX_SLOTS_PER_GROUP {
+            self.log_invariant_break(
+                "dispatch.sys_spu_thread_group_create_num_threads_over_encoding_cap",
+                format_args!(
+                    "sys_spu_thread_group_create num={num_threads} exceeds the \
+                     group_id * {cap} + slot thread-id encoding CellGov allocates \
+                     from; returning CELL_EINVAL. The kernel's own limit on num is \
+                     unestablished, so this is a CellGov refusal, not a modelled \
+                     kernel answer.",
+                    cap = MAX_SLOTS_PER_GROUP,
+                ),
+            );
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
         let group_id = match self.state.groups.create(num_threads) {
@@ -425,11 +441,10 @@ impl Lv2Host {
             }
         };
 
-        // Slot index is screened ahead of every pointer read: RPCS3
-        // `sys_spu.cpp` `sys_spu_thread_initialize` rejects an out-of-
-        // range `spu_num` as its first act, so an out-of-range slot with
-        // an unreadable image pointer answers CELL_EINVAL, not
-        // CELL_EFAULT.
+        // This screen runs ahead of every pointer read, so an
+        // out-of-range slot with an unreadable image pointer answers
+        // CELL_EINVAL rather than CELL_EFAULT. Which of the two the
+        // kernel answers when both apply is unestablished.
         if thread_num >= MAX_SLOTS_PER_GROUP {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
@@ -675,3 +690,74 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/spu_user_image_tests.rs"]
 mod user_image_tests;
+
+#[cfg(test)]
+mod encoding_cap_tests {
+    use super::*;
+    use crate::host::test_support::FakeRuntime;
+
+    /// Returns the dispatch and how many invariant breaks it added.
+    fn create(num_threads: u32) -> (Lv2Dispatch, usize) {
+        let mut host = Lv2Host::new();
+        let rt = FakeRuntime::new(0x4000);
+        let before = host.observability().invariant_break_count;
+        let d = host.dispatch(
+            Lv2Request::SpuThreadGroupCreate {
+                id_ptr: 0x100,
+                num_threads,
+                priority: 0,
+                attr_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        );
+        let added = host.observability().invariant_break_count - before;
+        (d, added)
+    }
+
+    #[test]
+    fn a_num_threads_over_the_encoding_cap_is_refused_with_a_witness() {
+        let (d, breaks) = create(MAX_SLOTS_PER_GROUP + 1);
+        match d {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, cell_errors::CELL_EINVAL.into());
+                assert!(effects.is_empty());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+        assert!(
+            breaks > 0,
+            "the cap is CellGov's thread-id encoding, not a kernel rule, so the \
+             refusal must leave a witness rather than pass for a kernel errno",
+        );
+    }
+
+    #[test]
+    fn a_num_threads_at_the_encoding_cap_is_accepted_without_a_witness() {
+        let (d, breaks) = create(MAX_SLOTS_PER_GROUP);
+        match d {
+            Lv2Dispatch::Immediate { code, effects } => {
+                assert_eq!(code, 0);
+                assert_eq!(effects.len(), 1);
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+        assert_eq!(breaks, 0);
+    }
+
+    #[test]
+    fn a_zero_thread_group_is_refused_without_the_encoding_cap_witness() {
+        let (d, breaks) = create(0);
+        match d {
+            Lv2Dispatch::Immediate { code, .. } => {
+                assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            }
+            other => panic!("expected Immediate, got {other:?}"),
+        }
+        assert_eq!(
+            breaks, 0,
+            "a slotless group is refused on its own terms; only the encoding cap \
+             is CellGov's own limit",
+        );
+    }
+}

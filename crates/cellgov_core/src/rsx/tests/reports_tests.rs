@@ -31,6 +31,15 @@ fn rsx_report_size_and_alignment() {
 }
 
 #[test]
+fn rsx_report_and_notify_field_offsets_match_the_libgcm_entry_layouts() {
+    assert_eq!(offset_of!(RsxReport, timer), 0x0);
+    assert_eq!(offset_of!(RsxReport, value), 0x8);
+    assert_eq!(offset_of!(RsxReport, zero), 0xC);
+    assert_eq!(offset_of!(RsxNotify, timer), 0x0);
+    assert_eq!(offset_of!(RsxNotify, zero), 0x8);
+}
+
+#[test]
 fn rsx_dma_control_total_size() {
     assert_eq!(RSX_DMA_CONTROL_SIZE, 0x58);
 }
@@ -71,9 +80,9 @@ fn rsx_driver_info_guest_facing_field_offsets() {
     assert_eq!(offset_of!(RsxDriverInfo, hardware_channel), 0x0C);
     assert_eq!(offset_of!(RsxDriverInfo, nvcore_frequency), 0x10);
     assert_eq!(offset_of!(RsxDriverInfo, memory_frequency), 0x14);
-    assert_eq!(offset_of!(RsxDriverInfo, reports_notify_offset), 0x2C);
-    assert_eq!(offset_of!(RsxDriverInfo, reports_offset), 0x30);
-    assert_eq!(offset_of!(RsxDriverInfo, reports_report_offset), 0x34);
+    assert_eq!(offset_of!(RsxDriverInfo, notify_array_offset), 0x2C);
+    assert_eq!(offset_of!(RsxDriverInfo, semaphore_block_offset), 0x30);
+    assert_eq!(offset_of!(RsxDriverInfo, report_array_offset), 0x34);
     assert_eq!(offset_of!(RsxDriverInfo, system_mode_flags), 0x50);
     assert_eq!(offset_of!(RsxDriverInfo, handlers), 0x12C0);
     assert_eq!(offset_of!(RsxDriverInfo, user_cmd_param), 0x12CC);
@@ -183,29 +192,18 @@ fn rsx_context_state_hash_distinguishes_every_field() {
 }
 
 #[test]
-fn semaphore_init_pattern_matches_rpcs3() {
-    assert_eq!(SEMAPHORE_INIT_PATTERN[0], 0x1337_C0D3);
-    assert_eq!(SEMAPHORE_INIT_PATTERN[1], 0x1337_BABE);
-    assert_eq!(SEMAPHORE_INIT_PATTERN[2], 0x1337_BEEF);
-    assert_eq!(SEMAPHORE_INIT_PATTERN[3], 0x1337_F001);
-}
-
-#[test]
-fn label_stride_maps_label_index_to_sentinel_correctly() {
+fn every_label_index_lands_on_a_distinct_semaphore_slot() {
     assert_eq!(LABEL_STRIDE, 0x10);
     assert_eq!(LABEL_COUNT, 256);
     assert_eq!(LABEL_COUNT * LABEL_STRIDE, 4096);
 
+    let mut seen = std::collections::BTreeSet::new();
     for i in 0..LABEL_COUNT {
-        let byte_offset = i * LABEL_STRIDE;
-        let sem_index = (byte_offset / 4) as usize;
-        assert!(sem_index < 1024);
-        let expected = SEMAPHORE_INIT_PATTERN[sem_index % 4];
-        if i == 255 {
-            assert_eq!(sem_index, 1020);
-            assert_eq!(expected, 0x1337_C0D3);
-        }
+        let sem_index = (i * LABEL_STRIDE / 4) as usize;
+        assert!(sem_index < 1024, "label {i} escapes the semaphore block");
+        assert!(seen.insert(sem_index), "label {i} aliases an earlier slot");
     }
+    assert_eq!(seen.last(), Some(&1020));
 }
 
 #[test]

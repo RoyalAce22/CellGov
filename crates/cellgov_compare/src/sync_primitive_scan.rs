@@ -5,13 +5,22 @@
 //! The layout scanners run against CG's runtime snapshot: the
 //! `sys_lwmutex_t` preamble they match exists only after the title's
 //! user-space init has run. Every other LV2 primitive hands the title
-//! a bare `u32` id it stores anywhere, so [`kernel_handle_pair`]
-//! recognises one by the value shape each runner's allocator imposes
-//! (CellGov counts up from [`FIRST_KERNEL_ID`]; RPCS3 uses a per-kind
-//! base plus an index step, RPCS3 `Emu/IdManager.h` `id_traits`,
-//! `Emu/Cell/lv2/sys_sync.h` `lv2_obj`). See
-//! [`crate::classify::DivergenceClass::SyncPrimitiveId`] for why a
-//! differing handle is inert.
+//! a bare `u32` id it stores anywhere. Nothing in the value marks it
+//! as an id, so [`kernel_handle_pair`] tells a handle from a number
+//! by the shape the minting allocator leaves on it.
+//!
+//! CellGov counts its own ids up from two separate allocators:
+//!
+//! - the shared kernel-id allocator, from [`FIRST_KERNEL_ID`];
+//! - the lwmutex table's allocator, from 1.
+//!
+//! The CellGov-side shape test therefore forks on
+//! [`KernelHandleKind::LwMutex`]. The per-kind base table recognises
+//! the values in a comparison runner's memory dump. Neither scheme is
+//! the console's.
+//!
+//! See [`crate::classify::DivergenceClass::SyncPrimitiveId`] for why
+//! a differing handle is inert.
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -164,7 +173,7 @@ pub fn find_sys_lwcond_handle_slots(
     out
 }
 
-/// Which LV2 object an RPCS3 kernel id names.
+/// Which LV2 object a comparison runner's kernel id names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KernelHandleKind {
     /// `sys_mutex`.
@@ -185,17 +194,18 @@ pub enum KernelHandleKind {
     EventFlag,
 }
 
-/// RPCS3's per-kind id bases: `id_base` in each `Emu/Cell/lv2/sys_*.h`
-/// object. Every kind shares `lv2_obj`'s `id_step = 0x100` and
-/// `id_count = 8192`, with the low byte reserved for the id manager's
-/// reuse counter (`sys_sync.h` `lv2_obj::id_invl_range`).
+/// Per-kind id bases the comparison runner's allocator produces:
+/// `id_base` in each RPCS3 `Emu/Cell/lv2/sys_*.h` object. Every kind
+/// shares `lv2_obj`'s `id_step = 0x100` and `id_count = 8192`, and
+/// the low byte holds that id manager's reuse counter (`sys_sync.h`
+/// `lv2_obj::id_invl_range`).
 ///
-/// Only kinds whose id window lies outside memory a guest can map on
-/// either runner are listed. `sys_event_port` (base 0x0e) and
-/// `sys_timer` (base 0x11) sit inside RPCS3's main and user areas
-/// (RPCS3 `vm.cpp` `vm::init` block layout and `_find_map`), so a heap
+/// The table lists only kinds whose id window lies outside memory a
+/// guest can map on either runner. `sys_event_port` (base 0x0e) and
+/// `sys_timer` (base 0x11) sit inside that runner's main and user
+/// areas (`vm.cpp` `vm::init` block layout and `_find_map`). A heap
 /// pointer there would pass as a handle and hide a real pointer
-/// divergence; those two kinds stay unclassified.
+/// divergence, so those two kinds stay unclassified.
 const RPCS3_ID_BASES: &[(u32, KernelHandleKind)] = &[
     (0x8500_0000, KernelHandleKind::Mutex),
     (0x8600_0000, KernelHandleKind::Cond),
@@ -209,7 +219,8 @@ const RPCS3_ID_BASES: &[(u32, KernelHandleKind)] = &[
 const RPCS3_ID_STEP: u32 = 0x100;
 const RPCS3_ID_COUNT: u32 = 8192;
 
-/// The kind of LV2 object `w` names if it has RPCS3's kernel-id shape.
+/// The kind of LV2 object `w` names, when the comparison runner's
+/// allocator minted it.
 pub fn rpcs3_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
     let base = w & 0xff00_0000;
     let (_, kind) = RPCS3_ID_BASES.iter().find(|(b, _)| *b == base)?;
@@ -217,12 +228,12 @@ pub fn rpcs3_kernel_handle_kind(w: u32) -> Option<KernelHandleKind> {
     (index < RPCS3_ID_COUNT).then_some(*kind)
 }
 
-/// The kind of LV2 object a 4-byte word holds when one side carries
-/// RPCS3's kernel-id shape and the other CellGov's, in either order.
+/// The kind of LV2 object a 4-byte word holds when each allocator
+/// minted one side, in either order.
 ///
-/// Two CellGov-shaped or two RPCS3-shaped words are not a pair: the
-/// comparison is then between like runners, where the same allocator
-/// produced both values and a difference is real.
+/// Two like-shaped words are not a pair. The comparison is then
+/// between like runners: one allocator produced both values, so a
+/// difference is real.
 pub fn kernel_handle_pair(a: u32, b: u32) -> Option<KernelHandleKind> {
     let pair = |rpcs3: u32, cellgov: u32| {
         let kind = rpcs3_kernel_handle_kind(rpcs3)?;

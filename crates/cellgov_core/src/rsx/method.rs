@@ -1,4 +1,8 @@
-//! NV2A FIFO command decoder and method dispatch table.
+//! RSX FIFO command decoder and method dispatch table.
+//!
+//! The header encoding is NVIDIA's NV4-and-later DMA pusher format,
+//! which the RSX inherits. The `hw/fifo/dma-pusher` chapter of
+//! envytools documents it.
 //!
 //! [`decode_header`] turns a host-endian u32 FIFO word into an
 //! [`NvMethodHeader`]; the advance pass consumes the declared
@@ -22,11 +26,13 @@ pub use cellgov_ps3_abi::rsx_nv_hardware::{
     NV_NEW_JUMP_OFFSET_MASK, NV_OLD_JUMP_OFFSET_MASK,
 };
 
-/// Catch-all for non-normal-method bits after every control-flow
-/// classifier has failed. Bit 16 sits in this mask (alongside bit 17
-/// for RETURN) because a set bit 16 alone would otherwise pass as a
-/// normal-method header with a bogus address; RPCS3's
-/// `RSX_METHOD_NON_METHOD_CMD_MASK` includes it for the same reason.
+/// Catch-all for non-normal-method bits, tested after every
+/// control-flow classifier rejects the word.
+///
+/// Bits 17 and 16 sit in this mask because both pusher method forms
+/// require them clear. An increasing method is
+/// `cmd & 0xe003_0003 == 0`; a non-increasing method is the same with
+/// bit 30 set.
 const NON_METHOD_MASK: u32 =
     0x8000_0000 | NV_FLAG_JUMP | NV_FLAG_RETURN | 0x0001_0000 | NV_FLAG_NEW_JUMP | NV_FLAG_CALL;
 
@@ -42,8 +48,8 @@ pub enum NvCommandKind {
         /// Absolute byte offset into the FIFO target buffer.
         offset: u32,
     },
-    /// RPCS3's "new" JUMP form; 30-bit byte offset. libgcm does not
-    /// emit this; classified defensively.
+    /// The NV1A-and-later JUMP form; 30-bit byte offset. libgcm does
+    /// not emit this; classified defensively.
     NewJump {
         /// Absolute byte offset, 30-bit range.
         offset: u32,
@@ -98,15 +104,16 @@ impl NvMethodHeader {
 
 /// Decode a host-endian u32 FIFO word into a structured header.
 ///
-/// # Cross-runner contract
+/// Two forms are narrower here than the published pusher encoding:
 ///
-/// First-recognised-form wins for multi-flag inputs, matching NV2A
-/// hardware and RPCS3 byte-for-byte: e.g. CALL|JUMP decodes as CALL
-/// with the JUMP bit folded into the offset. Stricter classification
-/// would flag guest-side corruption but diverge from the RPCS3
-/// oracle. RETURN is the only form classified strictly (exact
-/// `cmd == NV_FLAG_RETURN`) because it carries no offset or count,
-/// so there is nothing legitimate to reject.
+/// - A new JUMP must have bits 31..=29 clear. The pusher tests only
+///   the low two bits.
+/// - `NV_CALL_OFFSET_MASK` keeps 27 offset bits. A CALL address
+///   spans bits 2..=31.
+///
+/// RETURN is classified strictly (exact `cmd == NV_FLAG_RETURN`)
+/// because it carries no offset or count, so there is nothing
+/// legitimate to reject.
 ///
 /// `count` is returned verbatim from bits 18..=28; arity validation
 /// (a method receiving fewer args than it semantically requires) is

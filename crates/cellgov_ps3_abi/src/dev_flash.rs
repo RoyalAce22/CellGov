@@ -3,19 +3,26 @@
 /// Path components of the version file, relative to the `dev_flash`
 /// mount root.
 ///
-/// Every retail firmware image carries it, and it is where the console
-/// and RPCS3 (`util/sysinfo.cpp`, `utils::get_firmware_version`) both
-/// read the version a user sees.
+/// Every retail firmware image carries it, and it holds the version a
+/// user sees.
 pub const VERSION_TXT_COMPONENTS: [&str; 3] = ["vsh", "etc", "version.txt"];
+
+/// The record the version file opens with.
+pub const VERSION_TXT_RELEASE_FIELD: &str = "release";
+
+/// Major digits in the `release` record's fixed-width version field.
+pub const VERSION_TXT_MAJOR_DIGITS: usize = 2;
+
+/// Minor digits in that field. The leading two are the version a user
+/// sees; the rest are a sub-revision.
+pub const VERSION_TXT_MINOR_DIGITS: usize = 4;
 
 /// Module stems shipped in retail firmware's `sys/external/`.
 ///
-/// Externally defined by the firmware distribution: the set is
-/// observable from any retail `dev_flash` install (union across
-/// firmware revisions -- e.g. `libfs_155` ships only in some).
-/// RPCS3 gates its own firmware-miss `hle_load` fallback on the
-/// same membership (`sys_prx.cpp`, `g_prx_list`).
-/// Sorted for binary search.
+/// The set is the `.sprx` stems of that directory, so any retail
+/// `dev_flash` install checks it. The list is a union across firmware
+/// revisions: some revisions ship a module others do not, `libfs_155`
+/// for one. Sorted for binary search.
 pub const FIRMWARE_MODULE_STEMS: &[&str] = &[
     "libaacenc",
     "libaacenc_spurs",
