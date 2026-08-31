@@ -2,6 +2,7 @@
 //! `bench-boot-once`, and `bench-boot`.
 
 use cellgov_compare::BootOutcome;
+use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout};
 use cellgov_time::Budget;
 
 use crate::game;
@@ -17,10 +18,12 @@ use crate::paths::anchor_max_steps;
 
 use game::BENCH_AGREEMENT_GATE_PCT;
 
-/// Where `cellgov_install install` lands the sys/external firmware
-/// SPRXes by default: the `dev_flash` mount of the VFS root, beside
-/// the `dev_hdd0` / `dev_bdvd` mounts the game installers populate.
-const DEFAULT_FIRMWARE_DIR: &str = "vfs/dev_flash/sys/external";
+/// The `sys/external` modules inside a firmware entry, relative to
+/// the entry directory an install record names.
+const FIRMWARE_ENTRY_EXTERNAL: [&str; 3] = ["dev_flash", "sys", "external"];
+
+/// Suffix of an install record file under the installs directory.
+const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
 
 /// Set to `1` by synthetic harnesses (e.g. ps3autotests) to suppress
 /// the auto-default.
@@ -56,9 +59,101 @@ const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
 /// requested but writing its JSON failed.
 const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = 14;
 
+/// The `sys/external` directory of the installed firmware, from the
+/// install record that names where it landed.
+///
+/// The record is the authority, so a versioned store needs no path
+/// convention here and relocating an entry carries the default with
+/// it.
+///
+/// # Errors
+///
+/// A ready-to-print message when the store holds no firmware entry,
+/// holds more than one (nothing here can pick), or names an entry
+/// whose tree is gone. Each says what to do about it.
+fn default_firmware_dir(install_root: &std::path::Path) -> Result<String, String> {
+    let layout = StoreLayout::new(install_root);
+    let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
+    let advice = format!(
+        "install one with `cellgov_install install <PS3UPDAT.PUP>`, name a tree with \
+         --firmware-dir, or set {DISABLE_DEFAULT_ENV}=1 to boot with no firmware at all \
+         (every import then answers through the unresolved-import trampoline)"
+    );
+    let Ok(entries) = std::fs::read_dir(&records) else {
+        return Err(format!(
+            "boot: no firmware is installed under {}: {} does not exist. To proceed, {advice}.",
+            install_root.display(),
+            records.display(),
+        ));
+    };
+    let mut found: Vec<(String, std::path::PathBuf)> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(INSTALL_RECORD_SUFFIX))
+        {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .map_err(|e| format!("boot: reading {}: {e}", path.display()))?;
+        let record = InstallRecord::parse(&text)
+            .map_err(|e| format!("boot: parsing {}: {e}", path.display()))?;
+        if record.artifact.kind != ArtifactKind::Firmware {
+            continue;
+        }
+        let dir = FIRMWARE_ENTRY_EXTERNAL.iter().fold(
+            layout.resolve_store_path(&record.artifact.store_path),
+            |d, part| d.join(part),
+        );
+        found.push((record.artifact.version, dir));
+    }
+    found.sort();
+    match found.as_slice() {
+        [] => Err(format!(
+            "boot: no firmware is installed under {}: {} holds no firmware record. To \
+             proceed, {advice}.",
+            install_root.display(),
+            records.display(),
+        )),
+        [(version, dir)] => {
+            if !dir.is_dir() {
+                return Err(format!(
+                    "boot: firmware {version} is recorded under {} but {} is missing. \
+                     Reinstall it, or name a tree with --firmware-dir.",
+                    install_root.display(),
+                    dir.display(),
+                ));
+            }
+            dir.to_str().map(str::to_string).ok_or_else(|| {
+                format!(
+                    "boot: firmware directory {} is not valid UTF-8",
+                    dir.display()
+                )
+            })
+        }
+        many => Err(format!(
+            "boot: {} firmware versions are installed under {} ({}); name the one to boot \
+             against with --firmware-dir.",
+            many.len(),
+            install_root.display(),
+            many.iter()
+                .map(|(v, _)| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        )),
+    }
+}
+
 /// Explicit `--firmware-dir` wins (validated as an existing
-/// directory); otherwise auto-default to [`DEFAULT_FIRMWARE_DIR`]
-/// when it exists; `None` falls back to pure HLE.
+/// directory); otherwise the installed firmware's `sys/external`;
+/// `None` only when [`DISABLE_DEFAULT_ENV`] asks for pure HLE.
+///
+/// A default that cannot be resolved is fatal here rather than
+/// silently absent: a title boot without firmware binds no import and
+/// dies dozens of steps later naming a NID, which says nothing about
+/// the firmware.
 fn resolve_firmware_dir(args: &[String]) -> Option<String> {
     if let Some(explicit) = find_flag_value(args, "--firmware-dir") {
         if !std::path::Path::new(&explicit).is_dir() {
@@ -73,11 +168,14 @@ fn resolve_firmware_dir(args: &[String]) -> Option<String> {
     if parse_env_bool(DISABLE_DEFAULT_ENV) {
         return None;
     }
-    if std::path::Path::new(DEFAULT_FIRMWARE_DIR).is_dir() {
-        eprintln!("boot: --firmware-dir defaulted to {DEFAULT_FIRMWARE_DIR}");
-        return Some(DEFAULT_FIRMWARE_DIR.to_string());
+    let install_root = super::keys::install_root_of(&resolve_ps3_vfs_root(args));
+    match default_firmware_dir(&install_root) {
+        Ok(dir) => {
+            eprintln!("boot: --firmware-dir defaulted to {dir}");
+            Some(dir)
+        }
+        Err(msg) => die(&msg),
     }
-    None
 }
 
 struct BootInputs {
@@ -491,3 +589,7 @@ pub(crate) fn bench_boot(args: &[String]) {
 #[cfg(test)]
 #[path = "tests/boot_cmd_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/firmware_default_tests.rs"]
+mod firmware_default_tests;

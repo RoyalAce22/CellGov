@@ -64,8 +64,12 @@ when that exists), the boot path:
 - resolves game imports against real firmware exports keyed on
   (namespace, NID).
 
-`CELLGOV_NO_FIRMWARE_DIR=1` suppresses the default; the boot then
-loads no PRX and every game import routes to the
+The default comes from the install record under
+`<vfs>/.cellgov/installs/firmware/`, so it follows a relocated or
+re-versioned entry; a store with no firmware entry, more than one, or
+one whose tree is gone refuses the boot instead of running without
+firmware. `CELLGOV_NO_FIRMWARE_DIR=1` asks for that deliberately: the
+boot then loads no PRX and every game import routes to the
 unresolved-import trampoline. `_sys_prx_load_module` /
 `_sys_prx_get_module_list` resolve against the registered closure
 rather than echoing the path-pointer.

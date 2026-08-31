@@ -19,7 +19,7 @@ static VAULT_ROOT: OnceLock<PathBuf> = OnceLock::new();
 /// level up; the two must agree or an operator who installed under a
 /// non-default root gets `NotConfigured` from a vault
 /// `cellgov_install keys show` finds.
-fn install_root_of(ps3_vfs_root: &Path) -> PathBuf {
+pub(crate) fn install_root_of(ps3_vfs_root: &Path) -> PathBuf {
     let mut comps = ps3_vfs_root.components();
     match comps.next_back() {
         // Dropping a name is the only case where the remaining

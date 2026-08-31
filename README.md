@@ -144,9 +144,10 @@ target/release/cellgov_cli dump-prx-imports <path>       # inspect a PRX / SPRX 
 target/release/cellgov_cli --help                        # the full surface
 ```
 
-`run-game` finds the firmware at `vfs/dev_flash/sys/external/` when
-that directory exists; `--firmware-dir DIR` overrides it and
-`CELLGOV_NO_FIRMWARE_DIR=1` suppresses it.
+`run-game` reads the firmware install record to find the installed
+firmware; `--firmware-dir DIR` overrides it and
+`CELLGOV_NO_FIRMWARE_DIR=1` boots with none at all. With no firmware
+installed and no override, the boot is refused rather than run.
 
 ## Testing
 
