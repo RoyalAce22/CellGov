@@ -3,7 +3,12 @@
 //! it -- command ids, status codes, event bits, and record layouts.
 //!
 //! Behaviour lives in `cellgov_lv2::host::uart`; this module is data
-//! only. Oracle: RPCS3 `sys_uart.h`.
+//! only.
+//!
+//! The PS3AV protocol is not a guest-facing API and nothing in the
+//! corpus states it. The ring sizes, the header version and the
+//! command ids below are all unestablished. The packets vsh sends over
+//! this UART during boot would witness them.
 
 /// Bytes the RX (reply) ring holds.
 pub const PS3AV_RX_BUF_SIZE: usize = 0x800;

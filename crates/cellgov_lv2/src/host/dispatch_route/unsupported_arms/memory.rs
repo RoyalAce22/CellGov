@@ -20,19 +20,22 @@ impl Lv2Host {
     /// `sys_memory_container_create`: mints a container id and writes
     /// it to `*cid`.
     ///
-    /// Serves syscalls 324 and 341, which RPCS3's syscall table binds
-    /// to one kernel entry point. Physical-memory budgets are not
-    /// tracked. Oracle: RPCS3's `sys_memory.cpp`.
+    /// Serves syscalls 324 and 341. Firmware publishes a wrapper for
+    /// each: libsysmodule.sprx carries both in its syscall thunk
+    /// table. CellGov routes them to one arm; whether the kernel binds
+    /// them to one entry point is not witnessed here. Physical-memory
+    /// budgets are not tracked.
     ///
     /// # Errors
     ///
     /// Listed in the order they fire.
     ///
-    /// - `CELL_ENOMEM` when `size` rounds down to zero: the kernel
-    ///   truncates the request to the 1 MiB granule and refuses what
-    ///   is left of a sub-granule request (RPCS3
-    ///   `sys_memory_container_create`).
-    /// - `CELL_EFAULT` when `cid` is null; RPCS3 has no such gate.
+    /// - `CELL_ENOMEM` when `size` rounds down to zero. A sub-granule
+    ///   request has nothing left after truncation to the 1 MiB
+    ///   granule. Where that refusal sits against the `cid` gate is
+    ///   unestablished.
+    /// - `CELL_EFAULT` when `cid` is null. The gate is CellGov's own;
+    ///   no interface or firmware record establishes it.
     pub(in crate::host::dispatch_route) fn dispatch_memory_container_create(
         &mut self,
         cid_ptr: u32,
@@ -64,21 +67,22 @@ impl Lv2Host {
     /// `sys_mmapper_allocate_address` (330): bumps a 256 MiB-aligned
     /// cursor and writes its base to `*alloc_addr`.
     ///
-    /// Oracle: RPCS3's `sys_mmapper.cpp`
-    /// `sys_mmapper_allocate_address`.
+    /// liblv2.sprx's own reservation asks for 256 MiB at an alignment
+    /// of 256 MiB, so this cursor steps in the granule firmware uses.
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire; the argument gates precede the
-    /// `alloc_addr` gate as in RPCS3.
+    /// Listed in the order they fire. Where the argument gates sit
+    /// against the `alloc_addr` gate is unestablished.
     ///
     /// - `CELL_EALIGN` when `size` is not a multiple of the 256 MiB
     ///   VM-area granule; a misaligned request is never rounded up.
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
     /// - `CELL_EALIGN` when `alignment` is not one of the four area
     ///   sizes the kernel accepts.
-    /// - `CELL_EFAULT` when `alloc_addr` is null; RPCS3 has no such
-    ///   gate.
+    /// - `CELL_EFAULT` when `alloc_addr` is null. The gate is
+    ///   CellGov's own; no interface or firmware record establishes
+    ///   it.
     /// - `CELL_ENOMEM` when the VM window is exhausted.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_address(
         &mut self,
@@ -95,9 +99,11 @@ impl Lv2Host {
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         };
-        // A zero alignment is technically invalid but the hardware
-        // accepts it as the default area size; PSL1GHT's sbrk relies
-        // on that, and RPCS3 carries the same allowance.
+        // A zero alignment is outside the accepted set, but it is
+        // taken as the default area size. No firmware caller relies on
+        // that: liblv2.sprx always names 256 MiB explicitly. The only
+        // evidence for the allowance is PSL1GHT's sbrk, which depends
+        // on it on real hardware.
         let alignment = if alignment == 0 {
             VM_AREA_GRANULE
         } else {
@@ -133,14 +139,17 @@ impl Lv2Host {
     /// A non-sentinel, non-zero `ipc_key` (`args[0]`) routes through
     /// [`Lv2Host::mmapper_ipc`]: a registered key returns the
     /// existing `mem_id` with `size` / `flags` ignored, an
-    /// unregistered key mints and registers. Oracle: RPCS3's
-    /// `create_lv2_shm` SYS_SYNC_NOT_CARE path
-    /// (`sys_mmapper.cpp`).
+    /// unregistered key mints and registers.
+    ///
+    /// liblv2.sprx's `sys_mmapper_allocate_shared_memory` wrapper
+    /// takes `(size, flags, mem_id)`, shifts them into args 1..=3, and
+    /// loads the keyless sentinel into arg 0. Firmware therefore
+    /// presents both the four-slot shape and the sentinel value.
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire; the argument gates precede the
-    /// `mem_id` gate as in RPCS3.
+    /// Listed in the order they fire. Where the argument gates sit
+    /// against the `mem_id` gate is unestablished.
     ///
     /// - `CELL_EALIGN` when `size` is zero.
     /// - `CELL_EINVAL` when the `flags` granularity field carries an
@@ -148,8 +157,9 @@ impl Lv2Host {
     /// - `CELL_ENOMEM` when `size` does not fit in `u32`.
     /// - `CELL_EALIGN` when `size` is not a multiple of the granule
     ///   the `flags` field selects.
-    /// - `CELL_EFAULT` when `mem_id_ptr` is null; RPCS3 has no such
-    ///   gate.
+    /// - `CELL_EFAULT` when `mem_id_ptr` is null. The gate is
+    ///   CellGov's own; no interface or firmware record establishes
+    ///   it.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -298,9 +308,8 @@ impl Lv2Host {
     /// - `CELL_EBUSY` when the window intersects a region already
     ///   committed in the caller's space, or a window this host
     ///   already handed out through 334 / 337 -- loader images and
-    ///   prior maps alike (RPCS3 sys_mmapper.cpp
-    ///   sys_mmapper_map_shared_memory when the window cannot be
-    ///   claimed).
+    ///   prior maps alike. Nothing public states that the kernel
+    ///   refuses an overlapping claim rather than relocating it.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_map_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -390,10 +399,9 @@ impl Lv2Host {
     /// inside the mmapper window, push a `PendingRegionInstall`,
     /// write the actual mapped address back to `*alloc_addr_ptr`.
     ///
-    /// Oracle: RPCS3 `sys_mmapper.cpp` `sys_mmapper_search_and_map`.
-    /// RPCS3 calls `area->alloc(...)` which searches the area; the
-    /// out-pointer receives the actually mapped address, not the
-    /// caller's hint.
+    /// The interface carries `start_addr` in and `alloc_addr` out as
+    /// separate arguments. The out-pointer receives the address the
+    /// search settled on, not the caller's hint.
     ///
     /// # Errors
     /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
@@ -530,9 +538,9 @@ impl Lv2Host {
     /// A key already registered answers `CELL_EEXIST` where 332 would
     /// attach; callers probe a key range on that answer. Every key
     /// registers, including zero and `SYS_MMAPPER_NO_SHM_KEY`, so each
-    /// collides with itself on the next call. Oracle: RPCS3's
-    /// `sys_mmapper.cpp` `sys_mmapper_allocate_shared_memory_ext` and
-    /// `create_lv2_shm`.
+    /// collides with itself on the next call. Firmware publishes a
+    /// wrapper for 339 but never issues one from within the module
+    /// set, so no firmware witness fixes the exclusive-create rule.
     ///
     /// # Errors
     ///
@@ -603,10 +611,10 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
-        // RPCS3 `create_lv2_shm<true>(true, ipc_key, ..)`: the segment
-        // is always process-shared, the zero-key refusal is waived,
-        // and the create is exclusive -- so the key itself, including
-        // the sentinel 332 treats as keyless, is what collides.
+        // The segment is always process-shared here, the zero-key
+        // refusal is waived, and the create is exclusive -- so the key
+        // itself, including the sentinel 332 treats as keyless, is
+        // what collides. Nothing public establishes that reading.
         if self.state.mmapper_ipc.contains_key(&ipc_key) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
         }
@@ -640,11 +648,12 @@ impl Lv2Host {
 /// The page granule a `sys_mmapper` `flags` word selects, `None` when
 /// its granularity field holds an encoding the kernel refuses.
 ///
-/// The field is `flags` bits [8,11]; unset, 64 KiB, and 1 MiB are the
-/// only accepted values, and anything else is an error rather than a
-/// value rounded to a granule. RPCS3's `sys_mmapper.cpp`
-/// `sys_mmapper_allocate_shared_memory` switches on the field and
-/// answers CELL_EINVAL from its default arm.
+/// The granularity field is `flags` bits [8,11]. 64 KiB and 1 MiB are
+/// the only encodings it defines, and an unset field takes the
+/// default. liblv2.sprx's own 256 MiB reservation carries the 64 KiB
+/// encoding in exactly those bits. Anything else is refused rather
+/// than rounded to a granule; nothing public establishes the refusal
+/// itself.
 fn accepted_granule(flags: u64) -> Option<u32> {
     match flags & page_size::GRANULARITY_FIELD {
         0 | page_size::FLAG_64K | page_size::FLAG_1M => Some(page_size::granule_from_flags(flags)),

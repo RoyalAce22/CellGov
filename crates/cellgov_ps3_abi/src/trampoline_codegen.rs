@@ -81,14 +81,12 @@ const _: () = assert!(
     "blr canonical encoding drifted",
 );
 
-/// RPCS3-compatible packed OPD: `(code_addr_u32, toc_u32)` at 8-byte
-/// stride.
+/// Packed OPD: `(code_addr_u32, toc_u32)` at 8-byte stride.
 ///
-/// Matches RPCS3's `vm::alloc(N*8, vm::main)` HLE-table layout used
-/// by `cellgov_ppu::prx::HleLayout::Ps3Spec` and `Legacy24`. This is
-/// NOT a valid PPC64 ELFv1 OPD (those are 24 bytes
-/// `(code_addr_u64, toc_u64, env_u64)`); only safe when the call
-/// site dereferences via the packed convention.
+/// PS3 guest addresses are 32-bit, so an HLE descriptor holds two
+/// 32-bit words, one entry per stub. This is NOT a valid PPC64 ELFv1
+/// OPD (those are 24 bytes `(code_addr_u64, toc_u64, env_u64)`); only
+/// safe when the call site dereferences via the packed convention.
 #[inline]
 pub const fn encode_ps3_packed_opd(code_addr: u32, toc: u32) -> [u8; 8] {
     let code_b = code_addr.to_be_bytes();

@@ -4,9 +4,8 @@
 //! by exact equality against the file-relative vaddr at parse time
 //! (this tool does not run relocations).
 //!
-//! `--save-elf <path>` writes the decrypted plaintext ELF (the same
-//! bytes the parser consumes) to `path`. The output is byte-identical
-//! to RPCS3's `unself` for the same input.
+//! `--save-elf <path>` writes the decrypted plaintext ELF to `path`:
+//! the same bytes the parser consumed for the printed table.
 
 const NAME_COLUMN_WIDTH: usize = 49;
 
@@ -212,12 +211,13 @@ fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
 /// there is none.
 ///
 /// `Ok(None)` is the title-executable case: `e_type` is ET_EXEC, so
-/// no `sys_prx_module_info_t` exists and none is expected. Every
-/// other refusal, including any other `e_type`, is a structural
-/// anomaly in a file whose import table is about to be printed as
-/// authoritative, so it is returned for the caller to name. RPCS3's
-/// `Loader/ELF.h` admits a PPU object only as `elf_type::exec` or
-/// `elf_type::prx`.
+/// no `sys_prx_module_info_t` exists and none is expected. A PPU
+/// object on this platform carries one of exactly two ELF types, both
+/// in [`cellgov_ps3_abi::elf`]. `ET_EXEC` names a title executable.
+/// The PS3 relocatable-module type names every firmware module under
+/// `dev_flash/sys/external`. Every other `e_type` is a structural
+/// anomaly in a file whose import table the caller prints as
+/// authoritative, so this returns the refusal for the caller to name.
 fn module_identity(
     elf_bytes: &[u8],
 ) -> Result<Option<cellgov_ppu::sprx::ParsedPrx>, cellgov_ppu::sprx::PrxParseError> {

@@ -325,12 +325,13 @@ pub fn install_iso(
         .ok_or(GameInstallError::NoDiscEboot)?
         .read_data(image)?;
     // Metadata files can sit in a plaintext region of an otherwise
-    // encrypted disc, so the EBOOT settles whether the image is
-    // decrypted, before the tree is streamed to disk. Disc encryption
-    // is an unpadded per-sector block cipher and keeps every file's
-    // length, so an EBOOT too short to hold a magic is left for the
-    // proof to refuse by length. (RPCS3 `Loader/ISO.cpp` reads
-    // plaintext images only.)
+    // encrypted disc. ISO 9660 / ECMA-119 describes the directory
+    // structure only and says nothing about a file's contents. The
+    // EBOOT's own first bytes therefore settle whether the image is
+    // decrypted, before the tree streams to disk. Disc encryption is
+    // an unpadded per-sector block cipher and keeps every file's
+    // length, so an EBOOT too short to hold a magic reaches the proof,
+    // which refuses it by length.
     if let Some(&head) = eboot_bytes.first_chunk::<4>() {
         if !is_sce_wrapped(&eboot_bytes) && head != ELF_MAGIC {
             return Err(GameInstallError::DiscImageEncrypted {

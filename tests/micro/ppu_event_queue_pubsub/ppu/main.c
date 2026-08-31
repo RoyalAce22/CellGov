@@ -118,16 +118,14 @@ static inline void syscall1_noreturn(u64 num, u64 a)
 #define SYS_EVENT_PORT_SEND          138
 
 /* sys_event_port_create's port_type: LOCAL(1) connects by queue
- * id, IPC(3) by key (RPCS3 sys_event.cpp sys_event_port_create).
- * Sends go through a port connected to the queue, never through
- * the queue id directly. */
+ * id, IPC(3) by key. Sends go through a port connected to the
+ * queue, never through the queue id directly. */
 #define SYS_EVENT_PORT_LOCAL 1
 
 /* sys_event_queue_attribute_t: protocol@0 u32, type@4 s32,
  * name@8. The kernel reads protocol (FIFO/PRIORITY) and type
  * (SYS_PPU_QUEUE 1 / SYS_SPU_QUEUE 2) out of the struct, so the
- * pointer must name valid memory (RPCS3 sys_event.cpp
- * sys_event_queue_create). */
+ * pointer must name valid memory. */
 #define SYS_PPU_QUEUE 1
 static const struct {
     unsigned int protocol;      /* SYS_SYNC_FIFO */
@@ -136,10 +134,11 @@ static const struct {
 } equeue_attr __attribute__((aligned(8))) = { 1, SYS_PPU_QUEUE, "" };
 
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
- * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
- * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
- * passes unk = 0. The param* in r4 is a ppu_thread_param_t
- * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * stacksize, flags, threadname*); the user-space wrapper passes
+ * unk = 0. No public document states this raw-syscall argument
+ * list -- it is the shape the micro-test corpus is built and
+ * verified against. The param* in r4 is a two-word thread-init
+ * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
  * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
  * bytes of u64 fields -- so repack it before the syscall. */
@@ -245,8 +244,8 @@ int main(void)
     receiver_last_d1 = 0xDEADBEEF;
 
     /* Create queue. sys_event_queue_create(id_ptr, attr, key,
-     * size); size must be 1..127 -- anything else is EINVAL
-     * (RPCS3 sys_event.cpp sys_event_queue_create). */
+     * size); size must be 1..127 -- anything else is EINVAL. No
+     * public document states the 127 bound. */
     ret = syscall4_s32(SYS_EVENT_QUEUE_CREATE,
         (unsigned long)&queue_id, (unsigned long)&equeue_attr, 0, 16);
     if (ret != 0) { result.status = 0x01; write_tty_result(&result); return 1; }

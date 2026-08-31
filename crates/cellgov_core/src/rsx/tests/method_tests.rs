@@ -874,6 +874,13 @@ fn register_nv406e_label_handlers_surfaces_release_collision() {
     assert!(t.lookup(NV406E_SEMAPHORE_OFFSET).is_some());
 }
 
+/// The envytools / nouveau project documents the NV4-family DMA
+/// pusher header encoding -- method count at bit 18, plus the jump,
+/// call, return and non-increment flag bits -- and the NV406E and
+/// NV4097 class method addresses. libgcm_sys.sprx corroborates two of
+/// them: it emits `0x0004_0064` and `0x0004_006C` headers for the
+/// NV406E semaphore offset / release pair. `GCM_FLIP_COMMAND` is
+/// libgcm's own extension method, outside the NV class set.
 #[test]
 fn nv_constant_values_pin_the_pusher_encoding_and_class_method_addresses() {
     assert_eq!(NV406E_SET_REFERENCE, 0x0050);

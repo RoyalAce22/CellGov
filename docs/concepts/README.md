@@ -75,16 +75,16 @@ byte-identical observations. That is the determinism anchor.
 ## The null backend: honest vs contaminating divergence
 
 CellGov's central claim is fidelity: every observable the
-guest sees should match what a real PS3 (or RPCS3, as the
-closest faithful reference) would produce. Not every syscall
-a loaded PRX exercises is modeled. CellGov's policy for the
-unmodeled gap is the **null backend**: every syscall a loaded
-PRX makes that CellGov has not modeled returns an ABI-honest,
-per-syscall, traced "not implemented" response (typically
-`CELL_ENOSYS` for routes without a specific contract,
-`CELL_EINVAL` where the RPCS3 reference returns that for
-the unknown-input arm, etc.). Never a blanket `CELL_OK`,
-never a fabricated success the guest then consumes as truth.
+guest sees should match what a real PS3 would produce. Not
+every syscall a loaded PRX exercises is modeled. CellGov's
+policy for the unmodeled gap is the **null backend**: every
+syscall a loaded PRX makes that CellGov has not modeled
+returns an ABI-honest, per-syscall, traced "not implemented"
+response (typically `CELL_ENOSYS` for routes without a
+specific contract, `CELL_EINVAL` where the syscall's own LV2
+contract names that for an unknown-input arm, etc.). Never a
+blanket `CELL_OK`, never a fabricated success the guest then
+consumes as truth.
 
 That policy splits cross-runner divergence into two named
 kinds:

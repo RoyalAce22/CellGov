@@ -3,6 +3,12 @@
 use super::*;
 use core::mem::offset_of;
 
+/// 0x9400 is the sum of the three blocks: 1024 u32 semaphore slots
+/// (0x1000), then 64 notify and 2048 report entries at a 16-byte
+/// stride (0x400 and 0x8000). Notify therefore starts at 0x1000 and
+/// report at 0x1400. libgcm_sys.sprx confirms the semaphore span and
+/// the report stride: its label-address getter masks the index into a
+/// 0x1000-byte window, and its report-address getter scales by 16.
 #[test]
 fn rsx_reports_size_matches_rpcs3() {
     assert_eq!(reports::SIZE, 0x9400);
@@ -57,6 +63,10 @@ fn rsx_dma_control_reserved_tail_offsets() {
     assert_eq!(offset_of!(RsxDmaControl, unk1), 0x54);
 }
 
+/// Not independently attested. The driver-info block is written by the
+/// kernel, which is not in the readable firmware set, and libgcm only
+/// reads individual fields out of it -- never its length. A dump of the
+/// region from a console would settle the total.
 #[test]
 fn rsx_driver_info_size_matches_rpcs3() {
     assert_eq!(driver_info::SIZE, 0x12F8);
@@ -121,6 +131,11 @@ fn rsx_context_new_is_pristine() {
     assert_eq!(ctx.mem_addr, 0);
 }
 
+/// Not independently attested. These are the offsets from the RSX
+/// memory base at which `sys_rsx_context_allocate`'s OUT pointers
+/// land. The kernel that picks them is not in the readable firmware
+/// set, and libgcm takes the pointers as given. A console probe of
+/// the syscall's OUT values would settle them.
 #[test]
 fn reservation_offsets_match_rpcs3_layout() {
     assert_eq!(region::DRIVER_INFO_OFFSET, 0x0010_0000);

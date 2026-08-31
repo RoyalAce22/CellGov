@@ -22,12 +22,12 @@ pub const SYS_SYNC_PRIORITY: u32 = 0x2;
 pub const SYS_SYNC_PROCESS_SHARED: u32 = 0x100;
 
 /// `recursive = SYS_SYNC_RECURSIVE`: the owner may re-lock the mutex,
-/// bumping a recursion count (RPCS3 `sys_sync.h`).
+/// bumping a recursion count.
 pub const SYS_SYNC_RECURSIVE: u32 = 0x10;
 
 /// `recursive = SYS_SYNC_NOT_RECURSIVE`: an owner re-lock is EDEADLK.
-/// Any `recursive` value other than these two is EINVAL at create
-/// (RPCS3 `sys_mutex.cpp` `sys_mutex_create`).
+/// These two are the whole `recursive` vocabulary, so any other value
+/// is EINVAL at create.
 pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
 
 /// `type = SYS_SYNC_WAITER_SINGLE`: at most one thread may park on

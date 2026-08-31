@@ -3,13 +3,13 @@
  * with no lost updates.
  *
  * Structural microtest for the lwmutex primitive's kernel side.
- * _sys_lwmutex_lock (97) is the SLOW PATH only: on real firmware
- * the userspace wrapper owns the uncontended atomic fast path, and
- * the kernel object is a signal queue that starts with no signal
- * pending (RPCS3 sys_lwmutex.cpp _sys_lwmutex_lock /
- * _sys_lwmutex_unlock). Raw-syscall usage therefore primes the
- * queue with one _sys_lwmutex_unlock (98) after create; lock and
- * unlock then behave as a binary semaphore. It proves:
+ * _sys_lwmutex_lock (97) is the SLOW PATH only: the lock word
+ * lives in the caller's own sys_lwmutex_t, so the user-space
+ * wrapper owns the uncontended atomic fast path and the kernel
+ * object behaves as a signal queue that starts with no signal
+ * pending. Raw-syscall usage therefore primes the queue with one
+ * _sys_lwmutex_unlock (98) after create; lock and unlock then
+ * behave as a binary semaphore. It proves:
  *
  *   1. _sys_lwmutex_create (95) allocates an id with no signal
  *      pending.
@@ -154,15 +154,17 @@ static inline void syscall1_noreturn(u64 num, u64 a)
  * has_name, name): r4 carries the protocol word -- FIFO (1),
  * PRIORITY (2), or RETRY (4); anything else is EINVAL -- and r5
  * names the user-space sys_lwmutex_t the kernel records for the
- * object (RPCS3 sys_lwmutex.cpp _sys_lwmutex_create). */
+ * object. No public document states this raw-syscall argument
+ * order. */
 #define SYS_SYNC_FIFO 1
 static unsigned char lwmutex_control[32] __attribute__((aligned(8)));
 
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
- * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
- * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
- * passes unk = 0. The param* in r4 is a ppu_thread_param_t
- * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * stacksize, flags, threadname*); the user-space wrapper passes
+ * unk = 0. No public document states this raw-syscall argument
+ * list -- it is the shape the micro-test corpus is built and
+ * verified against. The param* in r4 is a two-word thread-init
+ * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
  * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
  * bytes of u64 fields -- so repack it before the syscall. */

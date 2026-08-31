@@ -322,11 +322,12 @@ pub fn load_firmware_set(
         check_relocations_within_text_data(&parsed)?;
         let mut parsed = parsed;
         // First module to publish a namespace owns it; a later module
-        // publishing the same name keeps loading but loses that one
-        // export library. Oracle: RPCS3 takes a per-library-name lock
-        // and logs "Skipped module '%s' (already loaded)"
-        // (`PPUModule.cpp` `ppu_register_library_lock`), rather than
-        // failing the load.
+        // that publishes the same name keeps loading but loses that one
+        // export library. The installed firmware forces the choice:
+        // `libfs` and `libfs_155` both publish `sys_fs`, and `libadec`,
+        // `libadec2` and `libadec_internal` all publish `cellAdec`. No
+        // public document says what LV2 does with a duplicate export
+        // library, so this shadowing is CellGov's own policy.
         parsed.exports.retain(|lib| {
             let ns_id = graph::module_id_from_name(&lib.name);
             match provider_of_namespace.get(&ns_id) {

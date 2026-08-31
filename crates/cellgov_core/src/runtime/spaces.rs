@@ -7,12 +7,12 @@
 //! all resolve through the unit's space.
 //!
 //! A shared segment is registered under an IPC key with one or more
-//! `(space, base)` views; a space may map the segment at several bases
-//! (RPCS3 `sys_mmapper.cpp` `sys_mmapper_map_shared_memory` counts
-//! maps of one shared segment). Registration installs a zero-filled
-//! region in each view's space, and the commit pipeline replicates a
-//! committed write landing in one view into every sibling view,
-//! same-space aliases included, within the same commit batch.
+//! `(space, base)` views; a space may map the segment at several bases,
+//! because the map call names one base and nothing in it forbids a
+//! repeat. Registration installs a zero-filled region in each view's
+//! space, and the commit pipeline replicates a committed write landing
+//! in one view into every sibling view, same-space aliases included,
+//! within the same commit batch.
 //!
 //! Reservations are space-scoped: space 0's table is
 //! `Runtime::reservations`, each child space owns its own
@@ -520,14 +520,12 @@ impl Runtime {
                 return;
             }
         }
-        // Every view is one map of the same segment -- the kernel
-        // installs one backing store at each mapped address (RPCS3
-        // sys_mmapper.cpp sys_mmapper_map_shared_memory maps the
-        // handle's shm object into every window it claims). Until
-        // promotion each view was an independent zero-filled region,
-        // so bring them ALL up to the first view's content, not just
-        // the one attaching now: a repeat map inside the first space
-        // would otherwise stay silently stale forever.
+        // Every view is one map of the same segment, and a shared
+        // segment is one backing store seen through each of its
+        // windows. Until promotion each view was an independent
+        // zero-filled region, so bring them ALL up to the first view's
+        // content, not just the one attaching now: a repeat map inside
+        // the first space would otherwise stay silently stale forever.
         let (first, rest) = views.split_first().expect("promotion needs two views");
         for &view in rest {
             self.copy_shared_segment(*first, view, size);

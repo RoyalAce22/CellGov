@@ -311,10 +311,11 @@ impl EventFlagTable {
         Some(std::mem::take(&mut entry.waiters))
     }
 
-    /// `entry.bits &= mask` -- the LV2 `sys_event_flag_clear` keeps
-    /// bits **inside** `mask` and drops the rest (RPCS3
-    /// `sys_event_flag.cpp` `sys_event_flag_clear` ANDs the pattern
-    /// with the argument). Returns `false` if `id` is unknown.
+    /// `entry.bits &= mask` -- `sys_event_flag_clear` ANDs the flag
+    /// value with the caller's pattern, so a 1 bit keeps and a 0 bit
+    /// clears.
+    ///
+    /// Returns `false` if `id` is unknown.
     pub fn clear_bits(&mut self, id: u32, mask: u64) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {
             return false;

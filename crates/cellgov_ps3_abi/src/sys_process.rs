@@ -1,4 +1,4 @@
-//! Constants from `sys/process.h`.
+//! `sys_process_*` ABI constants.
 //!
 //! `SYS_*_OBJECT` class ids for `sys_process_get_number_of_object`
 //! (syscall 24): a single integer that selects which kernel-object
@@ -22,9 +22,9 @@ pub const BOOT_PROCESS_PPID: u32 = 0x0100_0300;
 /// One past the highest `sys_process_param.primary_prio` the kernel
 /// adopts; a declaration at or above it leaves the kernel default
 /// standing rather than failing the load.
-// RPCS3 `PPUModule.cpp` `ppu_load_exec` takes the declared priority
-// only when it is below this bound and at or above the process
-// class's floor.
+// The bound follows from the PPU thread priority range, which ends at
+// 3071. How the loader answers an out-of-range declaration is its own
+// choice, not a stated rule.
 pub const SYS_PROCESS_PARAM_PRIO_LIMIT: i32 = 3072;
 
 /// `sys_event_port` objects.

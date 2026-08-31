@@ -187,22 +187,23 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         let _ = threadname_ptr;
-        // The kernel ignores `unk` (RPCS3 `sys_ppu_thread.cpp`
-        // `_sys_ppu_thread_create` only logs it; the sysPrxForUser
-        // wrapper passes 0), so a nonzero value is decode evidence
-        // worth keeping loud.
+        // liblv2.sprx's `sys_ppu_thread_create` wrapper loads 0 into
+        // the fourth syscall slot on every path, so no firmware caller
+        // ever presents a value here. A nonzero `unk` is decode
+        // evidence worth keeping loud.
         if unk != 0 {
             self.log_invariant_break(
                 "dispatch.ppu_thread_create_unconsumed_unk",
                 format_args!("sys_ppu_thread_create unk=0x{unk:x} carries a nonzero value"),
             );
         }
-        // JOINABLE and INTERRUPT together are refused (RPCS3
-        // sys_ppu_thread.cpp _sys_ppu_thread_create returns CELL_EPERM
-        // for (flags & 3) == 3). RPCS3 orders this check after the
-        // entry EFAULT and priority EINVAL checks; those run inside
-        // dispatch_ppu_thread_create here, so this refusal fires first
-        // when both would apply.
+        // The interface defines `flags` as an OR over the JOINABLE and
+        // INTERRUPT bits taken singly. A caller that sets both is
+        // outside the defined set, and CellGov refuses it with
+        // CELL_EPERM. Where that refusal sits against the entry
+        // EFAULT and priority EINVAL gates is unestablished. Those
+        // gates run inside dispatch_ppu_thread_create, so this one
+        // fires first when more than one would apply.
         if flags & 3 == 3 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
         }
@@ -219,19 +220,24 @@ impl Lv2Host {
         self.dispatch_ppu_thread_create(id_ptr, param_ptr, arg, priority, stacksize, rt)
     }
 
-    /// `sys_ss_access_control_engine`. Oracle: RPCS3's `sys_ss.cpp`.
-    /// `pkg_id` 1/3 require debug-or-root and return ENOSYS for
-    /// user-perm callers. `pkg_id == 2` writes the CALLING process's
-    /// program authority id to `*a2` (RPCS3 `sys_ss.cpp`
-    /// `sys_ss_access_control_engine` serves the caller's per-process
-    /// info) -- boot supplies its value from the title SELF's
-    /// identification header via
-    /// [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
-    /// spawned children serve the retail-application fallback.
-    /// Firmware modules classify callers by this value (libsysmodule's
-    /// module_start skips its init entirely for recognized
-    /// system-process ids). Any other `pkg_id` is SS-domain status
-    /// `0x8001_051D`.
+    /// `sys_ss_access_control_engine`.
+    ///
+    /// libsysmodule.sprx publishes one wrapper per `pkg_id` and issues
+    /// only 1, 2 and 3. The 2 and 3 wrappers forward the caller's
+    /// pointer in `a2` and load zero into `a3`, so `a2` is the out
+    /// slot on those paths. A firmware classifier ranks the caller
+    /// from the value the 2 wrapper yields.
+    ///
+    /// - `pkg_id` 1 and 3 require debug-or-root and return ENOSYS for
+    ///   a user-perm caller.
+    /// - `pkg_id` 2 writes the CALLING process's program authority id
+    ///   to `*a2`. Boot supplies that value from the title SELF's
+    ///   identification header via
+    ///   [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
+    ///   spawned children serve the retail-application fallback.
+    /// - Any other `pkg_id` answers SS-domain status `0x8001_051D`.
+    ///   No firmware caller reaches that arm, and the status itself
+    ///   is unanchored.
     pub(super) fn dispatch_ss_access_control_engine(
         &mut self,
         pkg_id: u64,

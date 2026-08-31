@@ -28,10 +28,7 @@ pub const PS3_ABI_MIN_STACK_FRAME: u64 = 0x70;
 /// The reserve is the callee's, not the caller's: the entry function
 /// stores CR at 8(r1) and LR at 16(r1) into linkage slots its caller
 /// is required to have provided, so anything less than a whole
-/// minimum frame puts those stores past the end of the region. RPCS3
-/// seeds every PPU thread the same way -- `PPUThread.cpp`
-/// `ppu_thread::ppu_thread` sets `gpr[1]` to `stack_addr + stack_size`
-/// less its `ppu_stack_start_offset`, which is also 0x70.
+/// minimum frame puts those stores past the end of the region.
 // [CBE-Handbook p:396 s:14.3.1.3] The loader hands the entry point an R1 that
 // is quadword-aligned and already points at a reserved initial frame carrying a
 // null back chain, so the top of the stack region is never itself the SP.
@@ -49,15 +46,15 @@ const _: () = assert!(
 // r1 that is not a multiple of 16.
 const _: () = assert!(PS3_PRIMARY_STACK_TOP.is_multiple_of(0x10));
 
-/// Smallest primary stack the kernel hands out, above the 4 KiB floor
-/// the published constant advertises. RPCS3 `PPUModule.cpp`
-/// `ppu_load_exec` records the observed floor as 64 KiB.
+/// Smallest primary stack the kernel hands out. A `primary_stacksize`
+/// may declare as little as 4 KiB, and the kernel still hands out
+/// 64 KiB. The wider floor is an observation, not a stated rule.
 pub const PS3_PRIMARY_STACK_SIZE_MIN: u32 = 0x1_0000;
 
-/// Largest primary stack the kernel hands out; a declaration above it
-/// is clamped, not refused. RPCS3 `sys_process.h`
-/// (`SYS_PROCESS_PARAM_STACK_SIZE_MAX`), clamped in `PPUModule.cpp`
-/// `ppu_load_exec`.
+/// Largest primary stack the kernel hands out, and the ceiling on a
+/// declared `primary_stacksize`. The loader clamps a larger
+/// declaration rather than refusing it -- a loader choice, not a
+/// stated rule.
 pub const PS3_PRIMARY_STACK_SIZE_MAX: u32 = 0x10_0000;
 
 /// Granularity a clamped primary-stack size is rounded up to.

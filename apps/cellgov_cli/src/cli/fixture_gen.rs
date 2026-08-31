@@ -356,14 +356,13 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
             phentsize,
             phnum,
         })?;
-    // The PHDR table lives inside the file, so a declared end past
-    // the image is a malformed header -- and the returned value
-    // becomes a classifier range that marks every divergent byte
-    // under it non-semantic, so accepting it would let a bad header
-    // claim guest bytes the ELF header does not own. RPCS3's
-    // `Loader/ELF.h` `elf_object::open` fails the same shape with
-    // `elf_error::stream_phdrs` when the `e_phnum` entries cannot be
-    // read at `e_phoff`; `disasm::elf::parse_pt_loads` rejects it as
+    // The ELF specification places the program-header table inside
+    // the file: `e_phnum` entries of `e_phentsize` bytes at file
+    // offset `e_phoff`. A declared end past the image is a malformed
+    // header. The returned value also becomes a classifier range that
+    // marks every divergent byte under it non-semantic. A malformed
+    // end would therefore claim guest bytes the ELF header does not
+    // own. `disasm::elf::parse_pt_loads` rejects the same shape as
     // `PhdrOutOfFile`.
     let file_len = eboot_bytes.len() as u64;
     if phdr_end > file_len {

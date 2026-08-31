@@ -12,6 +12,9 @@ fn identity_returns_offset_unchanged() {
     assert_eq!(IoMap::IDENTITY.translate(u32::MAX - 1), Some(u32::MAX - 1),);
 }
 
+/// libgcm_sys.sprx marks an unmapped 1 MiB page in its IO offset
+/// table with a sentinel. Its address getters then fail without
+/// writing an out address.
 #[test]
 fn unrecorded_iomap_returns_none_matching_rpcs3_oracle() {
     let m = IoMap::default();

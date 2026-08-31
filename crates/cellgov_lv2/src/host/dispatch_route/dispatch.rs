@@ -1,7 +1,7 @@
 //! Top-level dispatch routing for [`Lv2Host`].
 //!
-//! Per-arm shape and oracle citations live with the extracted
-//! `dispatch_*` methods; shared helpers live in [`super::helpers`].
+//! Per-arm shape and citations live with the extracted `dispatch_*`
+//! methods; shared helpers live in [`super::helpers`].
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::syscall;
@@ -479,9 +479,11 @@ impl Lv2Host {
             Lv2Request::SsAccessControlEngine { pkg_id, a2, .. } => {
                 self.dispatch_ss_access_control_engine(pkg_id, a2, requester, tick)
             }
-            // Both signatures place `path` at arg 0: RPCS3
-            // sys_prx.cpp `_sys_prx_load_module(path, flags, pOpt)`,
-            // sys_prx.cpp `_sys_prx_load_module_on_memcontainer(path, mem_ct, flags, pOpt)`.
+            // Both signatures place `path` at arg 0. liblv2.sprx's
+            // wrappers for 480 and 497 each forward their own first
+            // argument, the module path, into arg 0 unchanged. 497
+            // carries an extra memory container, but it does not
+            // shift that slot.
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_LOAD_MODULE,
                 args,

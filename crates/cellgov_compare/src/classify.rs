@@ -209,10 +209,11 @@ impl ClassifierContext {
 
 /// Guest-pointer window an HLE OPD slot value must stay inside: user
 /// memory above the 64 KiB floor and below the 1 GiB user boundary.
-/// The upper bound must admit both backends' placements -- CellGov
-/// trampolines sit low (0x01xx_xxxx), while RPCS3 resolves imports
-/// into segments mapped at the 0x3000_0000 user window -- while still
-/// refusing zero, kernel-space values, and non-pointer data.
+/// The test reads slot bytes out of two runners' memory dumps, so the
+/// upper bound admits both placements. CellGov trampolines sit low
+/// (0x01xx_xxxx). The comparison runner resolves its imports into
+/// segments mapped at the 0x3000_0000 user window. The window still
+/// refuses zero, kernel-space values, and non-pointer data.
 pub const HLE_OPD_POINTER_WINDOW: Range<u32> = 0x0001_0000..0x4000_0000;
 
 /// True iff every 4-byte slot overlapping `[start, end)` carries, in

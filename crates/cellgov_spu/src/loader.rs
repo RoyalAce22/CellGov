@@ -88,12 +88,12 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
     let phnum = read_u16(data, 44) as usize;
     let phentsize = read_u16(data, 42) as usize;
 
-    // Every read below indexes the slot at fixed ELF32 offsets, so a
-    // declared slot size other than the architected one is refused
-    // rather than strided over: zero would re-read slot 0 `e_phnum`
-    // times and anything narrower would overlap the neighbouring
-    // header. RPCS3 `Loader/ELF.h` `elf_object::open` refuses the same
-    // mismatch whenever `e_phnum` is nonzero.
+    // [CBE-Handbook p:393 s:14.2.2.1 Table 14-1] an SPE-ELF object is
+    // ELFCLASS32, so its program-header slot has exactly one architected
+    // size. Every read below indexes the slot at fixed ELF32 offsets, so
+    // a declared size other than that one is refused rather than strided
+    // over: zero would re-read slot 0 `e_phnum` times and anything
+    // narrower would overlap the neighbouring header.
     if phnum != 0 && phentsize != ELF32_PHDR_SIZE {
         return Err(LoadError::BadPhentsize { phentsize });
     }
@@ -148,10 +148,11 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         }
     }
 
-    // An entry point with no whole word left inside local store is
-    // rejected at load rather than deferred to the first failed fetch.
-    // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` refuses a user
-    // image whose entry point sits above `SPU_LS_SIZE - 4`.
+    // [CBE-Handbook p:395 s:14.3 Table 14-4] an SPE-ELF image names the
+    // LS size it targets, which is the SPU_LSLR setting it requires, so
+    // a loadable image lies wholly inside that local store. The loader
+    // rejects an entry point with no whole word left, rather than
+    // deferring to the first failed fetch.
     if entry as usize + 4 > state.ls.len() {
         return Err(LoadError::EntryOutOfRange { entry });
     }

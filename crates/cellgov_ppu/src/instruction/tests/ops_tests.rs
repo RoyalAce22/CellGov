@@ -193,8 +193,9 @@ fn mnemonic_serialization_anchors() {
     assert_eq!(<&'static str>::from(Fp59Op::Fnmadds), "fnmadds");
 }
 
-/// Dev-only differential spot-check: every op-enum mnemonic must
-/// exist as a `PPUDisAsm` method in the RPCS3 source tree.
+/// [PowerISA-3.1 p:App1481 s:Appendix H] the ISA lists every
+/// instruction under one mnemonic spelling, and the op enums render
+/// exactly those spellings.
 #[test]
 #[cfg_attr(
     not(feature = "rpcs3-src"),

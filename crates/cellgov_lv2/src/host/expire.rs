@@ -5,9 +5,7 @@
 //! guest-tick deadline fires. The wake-vs-timeout race cannot occur
 //! here: any wake or response restage cancels the unit's timer entry
 //! first, so a missing waiter record at expiry time is a host
-//! invariant break, not a lost race (contrast RPCS3's `unqueue`
-//! self-removal in `rpcs3/Emu/Cell/lv2/lv2.cpp`, where a failed
-//! unqueue means a signal won).
+//! invariant break, not a lost race.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
@@ -24,12 +22,14 @@ impl Lv2Host {
     /// `reason`, removing its waiter record and staging
     /// `CELL_ETIMEDOUT` delivery.
     ///
-    /// Per-primitive semantics follow real LV2 via the RPCS3 oracle:
-    /// mutex family takes no ownership, the event queue writes
-    /// nothing, the event flag writes the current pattern, and
-    /// cond re-acquires the companion mutex -- contended re-acquire
-    /// re-parks the unit UNTIMED with r3 already staged, so it
-    /// returns ETIMEDOUT holding the mutex when the unlock arrives.
+    /// Per-primitive semantics:
+    ///
+    /// - The mutex family takes no ownership.
+    /// - The event queue writes nothing.
+    /// - The event flag writes the current pattern.
+    /// - Cond re-acquires the companion mutex. A contended re-acquire
+    ///   re-parks the unit UNTIMED with r3 already staged, so it
+    ///   returns ETIMEDOUT holding the mutex once the unlock arrives.
     pub fn expire_wait(
         &mut self,
         reason: Lv2BlockReason,
@@ -44,8 +44,9 @@ impl Lv2Host {
             return ExpiredWait::default();
         };
         match reason {
-            // RPCS3 sys_mutex.cpp sys_mutex_lock: timeout unqueues the
-            // sleeper without taking ownership.
+            // Timeout unqueues the sleeper without transferring
+            // ownership. There is no guest-side control block for this
+            // primitive, so the whole answer is the ETIMEDOUT return.
             Lv2BlockReason::Mutex { id } => {
                 if !self.state.mutexes.remove_waiter(id, thread) {
                     return self.expire_missing_waiter("mutex", id, requester);
@@ -53,10 +54,12 @@ impl Lv2Host {
                 self.note_expiry("mutex");
                 timed_out_wake(requester)
             }
-            // RPCS3 sys_lwmutex.cpp _sys_lwmutex_lock: same shape; the
-            // syscall side writes no sys_lwmutex_t fields on timeout --
-            // the guest's lock routine owns its own bookkeeping on the
-            // ETIMEDOUT return path.
+            // Same shape, and the syscall side writes no
+            // sys_lwmutex_t fields on timeout. liblv2.prx's lock
+            // wrapper owns that bookkeeping. It spins on the owner
+            // word, bumps the waiter count with ldarx/stdcx., and
+            // stores the owner only after a zero return. A non-zero
+            // return undoes the waiter count.
             Lv2BlockReason::LwMutex { id } => {
                 if !self.state.lwmutexes.remove_waiter(id, thread) {
                     return self.expire_missing_waiter("lwmutex", id, requester);
@@ -64,9 +67,8 @@ impl Lv2Host {
                 self.note_expiry("lwmutex");
                 timed_out_wake(requester)
             }
-            // RPCS3 sys_semaphore.cpp sys_semaphore_wait: unqueue +
-            // ETIMEDOUT. RPCS3 also repairs its negative count; CellGov's
-            // count never decrements for waiters, so nothing to repair.
+            // Unqueue plus ETIMEDOUT. The count never decrements for a
+            // waiter here, so a timeout leaves nothing to repair.
             Lv2BlockReason::Semaphore { id } => {
                 if !self.state.semaphores.remove_waiter(id, thread) {
                     return self.expire_missing_waiter("semaphore", id, requester);
@@ -74,9 +76,10 @@ impl Lv2Host {
                 self.note_expiry("semaphore");
                 timed_out_wake(requester)
             }
-            // RPCS3 sys_event.cpp sys_event_queue_receive: timeout
-            // writes nothing; event data only ever returns in r4-r7 on
-            // success.
+            // Timeout writes nothing: the event payload comes back in
+            // r4-r7, never through the caller's pointer. libaudio.prx's
+            // receive wrapper passes a scratch pointer it ignores. It
+            // builds its event record out of the returned registers.
             Lv2BlockReason::EventQueue { id } => {
                 if self.state.event_queues.remove_waiter(id, thread).is_none() {
                     return self.expire_missing_waiter("equeue", id, requester);
@@ -84,9 +87,9 @@ impl Lv2Host {
                 self.note_expiry("equeue");
                 timed_out_wake(requester)
             }
-            // RPCS3 sys_event_flag.cpp sys_event_flag_wait: timeout
-            // writes the flag's current pattern through the result
-            // pointer (cancel does the same alongside ECANCELED).
+            // Timeout writes the flag's current pattern through the
+            // result pointer (cancel does the same alongside
+            // ECANCELED).
             Lv2BlockReason::EventFlag { id } => {
                 // Bits first: a missing flag entry implies a missing
                 // waiter record, so it routes to the same refusal.
@@ -98,8 +101,7 @@ impl Lv2Host {
                 };
                 self.note_expiry("eflag");
                 let mut out = timed_out_wake(requester);
-                // RPCS3 sys_event_flag.cpp sys_event_store_result:
-                // the result is written only through a non-null
+                // The result is written only through a non-null
                 // pointer; a null result pointer is legal and skipped.
                 if waiter.result_ptr != 0 {
                     out.effects.push(Effect::SharedWriteIntent {
@@ -134,10 +136,15 @@ impl Lv2Host {
         }
     }
 
-    /// RPCS3 sys_cond.cpp sys_cond_wait: timeout unqueues from the
-    /// cond, stages ETIMEDOUT, then tries to own the mutex; if held,
-    /// the thread re-parks on the mutex untimed and returns ETIMEDOUT
-    /// holding the mutex once the unlock transfers ownership.
+    /// Timeout unqueues from the cond and stages ETIMEDOUT, then tries
+    /// to own the mutex.
+    ///
+    /// A held mutex re-parks the thread untimed, so it returns
+    /// ETIMEDOUT holding the mutex once the unlock transfers
+    /// ownership. liblv2.prx's condition wait wrapper shows the same
+    /// contract from user mode: on an ETIMEDOUT return it re-locks the
+    /// companion lwmutex with an infinite timeout, then hands
+    /// ETIMEDOUT back.
     fn expire_cond_wait(
         &mut self,
         id: u32,

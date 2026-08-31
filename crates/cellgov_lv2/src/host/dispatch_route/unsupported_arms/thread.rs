@@ -17,9 +17,10 @@ impl Lv2Host {
     /// priority to `*priop`, CELL_ESRCH for ids absent from the
     /// thread table.
     ///
-    /// The id lookup precedes the `priop` null gate, matching
-    /// RPCS3's lookup-then-write order. Oracle: RPCS3's
-    /// `sys_ppu_thread.cpp`.
+    /// The id lookup precedes the `priop` null gate, so an unknown
+    /// id answers ESRCH even when `priop` is null. Both codes are
+    /// defined for this call; which one wins when both apply is a
+    /// CellGov choice, unestablished against the console.
     pub(in crate::host::dispatch_route) fn dispatch_ppu_thread_get_priority(
         &self,
         args: [u64; 8],
@@ -54,10 +55,11 @@ impl Lv2Host {
     /// `sys_ppu_thread_set_priority` (47): stores `prio` in the
     /// target's attrs; the round-robin scheduler does not consult it.
     ///
-    /// The window is `0..=3071` for a user process and `-512..=3071`
-    /// under debug-or-root capability, the floor
-    /// `_sys_ppu_thread_create` applies. Oracle: RPCS3's
-    /// `sys_ppu_thread.cpp` `sys_ppu_thread_set_priority`.
+    /// A PPU thread priority runs 0 (highest) through 3071, and a
+    /// value outside that window is EINVAL. A debug-or-root process
+    /// may go below zero, down to the -512 floor
+    /// `_sys_ppu_thread_create` applies; that privileged widening
+    /// has no public anchor.
     ///
     /// # Errors
     ///

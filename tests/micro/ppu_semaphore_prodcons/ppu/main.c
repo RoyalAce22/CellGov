@@ -127,10 +127,14 @@ static inline void syscall1_noreturn(u64 num, u64 a)
 #define SYS_SEMAPHORE_POST    94
 
 /* sys_semaphore_attribute_t: protocol@0 u32, pshared@4 u32,
- * ipc_key@8 u64, flags@16 s32, pad@20, name@24. The kernel
- * rejects a NULL attribute pointer with EFAULT and a protocol
- * that is neither FIFO (1) nor PRIORITY (2) with EINVAL (RPCS3
- * sys_semaphore.cpp sys_semaphore_create). */
+ * ipc_key@8 u64, flags@16 s32, pad@20, name@24. The
+ * hardware-captured expectations in
+ * tests/ps3autotests/tests/lv2/sys_semaphore record
+ * sys_semaphore_create returning 0x8001000d
+ * (EFAULT) for a NULL attribute pointer and 0x80010002 (EINVAL)
+ * for a zeroed attribute block, whose protocol is neither FIFO
+ * (1) nor PRIORITY (2). A zeroed block is wrong in more than one
+ * field, so that capture does not isolate protocol. */
 static const struct {
     unsigned int protocol;      /* SYS_SYNC_FIFO */
     unsigned int pshared;       /* SYS_SYNC_NOT_PROCESS_SHARED */
@@ -141,10 +145,11 @@ static const struct {
 } sem_attr __attribute__((aligned(8))) = { 1, 0x200, 0, 0, 0, "" };
 
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
- * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
- * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
- * passes unk = 0. The param* in r4 is a ppu_thread_param_t
- * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * stacksize, flags, threadname*); the user-space wrapper passes
+ * unk = 0. No public document states this raw-syscall argument
+ * list -- it is the shape the micro-test corpus is built and
+ * verified against. The param* in r4 is a two-word thread-init
+ * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
  * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
  * bytes of u64 fields -- so repack it before the syscall. */

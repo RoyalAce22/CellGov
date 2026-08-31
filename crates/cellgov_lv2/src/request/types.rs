@@ -237,9 +237,10 @@ pub enum Lv2Request {
         /// In: buffer size in bytes.
         size: u64,
         /// In: 0 = return what is queued, 1 = block until any bytes
-        /// are queued. Neither waits for the whole `size`: RPCS3
-        /// `sys_uart.cpp` `sys_uart_receive` leaves its blocking loop
-        /// on the first non-empty read and returns that count.
+        /// are queued. Neither waits for the whole `size`: the call
+        /// returns a byte count, and vsh's mode-1 reader takes that
+        /// count as it comes. Only its mode-2 sender compares the
+        /// count against the length it asked for.
         mode: u32,
     },
     /// `sys_uart_send`: writes PS3AV command packets to the UART.
@@ -605,11 +606,11 @@ pub enum Lv2Request {
         /// In: param block size in bytes.
         arg_size: u32,
         /// In: raw r6 carried for witness, not consumed. The kernel
-        /// entry takes a fourth word (RPCS3 `sys_process.h`
-        /// `_sys_process_exit2` declares `u32 arg4`), and the
-        /// exitspawn wrapper passes a live `0x1000_0000` (RPCS3
-        /// `sys_game_.cpp` `exitspawn`). Nonzero values are reported
-        /// via a named invariant-break at dispatch.
+        /// entry takes a fourth word, and liblv2.prx's syscall-26
+        /// wrapper forwards its own r6 into it. Both exitspawn paths
+        /// that reach that wrapper pass a live `0x1000_0000`. Nonzero
+        /// values are reported via a named invariant-break at
+        /// dispatch.
         arg4: u64,
     },
     /// `sys_process_get_status`: the status comes back as the
@@ -622,7 +623,7 @@ pub enum Lv2Request {
     },
     /// `sys_process_getpid`.
     ProcessGetPid,
-    /// `class_id` is from `sys_process.h`'s `SYS_*_OBJECT` enum;
+    /// `class_id` names one `SYS_*_OBJECT` kernel-object class;
     /// `count_out_ptr` receives a size_t written as 64-bit BE.
     ProcessGetNumberOfObject {
         /// In: object class id.
@@ -907,9 +908,10 @@ pub enum Lv2Request {
         param_ptr: u32,
         /// In: thread argument.
         arg: u64,
-        /// In: reserved 4th argument; liblv2's wrapper passes 0
-        /// (RPCS3 `Modules/sys_ppu_thread_.cpp`). Witnessed on a
-        /// nonzero value, never consumed.
+        /// In: reserved 4th argument; liblv2.prx's
+        /// `sys_ppu_thread_create` wrapper zeroes r6 immediately
+        /// before the trap. Witnessed on a nonzero value, never
+        /// consumed.
         unk: u64,
         /// In: priority. LV2 ABI is signed `int priority`; classify
         /// validates sign extension before constructing the variant.
@@ -966,11 +968,16 @@ pub enum Lv2Request {
         context_id: u32,
     },
     /// `sys_rsx_context_iomap`. Records the IO -> EA mapping in
-    /// `SysRsxContext`. RPCS3's validation set lives in its
-    /// `sys_rsx.cpp`: `context_id` must be `0x5555_5555`, `io` /
+    /// `SysRsxContext`. `context_id` must be `0x5555_5555`, `io` /
     /// `ea` / `size` must be non-zero and 1 MiB aligned, and `size`
     /// must fit in the backed iomap region (see
     /// `cellgov_ps3_abi::process_address_space::PS3_RSX_IOMAP_SIZE`).
+    /// libgcm_sys.prx screens the same arguments before it traps. It
+    /// refuses any of the three whose low 20 bits are set. It also
+    /// refuses a mapping whose end, counted in MiB, runs past the
+    /// region it was told backs the iomap. It reads `context_id` back
+    /// out of the context it allocated rather than spelling the value
+    /// out.
     SysRsxContextIomap {
         /// In: RSX context id (must be `0x5555_5555`).
         context_id: u32,
@@ -985,13 +992,13 @@ pub enum Lv2Request {
     },
     /// `sys_rsx_device_map`. Returns the RSX device-map address in
     /// `dev_addr` OUT (low 32 bits of an 8-byte BE u64 store);
-    /// libgcm's gate at the call site reads the value only when the
-    /// syscall returns `CELL_OK`. `a2` OUT is documented "Unused"
-    /// (RPCS3's `sys_rsx.cpp`) and observed unread by libgcm.
+    /// libgcm_sys.prx reads the value only when the syscall returns
+    /// `CELL_OK`. `a2` OUT goes unused: libgcm_sys.prx hands it a
+    /// separate zeroed stack doubleword and never reads it back.
     SysRsxDeviceMap {
         /// Out: dev_addr (8-byte BE u64; libgcm reads low 32 bits).
         dev_addr_ptr: u32,
-        /// Out: documented "Unused"; libgcm does not read it.
+        /// Out: unused; libgcm_sys.prx never reads it back.
         a2_ptr: u32,
         /// In: device id. Must be `8` (the only id used during boot;
         /// `cellGcmInitPerfMon` would use 7 / 9 / 10 / 11 / 12 but

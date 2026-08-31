@@ -14,6 +14,11 @@
 //! which answers on its own schedule. Its firmware is not part of
 //! dev_flash, so nothing here has a witness: the host stages every
 //! reply at dispatch, in one order, with no latency.
+//!
+//! vsh.self is the only dev_flash module that speaks this UART. It
+//! retries `sys_uart_initialize` up to ten times, with a 100 ms sleep
+//! between attempts. It has one send wrapper (mode 2) and one receive
+//! wrapper (mode 1), so no other mode has a firmware caller.
 
 use std::collections::VecDeque;
 
@@ -461,6 +466,10 @@ fn inc_avset_size(pkt: &[u8]) -> usize {
 
 /// Video-mode bounds table indexed by the vid map below:
 /// `(width_div, width, height)`.
+///
+/// No dev_flash module carries this table; the ladder belongs to the
+/// system controller. Its contents and its order are CellGov's own,
+/// and both are unestablished against hardware.
 const VIDEO_SCE_PARAMS: [(u32, u32, u32); 28] = [
     (0, 0, 0),
     (4, 2880, 480),
@@ -917,7 +926,10 @@ impl Lv2Host {
         }
         // Mode 0 pushes its first chunk and, when the ring cannot take
         // that chunk whole, reports the chunk's size rather than the
-        // ring's; the bytes past the ring are dropped either way.
+        // ring's; the bytes past the ring are dropped either way. No
+        // firmware caller reaches this arm -- vsh.self sends in mode 2
+        // only -- so the count the kernel really returns is
+        // unestablished.
         let sent = if mode == av::SYS_UART_MODE_NOT_BLOCKING_BIG_OP
             && size > av::PS3AV_TX_BUF_SIZE as u64
         {

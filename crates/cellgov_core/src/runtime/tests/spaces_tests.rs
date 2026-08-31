@@ -915,11 +915,9 @@ fn map_occupancy_is_judged_in_the_callers_space() {
     );
 }
 
-/// The kernel binds one backing store to every address a shared
-/// segment is mapped at (RPCS3 sys_mmapper.cpp
-/// sys_mmapper_map_shared_memory), so a repeat map inside the first
-/// space must not keep its own zero-filled bytes once the segment
-/// becomes shared.
+/// A shared segment is one backing store seen through each of its
+/// windows. A repeat map inside the first space must not keep its own
+/// zero-filled bytes once the segment becomes shared.
 #[test]
 fn a_repeat_map_in_one_space_is_seeded_when_the_segment_becomes_shared() {
     use cellgov_lv2::request::classify;

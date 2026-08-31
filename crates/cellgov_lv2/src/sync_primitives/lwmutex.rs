@@ -1,10 +1,11 @@
 //! Lightweight mutex sleep queue.
 //!
 //! Models the kernel-side primitive only: a `signaled` flag plus a
-//! FIFO waiter list. User-space wrappers track owner / recursion /
-//! waiter count in the `sys_lwmutex_t` struct and only invoke the
-//! kernel on contention, so this mirrors RPCS3's `lv2_lwmutex`
-//! (`signaled` + sleep queue).
+//! FIFO waiter list. The user-space wrapper owns the rest. liblv2's
+//! `sys_lwmutex_lock` compare-and-swaps the owner word of the
+//! caller's `sys_lwmutex_t` and bumps the in-struct recursion counter
+//! on an owner re-lock. It reaches the kernel (syscall 97) only after
+//! the contended spin fails.
 //!
 //! Ids are minted monotonically by [`LwMutexIdAllocator`]; the
 //! id space is distinct from the heavy mutex table.

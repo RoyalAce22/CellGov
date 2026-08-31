@@ -42,10 +42,11 @@ impl Lv2Host {
         {
             return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
         }
-        // Effective ipc_key is the attr's key iff pshared ==
-        // SYS_SYNC_PROCESS_SHARED, else 0. Oracle: RPCS3's
-        // `lv2_obj::get_key` (`sys_sync.h`). An unreadable attr
-        // stays keyless; attr validation is otherwise unchanged.
+        // The attribute's key field carries meaning only when
+        // attr_pshared selects a process-shared cond. A
+        // process-private cond has no key, so its effective key is 0.
+        // An unreadable attr stays keyless; attr validation is
+        // otherwise unchanged.
         if let Some(ipc_key) = cond_attr_ipc_key(attr_ptr, rt) {
             if ipc_key != 0 {
                 self.derived.cond_ipc_keys.insert(id, ipc_key);

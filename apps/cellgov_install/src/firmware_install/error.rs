@@ -60,9 +60,6 @@ pub enum FirmwareInstallError {
     OuterTar(#[source] TarParseError),
     /// The `update_files` TAR carries no dev_flash payload package, so
     /// there is no firmware tree to extract.
-    ///
-    /// RPCS3 separates the same two cases (`main_window.cpp`,
-    /// `HandlePupInstallation`).
     #[error("PUP update_files carries no dev_flash_* package")]
     NoDevFlashPackages,
     /// Every dev_flash package was empty or pruned away, so the

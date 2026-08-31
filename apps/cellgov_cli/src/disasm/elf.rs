@@ -139,12 +139,12 @@ pub(super) fn parse_pt_loads(data: &[u8]) -> Result<Vec<PtLoad>, ElfError> {
     if phnum == ELF_PN_XNUM {
         return Err(ElfError::PhdrCountExtended);
     }
-    // A container with no program-header table writes e_phentsize=0,
-    // which is not an undersized entry -- there are no entries to size.
-    // RPCS3's `Loader/ELF.h` `elf_object::open` gates its own
-    // e_phentsize check on e_phnum being non-zero for the same reason.
-    // Naming the absent table keeps "nothing here is loadable" apart
-    // from "your entry size is wrong".
+    // The ELF specification gives a file with no program-header table
+    // an e_phnum of zero. Such a container also writes
+    // e_phentsize=0, and a zero count locates no entries for
+    // e_phentsize to size. Reading the count before the entry size is
+    // CellGov's own ordering: it gives an absent table its own error
+    // rather than `PhentsizeTooSmall`.
     if phnum == 0 {
         return Err(ElfError::NoProgramHeaders);
     }

@@ -94,9 +94,8 @@ fn syscall_324_writes_fresh_cid_to_out_ptr() {
     }
 }
 
-/// The kernel truncates the request to the 1 MiB granule first, so a
-/// sub-granule container has nothing left to allocate. Oracle: RPCS3
-/// `sys_memory.cpp` `sys_memory_container_create`.
+/// The size rounds down to the 1 MiB granule first, so a sub-granule
+/// container has nothing left to allocate.
 #[test]
 fn syscall_324_sub_granule_size_returns_enomem_and_mints_no_id() {
     let mut host = Lv2Host::new();
@@ -123,8 +122,9 @@ fn syscall_324_sub_granule_size_returns_enomem_and_mints_no_id() {
     );
 }
 
-/// RPCS3 truncates and refuses the size before it ever reaches the
+/// Pins the order CellGov chose: the size refusal lands before the
 /// `cid` write, so a call wrong in both ways answers for its size.
+/// The kernel's own precedence between the two is unestablished.
 #[test]
 fn syscall_324_sub_granule_size_outranks_a_null_cid() {
     let mut host = Lv2Host::new();
@@ -182,8 +182,8 @@ fn syscall_324_exactly_one_granule_is_accepted() {
 }
 
 /// A misaligned reservation is refused, not silently rounded up to
-/// the next 256 MiB area. Oracle: RPCS3 `sys_mmapper.cpp`
-/// `sys_mmapper_allocate_address`.
+/// the next 256 MiB area -- the granule liblv2.sprx names explicitly
+/// on its own reservation.
 #[test]
 fn syscall_330_size_off_the_area_granule_returns_ealign() {
     let mut host = Lv2Host::new();
@@ -246,9 +246,10 @@ fn syscall_330_rejects_an_alignment_outside_the_area_sizes() {
     }
 }
 
-/// RPCS3 checks `size`, then `alignment`, and only reaches the
-/// `alloc_addr` write afterwards, so a call wrong in two ways answers
-/// for its arguments first.
+/// Pins the order CellGov chose: `size`, then `alignment`, and only
+/// then the `alloc_addr` write, so a call wrong in two ways answers
+/// for its arguments first. The kernel's own precedence is
+/// unestablished.
 #[test]
 fn syscall_330_argument_refusals_outrank_a_null_alloc_addr() {
     let mut host = Lv2Host::new();
@@ -1197,8 +1198,9 @@ fn syscall_334_partial_overlap_is_ebusy_too() {
     );
 }
 
-/// RPCS3's `area->alloc` searches the caller's vm area, so an
-/// occupied window is skipped rather than returned and then refused.
+/// The interface carries a hint in and a separate address out. The
+/// search skips an occupied window; it does not return one and then
+/// refuse it.
 #[test]
 fn syscall_337_search_skips_caller_occupied_windows() {
     let mut host = Lv2Host::new();
@@ -1358,10 +1360,9 @@ fn syscall_334_immediately_after_a_prior_map_is_not_busy() {
     );
 }
 
-/// The kernel refuses a zero-size shm outright; rounding it into a
-/// zero-size handle would stage a zero-byte region install downstream.
-/// Oracle: RPCS3 `sys_mmapper.cpp`
-/// `sys_mmapper_allocate_shared_memory`.
+/// A zero-size shm is refused outright; rounding it into a zero-size
+/// handle would stage a zero-byte region install downstream. Which
+/// code the kernel answers with is unestablished.
 #[test]
 fn syscall_332_zero_size_returns_ealign_and_mints_no_handle() {
     let mut host = Lv2Host::new();
@@ -1413,10 +1414,9 @@ fn syscall_362_zero_size_returns_ealign() {
     assert!(host.state.mmapper_handles.is_empty());
 }
 
-/// The granularity field is an encoding: a value outside
-/// {unset, 64K, 1M} is refused rather than resolved to a
-/// granule. Oracle: RPCS3 `sys_mmapper.cpp`
-/// `sys_mmapper_allocate_shared_memory` default arm.
+/// The granularity field is an encoding, not a size: 64 KiB and 1 MiB
+/// are the only values it defines, so anything outside {unset, 64K,
+/// 1M} is refused rather than resolved to a granule.
 #[test]
 fn syscall_332_unencodable_granularity_field_returns_einval() {
     let mut host = Lv2Host::new();
@@ -1494,9 +1494,9 @@ fn syscall_332_accepts_a_valid_granularity_beside_unrelated_flag_bits() {
     );
 }
 
-/// RPCS3 refuses `size` and `flags` before it ever reaches the
-/// `mem_id` write, so a call wrong in two ways answers for its
-/// arguments first.
+/// Pins the order CellGov chose: `size` and `flags` are refused
+/// before the `mem_id` write, so a call wrong in two ways answers for
+/// its arguments first. The kernel's own precedence is unestablished.
 #[test]
 fn syscall_332_argument_refusals_outrank_a_null_mem_id() {
     let mut host = Lv2Host::new();

@@ -316,16 +316,16 @@ impl Runtime {
         // Timer path: park the caller until guest time reaches the
         // requested interval, still bypassing `Lv2Host::dispatch`.
         // Other threads run meanwhile; when everything is parked, the
-        // all-blocked time-warp jumps the clock to the deadline (RPCS3
-        // rpcs3/Emu/Cell/lv2/sys_timer.cpp sys_timer_usleep /
-        // sys_timer_sleep: the thread enters a timed sleep and always
-        // returns CELL_OK).
+        // all-blocked time-warp jumps the clock to the deadline.
+        // Nothing public attests that the caller parks and then
+        // returns CELL_OK; a console probe or an lv2 timer autotest
+        // would settle it.
         let usec = match num {
             TIMER_USLEEP => args8[0],
-            // The seconds argument is a 32-bit value; the kernel reads
-            // only the low word of the register (RPCS3 sys_timer.cpp
-            // sys_timer_sleep takes u32 sleep_time). u32::MAX seconds
-            // fits in u64 microseconds, so the scale cannot overflow.
+            // The seconds-granularity call takes an unsigned 32-bit
+            // second count, so only the low word of the argument
+            // register carries a value. u32::MAX seconds fits in u64
+            // microseconds, so the scale cannot overflow.
             TIMER_SLEEP => u64::from(args8[0] as u32) * 1_000_000,
             _ => unreachable!("is_timer_fast_path implies num is TIMER_USLEEP or TIMER_SLEEP"),
         };
@@ -389,11 +389,11 @@ impl Runtime {
         request: cellgov_lv2::Lv2Request,
         source: UnitId,
     ) {
-        // ProcessExit2 with empty argv resolves to the same plain
-        // process exit (RPCS3 sys_process.cpp _sys_process_exit2
-        // calls _sys_process_exit when the argv walk finds nothing),
-        // so its Immediate(0) must trigger the same finish-all sweep
-        // -- otherwise the guest resumes past a noreturn exit. Child
+        // Both exit forms terminate the calling process, and an
+        // exit-and-spawn whose argv walk finds no target is just an
+        // exit. A ProcessExit2 that resolves to Immediate(0) must
+        // therefore trigger the same finish-all sweep as a plain exit,
+        // or the guest resumes past a noreturn call. Child
         // exits arrive as Lv2Dispatch::ProcessExitChild and never
         // reach the Immediate arm, so the flag stays boot-only there.
         let is_process_exit = matches!(
@@ -425,11 +425,11 @@ impl Runtime {
         let region_installs: Vec<(u64, usize, Option<u64>)> =
             self.lv2_host.drain_pending_region_installs().collect();
         if !region_installs.is_empty() {
-            // The mapping appears in the CALLER's address space: the
-            // handler validated the window against the caller's view,
-            // and the caller's own loads/stores resolve through its
-            // space (RPCS3 sys_mmapper.cpp sys_mmapper_map_shared_memory
-            // maps into the calling process's virtual memory).
+            // The mapping appears in the CALLER's address space. The
+            // syscall takes no process argument, so the caller's space
+            // is the only one it can name. The handler validated the
+            // window against the caller's view, and the caller's own
+            // loads/stores resolve through that space.
             let caller_space = self.spaces.space_of(source);
             for (addr, size, ipc_key) in region_installs {
                 let mem = super::spaces::resolve_space_memory_for_write(
@@ -744,9 +744,9 @@ impl Runtime {
                     // A NULL out-pointer is never written -- the join
                     // itself still completes (the target is reaped),
                     // but the joiner's r3 reports CELL_EFAULT, not
-                    // success (RPCS3 sys_ppu_thread.cpp
-                    // sys_ppu_thread_join checks vptr only after the
-                    // wait resolves and returns CELL_EFAULT for null).
+                    // success. Reap-then-fault ordering has no public
+                    // attestation; a console probe of a NULL-vptr join
+                    // would settle whether the target is still reaped.
                     self.deliver_syscall_return(
                         waiter,
                         cellgov_ps3_abi::cell_errors::CELL_EFAULT.into(),

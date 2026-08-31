@@ -6,6 +6,5 @@
 /// `update_files.tar`: the TAR of SCE-wrapped dev_flash packages that
 /// carries the firmware image itself.
 ///
-/// RPCS3 reads the same id in `rpcs3qt/main_window.cpp`
-/// `HandlePupInstallation`.
+/// Every retail update package carries this payload under this id.
 pub const ENTRY_ID_UPDATE_FILES: u64 = 0x300;

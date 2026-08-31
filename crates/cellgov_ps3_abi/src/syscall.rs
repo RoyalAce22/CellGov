@@ -1,6 +1,7 @@
 //! LV2 syscall numbers (the value the guest puts in r11 before `sc`).
 //!
-//! Names mirror RPCS3's `syscall_table_t` entries. Behaviour
+//! Each constant is named after the syscall it selects, or, where the
+//! syscall has no known name, after its number. Behaviour
 //! (the dispatch match in `cellgov_lv2::request::classify`) lives in
 //! `cellgov_lv2`; this module is data only. All `pub const` syscall
 //! numbers are emitted by the `lv2_syscalls!` macro from a single
@@ -66,9 +67,12 @@ lv2_syscalls! {
     /// `sys_process_get_number_of_object`.
     PROCESS_GET_NUMBER_OF_OBJECT = 12;
 
-    /// `sys_process_is_spu_lock_line_reservation_address` -- check
-    /// whether `addr` falls in the SPU lock-line reservation range.
-    /// Behavioural oracle: RPCS3's `sys_process.cpp`.
+    /// `sys_process_is_spu_lock_line_reservation_address` -- ask
+    /// whether an SPU thread or Raw SPU may wait for the lock-line
+    /// reservation lost event at `addr`.
+    // [CBE-Handbook p:479 s:18.6.4] The lock-line reservation lost event fires
+    // when an outside entity modifies the 128-byte line an SPU reserved with
+    // getllar, and not for a reservation the SPE itself resets.
     PROCESS_IS_SPU_LOCK_LINE_RESERVATION_ADDRESS = 14;
 
     /// `sys_process_getppid`.
@@ -90,15 +94,13 @@ lv2_syscalls! {
     PROCESS_GET_SDK_VERSION = 25;
 
     /// `_sys_process_exit2` -- exit carrying an argv/envp block;
-    /// non-empty argv means exitspawn (RPCS3 `sys_process.cpp`
-    /// `lv2_exitspawn`).
+    /// a non-empty argv makes it an exitspawn instead of a plain exit.
     PROCESS_EXIT2 = 26;
 
     /// `sys_process_spawns_a_self2` -- spawn a SELF as a child
     /// process. Decoded actual signature (vsh 0x608a8c): (pid_out,
     /// prio, flags, marshalled path/argv/envp block ptr, block size,
-    /// data word, 64B cfg block, dbg pair ptr); RPCS3's
-    /// stack/stack_size guess is the block/size pair.
+    /// data word, 64B cfg block, dbg pair ptr).
     PROCESS_SPAWNS_A_SELF2 = 27;
 
     /// `_sys_process_get_paramsfo`.
@@ -230,14 +232,15 @@ lv2_syscalls! {
     /// `sys_spu_image_import`.
     SPU_IMAGE_IMPORT = 158;
     /// `sys_spu_initialize` -- announce per-process SPU resource
-    /// limits (max usable / max raw SPUs). Behavioural oracle:
-    /// RPCS3's `sys_spu.cpp`.
+    /// limits: how many physical SPUs the process may use, and how
+    /// many of those may be handed out as Raw SPUs.
     SPU_INITIALIZE = 169;
     /// `sys_spu_thread_group_create`.
     SPU_THREAD_GROUP_CREATE = 170;
     /// `sys_spu_thread_group_destroy` -- destroy a non-running thread
-    /// group. Returns CELL_ESRCH on unknown id, CELL_EBUSY when the
-    /// group is still running. Behavioural oracle: RPCS3's `sys_spu.cpp`.
+    /// group. Returns CELL_ESRCH when the id names no group, and
+    /// CELL_EBUSY while the group is operational or in use by another
+    /// syscall.
     SPU_THREAD_GROUP_DESTROY = 171;
     /// `sys_spu_thread_initialize`.
     SPU_THREAD_INITIALIZE = 172;
@@ -367,7 +370,8 @@ lv2_syscalls! {
 
     /// `sys_ss_access_control_engine` -- privileged authority/identity
     /// gate used during user-PRX init to query the caller's SELF
-    /// program-authority-id. Behavioral oracle: RPCS3's `sys_ss.cpp`.
+    /// program-authority-id. Sits in the `sys_ss` block, just below
+    /// the open-PSID and product-mode queries.
     SS_ACCESS_CONTROL_ENGINE = 871;
 }
 
@@ -398,7 +402,7 @@ lv2_syscalls! {
     ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS;
     ALL_LV2_UNSUPPORTED_ROUTED_NAMED;
 
-    /// `sys_prx_load_module` -- behavioral oracle: RPCS3's `sys_prx.cpp`.
+    /// `sys_prx_load_module`.
     SYS_PRX_LOAD_MODULE = 480;
     /// `sys_prx_load_module_on_memcontainer`.
     SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER = 497;
@@ -410,8 +414,9 @@ lv2_syscalls! {
     SYS_PRX_UNLOAD_MODULE = 483;
     /// `sys_tty_read`.
     TTY_READ = 402;
-    /// Unnamed syscall 462 (RPCS3 references it as part of the
-    /// `sys_storage` / fs management surface).
+    /// Unnamed syscall 462. The number sits in the `sys_prx` block,
+    /// just above the module-id-by-address query at 461. What it does
+    /// is unestablished.
     UNS_FUNC_462 = 462;
     /// `sys_prx_register_module`.
     SYS_PRX_REGISTER_MODULE = 484;
@@ -429,12 +434,15 @@ lv2_syscalls! {
     EVENT_PORT_DISCONNECT = 137;
     /// `sys_event_port_connect_ipc`.
     EVENT_PORT_CONNECT_IPC = 140;
-    /// Gamepad YCON interface (RPCS3 `sys_io.cpp`).
+    /// Gamepad YCON interface. The number sits just below the sys_io
+    /// buffer block that starts at 624; the name is inherited
+    /// vocabulary, not a Sony one.
     GAMEPAD_YCON_IF = 621;
-    /// HID is-root query (RPCS3 `sys_io.cpp`).
+    /// HID is-root query. Both the number's owner and the name are
+    /// unestablished.
     HID_IS_ROOT = 512;
-    /// `sys_rsx_attribute` (671 is `_FREE`; 677 is the attribute setter
-    /// variant per RPCS3 `sys_rsx.cpp`).
+    /// `sys_rsx_attribute`, the last entry of the sys_rsx block. The
+    /// per-context setter is `sys_rsx_context_attribute` at 674.
     RSX_ATTRIBUTE = 677;
     /// `sys_memory_container_create` alternate entry (341 is the main
     /// entry; 324 is an older / authority-gated form).

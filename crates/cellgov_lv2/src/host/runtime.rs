@@ -41,8 +41,7 @@ pub trait Lv2Runtime {
     /// caller skip furthest.
     ///
     /// `sys_mmapper_map_shared_memory` refuses an occupied window
-    /// with `CELL_EBUSY` (RPCS3 sys_mmapper.cpp: the window
-    /// allocation fails) and `sys_mmapper_search_and_map` skips it,
+    /// with `CELL_EBUSY` and `sys_mmapper_search_and_map` skips it,
     /// so an implementor without a region model (fixed-layout test
     /// doubles) answers `None`.
     ///

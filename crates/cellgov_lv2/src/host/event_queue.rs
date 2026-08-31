@@ -20,11 +20,10 @@ impl Lv2Host {
     /// A non-zero `ipc_key` registers the queue under that key so
     /// `sys_event_port_connect_ipc` (140) can find it.
     ///
-    /// The oracle passes `SYS_SYNC_NEWLY_CREATED` unconditionally
-    /// (RPCS3 `sys_event.cpp`), so unlike the shm path there is no
-    /// resolve-or-create: a key already registered is `CELL_EEXIST`,
-    /// and the way a second referent reaches the queue is 140, not a
-    /// second create.
+    /// A key already in use is `CELL_EEXIST`. Unlike the shm path
+    /// there is no resolve-or-create: a second referent reaches the
+    /// queue through 140, never through a second create. The create
+    /// always carries `SYS_SYNC_NEWLY_CREATED`.
     ///
     /// # Errors
     ///
@@ -67,8 +66,10 @@ impl Lv2Host {
     /// # Errors
     ///
     /// `CELL_EINVAL` for a `port_type` outside
-    /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}. Oracle: RPCS3
-    /// `sys_event.cpp`.
+    /// {`SYS_EVENT_PORT_LOCAL`, `SYS_EVENT_PORT_IPC`}: the type word
+    /// is an enumeration, so an unlisted value is an invalid
+    /// argument. Only the local form is described outside the
+    /// kernel; the IPC enumerant is unestablished.
     pub(super) fn dispatch_event_port_create(
         &mut self,
         id_ptr: u32,
@@ -78,8 +79,8 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if port_type != SYS_EVENT_PORT_LOCAL && port_type != SYS_EVENT_PORT_IPC {
-            // The oracle logs this too (`sys_event.cpp`); a guest
-            // that trips it is passing a type LV2 does not define.
+            // A guest that trips this passes a type LV2 does not
+            // define, so the refusal is worth a named break.
             self.log_invariant_break(
                 "dispatch.event_port_create_bad_type",
                 format_args!("sys_event_port_create: port_type {port_type} is neither LOCAL(1) nor IPC(3); returning CELL_EINVAL"),
@@ -113,10 +114,11 @@ impl Lv2Host {
     /// `sys_event_port_connect_local` (136) and
     /// `sys_event_port_connect_ipc` (140).
     ///
-    /// The two forms differ only in how the queue is named and which
-    /// port type they accept, so they share one body. Oracle: RPCS3
-    /// `sys_event.cpp` (`sys_event_port_connect_local` /
-    /// `sys_event_port_connect_ipc`).
+    /// A port binds to at most one queue, and its type must match the
+    /// connect form. The two forms differ only in how the queue is
+    /// named, so they share one body. The local form's contract is
+    /// described outside the kernel; the IPC form's is
+    /// unestablished.
     ///
     /// # Errors
     ///
@@ -230,11 +232,10 @@ impl Lv2Host {
         match self.state.event_queues.try_receive(id) {
             None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
-                // The event returns in r4..=r7; the pointer argument
-                // is a dummy the kernel never writes (RPCS3
-                // `sys_event.cpp` `sys_event_queue_receive`), and the
-                // guest's own stub stores the registers where it
-                // wants them.
+                // The kernel returns the event's four words in
+                // r4..=r7, and the guest's own stub stores them into
+                // its `sys_event_t`. The pointer argument is a dummy
+                // the kernel never writes.
                 Lv2Dispatch::ImmediateRegisters {
                     code: 0,
                     effects: vec![],

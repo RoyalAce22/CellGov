@@ -22,39 +22,40 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         // A null out-pointer is EFAULT before any kernel-object state
-        // mutates (RPCS3 sys_mutex.cpp sys_mutex_create rejects a
-        // null mutex_id ahead of attribute validation and creation).
+        // mutates, so the refused create mints no id.
         if id_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
         // `sys_mutex_attribute_t`: protocol@0 u32, recursive@4 u32,
         // pshared@8 u32 (BE); ipc_key@16 u64 and flags@24 u32 are
         // read only for process-shared creates. Known divergence:
-        // a null attr_ptr serves default attributes where the kernel
-        // is EFAULT (RPCS3 sys_mutex.cpp sys_mutex_create); the
-        // testkit relies on the null-attr default create.
+        // the kernel faults on a null attr, but here a null attr_ptr
+        // serves default attributes because the testkit relies on the
+        // null-attr default create.
         let attrs = if attr_ptr == 0 {
             MutexAttrs::default()
         } else if let Some(bytes) = rt.read_committed(attr_ptr as u64, 12) {
             let protocol = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
             let recursive_raw = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
             let pshared = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
-            // Validation ladder and errnos follow RPCS3 sys_mutex.cpp
-            // sys_mutex_create: protocol then recursive in the syscall
-            // body, pshared / ipc_key / flags inside lv2_obj::create
-            // (sys_sync.h); every unknown enumerant is EINVAL.
+            // Each attribute word is an enumeration, so every unknown
+            // enumerant is EINVAL. Validation ladder: protocol then
+            // recursive in the syscall body, pshared / ipc_key /
+            // flags in the object create. The ladder's order is a
+            // CellGov choice -- which EINVAL fires first when two
+            // words are both bad is unestablished.
             match protocol {
                 cellgov_ps3_abi::sys_sync::SYS_SYNC_FIFO
                 | cellgov_ps3_abi::sys_sync::SYS_SYNC_PRIORITY => {}
-                // SYS_SYNC_PRIORITY_INHERIT (RPCS3 sys_sync.h); the
-                // enumerant is not yet in cellgov_ps3_abi::sys_sync.
+                // SYS_SYNC_PRIORITY_INHERIT, the third accepted
+                // scheduling policy; the enumerant is not yet in
+                // cellgov_ps3_abi::sys_sync.
                 0x3 => {}
                 _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
             }
             // Only the RECURSIVE enumerant enables re-locking;
             // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means
-            // NOT recursive (RPCS3 sys_mutex.cpp sys_mutex_create
-            // accepts exactly these two values).
+            // NOT recursive, and no third value is defined.
             match recursive_raw {
                 cellgov_ps3_abi::sys_sync::SYS_SYNC_RECURSIVE
                 | cellgov_ps3_abi::sys_sync::SYS_SYNC_NOT_RECURSIVE => {}
@@ -63,10 +64,12 @@ impl Lv2Host {
             match pshared {
                 cellgov_ps3_abi::sys_sync::SYS_SYNC_PROCESS_SHARED => {
                     // Process-shared creates carry an ipc_key and an
-                    // attach policy; a zero key or an attach flag
-                    // outside NEWLY_CREATED / NOT_CREATE / NOT_CARE
-                    // (1 / 2 / 3, RPCS3 sys_sync.h) is EINVAL
-                    // (RPCS3 sys_sync.h lv2_obj::create).
+                    // attach policy. A valid key starts at 1, so a
+                    // zero key is out of range; the attach flag must
+                    // be NEWLY_CREATED / NOT_CREATE / NOT_CARE
+                    // (1 / 2 / 3). EINVAL for the zero key is a
+                    // CellGov choice -- the key range is established,
+                    // the code for breaking it is not.
                     let Some(tail) = rt.read_committed(attr_ptr as u64 + 16, 12) else {
                         return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
                     };
@@ -90,8 +93,8 @@ impl Lv2Host {
                         ),
                     );
                 }
-                // SYS_SYNC_NOT_PROCESS_SHARED (0x200, RPCS3
-                // sys_sync.h); the enumerant is not yet in
+                // SYS_SYNC_NOT_PROCESS_SHARED (0x200), the only other
+                // accepted pshared value; the enumerant is not yet in
                 // cellgov_ps3_abi::sys_sync.
                 0x200 => {}
                 _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
@@ -104,8 +107,7 @@ impl Lv2Host {
         } else {
             // The kernel reads the attribute struct unconditionally;
             // an unreadable attr pointer is a guest fault, not the
-            // default-attribute arm (RPCS3 sys_mutex.cpp
-            // sys_mutex_create dereferences attr before validating).
+            // default-attribute arm.
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         };
         let id = self.alloc_id();
@@ -140,8 +142,8 @@ impl Lv2Host {
             }
             crate::sync_primitives::MutexAcquireOrEnqueue::Acquired
             | crate::sync_primitives::MutexAcquireOrEnqueue::Recursed => Lv2Dispatch::immediate(0),
-            // A recursive re-lock whose count would overflow is
-            // EKRESOURCE (RPCS3 sys_mutex.h lv2_mutex::try_lock).
+            // Recursive locking is counted, and a re-lock past the
+            // 2^32 - 1 limit is EKRESOURCE.
             crate::sync_primitives::MutexAcquireOrEnqueue::CountSaturated => {
                 Lv2Dispatch::immediate(cell_errors::CELL_EKRESOURCE.into())
             }
@@ -181,10 +183,10 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        // An owner unlock with recursive holds outstanding consumes
-        // one hold and keeps ownership; no waiter is granted until
-        // the count reaches zero (RPCS3 sys_mutex.cpp
-        // sys_mutex_unlock). Unknown-id and non-owner callers fall
+        // A recursive hold is counted, so it needs a matching unlock:
+        // an owner unlock with holds outstanding consumes one and
+        // keeps ownership, and no waiter is granted until the count
+        // reaches zero. Unknown-id and non-owner callers fall
         // through to the release path for ESRCH / EPERM.
         if self.state.mutexes.unlock_decrement(id, caller) {
             return Lv2Dispatch::immediate(0);

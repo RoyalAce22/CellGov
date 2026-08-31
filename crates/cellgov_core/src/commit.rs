@@ -419,11 +419,13 @@ impl CommitPipeline {
                         // are what `NV4097_GET_REPORT` legitimately
                         // targets, so the boundary worth asserting is the
                         // end of the area GCM handed out; past it the
-                        // write corrupts whatever follows. RPCS3
-                        // `sys_rsx.h` `RsxReports` and `sys_rsx.cpp`
-                        // `sys_rsx_context_allocate` publish the same
-                        // layout through `reportsNotifyOffset` /
-                        // `reportsReportOffset`.
+                        // write corrupts whatever follows.
+                        // libgcm_sys.sprx reads a separate block offset
+                        // for the semaphore, notify and report arrays
+                        // out of the driver-info block the kernel
+                        // published. It adds each one to a single
+                        // common reports base, so the bound that means
+                        // anything is the end of the whole area.
                         //
                         // The window only means something once a label
                         // base exists. A base of zero says GCM never

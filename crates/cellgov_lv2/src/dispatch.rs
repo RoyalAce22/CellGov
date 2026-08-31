@@ -200,8 +200,11 @@ impl Lv2Dispatch {
 }
 
 /// The GPR image of a received event: `source` in r4, then `data1`,
-/// `data2`, `data3` in r5..=r7, as `sys_event_queue_receive` returns
-/// it (RPCS3 `sys_event.cpp` `sys_event_queue_receive`).
+/// `data2`, `data3` in r5..=r7.
+///
+/// `sys_event_queue_receive` writes no `sys_event_t`. The user-mode
+/// wrapper copies r4..=r7 into that struct in field order after the
+/// `sc` returns.
 pub fn event_registers(payload: &crate::sync_primitives::EventPayload) -> Vec<(u8, u64)> {
     vec![
         (4, payload.source),
@@ -408,9 +411,9 @@ pub enum PendingResponse {
     /// On wake, write `observed` (u64 BE) to a non-null `result_ptr`
     /// and set r3 = `CELL_ECANCELED`. Staged by
     /// `sys_event_flag_cancel` for each drained waiter, so the store
-    /// resolves in the waiter's space, not the canceller's (RPCS3
-    /// sys_event_flag.cpp sys_event_flag_cancel stores the captured
-    /// pattern per waiter).
+    /// resolves in the waiter's space, not the canceller's. Every
+    /// drained waiter reports the same pattern, captured once at
+    /// cancel time.
     EventFlagCancelWake {
         /// Guest out-pointer receiving `observed` (u64 BE).
         result_ptr: u32,

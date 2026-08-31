@@ -223,10 +223,10 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
         syscall::PPU_THREAD_EXIT => Lv2Request::PpuThreadExit {
             exit_value: args[0],
         },
-        // RPCS3 `lv2.cpp` binds 52 to the 8-arg `_sys_ppu_thread_create`
-        // (thread_id, param, arg, unk, prio, stacksize, flags,
-        // threadname); its sysPrxForUser stub passes unk=0 in r6
-        // (`Modules/sys_ppu_thread_.cpp`).
+        // liblv2.prx's `sys_ppu_thread_create` wrapper fills r3-r10 for
+        // syscall 52: (thread_id, param, arg, unk, prio, stacksize,
+        // flags, threadname). It zeroes r6 immediately before the
+        // trap, so the 4th slot is reserved.
         syscall::PPU_THREAD_CREATE => Lv2Request::PpuThreadCreate {
             id_ptr: p!(0),
             param_ptr: p!(1),

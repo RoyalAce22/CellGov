@@ -70,8 +70,10 @@ static void write_tty_result(const struct TestResult *r)
     sysTtyWrite(0, r, len, &written);
 }
 
-/* SPU ELF path on the PS3 virtual filesystem. RPCS3 maps /app_home/
- * to the directory containing the launched PPU ELF. */
+/* SPU ELF path on the PS3 virtual filesystem. /app_home is the
+ * guest-visible mount a development host publishes for the running
+ * application; the harness resolves this exact path to the SPU ELF
+ * built beside this test. */
 static const char SPU_ELF_PATH[] = "/app_home/spu_main.elf";
 
 /* Result buffer in main memory. 128-byte aligned for DMA safety. */

@@ -24,10 +24,11 @@ impl Lv2Host {
         };
         if target_thread.state.is_finished() {
             let exit_value = target_thread.exit_value.unwrap_or(0);
-            // The kernel completes the join but reports EFAULT rather
-            // than writing through a null status pointer (RPCS3
-            // sys_ppu_thread.cpp sys_ppu_thread_join checks vptr only
-            // after the join concludes).
+            // The join completes, then the status pointer is checked:
+            // a null pointer is EFAULT and the exit status is
+            // dropped, not written. Both codes are defined for this
+            // call; that the join runs first is a CellGov choice,
+            // unestablished against the console.
             if status_out_ptr == 0 {
                 return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
             }
@@ -60,10 +61,9 @@ impl Lv2Host {
                 effects: vec![],
             },
             AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into()),
-            // A detached target is EINVAL, not ESRCH; ESRCH is
-            // reserved for ids that name no thread or an
-            // already-reaped one (RPCS3 sys_ppu_thread.cpp
-            // sys_ppu_thread_join: detached -> EINVAL).
+            // A join against a target that is not joinable is EINVAL.
+            // ESRCH is reserved for ids that name no thread or an
+            // already-reaped one.
             AddJoinWaiter::TargetDetached => {
                 Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
             }
@@ -114,16 +114,17 @@ impl Lv2Host {
             param_bytes[7],
         ]);
 
-        // A null entry descriptor is EFAULT before the priority check
-        // (RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create rejects
-        // !param->entry ahead of the range validation).
+        // A null entry descriptor is EFAULT. The check runs before
+        // the priority range test; that order is a CellGov choice,
+        // unestablished against the console.
         if entry_opd_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
 
-        // Priority window: 0..=3071 for user-permission processes;
-        // the floor drops to -512 with debug-or-root capability
-        // (RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create).
+        // A PPU thread priority runs 0 (highest) through 3071, and a
+        // value outside that window is EINVAL. The floor drops to
+        // -512 for a debug-or-root process -- a privileged widening
+        // with no public anchor.
         let prio = priority as i32;
         let prio_floor = if self.debug_or_root() { -512 } else { 0 };
         if prio < prio_floor || prio > 3071 {
@@ -161,11 +162,12 @@ impl Lv2Host {
                 arg,
                 extra_args: [0; 7],
                 stack_top: stack.initial_sp(),
-                // The kernel installs the param's tls field as the
-                // child's r13 verbatim, unvalidated; the caller's
-                // wrapper allocated and initialized the block before
-                // the syscall (RPCS3 sys_ppu_thread.cpp
-                // _sys_ppu_thread_create -> PPUThread.cpp gpr[13]).
+                // r13 is the PPU thread's TLS base: liblv2 reaches a
+                // thread's own id through an r13-relative TLS slot in
+                // sys_lwmutex_lock. The kernel installs the param's
+                // tls field there verbatim and unvalidated; the
+                // caller's wrapper allocated and initialized the
+                // block before the syscall.
                 tls_base: param_tls as u64,
                 // LR=0 traps a fallthrough return; guests exit via
                 // sys_ppu_thread_exit.

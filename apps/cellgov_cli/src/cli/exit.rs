@@ -47,9 +47,10 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// PRX) through unchanged, and decrypt an SCE/SELF wrapper.
 ///
 /// NPDRM titles resolve their RAP at
-/// `<vfs_root>/home/00000001/exdata/<content_id>.rap` -- the same
-/// exdata layout RPCS3 reads on boot, so a once-installed RAP is
-/// found by content id with no per-invocation `--rap` or `--title`.
+/// `<vfs_root>/home/00000001/exdata/<content_id>.rap`, the console's
+/// per-user license directory on the internal HDD. The resolver finds
+/// a once-installed RAP by content id, with no per-invocation
+/// `--rap` or `--title`.
 /// An absent RAP returns `None`: license-3 (free) titles fall back
 /// to the vault's free klicensee, Network / Local titles surface
 /// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.

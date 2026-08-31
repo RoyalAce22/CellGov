@@ -53,6 +53,10 @@ fn lookup_hits_known_code_and_misses_unknown() {
     assert!(cell_errors::lookup(0).is_none());
 }
 
+/// Firmware materializes all three of these at its own refusal sites.
+/// liblv2.prx builds 0x8001_0002 for a rejected lwmutex attribute and
+/// 0x8001_0009 for a condition wait by a non-owner. libfs.prx builds
+/// 0x8001_000D on its pointer checks.
 #[test]
 fn spot_check_three_canaries_against_rpcs3_header() {
     assert_eq!(CELL_EINVAL.code, 0x8001_0002);

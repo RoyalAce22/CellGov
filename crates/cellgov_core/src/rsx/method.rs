@@ -266,10 +266,11 @@ pub(crate) const NV4097_REPORT_OFFSET_MASK_U: u32 = NV4097_REPORT_OFFSET_MASK;
 /// The argument's offset field is relative to the report block, not
 /// to the label area's base: report entries sit
 /// [`REPORTS_REPORT_OFFSET`] in, behind the semaphore and notify
-/// blocks. RPCS3 `RSXThread.cpp` `get_address` resolves the local
-/// report DMA context the same way, adding the `RsxReports::report`
-/// field offset to the label address before the guest's offset. A
-/// zero `label_base` is the absolute-offset regime the commit
+/// blocks. libgcm_sys.sprx resolves a report address the same way.
+/// Its report-address getter adds the report-block offset the kernel
+/// published in the driver-info block, then scales the guest's index;
+/// its label-address getter adds a separate semaphore-block offset.
+/// A zero `label_base` is the absolute-offset regime the commit
 /// pipeline documents, where no block base applies either.
 ///
 /// [`REPORTS_REPORT_OFFSET`]: cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET

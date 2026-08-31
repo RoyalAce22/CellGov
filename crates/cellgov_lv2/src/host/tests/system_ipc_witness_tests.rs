@@ -17,7 +17,7 @@ use crate::host::{is_system_ipc_key, Lv2Host};
 use crate::request::Lv2Request;
 
 /// A key inside the namespace, and one in the neighbouring
-/// `0x8006_0200` namespace the RPCS3 vsh capture also saw traffic on.
+/// `0x8006_0200` namespace a vsh boot capture also saw traffic on.
 const NS_KEY: u64 = 0x8006_0100_0000_0010;
 const OTHER_KEY: u64 = 0x8006_0200_0000_0010;
 const NS_COND_KEY: u64 = 0x8006_0100_0000_0030;
@@ -328,9 +328,11 @@ fn a_namespace_event_queue_create_and_enqueue_bump_channel_two() {
     );
 }
 
-/// The oracle passes `SYS_SYNC_NEWLY_CREATED` unconditionally
-/// (RPCS3 `sys_event.cpp`), so a duplicate key is refused rather
-/// than resolved. The witness still records the attempt.
+/// A keyed create always asks for a newly created queue, so a
+/// duplicate key is refused rather than resolved. libaudio.prx never
+/// reuses a key: every queue it creates carries the same fixed upper
+/// half with a distinct counter in the low 16 bits. The witness still
+/// records the attempt.
 #[test]
 fn a_second_keyed_create_on_the_same_key_is_eexist() {
     let mut host = Lv2Host::new();

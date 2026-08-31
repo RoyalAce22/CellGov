@@ -173,9 +173,10 @@ pub(super) fn build_manifest(
         FirmwareManifest {
             format_version: SUPPORTED_FORMAT_VERSION,
             firmware: FirmwareIdentity {
-                // PUP-header `image_version` is an opaque u64 identifier
-                // (RPCS3 reads the user-facing version from
-                // `vsh/etc/version.txt` instead).
+                // PUP-header `image_version` is an opaque u64
+                // identifier. The user-facing `version` beside it
+                // comes from the extracted tree's
+                // `vsh/etc/version.txt`.
                 image_version: format!("0x{pup_image_version:016x}"),
                 version: version.as_str().to_string(),
                 pup_sha256,

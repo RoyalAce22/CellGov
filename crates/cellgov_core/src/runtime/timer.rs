@@ -28,13 +28,11 @@ impl Runtime {
             // resurrect the unit (the Runnable override replaces
             // Finished) and trip the missing-response invariant break.
             // handle_process_exit_child finishes every one of the
-            // pid's units at the same exit, so a due sleep or timed
-            // wait never resumes its thread after exit. (RPCS3 is not
-            // an oracle here: its _sys_process_exit calls Emu.Kill()
-            // and tears down the whole emulator rather than reclaiming
-            // one process.) Dropped wakes are excluded from the
-            // returned list so no UnitWoken record is traced for a
-            // unit that stays Finished.
+            // pid's units at the same exit. Process exit does not
+            // return to its caller, so a due sleep or timed wait never
+            // resumes its thread. Dropped wakes are excluded from the
+            // returned list so no UnitWoken record is traced for a unit
+            // that stays Finished.
             if self.registry.effective_status(wake.unit) == Some(cellgov_exec::UnitStatus::Finished)
             {
                 continue;

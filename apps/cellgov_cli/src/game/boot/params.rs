@@ -14,6 +14,8 @@ use crate::cli::exit::die;
 
 /// Default primary-thread priority when the title's `sys_proc_param`
 /// block is absent or declares a priority the kernel will not adopt.
+///
+/// 1001 is the kernel's own starting priority for the primary thread.
 const DEFAULT_PRIMARY_PRIO: u32 = 1001;
 
 /// What the boot resolved out of the title's `sys_proc_param` segment
@@ -75,11 +77,11 @@ pub(super) fn resolve_boot_params(opts: &PrepareOptions<'_>, elf_data: &[u8]) ->
     }
 
     let primary_prio: u32 = resolve_primary_prio(proc_param.map(|p| p.primary_prio));
-    // An absent param segment leaves the kernel's own starting value,
-    // the 1 MiB `SYS_PROCESS_PARAM_STACK_SIZE_MAX` (RPCS3
-    // `PPUModule.cpp` `ppu_load_exec`). A present one is decoded and
-    // clamped to that same ceiling, so the guard below cannot fire
-    // while the reservation is 1 MiB.
+    // An absent param segment leaves the kernel's own starting value
+    // of 1 MiB, which is also the ceiling on a `sys_proc_param` stack
+    // declaration. `decode_primary_stacksize` clamps a present
+    // declaration to that same ceiling, so the guard below cannot
+    // fire while the reservation is 1 MiB.
     let primary_stack_size: u32 = match proc_param {
         Some(p) => {
             let want = decode_primary_stacksize(p.primary_stacksize);
@@ -113,13 +115,12 @@ pub(super) fn resolve_boot_params(opts: &PrepareOptions<'_>, elf_data: &[u8]) ->
 /// declaration.
 ///
 /// An out-of-range declaration is not a load failure: the kernel keeps
-/// its own default and boots. RPCS3 `PPUModule.cpp` `ppu_load_exec`
-/// adopts the declared value only when it is below 3072 and at or
-/// above the process class's floor -- 0 for a debug/root process --
-/// and otherwise leaves its 1001 default standing.
-/// `cellgov_lv2::PpuThreadAttrs` carries an unsigned priority, so the
-/// floor here is that same 0 and a negative declaration falls back
-/// rather than booting at a wrapped value.
+/// its own default and boots. A PPU thread priority runs 0 (highest)
+/// to 3071. This adopts a declaration only inside that range and at
+/// or above the process class's floor, which is 0 for a debug/root
+/// process. `cellgov_lv2::PpuThreadAttrs` carries an unsigned
+/// priority, so a negative declaration reverts to the default rather
+/// than booting at a wrapped value.
 fn resolve_primary_prio(declared: Option<i32>) -> u32 {
     let Some(p) = declared else {
         return DEFAULT_PRIMARY_PRIO;
@@ -136,12 +137,14 @@ fn resolve_primary_prio(declared: Option<i32>) -> u32 {
 
 /// Decode a `sys_proc_param.primary_stacksize` declaration to bytes.
 ///
-/// The field carries either a kernel sentinel or a raw byte count;
-/// a raw count is clamped into the kernel's accepted window and
-/// rounded up to a page. Mapping and clamp per RPCS3 `sys_process.h`
-/// (`SYS_PROCESS_PRIMARY_STACK_SIZE_*`,
-/// `SYS_PROCESS_PARAM_STACK_SIZE_MAX`) and `PPUModule.cpp`
-/// `ppu_load_exec`.
+/// The field carries either a kernel sentinel or a raw byte count.
+/// This clamps a raw count between
+/// [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MIN)
+/// and
+/// [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MAX)
+/// -- 64 KiB through 1 MiB -- and rounds it up to a page. The field's
+/// own declared floor is 4 KiB; the clamp uses the wider 64 KiB floor
+/// the kernel gives every process.
 fn decode_primary_stacksize(declared: u32) -> u32 {
     use cellgov_ps3_abi::process_address_space::{
         PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_SIZE_MIN, PS3_STACK_SIZE_GRANULARITY,
@@ -168,7 +171,10 @@ fn decode_primary_stacksize(declared: u32) -> u32 {
 /// [`PS3_ABI_MIN_STACK_FRAME`](cellgov_ps3_abi::process_address_space::PS3_ABI_MIN_STACK_FRAME)
 /// below the end of the primary stack region, so the no-args entry
 /// takes it unchanged -- subtracting the reserve a second time here
-/// would drop r1 a whole frame lower than RPCS3 seeds it.
+/// would drop r1 a whole frame below the initial frame.
+///
+/// [CBE-Handbook p:396 s:14.3.1.2] at entry R1 addresses the word
+/// holding the initial frame's NULL back-chain pointer.
 pub(super) const fn primary_entry_sp() -> u64 {
     PS3_PRIMARY_STACK_TOP
 }
@@ -176,13 +182,14 @@ pub(super) const fn primary_entry_sp() -> u64 {
 /// Base address recorded for the primary thread's stack of `size`
 /// bytes.
 ///
-/// LV2 starts the primary thread's SP at the top of the stack it
-/// allocated for it (RPCS3 `PPUThread.cpp` `ppu_thread::ppu_thread`
-/// seeds `gpr[1]` from `stack_addr + stack_size`). CellGov's SP is the
-/// fixed [`PS3_PRIMARY_STACK_TOP`], so the recorded base sits `size`
-/// below the top of the reservation rather than at its bottom, which
-/// keeps the running SP inside the range `sys_process_is_stack`
-/// answers for.
+/// [CBE-Handbook p:396 s:14.3.1.3] the loader initializes the stack
+/// before entry and hands the program its address in R1, with the
+/// argument information block above it.
+///
+/// CellGov's SP is the fixed [`PS3_PRIMARY_STACK_TOP`], so the
+/// recorded base sits `size` below the top of the reservation rather
+/// than at its bottom. That keeps the running SP inside the range
+/// `sys_process_is_stack` answers for.
 ///
 /// # Panics
 ///

@@ -71,10 +71,10 @@ pub const PT_PROC_PARAM: u32 = 0x6000_0001;
 /// Bytes covered by the eight `sys_process_param_t` fields the loader
 /// reads, `size` through `ppc_seg`.
 ///
-/// Not a fixed record length: a record's own leading `size` field is
-/// its extent, and a title may declare more than this. Matches
-/// `sizeof(process_param_t)` in RPCS3 `PPUModule.cpp` `ppu_load_exec`,
-/// which warns rather than refuses when a record declares less.
+/// A record's own leading `size` field is its extent, and a title may
+/// declare more than these 32 bytes. The eight 32-bit fields are the
+/// whole record a toolchain emits. The loader warns about a record
+/// that declares less, then reads the fields it covers.
 pub const PROC_PARAM_SIZE: u64 = 32;
 
 /// `p_type` for normal loadable segments.
@@ -208,18 +208,20 @@ pub const SYS_PROCESS_PARAM_MAGIC: u32 = 0x13bc_c5f6;
 
 /// Sentinel `sys_process_get_sdk_version` returns when no
 /// `sys_process_param_t` segment is present (PSL1GHT homebrew with no
-/// recorded SDK build); RPCS3 mirrors this default in `PPUModule.cpp`.
+/// recorded SDK build). The process-param vocabulary reserves this
+/// value as the unknown-SDK marker, so a title may also declare it.
 /// Retail titles always carry a real version here, and cellSysutil's
 /// SDK-keyed init dispatcher takes a different branch on the sentinel.
 pub const SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN: u32 = 0xFFFF_FFFF;
 
 /// `version` field of `sys_process_param_t` for SDK 3.30 and later.
 ///
-/// A namespace of its own, unrelated to `sdk_version`: every firmware
-/// executable in the 4.92 image carries this value alongside
-/// `sdk_version` 0x00492000, and a 2.50-era title carries 0x00009000
-/// alongside `sdk_version` 0x00250001. RPCS3 enumerates the space as
-/// `SYS_PROCESS_PARAM_VERSION_*` in `sys_process.h`.
+/// The field is a namespace of its own, unrelated to `sdk_version`.
+/// Every firmware executable in the 4.92 image carries this value
+/// alongside `sdk_version` 0x00492000. A 2.50-era title carries
+/// 0x00009000 alongside `sdk_version` 0x00250001. Each member of the
+/// `SYS_PROCESS_PARAM_VERSION_*` space takes the name of the SDK
+/// release that first emitted it.
 pub const SYS_PROCESS_PARAM_VERSION_330_0: u32 = 0x0033_0000;
 
 /// `e_phoff` field offset in the ELF64 header.
@@ -288,7 +290,10 @@ pub const PRX_PARAM_IMPORTS_END_OFFSET: usize = 28;
 /// bytes.
 pub const PRX_PARAM_HEADER_MIN_SIZE: u32 = 32;
 
-// `PrxImportEntry` mirrors RPCS3's `ppu_prx_module_info` struct.
+// `PrxImportEntry` is the record a PS3 PRX carries once per imported
+// module. The offsets below locate its module name, its imported NIDs
+// and the GOT slots the binder patches. Every `.prx` in a retail
+// `dev_flash/sys/external` carries this record.
 
 /// Offset of the `size` byte (declared entry size) in
 /// `PrxImportEntry`.
@@ -298,7 +303,8 @@ pub const PRX_IMPORT_SIZE_OFFSET: usize = 0;
 pub const PRX_IMPORT_NUM_FUNC_OFFSET: usize = 6;
 
 /// Offset of the `num_var` u16 field (variable imports) in
-/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.num_var`.
+/// `PrxImportEntry`. Read only when the declared entry size covers the
+/// variable section.
 pub const PRX_IMPORT_NUM_VAR_OFFSET: usize = 8;
 
 /// Offset of the `name_ptr` u32 field in `PrxImportEntry`.
@@ -313,14 +319,20 @@ pub const PRX_IMPORT_NIDS_PTR_OFFSET: usize = 20;
 pub const PRX_IMPORT_STUB_PTR_OFFSET: usize = 24;
 
 /// Offset of the `vnids_ptr` u32 field (imported VNIDs) in
-/// `PrxImportEntry`. Mirrors RPCS3's `ppu_prx_module_info.vnids`.
-/// Only present when the declared entry size is at least 32 bytes.
+/// `PrxImportEntry`. Only present when the declared entry size is at
+/// least 32 bytes.
+///
+/// The installed firmware witnesses this field. Every import entry it
+/// declares is 0x2c bytes, which covers the field. The `libadec`,
+/// `libadec2`, `libadec_internal` and `libdmux` modules carry a
+/// non-zero `num_var` against it.
 pub const PRX_IMPORT_VNIDS_PTR_OFFSET: usize = 28;
 
 /// Offset of the `vstubs_ptr` u32 field (variable slot table the
-/// binder patches at boot) in `PrxImportEntry`. Mirrors RPCS3's
-/// `ppu_prx_module_info.vstubs`. Only present when the declared
-/// entry size is at least 36 bytes.
+/// binder patches at boot) in `PrxImportEntry`. Only present when the
+/// declared entry size is at least 36 bytes.
+///
+/// Witnessed on the same terms as [`PRX_IMPORT_VNIDS_PTR_OFFSET`].
 pub const PRX_IMPORT_VSTUBS_PTR_OFFSET: usize = 32;
 
 /// Minimum declared entry size for variable-import parsing to be
@@ -331,9 +343,8 @@ pub const PRX_IMPORT_ENTRY_VAR_MIN_SIZE: u8 = 36;
 /// Smallest declared entry size a `PrxImportEntry` can carry and
 /// still be parseable: an entry whose declared `size` byte is below
 /// this is structurally corrupt, because its fields would not cover
-/// the `addrs_ptr` field at +24. A conforming entry may declare more:
-/// RPCS3's `ppu_prx_module_info` (`PPUModule.cpp`) carries fields past
-/// `vstubs` at +32.
+/// the `addrs_ptr` field at +24. A conforming entry may declare more,
+/// with fields past `vstubs` at +32 that this parser never reads.
 pub const PRX_IMPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
 
 /// Cap on the length of a C string the PRX parser will accept when
@@ -341,9 +352,11 @@ pub const PRX_IMPORT_ENTRY_MIN_SIZE: u8 = 0x1C;
 /// malformed rather than copied into an `ImportedModule`.
 pub const PRX_NAME_MAX_LEN: usize = 256;
 
-// `ppu_prx_library_info` mirrors RPCS3's struct of the same name.
-// Firmware PRXs locate it via segment 0's `p_paddr` instead of a
-// `PT_PRX_PARAM` segment.
+// `ppu_prx_library_info` is the record a firmware PRX points at from
+// segment 0's `p_paddr` instead of shipping a `PT_PRX_PARAM` segment.
+// The offsets below reach the import table of every
+// `dev_flash/sys/external` module. The type name is inherited
+// vocabulary, not a Sony name.
 
 /// Offset of the `imports_start` u32 field in `ppu_prx_library_info`.
 pub const PRX_LIB_INFO_IMPORTS_START_OFFSET: usize = 44;

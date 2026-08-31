@@ -140,16 +140,19 @@ const PREFIX_FIELD_SIZE: usize = 155;
 
 /// USTAR magic field, sitting just past the 100-byte linkname.
 ///
-/// Only the first five bytes are compared: POSIX writers follow
-/// `ustar` with `\0` plus a two-digit version, GNU writers follow it
-/// with two spaces, and both are the same layout for everything this
-/// loader reads. RPCS3 compares the same five bytes before it will
-/// treat a block as a header (`Loader/TAR.cpp` `tar_object::get_file`).
+/// POSIX ustar (IEEE Std 1003.1) makes this field the mark of a ustar
+/// header block. The parser compares only the first five bytes:
+///
+/// - a POSIX writer follows `ustar` with `\0` plus a two-digit
+///   version;
+/// - a GNU writer follows it with two spaces.
+///
+/// Both spell the same layout for every field this loader reads.
 const MAGIC_FIELD_OFFSET: usize = 0x101;
 const USTAR_MAGIC: &[u8] = b"ustar";
 
-/// Type flag for a regular file. `0` is the historical spelling of the
-/// same thing and both are accepted, as in RPCS3's `tar_object::extract`.
+/// Type flag for a regular file. POSIX keeps NUL as the older spelling
+/// of the same type, so the parser accepts both.
 const TYPE_REGULAR: u8 = b'0';
 /// Type flag for a directory record.
 const TYPE_DIRECTORY: u8 = b'5';
@@ -158,10 +161,10 @@ const TYPE_DIRECTORY: u8 = b'5';
 /// and blank at either end.
 ///
 /// A field holding no octal digits at all is a decode failure, not a
-/// zero. RPCS3 reports the same field as unparseable rather than
-/// substituting a length (`Loader/TAR.cpp` `octal_text_to_u64`), and a
-/// zero invented here would turn a malformed record into an empty file
-/// that the archive never described.
+/// zero. POSIX spells the size field -- the only field this decodes --
+/// as a zero-filled octal number that NUL or blank terminates. It
+/// gives no spelling without digits. A zero invented here would turn a
+/// malformed record into an empty file the archive never described.
 fn octal_to_u64(s: &[u8]) -> Option<u64> {
     let s = std::str::from_utf8(s).ok()?;
     let s = s.trim_matches(|c: char| c == '\0' || c.is_ascii_whitespace());
@@ -172,11 +175,12 @@ fn octal_to_u64(s: &[u8]) -> Option<u64> {
 ///
 /// Directory records carry no payload and are dropped; every other
 /// non-regular type is a [`TarParseError::UnsupportedFileType`]
-/// refusal, matching RPCS3, which fails the whole extract on any type
-/// flag outside `\0` / `0` / `5` (`Loader/TAR.cpp`
-/// `tar_object::extract`). Naming the refusal also keeps a GNU
-/// long-name (`L`) record from being swallowed, which would silently
-/// truncate the following entry's path to the 100-byte name field.
+/// refusal. POSIX ustar defines further type flags -- hard and
+/// symbolic links, character and block devices, FIFOs, contiguous
+/// files -- and GNU writers add long-name and long-link records.
+/// Firmware payloads carry none of them. A refusal by name also keeps
+/// the parser from swallowing a GNU long-name (`L`) record, which
+/// would truncate the next entry's path to the 100-byte name field.
 ///
 /// Zero-byte regular files ARE returned (with empty `data`): PS3
 /// firmware ships empty placeholder files the install must reproduce.
@@ -195,9 +199,10 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
 
         // Without the magic, the fields below are just whatever bytes
         // happen to sit at those offsets -- a name and a size invented
-        // out of unrelated data. RPCS3 gates every field read on the
-        // same check (`Loader/TAR.cpp` `tar_object::get_file`); where it
-        // resyncs to the next block, an oracle refuses instead.
+        // out of unrelated data. POSIX defines those offsets for the
+        // ustar header block the magic names, and says nothing about a
+        // block without one. Refusing every such block, rather than
+        // resyncing to the next one, is CellGov's own choice.
         if &header[MAGIC_FIELD_OFFSET..MAGIC_FIELD_OFFSET + USTAR_MAGIC.len()] != USTAR_MAGIC {
             return Err(TarParseError::NotUstarHeader { offset });
         }
@@ -234,13 +239,13 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
 
         // Bound the payload of EVERY record, not just the ones whose
         // bytes are kept. A record whose payload is skipped still
-        // advances `offset` by its declared size, so an over-long size
-        // on a skipped record would walk past the archive and end the
-        // scan with `Ok`, silently dropping every entry behind it.
-        // RPCS3 applies its bound before caching any header, whatever
-        // the type flag (`Loader/TAR.cpp` `tar_object::get_file`).
-        // Comparing at the archive field's own width also keeps a size
-        // wider than `usize` from truncating into a short read.
+        // advances `offset` by its declared size. An over-long size on
+        // such a record would walk past the archive and end the scan
+        // with `Ok`, dropping every entry behind it. No published rule
+        // covers a size field longer than the archive that holds it,
+        // so CellGov refuses it whatever the type flag says. Comparing
+        // at the archive field's own width also keeps a size wider
+        // than `usize` from truncating into a short read.
         if declared_size > (data.len() - offset) as u64 {
             return Err(TarParseError::PayloadPastArchive {
                 name: full_name,
@@ -287,11 +292,9 @@ fn is_safe_relative(clean: &str) -> bool {
 /// prefix; they are siblings of `dev_flash` on the console, so they
 /// keep their prefix and land beside it.
 ///
-/// LV2 publishes exactly `/dev_flash`, `/dev_flash2` and
-/// `/dev_flash3` as flash mount points, and `/dev_flash` is itself
-/// flash 1, so the set is closed at two. RPCS3 mirrors the same three
-/// in `Emu/System.cpp` `Emulator::Init` and `Emu/Cell/lv2/sys_fs.cpp`
-/// `g_mp_sys_dev_flash{,2,3}`.
+/// LV2 publishes `/dev_flash`, `/dev_flash2` and `/dev_flash3` as its
+/// flash mount points, and `/dev_flash` is itself flash 1. The sibling
+/// set therefore closes at two.
 pub const SIBLING_MOUNTS: [&str; 2] = ["dev_flash2/", "dev_flash3/"];
 
 /// The flash-1 mount every name without a [`SIBLING_MOUNTS`] prefix
@@ -301,11 +304,9 @@ const DEV_FLASH_MOUNT: &str = "dev_flash/";
 /// Whether `clean` addresses `mount` itself rather than a file under
 /// it -- `dev_flash2`, `dev_flash2/`, `dev_flash2//` and so on.
 ///
-/// A tar entry naming a mount point addresses the mount directory:
-/// RPCS3 resolves the name through the mount table and then fails the
-/// write against the directory that is already there
-/// (`Loader/TAR.cpp` `tar_object::extract`, mounts registered in
-/// `Emu/System.cpp` `Emulator::Init`).
+/// Taking such an entry as a destination would write a plain file
+/// where the mount directory belongs. Every later entry beneath it
+/// would then fail to create its parent.
 fn addresses_mount_root(clean: &str, mount: &str) -> bool {
     let bare = mount.trim_end_matches('/');
     clean == bare

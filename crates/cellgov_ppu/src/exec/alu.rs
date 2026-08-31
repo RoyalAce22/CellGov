@@ -461,22 +461,22 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = if shift < 32 { val << shift } else { 0 } as u64;
             state.set_gpr(ra as usize, result);
             if rc {
-                // CR0 from a 32-bit word result: sign-extend to 64
-                // bits before the LT/GT/EQ comparison. A strict
-                // reading of the 64-bit-mode spec would compare the
-                // full RA value (always non-negative since
-                // RA[0:31]=0), making a result of 0x8000_0000 read
-                // as GT. The Cell PPE and RPCS3 both treat the
-                // word-width Rc results as sign-extended -- the SR
-                // mode-dependency annotation in the opcode table
-                // covers this -- and our cross-runner tests rely on
-                // it. Do not "fix" to the unsigned reading; that
-                // breaks RPCS3 baseline agreement.
+                // CR0 from a 32-bit word result. The architecture
+                // compares the whole 64-bit result. A word shift can
+                // never make that result negative (RA[0:31] = 0), so
+                // 0x8000_0000 reads GT under the spec. Hardware traces
+                // of the shift and rotate suite agree: every word
+                // result with bit 31 set records GT. CellGov
+                // sign-extends the word first, so this arm reads LT
+                // instead -- a CellGov divergence, not a reading of
+                // the architecture.
                 //
-                // Same choice applies to Srw / Rlwinm / Rlwimi /
-                // Rlwnm below.
+                // Srw, Rlwinm and Rlwnm below take the same treatment.
+                // Rlwimi differs: it merges into RA's surviving high
+                // half, so its result is a true 64-bit value and CR0
+                // reads all 64 bits.
                 // [PPC-Book1 p:71 s:3.3.12] Rotate/Shift Rc=1: first three CR0 bits set per 3.3.7 result test.
-                // [PPC-Book1 p:50 s:3.3.7] CR0 LT/GT/EQ read the (sign-extended) result as a signed value.
+                // [PPC-Book1 p:50 s:3.3.7] CR0 LT/GT/EQ come from a signed comparison of the result to zero -- all 64 bits in 64-bit mode.
                 state.set_cr0_from_result(result as i32 as i64 as u64);
             }
             ExecuteVerdict::Continue
@@ -792,11 +792,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // field. RT gets that 4-bit field placed at its canonical
         // PowerPC position (CR field N -> RT bits 32+4N..35+4N in
         // PPC numbering = LSB-0 bits (7-N)*4..(7-N)*4+3) and zeros
-        // elsewhere. Non-one-hot CRM is boundedly undefined per
-        // PPC ISA; RPCS3 throws on that case, so we fault via
-        // UnimplementedInstruction(19) to keep the differential
-        // harness divergence loud rather than silently masquerading
-        // as mfcr.
+        // elsewhere. Non-one-hot CRM leaves RT undefined, so CellGov
+        // faults via UnimplementedInstruction(19) rather than
+        // inventing a value or silently masquerading as mfcr.
         // [PowerISA-3.1 p:I128 s:3.3 Fixed-Point Facility Instructions] mfocrf: when FXM is not exactly one-hot the contents of RT are undefined.
         PpuInstruction::Mfocrf { rt, crm } => {
             if crm == 0 || crm.count_ones() != 1 {
@@ -811,13 +809,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             ExecuteVerdict::Continue
         }
         // [CBE-Handbook p:738 s:A.2.3.1] mtocrf writes ONE CR field.
-        // CRM is supposed to be one-hot; for non-one-hot CRM the
-        // spec says CR is boundedly undefined. RPCS3 deterministic-
-        // ally picks the highest set bit
-        // (`countl_zero(crm) & 7`); we mirror that so the
-        // differential harness matches and the executor is NOT a
-        // passthrough to mtcrf (which would update every selected
-        // field, not just one).
+        // CRM is supposed to be one-hot; when it is not, the whole
+        // CR is undefined. CellGov resolves that case to the highest
+        // set bit and writes that one field.
         // [PPC-Book1 p:124 s:5.1.1] mtocrf: when FXM is not exactly one-hot the whole Condition Register is undefined.
         PpuInstruction::Mtocrf { rs, crm } => {
             if crm == 0 {
@@ -932,10 +926,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // [PPC-Book1 p:76 s:3.3.12] rlwimi: rotate left word, insert under
         // mask MB..ME into RA. Spec's RA <- r&m | (RA)&~m operates on 64-bit
         // operands; mask MASK(MB+32, ME+32) only has 1-bits in the low 32, so
-        // the high 32 of RA must be PRESERVED. Earlier code cast prior RA to
-        // u32 before merging and zero-extended back, wiping RA[0:31]; cross-
-        // checked against RPCS3 PPUInterpreter.cpp's `(gpr[ra] & ~mask) |
-        // (dup32(rotl) & mask)` form.
+        // the high 32 of RA must be PRESERVED.
         PpuInstruction::Rlwimi {
             ra,
             rs,

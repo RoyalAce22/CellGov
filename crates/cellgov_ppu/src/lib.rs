@@ -303,10 +303,9 @@ impl ExecutionUnit for PpuExecutionUnit {
 
         let mem = ctx.memory().as_bytes();
         // Stack-allocated region table avoids per-call heap alloc on the
-        // Budget=1 hot path. The boot layout installs six regions and
-        // each shared-memory mapping adds one (RPCS3 sys_mmapper.cpp
-        // sys_mmapper_map_shared_memory), so a larger layout spills to
-        // the heap.
+        // Budget=1 hot path. Boot installs six regions and each
+        // shared-memory mapping adds one; a larger layout spills to the
+        // heap. Nothing guest-visible turns on the cutoff.
         const MAX_REGIONS: usize = 8;
         let mut region_views_storage: [cellgov_mem::RegionView<'_>; MAX_REGIONS] =
             [cellgov_mem::RegionView::plain(0, &[]); MAX_REGIONS];

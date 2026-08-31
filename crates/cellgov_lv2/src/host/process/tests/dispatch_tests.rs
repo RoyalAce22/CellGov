@@ -538,9 +538,10 @@ fn access_control_pkg_two_serves_the_calling_process_authority_id() {
         u64::from_be_bytes(bytes.bytes().try_into().unwrap())
     };
 
-    // A child-bound caller reads its own process's authority id, a
-    // boot-bound caller the boot process's (RPCS3 `sys_ss.cpp`
-    // `sys_ss_access_control_engine` serves per-process info).
+    // A child-bound caller reads its own process's authority id, and
+    // a boot-bound caller reads the boot process's. The service
+    // answers per process, never globally. The console's own answer
+    // is unestablished.
     assert_eq!(served_authid(&mut host, child_unit), CHILD_AUTHID);
     assert_eq!(
         served_authid(&mut host, UnitId::new(0)),

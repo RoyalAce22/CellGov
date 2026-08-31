@@ -175,7 +175,6 @@ fn syscall_480_firmware_miss_registers_stub_and_start_reaches_sentinel() {
 /// The miss-stub path is gated on the retail firmware module set: a
 /// made-up name under `/dev_flash/sys/external/` names nothing any
 /// console serves, so minting a success id for it would fabricate.
-/// RPCS3's whitelist gate produces the same ENOENT.
 #[test]
 fn syscall_480_unknown_firmware_name_returns_enoent_not_a_stub() {
     let mut host = Lv2Host::new();

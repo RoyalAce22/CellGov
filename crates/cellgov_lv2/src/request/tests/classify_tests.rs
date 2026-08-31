@@ -230,8 +230,8 @@ fn classify_ppu_thread_join_captures_target_and_out_ptr() {
 
 #[test]
 fn classify_ppu_thread_create_captures_all_eight_kernel_slots() {
-    // Kernel layout per RPCS3 lv2.cpp: (thread_id, param, arg, unk,
-    // prio, stacksize, flags, threadname).
+    // Kernel layout: (thread_id, param, arg, unk, prio, stacksize,
+    // flags, threadname).
     let args = [
         0x3000,
         0x2_0000,
@@ -496,9 +496,17 @@ fn classify_event_queue_create_destroy() {
     );
 }
 
-/// Register positions per RPCS3 `sys_config.h`; wide slots carry
-/// values above `u32::MAX`, and the slot past each prototype's last
-/// argument is non-zero.
+/// Register positions as libio.prx sets them at its sys_config call
+/// sites:
+///
+/// - two arguments for open,
+/// - one for close,
+/// - four for get_service_event,
+/// - seven each for add_service_listener and register_service,
+/// - two for remove_service_listener and unregister_service.
+///
+/// Wide slots carry values above `u32::MAX`, and the slot past each
+/// prototype's last argument is non-zero.
 #[test]
 fn classify_config_family_reads_each_register_position() {
     use cellgov_ps3_abi::sys_config::SYS_CONFIG_SERVICE_USER_LIBPAD;
@@ -847,9 +855,12 @@ const U32_SLOTS_BY_SYSCALL: &[(u64, &[usize])] = &[
     (syscall::SYS_RSX_DEVICE_MAP, &[0, 1, 2]),
 ];
 
-/// Register positions per RPCS3 `sys_uart.h`: `(buffer, size u64,
-/// mode u32)` for receive and send, `(buffer)` for get_params, none
-/// for initialize.
+/// Register positions as vsh sets them: `(buffer, size u64, mode
+/// u32)` for receive and send, and none at all for initialize. Its
+/// receive wrapper pins mode 1 and its send wrapper pins mode 2. vsh
+/// retries initialize with no argument register touched. No firmware
+/// module calls get_params, so its single `(buffer)` slot has no
+/// witness.
 #[test]
 fn classify_uart_family_reads_each_register_position() {
     assert_eq!(
@@ -881,8 +892,9 @@ fn classify_uart_family_reads_each_register_position() {
 
 #[test]
 fn uart_size_is_a_full_u64_and_reaches_the_arm_unnarrowed() {
-    // `size` is u64 in RPCS3 `sys_uart.h`; the transfer cap is the
-    // arm's to enforce.
+    // vsh zero-extends its length into the whole of r4 before the
+    // trap, so the slot is a u64. The transfer cap is the arm's to
+    // enforce.
     for num in [syscall::UART_RECEIVE, syscall::UART_SEND] {
         let args = [0x1000, 0x1_0000_0000, 0, 0, 0, 0, 0, 0];
         match classify(num, &args) {
@@ -1090,8 +1102,8 @@ fn classify_process_exit2_accepts_sign_extended_status() {
 
 #[test]
 fn classify_process_exit2_carries_arg4_for_witness() {
-    // The exitspawn wrapper passes 0x1000_0000 in r6 (RPCS3
-    // sys_game_.cpp exitspawn); the slot must reach the request.
+    // liblv2.prx's exitspawn paths pass 0x1000_0000 in r6; the slot
+    // must reach the request.
     let args = [0, 0x3000, 0x1030, 0x1000_0000, 0, 0, 0, 0];
     assert_eq!(
         classify(syscall::PROCESS_EXIT2, &args),

@@ -21,10 +21,10 @@ impl Runtime {
             // A Finished unit on the wake list is exited-process
             // residue: the exit sweep finishes every unit of the pid
             // but leaves the LV2 host's waiter lists unpurged, so a
-            // later release can still pick the unit. On PS3 an exited
-            // process's threads are gone before any wake can reach
-            // them (RPCS3 sys_process.cpp _sys_process_exit stops
-            // every thread), so the Runnable transition below would
+            // later release can still pick the unit. On PS3 a process
+            // exit deallocates everything the process owns, its PPU
+            // and SPU threads included, so no thread of it survives to
+            // take a wake. The Runnable transition below would
             // resurrect a unit the guest already terminated -- the
             // same reasoning as the Finished guard in
             // fire_timer_wakes. The release side consumed a waiter
@@ -77,9 +77,8 @@ impl Runtime {
                     observed,
                 }) => {
                     // The kernel stores the observed pattern only
-                    // through a non-null result pointer (RPCS3
-                    // sys_event_flag.cpp sys_event_store_result); a
-                    // NULL pointer waiter wakes with r3 alone.
+                    // through a non-null result pointer; a waiter that
+                    // passed NULL wakes with r3 alone.
                     if result_ptr != 0 {
                         self.commit_bytes_at(
                             waiter_space,
@@ -93,10 +92,10 @@ impl Runtime {
                     result_ptr,
                     observed,
                 }) => {
-                    // RPCS3 sys_event_flag.cpp sys_event_flag_cancel:
-                    // each drained waiter stores the captured pattern
-                    // through its own non-null result pointer and
-                    // returns CELL_ECANCELED.
+                    // On cancel each drained waiter stores the pattern
+                    // captured at the cancel call through its own
+                    // non-null result pointer and returns
+                    // CELL_ECANCELED.
                     if result_ptr != 0 {
                         self.commit_bytes_at(
                             waiter_space,
@@ -271,11 +270,12 @@ impl Runtime {
             // Both out-pointers came from the joiner's syscall
             // arguments, so they address the joiner's space. The join
             // itself completes regardless, but NULL out-pointers
-            // change the outcome (RPCS3 sys_spu.cpp
-            // sys_spu_thread_group_join checks the pointers after the
-            // wait): a NULL cause writes nothing -- not even a
-            // non-NULL status -- and returns CELL_EFAULT; a NULL
-            // status alone still writes cause and returns CELL_EFAULT.
+            // change the outcome, and the check happens after the
+            // wait: a NULL cause writes nothing -- not even a non-NULL
+            // status -- and returns CELL_EFAULT; a NULL status alone
+            // still writes cause and returns CELL_EFAULT. The
+            // hardware's answer here is unestablished, so the
+            // asymmetry is a witnessed choice.
             // Address 0 may be mapped, so NULL is never written
             // through.
             let waiter_space = self.spaces.space_of(waiter_id);

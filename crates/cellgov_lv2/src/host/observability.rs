@@ -148,10 +148,10 @@ pub struct Lv2Observability {
     /// `Lv2Host::mark_process_exited` for why a purged waiter must
     /// never be granted a resource.
     ///
-    /// RPCS3 is not an oracle for the per-process case -- its
-    /// `sys_process.cpp` `_sys_process_exit` kills the whole emulator
-    /// rather than one process's threads -- but it agrees on the part
-    /// this counter guards: no further wake is delivered.
+    /// No reference pins what one process's exit does to its waiters
+    /// while sibling processes keep running, so the purge is
+    /// CellGov's own rule: a purged waiter never receives a later
+    /// wake.
     pub process_exit_waiter_purges: BTreeMap<&'static str, u64>,
     /// Witness: mutexes whose owner belonged to an exited process at
     /// purge time. Ownership is retained, so each count here is a

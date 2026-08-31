@@ -147,11 +147,10 @@ impl MutexTable {
     /// Releases that dropped a nonzero recursive lock count.
     ///
     /// Only the cond-wait release reaches this: the unlock syscall
-    /// drains the count one hold at a time first. LV2 hands the
-    /// recursion depth back when the cond waiter re-acquires the
-    /// mutex on wake (RPCS3 `sys_cond.cpp` `sys_cond_wait` swaps
-    /// `lock_count` to zero before reowning and writes the saved
-    /// value back after the re-acquire), and nothing carries the
+    /// drains the count one hold at a time first. A cond wait
+    /// releases the mutex fully and re-acquires it on wake. LV2
+    /// zeroes the recursion depth across the park and writes the
+    /// saved value back after the re-acquire. Nothing carries the
     /// saved depth across the park here yet, so a nonzero counter
     /// means some guest's recursion depth was lost. Not folded into
     /// [`Self::state_hash`].
@@ -240,9 +239,9 @@ impl MutexTable {
             Some(owner) if owner == caller => {
                 if entry.attrs.recursive {
                     // Owner re-lock on a SYS_SYNC_RECURSIVE mutex
-                    // bumps the lock count; a count at u32::MAX is
-                    // EKRESOURCE (RPCS3 sys_mutex.h
-                    // lv2_mutex::try_lock).
+                    // bumps the lock count; the count is capped at
+                    // 2^32 - 1, past which the re-lock is
+                    // EKRESOURCE.
                     match entry.lock_count.checked_add(1) {
                         Some(next) => {
                             entry.lock_count = next;
@@ -338,9 +337,9 @@ impl MutexTable {
     /// Consume one recursive hold without releasing ownership.
     ///
     /// `true` only when `caller` owns the mutex and the lock count
-    /// is above zero; the caller still holds the mutex afterwards
-    /// (RPCS3 sys_mutex.cpp sys_mutex_unlock: a nonzero lock count
-    /// decrements and returns without waking a waiter).
+    /// is above zero; the caller still holds the mutex afterwards.
+    /// A counted recursive hold needs a matching unlock, so a
+    /// nonzero count decrements and returns without waking a waiter.
     pub fn unlock_decrement(&mut self, id: u32, caller: PpuThreadId) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {
             return false;

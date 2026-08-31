@@ -41,7 +41,9 @@ impl Lv2Host {
         {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // u64 catches u32 wrap; PS3_RSX_BASE is RPCS3's local_mem_base.
+        // An iomap `ea` names main storage, and the RSX MMIO window
+        // opens at PS3_RSX_BASE. The mapped range must therefore end
+        // at or below that base. u64 catches u32 wrap.
         if u64::from(ea) + u64::from(size) > PS3_RSX_BASE {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }

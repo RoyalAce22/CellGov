@@ -257,13 +257,15 @@ fn rsx_mirror_writes_on_routes_put_to_cursor() {
 #[test]
 fn rsx_mirror_writes_does_not_route_get_to_cursor() {
     // Spec: `get` is engine-side state advanced only by the
-    // method-advance pass. RPCS3's m_ctrl->get is written exclusively
-    // by the walker (`.release(...)` in Emu/RSX/RSXFIFO.cpp), never
-    // by the CPU. The mirror must NOT pull a guest SharedWriteIntent
-    // to GET_ADDR into rsx_cursor; doing so would let the guest
-    // desynchronize the walker (the advance pass reads `get` as its
-    // start cursor). The memory write still applies; the cursor stays
-    // at whatever the walker last set it to.
+    // method-advance pass. libgcm's published control structure keeps
+    // `put`, `get` and `ref` as three separate words. In the
+    // NV4-family DMA pusher the envytools / nouveau project documents,
+    // the CPU advances `put` and the engine advances `get` as it
+    // consumes commands. The mirror must NOT pull a guest
+    // SharedWriteIntent to GET_ADDR into rsx_cursor; doing so would
+    // let the guest desynchronize the walker (the advance pass reads
+    // `get` as its start cursor). The memory write still applies; the
+    // cursor stays at whatever the walker last set it to.
     use crate::rsx::control_register;
     let mut rt = build_with_rsx_writable();
     rt.set_rsx_mirror_writes(true);

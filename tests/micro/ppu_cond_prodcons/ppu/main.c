@@ -140,9 +140,15 @@ static inline void syscall1_noreturn(u64 num, u64 a)
 /* sys_mutex_attribute_t: protocol@0 u32, recursive@4 u32,
  * pshared@8 u32, adaptive@12 u32, ipc_key@16 u64, flags@24 s32,
  * pad@28, name@32. The kernel rejects a NULL attribute pointer
- * with EFAULT, and recursive must be SYS_SYNC_RECURSIVE (0x10)
- * or SYS_SYNC_NOT_RECURSIVE (0x20) (RPCS3 sys_mutex.cpp
- * sys_mutex_create). */
+ * with EFAULT: the hardware-captured expectations under
+ * tests/ps3autotests/tests/lv2/ record 0x8001000d for a NULL attribute
+ * pointer on the sibling sys_semaphore_create and
+ * sys_event_flag_create, and 0x80010002 (EINVAL) for a zeroed
+ * attribute block. The recursive field must be
+ * SYS_SYNC_RECURSIVE (0x10) or SYS_SYNC_NOT_RECURSIVE (0x20);
+ * no public document states those two values and no capture
+ * isolates that field, so the pair is what this corpus is built
+ * and verified against. */
 static const struct {
     unsigned int protocol;      /* SYS_SYNC_FIFO */
     unsigned int recursive;     /* SYS_SYNC_NOT_RECURSIVE */
@@ -157,8 +163,7 @@ static const struct {
 
 /* sys_cond_attribute_t: pshared@0 u32, flags@4 s32, ipc_key@8
  * u64, name@16. The kernel reads pshared / flags / ipc_key out
- * of the struct, so the pointer must name valid memory (RPCS3
- * sys_cond.cpp sys_cond_create). */
+ * of the struct, so the pointer must name valid memory. */
 static const struct {
     unsigned int pshared;       /* SYS_SYNC_NOT_PROCESS_SHARED */
     int flags;
@@ -167,10 +172,11 @@ static const struct {
 } cond_attr __attribute__((aligned(8))) = { 0x200, 0, 0, "" };
 
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
- * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
- * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
- * passes unk = 0. The param* in r4 is a ppu_thread_param_t
- * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * stacksize, flags, threadname*); the user-space wrapper passes
+ * unk = 0. No public document states this raw-syscall argument
+ * list -- it is the shape the micro-test corpus is built and
+ * verified against. The param* in r4 is a two-word thread-init
+ * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
  * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
  * bytes of u64 fields -- so repack it before the syscall. */

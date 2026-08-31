@@ -433,9 +433,8 @@ fn add_two_variable_imports(data: &mut [u8]) {
     data[v + 4..v + 8].copy_from_slice(&0x8765_4321u32.to_be_bytes());
 }
 
-/// RPCS3 walks `vnids[i]` / `vstubs[i]` for `i < num_var` in its
-/// import path (`rpcs3/Emu/Cell/PPUModule.cpp`); the VNID comes from
-/// the vnids table and the slot the binder patches from vstubs.
+/// The variable section is two parallel arrays, walked for
+/// `i < num_var`.
 #[test]
 fn variable_imports_are_walked_when_the_entry_declares_the_variable_section() {
     let mut data = build_synthetic_prx_elf(0xDEAD_BEEF);

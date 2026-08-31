@@ -71,8 +71,11 @@ fn wrong_context_id_returns_einval() {
 
 #[test]
 fn iomap_before_allocate_keys_only_on_context_id() {
-    // RPCS3's sys_rsx.cpp does not gate on host-side
-    // context-allocate state; CONTEXT_ID is the only handshake.
+    // libgcm_sys.sprx never writes a context id literal: it passes
+    // iomap the id it stored from sys_rsx_context_allocate. Firmware
+    // therefore never issues an iomap without a prior allocate, and
+    // witnesses no gate either way. CONTEXT_ID is the only handshake
+    // here.
     let mut host = Lv2Host::new();
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, 0x0010_0000);
     assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
@@ -147,8 +150,10 @@ fn oversized_size_returns_einval_and_logs_invariant_break() {
 
 #[test]
 fn ea_plus_size_exceeds_local_mem_returns_einval() {
-    // Asymmetry: ea-range rejection is plain EINVAL with no
-    // invariant break, matching RPCS3's undifferentiated gate.
+    // Asymmetry: the io-over-cap arm is CellGov's own backing-store
+    // limit, so it draws a named break. An ea that reaches into the
+    // RSX MMIO window is a bad argument and needs no break. Which of
+    // the two the kernel distinguishes is unestablished.
     let mut host = Lv2Host::new();
     allocate_context(&mut host);
     let before = host.observability().invariant_break_count;

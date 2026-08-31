@@ -148,10 +148,12 @@ static void write_tty_result(const struct TestResult *r)
                  (unsigned long)&written);
 }
 
-/* Endian: the FIFO consumer reads command words big-endian --
- * RPCS3's FIFO_control does so via vm::read32, and CellGov's
- * rsx_advance via u32::from_be_bytes. The PPU is big-endian, so a
- * plain store already lays the bytes down the way both read them. */
+/* Endian: [PPC-Book1 p:128 s:5.3.3.1] a PowerPC system comes up in
+ * big-endian mode, so a plain store lays a command word's bytes down
+ * most-significant first. The FIFO puller consumes them in that same
+ * order: tests/ps3autotests/tests/rsx/methods_pfifo_puller writes its
+ * command words as plain uint32_t stores, and a real PS3 reads the
+ * reference value back unchanged. */
 static inline void fifo_store(volatile unsigned int *slot, unsigned int value)
 {
     *slot = value;

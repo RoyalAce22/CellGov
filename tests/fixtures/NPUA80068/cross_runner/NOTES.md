@@ -54,6 +54,6 @@ mmapper handout window and re-measuring SSHD is what confirms
 which RSX-init step is the next honest fault. The 0x10000 thread-flag log can downgrade
 from invariant-break to a one-line note in the same effort
 if a lie-vs-gap classifier emerges; until then the count of
-3 reflects honest "unmodeled" reports against RPCS3-faithful
-behavior plus the unmodeled-no-op handler logs the boot
-triggers.
+3 reflects honest "unmodeled" reports against the LV2
+contract CellGov targets, plus the unmodeled-no-op handler
+logs the boot triggers.

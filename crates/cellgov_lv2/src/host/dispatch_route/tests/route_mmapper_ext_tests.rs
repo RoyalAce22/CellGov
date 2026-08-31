@@ -124,8 +124,8 @@ fn a_registered_key_is_eexist_and_the_caller_probes_the_next_key() {
 #[test]
 fn the_keyless_sentinel_and_the_zero_key_register_like_any_other_key() {
     // Unlike 332, the ext create is always process-shared and
-    // exclusive (RPCS3 `sys_mmapper.cpp` `create_lv2_shm<true>` with
-    // the zero-key check waived), so the sentinel collides with itself.
+    // exclusive with the zero-key refusal waived, so the sentinel
+    // collides with itself. Nothing public establishes that reading.
     let mut host = Lv2Host::new();
     let rt = rt_with_entries(&[0]);
     for key in [SYS_MMAPPER_NO_SHM_KEY, 0] {

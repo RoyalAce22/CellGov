@@ -79,13 +79,17 @@ use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, PT_LOAD};
 /// other than the ELF64 program header, and [`LoadError::TooSmall`] on
 /// overflow or when the slot would extend past `data_len`.
 ///
-/// The size check is a refusal rather than a clamp because
-/// `e_phentsize` is attacker-supplied and every reader below indexes
-/// the slot at fixed ELF64 offsets -- `p_memsz` at 40, `p_align` at
-/// 48. A narrower declared slot puts those reads outside the validated
-/// window, and a wider or zero one makes the stride disagree with the
-/// layout the readers assume. RPCS3 `Loader/ELF.h` `elf_object::open`
-/// refuses the same mismatch.
+/// [CBE-Handbook p:392 s:14.2.1] a loader builds the process image
+/// from the program header table, whose slot layout comes from the
+/// base ELF definition that the PPE-ELF ABI extends -- so exactly one
+/// slot size is valid here, not a range.
+///
+/// The check is a refusal rather than a clamp because `e_phentsize` is
+/// attacker-supplied and every reader below indexes the slot at fixed
+/// ELF64 offsets -- `p_memsz` at 40, `p_align` at 48. A narrower
+/// declared slot puts those reads outside the validated window, and a
+/// wider or zero one makes the stride disagree with the layout the
+/// readers assume.
 fn ph_slot_base(
     data_len: usize,
     phoff: usize,

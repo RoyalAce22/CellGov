@@ -97,9 +97,9 @@ impl Runtime {
             ) {
                 // Guest-reachable only when the child's image layout
                 // occupies the child-stacks window; the kernel would
-                // have failed the stack allocation itself, and a
-                // failed stack allocation is CELL_ENOMEM (RPCS3
-                // sys_ppu_thread.cpp _sys_ppu_thread_create).
+                // have failed the stack allocation itself. PPU thread
+                // creation reports CELL_ENOMEM when it cannot get the
+                // user stack area, which is the case here.
                 self.registry
                     .set_status_override(child_unit_id, UnitStatus::Finished);
                 let stranded = self.lv2_host.ppu_threads_mut().mark_finished(thread_id, 0);

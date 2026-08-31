@@ -83,9 +83,11 @@ impl PpuThreadTable {
     /// Cross-module contract: the bootstrap loop runs each PRX's
     /// module_start on a transient PPU unit that has no thread
     /// record of its own; real LV2 attributes those syscalls to
-    /// the calling (primary) thread (see RPCS3
-    /// `_sys_prx_start_module(ppu_thread&, ...)` in
-    /// `rpcs3/Emu/Cell/lv2/sys_prx.cpp`).
+    /// the calling (primary) thread. liblv2's `sys_prx_start_module`
+    /// takes the module lock, asks the kernel for the module's start
+    /// entry, and calls that entry through `bctrl` on the calling
+    /// thread. It creates no thread, so every syscall the entry
+    /// issues comes from the caller.
     ///
     /// # Errors
     /// Returns `false` if `existing` is not a known thread or

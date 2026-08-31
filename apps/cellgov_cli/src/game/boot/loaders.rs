@@ -111,10 +111,10 @@ pub(super) fn install_spawn_loader(rt: &mut Runtime, opts: &PrepareOptions<'_>) 
         mem.install_region(0, child_mem_size, "spawned", cellgov_mem::PageSize::Page64K)
             .map_err(|source| cellgov_core::ProcessSpawnLoadError::RegionInstall { source })?;
         let exit_stub_addr = child_exit_stub_addr(required);
-        // li r11, 22; sc -- entered if the child's entry returns. r11
-        // is the LV2 syscall number and 22 is `_sys_process_exit`
-        // (RPCS3 `lv2.cpp` syscall table); the exit status is whatever
-        // the entry left in r3.
+        // li r11, 22; sc -- the child enters this when its entry
+        // returns. r11 is the LV2 syscall number, and 22 is
+        // `cellgov_ps3_abi::syscall::PROCESS_EXIT`. The exit status is
+        // whatever the entry left in r3.
         let stub: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
         let range = cellgov_mem::ByteRange::new(
             cellgov_mem::GuestAddr::new(exit_stub_addr),
@@ -212,14 +212,9 @@ pub(super) fn install_spawn_loader(rt: &mut Runtime, opts: &PrepareOptions<'_>) 
 /// `p_align` padding.
 ///
 /// The floor of `STUB_MIN_ADDR` keeps address 0 out of the answer for
-/// an image whose PT_LOADs total zero bytes. RPCS3 reaches the same
-/// property by allocating its equivalent return sentinel out of the
-/// main area after the image's own fixed allocations
-/// (`Emu/Cell/PPUModule.cpp` `ppu_initialize_modules` fills an
-/// allocated fake-OPD array, and `Emu/Cell/PPUThread.cpp`
-/// `ppu_thread::fast_call` points LR at one of its slots); there
-/// `vm::alloc` returns 0 only to signal failure, so 0 is a null
-/// sentinel and never a code site.
+/// an image whose PT_LOADs total zero bytes. Address 0 is null
+/// throughout the boot path, so a stub there would read as an unset
+/// return site.
 ///
 /// The caller sizes the child region with [`spawned_child_region_size`],
 /// which always leaves headroom above the image, so the returned

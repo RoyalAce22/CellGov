@@ -296,11 +296,12 @@ impl Runtime {
     /// `sys_rsx_context_allocate` publishes the `RsxReports` base into
     /// the same LV2 context this pass already reads the iomap window
     /// from, and that base -- not the seeded field -- is what a title's
-    /// label offsets are relative to once GCM has run. RPCS3 resolves
-    /// the same family of writes the same way: `RSXThread.cpp`
-    /// `get_address` returns `label_addr + offset` for the semaphore
-    /// DMA contexts, where `label_addr` is the reports base 670 handed
-    /// out. Before 670 runs `reports_addr` is zero and
+    /// label offsets are relative to once GCM has run. libgcm_sys.sprx
+    /// works the same way. Its label and report address getters read
+    /// the block offsets out of the driver-info block the kernel
+    /// published at context allocate, then add them to that same base.
+    ///
+    /// Before 670 runs `reports_addr` is zero and
     /// [`Runtime::set_rsx_label_base`]'s seed stands in, which is also
     /// zero unless a scenario set one -- the absolute-offset regime the
     /// commit pipeline documents.
@@ -410,10 +411,13 @@ impl Runtime {
     /// leave the cursor alone.
     ///
     /// `get` (`0xC000_0044`) is NOT mirrored here. The walker owns
-    /// `get` in steady state (RPCS3 `Emu/RSX/NV47/HW/nv406e.cpp` `set_reference`
-    /// writes `dma.get` from the engine at every SET_REFERENCE
-    /// dispatch); the CPU writes it once at FIFO bring-up to seed the
-    /// initial read position. [`Self::catch_up_cursor_get_from_mmio`]
+    /// `get` in steady state. libgcm's published control structure
+    /// carries `put`, `get` and `ref` as three separate words. In the
+    /// NV4-family DMA pusher the envytools / nouveau project
+    /// documents, the CPU advances `put` to publish work, and the
+    /// engine advances `get` as it consumes commands. The CPU writes
+    /// `get` once at FIFO bring-up to seed the initial read position.
+    /// [`Self::catch_up_cursor_get_from_mmio`]
     /// picks up that seed at walker invocation, monotonically -- a
     /// per-effect mirror here would let a mid-walk guest GET write
     /// yank the cursor backward against an active walker. The reverse

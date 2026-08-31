@@ -71,9 +71,10 @@ pub mod cell_sysutil {
     }
 }
 
-/// `cellSaveData` NIDs. PRX-registered under `cellSysutil` per
-/// RPCS3's `REG_FUNC(cellSysutil, ...)` declarations, but grouped
-/// here by C source file to mirror PSL1GHT's header layout.
+/// `cellSaveData` NIDs. Firmware publishes them from `libsysutil.prx`
+/// (module `cellSysutil_Library`), which exports under the
+/// `cellSysutil` namespace. This module groups them by C source file
+/// to mirror PSL1GHT's header layout.
 /// Layouts and constants live in `crate::cell_save_data`.
 ///
 /// `CLASSIFIED_NIDS` lists only the AutoLoad NODATA fast-path NIDs

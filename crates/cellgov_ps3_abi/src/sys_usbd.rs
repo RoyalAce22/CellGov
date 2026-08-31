@@ -2,7 +2,11 @@
 //! vocabulary -- event codes and record sizes.
 //!
 //! Behaviour lives in `cellgov_lv2::host::usbd`; this module is data
-//! only. Oracle: RPCS3 `sys_usbd.h`.
+//! only.
+//!
+//! The event codes and record sizes below are unestablished: nothing
+//! in the corpus states them. `libusbd.sprx` is the module that would
+//! witness them.
 
 /// `sys_usbd_receive_event` arg1: a device was attached.
 pub const SYS_USBD_ATTACH: u64 = 1;

@@ -12,8 +12,9 @@ use std::collections::BTreeMap;
 
 /// One shared-memory handle recorded by 332 or 362.
 ///
-/// `align` is the page granule derived from the caller's `flags` per
-/// RPCS3's `sys_mmapper.cpp` granule resolution.
+/// `align` is the page granule the caller's `flags` name: libaudio.prx
+/// rounds its request up to 64 KiB and passes 0x200 in the same
+/// `sys_mmapper_allocate_shared_memory` call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct MmapperHandle {
     pub size: u32,
@@ -40,7 +41,8 @@ impl MmapperHandleTable {
         );
     }
 
-    /// `None` matches RPCS3's CELL_ESRCH path when `idm::get` fails.
+    /// `None` is the caller's CELL_ESRCH arm: a `mem_id` no create
+    /// minted names nothing.
     pub(crate) fn get(&self, mem_id: u32) -> Option<MmapperHandle> {
         self.handles.get(&mem_id).copied()
     }

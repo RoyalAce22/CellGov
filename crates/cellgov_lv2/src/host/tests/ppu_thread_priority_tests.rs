@@ -109,8 +109,9 @@ fn the_range_bounds_are_inclusive() {
 
 #[test]
 fn a_debug_or_root_process_may_go_down_to_the_root_floor() {
-    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_set_priority: the floor
-    // is -512 under debug_or_root, 0 otherwise; the ceiling does not move.
+    // The priority floor is -512 under debug_or_root and 0 otherwise;
+    // the 3071 ceiling does not move. The privileged widening below
+    // zero has no public anchor.
     let rt = rt();
     let mut host = Lv2Host::new();
     host.set_control_flags1(cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK);

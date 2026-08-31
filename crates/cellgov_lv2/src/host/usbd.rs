@@ -1,12 +1,17 @@
 //! `sys_usbd` (530-541): the USB host driver as the guest sees it --
 //! driver handles and the event wait -- on a bus with no device.
 //!
-//! Oracle: RPCS3 `sys_usbd.cpp`, whose `usb_handler_thread` polls
-//! libusb and queues attach / detach / transfer events for
-//! `sys_usbd_receive_event`. Here nothing ever attaches: an event
-//! reader parks until `sys_usbd_finalize` wakes every reader with the
-//! terminate triple, and every device- or pipe-scoped call answers
-//! the refusal an empty bus gives.
+//! Nothing ever attaches: an event reader parks until
+//! `sys_usbd_finalize` wakes every reader with the terminate triple,
+//! and every device- or pipe-scoped call answers the refusal an empty
+//! bus gives.
+//!
+//! `libusbd.sprx` is the firmware side of this surface: it issues 530
+//! through 540 from its own wrappers, and the audio server reaches the
+//! same set. Nothing in dev_flash issues 541. No firmware witness
+//! fixes what any of them answer on an empty bus. The refusals below
+//! are the model's own, and the kernel's real answers are
+//! unestablished.
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -121,9 +126,9 @@ impl UsbdState {
 }
 
 impl Lv2Host {
-    /// `sys_usbd_initialize` (530): mints a driver handle. The kernel
-    /// allows several live handles (RPCS3 `sys_usbd.cpp` notes it and
-    /// models one).
+    /// `sys_usbd_initialize` (530): mints a driver handle. Every call
+    /// mints a fresh one and all of them stay live; whether the kernel
+    /// caps the count is unestablished.
     ///
     /// # Errors
     ///
@@ -233,8 +238,8 @@ impl Lv2Host {
     /// `sys_usbd_register_ldd` (535): records the product string so a
     /// later unregister can find it. Registering a product twice is
     /// acknowledged like the first time. No device ever matches it
-    /// here. Oracle: RPCS3 `sys_usbd.cpp` `sys_usbd_register_ldd`,
-    /// which records the products it has device stubs for.
+    /// here, so the record is only ever read by
+    /// `sys_usbd_unregister_ldd`.
     ///
     /// # Errors
     ///
@@ -256,8 +261,7 @@ impl Lv2Host {
     }
 
     /// `sys_usbd_unregister_ldd` (536): forgets a product
-    /// `sys_usbd_register_ldd` recorded. Oracle: RPCS3 `sys_usbd.cpp`
-    /// `sys_usbd_unregister_ldd` via `sys_usbd_unregister_extra_ldd`.
+    /// `sys_usbd_register_ldd` recorded.
     ///
     /// # Errors
     ///
@@ -282,9 +286,9 @@ impl Lv2Host {
     }
 
     /// `sys_usbd_get_descriptor` (534): a null descriptor pointer is
-    /// refused before the device gate and left out of
-    /// `usbd_no_device_refusals` (RPCS3 `sys_usbd.cpp`
-    /// `sys_usbd_get_descriptor` checks the pointer first).
+    /// an argument fault, so it is refused ahead of the device gate.
+    /// It stays out of `usbd_no_device_refusals`, which counts only
+    /// the empty bus.
     ///
     /// # Errors
     ///
@@ -303,8 +307,7 @@ impl Lv2Host {
 
     /// The device- and pipe-scoped arms (533, 534, 537, 538, 539): no
     /// device ever attaches, so no device or pipe handle exists and
-    /// every one answers `CELL_EINVAL` (RPCS3 `sys_usbd.cpp`, the
-    /// `handled_devices` / `is_pipe` gates). Counted in
+    /// every one answers `CELL_EINVAL`. Counted in
     /// `usbd_no_device_refusals`.
     ///
     /// # Errors
@@ -371,8 +374,8 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_usbd_detect_event` (541): acknowledged; the oracle has no
-    /// body for it either.
+    /// `sys_usbd_detect_event` (541): acknowledged and otherwise
+    /// unmodeled.
     pub(super) fn dispatch_usbd_detect_event(&mut self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(0)
     }

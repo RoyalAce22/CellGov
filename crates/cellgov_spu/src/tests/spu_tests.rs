@@ -418,12 +418,13 @@ fn run_spu_fixed_value_binary() {
     {
         assert_eq!(request.destination().start().raw(), result_ea as u64);
         let data = payload.as_ref().expect("DMA put should carry payload");
-        // RPCS3 baseline: 0x00000000 (status) || 0x1337BAAD (value).
+        // Fixed by the micro-test's own source: status 0 followed by
+        // FIXED_VALUE (`tests/micro/spu_fixed_value/spu/main.c`).
         // Compiled binary may round up the DMA length past 8 bytes.
         assert_eq!(
             &data[..8],
             &[0x00, 0x00, 0x00, 0x00, 0x13, 0x37, 0xBA, 0xAD],
-            "DMA payload does not match RPCS3 baseline"
+            "DMA payload does not match the micro-test's TestResult"
         );
     }
 }

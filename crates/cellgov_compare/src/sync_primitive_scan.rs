@@ -29,16 +29,17 @@ use cellgov_lv2::FIRST_KERNEL_ID;
 use cellgov_mem::be::read_u32;
 
 /// Byte offset of the `sleep_queue` field within `sys_lwmutex_t`.
-/// Matches RPCS3's `sys_lwmutex.h` struct layout.
+/// The fields run lock_var (owner, waiter), attribute,
+/// recursive_count, sleep_queue, pad.
 pub const SLEEP_QUEUE_OFFSET: usize = 0x10;
 
 /// Total size of `sys_lwmutex_t` (lock_var + attribute + recursive +
 /// sleep_queue + pad).
 pub const SYS_LWMUTEX_T_SIZE: usize = 0x20;
 
-/// `lwmutex_free` sentinel: written to `lock_var.owner` by the
-/// user-space `sys_lwmutex_create` wrapper before the kernel handle
-/// is stored. Matches RPCS3's `sys_lwmutex.h` constant.
+/// `lwmutex_free` sentinel. The user-space `sys_lwmutex_create`
+/// wrapper writes it to `lock_var.owner` before it stores the kernel
+/// handle.
 const LWMUTEX_FREE: u32 = 0xffff_ffff;
 
 /// Validate that `attr` is a plausible `sys_lwmutex_attribute_t::recursive | protocol`.
@@ -103,8 +104,8 @@ pub fn find_sys_lwmutex_handle_slots(data: &[u8], data_base: u64) -> Vec<Range<u
 }
 
 /// Byte offset of the `lwcond_queue` field within `sys_lwcond_t`.
-/// Matches RPCS3's `sys_lwcond.h` struct layout: a pointer to the
-/// bound `sys_lwmutex_t`, then the lwcond pseudo-id.
+/// The fields run a pointer to the bound `sys_lwmutex_t`, then the
+/// lwcond pseudo-id.
 pub const LWCOND_QUEUE_OFFSET: usize = 0x4;
 
 /// Total size of `sys_lwcond_t`.

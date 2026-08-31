@@ -224,8 +224,11 @@ impl ThreadGroupTable {
         if group.slots.contains_key(&slot) {
             return Err(InitializeThreadError::SlotAlreadyInitialized);
         }
-        // Only the populated count is capped; any slot index the
-        // thread-id encoding can carry is accepted.
+        // The slot index is the SPU number, unique within the group;
+        // its ceiling is MAX_SLOTS_PER_GROUP, which is CellGov's own.
+        // Only the populated count is capped against the group's
+        // declared thread count, so any index below that ceiling is
+        // accepted.
         if group.slots.len() as u32 >= group.num_threads {
             return Err(InitializeThreadError::GroupFull {
                 num_threads: group.num_threads,

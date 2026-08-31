@@ -446,19 +446,19 @@ impl Lv2Host {
     /// bytes inside `[MMAPPER_REGION_START, MMAPPER_REGION_END)` at
     /// or after `hint`, skipping every range recorded in
     /// [`Self::mmapper_install_ledger`] and every window occupied in
-    /// the caller's committed layout (loader regions are invisible to
-    /// the ledger; RPCS3's `area->alloc` searches the caller's vm
-    /// area, so occupied windows are skipped, not errors).
+    /// the caller's committed layout. Loader regions are invisible to
+    /// the ledger, so an occupied window is skipped rather than
+    /// refused -- `sys_mmapper_search_and_map` searches, it does not
+    /// place.
     ///
     /// `hint` is rounded UP to `align`; misaligned hints do not fail.
-    /// The `start_addr != area->addr` check in `sys_mmapper.cpp`
-    /// `sys_mmapper_search_and_map` is area selection, not in-area
-    /// alignment: RPCS3 uses `start_addr` only to pick the vm block,
-    /// and `vm.cpp` `block_t::alloc` then scans from that block's
-    /// base rather than from the hint.
+    /// The scan begins at that rounded hint, clamped up to
+    /// `MMAPPER_REGION_START`. A caller's `start_addr` therefore
+    /// steers where the search starts; it does not only name a
+    /// region. The kernel's own placement rule is unestablished.
     ///
-    /// Returns `None` on exhaustion (matches RPCS3's `CELL_ENOMEM`
-    /// path in `sys_mmapper_search_and_map`).
+    /// Returns `None` on exhaustion, which the caller answers with
+    /// `CELL_ENOMEM`.
     pub(super) fn mmapper_search_free_range(
         &self,
         hint: u32,
@@ -698,9 +698,7 @@ impl Lv2Host {
     ///
     /// The runtime finishes every one of the pid's units at the same
     /// exit, so a grant handed to a parked thread of an exited process
-    /// is a resource no thread will ever consume or release. RPCS3 is
-    /// not an oracle for the per-process case: its `sys_process.cpp`
-    /// `_sys_process_exit` tears down the whole emulator.
+    /// is a resource no thread will ever consume or release.
     ///
     /// Mutex ownership held by a dead thread is retained and witnessed
     /// in `process_exit_retained_mutex_owners`; reclaiming it needs

@@ -53,8 +53,10 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// Listed in the order they fire (RPCS3 `sys_memory.cpp`
-    /// `sys_memory_allocate_from_container`).
+    /// Listed in the order they fire. `flags` names the page granule:
+    /// libaudio.prx passes 0x200 here and rounds its request up to a
+    /// 64 KiB multiple in the same call. The firing order itself is
+    /// unestablished.
     ///
     /// - `CELL_EALIGN` for a zero `size`.
     /// - `CELL_EINVAL` for `flags` other than 0, 64 KiB (0x200), or

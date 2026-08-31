@@ -1,12 +1,16 @@
 //! PS3 `sys_fs` ABI constants: open flags, the `CellFsStat` wire
 //! format, mode bits, and the maximum path length.
 //!
-//! Octal literals match the canonical PS3 `cell_fs.h` form (using
+//! Octal literals match the canonical PS3 open-flag spelling (using
 //! hex risks silent transcription errors on the order-of-magnitude
 //! nibble: `O_CREAT = 0o100 = 0x40`, NOT `0x4`).
 
-/// `lv2_fs_object::id_base` (per RPCS3's `sys_fs.h`): the starting
-/// fd value the kernel hands out for file/dir opens.
+/// Starting fd value the kernel hands out for file and directory
+/// opens.
+///
+/// The value is unestablished: nothing in the corpus witnesses a real
+/// console's first fd.
+///
 /// File fds are small ints in `[3, 255)` on real PS3. Titles encode
 /// the fd into narrow struct fields and load it with `lbz`/`lhz`/
 /// `lwz` semantics that truncate high bits; returning fds in the

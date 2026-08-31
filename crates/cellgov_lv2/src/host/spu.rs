@@ -16,9 +16,8 @@ use crate::request::Lv2Request;
 use crate::thread_group::{DestroyGroupError, GroupState, MAX_SLOTS_PER_GROUP};
 use cellgov_time::GuestTicks;
 
-/// The `sys_spu_image` record the kernel hands back: `type` KERNEL with
-/// the image id in `entry_point` (RPCS3 `sys_spu.cpp`
-/// `sys_spu_thread_initialize`, `SYS_SPU_IMAGE_TYPE_KERNEL` arm).
+/// The `sys_spu_image` record the kernel hands back: `type` KERNEL,
+/// with the kernel image id occupying the `entry_point` word.
 fn kernel_image_struct(handle: crate::image::SpuImageHandle) -> [u8; 16] {
     let mut img_struct = [0u8; 16];
     img_struct[0..4].copy_from_slice(&sys_spu::image::TYPE_KERNEL.to_be_bytes());
@@ -39,9 +38,8 @@ enum UserImageRefusal {
 impl Lv2Host {
     /// Parse a user-type `sys_spu_image` into its entry and local-store segments.
     ///
-    /// The gates mirror RPCS3's `sys_spu.cpp` `sys_spu_thread_initialize`
-    /// (`SYS_SPU_IMAGE_TYPE_USER` arm). Segment bytes are snapshotted
-    /// here rather than at group start, which has no guest-memory access.
+    /// Segment bytes are snapshotted here rather than at group start,
+    /// which has no guest-memory access.
     fn parse_user_image(
         &self,
         img_ptr: u32,
@@ -106,10 +104,10 @@ impl Lv2Host {
                     ))
                 }
             }
-            // The end check is this model's own: the oracle stops at
-            // `ls < LS_SIZE && size <= LS_SIZE` and would copy past
-            // local store, while the loader here refuses the segment
-            // at group start, where nothing can answer the guest.
+            // `ls + size > LS_SIZE` is this model's own end check:
+            // bounding `ls` and `size` separately still admits a
+            // segment that runs off the end of local store. Group
+            // start has no way to answer the guest.
             if size == 0
                 || !(ls | size).is_multiple_of(segment::LOAD_ALIGN)
                 || ls >= LS_SIZE
@@ -316,10 +314,10 @@ impl Lv2Host {
     /// not [`GroupState::Running`]. Unknown id -> CELL_ESRCH; running
     /// group -> CELL_EBUSY (the title must terminate or join first).
     pub(super) fn dispatch_group_destroy(&mut self, group_id: u32) -> Lv2Dispatch {
-        // A user image lives as long as the slot that registered it:
-        // RPCS3 `sys_spu.h` keeps `lv2_spu_group::imgs` inside the
-        // group, so its segments go when the group does. Kernel
-        // handles are not in the user map and pass through untouched.
+        // A user image lives as long as the group whose slot
+        // registered it, so its segments go when the group does.
+        // Kernel handles are not in the user map and pass through
+        // untouched.
         let slot_handles: Vec<_> = self
             .state
             .groups
@@ -345,8 +343,8 @@ impl Lv2Host {
     /// Resolve an image handle to what group start loads and where it
     /// enters. A kernel image reports 0x80 and the SPU factories pin
     /// `pc` to it after the ELF loads, so the ELF's own `e_entry` is
-    /// not consulted (RPCS3 `sys_spu_thread_group_start` enters at
-    /// `e_entry`); a user image enters where its record says.
+    /// not consulted; a user image enters where its record says. The
+    /// 0x80 entry is this model's own and is unestablished.
     fn load_image_for(&self, handle: crate::image::SpuImageHandle) -> Option<(SpuLoadImage, u32)> {
         if let Some(record) = self.state.content.lookup_by_handle(handle) {
             return Some((SpuLoadImage::Elf(record.elf_bytes.clone()), 0x80));
@@ -366,11 +364,11 @@ impl Lv2Host {
             }
         };
 
-        // RPCS3 `sys_spu.cpp` `sys_spu_thread_group_start` compare-and-
-        // swaps the group out of its initialized state and answers
-        // CELL_ESTAT for every other state, so a restart of a running or
-        // finished group is refused instead of silently re-registering
-        // its SPUs against a second RegisterSpu dispatch.
+        // Group start leaves the initialized state exactly once and
+        // answers CELL_ESTAT from every other state, so a restart of a
+        // running or finished group is refused instead of silently
+        // re-registering its SPUs against a second RegisterSpu
+        // dispatch.
         if group.state != GroupState::Created {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESTAT.into());
         }
@@ -525,11 +523,10 @@ impl Lv2Host {
                 let Some(handle) = crate::image::SpuImageHandle::new(kernel_handle) else {
                     return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
                 };
-                // The id must name an image the kernel holds: RPCS3
-                // `sys_spu.cpp` `sys_spu_thread_initialize` answers
-                // CELL_ESRCH when the KERNEL arm's id lookup fails.
-                // User-image handles are not kernel ids, so a forged
-                // kernel record cannot alias one at group start.
+                // The id must name an image the kernel holds; a lookup
+                // miss is CELL_ESRCH. User-image handles are not
+                // kernel ids, so a forged kernel record cannot alias
+                // one at group start.
                 if self.state.content.lookup_by_handle(handle).is_none() {
                     return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
                 }
@@ -548,9 +545,9 @@ impl Lv2Host {
             Err(crate::thread_group::InitializeThreadError::SlotAlreadyInitialized) => {
                 Some(cell_errors::CELL_EBUSY)
             }
-            // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` answers
-            // CELL_EBUSY once the group has left its not-initialized
-            // state, the same code it uses for an occupied slot.
+            // Once the group leaves its not-initialized state, this
+            // answers CELL_EBUSY, the same code an occupied slot
+            // takes.
             Err(crate::thread_group::InitializeThreadError::GroupAlreadyStarted { .. }) => {
                 Some(cell_errors::CELL_EBUSY)
             }
@@ -559,9 +556,8 @@ impl Lv2Host {
             Err(crate::thread_group::InitializeThreadError::GroupFull { .. }) => {
                 Some(cell_errors::CELL_EBUSY)
             }
-            // A slot index past the thread map is the bad-argument arm
-            // RPCS3 `sys_spu.cpp` `sys_spu_thread_initialize` answers
-            // CELL_EINVAL for.
+            // A slot index past the thread map is a bad argument, not
+            // a missing object: CELL_EINVAL.
             Err(crate::thread_group::InitializeThreadError::SlotOutOfRange) => {
                 Some(cell_errors::CELL_EINVAL)
             }
@@ -621,10 +617,9 @@ impl Lv2Host {
                 effects: vec![],
             },
             GroupState::Finished => {
-                // NULL out-pointer contract (RPCS3 sys_spu.cpp
-                // sys_spu_thread_group_join checks the pointers after
-                // the wait, so it applies even when the group already
-                // finished): a NULL cause writes nothing -- not even a
+                // NULL out-pointer contract, screened after the wait
+                // so it applies even when the group already finished:
+                // a NULL cause writes nothing -- not even a
                 // non-NULL status -- and returns CELL_EFAULT; a NULL
                 // status alone still writes cause and returns
                 // CELL_EFAULT. Mirrors resolve_join_wakes in

@@ -9,9 +9,9 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
-/// `sys_memory_access_right_raw_spu` flag value from `sys_memory.h`.
+/// `sys_memory_access_right_raw_spu` flag bit.
 const SYS_MEMORY_ACCESS_RIGHT_RAW_SPU: u64 = 0x0000_0000_0000_0001;
-/// `sys_memory_access_right_spu_thr` flag value from `sys_memory.h`.
+/// `sys_memory_access_right_spu_thr` flag bit.
 const SYS_MEMORY_ACCESS_RIGHT_SPU_THR: u64 = 0x0000_0000_0000_0002;
 
 /// Cap on marshalled-block pointer-table entries walked per list;
@@ -40,20 +40,19 @@ impl Lv2Host {
 
     /// `_sys_process_exit2`: exit carrying a `sys_exit2_param` block.
     ///
-    /// The argv walk follows RPCS3 `sys_process.cpp _sys_process_exit2`
-    /// (pointer array at param +0x28: argv strings, NULL, envp
-    /// strings, NULL). Empty argv is a plain `sys_process_exit`.
-    /// Non-empty argv requests exitspawn -- reboot into `argv[0]`
-    /// with argv/envp/data carried over. The re-spawn itself is not
-    /// modeled yet (the kernel-side spawn-request queue vsh's sc-23
-    /// service consumes is the natural carrier; its record format is
-    /// undecoded). The RPCS3 handoff semantics: LV2 memory
-    /// containers survive the handoff with `used`
-    /// reset to 0, and the default container's capacity can only
-    /// DECREASE across exitspawn -- a higher SDK-suggested capacity
-    /// is ignored, a lower one is honored, and capacity freed by the
-    /// shrink may be spent on user containers
-    /// (`lv2_exitspawn` in RPCS3 sys_process.cpp).
+    /// The argv walk follows the block liblv2's
+    /// `sys_game_process_exitspawn` builds before it issues sc 26.
+    /// That block is a 0x30 header whose +0x28 word points at the
+    /// marshalled pointer array: argv strings, NULL, envp strings,
+    /// NULL. Empty argv is a plain `sys_process_exit`. Non-empty argv
+    /// requests exitspawn -- reboot into `argv[0]` with argv/envp/data
+    /// carried over. The re-spawn itself is not modeled yet (the
+    /// kernel-side spawn-request queue vsh's sc-23 service consumes is
+    /// the natural carrier; its record format is undecoded). One
+    /// handoff rule is settled: a memory container the process holds
+    /// is released on an ordinary exit but survives an exitspawn. How
+    /// the default container's capacity is renegotiated across the
+    /// handoff is unestablished.
     pub(in crate::host) fn dispatch_process_exit2(
         &mut self,
         code: i32,
@@ -69,10 +68,10 @@ impl Lv2Host {
             .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
         match argv0 {
             None => {
-                // RPCS3 `sys_process.cpp _sys_process_exit2` reads the
-                // param block unconditionally; an unreadable block is
-                // a guest fault, not the empty-argv arm. Keep the
-                // plain-exit outcome but do not decide it silently.
+                // The param block is read unconditionally, so an
+                // unreadable one is a guest fault, not the empty-argv
+                // arm. Keep the plain-exit outcome but do not decide
+                // it silently.
                 self.log_invariant_break(
                     "process.exit2_param_unreadable",
                     format_args!(
@@ -82,8 +81,8 @@ impl Lv2Host {
                     ),
                 );
             }
-            // Empty argv is the plain-exit arm (RPCS3 `sys_process.cpp`
-            // `_sys_process_exit2` falls through to `_sys_process_exit`).
+            // Empty argv is the plain-exit arm: nothing to reboot
+            // into, so this degenerates to `sys_process_exit`.
             Some(0) => {}
             Some(path_ptr) => {
                 let path = rt
@@ -91,8 +90,10 @@ impl Lv2Host {
                     .map(|b| String::from_utf8_lossy(b).into_owned())
                     .unwrap_or_else(|| String::from("<unreadable>"));
                 // arg_size > 0x1030 additionally carries a 0x1000-byte
-                // data blob at the block's tail (RPCS3 `sys_process.cpp`
-                // `_sys_process_exit2`); recorded here so the trace
+                // data blob at the block's tail. liblv2's exitspawn
+                // marshaller reserves 0x1000 bytes beyond the 0x30
+                // header and copies the caller's data there whenever
+                // data_size is non-zero. Recorded here so the trace
                 // shows what the unmodeled re-spawn dropped.
                 self.log_invariant_break(
                     "process.exitspawn_not_modeled",
@@ -114,10 +115,14 @@ impl Lv2Host {
     ///
     /// Block layout decoded from vsh 0x608950: `{ u64 table_off,
     /// u64, ptr table [8B entries], packed strings }`; the table is
-    /// argv (argv[0] = SELF path), NULL, envp, NULL -- matching the
-    /// pointer-walk shape RPCS3 uses on the exit2 side. Only argv[0]
-    /// is consumed here; argv/envp delivery to the child's entry is
-    /// not modeled yet.
+    /// argv (argv[0] = SELF path), NULL, envp, NULL.
+    ///
+    /// [CBE-Handbook p:397 s:14.3.1.3] The OS hands a program an
+    /// argument-pointer array and an environment-pointer array, each
+    /// terminated by a NULL pointer.
+    ///
+    /// Only argv[0] is consumed here; argv/envp delivery to the
+    /// child's entry is not modeled yet.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::host) fn dispatch_process_spawn(
         &mut self,
@@ -131,11 +136,10 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if flags != 0 {
-            // The spawn flags word carries the child's primary-stack-size
-            // selection (RPCS3 `sys_process.h`
-            // `SYS_PROCESS_PRIMARY_STACK_SIZE_*`); the spawn loader
-            // currently sizes the child stack itself, so a nonzero
-            // request is dropped -- witnessed, never silent.
+            // The spawn flags word carries the child's
+            // primary-stack-size selection; the spawn loader currently
+            // sizes the child stack itself, so a nonzero request is
+            // dropped -- witnessed, never silent.
             self.log_invariant_break(
                 "process.spawn_flags_not_modeled",
                 format_args!(
@@ -222,9 +226,10 @@ impl Lv2Host {
         );
         if !inserted {
             // `next_child_pid` saturates at u32::MAX, so an occupied
-            // pid means the mint space is exhausted. CellGov-decided
-            // errno (RPCS3 todo-stubs the call): the resource-
-            // exhaustion code, never a spawn against the occupant.
+            // pid means the mint space is exhausted. Nothing pins what
+            // the kernel returns here, so the errno is CellGov's
+            // choice: the resource-exhaustion code, never a spawn
+            // against the occupant.
             self.log_invariant_break(
                 "process.spawn_pid_space_exhausted",
                 format_args!("next_child_pid returned occupied pid {pid:#x}; spawn rejected"),
@@ -384,11 +389,9 @@ impl Lv2Host {
     /// (`cellgov_ppu::loader::find_sys_process_param`) and plumbed
     /// through via [`Lv2Host::set_sdk_version`]. Callers that never
     /// invoke the setter retain `0xFFFFFFFF`
-    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`) -- the PS3
-    /// absent-case sentinel for PSL1GHT homebrew. RPCS3 mirrors the
-    /// same field at `sys_process.cpp`
-    /// (`g_ps3_process_info.sdk_ver`, populated from the LOOS+1
-    /// program header at `PPUModule.cpp`).
+    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`) -- the value a
+    /// process param carries when it declares no SDK version, which
+    /// is what PSL1GHT-built homebrew leaves behind.
     pub(in crate::host) fn dispatch_process_get_sdk_version(
         &self,
         version_out_ptr: u32,

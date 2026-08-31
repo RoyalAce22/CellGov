@@ -64,17 +64,19 @@ pub(in crate::host) struct Lv2Derived {
     /// pre-registered in the fs store. Boot populates from the
     /// title manifest; immutable thereafter.
     pub(in crate::host) fs_mounts: FsMountTable,
-    /// `sys_process_get_sdk_version` return value. Read from the
-    /// title ELF's `sys_proc_param` segment at boot (see
-    /// `cellgov_ppu::loader::find_sys_process_param`). RPCS3 mirror:
-    /// `g_ps3_process_info.sdk_ver` set from the LOOS+1 program
-    /// header's `process_param_t.sdk_version`
-    /// (rpcs3 PPUModule.cpp). The PS3 sentinel for
-    /// absent param segment is `0xFFFFFFFF` (the same one PSL1GHT
-    /// homebrew sees); this default matches that contract for
-    /// callers that never invoke `set_sdk_version`. Boot-time
-    /// constant read from the title image, whose bytes are hashed in
-    /// `GuestMemory`.
+    /// `sys_process_get_sdk_version` return value, read at boot from
+    /// the title ELF's `sys_proc_param` record.
+    ///
+    /// `cellgov_ppu::loader::find_sys_process_param` locates that
+    /// record by its magic word. The program header that declares it
+    /// is `PT_LOOS + 1`, in the ELF gABI's OS-specific range. The
+    /// record opens `size`, `magic`, `version`, `sdk_version`, so its
+    /// fourth word is what this syscall reports. `0xFFFFFFFF` is the
+    /// record's own unknown-version sentinel, the value a title with
+    /// no param segment shows, and it is the default here.
+    ///
+    /// Boot-time constant read from the title image, whose bytes are
+    /// hashed in `GuestMemory`.
     pub(in crate::host) sdk_version: u32,
     /// Firmware library name -> NID -> OPD address, supplied at boot
     /// from the loaded firmware set. The sc 484 CoreOS branch resolves

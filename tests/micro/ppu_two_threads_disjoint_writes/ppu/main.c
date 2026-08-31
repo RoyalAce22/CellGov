@@ -91,10 +91,11 @@ static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
 #define SYS_PPU_THREAD_CREATE 52
 
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
- * stacksize, flags, threadname*) per RPCS3 lv2.cpp /
- * sys_ppu_thread.cpp _sys_ppu_thread_create; liblv2's wrapper
- * passes unk = 0. The param* in r4 is a ppu_thread_param_t
- * { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
+ * stacksize, flags, threadname*); the user-space wrapper passes
+ * unk = 0. No public document states this raw-syscall argument
+ * list -- it is the shape the micro-test corpus is built and
+ * verified against. The param* in r4 is a two-word thread-init
+ * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's
  * `&fn` resolves to the function's ELFv1 .opd descriptor -- 24
  * bytes of u64 fields -- so repack it before the syscall. */

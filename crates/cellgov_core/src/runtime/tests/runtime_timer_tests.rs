@@ -446,9 +446,8 @@ fn process_exit_with_a_due_sleep_does_not_resurrect_the_sleeper() {
     // inside the same commit that dispatches PROCESS_EXIT: the exiter's
     // own 2000-tick step pushes time to 4000 first. The exit sweep
     // finishes every unit and drops the sleeper's parked response; the
-    // due timer entry must be dropped, not fired -- RPCS3
-    // sys_process.cpp _sys_process_exit stops every thread, so a due
-    // sleep never resumes its thread after exit.
+    // due timer entry must be dropped, not fired -- a process exit
+    // deallocates its threads, so a due sleep never resumes one.
     let budget = 2000u64;
     let mut rt = build(4096, budget, 100);
     let sleeper = rt
@@ -722,10 +721,8 @@ fn contended_cond_expiry_reparks_without_phantom_timer_wake_record() {
 #[test]
 fn a_huge_usleep_deadline_saturates_at_the_tick_ceiling() {
     // u64::MAX usec * 1000 overflows u64; the conversion must clamp
-    // to the tick ceiling (RPCS3 sys_timer.cpp sys_timer_usleep also
-    // saturates its sleep-time arithmetic). Wrapping would fabricate
-    // an in-the-past deadline and fire a spurious wake at this same
-    // commit.
+    // to the tick ceiling. Wrapping would fabricate an in-the-past
+    // deadline and fire a spurious wake at this same commit.
     let budget = 16u64;
     let mut rt = build(4096, budget, 100);
     let unit_id = rt
@@ -756,9 +753,8 @@ fn a_due_wake_for_a_finished_unit_is_dropped_unfired() {
     // entry whose unit is already Finished and whose parked response
     // is gone. Without the Finished guard the firing would resurrect
     // the unit (Runnable override replaces Finished) and log the
-    // missing-response invariant break. RPCS3 sys_process.cpp
-    // _sys_process_exit stops every thread, so a due sleep never
-    // resumes its thread after exit.
+    // missing-response invariant break. A process exit deallocates its
+    // threads, so a due sleep never resumes one.
     let budget = 2000u64;
     let mut rt = build(4096, budget, 100);
     let finished = rt

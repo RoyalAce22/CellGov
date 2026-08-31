@@ -43,9 +43,14 @@ pub struct ImportedFunction {
     pub stub_addr: u32,
 }
 
-/// One imported variable: VNID and the address of the slot the
-/// binder patches to point at the exporter's storage. Mirrors
-/// RPCS3's variable-import handling in its `PPUModule.cpp`.
+/// One imported variable: VNID and the address of the slot the binder
+/// patches to point at the exporter's storage.
+///
+/// The variable section has the same shape as the function section: an
+/// id array paired with a parallel array of 4-byte slots. The
+/// installed firmware witnesses that shape on its function half, where
+/// `cellSysutil_Library` binds `sysPrxForUser` NIDs against
+/// consecutive 4-byte GOT slots.
 #[derive(Debug, Clone, Copy)]
 pub struct ImportedVariable {
     /// Variable NID (hashed name).
@@ -450,8 +455,13 @@ fn locate_imports_via_prx_param(
 /// referenced from segment 0's `p_paddr` field. Returns the
 /// `(start, end)` v-addrs of the table on success, or `None` when
 /// either no segments are present or segment 0's `p_paddr` is zero
-/// (the "no library info" signal). Matches RPCS3's firmware-PRX
-/// path in `PPUModule.cpp`.
+/// (the "no library info" signal).
+///
+/// This is the only locator the installed firmware exercises. No
+/// module under `dev_flash/sys/external` carries a `PT_PRX_PARAM`
+/// segment; every one resolves its import table through segment 0's
+/// `p_paddr`. No module declares the zero sentinel, so that arm stays
+/// unexercised.
 fn locate_imports_via_library_info(
     data: &[u8],
     phoff: usize,
@@ -474,16 +484,15 @@ fn locate_imports_via_library_info(
         return Ok(None);
     }
 
-    // RPCS3 reads the struct at runtime address
-    // `segs[0].addr + p_paddr - p_offset`. `segs[0].addr` is the
-    // load-base of segment 0, so the offset-within-segment is
-    // `p_paddr - p_offset` and the file offset is `p_paddr`. This
-    // interprets p_paddr as Sony-repurposed-file-offset, matching
-    // the formula whether or not p_vaddr equals p_offset. We bound
-    // only against the file end; PS3 segments are runtime-
-    // contiguous so `library_info` may legitimately live in a
-    // later PT_LOAD than segment 0 (matches what `parse_prx`
-    // accepts on the same field for `module_info`).
+    // Sony repurposes `p_paddr` as a file offset. The struct sits at
+    // runtime address `segs[0].addr + p_paddr - p_offset`, so the
+    // offset within segment 0 is `p_paddr - p_offset` and the file
+    // offset is plain `p_paddr`. That holds whether or not p_vaddr
+    // equals p_offset, and every installed firmware module locates its
+    // import table this way. We bound only against the file end; PS3
+    // segments are runtime-contiguous so `library_info` may
+    // legitimately live in a later PT_LOAD than segment 0 (matches
+    // what `parse_prx` accepts on the same field for `module_info`).
     let lib_info_foff = usize::try_from(p_paddr).map_err(|_| ImportParseError::OutOfBounds)?;
     if lib_info_foff
         .checked_add(PRX_LIB_INFO_SIZE)

@@ -1,10 +1,11 @@
 //! PS3 LV2 `CellError` code database.
 //!
-//! Symbols, hex codes, and descriptions mirror RPCS3's
-//! `ErrorCodes.h` byte-for-byte. `CELL_OK` lives in the header's
-//! `CellNotAnError : s32` enum and is excluded from [`ENTRIES`].
+//! Symbols and codes are the Cell OS Lv-2 error-code table: one
+//! contiguous block starting at `0x8001_0001`, one symbol per code.
+//! `CELL_OK` is the success sentinel, not a member of the block, and is
+//! excluded from [`ENTRIES`].
 
-/// A PS3 LV2 error code with its symbol and header description.
+/// A PS3 LV2 error code with its symbol and description.
 ///
 /// Value-catalogue entry, not a Rust-level error type: only `code`
 /// flows to guest code via `impl From<Lv2ErrCode> for u64`.
@@ -14,7 +15,9 @@ pub struct Lv2ErrCode {
     pub code: u32,
     /// Symbol name, e.g. `"CELL_EPERM"`.
     pub symbol: &'static str,
-    /// Verbatim trailing comment from the RPCS3 header.
+    /// One-line description of the condition the code names.
+    ///
+    /// Diagnostic text; nothing branches on it.
     pub description: &'static str,
 }
 

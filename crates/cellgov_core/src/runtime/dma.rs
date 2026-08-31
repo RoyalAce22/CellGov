@@ -52,8 +52,9 @@ impl Runtime {
             // still commits (the payload was in flight and the terminal
             // memory snapshot must include it), but the Runnable
             // override would replace Finished and resume a stopped
-            // thread. RPCS3 sys_process.cpp _sys_process_exit stops
-            // every thread. Mirrors the guard in fire_timer_wakes.
+            // thread. Process exit does not return to its caller: it
+            // terminates the process, so no thread of it is left to
+            // resume. Mirrors the guard in fire_timer_wakes.
             // A Faulted issuer is a pre-validate DmaEnqueue rejection
             // (see the commit pipeline's DmaEnqueue arm) with an older
             // accepted transfer still in flight; the mark exists to

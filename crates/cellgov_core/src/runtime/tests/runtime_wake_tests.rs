@@ -293,8 +293,7 @@ fn a_group_join_wake_with_null_cause_writes_nothing_and_returns_efault() {
         Some(UnitStatus::Runnable),
         "the join itself completes; only the writeback and code change",
     );
-    // NULL cause suppresses BOTH writes and reports CELL_EFAULT (RPCS3
-    // sys_spu.cpp sys_spu_thread_group_join).
+    // The hardware's answer for a NULL cause is unestablished.
     assert_eq!(read_guest_u32_be(&rt, 0x200), 0);
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),
@@ -331,8 +330,6 @@ fn a_group_join_wake_with_null_status_writes_cause_and_returns_efault() {
     );
     rt.resolve_join_wakes_for_test(spu);
 
-    // NULL status alone still writes cause but reports CELL_EFAULT
-    // (RPCS3 sys_spu.cpp sys_spu_thread_group_join).
     assert_eq!(read_guest_u32_be(&rt, 0x100), 0xDEAD_BEEF);
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),
@@ -358,8 +355,7 @@ fn event_flag_wake_with_null_result_ptr_writes_nothing() {
     rt.resolve_sync_wakes_for_test(&[waiter]);
 
     // The kernel stores the observed pattern only through a non-null
-    // result pointer (RPCS3 sys_event_flag.cpp sys_event_store_result);
-    // guest address 0 must stay untouched.
+    // result pointer.
     let mem = rt.memory().as_bytes();
     assert!(
         mem[..8].iter().all(|&b| b == 0),

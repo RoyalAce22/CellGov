@@ -50,10 +50,9 @@ pub(in crate::host) struct Lv2State {
     pub(in crate::host) mmapper_handles: MmapperHandleTable,
     /// `ipc_key -> mem_id` for process-shared mmapper allocations.
     /// A keyed 332 with a registered key returns the existing
-    /// `mem_id` (RPCS3's SYS_SYNC_NOT_CARE path,
-    /// `sys_mmapper.cpp` `create_lv2_shm`); an unregistered key mints and
-    /// registers. The association steers a future 332's answer and is
-    /// recorded nowhere else.
+    /// `mem_id`; an unregistered key mints and registers. The
+    /// association steers a future 332's answer and is recorded
+    /// nowhere else.
     pub(in crate::host) mmapper_ipc: BTreeMap<u64, u32>,
     /// `sys_config` handles, services, listeners, and the events a
     /// listener may still read back (516-522).

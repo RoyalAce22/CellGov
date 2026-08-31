@@ -250,11 +250,10 @@ fn write_intent(addr: u64, value: u32) -> Effect {
 #[test]
 fn mmapper_map_installs_the_window_in_the_callers_space() {
     // A child-process caller's sys_mmapper_map_shared_memory window
-    // must appear in the CALLER's space: the handler validated it
-    // against the caller's view and the caller's own loads/stores
-    // resolve through that space (RPCS3 sys_mmapper.cpp
-    // sys_mmapper_map_shared_memory maps into the calling process's
-    // virtual memory).
+    // must appear in the CALLER's space. The syscall takes no process
+    // argument, so the caller's space is the only one it can name. The
+    // handler validated the window against the caller's view, and the
+    // caller's own loads/stores resolve through that space.
     use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
 
     let mut rt = build(0x10000, 1, 100);
@@ -332,10 +331,11 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
     // spawn loader installed in the caller's space, so a guest can ask
     // sys_mmapper_map_shared_memory (334) for a window its own layout
     // already occupies. The handler checks the caller's committed
-    // layout and refuses with CELL_EBUSY (RPCS3 sys_mmapper.cpp
-    // sys_mmapper_map_shared_memory) before staging anything; the
+    // layout and refuses with CELL_EBUSY before staging anything; the
     // runtime's install-overlap witness stays as defense in depth and
-    // must NOT fire on this path.
+    // must NOT fire on this path. Which code the kernel picks for an
+    // occupied window is unestablished. CELL_EBUSY is CellGov's
+    // choice, and a console probe of a colliding map would settle it.
     use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
 
     let mut rt = build(0x10000, 1, 100);
@@ -517,9 +517,9 @@ fn a_wake_payload_into_a_shared_view_is_trapped_in_debug() {
 
 #[test]
 fn a_join_completing_with_a_null_status_pointer_returns_efault() {
-    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_join: a NULL vptr still
-    // joins (the target is reaped), but the joiner's r3 reports
-    // CELL_EFAULT after the wait resolves, not CELL_OK.
+    // A NULL vptr still joins -- the target is reaped -- but the
+    // joiner's r3 reports CELL_EFAULT after the wait resolves.
+    // Reap-then-fault ordering is unestablished.
     let mut rt = build(0x1000, 1, 100);
     let joiner = rt
         .registry_mut()

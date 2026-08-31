@@ -6,7 +6,12 @@
 /// guest EAs; `rsx_advance` translates each IO offset through this
 /// struct before reading a header word. `size == 0` means no iomap
 /// has been recorded yet; [`translate`](Self::translate) returns
-/// `None` for every offset in that state, matching the RPCS3 oracle.
+/// `None` for every offset in that state.
+///
+/// libgcm_sys.sprx keeps an IO offset table with one entry per 1 MiB
+/// page, and marks an unmapped page with a sentinel. Its address
+/// getters then return a failure code and leave the caller's
+/// out-pointer unwritten.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct IoMap {
     /// Guest EA the IO base maps to.

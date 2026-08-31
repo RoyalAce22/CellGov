@@ -258,8 +258,7 @@ fn mutex_create_decodes_attr_ptr() {
 #[test]
 fn a_not_recursive_attr_creates_a_non_recursive_mutex() {
     // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means NOT
-    // recursive; only SYS_SYNC_RECURSIVE (0x10) enables re-locking
-    // (RPCS3 sys_mutex.cpp sys_mutex_create).
+    // recursive; only SYS_SYNC_RECURSIVE (0x10) enables re-locking.
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
     let attr_bytes = [
         0x00, 0x00, 0x00, 0x01, // protocol = SYS_SYNC_FIFO
@@ -355,8 +354,8 @@ fn create_with_attr_at_0x200(host: &mut Lv2Host, rt: &FakeRuntime) -> Lv2Dispatc
 
 #[test]
 fn an_unknown_mutex_protocol_is_einval_not_a_default() {
-    // RPCS3 sys_mutex.cpp sys_mutex_create: protocol outside
-    // FIFO / PRIORITY / PRIORITY_INHERIT is EINVAL.
+    // attr_protocol is an enumeration; FIFO, PRIORITY and
+    // PRIORITY_INHERIT are its only members.
     let rt = mutex_attr_runtime(0x20, 0x10, 0x200, 0, 0);
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
@@ -366,8 +365,8 @@ fn an_unknown_mutex_protocol_is_einval_not_a_default() {
 
 #[test]
 fn an_unknown_mutex_recursive_value_is_einval() {
-    // RPCS3 sys_mutex.cpp sys_mutex_create: recursive outside
-    // SYS_SYNC_RECURSIVE / SYS_SYNC_NOT_RECURSIVE is EINVAL.
+    // attr_recursive is an enumeration with two members:
+    // SYS_SYNC_RECURSIVE and SYS_SYNC_NOT_RECURSIVE.
     let rt = mutex_attr_runtime(0x1, 0x11, 0x200, 0, 0);
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
@@ -377,8 +376,8 @@ fn an_unknown_mutex_recursive_value_is_einval() {
 
 #[test]
 fn an_unknown_mutex_pshared_value_is_einval() {
-    // RPCS3 sys_sync.h lv2_obj::create: pshared outside 0x100 /
-    // 0x200 is EINVAL.
+    // attr_pshared is an enumeration with two members: 0x100 and
+    // 0x200.
     let rt = mutex_attr_runtime(0x1, 0x20, 0, 0, 0);
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
@@ -388,8 +387,9 @@ fn an_unknown_mutex_pshared_value_is_einval() {
 
 #[test]
 fn a_process_shared_mutex_with_zero_ipc_key_is_einval() {
-    // RPCS3 sys_sync.h lv2_obj::create: PROCESS_SHARED with a zero
-    // ipc_key is EINVAL.
+    // A valid ipc_key starts at 1, so zero is out of range on a
+    // PROCESS_SHARED create. EINVAL is CellGov's choice of code:
+    // the range is established, the code for breaking it is not.
     let rt = mutex_attr_runtime(0x1, 0x20, 0x100, 0, 1);
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
@@ -399,9 +399,8 @@ fn a_process_shared_mutex_with_zero_ipc_key_is_einval() {
 
 #[test]
 fn a_process_shared_mutex_with_bad_attach_flags_is_einval() {
-    // RPCS3 sys_sync.h lv2_obj::create: attach flags outside
-    // NEWLY_CREATED / NOT_CREATE / NOT_CARE (1 / 2 / 3) are EINVAL
-    // for a PROCESS_SHARED create.
+    // The attach flag is an enumeration with three members:
+    // NEWLY_CREATED, NOT_CREATE and NOT_CARE (1 / 2 / 3).
     let rt = mutex_attr_runtime(0x1, 0x20, 0x100, 0xCAFE, 0);
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
@@ -425,8 +424,6 @@ fn a_valid_process_shared_mutex_creates_locally_and_reports_the_gap() {
 
 #[test]
 fn a_null_mutex_id_ptr_is_efault_before_any_state_change() {
-    // RPCS3 sys_mutex.cpp sys_mutex_create rejects a null mutex_id
-    // before creation.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let src = UnitId::new(0);
@@ -450,9 +447,8 @@ fn a_null_mutex_id_ptr_is_efault_before_any_state_change() {
 
 #[test]
 fn an_unreadable_mutex_attr_ptr_is_efault_not_default() {
-    // The kernel reads the attribute struct unconditionally; an
-    // unreadable pointer is a guest fault, not the default-attribute
-    // arm (RPCS3 sys_mutex.cpp sys_mutex_create).
+    // The kernel reads the attribute struct unconditionally, so an
+    // unreadable pointer is a guest fault.
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x100);
     let src = UnitId::new(0);
@@ -470,10 +466,9 @@ fn an_unreadable_mutex_attr_ptr_is_efault_not_default() {
 
 #[test]
 fn a_recursive_relock_returns_ok_and_needs_matching_unlocks_before_the_waiter_wakes() {
-    // RPCS3 sys_mutex.h lv2_mutex::try_lock: owner re-lock on a
-    // SYS_SYNC_RECURSIVE mutex is CELL_OK with a count bump; RPCS3
-    // sys_mutex.cpp sys_mutex_unlock releases (and grants to a
-    // waiter) only once the count is back at zero.
+    // Each recursive hold needs a matching unlock: the mutex is
+    // released, and granted to a waiter, only once the count is back
+    // at zero.
     let rt = mutex_attr_runtime(0x1, 0x10, 0x200, 0, 0);
     let mut host = Lv2Host::new();
     let owner_unit = UnitId::new(0);
@@ -544,8 +539,8 @@ fn a_recursive_relock_returns_ok_and_needs_matching_unlocks_before_the_waiter_wa
 
 #[test]
 fn a_saturated_recursive_lock_count_returns_ekresource() {
-    // RPCS3 sys_mutex.h lv2_mutex::try_lock: a lock count at u32::MAX
-    // refuses the re-lock with CELL_EKRESOURCE and stays owned.
+    // The recursive lock count is capped at 2^32 - 1, and a mutex
+    // whose count saturates stays owned.
     let rt = mutex_attr_runtime(0x1, 0x10, 0x200, 0, 0);
     let mut host = Lv2Host::new();
     let src = UnitId::new(0);

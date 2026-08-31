@@ -9,31 +9,33 @@
 pub const USER_MEMORY_TOTAL: u32 = 0x0D50_0000;
 
 /// `ipc_key` sentinel meaning "not process-shared" for
-/// `sys_mmapper_allocate_shared_memory` (332 / 362). Cross-reference:
-/// RPCS3's `sys_mmapper.h` (`SYS_MMAPPER_NO_SHM_KEY`, unofficial
-/// name); liblv2 passes it on the keyless allocation path.
+/// `sys_mmapper_allocate_shared_memory` (332 / 362); liblv2 passes it
+/// on the keyless allocation path.
+///
+/// The constant's name is inherited vocabulary, not a Sony one.
 pub const SYS_MMAPPER_NO_SHM_KEY: u64 = 0xffff_0000_0000_0000;
 
 /// Granule `sys_mmapper_allocate_address` (330) reserves VM areas in,
-/// and the only multiple it accepts for `size`. Cross-reference:
-/// RPCS3's `sys_mmapper.cpp` `sys_mmapper_allocate_address`.
+/// and the only multiple it accepts for `size`. The syscall refuses a
+/// `size` that is not a whole number of 256 MiB areas.
 pub const VM_AREA_GRANULE: u64 = 0x1000_0000;
 
-/// The `alignment` values `sys_mmapper_allocate_address` accepts;
-/// anything else is refused rather than rounded. Cross-reference:
-/// RPCS3's `sys_mmapper.cpp` `sys_mmapper_allocate_address`.
+/// The `alignment` values `sys_mmapper_allocate_address` accepts:
+/// powers of two from the 256 MiB granule up to 0x8000_0000, the
+/// largest alignment that fits a 32-bit process address space.
+/// Anything else is refused rather than rounded.
 pub const VM_AREA_ALIGNMENTS: [u64; 4] = [0x1000_0000, 0x2000_0000, 0x4000_0000, 0x8000_0000];
 
 /// Granule `sys_memory_container_create` (324 / 341) truncates its
-/// request to before deciding whether anything is left to allocate.
-/// Cross-reference: RPCS3's `sys_memory.cpp`
-/// `sys_memory_container_create`.
+/// request to before deciding whether anything is left to allocate. A
+/// request under one granule therefore fails for want of memory, not
+/// for being small.
 pub const CONTAINER_GRANULE: u64 = 0x10_0000;
 
 /// The per-entry attribute table `sys_mmapper_allocate_shared_memory_ext`
 /// (339) and its container variant take alongside the key. Only the
-/// `type` word is understood. Cross-reference: RPCS3's `sys_mmapper.h`
-/// `mmapper_unk_entry_struct0`.
+/// `type` word carries a known meaning; the rest of the entry is
+/// unestablished, and so is the entry length.
 pub mod ext_entry {
     /// Byte length of one entry.
     pub const LEN: u32 = 0x18;
@@ -45,8 +47,8 @@ pub mod ext_entry {
     /// counts are refused as well.
     pub const MAX_COUNT: i32 = 0x10;
 
-    /// Entry types accepted without further checks. Cross-reference:
-    /// RPCS3's `sys_mmapper.cpp` `sys_mmapper_allocate_shared_memory_ext`.
+    /// Entry types accepted without further checks. The membership of
+    /// this set is unestablished: nothing here says why 2 is absent.
     pub const PLAIN_TYPES: [u64; 3] = [0, 1, 3];
 
     /// Entry type that additionally requires 64 KiB pages and a root
@@ -55,12 +57,13 @@ pub mod ext_entry {
 }
 
 /// `flags` bits selecting the page granule for shared-memory and
-/// mmapper-allocated regions. Cross-reference: RPCS3's `sys_memory.h`.
+/// mmapper-allocated regions. The two page sizes are exclusive: a
+/// `flags` word may name one or the other, never both.
 pub mod page_size {
     /// Mask over the granularity field the flags below occupy
     /// (`SYS_MEMORY_GRANULARITY_MASK`, bits 8..=11). A `flags` word
-    /// whose field holds anything other than the values below is
-    /// refused, not rounded. Cross-reference: RPCS3's `sys_memory.h`.
+    /// whose field holds anything other than zero or one of the flags
+    /// below is refused, not rounded.
     pub const GRANULARITY_FIELD: u64 = 0xf00;
 
     /// `SYS_MEMORY_PAGE_SIZE_64K` -- 64 KiB pages.
@@ -76,8 +79,8 @@ pub mod page_size {
     pub const GRANULE_1M: u32 = 0x0010_0000;
 
     /// Resolve `flags` to the byte granule that `sys_mmapper_map_shared_memory`
-    /// will enforce. Matches the `flags & SYS_MEMORY_PAGE_SIZE_64K ?
-    /// 0x10000 : 0x100000` branch RPCS3 uses in its mmapper handler.
+    /// will enforce. A `flags` word that names no page size takes the
+    /// same 1 MiB granule as the 1 MiB flag.
     #[must_use]
     pub const fn granule_from_flags(flags: u64) -> u32 {
         if flags & FLAG_64K != 0 {

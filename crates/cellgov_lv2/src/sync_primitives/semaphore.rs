@@ -252,9 +252,9 @@ impl SemaphoreTable {
     /// `entry.count`. Returns `OverMax` if the leftover would push
     /// `count` past `max`.
     ///
-    /// Real LV2 (and RPCS3) atomically consult the post-increment
-    /// view: if `count + slots_after_wake > max` the whole call
-    /// fails.
+    /// LV2 consults the post-increment view atomically: when
+    /// `count + slots_after_wake > max` nothing is woken and the
+    /// whole call fails.
     pub fn post_and_wake_n(&mut self, id: u32, count: u32) -> SemaphorePostN {
         let Some(entry) = self.entries.get_mut(&id) else {
             return SemaphorePostN::Unknown;

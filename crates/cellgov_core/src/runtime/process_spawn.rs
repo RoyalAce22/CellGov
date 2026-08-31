@@ -123,12 +123,12 @@ impl Runtime {
             .expect("space created above");
         self.lv2_host.bind_unit_process(child_unit, pid);
 
-        // PPU thread creation rejects a priority outside 0..=3071
-        // with EINVAL for a retail-authority caller (RPCS3
-        // sys_ppu_thread.cpp _sys_ppu_thread_create); whether this
-        // syscall does the same for the child's primary thread is
-        // undecoded (RPCS3 todo-stubs it), so an out-of-range value
-        // is witnessed instead of silently normalized.
+        // PPU thread creation takes a priority in 0..=3071, where 0 is
+        // highest. It rejects anything outside that range with EINVAL
+        // for a retail-authority caller. Whether spawn applies the same
+        // check to the child's PRIMARY thread is unestablished, so this
+        // path witnesses an out-of-range value instead of normalizing
+        // it.
         if !(0..=3071).contains(&prio) {
             self.lv2_host.log_invariant_break(
                 "runtime.process_spawn_prio_out_of_range",
@@ -206,8 +206,8 @@ impl Runtime {
     /// override means the child exited during its own init pass (a
     /// module_start unit bound to the pid called `sys_process_exit`),
     /// and clearing it would resume a thread of a process whose exit
-    /// status is already recorded (RPCS3 `sys_process.cpp`
-    /// `_sys_process_exit`: an exited process never resumes).
+    /// status is already recorded -- a process exit deallocates its
+    /// threads, so none of them ever runs again.
     pub fn release_child_init(&mut self, primary_unit: UnitId) {
         match self.registry.status_override(primary_unit) {
             Some(UnitStatus::Blocked) => self.registry.clear_status_override(primary_unit),

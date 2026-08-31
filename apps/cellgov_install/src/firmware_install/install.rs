@@ -58,9 +58,10 @@ const FIRMWARE_SOURCE_KIND: &str = "pup";
 
 /// Outer-TAR name fragment marking a dev_flash payload package.
 ///
-/// The trailing underscore is what drops the `dev_flash3_*`
-/// revocation-list package, which RPCS3 also skips
-/// (`main_window.cpp`, `HandlePupInstallation`).
+/// A retail PUP's `update_files` TAR names its flash-1 payloads
+/// `dev_flash_NNN.tar` and carries the revocation list beside them as
+/// `dev_flash3_NNN.tar`. The trailing underscore drops that
+/// revocation-list package.
 const DEV_FLASH_PACKAGE: &str = "dev_flash_";
 
 /// The `update_files` payload: the TAR of SCE-wrapped dev_flash
@@ -90,9 +91,8 @@ fn update_files_payload<'a>(
 
 /// The outer TAR's dev_flash payload packages, in archive order.
 ///
-/// An outer TAR carrying none of them names no firmware tree, which
-/// RPCS3 also refuses on its own terms (`main_window.cpp`,
-/// `HandlePupInstallation`).
+/// An outer TAR with none of them names no firmware tree, so this
+/// refuses the install instead of staging zero files.
 fn dev_flash_packages(
     outer: &[tar::TarEntry],
 ) -> Result<Vec<&tar::TarEntry>, FirmwareInstallError> {
@@ -337,10 +337,8 @@ impl ExtractTally {
     /// firmware the PUP carries.
     ///
     /// A manifest built over a partial tree would record the gap as if
-    /// it were the image. RPCS3 refuses the same way: `main_window.cpp`
-    /// `HandlePupInstallation` aborts the whole install when a
-    /// dev_flash sub-package will not decrypt or when `Loader/TAR.cpp`
-    /// `tar_object::extract` reports a failed write.
+    /// it were the image. Every later run would then compare against a
+    /// firmware set short of the PUP's.
     fn into_complete(self, attempted: usize) -> Result<Self, FirmwareInstallError> {
         if !self.failed.is_empty() || !self.extract_errors.is_empty() {
             return Err(FirmwareInstallError::PartialInstall {

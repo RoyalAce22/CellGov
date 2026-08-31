@@ -531,8 +531,8 @@ fn build_with_rsx_writable() -> Runtime {
     let mem = GuestMemory::from_regions(regions).expect("regions non-overlapping");
     let mut rt = Runtime::new(mem, Budget::new(1), 100);
     // Identity iomap over the flat region: IoMap::translate returns
-    // None for un-iomapped offsets (RPCS3's umax-on-miss), so the
-    // FIFO pass needs a seeded mapping.
+    // None for un-iomapped offsets, so the FIFO pass needs a seeded
+    // mapping.
     rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x1000);
     rt
 }
@@ -644,8 +644,8 @@ fn build_with_rsx_and_label_region(label_base: u32) -> Runtime {
     // Identity iomap over the flat region so the FIFO advance pass
     // can translate IO offsets back to EAs. Production records this
     // via dispatch_sys_rsx_context_iomap; tests record it directly.
-    // IoMap::translate returns None on a miss (RPCS3's umax-on-miss),
-    // so without it the consumer surfaces HeaderOutOfRange.
+    // IoMap::translate returns None on a miss, so without it the
+    // consumer surfaces HeaderOutOfRange.
     rt.lv2_host_mut().seed_rsx_iomap(0, 0, 0x10000);
     rt
 }

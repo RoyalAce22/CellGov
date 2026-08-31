@@ -132,10 +132,13 @@ impl Lv2Host {
     }
 
     pub(super) fn dispatch_semaphore_post(&mut self, id: u32, val: i32) -> Lv2Dispatch {
-        // Error order (real LV2 / RPCS3 sys_semaphore_post): id lookup,
-        // then val<=0, then overflow-vs-max. The overflow check folds in
-        // waiters: post(N) wakes up to N waiters and only the leftover
-        // counts toward `max`.
+        // Error order: id lookup, then val<=0, then overflow-vs-max.
+        // The hardware trace in
+        // tests/ps3autotests/tests/lv2/sys_semaphore posts val 0 to a
+        // stale id and gets ESRCH, not the EINVAL this arm would
+        // otherwise raise. The id lookup therefore runs first. The
+        // overflow check folds in waiters: post(N) wakes up to N
+        // waiters and only the leftover counts toward `max`.
         let Some(entry) = self.state.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };

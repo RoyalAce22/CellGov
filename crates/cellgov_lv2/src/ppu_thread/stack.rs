@@ -40,9 +40,15 @@ impl ThreadStack {
 
     /// Top-of-stack address to load into `r1`.
     ///
-    /// A whole minimum frame sits above it, matching the `r1` the
-    /// kernel hands every PPU thread (RPCS3 `PPUThread.cpp`
-    /// `ppu_thread::ppu_thread` subtracts `ppu_stack_start_offset`).
+    /// A whole minimum frame sits above it, so the top of the block
+    /// is never itself the SP.
+    ///
+    /// [CBE-Handbook p:396 s:14.3.1.3] The loader hands the entry
+    /// point an R1 that is quadword-aligned and already points at a
+    /// reserved initial frame whose back chain is null.
+    ///
+    /// CellGov seeds every PPU thread's `r1` that way, not only the
+    /// primary one.
     ///
     /// # Panics
     /// Debug-only if `size < ABI_MIN_STACK_FRAME`; unreachable via

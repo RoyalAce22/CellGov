@@ -104,10 +104,13 @@ impl Lv2Host {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };
-        // RPCS3 sys_event_flag.cpp sys_event_flag_wait /
-        // sys_event_store_result: every non-park exit stores through a
-        // non-null result pointer -- error exits store 0, mode
-        // validation precedes the id lookup (EINVAL over ESRCH).
+        // Every non-park exit stores through a non-null result
+        // pointer: an error exit stores 0, and only a satisfied wait
+        // stores the observed pattern. The order of mode validation
+        // against the id lookup is unestablished. The hardware trace
+        // in tests/ps3autotests/tests/lv2/sys_event_flag pins EINVAL
+        // for a bad mode and ESRCH for a bad id, but never combines
+        // the two. CellGov validates the mode first.
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::Immediate {
                 code: cell_errors::CELL_EINVAL.into(),
@@ -172,10 +175,11 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // RPCS3 sys_event_flag.cpp sys_event_flag_trywait /
-        // sys_event_store_result: every exit stores through a non-null
-        // result pointer -- EINVAL, ESRCH, and the no-match EBUSY all
-        // store 0; only a match stores the observed pattern.
+        // Every exit stores through a non-null result pointer:
+        // EINVAL, ESRCH, and the no-match EBUSY all store 0; only a
+        // match stores the observed pattern. As in the wait arm,
+        // CellGov validates the mode before the id lookup and no
+        // trace orders the two.
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::Immediate {
                 code: cell_errors::CELL_EINVAL.into(),
@@ -243,12 +247,10 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // Pattern snapshot before the drain: RPCS3
-        // sys_event_flag.cpp sys_event_flag_cancel captures the
-        // pattern once and every cancelled waiter reports it through
-        // its result pointer alongside ECANCELED. It also zeroes a
-        // non-null num pointer before the id lookup, so the ESRCH
-        // exit still stores 0 through it.
+        // Pattern snapshot before the drain: a cancelled waiter
+        // reports the captured pattern through its own result
+        // pointer, alongside ECANCELED. Cancel also stores 0 through
+        // a non-null num pointer on the ESRCH exit.
         let Some(bits) = self.state.event_flags.lookup(id).map(|e| e.bits()) else {
             return Lv2Dispatch::Immediate {
                 code: cell_errors::CELL_ESRCH.into(),
@@ -324,9 +326,8 @@ impl Lv2Host {
 
 /// The observed-pattern write for a satisfied wait/trywait.
 ///
-/// RPCS3 sys_event_flag.cpp `sys_event_store_result`: the result is
-/// written only through a non-null pointer; a null result pointer is
-/// legal and skipped.
+/// A null result pointer is legal: the caller passes 0 when it does
+/// not want the pattern back, and nothing is stored.
 fn event_flag_result_write(
     result_ptr: u32,
     observed: u64,
@@ -347,9 +348,9 @@ fn event_flag_result_write(
 
 /// The cancelled-waiter count write for `sys_event_flag_cancel`.
 ///
-/// RPCS3 sys_event_flag.cpp `sys_event_flag_cancel`: the count (u32)
-/// is written only through a non-null num pointer; a null pointer is
-/// legal and skipped. The ESRCH exit writes 0.
+/// A null num pointer is legal: the caller passes 0 when it does not
+/// want the woken-thread count back, and nothing is stored. The ESRCH
+/// exit writes 0 through a non-null one.
 fn event_flag_count_write(
     num_ptr: u32,
     count: u32,

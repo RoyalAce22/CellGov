@@ -184,8 +184,8 @@ fn ppu_thread_join_unknown_target_returns_esrch() {
 
 #[test]
 fn ppu_thread_join_detached_target_returns_einval() {
-    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_join: a detached
-    // target is EINVAL; ESRCH is reserved for unknown ids.
+    // ESRCH is reserved for ids that name no thread or an
+    // already-reaped one.
     let mut host = Lv2Host::new();
     host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
     let child = host
@@ -210,8 +210,9 @@ fn ppu_thread_join_detached_target_returns_einval() {
 
 #[test]
 fn ppu_thread_join_finished_target_with_null_status_ptr_is_efault_without_write() {
-    // RPCS3 sys_ppu_thread.cpp sys_ppu_thread_join checks vptr after
-    // the join concludes and returns EFAULT instead of storing.
+    // The status pointer is checked after the join concludes: a null
+    // pointer is EFAULT instead of a store. That the join runs first
+    // is a CellGov choice, unestablished against the console.
     let mut host = Lv2Host::new();
     host.seed_primary_ppu_thread(UnitId::new(0), primary_attrs());
     let child = host
@@ -413,8 +414,6 @@ fn ppu_thread_create_bad_opd_via_param_returns_efault() {
 
 #[test]
 fn ppu_thread_create_null_entry_descriptor_is_efault() {
-    // param.entry_opd_ptr == 0: RPCS3 sys_ppu_thread.cpp
-    // _sys_ppu_thread_create rejects !param->entry with EFAULT.
     // Without the check, the zeroed arena at address 0 silently
     // supplies an all-zero OPD.
     let mut mem = cellgov_mem::GuestMemory::new(0x1_0000);
@@ -444,8 +443,8 @@ fn ppu_thread_create_null_entry_descriptor_is_efault() {
 
 #[test]
 fn ppu_thread_create_priority_above_3071_is_einval() {
-    // RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create: prio > 3071
-    // is EINVAL regardless of capability.
+    // 3071 is the lowest priority any process may assign; the
+    // ceiling does not move with capability.
     let mut host = Lv2Host::new();
     let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
     let result = host.dispatch(
@@ -470,8 +469,8 @@ fn ppu_thread_create_priority_above_3071_is_einval() {
 
 #[test]
 fn ppu_thread_create_negative_priority_is_einval_for_user_perm() {
-    // RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create: the floor is
-    // 0 without debug-or-root capability.
+    // 0 is the highest priority a process may assign, so it is also
+    // the floor without debug-or-root capability.
     let mut host = Lv2Host::new();
     let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
     let result = host.dispatch(
@@ -496,8 +495,8 @@ fn ppu_thread_create_negative_priority_is_einval_for_user_perm() {
 
 #[test]
 fn ppu_thread_create_negative_priority_floor_drops_to_minus_512_with_debug_or_root() {
-    // RPCS3 sys_ppu_thread.cpp _sys_ppu_thread_create: debug-or-root
-    // callers may go down to -512; -513 stays EINVAL.
+    // Debug-or-root callers may go down to -512; -513 stays EINVAL.
+    // The privileged widening below zero has no public anchor.
     let mut host = Lv2Host::new();
     host.set_control_flags1(0x4000_0000); // root -> debug_or_root
     let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
