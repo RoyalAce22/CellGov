@@ -95,9 +95,29 @@ fn install_iso_parses_output_and_force() {
     .map(|s| s.to_string())
     .collect();
     let a = parse_install_iso_args(&args).expect("parse");
-    assert_eq!(a.iso_path, PathBuf::from("x.iso"));
+    assert_eq!(a.path, PathBuf::from("x.iso"));
     assert_eq!(a.output_dir, PathBuf::from("/d"));
     assert!(a.force);
+}
+
+// `install-iso` and `install-update` share one parser, which takes the
+// missing-path refusal as a parameter; only a per-subcommand assertion
+// catches the two call sites being handed each other's error.
+#[test]
+fn install_iso_with_no_path_is_refused_by_its_own_name() {
+    let r = parse_install_iso_args(&["cellgov_install".into(), "install-iso".into()]);
+    assert!(matches!(r, Err(FirmwareCliError::MissingIsoPath)));
+}
+
+#[test]
+fn install_iso_defaults_its_output_to_the_vfs_root() {
+    let args: Vec<String> = ["cellgov_install", "install-iso", "x.iso"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let a = parse_install_iso_args(&args).expect("parse");
+    assert_eq!(a.output_dir, PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT));
+    assert!(!a.force);
 }
 
 #[test]

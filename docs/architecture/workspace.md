@@ -115,8 +115,8 @@ Five structural rules:
   the host clock and the process environment, so no guest-visible path
   reaches it.
 - `cellgov_install` is a lib+bin. The binary exposes the `install`,
-  `install-game`, `install-iso`, `uninstall`, `keys` and
-  `decrypt-self` subcommands; the library exposes the same PUP / SCE /
+  `install-game`, `install-iso`, `install-update`, `uninstall`, `keys`
+  and `decrypt-self` subcommands; the library exposes the same PUP / SCE /
   SELF / TAR primitives, the operator key-vault loader (`keys`), and
   the game installers, which report progress through
   `cellgov_terminal`'s sink trait; the binary attaches the renderer.

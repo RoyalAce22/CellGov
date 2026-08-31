@@ -54,12 +54,14 @@ fn main() {
         "install-game" => cmd_install_game(&args),
         #[cfg(feature = "decrypt")]
         "install-iso" => cmd_install_iso(&args),
+        #[cfg(feature = "decrypt")]
+        "install-update" => cmd_install_update(&args),
         "uninstall" => cmd_uninstall(&args),
         "keys" => cmd_keys(&args),
         #[cfg(feature = "decrypt")]
         "decrypt-self" => cmd_decrypt_self(&args),
         #[cfg(not(feature = "decrypt"))]
-        sub @ ("install" | "install-game" | "install-iso" | "decrypt-self") => {
+        sub @ ("install" | "install-game" | "install-iso" | "install-update" | "decrypt-self") => {
             eprintln!(
                 "{}",
                 FirmwareCliError::DecryptFeatureDisabled {
@@ -98,10 +100,18 @@ fn print_usage() {
         eprintln!("    default --output: vfs/ (at the current working directory)");
         eprintln!("    takes a decrypted dump of a disc you own; an encrypted image is refused");
         eprintln!("    extracts the disc tree to dev_bdvd/");
+        eprintln!("  cellgov_install install-update <PKG_PATH> [--output <dir>] [--force]");
+        eprintln!("    [--no-progress] [--no-color] [--quiet]: progress-bar overrides");
+        eprintln!("    default --output: vfs/ (at the current working directory)");
+        eprintln!(
+            "    takes a GD/HG update PKG; PARAM.SFO APP_VER, else VERSION, names the version"
+        );
+        eprintln!("    extracts to titles/<TITLE_ID>/updates/<APP_VER>/game/");
+        eprintln!("    --force: replace an already-installed version of this update");
     } else {
         eprintln!("  this build has no decrypt support: only `uninstall` and `keys` run.");
         eprintln!(
-            "    `install`, `install-game`, `install-iso` and `decrypt-self` are refused by name;"
+            "    `install`, `install-game`, `install-iso`, `install-update` and `decrypt-self` are refused by name;"
         );
         eprintln!("    rebuild with `--features decrypt` to get them.");
     }
@@ -141,7 +151,7 @@ struct InstallArgs {
 }
 
 /// `install`'s `--output` names the VFS root, the same root
-/// `install-game` and `install-iso` populate.
+/// `install-game`, `install-iso` and `install-update` populate.
 const DEFAULT_INSTALL_OUTPUT: &str = "vfs";
 
 /// Mount under the VFS root that holds the firmware image and its
@@ -160,6 +170,9 @@ enum FirmwareCliError {
     /// `install-iso` invoked without an ISO path.
     #[error("install-iso requires an ISO path")]
     MissingIsoPath,
+    /// `install-update` invoked without an update-PKG path.
+    #[error("install-update requires an update PKG path")]
+    MissingUpdatePkgPath,
     /// `uninstall` invoked without a title-id.
     #[error("uninstall requires a title-id")]
     MissingTitleId,
@@ -923,19 +936,25 @@ fn cmd_install_game(args: &[String]) {
     );
 }
 
-/// Parsed `install-iso` subcommand arguments.
-struct InstallIsoArgs {
-    iso_path: PathBuf,
+/// Parsed arguments of a subcommand taking one container path and the
+/// shared output / force / progress-render flags.
+struct ContainerArgs {
+    path: PathBuf,
     output_dir: PathBuf,
     force: bool,
     render: RenderFlags,
 }
 
-fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCliError> {
+/// Parse `<PATH> [--output <dir>] [--force]` plus the render flags,
+/// reporting `missing_path` when the positional is absent.
+fn parse_container_args(
+    args: &[String],
+    missing_path: FirmwareCliError,
+) -> Result<ContainerArgs, FirmwareCliError> {
     if args.len() < 3 {
-        return Err(FirmwareCliError::MissingIsoPath);
+        return Err(missing_path);
     }
-    let iso_path = PathBuf::from(&args[2]);
+    let path = PathBuf::from(&args[2]);
     let mut output_dir: Option<PathBuf> = None;
     let mut force = false;
     let mut render = RenderFlags::default();
@@ -955,12 +974,20 @@ fn parse_install_iso_args(args: &[String]) -> Result<InstallIsoArgs, FirmwareCli
         }
         i += 1;
     }
-    Ok(InstallIsoArgs {
-        iso_path,
+    Ok(ContainerArgs {
+        path,
         output_dir: output_dir.unwrap_or_else(|| PathBuf::from(DEFAULT_GAME_INSTALL_OUTPUT)),
         force,
         render,
     })
+}
+
+fn parse_install_iso_args(args: &[String]) -> Result<ContainerArgs, FirmwareCliError> {
+    parse_container_args(args, FirmwareCliError::MissingIsoPath)
+}
+
+fn parse_install_update_args(args: &[String]) -> Result<ContainerArgs, FirmwareCliError> {
+    parse_container_args(args, FirmwareCliError::MissingUpdatePkgPath)
 }
 
 #[cfg(feature = "decrypt")]
@@ -975,8 +1002,8 @@ fn cmd_install_iso(args: &[String]) {
     // host RAM, and the install only ever reads it (twice, both
     // sequentially -- the carve and the source hash), so pages stream
     // in and are evicted rather than committed all at once.
-    let iso_data = filebuffer::FileBuffer::open(&parsed.iso_path).unwrap_or_else(|e| {
-        eprintln!("failed to map {}: {e}", parsed.iso_path.display());
+    let iso_data = filebuffer::FileBuffer::open(&parsed.path).unwrap_or_else(|e| {
+        eprintln!("failed to map {}: {e}", parsed.path.display());
         std::process::exit(1);
     });
     // Vault before install: a missing one should not cost a full image
@@ -988,14 +1015,14 @@ fn cmd_install_iso(args: &[String]) {
 
     println!(
         "cellgov_install: installing disc from {} ({:.1} MB)",
-        parsed.iso_path.display(),
+        parsed.path.display(),
         iso_data.len() as f64 / (1024.0 * 1024.0)
     );
 
     let bar = ProgressBar::start(
         parsed.render.caps(),
         &INSTALL_TASK,
-        &container_label(&parsed.iso_path),
+        &container_label(&parsed.path),
     );
     let reporter = bar.sink();
     let outcome = game_install::install_iso(
@@ -1028,6 +1055,76 @@ fn cmd_install_iso(args: &[String]) {
         outcome.game_dir.display(),
     );
     println!("  record {}", outcome.record_path.display());
+}
+
+#[cfg(feature = "decrypt")]
+fn cmd_install_update(args: &[String]) {
+    let parsed = parse_install_update_args(args).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        print_usage();
+        std::process::exit(1);
+    });
+
+    let pkg_data = filebuffer::FileBuffer::open(&parsed.path).unwrap_or_else(|e| {
+        eprintln!("failed to map {}: {e}", parsed.path.display());
+        std::process::exit(1);
+    });
+    let keys = KeyVault::load_for_vfs(&parsed.output_dir).unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
+
+    println!(
+        "cellgov_install: installing update from {} ({:.1} MB)",
+        parsed.path.display(),
+        pkg_data.len() as f64 / (1024.0 * 1024.0)
+    );
+
+    let bar = ProgressBar::start(
+        parsed.render.caps(),
+        &INSTALL_TASK,
+        &container_label(&parsed.path),
+    );
+    let reporter = bar.sink();
+    let outcome = game_install::install_update_pkg(
+        &pkg_data,
+        &keys,
+        &parsed.output_dir,
+        InstallOptions {
+            force: parsed.force,
+            progress: &*reporter,
+        },
+    );
+    let outcome = match outcome {
+        Ok(o) => {
+            bar.finish();
+            o
+        }
+        Err(e) => {
+            bar.abort();
+            eprintln!("install-update failed: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    println!(
+        "  title {} (content {}) update {}: {} files -> {}",
+        outcome.title_id,
+        outcome.content_id,
+        outcome.version,
+        outcome.file_count,
+        outcome.update_dir.display(),
+    );
+    println!("  record {}", outcome.record_path.display());
+    if outcome.replaced {
+        println!("  --force replaced the version that was installed there");
+    }
+    if outcome.orphan {
+        eprintln!(
+            "  no base is installed for {}; this update patches nothing until one is",
+            outcome.title_id
+        );
+    }
 }
 
 /// Parsed `uninstall` subcommand arguments.
@@ -1527,3 +1624,7 @@ mod scratch_dir;
 #[cfg(test)]
 #[path = "tests/main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/main_update_tests.rs"]
+mod update_tests;

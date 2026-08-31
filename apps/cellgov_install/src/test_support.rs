@@ -1,11 +1,53 @@
 //! Synthetic-fixture builders shared across the crate's unit tests:
-//! a synthetic key vault, a minimal PARAM.SFO emitter, and a
-//! retail-PKG emitter. Compiled only under `cfg(test)`; the PKG
-//! emitter encrypts and so rides with the `decrypt` feature.
+//! a synthetic key vault, a minimal PARAM.SFO emitter, a retail-PKG
+//! emitter, and the progress sinks the install tests assert against.
+//! Compiled only under `cfg(test)`; the PKG emitter encrypts and so
+//! rides with the `decrypt` feature.
 
 use std::path::Path;
 
 use crate::keys::KeyVault;
+use crate::progress::{Phase, ProgressSink};
+
+/// Records the phase sequence and the completion flag.
+#[derive(Default)]
+pub struct RecordingReporter {
+    phases: std::sync::Mutex<Vec<u8>>,
+    finished: std::sync::atomic::AtomicBool,
+}
+
+impl RecordingReporter {
+    /// The phase codes reported so far, in order.
+    pub fn phases(&self) -> Vec<u8> {
+        self.phases.lock().unwrap().clone()
+    }
+
+    /// Whether the install reported completion.
+    #[cfg_attr(not(feature = "decrypt"), allow(dead_code))]
+    pub fn finished(&self) -> bool {
+        self.finished.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl ProgressSink for RecordingReporter {
+    fn phase(&self, code: u8) {
+        self.phases.lock().unwrap().push(code);
+    }
+    fn totals(&self, _files: usize, _bytes: u64) {}
+    fn preset_done(&self, _amount: u64) {}
+    fn item_started(&self, _path: &str) {}
+    fn advanced(&self, _delta: u64) {}
+    fn item_finished(&self) {}
+    fn finished(&self) {
+        self.finished
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The codes a [`RecordingReporter`] stores for `phases`.
+pub fn codes(phases: &[Phase]) -> Vec<u8> {
+    phases.iter().map(|p| p.code()).collect()
+}
 
 /// A vault of made-up values in every slot, one keyset per class at
 /// revision 0x0001 and an SCE package keyset; enough for every
