@@ -389,9 +389,10 @@ impl Lv2Host {
     /// (`cellgov_ppu::loader::find_sys_process_param`) and plumbed
     /// through via [`Lv2Host::set_sdk_version`]. Callers that never
     /// invoke the setter retain `0xFFFFFFFF`
-    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`) -- the value a
-    /// process param carries when it declares no SDK version, which
-    /// is what PSL1GHT-built homebrew leaves behind.
+    /// (`SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN`), the value a process
+    /// param carries when it declares no SDK version. PSL1GHT-built
+    /// homebrew leaves that word behind, and a console answers it for
+    /// such a title in `tests/ps3autotests/tests/lv2/sys_process`.
     pub(in crate::host) fn dispatch_process_get_sdk_version(
         &self,
         version_out_ptr: u32,
@@ -412,11 +413,16 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_process_get_paramsfo`: writes the 64-byte SFO blob real
-    /// PS3 returns for PSL1GHT homebrew with no PARAM.SFO.
+    /// `sys_process_get_paramsfo`: writes the 64-byte SFO blob a PS3
+    /// returns for homebrew with no PARAM.SFO.
     ///
-    /// Layout: version=1@0, parental_level=4@23, attribute=1@31,
-    /// rest zero.
+    /// `tests/ps3autotests/tests/lv2/sys_process` prints the whole
+    /// buffer byte by byte for such a title:
+    ///
+    /// - `version` = 1 at offset 0
+    /// - `parental_level` = 4 at offset 23
+    /// - `attribute` = 1 at offset 31
+    /// - every other byte zero
     pub(in crate::host) fn dispatch_process_get_paramsfo(
         &self,
         buf_ptr: u32,

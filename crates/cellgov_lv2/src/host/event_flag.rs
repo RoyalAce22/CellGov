@@ -327,7 +327,11 @@ impl Lv2Host {
 /// The observed-pattern write for a satisfied wait/trywait.
 ///
 /// A null result pointer is legal: the caller passes 0 when it does
-/// not want the pattern back, and nothing is stored.
+/// not want the pattern back, and nothing is stored. The trywait
+/// helper in `tests/ps3autotests/tests/lv2/sys_event_flag` passes 0
+/// and still returns CELL_OK on the satisfied call. The wait helper
+/// there passes 0 too, but its call parks and a cancel wakes it, so
+/// it never reaches this write.
 fn event_flag_result_write(
     result_ptr: u32,
     observed: u64,

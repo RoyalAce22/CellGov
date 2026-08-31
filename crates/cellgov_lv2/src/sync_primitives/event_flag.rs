@@ -315,6 +315,10 @@ impl EventFlagTable {
     /// value with the caller's pattern, so a 1 bit keeps and a 0 bit
     /// clears.
     ///
+    /// The hardware trace settles that reading: in
+    /// `tests/ps3autotests/tests/lv2/sys_event_flag` a flag holding
+    /// `0x1f`, cleared with `0xaaaaaaaaaaaaaaaa`, reads back `0x0a`.
+    ///
     /// Returns `false` if `id` is unknown.
     pub fn clear_bits(&mut self, id: u32, mask: u64) -> bool {
         let Some(entry) = self.entries.get_mut(&id) else {

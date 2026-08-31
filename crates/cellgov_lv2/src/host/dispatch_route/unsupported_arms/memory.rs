@@ -538,9 +538,14 @@ impl Lv2Host {
     /// A key already registered answers `CELL_EEXIST` where 332 would
     /// attach; callers probe a key range on that answer. Every key
     /// registers, including zero and `SYS_MMAPPER_NO_SHM_KEY`, so each
-    /// collides with itself on the next call. Firmware publishes a
-    /// wrapper for 339 but never issues one from within the module
-    /// set, so no firmware witness fixes the exclusive-create rule.
+    /// collides with itself on the next call. Eleven installed modules
+    /// issue 339 across fourteen sites -- twelve inline calls plus two
+    /// exported wrappers -- so firmware does exercise the call. Those
+    /// sites fix the argument shape: the ones that build the word
+    /// inline pass the 64 KiB granularity flag in r5, one or two
+    /// entries in r7, and an out-pointer in r8. None of them fixes
+    /// what the kernel answers for a key it already holds, so the
+    /// exclusive-create rule is CellGov's.
     ///
     /// # Errors
     ///

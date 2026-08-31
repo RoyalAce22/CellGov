@@ -254,7 +254,10 @@ impl SemaphoreTable {
     ///
     /// LV2 consults the post-increment view atomically: when
     /// `count + slots_after_wake > max` nothing is woken and the
-    /// whole call fails.
+    /// whole call fails. The hardware trace in
+    /// `tests/ps3autotests/tests/lv2/sys_semaphore` posts 30 to a
+    /// `(0, 2)` semaphore that holds one waiter, and leaves that
+    /// waiter parked.
     pub fn post_and_wake_n(&mut self, id: u32, count: u32) -> SemaphorePostN {
         let Some(entry) = self.entries.get_mut(&id) else {
             return SemaphorePostN::Unknown;

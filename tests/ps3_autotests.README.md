@@ -25,17 +25,22 @@ without the corpus does not build it and CI stays green without
 skipping anything:
 
 ```bash
-cargo test -p cellgov_cli --features ps3autotests --test ps3autotests
+cargo test -p cellgov_cli --features ps3autotests,decrypt --test ps3autotests
 ```
 
 Enabling the feature declares the corpus present: a missing clone is a
 hard failure naming the path, never a silent pass. There is no env var
 to set.
 
-Every case is additionally `#[ignore]`d on an unrelated blocker -- the
-synthetic ELFs import `sysPrxForUser` NIDs that no HLE module binds --
-so they report as ignored until that is resolved. Each test's ignore
-reason states the condition.
+These ELFs import `sysPrxForUser` NIDs that no HLE module binds, so the
+harness boots them against the installed firmware and `decrypt` is
+required to open it. It finds the newest `vfs/firmware/<version>/`
+tree, falls back to `vfs/dev_flash/`, and fails naming the path when
+neither exists.
+
+Cases that still diverge from the console capture stay `#[ignore]`d,
+one reason each, naming what the boot does instead and the condition
+for un-ignoring.
 
 ## Line-ending caveat
 

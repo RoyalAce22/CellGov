@@ -78,7 +78,10 @@ impl Runtime {
                 }) => {
                     // The kernel stores the observed pattern only
                     // through a non-null result pointer; a waiter that
-                    // passed NULL wakes with r3 alone.
+                    // passed NULL wakes with r3 alone. A console
+                    // traces this in
+                    // tests/ps3autotests/tests/lv2/sys_event_flag,
+                    // whose wait helpers pass 0 and complete cleanly.
                     if result_ptr != 0 {
                         self.commit_bytes_at(
                             waiter_space,

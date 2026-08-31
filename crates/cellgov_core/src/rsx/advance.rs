@@ -273,3 +273,7 @@ pub fn rsx_advance(
 #[cfg(test)]
 #[path = "tests/advance_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/hardware_trace_tests.rs"]
+mod hardware_trace_tests;

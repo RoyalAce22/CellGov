@@ -155,10 +155,12 @@ every process. Fault and stack-walk diagnostics read every byte
 through the faulting unit's own space.
 
 Title boot exercises the firmware modules end-to-end, and the
-firmware-set boot is unconditional. The synthetic harness
-`ps3autotests` runs with `CELLGOV_NO_FIRMWARE_DIR=1`; those ELFs
-import `sysPrxForUser` NIDs, so the suppressed firmware set, not
-an absence of imports, forces the trampoline path.
+firmware-set boot is unconditional. The synthetic autotest ELFs go
+the same way: they import `sysPrxForUser` NIDs no HLE module binds,
+so their harness resolves an installed firmware set and passes it
+explicitly. Without one every such import lands on the
+unresolved-import trampoline, which is a different trajectory
+rather than a slower one, so the harness refuses to run instead.
 
 Each fault driver is a named NID or syscall number: an
 unresolved import faults through the trampoline of step 3 as

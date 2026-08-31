@@ -50,6 +50,10 @@ fn rsx_dma_control_total_size() {
     assert_eq!(RSX_DMA_CONTROL_SIZE, 0x58);
 }
 
+/// `put` and `ref` are hardware-traced. In
+/// `tests/ps3autotests/tests/rsx/methods_pfifo_puller` a console
+/// submits through the control block at `+0x40` and reads the
+/// reference word back at `+0x48`. That fixture never touches `get`.
 #[test]
 fn rsx_dma_control_put_get_ref_offsets() {
     assert_eq!(offset_of!(RsxDmaControl, put), 0x40);
@@ -136,6 +140,15 @@ fn rsx_context_new_is_pristine() {
 /// land. The kernel that picks them is not in the readable firmware
 /// set, and libgcm takes the pointers as given. A console probe of
 /// the syscall's OUT values would settle them.
+///
+/// `tests/ps3autotests/tests/rsx/methods_pfifo_puller` does not settle
+/// them either. Its windows are absolute lpar addresses its author
+/// hardcoded, under a standing TODO to read them back instead. These
+/// constants are offsets from a context base the model picks. The
+/// fixture also never reads or writes the driver-info window it
+/// declares -- only its DMA-control and reports windows produce
+/// console output -- so it does not pin that window even in its own
+/// address space.
 #[test]
 fn reservation_offsets_match_rpcs3_layout() {
     assert_eq!(region::DRIVER_INFO_OFFSET, 0x0010_0000);

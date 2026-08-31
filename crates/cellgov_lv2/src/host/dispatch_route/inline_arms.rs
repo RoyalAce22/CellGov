@@ -236,8 +236,10 @@ impl Lv2Host {
     ///   [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
     ///   spawned children serve the retail-application fallback.
     /// - Any other `pkg_id` answers SS-domain status `0x8001_051D`.
-    ///   No firmware caller reaches that arm, and the status itself
-    ///   is unanchored.
+    ///   All fourteen syscall-871 sites in the installed firmware --
+    ///   eight modules, each site an immediate load -- put 1, 2 or 3
+    ///   in `r3`. Nothing in that set reaches this arm, and the status
+    ///   itself is unanchored.
     pub(super) fn dispatch_ss_access_control_engine(
         &mut self,
         pkg_id: u64,

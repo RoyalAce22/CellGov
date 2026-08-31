@@ -7,6 +7,11 @@
 //! and gitignored, so opting in declares it present and its absence is
 //! a hard error rather than a silent pass.
 //!
+//! The boot cases need a second corpus the feature does not name.
+//! These ELFs import sysPrxForUser NIDs no HLE module binds, so
+//! `firmware_dir` resolves an installed firmware set. A run without
+//! one dies naming it.
+//!
 //! Cross-module contract: assumes `sys_tty_write` HLE captures
 //! byte-identical output to a real PS3 TTY. A capture-side
 //! truncation cannot be detected from inside this harness.
@@ -117,44 +122,46 @@ struct Case {
     expected_steps: Option<usize>,
 }
 
+// Reference counts come from firmware-set boots, so each is tied to
+// whichever firmware `firmware_dir()` resolves. A stale count only
+// warns in `report_verdict`; it never fails a run.
 const CPU_BASIC: Case = Case {
     rel_dir: "cpu/basic",
     stem: "basic",
     max_steps: 200_000,
-    expected_steps: Some(83),
+    expected_steps: Some(53),
 };
 
 const CPU_PPU_BRANCH: Case = Case {
     rel_dir: "cpu/ppu_branch",
     stem: "ppu_branch",
     max_steps: 50_000_000,
-    expected_steps: Some(52_622),
+    expected_steps: Some(31_791),
 };
 
 const LV2_SYS_EVENT_FLAG: Case = Case {
     rel_dir: "lv2/sys_event_flag",
     stem: "sys_event_flag",
     max_steps: 10_000_000,
-    expected_steps: Some(1_494),
+    expected_steps: Some(745),
 };
 
 const LV2_SYS_PROCESS: Case = Case {
     rel_dir: "lv2/sys_process",
     stem: "sys_process",
     max_steps: 10_000_000,
-    expected_steps: Some(3_686),
+    expected_steps: Some(2_180),
 };
 
 const LV2_SYS_SEMAPHORE: Case = Case {
     rel_dir: "lv2/sys_semaphore",
     stem: "sys_semaphore",
     max_steps: 10_000_000,
-    expected_steps: Some(1_167),
+    expected_steps: Some(930),
 };
 
-/// Every case the boot tests below name. They are all `#[ignore]`
-/// pending an HLE binding for the sysPrxForUser NIDs these ELFs
-/// import, so this table is what the corpus gate walks.
+/// Every case the boot tests below name, including the `#[ignore]`d
+/// ones, so the corpus gate walks the whole set.
 const CASES: &[Case] = &[
     CPU_BASIC,
     CPU_PPU_BRANCH,
@@ -182,6 +189,107 @@ fn workspace_root() -> PathBuf {
             );
         }
     }
+}
+
+/// Why `dir` cannot serve as the firmware set, or `None` when it can.
+///
+/// `--firmware-dir` only checks that its argument is a directory. An
+/// empty one loads no PRX, and `load_firmware_set` then installs the
+/// unresolved-import trampolines without complaint. A directory that
+/// holds at least one `.sprx` separates the two cases.
+fn firmware_set_reject_reason(dir: &Path) -> Option<String> {
+    if !dir.is_dir() {
+        return Some(format!("{}: absent", dir.display()));
+    }
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) => return Some(format!("{}: unreadable ({e})", dir.display())),
+    };
+    let holds_a_module = entries.filter_map(Result::ok).any(|e| {
+        e.path()
+            .extension()
+            .and_then(|x| x.to_str())
+            .is_some_and(|x| x.eq_ignore_ascii_case("sprx"))
+    });
+    if holds_a_module {
+        None
+    } else {
+        Some(format!("{}: holds no .sprx", dir.display()))
+    }
+}
+
+/// The installed `sys/external` firmware directory.
+///
+/// The harness passes this path to `run-game` explicitly, so a move in
+/// that command's default cannot change which modules boot here.
+/// `vfs/dev_flash/sys/external` comes first: it is the default the
+/// boot pipeline documents, so this suite boots the same modules as
+/// every other tool. The versioned store under
+/// `vfs/firmware/<version>/` is the fallback, newest first. A name
+/// that starts with `.` is the installer's staging or tombstone
+/// residue, not a version, so it is never a candidate.
+///
+/// # Panics
+///
+/// Panics when no candidate holds a firmware set.
+///
+/// These ELFs import sysPrxForUser NIDs no HLE module binds. A boot
+/// without firmware compares an unresolved-import trajectory against
+/// console output, and reports a divergence that is really a missing
+/// corpus.
+fn firmware_dir() -> PathBuf {
+    let vfs = workspace_root().join("vfs");
+    let live = vfs.join("dev_flash").join("sys").join("external");
+    let mut candidates: Vec<PathBuf> = vec![live];
+    let store = vfs.join("firmware");
+    match std::fs::read_dir(&store) {
+        Ok(entries) => {
+            let mut versions: Vec<PathBuf> = entries
+                .filter_map(Result::ok)
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.is_dir()
+                        && !p
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with('.'))
+                })
+                .collect();
+            // Store version names are fixed-width `<major>.<minor>`,
+            // so byte order and numeric order agree here.
+            versions.sort();
+            candidates.extend(
+                versions
+                    .into_iter()
+                    .rev()
+                    .map(|v| v.join("dev_flash").join("sys").join("external")),
+            );
+        }
+        // A machine that installed straight into the live mount has no
+        // store, so a missing one is ordinary. Any other failure hides
+        // candidates.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => eprintln!(
+            "ps3autotests: firmware store {} is unreadable ({e}); only the live \
+             dev_flash mount is a candidate",
+            store.display(),
+        ),
+    }
+    let mut rejected: Vec<String> = Vec::new();
+    for candidate in candidates {
+        match firmware_set_reject_reason(&candidate) {
+            None => return candidate,
+            Some(reason) => rejected.push(reason),
+        }
+    }
+    panic!(
+        "ps3autotests: no installed firmware under {} -- these ELFs import \
+         sysPrxForUser NIDs that only the firmware PRX resolves, so install \
+         firmware (the corpus the `firmware-corpus` feature declares) before \
+         running this suite. Candidates tried: {}",
+        vfs.display(),
+        rejected.join("; "),
+    )
 }
 
 fn ps3autotests_root() -> PathBuf {
@@ -287,13 +395,13 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
             .arg(&observation_path)
             .arg(&elf_path)
             .current_dir(workspace_root())
-            // These ELFs do import firmware namespaces --
-            // `cellgov_cli dump-prx-imports` on cpu/basic lists 12
-            // sysPrxForUser NIDs. The suppression keeps the boot off
-            // the firmware set so every such slot lands on the
-            // unresolved-import trampoline, the state the `#[ignore]`
-            // reasons below describe.
-            .env("CELLGOV_NO_FIRMWARE_DIR", "1")
+            // These ELFs import firmware namespaces: `cellgov_cli
+            // dump-prx-imports` on cpu/basic lists 12 sysPrxForUser
+            // NIDs. No HLE module binds them, so the boot must reach
+            // the installed firmware for the real PRX to fill those
+            // GOT slots.
+            .arg("--firmware-dir")
+            .arg(firmware_dir())
             .output()
             .expect("spawn cellgov_cli run-game")
     };
@@ -485,11 +593,10 @@ fn first_diff_offset(a: &[u8], b: &[u8]) -> String {
     }
 }
 
-/// Every boot test below is `#[ignore]`, so without this gate
-/// `--features ps3autotests` compiles a suite that asserts nothing: an
-/// absent, half-cloned, or LFS-stubbed corpus reports green. The
-/// feature declares the tree present, so a case whose ELF or
-/// `.expected` is missing or empty is a hard error here.
+/// Three of the five boot tests below are `#[ignore]`, so this gate is
+/// what holds their fixtures. Without it, a case could lose its ELF or
+/// `.expected` and nothing would say so. The feature declares the tree
+/// present, so a missing or empty file is a hard error here.
 #[test]
 fn every_declared_case_names_a_present_non_empty_fixture_pair() {
     assert!(!CASES.is_empty(), "the case table is empty");
@@ -606,83 +713,52 @@ fn a_clean_exit_whose_tty_differs_is_a_divergence() {
 }
 
 #[test]
-#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
-            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
-            identified by name in cellgov_ps3_abi::nid but no HLE module in \
-            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
-            and patch_got_atomic therefore does not bind their GOT slots. The harness \
-            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
-            gap either, and guest calls land at dispatch.unresolved_import returning \
-            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
-            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
-            synthetic boots."]
 fn cpu_basic() {
     run_case(&CPU_BASIC);
 }
 
 #[test]
-#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
-            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
-            identified by name in cellgov_ps3_abi::nid but no HLE module in \
-            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
-            and patch_got_atomic therefore does not bind their GOT slots. The harness \
-            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
-            gap either, and guest calls land at dispatch.unresolved_import returning \
-            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
-            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
-            synthetic boots."]
+#[ignore = "Known divergence: the run reaches PROCESS_EXIT(0) at step 31791 and \
+            produces no TTY at all, against 41490 bytes on the console. The boot \
+            reports syscall 988 unhandled -- a call eleven installed modules \
+            issue, liblv2.sprx among them -- so the guest computes the branch \
+            results and never reports them. Un-ignore when the capture is \
+            non-empty."]
 fn cpu_ppu_branch() {
     run_case(&CPU_PPU_BRANCH);
 }
 
 #[test]
-#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
-            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
-            identified by name in cellgov_ps3_abi::nid but no HLE module in \
-            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
-            and patch_got_atomic therefore does not bind their GOT slots. The harness \
-            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
-            gap either, and guest calls land at dispatch.unresolved_import returning \
-            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
-            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
-            synthetic boots."]
+#[ignore = "Known divergence: the run reproduces the console's error ladder \
+            line for line, then deadlocks at the master/worker section. The \
+            fixture creates the master and its five workers with \
+            SYS_PPU_THREAD_CREATE_JOINABLE, and the boot reports \
+            dispatch.ppu_thread_create_unmodeled_flags, so CellGov drops the \
+            flag. The fixture joins only the master, never the workers, so \
+            which dropped flag stalls the section is not yet pinned. Tracked \
+            on the thread-create flag gap; un-ignore when the boot reaches \
+            'Master: Exiting.'"]
 fn lv2_sys_event_flag() {
     run_case(&LV2_SYS_EVENT_FLAG);
 }
 
 #[test]
-#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
-            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
-            identified by name in cellgov_ps3_abi::nid but no HLE module in \
-            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
-            and patch_got_atomic therefore does not bind their GOT slots. The harness \
-            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
-            gap either, and guest calls land at dispatch.unresolved_import returning \
-            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
-            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
-            synthetic boots."]
+#[ignore = "Known divergence, one cell wide: the SYS_LWCOND_OBJECT column reads \
+            0 where the console reads 1. Syscall 111 has no dispatch handler, \
+            so nothing increments the lwcond counter. Every other byte of the \
+            capture matches. Tracked as the lwcond object-count gap; un-ignore \
+            when the count moves."]
 fn lv2_sys_process() {
     run_case(&LV2_SYS_PROCESS);
 }
 
 #[test]
-#[ignore = "Synthetic ELFs import sysPrxForUser/sys_fs NIDs (e.g. \
-            sysPrxForUser::sys_initialize_tls at NID 0x744680a2). These NIDs are \
-            identified by name in cellgov_ps3_abi::nid but no HLE module in \
-            cellgov_lv2::host registers them as OWNED_NIDS with a dispatch binding, \
-            and patch_got_atomic therefore does not bind their GOT slots. The harness \
-            runs with CELLGOV_NO_FIRMWARE_DIR=1 so the firmware-side PRX can't fill the \
-            gap either, and guest calls land at dispatch.unresolved_import returning \
-            CELL_EINVAL. Un-ignore once a sysPrxForUser HLE shim binds the autotest \
-            NIDs (sys_initialize_tls and friends) OR the harness loads firmware for \
-            synthetic boots."]
 fn lv2_sys_semaphore() {
     run_case(&LV2_SYS_SEMAPHORE);
 }
 
-/// Needs neither a bound import nor a converging trajectory: two boots
-/// agreeing is the whole claim, so the fault this ELF currently takes
-/// is itself what is held stable.
+/// The whole claim is that two boots agree, so this test holds
+/// whatever trajectory the ELF takes, converging or not.
 #[test]
 fn two_boots_of_cpu_basic_produce_the_same_observation() {
     let case = Case {

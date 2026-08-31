@@ -25,7 +25,11 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // EFAULT for NULL id/attr precedes bounds checks (real LV2 order).
+        // The order of the pointer gates against the bounds gates is
+        // unestablished. The hardware trace in
+        // tests/ps3autotests/tests/lv2/sys_semaphore presents a null
+        // pointer and an out-of-range bound only one at a time, so
+        // this order is CellGov's.
         if id_ptr == 0 || attr_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
@@ -40,7 +44,10 @@ impl Lv2Host {
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
-        // `max == 0` is invalid (real LV2 rejects an unacquirable semaphore).
+        // The hardware trace in
+        // tests/ps3autotests/tests/lv2/sys_semaphore covers all four
+        // refusals, `max == 0` among them: LV2 refuses a semaphore
+        // that nothing can ever acquire.
         if max <= 0 || initial < 0 || initial > max {
             return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
         }
@@ -120,7 +127,11 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // EFAULT for NULL out precedes the id lookup (real LV2 order).
+        // This order is CellGov's: the trace never presents both
+        // faults at once. It answers EFAULT for a null out-pointer on
+        // a live id, and ESRCH for a stale id with a good pointer.
+        // The post arm's order is the reverse, and there the trace
+        // does settle it.
         if out_ptr == 0 {
             return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
         }
@@ -135,10 +146,16 @@ impl Lv2Host {
         // Error order: id lookup, then val<=0, then overflow-vs-max.
         // The hardware trace in
         // tests/ps3autotests/tests/lv2/sys_semaphore posts val 0 to a
-        // stale id and gets ESRCH, not the EINVAL this arm would
-        // otherwise raise. The id lookup therefore runs first. The
-        // overflow check folds in waiters: post(N) wakes up to N
-        // waiters and only the leftover counts toward `max`.
+        // stale id and gets ESRCH, so this arm must answer ESRCH
+        // there too. That constrains CellGov without settling the
+        // kernel's own gate order. The documented refusal is a
+        // negative count, so a zero count may be legal, with no gate
+        // at all. The trace never presents two faults at once.
+        // Refusing zero is CellGov's choice.
+        //
+        // The overflow check folds in waiters: post(N) wakes up to N
+        // waiters and only the leftover counts toward `max`. The
+        // trace does settle that half -- see `post_and_wake_n`.
         let Some(entry) = self.state.semaphores.lookup(id) else {
             return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
         };

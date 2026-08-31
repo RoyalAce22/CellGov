@@ -181,7 +181,7 @@ pub enum Lv2Request {
         /// In: timeout in microseconds.
         timeout: u64,
     },
-    /// Only `val == 1` is accepted by the handler.
+    /// `sys_semaphore_post`.
     SemaphorePost {
         /// In: semaphore id.
         id: u32,
