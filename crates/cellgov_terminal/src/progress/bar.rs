@@ -1,0 +1,419 @@
+//! The live display: a render thread that owns stderr, and the
+//! teardown paths that leave the screen sane however the run ends.
+
+use super::frame::{compose_frame, osc_progress, plain_line, FrameCtx};
+use super::state::ProgressState;
+use super::task::Task;
+use crate::caps::{RenderMode, TermCaps};
+use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
+
+/// EWMA time constant for the rate, in seconds.
+const RATE_TAU_SECS: f64 = 2.0;
+/// Render tick. 10 Hz: comfortably under the 20 Hz convention ceiling,
+/// invisible as latency.
+const TICK: Duration = Duration::from_millis(100);
+/// How long the panic hook waits for the render thread to stop before
+/// restoring the terminal anyway. Long enough for a thread mid-tick,
+/// short enough not to stall a crash.
+const PANIC_DRAIN: Duration = Duration::from_millis(250);
+
+/// Stop/exit handshake between a bar and its render thread.
+#[derive(Debug, Default)]
+struct StopFlags {
+    /// The bar asked the render thread to stop.
+    stop: bool,
+    /// The render thread has left its loop and written its last byte.
+    exited: bool,
+}
+
+/// The [`StopFlags`] handshake, shared with the panic hook's registry.
+#[derive(Debug, Default)]
+struct BarStop {
+    flags: Mutex<StopFlags>,
+    cv: Condvar,
+}
+
+impl BarStop {
+    fn lock(&self) -> std::sync::MutexGuard<'_, StopFlags> {
+        self.flags
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn request_stop(&self) {
+        self.lock().stop = true;
+        self.cv.notify_all();
+    }
+
+    /// Sleep one tick, or until a stop is requested. Reports whether
+    /// this is the last tick.
+    fn wait_tick(&self) -> bool {
+        let mut guard = self.lock();
+        // A notify that lands before the wait is not queued (std
+        // Condvar), so a stop signalled before this thread reaches its
+        // first tick would otherwise cost a full extra tick.
+        if !guard.stop {
+            guard = self
+                .cv
+                .wait_timeout(guard, TICK)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+        guard.stop
+    }
+
+    fn mark_exited(&self) {
+        self.lock().exited = true;
+        self.cv.notify_all();
+    }
+
+    /// Wait up to `timeout` for the render thread to leave its loop.
+    ///
+    /// Runs inside the panic hook, where a second panic aborts the
+    /// process, so the deadline is elapsed-time arithmetic: `Instant +
+    /// Duration` panics on an unrepresentable sum.
+    fn wait_for_exit(&self, timeout: Duration) {
+        let mut guard = self.lock();
+        let start = Instant::now();
+        while !guard.exited {
+            let left = timeout.saturating_sub(start.elapsed());
+            if left.is_zero() {
+                break;
+            }
+            guard = self
+                .cv
+                .wait_timeout(guard, left)
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .0;
+        }
+    }
+}
+
+/// The terminal owes a restore: an `Ansi` bar hid the cursor and set a
+/// taskbar state.
+///
+/// Whoever swaps it false claims the restore. The panic hook and the
+/// [`Drop`] that follows it both run on the way out of a panicking
+/// command; only one of them may write.
+static BAR_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The live bar's handshake, for the panic hook to reach.
+///
+/// One live bar per process, so one slot. Nothing that can panic runs
+/// while this lock is held -- a panic there would deadlock the hook
+/// against itself.
+static LIVE_BAR: Mutex<Option<Arc<BarStop>>> = Mutex::new(None);
+
+fn live_bar_slot() -> std::sync::MutexGuard<'static, Option<Arc<BarStop>>> {
+    LIVE_BAR
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Install the cursor/OSC-restoring panic hook once, chained in front
+/// of the previous hook so the panic message lands on a sane screen.
+fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let prev = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            quiesce_for_panic();
+            prev(info);
+        }));
+    });
+}
+
+/// Stop the render thread and restore the terminal, before the
+/// previous hook prints.
+///
+/// The hook waits for the thread to leave its loop, so a tick in
+/// flight cannot cursor-up over the panic message. The wait is
+/// bounded: the panicking thread may be the render thread itself.
+fn quiesce_for_panic() {
+    let live = live_bar_slot().take();
+    if let Some(stop) = live {
+        stop.request_stop();
+        stop.wait_for_exit(PANIC_DRAIN);
+    }
+    if BAR_ACTIVE.swap(false, Ordering::Relaxed) {
+        let mut err = std::io::stderr();
+        let _ = err.write_all(b"\x1b[?25h\x1b]9;4;0\x07\n");
+        let _ = err.flush();
+    }
+}
+
+/// The live progress display: owns the render thread and stderr while
+/// running.
+///
+/// Known limitation: a hard Ctrl-C kills the process without
+/// unwinding, which can leave the cursor hidden and a stale taskbar
+/// state.
+pub struct ProgressBar {
+    state: Arc<ProgressState>,
+    stop: Arc<BarStop>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    caps: TermCaps,
+    /// [`Self::finish`] or [`Self::abort`] already ran, so [`Drop`]
+    /// has nothing left to do.
+    torn_down: bool,
+}
+
+impl ProgressBar {
+    /// Start rendering `task` for `label` (a no-op shell in
+    /// [`RenderMode::Off`]).
+    ///
+    /// A [`Task::streaming`] task caps the mode at [`RenderMode::Plain`]:
+    /// its own lines would scroll the terminal out from under the
+    /// in-place frame's cursor arithmetic.
+    pub fn start(caps: TermCaps, task: &'static Task, label: &str) -> Self {
+        let caps = if task.streaming {
+            caps.capped_at_plain()
+        } else {
+            caps
+        };
+        let state = Arc::new(ProgressState::new());
+        let stop = Arc::new(BarStop::default());
+        let handle = match caps.mode {
+            RenderMode::Off => None,
+            mode => {
+                install_panic_hook();
+                if mode == RenderMode::Ansi {
+                    BAR_ACTIVE.store(true, Ordering::Relaxed);
+                }
+                // Registered before the spawn, so a panic between the
+                // two still finds a handshake to signal. The slot lock
+                // is released before the assert: the panic hook takes
+                // that same lock.
+                let displaced = live_bar_slot().replace(Arc::clone(&stop)).is_some();
+                debug_assert!(
+                    !displaced,
+                    "one live bar per process: a second bar leaves the first's \
+                     render thread unreachable from the panic hook"
+                );
+                let st = Arc::clone(&state);
+                let sp = Arc::clone(&stop);
+                let label = label.to_string();
+                Some(std::thread::spawn(move || {
+                    render_loop(&st, &sp, caps, task, &label);
+                }))
+            }
+        };
+        Self {
+            state,
+            stop,
+            handle,
+            caps,
+            torn_down: false,
+        }
+    }
+
+    /// The sink to hand to the instrumented code.
+    #[must_use]
+    pub fn sink(&self) -> Arc<ProgressState> {
+        Arc::clone(&self.state)
+    }
+
+    fn stop_thread(&mut self) {
+        if let Some(h) = self.handle.take() {
+            self.stop.request_stop();
+            let _ = h.join();
+        }
+        // Runs whether or not a thread was started, so the slot never
+        // outlives the bar that owns it.
+        let mut slot = live_bar_slot();
+        if slot.as_ref().is_some_and(|s| Arc::ptr_eq(s, &self.stop)) {
+            *slot = None;
+        }
+    }
+
+    /// The sequence that restores the cursor and clears the
+    /// terminal-native progress state, optionally flashing the error
+    /// state first -- or `None` when this teardown does not own the
+    /// restore (see [`BAR_ACTIVE`]).
+    fn restore_sequence(&self, error: bool) -> Option<String> {
+        if self.caps.mode != RenderMode::Ansi || !BAR_ACTIVE.swap(false, Ordering::Relaxed) {
+            return None;
+        }
+        let mut out = String::from("\x1b[?25h");
+        if error {
+            out.push_str(&osc_progress(2, None));
+        }
+        out.push_str(&osc_progress(0, None));
+        Some(out)
+    }
+
+    fn restore_terminal(&mut self, error: bool) {
+        if let Some(seq) = self.restore_sequence(error) {
+            let mut err = std::io::stderr();
+            let _ = err.write_all(seq.as_bytes());
+            let _ = err.flush();
+        }
+    }
+
+    /// Graceful teardown after successful work: final frame, cursor
+    /// restored, taskbar state cleared.
+    pub fn finish(mut self) {
+        self.state.finished.store(true, Ordering::Relaxed);
+        self.stop_thread();
+        self.restore_terminal(false);
+        self.torn_down = true;
+    }
+
+    /// Teardown after a failure: error state to the taskbar, then
+    /// cleared, cursor restored, bar left on screen above the error
+    /// message the caller is about to print.
+    pub fn abort(mut self) {
+        self.stop_thread();
+        self.restore_terminal(true);
+        self.torn_down = true;
+    }
+}
+
+impl Drop for ProgressBar {
+    /// Insurance for an early return that drops the bar without
+    /// [`ProgressBar::finish`] or [`ProgressBar::abort`]: leaving the
+    /// render thread alive and the cursor hidden outlives the command.
+    fn drop(&mut self) {
+        if self.torn_down {
+            return;
+        }
+        self.stop_thread();
+        self.restore_terminal(false);
+    }
+}
+
+fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Task, label: &str) {
+    let mut err = std::io::stderr();
+    let start = Instant::now();
+    let mut first = true;
+    let mut hi_ratio = 0.0f64;
+    let mut rate = 0.0f64;
+    let mut prev_advanced = 0u64;
+    let mut prev_t = start;
+    let mut last_osc: Option<(u8, Option<u8>)> = None;
+    let mut last_plain = Instant::now();
+    let mut last_plain_decile = 0u64;
+    let spinner_frames = ['|', '/', '-', '\\'];
+    let mut tick_n = 0usize;
+
+    if caps.mode == RenderMode::Ansi {
+        let _ = err.write_all(b"\x1b[?25l");
+    }
+
+    loop {
+        let stopped = stop.wait_tick();
+        let snap = state.snapshot();
+        let now = Instant::now();
+
+        // Time-based EWMA over the deltas the ticks observe, measured
+        // on what this run moved so a resumed transfer's preset does
+        // not register as an opening burst.
+        let dt = now.duration_since(prev_t).as_secs_f64().max(1e-3);
+        let advanced = snap.advanced();
+        let inst = (advanced.saturating_sub(prev_advanced)) as f64 / dt;
+        let alpha = (dt / RATE_TAU_SECS).min(1.0);
+        rate = alpha * inst + (1.0 - alpha) * rate;
+        prev_advanced = advanced;
+        prev_t = now;
+
+        // Monotonic ratio: totals are a ceiling, never render backwards.
+        let ratio = if snap.total_amount > 0 {
+            (snap.done_amount as f64 / snap.total_amount as f64).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        hi_ratio = hi_ratio.max(ratio);
+
+        let eta = if start.elapsed().as_secs() >= 1
+            && rate > task.unit.eta_rate_floor()
+            && snap.total_amount > 0
+        {
+            Some(((snap.total_amount.saturating_sub(snap.done_amount)) as f64 / rate).ceil() as u64)
+        } else {
+            None
+        };
+
+        match caps.mode {
+            RenderMode::Ansi => {
+                let frame = compose_frame(
+                    &snap,
+                    &FrameCtx {
+                        task,
+                        label,
+                        width: caps.width,
+                        color: caps.color,
+                        first,
+                        ratio: hi_ratio,
+                        rate,
+                        eta,
+                        spinner: spinner_frames[tick_n % spinner_frames.len()],
+                        done: false,
+                    },
+                );
+                let _ = err.write_all(frame.as_bytes());
+                let osc = if snap.phase == task.measured && snap.total_amount > 0 {
+                    (1u8, Some((hi_ratio * 100.0).floor() as u8))
+                } else {
+                    (3u8, None)
+                };
+                if last_osc != Some(osc) {
+                    let _ = err.write_all(osc_progress(osc.0, osc.1).as_bytes());
+                    last_osc = Some(osc);
+                }
+                let _ = err.flush();
+                first = false;
+            }
+            RenderMode::Plain | RenderMode::Off => {
+                // Threshold lines: every 10% or every 10 s.
+                let decile = (hi_ratio * 10.0).floor() as u64;
+                if caps.mode == RenderMode::Plain
+                    && snap.total_amount > 0
+                    && (decile > last_plain_decile
+                        || now.duration_since(last_plain) >= Duration::from_secs(10))
+                {
+                    let _ = writeln!(err, "{}", plain_line(&snap, task, hi_ratio));
+                    last_plain = now;
+                    last_plain_decile = decile;
+                }
+            }
+        }
+
+        tick_n += 1;
+        if stopped {
+            break;
+        }
+    }
+
+    // Final frame so a finished bar reads 100%, then leave the lines.
+    // The phase is past the measured one by now, so `done` is what
+    // keeps line 2 a bar.
+    if caps.mode == RenderMode::Ansi && state.finished.load(Ordering::Relaxed) {
+        let snap = state.snapshot();
+        let frame = compose_frame(
+            &snap,
+            &FrameCtx {
+                task,
+                label,
+                width: caps.width,
+                color: caps.color,
+                first,
+                ratio: 1.0,
+                rate,
+                eta: None,
+                spinner: '=',
+                done: true,
+            },
+        );
+        let _ = err.write_all(frame.as_bytes());
+        let _ = err.flush();
+    }
+
+    stop.mark_exited();
+}
+
+#[cfg(test)]
+#[path = "tests/bar_tests.rs"]
+mod tests;

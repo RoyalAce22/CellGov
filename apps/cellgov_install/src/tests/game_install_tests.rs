@@ -691,12 +691,36 @@ fn prepare_staging_clears_stale_content() {
     let staging = out.join(".staging-X");
     std::fs::create_dir_all(&staging).unwrap();
     std::fs::write(staging.join("foreign.bin"), b"old").unwrap();
-    prepare_staging(&staging).unwrap();
+    prepare_staging(&staging, &()).unwrap();
     assert!(staging.exists());
     assert!(
         !staging.join("foreign.bin").exists(),
         "stale staging content is cleared"
     );
+}
+
+#[test]
+fn prepare_staging_reports_its_own_phase_only_when_there_is_residue() {
+    use crate::progress::Phase;
+    let out = scratch();
+
+    let fresh = RecordingReporter::default();
+    prepare_staging(&out.join(".staging-fresh"), &fresh).unwrap();
+    assert_eq!(fresh.phases(), Vec::<u8>::new());
+
+    let stale = out.join(".staging-stale");
+    std::fs::create_dir_all(&stale).unwrap();
+    let reporter = RecordingReporter::default();
+    prepare_staging(&stale, &reporter).unwrap();
+    assert_eq!(reporter.phases(), codes(&[Phase::ClearingStaging]));
+
+    // A regular file at the path is residue too: the probe is an
+    // existence check, so the removal error surfaces under this phase.
+    let file = out.join(".staging-file");
+    std::fs::write(&file, b"not a dir").unwrap();
+    let on_file = RecordingReporter::default();
+    prepare_staging(&file, &on_file).unwrap_err();
+    assert_eq!(on_file.phases(), codes(&[Phase::ClearingStaging]));
 }
 
 #[test]
@@ -707,7 +731,7 @@ fn prepare_staging_surfaces_non_notfound_removal_error() {
     let out = scratch();
     let staging = out.join(".staging-X");
     std::fs::write(&staging, b"not a dir").unwrap();
-    let err = prepare_staging(&staging).unwrap_err();
+    let err = prepare_staging(&staging, &()).unwrap_err();
     assert!(
         matches!(err, GameInstallError::Io { op: "remove", .. }),
         "non-NotFound removal error must surface, got {err:?}"
@@ -937,31 +961,32 @@ struct CountingReporter {
     totals_bytes: std::sync::atomic::AtomicU64,
     totals_files: std::sync::atomic::AtomicUsize,
     bytes: std::sync::atomic::AtomicU64,
-    /// `bytes_advanced` calls: one per written piece.
+    /// `advanced` calls: one per written piece.
     pieces: std::sync::atomic::AtomicUsize,
     started: std::sync::atomic::AtomicUsize,
     finished: std::sync::atomic::AtomicUsize,
 }
 
-impl crate::progress::InstallProgress for CountingReporter {
-    fn phase(&self, _phase: crate::progress::Phase) {}
+impl crate::progress::ProgressSink for CountingReporter {
+    fn phase(&self, _code: u8) {}
     fn totals(&self, files: usize, bytes: u64) {
         self.totals_files
             .store(files, std::sync::atomic::Ordering::Relaxed);
         self.totals_bytes
             .store(bytes, std::sync::atomic::Ordering::Relaxed);
     }
-    fn file_started(&self, _path: &str) {
+    fn preset_done(&self, _amount: u64) {}
+    fn item_started(&self, _path: &str) {
         self.started
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
-    fn bytes_advanced(&self, delta: u64) {
+    fn advanced(&self, delta: u64) {
         self.bytes
             .fetch_add(delta, std::sync::atomic::Ordering::Relaxed);
         self.pieces
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
-    fn file_finished(&self) {
+    fn item_finished(&self) {
         self.finished
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
@@ -1049,28 +1074,33 @@ fn a_live_reporter_observes_the_same_tree_the_noop_stages() {
 /// over the `Vec` is all the sharing the `Sync` bound needs.
 #[derive(Default)]
 struct RecordingReporter {
-    phases: std::sync::Mutex<Vec<crate::progress::Phase>>,
+    phases: std::sync::Mutex<Vec<u8>>,
     finished: std::sync::atomic::AtomicBool,
 }
 
 impl RecordingReporter {
-    fn phases(&self) -> Vec<crate::progress::Phase> {
+    fn phases(&self) -> Vec<u8> {
         self.phases.lock().unwrap().clone()
     }
 }
 
-impl crate::progress::InstallProgress for RecordingReporter {
-    fn phase(&self, phase: crate::progress::Phase) {
-        self.phases.lock().unwrap().push(phase);
+impl crate::progress::ProgressSink for RecordingReporter {
+    fn phase(&self, code: u8) {
+        self.phases.lock().unwrap().push(code);
     }
     fn totals(&self, _files: usize, _bytes: u64) {}
-    fn file_started(&self, _path: &str) {}
-    fn bytes_advanced(&self, _delta: u64) {}
-    fn file_finished(&self) {}
+    fn preset_done(&self, _amount: u64) {}
+    fn item_started(&self, _path: &str) {}
+    fn advanced(&self, _delta: u64) {}
+    fn item_finished(&self) {}
     fn finished(&self) {
         self.finished
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+fn codes(phases: &[crate::progress::Phase]) -> Vec<u8> {
+    phases.iter().map(|p| p.code()).collect()
 }
 
 /// `finished` means the install completed; a renderer draws its 100%
@@ -1101,7 +1131,7 @@ fn a_pre_commit_fault_never_reports_finished() {
     );
     assert_eq!(
         reporter.phases(),
-        vec![Phase::Reading, Phase::Staging, Phase::Proving]
+        codes(&[Phase::Reading, Phase::Staging, Phase::Proving])
     );
     assert!(
         !reporter.finished.load(std::sync::atomic::Ordering::Relaxed),
@@ -1140,7 +1170,7 @@ fn commit_reports_clearing_only_when_a_target_already_exists() {
     let fresh = out.join("fresh");
     assert_eq!(
         run(&fresh, &out.join(".staging-fresh")),
-        vec![Phase::Committing]
+        codes(&[Phase::Committing])
     );
     assert!(fresh.join("new").exists());
 
@@ -1149,7 +1179,7 @@ fn commit_reports_clearing_only_when_a_target_already_exists() {
     std::fs::write(existing.join("old"), b"o").unwrap();
     assert_eq!(
         run(&existing, &out.join(".staging-existing")),
-        vec![Phase::Committing, Phase::Clearing, Phase::Committing]
+        codes(&[Phase::Committing, Phase::Clearing, Phase::Committing])
     );
     assert!(
         !existing.join("old").exists(),

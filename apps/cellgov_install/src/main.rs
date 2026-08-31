@@ -22,8 +22,6 @@
     )
 )]
 
-mod progress_render;
-
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
 use cellgov_install::game_install::InstallOptions;
@@ -34,8 +32,10 @@ use cellgov_install::manifest::{
     self, FirmwareFileEntry, FirmwareIdentity, FirmwareManifest, SUPPORTED_FORMAT_VERSION,
 };
 use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
+use cellgov_install::progress::INSTALL_TASK;
 use cellgov_install::{game_install, game_uninstall, pup, sce, self_image, tar};
-use progress_render::{ProgressBar, TermCaps};
+use cellgov_terminal::caps::RenderFlags;
+use cellgov_terminal::progress::ProgressBar;
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -795,32 +795,6 @@ struct InstallGameArgs {
     render: RenderFlags,
 }
 
-/// The three progress-rendering overrides shared by the two game
-/// installers. Flags beat environment; see `progress_render::detect`.
-#[derive(Default, Clone, Copy)]
-struct RenderFlags {
-    no_progress: bool,
-    no_color: bool,
-    quiet: bool,
-}
-
-impl RenderFlags {
-    /// Absorb a render flag, reporting whether `arg` was one.
-    fn accept(&mut self, arg: &str) -> bool {
-        match arg {
-            "--no-progress" => self.no_progress = true,
-            "--no-color" => self.no_color = true,
-            "--quiet" => self.quiet = true,
-            _ => return false,
-        }
-        true
-    }
-
-    fn caps(self) -> TermCaps {
-        progress_render::detect(self.no_progress, self.no_color, self.quiet)
-    }
-}
-
 const DEFAULT_GAME_INSTALL_OUTPUT: &str = game_install::DEFAULT_VFS_ROOT;
 
 fn parse_install_game_args(args: &[String]) -> Result<InstallGameArgs, FirmwareCliError> {
@@ -904,8 +878,12 @@ fn cmd_install_game(args: &[String]) {
     );
 
     let installs_dir = game_install::installs_dir(&parsed.output_dir);
-    let bar = ProgressBar::start(parsed.render.caps(), &container_label(&parsed.pkg_path));
-    let reporter = bar.state();
+    let bar = ProgressBar::start(
+        parsed.render.caps(),
+        &INSTALL_TASK,
+        &container_label(&parsed.pkg_path),
+    );
+    let reporter = bar.sink();
     let outcome = game_install::install_pkg(
         &pkg_data,
         rap_data.as_deref(),
@@ -1017,8 +995,12 @@ fn cmd_install_iso(args: &[String]) {
     );
 
     let installs_dir = game_install::installs_dir(&parsed.output_dir);
-    let bar = ProgressBar::start(parsed.render.caps(), &container_label(&parsed.iso_path));
-    let reporter = bar.state();
+    let bar = ProgressBar::start(
+        parsed.render.caps(),
+        &INSTALL_TASK,
+        &container_label(&parsed.iso_path),
+    );
+    let reporter = bar.sink();
     let outcome = game_install::install_iso(
         &iso_data,
         &keys,

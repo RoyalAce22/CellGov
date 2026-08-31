@@ -1,58 +1,65 @@
-//! Install-progress reporting seam: the installers emit events, a
-//! caller-supplied sink renders them (or `()` drops them). Nothing in
-//! this module or its callers knows what a terminal is.
+//! The install's progress vocabulary: its stages, and the task
+//! descriptor a renderer lays them out from.
+//!
+//! The sink itself is [`cellgov_terminal::progress::ProgressSink`];
+//! only the labels are the installer's.
+
+use cellgov_terminal::progress::{Task, Unit};
+
+pub use cellgov_terminal::progress::ProgressSink;
 
 /// A coarse stage of an install, for a reporter to label its output.
 ///
-/// `Staging` is the only stage with a byte denominator; the others
-/// have no natural progress unit and a renderer should treat them as
-/// indeterminate.
+/// [`Self::Staging`] is the only stage with a byte denominator; the
+/// others have no natural progress unit and a renderer treats them as
+/// indeterminate. The discriminants index [`INSTALL_TASK`]'s label
+/// table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Phase {
     /// Reading and validating the container's structure.
-    Reading,
+    Reading = 0,
     /// Writing the game tree into the staging root.
-    Staging,
+    Staging = 1,
     /// Running the decrypt-proof gate.
-    Proving,
-    /// Hashing the source container for the install record.
-    Hashing,
+    Proving = 2,
     /// Clearing an existing target directory (`force` overwrite).
-    Clearing,
+    Clearing = 3,
     /// The commit rename sequence.
-    Committing,
+    Committing = 4,
+    /// Hashing the source container for the install record.
+    Hashing = 5,
+    /// Removing the staging tree an interrupted install left behind.
+    ClearingStaging = 6,
 }
 
-/// Install progress sink.
-///
-/// Implementations must be cheap: [`Self::bytes_advanced`] is called
-/// from the staging write loop once per piece, so it should amount to
-/// an atomic add. `Sync` because a renderer reads the sink's state
-/// from its own thread while the installer writes.
-pub trait InstallProgress: Sync {
-    /// The install entered `phase`.
-    fn phase(&self, phase: Phase);
-    /// Total staging work, known before the first write. `files`
-    /// counts staged entries, which can exceed the deduplicated
-    /// record count.
-    fn totals(&self, files: usize, bytes: u64);
-    /// Staging began writing the file at `path` (`/`-separated).
-    fn file_started(&self, path: &str);
-    /// Bytes newly written since the last call.
-    fn bytes_advanced(&self, delta: u64);
-    /// The current file finished (written, hashed, synced).
-    fn file_finished(&self);
-    /// The install completed successfully.
-    fn finished(&self);
+impl Phase {
+    /// The code a [`ProgressSink`] stores.
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        self as u8
+    }
 }
 
-/// The no-op reporter: an install with `&()` behaves exactly as it
-/// did before instrumentation.
-impl InstallProgress for () {
-    fn phase(&self, _phase: Phase) {}
-    fn totals(&self, _files: usize, _bytes: u64) {}
-    fn file_started(&self, _path: &str) {}
-    fn bytes_advanced(&self, _delta: u64) {}
-    fn file_finished(&self) {}
-    fn finished(&self) {}
-}
+/// How a renderer presents an install.
+pub const INSTALL_TASK: Task = Task {
+    verb: "Installing",
+    tag: "install",
+    phases: &[
+        "reading",
+        "staging",
+        "verifying decrypt",
+        "clearing old install",
+        "committing",
+        "hashing source",
+        "clearing staging",
+    ],
+    measured: Phase::Staging as u8,
+    unit: Unit::Bytes,
+    items: "files",
+    streaming: false,
+};
+
+#[cfg(test)]
+#[path = "tests/progress_tests.rs"]
+mod tests;

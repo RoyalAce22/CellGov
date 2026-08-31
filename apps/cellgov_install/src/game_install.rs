@@ -43,7 +43,7 @@ use crate::manifest::Sha256 as HexSha256;
 use crate::npdrm::{self, NpdHeaderInfo, NpdLicense};
 use crate::param_sfo;
 use crate::pkg::{self, PkgEntryKind};
-use crate::progress::{InstallProgress, Phase};
+use crate::progress::{Phase, ProgressSink};
 use crate::sce;
 use crate::self_image::is_sce_wrapped;
 use cellgov_ps3_abi::elf::ELF_MAGIC;
@@ -78,7 +78,7 @@ pub struct InstallOptions<'a> {
     /// Overwrite a non-empty target directory.
     pub force: bool,
     /// Where progress events go; `&()` drops them.
-    pub progress: &'a dyn InstallProgress,
+    pub progress: &'a dyn ProgressSink,
 }
 
 impl Default for InstallOptions<'_> {
@@ -426,7 +426,7 @@ const PROGRESS_PIECE: usize = 1 << 20;
 fn write_chunks_and_sync<'c>(
     path: &Path,
     chunks: impl IntoIterator<Item = &'c [u8]>,
-    progress: &dyn InstallProgress,
+    progress: &dyn ProgressSink,
 ) -> Result<HexSha256, GameInstallError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
@@ -439,7 +439,7 @@ fn write_chunks_and_sync<'c>(
             for piece in chunk.chunks(PROGRESS_PIECE) {
                 hasher.update(piece);
                 f.write_all(piece).map_err(io_err("write", path))?;
-                progress.bytes_advanced(piece.len() as u64);
+                progress.advanced(piece.len() as u64);
             }
         }
     }
@@ -457,7 +457,7 @@ fn write_and_sync(path: &Path, bytes: &[u8]) -> Result<(), GameInstallError> {
 /// total bytes. Staged entries whose paths collide still each count,
 /// so the totals can slightly exceed what lands; a renderer treats
 /// them as a ceiling.
-fn emit_totals(progress: &dyn InstallProgress, staged: &[StagedFile<'_>]) {
+fn emit_totals(progress: &dyn ProgressSink, staged: &[StagedFile<'_>]) {
     let mut files = 0usize;
     let mut bytes = 0u64;
     for f in staged {
@@ -597,7 +597,7 @@ pub fn install_pkg(
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
     let progress = opts.progress;
-    progress.phase(Phase::Reading);
+    progress.phase(Phase::Reading.code());
     let archive = pkg::extract(pkg_bytes, keys)?;
 
     // PARAM.SFO -> identity + HDD-game gate.
@@ -685,9 +685,9 @@ pub fn install_pkg(
     emit_totals(progress, &staged);
 
     // Build the whole batch (tree + RAP + proof) under the staging root.
-    prepare_staging(&staging_root)?;
+    prepare_staging(&staging_root, progress)?;
     let (file_digests, staged_rap) = run_or_clean(&staging_root, || {
-        progress.phase(Phase::Staging);
+        progress.phase(Phase::Staging.code());
         let file_digests = stage_tree(&staged, &tree_staging, progress)?;
         let staged_rap = plan_staged_rap(rap_needed, rap, &content_id, &staging_root, &exdata);
         if let Some(sr) = &staged_rap {
@@ -706,7 +706,7 @@ pub fn install_pkg(
             let arr: [u8; 16] = bytes.as_slice().try_into().ok()?;
             Some(npdrm::Rap(arr))
         };
-        progress.phase(Phase::Proving);
+        progress.phase(Phase::Proving.code());
         npdrm::decrypt_self_to_elf_auto(eboot_data, keys, resolver)
             .map_err(GameInstallError::DecryptProof)?;
         Ok((file_digests, staged_rap))
@@ -716,7 +716,7 @@ pub fn install_pkg(
     // The source hash is a full read of the container: its own phase,
     // or a multi-gigabyte container's hash time hides under the proof
     // label.
-    progress.phase(Phase::Hashing);
+    progress.phase(Phase::Hashing.code());
     let record = build_record(
         "pkg",
         pkg_bytes,
@@ -774,7 +774,7 @@ pub fn install_iso(
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
     let progress = opts.progress;
-    progress.phase(Phase::Reading);
+    progress.phase(Phase::Reading.code());
     let entries = iso::read_iso(image)?;
 
     let sfo_entry = entries
@@ -840,17 +840,17 @@ pub fn install_iso(
         .collect::<Result<_, iso::IsoError>>()?;
     emit_totals(progress, &staged);
 
-    prepare_staging(&staging_dir)?;
+    prepare_staging(&staging_dir, progress)?;
     let file_digests = run_or_clean(&staging_dir, || {
-        progress.phase(Phase::Staging);
+        progress.phase(Phase::Staging.code());
         let file_digests = stage_tree(&staged, &staging_dir, progress)?;
         // APP-keyed disc EBOOT: prove it decrypts end-to-end, discard.
-        progress.phase(Phase::Proving);
+        progress.phase(Phase::Proving.code());
         sce::decrypt_self_to_elf(&eboot_bytes, keys).map_err(GameInstallError::DecryptProof)?;
         Ok(file_digests)
     })?;
 
-    progress.phase(Phase::Hashing);
+    progress.phase(Phase::Hashing.code());
     let record = build_record(
         "iso",
         image,
@@ -909,7 +909,16 @@ fn parse_identity(sfo_bytes: &[u8]) -> Result<(String, String, String, String), 
 
 /// Clear and recreate a staging directory, so no foreign residue
 /// survives into the commit rename.
-fn prepare_staging(staging_dir: &Path) -> Result<(), GameInstallError> {
+fn prepare_staging(
+    staging_dir: &Path,
+    progress: &dyn ProgressSink,
+) -> Result<(), GameInstallError> {
+    // An interrupted multi-GB install leaves a staging tree whose
+    // removal takes minutes; under the reading phase that reads as a
+    // stall.
+    if staging_dir.exists() {
+        progress.phase(Phase::ClearingStaging.code());
+    }
     match std::fs::remove_dir_all(staging_dir) {
         Ok(()) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -953,7 +962,7 @@ fn run_or_clean<T>(
 fn stage_tree(
     staged: &[StagedFile<'_>],
     tree_dest: &Path,
-    progress: &dyn InstallProgress,
+    progress: &dyn ProgressSink,
 ) -> Result<BTreeMap<String, HexSha256>, GameInstallError> {
     // Create the destination root up front so an empty tree still has a
     // directory for the commit rename to move.
@@ -964,7 +973,7 @@ fn stage_tree(
         if f.is_dir {
             std::fs::create_dir_all(&dest).map_err(io_err("create dir", &dest))?;
         } else {
-            progress.file_started(&f.path);
+            progress.item_started(&f.path);
             let digest = match &f.data {
                 StagedData::Bytes(bytes) => {
                     write_chunks_and_sync(&dest, std::iter::once(*bytes), progress)?
@@ -974,7 +983,7 @@ fn stage_tree(
                 }
             };
             digests.insert(normalized_rel(&f.path), digest);
-            progress.file_finished();
+            progress.item_finished();
         }
     }
     Ok(digests)
@@ -996,9 +1005,9 @@ fn commit(
     installs_dir: &Path,
     title_id: &str,
     record: &InstallRecord,
-    progress: &dyn InstallProgress,
+    progress: &dyn ProgressSink,
 ) -> Result<PathBuf, GameInstallError> {
-    progress.phase(Phase::Committing);
+    progress.phase(Phase::Committing.code());
     if let Some(parent) = final_dir.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
     }
@@ -1023,9 +1032,9 @@ fn commit(
     // with a non-empty target). Its own phase: removing a large
     // existing install is genuinely slow.
     if final_dir.exists() {
-        progress.phase(Phase::Clearing);
+        progress.phase(Phase::Clearing.code());
         std::fs::remove_dir_all(final_dir).map_err(io_err("remove", final_dir))?;
-        progress.phase(Phase::Committing);
+        progress.phase(Phase::Committing.code());
     }
     std::fs::rename(tree_staging, final_dir).map_err(|source| GameInstallError::Io {
         op: "rename",

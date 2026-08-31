@@ -17,6 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
+cellgov_terminal = { path = "../../crates/cellgov_terminal" }
 # The cipher, MAC, and inflate crates serve only the key-consuming
 # decrypt paths, so they enter the build with the `decrypt` feature.
 aes = { version = "0.8", optional = true }
