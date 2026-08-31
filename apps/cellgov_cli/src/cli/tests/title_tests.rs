@@ -48,13 +48,12 @@ fn resolve_ps3_vfs_root_prefers_cli_flag() {
 fn resolve_ps3_vfs_root_default_is_project_relative() {
     let _guard = EnvGuard::unset("CELLGOV_PS3_VFS_ROOT");
     let args = sv(&["cli", "run-game", "--title", "flow"]);
+    let default_root = std::path::Path::new(cellgov_install::store::DEFAULT_VFS_ROOT);
     let got = resolve_ps3_vfs_root(&args);
-    assert_eq!(got, std::path::PathBuf::from("vfs/dev_hdd0"));
+    assert_eq!(got, default_root.join("dev_hdd0"));
     assert_eq!(
         crate::cli::keys::fixed_vault_root(),
-        Some(std::path::Path::new(
-            cellgov_install::store::DEFAULT_VFS_ROOT
-        )),
+        Some(default_root),
         "the vault is read beside dev_hdd0, where `cellgov_install` writes it",
     );
 }

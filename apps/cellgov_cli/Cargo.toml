@@ -67,13 +67,6 @@ ps3autotests = []
 name = "firmware_set_load"
 required-features = ["firmware-corpus"]
 
-# firmware_reloc_census is not listed here: its regenerator is gated
-# inside the file so the corpus-free companion test it carries still
-# runs in a default build.
-[[test]]
-name = "firmware_export_conflict_census"
-required-features = ["firmware-corpus"]
-
 [[test]]
 name = "ps3autotests"
 required-features = ["ps3autotests"]

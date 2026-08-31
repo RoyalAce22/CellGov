@@ -2,7 +2,11 @@
 //!
 //! Every path here is fixed and repo-relative because `cellgov_install
 //! install` produces it under `vfs/`.
-
+//!
+//! Those paths reach a tree git does not track, so this module
+//! declares the corpus feature itself. A helper module has no
+//! `[[test]]` target to carry `required-features`.
+#![cfg(feature = "firmware-corpus")]
 #![allow(
     dead_code,
     reason = "each integration-test binary compiles this module separately and uses a subset"

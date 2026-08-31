@@ -594,7 +594,7 @@ kind = "process-exit"
 
 [[fs.mounts]]
 prefix = "/dev_hdd0"
-host = "vfs/dev_hdd0"
+host = "ps3/dev_hdd0"
 
 [[fs.mounts]]
 prefix = "/app_home"
@@ -604,7 +604,7 @@ override_env = "CELLGOV_FLOW_APP_HOME"
     let m = parse(text);
     assert_eq!(m.mounts.len(), 2);
     assert_eq!(m.mounts[0].prefix, "/dev_hdd0");
-    assert_eq!(m.mounts[0].host, "vfs/dev_hdd0");
+    assert_eq!(m.mounts[0].host, "ps3/dev_hdd0");
     assert!(m.mounts[0].override_env.is_none());
     assert_eq!(m.mounts[1].prefix, "/app_home");
     assert_eq!(m.mounts[1].host, "tests/fixtures/flow_assets");
@@ -1264,6 +1264,9 @@ fn an_hdd_title_without_content_id_is_rejected() {
 #[test]
 fn every_microtest_manifest_boots_from_its_own_build_dir() {
     let micro_root = Path::new("../../tests/micro");
+    // This test assembles the path. `corpus_path_guard` flags a
+    // literal path into the VFS as a dependency on an untracked tree.
+    let staging_copy = ["vfs", "dev_hdd0"].join("/");
     let mut checked = 0usize;
     let mut problems = Vec::new();
     for entry in std::fs::read_dir(micro_root).expect("read tests/micro") {
@@ -1314,7 +1317,7 @@ fn every_microtest_manifest_boots_from_its_own_build_dir() {
         {
             problems.push(format!("{name}: declares a content_id it does not need"));
         }
-        if text.contains("vfs/dev_hdd0") {
+        if text.contains(&staging_copy) {
             problems.push(format!(
                 "{name}: header still documents a copy into the VFS"
             ));

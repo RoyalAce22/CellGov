@@ -5,9 +5,10 @@ use super::*;
 
 #[test]
 fn the_default_vfs_root_lands_on_the_install_root_cellgov_install_writes() {
+    let default_root = Path::new(cellgov_install::store::DEFAULT_VFS_ROOT);
     assert_eq!(
-        install_root_of(Path::new("vfs/dev_hdd0")),
-        PathBuf::from(cellgov_install::store::DEFAULT_VFS_ROOT),
+        install_root_of(&default_root.join("dev_hdd0")),
+        default_root.to_path_buf(),
     );
 }
 
@@ -15,9 +16,9 @@ fn the_default_vfs_root_lands_on_the_install_root_cellgov_install_writes() {
 fn a_relocated_vfs_root_reads_the_vault_beside_it_not_under_the_working_directory() {
     assert_eq!(
         cellgov_install::keys::installed_keys_dir(&install_root_of(Path::new(
-            "/dumps/ps3/vfs/dev_hdd0"
+            "/dumps/ps3/dev_hdd0"
         ))),
-        PathBuf::from("/dumps/ps3/vfs/.cellgov/keys"),
+        PathBuf::from("/dumps/ps3/.cellgov/keys"),
     );
 }
 
@@ -34,10 +35,13 @@ fn a_filesystem_root_stands_in_for_its_own_parent() {
 
 #[test]
 fn a_trailing_separator_does_not_move_the_root_up_a_level() {
-    assert_eq!(
-        install_root_of(Path::new("vfs/dev_hdd0/")),
-        install_root_of(Path::new("vfs/dev_hdd0")),
-    );
+    // Each call must match a named parent. `Path` compares by
+    // component, so a trailing separator is already invisible. A
+    // comparison between the two calls passes even when
+    // `install_root_of` returns its argument unchanged.
+    let want = PathBuf::from("ps3");
+    assert_eq!(install_root_of(Path::new("ps3/dev_hdd0/")), want);
+    assert_eq!(install_root_of(Path::new("ps3/dev_hdd0")), want);
 }
 
 #[test]
@@ -54,9 +58,9 @@ fn a_dot_dot_root_climbs_above_itself_rather_than_back_down_to_the_working_direc
 
 #[test]
 fn a_root_ending_in_dot_dot_is_not_read_as_the_name_that_precedes_it() {
-    let root = Path::new("vfs/..");
+    let root = Path::new("ps3/..");
     assert_eq!(install_root_of(root), root.join(".."));
-    assert_ne!(install_root_of(root), PathBuf::from("vfs"));
+    assert_ne!(install_root_of(root), PathBuf::from("ps3"));
 }
 
 /// `C:` names the working directory on that drive, not the drive root.
@@ -78,15 +82,15 @@ fn a_drive_root_stands_in_for_its_own_parent() {
 #[test]
 fn two_mounts_under_one_install_root_agree_on_the_vault() {
     let cell = OnceLock::new();
-    fix_vault_root_in(&cell, Path::new("vfs/dev_hdd0"));
-    fix_vault_root_in(&cell, Path::new("vfs/dev_bdvd"));
-    assert_eq!(cell.get().map(PathBuf::as_path), Some(Path::new("vfs")));
+    fix_vault_root_in(&cell, Path::new("ps3/dev_hdd0"));
+    fix_vault_root_in(&cell, Path::new("ps3/dev_bdvd"));
+    assert_eq!(cell.get().map(PathBuf::as_path), Some(Path::new("ps3")));
 }
 
 #[test]
 #[should_panic(expected = "key vault root already fixed")]
 fn a_second_root_under_a_different_install_root_is_refused_not_ignored() {
     let cell = OnceLock::new();
-    fix_vault_root_in(&cell, Path::new("vfs/dev_hdd0"));
-    fix_vault_root_in(&cell, Path::new("/dumps/ps3/vfs/dev_hdd0"));
+    fix_vault_root_in(&cell, Path::new("ps3/dev_hdd0"));
+    fix_vault_root_in(&cell, Path::new("/dumps/ps3/dev_hdd0"));
 }

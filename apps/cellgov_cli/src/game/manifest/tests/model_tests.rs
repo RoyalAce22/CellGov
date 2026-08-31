@@ -69,7 +69,7 @@ fn resolve_eboot_rejects_dot_prefixed_content_id() {
     let m = hdd_manifest(".staging-NPAA00001", "t", &["EBOOT.BIN"]);
     let before = HIDDEN_CONTENT_ID_REJECTIONS.load(Ordering::Relaxed);
     let err = m
-        .resolve_eboot(Path::new("vfs/dev_hdd0"))
+        .resolve_eboot(Path::new("ps3/dev_hdd0"))
         .expect_err("dot-prefixed content-id is rejected");
     assert!(
         matches!(err, ResolveEbootError::HiddenContentId { .. }),

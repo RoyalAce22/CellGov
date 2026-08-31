@@ -207,7 +207,7 @@ fn raps_are_stored_per_title_and_composed_into_one_live_directory() {
 
 #[test]
 fn every_store_path_stays_under_the_root_it_was_built_from() {
-    for root in ["vfs", "relative/nested/vfs", "/tmp/other-vfs"] {
+    for root in ["vfs", "relative/nested/store", "/tmp/other-store"] {
         let l = StoreLayout::new(root);
         let root = Path::new(root);
         let artifacts = [

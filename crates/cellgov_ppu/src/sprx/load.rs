@@ -14,10 +14,13 @@ pub use cellgov_ps3_abi::elf::{
 
 /// Relocation types `apply_relocations` knows how to apply.
 ///
-/// The firmware reloc census regenerator
-/// (`apps/cellgov_cli/tests/firmware_reloc_census.rs`) reads this
-/// slice; the `applier_supported_types_match_apply_relocations` test
-/// keeps it aligned with the `match` in `apply_relocations`.
+/// This slice and the `match` in `apply_relocations` list the same
+/// types. Two tests hold them to each other:
+///
+/// - `applier_supported_types_match_apply_relocations` -- the applier
+///   accepts every listed type.
+/// - `unsupported_reloc_types_rejected_outside_const_list` -- the
+///   applier refuses every unlisted type.
 pub const APPLIER_SUPPORTED_TYPES: &[u32] = &[
     R_PPC64_ADDR32,
     R_PPC64_ADDR16_LO,
