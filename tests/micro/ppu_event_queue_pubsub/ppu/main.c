@@ -11,8 +11,9 @@
  *      caller until a sys_event_port_send delivers a payload.
  *   3. A send with a parked waiter hands the payload directly
  *      to that waiter via the WakeAndReturn response_updates
- *      channel; the full 32-byte sys_event_t lands at the
- *      waiter's out pointer (source / data1 / data2 / data3).
+ *      channel, and the event arrives in r4..=r7 (source /
+ *      data1 / data2 / data3) beside r3 = CELL_OK -- the same
+ *      registers an unblocked receive returns.
  *   4. send-arrival order is preserved: N sends produce N
  *      receive completions in the same order.
  *
@@ -186,6 +187,46 @@ struct SysEvent {
     unsigned long long data3;
 };
 
+/* sys_event_queue_receive(equeue_id, dummy_event, timeout).
+ *
+ * The kernel returns the event in r4..=r7 and never writes the
+ * pointer argument -- RPCS3 sys_event.cpp sys_event_queue_receive
+ * names it `dummy_event` and delivers the payload as
+ * std::tie(gpr[4], gpr[5], gpr[6], gpr[7]) = queue.events.front().
+ * Storing those registers into the caller's struct is the stub's
+ * job, which is why this call cannot go through syscall3_s32: that
+ * wrapper declares r4 and r5 as inputs only, so a compiler free to
+ * hoist their setup out of a loop would feed the second receive the
+ * first event's data1 as its timeout. */
+static inline s32 event_queue_receive(unsigned int equeue_id,
+                                      struct SysEvent *out,
+                                      unsigned long long timeout)
+{
+    register u64 r3 __asm__("3") = equeue_id;
+    register u64 r4 __asm__("4") = (unsigned long)out;
+    register u64 r5 __asm__("5") = timeout;
+    register u64 r6 __asm__("6") = 0;
+    register u64 r7 __asm__("7") = 0;
+    register u64 r11 __asm__("11") = SYS_EVENT_QUEUE_RECV;
+    __asm__ volatile (
+        "sc\n"
+        : "+r"(r3), "+r"(r4), "+r"(r5), "+r"(r6), "+r"(r7)
+        : "r"(r11)
+        : "memory"
+    );
+    /* Only a CELL_OK return carries an event. An error return leaves
+     * r4 holding the pointer this call passed in, and storing that as
+     * `source` would leave the struct reading like a delivered event
+     * from an address. */
+    if ((s32)r3 == 0) {
+        out->source = r4;
+        out->data1  = r5;
+        out->data2  = r6;
+        out->data3  = r7;
+    }
+    return (s32)r3;
+}
+
 static const char CGOV_MAGIC[4] = { 'C', 'G', 'O', 'V' };
 
 static unsigned int queue_id __attribute__((aligned(128)));
@@ -203,8 +244,7 @@ static void receiver_entry(void *arg)
     unsigned int errs = 0;
     unsigned int last = 0;
     for (unsigned int i = 0; i < MESSAGES; i++) {
-        s32 r = syscall3_s32(SYS_EVENT_QUEUE_RECV,
-            queue_id, (unsigned long)&incoming, 0);
+        s32 r = event_queue_receive(queue_id, &incoming, 0);
         if (r != 0) {
             errs++;
             continue;
