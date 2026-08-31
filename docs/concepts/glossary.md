@@ -74,8 +74,10 @@ regions, same step count within tolerance. `Yes` or
 [README.md](README.md#two-independent-verdicts-convergence-and-byte-parity)
 
 **Convergent honest gap.** An unmodeled path where CellGov's
-not-implemented response matches RPCS3's own divergence from
-hardware. Not an implementation target.
+not-implemented response already agrees with RPCS3, because RPCS3
+diverges from hardware the same way. A coincidence of two gaps, not
+a match CellGov aimed for. Not an implementation target: the
+comparison surfaces nothing to chase.
 [README.md](README.md#the-null-backend-honest-vs-contaminating-divergence)
 
 **Cross-runner agreement.** Two independent runners (CellGov, RPCS3,
@@ -147,10 +149,10 @@ it, so per-step localization is scalar-visible only.
 Never wall-clock time; CellGov has no host-time dependency.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
 
-**Honest divergence.** A cross-runner difference where CellGov
-reported not-implemented through the null backend rather than
-fabricating a result. Splits into divergent and convergent honest
-gaps. [README.md](README.md#the-null-backend-honest-vs-contaminating-divergence)
+**Honest divergence.** A gap where CellGov reported not-implemented
+through the null backend rather than fabricating a result. Whether
+the runners' observations differ splits it into divergent and
+convergent honest gaps. [README.md](README.md#the-null-backend-honest-vs-contaminating-divergence)
 
 **Invariant break.** A named host-side diagnostic (`HostInvariantBreak`
 trace record) for a path the model does not cover, such as

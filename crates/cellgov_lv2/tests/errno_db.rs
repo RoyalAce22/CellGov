@@ -58,7 +58,7 @@ fn lookup_hits_known_code_and_misses_unknown() {
 /// 0x8001_0009 for a condition wait by a non-owner. libfs.prx builds
 /// 0x8001_000D on its pointer checks.
 #[test]
-fn spot_check_three_canaries_against_rpcs3_header() {
+fn spot_check_three_canaries_against_firmware_refusal_sites() {
     assert_eq!(CELL_EINVAL.code, 0x8001_0002);
     assert_eq!(CELL_EPERM.code, 0x8001_0009);
     assert_eq!(CELL_EFAULT.code, 0x8001_000D);

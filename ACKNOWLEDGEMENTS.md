@@ -26,10 +26,12 @@ CellGov does not vendor RPCS3 source code. Its own code is written
 using RPCS3 as a behavioral reference: where CellGov must agree with
 the PS3 on what a syscall returns, how a container is laid out, or
 which inputs a loader accepts, RPCS3's source was often the clearest
-description of the expected behavior, and CellGov's code and fixtures
-are checked against it. In-source notes name the RPCS3 file and
-function whose behavior they match, and the cross-runner fixtures
-under `tests/` hold CellGov's output against RPCS3's.
+description of the expected behavior. The shipped source states its
+own authorities instead -- the public Cell and PowerPC documents, the
+console's own firmware modules, and captured console output.
+The cross-runner fixtures under `tests/` hold CellGov's output against
+RPCS3's, and the comparison harness names RPCS3 because RPCS3 is what it
+runs and reads.
 
 CellGov invokes RPCS3 only as a separate process and never links it.
 The one place CellGov modifies RPCS3 itself -- the dump-hook and

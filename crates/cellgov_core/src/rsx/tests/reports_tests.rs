@@ -10,7 +10,7 @@ use core::mem::offset_of;
 /// the report stride: its label-address getter masks the index into a
 /// 0x1000-byte window, and its report-address getter scales by 16.
 #[test]
-fn rsx_reports_size_matches_rpcs3() {
+fn rsx_reports_size_is_9400() {
     assert_eq!(reports::SIZE, 0x9400);
 }
 
@@ -72,7 +72,7 @@ fn rsx_dma_control_reserved_tail_offsets() {
 /// reads individual fields out of it -- never its length. A dump of the
 /// region from a console would settle the total.
 #[test]
-fn rsx_driver_info_size_matches_rpcs3() {
+fn rsx_driver_info_size_is_12f8() {
     assert_eq!(driver_info::SIZE, 0x12F8);
 }
 
@@ -150,7 +150,7 @@ fn rsx_context_new_is_pristine() {
 /// console output -- so it does not pin that window even in its own
 /// address space.
 #[test]
-fn reservation_offsets_match_rpcs3_layout() {
+fn reservation_region_bases_are_pinned_and_do_not_overlap() {
     assert_eq!(region::DRIVER_INFO_OFFSET, 0x0010_0000);
     assert_eq!(region::REPORTS_OFFSET, 0x0020_0000);
     assert_eq!(region::CONTEXT_RESERVATION, 0x0030_0000);

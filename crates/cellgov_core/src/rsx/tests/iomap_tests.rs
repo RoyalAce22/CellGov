@@ -16,7 +16,7 @@ fn identity_returns_offset_unchanged() {
 /// table with a sentinel. Its address getters then fail without
 /// writing an out address.
 #[test]
-fn unrecorded_iomap_returns_none_matching_rpcs3_oracle() {
+fn unrecorded_iomap_translates_nothing() {
     let m = IoMap::default();
     assert_eq!(m.size, 0, "default IoMap means no iomap recorded");
     assert_eq!(m.translate(0), None);

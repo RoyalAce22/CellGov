@@ -90,22 +90,27 @@ That policy splits cross-runner divergence into two named
 kinds:
 
 - **Honest divergence.** CellGov faithfully reports "not
-  modeled" via the null backend and diverges from RPCS3
-  because RPCS3 has implemented what CellGov has not.
-  The divergence is traced and the gap is named. Two
+  modeled" via the null backend on a path it has not
+  implemented. The report is traced and the gap is named.
+  What RPCS3 answers on that path splits the case into two
   sub-kinds:
   - **Divergent honest gap.** RPCS3 delivers a real result
     where CellGov returns the not-implemented response.
     This is an implementation target: model the syscall and
     the gap closes.
-  - **Convergent honest gap.** CellGov matches RPCS3's own
-    divergence-from-hardware (both ignore the same flag
-    bits, both reject the same input shape with the same
-    errno, etc.). The diagnostic fires as a verbose log of
-    behavior that matches RPCS3 anyway, and the guest
-    proceeds believing something true. Not an implementation
-    target; the diagnostic can downgrade to a one-line note
-    when a classifier emerges.
+  - **Convergent honest gap.** CellGov targets the console,
+    and on this path its not-implemented response already
+    agrees with RPCS3 -- because RPCS3 diverges from
+    hardware the same way (both ignore the same flag bits,
+    both reject the same input shape with the same errno,
+    etc.). The agreement is a coincidence of two gaps, not
+    a match CellGov aimed for, and the console may do
+    something neither runner does. The diagnostic fires as
+    a verbose log; the guest is never handed a fabricated
+    success. Not an implementation target, because the
+    comparison surfaces nothing to chase; the diagnostic
+    can downgrade to a one-line note when a classifier
+    emerges.
 - **Contaminating divergence.** CellGov returns a result
   it did not compute -- a fabricated success the guest
   consumes as truth, after which downstream behavior is

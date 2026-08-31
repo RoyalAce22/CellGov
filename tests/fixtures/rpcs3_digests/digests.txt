@@ -1,9 +1,11 @@
 # RPCS3-extracted reference digests.
 #
-# CellGov's install and decrypt pipelines are held byte-identical to
-# RPCS3's output. RPCS3 is the reference, but a live RPCS3 install tree
-# is not a test input -- these digests are, captured once and
-# committed. See tests/fixtures/rpcs3_digests/README.md to re-bless.
+# A regression pin, and not a design target: CellGov's install and decrypt
+# pipelines target the console's own plaintext, and these digests
+# record what RPCS3 produced for the same inputs, so a change that
+# moves the output is noticed. A live RPCS3 install tree is not a test
+# input -- these digests are, captured once and committed. See
+# tests/fixtures/rpcs3_digests/README.md to re-bless.
 #
 # Format: <sha256>  <key>  <bytes>
 8a837487c92253eef78cdcd227328bd986e50cd4e09f8cf4150c6cdc40006b36  eboot/NPUA80001  10143200
