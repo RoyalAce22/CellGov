@@ -138,13 +138,18 @@ fn resolve_primary_prio(declared: Option<i32>) -> u32 {
 /// Decode a `sys_proc_param.primary_stacksize` declaration to bytes.
 ///
 /// The field carries either a kernel sentinel or a raw byte count.
-/// This clamps a raw count between
-/// [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MIN)
-/// and
-/// [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MAX)
-/// -- 64 KiB through 1 MiB -- and rounds it up to a page. The field's
-/// own declared floor is 4 KiB; the clamp uses the wider 64 KiB floor
-/// the kernel gives every process.
+///
+/// - A sentinel decodes to the byte count it names, down to 32 KiB,
+///   with no clamp.
+/// - This clamps a raw count between
+///   [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MIN)
+///   and
+///   [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MAX)
+///   -- 4 KiB through 1 MiB, the range the field itself admits -- then
+///   rounds it up to a page.
+///
+/// Whether the kernel widens a small declaration is unestablished, so
+/// this keeps a raw count as declared.
 fn decode_primary_stacksize(declared: u32) -> u32 {
     use cellgov_ps3_abi::process_address_space::{
         PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_SIZE_MIN, PS3_STACK_SIZE_GRANULARITY,

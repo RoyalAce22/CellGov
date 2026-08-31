@@ -461,23 +461,15 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = if shift < 32 { val << shift } else { 0 } as u64;
             state.set_gpr(ra as usize, result);
             if rc {
-                // CR0 from a 32-bit word result. The architecture
-                // compares the whole 64-bit result. A word shift can
-                // never make that result negative (RA[0:31] = 0), so
-                // 0x8000_0000 reads GT under the spec. Hardware traces
-                // of the shift and rotate suite agree: every word
-                // result with bit 31 set records GT. CellGov
-                // sign-extends the word first, so this arm reads LT
-                // instead -- a CellGov divergence, not a reading of
-                // the architecture.
-                //
-                // Srw, Rlwinm and Rlwnm below take the same treatment.
-                // Rlwimi differs: it merges into RA's surviving high
-                // half, so its result is a true 64-bit value and CR0
-                // reads all 64 bits.
+                // slw clears RA[0:31], so the 64-bit value CR0
+                // compares is never negative: a word result with bit
+                // 31 set reads GT. Srw has the same shape. The rlw*
+                // mask is 64 bits wide and reaches the high half (see
+                // the Rlwinm arm).
+                // [PPC-Book1 p:77 s:3.3.12.2] slw places the word result in RA[32:63] and sets RA[0:31] to zero.
                 // [PPC-Book1 p:71 s:3.3.12] Rotate/Shift Rc=1: first three CR0 bits set per 3.3.7 result test.
-                // [PPC-Book1 p:50 s:3.3.7] CR0 LT/GT/EQ come from a signed comparison of the result to zero -- all 64 bits in 64-bit mode.
-                state.set_cr0_from_result(result as i32 as i64 as u64);
+                // [PowerISA-3.1 p:I34 s:2.3.1] the result CR0 compares is the entire 64-bit value placed in the target register.
+                state.set_cr0_from_result(result);
             }
             ExecuteVerdict::Continue
         }
@@ -488,8 +480,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = if shift < 32 { val >> shift } else { 0 } as u64;
             state.set_gpr(ra as usize, result);
             if rc {
-                // Word-width Rc sign-extension; see Slw arm.
-                state.set_cr0_from_result(result as i32 as i64 as u64);
+                // srw clears RA[0:31], so CR0 never reads LT.
+                // [PPC-Book1 p:78 s:3.3.12.2] srw places the word result in RA[32:63] and sets RA[0:31] to zero.
+                state.set_cr0_from_result(result);
             }
             ExecuteVerdict::Continue
         }
@@ -809,18 +802,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             ExecuteVerdict::Continue
         }
         // [CBE-Handbook p:738 s:A.2.3.1] mtocrf writes ONE CR field.
-        // CRM is supposed to be one-hot; when it is not, the whole
-        // CR is undefined. CellGov resolves that case to the highest
-        // set bit and writes that one field.
+        // A non-one-hot CRM leaves the whole CR undefined, so CellGov
+        // faults, as the mfocrf arm above does.
         // [PPC-Book1 p:124 s:5.1.1] mtocrf: when FXM is not exactly one-hot the whole Condition Register is undefined.
         PpuInstruction::Mtocrf { rs, crm } => {
-            if crm == 0 {
-                // No CRM bit selected: nothing to write. Distinct
-                // from mtcrf with crm == 0 (also nop), but reached
-                // via a different decode path.
-                return ExecuteVerdict::Continue;
+            if crm.count_ones() != 1 {
+                return ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(144));
             }
-            let n = crm.leading_zeros() as u8; // highest set bit, 0..=7
+            let n = crm.leading_zeros() as u8;
             let val = state.gpr[rs as usize] as u32;
             let shift = (7 - n) * 4;
             let field_bits = ((val >> shift) & 0xF) as u8;
@@ -918,8 +907,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = (rotated & mask) as u64;
             state.set_gpr(ra as usize, result);
             if rc {
-                // Word-width Rc sign-extension; see Slw arm.
-                state.set_cr0_from_result(result as i32 as i64 as u64);
+                // `rlwinm_mask` is 32 bits wide, so `result` is always
+                // a word and CR0 never reads LT. That matches the
+                // architecture for MB <= ME. With MB > ME the mask
+                // wraps into RA[0:31], where ROTL32 leaves a second
+                // copy of the rotated word; `rlwinm_mask` models no
+                // part of that wrapped half.
+                // [PPC-Book1 p:71 s:3.3.12] the rotate/shift mask is 64 bits and wraps from position 63 to position 0 when mstart > mstop; ROTL32 places a copy of the rotated word in bits 0:31.
+                state.set_cr0_from_result(result);
             }
             ExecuteVerdict::Continue
         }
@@ -962,8 +957,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = (rotated & mask) as u64;
             state.set_gpr(ra as usize, result);
             if rc {
-                // Word-width Rc sign-extension; see Slw arm.
-                state.set_cr0_from_result(result as i32 as i64 as u64);
+                // Same 32-bit mask and same MB > ME gap as Rlwinm.
+                state.set_cr0_from_result(result);
             }
             ExecuteVerdict::Continue
         }

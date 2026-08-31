@@ -7,6 +7,7 @@ use cellgov_mem::ByteRange;
 use cellgov_sync::MailboxId;
 
 use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::elf::ELF32_E_ENTRY;
 use cellgov_ps3_abi::sys_spu;
 
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState, SpuLoadImage};
@@ -341,13 +342,23 @@ impl Lv2Host {
     }
 
     /// Resolve an image handle to what group start loads and where it
-    /// enters. A kernel image reports 0x80 and the SPU factories pin
-    /// `pc` to it after the ELF loads, so the ELF's own `e_entry` is
-    /// not consulted; a user image enters where its record says. The
-    /// 0x80 entry is this model's own and is unestablished.
+    /// enters.
+    ///
+    /// A kernel image enters at its own `e_entry`; a user image has no
+    /// header, so it enters where its record says. This function does
+    /// not bound the entry. The SPU loader refuses an image shorter
+    /// than an ELF32 header, and refuses an entry with no whole
+    /// instruction word left in local store, so the 0 this reports for
+    /// a truncated header never reaches a fetch.
+    // [CBE-Handbook p:421 s:14.6.3.3] control is transferred to the entry-point address the image's parameter area names.
     fn load_image_for(&self, handle: crate::image::SpuImageHandle) -> Option<(SpuLoadImage, u32)> {
         if let Some(record) = self.state.content.lookup_by_handle(handle) {
-            return Some((SpuLoadImage::Elf(record.elf_bytes.clone()), 0x80));
+            let entry = record
+                .elf_bytes
+                .get(ELF32_E_ENTRY..ELF32_E_ENTRY + 4)
+                .and_then(|w| w.try_into().ok())
+                .map_or(0, u32::from_be_bytes);
+            return Some((SpuLoadImage::Elf(record.elf_bytes.clone()), entry));
         }
         let user = self.state.content.lookup_user_image(handle)?;
         Some((SpuLoadImage::Segments(user.segments.clone()), user.entry))

@@ -368,10 +368,14 @@ lv2_syscalls! {
     /// `sys_usbd_detect_event`.
     USBD_DETECT_EVENT = 541;
 
-    /// `sys_ss_access_control_engine` -- privileged authority/identity
-    /// gate used during user-PRX init to query the caller's SELF
-    /// program-authority-id. Sits in the `sys_ss` block, just below
-    /// the open-PSID and product-mode queries.
+    /// Privileged authority/identity gate in the `sys_ss` block, just
+    /// below the open-PSID and product-mode queries.
+    ///
+    /// `r3` carries a `pkg_id` that selects the subcommand; `pkg_id` 2
+    /// yields the calling process's SELF program-authority-id. Every
+    /// call site in the installed firmware image loads 1, 2 or 3, so
+    /// the kernel's answer to any other `pkg_id` is unestablished. The
+    /// name is inherited vocabulary; no first-party list carries it.
     SS_ACCESS_CONTROL_ENGINE = 871;
 }
 

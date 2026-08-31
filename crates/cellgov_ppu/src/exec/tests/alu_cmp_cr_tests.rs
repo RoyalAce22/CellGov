@@ -151,19 +151,13 @@ fn mtcrf_reads_low_32_bits_of_rs() {
 }
 
 #[test]
-fn mtocrf_with_multi_bit_crm_diverges_from_mtcrf() {
-    // CRM=0xC0: mtcrf updates fields 0 AND 1; mtocrf only the
-    // highest set bit (field 0). RS low 32 0x12345678 -> field 0
-    // = 0x1, field 1 = 0x2; CR sentinel 0xAAAA_AAAA reveals
-    // untouched fields.
+fn mtocrf_with_multi_bit_crm_faults_where_mtcrf_writes_both_fields() {
     let mut s_mtcrf = PpuState::new();
     s_mtcrf.set_gpr(3, 0xAAAA_AAAA_1234_5678);
     s_mtcrf.set_cr(0xAAAA_AAAA);
     exec_no_mem(&PpuInstruction::Mtcrf { rs: 3, crm: 0xC0 }, &mut s_mtcrf);
-    // mtcrf: fields 0 AND 1 updated.
     assert_eq!(s_mtcrf.cr_field(0), 0x1);
     assert_eq!(s_mtcrf.cr_field(1), 0x2);
-    // Fields 2..7 unchanged (sentinel 0xA).
     for f in 2..=7 {
         assert_eq!(s_mtcrf.cr_field(f), 0xA, "mtcrf field {f}");
     }
@@ -171,24 +165,24 @@ fn mtocrf_with_multi_bit_crm_diverges_from_mtcrf() {
     let mut s_mtocrf = PpuState::new();
     s_mtocrf.set_gpr(3, 0xAAAA_AAAA_1234_5678);
     s_mtocrf.set_cr(0xAAAA_AAAA);
-    exec_no_mem(&PpuInstruction::Mtocrf { rs: 3, crm: 0xC0 }, &mut s_mtocrf);
-    // mtocrf: ONLY field 0 (highest set bit of CRM).
-    assert_eq!(s_mtocrf.cr_field(0), 0x1);
-    // Field 1 untouched -- stays at sentinel.
-    assert_eq!(
-        s_mtocrf.cr_field(1),
-        0xA,
-        "mtocrf must leave field 1 alone (mtcrf would not)"
-    );
-    for f in 2..=7 {
-        assert_eq!(s_mtocrf.cr_field(f), 0xA, "mtocrf field {f}");
-    }
-    // Final discriminator: the post-states diverge.
-    assert_ne!(
-        s_mtcrf.cr(),
-        s_mtocrf.cr(),
-        "Mtocrf must NOT be a passthrough to Mtcrf semantics"
-    );
+    let v = exec_no_mem(&PpuInstruction::Mtocrf { rs: 3, crm: 0xC0 }, &mut s_mtocrf);
+    assert!(matches!(
+        v,
+        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(144))
+    ));
+    assert_eq!(s_mtocrf.cr(), 0xAAAA_AAAA, "CR untouched on the fault");
+}
+
+#[test]
+fn mtocrf_with_empty_crm_faults() {
+    let mut s = PpuState::new();
+    s.set_cr(0xAAAA_AAAA);
+    let v = exec_no_mem(&PpuInstruction::Mtocrf { rs: 3, crm: 0 }, &mut s);
+    assert!(matches!(
+        v,
+        ExecuteVerdict::Fault(PpuFault::UnimplementedInstruction(144))
+    ));
+    assert_eq!(s.cr(), 0xAAAA_AAAA);
 }
 
 #[test]

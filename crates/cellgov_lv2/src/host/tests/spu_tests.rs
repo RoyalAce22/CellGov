@@ -3,6 +3,7 @@
 use super::*;
 use crate::host::test_support::FakeRuntime;
 use cellgov_mem::{GuestAddr, GuestMemory};
+use cellgov_ps3_abi::elf::{ELF32_E_ENTRY, ELF32_HEADER_SIZE};
 use cellgov_time::GuestTicks;
 
 #[test]
@@ -497,7 +498,7 @@ fn group_start_returns_register_spu_with_inits() {
                 init.image,
                 crate::dispatch::SpuLoadImage::Elf(vec![0xAA, 0xBB])
             );
-            assert_eq!(init.entry_pc, 0x80);
+            assert_eq!(init.entry_pc, 0, "a header too short to hold e_entry");
             assert_eq!(init.stack_ptr, 0x3FFF0);
             assert_eq!(init.args[0], 0x1000);
             assert_eq!(init.group_id, 1);
@@ -505,6 +506,81 @@ fn group_start_returns_register_spu_with_inits() {
         }
         other => panic!("expected RegisterSpu, got {other:?}"),
     }
+}
+
+/// Drive open -> create -> initialize -> start for a path-registered
+/// image and report slot 0's entry pc.
+fn kernel_image_entry_pc(elf: Vec<u8>) -> u32 {
+    let mut host = Lv2Host::new();
+    host.content_store_mut().register(b"/spu.elf", elf);
+
+    let mut mem = GuestMemory::new(0x4000);
+    let path = b"/spu.elf\0";
+    let path_range = ByteRange::new(GuestAddr::new(0x100), path.len() as u64).unwrap();
+    mem.apply_commit(path_range, path).unwrap();
+    let img_range = ByteRange::new(GuestAddr::new(0x300), 8).unwrap();
+    mem.apply_commit(img_range, &[0, 0, 0, 1, 0, 0, 0, 1])
+        .unwrap();
+    let arg_range = ByteRange::new(GuestAddr::new(0x200), 32).unwrap();
+    mem.apply_commit(arg_range, &[0u8; 32]).unwrap();
+    let rt = FakeRuntime::with_memory(mem);
+
+    host.dispatch(
+        Lv2Request::SpuImageOpen {
+            img_ptr: 0x300,
+            path_ptr: 0x100,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    host.dispatch(
+        Lv2Request::SpuThreadGroupCreate {
+            id_ptr: 0x400,
+            num_threads: 1,
+            priority: 0,
+            attr_ptr: 0,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+    host.dispatch(
+        Lv2Request::SpuThreadInitialize {
+            thread_ptr: 0x500,
+            group_id: 1,
+            thread_num: 0,
+            img_ptr: 0x300,
+            attr_ptr: 0,
+            arg_ptr: 0x200,
+        },
+        UnitId::new(0),
+        &rt,
+    );
+
+    let result = host.dispatch(
+        Lv2Request::SpuThreadGroupStart { group_id: 1 },
+        UnitId::new(0),
+        &rt,
+    );
+    let Lv2Dispatch::RegisterSpu { inits, .. } = result else {
+        panic!("expected RegisterSpu");
+    };
+    inits[&0].entry_pc
+}
+
+#[test]
+fn a_kernel_image_enters_at_its_own_elf_entry() {
+    let mut elf = vec![0u8; ELF32_HEADER_SIZE];
+    elf[ELF32_E_ENTRY..ELF32_E_ENTRY + 4].copy_from_slice(&0x2340u32.to_be_bytes());
+    assert_eq!(kernel_image_entry_pc(elf), 0x2340);
+}
+
+#[test]
+fn the_shortest_prefix_holding_e_entry_still_reports_it() {
+    let mut elf = vec![0u8; ELF32_E_ENTRY + 4];
+    elf[ELF32_E_ENTRY..].copy_from_slice(&0x1234_5678u32.to_be_bytes());
+    assert_eq!(kernel_image_entry_pc(elf.clone()), 0x1234_5678);
+    elf.truncate(ELF32_E_ENTRY + 3);
+    assert_eq!(kernel_image_entry_pc(elf), 0);
 }
 
 /// Group 1 created, driven to Running, and its single SPU finished.

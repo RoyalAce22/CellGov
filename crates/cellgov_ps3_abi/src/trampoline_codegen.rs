@@ -81,12 +81,11 @@ const _: () = assert!(
     "blr canonical encoding drifted",
 );
 
-/// Packed OPD: `(code_addr_u32, toc_u32)` at 8-byte stride.
+/// PS3 function descriptor: `(code_addr_u32, toc_u32)`, 8 bytes.
 ///
-/// PS3 guest addresses are 32-bit, so an HLE descriptor holds two
-/// 32-bit words, one entry per stub. This is NOT a valid PPC64 ELFv1
-/// OPD (those are 24 bytes `(code_addr_u64, toc_u64, env_u64)`); only
-/// safe when the call site dereferences via the packed convention.
+/// PS3 effective addresses are 32-bit, so a title's own `.opd` packs
+/// two words per entry where a PPC64 ELFv1 OPD holds three doublewords.
+/// The loader dereferences `e_entry` as these two words.
 #[inline]
 pub const fn encode_ps3_packed_opd(code_addr: u32, toc: u32) -> [u8; 8] {
     let code_b = code_addr.to_be_bytes();

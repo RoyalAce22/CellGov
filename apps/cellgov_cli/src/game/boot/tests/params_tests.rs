@@ -90,7 +90,7 @@ mod primary_stacksize_tests {
     use super::super::{decode_primary_stacksize, primary_entry_sp, primary_stack_base_for};
     use cellgov_ps3_abi::process_address_space::{
         PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_PRIMARY_STACK_BASE,
-        PS3_PRIMARY_STACK_SIZE,
+        PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_MIN,
     };
 
     #[test]
@@ -116,13 +116,26 @@ mod primary_stacksize_tests {
     }
 
     #[test]
-    fn a_raw_byte_count_below_the_kernel_floor_is_raised_to_it() {
-        // The system software's own param segment declares 0x9000;
-        // the floor the kernel enforces is 64 KiB.
-        assert_eq!(decode_primary_stacksize(0x9000), 0x10000);
-        assert_eq!(decode_primary_stacksize(0), 0x10000);
-        assert_eq!(decode_primary_stacksize(1), 0x10000);
-        assert_eq!(decode_primary_stacksize(0xFFFF), 0x10000);
+    fn a_raw_byte_count_is_honoured_as_declared_not_widened() {
+        // The system software's own param segment declares 0x9000, and
+        // the field's own definition permits a raw count down to 4 KiB.
+        assert_eq!(decode_primary_stacksize(0x9000), 0x9000);
+        assert_eq!(decode_primary_stacksize(0x1000), 0x1000);
+    }
+
+    #[test]
+    fn a_raw_byte_count_below_the_declared_minimum_is_raised_to_it() {
+        assert_eq!(decode_primary_stacksize(0), 0x1000);
+        assert_eq!(decode_primary_stacksize(1), 0x1000);
+        assert_eq!(decode_primary_stacksize(0xFFF), 0x1000);
+    }
+
+    #[test]
+    fn a_sentinel_is_decoded_before_the_raw_clamp_can_see_it() {
+        // Both numbers sit below the raw floor: 0x10 is the sentinel
+        // for 32 KiB, and 0x11 is no sentinel.
+        assert_eq!(decode_primary_stacksize(0x10), 0x8000);
+        assert_eq!(decode_primary_stacksize(0x11), PS3_PRIMARY_STACK_SIZE_MIN);
     }
 
     #[test]

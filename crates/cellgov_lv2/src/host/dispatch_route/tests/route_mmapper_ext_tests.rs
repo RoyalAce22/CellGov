@@ -122,22 +122,24 @@ fn a_registered_key_is_eexist_and_the_caller_probes_the_next_key() {
 }
 
 #[test]
-fn the_keyless_sentinel_and_the_zero_key_register_like_any_other_key() {
-    // Unlike 332, the ext create is always process-shared and
-    // exclusive with the zero-key refusal waived, so the sentinel
-    // collides with itself. Nothing public establishes that reading.
+fn a_keyless_create_registers_nothing_and_repeats_without_colliding() {
     let mut host = Lv2Host::new();
     let rt = rt_with_entries(&[0]);
     for key in [SYS_MMAPPER_NO_SHM_KEY, 0] {
-        let id = mem_id_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1));
-        assert_eq!(host.state.mmapper_ipc.get(&key), Some(&id));
-        assert_eq!(
-            code_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1)),
-            u64::from(cell_errors::CELL_EEXIST)
-        );
+        let first = mem_id_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1));
+        let second = mem_id_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1));
+        assert_ne!(first, second);
+        assert_eq!(host.state.mmapper_ipc.get(&key), None);
+        // A keyless create still mints a handle: 334 / 337 reach the
+        // segment through the handle table under the returned id.
+        for id in [first, second] {
+            let handle = host.state.mmapper_handles.get(id).expect("handle minted");
+            assert_eq!(handle.size, SIZE_64K as u32);
+        }
     }
-    assert_eq!(host.state.mmapper_ipc.len(), 2);
+    assert!(host.state.mmapper_ipc.is_empty());
     assert_eq!(host.obs.system_ipc_witness.shm_creates, 0);
+    assert!(host.obs.system_ipc_witness.keys_touched.is_empty());
 }
 
 #[test]

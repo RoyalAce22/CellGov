@@ -46,10 +46,14 @@ const _: () = assert!(
 // r1 that is not a multiple of 16.
 const _: () = assert!(PS3_PRIMARY_STACK_TOP.is_multiple_of(0x10));
 
-/// Smallest primary stack the kernel hands out. A `primary_stacksize`
-/// may declare as little as 4 KiB, and the kernel still hands out
-/// 64 KiB. The wider floor is an observation, not a stated rule.
-pub const PS3_PRIMARY_STACK_SIZE_MIN: u32 = 0x1_0000;
+/// Floor a decoder raises a raw `primary_stacksize` byte count to: the
+/// smallest count the field's own definition admits.
+///
+/// Whether the kernel then widens a small declaration is unestablished.
+///
+/// A decoder leaves the sentinel form alone: a sentinel names its own
+/// byte count, and the smallest names 32 KiB.
+pub const PS3_PRIMARY_STACK_SIZE_MIN: u32 = 0x1000;
 
 /// Largest primary stack the kernel hands out, and the ceiling on a
 /// declared `primary_stacksize`. The loader clamps a larger
@@ -60,7 +64,7 @@ pub const PS3_PRIMARY_STACK_SIZE_MAX: u32 = 0x10_0000;
 /// Granularity a clamped primary-stack size is rounded up to.
 pub const PS3_STACK_SIZE_GRANULARITY: u32 = 0x1000;
 
-// Decoders clamp a declared `primary_stacksize` into
+// Decoders clamp a raw `primary_stacksize` byte count into
 // [MIN, MAX] and then round up to the granularity. That round-up can
 // only stay inside the window while both bounds are themselves
 // granularity multiples, and the resulting stack only fits the backed

@@ -217,9 +217,7 @@ fn srad_shifts_full_64_bits_arithmetically() {
 }
 
 #[test]
-fn slw_dot_sets_cr0_from_sign_extended_low_32() {
-    // Result is 0x8000_0000 as u32, which sign-extends to a negative
-    // i64 -- CR0 should read LT.
+fn slw_dot_reads_gt_when_bit_31_is_set() {
     let mut s = PpuState::new();
     s.set_gpr(3, 1);
     s.set_gpr(4, 31);
@@ -233,6 +231,142 @@ fn slw_dot_sets_cr0_from_sign_extended_low_32() {
         &mut s,
     );
     assert_eq!(s.gpr[5], 0x8000_0000);
+    assert_eq!(s.cr_field(0), 0b0100);
+}
+
+#[test]
+fn srw_dot_reads_gt_when_bit_31_is_set() {
+    let mut s = PpuState::new();
+    s.set_gpr(3, 0x8000_0000);
+    s.set_gpr(4, 0);
+    exec_no_mem(
+        &PpuInstruction::Srw {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0x8000_0000);
+    assert_eq!(s.cr_field(0), 0b0100);
+}
+
+// [PPC-Book1 p:77 s:3.3.12.2] slw: shift amounts from 32 to 63 give a zero result.
+#[test]
+fn slw_dot_reads_eq_at_the_32_bit_shift_boundary() {
+    let mut s = PpuState::new();
+    s.set_gpr(3, 0xFFFF_FFFF);
+    s.set_gpr(4, 32);
+    exec_no_mem(
+        &PpuInstruction::Slw {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert_eq!(s.cr_field(0), 0b0010);
+}
+
+// [PPC-Book1 p:78 s:3.3.12.2] srw: shift amounts from 32 to 63 give a zero result.
+#[test]
+fn srw_dot_reads_eq_at_the_32_bit_shift_boundary() {
+    let mut s = PpuState::new();
+    s.set_gpr(3, 0xFFFF_FFFF);
+    s.set_gpr(4, 32);
+    exec_no_mem(
+        &PpuInstruction::Srw {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0);
+    assert_eq!(s.cr_field(0), 0b0010);
+}
+
+// [PPC-Book1 p:77 s:3.3.12.2] slw reads the shift count from RB[58:63]; RS[0:31] never reaches RA.
+#[test]
+fn slw_dot_ignores_the_high_half_of_rs_and_still_reads_gt() {
+    let mut s = PpuState::new();
+    s.set_gpr(3, 0xFFFF_FFFF_8000_0000);
+    s.set_gpr(4, 0);
+    exec_no_mem(
+        &PpuInstruction::Slw {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0x8000_0000);
+    assert_eq!(s.cr_field(0), 0b0100);
+}
+
+#[test]
+fn rlwinm_dot_reads_gt_when_bit_31_is_set() {
+    let mut s = PpuState::new();
+    s.set_gpr(3, 0x8000_0000);
+    exec_no_mem(
+        &PpuInstruction::Rlwinm {
+            ra: 5,
+            rs: 3,
+            sh: 0,
+            mb: 0,
+            me: 31,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0x8000_0000);
+    assert_eq!(s.cr_field(0), 0b0100);
+}
+
+#[test]
+fn rlwnm_dot_reads_gt_when_bit_31_is_set() {
+    let mut s = PpuState::new();
+    s.set_gpr(3, 0x8000_0000);
+    s.set_gpr(4, 0);
+    exec_no_mem(
+        &PpuInstruction::Rlwnm {
+            ra: 5,
+            rs: 3,
+            rb: 4,
+            mb: 0,
+            me: 31,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0x8000_0000);
+    assert_eq!(s.cr_field(0), 0b0100);
+}
+
+#[test]
+fn rlwimi_dot_reads_lt_from_the_merged_high_half() {
+    // With mb <= me the mask stays in the low word, so RA's high half
+    // survives the merge; its set bit 0 makes CR0 read LT.
+    let mut s = PpuState::new();
+    s.set_gpr(3, 1);
+    s.set_gpr(5, 0x8000_0000_0000_0000);
+    exec_no_mem(
+        &PpuInstruction::Rlwimi {
+            ra: 5,
+            rs: 3,
+            sh: 0,
+            mb: 0,
+            me: 31,
+            rc: true,
+        },
+        &mut s,
+    );
+    assert_eq!(s.gpr[5], 0x8000_0000_0000_0001);
     assert_eq!(s.cr_field(0), 0b1000);
 }
 
@@ -392,8 +526,6 @@ fn srad_shift_ge_64_collapses_to_sign_broadcast() {
 }
 
 // -- 64-bit shift Rc (Sld / Srd) --
-// Sld/Srd CR0 was verified clean; Slw/Srw are skipped
-// (suspect cluster).
 
 #[test]
 fn sld_dot_sets_cr0_lt_on_high_bit_result() {

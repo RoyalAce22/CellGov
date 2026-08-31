@@ -924,15 +924,16 @@ pub enum PpuInstruction {
     /// set bit selects which CR field gets copied into the
     /// corresponding 4 bits of RT (other bits boundedly undefined per
     /// spec; CellGov produces the same nibble layout as mfcr for the
-    /// selected field and zero elsewhere).
+    /// selected field and zero elsewhere). Non-one-hot `crm` leaves RT
+    /// undefined, and CellGov faults.
     Mfocrf {
         rt: u8,
         crm: u8,
     },
     /// Move To One Condition Register Field. `crm` is one-hot; the
     /// set bit selects which CR field gets RS[32+4*field..+4] copied
-    /// in. Non-one-hot `crm` is boundedly undefined per spec; CellGov
-    /// applies the mtcrf semantic (mask-each-set-bit) for that case.
+    /// in. Non-one-hot `crm` leaves the CR undefined, and CellGov
+    /// faults.
     Mtocrf {
         rs: u8,
         crm: u8,

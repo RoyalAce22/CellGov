@@ -185,7 +185,7 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
-        let keyed = ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY;
+        let keyed = names_shared_segment(ipc_key);
         let in_namespace = keyed && crate::host::is_system_ipc_key(ipc_key);
         let mem_id = match self.state.mmapper_ipc.get(&ipc_key) {
             Some(&existing) if keyed => {
@@ -536,9 +536,9 @@ impl Lv2Host {
     /// the `mem_id` out-pointer at r8.
     ///
     /// A key already registered answers `CELL_EEXIST` where 332 would
-    /// attach; callers probe a key range on that answer. Every key
-    /// registers, including zero and `SYS_MMAPPER_NO_SHM_KEY`, so each
-    /// collides with itself on the next call. Eleven installed modules
+    /// attach; callers probe a key range on that answer. Zero and
+    /// `SYS_MMAPPER_NO_SHM_KEY` are not keys, so they register nothing
+    /// and every keyless call mints a fresh id. Eleven installed modules
     /// issue 339 across fourteen sites -- twelve inline calls plus two
     /// exported wrappers -- so firmware does exercise the call. Those
     /// sites fix the argument shape: the ones that build the word
@@ -563,7 +563,7 @@ impl Lv2Host {
     /// - `CELL_EPERM` when an entry type is unknown, or privileged
     ///   without 64 KiB pages and debug-or-root capability.
     /// - `CELL_EFAULT` when `mem_id_ptr` is null.
-    /// - `CELL_EEXIST` when `ipc_key` is already registered.
+    /// - `CELL_EEXIST` when a keyed `ipc_key` is already registered.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory_ext(
         &mut self,
         args: [u64; 8],
@@ -616,11 +616,8 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
         }
-        // The segment is always process-shared here, the zero-key
-        // refusal is waived, and the create is exclusive -- so the key
-        // itself, including the sentinel 332 treats as keyless, is
-        // what collides. Nothing public establishes that reading.
-        if self.state.mmapper_ipc.contains_key(&ipc_key) {
+        let keyed = names_shared_segment(ipc_key);
+        if keyed && self.state.mmapper_ipc.contains_key(&ipc_key) {
             return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
         }
         let mem_id = self.alloc_id();
@@ -631,10 +628,12 @@ impl Lv2Host {
                 align,
             },
         );
-        self.state.mmapper_ipc.insert(ipc_key, mem_id);
-        if crate::host::is_system_ipc_key(ipc_key) {
-            self.obs.system_ipc_witness.shm_creates += 1;
-            self.obs.system_ipc_witness.note_key(ipc_key);
+        if keyed {
+            self.state.mmapper_ipc.insert(ipc_key, mem_id);
+            if crate::host::is_system_ipc_key(ipc_key) {
+                self.obs.system_ipc_witness.shm_creates += 1;
+                self.obs.system_ipc_witness.note_key(ipc_key);
+            }
         }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(mem_id_ptr, 4),
@@ -648,6 +647,17 @@ impl Lv2Host {
             effects: vec![write],
         }
     }
+}
+
+/// Whether an `ipc_key` names a process-shared segment.
+///
+/// 332 and 339 read this argument the same way: a key that names no
+/// segment registers nothing, so it cannot collide with itself.
+/// Whether zero belongs on the keyless side is unestablished.
+/// `SYS_MMAPPER_NO_SHM_KEY` is the sentinel the interface names; a
+/// zero key reads as an unset field, which is CellGov's own reading.
+fn names_shared_segment(ipc_key: u64) -> bool {
+    ipc_key != 0 && ipc_key != SYS_MMAPPER_NO_SHM_KEY
 }
 
 /// The page granule a `sys_mmapper` `flags` word selects, `None` when

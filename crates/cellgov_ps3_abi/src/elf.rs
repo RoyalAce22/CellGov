@@ -19,6 +19,14 @@ pub const ELF32_HEADER_SIZE: usize = 52;
 /// Size of one ELF32 program header entry.
 pub const ELF32_PHDR_SIZE: usize = 32;
 
+/// `e_entry` field offset in the ELF32 header.
+pub const ELF32_E_ENTRY: usize = 24;
+
+// Same container coupling as the `ELF64_*` block below: a reader that
+// bounds-checks `ELF32_HEADER_SIZE` reads this field without a second
+// check.
+const _: () = assert!(ELF32_E_ENTRY + 4 <= ELF32_HEADER_SIZE);
+
 /// `e_ident[EI_CLASS]` value for 64-bit ELF.
 pub const ELFCLASS64: u8 = 2;
 
