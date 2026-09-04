@@ -4,7 +4,7 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/RoyalAce22/CellGov/ci.yml?branch=main&label=CI)](https://github.com/RoyalAce22/CellGov/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.88-orange.svg)](https://blog.rust-lang.org/2025/06/26/Rust-1.88.0/)
+[![MSRV](https://img.shields.io/badge/MSRV-1.89-orange.svg)](https://blog.rust-lang.org/2025/08/07/Rust-1.89.0/)
 
 CellGov interprets PS3 PPU and SPU code deterministically, produces
 replayable execution traces, and validates its output against
@@ -41,8 +41,8 @@ byte, what a PS3 game would produce under any legal schedule.
 
 ## Building
 
-Rust 1.88 or newer. `rust-toolchain.toml` pins development to the
-version CI lints against; the 1.88 floor is what CI tests.
+Rust 1.89 or newer. `rust-toolchain.toml` pins development to the
+version CI lints against; the 1.89 floor is what CI tests.
 
 ```bash
 cargo build --workspace

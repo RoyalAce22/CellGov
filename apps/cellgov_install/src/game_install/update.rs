@@ -29,6 +29,7 @@ use crate::progress::Phase;
 use crate::store::layout::{
     staging_sibling, Artifact, ArtifactKind, StoreLayout, TitleId, TitleTree, VersionKey,
 };
+use crate::store::lock::lock_artifact;
 use crate::store::record::{ArtifactRecord, InstallRecord, TitleRecord};
 
 /// PARAM.SFO categories an update PKG carries: `GD` patches a disc
@@ -127,6 +128,9 @@ fn check_base_entry(base_record_path: &Path, title_id: &str) -> Result<bool, Gam
 /// that is not empty, [`GameInstallError::BaseRecordMismatch`] when the
 /// base record under this title's entry is not this title's base, and
 /// the shared container / staging / record failures.
+///
+/// [`GameInstallError::Locked`] when another process holds this version
+/// of this title.
 #[cfg(feature = "decrypt")]
 pub fn install_update_pkg(
     pkg_bytes: &[u8],
@@ -177,6 +181,10 @@ pub fn install_update_pkg(
     let store_path = layout.store_path_of(&entry_dir)?;
     let record_path = layout.record_path(&artifact);
     let staging_root = staging_sibling(&entry_dir)?;
+    // The install holds this claim to the end, as on the base path. The
+    // claim covers this version alone. Another version of the same title
+    // stages and commits under its own key.
+    let _lock = lock_artifact(&layout, &artifact)?;
 
     let orphan = check_base_entry(
         &layout.record_path(&Artifact::TitleBase { title_id: key }),

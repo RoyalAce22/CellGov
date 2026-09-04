@@ -35,6 +35,7 @@ use crate::progress::Phase;
 use crate::sce;
 use crate::self_image::is_sce_wrapped;
 use crate::store::layout::{staging_sibling, Artifact, StoreLayout, TitleId};
+use crate::store::lock::lock_artifact;
 use crate::store::record::{ArtifactRecord, RapRecord, TitleRecord};
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
@@ -112,6 +113,10 @@ fn plan_staged_rap(
 /// [`GameInstallError::PreStore`] when the root still holds the
 /// pre-store layout. Nothing is read or staged before this refusal.
 ///
+/// [`GameInstallError::Locked`] when another process holds this title's
+/// base. The install claims the base once the identity gates pass and
+/// before the staging sweep, so this refusal also stages nothing.
+///
 /// The shared identity / RAP / staging / record failures also apply.
 #[cfg(feature = "decrypt")]
 pub fn install_pkg(
@@ -188,6 +193,10 @@ pub fn install_pkg(
         title_id: TitleId::new(&title_id)?,
     };
     let store_path = layout.store_path_of(&final_dir)?;
+    // The install holds this claim to the end. The target gate, the
+    // staging sweep, and both commit renames touch paths that a second
+    // install or an uninstall of this title also touches.
+    let _lock = lock_artifact(&layout, &artifact)?;
 
     if dir_non_empty(&final_dir)? && !opts.force {
         return Err(GameInstallError::TargetExists { path: final_dir });
@@ -305,6 +314,11 @@ pub fn install_pkg(
 ///
 /// [`GameInstallError::DiscImageEncrypted`] for an image still carrying
 /// its disc encryption, refused before anything is staged.
+///
+/// [`GameInstallError::Locked`] when another process holds this title's
+/// base. A disc base and an HDD base of one title share one record, so
+/// they share one claim. An [`install_pkg`] of the same title raises
+/// this refusal too.
 #[cfg(feature = "decrypt")]
 pub fn install_iso(
     image: &[u8],
@@ -367,6 +381,7 @@ pub fn install_iso(
         title_id: TitleId::new(&title_id)?,
     };
     let store_path = layout.store_path_of(&final_dir)?;
+    let _lock = lock_artifact(&layout, &artifact)?;
 
     if dir_non_empty(&final_dir)? && !opts.force {
         return Err(GameInstallError::TargetExists { path: final_dir });

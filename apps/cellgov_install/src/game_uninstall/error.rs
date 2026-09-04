@@ -12,6 +12,9 @@ pub enum GameUninstallError {
     /// The pre-store check refused the root.
     #[error("{0}")]
     PreStore(#[from] crate::store::pre_store::PreStoreError),
+    /// Another writer holds one of the entries the scope names.
+    #[error("{0}")]
+    Locked(#[from] crate::store::lock::StoreLockError),
     /// The recorded tree names no tombstone sibling to rename onto.
     #[error("{0}")]
     HiddenSibling(#[from] crate::store::layout::HiddenSiblingError),
@@ -115,6 +118,23 @@ pub enum GameUninstallError {
         title_id: String,
         /// The `store_path` the record declared.
         store_path: String,
+    },
+    /// The record names a different tree than the plan resolved, so
+    /// another writer moved the entry.
+    #[error(
+        "install record {} named the tree {} when the removal was planned and names {} now; \
+         another writer re-installed the entry -- re-run the uninstall",
+        path.display(),
+        planned.display(),
+        found.display()
+    )]
+    RecordMovedSincePlan {
+        /// The record that changed.
+        path: PathBuf,
+        /// The tree the plan resolved.
+        planned: PathBuf,
+        /// The tree the record names now.
+        found: PathBuf,
     },
     /// A recorded file could be neither hashed nor shown absent, so the
     /// gate cannot say whether the tree matches.

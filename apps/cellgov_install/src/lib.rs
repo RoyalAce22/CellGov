@@ -57,3 +57,7 @@ pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "tests/lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/store_lock_tests.rs"]
+mod store_lock_tests;

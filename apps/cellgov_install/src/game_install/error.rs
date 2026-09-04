@@ -185,6 +185,9 @@ pub enum GameInstallError {
     /// The pre-store check refused the root.
     #[error("{0}")]
     PreStore(#[from] crate::store::pre_store::PreStoreError),
+    /// Another writer holds this artifact.
+    #[error("{0}")]
+    Locked(#[from] crate::store::lock::StoreLockError),
     /// A store key -- the title id that names the store directory --
     /// is not usable as a directory name.
     #[error("store key: {0}")]

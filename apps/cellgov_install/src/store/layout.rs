@@ -12,6 +12,9 @@
 //! - Staging and tombstone directories are hidden siblings of the
 //!   directory they stand in for, so the commit and teardown renames
 //!   stay inside one directory, and so on one filesystem.
+//! - A lock path is never under the directory it guards. A writer
+//!   renames or removes both the staging and the entry directory while
+//!   it holds their lock.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -25,6 +28,10 @@ pub const DEFAULT_VFS_ROOT: &str = "vfs";
 /// The single modeled user profile, matching the boot path's
 /// `home/00000001/exdata` RAP lookup.
 const HDD0_USER: &str = "00000001";
+
+/// Directory under a VFS root that holds what CellGov keeps about the
+/// store rather than in it.
+const CELLGOV_DIR: &str = ".cellgov";
 
 /// Whether a string is safe to use as a single path component under a
 /// store root: non-empty, no leading or trailing dot, no Win32 device
@@ -324,6 +331,12 @@ pub fn staging_sibling(final_dir: &Path) -> Result<PathBuf, HiddenSiblingError> 
 /// `fw`, which [`VersionKey`] accepts.
 const FIRMWARE_STAGING_DIR: &str = ".firmware-staging";
 
+/// Lock file for the staging directory every firmware install shares.
+///
+/// [`VersionKey`] rejects a leading dot, so no installed version claims
+/// this name.
+const FIRMWARE_STAGING_LOCK: &str = ".staging.lock";
+
 /// The tombstone sibling of `final_dir`: `<parent>/.uninstalling-<name>`.
 ///
 /// # Errors
@@ -387,7 +400,49 @@ impl StoreLayout {
     /// carries them along.
     #[must_use]
     pub fn installs_dir(&self) -> PathBuf {
-        self.root.join(".cellgov").join("installs")
+        self.root.join(CELLGOV_DIR).join("installs")
+    }
+
+    /// Advisory lock files, keyed the way records are.
+    ///
+    /// They live outside every directory they guard, and outside the
+    /// records directory a reader enumerates.
+    #[must_use]
+    pub fn locks_dir(&self) -> PathBuf {
+        self.root.join(CELLGOV_DIR).join("locks")
+    }
+
+    /// Where the lock for `artifact` lives.
+    ///
+    /// One artifact names one path, and no two artifacts name the same
+    /// path. Two writers of one artifact therefore meet on one file,
+    /// and two writers of different artifacts never do.
+    #[must_use]
+    pub fn lock_path(&self, artifact: &Artifact) -> PathBuf {
+        let rel = match artifact {
+            Artifact::Firmware { version } => {
+                Path::new("firmware").join(format!("{}.lock", version.as_str()))
+            }
+            Artifact::TitleBase { title_id } => Path::new("titles")
+                .join(title_id.as_str())
+                .join("base.lock"),
+            Artifact::TitleUpdate { title_id, version } => Path::new("titles")
+                .join(title_id.as_str())
+                .join(format!("update-{}.lock", version.as_str())),
+        };
+        self.locks_dir().join(rel)
+    }
+
+    /// Where the lock for [`Self::firmware_staging_dir`] lives.
+    ///
+    /// A firmware install cannot name its entry until the extracted
+    /// tree names a version. The staging directory is therefore what
+    /// one install holds against the next.
+    #[must_use]
+    pub fn firmware_staging_lock_path(&self) -> PathBuf {
+        self.locks_dir()
+            .join("firmware")
+            .join(FIRMWARE_STAGING_LOCK)
     }
 
     /// Root of the versioned firmware entries.

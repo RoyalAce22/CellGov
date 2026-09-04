@@ -1,8 +1,7 @@
-//! Synthetic-fixture builders shared across the crate's unit tests:
-//! a synthetic key vault, a minimal PARAM.SFO emitter, a retail-PKG
-//! emitter, and the progress sinks the install tests assert against.
-//! Compiled only under `cfg(test)`; the PKG emitter encrypts and so
-//! rides with the `decrypt` feature.
+//! Synthetic-fixture builders shared across the crate's unit tests,
+//! plus the progress sinks the install tests assert against. Compiled
+//! only under `cfg(test)`; the emitters that encrypt ride with the
+//! `decrypt` feature.
 
 use std::path::Path;
 
@@ -249,6 +248,87 @@ pub fn build_npdrm_eboot_header(license: u32, content_id: &str) -> Vec<u8> {
     let n = cid.len().min(0x30);
     buf[body + 0x10..body + 0x10 + n].copy_from_slice(&cid[..n]);
     buf
+}
+
+/// Build a USTAR archive of regular files, terminated by the all-zero
+/// block `tar::parse` stops at.
+///
+/// The header carries the fields the parser reads: name, octal size,
+/// magic, and a regular-file type flag. The checksum stays zero, which
+/// the parser does not check.
+///
+/// # Panics
+///
+/// On a name longer than the 100-byte USTAR name field.
+#[cfg_attr(not(feature = "decrypt"), allow(dead_code))]
+pub fn build_tar(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    const BLOCK: usize = 512;
+    let mut out = Vec::new();
+    for (name, data) in entries {
+        let mut header = [0u8; BLOCK];
+        assert!(
+            name.len() <= 100,
+            "build_tar: name {name:?} is {} bytes; the USTAR name field holds 100 and this \
+             emitter writes no prefix field",
+            name.len()
+        );
+        header[..name.len()].copy_from_slice(name.as_bytes());
+        // Size: 11 octal digits then a NUL, at the POSIX offset.
+        let size = format!("{:011o}\0", data.len());
+        header[0x7C..0x7C + size.len()].copy_from_slice(size.as_bytes());
+        header[0x9C] = b'0';
+        header[0x101..0x106].copy_from_slice(b"ustar");
+        out.extend_from_slice(&header);
+        out.extend_from_slice(data);
+        out.resize(out.len().next_multiple_of(BLOCK), 0);
+    }
+    out.extend_from_slice(&[0u8; BLOCK]);
+    out
+}
+
+/// Build a PUP whose entry table names `entries` by id.
+///
+/// The emitter records each payload's HMAC-SHA1 under the vault's PUP
+/// key, so `validate_hashes` accepts it. It copies the payloads
+/// verbatim: a caller that needs a payload read past the hash gate
+/// supplies the bytes that gate expects.
+#[cfg(feature = "decrypt")]
+pub fn build_pup(keys: &KeyVault, image_version: u64, entries: &[(u64, &[u8])]) -> Vec<u8> {
+    use hmac::{Hmac, Mac};
+    use sha1::Sha1;
+
+    let header_len = 0x30 + entries.len() * 0x40;
+    let mut payload = Vec::new();
+    let mut offsets = Vec::with_capacity(entries.len());
+    for (_, data) in entries {
+        offsets.push(header_len + payload.len());
+        payload.extend_from_slice(data);
+    }
+
+    let mut out = Vec::with_capacity(header_len + payload.len());
+    out.extend_from_slice(b"SCEUF\0\0\0");
+    out.extend_from_slice(&1u64.to_be_bytes());
+    out.extend_from_slice(&image_version.to_be_bytes());
+    out.extend_from_slice(&(entries.len() as u64).to_be_bytes());
+    out.extend_from_slice(&(header_len as u64).to_be_bytes());
+    out.extend_from_slice(&(payload.len() as u64).to_be_bytes());
+    for (i, (entry_id, data)) in entries.iter().enumerate() {
+        out.extend_from_slice(&entry_id.to_be_bytes());
+        out.extend_from_slice(&(offsets[i] as u64).to_be_bytes());
+        out.extend_from_slice(&(data.len() as u64).to_be_bytes());
+        out.extend_from_slice(&[0u8; 8]);
+    }
+    let pup_key = keys.pup_hmac().expect("the synthetic vault has a PUP key");
+    for (i, (_, data)) in entries.iter().enumerate() {
+        let mut mac =
+            Hmac::<Sha1>::new_from_slice(pup_key).expect("HMAC-SHA1 takes a key of any length");
+        mac.update(data);
+        out.extend_from_slice(&(i as u64).to_be_bytes());
+        out.extend_from_slice(&mac.finalize().into_bytes());
+        out.extend_from_slice(&[0u8; 4]);
+    }
+    out.extend_from_slice(&payload);
+    out
 }
 
 /// ISO9660 logical sector size, exposed for byte-level test tampering.

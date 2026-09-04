@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::store::layout::{tombstone_sibling, Artifact, ArtifactKind, StoreLayout, VersionKey};
+use crate::store::lock::lock_artifact;
 use crate::store::record::InstallRecord;
 
 /// Why a firmware uninstall failed.
@@ -20,6 +21,9 @@ pub enum FirmwareUninstallError {
     /// The pre-store check refused the root.
     #[error("{0}")]
     PreStore(#[from] crate::store::pre_store::PreStoreError),
+    /// Another writer holds this version's entry.
+    #[error("{0}")]
+    Locked(#[from] crate::store::lock::StoreLockError),
     /// The entry directory names no tombstone sibling to rename onto.
     #[error("{0}")]
     HiddenSibling(#[from] crate::store::layout::HiddenSiblingError),
@@ -116,6 +120,12 @@ pub struct FirmwareUninstallPlan {
     /// SHA-256 over the PUP the entry was installed from, so a report
     /// can name the source to reinstall.
     pub pup_sha256: String,
+    /// The identity the removal claims, resolved by the same gate that
+    /// resolved `entry_dir`.
+    artifact: Artifact,
+    /// The root [`plan`] resolved against, so the removal claims its
+    /// lock under the same store.
+    layout: StoreLayout,
 }
 
 /// What an [`uninstall`] removed.
@@ -235,6 +245,8 @@ pub fn plan(
         entry_dir: layout.resolve_store_path(&record.artifact.store_path),
         record_path,
         pup_sha256: record.source.sha256.to_hex(),
+        artifact,
+        layout,
     })
 }
 
@@ -286,12 +298,18 @@ pub fn uninstall(
 ///
 /// # Errors
 ///
-/// The filesystem failures, plus
-/// [`FirmwareUninstallError::HiddenSibling`] for an entry directory
-/// with no tombstone sibling.
+/// - The filesystem failures.
+/// - [`FirmwareUninstallError::HiddenSibling`] for an entry directory
+///   with no tombstone sibling.
+/// - [`FirmwareUninstallError::Locked`] when another process holds this
+///   version's entry. The claim precedes the first rename, so a refused
+///   pass removes nothing.
 pub fn execute(
     plan: &FirmwareUninstallPlan,
 ) -> Result<FirmwareUninstallOutcome, FirmwareUninstallError> {
+    // An install of this version must not commit into the entry this
+    // pass removes.
+    let _lock = lock_artifact(&plan.layout, &plan.artifact)?;
     let tombstone = tombstone_sibling(&plan.entry_dir)?;
     remove_dir_if_present(&tombstone)?;
 

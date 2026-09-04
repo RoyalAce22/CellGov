@@ -211,8 +211,10 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
         !vfs.join("dev_bdvd/BCES00664").exists(),
         "nothing committed"
     );
+    // The install leaves a lock file under `.cellgov`, so the assertion
+    // names the records directory alone.
     assert!(
-        !vfs.join(".cellgov").exists(),
+        !StoreLayout::new(&vfs).installs_dir().exists(),
         "no record for a failed install"
     );
 }

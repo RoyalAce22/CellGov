@@ -205,6 +205,9 @@ pub enum FirmwareInstallError {
     /// Serialising the install record failed.
     #[error("install-record serialise: {0}")]
     RecordSerialise(#[from] toml::ser::Error),
+    /// Another writer holds this artifact.
+    #[error("{0}")]
+    Locked(#[from] crate::store::lock::StoreLockError),
     /// The pre-store check refused the root.
     #[error("{0}")]
     PreStore(#[from] crate::store::pre_store::PreStoreError),

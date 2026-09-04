@@ -4,11 +4,12 @@
 use std::path::{Path, PathBuf};
 
 use crate::store::layout::tombstone_sibling;
+use crate::store::lock::lock_artifact;
 use crate::store::record::InstallRecord;
 use crate::store::verify::{verify_record_tree, verify_recorded_rap, DivergenceKind, VerifyReport};
 
 use super::error::{uio_err, GameUninstallError};
-use super::plan::{plan, EntryVersion, UninstallPlan, UninstallScope};
+use super::plan::{plan, recheck_under_claim, EntryVersion, UninstallPlan, UninstallScope};
 
 /// Options for [`uninstall`].
 #[derive(Debug, Clone, Copy)]
@@ -150,10 +151,31 @@ pub fn uninstall(
 /// The verify and filesystem failures, plus
 /// [`GameUninstallError::HiddenSibling`] for a recorded tree with no
 /// tombstone sibling.
+///
+/// [`GameUninstallError::Locked`] when another process holds any entry
+/// the plan names, and [`GameUninstallError::RecordMovedSincePlan`] when
+/// a record moved between the plan and the claim.
 pub fn execute(
     plan: &UninstallPlan,
     opts: UninstallOptions,
 ) -> Result<GameUninstallOutcome, GameUninstallError> {
+    // The removal claims every entry before the verify gate reads a
+    // byte: no installer may commit into a tree this pass is about to
+    // take. One entry held by another writer refuses the whole pass, so
+    // a scope over several entries removes all of them or none.
+    let _locks = plan
+        .entries
+        .iter()
+        .map(|e| lock_artifact(&plan.layout, &e.artifact))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // The plan resolved every record before the claim existed. No writer
+    // can move one now, so the teardown below steers off the store as it
+    // stands.
+    for entry in &plan.entries {
+        recheck_under_claim(&plan.layout, &plan.title_id, entry)?;
+    }
+
     let mut verified = 0usize;
     let mut diverged = 0usize;
     if opts.verify {

@@ -40,6 +40,7 @@ use crate::keys::KeyVault;
 use crate::manifest::{self, serialize_manifest, MANIFEST_FILE};
 use crate::progress::{FirmwarePhase, ProgressSink};
 use crate::store::layout::{Artifact, ArtifactKind, StoreLayout, VersionKey};
+use crate::store::lock::{lock_artifact, lock_firmware_staging};
 use crate::store::record::{
     ArtifactRecord, InstallRecord, InstallRecordParseError, SourceRecord,
     INSTALL_RECORD_FORMAT_VERSION,
@@ -369,6 +370,15 @@ impl ExtractTally {
 /// duplicate, [`FirmwareInstallError::TargetExists`] for an unrecorded
 /// entry directory that is not empty, and the container / staging /
 /// record failures.
+///
+/// [`FirmwareInstallError::Locked`] comes from either of two claims:
+///
+/// - the staging directory, claimed before the sweep;
+/// - the version's own entry, which the install cannot name until it
+///   extracts the tree.
+///
+/// The second claim therefore refuses only after the whole extraction
+/// runs, and the pass discards the staged tree with it.
 #[cfg(feature = "decrypt")]
 pub fn install_pup(
     pup_data: &[u8],
@@ -394,10 +404,13 @@ pub fn install_pup(
     );
 
     let layout = StoreLayout::new(output_dir);
+    // The claim precedes the sweep and holds past the commit rename
+    // that moves the staging directory onto the entry it becomes.
+    let _staging_lock = lock_firmware_staging(&layout)?;
     let staging_root = layout.firmware_staging_dir();
     prepare_staging(&staging_root, progress)?;
 
-    let staged = run_or_clean(&staging_root, || {
+    let (staged, _version_lock) = run_or_clean(&staging_root, || {
         let tally = extract_packages(&packages, &staging_root, keys, progress)
             .into_complete(packages.len())?;
 
@@ -408,6 +421,9 @@ pub fn install_pup(
         };
         let entry_dir = layout.entry_dir(&artifact);
         let record_path = layout.record_path(&artifact);
+        // The install knows the version only here. The claim holds past
+        // the commit that fills the entry.
+        let version_lock = lock_artifact(&layout, &artifact)?;
         let replaced = check_entry(
             &record_path,
             &entry_dir,
@@ -429,7 +445,7 @@ pub fn install_pup(
         std::fs::write(&staged_manifest, serialize_manifest(&manifest)?)
             .map_err(io_err("write", &staged_manifest))?;
 
-        Ok(Staged {
+        let staged = Staged {
             record: InstallRecord {
                 format_version: INSTALL_RECORD_FORMAT_VERSION,
                 artifact: ArtifactRecord {
@@ -453,7 +469,8 @@ pub fn install_pup(
             files: tally.files,
             packages: tally.packages,
             replaced,
-        })
+        };
+        Ok((staged, version_lock))
     })?;
 
     commit(&staging_root, &staged, progress)?;

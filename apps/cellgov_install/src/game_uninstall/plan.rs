@@ -56,6 +56,9 @@ pub struct PlannedEntry {
     pub recorded_files: usize,
     /// The record itself, so the removal need not read it twice.
     pub(super) record: InstallRecord,
+    /// The identity the removal claims, from the gate that resolved
+    /// `tree_dir`.
+    pub(super) artifact: Artifact,
 }
 
 /// Every entry a scope removes, updates first and the base last.
@@ -69,6 +72,9 @@ pub struct UninstallPlan {
     pub rap: Option<PathBuf>,
     /// Installed update versions this scope leaves in place.
     pub kept_updates: Vec<String>,
+    /// The root the plan resolved against, so the removal claims its
+    /// locks under the same store.
+    pub(super) layout: StoreLayout,
 }
 
 impl UninstallPlan {
@@ -184,6 +190,7 @@ pub fn plan(
         entries,
         rap,
         kept_updates,
+        layout,
     })
 }
 
@@ -226,7 +233,37 @@ fn planned_entry(
         record_path,
         recorded_files: record.files.len(),
         record,
+        artifact: artifact.clone(),
     })
+}
+
+/// Re-read `entry`'s record under the claim and hold it against what
+/// [`plan`] resolved.
+///
+/// [`plan`] reads every record before any claim exists. The CLI prints
+/// the plan and waits for an operator answer, so the gap runs as long as
+/// the operator takes. A base record names a live mount directory, and
+/// [`check_record_describes`] asks only that its last component be the
+/// title-id. An install that lands the same title on another mount in
+/// that gap moves the tree but leaves the record path alone. The removal
+/// would then take the tree the plan named and delete the record the new
+/// install wrote. Nothing would name the tree that stays installed.
+pub(super) fn recheck_under_claim(
+    layout: &StoreLayout,
+    title_id: &str,
+    entry: &PlannedEntry,
+) -> Result<(), GameUninstallError> {
+    let record = read_record(&entry.record_path, title_id, &entry.version)?;
+    check_record_describes(title_id, layout, &entry.artifact, &record)?;
+    let named = layout.resolve_store_path(&record.artifact.store_path);
+    if named != entry.tree_dir {
+        return Err(GameUninstallError::RecordMovedSincePlan {
+            path: entry.record_path.clone(),
+            planned: entry.tree_dir.clone(),
+            found: named,
+        });
+    }
+    Ok(())
 }
 
 fn read_record(

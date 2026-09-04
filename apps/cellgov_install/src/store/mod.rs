@@ -7,9 +7,11 @@
 //! separate index file, so a reader enumerating installs scans
 //! [`StoreLayout::installs_dir`]. [`pre_store`] refuses a root that
 //! still holds the layout that came before this one. [`verify`] holds
-//! a tree against the record that describes it.
+//! a tree against the record that describes it. [`lock`] keeps two
+//! writers off one entry; readers take nothing.
 
 pub mod layout;
+pub mod lock;
 pub mod pre_store;
 pub mod record;
 pub mod verify;
@@ -19,6 +21,7 @@ pub use layout::{
     HiddenSiblingError, StoreKeyError, StoreLayout, StorePathError, TitleId, TitleTree, VersionKey,
     DEFAULT_VFS_ROOT,
 };
+pub use lock::{lock_artifact, lock_firmware_staging, StoreLock, StoreLockError};
 pub use pre_store::{preflight, PreStoreArtifact, PreStoreError, PreStoreResidue};
 pub use record::{
     ArtifactRecord, InstallRecord, InstallRecordParseError, RapRecord, SourceRecord, TitleRecord,
