@@ -36,6 +36,18 @@ manifest path (`--title-manifest <file>`). A manifest declares:
   regions both runners capture; an EBOOT with more loadable
   segments names more regions (`code`, `data`, `code_hi`,
   `data_hi`, ...).
+- **`[[bench.matrix]]` cells.** A result is keyed by the cell -- the
+  title at one firmware version and one game version -- and the
+  matrix declares which cells exist. One row carries
+  `reference = true`, naming the configuration a headline row is
+  measured at; the loader refuses a matrix marking none or several,
+  since a reference chosen by sort order is a measurement nothing
+  attributes. A row overrides the title-level cap and checkpoint for
+  its own cell and nothing else, and a row expecting convergence
+  (`frontier`) is distinguished from one that exists to observe an
+  incompatibility (`probe`). A firmware-shipped title states no game
+  version: its version axis is the firmware's, so its matrix is one
+  row per firmware.
 
 [titles.md](../titles.md) tracks per-title status (boot checkpoint
 reached, cross-runner observation match).

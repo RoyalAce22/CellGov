@@ -21,6 +21,7 @@ fn manifest_with_bench_cap(bench_max_steps: Option<u64>) -> game::manifest::Titl
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
+        matrix: Vec::new(),
     }
 }
 

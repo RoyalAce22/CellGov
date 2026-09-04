@@ -1181,6 +1181,7 @@ mod child_command_tests {
             rsx_consume: false,
             content: None,
             mounts: Vec::new(),
+            matrix: Vec::new(),
         }
     }
 

@@ -3,6 +3,7 @@
 
 mod checkpoint;
 mod loader;
+mod matrix;
 mod model;
 mod registry;
 mod schema;
@@ -12,8 +13,15 @@ mod schema;
 mod test_fixtures;
 
 pub use checkpoint::{CheckpointParseError, CheckpointTrigger};
+pub use matrix::BASE_GAME_VER;
 pub use model::{ContentManifest, MountEntry, TitleManifest};
 pub use registry::TitleRegistry;
+
+#[allow(
+    unused_imports,
+    reason = "the types of TitleManifest's matrix field and reference_cell return"
+)]
+pub use matrix::{CellExpectation, MatrixCell};
 
 #[allow(unused_imports, reason = "named only by titles-gen tests")]
 pub use model::Distribution;

@@ -30,10 +30,10 @@ via `cellgov dev titles-gen`.
 ## Schema overview
 
 The file has one required `[title]` block, one required
-`[checkpoint]` block, and four optional blocks (`[source]`,
-`[rsx]`, `[content]`, `[[fs.mounts]]`). The TOML parser runs
-with `deny_unknown_fields`; a typo in a key name surfaces as a
-load error.
+`[checkpoint]` block, and five optional blocks (`[source]`,
+`[rsx]`, `[content]`, `[[fs.mounts]]`, `[[bench.matrix]]`). The
+TOML parser runs with `deny_unknown_fields`; a typo in a key name
+surfaces as a load error.
 
 ### `[title]` (required)
 
@@ -126,6 +126,80 @@ resource enumerator.
 | `prefix`       | string | yes      | Guest-side path prefix. MUST start with `/`. Each prefix must be unique within the manifest; duplicates are rejected. |
 | `host`         | string | yes      | Host-side directory the prefix maps to.                                                                               |
 | `override_env` | string | no       | Env-var name that replaces `host` at run time. Same role as `[content].override_base_env`.                            |
+
+### `[[bench.matrix]]` (optional, array-of-tables)
+
+Which **cells** this title declares. A cell is the title at one
+firmware and one game version, and it is the unit a result is
+keyed by: there is no "the result for `<disc serial>`", only a
+result for `(<disc serial>, fw 4.91, base)`.
+
+The matrix is **declared and validated, but nothing reads it yet.**
+A per-cell `bench_max_steps` or `checkpoint` written today is
+parsed and checked, then not applied: `boot bench` still uses the
+title-level values. The anchor gate and the doc generator are what
+will consume cells.
+
+Cells are declared here, never discovered from what a machine has
+installed. A store holding forty firmwares does not give a title
+forty cells.
+
+| Field             | Type    | Required                    | Notes                                                                                     |
+| ----------------- | ------- | --------------------------- | ------------------------------------------------------------------------------------------- |
+| `fw`              | string  | yes                         | Firmware version key; the name of a `vfs/firmware/<key>/` entry.                          |
+| `game_ver`        | string  | yes, except `firmware-exec` | `"base"` or an update version key. Refused on a `firmware-exec` title, whose version axis is the firmware's. |
+| `reference`       | bool    | exactly one row per title   | The cell the headline row of `docs/titles.md` renders.                                    |
+| `expect`          | string  | no (default `"frontier"`)   | `"frontier"` or `"probe"`; see below.                                                     |
+| `bench_max_steps` | integer | no                          | Per-cell override of the `[title]` cap.                                                   |
+| `checkpoint`      | table   | no                          | Per-cell override of the `[checkpoint]` block; same `kind` / `pc` fields and refusals.    |
+
+The reference cell is declared rather than inferred for the same
+reason `--fw` refuses to guess `latest`: a headline row whose
+configuration was picked by lexical sort is a real number that
+nothing on the page attributes.
+
+`expect` says what the cell is for:
+
+- **`frontier`** -- CellGov is expected to converge here, so a
+  divergence names the next implementation target.
+- **`probe`** -- the cell exists to observe an incompatibility.
+  Which error the guest received is the datum; convergence is
+  not. Running a 2012 title on 3.55 to see what it throws
+  produces a divergence that is the desired result, and mixing
+  that into the frontier map would make the "next target"
+  reading false.
+
+Per-cell overrides are whitelisted to `bench_max_steps` and
+`checkpoint`, and no other key is accepted. Both are genuinely
+properties of a cell: a different firmware library moves
+steps-to-first-RSX-write, so a cap that makes a run reproducible
+belongs to the triple, and a checkpoint reachable on one firmware
+may be unreachable on another. Everything else stays title-level,
+because two rows differing in a field the rendered document does
+not show are two incomparable measurements presented as
+comparable.
+
+```toml
+[[bench.matrix]]
+fw = "4.91"
+game_ver = "base"
+reference = true
+
+[[bench.matrix]]
+fw = "3.55"
+game_ver = "base"
+bench_max_steps = 250_000_000
+expect = "probe"
+```
+
+A `firmware-exec` title's matrix is one row per firmware, with no
+`game_ver` at all:
+
+```toml
+[[bench.matrix]]
+fw = "4.91"
+reference = true
+```
 
 ## Worked examples
 
@@ -231,6 +305,17 @@ The loader enforces, in addition to TOML well-formedness:
   are not combined.
 - Every `[[fs.mounts]].prefix` starts with `/`; no two
   mounts share a prefix.
+- A declared `[[bench.matrix]]` marks exactly one row
+  `reference = true`; zero and two are both refused, naming the
+  rows. An absent or empty matrix declares no cells and is
+  accepted.
+- Every `fw`, and every `game_ver` other than `"base"`, is usable
+  as a store directory name. This checks the key's shape only; the
+  loader never consults the store, so a cell may name a firmware
+  that is not installed.
+- `game_ver` is present on every row of a title with a version
+  axis, and absent from every row of a `firmware-exec` title.
+- No two rows name the same cell.
 
 Any of these failures surfaces as a typed `ManifestError` at
 startup, carrying the offending file path; a malformed

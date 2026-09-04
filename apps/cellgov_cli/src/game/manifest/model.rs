@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::checkpoint::CheckpointTrigger;
+use super::matrix::MatrixCell;
 
 /// How the title's executable is located on disk. Defaults to `Hdd`
 /// when `[source]` is omitted.
@@ -123,6 +124,10 @@ pub struct TitleManifest {
     /// Mount-table registration order matches declaration order;
     /// the dispatch layer consults mounts in that order on a miss.
     pub mounts: Vec<MountEntry>,
+    /// The `(firmware, game version)` cells this title declares, in
+    /// declaration order. A non-empty matrix marks exactly one cell as
+    /// the reference.
+    pub matrix: Vec<MatrixCell>,
 }
 
 /// One mount-table entry. `prefix` must start with `/`. `override_env`,
@@ -259,6 +264,29 @@ impl TitleManifest {
 
     pub fn checkpoint_trigger(&self) -> CheckpointTrigger {
         self.checkpoint
+    }
+
+    /// The cell the headline row renders, or `None` when the title
+    /// declares no cells.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build if the matrix marks more than one cell
+    /// as the reference.
+    #[allow(
+        dead_code,
+        reason = "declared by the registry; read once the gate and the doc generator consume cells"
+    )]
+    pub fn reference_cell(&self) -> Option<&MatrixCell> {
+        // The loader enforces the one-reference rule, but this struct is
+        // constructible without it. Picking the first of two marked
+        // cells would name a configuration nobody chose.
+        debug_assert!(
+            self.matrix.iter().filter(|c| c.reference).count() <= 1,
+            "title '{}' carries more than one reference cell",
+            self.short_name
+        );
+        self.matrix.iter().find(|c| c.reference)
     }
 
     pub fn rsx_mirror(&self) -> bool {

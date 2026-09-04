@@ -12,9 +12,7 @@
 use std::path::PathBuf;
 
 use super::inventory::{dir_exists, FirmwareEntry, StoreInventory, TitleEntry};
-
-/// The `--game-ver` value naming a title's base install.
-pub(crate) const BASE_VERSION: &str = "base";
+use crate::game::manifest::BASE_GAME_VER;
 
 /// What a boot answers `/dev_flash` from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +53,7 @@ pub(crate) enum GameVersion {
 impl std::fmt::Display for GameVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Base => f.write_str(BASE_VERSION),
+            Self::Base => f.write_str(BASE_GAME_VER),
             Self::Update(v) => write!(f, "update {v}"),
         }
     }
@@ -272,7 +270,7 @@ pub(crate) fn select_game_version(
         });
     }
     match asked {
-        Some(BASE_VERSION) => Ok(GameVersion::Base),
+        Some(BASE_GAME_VER) => Ok(GameVersion::Base),
         Some(version) => {
             if entry.updates.contains_key(version) {
                 Ok(GameVersion::Update(version.to_string()))

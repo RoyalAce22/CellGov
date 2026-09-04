@@ -14,6 +14,8 @@ use cellgov_install::store::{
     TitleTree,
 };
 
+use crate::game::manifest::BASE_GAME_VER;
+
 /// Suffix every install-record filename carries.
 const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
 
@@ -194,7 +196,7 @@ impl TitleEntry {
     pub(crate) fn candidates(&self) -> Vec<String> {
         let mut out = Vec::with_capacity(self.updates.len() + 1);
         if self.base.is_some() {
-            out.push(super::select::BASE_VERSION.to_string());
+            out.push(BASE_GAME_VER.to_string());
         }
         out.extend(self.updates.keys().cloned());
         out

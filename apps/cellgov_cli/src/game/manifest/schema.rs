@@ -10,6 +10,34 @@ pub(super) struct ManifestFile {
     pub(super) rsx: Option<ManifestRsx>,
     pub(super) content: Option<ManifestContent>,
     pub(super) fs: Option<ManifestFs>,
+    pub(super) bench: Option<ManifestBench>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ManifestBench {
+    #[serde(default)]
+    pub(super) matrix: Vec<ManifestMatrixRow>,
+}
+
+/// One `[[bench.matrix]]` row.
+#[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ManifestMatrixRow {
+    pub(super) fw: String,
+    /// `"base"` or an update version key; see
+    /// [`super::MatrixCell::game_ver`].
+    #[serde(default)]
+    pub(super) game_ver: Option<String>,
+    #[serde(default)]
+    pub(super) reference: bool,
+    /// One of `"frontier"`, `"probe"`; defaults to `"frontier"`.
+    #[serde(default)]
+    pub(super) expect: Option<String>,
+    #[serde(default)]
+    pub(super) bench_max_steps: Option<u64>,
+    #[serde(default)]
+    pub(super) checkpoint: Option<ManifestCheckpoint>,
 }
 
 #[derive(Debug, serde::Deserialize)]

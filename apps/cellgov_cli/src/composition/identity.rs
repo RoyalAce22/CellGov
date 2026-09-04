@@ -14,6 +14,7 @@ use cellgov_compare::{FirmwareIdentity, GameIdentity, RunIdentity};
 use super::compose::{GameChoice, StoredGame};
 use super::inventory::FirmwareEntry;
 use super::select::{FirmwareChoice, GameVersion};
+use crate::game::manifest::BASE_GAME_VER;
 
 /// The manifest the firmware install writes inside the tree it covers.
 const FIRMWARE_MANIFEST_FILE: &str = "firmware.toml";
@@ -139,10 +140,7 @@ fn parse_manifest(
 /// bypasses the probe.
 fn game_identity(stored: &StoredGame) -> GameIdentity {
     let (version, app_ver) = match &stored.version {
-        GameVersion::Base => (
-            super::select::BASE_VERSION.to_string(),
-            stored.base.app_ver.clone(),
-        ),
+        GameVersion::Base => (BASE_GAME_VER.to_string(), stored.base.app_ver.clone()),
         GameVersion::Update(v) => (
             format!("update:{v}"),
             stored

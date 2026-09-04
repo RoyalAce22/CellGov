@@ -1,5 +1,6 @@
 //! Eboot resolution across HDD and disc layouts -- candidate fall-through and failure shapes.
 
+use super::super::matrix::CellExpectation;
 use super::*;
 use crate::game::manifest::test_fixtures::TmpDir;
 
@@ -244,6 +245,7 @@ fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -> TitleMani
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
+        matrix: Vec::new(),
     }
 }
 
@@ -426,4 +428,39 @@ fn a_title_with_no_candidates_names_the_gap_rather_than_listing_nothing() {
         rendered.contains(&dir.display().to_string()),
         "got {rendered}"
     );
+}
+
+mod reference_cell_tests {
+    use super::*;
+
+    fn base_cell(fw: &str, reference: bool) -> MatrixCell {
+        MatrixCell {
+            fw: fw.to_string(),
+            game_ver: Some("base".to_string()),
+            reference,
+            expect: CellExpectation::Frontier,
+            bench_max_steps: None,
+            checkpoint: None,
+        }
+    }
+
+    #[test]
+    fn the_reference_cell_is_the_marked_row_not_the_first_row() {
+        let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        m.matrix = vec![base_cell("4.91", false), base_cell("3.55", true)];
+        assert_eq!(
+            m.reference_cell().map(|c| c.fw.as_str()),
+            Some("3.55"),
+            "the marked row answers, not the first declared one"
+        );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "more than one reference cell")]
+    fn a_second_reference_cell_breaks_the_accessor_rather_than_being_picked_between() {
+        let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        m.matrix = vec![base_cell("4.91", true), base_cell("3.55", true)];
+        let _ = m.reference_cell();
+    }
 }

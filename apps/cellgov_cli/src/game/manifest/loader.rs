@@ -3,10 +3,11 @@
 use std::path::{Path, PathBuf};
 
 use super::checkpoint::{parse_pc_literal, CheckpointTrigger};
+use super::matrix;
 use super::model::{
     ContentEntry, ContentManifest, Distribution, GameSource, MountEntry, TitleManifest,
 };
-use super::schema::ManifestFile;
+use super::schema::{ManifestCheckpoint, ManifestFile};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -56,7 +57,15 @@ pub enum ManifestError {
 /// the struct but missing here is read from `[cellgov]` and silently
 /// dropped from the root. `root_table_keys_cover_every_manifest_table`
 /// holds the two together.
-const ROOT_TABLE_KEYS: [&str; 6] = ["title", "checkpoint", "source", "rsx", "content", "fs"];
+const ROOT_TABLE_KEYS: [&str; 7] = [
+    "title",
+    "checkpoint",
+    "source",
+    "rsx",
+    "content",
+    "fs",
+    "bench",
+];
 
 /// Directory holding `origin`, or `.` for a bare filename. Joining
 /// onto `.` keeps a manifest-relative path relative instead of
@@ -108,6 +117,53 @@ fn derive_content_id(origin: &Path) -> Option<String> {
         .file_name()?
         .to_str()
         .map(std::string::ToString::to_string)
+}
+
+/// Translate a `[checkpoint]` table into its trigger.
+///
+/// # Errors
+///
+/// - [`ManifestError::UnknownCheckpointKind`] for a `kind` outside
+///   `process-exit`, `first-rsx-write` and `pc`.
+/// - [`ManifestError::BadCheckpointPc`] for kind `pc` with a missing
+///   or unreadable address.
+pub(super) fn parse_checkpoint(
+    cp: &ManifestCheckpoint,
+    origin: &Path,
+) -> Result<CheckpointTrigger, ManifestError> {
+    match cp.kind.as_str() {
+        "process-exit" => Ok(CheckpointTrigger::ProcessExit),
+        "first-rsx-write" => Ok(CheckpointTrigger::FirstRsxWrite),
+        "pc" => {
+            let raw = cp
+                .pc
+                .as_ref()
+                .ok_or_else(|| ManifestError::BadCheckpointPc {
+                    path: origin.to_path_buf(),
+                    detail: "checkpoint kind 'pc' requires a 'pc = \"0xADDR\"' value".to_string(),
+                })?;
+            let parsed = parse_pc_literal(raw).map_err(|e| ManifestError::BadCheckpointPc {
+                path: origin.to_path_buf(),
+                detail: e.to_string(),
+            })?;
+            Ok(CheckpointTrigger::Pc(parsed))
+        }
+        other => Err(ManifestError::UnknownCheckpointKind {
+            path: origin.to_path_buf(),
+            kind: other.to_string(),
+        }),
+    }
+}
+
+/// Whether `[rsx] mirror` leaves `checkpoint` unable to fire.
+///
+/// The mirror makes the RSX region writable, so the put-pointer store
+/// that `FirstRsxWrite` watches for cannot fault.
+pub(super) fn mirror_makes_checkpoint_unreachable(
+    rsx_mirror: bool,
+    checkpoint: CheckpointTrigger,
+) -> bool {
+    rsx_mirror && matches!(checkpoint, CheckpointTrigger::FirstRsxWrite)
 }
 
 fn render_files_identical_hint(files_identical: bool) -> &'static str {
@@ -171,32 +227,7 @@ impl TitleManifest {
                     path: origin.to_path_buf(),
                     message: e.to_string(),
                 })?;
-        let checkpoint = match file.checkpoint.kind.as_str() {
-            "process-exit" => CheckpointTrigger::ProcessExit,
-            "first-rsx-write" => CheckpointTrigger::FirstRsxWrite,
-            "pc" => {
-                let raw =
-                    file.checkpoint
-                        .pc
-                        .as_ref()
-                        .ok_or_else(|| ManifestError::BadCheckpointPc {
-                            path: origin.to_path_buf(),
-                            detail: "checkpoint kind 'pc' requires a 'pc = \"0xADDR\"' value"
-                                .to_string(),
-                        })?;
-                let parsed = parse_pc_literal(raw).map_err(|e| ManifestError::BadCheckpointPc {
-                    path: origin.to_path_buf(),
-                    detail: e.to_string(),
-                })?;
-                CheckpointTrigger::Pc(parsed)
-            }
-            other => {
-                return Err(ManifestError::UnknownCheckpointKind {
-                    path: origin.to_path_buf(),
-                    kind: other.to_string(),
-                })
-            }
-        };
+        let checkpoint = parse_checkpoint(&file.checkpoint, origin)?;
         let source_path = file.source.as_ref().and_then(|s| s.path.clone());
         let source = match file.source.as_ref().map(|s| s.kind.as_str()) {
             Some("disc") => GameSource::Disc,
@@ -292,7 +323,7 @@ impl TitleManifest {
             .as_ref()
             .map(|r| (r.mirror, r.consume))
             .unwrap_or((false, false));
-        if rsx_mirror && matches!(checkpoint, CheckpointTrigger::FirstRsxWrite) {
+        if mirror_makes_checkpoint_unreachable(rsx_mirror, checkpoint) {
             return Err(ManifestError::Parse {
                 path: origin.to_path_buf(),
                 message: "`[rsx] mirror = true` is incompatible with \
@@ -387,6 +418,12 @@ impl TitleManifest {
                 });
             }
         }
+        let matrix = matrix::build(
+            file.bench.map(|b| b.matrix).unwrap_or_default(),
+            &source,
+            rsx_mirror,
+            origin,
+        )?;
         Ok(TitleManifest {
             content_id,
             short_name: file.title.short_name,
@@ -404,6 +441,7 @@ impl TitleManifest {
             rsx_consume,
             content,
             mounts,
+            matrix,
         })
     }
 }

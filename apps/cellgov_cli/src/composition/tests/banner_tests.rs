@@ -23,6 +23,7 @@ fn manifest(content_id: &str, source: GameSource) -> TitleManifest {
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
+        matrix: Vec::new(),
     }
 }
 

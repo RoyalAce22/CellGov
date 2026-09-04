@@ -606,6 +606,7 @@ fn bench_manifest(bench_max_steps: Option<u64>) -> crate::game::manifest::TitleM
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
+        matrix: Vec::new(),
     }
 }
 

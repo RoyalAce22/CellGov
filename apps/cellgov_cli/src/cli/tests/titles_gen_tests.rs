@@ -27,6 +27,7 @@ fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleMa
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
+        matrix: Vec::new(),
     }
 }
 
