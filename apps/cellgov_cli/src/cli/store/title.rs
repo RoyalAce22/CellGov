@@ -126,6 +126,12 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
                 },
                 outcome.record_path.display(),
             );
+            if outcome.rap_ignored {
+                println!(
+                    "  note: this title is not RAP-keyed (free license, or no NPD header); \
+                     the supplied RAP was not installed"
+                );
+            }
         }
     }
 }

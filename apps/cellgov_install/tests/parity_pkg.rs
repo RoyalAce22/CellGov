@@ -145,6 +145,10 @@ fn flow_pkg_install_matches_the_rpcs3_extracted_eboot() {
     .expect("flOw install (incl. decrypt-proof) must succeed");
     assert_eq!(outcome.title_id, "NPUA80001");
     assert!(outcome.rap_installed, "license-1/2 title installs its RAP");
+    assert!(
+        !outcome.rap_ignored,
+        "a RAP this license consumes is not reported as dropped"
+    );
 
     let installed = vfs.join("dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN");
     let want = digests::table();

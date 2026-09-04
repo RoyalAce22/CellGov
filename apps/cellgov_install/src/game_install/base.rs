@@ -54,6 +54,9 @@ pub struct GameInstallOutcome {
     pub game_dir: PathBuf,
     /// Whether a RAP was installed into `exdata/`.
     pub rap_installed: bool,
+    /// Whether the install dropped a supplied RAP the title's license
+    /// does not consume.
+    pub rap_ignored: bool,
     /// Number of distinct files the committed tree holds, equal to the
     /// record's file count. Two container entries whose paths normalize
     /// to the same key are one file on disk and one record key, so the
@@ -76,7 +79,8 @@ fn rap_consumed(license: Option<NpdLicense>) -> bool {
 /// The RAP to stage for a title, or `None` for disc/free/no-RAP titles.
 ///
 /// A RAP supplied for a title [`rap_consumed`] rejects is dropped here
-/// and never staged, committed, or recorded.
+/// and never staged, committed, or recorded. The caller reports the
+/// drop through [`GameInstallOutcome::rap_ignored`].
 fn plan_staged_rap(
     rap_needed: bool,
     rap: Option<&[u8]>,
@@ -241,6 +245,7 @@ pub fn install_pkg(
     })?;
 
     let rap_installed = staged_rap.is_some();
+    let rap_ignored = rap.is_some() && !rap_installed;
     // The source hash is a full read of the container: its own phase,
     // or a multi-gigabyte container's hash time hides under the proof
     // label.
@@ -279,6 +284,7 @@ pub fn install_pkg(
         content_id,
         game_dir: final_dir,
         rap_installed,
+        rap_ignored,
         file_count: record.files.len(),
         record_path,
     })
@@ -427,6 +433,7 @@ pub fn install_iso(
         content_id: title_id,
         game_dir: final_dir,
         rap_installed: false,
+        rap_ignored: false,
         file_count: record.files.len(),
         record_path,
     })
