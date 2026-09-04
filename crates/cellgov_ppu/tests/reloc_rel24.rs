@@ -42,17 +42,20 @@ fn parsed_with_rel24(
         module_id: PrxModuleId(0),
         toc: 0,
         text: PrxSegment {
+            index: 0,
             vaddr: TEXT_VADDR,
             filesz: SEG_SIZE,
             memsz: SEG_SIZE,
             data: text,
         },
         data: PrxSegment {
+            index: 1,
             vaddr: DATA_VADDR,
             filesz: SEG_SIZE,
             memsz: SEG_SIZE,
             data: vec![0u8; SEG_SIZE as usize],
         },
+        segment_vaddrs: vec![TEXT_VADDR, DATA_VADDR],
         exports: vec![],
         relocations: vec![PrxRelocation {
             offset,
@@ -176,11 +179,9 @@ fn rel24_misaligned_delta_rejected() {
 
 #[test]
 fn rel24_cross_segment_target_text_value_data_resolves_delta() {
-    // target_seg=text, value_seg=data. Locks the seg_vaddrs[1]
-    // resolution path for REL24 (the existing same-segment tests
-    // never exercise value_seg = 1). With text at vaddr 0 and data
-    // at 0x1_0000, an offset 0x100 patch site branching to data
-    // vaddr 0 with addend 0 yields delta = 0x1_0000 - 0x100 = 0xFF00.
+    // target_seg=text, value_seg=data, text at vaddr 0, data at
+    // 0x1_0000. A patch site at offset 0x100 branches to data vaddr 0
+    // with addend 0. The delta is 0x1_0000 - 0x100 = 0xFF00.
     let mut mem = fresh_memory();
     let parsed = parsed_with_rel24(0x100, 0, 0, 1, PPC_BL_OPCODE_LK);
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");

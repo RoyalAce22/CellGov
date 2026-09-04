@@ -196,6 +196,11 @@ pub const R_PPC64_REL24: u32 = 10;
 /// `r_type` for `R_PPC64_ADDR16_LO_DS` (low 16 bits, DS-form, low 2 bits preserved).
 pub const R_PPC64_ADDR16_LO_DS: u32 = 57;
 
+/// Value-segment index in a PS3 PRX RELA entry that names no segment.
+///
+/// The addend is then a whole address.
+pub const PRX_RELOC_NO_VALUE_SEGMENT: u32 = 0xFF;
+
 /// PS3 module entrypoint NID (`module_start` noname-export).
 pub const NID_MODULE_START: u32 = 0xbc9a_0086;
 

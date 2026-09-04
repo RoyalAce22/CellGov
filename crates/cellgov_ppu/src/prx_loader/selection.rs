@@ -23,10 +23,35 @@ pub enum PruneReason {
     /// The module imports a namespace with no surviving provider.
     #[error("import namespace {0:?} has no viable provider")]
     UnprovidedImport(String),
-    /// The module's relocations span more than the two supported
-    /// segments; the loader would reject it.
-    #[error("multi-segment relocations (unsupported)")]
-    MultiSegmentRelocations,
+    /// A relocation names a segment the module does not carry.
+    #[error(
+        "relocation against segment {segment_idx}, past the module's {segment_count} PT_LOADs"
+    )]
+    RelocSegmentOutOfRange {
+        /// Decoded segment index the module does not carry.
+        segment_idx: usize,
+        /// How many PT_LOADs the module declares.
+        segment_count: usize,
+    },
+    /// A relocation names no value segment, so its addend is a whole
+    /// address the loader cannot rebase.
+    #[error("type-{rtype} relocation against no segment (unsupported)")]
+    RelocWithoutValueSegment {
+        /// Type of the offending relocation.
+        rtype: u32,
+    },
+    /// A relocation patches into a PT_LOAD that carries no bytes.
+    #[error("relocation patches into segment {segment_idx}, which carries no bytes")]
+    RelocTargetSegmentEmpty {
+        /// Decoded target segment index, a PT_LOAD with no content.
+        segment_idx: usize,
+    },
+    /// A relocation resolves against a PT_LOAD that carries no memory.
+    #[error("relocation resolves against segment {segment_idx}, which carries no memory")]
+    RelocValueSegmentEmpty {
+        /// Decoded value segment index, a PT_LOAD with no content.
+        segment_idx: usize,
+    },
     /// Another candidate carries the same file-level module name.
     /// Retail firmware ships such alternates (`libac3dec.sprx` /
     /// `libac3dec2.sprx`); a title loads one or the other by path,
@@ -96,8 +121,39 @@ pub fn select_import_closure(
         // loadability failure stays a hard error.
         match super::body::check_loadable(bytes) {
             Ok(()) => {}
-            Err(PrxLoaderError::MultiSegmentRelocations { .. }) => {
-                pruned.push((path.clone(), PruneReason::MultiSegmentRelocations));
+            Err(PrxLoaderError::RelocSegmentOutOfRange {
+                segment_idx,
+                segment_count,
+                ..
+            }) => {
+                pruned.push((
+                    path.clone(),
+                    PruneReason::RelocSegmentOutOfRange {
+                        segment_idx,
+                        segment_count,
+                    },
+                ));
+                continue;
+            }
+            Err(PrxLoaderError::RelocWithoutValueSegment { rtype, .. }) => {
+                pruned.push((
+                    path.clone(),
+                    PruneReason::RelocWithoutValueSegment { rtype },
+                ));
+                continue;
+            }
+            Err(PrxLoaderError::RelocTargetSegmentEmpty { segment_idx, .. }) => {
+                pruned.push((
+                    path.clone(),
+                    PruneReason::RelocTargetSegmentEmpty { segment_idx },
+                ));
+                continue;
+            }
+            Err(PrxLoaderError::RelocValueSegmentEmpty { segment_idx, .. }) => {
+                pruned.push((
+                    path.clone(),
+                    PruneReason::RelocValueSegmentEmpty { segment_idx },
+                ));
                 continue;
             }
             Err(e) => return Err(e),

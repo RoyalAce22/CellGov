@@ -189,11 +189,10 @@ fn a_corrupt_candidate_is_a_hard_error_naming_the_path() {
 }
 
 #[test]
-fn a_multi_segment_relocation_candidate_is_pruned_not_fatal() {
+fn a_relocation_past_the_declared_segments_prunes_its_candidate() {
     // RELA r_info lives at file 0x3F8 in the fixture; its high half
-    // is the packed segment field (sym), so writing 2 there makes
-    // the first relocation target segment 2 -- the loader-rejected
-    // multi-segment case.
+    // is the packed segment field (sym), so writing 2 there makes the
+    // first relocation name segment 2, past the module's two PT_LOADs.
     let mut multiseg = make_test_prx_graph_node("modcccc", "libcccc", None);
     multiseg[0x3F8..0x3FC].copy_from_slice(&2u32.to_be_bytes());
     let cands = candidates(&[
@@ -209,7 +208,10 @@ fn a_multi_segment_relocation_candidate_is_pruned_not_fatal() {
         sel.pruned,
         vec![(
             "c.sprx".to_string(),
-            super::PruneReason::MultiSegmentRelocations
+            super::PruneReason::RelocSegmentOutOfRange {
+                segment_idx: 2,
+                segment_count: 2,
+            }
         )]
     );
 }

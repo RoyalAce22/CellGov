@@ -7,6 +7,8 @@ use std::collections::BTreeMap;
 
 use super::{ParsedPrx, PrxRelocation, PrxSegment};
 
+use cellgov_ps3_abi::elf::PRX_RELOC_NO_VALUE_SEGMENT;
+
 pub use cellgov_ps3_abi::elf::{
     R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR16_LO_DS, R_PPC64_ADDR32,
     R_PPC64_ADDR64, R_PPC64_REL24,
@@ -159,14 +161,32 @@ pub enum PrxLoadError {
     /// Relocation type code is not handled by the loader.
     #[error("PRX unsupported relocation type {0}")]
     UnsupportedReloc(u32),
-    /// Relocation referenced a segment index outside the loaded
-    /// `[text, data]` pair (>= 2). Indicates corruption or a firmware
-    /// shape the loader does not yet model.
+    /// Relocation named a segment index past the module's PT_LOAD
+    /// count.
     #[error("PRX reloc segment {seg} out of range (sym 0x{sym:08x})")]
     RelocSegmentOutOfRange {
         /// Raw `sym` field carrying the offending segment index.
         sym: u32,
         /// Decoded segment index that was out of range.
+        seg: usize,
+    },
+    /// Relocation names no value segment, so its addend is a whole
+    /// address. The loader picks the module base itself and cannot
+    /// resolve such an addend.
+    #[error("PRX reloc type {rtype} at offset 0x{offset:x} names no value segment")]
+    RelocWithoutValueSegment {
+        /// Type of the offending relocation.
+        rtype: u32,
+        /// Patch offset within the target segment.
+        offset: u64,
+    },
+    /// Relocation measures its addend from a PT_LOAD that carries no
+    /// memory, so the placeholder has no address to measure from.
+    #[error("PRX reloc resolves against empty segment {seg} (sym 0x{sym:08x})")]
+    RelocEmptyValueSegment {
+        /// Raw `sym` field carrying the offending segment index.
+        sym: u32,
+        /// Decoded value-segment index that carries no memory.
         seg: usize,
     },
     /// Relocation `offset` falls outside its target segment's
@@ -435,7 +455,53 @@ fn stage_load(
 ) -> Result<usize, PrxLoadError> {
     stage_segment(staging, &prx.text, text_start)?;
     stage_segment(staging, &prx.data, data_start)?;
-    apply_relocations(staging, base, &prx.text, &prx.data, &prx.relocations)
+    apply_relocations(staging, base, &segment_views(prx), &prx.relocations)
+}
+
+/// One PT_LOAD as the relocation applier addresses it.
+///
+/// The index is the program-header position, so a zero-sized
+/// placeholder takes one.
+struct SegmentView<'a> {
+    vaddr: u64,
+    content: Option<&'a PrxSegment>,
+}
+
+/// The module's PT_LOADs in relocation-index order.
+///
+/// A content-bearing view takes its vaddr from the segment itself,
+/// which is where [`stage_segment`] places that segment's bytes.
+fn segment_views(prx: &ParsedPrx) -> Vec<SegmentView<'_>> {
+    let mut views: Vec<SegmentView<'_>> = prx
+        .segment_vaddrs
+        .iter()
+        .map(|&vaddr| SegmentView {
+            vaddr,
+            content: None,
+        })
+        .collect();
+    for seg in [&prx.text, &prx.data] {
+        // Parser invariant: segment_vaddrs holds every PT_LOAD and
+        // PrxSegment::index is a position in it. A fixture that breaks
+        // either leaves the segment unaddressable by its own
+        // relocations.
+        debug_assert!(
+            seg.index < views.len(),
+            "PrxSegment.index {} is past the {} PT_LOAD vaddrs",
+            seg.index,
+            views.len()
+        );
+        if let Some(view) = views.get_mut(seg.index) {
+            debug_assert_eq!(
+                view.vaddr, seg.vaddr,
+                "segment_vaddrs and PrxSegment.vaddr disagree at PT_LOAD {}",
+                seg.index
+            );
+            view.vaddr = seg.vaddr;
+            view.content = Some(seg);
+        }
+    }
+    views
 }
 
 /// Width in bytes of the patch a given relocation type writes;
@@ -460,36 +526,54 @@ fn reloc_write_size(rtype: u32) -> Option<u64> {
 fn apply_relocations(
     staging: &mut cellgov_mem::StagingMemory,
     base: u64,
-    text: &PrxSegment,
-    data: &PrxSegment,
+    segments: &[SegmentView<'_>],
     relocs: &[PrxRelocation],
 ) -> Result<usize, PrxLoadError> {
-    let segs: [&PrxSegment; 2] = [text, data];
-    let seg_vaddrs = [text.vaddr, data.vaddr];
-    let seg_sizes = [text.memsz, data.memsz];
     let mut staged_ranges: Vec<cellgov_mem::ByteRange> = Vec::with_capacity(relocs.len());
     for r in relocs {
-        // PS3 PRX RELA r_sym packs target / value segment indices
+        // PS3 PRX RELA r_sym packs target / value PT_LOAD indices
         // in the low two bytes; bits 16:31 are unspecified and
         // ignored.
         let target_seg = (r.sym & 0xFF) as usize;
-        let value_seg = ((r.sym >> 8) & 0xFF) as usize;
+        let value_seg = (r.sym >> 8) & 0xFF;
 
-        if target_seg >= seg_vaddrs.len() {
+        if value_seg == PRX_RELOC_NO_VALUE_SEGMENT {
+            return Err(PrxLoadError::RelocWithoutValueSegment {
+                rtype: r.rtype,
+                offset: r.offset,
+            });
+        }
+        let Some(target) = segments.get(target_seg) else {
             return Err(PrxLoadError::RelocSegmentOutOfRange {
                 sym: r.sym,
                 seg: target_seg,
             });
-        }
-        if value_seg >= seg_vaddrs.len() {
+        };
+        let Some(value) = segments.get(value_seg as usize) else {
             return Err(PrxLoadError::RelocSegmentOutOfRange {
                 sym: r.sym,
-                seg: value_seg,
+                seg: value_seg as usize,
+            });
+        };
+        // A zero-sized PT_LOAD holds nothing to patch.
+        let Some(target_content) = target.content else {
+            return Err(PrxLoadError::RelocOffsetOutOfSegment {
+                rtype: r.rtype,
+                offset: r.offset,
+                seg_size: 0,
+            });
+        };
+        // The loader never allocates a zero-sized PT_LOAD, so its
+        // declared vaddr is not an address the addend can offset.
+        if value.content.is_none() {
+            return Err(PrxLoadError::RelocEmptyValueSegment {
+                sym: r.sym,
+                seg: value_seg as usize,
             });
         }
-        let target_base = seg_vaddrs[target_seg];
-        let value_base = seg_vaddrs[value_seg];
-        let target_seg_size = seg_sizes[target_seg];
+        let target_base = target.vaddr;
+        let value_base = value.vaddr;
+        let target_seg_size = target_content.memsz;
 
         // Reject unsupported types up front so the bound check has
         // a known write width.
@@ -570,7 +654,7 @@ fn apply_relocations(
                 // DS-form instructions reserve the low 2 bits of
                 // the 16-bit halfword for the XO subfield; the
                 // relocation must not disturb them.
-                let existing = read_seg_u16(segs[target_seg], r.offset);
+                let existing = read_seg_u16(target_content, r.offset);
                 let patched = ((value32 as u16) & 0xFFFC) | (existing & 0x0003);
                 patched.to_be_bytes().to_vec()
             }
@@ -601,7 +685,7 @@ fn apply_relocations(
                     });
                 }
                 let mask: u32 = 0x03FF_FFFC;
-                let insn = read_seg_u32(segs[target_seg], r.offset);
+                let insn = read_seg_u32(target_content, r.offset);
                 let patched = (insn & !mask) | ((delta as u32) & mask);
                 patched.to_be_bytes().to_vec()
             }
@@ -670,3 +754,7 @@ fn read_seg_u16(seg: &PrxSegment, seg_offset: u64) -> u16 {
 #[cfg(test)]
 #[path = "tests/load_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/placeholder_reloc_refusal_tests.rs"]
+mod placeholder_reloc_refusal_tests;

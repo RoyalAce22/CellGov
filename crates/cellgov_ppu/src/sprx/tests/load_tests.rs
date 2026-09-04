@@ -223,17 +223,34 @@ fn load_uses_per_opd_toc_not_module_info_toc() {
     assert_eq!(mstop.toc, base + 0x200);
 }
 
+/// The applier's PT_LOAD table with each synthetic segment at the
+/// `index` it declares.
+fn views<'a>(text: &'a PrxSegment, data: &'a PrxSegment) -> Vec<SegmentView<'a>> {
+    let segs = [text, data];
+    (0..=text.index.max(data.index))
+        .map(|i| {
+            let content = segs.iter().copied().find(|s| s.index == i);
+            SegmentView {
+                vaddr: content.map_or(0, |s| s.vaddr),
+                content,
+            }
+        })
+        .collect()
+}
+
 #[test]
 fn applier_supported_types_match_apply_relocations() {
     // Other errors (overflow, write failure) are fine -- absence of
     // UnsupportedReloc is the invariant.
     let text = PrxSegment {
+        index: 0,
         vaddr: 0,
         filesz: 0x100,
         memsz: 0x100,
         data: vec![0u8; 0x100],
     };
     let data = PrxSegment {
+        index: 1,
         vaddr: 0,
         filesz: 0x100,
         memsz: 0x100,
@@ -247,7 +264,7 @@ fn applier_supported_types_match_apply_relocations() {
             addend: 0,
         }];
         let mut staging = cellgov_mem::StagingMemory::new();
-        let result = apply_relocations(&mut staging, 0, &text, &data, &relocs);
+        let result = apply_relocations(&mut staging, 0, &views(&text, &data), &relocs);
         staging.clear();
         match result {
             Ok(_) => {}
@@ -276,12 +293,14 @@ fn unsupported_reloc_types_rejected_outside_const_list() {
     use std::collections::BTreeSet;
     let supported: BTreeSet<u32> = APPLIER_SUPPORTED_TYPES.iter().copied().collect();
     let text = PrxSegment {
+        index: 0,
         vaddr: 0,
         filesz: 0x100,
         memsz: 0x100,
         data: vec![0u8; 0x100],
     };
     let data = PrxSegment {
+        index: 1,
         vaddr: 0,
         filesz: 0x100,
         memsz: 0x100,
@@ -301,7 +320,7 @@ fn unsupported_reloc_types_rejected_outside_const_list() {
             addend: 0,
         }];
         let mut staging = cellgov_mem::StagingMemory::new();
-        let result = apply_relocations(&mut staging, 0, &text, &data, &relocs);
+        let result = apply_relocations(&mut staging, 0, &views(&text, &data), &relocs);
         staging.clear();
         match result {
             Err(PrxLoadError::UnsupportedReloc(t)) => assert_eq!(

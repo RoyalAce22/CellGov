@@ -36,17 +36,20 @@ fn parsed_with_lo_ds(offset: u64, addend: i64, prefill: u16) -> ParsedPrx {
         module_id: PrxModuleId(0),
         toc: 0,
         text: PrxSegment {
+            index: 0,
             vaddr: TEXT_VADDR,
             filesz: SEG_SIZE,
             memsz: SEG_SIZE,
             data: text,
         },
         data: PrxSegment {
+            index: 1,
             vaddr: DATA_VADDR,
             filesz: SEG_SIZE,
             memsz: SEG_SIZE,
             data: vec![0u8; SEG_SIZE as usize],
         },
+        segment_vaddrs: vec![TEXT_VADDR, DATA_VADDR],
         exports: vec![],
         relocations: vec![PrxRelocation {
             offset,

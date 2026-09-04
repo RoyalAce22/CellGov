@@ -89,17 +89,20 @@ fn stub_parsed(id: PrxModuleId, relocs: Vec<crate::sprx::PrxRelocation>) -> crat
         module_id: id,
         toc: 0,
         text: crate::sprx::PrxSegment {
+            index: 0,
             vaddr: 0,
             filesz: 0,
             memsz: 0,
             data: Vec::new(),
         },
         data: crate::sprx::PrxSegment {
+            index: 1,
             vaddr: 0,
             filesz: 0,
             memsz: 0,
             data: Vec::new(),
         },
+        segment_vaddrs: vec![0, 0],
         exports: Vec::new(),
         relocations: relocs,
         module_start: None,
@@ -108,7 +111,7 @@ fn stub_parsed(id: PrxModuleId, relocs: Vec<crate::sprx::PrxRelocation>) -> crat
 }
 
 #[test]
-fn check_loadable_flags_relocation_into_third_segment() {
+fn check_loadable_flags_relocation_past_the_declared_segments() {
     let parsed = stub_parsed(
         PrxModuleId(7),
         vec![crate::sprx::PrxRelocation {
@@ -118,12 +121,13 @@ fn check_loadable_flags_relocation_into_third_segment() {
             addend: 0,
         }],
     );
-    let err = check_relocations_within_text_data(&parsed).unwrap_err();
+    let err = check_relocations_addressable(&parsed).unwrap_err();
     assert_eq!(
         err,
-        PrxLoaderError::MultiSegmentRelocations {
+        PrxLoaderError::RelocSegmentOutOfRange {
             module: PrxModuleId(7),
             segment_idx: 3,
+            segment_count: 2,
         }
     );
 }
@@ -140,12 +144,13 @@ fn check_loadable_flags_value_segment_alone_when_target_is_text() {
             addend: 0,
         }],
     );
-    let err = check_relocations_within_text_data(&parsed).unwrap_err();
+    let err = check_relocations_addressable(&parsed).unwrap_err();
     assert_eq!(
         err,
-        PrxLoaderError::MultiSegmentRelocations {
+        PrxLoaderError::RelocSegmentOutOfRange {
             module: PrxModuleId(9),
             segment_idx: 2,
+            segment_count: 2,
         }
     );
 }
@@ -169,7 +174,7 @@ fn check_loadable_accepts_text_and_data_only_relocations() {
             },
         ],
     );
-    assert!(check_relocations_within_text_data(&parsed).is_ok());
+    assert!(check_relocations_addressable(&parsed).is_ok());
 }
 
 #[test]

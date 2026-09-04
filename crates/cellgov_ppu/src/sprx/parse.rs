@@ -7,7 +7,8 @@ use std::borrow::Cow;
 
 use cellgov_ps3_abi::elf::{
     ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE,
-    NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC, R_PPC64_ADDR32,
+    NID_MODULE_START, NID_MODULE_STOP, PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD, PT_PRX_RELOC,
+    R_PPC64_ADDR32,
 };
 
 use crate::loader;
@@ -28,6 +29,12 @@ pub struct ParsedPrx {
     pub text: PrxSegment,
     /// Data PT_LOAD segment.
     pub data: PrxSegment,
+    /// Every PT_LOAD's vaddr, in program-header order.
+    ///
+    /// A relocation names its target and value segment by this index.
+    /// Some SDK versions emit zero-sized PT_LOAD placeholders, and a
+    /// placeholder takes an index of its own.
+    pub segment_vaddrs: Vec<u64>,
     /// Non-system exported libraries.
     pub exports: Vec<PrxExportLib>,
     /// RELA entries from the PT_PRX_RELOC segment.
@@ -44,6 +51,9 @@ pub struct ParsedPrx {
 /// `memsz - filesz` BSS tail.
 #[derive(Debug, Clone)]
 pub struct PrxSegment {
+    /// This segment's position among the module's PT_LOADs, which is
+    /// how a relocation names it.
+    pub index: usize,
     /// Unrelocated PRX-space vaddr of the segment.
     pub vaddr: u64,
     /// On-disk byte size.
@@ -92,9 +102,11 @@ pub struct PrxOpd {
 
 /// One ELF64 RELA relocation entry.
 ///
-/// `sym` packs two segment indices: `sym & 0xFF` is the target segment to
-/// patch (0 = text, 1 = data) and `(sym >> 8) & 0xFF` is the value segment
-/// whose vaddr the `addend` is relative to.
+/// `sym` packs two PT_LOAD indices:
+///
+/// - `sym & 0xFF` names the segment to patch.
+/// - `(sym >> 8) & 0xFF` names the segment whose vaddr the `addend` is
+///   relative to, or [`PRX_RELOC_NO_VALUE_SEGMENT`] for a whole address.
 #[derive(Debug, Clone, Copy)]
 pub struct PrxRelocation {
     /// Offset within the target segment to patch.
@@ -122,9 +134,10 @@ pub enum PrxParseError {
     /// ELF e_type was not 0xFFA4 (PS3 PRX); carries the observed type.
     #[error("PRX e_type 0x{0:04x} is not 0xFFA4")]
     NotPrx(u16),
-    /// Fewer than 2 PT_LOAD segments.
-    #[error("PRX has fewer than 2 PT_LOAD segments")]
-    MissingSegments,
+    /// A PS3 module carries two content-bearing PT_LOAD segments;
+    /// this one carries the reported count.
+    #[error("PRX has {0} PT_LOAD segment(s) with content, expected text and data")]
+    MissingSegments(usize),
     /// A computed file offset or size escaped the input buffer.
     #[error("PRX offset or size escaped buffer")]
     OutOfBounds,
@@ -156,9 +169,18 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
 
     let (loads, reloc_phdr) = scan_phdrs(data)?;
 
-    if loads.len() < 2 {
-        return Err(PrxParseError::MissingSegments);
-    }
+    // A module carries text and data. Some SDK versions surround them
+    // with zero-sized PT_LOAD placeholders, which take a relocation
+    // index and hold nothing to place.
+    let content: Vec<usize> = loads
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| l.p_memsz > 0)
+        .map(|(i, _)| i)
+        .collect();
+    let [text_idx, data_idx] = content[..] else {
+        return Err(PrxParseError::MissingSegments(content.len()));
+    };
 
     let seg_map: Vec<SegEntry> = loads
         .iter()
@@ -170,8 +192,8 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         })
         .collect();
 
-    let text = extract_segment(data, &loads[0])?;
-    let data_seg = extract_segment(data, &loads[1])?;
+    let text = extract_segment(data, &loads[text_idx], text_idx)?;
+    let data_seg = extract_segment(data, &loads[data_idx], data_idx)?;
 
     let relocations = match reloc_phdr {
         Some(rp) => parse_relocations(data, &rp)?,
@@ -179,8 +201,9 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     };
     let image = relocate_pointer_slots(data, &loads, &relocations);
 
-    // PT_LOAD[0].p_paddr doubles as the file offset of module_info.
-    let mi_file_off = loads[0].p_paddr as usize;
+    // The text segment's p_paddr doubles as the file offset of
+    // module_info.
+    let mi_file_off = loads[text_idx].p_paddr as usize;
     let (name, toc, exports_range, _imports_range) = parse_module_info(&image, mi_file_off)?;
 
     let exports = parse_export_table(&image, &seg_map, exports_range)?;
@@ -195,6 +218,7 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         toc,
         text,
         data: data_seg,
+        segment_vaddrs: loads.iter().map(|l| l.p_vaddr).collect(),
         exports,
         relocations,
         module_start,
@@ -320,18 +344,17 @@ pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, PrxP
 /// the file's own bytes for [`crate::sprx::load_prx`] to relocate
 /// against the real base.
 fn relocate_pointer_slots(data: &[u8], loads: &[RawPhdr], relocs: &[PrxRelocation]) -> Vec<u8> {
-    // Mirrors the loader's two-segment view, which reports a wider
-    // segment index as a load failure.
-    let segs = [&loads[0], &loads[1]];
     let mut image = data.to_vec();
     for r in relocs {
         if r.rtype != R_PPC64_ADDR32 {
             continue;
         }
-        let (Some(target), Some(value)) = (
-            segs.get((r.sym & 0xFF) as usize),
-            segs.get(((r.sym >> 8) & 0xFF) as usize),
-        ) else {
+        // The loader rejects such an index. This pass skips the slot
+        // so the load reports it once.
+        let Some(target) = loads.get((r.sym & 0xFF) as usize) else {
+            continue;
+        };
+        let Some(value_base) = value_segment_base(loads, r.sym) else {
             continue;
         };
         // A slot past filesz is BSS: it has no file bytes to rewrite.
@@ -346,13 +369,29 @@ fn relocate_pointer_slots(data: &[u8], loads: &[RawPhdr], relocs: &[PrxRelocatio
         else {
             continue;
         };
-        let resolved = value.p_vaddr.wrapping_add(r.addend as u64) as u32;
+        let resolved = value_base.wrapping_add(r.addend as u64) as u32;
         bytes.copy_from_slice(&resolved.to_be_bytes());
     }
     image
 }
 
-fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseError> {
+/// PRX-space base for a relocation's addend; zero when `sym` names no
+/// value segment.
+///
+/// Returns `None` when `sym` names a PT_LOAD the module does not
+/// declare, or one with no memory. The loader never allocates a
+/// zero-sized placeholder, so it has no address.
+fn value_segment_base(loads: &[RawPhdr], sym: u32) -> Option<u64> {
+    match (sym >> 8) & 0xFF {
+        PRX_RELOC_NO_VALUE_SEGMENT => Some(0),
+        idx => loads
+            .get(idx as usize)
+            .filter(|l| l.p_memsz > 0)
+            .map(|l| l.p_vaddr),
+    }
+}
+
+fn extract_segment(data: &[u8], phdr: &RawPhdr, index: usize) -> Result<PrxSegment, PrxParseError> {
     // ELF requires p_memsz >= p_filesz. The loader sizes its region
     // check against memsz, so filesz > memsz would write past the
     // validated range.
@@ -367,6 +406,7 @@ fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseEr
         return Err(PrxParseError::OutOfBounds);
     }
     Ok(PrxSegment {
+        index,
         vaddr: phdr.p_vaddr,
         filesz: phdr.p_filesz,
         memsz: phdr.p_memsz,
@@ -688,3 +728,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/relocated_pointer_tests.rs"]
 mod relocated_pointer_tests;
+
+#[cfg(test)]
+#[path = "tests/placeholder_segment_tests.rs"]
+mod placeholder_segment_tests;

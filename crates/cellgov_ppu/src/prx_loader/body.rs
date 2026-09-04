@@ -148,14 +148,44 @@ pub enum PrxLoaderError {
         /// Free-form failure payload supplied by the [`ModuleStartRunner`].
         reason: String,
     },
-    /// A relocation referenced a segment index beyond `[text, data]`.
-    /// `segment_idx` is the decoded segment number (>= 2).
-    #[error("PRX {module:?} has multi-segment relocations (segment {segment_idx})")]
-    MultiSegmentRelocations {
-        /// Module whose relocation table referenced an unsupported segment.
+    /// A relocation names a segment past the module's PT_LOAD count.
+    #[error(
+        "PRX {module:?} relocates against segment {segment_idx}, past its {segment_count} PT_LOADs"
+    )]
+    RelocSegmentOutOfRange {
+        /// Module whose relocation table names the segment.
         module: PrxModuleId,
-        /// Decoded segment index (>= 2) that the per-module relocation
-        /// applier cannot handle.
+        /// Decoded segment index the module does not carry.
+        segment_idx: usize,
+        /// How many PT_LOADs the module declares.
+        segment_count: usize,
+    },
+    /// A relocation names no value segment, so its addend is a whole
+    /// address. The applier picks each module's base, so it cannot
+    /// rebase such an addend.
+    #[error("PRX {module:?} has a type-{rtype} relocation against no segment")]
+    RelocWithoutValueSegment {
+        /// Module whose relocation table carries the entry.
+        module: PrxModuleId,
+        /// Type of the offending relocation.
+        rtype: u32,
+    },
+    /// A relocation patches into a PT_LOAD that carries no bytes.
+    /// Only the text and data segments hold content.
+    #[error("PRX {module:?} patches into segment {segment_idx}, which carries no bytes")]
+    RelocTargetSegmentEmpty {
+        /// Module whose relocation table names the segment.
+        module: PrxModuleId,
+        /// Decoded target segment index, a PT_LOAD with no content.
+        segment_idx: usize,
+    },
+    /// A relocation resolves against a PT_LOAD that carries no memory.
+    /// The loader allocates no placeholder, so the addend has no base.
+    #[error("PRX {module:?} resolves against segment {segment_idx}, which carries no memory")]
+    RelocValueSegmentEmpty {
+        /// Module whose relocation table names the segment.
+        module: PrxModuleId,
+        /// Decoded value segment index, a PT_LOAD with no content.
         segment_idx: usize,
     },
     /// Two paths in `bytes_by_path` produced the same `PrxModuleId`.
@@ -229,34 +259,55 @@ pub enum ModuleStartRunError {
 /// # Errors
 ///
 /// - [`PrxLoaderError::Parse`] if the input is not a parseable PRX.
-/// - [`PrxLoaderError::MultiSegmentRelocations`] if any relocation
-///   references a segment beyond `[text, data]`.
+/// - [`PrxLoaderError::RelocSegmentOutOfRange`] if any relocation names
+///   a segment the module does not carry.
+/// - [`PrxLoaderError::RelocWithoutValueSegment`] if any relocation
+///   names no value segment.
+/// - [`PrxLoaderError::RelocTargetSegmentEmpty`] if any relocation
+///   patches into a PT_LOAD that carries no bytes.
+/// - [`PrxLoaderError::RelocValueSegmentEmpty`] if any relocation
+///   resolves against a PT_LOAD that carries no memory.
 pub fn check_loadable(bytes: &[u8]) -> Result<(), PrxLoaderError> {
     let parsed = crate::sprx::parse_prx(bytes).map_err(PrxLoaderError::Parse)?;
-    check_relocations_within_text_data(&parsed)
+    check_relocations_addressable(&parsed)
 }
 
-fn check_relocations_within_text_data(
-    parsed: &crate::sprx::ParsedPrx,
-) -> Result<(), PrxLoaderError> {
+/// Accepts exactly what the relocation applier in
+/// [`crate::sprx::load_prx`] can address, so selection never keeps a
+/// module the load would refuse.
+fn check_relocations_addressable(parsed: &crate::sprx::ParsedPrx) -> Result<(), PrxLoaderError> {
+    let segment_count = parsed.segment_vaddrs.len();
+    // Every other PT_LOAD is a zero-sized placeholder: it declares a
+    // vaddr but holds no bytes.
+    let with_content = [parsed.text.index, parsed.data.index];
     for r in &parsed.relocations {
-        // PrxRelocation::sym encoding: low byte = target segment to
-        // patch; next byte = value segment whose vaddr the addend is
-        // relative to. The per-module relocation applier only knows
-        // segments 0 (text) and 1 (data); >= 2 is the multi-segment
-        // case.
         let target_seg = (r.sym & 0xFF) as usize;
-        let value_seg = ((r.sym >> 8) & 0xFF) as usize;
-        if target_seg >= 2 {
-            return Err(PrxLoaderError::MultiSegmentRelocations {
+        let value_seg = (r.sym >> 8) & 0xFF;
+        if value_seg == cellgov_ps3_abi::elf::PRX_RELOC_NO_VALUE_SEGMENT {
+            return Err(PrxLoaderError::RelocWithoutValueSegment {
+                module: parsed.module_id,
+                rtype: r.rtype,
+            });
+        }
+        for idx in [target_seg, value_seg as usize] {
+            if idx >= segment_count {
+                return Err(PrxLoaderError::RelocSegmentOutOfRange {
+                    module: parsed.module_id,
+                    segment_idx: idx,
+                    segment_count,
+                });
+            }
+        }
+        if !with_content.contains(&target_seg) {
+            return Err(PrxLoaderError::RelocTargetSegmentEmpty {
                 module: parsed.module_id,
                 segment_idx: target_seg,
             });
         }
-        if value_seg >= 2 {
-            return Err(PrxLoaderError::MultiSegmentRelocations {
+        if !with_content.contains(&(value_seg as usize)) {
+            return Err(PrxLoaderError::RelocValueSegmentEmpty {
                 module: parsed.module_id,
-                segment_idx: value_seg,
+                segment_idx: value_seg as usize,
             });
         }
     }
@@ -319,7 +370,7 @@ pub fn load_firmware_set(
                 second_path: path.clone(),
             });
         }
-        check_relocations_within_text_data(&parsed)?;
+        check_relocations_addressable(&parsed)?;
         let mut parsed = parsed;
         // First module to publish a namespace owns it; a later module
         // that publishes the same name keeps loading but loses that one
@@ -610,3 +661,7 @@ pub fn start_modules<R: ModuleStartRunner>(
 #[cfg(test)]
 #[path = "tests/body_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/reloc_addressability_tests.rs"]
+mod reloc_addressability_tests;

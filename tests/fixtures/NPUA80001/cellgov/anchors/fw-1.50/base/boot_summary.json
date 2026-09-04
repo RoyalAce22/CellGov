@@ -2,18 +2,18 @@
   "checkpoint": {
     "kind": "process_exit"
   },
-  "outcome": "Fault",
-  "steps": 44,
+  "outcome": "ProcessExit",
+  "steps": 7792,
   "budget": 256,
-  "host_invariant_breaks": 5,
+  "host_invariant_breaks": 3,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
       "class": "absent"
     },
     "dcbz": {
-      "value": 0,
-      "class": "absent"
+      "value": 28,
+      "class": "at-least"
     },
     "event_port_ipc_connect_attempts": {
       "value": 0,
@@ -28,35 +28,35 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 5,
+      "value": 3,
       "class": "exact"
     },
     "ldarx": {
-      "value": 0,
-      "class": "absent"
+      "value": 1871,
+      "class": "at-least"
     },
     "lwarx": {
-      "value": 0,
-      "class": "absent"
+      "value": 1747,
+      "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 0,
-      "class": "absent"
+      "value": 175,
+      "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 0,
-      "class": "absent"
+      "value": 175,
+      "class": "at-least"
     },
     "lwmutex_unknown_locks": {
       "value": 0,
       "class": "absent"
     },
     "mem_fault_arm_entries": {
-      "value": 1,
+      "value": 0,
       "class": "at-least"
     },
     "mem_fault_unmapped_routed": {
-      "value": 1,
+      "value": 0,
       "class": "at-least"
     },
     "mfvrsave_executed": {
@@ -76,8 +76,8 @@
       "class": "absent"
     },
     "register_module_calls": {
-      "value": 0,
-      "class": "absent"
+      "value": 2,
+      "class": "at-least"
     },
     "register_module_linked_slots": {
       "value": 0,
@@ -96,8 +96,8 @@
       "class": "absent"
     },
     "rsx_set_reference": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "spu_image_register": {
       "value": 0,
@@ -108,12 +108,12 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 0,
-      "class": "absent"
+      "value": 1696,
+      "class": "at-least"
     },
     "stwcx": {
-      "value": 0,
-      "class": "absent"
+      "value": 1363,
+      "class": "at-least"
     },
     "system_ipc_cond_creates": {
       "value": 0,
@@ -164,8 +164,8 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "unsupported_syscalls_distinct": {
       "value": 0,

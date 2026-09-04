@@ -43,6 +43,18 @@ relocation supply the value segment's vaddr. Resolving through the
 relocation is what makes a parsed address agree with the one the loader
 publishes at that slot.
 
+A module carries two PT_LOADs with content, text and data, but a
+relocation names its target and value segment by PT_LOAD index, and
+some SDK versions pad the table with zero-sized placeholders. So the
+applier addresses segments by program-header position rather than by
+which two hold bytes. A placeholder supplies an index and nothing else:
+a relocation that patches into one, or measures its addend from one,
+is refused, as is a relocation naming no value segment at all -- that
+addend is a whole address, which the applier cannot rebase under a base
+it chose. The selection check refuses the same four shapes the applier
+does, so a module the load would reject is pruned instead of taking the
+firmware set down with it.
+
 The NID lookup database lives in
 `cellgov_ps3_abi::nid`; `lookup(nid)` resolves human-readable names
 for fault diagnostics.
@@ -59,9 +71,9 @@ requested it. The load set is derived per title by
 provider closure of the namespaces its binary statically imports; a
 firmware executable, which builds its import tables at runtime,
 loads every viable module in the install. A module that cannot load
-is pruned with a typed, reported reason (unprovided import,
-multi-segment relocations, duplicate module identity), never
-silently dropped. The selected set loads in topological-sort order,
+is pruned with a typed, reported reason (unprovided import, a
+relocation the applier cannot address, duplicate module identity),
+never silently dropped. The selected set loads in topological-sort order,
 `module_start` invoked per module under a synthetic kernel-context
 OPD; a `module_start` that faults in guest code is skipped with a
 named witness instead of aborting the boot.
