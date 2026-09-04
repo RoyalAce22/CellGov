@@ -102,12 +102,7 @@ fn dispatch(command: &Command, globals: &Globals) {
             cli::boot_cmd::run_game(args, vfs_flag, globals.render());
         }
         Command::Boot(BootCommand::Bench(args)) => {
-            cli::boot_cmd::bench_boot(
-                &args.bench,
-                !args.no_anchor_check,
-                vfs_flag,
-                globals.render(),
-            );
+            cli::boot_cmd::bench_boot(args, vfs_flag, globals.render());
         }
         Command::Boot(BootCommand::BenchOnce(args)) => {
             cli::boot_cmd::bench_boot_once(args, vfs_flag, globals.render());

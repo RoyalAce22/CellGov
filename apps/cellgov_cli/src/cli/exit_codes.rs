@@ -15,7 +15,7 @@ pub(crate) const FAILED: i32 = 1;
 /// - a confirmation the run could not ask.
 pub(crate) const USAGE: i32 = 2;
 
-/// Two runs that had to agree did not.
+/// Runs that had to reproduce each other disagreed.
 pub(crate) const DISAGREED: i32 = 3;
 
 /// A subprocess failed, or a verification found the store diverged from
@@ -50,7 +50,7 @@ Exit codes:
   0    success
   1    the operation ran and failed
   2    usage error
-  3    the two runs of a pair disagreed
+  3    runs that had to reproduce each other disagreed
   4    a subprocess failed, or a verification diverged
   5    a boot moved off its committed anchor
   >=10 an outcome particular to one command; its own help names it";

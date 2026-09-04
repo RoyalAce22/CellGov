@@ -18,11 +18,11 @@ use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 use super::env::parse_env_bool;
 use super::exit::die;
 use super::exit_codes;
-use super::parse::{BenchArgs, BootRunArgs, BootSelection, TitleSelector};
+use super::parse::{
+    die_usage, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
+};
 use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
 use crate::paths::{cell_checkpoint, cell_max_steps};
-
-use game::BENCH_AGREEMENT_GATE_PCT;
 
 /// The `sys/external` modules inside a firmware entry, relative to the
 /// entry's `dev_flash` mount.
@@ -32,12 +32,13 @@ const FIRMWARE_EXTERNAL: [&str; 2] = ["sys", "external"];
 /// the auto-default.
 const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 
-/// Exit code: two bench runs disagreed on step count or outcome.
+/// Exit code: the runs of a set disagreed on step count, outcome or a
+/// witness.
 const EXIT_DETERMINISM_BREAK: i32 = exit_codes::DISAGREED;
 
-/// Exit code: wall-time disagreement exceeded the gate or was
-/// unmeasurable.
-const EXIT_WALL_DRIFT: i32 = exit_codes::command_specific(15);
+/// Exit code: `--strict-perf` is set and the run set reaches no
+/// throughput verdict.
+const EXIT_SPREAD_EXCEEDED: i32 = exit_codes::command_specific(15);
 
 /// Exit code: a bench subprocess failed or its `BENCH_RESULT` line was
 /// unparseable.
@@ -161,7 +162,7 @@ fn forwardable(path: Option<&Path>, flag: &str) -> Option<String> {
         p.to_str()
             .unwrap_or_else(|| {
                 die(&format!(
-                    "{flag} {} is not valid UTF-8, so the paired run cannot be given it",
+                    "{flag} {} is not valid UTF-8, so a child run cannot be given it",
                     p.display()
                 ))
             })
@@ -440,24 +441,59 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render:
             budget_override: args.budget.map(Budget::new),
             prescan: args.prescan,
             guest_args: &args.guest_arg,
-            // This entry point is the raw measurement the pair spawns
-            // twice; only the pair gates on the anchor.
+            // This entry point is the raw measurement a run set spawns
+            // once per run; only the set gates on the anchor.
             check_anchor: false,
+            run_index: args.run_index.unwrap_or(0),
         },
         inputs.elf_data,
         inputs.authority_id,
         inputs.control_flags1,
+        args.save_state_trace.as_deref(),
         &*sink,
     );
     bar.finish();
 }
 
-pub(crate) fn bench_boot(
-    args: &BenchArgs,
-    check_anchor: bool,
-    vfs_flag: Option<&Path>,
-    render: RenderFlags,
-) {
+/// Both `bench` and `bench-once` flatten [`BenchArgs`], so clap accepts
+/// `--save-state-trace` and `--run-index` on either. The run set
+/// forwards neither to its children.
+fn refuse_bench_once_only_flags(args: &BenchArgs) {
+    if let Some(path) = &args.save_state_trace {
+        die_usage(&format!(
+            "boot bench: --save-state-trace {path} names one path, and a run set takes \
+             several measurements that would each write over it. A traced boot is a \
+             divergence diagnostic rather than a measurement, so take it with \
+             `boot bench-once --save-state-trace PATH`."
+        ));
+    }
+    if let Some(index) = args.run_index {
+        die_usage(&format!(
+            "boot bench: --run-index {index} has no meaning for a run set: the set stamps \
+             each child it spawns with that child's own index. Pass it to \
+             `boot bench-once` only."
+        ));
+    }
+}
+
+/// One measurement spreads against nothing, so a strict gate over it
+/// would report OK for a check that never runs.
+fn refuse_strict_perf_without_a_spread(gate_args: &BenchGateArgs) {
+    if gate_args.strict_perf && gate_args.runs < 2 {
+        die_usage(
+            "boot bench: --strict-perf enforces the cross-run spread, and --runs 1 \
+             measures no spread to enforce. Take at least two runs, or drop \
+             --strict-perf.",
+        );
+    }
+}
+
+pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
+    let args: &BenchArgs = &gate_args.bench;
+    // Ahead of every resolution below: a refused invocation must not
+    // first read the store.
+    refuse_bench_once_only_flags(args);
+    refuse_strict_perf_without_a_spread(gate_args);
     let vfs_root = resolve_ps3_vfs_root(vfs_flag);
     let inputs = resolve_boot_inputs(
         &args.selector,
@@ -474,7 +510,7 @@ pub(crate) fn bench_boot(
     let selection = selection_args(&args.selection, vfs_flag);
     let bar = ProgressBar::start(render.caps(), &BENCH_PAIR_TASK, inputs.title.name());
     let sink = bar.sink();
-    let outcome = match game::bench_boot_pair(
+    let outcome = match game::bench_boot_runs(
         game::BenchOptions {
             title: &inputs.title,
             elf_path: &inputs.elf_path,
@@ -489,7 +525,13 @@ pub(crate) fn bench_boot(
             budget_override: args.budget.map(Budget::new),
             prescan: args.prescan,
             guest_args: &args.guest_arg,
-            check_anchor,
+            check_anchor: !gate_args.no_anchor_check,
+            // The set overwrites this with each child's own index.
+            run_index: 0,
+        },
+        game::ThroughputPolicy {
+            runs: gate_args.runs,
+            strict: gate_args.strict_perf,
         },
         &*sink,
     ) {
@@ -514,15 +556,22 @@ pub(crate) fn bench_boot(
     match outcome.gate {
         game::BenchGate::Pass => {}
         game::BenchGate::DeterminismBreak => {
-            // Steps and outcome can match here: a witness that moves
-            // between runs is also a determinism break, and the pair
-            // printed those disagreements to stdout above.
+            // A single run can move two witnesses, so a set of N runs
+            // can report more than N disagreements.
             eprintln!(
-                "boot bench: determinism break: run 1 steps={} outcome={}, \
-                 run 2 steps={} outcome={}. Identical steps and outcome here mean \
-                 the runs disagreed on a witness; see the disagreements above. \
-                 Exiting with status {EXIT_DETERMINISM_BREAK}",
-                outcome.run1.steps, outcome.run1.outcome, outcome.run2.steps, outcome.run2.outcome,
+                "boot bench: {} disagreement(s) across the {} run(s) of the set:",
+                outcome.determinism_failures.len(),
+                outcome.runs.len(),
+            );
+            for failure in &outcome.determinism_failures {
+                eprintln!("  {failure}");
+            }
+            eprintln!(
+                "the runs took identical inputs, so a disagreement is a determinism \
+                 defect. The report on stdout gives one of three things: the first step \
+                 two traced re-runs diverge at, the commands that find it, or the reason \
+                 the localization could not run. \
+                 exiting with status {EXIT_DETERMINISM_BREAK}"
             );
             std::process::exit(EXIT_DETERMINISM_BREAK);
         }
@@ -552,21 +601,28 @@ pub(crate) fn bench_boot(
             );
             std::process::exit(EXIT_ANCHOR_DRIFT);
         }
-        game::BenchGate::WallUnmeasurable => {
+        game::BenchGate::SpreadExceeded => {
+            let detail = match outcome.throughput {
+                game::ThroughputVerdict::Inconclusive { spread_pct, .. } => format!(
+                    "the {} runs spread {spread_pct:.2}%, above the \
+                     {:.1}% ceiling",
+                    outcome.runs.len(),
+                    game::BENCH_SPREAD_CEILING_PCT,
+                ),
+                game::ThroughputVerdict::Unmeasurable => {
+                    "a run reported a zero wall, so there is no spread to compare".to_string()
+                }
+                game::ThroughputVerdict::Measured { .. } => unreachable!(
+                    "invariant: a measured throughput verdict does not reach the strict gate"
+                ),
+            };
             eprintln!(
-                "boot bench: wall measurement unusable (zero / non-finite); \
-                 run 1 wall {:?}, run 2 wall {:?}; exiting with status {EXIT_WALL_DRIFT}",
-                outcome.run1.wall, outcome.run2.wall
+                "boot bench: --strict-perf: no throughput verdict -- {detail}. \
+                 Without --strict-perf this reports and exits 0: elapsed time on a host \
+                 running anything else measures the host. \
+                 exiting with status {EXIT_SPREAD_EXCEEDED}"
             );
-            std::process::exit(EXIT_WALL_DRIFT);
-        }
-        game::BenchGate::WallDriftExceeded => {
-            let drift = outcome.drift_pct.unwrap_or(f64::NAN);
-            eprintln!(
-                "boot bench: wall disagreement {drift:.2}% exceeds {BENCH_AGREEMENT_GATE_PCT:.1}% gate; \
-                 exiting with status {EXIT_WALL_DRIFT}"
-            );
-            std::process::exit(EXIT_WALL_DRIFT);
+            std::process::exit(EXIT_SPREAD_EXCEEDED);
         }
     }
 }

@@ -139,9 +139,10 @@ pub(crate) enum Command {
 pub(crate) enum BootCommand {
     /// Boot a title and report where it stopped.
     Run(Box<BootRunArgs>),
-    /// Boot a title twice and gate the pair against its anchor.
+    /// Boot a title several times and gate the set against its anchor.
     Bench(Box<BenchGateArgs>),
-    /// One bench measurement, with no pair and no anchor gate.
+    /// One bench measurement, with no run set around it and no anchor
+    /// gate.
     BenchOnce(Box<BenchArgs>),
 }
 

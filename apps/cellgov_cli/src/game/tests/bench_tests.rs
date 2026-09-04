@@ -1,49 +1,183 @@
-//! Bench-result line parsing, wall-clock disagreement math, and the
-//! anchor comparison the pair gate runs.
+//! Bench-result line parsing, the throughput verdict, and the anchor
+//! comparison the run-set gate runs.
 
 use std::collections::BTreeSet;
+use std::time::Duration;
 
 use super::*;
 
+/// A run of `wall` that agrees with every other run this helper
+/// builds, so a case that varies only the wall isolates the throughput
+/// half.
+fn run_of(run_index: usize, wall: Duration) -> BenchBootResult {
+    BenchBootResult {
+        run_index,
+        steps: 10,
+        wall,
+        budget: Budget::new(256),
+        outcome: BootOutcome::ProcessExit,
+    }
+}
+
+/// A set whose walls are `walls`, indexed in order.
+fn set_of(walls: &[Duration]) -> Vec<BenchBootResult> {
+    walls
+        .iter()
+        .enumerate()
+        .map(|(i, w)| run_of(i, *w))
+        .collect()
+}
+
+fn reporting() -> ThroughputPolicy {
+    ThroughputPolicy {
+        runs: 3,
+        strict: false,
+    }
+}
+
+fn strict() -> ThroughputPolicy {
+    ThroughputPolicy {
+        runs: 3,
+        strict: true,
+    }
+}
+
 #[test]
-fn wall_disagreement_percent_is_zero_for_identical_durations() {
-    use std::time::Duration;
+fn identical_walls_spread_nowhere() {
+    let set = set_of(&[Duration::from_millis(1000); 3]);
     assert_eq!(
-        wall_disagreement_percent(Duration::from_millis(1000), Duration::from_millis(1000)),
-        Some(0.0)
+        throughput_verdict(&set),
+        ThroughputVerdict::Measured {
+            min: Duration::from_millis(1000),
+            spread_pct: 0.0,
+        }
     );
 }
 
 #[test]
-fn wall_disagreement_percent_is_relative_to_faster_run() {
-    use std::time::Duration;
-    let pct = wall_disagreement_percent(Duration::from_millis(100), Duration::from_millis(105))
-        .expect("finite");
-    assert!((pct - 5.0).abs() < 0.0001, "expected 5.0, got {pct}");
+fn the_estimate_is_the_fastest_run_not_the_mean() {
+    let set = set_of(&[
+        Duration::from_millis(100),
+        Duration::from_millis(180),
+        Duration::from_millis(140),
+    ]);
+    let ThroughputVerdict::Inconclusive { min, spread_pct } = throughput_verdict(&set) else {
+        panic!("an 80% spread is above the ceiling");
+    };
+    assert_eq!(min, Duration::from_millis(100));
+    assert!((spread_pct - 80.0).abs() < 0.0001, "got {spread_pct}");
 }
 
 #[test]
-fn wall_disagreement_percent_is_symmetric() {
-    use std::time::Duration;
-    let a = wall_disagreement_percent(Duration::from_millis(200), Duration::from_millis(250));
-    let b = wall_disagreement_percent(Duration::from_millis(250), Duration::from_millis(200));
-    assert_eq!(a, b);
+fn the_spread_is_relative_to_the_fastest_run() {
+    let set = set_of(&[Duration::from_millis(100), Duration::from_millis(104)]);
+    let ThroughputVerdict::Measured { spread_pct, .. } = throughput_verdict(&set) else {
+        panic!("4% is inside the ceiling");
+    };
+    assert!((spread_pct - 4.0).abs() < 0.0001, "got {spread_pct}");
+}
+
+/// `100.0 * (21.0 - 20.0) / 20.0` is exact in binary floating point,
+/// so these two walls land on the ceiling and the assertion needs no
+/// tolerance.
+#[test]
+fn a_spread_exactly_at_the_ceiling_is_measured() {
+    let set = set_of(&[Duration::from_secs(20), Duration::from_secs(21)]);
+    let ThroughputVerdict::Measured { spread_pct, .. } = throughput_verdict(&set) else {
+        panic!("a spread equal to the ceiling is inside it");
+    };
+    assert_eq!(spread_pct, BENCH_SPREAD_CEILING_PCT);
 }
 
 #[test]
-fn wall_disagreement_percent_returns_none_on_zero_duration() {
-    use std::time::Duration;
+fn a_spread_just_past_the_ceiling_is_inconclusive() {
+    let set = set_of(&[Duration::from_secs(20), Duration::from_millis(21_001)]);
+    assert!(matches!(
+        throughput_verdict(&set),
+        ThroughputVerdict::Inconclusive { .. }
+    ));
+}
+
+#[test]
+fn a_set_of_one_run_makes_no_spread_claim() {
+    let policy = ThroughputPolicy {
+        runs: 1,
+        strict: false,
+    };
+    let verdict = throughput_verdict(&set_of(&[Duration::from_millis(100)]));
+    let line = throughput_line(verdict, policy);
+    assert!(line.contains("NOT CHECKED"), "got {line}");
+    assert!(!line.contains('%'), "got {line}");
+}
+
+#[test]
+fn a_set_of_several_runs_reports_the_spread_it_measured() {
+    let policy = ThroughputPolicy {
+        runs: 2,
+        strict: false,
+    };
+    let verdict = throughput_verdict(&set_of(&[
+        Duration::from_millis(100),
+        Duration::from_millis(102),
+    ]));
+    let line = throughput_line(verdict, policy);
+    assert!(line.contains("spread 2.00%"), "got {line}");
+}
+
+#[test]
+fn a_zero_wall_leaves_the_throughput_unmeasurable() {
+    let set = set_of(&[Duration::ZERO, Duration::from_millis(100)]);
+    assert_eq!(throughput_verdict(&set), ThroughputVerdict::Unmeasurable);
+}
+
+#[test]
+fn a_spread_above_the_ceiling_reports_and_does_not_fail() {
+    let set = set_of(&[Duration::from_millis(100), Duration::from_millis(200)]);
+    let verdict = throughput_verdict(&set);
+    assert!(matches!(verdict, ThroughputVerdict::Inconclusive { .. }));
     assert_eq!(
-        wall_disagreement_percent(Duration::ZERO, Duration::from_millis(100)),
-        None
+        classify_runs(&[], &AnchorVerdict::Skipped, verdict, reporting()),
+        BenchGate::Pass
     );
+}
+
+#[test]
+fn an_unmeasurable_wall_reports_and_does_not_fail() {
     assert_eq!(
-        wall_disagreement_percent(Duration::from_millis(100), Duration::ZERO),
-        None
+        classify_runs(
+            &[],
+            &AnchorVerdict::Skipped,
+            ThroughputVerdict::Unmeasurable,
+            reporting()
+        ),
+        BenchGate::Pass
     );
+}
+
+#[test]
+fn strict_perf_fails_on_either_way_of_reaching_no_verdict() {
+    let inconclusive = throughput_verdict(&set_of(&[
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+    ]));
+    for verdict in [inconclusive, ThroughputVerdict::Unmeasurable] {
+        assert_eq!(
+            classify_runs(&[], &AnchorVerdict::Skipped, verdict, strict()),
+            BenchGate::SpreadExceeded,
+            "{verdict:?}"
+        );
+    }
+}
+
+#[test]
+fn strict_perf_passes_a_measured_set() {
+    let verdict = throughput_verdict(&set_of(&[
+        Duration::from_millis(100),
+        Duration::from_millis(102),
+    ]));
     assert_eq!(
-        wall_disagreement_percent(Duration::ZERO, Duration::ZERO),
-        None
+        classify_runs(&[], &AnchorVerdict::Skipped, verdict, strict()),
+        BenchGate::Pass
     );
 }
 
@@ -59,7 +193,7 @@ fn parse_bench_result_round_trips_every_boot_outcome() {
     ];
     for v in variants {
         let line = format!(
-            "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1000000000 budget=256 outcome={v}\n"
+            "BENCH_RESULT run_index=0 steps=1 wall_ns=1 steps_per_sec=1000000000 budget=256 outcome={v}\n"
         );
         let r = parse_bench_result(&line)
             .unwrap_or_else(|e| panic!("round-trip parse failed for {v:?}: {e}"));
@@ -69,18 +203,53 @@ fn parse_bench_result_round_trips_every_boot_outcome() {
 
 #[test]
 fn parse_bench_result_extracts_fields() {
-    let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_ns=323000000 steps_per_sec=4341759 budget=256 outcome=ProcessExit\ntrailing noise\n";
+    let stdout = "some preamble\nBENCH_RESULT run_index=2 steps=1402388 wall_ns=323000000 steps_per_sec=4341759 budget=256 outcome=ProcessExit\ntrailing noise\n";
     let r = parse_bench_result(stdout).expect("parses");
+    assert_eq!(r.run_index, 2);
     assert_eq!(r.steps, 1402388);
     assert_eq!(r.wall.as_millis(), 323);
     assert_eq!(r.outcome, BootOutcome::ProcessExit);
 }
 
 #[test]
+fn the_result_line_round_trips_the_run_index() {
+    for index in [0usize, 1, 7] {
+        let r = BenchBootResult {
+            run_index: index,
+            steps: 12345,
+            wall: Duration::from_millis(3),
+            budget: Budget::new(256),
+            outcome: BootOutcome::MaxSteps,
+        };
+        let parsed = parse_bench_result(&format_bench_result(&r)).expect("parses");
+        assert_eq!(parsed.run_index, index);
+    }
+}
+
+#[test]
+fn parse_bench_result_errors_on_missing_run_index() {
+    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+    assert_eq!(
+        parse_bench_result(stdout).unwrap_err(),
+        ParseBenchError::MissingRunIndex
+    );
+}
+
+#[test]
+fn parse_bench_result_errors_on_malformed_run_index() {
+    let stdout =
+        "BENCH_RESULT run_index=last steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+    match parse_bench_result(stdout).unwrap_err() {
+        ParseBenchError::MalformedRunIndex(s) => assert_eq!(s, "last"),
+        other => panic!("expected MalformedRunIndex, got {other:?}"),
+    }
+}
+
+#[test]
 fn the_result_line_round_trips_the_wall_exactly() {
-    use std::time::Duration;
     for ns in [1u64, 750, 999_999, 1_000_001, 1_234_567_891, 3_037_000_123] {
         let r = BenchBootResult {
+            run_index: 0,
             steps: 12345,
             wall: Duration::from_nanos(ns),
             budget: Budget::new(256),
@@ -95,8 +264,8 @@ fn the_result_line_round_trips_the_wall_exactly() {
 
 #[test]
 fn a_sub_microsecond_wall_is_measurable_after_transport() {
-    use std::time::Duration;
     let r = BenchBootResult {
+        run_index: 0,
         steps: 3,
         wall: Duration::from_nanos(400),
         budget: Budget::new(256),
@@ -105,15 +274,15 @@ fn a_sub_microsecond_wall_is_measurable_after_transport() {
     let parsed = parse_bench_result(&format_bench_result(&r)).expect("parses");
     assert_eq!(parsed.wall, Duration::from_nanos(400));
     assert!(
-        wall_disagreement_percent(parsed.wall, parsed.wall).is_some(),
+        throughput_verdict(&[parsed]).is_measured(),
         "a 400 ns run must not read as an unmeasurable zero wall"
     );
 }
 
 #[test]
 fn the_printed_steps_per_sec_agrees_with_the_recomputed_one_to_rounding() {
-    use std::time::Duration;
     let r = BenchBootResult {
+        run_index: 0,
         steps: 390_435,
         wall: Duration::from_nanos(3_038_513_400),
         budget: Budget::new(256),
@@ -137,7 +306,7 @@ fn the_printed_steps_per_sec_agrees_with_the_recomputed_one_to_rounding() {
 #[test]
 fn a_wall_beyond_u64_nanoseconds_is_malformed_not_clamped() {
     let stdout =
-        "BENCH_RESULT steps=1 wall_ns=99999999999999999999999 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+        "BENCH_RESULT run_index=0 steps=1 wall_ns=99999999999999999999999 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedWallNs(s) => assert_eq!(s, "99999999999999999999999"),
         other => panic!("expected MalformedWallNs, got {other:?}"),
@@ -155,8 +324,8 @@ fn parse_bench_result_errors_on_missing_line() {
 
 #[test]
 fn parse_bench_result_errors_on_duplicate_line() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n\
-                  BENCH_RESULT steps=2 wall_ns=2 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT run_index=0 steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n\
+                  BENCH_RESULT run_index=1 steps=2 wall_ns=2 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::DuplicateResultLine
@@ -165,7 +334,8 @@ fn parse_bench_result_errors_on_duplicate_line() {
 
 #[test]
 fn parse_bench_result_errors_on_unknown_outcome() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=WhoKnows\n";
+    let stdout =
+        "BENCH_RESULT run_index=0 steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=WhoKnows\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::UnparseableOutcome { token, source: _ } => {
             assert_eq!(token, "WhoKnows");
@@ -177,7 +347,7 @@ fn parse_bench_result_errors_on_unknown_outcome() {
 #[test]
 fn parse_bench_result_errors_on_malformed_steps() {
     let stdout =
-        "BENCH_RESULT steps=abc wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+        "BENCH_RESULT run_index=0 steps=abc wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedSteps(s) => assert_eq!(s, "abc"),
         other => panic!("expected MalformedSteps, got {other:?}"),
@@ -186,7 +356,8 @@ fn parse_bench_result_errors_on_malformed_steps() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_steps() {
-    let stdout = "BENCH_RESULT wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+    let stdout =
+        "BENCH_RESULT run_index=0 wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingSteps
@@ -196,7 +367,7 @@ fn parse_bench_result_errors_on_missing_steps() {
 #[test]
 fn parse_bench_result_errors_on_malformed_wall_ns() {
     let stdout =
-        "BENCH_RESULT steps=1 wall_ns=xyz steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+        "BENCH_RESULT run_index=0 steps=1 wall_ns=xyz steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedWallNs(s) => assert_eq!(s, "xyz"),
         other => panic!("expected MalformedWallNs, got {other:?}"),
@@ -205,7 +376,8 @@ fn parse_bench_result_errors_on_malformed_wall_ns() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_wall_ns() {
-    let stdout = "BENCH_RESULT steps=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
+    let stdout =
+        "BENCH_RESULT run_index=0 steps=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingWallNs
@@ -214,7 +386,7 @@ fn parse_bench_result_errors_on_missing_wall_ns() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_outcome() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256\n";
+    let stdout = "BENCH_RESULT run_index=0 steps=1 wall_ns=1 steps_per_sec=1 budget=256\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingOutcome
@@ -223,7 +395,7 @@ fn parse_bench_result_errors_on_missing_outcome() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_budget() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT run_index=0 steps=1 wall_ns=1 steps_per_sec=1 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingBudget
@@ -232,7 +404,7 @@ fn parse_bench_result_errors_on_missing_budget() {
 
 #[test]
 fn parse_bench_result_errors_on_malformed_budget() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=lots outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT run_index=0 steps=1 wall_ns=1 steps_per_sec=1 budget=lots outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedBudget(s) => assert_eq!(s, "lots"),
         other => panic!("expected MalformedBudget, got {other:?}"),
@@ -240,118 +412,168 @@ fn parse_bench_result_errors_on_malformed_budget() {
 }
 
 #[test]
-fn classify_pair_pass() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(102),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r2.wall);
+fn a_set_whose_runs_reproduce_each_other_passes() {
+    let runs = set_of(&[Duration::from_millis(100), Duration::from_millis(102)]);
+    // `parse_witness_lines("")` succeeds with an empty map, so two
+    // blank streams would agree over nothing and the witness half of
+    // this case could never fail.
+    let witnesses = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n\
+                     BENCH_ATOMIC_WITNESS: ldarx=100 stdcx=0 lwarx=0 stwcx=0\n";
+    let streams = [witnesses.to_string(), witnesses.to_string()];
+    assert!(determinism_disagreements(&runs, &streams).is_empty());
     assert_eq!(
-        classify_pair(&r1, &r2, drift, &[], &AnchorVerdict::Skipped),
+        classify_runs(
+            &[],
+            &AnchorVerdict::Skipped,
+            throughput_verdict(&runs),
+            reporting()
+        ),
         BenchGate::Pass
     );
 }
 
 #[test]
-fn classify_pair_determinism_break_on_step_mismatch() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 11,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r2.wall);
+fn a_moved_step_count_between_runs_is_a_determinism_break() {
+    let mut runs = set_of(&[Duration::from_millis(100); 2]);
+    runs[1].steps += 1;
+    let failures = determinism_disagreements(&runs, &["".to_string(), "".to_string()]);
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("run 1 retired 10 steps") && failures[0].contains("run 2 retired 11"),
+        "got {failures:?}"
+    );
     assert_eq!(
-        classify_pair(&r1, &r2, drift, &[], &AnchorVerdict::Skipped),
+        classify_runs(
+            &failures,
+            &AnchorVerdict::Skipped,
+            throughput_verdict(&runs),
+            reporting()
+        ),
         BenchGate::DeterminismBreak
     );
 }
 
 #[test]
-fn classify_pair_determinism_break_on_outcome_mismatch() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::MaxSteps,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r2.wall);
+fn a_moved_outcome_between_runs_is_a_determinism_break() {
+    let mut runs = set_of(&[Duration::from_millis(100); 2]);
+    runs[1].outcome = BootOutcome::MaxSteps;
+    let failures = determinism_disagreements(&runs, &["".to_string(), "".to_string()]);
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("ProcessExit") && failures[0].contains("MaxSteps"),
+        "got {failures:?}"
+    );
+}
+
+#[test]
+fn a_moved_budget_between_runs_is_a_determinism_break() {
+    let mut runs = set_of(&[Duration::from_millis(100); 2]);
+    runs[1].budget = Budget::new(512);
+    let failures = determinism_disagreements(&runs, &["".to_string(), "".to_string()]);
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("run 1 ran at budget 256")
+            && failures[0].contains("run 2 ran at budget 512"),
+        "got {failures:?}"
+    );
     assert_eq!(
-        classify_pair(&r1, &r2, drift, &[], &AnchorVerdict::Skipped),
+        classify_runs(
+            &failures,
+            &AnchorVerdict::Match,
+            throughput_verdict(&runs),
+            reporting()
+        ),
         BenchGate::DeterminismBreak
     );
 }
 
 #[test]
-fn classify_pair_wall_drift_exceeded() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(200),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r2.wall);
-    assert_eq!(
-        classify_pair(&r1, &r2, drift, &[], &AnchorVerdict::Skipped),
-        BenchGate::WallDriftExceeded
+fn every_run_is_compared_against_the_first() {
+    let mut runs = set_of(&[Duration::from_millis(100); 4]);
+    runs[2].steps += 1;
+    let streams = vec![String::new(); 4];
+    let failures = determinism_disagreements(&runs, &streams);
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(failures[0].contains("run 3 retired 11"), "got {failures:?}");
+}
+
+#[test]
+fn a_long_boot_names_the_localization_commands_instead_of_running_them() {
+    let title = bench_manifest(None);
+    let cell = test_cell();
+    let opts = bench_options(&title, Some(&cell), &[]);
+    let mut runs = set_of(&[Duration::from_millis(100)]);
+    runs[0].steps = LOCALIZE_MAX_STEPS + 1;
+    let lines = locate_divergence(opts, &runs);
+    assert!(lines[0].contains("not run automatically"), "got {lines:?}");
+    assert!(
+        lines.iter().any(|l| l.contains("--save-state-trace"))
+            && lines.iter().any(|l| l.contains("diff diverge")),
+        "the report must name every command the operator has to run: {lines:?}"
     );
 }
 
 #[test]
-fn classify_pair_wall_unmeasurable() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::ZERO,
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
+fn the_localization_cap_reads_the_longest_run_not_the_first() {
+    let title = bench_manifest(None);
+    let cell = test_cell();
+    let opts = bench_options(&title, Some(&cell), &[]);
+    let mut runs = set_of(&[Duration::from_millis(100); 2]);
+    runs[0].steps = 10;
+    runs[1].steps = LOCALIZE_MAX_STEPS + 1;
+    let lines = locate_divergence(opts, &runs);
+    assert!(lines[0].contains("not run automatically"), "got {lines:?}");
+    assert!(
+        lines[0].contains(&(LOCALIZE_MAX_STEPS + 1).to_string()),
+        "the report must name the run that sets the cost: {lines:?}"
+    );
+}
+
+#[test]
+fn a_corrupt_trace_report_names_the_side_and_its_decode_failure() {
+    let line = format_diverge(&cellgov_compare::DivergeReport::CorruptTrace {
+        common_count: 12,
+        a_error: None,
+        b_error: Some(cellgov_compare::TraceDecodeError {
+            index: 4,
+            offset: 96,
+            source: cellgov_trace::DecodeError::UnknownTag(0xee),
+        }),
+    });
+    assert!(line.contains("a: ok"), "got {line}");
+    assert!(
+        line.contains("record 4") && line.contains("unknown record tag 0xee"),
+        "got {line}"
+    );
+}
+
+#[test]
+fn a_failing_traced_re_run_reports_its_stderr_tail_in_order() {
+    let stderr: String = (0..20).map(|i| format!("line {i}\n")).collect();
+    let tail = stderr_tail(stderr.as_bytes());
+    assert_eq!(tail.len(), 8);
+    assert_eq!(tail.first().map(String::as_str), Some("  line 12"));
+    assert_eq!(tail.last().map(String::as_str), Some("  line 19"));
+}
+
+#[test]
+fn a_determinism_break_outranks_a_measured_throughput() {
+    let runs = set_of(&[Duration::from_millis(100); 2]);
     assert_eq!(
-        classify_pair(&r1, &r2, None, &[], &AnchorVerdict::Skipped),
-        BenchGate::WallUnmeasurable
+        classify_runs(
+            &["a witness moved".to_string()],
+            &AnchorVerdict::Match,
+            throughput_verdict(&runs),
+            strict()
+        ),
+        BenchGate::DeterminismBreak
     );
 }
 
 /// The stop condition [`anchor_fixture`] records.
 const TEST_CHECKPOINT: manifest::CheckpointTrigger = manifest::CheckpointTrigger::ProcessExit;
 
-/// A run that reproduces [`anchor_fixture`] exactly, as the pair hands
+/// A run that reproduces [`anchor_fixture`] exactly, as the set hands
 /// it to the anchor check.
 fn measured_run(stderr: &str) -> MeasuredRun<'_> {
     MeasuredRun {
@@ -754,24 +976,11 @@ fn an_unreachable_workspace_root_does_not_read_as_an_unrecorded_cell() {
 }
 
 #[test]
-fn anchor_drift_outranks_wall_drift() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(200),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r2.wall);
+fn anchor_drift_outranks_an_inconclusive_throughput() {
+    let runs = set_of(&[Duration::from_millis(100), Duration::from_millis(200)]);
     let anchor = AnchorVerdict::Drift(vec!["host_invariant_breaks moved".to_string()]);
     assert_eq!(
-        classify_pair(&r1, &r2, drift, &[], &anchor),
+        classify_runs(&[], &anchor, throughput_verdict(&runs), strict()),
         BenchGate::AnchorDrift,
         "a contended host must not mask a real anchor regression",
     );
@@ -779,61 +988,33 @@ fn anchor_drift_outranks_wall_drift() {
 
 #[test]
 fn a_determinism_break_outranks_anchor_drift() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let r2 = BenchBootResult {
-        steps: 11,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r2.wall);
+    let runs = set_of(&[Duration::from_millis(100); 2]);
     let anchor = AnchorVerdict::Drift(vec!["host_invariant_breaks moved".to_string()]);
     assert_eq!(
-        classify_pair(&r1, &r2, drift, &[], &anchor),
+        classify_runs(
+            &["run 1 retired 10 steps, run 2 retired 11".to_string()],
+            &anchor,
+            throughput_verdict(&runs),
+            reporting()
+        ),
         BenchGate::DeterminismBreak,
     );
 }
 
 #[test]
 fn a_skipped_anchor_check_cannot_produce_anchor_drift() {
-    use std::time::Duration;
-    let r1 = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(r1.wall, r1.wall);
-    assert_eq!(
-        classify_pair(&r1, &r1, drift, &[], &AnchorVerdict::Skipped),
-        BenchGate::Pass
-    );
-    assert_eq!(
-        classify_pair(
-            &r1,
-            &r1,
-            drift,
-            &[],
-            &AnchorVerdict::NotRecorded("fw 4.93 x base".into())
-        ),
-        BenchGate::Pass
-    );
-    assert_eq!(
-        classify_pair(
-            &r1,
-            &r1,
-            drift,
-            &[],
-            &AnchorVerdict::NotComparable(vec!["retargeted".to_string()])
-        ),
-        BenchGate::Pass
-    );
+    let throughput = throughput_verdict(&set_of(&[Duration::from_millis(100); 2]));
+    for anchor in [
+        AnchorVerdict::Skipped,
+        AnchorVerdict::NotRecorded("fw 4.93 x base".into()),
+        AnchorVerdict::NotComparable(vec!["retargeted".to_string()]),
+    ] {
+        assert_eq!(
+            classify_runs(&[], &anchor, throughput, reporting()),
+            BenchGate::Pass,
+            "{anchor:?}"
+        );
+    }
 }
 
 #[test]
@@ -966,6 +1147,7 @@ fn bench_options<'a>(
         prescan: false,
         guest_args,
         check_anchor: true,
+        run_index: 0,
     }
 }
 
@@ -1126,34 +1308,38 @@ fn a_checkpoint_override_equal_to_the_cells_stays_comparable() {
 
 #[test]
 fn identical_witness_streams_disagree_nowhere() {
-    let stream = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n\
-                  BENCH_ATOMIC_WITNESS: ldarx=100 stdcx=0 lwarx=0 stwcx=0\n";
-    assert!(witness_disagreements(stream, stream).is_empty());
+    let stream = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73
+                  BENCH_ATOMIC_WITNESS: ldarx=100 stdcx=0 lwarx=0 stwcx=0
+";
+    assert!(witness_disagreements("run 1", stream, "run 2", stream).is_empty());
 }
 
 /// The steps/outcome comparison cannot see this, and the anchor check
-/// reads run 1 alone, so without the pairwise witness check a counter
-/// that moves between runs passes the gate.
+/// reads run 1 alone, so without the witness check a counter that
+/// moves between runs passes the gate.
 #[test]
 fn a_witness_that_moved_between_runs_is_a_determinism_break() {
-    let r1 = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n";
-    let r2 = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=76\n";
-    let failures = witness_disagreements(r1, r2);
+    let streams = [
+        "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73
+"
+        .to_string(),
+        "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=76
+"
+        .to_string(),
+    ];
+    let runs = set_of(&[Duration::from_millis(100); 2]);
+    let failures = determinism_disagreements(&runs, &streams);
     assert_eq!(
         failures,
         vec!["witness host_invariant_breaks: run 1 73 != run 2 76".to_string()]
     );
-
-    use std::time::Duration;
-    let run = BenchBootResult {
-        steps: 10,
-        wall: Duration::from_millis(100),
-        budget: Budget::new(256),
-        outcome: BootOutcome::ProcessExit,
-    };
-    let drift = wall_disagreement_percent(run.wall, run.wall);
     assert_eq!(
-        classify_pair(&run, &run, drift, &failures, &AnchorVerdict::Match),
+        classify_runs(
+            &failures,
+            &AnchorVerdict::Match,
+            throughput_verdict(&runs),
+            reporting()
+        ),
         BenchGate::DeterminismBreak,
         "agreeing steps, outcome and anchor must not outvote a moving witness",
     );
@@ -1161,10 +1347,12 @@ fn a_witness_that_moved_between_runs_is_a_determinism_break() {
 
 #[test]
 fn a_witness_line_only_one_run_emitted_is_a_disagreement() {
-    let r1 = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n\
-              BENCH_DCBZ_WITNESS: count=0\n";
-    let r2 = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n";
-    let failures = witness_disagreements(r1, r2);
+    let r1 = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73
+              BENCH_DCBZ_WITNESS: count=0
+";
+    let r2 = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73
+";
+    let failures = witness_disagreements("run 1", r1, "run 2", r2);
     assert_eq!(
         failures,
         vec![
@@ -1175,11 +1363,36 @@ fn a_witness_line_only_one_run_emitted_is_a_disagreement() {
 }
 
 #[test]
+fn a_disagreement_is_labelled_with_the_run_it_came_from() {
+    let streams = vec![
+        "BENCH_DCBZ_WITNESS: count=0
+"
+        .to_string(),
+        "BENCH_DCBZ_WITNESS: count=0
+"
+        .to_string(),
+        "BENCH_DCBZ_WITNESS: count=4
+"
+        .to_string(),
+    ];
+    let runs = set_of(&[Duration::from_millis(100); 3]);
+    let failures = determinism_disagreements(&runs, &streams);
+    assert_eq!(
+        failures,
+        vec!["witness dcbz: run 1 0 != run 3 4".to_string()]
+    );
+}
+
+#[test]
 fn a_malformed_witness_line_in_either_run_is_a_disagreement() {
-    let good = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n";
-    let bad = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=lots\n";
-    assert!(witness_disagreements(good, bad)[0].starts_with("run 2 witness line did not parse"));
-    assert!(witness_disagreements(bad, good)[0].starts_with("run 1 witness line did not parse"));
+    let good = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73
+";
+    let bad = "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=lots
+";
+    assert!(witness_disagreements("run 1", good, "run 2", bad)[0]
+        .starts_with("run 2 witness line did not parse"));
+    assert!(witness_disagreements("run 1", bad, "run 2", good)[0]
+        .starts_with("run 1 witness line did not parse"));
 }
 
 /// Every `"BENCH_<NAME>:` string literal in `source`: the prefixes of

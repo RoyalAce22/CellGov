@@ -21,7 +21,7 @@ fn the_top_level_help_states_the_shared_contract() {
         "  0    success",
         "  1    the operation ran and failed",
         "  2    usage error",
-        "  3    the two runs of a pair disagreed",
+        "  3    runs that had to reproduce each other disagreed",
         "  4    a subprocess failed, or a verification diverged",
         "  5    a boot moved off its committed anchor",
     ] {
@@ -84,6 +84,74 @@ fn only_a_command_specific_code_is_labelled_particular_to_that_command() {
 {text}"
         );
     }
+}
+
+/// `--save-state-trace` and `--run-index` reach `boot bench` through
+/// the argument struct it shares with `boot bench-once`. The refusal
+/// lands before any store read.
+#[test]
+fn a_child_only_bench_flag_on_the_run_set_is_a_usage_error() {
+    for extra in [
+        vec!["--save-state-trace", "trace.state"],
+        vec!["--run-index", "2"],
+    ] {
+        let mut argv = vec!["boot", "bench", "--title", "synthetic"];
+        argv.extend_from_slice(&extra);
+        let out = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+            .args(&argv)
+            .output()
+            .expect("spawn cellgov");
+        assert_eq!(out.status.code(), Some(2), "{argv:?}");
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("bench-once"),
+            "{argv:?}: the refusal names the command that takes the flag:\n{stderr}"
+        );
+    }
+}
+
+/// The refusal lands before any store read.
+#[test]
+fn a_strict_throughput_gate_over_one_run_is_a_usage_error() {
+    let out = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args([
+            "boot",
+            "bench",
+            "--title",
+            "synthetic",
+            "--runs",
+            "1",
+            "--strict-perf",
+        ])
+        .output()
+        .expect("spawn cellgov");
+    assert_eq!(out.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("--strict-perf") && stderr.contains("--runs 1"),
+        "the refusal names both flags it is about:\n{stderr}"
+    );
+}
+
+#[test]
+fn a_strict_throughput_gate_over_several_runs_is_not_refused() {
+    let out = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args([
+            "boot",
+            "bench",
+            "--title",
+            "synthetic",
+            "--runs",
+            "2",
+            "--strict-perf",
+        ])
+        .output()
+        .expect("spawn cellgov");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("--strict-perf enforces"),
+        "a two-run set measures a spread, so nothing is refused:\n{stderr}"
+    );
 }
 
 #[test]

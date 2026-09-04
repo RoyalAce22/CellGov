@@ -125,7 +125,7 @@ measurement.
 
 ```mermaid
 flowchart LR
-  bb["boot bench --title NAME --fw F --game-ver V"] --> boot["two subprocess-isolated boots"]
+  bb["boot bench --title NAME --fw F --game-ver V"] --> boot["N subprocess-isolated boots (--runs, default 3)"]
   boot --> lines["BENCH_* stderr lines"]
   lines --> chk["witness checker: exact / at-least / absent / informational; every recorded emitter must appear"]
   base["anchors/fw-F/V/boot_summary.json"] --> chk
@@ -135,6 +135,40 @@ flowchart LR
   ra --> base
   ra --> hist["one line appended to that cell's boot_history.jsonl"]
 ```
+
+### What a run set gates on, and what it only reports
+
+A run set separates two questions the same invocation answers.
+
+**Determinism is a hard gate.** Every run of the set is held against
+run 1 on four surfaces: retired steps, boot outcome, the budget the
+run resolved, and the whole witness map parsed out of the `BENCH_*`
+stderr lines. The witness map is what catches a counter that moves
+while the step count holds, and the budget is a per-run result because
+each child re-resolves its own composition. A disagreement exits
+nonzero and re-runs the boot twice more under `--save-state-trace`,
+feeding the two traces to the same comparison `diff diverge` uses, so
+the report names the first divergent step, PC and hash. Those re-runs
+take `DeterminismCheck` mode, which the measured runs do not, so a
+break that mode fails to reproduce reports as identical -- the line
+says which. The mode records a state hash per retired instruction, so
+above a step cap the report names the two `bench-once` commands and
+the `diff diverge` that follows them, and runs no boot itself. The cap
+reads the longest run of the set, since a moved step count is one of
+the breaks that triggers the localization.
+
+A set of one run reproduces nothing, and says so where the gate
+verdict would go.
+
+**Throughput only reports.** The set estimates cost as min-of-N:
+contention only ever adds time, so the fastest run is the least
+contaminated. It reports the cross-run spread against a noise ceiling
+and, above it, says `INCONCLUSIVE` and exits 0. Elapsed time on a host
+running anything else measures the host, so gating on it inverts the
+polarity -- the busier the machine, the likelier the gate trips on a
+run that regressed nothing. `--strict-perf` turns "no throughput
+verdict" into a nonzero exit, for a box with nothing else on it; it
+needs two runs to have a spread to enforce, and refuses a one-run set.
 
 The title suites (`title_witnesses`, `authority_id`) sit behind
 the `title-corpus` cargo feature because they need the operator's
@@ -158,11 +192,17 @@ fits the existing checkpoint kinds (`process-exit`,
 targeted diagnostics, e.g. `--checkpoint pc=0xADDR` for
 step-count-aligned A/B measurements.
 
-`boot bench` measures a pair of subprocess boots, so it forwards the
-selection flags to its child rather than the paths they resolved to.
-Handing the child a resolved directory would make it read an unmanaged
-tree and compose no store mounts, and the pair would measure two
-different guest trees.
+`boot bench` measures a set of subprocess boots, so it forwards the
+selection flags to each child rather than the paths they resolved to.
+Handing a child a resolved directory would make it read an unmanaged
+tree and compose no store mounts, and the set would measure different
+guest trees.
+
+The two commands share one argument struct, so the flags that describe
+a single child -- the trace path it writes and the index it reports --
+parse on both and mean something on only one. `boot bench` refuses
+them by name: one path cannot serve several measurements, and the set
+stamps each child's index itself.
 
 ## Version selection
 
@@ -241,12 +281,12 @@ The diagnostic surface is:
 
 - `boot run --title <name>`: fault-driven bring-up run with full
   per-step coverage (insn tally, PC hit counts, syscall summary).
-- `boot bench --title <name>`: two subprocess-isolated boot runs
-  per invocation for reproducible wall-time measurement; the
-  split sidesteps wall-time drift from guest-memory allocation /
-  page-commit reuse across `Runtime` instances in one process.
-  `--checkpoint pc=0xADDR` stops at a specific retired PC for A/B
-  measurements that need identical step counts across runs.
+- `boot bench --title <name>`: `--runs` subprocess-isolated boot
+  runs per invocation (default 3); the split sidesteps wall-time
+  drift from guest-memory allocation / page-commit reuse across
+  `Runtime` instances in one process. `--checkpoint pc=0xADDR`
+  stops at a specific retired PC for A/B measurements that need
+  identical step counts across runs.
 - `dev prx-imports <path>`: decodes any raw `.prx` or SCE-wrapped
   `.sprx` (SCE wrappers auto-detected and decrypted via
   `cellgov_install::sce`) and prints the module's internal name,

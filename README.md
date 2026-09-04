@@ -139,7 +139,7 @@ install record.
 ```bash
 cargo build --release -p cellgov_cli --features decrypt
 target/release/cellgov boot run --title <name>     # boot to the manifest's checkpoint
-target/release/cellgov boot bench --title <name>   # boot twice, check the committed anchor
+target/release/cellgov boot bench --title <name>   # boot a run set, check the committed anchor
 target/release/cellgov dev prx-imports <path>      # inspect a PRX / SPRX / EBOOT
 target/release/cellgov --help                     # the full surface
 ```

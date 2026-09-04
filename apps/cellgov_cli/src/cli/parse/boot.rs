@@ -3,7 +3,33 @@
 use std::path::PathBuf;
 
 use super::value;
+use crate::cli::args::CliArgError;
 use crate::game::manifest::CheckpointTrigger;
+
+/// Ceiling on `boot bench --runs`. Each run is a whole boot, and the
+/// throughput estimator gains nothing past a handful of samples.
+const MAX_BENCH_RUNS: usize = 25;
+
+/// A `--runs` count inside the run set's window.
+fn bench_runs(s: &str) -> Result<usize, CliArgError> {
+    let n: usize = s
+        .parse()
+        .map_err(|source| CliArgError::CannotParseDecimal {
+            context: "runs".to_string(),
+            raw: s.to_string(),
+            source,
+        })?;
+    if n == 0 {
+        return Err(CliArgError::CountIsZero);
+    }
+    if n > MAX_BENCH_RUNS {
+        return Err(CliArgError::CountTooLarge {
+            got: n,
+            max: MAX_BENCH_RUNS,
+        });
+    }
+    Ok(n)
+}
 
 /// Which installed title the boot runs.
 #[derive(Debug, Clone, clap::Args)]
@@ -47,8 +73,8 @@ const BOOT_RUN_EXIT_CODES: &str = "Exit codes particular to this command:
 
 /// The outcomes `boot bench` has beyond the shared 0-5 contract.
 const BOOT_BENCH_EXIT_CODES: &str = "Exit codes particular to this command:
-  15  the pair's wall-time measurement drifted past the gate, or was
-      unusable";
+  15  --strict-perf is set and the run set reaches no throughput
+      verdict";
 
 /// `cellgov boot run`
 #[derive(Debug, Clone, clap::Args)]
@@ -140,9 +166,19 @@ pub(crate) struct BenchArgs {
     /// One guest argv entry; repeat for more. Values may spell a flag.
     #[arg(long, value_name = "VALUE", allow_hyphen_values = true, action = clap::ArgAction::Append)]
     pub guest_arg: Vec<String>,
+    /// Write the run's state trace here. It records a state hash per
+    /// step, which makes the run a divergence diagnostic instead of a
+    /// throughput measurement.
+    #[arg(long, value_name = "PATH")]
+    pub save_state_trace: Option<String>,
+    /// Index this measurement reports on its `BENCH_RESULT` line. A
+    /// run set stamps each of its children.
+    #[arg(long, value_name = "N")]
+    pub run_index: Option<usize>,
 }
 
-/// `cellgov boot bench` -- the pair, which alone gates on the anchor.
+/// `cellgov boot bench` -- the run set, which alone gates on the
+/// anchor.
 #[derive(Debug, Clone, clap::Args)]
 #[command(after_help = BOOT_BENCH_EXIT_CODES)]
 pub(crate) struct BenchGateArgs {
@@ -151,4 +187,13 @@ pub(crate) struct BenchGateArgs {
     /// Drop the anchor gate for a measurement-only run.
     #[arg(long)]
     pub no_anchor_check: bool,
+    /// Subprocess measurements to take. With `1` the determinism gate
+    /// compares nothing, and the set reports that.
+    #[arg(long, value_name = "N", default_value_t = crate::game::BENCH_DEFAULT_RUNS, value_parser = bench_runs)]
+    pub runs: usize,
+    /// Fail when the runs reach no throughput verdict. Use it only on
+    /// a host that runs nothing else; elsewhere the spread measures
+    /// the host.
+    #[arg(long)]
+    pub strict_perf: bool,
 }

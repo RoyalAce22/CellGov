@@ -5,7 +5,7 @@ fn the_contract_text_names_every_shared_code() {
     for (code, meaning) in [
         (FAILED, "the operation ran and failed"),
         (USAGE, "usage error"),
-        (DISAGREED, "the two runs of a pair disagreed"),
+        (DISAGREED, "runs that had to reproduce each other disagreed"),
         (DIVERGED, "a subprocess failed, or a verification diverged"),
         (ANCHOR_MOVED, "a boot moved off its committed anchor"),
     ] {

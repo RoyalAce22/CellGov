@@ -310,6 +310,93 @@ fn the_anchor_gate_is_dropped_only_where_there_is_one() {
 }
 
 #[test]
+fn the_run_set_flags_reach_only_the_command_that_has_a_set() {
+    assert!(parse(&[
+        "boot",
+        "bench",
+        "--title",
+        "t",
+        "--runs",
+        "5",
+        "--strict-perf"
+    ])
+    .is_ok());
+    for flag in [vec!["--runs", "5"], vec!["--strict-perf"]] {
+        let mut argv = vec!["boot", "bench-once", "--title", "t"];
+        argv.extend_from_slice(&flag);
+        assert_eq!(
+            err_kind(&argv),
+            clap::error::ErrorKind::UnknownArgument,
+            "{flag:?}"
+        );
+    }
+}
+
+#[test]
+fn a_bench_takes_three_runs_unless_it_is_told_otherwise() {
+    let cli = parse(&["boot", "bench", "--title", "t"]).unwrap();
+    let Command::Boot(BootCommand::Bench(args)) = cli.command else {
+        panic!("expected boot bench");
+    };
+    assert_eq!(args.runs, crate::game::BENCH_DEFAULT_RUNS);
+    assert!(!args.strict_perf);
+}
+
+#[test]
+fn a_run_count_outside_the_window_is_refused() {
+    for count in ["0", "26"] {
+        assert_eq!(
+            err_kind(&["boot", "bench", "--title", "t", "--runs", count]),
+            clap::error::ErrorKind::ValueValidation,
+            "--runs {count}"
+        );
+    }
+    assert!(parse(&["boot", "bench", "--title", "t", "--runs", "25"]).is_ok());
+}
+
+/// The parser admits `1`; the set reports that it gated nothing.
+#[test]
+fn a_set_of_one_run_is_inside_the_window() {
+    let cli = parse(&["boot", "bench", "--title", "t", "--runs", "1"]).unwrap();
+    let Command::Boot(BootCommand::Bench(args)) = cli.command else {
+        panic!("expected boot bench");
+    };
+    assert_eq!(args.runs, 1);
+}
+
+#[test]
+fn a_run_count_that_is_not_a_decimal_is_refused() {
+    for raw in ["", "three", "3.5", "1e2", "-1", "0x3", " 3"] {
+        // The attached form, so a leading '-' reaches the parser as a
+        // value.
+        let flag = format!("--runs={raw}");
+        assert_eq!(
+            err_kind(&["boot", "bench", "--title", "t", flag.as_str()]),
+            clap::error::ErrorKind::ValueValidation,
+            "--runs {raw:?}"
+        );
+    }
+}
+
+/// Both bench commands share `BenchArgs`, so clap parses these on the
+/// set. `boot_cmd::bench_boot` refuses them, and
+/// `tests/exit_code_contract.rs` covers that refusal.
+#[test]
+fn the_child_only_flags_still_parse_on_the_set() {
+    assert!(parse(&[
+        "boot",
+        "bench",
+        "--title",
+        "t",
+        "--save-state-trace",
+        "t.state",
+        "--run-index",
+        "2",
+    ])
+    .is_ok());
+}
+
+#[test]
 fn a_store_root_is_named_once() {
     assert_eq!(
         err_kind(&[

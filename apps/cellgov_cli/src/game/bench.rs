@@ -1,9 +1,13 @@
 //! `boot bench` / `boot bench-once` machinery.
-//! A pair runs two subprocesses and gates on per-run agreement.
+//!
+//! A run set takes N subprocess measurements. It gates on what the
+//! runs must reproduce exactly: steps, outcome, budget, and witness
+//! map. It reports throughput separately, because elapsed time
+//! measures the host as much as the emulator.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
 use cellgov_compare::witnesses::{check_all, unrecorded};
@@ -18,14 +22,24 @@ use super::manifest::{self, CellKey, TitleManifest};
 use super::step_loop::bench_step_loop;
 use crate::paths::{boot_anchor_path, workspace_root};
 
-/// Wall-time disagreement that trips the pair gate, as a percentage
-/// of the faster run.
-pub const BENCH_AGREEMENT_GATE_PCT: f64 = 5.0;
+/// Subprocess measurements one `boot bench` invocation takes.
+///
+/// The determinism gate is exact at any count above one. The
+/// throughput half fixes the count: min-of-N is the estimator there,
+/// and two samples cannot outvote a single descheduling event.
+pub const BENCH_DEFAULT_RUNS: usize = 3;
+
+/// Cross-run wall spread above which a run set makes no throughput
+/// claim, as a percentage of the fastest run.
+///
+/// A spread above the ceiling is a nonzero exit only under
+/// `--strict-perf`. On a busy host the spread measures the host.
+pub const BENCH_SPREAD_CEILING_PCT: f64 = 5.0;
 
 /// The selection flags a run resolved its composition from.
 ///
-/// The parent of a pair forwards these flags to the child, so both
-/// processes compose from the same store.
+/// The parent of a run set forwards these flags to every child, so
+/// each process composes from the same store.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SelectionArgs<'a> {
     pub fw: Option<&'a str>,
@@ -79,6 +93,9 @@ pub struct BenchOptions<'a> {
     /// by `--no-anchor-check` for the re-record workflow, where the
     /// anchor is expected to disagree.
     pub check_anchor: bool,
+    /// Travels to the child, which reports it back on its
+    /// `BENCH_RESULT` line.
+    pub run_index: usize,
 }
 
 impl BenchOptions<'_> {
@@ -92,7 +109,9 @@ impl BenchOptions<'_> {
             .arg("--title")
             .arg(self.title.name())
             .arg("--max-steps")
-            .arg(self.max_steps.to_string());
+            .arg(self.max_steps.to_string())
+            .arg("--run-index")
+            .arg(self.run_index.to_string());
         for (flag, value) in [
             ("--vfs-root", self.selection.vfs_root),
             ("--fw", self.selection.fw),
@@ -124,8 +143,9 @@ impl BenchOptions<'_> {
 /// One completed bench run.
 #[derive(Debug, Clone, Copy)]
 pub struct BenchBootResult {
+    pub run_index: usize,
     pub steps: usize,
-    pub wall: std::time::Duration,
+    pub wall: Duration,
     /// Instructions each step was granted; `steps * budget` is the
     /// count the run retired.
     pub budget: Budget,
@@ -143,32 +163,63 @@ impl BenchBootResult {
     }
 }
 
-/// Gate verdict for [`bench_boot_pair`].
+/// How the throughput half of a run set behaves.
+#[derive(Debug, Clone, Copy)]
+pub struct ThroughputPolicy {
+    /// Subprocess measurements to take.
+    pub runs: usize,
+    /// Turn a throughput verdict the set could not reach into a
+    /// nonzero exit. Set it only on an idle host.
+    pub strict: bool,
+}
+
+/// What the throughput half of a run set concluded.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ThroughputVerdict {
+    /// Spread within [`BENCH_SPREAD_CEILING_PCT`]. `min` estimates the
+    /// uncontended cost: contention only ever adds time, so the
+    /// fastest run is the least contaminated one.
+    Measured { min: Duration, spread_pct: f64 },
+    /// Spread above the ceiling, so the set makes no throughput claim.
+    Inconclusive { min: Duration, spread_pct: f64 },
+    /// A run reported a zero wall, so there is no spread to compare.
+    Unmeasurable,
+}
+
+impl ThroughputVerdict {
+    fn is_measured(self) -> bool {
+        matches!(self, Self::Measured { .. })
+    }
+}
+
+/// Gate verdict for [`bench_boot_runs`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BenchGate {
-    /// Both runs agree on steps + outcome; wall drift within
-    /// [`BENCH_AGREEMENT_GATE_PCT`].
+    /// Every run reproduced the same steps, outcome and witness map,
+    /// and the anchor comparison found nothing.
     Pass,
-    /// Runs disagreed on retired step count or boot outcome.
+    /// Runs disagreed on retired step count, boot outcome, or a
+    /// witness.
     DeterminismBreak,
     /// The run disagreed with the cell's committed anchor.
     AnchorDrift,
-    /// Wall drift exceeded the gate.
-    WallDriftExceeded,
-    /// Wall measurement was zero / non-finite.
-    WallUnmeasurable,
+    /// The set reached no throughput claim under `--strict-perf`.
+    SpreadExceeded,
 }
 
-/// Result of one [`bench_boot_pair`] invocation.
+/// Result of one [`bench_boot_runs`] invocation.
 #[derive(Debug, Clone)]
-pub struct BenchPairOutcome {
-    pub run1: BenchBootResult,
-    pub run2: BenchBootResult,
-    pub drift_pct: Option<f64>,
+pub struct BenchRunsOutcome {
+    /// Every measurement taken, in the order they ran.
+    pub runs: Vec<BenchBootResult>,
+    pub throughput: ThroughputVerdict,
     pub gate: BenchGate,
     /// Every anchor disagreement found, empty unless `gate` is
     /// [`BenchGate::AnchorDrift`].
     pub anchor_failures: Vec<String>,
+    /// Every way the runs failed to reproduce each other, empty unless
+    /// `gate` is [`BenchGate::DeterminismBreak`].
+    pub determinism_failures: Vec<String>,
 }
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
@@ -178,11 +229,16 @@ pub struct BenchPairOutcome {
 /// manifest's declared checkpoint, not the runtime-overridable
 /// `checkpoint`, so a `--checkpoint pc=ADDR` override does not change
 /// the boot trajectory's init path.
+///
+/// `trace_path` puts the runtime in `DeterminismCheck` mode, which
+/// costs a state hash per step. No comparison reads a traced run's
+/// wall time.
 pub fn bench_boot(
     opts: BenchOptions<'_>,
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
     control_flags1: Option<u32>,
+    trace_path: Option<&str>,
     progress: &dyn crate::progress::ProgressSink,
 ) -> BenchBootResult {
     progress.phase(crate::progress::BootPhase::Loading.code());
@@ -205,7 +261,7 @@ pub fn bench_boot(
         dump_mem_boot_addrs: &[],
         profile_pairs: false,
         budget_override: opts.budget_override,
-        capture_state_trace: false,
+        capture_state_trace: trace_path.is_some(),
         prescan: opts.prescan,
         guest_args: opts.guest_args,
     });
@@ -555,7 +611,16 @@ pub fn bench_boot(
         }
     }
 
+    // After the witness block: the write is host I/O, and a reader
+    // that scrapes stderr must not have to wait on a disk.
+    if let Some(path) = trace_path {
+        std::fs::write(path, rt.trace().bytes()).unwrap_or_else(|e| {
+            crate::cli::exit::die(&format!("boot bench: writing state trace to {path}: {e}"))
+        });
+    }
+
     BenchBootResult {
+        run_index: opts.run_index,
         steps,
         wall,
         budget: step_budget,
@@ -576,18 +641,22 @@ fn unit_status_label(status: Option<cellgov_exec::UnitStatus>) -> &'static str {
 }
 
 /// Run a single bench invocation and print one `BENCH_RESULT` line.
-///
-/// Each measurement runs in its own subprocess: in-process back-to-back
-/// runs drift ~60 percent in wall time on Windows due to 1 GB
-/// guest-memory page-commit reuse.
 pub fn bench_boot_one_run(
     opts: BenchOptions<'_>,
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
     control_flags1: Option<u32>,
+    trace_path: Option<&str>,
     progress: &dyn crate::progress::ProgressSink,
 ) -> BenchBootResult {
-    let r = bench_boot(opts, elf_data, authority_id, control_flags1, progress);
+    let r = bench_boot(
+        opts,
+        elf_data,
+        authority_id,
+        control_flags1,
+        trace_path,
+        progress,
+    );
     println!("{}", format_bench_result(&r));
     r
 }
@@ -598,9 +667,12 @@ pub fn bench_boot_one_run(
 /// the parent reconstructs exactly what the clock returned and
 /// recomputes `steps_per_sec` from the same inputs this line was
 /// printed from; `steps_per_sec` itself is carried for readers.
+/// `run_index` names the measurement a captured line came from, once
+/// several runs share one log.
 fn format_bench_result(r: &BenchBootResult) -> String {
     format!(
-        "BENCH_RESULT steps={} wall_ns={} steps_per_sec={:.0} budget={} outcome={}",
+        "BENCH_RESULT run_index={} steps={} wall_ns={} steps_per_sec={:.0} budget={} outcome={}",
+        r.run_index,
         r.steps,
         r.wall.as_nanos(),
         r.steps_per_sec(),
@@ -648,6 +720,11 @@ impl SpawnError {
 /// Spawn the current binary as `boot bench-once` and parse its
 /// `BENCH_RESULT` line. Subprocess stderr is forwarded so warnings
 /// reach the parent on the success path.
+///
+/// Each measurement runs in its own process. Back-to-back runs inside
+/// one process drift ~60 percent in wall time on Windows, from 1 GB
+/// guest-memory page-commit reuse.
+///
 /// Returns the parsed result alongside the subprocess stderr, which
 /// carries the `BENCH_*` witness lines the anchor check reads.
 fn spawn_one_run(opts: BenchOptions<'_>) -> Result<(BenchBootResult, String), SpawnError> {
@@ -668,7 +745,17 @@ fn spawn_one_run(opts: BenchOptions<'_>) -> Result<(BenchBootResult, String), Sp
         eprint!("{stderr}");
     }
     match parse_bench_result(&stdout) {
-        Ok(r) => Ok((r, stderr)),
+        Ok(r) => {
+            // The parent asked for this index on the command line. A
+            // child that reports another index means `--run-index` no
+            // longer reaches it. Every line would then read 0, and the
+            // per-run attribution would be silently false.
+            debug_assert_eq!(
+                r.run_index, opts.run_index,
+                "the child reported an index the parent did not ask for"
+            );
+            Ok((r, stderr))
+        }
         Err(error) => Err(SpawnError::ParseFailed {
             error,
             stdout,
@@ -677,12 +764,23 @@ fn spawn_one_run(opts: BenchOptions<'_>) -> Result<(BenchBootResult, String), Sp
     }
 }
 
-/// Run [`bench_boot_one_run`] twice in separate subprocesses and
-/// classify the pair against the gate.
-pub fn bench_boot_pair(
+/// Run [`bench_boot_one_run`] `policy.runs` times in separate
+/// subprocesses, gate on what the runs must reproduce, and report
+/// throughput.
+///
+/// # Panics
+///
+/// Panics if `policy.runs` is zero. A set of no runs has nothing to
+/// compare, and the argument parser refuses the value.
+pub fn bench_boot_runs(
     opts: BenchOptions<'_>,
+    policy: ThroughputPolicy,
     progress: &dyn crate::progress::ProgressSink,
-) -> Result<BenchPairOutcome, SpawnError> {
+) -> Result<BenchRunsOutcome, SpawnError> {
+    assert!(
+        policy.runs > 0,
+        "invariant: a run set takes at least one measurement"
+    );
     // Optional trailing tokens, each carrying its own leading space
     // so the banner has no gap when both are absent.
     let mut overrides = String::new();
@@ -697,42 +795,47 @@ pub fn bench_boot_pair(
         overrides.push_str(&format!(" guest_args={:?}", opts.guest_args));
     }
     println!(
-        "boot bench: title={} elf={} max_steps={}{overrides}",
+        "boot bench: title={} elf={} max_steps={} runs={}{overrides}",
         opts.title.name(),
         opts.elf_path,
-        opts.max_steps
+        opts.max_steps,
+        policy.runs,
     );
     progress.phase(crate::progress::BenchPairPhase::Measuring.code());
-    // Both counters track the same two runs.
-    progress.totals(2, 2);
-    progress.item_started("run 1 of 2");
-    let (r1, r1_stderr) = spawn_one_run(opts)?;
-    progress.advanced(1);
-    progress.item_finished();
-    println!(
-        "  run 1: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
-        r1.steps,
-        r1.wall.as_secs_f64() * 1e3,
-        r1.steps_per_sec(),
-        r1.outcome,
-    );
-    progress.item_started("run 2 of 2");
-    let (r2, r2_stderr) = spawn_one_run(opts)?;
-    progress.advanced(1);
-    progress.item_finished();
+    // Both counters track the same set of runs.
+    progress.totals(policy.runs, policy.runs as u64);
+    let mut runs: Vec<BenchBootResult> = Vec::with_capacity(policy.runs);
+    let mut streams: Vec<String> = Vec::with_capacity(policy.runs);
+    for index in 0..policy.runs {
+        progress.item_started(&format!("run {} of {}", index + 1, policy.runs));
+        let mut this_run = opts;
+        this_run.run_index = index;
+        let (result, stderr) = spawn_one_run(this_run)?;
+        progress.advanced(1);
+        progress.item_finished();
+        println!(
+            "  run {}: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
+            index + 1,
+            result.steps,
+            result.wall.as_secs_f64() * 1e3,
+            result.steps_per_sec(),
+            result.outcome,
+        );
+        runs.push(result);
+        streams.push(stderr);
+    }
     progress.phase(crate::progress::BenchPairPhase::Comparing.code());
-    println!(
-        "  run 2: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
-        r2.steps,
-        r2.wall.as_secs_f64() * 1e3,
-        r2.steps_per_sec(),
-        r2.outcome,
-    );
-    let drift_pct = wall_disagreement_percent(r1.wall, r2.wall);
-    let witness_break = witness_disagreements(&r1_stderr, &r2_stderr);
-    // Only run 1's stream reaches the anchor. That is sound only
-    // because `witness_disagreements` above has already established
-    // the two runs produced the same one.
+
+    let determinism_failures = determinism_disagreements(&runs, &streams);
+    // A set of one run has no second run to compare against, so the
+    // hard gate covers nothing.
+    if policy.runs == 1 {
+        println!("  determinism: NOT CHECKED -- a set of one run reproduces nothing");
+    }
+    // Only run 1's stream reaches the anchor;
+    // `determinism_disagreements` above already checked that every run
+    // produced the same stream.
+    let first = runs[0];
     let anchor = if !opts.check_anchor {
         AnchorVerdict::Skipped
     } else {
@@ -745,10 +848,10 @@ pub fn bench_boot_pair(
                 cell,
                 &MeasuredRun {
                     checkpoint: opts.checkpoint_override.unwrap_or(opts.plan.checkpoint),
-                    steps: r1.steps as u64,
-                    budget: r1.budget,
-                    outcome: r1.outcome.to_string(),
-                    stderr: &r1_stderr,
+                    steps: first.steps as u64,
+                    budget: first.budget,
+                    outcome: first.outcome.to_string(),
+                    stderr: &streams[0],
                 },
             ),
             (true, None) => unreachable!("an unnameable cell is itself an incomparable reason"),
@@ -783,41 +886,302 @@ pub fn bench_boot_pair(
             )
         }
     }
-    let gate = classify_pair(&r1, &r2, drift_pct, &witness_break, &anchor);
+
+    let throughput = throughput_verdict(&runs);
+    print_throughput(throughput, policy);
+    let gate = classify_runs(&determinism_failures, &anchor, throughput, policy);
     progress.finished();
-    match gate {
-        BenchGate::Pass => {
-            let d = drift_pct.expect("Pass implies finite drift");
-            println!("  agreement: {d:.2}% (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => OK)");
+    if gate == BenchGate::DeterminismBreak {
+        println!("  determinism: BREAK");
+        for failure in &determinism_failures {
+            println!("    {failure}");
         }
-        BenchGate::WallDriftExceeded => {
-            let d = drift_pct.expect("WallDriftExceeded implies finite drift");
-            println!("  agreement: {d:.2}% (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => FAIL)");
+        for line in locate_divergence(opts, &runs) {
+            println!("    {line}");
         }
-        BenchGate::WallUnmeasurable => {
-            println!("  agreement: unmeasurable (gate: <= {BENCH_AGREEMENT_GATE_PCT}% => FAIL)");
-        }
-        BenchGate::DeterminismBreak => {
-            println!("  agreement: determinism break");
-            if r1.steps != r2.steps || r1.outcome != r2.outcome {
-                println!("    steps/outcome differ between the two runs");
-            }
-            for failure in &witness_break {
-                println!("    {failure}");
-            }
-        }
-        BenchGate::AnchorDrift => {}
     }
-    Ok(BenchPairOutcome {
-        run1: r1,
-        run2: r2,
-        drift_pct,
+    Ok(BenchRunsOutcome {
+        runs,
+        throughput,
         gate,
         anchor_failures: match anchor {
             AnchorVerdict::Drift(f) => f,
             _ => Vec::new(),
         },
+        determinism_failures,
     })
+}
+
+fn print_throughput(verdict: ThroughputVerdict, policy: ThroughputPolicy) {
+    println!("{}", throughput_line(verdict, policy));
+}
+
+/// A set of one run spreads against nothing, and a range over one
+/// measurement is 0%. That would read as an agreement, so the
+/// single-run line names the estimate and says the spread went
+/// unchecked.
+fn throughput_line(verdict: ThroughputVerdict, policy: ThroughputPolicy) -> String {
+    let outcome = if policy.strict && !verdict.is_measured() {
+        "FAIL (--strict-perf)"
+    } else if verdict.is_measured() {
+        "OK"
+    } else {
+        "SKIPPED"
+    };
+    match verdict {
+        ThroughputVerdict::Measured { min, .. } if policy.runs < 2 => format!(
+            "  throughput: min_ms={:.3} over 1 run, spread NOT CHECKED -- one \
+             measurement spreads against nothing => {outcome}",
+            min.as_secs_f64() * 1e3,
+        ),
+        ThroughputVerdict::Measured { min, spread_pct } => format!(
+            "  throughput: min_ms={:.3} over {} run(s), spread {spread_pct:.2}% \
+             (ceiling {BENCH_SPREAD_CEILING_PCT}%) => {outcome}",
+            min.as_secs_f64() * 1e3,
+            policy.runs,
+        ),
+        ThroughputVerdict::Inconclusive { min, spread_pct } => format!(
+            "  throughput: INCONCLUSIVE -- min_ms={:.3} over {} run(s), spread \
+             {spread_pct:.2}% above the {BENCH_SPREAD_CEILING_PCT}% ceiling; the host was \
+             busy, so no throughput claim is made => {outcome}",
+            min.as_secs_f64() * 1e3,
+            policy.runs,
+        ),
+        ThroughputVerdict::Unmeasurable => format!(
+            "  throughput: INCONCLUSIVE -- a run reported a zero wall, so there is no \
+             spread to compare => {outcome}"
+        ),
+    }
+}
+
+/// Every way the runs of a set failed to reproduce each other.
+///
+/// Run 1 is the reference for every comparison, so one counter that
+/// moves yields one finding per run that moved.
+fn determinism_disagreements(runs: &[BenchBootResult], streams: &[String]) -> Vec<String> {
+    // The one production caller fills both vectors from the same loop,
+    // so a shorter `streams` cannot reach this point.
+    debug_assert_eq!(
+        runs.len(),
+        streams.len(),
+        "every run of a set carries the stream it printed"
+    );
+    let mut out = Vec::new();
+    for (index, run) in runs.iter().enumerate().skip(1) {
+        if run.steps != runs[0].steps || run.outcome != runs[0].outcome {
+            out.push(format!(
+                "run 1 retired {} steps ending {}, run {} retired {} steps ending {}",
+                runs[0].steps,
+                runs[0].outcome,
+                index + 1,
+                run.steps,
+                run.outcome,
+            ));
+        }
+        // Each child re-resolves its own composition, so the budget is
+        // a per-run result. Only run 1's budget reaches the anchor
+        // check. A budget that moves between runs is otherwise
+        // invisible: it retires a different trajectory under an
+        // unmoved step count.
+        if run.budget != runs[0].budget {
+            out.push(format!(
+                "run 1 ran at budget {}, run {} ran at budget {}",
+                runs[0].budget,
+                index + 1,
+                run.budget,
+            ));
+        }
+        out.extend(witness_disagreements(
+            "run 1",
+            &streams[0],
+            &format!("run {}", index + 1),
+            &streams[index],
+        ));
+    }
+    out
+}
+
+/// Retired steps above which a break is localized by hand.
+///
+/// `DeterminismCheck` records a state hash per retired instruction, so
+/// a traced boot costs orders of magnitude more time and memory than
+/// the measurement it re-runs. Past this cap the report names the two
+/// commands and runs neither.
+const LOCALIZE_MAX_STEPS: usize = 25_000;
+
+/// Localize a determinism break to its first divergent step.
+///
+/// Two more boots run under `DeterminismCheck`, and the two traces go
+/// through the same comparison `diff diverge` uses. A break that
+/// `DeterminismCheck` mode does not reproduce reports as identical.
+///
+/// The cap reads the longest run: when a break moves the step count,
+/// run 1 bounds neither re-run.
+fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]) -> Vec<String> {
+    let mut out = Vec::new();
+    let steps = runs.iter().map(|r| r.steps).max().unwrap_or(0);
+    if steps > LOCALIZE_MAX_STEPS {
+        out.push(format!(
+            "diverge: not run automatically -- the boot retires {steps} steps, past the \
+             {LOCALIZE_MAX_STEPS} a traced re-run is affordable at. Localize it by hand:"
+        ));
+        for i in 0..2 {
+            out.push(format!(
+                "  cellgov boot bench-once --title {} --save-state-trace run{i}.state",
+                opts.title.name()
+            ));
+        }
+        out.push("  cellgov diff diverge run0.state run1.state".to_string());
+        return out;
+    }
+    // This prints before the two boots below, which run in
+    // DeterminismCheck mode with no progress bar and take far longer
+    // than the measurements did.
+    println!(
+        "    diverge: re-running the boot twice under --save-state-trace to localize the \
+         break; this is slower than the measurement was"
+    );
+    let pid = std::process::id();
+    let paths: Vec<PathBuf> = (0..2)
+        .map(|i| std::env::temp_dir().join(format!("cellgov-bench-diverge-{pid}-{i}.state")))
+        .collect();
+    let mut traces = Vec::with_capacity(paths.len());
+    for (i, path) in paths.iter().enumerate() {
+        let Some(text) = path.to_str() else {
+            out.push(format!(
+                "cannot localize: the temporary trace path {} is not valid UTF-8",
+                path.display()
+            ));
+            cleanup_traces(&paths);
+            return out;
+        };
+        let mut traced = opts;
+        // The offset puts these indices outside the measured set's
+        // range, so a captured log cannot read a diagnostic boot as a
+        // measurement.
+        traced.run_index = opts.run_index + 1000 + i;
+        let exe = match std::env::current_exe() {
+            Ok(e) => e,
+            Err(e) => {
+                out.push(format!("cannot localize: current_exe: {e}"));
+                cleanup_traces(&paths);
+                return out;
+            }
+        };
+        let mut cmd = std::process::Command::new(exe);
+        traced.encode_to_command(&mut cmd);
+        cmd.arg("--save-state-trace").arg(text);
+        match cmd.output() {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                out.push(format!(
+                    "cannot localize: the traced re-run exited {:?}",
+                    o.status.code()
+                ));
+                // The child's own stderr is the only account of why it
+                // refused.
+                out.extend(stderr_tail(&o.stderr));
+                cleanup_traces(&paths);
+                return out;
+            }
+            Err(e) => {
+                out.push(format!("cannot localize: spawning the traced re-run: {e}"));
+                cleanup_traces(&paths);
+                return out;
+            }
+        }
+        match std::fs::read(path) {
+            Ok(bytes) => traces.push(bytes),
+            Err(e) => {
+                out.push(format!("cannot localize: reading {}: {e}", path.display()));
+                cleanup_traces(&paths);
+                return out;
+            }
+        }
+    }
+    cleanup_traces(&paths);
+    out.push(format_diverge(&cellgov_compare::diverge(
+        &traces[0], &traces[1],
+    )));
+    out
+}
+
+/// Lines a failing child left on stderr, indented for the report.
+///
+/// A boot that refuses can print a whole witness block first, and the
+/// refusal is the last thing it says.
+fn stderr_tail(stderr: &[u8]) -> Vec<String> {
+    const TAIL_LINES: usize = 8;
+    let text = String::from_utf8_lossy(stderr);
+    let mut tail: Vec<String> = text
+        .lines()
+        .rev()
+        .take(TAIL_LINES)
+        .map(|l| format!("  {l}"))
+        .collect();
+    tail.reverse();
+    tail
+}
+
+fn cleanup_traces(paths: &[PathBuf]) {
+    for path in paths {
+        // Best effort: this path already reports a failure, and a
+        // leftover file in the OS temp directory adds nothing to it.
+        drop(std::fs::remove_file(path));
+    }
+}
+
+/// One line naming where two traced re-runs first disagree.
+fn format_diverge(report: &cellgov_compare::DivergeReport) -> String {
+    use cellgov_compare::{DivergeField, DivergeReport};
+    match report {
+        DivergeReport::Identical { count } => format!(
+            "diverge: the two traced re-runs matched over {count} PpuStateHash record(s); \
+             the break did not reproduce under DeterminismCheck mode"
+        ),
+        DivergeReport::Differs {
+            step,
+            a_pc,
+            b_pc,
+            a_hash,
+            b_hash,
+            field,
+        } => {
+            let field = match field {
+                DivergeField::Pc => "pc",
+                DivergeField::Hash => "hash",
+            };
+            format!(
+                "diverge: first divergent step={step} field={field} \
+                 a_pc=0x{a_pc:x} b_pc=0x{b_pc:x} a_hash=0x{a_hash:x} b_hash=0x{b_hash:x}"
+            )
+        }
+        DivergeReport::LengthDiffers {
+            common_count,
+            a_count,
+            b_count,
+        } => format!(
+            "diverge: the traced re-runs agreed over {common_count} record(s) then ran to \
+             different lengths (a={a_count}, b={b_count})"
+        ),
+        // Both sides render, as `cellgov diff diverge` renders them.
+        DivergeReport::CorruptTrace {
+            common_count,
+            a_error,
+            b_error,
+        } => {
+            let a = a_error
+                .as_ref()
+                .map_or_else(|| "ok".to_string(), ToString::to_string);
+            let b = b_error
+                .as_ref()
+                .map_or_else(|| "ok".to_string(), ToString::to_string);
+            format!(
+                "diverge: a traced re-run failed to decode after {common_count} record(s), so \
+                 nothing past the cut was compared (a: {a}, b: {b})"
+            )
+        }
+    }
 }
 
 /// How a run compared against its cell's committed anchor.
@@ -890,16 +1254,21 @@ fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
     reasons
 }
 
-/// Witness-level disagreements between the pair's two runs.
+/// Witness-level disagreements between two runs of a set.
 ///
 /// The steps/outcome comparison cannot see a counter that moved
 /// without changing either, and the anchor check reads one run's
 /// stream; without this, a witness that is nondeterministic across
-/// runs passes the pair gate whenever it happens to match the anchor.
-fn witness_disagreements(r1_stderr: &str, r2_stderr: &str) -> Vec<String> {
+/// runs passes the gate whenever it happens to match the anchor.
+fn witness_disagreements(
+    a_label: &str,
+    a_stderr: &str,
+    b_label: &str,
+    b_stderr: &str,
+) -> Vec<String> {
     let mut out = Vec::new();
     let mut parsed = Vec::new();
-    for (label, stderr) in [("run 1", r1_stderr), ("run 2", r2_stderr)] {
+    for (label, stderr) in [(a_label, a_stderr), (b_label, b_stderr)] {
         match parse_witness_lines(stderr) {
             Ok(w) => parsed.push(w),
             Err(errs) => out.extend(
@@ -912,24 +1281,28 @@ fn witness_disagreements(r1_stderr: &str, r2_stderr: &str) -> Vec<String> {
         return out;
     };
     for line in a.seen_lines.symmetric_difference(&b.seen_lines) {
-        let present = if a.seen_lines.contains(line) { 1 } else { 2 };
-        out.push(format!(
-            "witness line {line} appeared in run {present} only"
-        ));
+        let present = if a.seen_lines.contains(line) {
+            a_label
+        } else {
+            b_label
+        };
+        out.push(format!("witness line {line} appeared in {present} only"));
     }
     for (name, x) in &a.values {
         let Some(y) = b.values.get(name) else {
-            out.push(format!("witness {name}: run 1 {x}, absent from run 2"));
+            out.push(format!(
+                "witness {name}: {a_label} {x}, absent from {b_label}"
+            ));
             continue;
         };
         if x != y {
-            out.push(format!("witness {name}: run 1 {x} != run 2 {y}"));
+            out.push(format!("witness {name}: {a_label} {x} != {b_label} {y}"));
         }
     }
     for name in b.values.keys() {
         if !a.values.contains_key(name) {
             out.push(format!(
-                "witness {name}: run 2 {}, absent from run 1",
+                "witness {name}: {b_label} {}, absent from {a_label}",
                 b.values[name]
             ));
         }
@@ -1048,7 +1421,7 @@ fn anchor_disagreements(
     failures
 }
 
-/// What one measured run of the pair produced, in the terms the anchor
+/// What one measured run of the set produced, in the terms the anchor
 /// records.
 struct MeasuredRun<'a> {
     /// Stop condition the run was taken at.
@@ -1145,27 +1518,49 @@ fn check_anchor_under(
     }
 }
 
-/// Order matters: a determinism break makes the witness stream
-/// meaningless, and an anchor disagreement outranks wall drift so a
-/// contended host cannot mask a real regression behind a timing
-/// failure.
-fn classify_pair(
-    r1: &BenchBootResult,
-    r2: &BenchBootResult,
-    drift_pct: Option<f64>,
-    witness_break: &[String],
+/// Order matters. A determinism break makes the witness stream
+/// meaningless. An anchor disagreement outranks the throughput
+/// verdict, so a contended host cannot mask a real regression behind a
+/// timing failure.
+///
+/// Throughput reaches the gate only under `policy.strict`: a busy host
+/// inflates the spread of a run that regressed nothing.
+fn classify_runs(
+    determinism_failures: &[String],
     anchor: &AnchorVerdict,
+    throughput: ThroughputVerdict,
+    policy: ThroughputPolicy,
 ) -> BenchGate {
-    if r1.steps != r2.steps || r1.outcome != r2.outcome || !witness_break.is_empty() {
+    if !determinism_failures.is_empty() {
         return BenchGate::DeterminismBreak;
     }
     if matches!(anchor, AnchorVerdict::Drift(_)) {
         return BenchGate::AnchorDrift;
     }
-    match drift_pct {
-        Some(d) if d > BENCH_AGREEMENT_GATE_PCT => BenchGate::WallDriftExceeded,
-        Some(_) => BenchGate::Pass,
-        None => BenchGate::WallUnmeasurable,
+    if policy.strict && !throughput.is_measured() {
+        return BenchGate::SpreadExceeded;
+    }
+    BenchGate::Pass
+}
+
+fn throughput_verdict(runs: &[BenchBootResult]) -> ThroughputVerdict {
+    if runs.is_empty() {
+        return ThroughputVerdict::Unmeasurable;
+    }
+    let mut min = Duration::MAX;
+    let mut max = Duration::ZERO;
+    for run in runs {
+        if run.wall.is_zero() {
+            return ThroughputVerdict::Unmeasurable;
+        }
+        min = min.min(run.wall);
+        max = max.max(run.wall);
+    }
+    let spread_pct = 100.0 * (max.as_secs_f64() - min.as_secs_f64()) / min.as_secs_f64();
+    if spread_pct > BENCH_SPREAD_CEILING_PCT {
+        ThroughputVerdict::Inconclusive { min, spread_pct }
+    } else {
+        ThroughputVerdict::Measured { min, spread_pct }
     }
 }
 
@@ -1177,6 +1572,10 @@ pub enum ParseBenchError {
     NoResultLine,
     #[error("more than one BENCH_RESULT line")]
     DuplicateResultLine,
+    #[error("BENCH_RESULT: missing run_index= field")]
+    MissingRunIndex,
+    #[error("BENCH_RESULT: malformed run_index={0:?}")]
+    MalformedRunIndex(String),
     #[error("BENCH_RESULT: missing steps= field")]
     MissingSteps,
     #[error("BENCH_RESULT: malformed steps={0:?}")]
@@ -1199,8 +1598,8 @@ pub enum ParseBenchError {
     },
 }
 
-/// Parse the `BENCH_RESULT steps=N wall_ns=M steps_per_sec=X budget=B
-/// outcome=O` line out of captured stdout.
+/// Parse the `BENCH_RESULT run_index=I steps=N wall_ns=M
+/// steps_per_sec=X budget=B outcome=O` line out of captured stdout.
 ///
 /// `wall_ns` must fit a `u64` (about 584 years); the child's `u128`
 /// print never exceeds that for a real run, and a larger value is
@@ -1211,13 +1610,19 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
     if iter.next().is_some() {
         return Err(ParseBenchError::DuplicateResultLine);
     }
+    let mut run_index: Option<usize> = None;
     let mut steps: Option<usize> = None;
     let mut wall_ns: Option<u64> = None;
     let mut budget: Option<u64> = None;
     let mut outcome_token: Option<String> = None;
     let mut reported_sps: Option<f64> = None;
     for tok in line.split_whitespace().skip(1) {
-        if let Some(v) = tok.strip_prefix("steps=") {
+        if let Some(v) = tok.strip_prefix("run_index=") {
+            run_index = Some(
+                v.parse()
+                    .map_err(|_| ParseBenchError::MalformedRunIndex(v.to_string()))?,
+            );
+        } else if let Some(v) = tok.strip_prefix("steps=") {
             steps = Some(
                 v.parse()
                     .map_err(|_| ParseBenchError::MalformedSteps(v.to_string()))?,
@@ -1242,6 +1647,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
             );
         }
     }
+    let run_index = run_index.ok_or(ParseBenchError::MissingRunIndex)?;
     let steps = steps.ok_or(ParseBenchError::MissingSteps)?;
     let wall_ns = wall_ns.ok_or(ParseBenchError::MissingWallNs)?;
     let budget = budget.ok_or(ParseBenchError::MissingBudget)?;
@@ -1252,8 +1658,9 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
             source,
         }
     })?;
-    let wall = std::time::Duration::from_nanos(wall_ns);
+    let wall = Duration::from_nanos(wall_ns);
     let result = BenchBootResult {
+        run_index,
         steps,
         wall,
         budget: Budget::new(budget),
@@ -1273,24 +1680,6 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
         );
     }
     Ok(result)
-}
-
-/// Relative wall-time disagreement between two runs, as a percentage
-/// of the faster run. Returns `None` when either duration is zero so
-/// the caller cannot silently pass an unmeasurable run through the
-/// gate.
-pub(crate) fn wall_disagreement_percent(
-    a: std::time::Duration,
-    b: std::time::Duration,
-) -> Option<f64> {
-    let aa = a.as_secs_f64();
-    let bb = b.as_secs_f64();
-    if !(aa > 0.0 && bb > 0.0) {
-        return None;
-    }
-    let min = aa.min(bb);
-    let max = aa.max(bb);
-    Some(100.0 * (max - min) / min)
 }
 
 #[cfg(test)]
@@ -1329,11 +1718,11 @@ mod child_command_tests {
         }
     }
 
-    /// Every forwarded flag must survive the round trip. The pair
+    /// Every forwarded flag must survive the round trip. A run set
     /// re-enters the binary as a child process, and it forwards the
     /// selection flags for the child to resolve on its own. A spelling
-    /// the child parses differently makes the two runs measure
-    /// different things while the gate still reports agreement. See
+    /// the child parses differently makes the runs measure different
+    /// things while the gate still reports agreement. See
     /// `docs/architecture/title_harness.md`, "Title anchors and
     /// witnesses".
     #[test]
@@ -1370,6 +1759,7 @@ mod child_command_tests {
             prescan: true,
             guest_args: &guest_args,
             check_anchor: true,
+            run_index: 0,
         };
 
         let mut cmd = std::process::Command::new("cellgov");
@@ -1383,11 +1773,12 @@ mod child_command_tests {
             cli.globals.vfs_root.as_deref(),
             Some(Path::new("elsewhere/dev_hdd0")),
         );
-        // `bench-once`, never `bench`: the gating pair must not spawn
-        // another gating pair.
+        // `bench-once`, never `bench`: the gating set must not spawn
+        // another gating set.
         let Command::Boot(BootCommand::BenchOnce(child)) = cli.command else {
             panic!("child argv {argv:?} did not select `boot bench-once`");
         };
+        assert_eq!(child.run_index, Some(0));
         assert_eq!(child.selector.title.as_deref(), Some(title.name()));
         assert_eq!(child.selector.content_id, None);
         assert_eq!(child.selector.title_manifest, None);
@@ -1433,6 +1824,7 @@ mod child_command_tests {
             prescan: false,
             guest_args: &[],
             check_anchor: true,
+            run_index: 0,
         };
 
         let mut cmd = std::process::Command::new("cellgov");
