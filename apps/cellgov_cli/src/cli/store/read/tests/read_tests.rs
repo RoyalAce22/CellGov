@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::*;
 
 #[test]
@@ -54,5 +56,21 @@ fn a_path_the_walk_cannot_read_is_counted_rather_than_dropped() {
     let size = tree_bytes(&not_a_dir);
     assert_eq!(size.bytes, 0);
     assert_eq!(size.unreadable, 1, "a refused directory is named, not zero");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Only Unix creates a symlink without an elevated process.
+#[cfg(unix)]
+#[test]
+fn an_entry_the_walk_does_not_follow_is_counted_rather_than_dropped() {
+    let dir = std::env::temp_dir().join(format!("cellgov_read_link_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create the tree");
+    let target = dir.join("target");
+    std::fs::write(&target, [0u8; 40]).expect("write");
+    std::os::unix::fs::symlink(&target, dir.join("link")).expect("link");
+
+    let size = tree_bytes(&dir);
+    assert_eq!(size.bytes, 40, "the target is counted once, through itself");
+    assert_eq!(size.unreadable, 1, "the link is named, not silently zero");
     std::fs::remove_dir_all(&dir).ok();
 }

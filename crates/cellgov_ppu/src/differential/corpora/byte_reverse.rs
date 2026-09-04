@@ -6,7 +6,7 @@
 //! little-endian load of N bytes (zero-extended to RT for the load
 //! variants), and a little-endian store of the low N bytes of RS
 //! for the store variants. Citations on each case route through the
-//! [`super::OracleSource::Spec`] `rationale` field.
+//! [`super::super::OracleSource::Spec`] `rationale` field.
 
 use super::super::{InstructionCase, MemorySnapshot, OracleSource};
 use super::{case_keep_memory, state_with_gpr, state_with_three_gprs, state_with_two_gprs};

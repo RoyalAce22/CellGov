@@ -2,6 +2,7 @@
 
 use clap::{CommandFactory, Parser};
 
+use super::globals::{reads_format, reads_vfs_root, renders_progress};
 use super::*;
 
 /// Parse one invocation, with the program name prepended.
@@ -731,6 +732,14 @@ fn a_vfs_root_reaches_every_command_that_opens_a_guest_image() {
         let cli = parse(&argv).unwrap();
         assert!(reads_vfs_root(&cli.command), "{argv:?}");
     }
+}
+
+#[test]
+fn the_vfs_root_refusal_names_status_among_the_readers() {
+    assert_eq!(refusal(&["--vfs-root", "vfs/dev_hdd0", "status"]), None);
+    let said = refusal(&["--vfs-root", "vfs/dev_hdd0", "diff", "diverge", "a", "b"])
+        .expect("diff diverge reads no vfs root");
+    assert!(said.contains("status"), "{said}");
 }
 
 #[test]

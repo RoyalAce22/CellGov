@@ -27,6 +27,8 @@ fn a_decrypting_command_on_a_build_without_decrypt_is_refused_naming_both() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn a_container_label_is_the_filename_the_bar_shows() {
+    use std::path::Path;
+
     assert_eq!(
         container_label(Path::new("/a/b/PS3UPDAT.PUP")),
         "PS3UPDAT.PUP"
