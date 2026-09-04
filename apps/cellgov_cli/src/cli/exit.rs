@@ -221,11 +221,16 @@ pub(crate) fn load_ppu_image_with_title_or_die(
 /// lists the SCE-wrapped binary first so an in-tree plaintext copy
 /// cannot shadow it (`titles/manifest_template.README.md`,
 /// `eboot_candidates`).
+///
+/// The walk runs in the first entry of `eboot_dirs` that holds any
+/// candidate. A selected update's executable therefore shadows the
+/// base one, and the two directories never interleave.
 pub(crate) fn load_ppu_image_walk_candidates_or_die(
     title: &TitleManifest,
     vfs_root: &Path,
+    eboot_dirs: &[PathBuf],
 ) -> (LoadedPpuImage, PathBuf) {
-    let resolved = title.resolve_eboot(vfs_root).unwrap_or_else(|e| {
+    let resolved = title.resolve_eboot_in(eboot_dirs).unwrap_or_else(|e| {
         // No content directory at all: the dump is not on this machine.
         eprintln!(
             "{} title={} (no content directory)",

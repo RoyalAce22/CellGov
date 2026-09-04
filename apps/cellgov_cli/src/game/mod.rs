@@ -17,6 +17,7 @@ mod stack_walk;
 mod step_loop;
 
 pub use bench::{
-    bench_boot_one_run, bench_boot_pair, BenchGate, BenchOptions, BENCH_AGREEMENT_GATE_PCT,
+    bench_boot_one_run, bench_boot_pair, BenchGate, BenchOptions, SelectionArgs,
+    BENCH_AGREEMENT_GATE_PCT,
 };
 pub use run::{run_game, RunGameOptions, RunSummary};

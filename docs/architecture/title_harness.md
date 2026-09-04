@@ -8,18 +8,17 @@ name (`--title <name>`), content id (`--content-id <id>`), or
 manifest path (`--title-manifest <file>`). A manifest declares:
 
 - **Source kind.** The default PSN HDD layout resolves the EBOOT
-  under `<vfs-root>/game/<content-id>/USRDIR/` and is NPDRM-keyed;
-  the manifest's `rap_filename` names the operator-supplied RAP
-  (decrypt path below). `[source] kind = "disc"` makes
-  `resolve_eboot` look under
-  `<vfs-parent>/dev_bdvd/<content-id>/PS3_GAME/USRDIR/` instead,
-  APP-keyed (no RAP). `[source] kind = "firmware-exec"` points the
-  resolver at a module directory inside an installed firmware image,
-  where the manifest's `path` names the tree and `eboot_candidates`
-  names the executable (the system shell is `vsh/module/vsh.self`).
-  It boots as an ordinary guest process with no install step and
-  exercises the privileged paths under
-  [Process privilege](lv2_host.md#process-privilege).
+  under the title's `game` tree and is NPDRM-keyed; the manifest's
+  `rap_filename` names the operator-supplied RAP (decrypt path
+  below). `[source] kind = "disc"` resolves under the disc tree's
+  `PS3_GAME/USRDIR/` instead, APP-keyed (no RAP). `[source] kind =
+  "firmware-exec"` points the resolver at a module directory inside a
+  firmware image, where the manifest's `path` is relative to the
+  selected firmware entry and `eboot_candidates` names the
+  executable. That relative path is what lets one manifest boot
+  against every installed firmware. It boots as an ordinary guest
+  process with no install step and exercises the privileged paths
+  under [Process privilege](lv2_host.md#process-privilege).
 - **Checkpoint kind.** `process-exit` for a title that calls
   `sys_process_exit` inside the captured window; `first-rsx-write`
   for one whose main loop never exits, so the first PPU write into
@@ -98,29 +97,77 @@ fits the existing checkpoint kinds (`process-exit`,
 targeted diagnostics, e.g. `--checkpoint pc=0xADDR` for
 step-count-aligned A/B measurements.
 
-EBOOT resolution walks
-`<vfs-root>/game/<content-id>/USRDIR/<candidate>` in the order the
-manifest's `eboot_candidates` declares. The canonical layout is
-`EBOOT.BIN`-first, so the encrypted SCE source is the source of
-truth and a stale operator-decrypted `EBOOT.elf` cannot shadow
-it. CellGov decrypts the encrypted `EBOOT.BIN` in memory at boot
-through `cellgov_install::sce::decrypt_self_to_elf`: APP-keyed
-for disc titles, RAP-keyed NPDRM for PSN-HDD titles (the RAP file
-named by the manifest's `rap_filename` is read from
+`bench-boot` measures a pair of subprocess boots, so it forwards the
+selection flags to its child rather than the paths they resolved to.
+Handing the child a resolved directory would make it read an unmanaged
+tree and compose no store mounts, and the pair would measure two
+different guest trees.
+
+## Version selection
+
+The store keys firmware on its version and a title on its base plus
+each installed update, so a boot names which of each it runs. `--fw
+<version>` and `--game-ver base|<version>` resolve against the install
+records, and the same contract governs both: the flag names a version
+that must exist, no flag with exactly one candidate selects that
+candidate, and no flag with zero or several refuses and lists what is
+installed. There is no `latest` -- a lexical winner would decide
+silently which of two versions a measurement was taken against, and
+version strings are compared verbatim rather than normalized.
+
+`--game-ver` is refused for a `firmware-exec` title: its executable
+ships inside the firmware, so its version axis is the firmware axis
+and `--fw` is what selects it.
+
+The selection composes the guest tree from the records rather than
+from a path convention. `/dev_flash` comes from the firmware entry;
+a disc title keeps its `/dev_bdvd` mount whatever is selected; and
+`/dev_hdd0/game/<id>` is answered by the base alone, by a selected
+update alone for a disc title, or by a selected update ordered ahead
+of the base for an HDD title, which is how a patch package lands on
+hardware. The composed license directory is the content union of the
+live one and each title's own, refusing by name when two same-named
+files differ. Nothing is copied or merged: an update is a second mount
+root, so the bytes under test are the bytes that were installed
+(ordered roots in
+[lv2_host.md](lv2_host.md#in-memory-filesystem)).
+
+`--firmware-dir` remains as an expert escape hatch naming a tree
+outside the store. It is mutually exclusive with `--fw`, composes no
+`/dev_flash` mount, and marks the run as carrying no firmware version,
+which makes it incomparable against a committed anchor. Every
+boot-family command prints the resolved selection on stderr before any
+other output.
+
+## EBOOT resolution
+
+EBOOT resolution probes the composed directories in order, first hit
+wins, trying the manifest's `eboot_candidates` within each. A selected
+update is probed before the base it patches, so the patch's executable
+is the one that runs. The canonical candidate order is `EBOOT.BIN`
+-first, so the encrypted SCE source is the source of truth and a stale
+operator-decrypted `EBOOT.elf` cannot shadow it. A title the store
+does not hold derives its one directory from `<vfs-root>` instead.
+
+CellGov decrypts the encrypted `EBOOT.BIN` in memory at boot through
+`cellgov_install::sce::decrypt_self_to_elf`: APP-keyed for disc
+titles, RAP-keyed NPDRM for PSN-HDD titles (the RAP file named by the
+manifest's `rap_filename` is read from
 `<vfs-root>/home/00000001/exdata/`). `<vfs-root>` defaults to
-`vfs/dev_hdd0`, the CellGov-owned VFS that
-`cellgov_install install-game` / `install-iso` populate from a
-user's PKG/ISO dumps; `--vfs-root` or `$CELLGOV_PS3_VFS_ROOT`
-overrides it. `tools/rpcs3/` holds an RPCS3 checkout for offline
-baselines only.
+`vfs/dev_hdd0`, the CellGov-owned VFS that `cellgov_install
+install-game` / `install-iso` populate from a user's PKG/ISO dumps;
+`--vfs-root` or `$CELLGOV_PS3_VFS_ROOT` overrides it, and also decides
+which store the selection reads. `tools/rpcs3/` holds an RPCS3
+checkout for offline baselines only.
 
 ```mermaid
 flowchart TD
   sel["--title / --content-id / --title-manifest"] --> reg["registry from titles/*.toml"]
-  reg --> kind{"source kind"}
-  kind -->|"PSN HDD (default)"| hdd["vfs-root/game/ID/USRDIR/ + eboot_candidates, EBOOT.BIN first"]
-  kind -->|disc| bd["vfs-parent/dev_bdvd/ID/PS3_GAME/USRDIR/"]
-  kind -->|firmware-exec| vsh["manifest path/ + eboot_candidates, inside an installed firmware"]
+  reg --> ver["--fw / --game-ver against the install records"]
+  ver --> kind{"source kind"}
+  kind -->|"PSN HDD (default)"| hdd["game tree USRDIR/, update ahead of base"]
+  kind -->|disc| bd["update USRDIR/, then disc PS3_GAME/USRDIR/"]
+  kind -->|firmware-exec| vsh["manifest path/ under the selected firmware entry"]
   hdd --> sce{"SCE-wrapped?"}
   bd --> sce
   vsh --> sce

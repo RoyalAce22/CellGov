@@ -64,7 +64,7 @@ pub(crate) enum CliArgError {
     EmptyPositional,
     #[error("{name}={got:?}: expected 0/1/true/false/yes/no/on/off")]
     EnvBoolUnknown { name: String, got: String },
-    #[error("{flags} select different outputs; pass exactly one")]
+    #[error("{flags} are mutually exclusive; pass exactly one")]
     MutuallyExclusiveFlags { flags: String },
     #[error("{flag} applies to {context} only")]
     FlagNotValidHere { flag: String, context: String },
@@ -192,9 +192,8 @@ fn has_bool_flag_inner(args: &[String], flag: &str) -> Result<bool, CliArgError>
 }
 
 /// Refuse an invocation naming more than one of a set of flags that
-/// each select a different output. The handlers honour the first one
-/// they test and return, so without this the others are dropped in
-/// silence.
+/// answer the same question. A handler honours the first flag it
+/// tests and returns, so without this it drops the rest in silence.
 pub(crate) fn require_at_most_one(args: &[String], flags: &[&str]) {
     require_at_most_one_inner(args, flags).unwrap_or_else(|e| die(&e.to_string()))
 }
@@ -411,6 +410,8 @@ pub(crate) const RUN_GAME_VALUE_FLAGS: &[&str] = &[
     "--content-id",
     "--title-manifest",
     "--vfs-root",
+    "--fw",
+    "--game-ver",
     "--max-steps",
     "--budget",
     "--firmware-dir",

@@ -140,8 +140,11 @@ pub(crate) fn run(args: &[String]) {
     let manifest = TitleManifest::load_from_path(Path::new(&manifest_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: load manifest: {e}")));
     let vfs_root = resolve_ps3_vfs_root(args);
+    // The fixture names the EBOOT composition resolves, on the same
+    // selection contract as the boot family.
+    let composition = super::boot_cmd::resolve_composition(args, &manifest);
     let eboot_path = manifest
-        .resolve_eboot(&vfs_root)
+        .resolve_eboot_in(&composition.eboot_dirs)
         .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
     let eboot_bytes = crate::cli::exit::load_ppu_image_with_title_or_die(
         eboot_path.to_str().unwrap_or_else(|| {

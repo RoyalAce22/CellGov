@@ -32,11 +32,11 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 21786,
+      "value": 31659,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 106583,
+      "value": 87881,
       "class": "at-least"
     },
     "lwmutex_acquires": {
@@ -64,7 +64,7 @@
       "class": "absent"
     },
     "mutex_unlock_not_owner": {
-      "value": 211,
+      "value": 140,
       "class": "at-least"
     },
     "prx_load_hle_stubs": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 21720,
+      "value": 31593,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 106464,
+      "value": 87762,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 21220,
+      "value": 14074,
       "class": "at-least"
     },
     "uart_cids_distinct": {

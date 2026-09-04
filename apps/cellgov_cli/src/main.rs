@@ -8,6 +8,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 mod cli;
+mod composition;
 mod disasm;
 mod dump_prx_imports;
 mod funcs;
@@ -33,11 +34,16 @@ cellgov_cli explore <scenario> [--format human|json]
 cellgov_cli explore micro <name> [--observations-dir <dir>] [--format human|json]";
 const USAGE_RUN_GAME: &str = "\
 cellgov_cli run-game <--title NAME|--content-id ID|--title-manifest PATH> [elf-path]
-\t\t[--max-steps N] [--budget N] [--trace] [--profile]
+\t\t[--fw VERSION] [--game-ver base|VERSION] [--max-steps N] [--budget N] [--trace] [--profile]
 \t\t[--firmware-dir DIR] [--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]
-\t\t(default --firmware-dir: vfs/dev_flash/sys/external/ when present at the current working directory)";
+\t\t(--fw and --game-ver name the installed firmware and title version; each may be
+\t\t omitted when its candidate set holds exactly one. --game-ver is refused for a
+\t\t title the store does not hold and for one shipping inside the firmware, whose
+\t\t version axis is --fw. --firmware-dir names a tree outside the store, is
+\t\t mutually exclusive with --fw, and marks the run unmanaged)";
 const USAGE_BENCH_BOOT: &str = "\
 cellgov_cli bench-boot <--title NAME|--content-id ID|--title-manifest PATH>
+\t\t[--fw VERSION] [--game-ver base|VERSION]
 \t\t[--max-steps N] [--budget N] [--firmware-dir DIR] [--vfs-root PATH]
 \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan] [--guest-arg VAL]
 \t\t[--strict-reserved] [--no-anchor-check]
@@ -47,6 +53,7 @@ cellgov_cli bench-boot <--title NAME|--content-id ID|--title-manifest PATH>
 \t\t compared rather than failing)";
 const USAGE_BENCH_BOOT_ONCE: &str = "\
 cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>
+\t\t[--fw VERSION] [--game-ver base|VERSION]
 \t\t[--max-steps N] [--budget N] [--firmware-dir DIR] [--vfs-root PATH]
 \t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan]
 \t\t[--strict-reserved] [--guest-arg VAL]";
@@ -62,8 +69,11 @@ cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [-
 \t\t[--name SUBSTR]  (at least one query mode is required)";
 const USAGE_FIXTURE_GEN: &str = "\
 cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --output-dir <path>
-\t\t[--vfs-root PATH] [--allow-divergence]
-\t\t(defaults: CELLGOV_PS3_VFS_ROOT env, then vfs/dev_hdd0)";
+\t\t[--fw VERSION] [--game-ver base|VERSION] [--firmware-dir DIR] [--vfs-root PATH]
+\t\t[--allow-divergence]
+\t\t(the EBOOT is the one the boot family would compose, so the selection flags
+\t\t resolve exactly as they do there; defaults: CELLGOV_PS3_VFS_ROOT env, then
+\t\t vfs/dev_hdd0)";
 const USAGE_TITLES_GEN: &str = "\
 cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
 \t\t(defaults: titles, tests/fixtures, docs/titles.md)";

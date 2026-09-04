@@ -72,6 +72,8 @@ pub(in crate::game) struct PrepareOptions<'a> {
     /// `None` for raw-ELF input and for a SELF without the record.
     pub control_flags1: Option<u32>,
     pub firmware_dir: Option<&'a str>,
+    /// Store-composed mounts, registered before the manifest's own.
+    pub composed_mounts: &'a [crate::composition::ComposedMount],
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,

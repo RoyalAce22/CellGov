@@ -3,6 +3,7 @@
 //! mounts.
 
 use cellgov_core::Runtime;
+use cellgov_lv2::FsError;
 
 use super::types::PrepareOptions;
 use crate::cli::exit::die;
@@ -68,6 +69,7 @@ pub(super) fn register_content(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
 /// Runs after [`register_content`] so the FsStore path-existence check
 /// wins over mount resolution.
 pub(super) fn register_mounts(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
+    register_composed_mounts(rt, opts);
     if opts.title.mounts.is_empty() {
         return;
     }
@@ -84,6 +86,59 @@ pub(super) fn register_mounts(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
     };
     if opts.print_banner {
         println!("mounts: registered {n} mount(s)");
+    }
+}
+
+/// Why a store-composed mount could not be registered.
+#[derive(Debug, thiserror::Error)]
+enum ComposedMountError {
+    /// The mount table refused the prefix, or the root list was empty.
+    #[error(
+        "composition names mount prefix {prefix:?} over {roots} root(s), which the mount \
+         table refuses"
+    )]
+    Rejected {
+        prefix: String,
+        /// An empty root list is refused here too, so the count
+        /// separates that case from a bad prefix.
+        roots: usize,
+    },
+    /// Another mount already answers this prefix.
+    #[error("mount prefix {prefix:?}: {source}")]
+    NotAdded {
+        prefix: String,
+        #[source]
+        source: FsError,
+    },
+}
+
+/// Runs before the manifest's own mounts so a manifest prefix that
+/// encloses a composed one cannot answer first.
+fn register_composed_mounts(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
+    for mount in opts.composed_mounts {
+        let registered =
+            cellgov_lv2::FsMount::with_roots(mount.prefix.clone(), mount.roots.clone())
+                .ok_or_else(|| ComposedMountError::Rejected {
+                    prefix: mount.prefix.clone(),
+                    roots: mount.roots.len(),
+                })
+                .and_then(|m| {
+                    rt.lv2_host_mut().fs_mounts_mut().add(m).map_err(|source| {
+                        ComposedMountError::NotAdded {
+                            prefix: mount.prefix.clone(),
+                            source,
+                        }
+                    })
+                });
+        if let Err(e) = registered {
+            die(&format!("composed mount provider failed: {e}"));
+        }
+    }
+    if opts.print_banner && !opts.composed_mounts.is_empty() {
+        println!(
+            "mounts: composed {} store mount(s)",
+            opts.composed_mounts.len()
+        );
     }
 }
 

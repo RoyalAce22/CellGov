@@ -1,7 +1,8 @@
 //! Where the local PS3 corpus lives on disk.
 //!
-//! Every path here is fixed and repo-relative because `cellgov_install
-//! install` produces it under `vfs/`.
+//! The store keys firmware on version, so the firmware install record
+//! names the installed tree. This module reads that record the way the
+//! boot path does.
 //!
 //! Those paths reach a tree git does not track, so this module
 //! declares the corpus feature itself. A helper module has no
@@ -13,6 +14,9 @@
 )]
 
 use std::path::PathBuf;
+
+use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
+use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
 
 /// Workspace root, found by walking up to the manifest carrying
 /// `[workspace]`. Integration tests run with the crate directory as
@@ -31,9 +35,73 @@ pub fn workspace_root() -> PathBuf {
     }
 }
 
-/// The `dev_flash` mount `cellgov_install install` populates.
+/// The `dev_flash` tree of the one installed firmware.
+///
+/// # Panics
+///
+/// Panics when the store:
+///
+/// - holds no firmware entry, or
+/// - holds more than one.
 pub fn dev_flash() -> PathBuf {
-    workspace_root().join("vfs/dev_flash")
+    let root = workspace_root().join(DEFAULT_VFS_ROOT);
+    let layout = StoreLayout::new(&root);
+    let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
+    let entries = std::fs::read_dir(&records).unwrap_or_else(|e| {
+        panic!(
+            "firmware-corpus: no firmware install records at {}: {e}. Run \
+             `cellgov_install install <PS3UPDAT.PUP>` to populate the store.",
+            records.display()
+        )
+    });
+    let mut found: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        // Skipping an unreadable entry would drop a firmware from the
+        // census.
+        let entry = entry.unwrap_or_else(|e| {
+            panic!(
+                "firmware-corpus: reading an entry of {}: {e}",
+                records.display()
+            )
+        });
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".install.toml"))
+        {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        let record = InstallRecord::parse(&text)
+            .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()));
+        found.push(
+            layout
+                .resolve_store_path(&record.artifact.store_path)
+                .join(DEV_FLASH_MOUNT),
+        );
+    }
+    found.sort();
+    match found.as_slice() {
+        [only] => only.clone(),
+        many => panic!(
+            "firmware-corpus: expected exactly one installed firmware under {}, found {}{}",
+            root.display(),
+            many.len(),
+            render_trees(many)
+        ),
+    }
+}
+
+/// The trees a census found, formatted as a suffix for a refusal.
+fn render_trees(trees: &[PathBuf]) -> String {
+    if trees.is_empty() {
+        String::new()
+    } else {
+        let rendered: Vec<String> = trees.iter().map(|p| p.display().to_string()).collect();
+        format!(": {}", rendered.join(", "))
+    }
 }
 
 /// Firmware modules published to the guest.
@@ -44,7 +112,7 @@ pub fn dev_flash() -> PathBuf {
 /// installed -- through the `firmware-corpus` feature or an `#[ignore]`
 /// opt-in -- so absence is a failure rather than a reason to skip.
 pub fn firmware_external_dir() -> PathBuf {
-    let dir = dev_flash().join("sys/external");
+    let dir = dev_flash().join("sys").join("external");
     assert!(
         dir.is_dir(),
         "no PS3 firmware corpus at {}. Run `cellgov_install install <PS3UPDAT.PUP>` \

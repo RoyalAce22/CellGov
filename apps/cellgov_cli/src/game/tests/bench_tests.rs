@@ -618,6 +618,8 @@ fn bench_options<'a>(
         elf_path: "EBOOT.BIN",
         max_steps: DEFAULT_BENCH_MAX_STEPS as usize,
         firmware_dir: None,
+        composed_mounts: &[],
+        selection: SelectionArgs::default(),
         strict_reserved: false,
         checkpoint_override: None,
         budget_override: None,
@@ -680,6 +682,73 @@ fn every_trajectory_override_names_itself_as_incomparable() {
         assert_eq!(reasons.len(), 1, "{label}: got {reasons:?}");
         assert!(reasons[0].contains(label), "{label}: got {reasons:?}");
     }
+}
+
+#[test]
+fn every_selection_flag_names_itself_as_incomparable() {
+    let title = bench_manifest(None);
+    for (label, selection) in [
+        (
+            "--firmware-dir",
+            SelectionArgs {
+                firmware_dir: Some("dev_flash/sys/external"),
+                ..SelectionArgs::default()
+            },
+        ),
+        (
+            "--fw",
+            SelectionArgs {
+                fw: Some("4.91"),
+                ..SelectionArgs::default()
+            },
+        ),
+        (
+            "--game-ver",
+            SelectionArgs {
+                game_ver: Some("02.51"),
+                ..SelectionArgs::default()
+            },
+        ),
+    ] {
+        let mut opts = bench_options(&title, &[]);
+        opts.selection = selection;
+        let reasons = incomparable_reasons(&opts);
+        assert_eq!(reasons.len(), 1, "{label}: got {reasons:?}");
+        assert!(reasons[0].contains(label), "{label}: got {reasons:?}");
+    }
+}
+
+#[test]
+fn the_child_receives_the_selection_flags_not_the_resolved_firmware_dir() {
+    let title = bench_manifest(None);
+    let mut opts = bench_options(&title, &[]);
+    opts.firmware_dir = Some("resolved/4.91/dev_flash/sys/external");
+    opts.selection = SelectionArgs {
+        fw: Some("4.91"),
+        game_ver: Some("02.51"),
+        firmware_dir: None,
+        vfs_root: Some("elsewhere/dev_hdd0"),
+    };
+    let mut cmd = std::process::Command::new("cellgov_cli");
+    opts.encode_to_command(&mut cmd);
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    let forwarded = |flag: &str, value: &str| {
+        args.windows(2)
+            .any(|pair| pair[0] == flag && pair[1] == value)
+    };
+    assert!(
+        forwarded("--vfs-root", "elsewhere/dev_hdd0"),
+        "got {args:?}"
+    );
+    assert!(forwarded("--fw", "4.91"), "got {args:?}");
+    assert!(forwarded("--game-ver", "02.51"), "got {args:?}");
+    assert!(
+        !args.iter().any(|a| a == "--firmware-dir"),
+        "the resolved module directory must not reach the child: {args:?}"
+    );
 }
 
 /// Restating the manifest's own checkpoint is not a retarget, so it

@@ -50,9 +50,10 @@ The `run-game` CLI subcommand loads a PS3 ELF, raw or SCE-wrapped
 (`SCE\0` magic dispatches to
 `cellgov_install::sce::decrypt_self_to_elf` at load time), and
 runs the PPU at the mode's default step budget (256; `--budget`
-overrides). When `--firmware-dir` resolves to a directory holding
-the firmware SPRX modules (default `vfs/dev_flash/sys/external/`
-when that exists), the boot path:
+overrides). Given a directory holding the firmware SPRX modules --
+the `dev_flash/sys/external/` of the selected firmware entry
+([title_harness.md](title_harness.md#version-selection)), or the tree
+`--firmware-dir` names -- the boot path:
 
 - scans every module in the install;
 - derives the title's load set with
@@ -64,11 +65,12 @@ when that exists), the boot path:
 - resolves game imports against real firmware exports keyed on
   (namespace, NID).
 
-The default comes from the install record under
+The directory comes from the install record under
 `<vfs>/.cellgov/installs/firmware/`, so it follows a relocated or
-re-versioned entry; a store with no firmware entry, more than one, or
-one whose tree is gone refuses the boot instead of running without
-firmware. `CELLGOV_NO_FIRMWARE_DIR=1` asks for that deliberately: the
+re-versioned entry; a store with no firmware entry, or one whose tree
+is gone, refuses the boot instead of running without firmware, and a
+store holding several refuses until `--fw` names one.
+`CELLGOV_NO_FIRMWARE_DIR=1` asks for that deliberately: the
 boot then loads no PRX and every game import routes to the
 unresolved-import trampoline. `_sys_prx_load_module` /
 `_sys_prx_get_module_list` resolve against the registered closure

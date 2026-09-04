@@ -19,13 +19,31 @@ use crate::paths::{boot_anchor_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
 /// of the faster run.
 pub const BENCH_AGREEMENT_GATE_PCT: f64 = 5.0;
 
+/// The selection flags a run resolved its composition from.
+///
+/// The parent of a pair forwards these flags to the child, so both
+/// processes compose from the same store.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SelectionArgs<'a> {
+    pub fw: Option<&'a str>,
+    pub game_ver: Option<&'a str>,
+    /// An unmanaged firmware tree, which bypasses the store.
+    pub firmware_dir: Option<&'a str>,
+    /// The root the CLI reads the store from.
+    pub vfs_root: Option<&'a str>,
+}
+
 /// Inputs common to every bench-boot entry point.
 #[derive(Debug, Clone, Copy)]
 pub struct BenchOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
     pub max_steps: usize,
+    /// The `sys/external` directory the firmware loader reads.
     pub firmware_dir: Option<&'a str>,
+    pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// What the child re-resolves its own composition from.
+    pub selection: SelectionArgs<'a>,
     pub strict_reserved: bool,
     pub checkpoint_override: Option<manifest::CheckpointTrigger>,
     pub budget_override: Option<Budget>,
@@ -49,8 +67,15 @@ impl BenchOptions<'_> {
             .arg(self.title.name())
             .arg("--max-steps")
             .arg(self.max_steps.to_string());
-        if let Some(d) = self.firmware_dir {
-            cmd.arg("--firmware-dir").arg(d);
+        for (flag, value) in [
+            ("--vfs-root", self.selection.vfs_root),
+            ("--fw", self.selection.fw),
+            ("--game-ver", self.selection.game_ver),
+            ("--firmware-dir", self.selection.firmware_dir),
+        ] {
+            if let Some(v) = value {
+                cmd.arg(flag).arg(v);
+            }
         }
         if self.strict_reserved {
             cmd.arg("--strict-reserved");
@@ -138,6 +163,7 @@ pub fn bench_boot(
         authority_id,
         control_flags1,
         firmware_dir: opts.firmware_dir,
+        composed_mounts: opts.composed_mounts,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
         dump_skip: 0,
@@ -745,10 +771,30 @@ enum AnchorVerdict {
 /// moves the trajectory yields a legitimately different run, so gating
 /// it would report a regression that is not one. `--prescan` is absent
 /// from the list because it only prints a decode report before
-/// execution; `--firmware-dir` is absent because the resolved value
-/// cannot be told apart from the auto-default here.
+/// execution.
 fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
     let mut reasons = Vec::new();
+    if let Some(dir) = opts.selection.firmware_dir {
+        reasons.push(format!(
+            "--firmware-dir {dir} is unmanaged: the run carries no firmware version, and the \
+             anchor is recorded against an installed one"
+        ));
+    }
+    // An anchor is keyed by content id alone, so it cannot say which
+    // firmware or which content version it was recorded under. Naming
+    // either here is a selection `record-anchors` never made.
+    if let Some(fw) = opts.selection.fw {
+        reasons.push(format!(
+            "--fw {fw} selects a firmware; the anchor names none, so nothing can say the two \
+             ran the same library"
+        ));
+    }
+    if let Some(ver) = opts.selection.game_ver {
+        reasons.push(format!(
+            "--game-ver {ver} selects a content version; the anchor names none, so nothing can \
+             say the two ran the same tree"
+        ));
+    }
     let recorded_cap = opts
         .title
         .bench_max_steps

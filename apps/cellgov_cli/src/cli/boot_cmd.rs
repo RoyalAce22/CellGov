@@ -2,14 +2,15 @@
 //! `bench-boot-once`, and `bench-boot`.
 
 use cellgov_compare::BootOutcome;
-use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout};
 use cellgov_time::Budget;
 
+use crate::composition::{banner, compose_boot, BootComposition, ComposeInputs, FirmwareChoice};
 use crate::game;
 
 use super::args::{
     find_flag_value, find_run_game_elf_path, has_bool_flag, parse_flag_value, parse_hex_flag,
-    parse_hex_u64, parse_patch_byte_pair, split_off_flag_values, GUEST_ARG_FLAG,
+    parse_hex_u64, parse_patch_byte_pair, require_at_most_one, split_off_flag_values,
+    GUEST_ARG_FLAG,
 };
 use super::env::parse_env_bool;
 use super::exit::die;
@@ -18,12 +19,13 @@ use crate::paths::anchor_max_steps;
 
 use game::BENCH_AGREEMENT_GATE_PCT;
 
-/// The `sys/external` modules inside a firmware entry, relative to
-/// the entry directory an install record names.
-const FIRMWARE_ENTRY_EXTERNAL: [&str; 3] = ["dev_flash", "sys", "external"];
+/// The `sys/external` modules inside a firmware entry, relative to the
+/// entry's `dev_flash` mount.
+const FIRMWARE_EXTERNAL: [&str; 2] = ["sys", "external"];
 
-/// Suffix of an install record file under the installs directory.
-const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
+/// The flags that each name a firmware, refused together by
+/// [`require_at_most_one`].
+const FIRMWARE_SELECTORS: [&str; 2] = ["--fw", "--firmware-dir"];
 
 /// Set to `1` by synthetic harnesses (e.g. ps3autotests) to suppress
 /// the auto-default.
@@ -59,127 +61,107 @@ const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
 /// requested but writing its JSON failed.
 const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = 14;
 
-/// The `sys/external` directory of the installed firmware, from the
-/// install record that names where it landed.
+/// Resolve `--fw`, `--game-ver` and `--firmware-dir` against the
+/// store, then print the selection banner before any other output.
 ///
-/// The record is the authority, so a versioned store needs no path
-/// convention here and relocating an entry carries the default with
-/// it.
-///
-/// # Errors
-///
-/// A ready-to-print message when the store holds no firmware entry,
-/// holds more than one (nothing here can pick), or names an entry
-/// whose tree is gone. Each says what to do about it.
-fn default_firmware_dir(install_root: &std::path::Path) -> Result<String, String> {
-    let layout = StoreLayout::new(install_root);
-    let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
-    let advice = format!(
-        "install one with `cellgov_install install <PS3UPDAT.PUP>`, name a tree with \
-         --firmware-dir, or set {DISABLE_DEFAULT_ENV}=1 to boot with no firmware at all \
-         (every import then answers through the unresolved-import trampoline)"
-    );
-    let Ok(entries) = std::fs::read_dir(&records) else {
-        return Err(format!(
-            "boot: no firmware is installed under {}: {} does not exist. To proceed, {advice}.",
-            install_root.display(),
-            records.display(),
-        ));
-    };
-    let mut found: Vec<(String, std::path::PathBuf)> = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.ends_with(INSTALL_RECORD_SUFFIX))
-        {
-            continue;
-        }
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| format!("boot: reading {}: {e}", path.display()))?;
-        let record = InstallRecord::parse(&text)
-            .map_err(|e| format!("boot: parsing {}: {e}", path.display()))?;
-        if record.artifact.kind != ArtifactKind::Firmware {
-            continue;
-        }
-        let dir = FIRMWARE_ENTRY_EXTERNAL.iter().fold(
-            layout.resolve_store_path(&record.artifact.store_path),
-            |d, part| d.join(part),
-        );
-        found.push((record.artifact.version, dir));
-    }
-    found.sort();
-    match found.as_slice() {
-        [] => Err(format!(
-            "boot: no firmware is installed under {}: {} holds no firmware record. To \
-             proceed, {advice}.",
-            install_root.display(),
-            records.display(),
-        )),
-        [(version, dir)] => {
-            if !dir.is_dir() {
-                return Err(format!(
-                    "boot: firmware {version} is recorded under {} but {} is missing. \
-                     Reinstall it, or name a tree with --firmware-dir.",
-                    install_root.display(),
-                    dir.display(),
-                ));
-            }
-            dir.to_str().map(str::to_string).ok_or_else(|| {
-                format!(
-                    "boot: firmware directory {} is not valid UTF-8",
-                    dir.display()
-                )
-            })
-        }
-        many => Err(format!(
-            "boot: {} firmware versions are installed under {} ({}); name the one to boot \
-             against with --firmware-dir.",
-            many.len(),
-            install_root.display(),
-            many.iter()
-                .map(|(v, _)| v.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-        )),
-    }
-}
-
-/// Explicit `--firmware-dir` wins (validated as an existing
-/// directory); otherwise the installed firmware's `sys/external`;
-/// `None` only when [`DISABLE_DEFAULT_ENV`] asks for pure HLE.
-///
-/// A default that cannot be resolved is fatal here rather than
-/// silently absent: a title boot without firmware binds no import and
-/// dies dozens of steps later naming a NID, which says nothing about
-/// the firmware.
-fn resolve_firmware_dir(args: &[String]) -> Option<String> {
-    if let Some(explicit) = find_flag_value(args, "--firmware-dir") {
-        if !std::path::Path::new(&explicit).is_dir() {
+/// An unresolved selection is fatal here. A title that boots without
+/// firmware binds no import and dies dozens of steps later naming a
+/// NID, which says nothing about the firmware.
+pub(super) fn resolve_composition(
+    args: &[String],
+    title: &game::manifest::TitleManifest,
+) -> BootComposition {
+    require_at_most_one(args, &FIRMWARE_SELECTORS);
+    let firmware_dir = find_flag_value(args, "--firmware-dir").inspect(|explicit| {
+        if !std::path::Path::new(explicit).is_dir() {
             die(&format!(
                 "--firmware-dir: {explicit:?} is not an existing directory"
             ));
         }
-        return Some(explicit);
+    });
+    let vfs_root = resolve_ps3_vfs_root(args);
+    let install_root = super::keys::install_root_of(&vfs_root);
+    let composition = compose_boot(&ComposeInputs {
+        title,
+        vfs_root: &vfs_root,
+        install_root: &install_root,
+        fw: find_flag_value(args, "--fw").as_deref(),
+        game_ver: find_flag_value(args, "--game-ver").as_deref(),
+        firmware_dir: firmware_dir.as_deref().map(std::path::Path::new),
+        // The value decides: `CELLGOV_NO_FIRMWARE_DIR=0` leaves the
+        // default in place.
+        no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV),
+        disable_env: DISABLE_DEFAULT_ENV,
+    })
+    .unwrap_or_else(|e| die(&format!("boot: {e}")));
+    for line in banner::render(title, &composition) {
+        eprintln!("{line}");
     }
-    // The value decides, not the presence: `CELLGOV_NO_FIRMWARE_DIR=0`
-    // leaves the default in place.
-    if parse_env_bool(DISABLE_DEFAULT_ENV) {
-        return None;
+    for line in banner::render_firmware_notes(&composition.understated_firmware) {
+        eprintln!("{line}");
     }
-    let install_root = super::keys::install_root_of(&resolve_ps3_vfs_root(args));
-    match default_firmware_dir(&install_root) {
-        Ok(dir) => {
-            eprintln!("boot: --firmware-dir defaulted to {dir}");
-            Some(dir)
+    composition
+}
+
+/// The `sys/external` directory the firmware loader reads its modules
+/// from, or `None` for a boot with no firmware.
+fn firmware_module_dir(composition: &BootComposition) -> Option<String> {
+    let dir = match &composition.firmware {
+        FirmwareChoice::Managed(entry) => FIRMWARE_EXTERNAL
+            .iter()
+            .fold(entry.dev_flash_dir(), |d, part| d.join(part)),
+        // `--firmware-dir` names a `sys/external` tree directly, so
+        // this arm joins nothing onto it.
+        FirmwareChoice::Unmanaged { dir } => dir.clone(),
+        FirmwareChoice::None => return None,
+    };
+    Some(
+        dir.to_str()
+            .unwrap_or_else(|| {
+                die(&format!(
+                    "boot: firmware module directory {} is not valid UTF-8",
+                    dir.display()
+                ))
+            })
+            .to_string(),
+    )
+}
+
+/// The selection flags this process received, owned so a
+/// [`game::SelectionArgs`] can borrow them across the call that
+/// encodes a child invocation.
+struct OwnedSelection {
+    fw: Option<String>,
+    game_ver: Option<String>,
+    firmware_dir: Option<String>,
+    vfs_root: Option<String>,
+}
+
+impl OwnedSelection {
+    fn as_args(&self) -> game::SelectionArgs<'_> {
+        game::SelectionArgs {
+            fw: self.fw.as_deref(),
+            game_ver: self.game_ver.as_deref(),
+            firmware_dir: self.firmware_dir.as_deref(),
+            vfs_root: self.vfs_root.as_deref(),
         }
-        Err(msg) => die(&msg),
+    }
+}
+
+fn selection_args(args: &[String]) -> OwnedSelection {
+    OwnedSelection {
+        fw: find_flag_value(args, "--fw"),
+        game_ver: find_flag_value(args, "--game-ver"),
+        firmware_dir: find_flag_value(args, "--firmware-dir"),
+        vfs_root: find_flag_value(args, "--vfs-root"),
     }
 }
 
 struct BootInputs {
     title: game::manifest::TitleManifest,
+    /// What the store composed for this run: the firmware, the game
+    /// version, and the guest tree the two produce.
+    composition: BootComposition,
     elf_path: String,
     /// Pre-loaded plaintext ELF bytes from the loader (explicit
     /// path or candidate walk). Passed to `prepare()` so the
@@ -196,6 +178,7 @@ struct BootInputs {
 /// is set; bench subcommands pass `false`.
 fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) -> BootInputs {
     let title = resolve_title_manifest(args, subcmd);
+    let composition = resolve_composition(args, &title);
     let vfs_root = resolve_ps3_vfs_root(args);
     let explicit = find_run_game_elf_path(args);
     if !allow_explicit_elf {
@@ -212,8 +195,11 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
             (p, image)
         }
         None => {
-            let (image, path) =
-                crate::cli::exit::load_ppu_image_walk_candidates_or_die(&title, &vfs_root);
+            let (image, path) = crate::cli::exit::load_ppu_image_walk_candidates_or_die(
+                &title,
+                &vfs_root,
+                &composition.eboot_dirs,
+            );
             let path_str = path
                 .to_str()
                 .map(|s| s.replace('\\', "/"))
@@ -242,6 +228,7 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
     );
     BootInputs {
         title,
+        composition,
         elf_path,
         elf_data: image.elf_data,
         authority_id: image.authority_id,
@@ -272,7 +259,6 @@ pub(crate) fn run_game(args: &[String]) {
     let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000);
     let trace = has_bool_flag(args, "--trace");
     let profile = has_bool_flag(args, "--profile");
-    let firmware_dir = resolve_firmware_dir(args);
     let dump_at_pc = parse_hex_flag(args, "--dump-at-pc");
     let dump_skip: u32 = parse_flag_value(args, "--dump-skip").unwrap_or(0);
     if dump_skip > 0 && dump_at_pc.is_none() {
@@ -295,6 +281,7 @@ pub(crate) fn run_game(args: &[String]) {
         parse_flag_value::<u64>(args, "--budget").map(Budget::new);
     let prescan = has_bool_flag(args, "--prescan");
     let inputs = resolve_boot_inputs(args, "run-game", true);
+    let firmware_dir = firmware_module_dir(&inputs.composition);
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -305,6 +292,7 @@ pub(crate) fn run_game(args: &[String]) {
         trace,
         profile,
         firmware_dir: firmware_dir.as_deref(),
+        composed_mounts: &inputs.composition.mounts,
         dump_at_pc,
         dump_skip,
         patch_bytes: &patch_bytes,
@@ -463,7 +451,8 @@ pub(crate) fn bench_boot_once(args: &[String]) {
     let inputs = resolve_boot_inputs(args, "bench-boot-once", false);
     let max_steps: usize = parse_flag_value(args, "--max-steps")
         .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
-    let firmware_dir = resolve_firmware_dir(args);
+    let firmware_dir = firmware_module_dir(&inputs.composition);
+    let selection = selection_args(args);
     let strict_reserved = has_bool_flag(args, "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
     let budget_override: Option<Budget> =
@@ -475,6 +464,8 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             elf_path: &inputs.elf_path,
             max_steps,
             firmware_dir: firmware_dir.as_deref(),
+            composed_mounts: &inputs.composition.mounts,
+            selection: selection.as_args(),
             strict_reserved,
             checkpoint_override,
             budget_override,
@@ -497,7 +488,8 @@ pub(crate) fn bench_boot(args: &[String]) {
     let inputs = resolve_boot_inputs(args, "bench-boot", false);
     let max_steps: usize = parse_flag_value(args, "--max-steps")
         .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
-    let firmware_dir = resolve_firmware_dir(args);
+    let firmware_dir = firmware_module_dir(&inputs.composition);
+    let selection = selection_args(args);
     let strict_reserved = has_bool_flag(args, "--strict-reserved");
     let checkpoint_override = resolve_checkpoint_override(args, "bench-boot");
     let budget_override: Option<Budget> =
@@ -509,6 +501,8 @@ pub(crate) fn bench_boot(args: &[String]) {
         elf_path: &inputs.elf_path,
         max_steps,
         firmware_dir: firmware_dir.as_deref(),
+        composed_mounts: &inputs.composition.mounts,
+        selection: selection.as_args(),
         strict_reserved,
         checkpoint_override,
         budget_override,
@@ -591,5 +585,5 @@ pub(crate) fn bench_boot(args: &[String]) {
 mod tests;
 
 #[cfg(test)]
-#[path = "tests/firmware_default_tests.rs"]
-mod firmware_default_tests;
+#[path = "tests/composition_wiring_tests.rs"]
+mod composition_wiring_tests;

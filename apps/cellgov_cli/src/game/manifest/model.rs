@@ -155,7 +155,7 @@ pub struct ContentEntry {
     pub host_path: String,
 }
 
-/// Why [`TitleManifest::resolve_eboot`] could not return a path.
+/// Why an EBOOT could not be found for a title.
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveEbootError {
     /// Disc title with a `vfs_root` that has no non-empty parent.
@@ -167,14 +167,15 @@ pub enum ResolveEbootError {
         vfs_root: PathBuf,
         short_name: String,
     },
-    /// No candidate executable exists under the resolved USRDIR.
+    /// No candidate executable exists under any searched directory.
     /// `probe_errors` collects non-NotFound I/O errors.
     #[error(
         "{}",
         render_not_found(searched, candidates, probe_errors, not_regular)
     )]
     NotFound {
-        searched: PathBuf,
+        /// Directories probed, in probe order.
+        searched: Vec<PathBuf>,
         candidates: Vec<String>,
         probe_errors: Vec<(PathBuf, std::io::Error)>,
         /// Candidates that exist but are not regular files -- a
@@ -204,7 +205,7 @@ pub enum ResolveEbootError {
 }
 
 /// Test witness: counts how many times the hidden-content-id guard in
-/// [`TitleManifest::resolve_eboot`] fired, so a test can prove the
+/// [`TitleManifest::eboot_dirs`] fired, so a test can prove the
 /// guard executed rather than passing vacuously. Shared by every test
 /// in the process, so a reader compares for growth, not for an exact
 /// delta.
@@ -213,16 +214,31 @@ pub(crate) static HIDDEN_CONTENT_ID_REJECTIONS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 fn render_not_found(
-    searched: &Path,
+    searched: &[PathBuf],
     candidates: &[String],
     probe_errors: &[(PathBuf, std::io::Error)],
     not_regular: &[PathBuf],
 ) -> String {
     use std::fmt::Write as _;
-    let mut s = String::from("no executable found; looked for:");
-    for name in candidates {
-        let _ = write!(s, "\n  {}", searched.join(name).display());
-    }
+    // The two lists feed one cross product, so an empty list leaves the
+    // "looked for" list empty -- a diagnostic that names nothing.
+    let mut s = if searched.is_empty() {
+        String::from("no executable found; no directory was given to probe")
+    } else if candidates.is_empty() {
+        let dirs: Vec<String> = searched.iter().map(|d| d.display().to_string()).collect();
+        format!(
+            "no executable found; the title lists no eboot_candidates to probe under {}",
+            dirs.join(", ")
+        )
+    } else {
+        let mut s = String::from("no executable found; looked for:");
+        for dir in searched {
+            for name in candidates {
+                let _ = write!(s, "\n  {}", dir.join(name).display());
+            }
+        }
+        s
+    };
     for p in not_regular {
         let _ = write!(s, "\n  exists but is not a regular file: {}", p.display());
     }
@@ -254,13 +270,18 @@ impl TitleManifest {
         self.rsx_consume
     }
 
-    /// Return the first [`TitleManifest::eboot_candidates`] filename
-    /// that exists as a regular file under the title's USRDIR.
+    /// The directory the title's executable sits in, derived from the
+    /// VFS root alone.
+    ///
+    /// This derivation covers a title the versioned store does not
+    /// hold. A stored title takes its directories from its install
+    /// records.
     ///
     /// # Errors
     ///
-    /// See [`ResolveEbootError`].
-    pub fn resolve_eboot(&self, vfs_root: &Path) -> Result<PathBuf, ResolveEbootError> {
+    /// - [`ResolveEbootError::HiddenContentId`]
+    /// - [`ResolveEbootError::MisconfiguredVfsRoot`]
+    pub fn eboot_dirs(&self, vfs_root: &Path) -> Result<Vec<PathBuf>, ResolveEbootError> {
         // A dot-prefixed content-id would resolve a hidden directory
         // (an in-progress `.staging-*` / `.uninstalling-*` sibling);
         // reject it so such residue can never be booted.
@@ -272,7 +293,7 @@ impl TitleManifest {
                 short_name: self.short_name.clone(),
             });
         }
-        let usrdir = match &self.source {
+        Ok(vec![match &self.source {
             GameSource::Hdd => vfs_root.join("game").join(&self.content_id).join("USRDIR"),
             GameSource::Disc => {
                 let parent = match vfs_root.parent() {
@@ -291,23 +312,38 @@ impl TitleManifest {
                     .join("USRDIR")
             }
             GameSource::FirmwareExec { dir } | GameSource::ManifestRelative { dir } => dir.clone(),
-        };
+        }])
+    }
+
+    /// Return the first [`TitleManifest::eboot_candidates`] filename
+    /// that exists as a regular file under `dirs`, in order.
+    ///
+    /// An earlier directory shadows a later one, so a selected
+    /// update's executable wins over the base's.
+    ///
+    /// # Errors
+    ///
+    /// [`ResolveEbootError::NotFound`], which names every path probed.
+    pub fn resolve_eboot_in(&self, dirs: &[PathBuf]) -> Result<PathBuf, ResolveEbootError> {
         let mut probe_errors = Vec::new();
         let mut not_regular = Vec::new();
-        for name in &self.eboot_candidates {
-            let p = usrdir.join(name);
-            match std::fs::metadata(&p) {
-                Ok(md) if md.is_file() => return Ok(p),
-                // The name is taken by a directory or a special file.
-                // Not a miss -- say so rather than folding it into the
-                // "looked for" list, which reads as "nothing was there".
-                Ok(_) => not_regular.push(p),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => probe_errors.push((p, e)),
+        for dir in dirs {
+            for name in &self.eboot_candidates {
+                let p = dir.join(name);
+                match std::fs::metadata(&p) {
+                    Ok(md) if md.is_file() => return Ok(p),
+                    // The name is taken by a directory or a special
+                    // file. Not a miss -- say so rather than folding it
+                    // into the "looked for" list, which reads as
+                    // "nothing was there".
+                    Ok(_) => not_regular.push(p),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => probe_errors.push((p, e)),
+                }
             }
         }
         Err(ResolveEbootError::NotFound {
-            searched: usrdir,
+            searched: dirs.to_vec(),
             candidates: self.eboot_candidates.clone(),
             probe_errors,
             not_regular,

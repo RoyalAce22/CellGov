@@ -3,6 +3,18 @@
 use super::*;
 use crate::game::manifest::test_fixtures::TmpDir;
 
+/// The two-step resolution the boot path performs: derive the
+/// directories, then probe them.
+trait ResolveEbootFromVfsRoot {
+    fn resolve_eboot(&self, vfs_root: &Path) -> Result<PathBuf, ResolveEbootError>;
+}
+
+impl ResolveEbootFromVfsRoot for TitleManifest {
+    fn resolve_eboot(&self, vfs_root: &Path) -> Result<PathBuf, ResolveEbootError> {
+        self.resolve_eboot_in(&self.eboot_dirs(vfs_root)?)
+    }
+}
+
 #[test]
 fn resolve_eboot_hdd_finds_first_candidate() {
     let tmp = TmpDir::new("resolve_hdd_first");
@@ -266,7 +278,7 @@ fn resolve_eboot_firmware_exec_missing_file_reports_the_firmware_dir() {
     };
     match m.resolve_eboot(Path::new("")) {
         Err(ResolveEbootError::NotFound { searched, .. }) => {
-            assert_eq!(searched, moddir);
+            assert_eq!(searched, vec![moddir]);
         }
         other => panic!("expected NotFound under the firmware dir, got {other:?}"),
     }
@@ -312,8 +324,106 @@ fn resolve_eboot_manifest_relative_missing_file_reports_the_build_dir() {
     };
     match m.resolve_eboot(Path::new("")) {
         Err(ResolveEbootError::NotFound { searched, .. }) => {
-            assert_eq!(searched, builddir);
+            assert_eq!(searched, vec![builddir]);
         }
         other => panic!("expected NotFound under the build dir, got {other:?}"),
     }
+}
+
+#[test]
+fn an_earlier_directory_shadows_a_later_one() {
+    let tmp = TmpDir::new("resolve_in_earlier_wins");
+    let update = tmp.path().join("update").join("USRDIR");
+    let base = tmp.path().join("base").join("USRDIR");
+    std::fs::create_dir_all(&update).unwrap();
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(update.join("EBOOT.BIN"), b"patched").unwrap();
+    std::fs::write(base.join("EBOOT.BIN"), b"shipped").unwrap();
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+    let got = m
+        .resolve_eboot_in(&[update.clone(), base])
+        .expect("the first directory answers");
+    assert_eq!(got, update.join("EBOOT.BIN"));
+}
+
+#[test]
+fn a_miss_in_the_first_directory_falls_through_to_the_second() {
+    let tmp = TmpDir::new("resolve_in_fallthrough");
+    let update = tmp.path().join("update").join("USRDIR");
+    let base = tmp.path().join("base").join("USRDIR");
+    std::fs::create_dir_all(&update).unwrap();
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("EBOOT.BIN"), b"shipped").unwrap();
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+    let got = m
+        .resolve_eboot_in(&[update, base.clone()])
+        .expect("the second directory answers");
+    assert_eq!(got, base.join("EBOOT.BIN"));
+}
+
+#[test]
+fn a_directory_on_the_name_in_the_first_root_does_not_hide_the_second_roots_file() {
+    let tmp = TmpDir::new("resolve_in_dir_then_root");
+    let update = tmp.path().join("update").join("USRDIR");
+    let base = tmp.path().join("base").join("USRDIR");
+    std::fs::create_dir_all(update.join("EBOOT.BIN")).unwrap();
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::write(base.join("EBOOT.BIN"), b"shipped").unwrap();
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+    let got = m
+        .resolve_eboot_in(&[update, base.clone()])
+        .expect("the second root answers");
+    assert_eq!(got, base.join("EBOOT.BIN"));
+}
+
+#[test]
+fn a_miss_names_every_directory_probed_not_only_the_last() {
+    let tmp = TmpDir::new("resolve_in_notfound_lists_all");
+    let update = tmp.path().join("update").join("USRDIR");
+    let base = tmp.path().join("base").join("USRDIR");
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN", "EBOOT.elf"]);
+    let err = m
+        .resolve_eboot_in(&[update.clone(), base.clone()])
+        .expect_err("neither directory holds a candidate");
+    match &err {
+        ResolveEbootError::NotFound { searched, .. } => {
+            assert_eq!(*searched, vec![update.clone(), base.clone()]);
+        }
+        other => panic!("expected NotFound, got {other:?}"),
+    }
+    let rendered = err.to_string();
+    for dir in [&update, &base] {
+        for name in ["EBOOT.BIN", "EBOOT.elf"] {
+            let path = dir.join(name).display().to_string();
+            assert!(rendered.contains(&path), "{path} missing from {rendered}");
+        }
+    }
+}
+
+#[test]
+fn a_probe_over_no_directories_says_so_rather_than_listing_nothing() {
+    let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+    let err = m
+        .resolve_eboot_in(&[])
+        .expect_err("nothing to probe is not a hit");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("no directory was given to probe"),
+        "got {rendered}"
+    );
+}
+
+#[test]
+fn a_title_with_no_candidates_names_the_gap_rather_than_listing_nothing() {
+    let m = hdd_manifest("NPAA00001", "t", &[]);
+    let dir = PathBuf::from("some").join("USRDIR");
+    let err = m
+        .resolve_eboot_in(std::slice::from_ref(&dir))
+        .expect_err("no candidate name can hit");
+    let rendered = err.to_string();
+    assert!(rendered.contains("no eboot_candidates"), "got {rendered}");
+    assert!(
+        rendered.contains(&dir.display().to_string()),
+        "got {rendered}"
+    );
 }

@@ -19,15 +19,14 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
 use cellgov_install::keys::KeyVault;
+use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
 
 #[path = "common/digests.rs"]
 mod digests;
 #[path = "common/keys.rs"]
 mod keys;
-
-/// The mount `cellgov_install install` populates with firmware.
-const FIRMWARE_EXTERNAL: &str = "vfs/dev_flash/sys/external";
 
 /// Module stems present as both `<stem>.sprx` and `<stem>.prx`.
 const MODULES: &[&str] = &[
@@ -45,21 +44,78 @@ const MODULES: &[&str] = &[
     "libsysutil_np",
 ];
 
-/// The installed firmware directory, asserted present.
+/// The `sys/external` directory of the one installed firmware.
+///
+/// The store keys firmware on version, so the install record names the
+/// tree.
 ///
 /// # Panics
 ///
-/// If absent. `firmware-corpus` declares the install exists, so a
-/// missing one is a failure rather than a skip.
+/// Panics when the store:
+///
+/// - holds no firmware entry,
+/// - holds more than one, or
+/// - names a tree that is gone.
+///
+/// `firmware-corpus` declares the install exists, so each is a failure
+/// rather than a skip.
 fn firmware_external_dir() -> PathBuf {
-    let dir = digests::workspace_root().join(FIRMWARE_EXTERNAL);
+    let root = digests::workspace_root().join(DEFAULT_VFS_ROOT);
+    let layout = StoreLayout::new(&root);
+    let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
+    let entries = std::fs::read_dir(&records).unwrap_or_else(|e| {
+        panic!(
+            "firmware-corpus: no firmware install records at {}: {e}. Run \
+             `cellgov_install install <PS3UPDAT.PUP>` to populate the store.",
+            records.display()
+        )
+    });
+    let mut found: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        // Skipping an unreadable entry would drop a firmware from the
+        // census.
+        let entry = entry.unwrap_or_else(|e| {
+            panic!(
+                "firmware-corpus: reading an entry of {}: {e}",
+                records.display()
+            )
+        });
+        let path = entry.path();
+        if !path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".install.toml"))
+        {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        let record = InstallRecord::parse(&text)
+            .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()));
+        found.push(
+            layout
+                .resolve_store_path(&record.artifact.store_path)
+                .join(DEV_FLASH_MOUNT)
+                .join("sys")
+                .join("external"),
+        );
+    }
+    found.sort();
+    let [dir] = found.as_slice() else {
+        let rendered: Vec<String> = found.iter().map(|p| p.display().to_string()).collect();
+        panic!(
+            "firmware-corpus: expected exactly one installed firmware under {}, found {} [{}]",
+            root.display(),
+            found.len(),
+            rendered.join(", ")
+        );
+    };
     assert!(
         dir.is_dir(),
-        "firmware-corpus: no firmware at {}. Run \
-         `cellgov_install install <PS3UPDAT.PUP>` to populate it.",
+        "firmware-corpus: firmware is recorded but its tree at {} is missing",
         dir.display()
     );
-    dir
+    dir.clone()
 }
 
 fn decrypt_and_compare(
