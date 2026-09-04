@@ -30,9 +30,22 @@ pub(crate) fn percent(ratio: f64) -> u32 {
     (ratio.clamp(0.0, 1.0) * 100.0).floor() as u32
 }
 
-/// `1m12s` / `47s`.
+/// The first ETA the two-digit hour form cannot carry.
+const ETA_CEILING_SECS: u64 = 100 * 60 * 60;
+
+/// What an ETA at or past [`ETA_CEILING_SECS`] reads as.
+const ETA_OFF_SCALE: &str = ">99h";
+
+/// `2h05m` / `1m12s` / `47s`, or [`ETA_OFF_SCALE`] past
+/// [`ETA_CEILING_SECS`].
+///
+/// The ceiling holds the field to six columns.
 pub(crate) fn fmt_eta(secs: u64) -> String {
-    if secs >= 60 {
+    if secs >= ETA_CEILING_SECS {
+        ETA_OFF_SCALE.to_string()
+    } else if secs >= 3600 {
+        format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60)
+    } else if secs >= 60 {
         format!("{}m{:02}s", secs / 60, secs % 60)
     } else {
         format!("{secs}s")

@@ -54,13 +54,36 @@ fn bar_fill_is_exact_width_and_monotonic() {
 }
 
 #[test]
-fn fmt_eta_reads_as_minutes_and_seconds() {
+fn fmt_eta_reads_as_seconds_then_minutes_then_hours() {
     assert_eq!(fmt_eta(0), "0s");
     assert_eq!(fmt_eta(47), "47s");
     assert_eq!(fmt_eta(59), "59s");
     assert_eq!(fmt_eta(60), "1m00s");
     assert_eq!(fmt_eta(72), "1m12s");
     assert_eq!(fmt_eta(600), "10m00s");
+    assert_eq!(fmt_eta(3599), "59m59s");
+    assert_eq!(fmt_eta(3600), "1h00m");
+    assert_eq!(fmt_eta(7500), "2h05m");
+}
+
+#[test]
+fn fmt_eta_holds_six_columns_and_reads_off_scale_past_its_ceiling() {
+    assert_eq!(fmt_eta(ETA_CEILING_SECS - 1), "99h59m");
+    assert_eq!(fmt_eta(ETA_CEILING_SECS), ETA_OFF_SCALE);
+    // 66666667 s is a 100M-step run at just over one step per second.
+    // u64::MAX is what the saturating cast produces at the extreme.
+    assert_eq!(fmt_eta(66_666_667), ETA_OFF_SCALE);
+    assert_eq!(fmt_eta(u64::MAX), ETA_OFF_SCALE);
+    // An edited ceiling must not leave the off-scale string false.
+    assert_eq!(ETA_OFF_SCALE, format!(">{}h", ETA_CEILING_SECS / 3600 - 1));
+    // The sweep covers every second through both form transitions,
+    // then the boundaries above them.
+    let range = (0..7200).chain([359_998, 359_999, 360_000, u64::MAX]);
+    for secs in range {
+        let e = fmt_eta(secs);
+        assert!(e.len() <= 6, "{secs}s renders {} columns: {e}", e.len());
+        assert!(e.is_ascii(), "{secs}s renders non-ASCII: {e}");
+    }
 }
 
 #[test]
@@ -482,6 +505,47 @@ fn a_counting_unit_formats_the_totals_the_rate_and_the_eta() {
     // No item counter, so line 3 opens on the rate rather than on a
     // stray separator.
     assert_eq!(lines[2], "12.4M steps/s  ETA 1m12s");
+}
+
+/// A step rate just above [`Unit::eta_rate_floor`] over a 100M-step
+/// run predicts about 1e8 seconds.
+#[test]
+fn a_stalled_counting_run_keeps_the_item_name_beside_an_off_scale_eta() {
+    const BENCH: Task = Task {
+        verb: "Booting",
+        tag: "boot",
+        phases: &["loading", "stepping"],
+        measured: 1,
+        unit: Unit::Steps,
+        items: "",
+        streaming: false,
+    };
+    let snap = Snapshot {
+        phase: STAGING,
+        total_amount: 100_000_000,
+        done_amount: 0,
+        preset_amount: 0,
+        total_items: 0,
+        done_items: 0,
+        current: "sys/external/liblv2.sprx".to_string(),
+    };
+    let f = compose_frame(
+        &snap,
+        &FrameCtx {
+            task: &BENCH,
+            label: "synthetic",
+            width: 40,
+            ratio: 0.0,
+            rate: 1.5,
+            eta: Some(66_666_667),
+            ..frame_ctx(false)
+        },
+    );
+    let lines = visible_lines(&f);
+    assert_eq!(lines[2], "1 steps/s  ETA >99h  sys/e...liblv2.sprx");
+    for (n, line) in lines.iter().enumerate() {
+        assert!(line.len() <= 40, "line {n} spans {} columns", line.len());
+    }
 }
 
 #[test]
