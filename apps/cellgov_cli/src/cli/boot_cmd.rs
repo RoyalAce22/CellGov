@@ -8,15 +8,18 @@ use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::ProgressBar;
 use cellgov_time::Budget;
 
-use crate::composition::{banner, compose_boot, BootComposition, ComposeInputs, FirmwareChoice};
+use crate::composition::{
+    banner, compose_boot, BootComposition, ComposeInputs, FirmwareChoice, GameChoice, GameVersion,
+};
 use crate::game;
+use crate::game::manifest::{CellKey, BASE_GAME_VER};
 use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 
 use super::env::parse_env_bool;
 use super::exit::die;
 use super::parse::{BenchArgs, BootRunArgs, BootSelection, TitleSelector};
 use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
-use crate::paths::anchor_max_steps;
+use crate::paths::{cell_checkpoint, cell_max_steps};
 
 use game::BENCH_AGREEMENT_GATE_PCT;
 
@@ -330,16 +333,79 @@ fn classify_run_game_exit(summary: &game::RunSummary) -> i32 {
     outcome_code
 }
 
-/// [`anchor_max_steps`] as a step count, so an un-overridden bench run
-/// stays comparable to the anchor `dev record-anchors` measured.
-fn default_bench_max_steps(title: &game::manifest::TitleManifest) -> usize {
-    let cap = anchor_max_steps(title);
-    usize::try_from(cap).unwrap_or_else(|_| {
-        die(&format!(
-            "{}: bench_max_steps {cap} does not fit this host's usize",
-            title.name()
-        ))
-    })
+/// The cell this composition puts the run in.
+///
+/// Returns `None` when the composition names no key an anchor could be
+/// filed under:
+///
+/// - an unmanaged or absent firmware carries no version;
+/// - a title the store does not hold has no game-version axis;
+/// - an executable outside the selected firmware entry belongs to no
+///   entry.
+fn composed_cell(composition: &BootComposition) -> Option<CellKey> {
+    let fw = composition.firmware.version()?.to_string();
+    let game_ver = match &composition.game {
+        GameChoice::Stored(stored) => Some(match &stored.version {
+            GameVersion::Base => BASE_GAME_VER.to_string(),
+            GameVersion::Update(v) => v.clone(),
+        }),
+        // The manifest named an absolute `firmware-exec` path, and the
+        // composition keeps it as written. The executable therefore did
+        // not come from the firmware entry this key would name.
+        GameChoice::Firmware {
+            unmanaged_path: true,
+            ..
+        } => return None,
+        // A firmware-shipped executable has no version axis of its own,
+        // so its cell is the firmware alone.
+        GameChoice::Firmware { .. } => None,
+        GameChoice::Unstored => return None,
+    };
+    Some(CellKey { fw, game_ver })
+}
+
+/// What the registry declares for the cell this run composed.
+///
+/// The run and the cell's anchor use the same cap and the same
+/// checkpoint.
+struct ResolvedPlan {
+    cell: Option<CellKey>,
+    max_steps: u64,
+    checkpoint: game::manifest::CheckpointTrigger,
+}
+
+impl ResolvedPlan {
+    fn resolve(title: &game::manifest::TitleManifest, composition: &BootComposition) -> Self {
+        let cell = composed_cell(composition);
+        // A cell the matrix does not declare takes the title's own
+        // defaults.
+        let declared = cell.as_ref().and_then(|k| title.cell(k));
+        Self {
+            max_steps: cell_max_steps(title, declared),
+            checkpoint: cell_checkpoint(title, declared),
+            cell,
+        }
+    }
+
+    fn as_plan(&self) -> game::AnchorPlan<'_> {
+        game::AnchorPlan {
+            cell: self.cell.as_ref(),
+            max_steps: self.max_steps,
+            checkpoint: self.checkpoint,
+        }
+    }
+
+    /// The cap as a step count, so an un-overridden bench run stays
+    /// comparable to the anchor `dev record-anchors` measured.
+    fn max_steps_usize(&self, title: &game::manifest::TitleManifest) -> usize {
+        usize::try_from(self.max_steps).unwrap_or_else(|_| {
+            die(&format!(
+                "{}: bench_max_steps {} does not fit this host's usize",
+                title.name(),
+                self.max_steps
+            ))
+        })
+    }
 }
 
 pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
@@ -351,9 +417,10 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render:
         None,
         "boot bench-once",
     );
+    let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
     let max_steps = args
         .max_steps
-        .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
+        .unwrap_or_else(|| plan.max_steps_usize(&inputs.title));
     let firmware_dir = firmware_module_dir(&inputs.composition);
     let selection = selection_args(&args.selection, vfs_flag);
     let bar = ProgressBar::start(render.caps(), &BENCH_TASK, inputs.title.name());
@@ -363,6 +430,7 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render:
             title: &inputs.title,
             elf_path: &inputs.elf_path,
             max_steps,
+            plan: plan.as_plan(),
             firmware_dir: firmware_dir.as_deref(),
             composed_mounts: &inputs.composition.mounts,
             identity: &inputs.composition.identity,
@@ -398,9 +466,10 @@ pub(crate) fn bench_boot(
         None,
         "boot bench",
     );
+    let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
     let max_steps = args
         .max_steps
-        .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
+        .unwrap_or_else(|| plan.max_steps_usize(&inputs.title));
     let firmware_dir = firmware_module_dir(&inputs.composition);
     let selection = selection_args(&args.selection, vfs_flag);
     let bar = ProgressBar::start(render.caps(), &BENCH_PAIR_TASK, inputs.title.name());
@@ -410,6 +479,7 @@ pub(crate) fn bench_boot(
             title: &inputs.title,
             elf_path: &inputs.elf_path,
             max_steps,
+            plan: plan.as_plan(),
             firmware_dir: firmware_dir.as_deref(),
             composed_mounts: &inputs.composition.mounts,
             identity: &inputs.composition.identity,
@@ -457,9 +527,13 @@ pub(crate) fn bench_boot(
             std::process::exit(EXIT_DETERMINISM_BREAK);
         }
         game::BenchGate::AnchorDrift => {
+            let cell = plan
+                .cell
+                .as_ref()
+                .map_or_else(String::new, |c| format!(" {}", c.label()));
             eprintln!(
                 "boot bench: {} disagreement(s) with the committed anchor for {} \
-                 (content id {}):",
+                 (content id {}{cell}):",
                 outcome.anchor_failures.len(),
                 inputs.title.name(),
                 inputs.title.content_id,
@@ -468,7 +542,7 @@ pub(crate) fn bench_boot(
                 eprintln!("  {failure}");
             }
             eprintln!(
-                "this run used the configuration the anchor was recorded under, so \
+                "this run used the configuration the cell's anchor was recorded under, so \
                  the movement is a regression until it is attributed to a change. \
                  Once it is, re-bless with:\n  \
                  cargo run --release -p cellgov_cli -- dev record-anchors --title {}\n\

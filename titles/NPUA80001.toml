@@ -29,3 +29,10 @@ files = [
 prefix = "/app_home"
 host = "boot_content/NPUA80001"
 override_env = "CELLGOV_NPUA80001_CONTENT_DIR"
+
+# The one cell this title is gated and rendered at; see
+# docs/architecture/title_harness.md.
+[[bench.matrix]]
+fw = "4.93"
+game_ver = "base"
+reference = true

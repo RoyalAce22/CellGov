@@ -58,7 +58,9 @@ fn parse_bench_result_round_trips_every_boot_outcome() {
         BootOutcome::TimeOverflow,
     ];
     for v in variants {
-        let line = format!("BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1000000000 outcome={v}\n");
+        let line = format!(
+            "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1000000000 budget=256 outcome={v}\n"
+        );
         let r = parse_bench_result(&line)
             .unwrap_or_else(|e| panic!("round-trip parse failed for {v:?}: {e}"));
         assert_eq!(r.outcome, v, "round-trip mismatch for {v:?}");
@@ -67,7 +69,7 @@ fn parse_bench_result_round_trips_every_boot_outcome() {
 
 #[test]
 fn parse_bench_result_extracts_fields() {
-    let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_ns=323000000 steps_per_sec=4341759 outcome=ProcessExit\ntrailing noise\n";
+    let stdout = "some preamble\nBENCH_RESULT steps=1402388 wall_ns=323000000 steps_per_sec=4341759 budget=256 outcome=ProcessExit\ntrailing noise\n";
     let r = parse_bench_result(stdout).expect("parses");
     assert_eq!(r.steps, 1402388);
     assert_eq!(r.wall.as_millis(), 323);
@@ -81,6 +83,7 @@ fn the_result_line_round_trips_the_wall_exactly() {
         let r = BenchBootResult {
             steps: 12345,
             wall: Duration::from_nanos(ns),
+            budget: Budget::new(256),
             outcome: BootOutcome::MaxSteps,
         };
         let parsed = parse_bench_result(&format!("{}\n", format_bench_result(&r))).expect("parses");
@@ -96,6 +99,7 @@ fn a_sub_microsecond_wall_is_measurable_after_transport() {
     let r = BenchBootResult {
         steps: 3,
         wall: Duration::from_nanos(400),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let parsed = parse_bench_result(&format_bench_result(&r)).expect("parses");
@@ -112,6 +116,7 @@ fn the_printed_steps_per_sec_agrees_with_the_recomputed_one_to_rounding() {
     let r = BenchBootResult {
         steps: 390_435,
         wall: Duration::from_nanos(3_038_513_400),
+        budget: Budget::new(256),
         outcome: BootOutcome::MaxSteps,
     };
     let line = format_bench_result(&r);
@@ -132,7 +137,7 @@ fn the_printed_steps_per_sec_agrees_with_the_recomputed_one_to_rounding() {
 #[test]
 fn a_wall_beyond_u64_nanoseconds_is_malformed_not_clamped() {
     let stdout =
-        "BENCH_RESULT steps=1 wall_ns=99999999999999999999999 steps_per_sec=1 outcome=ProcessExit\n";
+        "BENCH_RESULT steps=1 wall_ns=99999999999999999999999 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedWallNs(s) => assert_eq!(s, "99999999999999999999999"),
         other => panic!("expected MalformedWallNs, got {other:?}"),
@@ -150,8 +155,8 @@ fn parse_bench_result_errors_on_missing_line() {
 
 #[test]
 fn parse_bench_result_errors_on_duplicate_line() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 outcome=ProcessExit\n\
-                  BENCH_RESULT steps=2 wall_ns=2 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n\
+                  BENCH_RESULT steps=2 wall_ns=2 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::DuplicateResultLine
@@ -160,7 +165,7 @@ fn parse_bench_result_errors_on_duplicate_line() {
 
 #[test]
 fn parse_bench_result_errors_on_unknown_outcome() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 outcome=WhoKnows\n";
+    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256 outcome=WhoKnows\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::UnparseableOutcome { token, source: _ } => {
             assert_eq!(token, "WhoKnows");
@@ -171,7 +176,8 @@ fn parse_bench_result_errors_on_unknown_outcome() {
 
 #[test]
 fn parse_bench_result_errors_on_malformed_steps() {
-    let stdout = "BENCH_RESULT steps=abc wall_ns=1 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout =
+        "BENCH_RESULT steps=abc wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedSteps(s) => assert_eq!(s, "abc"),
         other => panic!("expected MalformedSteps, got {other:?}"),
@@ -180,7 +186,7 @@ fn parse_bench_result_errors_on_malformed_steps() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_steps() {
-    let stdout = "BENCH_RESULT wall_ns=1 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT wall_ns=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingSteps
@@ -189,7 +195,8 @@ fn parse_bench_result_errors_on_missing_steps() {
 
 #[test]
 fn parse_bench_result_errors_on_malformed_wall_ns() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=xyz steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout =
+        "BENCH_RESULT steps=1 wall_ns=xyz steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     match parse_bench_result(stdout).unwrap_err() {
         ParseBenchError::MalformedWallNs(s) => assert_eq!(s, "xyz"),
         other => panic!("expected MalformedWallNs, got {other:?}"),
@@ -198,7 +205,7 @@ fn parse_bench_result_errors_on_malformed_wall_ns() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_wall_ns() {
-    let stdout = "BENCH_RESULT steps=1 steps_per_sec=1 outcome=ProcessExit\n";
+    let stdout = "BENCH_RESULT steps=1 steps_per_sec=1 budget=256 outcome=ProcessExit\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingWallNs
@@ -207,11 +214,29 @@ fn parse_bench_result_errors_on_missing_wall_ns() {
 
 #[test]
 fn parse_bench_result_errors_on_missing_outcome() {
-    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1\n";
+    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=256\n";
     assert_eq!(
         parse_bench_result(stdout).unwrap_err(),
         ParseBenchError::MissingOutcome
     );
+}
+
+#[test]
+fn parse_bench_result_errors_on_missing_budget() {
+    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 outcome=ProcessExit\n";
+    assert_eq!(
+        parse_bench_result(stdout).unwrap_err(),
+        ParseBenchError::MissingBudget
+    );
+}
+
+#[test]
+fn parse_bench_result_errors_on_malformed_budget() {
+    let stdout = "BENCH_RESULT steps=1 wall_ns=1 steps_per_sec=1 budget=lots outcome=ProcessExit\n";
+    match parse_bench_result(stdout).unwrap_err() {
+        ParseBenchError::MalformedBudget(s) => assert_eq!(s, "lots"),
+        other => panic!("expected MalformedBudget, got {other:?}"),
+    }
 }
 
 #[test]
@@ -220,11 +245,13 @@ fn classify_pair_pass() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(102),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(r1.wall, r2.wall);
@@ -240,11 +267,13 @@ fn classify_pair_determinism_break_on_step_mismatch() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 11,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(r1.wall, r2.wall);
@@ -260,11 +289,13 @@ fn classify_pair_determinism_break_on_outcome_mismatch() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::MaxSteps,
     };
     let drift = wall_disagreement_percent(r1.wall, r2.wall);
@@ -280,11 +311,13 @@ fn classify_pair_wall_drift_exceeded() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(200),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(r1.wall, r2.wall);
@@ -300,17 +333,47 @@ fn classify_pair_wall_unmeasurable() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::ZERO,
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     assert_eq!(
         classify_pair(&r1, &r2, None, &[], &AnchorVerdict::Skipped),
         BenchGate::WallUnmeasurable
     );
+}
+
+/// The stop condition [`anchor_fixture`] records.
+const TEST_CHECKPOINT: manifest::CheckpointTrigger = manifest::CheckpointTrigger::ProcessExit;
+
+/// A run that reproduces [`anchor_fixture`] exactly, as the pair hands
+/// it to the anchor check.
+fn measured_run(stderr: &str) -> MeasuredRun<'_> {
+    MeasuredRun {
+        checkpoint: TEST_CHECKPOINT,
+        steps: 1,
+        budget: Budget::new(256),
+        outcome: "MaxSteps".to_string(),
+        stderr,
+    }
+}
+
+/// The cell [`anchor_fixture`] is filed under.
+fn test_cell() -> CellKey {
+    CellKey {
+        fw: "4.93".to_string(),
+        game_ver: Some("base".to_string()),
+    }
+}
+
+/// The triple [`anchor_fixture`] embeds.
+fn test_identity() -> RunIdentity {
+    anchor_fixture(0).identity
 }
 
 /// Mirrors a committed `boot_summary.json`, so the fixture format and
@@ -330,6 +393,16 @@ fn anchor_fixture(breaks: u64) -> BootSummary {
             "stdcx": {{ "value": 0, "class": "at-least" }},
             "lwarx": {{ "value": 0, "class": "at-least" }},
             "stwcx": {{ "value": 0, "class": "at-least" }}
+          }},
+          "firmware": {{
+            "version": "4.93",
+            "image_version": "0x0000000000010b94",
+            "pup_sha256": "00"
+          }},
+          "game": {{
+            "title_id": "CG_TEST",
+            "version": "base",
+            "app_ver": "01.00"
           }}
         }}"#
     ))
@@ -348,7 +421,10 @@ fn observed_stderr(breaks: u64, ldarx: u64) -> ParsedWitnesses {
 fn a_run_matching_its_anchor_reports_no_disagreements() {
     let failures = anchor_disagreements(
         &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
         390099,
+        Budget::new(256),
         "MaxSteps",
         &observed_stderr(73, 100),
     );
@@ -362,7 +438,10 @@ fn a_run_matching_its_anchor_reports_no_disagreements() {
 fn an_exact_witness_that_moved_is_reported() {
     let failures = anchor_disagreements(
         &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
         390099,
+        Budget::new(256),
         "MaxSteps",
         &observed_stderr(77, 100),
     );
@@ -378,7 +457,10 @@ fn an_exact_witness_that_moved_is_reported() {
 fn an_at_least_witness_above_its_baseline_is_not_a_disagreement() {
     let failures = anchor_disagreements(
         &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
         390099,
+        Budget::new(256),
         "MaxSteps",
         &observed_stderr(73, 9_999),
     );
@@ -389,7 +471,10 @@ fn an_at_least_witness_above_its_baseline_is_not_a_disagreement() {
 fn a_moved_step_count_is_reported() {
     let failures = anchor_disagreements(
         &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
         390100,
+        Budget::new(256),
         "MaxSteps",
         &observed_stderr(73, 100),
     );
@@ -403,7 +488,10 @@ fn a_moved_step_count_is_reported() {
 fn a_changed_outcome_is_reported() {
     let failures = anchor_disagreements(
         &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
         390099,
+        Budget::new(256),
         "ProcessExit",
         &observed_stderr(73, 100),
     );
@@ -411,6 +499,176 @@ fn a_changed_outcome_is_reported() {
         failures.iter().any(|f| f.contains("outcome ProcessExit")),
         "got {failures:?}"
     );
+}
+
+/// A stop condition the run never reaches leaves the step count, the
+/// outcome and every witness intact, so nothing else in the comparison
+/// sees a moved checkpoint.
+#[test]
+fn a_run_taken_at_another_checkpoint_is_reported() {
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &test_identity(),
+        manifest::CheckpointTrigger::Pc(0x1_0000),
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("Pc=0x10000") && failures[0].contains("ProcessExit"),
+        "the failure must name both stop conditions: {}",
+        failures[0]
+    );
+}
+
+/// A moved budget retires a different trajectory under a step count
+/// that did not move, and the recorded witnesses are at-least bounds
+/// that do not catch it.
+#[test]
+fn a_run_at_another_budget_is_reported() {
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(512),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("budget 512") && failures[0].contains("256"),
+        "got {failures:?}"
+    );
+}
+
+/// The steps and the witnesses come out of the measuring child, so the
+/// triple must come out of that same stream.
+#[test]
+fn a_measured_run_that_named_no_triple_is_a_disagreement() {
+    let root = crate::paths::workspace_root();
+    let verdict = check_anchor_under(
+        &root,
+        "NPUA80001",
+        &test_cell(),
+        &measured_run("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n"),
+    );
+    let AnchorVerdict::Drift(failures) = verdict else {
+        panic!("expected Drift, got {verdict:?}");
+    };
+    assert!(
+        failures
+            .iter()
+            .any(|f| f.contains(RUN_IDENTITY_SENTINEL) && f.contains("no")),
+        "got {failures:?}"
+    );
+}
+
+/// A file copied from another cell reproduces every witness of its own
+/// run, so only the embedded triple names the wrong cell.
+#[test]
+fn an_anchor_measured_against_another_firmware_reports_the_triple() {
+    let mut ran = test_identity();
+    ran.firmware.as_mut().expect("firmware half").version = "3.55".to_string();
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &ran,
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("recorded 4.93") && failures[0].contains("ran 3.55"),
+        "got {failures:?}"
+    );
+}
+
+#[test]
+fn an_anchor_measured_against_another_title_version_reports_the_triple() {
+    let mut ran = test_identity();
+    ran.game.as_mut().expect("game half").version = "update:02.51".to_string();
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &ran,
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("recorded CG_TEST base")
+            && failures[0].contains("ran CG_TEST update:02.51"),
+        "got {failures:?}"
+    );
+}
+
+/// A reinstall from another PUP keeps the console-visible version, so
+/// the report carries every compared field.
+#[test]
+fn two_firmwares_sharing_a_version_are_still_told_apart_in_the_report() {
+    let mut ran = test_identity();
+    ran.firmware.as_mut().expect("firmware half").pup_sha256 = "ff".to_string();
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &ran,
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("pup sha256 00") && failures[0].contains("pup sha256 ff"),
+        "got {failures:?}"
+    );
+}
+
+/// The same for the game half: two trees of one version can differ in
+/// the `APP_VER` their PARAM.SFO declares.
+#[test]
+fn two_title_trees_sharing_a_version_are_still_told_apart_in_the_report() {
+    let mut ran = test_identity();
+    ran.game.as_mut().expect("game half").app_ver = "01.01".to_string();
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &ran,
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(
+        failures[0].contains("app_ver 01.00") && failures[0].contains("app_ver 01.01"),
+        "got {failures:?}"
+    );
+}
+
+/// An anchor can predate the install of one half of the triple.
+#[test]
+fn a_half_the_anchor_never_named_is_reported_as_unidentified() {
+    let mut ran = test_identity();
+    ran.game = None;
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &ran,
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
+    assert_eq!(failures.len(), 1, "got {failures:?}");
+    assert!(failures[0].contains("(unidentified)"), "got {failures:?}");
 }
 
 /// `FromStr` round-trips the Display form, so the comparison must use
@@ -421,9 +679,25 @@ fn a_pc_reached_outcome_compares_by_its_display_form() {
     let mut baseline = anchor_fixture(73);
     baseline.outcome = BootOutcome::PcReached(0x1_0000);
     let observed = observed_stderr(73, 100);
-    let same = anchor_disagreements(&baseline, 390099, "PcReached(0x10000)", &observed);
+    let same = anchor_disagreements(
+        &baseline,
+        &test_identity(),
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "PcReached(0x10000)",
+        &observed,
+    );
     assert!(same.is_empty(), "identical outcome must match: {same:?}");
-    let debug_form = anchor_disagreements(&baseline, 390099, "PcReached(65536)", &observed);
+    let debug_form = anchor_disagreements(
+        &baseline,
+        &test_identity(),
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "PcReached(65536)",
+        &observed,
+    );
     assert!(
         !debug_form.is_empty(),
         "the decimal Debug form is not equal"
@@ -431,28 +705,42 @@ fn a_pc_reached_outcome_compares_by_its_display_form() {
 }
 
 #[test]
-fn a_title_with_no_committed_anchor_is_skipped_not_failed() {
+fn a_cell_with_no_committed_anchor_is_skipped_not_failed() {
     let verdict = check_anchor(
         "CG_NO_SUCH_CONTENT_ID",
-        1,
-        "MaxSteps",
-        "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n",
+        &test_cell(),
+        &measured_run("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n"),
     );
-    assert_eq!(verdict, AnchorVerdict::NoBaseline);
+    assert_eq!(verdict, AnchorVerdict::NotRecorded("fw 4.93 x base".into()));
 }
 
-/// The workspace root is compiled in, so every title looks unrecorded
+/// The anchor tree is keyed by the whole triple, so a file one path
+/// segment away is another cell's anchor.
+#[test]
+fn a_sibling_cells_anchor_does_not_stand_in_for_an_unrecorded_one() {
+    let other = CellKey {
+        fw: "3.55".to_string(),
+        game_ver: Some("base".to_string()),
+    };
+    let verdict = check_anchor(
+        "NPUA80001",
+        &other,
+        &measured_run("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n"),
+    );
+    assert_eq!(verdict, AnchorVerdict::NotRecorded("fw 3.55 x base".into()));
+}
+
+/// The workspace root is compiled in, so every cell looks unrecorded
 /// once the binary leaves its source tree. Saying so is the difference
 /// between a reported skip and a gate that quietly stopped gating.
 #[test]
-fn an_unreachable_workspace_root_does_not_read_as_an_unrecorded_title() {
+fn an_unreachable_workspace_root_does_not_read_as_an_unrecorded_cell() {
     let absent = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("no_such_workspace_root");
     let verdict = check_anchor_under(
         &absent,
         "VSH",
-        1,
-        "MaxSteps",
-        "BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n",
+        &test_cell(),
+        &measured_run("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n"),
     );
     let AnchorVerdict::NotComparable(reasons) = verdict else {
         panic!("expected NotComparable, got {verdict:?}");
@@ -471,11 +759,13 @@ fn anchor_drift_outranks_wall_drift() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(200),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(r1.wall, r2.wall);
@@ -493,11 +783,13 @@ fn a_determinism_break_outranks_anchor_drift() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let r2 = BenchBootResult {
         steps: 11,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(r1.wall, r2.wall);
@@ -514,6 +806,7 @@ fn a_skipped_anchor_check_cannot_produce_anchor_drift() {
     let r1 = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(r1.wall, r1.wall);
@@ -522,7 +815,13 @@ fn a_skipped_anchor_check_cannot_produce_anchor_drift() {
         BenchGate::Pass
     );
     assert_eq!(
-        classify_pair(&r1, &r1, drift, &[], &AnchorVerdict::NoBaseline),
+        classify_pair(
+            &r1,
+            &r1,
+            drift,
+            &[],
+            &AnchorVerdict::NotRecorded("fw 4.93 x base".into())
+        ),
         BenchGate::Pass
     );
     assert_eq!(
@@ -541,7 +840,15 @@ fn a_skipped_anchor_check_cannot_produce_anchor_drift() {
 fn an_anchor_with_no_witnesses_is_a_disagreement() {
     let mut baseline = anchor_fixture(73);
     baseline.witnesses.clear();
-    let failures = anchor_disagreements(&baseline, 390099, "MaxSteps", &observed_stderr(73, 100));
+    let failures = anchor_disagreements(
+        &baseline,
+        &test_identity(),
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed_stderr(73, 100),
+    );
     assert_eq!(failures, vec!["anchor records no witnesses".to_string()]);
 }
 
@@ -549,7 +856,15 @@ fn an_anchor_with_no_witnesses_is_a_disagreement() {
 fn a_recorded_witness_whose_line_never_appeared_is_reported() {
     let observed = parse_witness_lines("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=73\n")
         .expect("synthetic witness line parses");
-    let failures = anchor_disagreements(&anchor_fixture(73), 390099, "MaxSteps", &observed);
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed,
+    );
     assert!(
         failures
             .iter()
@@ -566,7 +881,15 @@ fn a_witness_the_anchor_does_not_carry_is_reported() {
          BENCH_DCBZ_WITNESS: count=4\n",
     )
     .expect("synthetic witness lines parse");
-    let failures = anchor_disagreements(&anchor_fixture(73), 390099, "MaxSteps", &observed);
+    let failures = anchor_disagreements(
+        &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
+        390099,
+        Budget::new(256),
+        "MaxSteps",
+        &observed,
+    );
     assert_eq!(
         failures,
         vec!["witness dcbz is emitted but not recorded in the anchor".to_string()]
@@ -577,7 +900,10 @@ fn a_witness_the_anchor_does_not_carry_is_reported() {
 fn a_zero_step_run_against_a_recorded_anchor_is_a_disagreement() {
     let failures = anchor_disagreements(
         &anchor_fixture(73),
+        &test_identity(),
+        TEST_CHECKPOINT,
         0,
+        Budget::new(256),
         "MaxSteps",
         &observed_stderr(73, 100),
     );
@@ -610,14 +936,23 @@ fn bench_manifest(bench_max_steps: Option<u64>) -> crate::game::manifest::TitleM
     }
 }
 
+/// A run of `title` in `cell`, at exactly what the registry declares
+/// for it.
 fn bench_options<'a>(
     title: &'a crate::game::manifest::TitleManifest,
+    cell: Option<&'a CellKey>,
     guest_args: &'a [String],
 ) -> BenchOptions<'a> {
+    let max_steps = crate::paths::cell_max_steps(title, None);
     BenchOptions {
         title,
         elf_path: "EBOOT.BIN",
-        max_steps: DEFAULT_BENCH_MAX_STEPS as usize,
+        max_steps: max_steps as usize,
+        plan: AnchorPlan {
+            cell,
+            max_steps,
+            checkpoint: title.checkpoint_trigger(),
+        },
         firmware_dir: None,
         composed_mounts: &[],
         identity: &cellgov_compare::RunIdentity {
@@ -636,11 +971,12 @@ fn bench_options<'a>(
 
 #[test]
 fn a_run_at_the_recorded_cap_is_comparable() {
+    let cell = test_cell();
     let title = bench_manifest(None);
-    assert!(incomparable_reasons(&bench_options(&title, &[])).is_empty());
+    assert!(incomparable_reasons(&bench_options(&title, Some(&cell), &[])).is_empty());
     let capped = bench_manifest(Some(4_000));
-    let mut opts = bench_options(&capped, &[]);
-    opts.max_steps = 4_000;
+    let opts = bench_options(&capped, Some(&cell), &[]);
+    assert_eq!(opts.max_steps, 4_000);
     assert!(incomparable_reasons(&opts).is_empty());
 }
 
@@ -648,34 +984,53 @@ fn a_run_at_the_recorded_cap_is_comparable() {
 /// prints a decode report before execution.
 #[test]
 fn prescan_leaves_the_run_comparable() {
+    let cell = test_cell();
     let title = bench_manifest(None);
-    let mut opts = bench_options(&title, &[]);
+    let mut opts = bench_options(&title, Some(&cell), &[]);
     opts.prescan = true;
     assert!(incomparable_reasons(&opts).is_empty());
 }
 
 #[test]
 fn a_shortened_run_is_not_compared_against_the_anchor() {
+    let cell = test_cell();
     let title = bench_manifest(None);
-    let mut opts = bench_options(&title, &[]);
+    let mut opts = bench_options(&title, Some(&cell), &[]);
     opts.max_steps = 50_000;
     let reasons = incomparable_reasons(&opts);
     assert_eq!(reasons.len(), 1, "got {reasons:?}");
     assert!(reasons[0].contains("--max-steps 50000"), "got {reasons:?}");
 }
 
+/// The cell's cap is what its anchor was recorded at, so a run at the
+/// title-level default is the retargeted one.
+#[test]
+fn a_run_at_the_title_cap_is_incomparable_against_a_cell_that_overrides_it() {
+    let cell = test_cell();
+    let title = bench_manifest(Some(4_000));
+    let mut opts = bench_options(&title, Some(&cell), &[]);
+    opts.plan.max_steps = 250;
+    let reasons = incomparable_reasons(&opts);
+    assert_eq!(reasons.len(), 1, "got {reasons:?}");
+    assert!(
+        reasons[0].contains("--max-steps 4000") && reasons[0].contains("250"),
+        "got {reasons:?}"
+    );
+}
+
 #[test]
 fn every_trajectory_override_names_itself_as_incomparable() {
+    let cell = test_cell();
     let title = bench_manifest(None);
     let args = vec!["EBOOT.BIN".to_string()];
 
-    let mut checkpoint = bench_options(&title, &[]);
+    let mut checkpoint = bench_options(&title, Some(&cell), &[]);
     checkpoint.checkpoint_override = Some(manifest::CheckpointTrigger::Pc(0x1_0000));
-    let mut budget = bench_options(&title, &[]);
+    let mut budget = bench_options(&title, Some(&cell), &[]);
     budget.budget_override = Some(Budget::new(512));
-    let mut strict = bench_options(&title, &[]);
+    let mut strict = bench_options(&title, Some(&cell), &[]);
     strict.strict_reserved = true;
-    let guest = bench_options(&title, &args);
+    let guest = bench_options(&title, Some(&cell), &args);
 
     for (label, opts) in [
         ("--checkpoint", checkpoint),
@@ -689,44 +1044,46 @@ fn every_trajectory_override_names_itself_as_incomparable() {
     }
 }
 
+/// An anchor is filed under a cell, so a run that composed none has
+/// nothing to be held against.
 #[test]
-fn every_selection_flag_names_itself_as_incomparable() {
+fn a_run_that_composed_no_cell_is_not_compared() {
     let title = bench_manifest(None);
-    for (label, selection) in [
-        (
-            "--firmware-dir",
-            SelectionArgs {
-                firmware_dir: Some("dev_flash/sys/external"),
-                ..SelectionArgs::default()
-            },
-        ),
-        (
-            "--fw",
-            SelectionArgs {
-                fw: Some("4.91"),
-                ..SelectionArgs::default()
-            },
-        ),
-        (
-            "--game-ver",
-            SelectionArgs {
-                game_ver: Some("02.51"),
-                ..SelectionArgs::default()
-            },
-        ),
-    ] {
-        let mut opts = bench_options(&title, &[]);
-        opts.selection = selection;
-        let reasons = incomparable_reasons(&opts);
-        assert_eq!(reasons.len(), 1, "{label}: got {reasons:?}");
-        assert!(reasons[0].contains(label), "{label}: got {reasons:?}");
-    }
+
+    let mut unmanaged = bench_options(&title, None, &[]);
+    unmanaged.selection = SelectionArgs {
+        firmware_dir: Some("dev_flash/sys/external"),
+        ..SelectionArgs::default()
+    };
+    let reasons = incomparable_reasons(&unmanaged);
+    assert_eq!(reasons.len(), 1, "got {reasons:?}");
+    assert!(reasons[0].contains("--firmware-dir"), "got {reasons:?}");
+
+    let reasons = incomparable_reasons(&bench_options(&title, None, &[]));
+    assert_eq!(reasons.len(), 1, "got {reasons:?}");
+    assert!(reasons[0].contains("composed no cell"), "got {reasons:?}");
+}
+
+/// The anchor is keyed by the firmware and the game version, so a run
+/// that selects them composes the cell it is held against.
+#[test]
+fn selecting_a_firmware_and_a_game_version_leaves_the_run_comparable() {
+    let cell = test_cell();
+    let title = bench_manifest(None);
+    let mut opts = bench_options(&title, Some(&cell), &[]);
+    opts.selection = SelectionArgs {
+        fw: Some("4.93"),
+        game_ver: Some("base"),
+        ..SelectionArgs::default()
+    };
+    assert!(incomparable_reasons(&opts).is_empty());
 }
 
 #[test]
 fn the_child_receives_the_selection_flags_not_the_resolved_firmware_dir() {
+    let cell = test_cell();
     let title = bench_manifest(None);
-    let mut opts = bench_options(&title, &[]);
+    let mut opts = bench_options(&title, Some(&cell), &[]);
     opts.firmware_dir = Some("resolved/4.91/dev_flash/sys/external");
     opts.selection = SelectionArgs {
         fw: Some("4.91"),
@@ -756,13 +1113,14 @@ fn the_child_receives_the_selection_flags_not_the_resolved_firmware_dir() {
     );
 }
 
-/// Restating the manifest's own checkpoint is not a retarget, so it
-/// must not disable the comparison.
+/// Restating the cell's own checkpoint is not a retarget, so it must
+/// not disable the comparison.
 #[test]
-fn a_checkpoint_override_equal_to_the_manifest_stays_comparable() {
+fn a_checkpoint_override_equal_to_the_cells_stays_comparable() {
+    let cell = test_cell();
     let title = bench_manifest(None);
-    let mut opts = bench_options(&title, &[]);
-    opts.checkpoint_override = Some(title.checkpoint_trigger());
+    let mut opts = bench_options(&title, Some(&cell), &[]);
+    opts.checkpoint_override = Some(opts.plan.checkpoint);
     assert!(incomparable_reasons(&opts).is_empty());
 }
 
@@ -790,6 +1148,7 @@ fn a_witness_that_moved_between_runs_is_a_determinism_break() {
     let run = BenchBootResult {
         steps: 10,
         wall: Duration::from_millis(100),
+        budget: Budget::new(256),
         outcome: BootOutcome::ProcessExit,
     };
     let drift = wall_disagreement_percent(run.wall, run.wall);

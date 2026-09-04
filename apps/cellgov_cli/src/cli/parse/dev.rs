@@ -215,6 +215,12 @@ pub(crate) struct AnchorScope {
 pub(crate) struct RecordAnchorsArgs {
     #[command(flatten)]
     pub scope: AnchorScope,
+    /// Record only the declared cells at this firmware version.
+    #[arg(long, value_name = "VERSION")]
+    pub fw: Option<String>,
+    /// Record only the declared cells at this game version.
+    #[arg(long, value_name = "base|VERSION")]
+    pub game_ver: Option<String>,
     /// Registry directory; must be the one the measurement reads.
     #[arg(long, value_name = "DIR")]
     pub registry: Option<PathBuf>,

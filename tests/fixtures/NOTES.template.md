@@ -70,7 +70,7 @@ new structurally-grounded DivergenceClass, etc.>
 ## Notes on each section
 
 - **Frontmatter** mirrors fields already in `titles/<id>.toml`
-  + `cellgov/boot_summary.json` + `cross_runner_summary.json`.
+  + the cell's anchor + `cross_runner_summary.json`.
   Duplicates the headline so a reader scanning multiple NOTES.md
   files gets the title at a glance without opening the generated
   triple.

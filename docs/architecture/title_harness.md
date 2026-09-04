@@ -54,11 +54,25 @@ reached, cross-runner observation match).
 
 ## Title anchors and witnesses
 
-Each title's expected boot behaviour is committed data, not test
-code: `tests/fixtures/<content-id>/cellgov/boot_summary.json`
-records the step count, outcome, and a witness set -- named
-counters the boot emits as `BENCH_*` stderr lines (atomic-op
-executions, invariant breaks, PRX load misses, ...). Every
+An anchor is evidence about a cell, so it is filed under one:
+
+```
+tests/fixtures/<content-id>/cellgov/anchors/fw-<ver>/<game-ver>/
+  boot_summary.json
+  boot_history.jsonl
+```
+
+A firmware-shipped title has no game-version axis, so its anchors sit
+one level shallower -- the path names every axis the cell has and no
+segment standing for one it does not. Nothing keys an anchor by content
+id alone: the moment two firmwares can coexist, a witness moved by a
+firmware swap and a regression are the same reading.
+
+Each cell's expected boot behaviour is committed data, not test code:
+`boot_summary.json` records the step count, outcome, per-step budget,
+the identity triple the measurement was taken against, and a witness
+set -- named counters the boot emits as `BENCH_*` stderr lines
+(atomic-op executions, invariant breaks, PRX load misses, ...). Every
 witness carries a class:
 
 - `exact`: any movement is a finding;
@@ -76,28 +90,41 @@ carries no witness (a run-dependent key set, a line repeated per
 module, a line suppressed on the quiet path), and a test holds
 the emitters to that split.
 
-`dev record-anchors` is the only writer: it re-measures, rewrites the
-baseline (outcome included), and appends one line per real move
-to the title's append-only `boot_history.jsonl`, so blessing a
-change is a reviewable data diff.
+`dev record-anchors` is the only writer. It records the cells the
+registry declares and refuses one it does not: the store may hold ten
+firmwares, and a gated cell is one somebody reviewed into a
+`[[bench.matrix]]` row. `--fw` and `--game-ver` narrow the recording to
+the declared cells they name. Each recording re-measures the cell at
+its own cap and checkpoint, rewrites the anchor (outcome included), and
+appends one line per real move to that cell's append-only
+`boot_history.jsonl`, so blessing a change is a reviewable data diff.
+Per-cell files start empty rather than inheriting anything: a reader
+that has to treat absence as "some earlier firmware" cannot say what it
+is looking at.
 
-The summary and every history line also carry the identity triple
-the measurement was taken against -- which firmware answered, and
-which of the title's installed versions ran. A line that names
-none was recorded before the store carried versions, which is why
-a first triple over such a line is not itself a move.
+The gate holds a run against the anchor of the cell the run composed,
+and against nothing else. A cell with no committed anchor reports
+`NOT RECORDED` and gates nothing, the same way a retargeted run reports
+`NOT COMPARED`. A run that composed no cell at all -- an unmanaged
+`--firmware-dir` tree, or a title the store does not hold -- has no key
+to file evidence under, so it is reported incomparable rather than held
+against a neighbouring cell. The gate also compares the triple the
+anchor embeds against the one the run composed, so a file hand-edited,
+copied in from another cell, or measured before one side of the triple
+was installed says so instead of standing in for this cell's
+measurement.
 
 ```mermaid
 flowchart LR
-  bb["boot bench --title NAME"] --> boot["two subprocess-isolated boots"]
+  bb["boot bench --title NAME --fw F --game-ver V"] --> boot["two subprocess-isolated boots"]
   boot --> lines["BENCH_* stderr lines"]
   lines --> chk["witness checker: exact / at-least / absent / informational; every recorded emitter must appear"]
-  base["tests/fixtures/ID/cellgov/boot_summary.json"] --> chk
+  base["anchors/fw-F/V/boot_summary.json"] --> chk
   chk -->|all hold| ok["anchor matches"]
   chk -->|any moved| fail["fails, naming every moved witness"]
   fail -.->|a movement you can name| ra["record-anchors --title NAME"]
   ra --> base
-  ra --> hist["one line appended to boot_history.jsonl"]
+  ra --> hist["one line appended to that cell's boot_history.jsonl"]
 ```
 
 The title suites (`title_witnesses`, `authority_id`) sit behind

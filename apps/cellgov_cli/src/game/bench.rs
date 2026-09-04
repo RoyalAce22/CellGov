@@ -7,13 +7,16 @@ use std::time::Instant;
 
 use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
 use cellgov_compare::witnesses::{check_all, unrecorded};
-use cellgov_compare::{BootOutcome, BootOutcomeParseError, BootSummary};
+use cellgov_compare::{
+    BootOutcome, BootOutcomeParseError, BootSummary, FirmwareIdentity, GameIdentity, RunIdentity,
+    RUN_IDENTITY_SENTINEL,
+};
 use cellgov_time::Budget;
 
 use super::boot;
-use super::manifest::{self, TitleManifest};
+use super::manifest::{self, CellKey, TitleManifest};
 use super::step_loop::bench_step_loop;
-use crate::paths::{boot_anchor_path, workspace_root, DEFAULT_BENCH_MAX_STEPS};
+use crate::paths::{boot_anchor_path, workspace_root};
 
 /// Wall-time disagreement that trips the pair gate, as a percentage
 /// of the faster run.
@@ -33,12 +36,29 @@ pub struct SelectionArgs<'a> {
     pub vfs_root: Option<&'a str>,
 }
 
+/// The cell a run is held against, and the two parameters the registry
+/// fixes for it.
+#[derive(Debug, Clone, Copy)]
+pub struct AnchorPlan<'a> {
+    /// `None` when the composition names no cell:
+    ///
+    /// - an unmanaged firmware tree carries no version;
+    /// - a title the store does not hold has no game-version axis.
+    pub cell: Option<&'a CellKey>,
+    /// Instruction cap the cell's anchor is recorded under.
+    pub max_steps: u64,
+    /// Checkpoint the cell's anchor is recorded under.
+    pub checkpoint: manifest::CheckpointTrigger,
+}
+
 /// Inputs common to every `boot bench` entry point.
 #[derive(Debug, Clone, Copy)]
 pub struct BenchOptions<'a> {
     pub title: &'a TitleManifest,
     pub elf_path: &'a str,
     pub max_steps: usize,
+    /// What the registry declares for the cell this run composes.
+    pub plan: AnchorPlan<'a>,
     /// The `sys/external` directory the firmware loader reads.
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
@@ -55,7 +75,7 @@ pub struct BenchOptions<'a> {
     /// Guest argv for the primary thread, `argv[0]` included. Empty
     /// keeps the no-args entry state (r3..r6 = 0).
     pub guest_args: &'a [String],
-    /// Compare the run against the title's committed anchor. Cleared
+    /// Compare the run against the cell's committed anchor. Cleared
     /// by `--no-anchor-check` for the re-record workflow, where the
     /// anchor is expected to disagree.
     pub check_anchor: bool,
@@ -101,12 +121,14 @@ impl BenchOptions<'_> {
     }
 }
 
-/// One completed bench run: retired step count, wall duration, and
-/// terminal [`BootOutcome`].
+/// One completed bench run.
 #[derive(Debug, Clone, Copy)]
 pub struct BenchBootResult {
     pub steps: usize,
     pub wall: std::time::Duration,
+    /// Instructions each step was granted; `steps * budget` is the
+    /// count the run retired.
+    pub budget: Budget,
     pub outcome: BootOutcome,
 }
 
@@ -129,7 +151,7 @@ pub enum BenchGate {
     Pass,
     /// Runs disagreed on retired step count or boot outcome.
     DeterminismBreak,
-    /// The run disagreed with the title's committed anchor.
+    /// The run disagreed with the cell's committed anchor.
     AnchorDrift,
     /// Wall drift exceeded the gate.
     WallDriftExceeded,
@@ -190,9 +212,8 @@ pub fn bench_boot(
     let mut rt = prepared.rt;
     let authid_source = prepared.authid_source;
     let child_init = prepared.child_init;
-    let active_checkpoint = opts
-        .checkpoint_override
-        .unwrap_or_else(|| opts.title.checkpoint_trigger());
+    let step_budget = prepared.step_budget;
+    let active_checkpoint = opts.checkpoint_override.unwrap_or(opts.plan.checkpoint);
     super::run::configure_rsx_from_manifest(&mut rt, opts.title);
 
     let mut steps: usize = 0;
@@ -537,6 +558,7 @@ pub fn bench_boot(
     BenchBootResult {
         steps,
         wall,
+        budget: step_budget,
         outcome,
     }
 }
@@ -578,10 +600,11 @@ pub fn bench_boot_one_run(
 /// printed from; `steps_per_sec` itself is carried for readers.
 fn format_bench_result(r: &BenchBootResult) -> String {
     format!(
-        "BENCH_RESULT steps={} wall_ns={} steps_per_sec={:.0} outcome={}",
+        "BENCH_RESULT steps={} wall_ns={} steps_per_sec={:.0} budget={} outcome={}",
         r.steps,
         r.wall.as_nanos(),
         r.steps_per_sec(),
+        r.budget.raw(),
         r.outcome,
     )
 }
@@ -714,15 +737,22 @@ pub fn bench_boot_pair(
         AnchorVerdict::Skipped
     } else {
         let reasons = incomparable_reasons(&opts);
-        if reasons.is_empty() {
-            check_anchor(
+        match (reasons.is_empty(), opts.plan.cell) {
+            // `incomparable_reasons` names a missing cell as one of its
+            // reasons, so an empty list implies a cell.
+            (true, Some(cell)) => check_anchor(
                 &opts.title.content_id,
-                r1.steps as u64,
-                &r1.outcome.to_string(),
-                &r1_stderr,
-            )
-        } else {
-            AnchorVerdict::NotComparable(reasons)
+                cell,
+                &MeasuredRun {
+                    checkpoint: opts.checkpoint_override.unwrap_or(opts.plan.checkpoint),
+                    steps: r1.steps as u64,
+                    budget: r1.budget,
+                    outcome: r1.outcome.to_string(),
+                    stderr: &r1_stderr,
+                },
+            ),
+            (true, None) => unreachable!("an unnameable cell is itself an incomparable reason"),
+            (false, _) => AnchorVerdict::NotComparable(reasons),
         }
     };
     match &anchor {
@@ -734,16 +764,22 @@ pub fn bench_boot_pair(
                 reasons.join("; ")
             );
         }
-        AnchorVerdict::NoBaseline => println!(
-            "  anchor: none recorded for {} (skipped)",
-            opts.title.content_id
+        AnchorVerdict::NotRecorded(cell) => println!(
+            "  anchor: NOT RECORDED for {cell} (gates nothing) -- record it with \
+             `dev record-anchors --title {}`",
+            opts.title.name()
         ),
-        AnchorVerdict::Match => println!("  anchor: matches {}", opts.title.content_id),
+        AnchorVerdict::Match => println!(
+            "  anchor: matches {} {}",
+            opts.title.content_id,
+            opts.plan.cell.map_or_else(String::new, CellKey::label)
+        ),
         AnchorVerdict::Drift(f) => {
             println!(
-                "  anchor: {} disagreement(s) vs {}",
+                "  anchor: {} disagreement(s) vs {} {}",
                 f.len(),
-                opts.title.content_id
+                opts.title.content_id,
+                opts.plan.cell.map_or_else(String::new, CellKey::label)
             )
         }
     }
@@ -784,72 +820,58 @@ pub fn bench_boot_pair(
     })
 }
 
-/// How a run compared against the title's committed anchor.
+/// How a run compared against its cell's committed anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AnchorVerdict {
     /// The check was not requested.
     Skipped,
     /// The comparison is meaningless for this invocation; each string
-    /// names one cause. Distinct from [`Self::NoBaseline`] so a
-    /// retargeted run never reads as "nothing is recorded".
+    /// names one cause.
     NotComparable(Vec<String>),
-    /// No anchor is committed for this title, so there is nothing to
-    /// compare against. A title being benchmarked before its first
-    /// `dev record-anchors` is an ordinary state, not a failure.
-    NoBaseline,
+    /// No anchor is committed for the cell this run composed, so there
+    /// is nothing to compare against.
+    NotRecorded(String),
     /// The run reproduced every recorded value.
     Match,
     /// Every disagreement found, in the order the comparison made them.
     Drift(Vec<String>),
 }
 
-/// Why this invocation cannot be held against the committed anchor.
+/// Why this invocation cannot be held against the cell's committed
+/// anchor.
 ///
-/// The anchor is measured by `dev record-anchors`, which boots the title
-/// under its manifest defaults and nothing else. An override that
-/// moves the trajectory yields a legitimately different run, so gating
-/// it would report a regression that is not one. `--prescan` is absent
-/// from the list because it only prints a decode report before
+/// The anchor is measured by `dev record-anchors`, which boots the cell
+/// under what its manifest row declares and nothing else. An override
+/// that moves the trajectory yields a legitimately different run, so
+/// gating it would report a regression that is not one. `--prescan` is
+/// absent from the list because it only prints a decode report before
 /// execution.
 fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
     let mut reasons = Vec::new();
     if let Some(dir) = opts.selection.firmware_dir {
         reasons.push(format!(
-            "--firmware-dir {dir} is unmanaged: the run carries no firmware version, and the \
-             anchor is recorded against an installed one"
+            "--firmware-dir {dir} is unmanaged: the run carries no firmware version, so nothing \
+             names the cell an anchor would be filed under"
+        ));
+    } else if opts.plan.cell.is_none() {
+        reasons.push(format!(
+            "{} composed no cell: an anchor is keyed by (content id, firmware, game version), \
+             and this run named no firmware version or no game version to key on",
+            opts.title.name()
         ));
     }
-    // An anchor is keyed by content id alone, so it cannot say which
-    // firmware or which content version it was recorded under. Naming
-    // either here is a selection `dev record-anchors` never made.
-    if let Some(fw) = opts.selection.fw {
+    if opts.max_steps as u64 != opts.plan.max_steps {
         reasons.push(format!(
-            "--fw {fw} selects a firmware; the anchor names none, so nothing can say the two \
-             ran the same library"
-        ));
-    }
-    if let Some(ver) = opts.selection.game_ver {
-        reasons.push(format!(
-            "--game-ver {ver} selects a content version; the anchor names none, so nothing can \
-             say the two ran the same tree"
-        ));
-    }
-    let recorded_cap = opts
-        .title
-        .bench_max_steps
-        .unwrap_or(DEFAULT_BENCH_MAX_STEPS);
-    if opts.max_steps as u64 != recorded_cap {
-        reasons.push(format!(
-            "--max-steps {} differs from the {recorded_cap} the anchor is recorded under",
-            opts.max_steps
+            "--max-steps {} differs from the {} the cell's anchor is recorded under",
+            opts.max_steps, opts.plan.max_steps
         ));
     }
     if let Some(cp) = opts.checkpoint_override {
-        if cp != opts.title.checkpoint_trigger() {
+        if cp != opts.plan.checkpoint {
             reasons.push(format!(
-                "--checkpoint {} overrides the manifest checkpoint {}",
+                "--checkpoint {} overrides the cell's checkpoint {}",
                 cp.as_cli_str(),
-                opts.title.checkpoint_trigger().as_cli_str()
+                opts.plan.checkpoint.as_cli_str()
             ));
         }
     }
@@ -915,6 +937,60 @@ fn witness_disagreements(r1_stderr: &str, r2_stderr: &str) -> Vec<String> {
     out
 }
 
+/// How the triple a summary embeds disagrees with the one the run
+/// composed.
+///
+/// The anchor's directory names the cell it is filed under; the
+/// embedded triple is what the recording run itself composed. A file
+/// whose two accounts disagree was measured elsewhere, so the numbers
+/// below compare two different cells.
+fn mislabelled_anchor(recorded: &RunIdentity, run: &RunIdentity) -> Vec<String> {
+    let mut failures = Vec::new();
+    if recorded.firmware != run.firmware {
+        failures.push(format!(
+            "the anchor was measured against a different firmware: recorded {}, ran {}",
+            render_firmware(recorded.firmware.as_ref()),
+            render_firmware(run.firmware.as_ref()),
+        ));
+    }
+    if recorded.game != run.game {
+        failures.push(format!(
+            "the anchor was measured against a different title version: recorded {}, ran {}",
+            render_game(recorded.game.as_ref()),
+            render_game(run.game.as_ref()),
+        ));
+    }
+    failures
+}
+
+/// How a report names the firmware half.
+///
+/// The comparison covers every field, so the report renders every
+/// field. Two entries installed from different PUPs can carry one
+/// version string. The version alone would then print the same value
+/// on both sides of a disagreement.
+fn render_firmware(half: Option<&FirmwareIdentity>) -> String {
+    half.map_or_else(unidentified, |f| {
+        format!(
+            "{} (image {}, pup sha256 {})",
+            f.version, f.image_version, f.pup_sha256
+        )
+    })
+}
+
+/// How a report names the game half. Renders every compared field for
+/// the reason [`render_firmware`] gives.
+fn render_game(half: Option<&GameIdentity>) -> String {
+    half.map_or_else(unidentified, |g| {
+        format!("{} {} (app_ver {})", g.title_id, g.version, g.app_ver)
+    })
+}
+
+/// The half a run had nothing to name.
+fn unidentified() -> String {
+    "(unidentified)".to_string()
+}
+
 /// Compare a run against a loaded anchor, returning every
 /// disagreement.
 ///
@@ -922,13 +998,33 @@ fn witness_disagreements(r1_stderr: &str, r2_stderr: &str) -> Vec<String> {
 /// agree, or `boot bench` would pass a run the witness suite rejects.
 fn anchor_disagreements(
     baseline: &BootSummary,
+    identity: &RunIdentity,
+    checkpoint: manifest::CheckpointTrigger,
     steps: u64,
+    budget: Budget,
     outcome: &str,
     observed: &ParsedWitnesses,
 ) -> Vec<String> {
-    let mut failures = Vec::new();
+    let mut failures = mislabelled_anchor(&baseline.identity, identity);
+    // The checkpoint is a manifest row an edit can move after the
+    // anchor was recorded. A stop condition the run never reaches
+    // leaves the steps, the outcome and the witnesses intact, so
+    // nothing else in this comparison sees the move.
+    let recorded_checkpoint = crate::paths::checkpoint_kind(checkpoint);
+    if recorded_checkpoint != baseline.checkpoint {
+        failures.push(format!(
+            "checkpoint {} != recorded {}",
+            recorded_checkpoint.as_markdown_label(),
+            baseline.checkpoint.as_markdown_label()
+        ));
+    }
     if steps != baseline.steps {
         failures.push(format!("steps {steps} != recorded {}", baseline.steps));
+    }
+    // `steps * budget` is the anchor's instruction count, so a moved
+    // budget retires a different trajectory under an unmoved step count.
+    if budget != baseline.budget {
+        failures.push(format!("budget {budget} != recorded {}", baseline.budget));
     }
     // Display, not Debug: `BootOutcome`'s `FromStr` round-trips the
     // Display form, and the two disagree for `PcReached`, whose Debug
@@ -952,8 +1048,21 @@ fn anchor_disagreements(
     failures
 }
 
-/// Load the anchor for `content_id` and compare `stderr`'s witness
-/// lines against it.
+/// What one measured run of the pair produced, in the terms the anchor
+/// records.
+struct MeasuredRun<'a> {
+    /// Stop condition the run was taken at.
+    checkpoint: manifest::CheckpointTrigger,
+    steps: u64,
+    budget: Budget,
+    outcome: String,
+    /// The measuring process's own stderr: the witness lines, and the
+    /// `RUN_IDENTITY` line naming what it composed.
+    stderr: &'a str,
+}
+
+/// Load the anchor for one cell of `content_id` and compare `run`
+/// against it.
 ///
 /// An unreadable or unparseable anchor is a disagreement, not a skip:
 /// only a genuinely absent file means "nothing recorded yet".
@@ -961,18 +1070,17 @@ fn anchor_disagreements(
 /// [`workspace_root`] is compiled in, so a binary invoked outside the
 /// tree it was built from reaches no anchor at all. That says nothing
 /// about what is recorded, so it reports as
-/// [`AnchorVerdict::NotComparable`] rather than letting every title
+/// [`AnchorVerdict::NotComparable`] rather than letting every cell
 /// look unrecorded.
-fn check_anchor(content_id: &str, steps: u64, outcome: &str, stderr: &str) -> AnchorVerdict {
-    check_anchor_under(&workspace_root(), content_id, steps, outcome, stderr)
+fn check_anchor(content_id: &str, cell: &CellKey, run: &MeasuredRun<'_>) -> AnchorVerdict {
+    check_anchor_under(&workspace_root(), content_id, cell, run)
 }
 
 fn check_anchor_under(
     root: &Path,
     content_id: &str,
-    steps: u64,
-    outcome: &str,
-    stderr: &str,
+    cell: &CellKey,
+    run: &MeasuredRun<'_>,
 ) -> AnchorVerdict {
     if !root.is_dir() {
         return AnchorVerdict::NotComparable(vec![format!(
@@ -981,10 +1089,12 @@ fn check_anchor_under(
             root.display()
         )]);
     }
-    let path = boot_anchor_path(root, content_id);
+    let path = boot_anchor_path(root, content_id, cell);
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AnchorVerdict::NoBaseline,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return AnchorVerdict::NotRecorded(cell.label())
+        }
         Err(e) => {
             return AnchorVerdict::Drift(vec![format!("read {}: {e}", path.display())]);
         }
@@ -995,7 +1105,7 @@ fn check_anchor_under(
             return AnchorVerdict::Drift(vec![format!("parse {}: {e}", path.display())]);
         }
     };
-    let observed = match parse_witness_lines(stderr) {
+    let observed = match parse_witness_lines(run.stderr) {
         Ok(w) => w,
         Err(errs) => {
             return AnchorVerdict::Drift(
@@ -1005,7 +1115,29 @@ fn check_anchor_under(
             );
         }
     };
-    let failures = anchor_disagreements(&baseline, steps, outcome, &observed);
+    // The triple comes out of the measuring child's own stream. The
+    // steps and the witnesses below came out of that same stream, and
+    // a triple the parent resolved would hide the mismatch this
+    // comparison exists to catch.
+    let identity = match RunIdentity::parse_sentinel_lines(run.stderr) {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            return AnchorVerdict::Drift(vec![format!(
+                "the measured run printed no {RUN_IDENTITY_SENTINEL} line, so nothing says \
+                 which firmware and title version produced these numbers"
+            )])
+        }
+        Err(e) => return AnchorVerdict::Drift(vec![e.to_string()]),
+    };
+    let failures = anchor_disagreements(
+        &baseline,
+        &identity,
+        run.checkpoint,
+        run.steps,
+        run.budget,
+        &run.outcome,
+        &observed,
+    );
     if failures.is_empty() {
         AnchorVerdict::Match
     } else {
@@ -1053,6 +1185,10 @@ pub enum ParseBenchError {
     MissingWallNs,
     #[error("BENCH_RESULT: malformed wall_ns={0:?}")]
     MalformedWallNs(String),
+    #[error("BENCH_RESULT: missing budget= field")]
+    MissingBudget,
+    #[error("BENCH_RESULT: malformed budget={0:?}")]
+    MalformedBudget(String),
     #[error("BENCH_RESULT: missing outcome= field")]
     MissingOutcome,
     #[error("BENCH_RESULT: malformed outcome={token:?}: {source}")]
@@ -1063,8 +1199,8 @@ pub enum ParseBenchError {
     },
 }
 
-/// Parse the `BENCH_RESULT steps=N wall_ns=M steps_per_sec=X outcome=O`
-/// line out of captured stdout.
+/// Parse the `BENCH_RESULT steps=N wall_ns=M steps_per_sec=X budget=B
+/// outcome=O` line out of captured stdout.
 ///
 /// `wall_ns` must fit a `u64` (about 584 years); the child's `u128`
 /// print never exceeds that for a real run, and a larger value is
@@ -1077,6 +1213,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
     }
     let mut steps: Option<usize> = None;
     let mut wall_ns: Option<u64> = None;
+    let mut budget: Option<u64> = None;
     let mut outcome_token: Option<String> = None;
     let mut reported_sps: Option<f64> = None;
     for tok in line.split_whitespace().skip(1) {
@@ -1090,6 +1227,11 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
                 v.parse()
                     .map_err(|_| ParseBenchError::MalformedWallNs(v.to_string()))?,
             );
+        } else if let Some(v) = tok.strip_prefix("budget=") {
+            budget = Some(
+                v.parse()
+                    .map_err(|_| ParseBenchError::MalformedBudget(v.to_string()))?,
+            );
         } else if let Some(v) = tok.strip_prefix("steps_per_sec=") {
             reported_sps = v.parse().ok();
         } else if let Some(v) = tok.strip_prefix("outcome=") {
@@ -1102,6 +1244,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
     }
     let steps = steps.ok_or(ParseBenchError::MissingSteps)?;
     let wall_ns = wall_ns.ok_or(ParseBenchError::MissingWallNs)?;
+    let budget = budget.ok_or(ParseBenchError::MissingBudget)?;
     let outcome_token = outcome_token.ok_or(ParseBenchError::MissingOutcome)?;
     let outcome = BootOutcome::from_str(&outcome_token).map_err(|source| {
         ParseBenchError::UnparseableOutcome {
@@ -1113,6 +1256,7 @@ pub(crate) fn parse_bench_result(stdout: &str) -> Result<BenchBootResult, ParseB
     let result = BenchBootResult {
         steps,
         wall,
+        budget: Budget::new(budget),
         outcome,
     };
     // The transport is lossless, so the parent recomputes
@@ -1197,10 +1341,19 @@ mod child_command_tests {
         let title = bench_manifest();
         let identity = cellgov_compare::RunIdentity::default();
         let guest_args = vec!["--trace".to_string(), "argv1".to_string()];
+        let cell = CellKey {
+            fw: "4.91".to_string(),
+            game_ver: Some("02.51".to_string()),
+        };
         let opts = BenchOptions {
             title: &title,
             elf_path: "EBOOT.BIN",
             max_steps: 4_000,
+            plan: AnchorPlan {
+                cell: Some(&cell),
+                max_steps: 4_000,
+                checkpoint: manifest::CheckpointTrigger::ProcessExit,
+            },
             // The resolved directory, which must not reach the child.
             firmware_dir: Some("resolved/4.91/dev_flash/sys/external"),
             composed_mounts: &[],
@@ -1262,6 +1415,11 @@ mod child_command_tests {
             title: &title,
             elf_path: "EBOOT.BIN",
             max_steps: 4_000,
+            plan: AnchorPlan {
+                cell: None,
+                max_steps: 4_000,
+                checkpoint: manifest::CheckpointTrigger::ProcessExit,
+            },
             firmware_dir: Some("elsewhere/sys/external"),
             composed_mounts: &[],
             identity: &identity,

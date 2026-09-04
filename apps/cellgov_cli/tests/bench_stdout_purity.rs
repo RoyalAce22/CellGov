@@ -8,9 +8,9 @@
 //!
 //! Both runs must also render: a case whose bar emitted nothing would
 //! compare two identical no-bar runs and pass on a broken renderer, so
-//! each asserts its threshold lines reached stderr. The cap is the
-//! title's own, so the boot walks the trajectory its anchor records
-//! and the comparison is over a real result stream.
+//! each asserts its threshold lines reached stderr. The boot names the
+//! reference cell and uses that cell's cap, so it walks the trajectory
+//! the cell's anchor records over a real result stream.
 //!
 //! Needs an installed title: the contract is about a real boot's
 //! output, and no synthetic input reaches the step loop.
@@ -94,7 +94,7 @@ fn by_cost() -> Vec<(u64, TitleUnderTest)> {
     let mut out: Vec<(u64, TitleUnderTest)> = titles()
         .into_iter()
         .map(|t| {
-            let path = boot_anchor_path(&t.content_id);
+            let path = boot_anchor_path(&t.content_id, &t.reference);
             let text = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("{}: read {}: {e}", t.short_name, path.display()));
             let summary: BootSummary = serde_json::from_str(&text).unwrap_or_else(|e| {
@@ -125,11 +125,21 @@ struct Baseline {
 /// finding the title costs no extra boot.
 fn first_installed(build: impl Fn(&str, &str) -> Vec<String>) -> Baseline {
     for (_, title) in by_cost() {
-        // The title's own cap. A smaller one is not a shorter version
-        // of the same boot: the cap bounds module_start too, so a run
-        // under it dies before the step loop.
+        // The reference cell's own cap. It bounds module_start too, so
+        // a run under a smaller cap dies before the step loop.
         let cap = title.max_steps.to_string();
-        let args = build(&title.short_name, &cap);
+        let mut args = build(&title.short_name, &cap);
+        // An unflagged selection refuses when the store holds several
+        // firmwares or several game versions, so the boot names the
+        // cell.
+        args.push("--fw".to_string());
+        args.push(title.reference.fw.clone());
+        // A firmware-shipped title has no game-version axis, and the
+        // composition refuses the flag for one.
+        if let Some(v) = &title.reference.game_ver {
+            args.push("--game-ver".to_string());
+            args.push(v.clone());
+        }
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         match run(&borrowed) {
             Some(run) => return Baseline { args, run },

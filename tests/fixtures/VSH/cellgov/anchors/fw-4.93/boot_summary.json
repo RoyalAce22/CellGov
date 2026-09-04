@@ -1,50 +1,50 @@
 {
   "checkpoint": {
-    "kind": "first_rsx_write"
+    "kind": "process_exit"
   },
-  "outcome": "RsxWriteCheckpoint",
-  "steps": 43055,
+  "outcome": "MaxSteps",
+  "steps": 389859,
   "budget": 256,
-  "host_invariant_breaks": 3,
+  "host_invariant_breaks": 119,
   "witnesses": {
     "cond_reacquires": {
-      "value": 0,
-      "class": "absent"
-    },
-    "dcbz": {
-      "value": 614,
+      "value": 1,
       "class": "at-least"
     },
-    "event_port_ipc_connect_attempts": {
+    "dcbz": {
       "value": 0,
       "class": "absent"
+    },
+    "event_port_ipc_connect_attempts": {
+      "value": 8,
+      "class": "at-least"
     },
     "event_port_ipc_connect_bound": {
-      "value": 0,
-      "class": "absent"
+      "value": 8,
+      "class": "at-least"
     },
     "event_port_keyed_queues": {
-      "value": 0,
-      "class": "absent"
+      "value": 12,
+      "class": "at-least"
     },
     "host_invariant_breaks": {
-      "value": 3,
+      "value": 119,
       "class": "exact"
     },
     "ldarx": {
-      "value": 11780,
+      "value": 31659,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 10798,
+      "value": 87881,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 982,
+      "value": 59,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 982,
+      "value": 66,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -64,32 +64,32 @@
       "class": "absent"
     },
     "mutex_unlock_not_owner": {
-      "value": 0,
-      "class": "absent"
+      "value": 140,
+      "class": "at-least"
     },
     "prx_load_hle_stubs": {
       "value": 0,
       "class": "absent"
     },
     "prx_load_not_found": {
-      "value": 1,
-      "class": "at-least"
+      "value": 0,
+      "class": "absent"
     },
     "register_module_calls": {
-      "value": 2,
+      "value": 4,
       "class": "at-least"
     },
     "register_module_linked_slots": {
-      "value": 0,
-      "class": "absent"
+      "value": 68,
+      "class": "at-least"
     },
     "register_module_manual": {
-      "value": 0,
-      "class": "absent"
+      "value": 2,
+      "class": "at-least"
     },
     "register_module_unresolved_nids": {
-      "value": 0,
-      "class": "absent"
+      "value": 126,
+      "class": "at-least"
     },
     "rsx_label_writes": {
       "value": 0,
@@ -104,15 +104,15 @@
       "class": "absent"
     },
     "spu_thread_init": {
-      "value": 5,
+      "value": 1,
       "class": "at-least"
     },
     "stdcx": {
-      "value": 10798,
+      "value": 31593,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 8833,
+      "value": 87762,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,16 +164,41 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 1,
+      "value": 14074,
       "class": "at-least"
     },
+    "uart_cids_distinct": {
+      "value": 14,
+      "class": "exact"
+    },
+    "uart_events_gated": {
+      "value": 0,
+      "class": "absent"
+    },
+    "uart_readers_queued": {
+      "value": 0,
+      "class": "absent"
+    },
+    "uart_rx_overflow_bytes": {
+      "value": 0,
+      "class": "absent"
+    },
+    "uart_unknown_cids": {
+      "value": 0,
+      "class": "exact"
+    },
     "unsupported_syscalls_distinct": {
-      "value": 1,
+      "value": 21,
       "class": "exact"
     },
     "vrsave_written": {
       "value": 0,
       "class": "exact"
     }
+  },
+  "firmware": {
+    "version": "4.93",
+    "image_version": "0x0000000000010b94",
+    "pup_sha256": "158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365"
   }
 }

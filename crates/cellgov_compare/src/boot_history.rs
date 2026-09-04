@@ -1,9 +1,8 @@
 //! Append-only record of every time a title's baseline moved.
 //!
-//! One JSON object per line in
-//! `tests/fixtures/<content-id>/cellgov/boot_history.jsonl`, appended
-//! by `dev record-anchors` and read by nobody at runtime -- it exists so a
-//! reader can answer "when did this anchor change, and to what".
+//! `dev record-anchors` appends one JSON object per line to one cell's
+//! `boot_history.jsonl`. Nothing reads the file at runtime; it exists
+//! so a reader can answer "when did this anchor change, and to what".
 //! Lines carry no timestamp or commit id, so a re-record is
 //! byte-reproducible: same code, same line. A run that changes nothing
 //! appends nothing, so every line in the file is a real move.

@@ -15,3 +15,10 @@ bench_max_steps = 100_000_000
 
 [checkpoint]
 kind = "first-rsx-write"
+
+# The one cell this title is gated and rendered at; see
+# docs/architecture/title_harness.md.
+[[bench.matrix]]
+fw = "4.93"
+game_ver = "base"
+reference = true

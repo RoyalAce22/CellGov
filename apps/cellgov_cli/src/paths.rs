@@ -1,10 +1,9 @@
-//! Workspace-relative locations the anchor machinery shares.
+//! Where a cell's anchor lives, and the two parameters it is measured
+//! under.
 //!
 //! `dev record-anchors` writes the boot anchors and `boot bench` gates
-//! against them. They must agree on where an anchor lives and on the
-//! instruction cap it was measured under -- a silent disagreement
-//! there would make the gate compare a run against the wrong file, or
-//! hold a default run against an anchor recorded at another cap.
+//! against them. They must agree on the cell an anchor is filed under,
+//! and on the cap and checkpoint it was measured at.
 //!
 //! A boot anchor is not a scenario observation: anchors are CellGov's
 //! own witnesses for a real title, under `tests/fixtures/<id>/`, while
@@ -13,20 +12,39 @@
 
 use std::path::{Path, PathBuf};
 
-/// Instruction cap a title boots under when its manifest sets none.
-///
-/// `dev record-anchors` measures with it, and `boot bench` reads it to
-/// tell a default-parameter run from one the operator retargeted.
+use cellgov_compare::CheckpointKind;
+
+use crate::game::manifest::{CellKey, CheckpointTrigger, MatrixCell, TitleManifest};
+
+/// Instruction cap a cell is measured under when neither it nor its
+/// title declares one.
 pub(crate) const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
 
-/// Instruction cap the anchor for `title` is recorded and gated under.
-///
-/// `dev record-anchors` measures with it and `boot bench` must default to
-/// it: a bench run at any other cap is reported incomparable and gates
-/// nothing, so a title that raises the cap would silently lose its
-/// anchor check.
-pub(crate) fn anchor_max_steps(title: &crate::game::manifest::TitleManifest) -> u64 {
-    title.bench_max_steps.unwrap_or(DEFAULT_BENCH_MAX_STEPS)
+/// Instruction cap `cell` is recorded and gated under.
+pub(crate) fn cell_max_steps(title: &TitleManifest, cell: Option<&MatrixCell>) -> u64 {
+    cell.and_then(|c| c.bench_max_steps)
+        .or(title.bench_max_steps)
+        .unwrap_or(DEFAULT_BENCH_MAX_STEPS)
+}
+
+/// Checkpoint `cell` is recorded and gated under.
+pub(crate) fn cell_checkpoint(
+    title: &TitleManifest,
+    cell: Option<&MatrixCell>,
+) -> CheckpointTrigger {
+    cell.and_then(|c| c.checkpoint)
+        .unwrap_or_else(|| title.checkpoint_trigger())
+}
+
+/// The wire form an anchor records a checkpoint in.
+pub(crate) fn checkpoint_kind(cp: CheckpointTrigger) -> CheckpointKind {
+    match cp {
+        CheckpointTrigger::ProcessExit => CheckpointKind::ProcessExit,
+        CheckpointTrigger::FirstRsxWrite => CheckpointKind::FirstRsxWrite,
+        CheckpointTrigger::Pc(addr) => CheckpointKind::Pc {
+            addr: cellgov_mem::GuestAddr::new(addr),
+        },
+    }
 }
 
 /// Compiled-in workspace root.
@@ -42,16 +60,43 @@ pub(crate) fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Committed boot anchor for `content_id`, under `root`.
-pub(crate) fn boot_anchor_path(root: &Path, content_id: &str) -> PathBuf {
-    root.join(format!(
-        "tests/fixtures/{content_id}/cellgov/boot_summary.json"
-    ))
+pub(crate) fn fixtures_dir(root: &Path) -> PathBuf {
+    root.join("tests").join("fixtures")
 }
 
-/// Append-only record of every anchor this title has been recorded at.
-pub(crate) fn history_path(root: &Path, content_id: &str) -> PathBuf {
-    root.join(format!(
-        "tests/fixtures/{content_id}/cellgov/boot_history.jsonl"
-    ))
+/// Directory holding one cell's committed anchor, under a fixture tree.
+///
+/// A firmware-shipped title has no game-version axis, so its cells sit
+/// one level shallower.
+pub(crate) fn cell_anchor_dir_in(fixtures: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
+    let dir = fixtures
+        .join(content_id)
+        .join("cellgov")
+        .join("anchors")
+        .join(format!("fw-{}", cell.fw));
+    match &cell.game_ver {
+        Some(v) => dir.join(v),
+        None => dir,
+    }
 }
+
+/// Committed boot anchor for one cell of `content_id`, under a fixture
+/// tree.
+pub(crate) fn boot_anchor_path_in(fixtures: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
+    cell_anchor_dir_in(fixtures, content_id, cell).join("boot_summary.json")
+}
+
+/// Committed boot anchor for one cell of `content_id`, under a
+/// workspace root.
+pub(crate) fn boot_anchor_path(root: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
+    boot_anchor_path_in(&fixtures_dir(root), content_id, cell)
+}
+
+/// Append-only record of every anchor recorded for this cell.
+pub(crate) fn history_path(root: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
+    cell_anchor_dir_in(&fixtures_dir(root), content_id, cell).join("boot_history.jsonl")
+}
+
+#[cfg(test)]
+#[path = "tests/paths_tests.rs"]
+mod tests;

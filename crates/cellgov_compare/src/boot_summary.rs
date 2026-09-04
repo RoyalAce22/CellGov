@@ -10,8 +10,8 @@ use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::runner_cellgov::BootOutcome;
 use crate::witnesses::WitnessSet;
 
-/// One title's run-side summary, JSON-serialized to
-/// `tests/fixtures/<id>/cellgov/boot_summary.json` by convention.
+/// One cell's run-side summary, JSON-serialized under
+/// `tests/fixtures/<id>/cellgov/anchors/` by convention.
 ///
 /// `checkpoint`/`outcome` consistency is enforced on deserialize
 /// via [`BootSummary::validate`]: outcomes that name a checkpoint

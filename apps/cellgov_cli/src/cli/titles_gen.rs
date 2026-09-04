@@ -1,8 +1,8 @@
 //! `cellgov dev titles-gen` -- regenerate `docs/titles.md` from
-//! `TitleRegistry::scan_dir` + per-title `boot_summary.json` and
-//! `cross_runner_summary.json`. ENOENT on a summary renders as `--`;
-//! any other I/O or parse failure surfaces as a typed error so a
-//! corrupted file cannot read the same as an absent one.
+//! `TitleRegistry::scan_dir` + the reference cell's anchor and the
+//! per-title `cross_runner_summary.json`. ENOENT on a summary renders
+//! as `--`; any other I/O or parse failure surfaces as a typed error so
+//! a corrupted file cannot read the same as an absent one.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -155,15 +155,23 @@ fn assert_table_safe(field: &str, value: &str) {
     );
 }
 
+/// The headline row's measurement: the anchor of the cell the manifest
+/// marks `reference = true`.
+///
+/// A title that declares no reference cell names no configuration for
+/// the row, so the row's data cells render as `--`.
 fn load_boot_summary(
     title: &TitleManifest,
     fixtures: &Path,
 ) -> Result<Option<BootSummary>, SummaryLoadError> {
-    let path: PathBuf = fixtures
-        .join(&title.content_id)
-        .join("cellgov")
-        .join("boot_summary.json");
-    load_summary_file(&path)
+    let Some(cell) = title.reference_cell() else {
+        return Ok(None);
+    };
+    load_summary_file(&crate::paths::boot_anchor_path_in(
+        fixtures,
+        &title.content_id,
+        &cell.key,
+    ))
 }
 
 fn load_cross_runner_summary(

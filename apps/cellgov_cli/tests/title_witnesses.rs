@@ -1,9 +1,10 @@
-//! Every installed title in the registry must reproduce its recorded
-//! baseline.
+//! Every installed title in the registry must reproduce its reference
+//! cell's recorded baseline.
 //!
-//! Titles come from `titles/`; expectations come from
-//! each title's committed `boot_summary.json`. Adding a title needs no
-//! change here -- drop in a manifest, record it, commit the baseline.
+//! Titles come from `titles/`; expectations come from the anchor of
+//! the cell each manifest marks `reference = true`. Adding a title
+//! needs no change here -- drop in a manifest, record it, commit the
+//! baseline.
 //!
 //! The registry is shared but installs vary per operator, so a title
 //! whose boot prints the not-installed marker skips by name; at least
@@ -35,6 +36,8 @@ use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
 struct Observed {
     witnesses: ParsedWitnesses,
     steps: u64,
+    /// Instructions per step; `steps * budget` is the instruction count.
+    budget: u64,
     outcome: String,
 }
 
@@ -47,12 +50,20 @@ enum Boot {
 }
 
 fn boot(title: &TitleUnderTest) -> Boot {
-    let output = Command::new(env!("CARGO_BIN_EXE_cellgov"))
-        .args(["boot", "bench-once"])
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_cellgov"));
+    cmd.args(["boot", "bench-once"])
         .arg("--title")
         .arg(&title.short_name)
+        .arg("--fw")
+        .arg(&title.reference.fw)
         .arg("--max-steps")
-        .arg(title.max_steps.to_string())
+        .arg(title.max_steps.to_string());
+    // A firmware-shipped title has no game-version axis, and the
+    // composition refuses the flag for one.
+    if let Some(v) = &title.reference.game_ver {
+        cmd.arg("--game-ver").arg(v);
+    }
+    let output = cmd
         .current_dir(workspace_root())
         .output()
         .expect("spawn cellgov boot bench-once");
@@ -89,20 +100,26 @@ fn boot(title: &TitleUnderTest) -> Boot {
         return Boot::Failed("no BENCH_RESULT line on stdout".to_string());
     };
     let mut steps = None;
+    let mut budget = None;
     let mut outcome = None;
     for tok in result.split_whitespace() {
         if let Some(v) = tok.strip_prefix("steps=") {
             steps = v.parse::<u64>().ok();
+        } else if let Some(v) = tok.strip_prefix("budget=") {
+            budget = v.parse::<u64>().ok();
         } else if let Some(v) = tok.strip_prefix("outcome=") {
             outcome = Some(v.to_string());
         }
     }
-    let (Some(steps), Some(outcome)) = (steps, outcome) else {
-        return Boot::Failed(format!("BENCH_RESULT missing steps=/outcome=: {result}"));
+    let (Some(steps), Some(budget), Some(outcome)) = (steps, budget, outcome) else {
+        return Boot::Failed(format!(
+            "BENCH_RESULT missing steps=/budget=/outcome=: {result}"
+        ));
     };
     Boot::Ran(Observed {
         witnesses,
         steps,
+        budget,
         outcome,
     })
 }
@@ -119,7 +136,7 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
         Boot::Ran(o) => o,
     };
 
-    let path = boot_anchor_path(&title.content_id);
+    let path = boot_anchor_path(&title.content_id, &title.reference);
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Some(vec![format!(
             "{}: installed but no baseline at {}. Record it with:\n    \
@@ -145,6 +162,18 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
         failures.push(format!(
             "{}: steps {} != recorded {}",
             title.short_name, observed.steps, baseline.steps
+        ));
+    }
+    // A cap-bounded anchor stops at the step count the run asked for.
+    // A changed budget then retires a different instruction count under
+    // an unchanged `steps` and outcome. The recorded witnesses are
+    // at-least bounds and do not catch it.
+    if observed.budget != baseline.budget.raw() {
+        failures.push(format!(
+            "{}: budget {} != recorded {}",
+            title.short_name,
+            observed.budget,
+            baseline.budget.raw()
         ));
     }
     // Display, not Debug: BENCH_RESULT prints the Display form, and

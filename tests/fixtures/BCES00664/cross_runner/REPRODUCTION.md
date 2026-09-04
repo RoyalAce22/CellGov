@@ -17,9 +17,11 @@ cargo run --release -p cellgov_cli -- boot run \
   --title-manifest titles/BCES00664.toml \
   --max-steps <N> \
   --save-observation tests/fixtures/BCES00664/cellgov/observation.json \
-  --save-boot-summary tests/fixtures/BCES00664/cellgov/boot_summary.json \
   --observation-manifest tests/fixtures/BCES00664/checkpoint.toml
 ```
+
+The boot anchor is not captured here: it is keyed by the cell the run
+composed and `cellgov dev record-anchors` is its only writer.
 
 `--max-steps` is the instruction budget and defaults to 100,000.
 That default halts well before a title reaches its checkpoint;

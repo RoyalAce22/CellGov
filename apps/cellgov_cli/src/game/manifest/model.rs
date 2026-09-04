@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::checkpoint::CheckpointTrigger;
-use super::matrix::MatrixCell;
+use super::matrix::{CellKey, MatrixCell};
 
 /// How the title's executable is located on disk. Defaults to `Hdd`
 /// when `[source]` is omitted.
@@ -273,10 +273,6 @@ impl TitleManifest {
     ///
     /// Panics in a debug build if the matrix marks more than one cell
     /// as the reference.
-    #[allow(
-        dead_code,
-        reason = "declared by the registry; read once the gate and the doc generator consume cells"
-    )]
     pub fn reference_cell(&self) -> Option<&MatrixCell> {
         // The loader enforces the one-reference rule, but this struct is
         // constructible without it. Picking the first of two marked
@@ -287,6 +283,10 @@ impl TitleManifest {
             self.short_name
         );
         self.matrix.iter().find(|c| c.reference)
+    }
+
+    pub fn cell(&self, key: &CellKey) -> Option<&MatrixCell> {
+        self.matrix.iter().find(|c| c.key == *key)
     }
 
     pub fn rsx_mirror(&self) -> bool {

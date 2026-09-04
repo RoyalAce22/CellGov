@@ -26,7 +26,7 @@ pub(super) struct ManifestBench {
 pub(super) struct ManifestMatrixRow {
     pub(super) fw: String,
     /// `"base"` or an update version key; see
-    /// [`super::MatrixCell::game_ver`].
+    /// [`super::CellKey::game_ver`].
     #[serde(default)]
     pub(super) game_ver: Option<String>,
     #[serde(default)]

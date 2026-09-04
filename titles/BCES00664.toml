@@ -13,3 +13,10 @@ kind = "disc"
 
 [checkpoint]
 kind = "first-rsx-write"
+
+# The one cell this title is gated and rendered at; see
+# docs/architecture/title_harness.md.
+[[bench.matrix]]
+fw = "4.93"
+game_ver = "base"
+reference = true

@@ -435,8 +435,10 @@ mod reference_cell_tests {
 
     fn base_cell(fw: &str, reference: bool) -> MatrixCell {
         MatrixCell {
-            fw: fw.to_string(),
-            game_ver: Some("base".to_string()),
+            key: CellKey {
+                fw: fw.to_string(),
+                game_ver: Some("base".to_string()),
+            },
             reference,
             expect: CellExpectation::Frontier,
             bench_max_steps: None,
@@ -449,10 +451,65 @@ mod reference_cell_tests {
         let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
         m.matrix = vec![base_cell("4.91", false), base_cell("3.55", true)];
         assert_eq!(
-            m.reference_cell().map(|c| c.fw.as_str()),
+            m.reference_cell().map(|c| c.key.fw.as_str()),
             Some("3.55"),
             "the marked row answers, not the first declared one"
         );
+    }
+
+    #[test]
+    fn a_cell_lookup_matches_the_whole_key() {
+        let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        m.matrix = vec![base_cell("4.91", true)];
+        let base = CellKey {
+            fw: "4.91".to_string(),
+            game_ver: Some("base".to_string()),
+        };
+        assert!(m.cell(&base).is_some());
+        assert!(m
+            .cell(&CellKey {
+                fw: "4.91".to_string(),
+                game_ver: Some("02.51".to_string()),
+            })
+            .is_none());
+        assert!(m
+            .cell(&CellKey {
+                fw: "3.55".to_string(),
+                game_ver: Some("base".to_string()),
+            })
+            .is_none());
+    }
+
+    /// The two axis shapes file their anchors one directory level
+    /// apart.
+    #[test]
+    fn an_absent_game_version_is_not_the_base_one() {
+        let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        m.matrix = vec![base_cell("4.91", true)];
+        assert!(m
+            .cell(&CellKey {
+                fw: "4.91".to_string(),
+                game_ver: None,
+            })
+            .is_none());
+
+        let mut firmware_shipped = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        firmware_shipped.matrix = vec![MatrixCell {
+            key: CellKey {
+                fw: "4.91".to_string(),
+                game_ver: None,
+            },
+            reference: true,
+            expect: CellExpectation::Frontier,
+            bench_max_steps: None,
+            checkpoint: None,
+        }];
+        assert!(firmware_shipped
+            .cell(&CellKey {
+                fw: "4.91".to_string(),
+                game_ver: Some("base".to_string()),
+            })
+            .is_none());
     }
 
     #[test]

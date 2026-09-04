@@ -10,10 +10,11 @@ process; a spawned child gets its own `GuestMemory`, numbered from 1
 in spawn order. Equal numeric addresses in different spaces never
 alias. [guest_memory.md](../architecture/guest_memory.md#per-process-address-spaces)
 
-**Anchor** (boot anchor). A title's committed expected boot
+**Anchor** (boot anchor). One cell's committed expected boot
 behaviour: step count, outcome, and witness set in
-`tests/fixtures/<content-id>/cellgov/boot_summary.json`. `boot bench`
-gates a run against it; `dev record-anchors` is its only writer.
+`tests/fixtures/<content-id>/cellgov/anchors/fw-<ver>/<game-ver>/boot_summary.json`.
+`boot bench` gates a run against the anchor of the cell it composed;
+`dev record-anchors` is its only writer.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Atomic batch.** The effects one unit emits in one step, validated
@@ -36,6 +37,11 @@ regions are byte-identical modulo classified non-semantic
 divergences: `equivalent`, `N non-semantic`, `M non-semantic + N
 pending`, or `--` when convergence is `No`.
 [README.md](README.md#two-independent-verdicts-convergence-and-byte-parity)
+
+**Cell.** One title at one firmware version and one game version --
+`(content_id, fw, game_ver)`. Every result is keyed by a cell, and a
+title's manifest declares which cells exist.
+[title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Checkpoint.** The deterministic event at which an observation
 stops. Kinds: `ProcessExit` (the guest called `sys_process_exit`),
@@ -90,6 +96,12 @@ observations that agree.
 `cross_runner_summary.json`, `REPRODUCTION.md`, beside the
 hand-maintained `NOTES.md`. Produced by `cellgov dev fixture-gen`.
 [titles.md](../titles.md)
+
+**Declared cell.** A cell a title's `[[bench.matrix]]` names. The
+registry declares every cell; the gate and the generated documents
+read the declared set rather than enumerating the store, and
+`dev record-anchors` refuses a cell no manifest declares.
+[title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Declared high-level divergence.** A firmware initializer CellGov
 answers with a seeded result instead of running to completion,
@@ -223,6 +235,12 @@ relocatable module; an SPRX is its SCE-wrapped (encrypted) form; a
 SELF is an SCE-wrapped executable; the PUP is the firmware update
 package `cellgov firmware install` unpacks into the VFS.
 [workspace.md](../architecture/workspace.md#per-crate-responsibilities)
+
+**Reference cell.** The one `[[bench.matrix]]` row marked
+`reference = true`, naming the configuration a headline row is
+measured at. The loader refuses a matrix that marks none or several,
+and refuses a probe as the reference.
+[title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Region.** One contiguous range of a guest address space with a
 label, page-size class, and access mode (`ReadWrite`,

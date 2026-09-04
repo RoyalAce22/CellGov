@@ -169,11 +169,12 @@ scenario is recorded once per RPCS3 decoder, so two independent
 answers can be checked against each other before either is trusted.
 The tree's `README.md` carries the capture procedure.
 
-A **boot anchor** is CellGov's own witness set for one real title,
-under `tests/fixtures/<content-id>/cellgov/`. It records the step
+A **boot anchor** is CellGov's own witness set for one cell -- one
+real title at one firmware version and one game version -- under
+`tests/fixtures/<content-id>/cellgov/anchors/`. It records the step
 count, outcome, and named counters a boot must reproduce.
-`boot bench` gates a run against the anchor; `dev record-anchors`
-writes it.
+`boot bench` gates a run against the anchor of the cell it composed;
+`dev record-anchors` writes it.
 
 ## Semantic vs non-semantic divergence
 

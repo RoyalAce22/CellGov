@@ -1,18 +1,18 @@
 {
   "checkpoint": {
-    "kind": "first_rsx_write"
+    "kind": "process_exit"
   },
-  "outcome": "RsxWriteCheckpoint",
-  "steps": 7119,
+  "outcome": "ProcessExit",
+  "steps": 11212,
   "budget": 256,
-  "host_invariant_breaks": 1,
+  "host_invariant_breaks": 4,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
       "class": "absent"
     },
     "dcbz": {
-      "value": 30,
+      "value": 28,
       "class": "at-least"
     },
     "event_port_ipc_connect_attempts": {
@@ -28,24 +28,24 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 1,
+      "value": 4,
       "class": "exact"
     },
     "ldarx": {
-      "value": 18,
+      "value": 3096,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 655,
+      "value": 2349,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 0,
-      "class": "absent"
+      "value": 797,
+      "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 0,
-      "class": "absent"
+      "value": 797,
+      "class": "at-least"
     },
     "lwmutex_unknown_locks": {
       "value": 0,
@@ -96,8 +96,8 @@
       "class": "absent"
     },
     "rsx_set_reference": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "spu_image_register": {
       "value": 0,
@@ -108,11 +108,11 @@
       "class": "absent"
     },
     "stdcx": {
-      "value": 18,
+      "value": 2299,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 654,
+      "value": 719,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,8 +164,8 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 0,
-      "class": "absent"
+      "value": 1,
+      "class": "at-least"
     },
     "unsupported_syscalls_distinct": {
       "value": 0,
@@ -175,5 +175,15 @@
       "value": 0,
       "class": "exact"
     }
+  },
+  "firmware": {
+    "version": "4.93",
+    "image_version": "0x0000000000010b94",
+    "pup_sha256": "158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365"
+  },
+  "game": {
+    "title_id": "NPUA80001",
+    "version": "base",
+    "app_ver": "01.00"
   }
 }

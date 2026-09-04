@@ -187,7 +187,7 @@ fn the_intermediate_extension_matcher_flags_a_capture_and_spares_committed_data(
         assert!(is_capture_intermediate(path), "{path} should be flagged");
     }
     for path in [
-        "tests/fixtures/NPUA80145/cellgov/boot_summary.json",
+        "tests/fixtures/NPUA80145/cellgov/anchors/fw-4.93/base/boot_summary.json",
         "tests/micro/process_spawn_wait/build/parent.elf",
         "tests/title_manifests/flow.toml",
         "tests/fixtures/NPUA80145",
@@ -209,7 +209,7 @@ fn the_corpus_allowlist_exempts_built_output_and_nothing_else() {
         "tests/ps3autotests/tests/cpu/basic/basic.ppu.elf"
     ));
     assert!(!is_corpus(
-        "tests/fixtures/NPUA80145/cellgov/boot_summary.json"
+        "tests/fixtures/NPUA80145/cellgov/anchors/fw-4.93/base/boot_summary.json"
     ));
     assert!(!is_corpus("tests/title_manifests/flow.toml"));
 }

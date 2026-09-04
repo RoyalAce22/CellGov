@@ -4,12 +4,12 @@
  * PSL1GHT's CRT0 uses rldicr (64-bit rotate) to build the TOC
  * address. RPCS3 v0.0.40 mishandles this instruction, causing a
  * branch to a garbage address. This replacement builds the TOC
- * using only 32-bit PPC instructions (lis/ori), then calls
- * PSL1GHT's _initialize which handles _init, main, and exit.
+ * from a data word patched in after linking, then calls main
+ * directly and exits through sys_process_exit.
  *
- * Linked with the standard CRT objects (not -nostartfiles) so
- * PSL1GHT's _initialize, __syscalls_init, and libc are available.
- * This file provides a stronger _start that overrides the CRT's.
+ * Every micro-test links with -nostartfiles, so this file is the
+ * whole entry path: PSL1GHT's _initialize and __syscalls_init
+ * never run, and neither do static constructors.
  */
 
     .section .rodata
@@ -64,7 +64,7 @@ __cg_tocval:
     .long   0xDEADBEEF          /* patched by build script */
 
     /* Stubs for _init/_fini -- PSL1GHT doesn't provide crti.o.
-     * Constructors run via __libc_init_array instead. */
+     * Nothing calls them; they exist to satisfy the link. */
     .section .text
     .globl  _init
     .type   _init, @function

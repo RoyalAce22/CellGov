@@ -22,3 +22,9 @@ path = "dev_flash/vsh/module"
 
 [checkpoint]
 kind = "process-exit"
+
+# vsh ships inside the firmware, so its version axis is the
+# firmware axis and its matrix is one row per firmware.
+[[bench.matrix]]
+fw = "4.93"
+reference = true

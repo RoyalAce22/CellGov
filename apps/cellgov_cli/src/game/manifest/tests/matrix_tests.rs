@@ -88,8 +88,8 @@ fn a_cell_defaults_to_the_frontier_expectation() {
         "\n[[bench.matrix]]\nfw = \"4.91\"\ngame_ver = \"base\"\nreference = true\n",
     ));
     let cell = m.reference_cell().expect("the declared reference cell");
-    assert_eq!(cell.fw, "4.91");
-    assert_eq!(cell.game_ver.as_deref(), Some(BASE_GAME_VER));
+    assert_eq!(cell.key.fw, "4.91");
+    assert_eq!(cell.key.game_ver.as_deref(), Some(BASE_GAME_VER));
     assert_eq!(cell.expect, CellExpectation::Frontier);
     assert_eq!(cell.bench_max_steps, None);
     assert_eq!(cell.checkpoint, None);
@@ -137,7 +137,7 @@ game_ver = "base"
 reference = true
 "#,
     ));
-    let order: Vec<&str> = m.matrix.iter().map(|c| c.fw.as_str()).collect();
+    let order: Vec<&str> = m.matrix.iter().map(|c| c.key.fw.as_str()).collect();
     assert_eq!(order, ["3.55", "4.91"]);
 }
 
@@ -200,7 +200,7 @@ game_ver = "base"
     assert_eq!(m.matrix.len(), 3);
     let cell = m.reference_cell().expect("the declared reference cell");
     assert_eq!(
-        (cell.fw.as_str(), cell.game_ver.as_deref()),
+        (cell.key.fw.as_str(), cell.key.game_ver.as_deref()),
         ("4.91", Some("02.51"))
     );
 }
@@ -274,9 +274,9 @@ expect = "probe"
     )
     .expect("manifest loads");
     assert_eq!(m.matrix.len(), 2);
-    assert!(m.matrix.iter().all(|c| c.game_ver.is_none()));
+    assert!(m.matrix.iter().all(|c| c.key.game_ver.is_none()));
     let cell = m.reference_cell().expect("the declared reference cell");
-    assert_eq!(cell.fw, "4.91");
+    assert_eq!(cell.key.fw, "4.91");
 }
 
 #[test]
@@ -463,7 +463,7 @@ fn the_nested_cellgov_layout_carries_the_matrix() {
         "\n[[cellgov.bench.matrix]]\nfw = \"4.91\"\ngame_ver = \"base\"\nreference = true\n",
     ));
     let cell = m.reference_cell().expect("the declared reference cell");
-    assert_eq!(cell.fw, "4.91");
+    assert_eq!(cell.key.fw, "4.91");
 }
 
 /// `bench` is a root-level manifest table, so the ambiguity check
@@ -508,7 +508,7 @@ reference = true
 "#;
     let m = load(text);
     assert_eq!(m.matrix.len(), 1);
-    assert_eq!(m.matrix[0].game_ver.as_deref(), Some(BASE_GAME_VER));
+    assert_eq!(m.matrix[0].key.game_ver.as_deref(), Some(BASE_GAME_VER));
     let err = refusal(&text.replace("game_ver = \"base\"\n", ""));
     assert!(err.contains("states no game_ver"), "{err}");
 }

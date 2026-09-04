@@ -7,8 +7,9 @@ Each file is an **observation** as
 snapshot of guest-visible state at a checkpoint.
 
 Boot anchors are a separate tree. An anchor holds CellGov's own
-witnesses for a real title at
-`tests/fixtures/<content-id>/cellgov/boot_summary.json`. `boot bench`
+witnesses for one cell -- a real title at one firmware version and one
+game version -- under
+`tests/fixtures/<content-id>/cellgov/anchors/`. `boot bench`
 gates against anchors. `dev record-anchors` writes them.
 
 ## Layout

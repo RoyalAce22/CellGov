@@ -1,8 +1,17 @@
-//! The bench step cap the anchor is recorded at.
+//! The cell a composition puts a run in, and what the registry
+//! declares for it.
+
+use std::path::PathBuf;
 
 use super::*;
+use crate::composition::compose::StoredGame;
+use crate::composition::inventory::{BaseEntry, FirmwareEntry};
+use crate::game::manifest::{CellExpectation, MatrixCell};
 
-fn manifest_with_bench_cap(bench_max_steps: Option<u64>) -> game::manifest::TitleManifest {
+fn manifest(
+    bench_max_steps: Option<u64>,
+    matrix: Vec<MatrixCell>,
+) -> game::manifest::TitleManifest {
     use game::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
     TitleManifest {
         content_id: "CG_TEST".to_string(),
@@ -21,23 +30,179 @@ fn manifest_with_bench_cap(bench_max_steps: Option<u64>) -> game::manifest::Titl
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
-        matrix: Vec::new(),
+        matrix,
     }
 }
 
-#[test]
-fn a_raised_manifest_cap_is_the_bench_default_not_the_hardcoded_one() {
-    // The anchor is measured at this cap, and a bench run at any other
-    // cap is reported incomparable and gates nothing.
-    let title = manifest_with_bench_cap(Some(250_000_000));
-    assert_eq!(default_bench_max_steps(&title), 250_000_000);
+fn declared(
+    fw: &str,
+    game_ver: Option<&str>,
+    bench_max_steps: Option<u64>,
+    checkpoint: Option<game::manifest::CheckpointTrigger>,
+) -> MatrixCell {
+    MatrixCell {
+        key: CellKey {
+            fw: fw.to_string(),
+            game_ver: game_ver.map(str::to_string),
+        },
+        reference: true,
+        expect: CellExpectation::Frontier,
+        bench_max_steps,
+        checkpoint,
+    }
+}
+
+fn composition(firmware: FirmwareChoice, game: GameChoice) -> BootComposition {
+    BootComposition {
+        firmware,
+        game,
+        mounts: Vec::new(),
+        eboot_dirs: Vec::new(),
+        understated_firmware: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
+    }
+}
+
+fn managed(version: &str) -> FirmwareChoice {
+    FirmwareChoice::Managed(FirmwareEntry {
+        version: version.to_string(),
+        entry_dir: PathBuf::from("store/firmware"),
+        pup_sha256: "0".repeat(64),
+    })
+}
+
+fn stored(version: GameVersion) -> GameChoice {
+    GameChoice::Stored(Box::new(StoredGame {
+        title_id: "CG_TEST".to_string(),
+        version,
+        base: BaseEntry {
+            app_ver: "01.00".to_string(),
+            dir: PathBuf::from("store/titles/CG_TEST/base"),
+            tree: cellgov_install::store::TitleTree::Game,
+            distribution: "psn-hdd".to_string(),
+            source_sha256: "0".repeat(64),
+        },
+        update: None,
+    }))
 }
 
 #[test]
-fn a_manifest_without_a_bench_cap_takes_the_recorder_default() {
-    let title = manifest_with_bench_cap(None);
+fn a_stored_title_keys_on_the_firmware_and_the_selected_game_version() {
+    let base = composed_cell(&composition(managed("4.93"), stored(GameVersion::Base)));
     assert_eq!(
-        default_bench_max_steps(&title) as u64,
-        crate::paths::DEFAULT_BENCH_MAX_STEPS
+        base,
+        Some(CellKey {
+            fw: "4.93".to_string(),
+            game_ver: Some("base".to_string()),
+        })
     );
+    let update = composed_cell(&composition(
+        managed("4.93"),
+        stored(GameVersion::Update("02.51".to_string())),
+    ));
+    assert_eq!(
+        update,
+        Some(CellKey {
+            fw: "4.93".to_string(),
+            game_ver: Some("02.51".to_string()),
+        })
+    );
+}
+
+#[test]
+fn a_firmware_shipped_title_keys_on_the_firmware_alone() {
+    let cell = composed_cell(&composition(
+        managed("4.93"),
+        GameChoice::Firmware {
+            dir: PathBuf::from("store/firmware/4.93/dev_flash/vsh/module"),
+            unmanaged_path: false,
+        },
+    ));
+    assert_eq!(
+        cell,
+        Some(CellKey {
+            fw: "4.93".to_string(),
+            game_ver: None,
+        })
+    );
+}
+
+#[test]
+fn a_firmware_exec_path_outside_the_selected_entry_composes_no_cell() {
+    let cell = composed_cell(&composition(
+        managed("4.93"),
+        GameChoice::Firmware {
+            dir: PathBuf::from("/elsewhere/vsh/module"),
+            unmanaged_path: true,
+        },
+    ));
+    assert_eq!(cell, None);
+}
+
+#[test]
+fn a_run_with_no_version_to_key_on_composes_no_cell() {
+    let unmanaged = composition(
+        FirmwareChoice::Unmanaged {
+            dir: PathBuf::from("elsewhere/sys/external"),
+        },
+        stored(GameVersion::Base),
+    );
+    assert_eq!(composed_cell(&unmanaged), None);
+    assert_eq!(
+        composed_cell(&composition(
+            FirmwareChoice::None,
+            stored(GameVersion::Base)
+        )),
+        None
+    );
+    assert_eq!(
+        composed_cell(&composition(managed("4.93"), GameChoice::Unstored)),
+        None
+    );
+}
+
+#[test]
+fn a_declared_cells_overrides_are_what_the_run_and_the_anchor_are_taken_at() {
+    use game::manifest::CheckpointTrigger;
+    let title = manifest(
+        Some(250_000_000),
+        vec![declared(
+            "4.93",
+            Some("base"),
+            Some(4_000),
+            Some(CheckpointTrigger::FirstRsxWrite),
+        )],
+    );
+    let plan = ResolvedPlan::resolve(
+        &title,
+        &composition(managed("4.93"), stored(GameVersion::Base)),
+    );
+    assert_eq!(plan.max_steps, 4_000);
+    assert_eq!(plan.checkpoint, CheckpointTrigger::FirstRsxWrite);
+    assert_eq!(plan.max_steps_usize(&title), 4_000);
+}
+
+#[test]
+fn an_undeclared_cell_takes_the_title_defaults() {
+    use game::manifest::CheckpointTrigger;
+    let title = manifest(
+        Some(250_000_000),
+        vec![declared("3.55", Some("base"), Some(4_000), None)],
+    );
+    let plan = ResolvedPlan::resolve(
+        &title,
+        &composition(managed("4.93"), stored(GameVersion::Base)),
+    );
+    assert_eq!(plan.max_steps, 250_000_000);
+    assert_eq!(plan.checkpoint, CheckpointTrigger::ProcessExit);
+}
+
+#[test]
+fn a_title_with_no_cap_anywhere_takes_the_recorder_default() {
+    let title = manifest(None, Vec::new());
+    let plan = ResolvedPlan::resolve(
+        &title,
+        &composition(managed("4.93"), stored(GameVersion::Base)),
+    );
+    assert_eq!(plan.max_steps, crate::paths::DEFAULT_BENCH_MAX_STEPS);
 }

@@ -41,11 +41,21 @@ fn boot_with_trace(title: &TitleUnderTest, trace_path: &PathBuf, null_sink: bool
     cmd.args(["boot", "run"])
         .arg("--title")
         .arg(&title.short_name)
+        // The cap and the anchor are the reference cell's, so the boot
+        // names that cell. An unflagged selection refuses when the
+        // store holds several firmwares or several game versions.
+        .arg("--fw")
+        .arg(&title.reference.fw)
         .arg("--max-steps")
         .arg(title.max_steps.to_string())
         .arg("--save-state-trace")
         .arg(trace_path)
         .current_dir(workspace_root());
+    // A firmware-shipped title has no game-version axis, and the
+    // composition refuses the flag for one.
+    if let Some(v) = &title.reference.game_ver {
+        cmd.arg("--game-ver").arg(v);
+    }
     // Scrub rather than merely not set: `Command` inherits the parent
     // environment, so an exported CELLGOV_OBS_NULL_SINK would turn
     // both runs into nulled runs and make the comparison vacuous.
@@ -95,7 +105,7 @@ fn observability_is_inert_wiping_it_every_step_leaves_the_state_trace_byte_ident
     let mut by_cost: Vec<(u64, TitleUnderTest)> = titles()
         .into_iter()
         .map(|t| {
-            let path = boot_anchor_path(&t.content_id);
+            let path = boot_anchor_path(&t.content_id, &t.reference);
             let text = std::fs::read_to_string(&path)
                 .unwrap_or_else(|e| panic!("{}: read {}: {e}", t.short_name, path.display()));
             let summary: BootSummary = serde_json::from_str(&text).unwrap_or_else(|e| {

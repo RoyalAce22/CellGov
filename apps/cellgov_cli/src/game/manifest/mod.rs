@@ -21,7 +21,7 @@ pub use registry::TitleRegistry;
     unused_imports,
     reason = "the types of TitleManifest's matrix field and reference_cell return"
 )]
-pub use matrix::{CellExpectation, MatrixCell};
+pub use matrix::{CellExpectation, CellKey, MatrixCell};
 
 #[allow(unused_imports, reason = "named only by titles-gen tests")]
 pub use model::Distribution;

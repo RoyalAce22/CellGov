@@ -1,18 +1,18 @@
 {
   "checkpoint": {
-    "kind": "process_exit"
+    "kind": "first_rsx_write"
   },
-  "outcome": "ProcessExit",
-  "steps": 11212,
+  "outcome": "RsxWriteCheckpoint",
+  "steps": 43055,
   "budget": 256,
-  "host_invariant_breaks": 4,
+  "host_invariant_breaks": 3,
   "witnesses": {
     "cond_reacquires": {
       "value": 0,
       "class": "absent"
     },
     "dcbz": {
-      "value": 28,
+      "value": 614,
       "class": "at-least"
     },
     "event_port_ipc_connect_attempts": {
@@ -28,23 +28,23 @@
       "class": "absent"
     },
     "host_invariant_breaks": {
-      "value": 4,
+      "value": 3,
       "class": "exact"
     },
     "ldarx": {
-      "value": 3096,
+      "value": 11780,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 2349,
+      "value": 10798,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 797,
+      "value": 982,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 797,
+      "value": 982,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -96,23 +96,23 @@
       "class": "absent"
     },
     "rsx_set_reference": {
-      "value": 1,
-      "class": "at-least"
+      "value": 0,
+      "class": "absent"
     },
     "spu_image_register": {
       "value": 0,
       "class": "absent"
     },
     "spu_thread_init": {
-      "value": 0,
-      "class": "absent"
+      "value": 5,
+      "class": "at-least"
     },
     "stdcx": {
-      "value": 2299,
+      "value": 10798,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 718,
+      "value": 8833,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -168,12 +168,22 @@
       "class": "at-least"
     },
     "unsupported_syscalls_distinct": {
-      "value": 0,
+      "value": 1,
       "class": "exact"
     },
     "vrsave_written": {
       "value": 0,
       "class": "exact"
     }
+  },
+  "firmware": {
+    "version": "4.93",
+    "image_version": "0x0000000000010b94",
+    "pup_sha256": "158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365"
+  },
+  "game": {
+    "title_id": "BCES00664",
+    "version": "base",
+    "app_ver": "02.00"
   }
 }

@@ -45,35 +45,46 @@ impl CellExpectation {
     }
 }
 
-/// One declared cell: a title at one firmware and one game version.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MatrixCell {
+/// The `(firmware, game version)` pair a result is keyed by.
+///
+/// The registry's declaration and the anchor tree speak this one key.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CellKey {
     /// Firmware version key of a `vfs/firmware/<key>/` entry.
     pub fw: String,
     /// [`BASE_GAME_VER`] or an update version key. `None` only for a
     /// title shipped inside the firmware, whose version axis is the
     /// firmware's.
     pub game_ver: Option<String>,
+}
+
+impl CellKey {
+    /// The form a refusal and a gate verdict name this cell by.
+    pub fn label(&self) -> String {
+        match &self.game_ver {
+            Some(v) => format!("fw {} x {v}", self.fw),
+            None => format!("fw {}", self.fw),
+        }
+    }
+}
+
+/// One declared cell: a title at one firmware and one game version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatrixCell {
+    pub key: CellKey,
     /// True on the one cell whose measurement the headline row renders.
     pub reference: bool,
     pub expect: CellExpectation,
     /// Overrides the title-level cap for this cell alone.
-    #[allow(
-        dead_code,
-        reason = "declared by the registry; read once the gate and the doc generator consume cells"
-    )]
     pub bench_max_steps: Option<u64>,
     /// Overrides the title-level checkpoint for this cell alone.
     pub checkpoint: Option<CheckpointTrigger>,
 }
 
 impl MatrixCell {
-    /// The form a refusal names this cell by.
+    /// See [`CellKey::label`].
     pub(super) fn label(&self) -> String {
-        match &self.game_ver {
-            Some(v) => format!("fw {} x {v}", self.fw),
-            None => format!("fw {}", self.fw),
-        }
+        self.key.label()
     }
 }
 
@@ -111,10 +122,10 @@ pub(super) fn build(
 ) -> Result<Vec<MatrixCell>, ManifestError> {
     let firmware_exec = matches!(source, GameSource::FirmwareExec { .. });
     let mut cells: Vec<MatrixCell> = Vec::with_capacity(rows.len());
-    let mut seen: BTreeSet<(String, Option<String>)> = BTreeSet::new();
+    let mut seen: BTreeSet<CellKey> = BTreeSet::new();
     for row in rows {
         let cell = build_cell(row, firmware_exec, rsx_mirror, origin)?;
-        if !seen.insert((cell.fw.clone(), cell.game_ver.clone())) {
+        if !seen.insert(cell.key.clone()) {
             return Err(refusal(
                 origin,
                 format!(
@@ -236,8 +247,10 @@ fn build_cell(
         .map(|c| parse_checkpoint(c, origin))
         .transpose()?;
     let cell = MatrixCell {
-        fw: row.fw,
-        game_ver,
+        key: CellKey {
+            fw: row.fw,
+            game_ver,
+        },
         reference: row.reference,
         expect,
         bench_max_steps: row.bench_max_steps,
