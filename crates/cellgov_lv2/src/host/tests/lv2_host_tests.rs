@@ -192,11 +192,41 @@ fn fs_mounts_mut_accepts_registration_and_resolves() {
 
     let resolved = host
         .fs_mounts()
-        .resolve("/app_home/Data/level.xml")
+        .resolve_candidates("/app_home/Data/level.xml")
         .expect("no traversal");
     assert_eq!(
         resolved,
-        Some(PathBuf::from("/host/usr").join("Data").join("level.xml"))
+        Some(vec![PathBuf::from("/host/usr")
+            .join("Data")
+            .join("level.xml")])
+    );
+}
+
+#[test]
+fn fs_mounts_registration_keeps_every_root_in_declaration_order() {
+    use std::path::PathBuf;
+
+    let mut host = Lv2Host::new();
+    host.fs_mounts_mut()
+        .add(
+            crate::fs_store::FsMount::with_roots(
+                "/app_home",
+                vec![PathBuf::from("/host/update"), PathBuf::from("/host/base")],
+            )
+            .expect("valid mount"),
+        )
+        .expect("registration succeeds");
+
+    assert_eq!(
+        host.fs_mounts()
+            .resolve_candidates("/app_home/USRDIR/EBOOT.BIN")
+            .expect("no traversal"),
+        Some(vec![
+            PathBuf::from("/host/update")
+                .join("USRDIR")
+                .join("EBOOT.BIN"),
+            PathBuf::from("/host/base").join("USRDIR").join("EBOOT.BIN"),
+        ])
     );
 }
 
@@ -211,7 +241,10 @@ fn fs_mounts_unmatched_path_returns_none() {
                 .expect("valid mount"),
         )
         .expect("registration succeeds");
-    assert_eq!(host.fs_mounts().resolve("/app_home/foo"), Ok(None));
+    assert_eq!(
+        host.fs_mounts().resolve_candidates("/app_home/foo"),
+        Ok(None)
+    );
 }
 
 #[test]

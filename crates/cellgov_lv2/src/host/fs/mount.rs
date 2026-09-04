@@ -1,6 +1,9 @@
 //! Mount-table resolution with single-read disk caching.
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::fs::Metadata;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
 use cellgov_ps3_abi::cell_errors;
 
@@ -38,17 +41,22 @@ impl Lv2Host {
     /// Determinism contract: a single host read per guest path; the
     /// cached content is immutable thereafter.
     pub(super) fn try_mount_resolve_and_cache(&mut self, path: &str) -> MountResolution {
-        let host_path = match resolve_path(self, path) {
-            Ok(p) => p,
+        let candidates = match resolve_candidates(self, path) {
+            Ok(c) => c,
             Err(MountResolveErr::Unmounted) => return MountResolution::Unmounted,
             Err(MountResolveErr::Failed(code)) => return MountResolution::Failed(code),
         };
 
-        match std::fs::metadata(&host_path) {
-            Ok(md) if md.is_file() => {}
-            Ok(_) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
-            Err(_) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
-        }
+        let host_path = match first_existing(&candidates) {
+            Ok(Some((host_path, md))) if md.is_file() => host_path.to_path_buf(),
+            // A shadowing root that holds a directory under this name
+            // hides whatever a later root holds there.
+            Ok(Some(_)) | Ok(None) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
+            Err((candidate, kind)) => {
+                let code = self.mount_candidate_unreadable(path, candidate, kind);
+                return MountResolution::Failed(code);
+            }
+        };
 
         let bytes = match std::fs::read(&host_path) {
             Ok(b) => b,
@@ -79,57 +87,167 @@ impl Lv2Host {
         }
     }
 
-    /// Try to satisfy a guest directory path via the mount table.
+    /// Try to satisfy a guest directory path via the mount table,
+    /// merged across every root that holds the directory.
     ///
     /// Determinism contract:
     /// - Entries sorted by `name` in lexicographic byte order.
+    /// - The earliest root that holds a name supplies its entry;
+    ///   later roots do not change its type.
     /// - Symlinks, special files, and non-UTF-8 names are dropped.
+    /// - A root the host will not describe fails the whole listing.
     pub(super) fn try_mount_resolve_dir(&mut self, path: &str) -> DirMountResolution {
-        let host_path = match resolve_path(self, path) {
-            Ok(p) => p,
+        let candidates = match resolve_candidates(self, path) {
+            Ok(c) => c,
             Err(MountResolveErr::Unmounted) => return DirMountResolution::Unmounted,
             Err(MountResolveErr::Failed(code)) => return DirMountResolution::Failed(code),
         };
 
-        match std::fs::metadata(&host_path) {
-            Ok(md) if md.is_dir() => {}
-            Ok(_) => return DirMountResolution::Failed(cell_errors::CELL_ENOTDIR),
-            Err(_) => return DirMountResolution::Failed(cell_errors::CELL_ENOENT),
+        // One probe pass over the roots. The same metadata decides
+        // the type of the hit and which roots contribute entries, so
+        // the listing cannot straddle two disk states.
+        let mut present: Vec<(&Path, Metadata)> = Vec::new();
+        for candidate in &candidates {
+            match probe(candidate) {
+                Ok(md) => {
+                    // The earliest root that holds this name decides
+                    // the type; a file there hides every later
+                    // root's directory.
+                    if present.is_empty() && !md.is_dir() {
+                        return DirMountResolution::Failed(cell_errors::CELL_ENOTDIR);
+                    }
+                    present.push((candidate.as_path(), md));
+                }
+                Err(CandidateMiss::Absent) => {}
+                Err(CandidateMiss::Unreadable(kind)) => {
+                    let code = self.mount_candidate_unreadable(path, candidate, kind);
+                    return DirMountResolution::Failed(code);
+                }
+            }
+        }
+        if present.is_empty() {
+            return DirMountResolution::Failed(cell_errors::CELL_ENOENT);
         }
 
-        let read_dir = match std::fs::read_dir(&host_path) {
-            Ok(rd) => rd,
-            Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
-        };
-
-        let mut entries: Vec<DirEntry> = Vec::new();
-        for entry in read_dir {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
-            };
-            let file_type = match entry.file_type() {
-                Ok(ft) => ft,
-                Err(_) => return DirMountResolution::Failed(cell_errors::CELL_EIO),
-            };
-            let is_directory = if file_type.is_dir() {
-                true
-            } else if file_type.is_file() {
-                false
-            } else {
+        // The `String` key gives the UTF-8 byte order the contract
+        // names, and `or_insert` keeps the earliest root's entry.
+        let mut merged: BTreeMap<String, DirEntry> = BTreeMap::new();
+        for (candidate, md) in &present {
+            if !md.is_dir() {
                 continue;
-            };
-            let name = match entry.file_name().into_string() {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            entries.push(DirEntry { name, is_directory });
+            }
+            if let Err(kind) = collect_dir_entries(candidate, &mut merged) {
+                let code = self.mount_candidate_unreadable(path, candidate, kind);
+                return DirMountResolution::Failed(code);
+            }
         }
-        // Determinism: read_dir yields host-FS-specific order; sort
-        // collapses that to lexicographic byte order.
-        entries.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
-        DirMountResolution::Snapshot(entries)
+        DirMountResolution::Snapshot(merged.into_values().collect())
     }
+
+    /// Log a candidate root the host would not read, and map its
+    /// error kind to the errno the guest sees.
+    fn mount_candidate_unreadable(
+        &mut self,
+        path: &str,
+        candidate: &Path,
+        kind: ErrorKind,
+    ) -> cellgov_ps3_abi::cell_errors::Lv2ErrCode {
+        self.log_invariant_break(
+            "dispatch.fs.mount_candidate_unreadable",
+            format_args!(
+                "host lookup of {candidate:?} while resolving {path:?} failed with \
+                 {kind:?}; refusing to fall through to a later root"
+            ),
+        );
+        if kind == ErrorKind::PermissionDenied {
+            cell_errors::CELL_EACCES
+        } else {
+            cell_errors::CELL_EIO
+        }
+    }
+}
+
+/// Read one host directory into `merged`; a repeated name keeps the
+/// entry already there.
+///
+/// # Errors
+///
+/// Returns the host error kind if the host will not enumerate the
+/// directory. The caller maps that kind to a guest errno.
+fn collect_dir_entries(
+    host_path: &Path,
+    merged: &mut BTreeMap<String, DirEntry>,
+) -> Result<(), ErrorKind> {
+    let read_dir = std::fs::read_dir(host_path).map_err(|e| e.kind())?;
+    for entry in read_dir {
+        let entry = entry.map_err(|e| e.kind())?;
+        let file_type = entry.file_type().map_err(|e| e.kind())?;
+        let is_directory = if file_type.is_dir() {
+            true
+        } else if file_type.is_file() {
+            false
+        } else {
+            continue;
+        };
+        let name = match entry.file_name().into_string() {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        merged
+            .entry(name.clone())
+            .or_insert(DirEntry { name, is_directory });
+    }
+    Ok(())
+}
+
+/// Why a probed root does not answer for a guest path.
+enum CandidateMiss {
+    /// The name is not under this root.
+    Absent,
+    /// The host would not say what this root holds.
+    Unreadable(ErrorKind),
+}
+
+/// Probe one candidate and tell an absent name apart from an
+/// unreadable root.
+///
+/// Three host error kinds report one fact -- nothing is under this
+/// root at that name:
+/// - `NotFound`.
+/// - `NotADirectory`, from a host family where a path component is
+///   a regular file.
+/// - `InvalidFilename`, from a host that cannot express the name.
+///
+/// Every other kind leaves the root's contents unknown.
+fn probe(candidate: &Path) -> Result<Metadata, CandidateMiss> {
+    match std::fs::metadata(candidate) {
+        Ok(md) => Ok(md),
+        Err(err)
+            if matches!(
+                err.kind(),
+                ErrorKind::NotFound | ErrorKind::NotADirectory | ErrorKind::InvalidFilename
+            ) =>
+        {
+            Err(CandidateMiss::Absent)
+        }
+        Err(err) => Err(CandidateMiss::Unreadable(err.kind())),
+    }
+}
+
+/// First candidate that exists on the host, with its metadata.
+///
+/// # Errors
+///
+/// Returns the first unreadable candidate and its host error kind.
+fn first_existing(candidates: &[PathBuf]) -> Result<Option<(&Path, Metadata)>, (&Path, ErrorKind)> {
+    for candidate in candidates {
+        match probe(candidate) {
+            Ok(md) => return Ok(Some((candidate.as_path(), md))),
+            Err(CandidateMiss::Absent) => {}
+            Err(CandidateMiss::Unreadable(kind)) => return Err((candidate.as_path(), kind)),
+        }
+    }
+    Ok(None)
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -141,19 +259,24 @@ enum MountResolveErr {
 }
 
 /// Shared prefix-resolution step for the file and directory surfaces.
-fn resolve_path(host: &mut Lv2Host, path: &str) -> Result<PathBuf, MountResolveErr> {
-    match host.fs_mounts().resolve(path) {
-        Ok(Some(p)) => Ok(p),
+fn resolve_candidates(host: &mut Lv2Host, path: &str) -> Result<Vec<PathBuf>, MountResolveErr> {
+    match host.fs_mounts().resolve_candidates(path) {
+        Ok(Some(c)) => Ok(c),
         Ok(None) => Err(MountResolveErr::Unmounted),
         Err(FsError::PathTraversal) => Err(MountResolveErr::Failed(cell_errors::CELL_EACCES)),
         Err(other) => {
             host.record_invariant_break(
                 "dispatch.fs.mount_resolve_unexpected",
                 format_args!(
-                    "FsMountTable::resolve returned {other:?} for {path:?}; contract violated"
+                    "FsMountTable::resolve_candidates returned {other:?} for {path:?}; \
+                     contract violated"
                 ),
             );
             Err(MountResolveErr::Failed(cell_errors::CELL_EFAULT))
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/overlay_tests.rs"]
+mod tests;

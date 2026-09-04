@@ -387,19 +387,32 @@ open fd.
 Path resolution beyond the manifest goes through `FsMountTable`:
 per-title mounts (typically `/app_home`, populated from the title
 manifest at boot; no default mount is auto-registered), each with a
-guest-path prefix and a host-side root. Read-only enforcement is
-global in the dispatch layer, not a per-mount flag: writes / mkdir
-/ unlink return `CELL_EROFS` regardless of host-side permissions.
-`dispatch_fs_open` / `dispatch_fs_stat` probe the manifest blob set
-first; on a miss they call `try_mount_resolve_and_cache`, which
-resolves the guest path against the mount's host root, reads the
-bytes on demand, and inserts them into `FsStore` for the rest of
-the boot. The resolver canonicalizes path segments (drops empty /
-`.` segments, rejects `..`), so titles cannot escape their mount.
-Directory iteration (`sys_fs_opendir` / `_readdir` / `_closedir`)
-snapshots the directory at opendir time in lexicographic byte
-order, so later reads are deterministic across host file system
-order.
+guest-path prefix and an ordered list of host roots. Read-only
+enforcement is global in the dispatch layer, not a per-mount flag:
+writes / mkdir / unlink return `CELL_EROFS` regardless of host-side
+permissions. `dispatch_fs_open` / `dispatch_fs_stat` probe the
+manifest blob set first; on a miss they call
+`try_mount_resolve_and_cache`, which resolves the guest path against
+each root in turn, reads the bytes on demand, and inserts them into
+`FsStore` for the rest of the boot. `resolve_candidates` is pure path
+arithmetic -- it yields one host path per root and probes nothing --
+so the candidate list is a function of the guest path and the root
+list alone. It canonicalizes path segments (drops empty / `.`
+segments, refuses `..` and any segment carrying a host separator or
+drive marker), so titles cannot escape their roots and resolution
+does not vary with the host operating system.
+
+Root order is shadowing order: the earliest root holding a name
+decides both the hit and its type, which is what lets an update tree
+sit over a base tree without the two being merged on disk. A root
+that does not hold the name is skipped; a root the host declines to
+read stops the lookup with a named refusal rather than falling
+through to the next, since falling through would answer with bytes
+the mount order does not name. Directory iteration (`sys_fs_opendir`
+/ `_readdir` / `_closedir`) snapshots at opendir time, merging every
+root that holds the directory into one listing in lexicographic byte
+order, with a repeated name taken from the earliest root. Later reads
+are deterministic across host file system order.
 
 ```mermaid
 flowchart TD
@@ -407,10 +420,12 @@ flowchart TD
   blob -->|yes| fd["fresh fd from next_fd (starts at 3, never recycled)"]
   blob -->|no| mount{"a mount prefix matches?"}
   mount -->|no| enoent["CELL_FS_ENOENT"]
-  mount -->|yes| canon["canonicalize segments: drop empty and dot, reject dot-dot"]
-  canon --> host["read the bytes under the mount's host root"]
-  host -->|found| cache["insert into FsStore for the rest of the boot"] --> fd
-  host -->|missing| enoent
+  mount -->|yes| canon["canonicalize segments: drop empty and dot, refuse dot-dot and host separators"]
+  canon --> probe["probe each host root in order"]
+  probe -->|first root holding the name| host["read the bytes there"]
+  host --> cache["insert into FsStore for the rest of the boot"] --> fd
+  probe -->|no root holds it| enoent
+  probe -->|a root will not be read| refuse["named refusal: CELL_FS_EACCES or CELL_FS_EIO"]
 ```
 
 Per-title content lands in the store at boot via the manifest

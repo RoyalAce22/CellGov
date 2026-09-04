@@ -385,6 +385,10 @@ impl TempMountDir {
         }
         std::fs::write(full, bytes).expect("temp file write");
     }
+
+    pub(super) fn mkdir(&self, rel: &str) {
+        std::fs::create_dir_all(self.path.join(rel)).expect("temp subdir");
+    }
 }
 
 impl Drop for TempMountDir {

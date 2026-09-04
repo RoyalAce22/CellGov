@@ -37,6 +37,15 @@ fn canon(p: &Path) -> PathBuf {
     std::fs::canonicalize(p).expect("canonicalize")
 }
 
+fn mount_roots(host: &Lv2Host) -> Vec<PathBuf> {
+    host.fs_mounts()
+        .mounts()
+        .next()
+        .expect("one mount")
+        .roots()
+        .to_vec()
+}
+
 #[test]
 fn validate_host_shape_rejects_empty() {
     let err = validate_host_shape("/p", "").unwrap_err();
@@ -128,14 +137,8 @@ fn relative_host_resolves_under_workspace_and_canonicalizes() {
     let entries = vec![entry("/app_home", "assets", None)];
     let n = register_mounts(&entries, workspace.path(), |_| None, &mut host).unwrap();
     assert_eq!(n, 1);
-    let mount_host = host
-        .fs_mounts()
-        .mounts()
-        .next()
-        .expect("one mount")
-        .host_root
-        .clone();
-    assert_eq!(mount_host, canon(&workspace.path().join("assets")));
+    let roots = mount_roots(&host);
+    assert_eq!(roots, vec![canon(&workspace.path().join("assets"))]);
 }
 
 #[test]
@@ -211,14 +214,8 @@ fn override_env_replaces_manifest_host() {
         }
     };
     register_mounts(&entries, workspace.path(), getter, &mut host).unwrap();
-    let mount_host = host
-        .fs_mounts()
-        .mounts()
-        .next()
-        .expect("one mount")
-        .host_root
-        .clone();
-    assert_eq!(mount_host, canon(&workspace.path().join("real_dir")));
+    let roots = mount_roots(&host);
+    assert_eq!(roots, vec![canon(&workspace.path().join("real_dir"))]);
 }
 
 #[test]
@@ -239,14 +236,8 @@ fn empty_override_env_value_falls_through_to_manifest_host() {
         }
     };
     register_mounts(&entries, workspace.path(), getter, &mut host).unwrap();
-    let mount_host = host
-        .fs_mounts()
-        .mounts()
-        .next()
-        .expect("one mount")
-        .host_root
-        .clone();
-    assert_eq!(mount_host, canon(&workspace.path().join("fallback")));
+    let roots = mount_roots(&host);
+    assert_eq!(roots, vec![canon(&workspace.path().join("fallback"))]);
 }
 
 #[test]
@@ -263,14 +254,8 @@ fn whitespace_only_override_env_value_falls_through_to_manifest_host() {
         }
     };
     register_mounts(&entries, workspace.path(), getter, &mut host).unwrap();
-    let mount_host = host
-        .fs_mounts()
-        .mounts()
-        .next()
-        .expect("one mount")
-        .host_root
-        .clone();
-    assert_eq!(mount_host, canon(&workspace.path().join("fallback")));
+    let roots = mount_roots(&host);
+    assert_eq!(roots, vec![canon(&workspace.path().join("fallback"))]);
 }
 
 #[test]
