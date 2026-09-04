@@ -9,7 +9,7 @@ mod prune;
 mod version_txt;
 
 pub use error::{FirmwareInstallError, PackageFailure};
-pub use install::{FirmwareInstallOutcome, PackageSummary, DEV_FLASH_MOUNT};
+pub use install::{FirmwareInstallOutcome, PackageSummary};
 pub use manifest_build::ManifestOmission;
 
 #[cfg(feature = "decrypt")]

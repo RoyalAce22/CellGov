@@ -186,9 +186,7 @@ fn verify_before_removal(
 ) {
     let keys = cellgov_install::keys::KeyVault::load_for_vfs(store)
         .unwrap_or_else(|e| die(&format!("firmware uninstall --verify: {e}")));
-    let dev_flash = plan
-        .entry_dir
-        .join(cellgov_install::firmware_install::DEV_FLASH_MOUNT);
+    let dev_flash = plan.entry_dir.join(cellgov_ps3_abi::dev_flash::FLASH_MOUNT);
     let report = cellgov_install::firmware_verify::verify_firmware_tree(&dev_flash, &keys)
         .unwrap_or_else(|e| die(&format!("firmware uninstall --verify: {e}")));
     for fault in &report.divergences {

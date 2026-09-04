@@ -1,5 +1,7 @@
 //! Which dev_flash entries an install drops before they reach disk.
 
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
+
 use crate::tar;
 
 /// dev_flash subtrees CellGov never loads and prunes at install time:
@@ -16,7 +18,10 @@ pub(super) fn is_install_excluded(entry_name: &str) -> bool {
     let Some(routed) = tar::route_entry_path(entry_name) else {
         return false;
     };
-    let Some(rel) = routed.strip_prefix("dev_flash/") else {
+    let Some(rel) = routed
+        .strip_prefix(FLASH_MOUNT)
+        .and_then(|r| r.strip_prefix('/'))
+    else {
         return false;
     };
     PRUNED_DEV_FLASH_DIRS.iter().any(|d| rel.starts_with(d))

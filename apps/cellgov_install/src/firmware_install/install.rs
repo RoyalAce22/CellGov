@@ -27,6 +27,7 @@
 
 use std::path::{Path, PathBuf};
 
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
 use cellgov_ps3_abi::pup::ENTRY_ID_UPDATE_FILES;
 
 use super::error::{FirmwareInstallError, PackageFailure};
@@ -44,10 +45,6 @@ use crate::store::record::{
     INSTALL_RECORD_FORMAT_VERSION,
 };
 use crate::{pup, sce, tar};
-
-/// Mount under a firmware entry that holds the image and its
-/// `firmware.toml`.
-pub const DEV_FLASH_MOUNT: &str = "dev_flash";
 
 /// `source.kind` every firmware record carries.
 const FIRMWARE_SOURCE_KIND: &str = "pup";
@@ -404,7 +401,7 @@ pub fn install_pup(
         let tally = extract_packages(&packages, &staging_root, keys, progress)
             .into_complete(packages.len())?;
 
-        let dev_flash_dir = staging_root.join(DEV_FLASH_MOUNT);
+        let dev_flash_dir = staging_root.join(FLASH_MOUNT);
         let version = VersionKey::new(&read_version(&dev_flash_dir)?)?;
         let artifact = Artifact::Firmware {
             version: version.clone(),
@@ -463,7 +460,7 @@ pub fn install_pup(
     progress.finished();
 
     Ok(FirmwareInstallOutcome {
-        manifest_path: staged.entry_dir.join(DEV_FLASH_MOUNT).join(MANIFEST_FILE),
+        manifest_path: staged.entry_dir.join(FLASH_MOUNT).join(MANIFEST_FILE),
         version: staged.version,
         entry_dir: staged.entry_dir,
         manifest_entries: staged.manifest_entries,

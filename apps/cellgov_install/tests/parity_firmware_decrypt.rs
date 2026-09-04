@@ -19,9 +19,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
 use cellgov_install::keys::KeyVault;
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
 
 #[path = "common/digests.rs"]
 mod digests;
@@ -95,7 +95,7 @@ fn firmware_external_dir() -> PathBuf {
         found.push(
             layout
                 .resolve_store_path(&record.artifact.store_path)
-                .join(DEV_FLASH_MOUNT)
+                .join(FLASH_MOUNT)
                 .join("sys")
                 .join("external"),
         );

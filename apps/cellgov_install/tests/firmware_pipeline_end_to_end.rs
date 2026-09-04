@@ -21,10 +21,9 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_install::firmware_install::{
-    FirmwareInstallError, FirmwareInstallOutcome, DEV_FLASH_MOUNT,
-};
+use cellgov_install::firmware_install::{FirmwareInstallError, FirmwareInstallOutcome};
 use cellgov_install::store::{Artifact, ArtifactKind, InstallRecord, StoreLayout, VersionKey};
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
 
 #[path = "common/digests.rs"]
 mod digests;
@@ -139,7 +138,7 @@ fn assert_pinned_modules_present(dir: &Path) {
 
 /// `sys/external` under a firmware entry, where the pinned modules land.
 fn sys_external(entry: &Path) -> PathBuf {
-    entry.join(DEV_FLASH_MOUNT).join("sys").join("external")
+    entry.join(FLASH_MOUNT).join("sys").join("external")
 }
 
 #[test]
@@ -157,7 +156,7 @@ fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
     // tree, so a reader can re-derive the key from the entry alone.
     assert!(
         entry
-            .join(DEV_FLASH_MOUNT)
+            .join(FLASH_MOUNT)
             .join("vsh/etc/version.txt")
             .is_file(),
         "the tree the version key was read from must be the committed one",
@@ -175,7 +174,7 @@ fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
     // The manifest describes the firmware image, so it sits in the
     // mount it covers rather than at the entry root, and it declares
     // the same version the directory is named after.
-    let manifest_path = entry.join(DEV_FLASH_MOUNT).join("firmware.toml");
+    let manifest_path = entry.join(FLASH_MOUNT).join("firmware.toml");
     let manifest = cellgov_install::manifest::parse_manifest(
         &std::fs::read_to_string(&manifest_path).unwrap(),
     )
@@ -211,9 +210,7 @@ fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
     let output = scratch::ScratchDir::new("fw_refuse");
     assert_succeeded(run_install(&pup, &output, false), "first install");
     let (_, entry) = sole_entry(&output);
-    let before = std::fs::read_dir(entry.join(DEV_FLASH_MOUNT))
-        .unwrap()
-        .count();
+    let before = std::fs::read_dir(entry.join(FLASH_MOUNT)).unwrap().count();
 
     let refusal = run_install(&pup, &output, false)
         .expect_err("the second install must refuse an installed version");
@@ -233,9 +230,7 @@ fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
         "a refused install must discard its staging tree"
     );
     assert_eq!(
-        std::fs::read_dir(entry.join(DEV_FLASH_MOUNT))
-            .unwrap()
-            .count(),
+        std::fs::read_dir(entry.join(FLASH_MOUNT)).unwrap().count(),
         before,
         "the installed entry is untouched by the refused install"
     );
@@ -266,7 +261,7 @@ fn force_replaces_an_installed_version_whole() {
     let output = scratch::ScratchDir::new("fw_force");
     assert_succeeded(run_install(&pup, &output, false), "first install");
     let (_, entry) = sole_entry(&output);
-    let stale = entry.join(DEV_FLASH_MOUNT).join("stale.bin");
+    let stale = entry.join(FLASH_MOUNT).join("stale.bin");
     std::fs::write(&stale, b"left over from the previous install").unwrap();
 
     assert_succeeded(run_install(&pup, &output, true), "install --force");

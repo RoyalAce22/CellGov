@@ -8,11 +8,11 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
 use cellgov_install::store::{
     ArtifactKind, InstallRecord, InstallRecordParseError, PreStoreError, StoreKeyError,
     StoreLayout, TitleId, TitleTree,
 };
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
 
 use crate::game::manifest::BASE_GAME_VER;
 
@@ -145,7 +145,7 @@ pub(crate) struct FirmwareEntry {
 impl FirmwareEntry {
     /// The `dev_flash` tree the guest sees at `/dev_flash`.
     pub(crate) fn dev_flash_dir(&self) -> PathBuf {
-        self.entry_dir.join(DEV_FLASH_MOUNT)
+        self.entry_dir.join(FLASH_MOUNT)
     }
 }
 

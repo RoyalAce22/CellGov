@@ -1,5 +1,26 @@
 //! Retail firmware (`dev_flash`) content facts.
 
+/// Names of the three flash mounts, flash 1 first.
+///
+/// These are bare directory names, the spelling the host store lays
+/// out. The guest addresses flash 1 as [`GUEST_FLASH_MOUNT`].
+pub const FLASH_MOUNTS: [&str; 3] = ["dev_flash", "dev_flash2", "dev_flash3"];
+
+/// Flash 1, the mount that holds the firmware image, as a bare
+/// directory name.
+pub const FLASH_MOUNT: &str = FLASH_MOUNTS[0];
+
+/// The flash mounts that sit beside [`FLASH_MOUNT`].
+pub const SIBLING_FLASH_MOUNTS: [&str; 2] = [FLASH_MOUNTS[1], FLASH_MOUNTS[2]];
+
+// A flash mount missing from SIBLING_FLASH_MOUNTS lands inside flash 1:
+// prefix routing files every name without a sibling prefix under
+// FLASH_MOUNT.
+const _: () = assert!(SIBLING_FLASH_MOUNTS.len() + 1 == FLASH_MOUNTS.len());
+
+/// The path the guest addresses flash 1 at.
+pub const GUEST_FLASH_MOUNT: &str = "/dev_flash";
+
 /// Path components of the version file, relative to the `dev_flash`
 /// mount root.
 ///
@@ -16,6 +37,14 @@ pub const VERSION_TXT_MAJOR_DIGITS: usize = 2;
 /// Minor digits in that field. The leading two are the version a user
 /// sees; the rest are a sub-revision.
 pub const VERSION_TXT_MINOR_DIGITS: usize = 4;
+
+/// Module stems under `sys/internal/` that the system shell loads by
+/// full path.
+///
+/// Import-closure selection cannot derive these stems. The shell names
+/// them by filesystem path from its own runtime data, so a
+/// firmware-exec boot adds them to the candidate set explicitly.
+pub const FIRMWARE_INTERNAL_PRX_STEMS: &[&str] = &["libfs_utility2"];
 
 /// Module stems shipped in retail firmware's `sys/external/`.
 ///
@@ -167,3 +196,7 @@ pub const FIRMWARE_MODULE_STEMS: &[&str] = &[
     "libvpost2",
     "libwmadec",
 ];
+
+#[cfg(test)]
+#[path = "tests/dev_flash_tests.rs"]
+mod tests;

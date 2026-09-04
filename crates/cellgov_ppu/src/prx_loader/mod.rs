@@ -3,7 +3,6 @@
 mod body;
 pub mod export_table;
 pub mod graph;
-mod internal_stems;
 pub mod selection;
 
 pub use body::{
@@ -12,5 +11,4 @@ pub use body::{
 };
 pub use export_table::FirmwareExportTable;
 pub use graph::{DependencyGraph, PrxModuleId};
-pub use internal_stems::FIRMWARE_INTERNAL_PRX_STEMS;
 pub use selection::{select_import_closure, ClosureSelection, PruneReason};

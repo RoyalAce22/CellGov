@@ -492,7 +492,7 @@ fn installed_vsh_selfs() -> Vec<(String, std::path::PathBuf)> {
             );
             let path = layout
                 .resolve_store_path(&record.artifact.store_path)
-                .join(crate::firmware_install::DEV_FLASH_MOUNT)
+                .join(cellgov_ps3_abi::dev_flash::FLASH_MOUNT)
                 .join("vsh")
                 .join("module")
                 .join("vsh.self");

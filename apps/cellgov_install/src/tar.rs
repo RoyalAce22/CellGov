@@ -7,6 +7,8 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
+use cellgov_ps3_abi::dev_flash::{FLASH_MOUNT, SIBLING_FLASH_MOUNTS};
+
 /// One regular file extracted from a USTAR archive.
 #[derive(Debug)]
 pub struct TarEntry {
@@ -288,38 +290,26 @@ fn is_safe_relative(clean: &str) -> bool {
         .all(|c| !matches!(c, Component::ParentDir))
 }
 
-/// Mounts a PUP carries alongside `dev_flash`, named by their own
-/// prefix; they are siblings of `dev_flash` on the console, so they
-/// keep their prefix and land beside it.
+/// The part of `clean` under `mount`, or `None` when `clean` is not
+/// under it.
 ///
-/// LV2 publishes `/dev_flash`, `/dev_flash2` and `/dev_flash3` as its
-/// flash mount points, and `/dev_flash` is itself flash 1. The sibling
-/// set therefore closes at two.
-pub const SIBLING_MOUNTS: [&str; 2] = ["dev_flash2/", "dev_flash3/"];
-
-/// The flash-1 mount every name without a [`SIBLING_MOUNTS`] prefix
-/// belongs to, whether or not it spells the prefix out.
-const DEV_FLASH_MOUNT: &str = "dev_flash/";
-
-/// Whether `clean` addresses `mount` itself rather than a file under
-/// it -- `dev_flash2`, `dev_flash2/`, `dev_flash2//` and so on.
-///
-/// Taking such an entry as a destination would write a plain file
-/// where the mount directory belongs. Every later entry beneath it
-/// would then fail to create its parent.
-fn addresses_mount_root(clean: &str, mount: &str) -> bool {
-    let bare = mount.trim_end_matches('/');
-    clean == bare
-        || clean
-            .strip_prefix(mount)
-            .is_some_and(|rest| rest.trim_start_matches('/').is_empty())
+/// `mount` is a bare component. The match requires a `/` or the end of
+/// the string after it, so `dev_flash2foo/x` names no flash-2 content.
+/// An empty result means `clean` addresses the mount root itself
+/// (`dev_flash2`, `dev_flash2/`, `dev_flash2//`), which is not a file.
+fn under_mount<'a>(clean: &'a str, mount: &str) -> Option<&'a str> {
+    let rest = clean.strip_prefix(mount)?;
+    if rest.is_empty() {
+        return Some("");
+    }
+    rest.strip_prefix('/').map(|r| r.trim_start_matches('/'))
 }
 
 /// VFS-root-relative destination for one archive entry name, or
 /// `None` when the name resolves to no file (empty, or a mount root).
 ///
 /// A leading `/` and the `000/` packaging artefact are stripped; a
-/// name without a [`SIBLING_MOUNTS`] prefix is dev_flash content
+/// name without a [`SIBLING_FLASH_MOUNTS`] prefix is dev_flash content
 /// whether or not it spells `dev_flash/` out.
 ///
 /// The result is relative but not traversal-checked: a caller that
@@ -341,30 +331,25 @@ pub fn route_entry_path(name: &str) -> Option<String> {
     if clean.is_empty() {
         return None;
     }
-    for mount in SIBLING_MOUNTS {
-        if addresses_mount_root(clean, mount) {
-            return None;
+    for mount in SIBLING_FLASH_MOUNTS {
+        if let Some(inner) = under_mount(clean, mount) {
+            if inner.is_empty() {
+                return None;
+            }
+            return Some(format!("{mount}/{inner}"));
         }
-        if let Some(rest) = clean.strip_prefix(mount) {
-            return Some(format!("{mount}{}", rest.trim_start_matches('/')));
-        }
     }
-    if addresses_mount_root(clean, DEV_FLASH_MOUNT) {
-        return None;
-    }
-    let inner = clean
-        .strip_prefix(DEV_FLASH_MOUNT)
-        .unwrap_or(clean)
-        .trim_start_matches('/');
-    if inner.is_empty() {
-        return None;
-    }
-    Some(format!("{DEV_FLASH_MOUNT}{inner}"))
+    let inner = match under_mount(clean, FLASH_MOUNT) {
+        Some("") => return None,
+        Some(inner) => inner,
+        None => clean,
+    };
+    Some(format!("{FLASH_MOUNT}/{inner}"))
 }
 
 /// Write `entries` under `vfs_root`, routing each name through
 /// [`route_entry_path`] so `dev_flash` content lands in
-/// `vfs_root/dev_flash/` and each [`SIBLING_MOUNTS`] mount lands
+/// `vfs_root/dev_flash/` and each [`SIBLING_FLASH_MOUNTS`] mount lands
 /// beside it.
 ///
 /// Path-traversal (`..`) entries are rejected and recorded in the

@@ -305,6 +305,16 @@ fn sibling_mount_match_needs_a_whole_path_component() {
 }
 
 #[test]
+fn a_sibling_mount_name_inside_dev_flash_stays_where_the_archive_put_it() {
+    // The sibling prefixes match only at the start of a name, so this
+    // one is ordinary flash-1 content.
+    assert_eq!(
+        route_entry_path("dev_flash/dev_flash2/x").as_deref(),
+        Some("dev_flash/dev_flash2/x")
+    );
+}
+
+#[test]
 fn a_sibling_mount_entry_keeps_one_separator_after_its_prefix() {
     assert_eq!(
         route_entry_path("dev_flash2//etc//x.sys").as_deref(),

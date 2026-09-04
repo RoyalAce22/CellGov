@@ -43,9 +43,9 @@ fn staged_at(root: &Path, version: &str) -> (PathBuf, Staged) {
     };
     let entry_dir = layout.entry_dir(&artifact);
     let staging_root = layout.firmware_staging_dir();
-    std::fs::create_dir_all(staging_root.join(DEV_FLASH_MOUNT)).unwrap();
+    std::fs::create_dir_all(staging_root.join(FLASH_MOUNT)).unwrap();
     std::fs::write(
-        staging_root.join(DEV_FLASH_MOUNT).join(MANIFEST_FILE),
+        staging_root.join(FLASH_MOUNT).join(MANIFEST_FILE),
         b"staged",
     )
     .unwrap();
@@ -327,7 +327,7 @@ fn the_commit_renames_the_tree_into_place_and_writes_the_record_after_it() {
 
     assert!(!staging.exists(), "the staging root is consumed");
     assert_eq!(
-        std::fs::read(staged.entry_dir.join(DEV_FLASH_MOUNT).join(MANIFEST_FILE)).unwrap(),
+        std::fs::read(staged.entry_dir.join(FLASH_MOUNT).join(MANIFEST_FILE)).unwrap(),
         b"staged",
     );
     let text = std::fs::read_to_string(&staged.record_path).unwrap();
@@ -372,9 +372,9 @@ fn a_commit_that_cannot_rename_names_both_paths_and_the_retry() {
 fn committing_over_an_installed_version_clears_it_first() {
     let dir = scratch();
     let (staging, staged) = staged_at(&dir, "4.91");
-    std::fs::create_dir_all(staged.entry_dir.join(DEV_FLASH_MOUNT)).unwrap();
+    std::fs::create_dir_all(staged.entry_dir.join(FLASH_MOUNT)).unwrap();
     std::fs::write(
-        staged.entry_dir.join(DEV_FLASH_MOUNT).join("stale.sprx"),
+        staged.entry_dir.join(FLASH_MOUNT).join("stale.sprx"),
         b"old",
     )
     .unwrap();
@@ -384,7 +384,7 @@ fn committing_over_an_installed_version_clears_it_first() {
     assert!(
         !staged
             .entry_dir
-            .join(DEV_FLASH_MOUNT)
+            .join(FLASH_MOUNT)
             .join("stale.sprx")
             .exists(),
         "the replaced version is removed whole, not merged into"

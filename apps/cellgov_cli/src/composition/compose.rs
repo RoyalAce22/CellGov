@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 
 use cellgov_compare::RunIdentity;
 use cellgov_install::store::TitleTree;
+use cellgov_ps3_abi::dev_flash::GUEST_FLASH_MOUNT;
 
 use super::identity::{run_identity, FirmwareIdentityError};
 use super::inventory::{dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry};
@@ -19,9 +20,6 @@ use super::select::{
     GameVersionSelectError,
 };
 use crate::game::manifest::{GameSource, ResolveEbootError, TitleManifest};
-
-/// Guest prefix of the firmware tree.
-const GUEST_DEV_FLASH: &str = "/dev_flash";
 
 /// Guest prefix a title's disc tree mounts under, joined with the
 /// title id.
@@ -264,7 +262,7 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
     let mut mounts = Vec::new();
     if let FirmwareChoice::Managed(entry) = &firmware {
         mounts.push(ComposedMount {
-            prefix: GUEST_DEV_FLASH.to_string(),
+            prefix: GUEST_FLASH_MOUNT.to_string(),
             roots: vec![entry.dev_flash_dir()],
         });
     }

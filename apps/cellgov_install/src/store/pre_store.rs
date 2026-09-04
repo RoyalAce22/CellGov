@@ -11,11 +11,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::store::layout::StoreLayout;
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNTS;
 
-/// The flash mounts a pre-store firmware install wrote at the store
-/// root. The store holds all three inside one firmware entry.
-const PRE_STORE_FIRMWARE_MOUNTS: [&str; 3] = ["dev_flash", "dev_flash2", "dev_flash3"];
+use crate::store::layout::StoreLayout;
 
 /// Suffix a pre-store install record shares with a store one.
 const INSTALL_RECORD_SUFFIX: &str = ".install.toml";
@@ -135,10 +133,10 @@ pub fn preflight(root: &Path) -> Result<(), PreStoreError> {
 }
 
 /// Every piece of pre-store residue under `root`: the flash mounts in
-/// declaration order, then the flat records sorted by name.
+/// [`FLASH_MOUNTS`] order, then the flat records sorted by name.
 fn detect(root: &Path) -> Result<Vec<PreStoreResidue>, PreStoreError> {
     let mut residue = Vec::new();
-    for mount in PRE_STORE_FIRMWARE_MOUNTS {
+    for mount in FLASH_MOUNTS {
         let dir = root.join(mount);
         if probe(root, &dir)?.is_some_and(|md| md.is_dir()) {
             residue.push(PreStoreResidue {

@@ -15,8 +15,8 @@
 
 use std::path::PathBuf;
 
-use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
+use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
 
 /// Workspace root, found by walking up to the manifest carrying
 /// `[workspace]`. Integration tests run with the crate directory as
@@ -75,7 +75,7 @@ pub fn dev_flash() -> PathBuf {
         found.push(
             layout
                 .resolve_store_path(&record.artifact.store_path)
-                .join(DEV_FLASH_MOUNT),
+                .join(FLASH_MOUNT),
         );
     }
     found.sort();
