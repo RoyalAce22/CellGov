@@ -106,7 +106,7 @@ Column definitions:
 | [NPUA80068](titles/NPUA80068.md) | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | fw 4.93 x base | FirstRsxWrite -> MaxSteps | 390,435 | 99,951,360 | No (outcome: Timeout vs Completed) | -- |
 | [VSH](titles/VSH.md) | PS3 System Software (vsh) | 2006 | Sony Interactive Entertainment | PAF | Firmware Exec | fw 4.93 | ProcessExit -> MaxSteps | 389,859 | 99,803,904 | -- | -- |
 
-Coverage: 5 title(s), 5 firmware(s), 9 declared cell(s), 8 recorded.
+Coverage: 5 title(s), 5 firmware(s), 9 declared cell(s), 9 recorded.
 
 Counts only, and the denominator is what the registry declares rather
 than the product of every version that exists. A cell is declared

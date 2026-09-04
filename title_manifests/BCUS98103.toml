@@ -19,7 +19,6 @@ kind = "first-rsx-write"
 [[bench.matrix]]
 fw = "1.94"
 game_ver = "base"
-pending = "the PRX loader refuses a module_stop entry point above the 32-bit guest space on this firmware, so the boot ends before any checkpoint"
 
 # The cell this title is gated and rendered at. See
 # docs/architecture/title_harness.md.

@@ -3,9 +3,11 @@
 //! Produces a [`ParsedPrx`] that [`crate::sprx::load_prx`] consumes; no
 //! guest-memory dependency lives in this layer.
 
+use std::borrow::Cow;
+
 use cellgov_ps3_abi::elf::{
     ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE,
-    NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC,
+    NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC, R_PPC64_ADDR32,
 };
 
 use crate::loader;
@@ -152,50 +154,7 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         return Err(PrxParseError::NotPrx(e_type));
     }
 
-    let phoff = loader::read_u64(data, 32) as usize;
-    let phentsize = loader::read_u16(data, 54) as usize;
-    let phnum = loader::read_u16(data, 56) as usize;
-    // ELF64 phdr is 56 bytes; smaller phentsize would alias entries.
-    if phentsize < 56 {
-        return Err(PrxParseError::OutOfBounds);
-    }
-
-    let mut loads: Vec<RawPhdr> = Vec::new();
-    let mut reloc_phdr: Option<RawPhdr> = None;
-
-    for i in 0..phnum {
-        let base = i
-            .checked_mul(phentsize)
-            .and_then(|off| phoff.checked_add(off))
-            .ok_or(PrxParseError::OutOfBounds)?;
-        let end = base
-            .checked_add(phentsize)
-            .ok_or(PrxParseError::OutOfBounds)?;
-        if end > data.len() {
-            return Err(PrxParseError::OutOfBounds);
-        }
-        let p_type = loader::read_u32(data, base);
-        let p_offset = loader::read_u64(data, base + 8) as usize;
-        let p_vaddr = loader::read_u64(data, base + 16);
-        let p_paddr = loader::read_u64(data, base + 24);
-        let p_filesz = loader::read_u64(data, base + 32);
-        let p_memsz = loader::read_u64(data, base + 40);
-
-        let phdr = RawPhdr {
-            p_type,
-            p_offset,
-            p_vaddr,
-            p_paddr,
-            p_filesz,
-            p_memsz,
-        };
-
-        match p_type {
-            PT_LOAD => loads.push(phdr),
-            PT_PRX_RELOC => reloc_phdr = Some(phdr),
-            _ => {}
-        }
-    }
+    let (loads, reloc_phdr) = scan_phdrs(data)?;
 
     if loads.len() < 2 {
         return Err(PrxParseError::MissingSegments);
@@ -214,19 +173,20 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     let text = extract_segment(data, &loads[0])?;
     let data_seg = extract_segment(data, &loads[1])?;
 
-    // PT_LOAD[0].p_paddr doubles as the file offset of module_info.
-    let mi_file_off = loads[0].p_paddr as usize;
-    let (name, toc, exports_range, _imports_range) = parse_module_info(data, mi_file_off)?;
-
-    let exports = parse_export_table(data, &seg_map, exports_range)?;
-
-    let module_start = find_system_opd(data, &seg_map, &exports_range, NID_MODULE_START)?;
-    let module_stop = find_system_opd(data, &seg_map, &exports_range, NID_MODULE_STOP)?;
-
     let relocations = match reloc_phdr {
         Some(rp) => parse_relocations(data, &rp)?,
         None => Vec::new(),
     };
+    let image = relocate_pointer_slots(data, &loads, &relocations);
+
+    // PT_LOAD[0].p_paddr doubles as the file offset of module_info.
+    let mi_file_off = loads[0].p_paddr as usize;
+    let (name, toc, exports_range, _imports_range) = parse_module_info(&image, mi_file_off)?;
+
+    let exports = parse_export_table(&image, &seg_map, exports_range)?;
+
+    let module_start = find_system_opd(&image, &seg_map, &exports_range, NID_MODULE_START)?;
+    let module_stop = find_system_opd(&image, &seg_map, &exports_range, NID_MODULE_STOP)?;
 
     let module_id = crate::prx_loader::graph::module_id_from_name(&name);
     Ok(ParsedPrx {
@@ -252,6 +212,50 @@ struct RawPhdr {
     p_memsz: u64,
 }
 
+/// Every PT_LOAD in program-header order, plus the PT_PRX_RELOC segment.
+fn scan_phdrs(data: &[u8]) -> Result<(Vec<RawPhdr>, Option<RawPhdr>), PrxParseError> {
+    let phoff = loader::read_u64(data, 32) as usize;
+    let phentsize = loader::read_u16(data, 54) as usize;
+    let phnum = loader::read_u16(data, 56) as usize;
+    // ELF64 phdr is 56 bytes; smaller phentsize would alias entries.
+    if phentsize < 56 {
+        return Err(PrxParseError::OutOfBounds);
+    }
+
+    let mut loads: Vec<RawPhdr> = Vec::new();
+    let mut reloc_phdr: Option<RawPhdr> = None;
+
+    for i in 0..phnum {
+        let base = i
+            .checked_mul(phentsize)
+            .and_then(|off| phoff.checked_add(off))
+            .ok_or(PrxParseError::OutOfBounds)?;
+        let end = base
+            .checked_add(phentsize)
+            .ok_or(PrxParseError::OutOfBounds)?;
+        if end > data.len() {
+            return Err(PrxParseError::OutOfBounds);
+        }
+        let p_type = loader::read_u32(data, base);
+        let phdr = RawPhdr {
+            p_type,
+            p_offset: loader::read_u64(data, base + 8) as usize,
+            p_vaddr: loader::read_u64(data, base + 16),
+            p_paddr: loader::read_u64(data, base + 24),
+            p_filesz: loader::read_u64(data, base + 32),
+            p_memsz: loader::read_u64(data, base + 40),
+        };
+
+        match p_type {
+            PT_LOAD => loads.push(phdr),
+            PT_PRX_RELOC => reloc_phdr = Some(phdr),
+            _ => {}
+        }
+    }
+
+    Ok((loads, reloc_phdr))
+}
+
 struct SegEntry {
     vaddr: usize,
     file_offset: usize,
@@ -271,6 +275,81 @@ fn v2f(seg_map: &[SegEntry], vaddr: usize) -> Option<usize> {
         }
     }
     None
+}
+
+/// `data` with every `R_PPC64_ADDR32` slot resolved, for a caller that
+/// reads pointers out of a PRX without parsing one.
+///
+/// Copies the whole file to rewrite the slots. Borrows `data` instead
+/// when the file:
+///
+/// - declares no PT_PRX_RELOC segment,
+/// - declares fewer than two PT_LOADs, as a title executable does,
+/// - carries a program-header table that does not scan.
+///
+/// See `relocate_pointer_slots` for what the raw slot word holds.
+///
+/// # Errors
+///
+/// [`PrxParseError::OutOfBounds`] when a declared relocation segment
+/// escapes the file.
+pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, PrxParseError> {
+    let Ok((loads, reloc_phdr)) = scan_phdrs(data) else {
+        return Ok(Cow::Borrowed(data));
+    };
+    let Some(reloc_phdr) = reloc_phdr else {
+        return Ok(Cow::Borrowed(data));
+    };
+    if loads.len() < 2 {
+        return Ok(Cow::Borrowed(data));
+    }
+    let relocs = parse_relocations(data, &reloc_phdr)?;
+    Ok(Cow::Owned(relocate_pointer_slots(data, &loads, &relocs)))
+}
+
+/// Copy of the file image with every `R_PPC64_ADDR32` slot holding the
+/// PRX-space address it resolves to.
+///
+/// PRX metadata pointers -- module-info, export tables, OPD words,
+/// import tables -- are relocation targets. Some SDK versions store the
+/// bare addend in the slot and let the relocation supply the value
+/// segment's vaddr; others store the sum. A raw read of the first kind
+/// lands short by that vaddr, in the wrong segment.
+///
+/// Only the metadata reads take this image; [`PrxSegment::data`] keeps
+/// the file's own bytes for [`crate::sprx::load_prx`] to relocate
+/// against the real base.
+fn relocate_pointer_slots(data: &[u8], loads: &[RawPhdr], relocs: &[PrxRelocation]) -> Vec<u8> {
+    // Mirrors the loader's two-segment view, which reports a wider
+    // segment index as a load failure.
+    let segs = [&loads[0], &loads[1]];
+    let mut image = data.to_vec();
+    for r in relocs {
+        if r.rtype != R_PPC64_ADDR32 {
+            continue;
+        }
+        let (Some(target), Some(value)) = (
+            segs.get((r.sym & 0xFF) as usize),
+            segs.get(((r.sym >> 8) & 0xFF) as usize),
+        ) else {
+            continue;
+        };
+        // A slot past filesz is BSS: it has no file bytes to rewrite.
+        if r.offset.saturating_add(4) > target.p_filesz {
+            continue;
+        }
+        let Some(bytes) = (target.p_offset as u64)
+            .checked_add(r.offset)
+            .and_then(|slot| usize::try_from(slot).ok())
+            .and_then(|slot| Some(slot..slot.checked_add(4)?))
+            .and_then(|slot| image.get_mut(slot))
+        else {
+            continue;
+        };
+        let resolved = value.p_vaddr.wrapping_add(r.addend as u64) as u32;
+        bytes.copy_from_slice(&resolved.to_be_bytes());
+    }
+    image
 }
 
 fn extract_segment(data: &[u8], phdr: &RawPhdr) -> Result<PrxSegment, PrxParseError> {
@@ -550,7 +629,9 @@ fn find_system_opd(
 fn parse_relocations(data: &[u8], phdr: &RawPhdr) -> Result<Vec<PrxRelocation>, PrxParseError> {
     let start = phdr.p_offset;
     let size = phdr.p_filesz as usize;
-    let end = start + size;
+    // Both fields are unvalidated header words from an arbitrary file:
+    // `relocated_pointer_image` reaches this before any PRX check.
+    let end = start.checked_add(size).ok_or(PrxParseError::OutOfBounds)?;
     if end > data.len() {
         return Err(PrxParseError::OutOfBounds);
     }
@@ -603,3 +684,7 @@ fn read_cstring(data: &[u8], seg_map: &[SegEntry], vaddr: usize) -> String {
 #[cfg(test)]
 #[path = "tests/parse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/relocated_pointer_tests.rs"]
+mod relocated_pointer_tests;

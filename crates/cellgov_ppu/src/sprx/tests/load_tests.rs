@@ -170,9 +170,11 @@ fn load_module_start_not_double_added_when_text_vaddr_nonzero() {
 
     let prx = parse_prx(&data).unwrap();
     assert_eq!(prx.text.vaddr, 0x1000);
+    // The OPD code slot's relocation names the text segment with addend
+    // 0x10, so it resolves to text.vaddr + 0x10.
     assert_eq!(
         prx.module_start.expect("module_start").code,
-        0x10,
+        0x1010,
         "OPD code is absolute PRX vaddr, not text-relative",
     );
 
@@ -183,8 +185,19 @@ fn load_module_start_not_double_added_when_text_vaddr_nonzero() {
     let ms = loaded.module_start.expect("module_start");
     assert_eq!(
         ms.code,
-        base + 0x10,
+        base + 0x1010,
         "ms.code = base + opd.code, not base + text.vaddr + opd.code",
+    );
+    // The loader writes ms.code into the OPD word at data + 0xF0.
+    let opd_code = (base + prx.data.vaddr + 0xF0) as usize;
+    assert_eq!(
+        u32::from_be_bytes([
+            mem.as_bytes()[opd_code],
+            mem.as_bytes()[opd_code + 1],
+            mem.as_bytes()[opd_code + 2],
+            mem.as_bytes()[opd_code + 3],
+        ]) as u64,
+        ms.code,
     );
 }
 

@@ -13,6 +13,7 @@ pub use load::{
     APPLIER_SUPPORTED_TYPES, R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO,
     R_PPC64_ADDR16_LO_DS, R_PPC64_ADDR32, R_PPC64_ADDR64, R_PPC64_REL24,
 };
+pub(crate) use parse::relocated_pointer_image;
 pub use parse::{
     parse_prx, ParsedPrx, PrxExport, PrxExportLib, PrxOpd, PrxParseError, PrxRelocation, PrxSegment,
 };

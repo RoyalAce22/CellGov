@@ -1,8 +1,9 @@
 //! Where the local PS3 corpus lives on disk.
 //!
 //! The store keys firmware on version, so the firmware install record
-//! names the installed tree. This module reads that record the way the
-//! boot path does.
+//! names the installed tree. This module reads those records the way
+//! the boot path does. A suite that asserts about one firmware library
+//! names the version it means.
 //!
 //! Those paths reach a tree git does not track, so this module
 //! declares the corpus features itself. A helper module has no
@@ -13,6 +14,7 @@
     reason = "each integration-test binary compiles this module separately and uses a subset"
 )]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
@@ -35,15 +37,20 @@ pub fn workspace_root() -> PathBuf {
     }
 }
 
-/// The `dev_flash` tree of the one installed firmware.
+/// The firmware version the corpus suites hold their assertions
+/// against.
+pub const CORPUS_FIRMWARE_VERSION: &str = "4.93";
+
+/// Every installed firmware's `dev_flash` tree, keyed by version.
 ///
 /// # Panics
 ///
-/// Panics when the store:
+/// Panics when:
 ///
-/// - holds no firmware entry, or
-/// - holds more than one.
-pub fn dev_flash() -> PathBuf {
+/// - the firmware records directory cannot be read,
+/// - a record cannot be parsed, or
+/// - two records claim one version.
+fn dev_flash_trees() -> BTreeMap<String, PathBuf> {
     let root = workspace_root().join(DEFAULT_VFS_ROOT);
     let layout = StoreLayout::new(&root);
     let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
@@ -54,7 +61,7 @@ pub fn dev_flash() -> PathBuf {
             records.display()
         )
     });
-    let mut found: Vec<PathBuf> = Vec::new();
+    let mut found: BTreeMap<String, PathBuf> = BTreeMap::new();
     for entry in entries {
         // Skipping an unreadable entry would drop a firmware from the
         // census.
@@ -72,32 +79,40 @@ pub fn dev_flash() -> PathBuf {
             .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
         let record = InstallRecord::parse(&text)
             .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()));
-        found.push(
-            layout
-                .resolve_store_path(&record.artifact.store_path)
-                .join(FLASH_MOUNT),
-        );
+        let tree = layout
+            .resolve_store_path(&record.artifact.store_path)
+            .join(FLASH_MOUNT);
+        if let Some(prev) = found.insert(record.artifact.version.clone(), tree) {
+            panic!(
+                "two firmware install records claim version {}: {} and {}",
+                record.artifact.version,
+                prev.display(),
+                path.display()
+            );
+        }
     }
-    found.sort();
-    match found.as_slice() {
-        [only] => only.clone(),
-        many => panic!(
-            "expected exactly one installed firmware under {}, found {}{}",
-            root.display(),
-            many.len(),
-            render_trees(many)
-        ),
-    }
+    found
 }
 
-/// The trees a census found, formatted as a suffix for a refusal.
-fn render_trees(trees: &[PathBuf]) -> String {
-    if trees.is_empty() {
-        String::new()
-    } else {
-        let rendered: Vec<String> = trees.iter().map(|p| p.display().to_string()).collect();
-        format!(": {}", rendered.join(", "))
-    }
+/// The `dev_flash` tree of [`CORPUS_FIRMWARE_VERSION`].
+///
+/// # Panics
+///
+/// Panics when the store holds no entry for that version.
+pub fn dev_flash() -> PathBuf {
+    let trees = dev_flash_trees();
+    trees
+        .get(CORPUS_FIRMWARE_VERSION)
+        .unwrap_or_else(|| {
+            let installed: Vec<&str> = trees.keys().map(String::as_str).collect();
+            panic!(
+                "the corpus suites are held against firmware {CORPUS_FIRMWARE_VERSION}, \
+                 which is not installed (installed: {}). Run \
+                 `cellgov firmware install <PS3UPDAT.PUP>` for it.",
+                installed.join(", ")
+            )
+        })
+        .clone()
 }
 
 /// Firmware modules published to the guest.

@@ -44,7 +44,10 @@ const MODULES: &[&str] = &[
     "libsysutil_np",
 ];
 
-/// The `sys/external` directory of the one installed firmware.
+/// The firmware version the committed digests were captured from.
+const REFERENCE_FIRMWARE_VERSION: &str = "4.93";
+
+/// The `sys/external` directory of [`REFERENCE_FIRMWARE_VERSION`].
 ///
 /// The store keys firmware on version, so the install record names the
 /// tree.
@@ -54,7 +57,8 @@ const MODULES: &[&str] = &[
 /// Panics when the store:
 ///
 /// - holds no firmware entry,
-/// - holds more than one, or
+/// - holds no entry for that version,
+/// - names one version twice, or
 /// - names a tree that is gone.
 ///
 /// `firmware-corpus` declares the install exists, so each is a failure
@@ -70,7 +74,7 @@ fn firmware_external_dir() -> PathBuf {
             records.display()
         )
     });
-    let mut found: Vec<PathBuf> = Vec::new();
+    let mut found: BTreeMap<String, PathBuf> = BTreeMap::new();
     for entry in entries {
         // Skipping an unreadable entry would drop a firmware from the
         // census.
@@ -92,22 +96,27 @@ fn firmware_external_dir() -> PathBuf {
             .unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
         let record = InstallRecord::parse(&text)
             .unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()));
-        found.push(
-            layout
-                .resolve_store_path(&record.artifact.store_path)
-                .join(FLASH_MOUNT)
-                .join("sys")
-                .join("external"),
-        );
+        let tree = layout
+            .resolve_store_path(&record.artifact.store_path)
+            .join(FLASH_MOUNT)
+            .join("sys")
+            .join("external");
+        if let Some(prev) = found.insert(record.artifact.version.clone(), tree) {
+            panic!(
+                "firmware-corpus: two firmware install records claim version {}: {} and {}",
+                record.artifact.version,
+                prev.display(),
+                path.display()
+            );
+        }
     }
-    found.sort();
-    let [dir] = found.as_slice() else {
-        let rendered: Vec<String> = found.iter().map(|p| p.display().to_string()).collect();
+    let Some(dir) = found.get(REFERENCE_FIRMWARE_VERSION) else {
+        let installed: Vec<&str> = found.keys().map(String::as_str).collect();
         panic!(
-            "firmware-corpus: expected exactly one installed firmware under {}, found {} [{}]",
+            "firmware-corpus: the committed digests were captured from firmware \
+             {REFERENCE_FIRMWARE_VERSION}, which is not installed under {} (installed: {})",
             root.display(),
-            found.len(),
-            rendered.join(", ")
+            installed.join(", ")
         );
     };
     assert!(

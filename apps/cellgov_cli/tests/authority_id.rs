@@ -61,9 +61,16 @@ fn boot(title: &TitleUnderTest, force_system_authid: bool) -> Option<AuthorityWi
     cmd.args(["boot", "bench-once"])
         .arg("--title")
         .arg(&title.short_name)
+        .arg("--fw")
+        .arg(&title.reference.fw)
         .arg("--max-steps")
         .arg(title.max_steps.to_string())
         .current_dir(workspace_root());
+    // A firmware-shipped title has no game-version axis. The
+    // composition refuses `--game-ver` for such a title.
+    if let Some(v) = &title.reference.game_ver {
+        cmd.arg("--game-ver").arg(v);
+    }
     if force_system_authid {
         cmd.env("CELLGOV_FORCE_SYSTEM_AUTHID", "1");
     }

@@ -9,8 +9,8 @@
 //!
 //! The boot cases need a second corpus the feature does not name.
 //! These ELFs import sysPrxForUser NIDs no HLE module binds, so
-//! `firmware_dir` resolves the store's one installed firmware. A run
-//! without one fails, and the refusal names it.
+//! `firmware_dir` resolves the one firmware version the corpus suites
+//! name. A store without that version fails, and the refusal names it.
 //!
 //! Cross-module contract: assumes `sys_tty_write` HLE captures
 //! byte-identical output to a real PS3 TTY. A capture-side
@@ -221,7 +221,8 @@ fn firmware_set_reject_reason(dir: &Path) -> Option<String> {
     }
 }
 
-/// The `sys/external` directory of the one installed firmware.
+/// The `sys/external` directory of the firmware these ELFs are held
+/// against.
 ///
 /// The harness passes this path to `boot run` explicitly, so a move in
 /// that command's default cannot change which modules boot here.
@@ -230,8 +231,7 @@ fn firmware_set_reject_reason(dir: &Path) -> Option<String> {
 ///
 /// Panics when the store:
 ///
-/// - holds no firmware,
-/// - holds more than one, or
+/// - holds no entry for that firmware version, or
 /// - names a tree that holds no module.
 fn firmware_dir() -> PathBuf {
     let dir = corpus::firmware_external_dir();

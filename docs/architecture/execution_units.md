@@ -33,6 +33,16 @@ modules with relocation appliers for the types in
 `cellgov_ppu::sprx::APPLIER_SUPPORTED_TYPES` (the single list; the
 firmware reloc census consults it too), and the PS3 PRX
 import-table parser.
+
+Both parsers read their pointers through the relocation that patches
+each slot, not from the file word sitting in it. A module's TOC, its
+export and import ranges, its per-library table pointers, its exported
+stub vaddrs and its entry-point OPDs are all `R_PPC64_ADDR32` targets,
+and an SDK is free to leave the bare addend in the slot and let the
+relocation supply the value segment's vaddr. Resolving through the
+relocation is what makes a parsed address agree with the one the loader
+publishes at that slot.
+
 The NID lookup database lives in
 `cellgov_ps3_abi::nid`; `lookup(nid)` resolves human-readable names
 for fault diagnostics.

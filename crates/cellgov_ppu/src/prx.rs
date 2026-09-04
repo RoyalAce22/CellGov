@@ -171,9 +171,17 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     if data.len() < ELF_HEADER_SIZE {
         return Err(ImportParseError::OutOfBounds);
     }
+    // Read the program headers before `data` below names the relocated
+    // image; a relocation inside the header's segment rewrites these words.
     let phoff = loader::read_u64(data, ELF_PHOFF_OFFSET) as usize;
     let phentsize = loader::read_u16(data, ELF_PHENTSIZE_OFFSET) as usize;
     let phnum = loader::read_u16(data, ELF_PHNUM_OFFSET) as usize;
+
+    // Every table pointer below is a relocation target, so the walk
+    // reads the resolved image.
+    let image =
+        crate::sprx::relocated_pointer_image(data).map_err(|_| ImportParseError::OutOfBounds)?;
+    let data: &[u8] = &image;
 
     let (imports_table_start_vaddr, imports_table_end_vaddr) =
         match locate_imports_via_prx_param(data, phoff, phentsize, phnum)? {

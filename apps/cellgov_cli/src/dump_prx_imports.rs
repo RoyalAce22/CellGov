@@ -141,7 +141,8 @@ pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
         Err(e) => {
             eprintln!(
                 "prx-imports: {}: PRX module info: {e}; \
-                 module name and export namespaces omitted from the listing",
+                 module name, export namespaces, segment geometry, module TOC \
+                 and entry-point OPDs omitted from the listing",
                 parsed.path.display(),
             );
             None
@@ -167,6 +168,21 @@ pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
         } else {
             println!("- Exports under: {}", ns_names.join(", "));
         }
+        // Every vaddr below is unrelocated PRX-space, the frame the
+        // import table prints stub addresses in. `sprx::load_prx` adds
+        // the load base, so none of these matches a fault PC from a
+        // booted run.
+        println!(
+            "- Text segment: vaddr 0x{:08x} (unrelocated), 0x{:x} byte(s)",
+            p.text.vaddr, p.text.memsz
+        );
+        println!(
+            "- Data segment: vaddr 0x{:08x} (unrelocated), 0x{:x} byte(s)",
+            p.data.vaddr, p.data.memsz
+        );
+        println!("- Module TOC: 0x{:08x} (unrelocated)", p.toc);
+        println!("- module_start: {}", describe_opd(p.module_start));
+        println!("- module_stop: {}", describe_opd(p.module_stop));
     }
     println!("- Modules imported: {}", modules.len());
     println!("- Functions imported: {total_funcs}");
@@ -275,6 +291,23 @@ pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
     }
 }
 
+/// Render an entry-point OPD, in the listing's unrelocated PRX-space vaddrs.
+///
+/// The parser returns `None` for two cases:
+///
+/// - the module exports no such entry point;
+/// - the located OPD pairs its entry with TOC 0, which the parser
+///   refuses as a corrupt descriptor.
+fn describe_opd(opd: Option<cellgov_ppu::sprx::PrxOpd>) -> String {
+    match opd {
+        Some(o) => format!(
+            "OPD 0x{:08x} -> code 0x{:08x}, toc 0x{:08x}",
+            o.opd_vaddr, o.code, o.toc
+        ),
+        None => "<none> (not exported, or its OPD carries toc 0)".to_string(),
+    }
+}
+
 /// Build a single-line hint pointing at the closest declared
 /// `stub_addr` to `target`. Useful when a user types a fault PC
 /// mid-stub and gets no exact match.
@@ -299,3 +332,7 @@ fn nearest_stub_hint(modules: &[&cellgov_ppu::prx::ImportedModule], target: u32)
 #[cfg(test)]
 #[path = "tests/dump_prx_imports_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/dump_prx_imports_opd_tests.rs"]
+mod opd_tests;
