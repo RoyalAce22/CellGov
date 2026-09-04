@@ -219,10 +219,16 @@ pub(crate) enum CompletionShell {
     Pwsh,
 }
 
+/// Which record `gen-manifest` generates from.
+const GEN_MANIFEST_SCOPE: &str = "Notes:
+  A manifest describes a title, so it is generated from that title's base
+  record; a firmware or title-update record is refused by name.";
+
 /// `cellgov dev gen-manifest`
 #[derive(Debug, clap::Args)]
+#[command(after_help = GEN_MANIFEST_SCOPE)]
 pub(crate) struct GenManifestArgs {
-    /// An install record to read directly.
+    /// A title-base install record to read directly.
     #[arg(long, value_name = "PATH", conflicts_with_all = ["title_id", "installs"])]
     pub record: Option<PathBuf>,
     /// A title id whose base record is looked up under `--installs`.

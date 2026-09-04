@@ -1140,7 +1140,7 @@ Emit a title-manifest stub from an install record.
 
 ```console
 $ cellgov dev gen-manifest --title-id NPUA80001
-$ cellgov dev gen-manifest --record vfs/.cellgov/installs/NPUA80001/base.toml --force
+$ cellgov dev gen-manifest --record vfs/.cellgov/installs/titles/NPUA80001/base.install.toml --force
 ```
 
 ```
@@ -1149,11 +1149,17 @@ Usage: cellgov dev gen-manifest [OPTIONS]
 
 | Option | Value | Description |
 | --- | --- | --- |
-| `--record` | `PATH` | An install record to read directly. |
+| `--record` | `PATH` | A title-base install record to read directly. |
 | `--title-id` | `ID` | A title id whose base record is looked up under `--installs`. |
 | `--installs` | `DIR` | Install-records directory `--title-id` is resolved under. |
 | `--registry` | `DIR` | Registry directory the stub is written into. |
 | `--force` | -- | Overwrite an existing manifest. |
+
+```
+Notes:
+  A manifest describes a title, so it is generated from that title's base
+  record; a firmware or title-update record is refused by name.
+```
 
 #### `cellgov dev record-anchors`
 

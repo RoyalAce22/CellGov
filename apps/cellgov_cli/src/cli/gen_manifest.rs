@@ -14,18 +14,31 @@
 use std::path::{Path, PathBuf};
 
 use cellgov_install::store::{
-    record_rel_path, Artifact, InstallRecord, StoreLayout, TitleId, TitleRecord, DEFAULT_VFS_ROOT,
+    preflight, record_rel_path, Artifact, ArtifactKind, InstallRecord, StoreLayout, TitleId,
+    TitleRecord, DEFAULT_VFS_ROOT,
 };
 
 use crate::cli::exit::die;
 use crate::cli::parse::GenManifestArgs;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
+use crate::game::manifest::TitleManifest;
 
 /// The install-record directory under the default store root, where
 /// the installers write. `--installs` names that directory directly,
 /// for a store rooted elsewhere.
 fn default_installs() -> PathBuf {
     StoreLayout::new(DEFAULT_VFS_ROOT).installs_dir()
+}
+
+/// The default install-record directory, refusing a root the store
+/// cannot read.
+///
+/// The default is the only invocation that resolves a store root:
+/// `--installs` and `--record` each name a path directly.
+fn default_installs_checked() -> PathBuf {
+    preflight(Path::new(DEFAULT_VFS_ROOT))
+        .unwrap_or_else(|e| die(&format!("gen-manifest failed: {e}")));
+    default_installs()
 }
 
 /// The base record for `title_id` under an `installs/` directory.
@@ -48,7 +61,10 @@ pub(crate) fn run(args: &GenManifestArgs) {
     let record_path = match (&args.record, &args.title_id) {
         (Some(p), _) => p.clone(),
         (None, Some(id)) => {
-            let installs = args.installs.clone().unwrap_or_else(default_installs);
+            let installs = args
+                .installs
+                .clone()
+                .unwrap_or_else(default_installs_checked);
             base_record_under(&installs, id)
         }
         // clap requires one of the two.
@@ -65,6 +81,16 @@ pub(crate) fn run(args: &GenManifestArgs) {
     let record = InstallRecord::parse(&text)
         .unwrap_or_else(|e| die(&format!("parse {}: {e}", record_path.display())));
 
+    // An update record names the title, so it passes the `[title]` gate
+    // below. Its `distribution` is the update's own tag, which no title
+    // manifest holds.
+    if record.artifact.kind == ArtifactKind::TitleUpdate {
+        die(&format!(
+            "{} describes a {} entry; a manifest is generated from the title's base record",
+            record_path.display(),
+            record.artifact.kind.as_str()
+        ));
+    }
     let title = record.title.as_ref().unwrap_or_else(|| {
         die(&format!(
             "{} describes a {} entry, which names no title",
@@ -74,6 +100,18 @@ pub(crate) fn run(args: &GenManifestArgs) {
     });
     let gen = GeneratedFields::from_record(&record, title);
     let manifest_path = registry.join(format!("{}.toml", gen.content_id));
+
+    let stub = gen.render_stub(&record_path);
+    // A record's `distribution` is a free-form string and its `title`
+    // is PARAM.SFO text, so a stub can carry a field the manifest
+    // loader refuses. The check runs ahead of the identity report as
+    // well as the write, so both answer the same for every record.
+    if let Err(e) = TitleManifest::load_from_text(&stub, &manifest_path) {
+        die(&format!(
+            "the stub generated from {} is not a title manifest: {e}",
+            record_path.display()
+        ));
+    }
 
     if manifest_path.exists() && !force {
         println!(
@@ -86,7 +124,6 @@ pub(crate) fn run(args: &GenManifestArgs) {
         return;
     }
 
-    let stub = gen.render_stub(&record_path);
     if let Some(parent) = manifest_path.parent() {
         std::fs::create_dir_all(parent)
             .unwrap_or_else(|e| die(&format!("create {}: {e}", parent.display())));
