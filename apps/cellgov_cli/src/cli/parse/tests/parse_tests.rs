@@ -189,22 +189,24 @@ fn record_anchors_takes_all_or_one_title_and_not_both() {
 }
 
 #[test]
-fn gen_manifest_takes_a_record_or_a_title_id_and_not_both() {
+fn gen_manifest_takes_exactly_one_of_its_three_record_selectors() {
     assert_eq!(
         err_kind(&["dev", "gen-manifest"]),
         clap::error::ErrorKind::MissingRequiredArgument
     );
-    assert_eq!(
-        err_kind(&[
-            "dev",
-            "gen-manifest",
-            "--record",
-            "r.toml",
-            "--title-id",
-            "X"
-        ]),
-        clap::error::ErrorKind::ArgumentConflict
-    );
+    assert!(parse(&["dev", "gen-manifest", "--firmware", "4.93"]).is_ok());
+    for pair in [
+        ["--record", "r.toml", "--title-id", "X"],
+        ["--record", "r.toml", "--firmware", "4.93"],
+        ["--title-id", "X", "--firmware", "4.93"],
+    ] {
+        let argv = [&["dev", "gen-manifest"][..], &pair[..]].concat();
+        assert_eq!(
+            err_kind(&argv),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{argv:?}"
+        );
+    }
     assert_eq!(
         err_kind(&[
             "dev",
@@ -215,8 +217,17 @@ fn gen_manifest_takes_a_record_or_a_title_id_and_not_both() {
             "d"
         ]),
         clap::error::ErrorKind::ArgumentConflict,
-        "--installs only resolves a --title-id",
+        "--installs only resolves a --title-id or a --firmware",
     );
+    for selector in [["--title-id", "X"], ["--firmware", "4.93"]] {
+        let argv = [
+            &["dev", "gen-manifest"][..],
+            &selector[..],
+            &["--installs", "d"][..],
+        ]
+        .concat();
+        assert!(parse(&argv).is_ok(), "{argv:?}");
+    }
 }
 
 #[test]

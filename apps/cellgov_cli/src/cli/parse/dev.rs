@@ -221,20 +221,30 @@ pub(crate) enum CompletionShell {
 
 /// Which record `gen-manifest` generates from.
 const GEN_MANIFEST_SCOPE: &str = "Notes:
-  A manifest describes a title, so it is generated from that title's base
-  record; a firmware or title-update record is refused by name.";
+  A title's base record generates that title's manifest; a title-update
+  record is refused by name. A firmware record generates the manifest
+  for the system software the firmware ships. That manifest names no
+  firmware version: the store holds the version, and the manifest
+  resolves against whichever firmware --fw selects.";
 
 /// `cellgov dev gen-manifest`
 #[derive(Debug, clap::Args)]
 #[command(after_help = GEN_MANIFEST_SCOPE)]
+#[command(group = clap::ArgGroup::new("gen-manifest-record")
+    .required(true)
+    .args(["record", "title_id", "firmware"]))]
 pub(crate) struct GenManifestArgs {
-    /// A title-base install record to read directly.
-    #[arg(long, value_name = "PATH", conflicts_with_all = ["title_id", "installs"])]
+    /// An install record to read directly.
+    #[arg(long, value_name = "PATH", conflicts_with = "installs")]
     pub record: Option<PathBuf>,
     /// A title id whose base record is looked up under `--installs`.
-    #[arg(long, value_name = "ID", required_unless_present = "record")]
+    #[arg(long, value_name = "ID")]
     pub title_id: Option<String>,
-    /// Install-records directory `--title-id` is resolved under.
+    /// A firmware version whose record is looked up under `--installs`.
+    #[arg(long, value_name = "VERSION")]
+    pub firmware: Option<String>,
+    /// Install-records directory `--title-id` and `--firmware` are
+    /// resolved under.
     #[arg(long, value_name = "DIR")]
     pub installs: Option<PathBuf>,
     /// Registry directory the stub is written into.

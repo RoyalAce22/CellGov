@@ -28,6 +28,16 @@ pub const GUEST_FLASH_MOUNT: &str = "/dev_flash";
 /// user sees.
 pub const VERSION_TXT_COMPONENTS: [&str; 3] = ["vsh", "etc", "version.txt"];
 
+/// The system shell's directory, relative to the `dev_flash` mount
+/// root, `/`-separated.
+///
+/// Retail firmware puts the shell and the modules it loads by path
+/// here, at the same place in every revision.
+pub const VSH_MODULE_DIR: &str = "vsh/module";
+
+/// The system shell's executable, inside [`VSH_MODULE_DIR`].
+pub const VSH_SELF: &str = "vsh.self";
+
 /// The record the version file opens with.
 pub const VERSION_TXT_RELEASE_FIELD: &str = "release";
 

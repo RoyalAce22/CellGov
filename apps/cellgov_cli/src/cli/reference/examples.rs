@@ -233,6 +233,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         path: "dev gen-manifest",
         lines: &[
             "cellgov dev gen-manifest --title-id NPUA80001",
+            "cellgov dev gen-manifest --firmware 4.93",
             "cellgov dev gen-manifest --record \
              vfs/.cellgov/installs/titles/NPUA80001/base.install.toml --force",
         ],

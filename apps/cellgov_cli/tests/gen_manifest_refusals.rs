@@ -1,6 +1,7 @@
-//! What `dev gen-manifest` refuses to generate a title manifest from.
-//! Each refusal goes through `die`, so it is only observable from a
-//! spawned process. Needs no corpus: every record here is hand-written.
+//! Which install records `dev gen-manifest` generates a manifest from,
+//! and which it refuses. Each refusal goes through `die`, so it is only
+//! observable from a spawned process. Needs no corpus: every record here
+//! is hand-written.
 
 use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};
@@ -126,21 +127,116 @@ fn base_record() -> String {
 }
 
 #[test]
-fn a_firmware_record_is_refused_by_path_and_kind() {
+fn a_firmware_record_generates_the_system_software_manifest() {
     let scratch = Scratch::new("firmware");
     let record = scratch.write("4.91.install.toml", &firmware_record("4.91"));
 
     let (code, stdout, stderr) = scratch.gen_from(&record);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    let stub = scratch.registry().join("VSH.toml");
+    assert!(stub.is_file(), "stdout:\n{stdout}stderr:\n{stderr}");
+    let text = std::fs::read_to_string(&stub).expect("read the generated stub");
+    assert!(text.contains("distribution = \"firmware-exec\""), "{text}");
+    assert!(
+        !text.contains("4.91"),
+        "the store holds the firmware version; the manifest names none:\n{text}"
+    );
+}
+
+/// The selector form of the case above. With no `--installs`, the record
+/// resolves under the default store root, which the working directory
+/// encloses.
+#[test]
+fn a_firmware_version_resolves_its_record_under_the_store() {
+    let scratch = Scratch::new("firmware_selector");
+    let installs = scratch.root.join("vfs").join(".cellgov").join("installs");
+    std::fs::create_dir_all(installs.join("firmware")).expect("create the record directory");
+    std::fs::write(
+        installs.join("firmware").join("4.91.install.toml"),
+        firmware_record("4.91"),
+    )
+    .expect("write the firmware record");
+
+    let (code, stdout, stderr) = scratch.gen(&["--firmware".as_ref(), "4.91".as_ref()]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        scratch.registry().join("VSH.toml").is_file(),
+        "stdout:\n{stdout}stderr:\n{stderr}"
+    );
+}
+
+/// `--installs` names the record directory itself, so residue under the
+/// default root refuses nothing.
+#[test]
+fn a_firmware_version_resolves_under_an_explicit_installs_directory() {
+    let scratch = Scratch::new("firmware_installs");
+    std::fs::create_dir_all(scratch.root.join("vfs").join("dev_flash"))
+        .expect("create the mount the store refuses");
+    scratch.write(
+        "records/firmware/4.91.install.toml",
+        &firmware_record("4.91"),
+    );
+    let installs = scratch.root.join("records");
+
+    let (code, stdout, stderr) = scratch.gen(&[
+        "--installs".as_ref(),
+        installs.as_os_str(),
+        "--firmware".as_ref(),
+        "4.91".as_ref(),
+    ]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        scratch.registry().join("VSH.toml").is_file(),
+        "stdout:\n{stdout}stderr:\n{stderr}"
+    );
+}
+
+/// The version keys the record path, so a directory that holds only
+/// another version resolves nothing.
+#[test]
+fn a_firmware_version_with_no_record_names_the_file_it_looked_for() {
+    let scratch = Scratch::new("firmware_missing");
+    scratch.write(
+        "records/firmware/4.91.install.toml",
+        &firmware_record("4.91"),
+    );
+    let installs = scratch.root.join("records");
+
+    let (code, stdout, stderr) = scratch.gen(&[
+        "--installs".as_ref(),
+        installs.as_os_str(),
+        "--firmware".as_ref(),
+        "4.92".as_ref(),
+    ]);
     assert_eq!(code, EXIT_FAILED, "stdout:\n{stdout}stderr:\n{stderr}");
     assert!(
-        stderr.contains("4.91.install.toml") && stderr.contains("firmware"),
-        "the refusal names the record and its kind:\n{stderr}"
+        stderr.contains("4.92.install.toml"),
+        "the refusal names the record the version keys:\n{stderr}"
     );
-    // A parse failure names the kind too, so the kind alone does not
-    // say which gate answered.
     assert!(
-        stderr.contains("names no title"),
-        "the refusal is the title gate's, not the parser's:\n{stderr}"
+        !scratch.registry().exists(),
+        "a refused generation writes no stub"
+    );
+}
+
+/// A version is one store path component, so it never escapes the
+/// record directory it resolves under.
+#[test]
+fn a_firmware_version_that_is_not_a_store_key_is_refused_by_name() {
+    let scratch = Scratch::new("firmware_unsafe_version");
+    let installs = scratch.root.join("records");
+    std::fs::create_dir_all(&installs).expect("create the record directory");
+
+    let (code, stdout, stderr) = scratch.gen(&[
+        "--installs".as_ref(),
+        installs.as_os_str(),
+        "--firmware".as_ref(),
+        "../4.91".as_ref(),
+    ]);
+    assert_eq!(code, EXIT_FAILED, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        stderr.contains("--firmware") && stderr.contains("../4.91"),
+        "the refusal names the selector and the value it could not use:\n{stderr}"
     );
     assert!(
         !scratch.registry().exists(),

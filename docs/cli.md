@@ -1140,25 +1140,30 @@ Emit a title-manifest stub from an install record.
 
 ```console
 $ cellgov dev gen-manifest --title-id NPUA80001
+$ cellgov dev gen-manifest --firmware 4.93
 $ cellgov dev gen-manifest --record vfs/.cellgov/installs/titles/NPUA80001/base.install.toml --force
 ```
 
 ```
-Usage: cellgov dev gen-manifest [OPTIONS]
+Usage: cellgov dev gen-manifest [OPTIONS] <--record <PATH>|--title-id <ID>|--firmware <VERSION>>
 ```
 
 | Option | Value | Description |
 | --- | --- | --- |
-| `--record` | `PATH` | A title-base install record to read directly. |
+| `--record` | `PATH` | An install record to read directly. |
 | `--title-id` | `ID` | A title id whose base record is looked up under `--installs`. |
-| `--installs` | `DIR` | Install-records directory `--title-id` is resolved under. |
+| `--firmware` | `VERSION` | A firmware version whose record is looked up under `--installs`. |
+| `--installs` | `DIR` | Install-records directory `--title-id` and `--firmware` are resolved under. |
 | `--registry` | `DIR` | Registry directory the stub is written into. |
 | `--force` | -- | Overwrite an existing manifest. |
 
 ```
 Notes:
-  A manifest describes a title, so it is generated from that title's base
-  record; a firmware or title-update record is refused by name.
+  A title's base record generates that title's manifest; a title-update
+  record is refused by name. A firmware record generates the manifest
+  for the system software the firmware ships. That manifest names no
+  firmware version: the store holds the version, and the manifest
+  resolves against whichever firmware --fw selects.
 ```
 
 #### `cellgov dev record-anchors`
