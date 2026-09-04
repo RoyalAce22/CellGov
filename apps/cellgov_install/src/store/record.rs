@@ -35,7 +35,8 @@ pub enum InstallRecordParseError {
     /// The record declares a schema this build does not read.
     #[error(
         "install record declares format_version {found}, this build reads {supported}; \
-         reinstall the artifact to regenerate it"
+         there is no migration path, so remove it and reinstall with \
+         `cellgov firmware install <PS3UPDAT.PUP>` or `cellgov title install <PKG|ISO>`"
     )]
     UnsupportedFormatVersion {
         /// Version the record declared.
@@ -232,6 +233,16 @@ struct RawInstallRecord {
     rap: Option<RapRecord>,
 }
 
+/// The schema stamp alone, read before the full shape.
+///
+/// A record from an older schema lacks blocks this one requires.
+/// Without the stamp, [`InstallRecord::parse`] reports a missing field
+/// instead of the version that explains it.
+#[derive(Deserialize)]
+struct FormatStamp {
+    format_version: u32,
+}
+
 impl TryFrom<RawInstallRecord> for InstallRecord {
     type Error = InstallRecordParseError;
 
@@ -335,6 +346,13 @@ impl InstallRecord {
     /// block-shape checks, and the path/version safety checks all run
     /// here.
     pub fn parse(text: &str) -> Result<Self, InstallRecordParseError> {
+        let stamp: FormatStamp = toml::from_str(text)?;
+        if stamp.format_version != INSTALL_RECORD_FORMAT_VERSION {
+            return Err(InstallRecordParseError::UnsupportedFormatVersion {
+                found: stamp.format_version,
+                supported: INSTALL_RECORD_FORMAT_VERSION,
+            });
+        }
         Self::try_from(toml::from_str::<RawInstallRecord>(text)?)
     }
 

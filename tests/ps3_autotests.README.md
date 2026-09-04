@@ -34,9 +34,9 @@ to set.
 
 These ELFs import `sysPrxForUser` NIDs that no HLE module binds, so the
 harness boots them against the installed firmware and `decrypt` is
-required to open it. It finds the newest `vfs/firmware/<version>/`
-tree, falls back to `vfs/dev_flash/`, and fails naming the path when
-neither exists.
+required to open it. It resolves that tree through the firmware install
+record, and fails naming the store when it holds no firmware or holds
+several.
 
 Cases that still diverge from the console capture stay `#[ignore]`d,
 one reason each, naming what the boot does instead and the condition

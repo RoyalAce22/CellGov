@@ -81,17 +81,32 @@ fn unsupported_format_version_errors_via_parse_manifest() {
     })
     .expect("forge");
     let err = parse_manifest(&text).unwrap_err();
-    let inner = match err {
-        ManifestError::Toml(e) => e.to_string(),
-        other => panic!("expected Toml-wrapped UnsupportedFormatVersion, got {other:?}"),
-    };
     assert!(
-        inner.contains(&format!(
-            "unsupported firmware.toml format_version {}",
-            SUPPORTED_FORMAT_VERSION + 1
-        )),
-        "wrong inner message: {inner}"
+        matches!(
+            err,
+            ManifestError::UnsupportedFormatVersion { found, expected }
+                if found == SUPPORTED_FORMAT_VERSION + 1 && expected == SUPPORTED_FORMAT_VERSION
+        ),
+        "wrong refusal: {err:?}"
     );
+}
+
+/// A v1 manifest states no `[firmware] version`.
+#[test]
+fn a_manifest_from_the_schema_before_this_one_is_refused_by_its_version() {
+    let text = "format_version = 1\n[firmware]\nimage_version = \"0x0004008200000000\"\n\
+                pup_sha256 = \"00000000000000000000000000000000000000000000000000000000000000ff\"\n";
+    let err = parse_manifest(text).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            ManifestError::UnsupportedFormatVersion { found: 1, expected }
+                if expected == SUPPORTED_FORMAT_VERSION
+        ),
+        "wrong refusal: {err:?}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("cellgov firmware install"), "{msg}");
 }
 
 #[test]

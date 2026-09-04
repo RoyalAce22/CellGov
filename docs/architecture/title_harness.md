@@ -134,6 +134,13 @@ failure" via explicit stderr markers (`BENCH_TITLE_NOT_INSTALLED`,
 `BENCH_BOOT_INPUTS_RESOLVED`), skip missing titles by name, and
 fail unless at least one title booted.
 
+A corpus-gated suite locates its fixtures the way the boot path does:
+through the install record that names the tree, never through a layout
+path of its own. "Not installed" is then the absence of a record, and a
+record naming a tree whose file is gone fails as drift rather than
+passing over. That keeps every suite reading one layout, and moves each
+of them with the artifact when an installer's target changes.
+
 Adding a title is a single-file TOML commit under
 `titles/`; no Rust change is needed while the title
 fits the existing checkpoint kinds (`process-exit`,

@@ -69,7 +69,13 @@ The directory comes from the install record under
 `<vfs>/.cellgov/installs/firmware/`, so it follows a relocated or
 re-versioned entry; a store with no firmware entry, or one whose tree
 is gone, refuses the boot instead of running without firmware, and a
-store holding several refuses until `--fw` names one.
+store holding several refuses until `--fw` names one. A root still
+holding the layout that came before the store -- a flash mount at the
+root, or a record filed where the store files none -- is refused by
+name, listing what to remove and the install command that rebuilds it.
+A probe that can neither find that residue nor show its absence is its
+own refusal, because no reader behind it re-asks. There is no migration
+path and no second resolver.
 `CELLGOV_NO_FIRMWARE_DIR=1` asks for that deliberately: the
 boot then loads no PRX and every game import routes to the
 unresolved-import trampoline. `_sys_prx_load_module` /

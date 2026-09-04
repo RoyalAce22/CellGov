@@ -61,6 +61,9 @@ pub struct GameUninstallOutcome {
 /// per-operation error rule.
 #[derive(Debug, thiserror::Error)]
 pub enum GameUninstallError {
+    /// The pre-store check refused the root.
+    #[error("{0}")]
+    PreStore(#[from] crate::store::pre_store::PreStoreError),
     /// No install record exists for the title; nothing to uninstall.
     #[error("no install record for title {title_id:?}")]
     NoRecord {
@@ -272,11 +275,19 @@ fn check_record_describes(
 /// Idempotent: a record whose tree is already gone still removes the
 /// RAP and record and succeeds; a title-id with no record is
 /// [`GameUninstallError::NoRecord`], never a silent success.
+///
+/// # Errors
+///
+/// [`GameUninstallError::PreStore`] when the root still holds the
+/// pre-store layout. Nothing is read or removed before this refusal.
+///
+/// The record / verify / filesystem failures also apply.
 pub fn uninstall(
     title_id: &str,
     output_dir: &Path,
     opts: UninstallOptions,
 ) -> Result<GameUninstallOutcome, GameUninstallError> {
+    crate::store::pre_store::preflight(output_dir)?;
     let key = TitleId::new(title_id).map_err(|source| GameUninstallError::UnsafeTitleId {
         title_id: title_id.to_string(),
         source,

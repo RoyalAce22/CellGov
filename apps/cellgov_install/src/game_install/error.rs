@@ -179,6 +179,9 @@ pub enum GameInstallError {
         /// The offending content-id.
         content_id: String,
     },
+    /// The pre-store check refused the root.
+    #[error("{0}")]
+    PreStore(#[from] crate::store::pre_store::PreStoreError),
     /// A store key -- the title id that names the store directory --
     /// is not usable as a directory name.
     #[error("store key: {0}")]

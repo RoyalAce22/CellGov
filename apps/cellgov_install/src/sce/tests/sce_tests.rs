@@ -382,6 +382,132 @@ fn parse_program_authority_id_rejects_truncated_ext_header() {
     ));
 }
 
+/// The `[title] distribution` tag that makes a base a disc tree.
+const DISC_DISTRIBUTION: &str = "disc-iso";
+
+/// The store, rooted at this workspace's VFS root.
+fn corpus_layout() -> crate::store::StoreLayout {
+    let mut root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    root.pop();
+    root.pop();
+    crate::store::StoreLayout::new(root.join(crate::store::DEFAULT_VFS_ROOT))
+}
+
+/// The install records under one kind's directory, sorted by name.
+fn records_of_kind(dir: &std::path::Path) -> Vec<crate::store::InstallRecord> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(e) => panic!("reading the install records under {}: {e}", dir.display()),
+    };
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries {
+        let entry = entry.unwrap_or_else(|e| panic!("reading an entry of {}: {e}", dir.display()));
+        let path = entry.path();
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".install.toml"))
+        {
+            paths.push(path);
+        }
+    }
+    paths.sort();
+    paths
+        .iter()
+        .map(|p| {
+            let text = std::fs::read_to_string(p)
+                .unwrap_or_else(|e| panic!("reading {}: {e}", p.display()));
+            crate::store::InstallRecord::parse(&text)
+                .unwrap_or_else(|e| panic!("parsing {}: {e}", p.display()))
+        })
+        .collect()
+}
+
+/// A title's executable, or `None` when the store holds no base record
+/// for it.
+///
+/// # Panics
+///
+/// Panics when the record names a tree whose executable is gone.
+fn installed_title_eboot(title_id: &str, label: &str) -> Option<std::path::PathBuf> {
+    let layout = corpus_layout();
+    let key = crate::store::TitleId::new(title_id).expect("a pinned title id is a store key");
+    let record_path = layout.record_path(&crate::store::Artifact::TitleBase { title_id: key });
+    let text = match std::fs::read_to_string(&record_path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => panic!("reading {}: {e}", record_path.display()),
+    };
+    let record = crate::store::InstallRecord::parse(&text)
+        .unwrap_or_else(|e| panic!("parsing {}: {e}", record_path.display()));
+    let title = record.title.as_ref().unwrap_or_else(|| {
+        panic!(
+            "{} describes a {} entry, which names no title",
+            record_path.display(),
+            record.artifact.kind.as_str()
+        )
+    });
+    let dir = layout.resolve_store_path(&record.artifact.store_path);
+    let usrdir = if title.distribution == DISC_DISTRIBUTION {
+        dir.join("PS3_GAME").join("USRDIR")
+    } else {
+        dir.join("USRDIR")
+    };
+    let eboot = usrdir.join("EBOOT.BIN");
+    assert!(
+        eboot.is_file(),
+        "{label} is recorded but {} resolved nothing: the tree has drifted from \
+         the record that names it",
+        eboot.display(),
+    );
+    Some(eboot)
+}
+
+/// `vsh/module/vsh.self` inside every installed firmware, keyed by
+/// version.
+///
+/// # Panics
+///
+/// Panics when:
+/// - a record under the firmware records directory declares another
+///   kind;
+/// - a firmware entry holds no `vsh.self`.
+fn installed_vsh_selfs() -> Vec<(String, std::path::PathBuf)> {
+    let layout = corpus_layout();
+    let records = layout
+        .installs_dir()
+        .join(crate::store::ArtifactKind::Firmware.as_str());
+    records_of_kind(&records)
+        .into_iter()
+        .map(|record| {
+            // A misfiled record would otherwise fail as a missing
+            // vsh.self, which names the wrong problem.
+            assert_eq!(
+                record.artifact.kind,
+                crate::store::ArtifactKind::Firmware,
+                "install record for {} sits under the firmware records but declares {}",
+                record.artifact.version,
+                record.artifact.kind.as_str(),
+            );
+            let path = layout
+                .resolve_store_path(&record.artifact.store_path)
+                .join(crate::firmware_install::DEV_FLASH_MOUNT)
+                .join("vsh")
+                .join("module")
+                .join("vsh.self");
+            assert!(
+                path.is_file(),
+                "firmware {} is recorded but {} resolved nothing: the tree has \
+                 drifted from the record that names it",
+                record.artifact.version,
+                path.display(),
+            );
+            (record.artifact.version, path)
+        })
+        .collect()
+}
+
 /// Hand-verified ground truth (independent byte-level parse of the
 /// plaintext headers): flOw (NPDRM, program_type 8) and WipEout (disc
 /// APP, program_type 4) both carry the retail-application authority id
@@ -392,43 +518,21 @@ fn parse_program_authority_id_rejects_truncated_ext_header() {
     ignore = "pins values read off installed titles under vfs/; run with --features title-corpus"
 )]
 fn parse_program_authority_id_matches_known_corpus_values() {
-    let root = {
-        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        p.pop();
-        p.pop();
-        p
-    };
-    // (label, fixture, the directory `title install` creates for that
-    // title, expected authority id).
     let cases = [
-        (
-            "flOw (NPDRM SELF)",
-            "vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
-            "vfs/dev_hdd0/game/NPUA80001",
-            0x1010_0000_0100_0003u64,
-        ),
-        (
-            "WipEout (disc SELF)",
-            "vfs/dev_bdvd/BCES00664/PS3_GAME/USRDIR/EBOOT.BIN",
-            "vfs/dev_bdvd/BCES00664",
-            0x1010_0000_0100_0003u64,
-        ),
+        ("NPUA80001", "flOw (NPDRM SELF)"),
+        ("BCES00664", "WipEout (disc SELF)"),
     ];
     let mut checked = 0;
-    for (label, rel, installed, expected) in cases {
-        let path = root.join(rel);
-        let Ok(bytes) = std::fs::read(&path) else {
-            assert!(
-                !root.join(installed).is_dir(),
-                "{label} is installed under {installed} but the pin {rel} \
-                 resolved nothing: the path pin is stale and proves nothing",
-            );
+    for (title_id, label) in cases {
+        let Some(path) = installed_title_eboot(title_id, label) else {
             eprintln!("parse_program_authority_id corpus pin: skipping {label} (not installed)");
             continue;
         };
+        let bytes =
+            std::fs::read(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
         assert_eq!(
             parse_program_authority_id(&bytes).unwrap(),
-            expected,
+            cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
             "{label}: authority id mismatch",
         );
         checked += 1;
@@ -802,6 +906,9 @@ fn parse_control_flags1_rejects_non_sce_input() {
     ));
 }
 
+/// The `ctrl_flags1` word a root-capable SELF carries.
+const CTRL_FLAGS1_ROOT: u32 = 0x4000_0000;
+
 /// Corpus pin for the privilege split: vsh.self is root-capable,
 /// retail application SELFs are not.
 #[test]
@@ -810,78 +917,51 @@ fn parse_control_flags1_rejects_non_sce_input() {
     ignore = "pins values read off an installed vfs/; run with --features title-corpus"
 )]
 fn parse_control_flags1_matches_known_corpus_values() {
-    let root = {
-        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        p.pop();
-        p.pop();
-        p
-    };
-    // (label, fixture, the directory the installer creates when that
-    // module / title is installed, whether the SELF carries a
-    // plaintext capability record at all, expected ctrl_flags1).
-    let cases = [
-        (
-            "vsh.self (CoreOS)",
-            "vfs/dev_flash/vsh/module/vsh.self",
-            "vfs/dev_flash/vsh/module",
-            true,
-            0x4000_0000u32,
-        ),
-        (
-            "flOw (NPDRM SELF)",
-            "vfs/dev_hdd0/game/NPUA80001/USRDIR/EBOOT.BIN",
-            "vfs/dev_hdd0/game/NPUA80001",
-            true,
-            0x0000_0000u32,
-        ),
-        (
-            "Super Stardust HD (NPDRM SELF)",
-            "vfs/dev_hdd0/game/NPUA80068/USRDIR/EBOOT.BIN",
-            "vfs/dev_hdd0/game/NPUA80068",
-            true,
-            0x0000_0000u32,
-        ),
+    let retail = [
+        ("NPUA80001", "flOw (NPDRM SELF)"),
+        ("NPUA80068", "Super Stardust HD (NPDRM SELF)"),
     ];
-    let mut checked = 0;
-    for (label, rel, installed, has_capability_record, expected) in cases {
-        let path = root.join(rel);
-        let Ok(bytes) = std::fs::read(&path) else {
-            assert!(
-                !root.join(installed).is_dir(),
-                "{label} is installed under {installed} but the pin {rel} \
-                 resolved nothing: the path pin is stale and proves nothing",
-            );
-            eprintln!("parse_control_flags1 corpus pin: skipping {label} (not installed)");
-            continue;
-        };
-        let flags = parse_control_flags1(&bytes).unwrap();
-        // All three carry a capability record; the retail pair's flags
-        // word is simply zero. Collapsing `None` to 0 would read a
-        // vanished record as an unprivileged one, so presence is
-        // pinned apart from the value.
-        assert_eq!(
-            flags.is_some(),
-            has_capability_record,
-            "{label}: capability-record presence"
-        );
-        assert_eq!(
-            flags.unwrap_or(0),
-            expected,
-            "{label}: ctrl_flags1 mismatch"
-        );
-        checked += 1;
-    }
+    let mut pins: Vec<(String, std::path::PathBuf, u32)> = installed_vsh_selfs()
+        .into_iter()
+        .map(|(version, path)| {
+            (
+                format!("vsh.self (CoreOS, firmware {version})"),
+                path,
+                CTRL_FLAGS1_ROOT,
+            )
+        })
+        .collect();
+    pins.extend(retail.into_iter().filter_map(|(title_id, label)| {
+        installed_title_eboot(title_id, label).map(|path| (label.to_string(), path, 0))
+    }));
     // Floor only. Proving the root-vs-non-root split needs one fixture
     // of each class, but vsh comes with firmware while the games come
     // with titles -- two independent features -- so a run carrying only
     // one class still checks what it can rather than failing.
     assert!(
-        checked > 0,
-        "title-corpus is on but none of the {} pinned fixtures is installed",
-        cases.len()
+        !pins.is_empty(),
+        "title-corpus is on but the store holds neither a firmware nor a pinned title"
     );
+    for (label, path, expected) in &pins {
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
+        let flags = parse_control_flags1(&bytes).unwrap();
+        // Every fixture carries a capability record; the retail pair's
+        // flags word is zero.
+        assert!(flags.is_some(), "{label}: capability-record presence");
+        assert_eq!(flags.unwrap_or(0), *expected, "{label}: ctrl_flags1");
+    }
+    let root_capable = pins.iter().filter(|p| p.2 == CTRL_FLAGS1_ROOT).count();
     eprintln!(
-        "parse_control_flags1 corpus pin: checked {checked}/{} fixtures",
-        cases.len()
+        "parse_control_flags1 corpus pin: checked {} fixtures ({root_capable} root-capable, \
+         {} unprivileged)",
+        pins.len(),
+        pins.len() - root_capable,
     );
+    if root_capable == 0 || root_capable == pins.len() {
+        eprintln!(
+            "parse_control_flags1 corpus pin: only one privilege class is installed, so this \
+             run did not hold the root-vs-non-root split apart"
+        );
+    }
 }

@@ -115,6 +115,16 @@ pub struct FirmwareFileEntry {
     pub revision: u16,
 }
 
+/// The schema stamp alone, read before the full shape.
+///
+/// A v1 manifest carries no `[firmware] version`. Without the stamp,
+/// [`parse_manifest`] reports a missing field instead of the version
+/// that explains it.
+#[derive(Deserialize)]
+struct FormatStamp {
+    format_version: u32,
+}
+
 /// Raw on-disk shape; `TryFrom`-validated into [`FirmwareManifest`].
 #[derive(Deserialize)]
 struct RawManifest {
@@ -156,8 +166,9 @@ impl TryFrom<RawManifest> for FirmwareManifest {
 pub enum ManifestError {
     /// `format_version` field did not equal [`SUPPORTED_FORMAT_VERSION`].
     #[error(
-        "unsupported firmware.toml format_version {found} (expected {expected}); \
-         reinstall the PUP to regenerate it"
+        "unsupported firmware.toml format_version {found} (expected {expected}); there is no \
+         migration path, so remove the entry and reinstall with \
+         `cellgov firmware install <PS3UPDAT.PUP>`"
     )]
     UnsupportedFormatVersion {
         /// `format_version` value read from the manifest.
@@ -189,6 +200,13 @@ pub enum ManifestError {
 /// `format_version`s, duplicate `path` entries, and malformed hex
 /// digests.
 pub fn parse_manifest(text: &str) -> Result<FirmwareManifest, ManifestError> {
+    let stamp: FormatStamp = toml::from_str(text).map_err(ManifestError::Toml)?;
+    if stamp.format_version != SUPPORTED_FORMAT_VERSION {
+        return Err(ManifestError::UnsupportedFormatVersion {
+            found: stamp.format_version,
+            expected: SUPPORTED_FORMAT_VERSION,
+        });
+    }
     toml::from_str(text).map_err(ManifestError::Toml)
 }
 

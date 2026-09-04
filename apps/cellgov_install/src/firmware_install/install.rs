@@ -366,6 +366,9 @@ impl ExtractTally {
 ///
 /// # Errors
 ///
+/// [`FirmwareInstallError::PreStore`] when the root still holds the
+/// pre-store layout. Nothing is read or staged before this refusal.
+///
 /// [`FirmwareInstallError::NoDevFlashPackages`] when the PUP names no
 /// firmware tree, [`FirmwareInstallError::PartialInstall`] when any
 /// package failed to land, [`FirmwareInstallError::VersionInstalled`] and
@@ -381,6 +384,7 @@ pub fn install_pup(
     force: bool,
     progress: &dyn ProgressSink,
 ) -> Result<FirmwareInstallOutcome, FirmwareInstallError> {
+    crate::store::pre_store::preflight(output_dir)?;
     progress.phase(FirmwarePhase::Reading.code());
     let pup = pup::parse(pup_data)?;
     let pup_sha256 = manifest::Sha256(manifest::sha256_of(pup_data));

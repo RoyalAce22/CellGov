@@ -9,8 +9,8 @@
 //!
 //! The boot cases need a second corpus the feature does not name.
 //! These ELFs import sysPrxForUser NIDs no HLE module binds, so
-//! `firmware_dir` resolves an installed firmware set. A run without
-//! one dies naming it.
+//! `firmware_dir` resolves the store's one installed firmware. A run
+//! without one fails, and the refusal names it.
 //!
 //! Cross-module contract: assumes `sys_tty_write` HLE captures
 //! byte-identical output to a real PS3 TTY. A capture-side
@@ -30,6 +30,9 @@ use std::process::Command;
 use std::sync::{Condvar, Mutex, OnceLock};
 
 use cellgov_compare::{Observation, ObservationMetadata, ObservedOutcome};
+
+#[path = "common/corpus.rs"]
+mod corpus;
 
 /// Peak RSS budget per subprocess: ~1.8 GiB guest memory plus a
 /// transient JSON-array dump from `--save-observation`. 4 GiB covers
@@ -218,78 +221,28 @@ fn firmware_set_reject_reason(dir: &Path) -> Option<String> {
     }
 }
 
-/// The installed `sys/external` firmware directory.
+/// The `sys/external` directory of the one installed firmware.
 ///
 /// The harness passes this path to `boot run` explicitly, so a move in
 /// that command's default cannot change which modules boot here.
-/// `vfs/dev_flash/sys/external` comes first: it is the default the
-/// boot pipeline documents, so this suite boots the same modules as
-/// every other tool. The versioned store under
-/// `vfs/firmware/<version>/` is the fallback, newest first. A name
-/// that starts with `.` is the installer's staging or tombstone
-/// residue, not a version, so it is never a candidate.
 ///
 /// # Panics
 ///
-/// Panics when no candidate holds a firmware set.
+/// Panics when the store:
 ///
-/// These ELFs import sysPrxForUser NIDs no HLE module binds. A boot
-/// without firmware compares an unresolved-import trajectory against
-/// console output, and reports a divergence that is really a missing
-/// corpus.
+/// - holds no firmware,
+/// - holds more than one, or
+/// - names a tree that holds no module.
 fn firmware_dir() -> PathBuf {
-    let vfs = workspace_root().join("vfs");
-    let live = vfs.join("dev_flash").join("sys").join("external");
-    let mut candidates: Vec<PathBuf> = vec![live];
-    let store = vfs.join("firmware");
-    match std::fs::read_dir(&store) {
-        Ok(entries) => {
-            let mut versions: Vec<PathBuf> = entries
-                .filter_map(Result::ok)
-                .map(|e| e.path())
-                .filter(|p| {
-                    p.is_dir()
-                        && !p
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.starts_with('.'))
-                })
-                .collect();
-            // Store version names are fixed-width `<major>.<minor>`,
-            // so byte order and numeric order agree here.
-            versions.sort();
-            candidates.extend(
-                versions
-                    .into_iter()
-                    .rev()
-                    .map(|v| v.join("dev_flash").join("sys").join("external")),
-            );
-        }
-        // A machine that installed straight into the live mount has no
-        // store, so a missing one is ordinary. Any other failure hides
-        // candidates.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => eprintln!(
-            "ps3autotests: firmware store {} is unreadable ({e}); only the live \
-             dev_flash mount is a candidate",
-            store.display(),
-        ),
+    let dir = corpus::firmware_external_dir();
+    if let Some(reason) = firmware_set_reject_reason(&dir) {
+        panic!(
+            "ps3autotests: {reason} -- these ELFs import sysPrxForUser NIDs that only the \
+             firmware PRX resolves, so install firmware with \
+             `cellgov firmware install <PS3UPDAT.PUP>` before running this suite"
+        );
     }
-    let mut rejected: Vec<String> = Vec::new();
-    for candidate in candidates {
-        match firmware_set_reject_reason(&candidate) {
-            None => return candidate,
-            Some(reason) => rejected.push(reason),
-        }
-    }
-    panic!(
-        "ps3autotests: no installed firmware under {} -- these ELFs import \
-         sysPrxForUser NIDs that only the firmware PRX resolves, so install \
-         firmware (the corpus the `firmware-corpus` feature declares) before \
-         running this suite. Candidates tried: {}",
-        vfs.display(),
-        rejected.join("; "),
-    )
+    dir
 }
 
 fn ps3autotests_root() -> PathBuf {

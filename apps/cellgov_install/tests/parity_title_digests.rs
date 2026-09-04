@@ -7,10 +7,9 @@
 //!
 //! Compiled only under `title-corpus`, which declares the operator
 //! owns title dumps -- though not necessarily every row pinned here.
-//! A row whose title is not installed is passed over; a row whose
-//! title IS installed but whose pinned EBOOT or RAP path resolves
-//! nothing fails as drift; a run that compared no row at all fails as
-//! vacuous.
+//! A row with no base record is passed over; a row whose record names
+//! a tree with no EBOOT or RAP fails as drift; a run that compared no
+//! row at all fails as vacuous.
 
 #![allow(
     clippy::print_stderr,
@@ -21,9 +20,12 @@
     reason = "integration test: unwrap on unexpected failure is correct"
 )]
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use cellgov_install::keys::KeyVault;
+use cellgov_install::store::{
+    Artifact, InstallRecord, StoreLayout, TitleId, TitleTree, DEFAULT_VFS_ROOT,
+};
 use sha2::{Digest, Sha256};
 
 #[path = "common/digests.rs"]
@@ -35,57 +37,98 @@ mod title_digests;
 
 use title_digests::{hex_to_bytes32, TitleDigest};
 
+/// The `[title] distribution` tag that makes a base a disc tree.
+const DISC_DISTRIBUTION: &str = "disc-iso";
+
+/// Where a disc tree holds its executable, under the base directory.
+const DISC_USRDIR: [&str; 2] = ["PS3_GAME", "USRDIR"];
+
+/// Where an HDD game tree holds its executable.
+const GAME_USRDIR: &str = "USRDIR";
+
 fn workspace_root() -> PathBuf {
     digests::workspace_root()
 }
 
-fn bin_path_for(content_id: &str, key: &str) -> PathBuf {
-    let ws = workspace_root();
-    match key {
-        "npdrm" => ws
-            .join("vfs/dev_hdd0/game")
-            .join(content_id)
-            .join("USRDIR/EBOOT.BIN"),
-        "app" => ws
-            .join("vfs/dev_bdvd")
-            .join(content_id)
-            .join("PS3_GAME/USRDIR/EBOOT.BIN"),
-        other => panic!("{content_id}: unknown key {other:?}"),
-    }
+fn layout() -> StoreLayout {
+    StoreLayout::new(workspace_root().join(DEFAULT_VFS_ROOT))
 }
 
-/// The directory `cellgov title install` creates for a title.
+/// One title's installed base, resolved through its install record.
+struct InstalledBase {
+    /// The tree the record's `store_path` names.
+    dir: PathBuf,
+    /// The executable inside that tree.
+    eboot: PathBuf,
+}
+
+/// The base entry for `content_id`, or `None` when the store holds no
+/// record for it.
 ///
-/// Its presence separates an uninstalled title (a pass-over) from a
-/// derived EBOOT path that no longer matches where the installer
-/// writes (drift).
-fn title_dir_for(content_id: &str, key: &str) -> PathBuf {
-    let ws = workspace_root();
-    match key {
-        "npdrm" => ws.join("vfs/dev_hdd0/game").join(content_id),
-        "app" => ws.join("vfs/dev_bdvd").join(content_id),
-        other => panic!("{content_id}: unknown key {other:?}"),
-    }
+/// The record names the tree, so this resolves the same title wherever
+/// the installer puts it.
+///
+/// # Panics
+///
+/// Panics when the record:
+///
+/// - is unreadable,
+/// - does not parse, or
+/// - describes a kind that names no title.
+fn installed_base(content_id: &str) -> Option<InstalledBase> {
+    let layout = layout();
+    let title_id = TitleId::new(content_id)
+        .unwrap_or_else(|e| panic!("{content_id} is not a store title id: {e}"));
+    let record_path = layout.record_path(&Artifact::TitleBase { title_id });
+    let text = match std::fs::read_to_string(&record_path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) => panic!("reading {}: {e}", record_path.display()),
+    };
+    let record = InstallRecord::parse(&text)
+        .unwrap_or_else(|e| panic!("parsing {}: {e}", record_path.display()));
+    let title = record.title.as_ref().unwrap_or_else(|| {
+        panic!(
+            "{} describes a {} entry, which names no title",
+            record_path.display(),
+            record.artifact.kind.as_str()
+        )
+    });
+    let dir = layout.resolve_store_path(&record.artifact.store_path);
+    let tree = if title.distribution == DISC_DISTRIBUTION {
+        TitleTree::Disc
+    } else {
+        TitleTree::Game
+    };
+    let usrdir = match tree {
+        TitleTree::Disc => DISC_USRDIR.iter().fold(dir.clone(), |d, p| d.join(p)),
+        TitleTree::Game => dir.join(GAME_USRDIR),
+    };
+    Some(InstalledBase {
+        eboot: usrdir.join("EBOOT.BIN"),
+        dir,
+    })
 }
 
-/// Refuse a pass-over that only looks like an absent fixture.
-fn assert_not_installed(entry: &TitleDigest, bin_path: &Path) {
-    let title_dir = title_dir_for(&entry.content_id, &entry.key);
+/// The EBOOT of an installed title, or `None` when it is not installed.
+///
+/// A record whose tree holds no EBOOT is drift: something removed the
+/// executable the record names.
+fn installed_eboot(entry: &TitleDigest) -> Option<PathBuf> {
+    let base = installed_base(&entry.content_id)?;
     assert!(
-        bin_path.is_file() || !title_dir.is_dir(),
-        "{} is installed under {} but the pinned EBOOT {} resolved \
-         nothing: the derived path has drifted from where the \
-         installer writes",
+        base.eboot.is_file(),
+        "{} is installed under {} but its EBOOT {} resolved nothing: the tree \
+         has drifted from the record that names it",
         entry.display,
-        title_dir.display(),
-        bin_path.display(),
+        base.dir.display(),
+        base.eboot.display(),
     );
+    Some(base.eboot)
 }
 
 fn rap_path_for(rap_filename: &str) -> PathBuf {
-    workspace_root()
-        .join("vfs/dev_hdd0/home/00000001/exdata")
-        .join(rap_filename)
+    layout().live_exdata_dir().join(rap_filename)
 }
 
 /// NPDRM byte-identity gate; masked-identity is the contract.
@@ -100,19 +143,18 @@ fn rap_path_for(rap_filename: &str) -> PathBuf {
 /// Returns `true` when the title was actually compared.
 fn run_npdrm_digest_check(entry: &TitleDigest, keys: &KeyVault) -> bool {
     let title = &entry.display;
-    let bin_path = bin_path_for(&entry.content_id, &entry.key);
     let rap_filename = entry.rap_filename.as_ref().unwrap_or_else(|| {
         panic!("{title}: npdrm row requires rap_filename in parity_digests.toml")
     });
     let rap_path = rap_path_for(rap_filename);
-    if !bin_path.is_file() {
-        assert_not_installed(entry, &bin_path);
+    let Some(bin_path) = installed_eboot(entry) else {
         eprintln!(
-            "cellgov_install eboot parity ({title}): not installed; missing {}",
-            bin_path.display(),
+            "cellgov_install eboot parity ({title}): not installed; the store holds no \
+             base record for {}",
+            entry.content_id,
         );
         return false;
-    }
+    };
     // The RAP is written into `exdata/` by the same install that wrote
     // the EBOOT (`cellgov_install::game_install::install_pkg`), so for
     // an installed title its absence is drift. Passing over it would
@@ -121,10 +163,8 @@ fn run_npdrm_digest_check(entry: &TitleDigest, keys: &KeyVault) -> bool {
     // the suite's anti-vacuity floor satisfied and the run green.
     assert!(
         rap_path.is_file(),
-        "{title} is installed under {} but its pinned RAP {} resolved \
-         nothing: reinstall the title with its RAP, or drop the row from \
-         parity_digests.toml",
-        title_dir_for(&entry.content_id, &entry.key).display(),
+        "{title} is installed but its pinned RAP {} resolved nothing: reinstall \
+         the title with its RAP, or drop the row from parity_digests.toml",
         rap_path.display(),
     );
     let expected_unmasked = hex_to_bytes32(&entry.unmasked_sha256, &format!("{title} unmasked"));
@@ -179,15 +219,14 @@ fn run_npdrm_digest_check(entry: &TitleDigest, keys: &KeyVault) -> bool {
 /// Returns `true` when the title was actually compared.
 fn run_app_digest_check(entry: &TitleDigest, keys: &KeyVault) -> bool {
     let title = &entry.display;
-    let bin_path = bin_path_for(&entry.content_id, &entry.key);
-    if !bin_path.is_file() {
-        assert_not_installed(entry, &bin_path);
+    let Some(bin_path) = installed_eboot(entry) else {
         eprintln!(
-            "cellgov_install eboot parity ({title}): not installed; missing {}",
-            bin_path.display()
+            "cellgov_install eboot parity ({title}): not installed; the store holds no \
+             base record for {}",
+            entry.content_id,
         );
         return false;
-    }
+    };
     let expected = hex_to_bytes32(&entry.unmasked_sha256, &format!("{title} unmasked"));
     let bin = std::fs::read(&bin_path).unwrap();
     let elf = cellgov_install::sce::decrypt_self_to_elf(&bin, keys)

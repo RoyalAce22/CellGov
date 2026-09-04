@@ -102,6 +102,13 @@ fn plan_staged_rap(
 /// Install a retail PKG (PSN/retail HDD title) into `output_dir`'s
 /// `dev_hdd0` tree, installing the RAP and writing the title-base
 /// record for that root.
+///
+/// # Errors
+///
+/// [`GameInstallError::PreStore`] when the root still holds the
+/// pre-store layout. Nothing is read or staged before this refusal.
+///
+/// The shared identity / RAP / staging / record failures also apply.
 #[cfg(feature = "decrypt")]
 pub fn install_pkg(
     pkg_bytes: &[u8],
@@ -110,6 +117,7 @@ pub fn install_pkg(
     output_dir: &Path,
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
+    crate::store::pre_store::preflight(output_dir)?;
     let progress = opts.progress;
     progress.phase(Phase::Reading.code());
     let archive = pkg::extract(pkg_bytes, keys)?;
@@ -286,6 +294,9 @@ pub fn install_pkg(
 ///
 /// # Errors
 ///
+/// [`GameInstallError::PreStore`] when the root still holds the
+/// pre-store layout. Nothing is read or staged before this refusal.
+///
 /// [`GameInstallError::DiscImageEncrypted`] for an image still carrying
 /// its disc encryption, refused before anything is staged.
 #[cfg(feature = "decrypt")]
@@ -295,6 +306,7 @@ pub fn install_iso(
     output_dir: &Path,
     opts: InstallOptions<'_>,
 ) -> Result<GameInstallOutcome, GameInstallError> {
+    crate::store::pre_store::preflight(output_dir)?;
     let progress = opts.progress;
     progress.phase(Phase::Reading.code());
     let entries = iso::read_iso(image)?;

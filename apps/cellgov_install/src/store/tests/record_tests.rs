@@ -157,6 +157,28 @@ fn a_record_from_another_schema_is_refused_by_version() {
     }
 }
 
+/// A record from the schema before this one carries no `[artifact]`
+/// block.
+#[test]
+fn a_record_from_the_schema_before_this_one_is_refused_by_its_version() {
+    let text = "format_version = 2\n\
+                [source]\nkind = \"pkg\"\nsha256 = \"00000000000000000000000000000000000000000000000000000000000000ff\"\n\
+                [title]\ntitle_id = \"TEST00000\"\ncontent_id = \"TEST00000\"\ncategory = \"HG\"\n\
+                title = \"T\"\napp_version = \"01.00\"\ndistribution = \"psn-hdd\"\n\
+                [files]\n";
+    let err = InstallRecord::parse(text).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            InstallRecordParseError::UnsupportedFormatVersion { found: 2, supported }
+                if supported == INSTALL_RECORD_FORMAT_VERSION
+        ),
+        "{err:?}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("cellgov title install"), "{msg}");
+}
+
 #[test]
 fn a_record_that_is_not_toml_is_refused() {
     let err = InstallRecord::parse("this is not toml {{{").unwrap_err();

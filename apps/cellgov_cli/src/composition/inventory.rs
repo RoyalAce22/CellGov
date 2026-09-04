@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
 use cellgov_install::store::{
-    ArtifactKind, InstallRecord, InstallRecordParseError, StoreKeyError, StoreLayout, TitleId,
-    TitleTree,
+    ArtifactKind, InstallRecord, InstallRecordParseError, PreStoreError, StoreKeyError,
+    StoreLayout, TitleId, TitleTree,
 };
 
 use crate::game::manifest::BASE_GAME_VER;
@@ -32,6 +32,10 @@ const DISC_DISTRIBUTION: &str = "disc-iso";
 /// Why the store's install records could not be read.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum InventoryError {
+    /// The root still holds the layout that came before the store,
+    /// or a probe could not say which layout it holds.
+    #[error("{0}")]
+    PreStore(#[from] PreStoreError),
     /// A records directory exists but could not be enumerated.
     #[error("reading the store's install records under {}: {source}", dir.display())]
     ReadDir {
@@ -222,11 +226,13 @@ impl StoreInventory {
     ///
     /// Every [`InventoryError`]:
     ///
+    /// - a root that still holds the pre-store layout;
     /// - an unreadable directory or file;
     /// - a record this build does not read;
     /// - a record whose declared identity disagrees with where the
     ///   store files it.
     pub(crate) fn read(root: &Path) -> Result<Self, InventoryError> {
+        cellgov_install::store::preflight(root)?;
         let layout = StoreLayout::new(root);
         let installs = layout.installs_dir();
         let mut firmware = BTreeMap::new();
@@ -514,3 +520,7 @@ fn file_name(path: &Path) -> String {
 #[cfg(test)]
 #[path = "tests/inventory_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/pre_store_tests.rs"]
+mod pre_store_tests;

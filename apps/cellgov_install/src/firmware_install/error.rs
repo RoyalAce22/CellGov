@@ -205,6 +205,9 @@ pub enum FirmwareInstallError {
     /// Serialising the install record failed.
     #[error("install-record serialise: {0}")]
     RecordSerialise(#[from] toml::ser::Error),
+    /// The pre-store check refused the root.
+    #[error("{0}")]
+    PreStore(#[from] crate::store::pre_store::PreStoreError),
     /// The version read from `version.txt` is not usable as a store
     /// directory name.
     #[error("store key: {0}")]

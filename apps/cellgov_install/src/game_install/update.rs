@@ -116,6 +116,9 @@ fn check_base_entry(base_record_path: &Path, title_id: &str) -> Result<bool, Gam
 ///
 /// # Errors
 ///
+/// [`GameInstallError::PreStore`] when the root still holds the
+/// pre-store layout. Nothing is read or staged before this refusal.
+///
 /// [`GameInstallError::NotUpdatePackage`] for a category that is
 /// neither `GD` nor `HG`, [`GameInstallError::MissingAppVersion`] when
 /// nothing names the version directory,
@@ -131,6 +134,7 @@ pub fn install_update_pkg(
     output_dir: &Path,
     opts: InstallOptions<'_>,
 ) -> Result<UpdateInstallOutcome, GameInstallError> {
+    crate::store::pre_store::preflight(output_dir)?;
     let progress = opts.progress;
     progress.phase(Phase::Reading.code());
     let archive = pkg::extract(pkg_bytes, keys)?;

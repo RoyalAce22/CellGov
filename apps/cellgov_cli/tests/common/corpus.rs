@@ -5,9 +5,9 @@
 //! boot path does.
 //!
 //! Those paths reach a tree git does not track, so this module
-//! declares the corpus feature itself. A helper module has no
+//! declares the corpus features itself. A helper module has no
 //! `[[test]]` target to carry `required-features`.
-#![cfg(feature = "firmware-corpus")]
+#![cfg(any(feature = "firmware-corpus", feature = "ps3autotests"))]
 #![allow(
     dead_code,
     reason = "each integration-test binary compiles this module separately and uses a subset"
@@ -49,7 +49,7 @@ pub fn dev_flash() -> PathBuf {
     let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
     let entries = std::fs::read_dir(&records).unwrap_or_else(|e| {
         panic!(
-            "firmware-corpus: no firmware install records at {}: {e}. Run \
+            "no firmware install records at {}: {e}. Run \
              `cellgov firmware install <PS3UPDAT.PUP>` to populate the store.",
             records.display()
         )
@@ -58,12 +58,8 @@ pub fn dev_flash() -> PathBuf {
     for entry in entries {
         // Skipping an unreadable entry would drop a firmware from the
         // census.
-        let entry = entry.unwrap_or_else(|e| {
-            panic!(
-                "firmware-corpus: reading an entry of {}: {e}",
-                records.display()
-            )
-        });
+        let entry =
+            entry.unwrap_or_else(|e| panic!("reading an entry of {}: {e}", records.display()));
         let path = entry.path();
         if !path
             .file_name()
@@ -86,7 +82,7 @@ pub fn dev_flash() -> PathBuf {
     match found.as_slice() {
         [only] => only.clone(),
         many => panic!(
-            "firmware-corpus: expected exactly one installed firmware under {}, found {}{}",
+            "expected exactly one installed firmware under {}, found {}{}",
             root.display(),
             many.len(),
             render_trees(many)
@@ -108,9 +104,9 @@ fn render_trees(trees: &[PathBuf]) -> String {
 ///
 /// # Panics
 ///
-/// If the directory is absent. Callers have already declared the corpus
-/// installed -- through the `firmware-corpus` feature or an `#[ignore]`
-/// opt-in -- so absence is a failure rather than a reason to skip.
+/// If the directory is absent. Every caller declares the corpus
+/// installed, through the feature its own target is gated on or
+/// through an `#[ignore]` opt-in.
 pub fn firmware_external_dir() -> PathBuf {
     let dir = dev_flash().join("sys").join("external");
     assert!(
