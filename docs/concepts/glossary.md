@@ -91,10 +91,11 @@ a future recompiled binary) reaching the same checkpoint with
 observations that agree.
 [README.md](README.md#cross-runner-comparison)
 
-**Cross-runner triple.** The generated fixture under
-`tests/fixtures/<content-id>/cross_runner/`: `compare_report.txt`,
-`cross_runner_summary.json`, `REPRODUCTION.md`, beside the
-hand-maintained `NOTES.md`. Produced by `cellgov dev fixture-gen`.
+**Cross-runner triple.** The generated fixture under one cell's
+`tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/`:
+`compare_report.txt`, `cross_runner_summary.json`, `REPRODUCTION.md`,
+beside the hand-maintained `NOTES.md`. Produced by `cellgov dev
+fixture-gen`.
 [titles.md](../titles.md)
 
 **Declared cell.** A cell a title's `[[bench.matrix]]` names. The

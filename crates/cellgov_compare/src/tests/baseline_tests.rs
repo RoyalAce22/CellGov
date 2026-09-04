@@ -24,6 +24,30 @@ fn save_and_load_roundtrip() {
 }
 
 #[test]
+fn a_saved_baseline_carries_the_runner_firmware_it_was_given() {
+    let mut obs = sample_observation();
+    obs.identity = crate::identity::RunIdentity::default();
+    obs.runner_firmware = Some("2.76".to_string());
+    let dir = TempDir::new("runner_firmware_baseline");
+    let path = dir.file("rpcs3.json");
+
+    save(&obs, &path).expect("save");
+    let loaded = load(&path).expect("load");
+    assert_eq!(loaded.runner_firmware.as_deref(), Some("2.76"));
+    assert_eq!(obs, loaded);
+}
+
+#[test]
+fn an_observation_without_the_field_names_no_runner_firmware() {
+    let obs = sample_observation();
+    assert!(obs.runner_firmware.is_none(), "the sample names none");
+    let json = serde_json::to_string(&obs).expect("serialize");
+    assert!(!json.contains("runner_firmware"), "{json}");
+    let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
+    assert!(loaded.runner_firmware.is_none());
+}
+
+#[test]
 fn load_nonexistent_file_returns_error() {
     let result = load(Path::new("/nonexistent/path/baseline.json"));
     assert!(result.is_err());
@@ -118,6 +142,7 @@ fn rpcs3_tty_baseline_roundtrip() {
         },
         tty_log: Vec::new(),
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     };
 
     let dir = TempDir::new("rpcs3_baseline_test");

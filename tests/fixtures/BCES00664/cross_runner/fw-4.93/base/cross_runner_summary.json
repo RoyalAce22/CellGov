@@ -1,0 +1,34 @@
+{
+  "convergence": {
+    "kind": "yes"
+  },
+  "byte_parity": {
+    "kind": "non_semantic",
+    "bytes": 975
+  },
+  "per_class_bytes": {
+    "hle_opd_slot": 963,
+    "sync_primitive_id": 12
+  },
+  "unclassified_bytes": 0,
+  "unclassified_runs": [],
+  "lowest_offset_class": [
+    "hle_opd_slot",
+    {
+      "name": "data",
+      "addr": 8781824
+    },
+    65517
+  ],
+  "firmware": {
+    "version": "4.93",
+    "image_version": "0x0000000000010b94",
+    "pup_sha256": "158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365"
+  },
+  "game": {
+    "title_id": "BCES00664",
+    "version": "base",
+    "app_ver": "02.00"
+  },
+  "rpcs3_firmware": "4.93"
+}

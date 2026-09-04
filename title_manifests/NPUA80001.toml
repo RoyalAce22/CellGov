@@ -30,7 +30,14 @@ prefix = "/app_home"
 host = "boot_content/NPUA80001"
 override_env = "CELLGOV_NPUA80001_CONTENT_DIR"
 
-# The one cell this title is gated and rendered at; see
+# The firmware this title's own PARAM.SFO asks for
+# (PS3_SYSTEM_VER = 01.5000). Kept declared so the anchors committed for
+# it stay evidence about a cell somebody chose.
+[[bench.matrix]]
+fw = "1.50"
+game_ver = "base"
+
+# The cell this title is gated and rendered at. See
 # docs/architecture/title_harness.md.
 [[bench.matrix]]
 fw = "4.93"

@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::classify::DivergenceClass;
+use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::observation::ObservedOutcome;
 use crate::observation_compare::{ObservationCompareResult, RegionPairOutcome};
 
@@ -38,6 +39,9 @@ pub struct UnclassifiedRun {
 /// consume this to produce both the `compare_report.txt` verdict
 /// header and the `titles.md` Convergence + Byte parity columns.
 ///
+/// A summary states a property of two runs, so it names the firmware
+/// each side ran. It is a verdict only while the two agree.
+///
 /// `convergence`, `byte_parity`, and the byte-accounting fields are
 /// mutually constrained; the contract is enforced on deserialization
 /// via [`CrossRunnerSummary::validate`] (see
@@ -62,9 +66,19 @@ pub struct CrossRunnerSummary {
     /// Byte-divergence run with the lowest guest start address;
     /// `None` when no byte divergences were found.
     pub lowest_offset_class: Option<(DivergenceClass, RegionIdent, u64)>,
+    /// Which firmware and title version CellGov composed.
+    #[serde(flatten)]
+    pub identity: RunIdentity,
+    /// Firmware version the other runner ran, read from that runner's
+    /// own configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rpcs3_firmware: Option<String>,
 }
 
+/// Serde shim so `try_from` runs [`CrossRunnerSummary::validate`] on
+/// every load.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct CrossRunnerSummaryShadow {
     convergence: Convergence,
     byte_parity: ByteParity,
@@ -72,11 +86,50 @@ struct CrossRunnerSummaryShadow {
     unclassified_bytes: u64,
     unclassified_runs: Vec<UnclassifiedRun>,
     lowest_offset_class: Option<(DivergenceClass, RegionIdent, u64)>,
+    #[serde(default)]
+    firmware: Option<FirmwareIdentity>,
+    #[serde(default)]
+    game: Option<GameIdentity>,
+    #[serde(default)]
+    rpcs3_firmware: Option<String>,
 }
 
 /// Why [`CrossRunnerSummary::validate`] rejected a candidate.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CrossRunnerSummaryError {
+    /// The two runs used different firmware versions.
+    #[error(
+        "the two runs used different firmware libraries: cellgov ran {cellgov}, the other \
+         runner ran {rpcs3}. A byte-parity verdict states agreement between two runs of one \
+         library; a cross-firmware comparison is a version difference until it is shown \
+         otherwise"
+    )]
+    FirmwareDisagreement {
+        /// Version CellGov composed.
+        cellgov: String,
+        /// Version the other runner ran.
+        rpcs3: String,
+    },
+    /// CellGov's side names a firmware version and the other runner's
+    /// does not.
+    #[error(
+        "cellgov ran firmware {cellgov} and the summary does not name the other runner's; a \
+         verdict over two libraries needs both named"
+    )]
+    Rpcs3FirmwareUnnamed {
+        /// Version CellGov composed.
+        cellgov: String,
+    },
+    /// The other runner's side names a firmware version and CellGov's
+    /// does not.
+    #[error(
+        "the other runner ran firmware {rpcs3} and the summary does not name cellgov's; a \
+         verdict over two libraries needs both named"
+    )]
+    CellgovFirmwareUnnamed {
+        /// Version the other runner ran.
+        rpcs3: String,
+    },
     /// `convergence == Yes` requires `byte_parity != Diverge`.
     #[error("convergence == Yes paired with byte_parity == Diverge")]
     ConvergedButByteParityDiverged,
@@ -167,6 +220,11 @@ impl TryFrom<CrossRunnerSummaryShadow> for CrossRunnerSummary {
             unclassified_bytes: s.unclassified_bytes,
             unclassified_runs: s.unclassified_runs,
             lowest_offset_class: s.lowest_offset_class,
+            identity: RunIdentity {
+                firmware: s.firmware,
+                game: s.game,
+            },
+            rpcs3_firmware: s.rpcs3_firmware,
         };
         out.validate()?;
         Ok(out)
@@ -175,8 +233,9 @@ impl TryFrom<CrossRunnerSummaryShadow> for CrossRunnerSummary {
 
 impl CrossRunnerSummary {
     /// Verify the cross-field invariants between `convergence`,
-    /// `byte_parity`, and the byte-accounting fields. Called
-    /// automatically on JSON deserialize via `#[serde(try_from = ...)]`.
+    /// `byte_parity`, and the byte-accounting fields, after checking
+    /// that both sides name one firmware version. Called automatically
+    /// on JSON deserialize via `#[serde(try_from = ...)]`.
     ///
     /// # Errors
     ///
@@ -189,6 +248,7 @@ impl CrossRunnerSummary {
     /// `per_class_bytes` entries; both are contract violations
     /// (mirrors `summarize`'s overflow policy).
     pub fn validate(&self) -> Result<(), CrossRunnerSummaryError> {
+        self.validate_firmware()?;
         match (&self.convergence, &self.byte_parity) {
             (Convergence::Yes, ByteParity::Diverge { .. }) => {
                 return Err(CrossRunnerSummaryError::ConvergedButByteParityDiverged);
@@ -298,6 +358,52 @@ impl CrossRunnerSummary {
         }
 
         Ok(())
+    }
+
+    /// Name what each runner ran: CellGov's composed triple, and the
+    /// firmware version from the other runner's installation.
+    ///
+    /// # Errors
+    ///
+    /// - [`CrossRunnerSummaryError::FirmwareDisagreement`] when the two
+    ///   versions differ.
+    /// - [`CrossRunnerSummaryError::CellgovFirmwareUnnamed`] when
+    ///   `identity` names no firmware version.
+    pub fn with_firmware(
+        mut self,
+        identity: RunIdentity,
+        rpcs3_firmware: String,
+    ) -> Result<Self, CrossRunnerSummaryError> {
+        self.identity = identity;
+        self.rpcs3_firmware = Some(rpcs3_firmware);
+        self.validate_firmware()?;
+        Ok(self)
+    }
+
+    /// Both sides name one firmware version, or neither side is named.
+    ///
+    /// The two versions compare as raw strings: both come from
+    /// `cellgov_ps3_abi::dev_flash::parse_version_txt`, which emits one
+    /// spelling per release.
+    fn validate_firmware(&self) -> Result<(), CrossRunnerSummaryError> {
+        match (
+            self.identity.firmware.as_ref(),
+            self.rpcs3_firmware.as_deref(),
+        ) {
+            (Some(cellgov), Some(rpcs3)) if cellgov.version != rpcs3 => {
+                Err(CrossRunnerSummaryError::FirmwareDisagreement {
+                    cellgov: cellgov.version.clone(),
+                    rpcs3: rpcs3.to_string(),
+                })
+            }
+            (Some(cellgov), None) => Err(CrossRunnerSummaryError::Rpcs3FirmwareUnnamed {
+                cellgov: cellgov.version.clone(),
+            }),
+            (None, Some(rpcs3)) => Err(CrossRunnerSummaryError::CellgovFirmwareUnnamed {
+                rpcs3: rpcs3.to_string(),
+            }),
+            (Some(_), Some(_)) | (None, None) => Ok(()),
+        }
     }
 
     /// Render `(convergence_string, byte_parity_string)` for the
@@ -427,6 +533,10 @@ pub enum ByteParity {
 
 /// Summarize a cross-runner comparison.
 ///
+/// The result names neither runner's firmware. A caller that writes it
+/// as a fixture stamps both sides through
+/// [`CrossRunnerSummary::with_firmware`].
+///
 /// # Panics
 ///
 /// In both debug and release, if `classes` length does not match the
@@ -536,6 +646,8 @@ pub fn summarize(
         unclassified_bytes,
         unclassified_runs,
         lowest_offset_class,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     }
 }
 
@@ -624,9 +736,15 @@ fn diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     }
 }
 
 #[cfg(test)]
 #[path = "tests/summary_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/summary_firmware_tests.rs"]
+mod firmware_tests;

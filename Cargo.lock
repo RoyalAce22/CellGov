@@ -993,6 +993,7 @@ name = "rpcs3_to_observation"
 version = "0.0.0"
 dependencies = [
  "cellgov_compare",
+ "cellgov_ps3_abi",
  "cellgov_testkit",
  "cellgov_trace",
  "serde",

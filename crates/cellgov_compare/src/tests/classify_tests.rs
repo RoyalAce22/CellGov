@@ -47,6 +47,7 @@ fn obs_with(regions: Vec<NamedMemoryRegion>) -> Observation {
         },
         tty_log: Vec::new(),
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     }
 }
 

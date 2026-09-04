@@ -3,7 +3,7 @@
 use super::*;
 use cellgov_compare::{
     BootOutcome, BootSummary, ByteParity, CheckpointKind, Convergence, ConvergenceFailure,
-    CrossRunnerSummary, DivergenceClass, ObservedOutcome, UnclassifiedRun,
+    CrossRunnerSummary, DivergenceClass, ObservedOutcome, RunIdentity, UnclassifiedRun,
 };
 use cellgov_time::Budget;
 use std::collections::BTreeMap;
@@ -32,6 +32,16 @@ fn anchor_path(fixtures: &Path, content_id: &str) -> PathBuf {
         .join(format!("fw-{REFERENCE_FW}"))
         .join(REFERENCE_GAME_VER)
         .join("boot_summary.json")
+}
+
+/// The cross-runner summary `render_row` reads for the same title.
+fn cross_runner_path(fixtures: &Path, content_id: &str) -> PathBuf {
+    fixtures
+        .join(content_id)
+        .join("cross_runner")
+        .join(format!("fw-{REFERENCE_FW}"))
+        .join(REFERENCE_GAME_VER)
+        .join("cross_runner_summary.json")
 }
 
 fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleManifest {
@@ -64,6 +74,7 @@ fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleMa
             expect: CellExpectation::Frontier,
             bench_max_steps: None,
             checkpoint: None,
+            pending: None,
         }],
     }
 }
@@ -122,9 +133,7 @@ fn row_with_boot_summary_renders_steps_and_insns() {
 fn row_with_converged_summary_renders_yes_plus_byte_parity() {
     let t = title("NPAA00003", "Converged", 2008, "Studio");
     let tmp = TmpDir::new("converged");
-    let path = tmp
-        .path()
-        .join("NPAA00003/cross_runner/cross_runner_summary.json");
+    let path = cross_runner_path(tmp.path(), "NPAA00003");
     write_json(
         &path,
         &CrossRunnerSummary {
@@ -134,6 +143,8 @@ fn row_with_converged_summary_renders_yes_plus_byte_parity() {
             unclassified_bytes: 0,
             unclassified_runs: Vec::new(),
             lowest_offset_class: None,
+            identity: RunIdentity::default(),
+            rpcs3_firmware: None,
         },
     );
     let row = render_row(&t, tmp.path()).unwrap();
@@ -148,9 +159,7 @@ fn row_with_converged_summary_renders_yes_plus_byte_parity() {
 fn row_with_pending_renders_yes_plus_split_byte_count() {
     let t = title("NPAA00005", "Pending", 2008, "Studio");
     let tmp = TmpDir::new("pending");
-    let path = tmp
-        .path()
-        .join("NPAA00005/cross_runner/cross_runner_summary.json");
+    let path = cross_runner_path(tmp.path(), "NPAA00005");
     write_json(
         &path,
         &CrossRunnerSummary {
@@ -170,6 +179,8 @@ fn row_with_pending_renders_yes_plus_split_byte_count() {
                 length: 125,
             }],
             lowest_offset_class: None,
+            identity: RunIdentity::default(),
+            rpcs3_firmware: None,
         },
     );
     let row = render_row(&t, tmp.path()).unwrap();
@@ -184,9 +195,7 @@ fn row_with_pending_renders_yes_plus_split_byte_count() {
 fn row_with_diverged_summary_renders_no_plus_dash_byte_parity() {
     let t = title("NPAA00006", "Diverged", 2008, "Studio");
     let tmp = TmpDir::new("diverged");
-    let path = tmp
-        .path()
-        .join("NPAA00006/cross_runner/cross_runner_summary.json");
+    let path = cross_runner_path(tmp.path(), "NPAA00006");
     let reason = ConvergenceFailure::OutcomeMismatch {
         cellgov: ObservedOutcome::Fault,
         rpcs3: ObservedOutcome::Completed,
@@ -202,6 +211,8 @@ fn row_with_diverged_summary_renders_no_plus_dash_byte_parity() {
             unclassified_bytes: 0,
             unclassified_runs: Vec::new(),
             lowest_offset_class: None,
+            identity: RunIdentity::default(),
+            rpcs3_firmware: None,
         },
     );
     let row = render_row(&t, tmp.path()).unwrap();
@@ -286,9 +297,7 @@ fn corrupt_boot_summary_surfaces_typed_error() {
 fn corrupt_cross_runner_summary_surfaces_typed_error() {
     let t = title("NPAA20002", "CorruptCross", 2008, "Studio");
     let tmp = TmpDir::new("corruptcross");
-    let path = tmp
-        .path()
-        .join("NPAA20002/cross_runner/cross_runner_summary.json");
+    let path = cross_runner_path(tmp.path(), "NPAA20002");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, b"{also not json").unwrap();
     match render_row(&t, tmp.path()) {
@@ -314,8 +323,7 @@ fn render_row_is_byte_identical_across_two_invocations() {
         .unwrap(),
     );
     write_json(
-        &tmp.path()
-            .join("NPAA30001/cross_runner/cross_runner_summary.json"),
+        &cross_runner_path(tmp.path(), "NPAA30001"),
         &CrossRunnerSummary {
             convergence: Convergence::Yes,
             byte_parity: ByteParity::NonSemantic { bytes: 1 },
@@ -323,6 +331,8 @@ fn render_row_is_byte_identical_across_two_invocations() {
             unclassified_bytes: 0,
             unclassified_runs: Vec::new(),
             lowest_offset_class: None,
+            identity: RunIdentity::default(),
+            rpcs3_firmware: None,
         },
     );
     let a = render_row(&t, tmp.path()).unwrap();
@@ -358,8 +368,7 @@ fn cross_present_boot_absent_renders_dashes_then_yes() {
     let t = title("NPAA40002", "CrossOnly", 2008, "Studio");
     let tmp = TmpDir::new("crossonly");
     write_json(
-        &tmp.path()
-            .join("NPAA40002/cross_runner/cross_runner_summary.json"),
+        &cross_runner_path(tmp.path(), "NPAA40002"),
         &CrossRunnerSummary {
             convergence: Convergence::Yes,
             byte_parity: ByteParity::Equivalent,
@@ -367,6 +376,8 @@ fn cross_present_boot_absent_renders_dashes_then_yes() {
             unclassified_bytes: 0,
             unclassified_runs: Vec::new(),
             lowest_offset_class: None,
+            identity: RunIdentity::default(),
+            rpcs3_firmware: None,
         },
     );
     let row = render_row(&t, tmp.path()).unwrap();
@@ -521,6 +532,7 @@ fn a_non_reference_cells_anchor_is_never_the_headline_row() {
         expect: crate::game::manifest::CellExpectation::Frontier,
         bench_max_steps: None,
         checkpoint: None,
+        pending: None,
     });
     let tmp = TmpDir::new("twocells");
     write_json(

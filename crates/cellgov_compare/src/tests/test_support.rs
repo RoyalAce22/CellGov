@@ -48,6 +48,7 @@ pub fn obs(
         metadata: meta("test"),
         tty_log: Vec::new(),
         identity: RunIdentity::default(),
+        runner_firmware: None,
     }
 }
 
@@ -88,6 +89,7 @@ pub fn sample_observation() -> Observation {
         },
         tty_log: b"sample tty\n".to_vec(),
         identity: identity("4.91", "NPAA00001", "base"),
+        runner_firmware: None,
     }
 }
 

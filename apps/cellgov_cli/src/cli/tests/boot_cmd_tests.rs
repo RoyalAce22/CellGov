@@ -49,6 +49,7 @@ fn declared(
         expect: CellExpectation::Frontier,
         bench_max_steps,
         checkpoint,
+        pending: None,
     }
 }
 

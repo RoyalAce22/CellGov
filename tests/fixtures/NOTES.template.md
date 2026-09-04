@@ -5,6 +5,7 @@ year: <first release year>
 developer: <developer credit, matches title_manifests/<id>.toml>
 engine: <engine name, e.g. PhyreEngine / Unreal 3 / "<studio> proprietary">
 distribution: <PSN HDD | Retail HDD | Disc ISO>
+cell: <fw <ver> x <game-ver>, or fw <ver> for a firmware-shipped title>
 checkpoint: <ProcessExit | FirstRsxWrite | Pc=0x...>
 steps: <retired step count at the checkpoint, integer>
 convergence: <Yes | No (<reason>)>
@@ -13,9 +14,10 @@ byte_parity: <equivalent | N non-semantic | M non-semantic + N pending | -->
 
 # Cross-runner NOTES.md template
 
-Hand-authored prose context for one fixture. Copy this skeleton
-into `tests/fixtures/<content-id>/cross_runner/NOTES.md`, fill in
-the frontmatter, and keep whichever body sections apply.
+Hand-authored prose context for one cell's fixture. Copy this
+skeleton into
+`tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/NOTES.md`,
+fill in the frontmatter, and keep whichever body sections apply.
 
 The generator never reads or writes NOTES.md. The machine-readable
 surface is the triple `compare_report.txt` / `REPRODUCTION.md` /
@@ -36,6 +38,7 @@ year: ...
 developer: ...
 engine: ...
 distribution: ...
+cell: ...
 checkpoint: ...
 steps: ...
 convergence: ...

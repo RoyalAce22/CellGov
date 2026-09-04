@@ -38,6 +38,9 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
         // Neither the memory dump nor the CGOV frame in the TTY log
         // carries a version.
         identity: crate::identity::RunIdentity::default(),
+        // `config` does not name the runner's installation directory,
+        // so this function cannot read the firmware version from it.
+        runner_firmware: None,
     })
 }
 
@@ -59,8 +62,10 @@ pub fn observe_from_tty(
             steps: None,
         },
         tty_log: Vec::new(),
-        // The CGOV frame in the TTY log carries no version.
+        // The CGOV frame in the TTY log carries no version, and this
+        // function takes no installation directory; see `observe`.
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     })
 }
 

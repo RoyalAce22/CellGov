@@ -211,7 +211,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         path: "dev fixture-gen",
         lines: &[
             "cellgov dev fixture-gen --manifest title_manifests/NPUA80001.toml --cellgov cellgov.json \
-             --rpcs3 rpcs3.json --output-dir tests/fixtures/NPUA80001 --fw 4.93",
+             --rpcs3 rpcs3.json --fw 4.93 --game-ver base",
         ],
     },
     Examples {

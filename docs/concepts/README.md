@@ -323,7 +323,7 @@ after a new structurally-grounded `DivergenceClass` lands.
 The verdict vocabulary appears in three places:
 
 - `docs/titles.md` compatibility matrix columns.
-- `tests/fixtures/<serial>/cross_runner/compare_report.txt`
+- `tests/fixtures/<serial>/cross_runner/fw-<ver>/<game-ver>/compare_report.txt`
   two-line header.
 - This document.
 

@@ -14,7 +14,14 @@ kind = "disc"
 [checkpoint]
 kind = "first-rsx-write"
 
-# The one cell this title is gated and rendered at; see
+# The firmware this title's own PARAM.SFO asks for
+# (PS3_SYSTEM_VER = 02.7600). Kept declared so the anchors committed for
+# it stay evidence about a cell somebody chose.
+[[bench.matrix]]
+fw = "2.76"
+game_ver = "base"
+
+# The cell this title is gated and rendered at. See
 # docs/architecture/title_harness.md.
 [[bench.matrix]]
 fw = "4.93"

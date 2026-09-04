@@ -38,6 +38,9 @@ pub(super) struct ManifestMatrixRow {
     pub(super) bench_max_steps: Option<u64>,
     #[serde(default)]
     pub(super) checkpoint: Option<ManifestCheckpoint>,
+    /// A non-empty reason; see [`super::MatrixCell::pending`].
+    #[serde(default)]
+    pub(super) pending: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]

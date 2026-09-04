@@ -79,6 +79,12 @@ pub struct MatrixCell {
     pub bench_max_steps: Option<u64>,
     /// Overrides the title-level checkpoint for this cell alone.
     pub checkpoint: Option<CheckpointTrigger>,
+    /// Why this cell has no committed measurement yet, when something
+    /// outside the registry stops it. For example:
+    ///
+    /// - a firmware nobody can obtain,
+    /// - a defect that ends the boot before the checkpoint.
+    pub pending: Option<String>,
 }
 
 impl MatrixCell {
@@ -103,7 +109,8 @@ impl MatrixCell {
 ///   anywhere else,
 /// - overrides the checkpoint to one the title-level `[rsx] mirror`
 ///   makes unreachable,
-/// - repeats a cell an earlier row already declared.
+/// - repeats a cell an earlier row already declared,
+/// - states an empty `pending` reason.
 ///
 /// [`ManifestError::Parse`] also covers two whole-matrix faults:
 ///
@@ -246,6 +253,18 @@ fn build_cell(
         .as_ref()
         .map(|c| parse_checkpoint(c, origin))
         .transpose()?;
+    let pending = match row.pending {
+        Some(reason) if reason.trim().is_empty() => {
+            return Err(refusal(
+                origin,
+                "[[bench.matrix]] pending is empty; it states why the cell cannot be \
+                 measured yet, and an empty reason names nothing. Drop the key or give \
+                 the reason"
+                    .to_string(),
+            ))
+        }
+        other => other,
+    };
     let cell = MatrixCell {
         key: CellKey {
             fw: row.fw,
@@ -255,6 +274,7 @@ fn build_cell(
         expect,
         bench_max_steps: row.bench_max_steps,
         checkpoint,
+        pending,
     };
     // `[rsx] mirror` is title-level, so it holds for every cell.
     if cell
@@ -310,3 +330,7 @@ fn refusal(origin: &Path, message: String) -> ManifestError {
 #[cfg(test)]
 #[path = "tests/matrix_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/matrix_pending_tests.rs"]
+mod pending_tests;

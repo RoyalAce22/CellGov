@@ -54,6 +54,7 @@ pub fn observe(
         tty_log: Vec::new(),
         // A synthetic scenario composes no firmware and no title.
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     })
 }
 

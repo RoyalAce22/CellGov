@@ -158,9 +158,9 @@ pub(crate) struct FixtureGenArgs {
     /// The other runner's observation JSON.
     #[arg(long, value_name = "PATH")]
     pub rpcs3: String,
-    /// Directory the fixture is written to.
-    #[arg(long, value_name = "PATH")]
-    pub output_dir: PathBuf,
+    /// Fixture tree the cell's directory is created under.
+    #[arg(long, value_name = "DIR")]
+    pub fixtures_dir: Option<PathBuf>,
     /// Write the fixture even when the two observations disagree.
     #[arg(long)]
     pub allow_divergence: bool,

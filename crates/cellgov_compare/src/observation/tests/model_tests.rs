@@ -61,6 +61,7 @@ fn rpcs3_style_observation_has_no_hashes_or_steps() {
         },
         tty_log: Vec::new(),
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     };
     assert!(obs.state_hashes.is_none());
     assert!(obs.metadata.steps.is_none());
@@ -87,6 +88,7 @@ fn observation_without_hashes_roundtrips() {
         },
         tty_log: Vec::new(),
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     };
     let json = serde_json::to_string(&obs).expect("serialize");
     let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
@@ -112,6 +114,22 @@ fn tty_log_difference_breaks_observation_equality() {
     let mut b = sample_observation();
     b.tty_log.push(b'!');
     assert_ne!(a, b);
+}
+
+#[test]
+fn an_unset_runner_firmware_writes_no_key() {
+    let value = serde_json::to_value(sample_observation()).expect("serialize");
+    assert!(value.get("runner_firmware").is_none(), "{value}");
+}
+
+#[test]
+fn a_runner_firmware_round_trips() {
+    let mut obs = sample_observation();
+    obs.runner_firmware = Some("4.93".to_string());
+    let json = serde_json::to_string(&obs).expect("serialize");
+    let loaded: Observation = serde_json::from_str(&json).expect("deserialize");
+    assert_eq!(loaded.runner_firmware.as_deref(), Some("4.93"));
+    assert_eq!(obs, loaded);
 }
 
 #[test]

@@ -33,7 +33,8 @@ tests/scenario_observations/**/*.tty
 *.htrc
 
 # Large cross-runner observation artifacts (too big for git;
-# reproduced from tests/fixtures/<id>/cross_runner/REPRODUCTION.md).
+# reproduced from a cell's REPRODUCTION.md under
+# tests/fixtures/<id>/cross_runner/fw-<ver>/<game-ver>/).
 # Per-runner observations live under tests/fixtures/<id>/<runner>/.
 tests/fixtures/*/cellgov/observation.json
 tests/fixtures/*/cellgov/observation_*.json

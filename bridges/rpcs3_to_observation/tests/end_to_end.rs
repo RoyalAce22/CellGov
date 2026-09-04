@@ -11,7 +11,7 @@ use cellgov_compare::observation::{
 use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 use cellgov_trace::StateHash;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn tmp(name: &str) -> ScratchDir {
@@ -115,6 +115,7 @@ size = "0x8"
         },
         tty_log: Vec::new(),
         identity: cellgov_compare::RunIdentity::default(),
+        runner_firmware: None,
     };
     let cellgov_obs_path = work.join("cellgov.json");
     fs::write(
@@ -203,6 +204,7 @@ size = "0x4"
         },
         tty_log: Vec::new(),
         identity: cellgov_compare::RunIdentity::default(),
+        runner_firmware: None,
     };
     let cellgov_obs_path = work.join("cellgov.json");
     fs::write(
@@ -287,10 +289,10 @@ size = "0x10"
     );
 }
 
-/// The per-title fixture flow in every `cross_runner/REPRODUCTION.md`
-/// writes `tests/fixtures/<id>/rpcs3/observation.json`, a fixed name
-/// `cellgov dev fixture-gen --rpcs3` reads back. The decoder rule must
-/// not forbid it.
+/// The fixture flow in every cell's `REPRODUCTION.md` writes
+/// `tests/fixtures/<id>/rpcs3/observation.json`, a fixed name `cellgov
+/// dev fixture-gen --rpcs3` reads back. The decoder rule must not
+/// forbid it.
 #[test]
 fn adapter_accepts_the_fixture_tree_output_name() {
     let work = tmp("fixture_name");
@@ -381,6 +383,135 @@ size = "0x10"
         "diagnostic names both sides: {stderr}"
     );
     assert!(!out_path.exists(), "no observation written on refusal");
+}
+
+/// Lay out a runner installation whose default `dev_flash` carries
+/// `version.txt`.
+fn runner_install(work: &ScratchDir, version_txt: Option<&str>) -> PathBuf {
+    let root = work.join("runner");
+    if let Some(text) = version_txt {
+        let mut path = root.join("dev_flash");
+        for c in cellgov_ps3_abi::dev_flash::VERSION_TXT_COMPONENTS {
+            path.push(c);
+        }
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, text).unwrap();
+    } else {
+        fs::create_dir_all(&root).unwrap();
+    }
+    root
+}
+
+fn convert_with_runner_dir(work: &ScratchDir, runner_dir: &Path) -> std::process::Output {
+    let dump_path = work.join("rpcs3.dump");
+    fs::write(&dump_path, [0u8; 16]).unwrap();
+
+    let manifest_path = work.join("manifest.toml");
+    fs::write(
+        &manifest_path,
+        r#"
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x10"
+"#,
+    )
+    .unwrap();
+    let out_path = work.join("rpcs3_llvm.json");
+
+    Command::new(adapter_bin())
+        .args([
+            "--dump",
+            dump_path.to_str().unwrap(),
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--outcome",
+            "completed",
+            "--decoder",
+            "llvm",
+            "--output",
+            out_path.to_str().unwrap(),
+            "--config-hash",
+            &expected_config_hash_hex(),
+            "--rpcs3-dir",
+            runner_dir.to_str().unwrap(),
+        ])
+        .output()
+        .expect("adapter runs")
+}
+
+#[test]
+fn the_runner_dir_stamps_the_observation_with_the_version_it_found() {
+    let work = tmp("runner_firmware_stamp");
+    let runner = runner_install(&work, Some("release:04.9300:\nbuild:1,2:host\n"));
+    let out = convert_with_runner_dir(&work, &runner);
+    assert!(
+        out.status.success(),
+        "adapter refused a stamped conversion: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let obs: Observation =
+        serde_json::from_str(&fs::read_to_string(work.join("rpcs3_llvm.json")).unwrap()).unwrap();
+    assert_eq!(obs.runner_firmware.as_deref(), Some("4.93"));
+}
+
+#[test]
+fn a_runner_dir_with_no_firmware_refuses_instead_of_writing_an_unstamped_observation() {
+    let work = tmp("runner_firmware_missing");
+    let runner = runner_install(&work, None);
+    let out = convert_with_runner_dir(&work, &runner);
+    assert!(!out.status.success(), "adapter must refuse");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("--rpcs3-dir"), "{stderr}");
+    assert!(
+        !work.join("rpcs3_llvm.json").exists(),
+        "no observation written on refusal"
+    );
+}
+
+/// The refusal for a title capture lives in `cellgov dev fixture-gen`,
+/// which reads the field back.
+#[test]
+fn omitting_the_runner_dir_leaves_the_firmware_field_absent() {
+    let work = tmp("runner_firmware_absent");
+    let dump_path = work.join("rpcs3.dump");
+    fs::write(&dump_path, [0u8; 16]).unwrap();
+    let manifest_path = work.join("manifest.toml");
+    fs::write(
+        &manifest_path,
+        r#"
+[[regions]]
+name = "code"
+addr = "0x10000"
+size = "0x10"
+"#,
+    )
+    .unwrap();
+    let out_path = work.join("rpcs3_llvm.json");
+    let out = Command::new(adapter_bin())
+        .args([
+            "--dump",
+            dump_path.to_str().unwrap(),
+            "--manifest",
+            manifest_path.to_str().unwrap(),
+            "--outcome",
+            "completed",
+            "--decoder",
+            "llvm",
+            "--output",
+            out_path.to_str().unwrap(),
+            "--config-hash",
+            &expected_config_hash_hex(),
+        ])
+        .output()
+        .expect("adapter runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let obs: Observation = serde_json::from_str(&fs::read_to_string(&out_path).unwrap()).unwrap();
+    assert_eq!(obs.runner_firmware, None);
 }
 
 #[test]

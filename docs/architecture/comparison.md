@@ -38,6 +38,26 @@ artifact naming no triple was written before the store carried
 versions, or by a runner that reports none; absence never reads as a
 mismatch.
 
+A runner CellGov does not compose for names no triple, because no store
+entry describes it. It still names a firmware. Its capture carries
+`runner_firmware`, the version read out of that runner's own
+installation -- the guest-path mapping in its configuration, then the
+console version file in whichever tree that mapping names. The read
+happens where the capture becomes an observation, not where a report is
+later generated: a runner's installation can change between the two, and
+a version read late names a library the capture never saw. A capture
+whose conversion was given no installation to read names no version, and
+a verdict built from it is refused rather than assumed.
+
+A byte-parity verdict is a statement about two runs of one firmware
+library, so `CrossRunnerSummary` carries the cell triple and the other
+runner's version together. Three shapes are refused on load rather than
+rendered: the two versions disagreeing, either side named alone, and a
+file whose recorded firmware differs from the cell its directory names.
+A summary naming neither side predates the schema and makes no claim to
+contradict. A cross-firmware comparison remains a legitimate experiment;
+what it is not is a parity verdict, and nothing renders it as one.
+
 ```mermaid
 flowchart LR
   man["checkpoint manifest (regions, spaces)"] --> cg
@@ -114,8 +134,9 @@ dump plus a shared region manifest into the same `Observation` JSON
 The user builds the patched RPCS3 binary; the CellGov library has no
 Cargo or runtime dependency on RPCS3, and the bridge is a
 verification-time tool. See
-`tests/fixtures/<content-id>/cross_runner/REPRODUCTION.md` for the build
-commands and the vendored-RPCS3 build-config workarounds.
+a cell's `REPRODUCTION.md` under
+`tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/` for the
+build commands and the build-config workarounds.
 
 ## Oracle-mode config contract
 

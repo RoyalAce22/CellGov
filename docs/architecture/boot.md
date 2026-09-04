@@ -203,5 +203,6 @@ are what carry a boot past firmware init.
 Per-title boot trajectories, checkpoints, and cross-runner verdicts
 are data rather than architecture: the generated
 [titles.md](../titles.md) carries each title's matrix row, and
-`tests/fixtures/<content-id>/cross_runner/NOTES.md` carries its
-narrative.
+the cell's `NOTES.md` under
+`tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/`
+carries its narrative.

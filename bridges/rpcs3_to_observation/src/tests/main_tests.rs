@@ -77,6 +77,7 @@ fn dump_slices_contiguously_in_manifest_order() {
         ObservedOutcome::Completed,
         Some(42),
         Decoder::Llvm,
+        None,
     );
     assert_eq!(obs.memory_regions.len(), 2);
     assert_eq!(obs.memory_regions[0].name, "first");
@@ -105,6 +106,7 @@ fn the_decoder_reaches_the_runner_field() {
             ObservedOutcome::Completed,
             None,
             decoder,
+            None,
         );
         assert_eq!(obs.metadata.runner, expected);
     }
@@ -130,6 +132,7 @@ fn observation_roundtrips_through_json() {
         ObservedOutcome::Fault,
         None,
         Decoder::Llvm,
+        None,
     );
     let json = serde_json::to_string(&obs).unwrap();
     let back: Observation = serde_json::from_str(&json).unwrap();
@@ -367,7 +370,7 @@ fn the_bridge_runner_label_matches_the_live_runners() {
         (Decoder::Interpreter, Rpcs3Decoder::Interpreter),
         (Decoder::Llvm, Rpcs3Decoder::Llvm),
     ] {
-        let obs = build_observation(regions(), ObservedOutcome::Completed, None, bridge);
+        let obs = build_observation(regions(), ObservedOutcome::Completed, None, bridge, None);
         assert_eq!(obs.metadata.runner, live.as_runner_str());
     }
 }
@@ -452,9 +455,10 @@ fn a_flag_given_twice_is_refused_rather_than_overwritten() {
         ("--output", "other.json"),
         ("--config-hash", "0x1"),
         ("--steps", "1"),
+        ("--rpcs3-dir", "runner"),
     ] {
-        // --steps is absent from the base argv, so pass it twice.
-        let extra: Vec<&str> = if flag == "--steps" {
+        // These are absent from the base argv, so pass them twice.
+        let extra: Vec<&str> = if matches!(flag, "--steps" | "--rpcs3-dir") {
             vec![flag, value, flag, value]
         } else {
             vec![flag, value]

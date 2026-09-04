@@ -21,6 +21,7 @@ fn obs(
         },
         tty_log: Vec::new(),
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     }
 }
 
@@ -484,6 +485,8 @@ fn empty_diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     }
 }
 
@@ -495,6 +498,8 @@ fn empty_converged_equivalent() -> CrossRunnerSummary {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     }
 }
 
@@ -521,6 +526,8 @@ fn validate_rejects_converged_with_diverge_byte_parity() {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -539,6 +546,8 @@ fn validate_rejects_diverged_without_diverge_byte_parity() {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -562,6 +571,8 @@ fn validate_rejects_diverge_reasons_disagree() {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -636,6 +647,8 @@ fn validate_rejects_unclassified_denormalization_mismatch() {
             length: 10,
         }],
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -662,6 +675,8 @@ fn validate_rejects_unclassified_runs_sum_mismatch() {
             length: 7,
         }],
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -681,6 +696,8 @@ fn validate_rejects_equivalent_with_non_zero_totals() {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -697,6 +714,8 @@ fn validate_rejects_non_semantic_bytes_disagreement() {
         unclassified_bytes: 0,
         unclassified_runs: Vec::new(),
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -723,6 +742,8 @@ fn validate_rejects_non_semantic_with_unclassified_present() {
             length: 2,
         }],
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -749,6 +770,8 @@ fn validate_rejects_pending_non_semantic_disagreement() {
             length: 2,
         }],
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -778,6 +801,8 @@ fn validate_rejects_pending_unclassified_disagreement() {
             length: 2,
         }],
         lowest_offset_class: None,
+        identity: RunIdentity::default(),
+        rpcs3_firmware: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),

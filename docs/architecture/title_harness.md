@@ -49,6 +49,29 @@ manifest path (`--title-manifest <file>`). A manifest declares:
   version: its version axis is the firmware's, so its matrix is one
   row per firmware.
 
+## Which firmware a title is measured against
+
+The reference cell is declared, not derived. One `[[bench.matrix]]` row
+carries `reference = true`, and that row names the cell a headline row
+is measured at. The loader refuses a matrix marking none or several, so
+the choice is always one somebody made.
+
+Every title currently names firmware 4.93. Measuring the whole set
+against one library is what makes two titles' verdicts readable side by
+side: a divergence that appears in one title and not another is then a
+difference between the titles rather than between the firmwares they
+happened to be measured against.
+
+A title also states a floor of its own, in its `PARAM.SFO`
+`PS3_SYSTEM_VER` field, which every title carries, disc and network
+alike. `02.7600` names firmware 2.76. A disc ships the matching PUP in
+`PS3_UPDATE/PS3UPDAT.PUP`, so install that PUP and its install-record
+digest matches the one on the disc; a network title states the same
+floor and ships nothing to satisfy it. That floor is the library the
+title was built against, which is why a cell at it is worth declaring.
+It is not what the reference row has to name, and a matrix may declare
+both cells and mark either one.
+
 [titles.md](../titles.md) tracks per-title status (boot checkpoint
 reached, cross-runner observation match).
 
@@ -67,6 +90,21 @@ one level shallower -- the path names every axis the cell has and no
 segment standing for one it does not. Nothing keys an anchor by content
 id alone: the moment two firmwares can coexist, a witness moved by a
 firmware swap and a regression are the same reading.
+
+The cross-runner triple is filed the same way, under
+`tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/`, so the
+two schemes share one tail and one notion of which cell an artifact
+answers for. A committed file states the firmware it was measured
+against, and a file whose statement disagrees with the cell it sits in
+is refused: the directory alone is a claim nothing checks.
+
+A reference cell normally carries a committed anchor. When something
+outside the registry stops it being measured -- a firmware that cannot
+be obtained, a defect that ends the boot before the checkpoint -- the
+cell states the reason, and the gate holds the reason rather than
+tolerating a silent hole. A cell that states a reason and carries an
+anchor anyway is refused too, so the reason cannot outlive what it
+described.
 
 Each cell's expected boot behaviour is committed data, not test code:
 `boot_summary.json` records the step count, outcome, per-step budget,

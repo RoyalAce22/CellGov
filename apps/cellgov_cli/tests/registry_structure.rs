@@ -11,15 +11,26 @@ use registry::{boot_anchor_path, titles, BASE_GAME_VER};
 fn every_registered_titles_reference_cell_has_a_committed_baseline() {
     for t in titles() {
         let p = boot_anchor_path(&t.content_id, &t.reference);
-        assert!(
-            p.is_file(),
-            "{}: no committed baseline for {} at {} -- record it with \
-             `dev record-anchors --title {}` on a machine with the dump",
-            t.short_name,
-            t.reference.label(),
-            p.display(),
-            t.short_name
-        );
+        match (&t.reference.pending, p.is_file()) {
+            (None, false) => panic!(
+                "{}: no committed baseline for {} at {} -- record it with \
+                 `dev record-anchors --title {}` on a machine with the dump, or state \
+                 `pending = \"<why>\"` on the row when something outside the registry \
+                 stops it",
+                t.short_name,
+                t.reference.label(),
+                p.display(),
+                t.short_name
+            ),
+            (Some(why), true) => panic!(
+                "{}: {} is marked pending ({why}) but {} exists; the cell was measured, \
+                 so drop the marker",
+                t.short_name,
+                t.reference.label(),
+                p.display()
+            ),
+            (None, true) | (Some(_), false) => {}
+        }
     }
 }
 
@@ -31,6 +42,11 @@ fn every_registered_titles_reference_cell_has_a_committed_baseline() {
 fn every_committed_anchor_names_the_cell_it_is_filed_under() {
     for t in titles() {
         let p = boot_anchor_path(&t.content_id, &t.reference);
+        // A cell the manifest declares unmeasurable has nothing filed
+        // to check. The sibling test holds the marker honest.
+        if t.reference.pending.is_some() && !p.is_file() {
+            continue;
+        }
         let text = std::fs::read_to_string(&p)
             .unwrap_or_else(|e| panic!("{}: read {}: {e}", t.short_name, p.display()));
         let summary: BootSummary = serde_json::from_str(&text).unwrap_or_else(|e| {

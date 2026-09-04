@@ -18,5 +18,16 @@
   "per_class_bytes": {},
   "unclassified_bytes": 0,
   "unclassified_runs": [],
-  "lowest_offset_class": null
+  "lowest_offset_class": null,
+  "firmware": {
+    "version": "4.93",
+    "image_version": "0x0000000000010b94",
+    "pup_sha256": "158471fd834f8ea8036136b6aab43cd86c7ba73d79ca30e0af3c0fe0001cf365"
+  },
+  "game": {
+    "title_id": "NPUA80068",
+    "version": "base",
+    "app_ver": "06.00"
+  },
+  "rpcs3_firmware": "4.93"
 }

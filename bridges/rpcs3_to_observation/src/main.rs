@@ -4,14 +4,18 @@
 //! rpcs3_to_observation (--dump <path> | --tty <path>) --manifest <path> \
 //!     --outcome <kind> \
 //!     --decoder <interpreter|llvm> --config-hash <hex> [--steps <n>] \
-//!     --output <path>
+//!     [--rpcs3-dir <path>] --output <path>
 //! rpcs3_to_observation --print-expected-config-hash
 //! ```
 //!
 //! `<kind>` is one of `completed|stalled|timeout|fault`. `--config-hash` is
 //! the 16-char hex FNV-1a of the hashed block in the canonical config YAML.
 //! `--decoder` records which decoder ran; an `--output` whose name ends
-//! `_<decoder>.json` must name that same decoder.
+//! `_<decoder>.json` must name that same decoder. `--rpcs3-dir` names the
+//! runner installation the capture came from; the adapter stamps the
+//! observation with the firmware version it finds there. A synthetic
+//! scenario runs against no firmware, so the flag is optional;
+//! `cellgov dev fixture-gen` refuses a title capture that omits it.
 
 #![allow(
     clippy::print_stdout,
@@ -25,10 +29,13 @@ use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedOutcome,
 };
 use cellgov_compare::runner_rpcs3::{parse_tty_log, TtyRegion};
+use runner_firmware::RunnerFirmwareError;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+
+mod runner_firmware;
 
 /// Where the region bytes come from. RPCS3 produces one or the
 /// other: a binary memory dump from the checkpoint hook, or its
@@ -46,6 +53,7 @@ struct Args {
     output: PathBuf,
     config_hash: u64,
     decoder: Decoder,
+    rpcs3_dir: Option<PathBuf>,
 }
 
 /// Canonical RPCS3 reference-mode config. Dumps produced under other
@@ -204,6 +212,9 @@ enum Rpcs3BridgeError {
     /// A required CLI flag was missing.
     #[error("{flag} required")]
     RequiredFlagMissing { flag: &'static str },
+    /// The runner installation named no readable firmware version.
+    #[error("--rpcs3-dir: {0}")]
+    RunnerFirmware(#[from] RunnerFirmwareError),
     /// `region.size` overflowed usize while accumulating cursor.
     #[error("region {region} size overflow")]
     RegionSizeOverflow { region: String },
@@ -297,6 +308,7 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
     let mut output: Option<PathBuf> = None;
     let mut config_hash: Option<u64> = None;
     let mut decoder: Option<Decoder> = None;
+    let mut rpcs3_dir: Option<PathBuf> = None;
 
     let mut it = argv.into_iter().skip(1);
     while let Some(flag) = it.next() {
@@ -319,6 +331,7 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
             "--output" => set_once(&mut output, &flag, PathBuf::from(val))?,
             "--config-hash" => set_once(&mut config_hash, &flag, parse_hex_u64(&val)?)?,
             "--decoder" => set_once(&mut decoder, &flag, parse_decoder(&val)?)?,
+            "--rpcs3-dir" => set_once(&mut rpcs3_dir, &flag, PathBuf::from(val))?,
             other => return Err(Rpcs3BridgeError::UnknownFlag(other.to_string())),
         }
     }
@@ -342,6 +355,7 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
             flag: "--config-hash",
         })?,
         decoder: decoder.ok_or(Rpcs3BridgeError::RequiredFlagMissing { flag: "--decoder" })?,
+        rpcs3_dir,
     }))
 }
 
@@ -430,6 +444,7 @@ fn build_observation(
     outcome: ObservedOutcome,
     steps: Option<usize>,
     decoder: Decoder,
+    runner_firmware: Option<String>,
 ) -> Observation {
     Observation {
         outcome,
@@ -443,8 +458,11 @@ fn build_observation(
         // The regions above carry the payload; the surrounding TTY
         // stream is left out.
         tty_log: Vec::new(),
-        // A capture carries no firmware or title version.
+        // The runner composes no store entry, so it names no title
+        // version and no firmware the store identifies -- only the
+        // version its own installation reports.
         identity: cellgov_compare::RunIdentity::default(),
+        runner_firmware,
     }
 }
 
@@ -510,7 +528,15 @@ fn run(args: Args) -> Result<(), Rpcs3BridgeError> {
         }
     };
 
-    let obs = build_observation(regions, args.outcome, args.steps, args.decoder);
+    // Read now, while the installation is still the one that produced
+    // this capture. A later read names whatever firmware the runner
+    // holds then.
+    let firmware = args
+        .rpcs3_dir
+        .as_deref()
+        .map(runner_firmware::firmware_version)
+        .transpose()?;
+    let obs = build_observation(regions, args.outcome, args.steps, args.decoder, firmware);
 
     let json = serde_json::to_string_pretty(&obs).map_err(Rpcs3BridgeError::Serialize)?;
     fs::write(&args.output, json).map_err(|source| Rpcs3BridgeError::OutputWrite {

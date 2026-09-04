@@ -343,7 +343,7 @@ fn classify_run_game_exit(summary: &game::RunSummary) -> i32 {
 /// - a title the store does not hold has no game-version axis;
 /// - an executable outside the selected firmware entry belongs to no
 ///   entry.
-fn composed_cell(composition: &BootComposition) -> Option<CellKey> {
+pub(super) fn composed_cell(composition: &BootComposition) -> Option<CellKey> {
     let fw = composition.firmware.version()?.to_string();
     let game_ver = match &composition.game {
         GameChoice::Stored(stored) => Some(match &stored.version {

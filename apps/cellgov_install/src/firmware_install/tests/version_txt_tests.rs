@@ -5,13 +5,28 @@ use crate::scratch_dir::scratch;
 
 #[test]
 fn the_padded_release_field_trims_to_the_version_a_user_sees() {
-    assert_eq!(parse_version("release:04.9100:").as_deref(), Some("4.91"));
+    assert_eq!(
+        parse_version_txt("release:04.9100:").as_deref(),
+        Some("4.91")
+    );
     // The second minor digit survives even when it is a zero.
-    assert_eq!(parse_version("release:04.9000:").as_deref(), Some("4.90"));
-    assert_eq!(parse_version("release:04.0500:").as_deref(), Some("4.05"));
+    assert_eq!(
+        parse_version_txt("release:04.9000:").as_deref(),
+        Some("4.90")
+    );
+    assert_eq!(
+        parse_version_txt("release:04.0500:").as_deref(),
+        Some("4.05")
+    );
     // A sub-1.0 version keeps one leading zero rather than becoming `.31`.
-    assert_eq!(parse_version("release:00.3100:").as_deref(), Some("0.31"));
-    assert_eq!(parse_version("release:04.0000:").as_deref(), Some("4.00"));
+    assert_eq!(
+        parse_version_txt("release:00.3100:").as_deref(),
+        Some("0.31")
+    );
+    assert_eq!(
+        parse_version_txt("release:04.0000:").as_deref(),
+        Some("4.00")
+    );
 }
 
 #[test]
@@ -26,19 +41,22 @@ fn every_release_field_on_hand_reads_as_its_store_key() {
         ("release:04.9200:", "4.92"),
         ("release:04.9300:", "4.93"),
     ] {
-        assert_eq!(parse_version(field).as_deref(), Some(want), "{field}");
+        assert_eq!(parse_version_txt(field).as_deref(), Some(want), "{field}");
     }
 }
 
 #[test]
 fn a_nonzero_sub_revision_does_not_reach_the_displayed_version() {
-    assert_eq!(parse_version("release:04.9312:").as_deref(), Some("4.93"));
+    assert_eq!(
+        parse_version_txt("release:04.9312:").as_deref(),
+        Some("4.93")
+    );
 }
 
 #[test]
 fn only_the_first_delimited_field_is_read() {
     let text = "release:04.9100:\nbuild:12345:\n";
-    assert_eq!(parse_version(text).as_deref(), Some("4.91"));
+    assert_eq!(parse_version_txt(text).as_deref(), Some("4.91"));
 }
 
 #[test]
@@ -46,7 +64,7 @@ fn an_unpadded_field_is_refused_rather_than_reshaped() {
     // Accepting one of these means guessing which digits the writer
     // dropped.
     for text in ["release:4.91:", "release:4.9:", "release:4.9100:"] {
-        assert_eq!(parse_version(text), None, "must refuse {text:?}");
+        assert_eq!(parse_version_txt(text), None, "must refuse {text:?}");
     }
 }
 
@@ -68,7 +86,7 @@ fn a_field_that_is_not_the_fixed_width_record_is_refused() {
         "release:04.91000:",    // minor wider than the record
         "release:000000.0000:", // both wider than the record
     ] {
-        assert_eq!(parse_version(text), None, "must refuse {text:?}");
+        assert_eq!(parse_version_txt(text), None, "must refuse {text:?}");
     }
 }
 
@@ -76,8 +94,8 @@ fn a_field_that_is_not_the_fixed_width_record_is_refused() {
 fn a_multibyte_field_is_refused_rather_than_split_mid_character() {
     // The field is located by byte index, so a non-ASCII field has to
     // fail the digit gate rather than reach a slice.
-    assert_eq!(parse_version("release:04.91\u{00e9}:"), None);
-    assert_eq!(parse_version("release:\u{ff10}4.9100:"), None);
+    assert_eq!(parse_version_txt("release:04.91\u{00e9}:"), None);
+    assert_eq!(parse_version_txt("release:\u{ff10}4.9100:"), None);
 }
 
 #[test]
@@ -93,14 +111,14 @@ fn a_leading_record_that_is_not_release_yields_no_version() {
         "release :04.9100:",
         "\u{feff}release:04.9100:",
     ] {
-        assert_eq!(parse_version(text), None, "must refuse {text:?}");
+        assert_eq!(parse_version_txt(text), None, "must refuse {text:?}");
     }
 }
 
 #[test]
 fn every_accepted_version_is_a_usable_store_directory_name() {
     for text in ["release:04.9100:", "release:00.0000:", "release:99.9999:"] {
-        let v = parse_version(text).unwrap_or_else(|| panic!("must parse {text:?}"));
+        let v = parse_version_txt(text).unwrap_or_else(|| panic!("must parse {text:?}"));
         assert!(
             crate::store::layout::is_safe_component(&v),
             "{v:?} from {text:?} cannot name a store entry"

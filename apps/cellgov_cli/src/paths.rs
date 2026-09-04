@@ -1,5 +1,5 @@
-//! Where a cell's anchor lives, and the two parameters it is measured
-//! under.
+//! Where a cell's committed artifacts live, and the two parameters its
+//! anchor is measured under.
 //!
 //! `dev record-anchors` writes the boot anchors and `boot bench` gates
 //! against them. They must agree on the cell an anchor is filed under,
@@ -19,6 +19,13 @@ use crate::game::manifest::{CellKey, CheckpointTrigger, MatrixCell, TitleManifes
 /// Instruction cap a cell is measured under when neither it nor its
 /// title declares one.
 pub(crate) const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
+
+/// The cross-runner verdict `dev fixture-gen` writes and `dev
+/// titles-gen` renders from.
+pub(crate) const CROSS_RUNNER_SUMMARY_FILE: &str = "cross_runner_summary.json";
+
+/// The committed fixture tree, relative to the workspace root.
+pub(crate) const DEFAULT_FIXTURES_DIR: &str = "tests/fixtures";
 
 /// Instruction cap `cell` is recorded and gated under.
 pub(crate) fn cell_max_steps(title: &TitleManifest, cell: Option<&MatrixCell>) -> u64 {
@@ -65,15 +72,33 @@ pub(crate) fn fixtures_dir(root: &Path) -> PathBuf {
 }
 
 /// Directory holding one cell's committed anchor, under a fixture tree.
+pub(crate) fn cell_anchor_dir_in(fixtures: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
+    cell_dir(
+        fixtures.join(content_id).join("cellgov").join("anchors"),
+        cell,
+    )
+}
+
+/// Directory holding one cell's committed cross-runner triple, under a
+/// fixture tree.
+///
+/// The triple is `compare_report.txt`, `cross_runner_summary.json` and
+/// `REPRODUCTION.md`, beside the hand-maintained `NOTES.md`.
+pub(crate) fn cell_cross_runner_dir_in(
+    fixtures: &Path,
+    content_id: &str,
+    cell: &CellKey,
+) -> PathBuf {
+    cell_dir(fixtures.join(content_id).join("cross_runner"), cell)
+}
+
+/// The `fw-<ver>/<game-ver>` tail every per-cell artifact directory
+/// ends in.
 ///
 /// A firmware-shipped title has no game-version axis, so its cells sit
 /// one level shallower.
-pub(crate) fn cell_anchor_dir_in(fixtures: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
-    let dir = fixtures
-        .join(content_id)
-        .join("cellgov")
-        .join("anchors")
-        .join(format!("fw-{}", cell.fw));
+fn cell_dir(base: PathBuf, cell: &CellKey) -> PathBuf {
+    let dir = base.join(format!("fw-{}", cell.fw));
     match &cell.game_ver {
         Some(v) => dir.join(v),
         None => dir,
@@ -84,6 +109,16 @@ pub(crate) fn cell_anchor_dir_in(fixtures: &Path, content_id: &str, cell: &CellK
 /// tree.
 pub(crate) fn boot_anchor_path_in(fixtures: &Path, content_id: &str, cell: &CellKey) -> PathBuf {
     cell_anchor_dir_in(fixtures, content_id, cell).join("boot_summary.json")
+}
+
+/// Committed cross-runner summary for one cell of `content_id`, under
+/// a fixture tree.
+pub(crate) fn cross_runner_summary_path_in(
+    fixtures: &Path,
+    content_id: &str,
+    cell: &CellKey,
+) -> PathBuf {
+    cell_cross_runner_dir_in(fixtures, content_id, cell).join(CROSS_RUNNER_SUMMARY_FILE)
 }
 
 /// Committed boot anchor for one cell of `content_id`, under a

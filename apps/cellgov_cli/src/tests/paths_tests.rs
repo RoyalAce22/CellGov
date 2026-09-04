@@ -17,6 +17,7 @@ fn cell(bench_max_steps: Option<u64>, checkpoint: Option<CheckpointTrigger>) -> 
         expect: CellExpectation::Frontier,
         bench_max_steps,
         checkpoint,
+        pending: None,
     }
 }
 

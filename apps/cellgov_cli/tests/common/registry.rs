@@ -48,6 +48,11 @@ pub struct ReferenceCell {
     /// `None` for a title shipped inside the firmware, whose version
     /// axis is the firmware's.
     pub game_ver: Option<String>,
+    /// Why the cell carries no committed measurement yet, when the
+    /// manifest states a reason. `None` means the cell must carry an
+    /// anchor.
+    #[allow(dead_code, reason = "not every suite reads every field")]
+    pub pending: Option<String>,
 }
 
 impl ReferenceCell {
@@ -185,9 +190,25 @@ fn reference_cell(path: &Path, root: &toml::Value, row: &toml::Value) -> Referen
             Some(version_key(path, "game_ver", raw))
         }
     };
+    let pending = row.get("pending").map(|v| {
+        let reason = v.as_str().unwrap_or_else(|| {
+            panic!(
+                "{}: [[bench.matrix]] pending must be a string stating why, got {v:?}",
+                path.display()
+            )
+        });
+        assert!(
+            !reason.trim().is_empty(),
+            "{}: [[bench.matrix]] pending is empty; it states why the cell cannot be \
+             measured yet, and an empty reason names nothing",
+            path.display()
+        );
+        reason.to_string()
+    });
     ReferenceCell {
         fw: version_key(path, "fw", fw),
         game_ver,
+        pending,
     }
 }
 

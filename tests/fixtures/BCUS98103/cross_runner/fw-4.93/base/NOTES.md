@@ -8,7 +8,7 @@ distribution: Disc ISO
 checkpoint: FirstRsxWrite
 steps: 7119
 convergence: Yes
-byte_parity: 666 non-semantic + 57 pending
+byte_parity: 666 non-semantic + 56 pending
 ---
 
 Reaches `FirstRsxWrite` at step 7,119 deterministically across
@@ -44,7 +44,7 @@ is where every pending byte sits.
   field holds each runner's kernel id (CG `0x27..0x29`, RP
   `0x95001e00..0x95002000`).
 
-## Unclassified residual (57 bytes, 22 runs)
+## Unclassified residual (56 bytes, 21 runs)
 
 - `data_hi@0x150..0x27f` (14 runs, 14 bytes): twelve 32-bit words
   spread over three parallel 0x8c-byte records (floats, two
@@ -67,8 +67,6 @@ is where every pending byte sits.
 - `data_hi@0x125cd` (1 byte): a flag byte, CG `0x80` vs RP `0x10`,
   inside a word that reads `0x00800000` vs `0x00100000`.
   Successor: attribution as above.
-- `data_hi@0xe21f4` (1 byte): a zero-vs-one word directly after
-  two `data_hi` pointers. Successor: attribution as above.
 - `data_hi@0xe22d3` (1 byte): a small count adjacent to the three
   classified lwmutexes, CG `0x4f` vs RP `0x4c`. Successor:
   attribution as above.
@@ -83,6 +81,11 @@ is where every pending byte sits.
   on CG. Successor: attribute the allocation (`sys_memory_allocate`
   / `sys_mmapper_*` returns) on both runners; the CG value is the
   more suspicious of the two.
+
+A seventh cluster, the zero-vs-one word at `data_hi@0xe21f4`, no
+longer diverges: RP holds `0x01000000` in every capture of this title
+held here, and CG now holds it too. WipEout's B1 byte closed the same
+way in the same round, so the two were one shape rather than two.
 
 Every cluster is inert at `FirstRsxWrite`: the step counts agree
 exactly and the divergent words are not read on the path to the

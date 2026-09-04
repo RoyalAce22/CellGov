@@ -48,6 +48,7 @@ fn observation(id: RunIdentity) -> Observation {
         },
         tty_log: Vec::new(),
         identity: id,
+        runner_firmware: None,
     }
 }
 

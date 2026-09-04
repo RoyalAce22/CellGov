@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cellgov_compare::{
     classify, classify::ClassifierContext, summarize, ByteParity, Convergence, CrossRunnerSummary,
@@ -17,7 +17,7 @@ use cellgov_ps3_abi::elf::ELF_MAGIC;
 use super::exit::{die, load_file_or_die};
 use super::parse::FixtureGenArgs;
 use super::title::resolve_ps3_vfs_root;
-use crate::game::manifest::TitleManifest;
+use crate::game::manifest::{CellKey, TitleManifest};
 
 /// `ELF_HEADER_SIZE >= 58` is required for the `e_phnum` (56..58)
 /// reads in [`elf_header_plus_phdr_table_end`] to be in bounds.
@@ -30,6 +30,14 @@ const REPRODUCTION_TEMPLATE: &str = include_str!("templates/REPRODUCTION.md.temp
 /// Max run length for inline `<hex> vs <hex>` byte listing in the
 /// report. Longer runs render as head + tail + count.
 const INLINE_BYTE_LIMIT: u64 = 16;
+
+/// Path components between the workspace root and a cell's committed
+/// fixture directory, `tests/fixtures/<id>/cross_runner/fw-<ver>/<game-ver>`.
+const COMMITTED_CELL_DEPTH: usize = 6;
+
+/// How many of those components a title's `<content-id>/` directory
+/// covers.
+const CONTENT_ID_DEPTH: usize = 3;
 
 /// Why the ELF-header-plus-PHDR-table parser rejected the EBOOT.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -129,7 +137,6 @@ pub(crate) fn apply_subs(template: &str, subs: &[(&str, &str)]) -> String {
 pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     let cellgov_path = args.cellgov.clone();
     let rpcs3_path = args.rpcs3.clone();
-    let output_dir = args.output_dir.display().to_string();
     let allow_divergence = args.allow_divergence;
 
     let manifest = TitleManifest::load_from_path(&args.manifest)
@@ -138,6 +145,30 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     // The fixture must name the EBOOT a boot run picks, so the
     // selection goes through the boot family's resolver.
     let composition = super::boot_cmd::resolve_composition(&args.selection, &vfs_root, &manifest);
+    let cell = super::boot_cmd::composed_cell(&composition).unwrap_or_else(|| {
+        die(&format!(
+            "fixture-gen: {} composed no cell: a cross-runner result is filed under \
+             (content id, firmware, game version), and this composition names none. An \
+             unmanaged or absent firmware carries no version, a title the store does not \
+             hold has no game-version axis, and an executable named by an absolute path \
+             belongs to no firmware entry",
+            manifest.name()
+        ))
+    });
+    let fixtures = args
+        .fixtures_dir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from(crate::paths::DEFAULT_FIXTURES_DIR));
+    let out_dir = crate::paths::cell_cross_runner_dir_in(&fixtures, &manifest.content_id, &cell);
+    if !is_committed_tree(&fixtures) {
+        eprintln!(
+            "fixture-gen: --fixtures-dir {} is not the committed tree {}; REPRODUCTION.md's \
+             links to the workspace root count the levels of the committed tree, so they \
+             will not resolve from here",
+            fixtures.display(),
+            crate::paths::DEFAULT_FIXTURES_DIR,
+        );
+    }
     let eboot_path = manifest
         .resolve_eboot_in(&composition.eboot_dirs)
         .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
@@ -178,24 +209,38 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
         ));
     }
 
+    // The other runner's firmware comes from the capture, stamped when
+    // the dump was converted. This command can run long after that
+    // runner's installation changed, so a version read now would name a
+    // library the dump never saw.
+    let rpcs3_firmware = rpcs3.runner_firmware.clone().unwrap_or_else(|| {
+        die(&format!(
+            "fixture-gen: {rpcs3_path} names no runner firmware, so nothing says which \
+             library produced it. Re-convert the dump with `rpcs3_to_observation \
+             --rpcs3-dir <dir>`"
+        ))
+    });
+
     let result = cellgov_compare::compare_observations(&cellgov, &rpcs3);
     let ctx = build_classifier_context(&eboot_bytes, &cellgov)
         .unwrap_or_else(|e| die(&format!("fixture-gen: build classifier context: {e}")));
     let classes = classify_all(&result, &cellgov, &rpcs3, &ctx);
-    let summary = summarize(&result, &classes);
+    let summary = summarize(&result, &classes)
+        .with_firmware(composition.identity.clone(), rpcs3_firmware)
+        .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
 
-    let out_dir = Path::new(&output_dir);
-    std::fs::create_dir_all(out_dir).unwrap_or_else(|e| {
+    std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
         die(&format!(
             "fixture-gen: create_dir_all {}: {e}",
             out_dir.display()
         ))
     });
 
-    write_compare_report(out_dir, &result, &summary, &cellgov, &rpcs3)
+    write_compare_report(&out_dir, &result, &summary, &cellgov, &rpcs3)
         .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
-    write_reproduction(out_dir, &manifest).unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
-    write_summary_json(out_dir, &summary).unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
+    write_reproduction(&out_dir, &manifest, &cell)
+        .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
+    write_summary_json(&out_dir, &summary).unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
 
     let (conv_str, parity_str) = summary.display_matrix_columns();
     println!(
@@ -683,15 +728,88 @@ fn hex_run(bytes: &[u8]) -> String {
     s
 }
 
-fn write_reproduction(out_dir: &Path, manifest: &TitleManifest) -> Result<(), FixtureGenError> {
-    let checkpoint_kind = manifest.checkpoint_trigger().as_cli_str();
-    let body = apply_subs(
+/// Whether `fixtures` is the committed tree the reproduction's
+/// workspace-root links are written for.
+///
+/// Two spellings name that tree:
+///
+/// - the relative default,
+/// - the same tree under the compiled-in workspace root.
+fn is_committed_tree(fixtures: &Path) -> bool {
+    fixtures == Path::new(crate::paths::DEFAULT_FIXTURES_DIR)
+        || fixtures == crate::paths::fixtures_dir(&crate::paths::workspace_root()).as_path()
+}
+
+/// The `../` chain from a cell's fixture directory to the workspace
+/// root, and the chain to the `<content-id>/` directory holding the two
+/// observations.
+///
+/// Both chains are written for the committed tree, where a cell sits at
+/// `tests/fixtures/<id>/cross_runner/fw-<ver>/<game-ver>`. A
+/// firmware-shipped title has no game-version level, so its cells sit
+/// one level shallower.
+///
+/// The second chain counts only the levels of the cell itself, so it
+/// holds under any `--fixtures-dir`. The first also counts the levels
+/// of `tests/fixtures`.
+fn relative_prefixes(cell: &CellKey) -> (String, String) {
+    let depth = if cell.game_ver.is_some() {
+        COMMITTED_CELL_DEPTH
+    } else {
+        COMMITTED_CELL_DEPTH - 1
+    };
+    ("../".repeat(depth), "../".repeat(depth - CONTENT_ID_DEPTH))
+}
+
+/// The `--fw` / `--game-ver` pair that reproduces this cell.
+fn selection_flags(cell: &CellKey) -> String {
+    match &cell.game_ver {
+        Some(v) => format!("--fw {} --game-ver {v}", cell.fw),
+        None => format!("--fw {}", cell.fw),
+    }
+}
+
+/// Render the reproduction for one cell.
+///
+/// [`apply_subs`] leaves an unmatched token in place, so a template key
+/// absent from this list reaches the reader verbatim.
+fn reproduction_body(
+    content_id: &str,
+    display_name: &str,
+    checkpoint_kind: &str,
+    cell: &CellKey,
+) -> String {
+    let (repo_root_rel, observation_dir) = relative_prefixes(cell);
+    let cell_dir = match &cell.game_ver {
+        Some(v) => format!("fw-{}/{v}", cell.fw),
+        None => format!("fw-{}", cell.fw),
+    };
+    apply_subs(
         REPRODUCTION_TEMPLATE,
         &[
-            ("content_id", &manifest.content_id),
-            ("display_name", manifest.display_name()),
-            ("checkpoint_kind", &checkpoint_kind),
+            ("content_id", content_id),
+            ("display_name", display_name),
+            ("checkpoint_kind", checkpoint_kind),
+            ("cell_label", &cell.label()),
+            ("cell_dir", &cell_dir),
+            ("selection_flags", &selection_flags(cell)),
+            ("repo_root_rel", &repo_root_rel),
+            ("observation_dir", &observation_dir),
         ],
+    )
+}
+
+fn write_reproduction(
+    out_dir: &Path,
+    manifest: &TitleManifest,
+    cell: &CellKey,
+) -> Result<(), FixtureGenError> {
+    let checkpoint_kind = manifest.checkpoint_trigger().as_cli_str();
+    let body = reproduction_body(
+        &manifest.content_id,
+        manifest.display_name(),
+        &checkpoint_kind,
+        cell,
     );
     let path = out_dir.join("REPRODUCTION.md");
     std::fs::write(&path, body).map_err(|e| FixtureGenError::Io {
@@ -704,7 +822,7 @@ fn write_summary_json(out_dir: &Path, summary: &CrossRunnerSummary) -> Result<()
     let mut body = serde_json::to_string_pretty(summary)
         .map_err(|e| FixtureGenError::Serialize { source: e })?;
     body.push('\n');
-    let path = out_dir.join("cross_runner_summary.json");
+    let path = out_dir.join(crate::paths::CROSS_RUNNER_SUMMARY_FILE);
     std::fs::write(&path, body).map_err(|e| FixtureGenError::Io {
         context: format!("write {}", path.display()),
         source: e,
@@ -714,3 +832,7 @@ fn write_summary_json(out_dir: &Path, summary: &CrossRunnerSummary) -> Result<()
 #[cfg(test)]
 #[path = "tests/fixture_gen_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fixture_gen_cell_tests.rs"]
+mod cell_tests;

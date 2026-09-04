@@ -69,8 +69,6 @@ const EVERY_LEAF: &[&[&str]] = &[
         "a.json",
         "--rpcs3",
         "b.json",
-        "--output-dir",
-        "out",
     ],
     &["dev", "titles-gen"],
     &["dev", "gen-manifest", "--title-id", "NPAA00001"],

@@ -443,6 +443,7 @@ mod reference_cell_tests {
             expect: CellExpectation::Frontier,
             bench_max_steps: None,
             checkpoint: None,
+            pending: None,
         }
     }
 
@@ -503,6 +504,7 @@ mod reference_cell_tests {
             expect: CellExpectation::Frontier,
             bench_max_steps: None,
             checkpoint: None,
+            pending: None,
         }];
         assert!(firmware_shipped
             .cell(&CellKey {

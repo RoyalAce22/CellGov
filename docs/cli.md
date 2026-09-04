@@ -1054,11 +1054,11 @@ Usage: cellgov dev rpcs3-attribute [OPTIONS] --trace <PATH> <--addr <HEX>|--list
 Regenerate a title's cross-runner fixture directory.
 
 ```console
-$ cellgov dev fixture-gen --manifest title_manifests/NPUA80001.toml --cellgov cellgov.json --rpcs3 rpcs3.json --output-dir tests/fixtures/NPUA80001 --fw 4.93
+$ cellgov dev fixture-gen --manifest title_manifests/NPUA80001.toml --cellgov cellgov.json --rpcs3 rpcs3.json --fw 4.93 --game-ver base
 ```
 
 ```
-Usage: cellgov dev fixture-gen [OPTIONS] --manifest <PATH> --cellgov <PATH> --rpcs3 <PATH> --output-dir <PATH>
+Usage: cellgov dev fixture-gen [OPTIONS] --manifest <PATH> --cellgov <PATH> --rpcs3 <PATH>
 ```
 
 | Option | Value | Description |
@@ -1066,7 +1066,7 @@ Usage: cellgov dev fixture-gen [OPTIONS] --manifest <PATH> --cellgov <PATH> --rp
 | `--manifest` | `PATH` | The title manifest the fixture is generated for. Required. |
 | `--cellgov` | `PATH` | CellGov's observation JSON. Required. |
 | `--rpcs3` | `PATH` | The other runner's observation JSON. Required. |
-| `--output-dir` | `PATH` | Directory the fixture is written to. Required. |
+| `--fixtures-dir` | `DIR` | Fixture tree the cell's directory is created under. |
 | `--allow-divergence` | -- | Write the fixture even when the two observations disagree. |
 | `--fw` | `VERSION` | Installed firmware version; may be omitted when exactly one is a candidate. |
 | `--game-ver` | `base\|VERSION` | Installed content version; may be omitted when exactly one is a candidate. |

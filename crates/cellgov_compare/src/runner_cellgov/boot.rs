@@ -121,6 +121,7 @@ pub fn observe_from_boot(
         },
         tty_log: tty_log.to_vec(),
         identity,
+        runner_firmware: None,
     }
 }
 

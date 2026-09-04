@@ -52,6 +52,29 @@ from [concepts/](concepts/README.md). In brief:
   - `--` -- byte parity is undefined because the runners did not
     converge.
 
+## Which firmware a title is measured against
+
+Every row here is measured on firmware 4.93. Each title's manifest
+declares which cells exist and marks one of them the reference, so the
+version a row reports against is a stated choice rather than something
+read off the content.
+
+Measuring the whole set against one library is what makes two rows
+readable side by side: a divergence that appears in one title and not
+another is then a difference between the titles rather than between
+the firmwares they happened to be measured against.
+
+A title also states a floor of its own, in its `PARAM.SFO`
+`PS3_SYSTEM_VER` field. That is the library it was built against, and a
+row measured there answers a different question -- what the title did on
+the firmware it shipped with. Both cells can be declared; only the
+marked one is rendered above.
+
+Both verdicts state agreement between two runs of one firmware
+library. A summary naming a different firmware on each side is
+refused rather than rendered here, because a difference between two
+libraries is a version difference until it is shown otherwise.
+
 A `Yes` convergence with `M non-semantic + N pending` is a
 successful boot with investigation outstanding, NOT a regression.
 The matrix renders progress and backlog side by side rather than
@@ -71,8 +94,8 @@ Column definitions:
 
 | Serial | Title | Year | Developer | Engine | Format | Checkpoint | Steps | Insns | Convergence | Byte parity |
 | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
-| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 43,055 | 11,022,080 | Yes | 975 non-semantic + 1 pending |
-| BCUS98103 | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 7,119 | 1,822,464 | Yes | 666 non-semantic + 57 pending |
+| BCES00664 | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 43,055 | 11,022,080 | Yes | 975 non-semantic |
+| BCUS98103 | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | FirstRsxWrite -> RsxWriteCheckpoint | 7,119 | 1,822,464 | Yes | 666 non-semantic + 56 pending |
 | NPUA80001 | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | ProcessExit -> ProcessExit | 11,212 | 2,870,272 | No (outcome: ProcessExit vs Completed) | -- |
 | NPUA80068 | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | FirstRsxWrite -> MaxSteps | 390,435 | 99,951,360 | No (outcome: Timeout vs Completed) | -- |
 | VSH | PS3 System Software (vsh) | 2006 | Sony Interactive Entertainment | PAF | Firmware Exec | ProcessExit -> MaxSteps | 389,859 | 99,803,904 | -- | -- |

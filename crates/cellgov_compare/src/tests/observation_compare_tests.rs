@@ -21,6 +21,7 @@ fn obs(
         },
         tty_log: Vec::new(),
         identity: crate::identity::RunIdentity::default(),
+        runner_firmware: None,
     }
 }
 

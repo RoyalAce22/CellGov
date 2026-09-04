@@ -44,6 +44,13 @@ pub struct Observation {
     /// [`RunIdentity`] for when it is empty.
     #[serde(flatten)]
     pub identity: RunIdentity,
+    /// Firmware version of a runner whose firmware CellGov does not
+    /// manage.
+    ///
+    /// A CellGov run names its firmware in [`Self::identity`], so the
+    /// two are never both set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_firmware: Option<String>,
 }
 
 #[cfg(test)]

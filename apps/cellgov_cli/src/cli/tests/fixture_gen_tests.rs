@@ -17,6 +17,7 @@ fn obs(outcome: ObservedOutcome, regions: Vec<NamedMemoryRegion>) -> Observation
         },
         tty_log: Vec::new(),
         identity: cellgov_compare::RunIdentity::default(),
+        runner_firmware: None,
     }
 }
 

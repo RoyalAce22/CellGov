@@ -1,22 +1,27 @@
 //! `cellgov dev titles-gen` -- regenerate `docs/titles.md` from
-//! `TitleRegistry::scan_dir` + the reference cell's anchor and the
-//! per-title `cross_runner_summary.json`. ENOENT on a summary renders
-//! as `--`; any other I/O or parse failure surfaces as a typed error so
-//! a corrupted file cannot read the same as an absent one.
+//! `TitleRegistry::scan_dir`, the reference cell's anchor, and
+//! `cross_runner_summary.json`.
+//!
+//! ENOENT on a summary renders as `--`. Any other I/O or parse failure
+//! surfaces as a typed error, so a corrupted file cannot read the same
+//! as an absent one. Two firmware disagreements refuse the row the same
+//! way:
+//!
+//! - the two runners of one summary name different libraries,
+//! - a summary names a library other than the one its cell names.
 
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::{format_with_commas, BootSummary, CrossRunnerSummary};
+use cellgov_compare::{format_with_commas, BootSummary, CrossRunnerSummary, FirmwareIdentity};
 
 use super::exit::die;
 use super::parse::TitlesGenArgs;
 use super::title::DEFAULT_TITLE_REGISTRY_DIR;
-use crate::game::manifest::{TitleManifest, TitleRegistry};
+use crate::game::manifest::{CellKey, TitleManifest, TitleRegistry};
 
 const TITLES_TEMPLATE: &str = include_str!("templates/titles.md.template");
 
-const DEFAULT_FIXTURES_DIR: &str = "tests/fixtures";
 const DEFAULT_OUTPUT: &str = "docs/titles.md";
 
 /// Why loading a per-title summary JSON file failed. ENOENT is
@@ -35,6 +40,21 @@ pub(crate) enum SummaryLoadError {
         #[source]
         err: serde_json::Error,
     },
+    /// The file states one firmware and the cell it sits in names
+    /// another.
+    #[error(
+        "{}: states firmware {recorded}, but it is filed under the cell for firmware {cell}. \
+         A row states the result for the cell it names, so a file measured elsewhere is not \
+         an answer for this one",
+        path.display()
+    )]
+    CellFirmwareMismatch {
+        path: PathBuf,
+        /// Firmware version the cell names.
+        cell: String,
+        /// Firmware version the file states.
+        recorded: String,
+    },
 }
 
 pub(crate) fn run(args: &TitlesGenArgs) {
@@ -45,7 +65,7 @@ pub(crate) fn run(args: &TitlesGenArgs) {
     let fixtures_dir = args
         .fixtures_dir
         .clone()
-        .unwrap_or_else(|| DEFAULT_FIXTURES_DIR.to_string());
+        .unwrap_or_else(|| crate::paths::DEFAULT_FIXTURES_DIR.to_string());
     let output = args
         .output
         .clone()
@@ -99,8 +119,9 @@ fn render_rows_sorted<'a>(
 ///
 /// # Errors
 ///
-/// `SummaryLoadError` if a summary file exists but cannot be read
-/// or parsed. ENOENT renders as `--` cells, not an error.
+/// `SummaryLoadError` if a summary file exists but cannot be read,
+/// cannot be parsed, or states a firmware other than the one its cell
+/// names. ENOENT renders as `--` cells, not an error.
 fn render_row(title: &TitleManifest, fixtures: &Path) -> Result<String, SummaryLoadError> {
     let boot = load_boot_summary(title, fixtures)?;
     let cross = load_cross_runner_summary(title, fixtures)?;
@@ -167,22 +188,51 @@ fn load_boot_summary(
     let Some(cell) = title.reference_cell() else {
         return Ok(None);
     };
-    load_summary_file(&crate::paths::boot_anchor_path_in(
-        fixtures,
-        &title.content_id,
-        &cell.key,
-    ))
+    let path = crate::paths::boot_anchor_path_in(fixtures, &title.content_id, &cell.key);
+    let Some(summary) = load_summary_file::<BootSummary>(&path)? else {
+        return Ok(None);
+    };
+    check_cell_firmware(&path, &cell.key, summary.identity.firmware.as_ref())?;
+    Ok(Some(summary))
 }
 
+/// The headline row's cross-runner verdict, from the reference cell
+/// [`load_boot_summary`] also reads.
 fn load_cross_runner_summary(
     title: &TitleManifest,
     fixtures: &Path,
 ) -> Result<Option<CrossRunnerSummary>, SummaryLoadError> {
-    let path: PathBuf = fixtures
-        .join(&title.content_id)
-        .join("cross_runner")
-        .join("cross_runner_summary.json");
-    load_summary_file(&path)
+    let Some(cell) = title.reference_cell() else {
+        return Ok(None);
+    };
+    let path = crate::paths::cross_runner_summary_path_in(fixtures, &title.content_id, &cell.key);
+    let Some(summary) = load_summary_file::<CrossRunnerSummary>(&path)? else {
+        return Ok(None);
+    };
+    check_cell_firmware(&path, &cell.key, summary.identity.firmware.as_ref())?;
+    Ok(Some(summary))
+}
+
+/// Hold a committed file against the cell whose directory it sits in.
+///
+/// Both firmware spellings are the store key of a `vfs/firmware/<key>/`
+/// entry, so they compare directly.
+///
+/// A file written before the store carried versions names no firmware,
+/// and raises no mismatch.
+fn check_cell_firmware(
+    path: &Path,
+    cell: &CellKey,
+    recorded: Option<&FirmwareIdentity>,
+) -> Result<(), SummaryLoadError> {
+    match recorded {
+        Some(f) if f.version != cell.fw => Err(SummaryLoadError::CellFirmwareMismatch {
+            path: path.to_path_buf(),
+            cell: cell.fw.clone(),
+            recorded: f.version.clone(),
+        }),
+        Some(_) | None => Ok(()),
+    }
 }
 
 /// `Ok(None)` on ENOENT; any other I/O or parse failure surfaces
@@ -212,3 +262,7 @@ fn load_summary_file<T: serde::de::DeserializeOwned>(
 #[cfg(test)]
 #[path = "tests/titles_gen_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/titles_gen_firmware_tests.rs"]
+mod firmware_tests;

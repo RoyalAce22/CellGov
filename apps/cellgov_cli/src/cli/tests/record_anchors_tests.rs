@@ -12,6 +12,7 @@ fn cell(fw: &str, game_ver: Option<&str>, bench_max_steps: Option<u64>) -> Matri
         expect: CellExpectation::Frontier,
         bench_max_steps,
         checkpoint: None,
+        pending: None,
     }
 }
 
