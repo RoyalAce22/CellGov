@@ -17,4 +17,4 @@ mod types;
 
 pub use image::HLE_HEAP_BASE;
 pub(super) use prepare::prepare;
-pub(super) use types::{PrepareOptions, PreparedBoot};
+pub(super) use types::{AuthorityIdSource, PrepareOptions, PreparedBoot};
