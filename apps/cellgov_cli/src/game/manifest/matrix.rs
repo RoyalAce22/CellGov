@@ -110,7 +110,8 @@ impl MatrixCell {
 /// - overrides the checkpoint to one the title-level `[rsx] mirror`
 ///   makes unreachable,
 /// - repeats a cell an earlier row already declared,
-/// - states an empty `pending` reason.
+/// - states a `pending` reason that is empty, or that carries a `|` or
+///   a line break.
 ///
 /// [`ManifestError::Parse`] also covers two whole-matrix faults:
 ///
@@ -261,6 +262,18 @@ fn build_cell(
                  measured yet, and an empty reason names nothing. Drop the key or give \
                  the reason"
                     .to_string(),
+            ))
+        }
+        // The reason renders inside a markdown table cell on the
+        // title's generated page. A `|` ends that cell early, and a
+        // line ending -- LF, CRLF, or a bare CR -- ends the whole row.
+        Some(reason) if reason.contains('|') || reason.contains('\n') || reason.contains('\r') => {
+            return Err(refusal(
+                origin,
+                format!(
+                    "[[bench.matrix]] pending {reason:?} contains a `|` or a line break; the \
+                     reason is rendered in a markdown table cell, which neither survives"
+                ),
             ))
         }
         other => other,

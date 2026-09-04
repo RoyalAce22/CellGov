@@ -81,3 +81,59 @@ pending = "   "
     assert!(err.contains("pending"), "{err}");
     assert!(err.contains("empty"), "{err}");
 }
+
+#[test]
+fn a_reason_carrying_a_table_separator_is_refused() {
+    let text = manifest_with(
+        r#"
+[[bench.matrix]]
+fw = "1.50"
+game_ver = "base"
+reference = true
+pending = "the loader fails | the boot ends early"
+"#,
+    );
+    let err = TitleManifest::load_from_text(&text, origin())
+        .expect_err("a pipe ends the table cell the reason renders in")
+        .to_string();
+    assert!(err.contains("pending"), "{err}");
+    assert!(err.contains("markdown table"), "{err}");
+}
+
+#[test]
+fn a_reason_carrying_a_newline_is_refused() {
+    let text = manifest_with(
+        "
+[[bench.matrix]]
+fw = \"1.50\"
+game_ver = \"base\"
+reference = true
+pending = \"\"\"
+the loader fails
+the boot ends early\"\"\"
+",
+    );
+    let err = TitleManifest::load_from_text(&text, origin())
+        .expect_err("a newline ends the table row the reason renders in")
+        .to_string();
+    assert!(err.contains("pending"), "{err}");
+    assert!(err.contains("markdown table"), "{err}");
+}
+
+#[test]
+fn a_reason_carrying_a_bare_carriage_return_is_refused() {
+    let text = manifest_with(
+        r#"
+[[bench.matrix]]
+fw = "1.50"
+game_ver = "base"
+reference = true
+pending = "the loader fails\rthe boot ends early"
+"#,
+    );
+    let err = TitleManifest::load_from_text(&text, origin())
+        .expect_err("a bare carriage return ends the table row the reason renders in")
+        .to_string();
+    assert!(err.contains("pending"), "{err}");
+    assert!(err.contains("markdown table"), "{err}");
+}

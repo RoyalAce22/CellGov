@@ -134,11 +134,9 @@ firmware and one game version, and it is the unit a result is
 keyed by: there is no "the result for `<disc serial>`", only a
 result for `(<disc serial>, fw 4.91, base)`.
 
-The matrix is **declared and validated, but nothing reads it yet.**
-A per-cell `bench_max_steps` or `checkpoint` written today is
-parsed and checked, then not applied: `boot bench` still uses the
-title-level values. The anchor gate and the doc generator are what
-will consume cells.
+Three readers consume the matrix: `dev record-anchors` walks it,
+`boot bench` gates the run against the selected cell's anchor under
+that cell's cap and checkpoint, and `dev titles-gen` renders it.
 
 Cells are declared here, never discovered from what a machine has
 installed. A store holding forty firmwares does not give a title
@@ -152,6 +150,7 @@ forty cells.
 | `expect`          | string  | no (default `"frontier"`)   | `"frontier"` or `"probe"`; see below.                                                     |
 | `bench_max_steps` | integer | no                          | Per-cell override of the `[title]` cap.                                                   |
 | `checkpoint`      | table   | no                          | Per-cell override of the `[checkpoint]` block; same `kind` / `pc` fields and refusals.    |
+| `pending`         | string  | no                          | Why the cell carries no measurement yet; rendered beside the cell on the title's page.    |
 
 The reference cell is declared rather than inferred for the same
 reason `--fw` refuses to guess `latest`: a headline row whose
@@ -168,6 +167,14 @@ nothing on the page attributes.
   produces a divergence that is the desired result, and mixing
   that into the frontier map would make the "next target"
   reading false.
+
+`pending` is what a declared cell says while it waits. The title's
+page renders an unmeasured cell as `.`, and as `. (<reason>)` when the
+row states one -- so a hole in the coverage grid can say why it is
+there. The reason goes on a public page: state the defect or the
+obstacle, not an issue number. An empty reason is refused, and so is
+one carrying a `|` or a newline, neither of which survives the table
+cell it renders in.
 
 Per-cell overrides are whitelisted to `bench_max_steps` and
 `checkpoint`, and no other key is accepted. Both are genuinely
@@ -285,9 +292,10 @@ unpopulated out-params and bails.
    schema above.
 4. Run `cellgov boot run --title <short_name>` once to
    confirm the boot path resolves the EBOOT.
-5. If a cross-runner fixture exists or will be captured, run
-   `cellgov dev titles-gen` to refresh
-   [../titles.md](../docs/titles.md).
+5. Run `cellgov dev titles-gen` to refresh
+   [../titles.md](../docs/titles.md) and the title's own page under
+   `docs/titles/`. A title added to the registry without this step
+   fails the drift gate on its missing page.
 
 ## Validation summary
 
@@ -316,6 +324,10 @@ The loader enforces, in addition to TOML well-formedness:
 - `game_ver` is present on every row of a title with a version
   axis, and absent from every row of a `firmware-exec` title.
 - No two rows name the same cell.
+- `pending` is neither empty nor carrying a `|` or a newline.
+- The reference row is not a `probe`: a headline row states whether
+  the title converged, and a probe cell's datum is the error the
+  guest received instead.
 
 Any of these failures surfaces as a typed `ManifestError` at
 startup, carrying the offending file path; a malformed

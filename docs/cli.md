@@ -1074,7 +1074,7 @@ Usage: cellgov dev fixture-gen [OPTIONS] --manifest <PATH> --cellgov <PATH> --rp
 
 #### `cellgov dev titles-gen`
 
-Regenerate `docs/titles.md` from the registry and fixtures.
+Regenerate the title documents from the registry and fixtures.
 
 ```console
 $ cellgov dev titles-gen
@@ -1088,7 +1088,7 @@ Usage: cellgov dev titles-gen [OPTIONS]
 | --- | --- | --- |
 | `--registry` | `DIR` | Title registry directory. |
 | `--fixtures-dir` | `DIR` | Cross-runner fixture directory. |
-| `--output` | `PATH` | Document to write. |
+| `--output-dir` | `DIR` | Directory the generated documents are written under. |
 
 #### `cellgov dev cli-gen`
 

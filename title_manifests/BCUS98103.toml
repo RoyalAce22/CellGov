@@ -15,12 +15,11 @@ kind = "disc"
 kind = "first-rsx-write"
 
 # The firmware this title's own PARAM.SFO asks for
-# (PS3_SYSTEM_VER = 01.9400). The PRX loader refuses a module_stop OPD
-# above the 32-bit guest space on it, so the boot ends before any
-# checkpoint and the cell carries no anchor.
+# (PS3_SYSTEM_VER = 01.9400).
 [[bench.matrix]]
 fw = "1.94"
 game_ver = "base"
+pending = "the PRX loader refuses a module_stop entry point above the 32-bit guest space on this firmware, so the boot ends before any checkpoint"
 
 # The cell this title is gated and rendered at. See
 # docs/architecture/title_harness.md.

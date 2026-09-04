@@ -29,7 +29,7 @@ pub(crate) enum DevCommand {
     Rpcs3Attribute(Rpcs3AttributeArgs),
     /// Regenerate a title's cross-runner fixture directory.
     FixtureGen(Box<FixtureGenArgs>),
-    /// Regenerate `docs/titles.md` from the registry and fixtures.
+    /// Regenerate the title documents from the registry and fixtures.
     TitlesGen(TitlesGenArgs),
     /// Regenerate `docs/cli.md` from this command tree.
     CliGen(CliGenArgs),
@@ -177,9 +177,9 @@ pub(crate) struct TitlesGenArgs {
     /// Cross-runner fixture directory.
     #[arg(long, value_name = "DIR")]
     pub fixtures_dir: Option<String>,
-    /// Document to write.
-    #[arg(long, value_name = "PATH")]
-    pub output: Option<String>,
+    /// Directory the generated documents are written under.
+    #[arg(long, value_name = "DIR")]
+    pub output_dir: Option<String>,
 }
 
 /// `cellgov dev cli-gen`

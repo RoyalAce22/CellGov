@@ -56,11 +56,12 @@ carries `reference = true`, and that row names the cell a headline row
 is measured at. The loader refuses a matrix marking none or several, so
 the choice is always one somebody made.
 
-Every title currently names firmware 4.93. Measuring the whole set
-against one library is what makes two titles' verdicts readable side by
-side: a divergence that appears in one title and not another is then a
-difference between the titles rather than between the firmwares they
-happened to be measured against.
+Pointing every title's reference at one library is what makes two
+titles' verdicts readable side by side: a divergence that appears in
+one title and not another is then a difference between the titles
+rather than between the firmwares they happened to be measured
+against. Which library each one names is a property of the registry,
+and the generated index renders it per row.
 
 A title also states a floor of its own, in its `PARAM.SFO`
 `PS3_SYSTEM_VER` field, which every title carries, disc and network
@@ -73,7 +74,33 @@ It is not what the reference row has to name, and a matrix may declare
 both cells and mark either one.
 
 [titles.md](../titles.md) tracks per-title status (boot checkpoint
-reached, cross-runner observation match).
+reached, cross-runner observation match), one row per title at its
+reference cell, with a Config column naming that cell. Every declared
+cell of one title, measured or not, is on that title's own page under
+`docs/titles/<content-id>.md` -- a grid with firmware down the side and
+game version across.
+
+Splitting the two presentations is what keeps either readable. One
+table cannot express the product of every version and stay the page
+people screenshot, and folding a title's other cells into the headline
+row would state several measurements as one. The grid distinguishes a
+declared cell with nothing recorded from an intersection the manifest
+never declared, because rendering a hole and a boundary the same makes
+a coverage table lie about its own gaps.
+
+`titles-gen` owns the whole set it writes: the index, and one page per
+title in the registry. A page under `docs/titles/` that no title
+claims is removed on the next run and named as it goes, so a title
+dropped from the registry cannot leave a page behind that still reads
+as current. The drift gate compares the set rather than each file, and
+fails on the orphan.
+
+Each committed file is held against the cell it sits in. A summary
+stating a firmware or a title version other than the one its directory
+names is refused, and so is one filed under a cell no
+`[[bench.matrix]]` row declares, or at a path no cell key names at all.
+The path is a claim about what a file is, and an unchecked claim is how
+a curated matrix stops being curated.
 
 ## Title anchors and witnesses
 
