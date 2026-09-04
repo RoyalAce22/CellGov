@@ -1,6 +1,8 @@
 //! Unit formatting and the phase-label table's edges.
 
 use super::*;
+#[cfg(debug_assertions)]
+use crate::progress::serial::serial;
 
 #[test]
 fn bytes_format_in_binary_multiples() {
@@ -78,6 +80,8 @@ fn an_empty_table_answers_the_fallback_rather_than_treating_it_as_drift() {
 #[test]
 #[should_panic(expected = "is past the 3 label(s)")]
 fn a_phase_code_past_a_populated_table_names_the_drift() {
+    // The panic reaches the bar's panic hook, which clears `LIVE_BAR`.
+    let _s = serial();
     let _ = T.phase_label(3);
 }
 

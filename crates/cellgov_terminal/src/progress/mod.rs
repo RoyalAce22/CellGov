@@ -8,6 +8,9 @@
 
 mod bar;
 mod frame;
+#[cfg(test)]
+#[path = "tests/serial.rs"]
+mod serial;
 mod sink;
 mod state;
 mod task;

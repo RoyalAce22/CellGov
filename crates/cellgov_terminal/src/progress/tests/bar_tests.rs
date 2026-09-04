@@ -7,18 +7,9 @@
 //! harness does not capture.
 
 use super::*;
+use crate::progress::serial::serial;
 use crate::progress::sink::ProgressSink;
 use crate::progress::task::Unit;
-
-/// `LIVE_BAR` is process-global, so the tests that read it run one at
-/// a time.
-static SERIAL: Mutex<()> = Mutex::new(());
-
-fn serial() -> std::sync::MutexGuard<'static, ()> {
-    SERIAL
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
 
 const QUIET: Task = Task {
     verb: "Verifying",
@@ -51,7 +42,7 @@ fn caps(mode: RenderMode) -> TermCaps {
 #[test]
 fn a_streaming_task_caps_the_bar_at_plain() {
     let _s = serial();
-    let bar = ProgressBar::start(caps(RenderMode::Ansi), &STREAMING, "wipeout");
+    let bar = ProgressBar::start(caps(RenderMode::Ansi), &STREAMING, "synthetic");
     assert_eq!(bar.caps.mode, RenderMode::Plain);
     assert!(!bar.caps.color);
     bar.finish();
@@ -101,6 +92,25 @@ fn aborting_deregisters_the_bar_too() {
     let bar = ProgressBar::start(caps(RenderMode::Plain), &QUIET, "x.pkg");
     bar.abort();
     assert!(live_bar_slot().is_none());
+}
+
+#[test]
+fn a_panic_anywhere_clears_the_registration_whatever_bar_owns_it() {
+    let _s = serial();
+    let bar = ProgressBar::start(caps(RenderMode::Plain), &QUIET, "x.pkg");
+    assert!(live_bar_slot().is_some());
+    // `catch_unwind` rather than `#[should_panic]`: this test reads the
+    // slot after the hook runs. A test that ends in a panic never
+    // reaches that read.
+    let caught: std::thread::Result<()> = std::panic::catch_unwind(|| {
+        panic!("a panic the bar hook must observe");
+    });
+    assert!(caught.is_err(), "the panic must not escape this test");
+    assert!(
+        live_bar_slot().is_none(),
+        "the hook must deregister the live bar for a panic raised anywhere"
+    );
+    bar.finish();
 }
 
 #[test]

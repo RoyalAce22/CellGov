@@ -469,7 +469,7 @@ fn a_counting_unit_formats_the_totals_the_rate_and_the_eta() {
         &snap,
         &FrameCtx {
             task: &BENCH,
-            label: "wipeout",
+            label: "synthetic",
             ratio: 0.25,
             rate: 12_400_000.0,
             eta: Some(72),
@@ -477,7 +477,7 @@ fn a_counting_unit_formats_the_totals_the_rate_and_the_eta() {
         },
     );
     let lines = visible_lines(&f);
-    assert_eq!(lines[0], "Booting wipeout  [stepping]");
+    assert_eq!(lines[0], "Booting synthetic  [stepping]");
     assert!(lines[1].contains(" 25%  25.0M / 100.0M"), "{}", lines[1]);
     // No item counter, so line 3 opens on the rate rather than on a
     // stray separator.
