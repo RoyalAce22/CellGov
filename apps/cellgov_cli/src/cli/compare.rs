@@ -49,7 +49,9 @@ pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&s
         match scenario_factory(target) {
             Some(factory) => {
                 if let Some(path) = save_path.as_deref() {
-                    save_baseline(&factory, target, path);
+                    // A bare scenario names no regions, so neither
+                    // side of the round trip observes any.
+                    save_baseline(&factory, target, path, &[]);
                 } else if let Some(path) = against_path.as_deref() {
                     compare_against_baseline(&factory, target, path, mode, format);
                 } else {
@@ -73,8 +75,18 @@ fn require_determinism(
         .unwrap_or_else(|e| die(&format!("determinism check FAILED for {name}: {e}")))
 }
 
-fn save_baseline(factory: &dyn Fn() -> ScenarioFixture, name: &str, path: &str) {
-    let obs = require_determinism(factory, name, &[]);
+/// `regions` must match what the `--against-baseline` run observes with.
+///
+/// A comparison matches regions by name. A baseline saved without the
+/// caller's regions reads every region the compare run captures as a
+/// divergence.
+fn save_baseline(
+    factory: &dyn Fn() -> ScenarioFixture,
+    name: &str,
+    path: &str,
+    regions: &[RegionDescriptor],
+) {
+    let obs = require_determinism(factory, name, regions);
     let p = std::path::Path::new(path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() {
@@ -217,7 +229,7 @@ fn run_manifest_compare(
     };
 
     if let Some(path) = save_path {
-        save_baseline(&factory, test_name, &path);
+        save_baseline(&factory, test_name, &path, &regions);
         return;
     }
 
