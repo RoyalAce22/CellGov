@@ -9,12 +9,13 @@ mod diff;
 mod store;
 mod value;
 
-use clap::{Parser, Subcommand};
+use clap::{FromArgMatches, Parser, Subcommand};
 
 pub(crate) use boot::{BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector};
 pub(crate) use dev::{
-    DevCommand, DisasmArgs, FixtureGenArgs, FuncsArgs, GenManifestArgs, PrxImportsArgs,
-    RecordAnchorsArgs, Rpcs3AttributeArgs, TitlesGenArgs, MAX_DISASM_COUNT,
+    CliGenArgs, CompletionShell, CompletionsArgs, DevCommand, DisasmArgs, FixtureGenArgs,
+    FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,
+    TitlesGenArgs, MAX_DISASM_COUNT,
 };
 pub(crate) use diff::{
     CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, OutputFormat, ScenarioCommand,
@@ -153,7 +154,7 @@ pub(crate) enum BootCommand {
 /// - A usage error exits [`crate::cli::exit_codes::USAGE`].
 /// - `--help` and `--version` print their text and exit 0.
 pub(crate) fn parse_or_exit(argv: &[String]) -> Cli {
-    let cli = match Cli::try_parse_from(argv) {
+    let cli = match try_parse(argv) {
         Ok(cli) => cli,
         Err(e) => e.exit(),
     };
@@ -163,6 +164,17 @@ pub(crate) fn parse_or_exit(argv: &[String]) -> Cli {
     cli
 }
 
+/// Parse `argv` against the tree carrying each command's examples, so
+/// `--help` and `docs/cli.md` show the same invocations.
+pub(crate) fn try_parse(argv: &[String]) -> Result<Cli, clap::Error> {
+    let matches = crate::cli::reference::command_tree().try_get_matches_from(argv)?;
+    // `Cli::from_arg_matches` raises an unformatted error: no usage
+    // line, no "try --help". `Parser::try_parse_from` formats every such
+    // error through the command, so this path formats it here instead.
+    Cli::from_arg_matches(&matches)
+        .map_err(|e| e.format(&mut crate::cli::reference::command_tree()))
+}
+
 /// Why this invocation's globals do not fit its command, or `None`
 /// when they do.
 ///
@@ -170,7 +182,7 @@ pub(crate) fn parse_or_exit(argv: &[String]) -> Cli {
 /// subcommand's matcher only after parsing, so a `conflicts_with` on
 /// the subcommand's own flag never sees it. These checks run on the
 /// parsed tree instead.
-fn global_refusal(cli: &Cli) -> Option<String> {
+pub(crate) fn global_refusal(cli: &Cli) -> Option<String> {
     let g = &cli.globals;
     if g.vfs_root.is_some() && !reads_vfs_root(&cli.command) {
         return Some(format!("--vfs-root applies to {VFS_ROOT_READERS} only"));

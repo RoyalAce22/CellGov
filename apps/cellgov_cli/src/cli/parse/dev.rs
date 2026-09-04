@@ -31,6 +31,10 @@ pub(crate) enum DevCommand {
     FixtureGen(Box<FixtureGenArgs>),
     /// Regenerate `docs/titles.md` from the registry and fixtures.
     TitlesGen(TitlesGenArgs),
+    /// Regenerate `docs/cli.md` from this command tree.
+    CliGen(CliGenArgs),
+    /// Print a shell completion script for this command tree.
+    Completions(CompletionsArgs),
     /// Emit a title-manifest stub from an install record.
     GenManifest(GenManifestArgs),
     /// Re-measure titles and rewrite their committed anchors.
@@ -176,6 +180,43 @@ pub(crate) struct TitlesGenArgs {
     /// Document to write.
     #[arg(long, value_name = "PATH")]
     pub output: Option<String>,
+}
+
+/// `cellgov dev cli-gen`
+#[derive(Debug, clap::Args)]
+pub(crate) struct CliGenArgs {
+    /// Document to write.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+}
+
+/// Where each shell reads a completion script from, and the outcome
+/// `dev completions` has beyond the shared 0-5 contract.
+const COMPLETIONS_INSTALL_NOTE: &str = "\
+The script goes to stdout; redirect it to where the shell reads it:
+
+  bash  cellgov dev completions bash > ~/.local/share/bash-completion/completions/cellgov
+  zsh   cellgov dev completions zsh > \"${fpath[1]}/_cellgov\"
+  pwsh  cellgov dev completions pwsh >> $PROFILE
+
+Exit codes particular to this command:
+  141  stdout was closed by a downstream reader";
+
+/// `cellgov dev completions`
+#[derive(Debug, clap::Args)]
+#[command(after_help = COMPLETIONS_INSTALL_NOTE)]
+pub(crate) struct CompletionsArgs {
+    /// Shell the script is written for.
+    #[arg(value_name = "SHELL", value_enum)]
+    pub shell: CompletionShell,
+}
+
+/// The shells `dev completions` writes a script for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum CompletionShell {
+    Bash,
+    Zsh,
+    Pwsh,
 }
 
 /// `cellgov dev gen-manifest`

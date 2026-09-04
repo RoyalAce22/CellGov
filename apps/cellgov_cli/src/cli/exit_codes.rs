@@ -28,9 +28,15 @@ pub(crate) const ANCHOR_MOVED: i32 = 5;
 /// The lowest status a command may give an outcome of its own.
 pub(crate) const FIRST_COMMAND_SPECIFIC: i32 = 10;
 
+/// A downstream reader closed stdout (`| head`, `| less` quit early).
+///
+/// The value follows coreutils' 128 + SIGPIPE convention, so a pipeline
+/// distinguishes "the consumer left" from any other exit mode.
+pub(crate) const BROKEN_PIPE: i32 = command_specific(141);
+
 /// `code`, checked against the command-specific range.
 ///
-/// Every status a single command defines goes through this function.
+/// Every status beyond the shared contract goes through this function.
 ///
 /// # Panics
 ///

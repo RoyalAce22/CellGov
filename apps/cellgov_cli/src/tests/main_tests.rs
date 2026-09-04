@@ -68,6 +68,8 @@ const DISPATCHED: &[&str] = &[
     "dev rpcs3-attribute",
     "dev fixture-gen",
     "dev titles-gen",
+    "dev cli-gen",
+    "dev completions",
     "dev gen-manifest",
     "dev record-anchors",
 ];

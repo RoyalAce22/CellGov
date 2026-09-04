@@ -7,7 +7,7 @@
 
 mod collect;
 mod list;
-mod model;
+pub(crate) mod model;
 mod status;
 mod verify;
 

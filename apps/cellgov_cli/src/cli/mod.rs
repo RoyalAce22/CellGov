@@ -2,6 +2,7 @@
 
 pub(crate) mod args;
 pub(crate) mod boot_cmd;
+pub(crate) mod cli_gen;
 pub(crate) mod compare;
 pub(crate) mod dump;
 pub(crate) mod env;
@@ -13,6 +14,7 @@ pub(crate) mod gen_manifest;
 pub(crate) mod keys;
 pub(crate) mod parse;
 pub(crate) mod record_anchors;
+pub(crate) mod reference;
 pub(crate) mod rpcs3_attribute;
 pub(crate) mod scenarios;
 pub(crate) mod store;

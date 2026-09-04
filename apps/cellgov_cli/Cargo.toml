@@ -37,6 +37,9 @@ cellgov_trace = { path = "../../crates/cellgov_trace" }
 # here; the hand-rolled equivalent for a two-level tree with global
 # flags is a subsystem this crate would own outright.
 clap = { version = "4", features = ["derive"] }
+# Shell completion scripts for the same command tree clap already
+# holds, so a completion cannot describe a command that does not exist.
+clap_complete = "4"
 # Read-only file mapping with a safe API, for containers too large to
 # hold resident (a BD-DL ISO is up to 50 GB; fs::read commits it all).
 # Chosen over memmap2 because its map call is not `unsafe fn`, keeping

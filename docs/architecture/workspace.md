@@ -133,12 +133,16 @@ Five structural rules:
 - `cellgov_cli` builds the workspace's one binary, `cellgov`: a
   two-level noun-verb tree parsed by `clap` in `cli::parse`, with
   every command's behavior a function over the plain structs that
-  module produces.
+  module produces. `cli::reference` renders that same tree three ways
+  -- the examples each command's help leads with, the committed
+  `docs/cli.md`, and the `clap_complete` shell scripts -- so a
+  command the binary accepts and a command the reference documents
+  cannot differ.
 
 External dependencies: `serde`, `serde_json`, and `toml` in
 `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and
-`cellgov_cli`; `clap` and `filebuffer` in `cellgov_cli`; crypto crates
-in `cellgov_install` only.
+`cellgov_cli`; `clap`, `clap_complete` and `filebuffer` in
+`cellgov_cli`; crypto crates in `cellgov_install` only.
 Everything else is workspace-internal. The workspace compiles under
 `unsafe_code = "forbid"`.
 

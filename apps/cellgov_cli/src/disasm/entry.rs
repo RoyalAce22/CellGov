@@ -15,12 +15,6 @@ use crate::disasm::{args, elf, stream};
 /// bytes; some weren't instructions".
 const DECODE_ERROR_EXIT_CODE: i32 = exit_codes::command_specific(20);
 
-/// Process exit code for a stdout closed by a downstream pipe reader
-/// (`| head`, `| less` quit early). Matches coreutils' 128 + SIGPIPE
-/// convention so shell pipelines can distinguish "consumer left" from
-/// any of our other exit modes.
-const BROKEN_PIPE_EXIT_CODE: i32 = exit_codes::command_specific(141);
-
 pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
     args::check_alignment(parsed.vaddr).unwrap_or_else(|e| die_usage(&e.to_string()));
     let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
@@ -50,7 +44,7 @@ pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
         Ok(s) => s,
         Err(StreamError::BadVaddr(e)) => die(&e.message()),
         Err(StreamError::Io(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-            std::process::exit(BROKEN_PIPE_EXIT_CODE);
+            std::process::exit(exit_codes::BROKEN_PIPE);
         }
         Err(StreamError::Io(e)) => die(&format!("disasm: stdout write: {e}")),
     };
@@ -60,7 +54,7 @@ pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
     // stream would be lost. Flush explicitly before any exit below.
     if let Err(e) = out.flush() {
         if e.kind() == std::io::ErrorKind::BrokenPipe {
-            std::process::exit(BROKEN_PIPE_EXIT_CODE);
+            std::process::exit(exit_codes::BROKEN_PIPE);
         }
         die(&format!("disasm: stdout flush: {e}"));
     }

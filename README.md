@@ -29,6 +29,8 @@ byte, what a PS3 game would produce under any legal schedule.
   the [glossary](docs/concepts/glossary.md) sits beside it.
 - [docs/architecture/](docs/architecture/README.md) -- how the
   runtime works, one document per subsystem.
+- [docs/cli.md](docs/cli.md) -- generated command reference: every
+  command, its examples, its flags, and its exit codes.
 - [docs/titles.md](docs/titles.md) -- generated compatibility
   matrix: which titles boot, to which checkpoint, and whether they
   converge with RPCS3. This is where current status lives.
