@@ -14,7 +14,7 @@ use cellgov_install::progress::FIRMWARE_TASK;
 use cellgov_terminal::progress::ProgressBar;
 
 #[cfg(feature = "decrypt")]
-use super::{container_label, map_container_or_die, megabytes, vault_or_die};
+use super::{container_label, install_caps, map_container_or_die, megabytes, vault_or_die};
 
 #[cfg(not(feature = "decrypt"))]
 pub(crate) fn install(_args: &InstallContainerArgs, _store: &Path, _render: RenderFlags, _v: bool) {
@@ -45,7 +45,11 @@ pub(crate) fn install(
         megabytes(pup_data.len()),
     );
 
-    let bar = ProgressBar::start(render.caps(), &FIRMWARE_TASK, &container_label(&args.path));
+    let bar = ProgressBar::start(
+        install_caps(render),
+        &FIRMWARE_TASK,
+        &container_label(&args.path),
+    );
     let reporter = bar.sink();
     let outcome = cellgov_install::firmware_install::install_pup(
         &pup_data, &keys, store, args.force, &*reporter,

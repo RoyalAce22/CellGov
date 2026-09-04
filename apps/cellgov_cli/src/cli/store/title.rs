@@ -19,7 +19,7 @@ use cellgov_install::progress::INSTALL_TASK;
 use cellgov_terminal::progress::ProgressBar;
 
 #[cfg(feature = "decrypt")]
-use super::{container_label, map_container_or_die, megabytes, vault_or_die};
+use super::{container_label, install_caps, map_container_or_die, megabytes, vault_or_die};
 
 #[cfg(not(feature = "decrypt"))]
 pub(crate) fn install(_args: &TitleInstallArgs, _store: &Path, _render: RenderFlags) {
@@ -67,7 +67,11 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
         megabytes(data.len()),
     );
 
-    let bar = ProgressBar::start(render.caps(), &INSTALL_TASK, &container_label(&args.path));
+    let bar = ProgressBar::start(
+        install_caps(render),
+        &INSTALL_TASK,
+        &container_label(&args.path),
+    );
     let reporter = bar.sink();
     let options = InstallOptions {
         force: args.force,
@@ -148,7 +152,11 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
         megabytes(pkg_data.len()),
     );
 
-    let bar = ProgressBar::start(render.caps(), &INSTALL_TASK, &container_label(&args.path));
+    let bar = ProgressBar::start(
+        install_caps(render),
+        &INSTALL_TASK,
+        &container_label(&args.path),
+    );
     let reporter = bar.sink();
     let outcome = game_install::install_update_pkg(
         &pkg_data,

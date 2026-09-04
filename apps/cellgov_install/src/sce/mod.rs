@@ -11,6 +11,7 @@ mod decrypt;
 mod elf;
 mod error;
 mod raw;
+mod trace;
 
 #[cfg(feature = "decrypt")]
 pub use decrypt::{decrypt_package, decrypt_sce_sections, decrypt_self_to_elf};
@@ -20,6 +21,7 @@ pub use raw::{
     parse_control_flags1, parse_program_authority_id, parse_sce_header, EncryptedMetadataDirectory,
     EncryptedSectionDescriptor, MetadataKeyEnvelope, SceContainerHeader,
 };
+pub use trace::{section_trace_enabled, ENV_FW_DEBUG};
 
 #[cfg(all(test, feature = "decrypt"))]
 pub(crate) use decrypt::decrypt_envelope;

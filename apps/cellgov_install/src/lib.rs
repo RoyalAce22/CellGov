@@ -25,7 +25,7 @@
 #![allow(
     clippy::print_stdout,
     clippy::print_stderr,
-    reason = "the CELLGOV_FW_DEBUG section trace writes to the operator's terminal"
+    reason = "the firmware section trace and the scratch-dir drop refusal write to the operator's terminal"
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 

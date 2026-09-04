@@ -113,6 +113,15 @@ fn no_firmware_label_is_left_unclaimed_by_a_phase() {
     }
 }
 
+/// The caller that starts the bar answers
+/// [`crate::sce::section_trace_enabled`] once per run.
+#[test]
+fn neither_install_task_declares_itself_a_streaming_writer() {
+    for task in [&INSTALL_TASK, &FIRMWARE_TASK] {
+        assert!(!task.streaming, "{}", task.tag);
+    }
+}
+
 #[test]
 fn the_measured_firmware_phase_is_the_one_the_package_loop_runs_under() {
     assert_eq!(FIRMWARE_TASK.measured, FirmwarePhase::Extracting.code());

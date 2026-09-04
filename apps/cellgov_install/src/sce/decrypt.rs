@@ -140,7 +140,7 @@ fn no_candidate_fits(
 fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8>, SceError> {
     let sections = decrypt_sce_sections(data, erk, riv)?;
 
-    if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
+    if super::section_trace_enabled() {
         for (i, (_, s)) in sections.iter().enumerate() {
             let magic = if s.len() >= 4 {
                 format!("{:02x}{:02x}{:02x}{:02x}", s[0], s[1], s[2], s[3])
@@ -153,7 +153,7 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
 
     for (i, (_, s)) in sections.iter().enumerate() {
         if s.len() >= 0x107 && &s[0x101..0x106] == b"ustar" {
-            if std::env::var("CELLGOV_FW_DEBUG").is_ok() {
+            if super::section_trace_enabled() {
                 eprintln!("    -> using section[{i}] (ustar TAR)");
             }
             return Ok(sections

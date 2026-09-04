@@ -4,6 +4,25 @@
 
 use std::path::Path;
 
+use cellgov_terminal::caps::{RenderFlags, TermCaps};
+
+/// Terminal capabilities for a store install, capped at plain when the
+/// firmware section trace is on.
+///
+/// The trace writes to stderr, so an in-place bar frame would cursor-up
+/// over its lines.
+pub(crate) fn install_caps(render: RenderFlags) -> TermCaps {
+    cap_for_trace(render.caps(), cellgov_install::sce::section_trace_enabled())
+}
+
+fn cap_for_trace(caps: TermCaps, section_trace: bool) -> TermCaps {
+    if section_trace {
+        caps.capped_at_plain()
+    } else {
+        caps
+    }
+}
+
 /// The container's filename, for the progress bar's title line.
 pub(crate) fn container_label(path: &Path) -> String {
     path.file_name()
@@ -31,3 +50,7 @@ pub(crate) fn vault_or_die(store: &Path) -> cellgov_install::keys::KeyVault {
     cellgov_install::keys::KeyVault::load_for_vfs(store)
         .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()))
 }
+
+#[cfg(test)]
+#[path = "tests/container_tests.rs"]
+mod tests;
