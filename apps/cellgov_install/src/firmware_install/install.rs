@@ -6,12 +6,20 @@
 //!
 //! - Nothing is written outside
 //!   [`StoreLayout::firmware_staging_dir`](crate::store::StoreLayout::firmware_staging_dir)
-//!   until the commit rename, so a fault before it -- including the
-//!   version gate refusing, which cannot run until the tree is
-//!   extracted -- discards the whole install.
-//! - The commit is a fixed sequence: the tree into its entry directory
-//!   (the commit point), then the record. A record never points at an
-//!   absent tree.
+//!   until the commit, so a fault before it -- including the version
+//!   gate refusing, which cannot run until the tree is extracted --
+//!   discards the whole install.
+//! - The commit is a fixed sequence:
+//!   1. remove the record the entry already has,
+//!   2. rename the staged tree onto the entry directory -- the commit
+//!      point,
+//!   3. write the new record.
+//!
+//!   A record therefore never points at an absent tree. A fault leaves
+//!   either an unrecorded tree, which the version gate refuses on its
+//!   own terms, or no tree at all, which it reads as free. Nothing
+//!   syncs a directory, so a host crash can still reorder the unlink
+//!   and the rename.
 //! - A commit that fails leaves the staged tree where it is rather than
 //!   discarding it: the next install of any version sweeps it by name,
 //!   and re-extracting a PUP costs minutes.
@@ -191,8 +199,11 @@ fn run_or_clean<T>(
 }
 
 /// Whether `path` exists and contains at least one entry.
+///
+/// A stat that fails is not an absent directory: it refuses here
+/// rather than reporting an occupied target as free.
 fn dir_non_empty(path: &Path) -> Result<bool, FirmwareInstallError> {
-    if !path.exists() {
+    if !std::fs::exists(path).map_err(io_err("stat", path))? {
         return Ok(false);
     }
     let mut entries = std::fs::read_dir(path).map_err(io_err("read dir", path))?;
@@ -502,11 +513,20 @@ struct Staged {
     replaced: bool,
 }
 
-/// Rename the staged tree into its entry directory, then write the
-/// record.
+/// An absent record is success; every other failure is named.
+fn remove_record(record_path: &Path) -> Result<(), FirmwareInstallError> {
+    match std::fs::remove_file(record_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_err("remove", record_path)(e)),
+    }
+}
+
+/// Drop the entry's record, rename the staged tree onto it, then write
+/// the new record.
 ///
-/// No rollback: the tree rename is the commit point, and a record
-/// written after it can only fail with the tree already in place.
+/// No rollback -- see the module invariants for the residue a fault
+/// leaves and which retry clears it.
 fn commit(
     staging_root: &Path,
     staged: &Staged,
@@ -516,7 +536,8 @@ fn commit(
     if let Some(parent) = staged.entry_dir.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
     }
-    if staged.entry_dir.exists() {
+    remove_record(&staged.record_path)?;
+    if std::fs::exists(&staged.entry_dir).map_err(io_err("stat", &staged.entry_dir))? {
         // Its own phase: removing a whole installed firmware is
         // genuinely slow.
         progress.phase(FirmwarePhase::Clearing.code());
@@ -541,3 +562,7 @@ fn commit(
 #[cfg(test)]
 #[path = "tests/install_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/commit_discipline_tests.rs"]
+mod commit_discipline_tests;

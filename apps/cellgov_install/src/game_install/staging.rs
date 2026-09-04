@@ -7,13 +7,24 @@
 //!   RAP and a decrypt-proof the installer has -- lives under one
 //!   [`staging_sibling`](crate::store::staging_sibling) of the target
 //!   directory; a fault before commit discards it whole.
-//! - [`commit`] is a fixed rename sequence: the staged RAP into
-//!   `exdata/` first, then the tree into its final directory (the
-//!   commit point), then the record last. The residue window is
-//!   between those two renames -- a tree-rename failure leaves an
-//!   inert, content-id-keyed RAP with no game directory, read only
-//!   when that title's EBOOT is decrypted and overwritten identically
-//!   on retry.
+//! - [`commit`] is a fixed sequence:
+//!   1. rename the staged RAP into `exdata/`,
+//!   2. remove the record the target already has,
+//!   3. rename the staged tree onto the target -- the commit point,
+//!   4. write the new record.
+//!
+//!   A record therefore never names an absent tree. Nothing syncs a
+//!   directory, so a host crash can still reorder the unlink and the
+//!   rename.
+//! - The residue window runs from the RAP rename to the record write.
+//!   A fault that clears the target, or that writes the record, leaves
+//!   a tree no record names. The target gate calls that `TargetExists`,
+//!   and a `--force` retry commits over it. A fault that renames the
+//!   tree leaves no target at all: the staged tree stays under the
+//!   staging root for the next [`prepare_staging`], so that retry needs
+//!   no `--force`. The RAP is in `exdata/` in both cases. It is inert,
+//!   read only when that title's EBOOT is decrypted, and a retry
+//!   overwrites it identically.
 //! - The staging root's own removal, after the tree rename, is
 //!   best-effort and its failure is not reported: the install has
 //!   already committed, and a `.staging-<target>` left behind is swept
@@ -252,8 +263,11 @@ pub(super) fn validate_content_id(id: &str) -> Result<(), GameInstallError> {
 }
 
 /// Whether `path` exists and contains at least one entry.
+///
+/// A stat that fails is not an absent directory: it refuses here
+/// rather than reporting an occupied target as free.
 pub(super) fn dir_non_empty(path: &Path) -> Result<bool, GameInstallError> {
-    if !path.exists() {
+    if !std::fs::exists(path).map_err(io_err("stat", path))? {
         return Ok(false);
     }
     let mut entries = std::fs::read_dir(path).map_err(io_err("read dir", path))?;
@@ -366,10 +380,19 @@ pub(super) fn stage_tree(
     Ok(digests)
 }
 
-/// Commit a staging batch in a fixed rename sequence: RAP into
-/// `exdata/` first, then the tree into `final_dir` (the commit point),
-/// then the record last. No rollback -- see the module invariants for
-/// the residue window between the two renames.
+/// An absent record is success; every other failure is named.
+fn remove_record(record_path: &Path) -> Result<(), GameInstallError> {
+    match std::fs::remove_file(record_path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_err("remove", record_path)(e)),
+    }
+}
+
+/// Commit a staging batch in a fixed sequence: RAP into `exdata/`
+/// first, then the record removed, then the tree into `final_dir` (the
+/// commit point), then the record written. No rollback -- see the
+/// module invariants for the residue window.
 ///
 /// `tree_staging` may be `staging_root` itself: an installer that
 /// stages no sibling `rap/` passes the root as the tree.
@@ -406,11 +429,15 @@ pub(super) fn commit(
         })?;
     }
 
+    // The record goes before the tree it names, so nothing between here
+    // and the write below can leave a record over an absent tree.
+    remove_record(record_path)?;
+
     // Tree second: the commit point. Clear an existing target first
     // (the dir_non_empty gate already required --force to reach here
     // with a non-empty target). Its own phase: removing a large
     // existing install is genuinely slow.
-    if final_dir.exists() {
+    if std::fs::exists(final_dir).map_err(io_err("stat", final_dir))? {
         progress.phase(Phase::Clearing.code());
         std::fs::remove_dir_all(final_dir).map_err(io_err("remove", final_dir))?;
         progress.phase(Phase::Committing.code());
@@ -457,3 +484,7 @@ pub(super) fn build_record(
 #[cfg(test)]
 #[path = "tests/staging_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/commit_discipline_tests.rs"]
+mod commit_discipline_tests;
