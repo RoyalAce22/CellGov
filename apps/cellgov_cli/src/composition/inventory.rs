@@ -373,6 +373,16 @@ impl StoreInventory {
         self.firmware.keys().cloned().collect()
     }
 
+    /// Every installed firmware entry, ascending by version key.
+    pub(crate) fn firmware_entries(&self) -> impl Iterator<Item = &FirmwareEntry> {
+        self.firmware.values()
+    }
+
+    /// Every title with a store entry, ascending by title id.
+    pub(crate) fn titles(&self) -> impl Iterator<Item = &TitleEntry> {
+        self.titles.values()
+    }
+
     /// The entry for one firmware version, if installed.
     pub(crate) fn firmware(&self, version: &str) -> Option<&FirmwareEntry> {
         self.firmware.get(version)

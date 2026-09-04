@@ -17,6 +17,7 @@ use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 
 use super::env::parse_env_bool;
 use super::exit::die;
+use super::exit_codes;
 use super::parse::{BenchArgs, BootRunArgs, BootSelection, TitleSelector};
 use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
 use crate::paths::{cell_checkpoint, cell_max_steps};
@@ -32,34 +33,33 @@ const FIRMWARE_EXTERNAL: [&str; 2] = ["sys", "external"];
 const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 
 /// Exit code: two bench runs disagreed on step count or outcome.
-const EXIT_DETERMINISM_BREAK: i32 = 3;
+const EXIT_DETERMINISM_BREAK: i32 = exit_codes::DISAGREED;
 
 /// Exit code: wall-time disagreement exceeded the gate or was
-/// unmeasurable. The value sits above the shared 0-5 contract, which
-/// gives 2 to a usage error `boot bench` can also return.
-const EXIT_WALL_DRIFT: i32 = 15;
+/// unmeasurable.
+const EXIT_WALL_DRIFT: i32 = exit_codes::command_specific(15);
 
 /// Exit code: a bench subprocess failed or its `BENCH_RESULT` line was
 /// unparseable.
-const EXIT_SUBPROCESS_FAIL: i32 = 4;
+const EXIT_SUBPROCESS_FAIL: i32 = exit_codes::DIVERGED;
 
 /// Exit code: the run disagreed with the title's committed anchor.
-const EXIT_ANCHOR_DRIFT: i32 = 5;
+const EXIT_ANCHOR_DRIFT: i32 = exit_codes::ANCHOR_MOVED;
 
 /// `boot run` terminated with a guest fault.
-const EXIT_RUN_GAME_FAULT: i32 = 10;
+const EXIT_RUN_GAME_FAULT: i32 = exit_codes::command_specific(10);
 /// `boot run` reached `--max-steps` without hitting the configured
 /// checkpoint.
-const EXIT_RUN_GAME_MAX_STEPS: i32 = 11;
+const EXIT_RUN_GAME_MAX_STEPS: i32 = exit_codes::command_specific(11);
 /// `boot run` exhausted simulated time before reaching a terminal
 /// state.
-const EXIT_RUN_GAME_TIME_OVERFLOW: i32 = 12;
+const EXIT_RUN_GAME_TIME_OVERFLOW: i32 = exit_codes::command_specific(12);
 /// `boot run` completed but the loop logged an anomaly that violates
 /// the determinism contract (lost syscall-wake responses).
-const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
+const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = exit_codes::command_specific(13);
 /// A `--save-observation` / `--save-boot-summary` artifact was
 /// requested but writing its JSON failed.
-const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = 14;
+const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = exit_codes::command_specific(14);
 
 /// Resolve `--fw`, `--game-ver` and `--firmware-dir` against the
 /// store, then print the selection banner before any other output.

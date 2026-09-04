@@ -6,7 +6,7 @@
 //! Each case reaches the refusal before the installer parses its
 //! container, so every case passes empty container bytes.
 
-use crate::game_uninstall::{uninstall, UninstallOptions};
+use crate::game_uninstall::{uninstall, UninstallOptions, UninstallScope};
 use crate::scratch_dir::{scratch, ScratchDir};
 
 /// Placeholder identity: no case reaches a container, so no case names
@@ -39,8 +39,13 @@ fn store_root() -> ScratchDir {
 #[test]
 fn uninstall_refuses_a_pre_store_root_before_it_reads_a_record() {
     let dir = pre_store_root();
-    let err = uninstall(SYNTHETIC_TITLE_ID, &dir, PLAIN_UNINSTALL)
-        .expect_err("a pre-store root is refused");
+    let err = uninstall(
+        SYNTHETIC_TITLE_ID,
+        &dir,
+        &UninstallScope::Base,
+        PLAIN_UNINSTALL,
+    )
+    .expect_err("a pre-store root is refused");
     assert!(
         matches!(err, crate::game_uninstall::GameUninstallError::PreStore(_)),
         "got {err:?}"
@@ -50,8 +55,13 @@ fn uninstall_refuses_a_pre_store_root_before_it_reads_a_record() {
 #[test]
 fn uninstall_on_a_store_root_reaches_the_record_read() {
     let dir = store_root();
-    let err =
-        uninstall(SYNTHETIC_TITLE_ID, &dir, PLAIN_UNINSTALL).expect_err("nothing is installed");
+    let err = uninstall(
+        SYNTHETIC_TITLE_ID,
+        &dir,
+        &UninstallScope::Base,
+        PLAIN_UNINSTALL,
+    )
+    .expect_err("nothing is installed");
     assert!(
         matches!(
             err,

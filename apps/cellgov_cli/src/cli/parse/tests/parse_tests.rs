@@ -27,7 +27,15 @@ fn the_binary_is_named_after_the_command_operators_type() {
 
 /// One invocation of every leaf in the command tree.
 const EVERY_LEAF: &[&[&str]] = &[
+    &["status"],
     &["firmware", "install", "fw.pup"],
+    &["firmware", "list"],
+    &["firmware", "show", "4.91"],
+    &["firmware", "verify", "4.91"],
+    &["firmware", "uninstall", "4.91"],
+    &["title", "list"],
+    &["title", "show", "NPAA00001"],
+    &["title", "verify", "NPAA00001"],
     &["title", "install", "game.pkg"],
     &["title", "install-update", "patch.pkg"],
     &["title", "uninstall", "NPAA00001"],
@@ -726,5 +734,82 @@ fn the_sce_note_claims_a_decrypt_path_only_when_the_build_has_one() {
             has_decrypt,
             "disasm help and the build disagree over '{claim}':\n{help}"
         );
+    }
+}
+
+mod uninstall_scope_tests {
+    use super::*;
+
+    /// Parse a `title uninstall` invocation carrying `argv`.
+    fn uninstall(argv: &[&str]) -> Result<Cli, clap::Error> {
+        let mut full = vec!["title", "uninstall", "NPAA00001"];
+        full.extend_from_slice(argv);
+        super::parse(&full)
+    }
+
+    #[test]
+    fn two_scope_flags_are_refused_before_a_scope_is_chosen() {
+        for argv in [
+            vec!["--ver", "02.51", "--updates"],
+            vec!["--ver", "02.51", "--all"],
+            vec!["--updates", "--all"],
+            vec!["--ver", "02.51", "--updates", "--all"],
+        ] {
+            let kind = uninstall(&argv).expect_err("expected a usage error").kind();
+            assert_eq!(kind, clap::error::ErrorKind::ArgumentConflict, "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn one_scope_flag_parses() {
+        for argv in [
+            vec![],
+            vec!["--ver", "02.51"],
+            vec!["--updates"],
+            vec!["--all"],
+        ] {
+            assert!(uninstall(&argv).is_ok(), "{argv:?}");
+        }
+    }
+}
+
+mod store_read_globals_tests {
+    use super::*;
+
+    fn refusal(argv: &[&str]) -> Option<String> {
+        let mut full = vec!["cellgov"];
+        full.extend_from_slice(argv);
+        global_refusal(&Cli::try_parse_from(full).expect("the invocation parses"))
+    }
+
+    #[test]
+    fn status_takes_quiet_because_it_drops_its_next_step_hint() {
+        assert_eq!(refusal(&["--quiet", "status"]), None);
+    }
+
+    #[test]
+    fn every_read_verb_takes_a_format() {
+        for argv in [
+            vec!["--format", "json", "status"],
+            vec!["--format", "json", "firmware", "list"],
+            vec!["--format", "json", "firmware", "show", "4.91"],
+            vec!["--format", "json", "firmware", "verify", "4.91"],
+            vec!["--format", "json", "title", "list"],
+            vec!["--format", "json", "title", "show", "NPAA00001"],
+            vec!["--format", "json", "title", "verify", "NPAA00001"],
+        ] {
+            assert_eq!(refusal(&argv), None, "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn a_removal_renders_no_report_so_it_refuses_a_format() {
+        for argv in [
+            vec!["--format", "json", "title", "uninstall", "NPAA00001"],
+            vec!["--format", "json", "firmware", "uninstall", "4.91"],
+        ] {
+            let said = refusal(&argv).unwrap_or_else(|| panic!("{argv:?} accepted --format"));
+            assert!(said.starts_with("--format"), "{said}");
+        }
     }
 }

@@ -34,9 +34,17 @@ fn collect(command: &clap::Command, prefix: &mut Vec<String>, out: &mut Vec<Stri
 /// them. A command declared in the tree and missing here would parse
 /// and then reach no handler.
 const DISPATCHED: &[&str] = &[
+    "status",
     "firmware install",
+    "firmware list",
+    "firmware show",
+    "firmware verify",
+    "firmware uninstall",
     "title install",
     "title install-update",
+    "title list",
+    "title show",
+    "title verify",
     "title uninstall",
     "keys show",
     "keys import",

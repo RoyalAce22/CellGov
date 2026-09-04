@@ -5,20 +5,21 @@
 use std::io::Write;
 
 use crate::cli::exit::die;
+use crate::cli::exit_codes;
 use crate::cli::parse::{die_usage, DisasmArgs};
 use crate::disasm::stream::StreamError;
 use crate::disasm::{args, elf, stream};
 
 /// Process exit code when at least one decoded word was an unsupported
-/// encoding. Above the shared 0-5 contract, so wrappers can tell apart
-/// "bad inputs" from "decoded the bytes; some weren't instructions".
-const DECODE_ERROR_EXIT_CODE: i32 = 20;
+/// encoding. A wrapper can then tell "bad inputs" from "decoded the
+/// bytes; some weren't instructions".
+const DECODE_ERROR_EXIT_CODE: i32 = exit_codes::command_specific(20);
 
 /// Process exit code for a stdout closed by a downstream pipe reader
 /// (`| head`, `| less` quit early). Matches coreutils' 128 + SIGPIPE
 /// convention so shell pipelines can distinguish "consumer left" from
 /// any of our other exit modes.
-const BROKEN_PIPE_EXIT_CODE: i32 = 141;
+const BROKEN_PIPE_EXIT_CODE: i32 = exit_codes::command_specific(141);
 
 pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
     args::check_alignment(parsed.vaddr).unwrap_or_else(|e| die_usage(&e.to_string()));

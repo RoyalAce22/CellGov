@@ -12,11 +12,51 @@ pub(crate) struct VfsOutput {
     pub output: Option<PathBuf>,
 }
 
+/// Which of the shared statuses a `verify` command gives, and for what.
+const VERIFY_EXIT_CODES: &str = "Exit codes:
+  0   every recorded artefact matched
+  4   the tree diverged from what its record holds";
+
 /// `cellgov firmware ...`
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum FirmwareCommand {
     /// Install system software from a PS3UPDAT.PUP.
     Install(InstallContainerArgs),
+    /// Name every installed firmware version.
+    List,
+    /// Report one installed version in full.
+    Show {
+        /// Version key of a `firmware/<key>/` entry.
+        #[arg(id = "fw_version", value_name = "VERSION")]
+        version: String,
+    },
+    /// Re-hash an installed version against its manifest.
+    #[command(after_help = VERIFY_EXIT_CODES)]
+    Verify {
+        /// Version key of a `firmware/<key>/` entry.
+        #[arg(id = "fw_version", value_name = "VERSION")]
+        version: String,
+    },
+    /// Remove an installed firmware version.
+    Uninstall(FirmwareUninstallArgs),
+}
+
+/// `cellgov firmware uninstall`
+#[derive(Debug, clap::Args)]
+pub(crate) struct FirmwareUninstallArgs {
+    /// Version key of a `firmware/<key>/` entry.
+    #[arg(id = "fw_version", value_name = "VERSION")]
+    pub version: String,
+    /// Re-hash the installed tree against its manifest first.
+    #[arg(long)]
+    pub verify: bool,
+    /// Remove it even though a committed anchor names it, or though
+    /// `--verify` found the tree diverged.
+    #[arg(long)]
+    pub force: bool,
+    /// Print the removal plan and stop.
+    #[arg(long)]
+    pub dry_run: bool,
 }
 
 /// `cellgov title ...`
@@ -26,7 +66,25 @@ pub(crate) enum TitleCommand {
     Install(TitleInstallArgs),
     /// Install a GD/HG update PKG over an installed base.
     InstallUpdate(InstallContainerArgs),
-    /// Remove an installed title.
+    /// Name every installed title, its base, and its updates.
+    List,
+    /// Report one installed title in full.
+    Show {
+        /// Title id of a store entry.
+        #[arg(value_name = "TITLE_ID")]
+        title_id: String,
+    },
+    /// Re-hash an installed title against its records.
+    #[command(after_help = VERIFY_EXIT_CODES)]
+    Verify {
+        /// Title id of a store entry.
+        #[arg(value_name = "TITLE_ID")]
+        title_id: String,
+        /// Check this version alone: `base`, or an update version key.
+        #[arg(long, value_name = "V")]
+        ver: Option<String>,
+    },
+    /// Remove an installed title, or one of its versions.
     Uninstall(UninstallArgs),
 }
 
@@ -61,11 +119,23 @@ pub(crate) struct TitleInstallArgs {
 }
 
 /// `cellgov title uninstall`
+///
+/// Without a scope flag the title id names its base alone, which is
+/// refused while updates are installed.
 #[derive(Debug, clap::Args)]
 pub(crate) struct UninstallArgs {
     /// Title id to remove.
     #[arg(value_name = "TITLE_ID")]
     pub title_id: String,
+    /// Remove one version alone: `base`, or an update version key.
+    #[arg(long, value_name = "V", conflicts_with_all = ["updates", "all"])]
+    pub ver: Option<String>,
+    /// Remove every installed update, keeping the base.
+    #[arg(long, conflicts_with = "all")]
+    pub updates: bool,
+    /// Remove every update and the base.
+    #[arg(long)]
+    pub all: bool,
     /// Re-hash the live tree against the install record first.
     #[arg(long)]
     pub verify: bool,
@@ -75,8 +145,34 @@ pub(crate) struct UninstallArgs {
     /// Remove even when `--verify` finds a modified tree.
     #[arg(long)]
     pub force: bool,
+    /// Print the removal plan and stop.
+    #[arg(long)]
+    pub dry_run: bool,
     #[command(flatten)]
     pub output: VfsOutput,
+}
+
+impl UninstallArgs {
+    /// The scope the flags select.
+    ///
+    /// The three scope flags exclude one another at parse time.
+    pub(crate) fn scope(&self) -> cellgov_install::game_uninstall::UninstallScope {
+        use cellgov_install::game_uninstall::UninstallScope;
+        match (&self.ver, self.updates, self.all) {
+            // `base` names the base entry here as it does for
+            // `title verify --ver` and `boot --game-ver`.
+            (Some(v), false, false) if v == crate::game::manifest::BASE_GAME_VER => {
+                UninstallScope::Base
+            }
+            (Some(v), false, false) => UninstallScope::Update(v.clone()),
+            (None, true, false) => UninstallScope::Updates,
+            (None, false, true) => UninstallScope::All,
+            (None, false, false) => UninstallScope::Base,
+            _ => super::die_usage(
+                "--ver, --updates and --all each name a different scope; pass one of them",
+            ),
+        }
+    }
 }
 
 /// The outcomes `keys show` has beyond the shared 0-5 contract.

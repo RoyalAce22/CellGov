@@ -6,6 +6,7 @@
 use super::*;
 use crate::game_install::sha256_of;
 use crate::scratch_dir::scratch;
+use crate::store::layout::{Artifact, StoreLayout, TitleId};
 use crate::store::record::{
     ArtifactRecord, InstallRecord, RapRecord, SourceRecord, TitleRecord,
     INSTALL_RECORD_FORMAT_VERSION,
@@ -16,6 +17,13 @@ fn record_path(vfs: &Path, title_id: &str) -> PathBuf {
     StoreLayout::new(vfs).record_path(&Artifact::TitleBase {
         title_id: TitleId::new(title_id).expect("synthetic title id"),
     })
+}
+
+/// The base entry of a `Base`-scoped outcome, which always has one.
+fn base_of(outcome: &GameUninstallOutcome) -> &RemovedEntry {
+    outcome
+        .base()
+        .unwrap_or_else(|| panic!("a base-scoped uninstall removes the base: {outcome:?}"))
 }
 
 /// Hand-write a game tree + RAP + install record under `out`.
@@ -95,7 +103,8 @@ fn uninstall_round_trip_removes_tree_rap_record() {
         Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
     );
 
-    let outcome = uninstall("NPUA80001", &vfs, NO_VERIFY).expect("uninstall");
+    let outcome =
+        uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).expect("uninstall");
     assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
     assert!(!vfs
         .join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap")
@@ -112,7 +121,7 @@ fn uninstall_round_trip_removes_tree_rap_record() {
         "the outcome names the RAP it removed, not just that it removed one"
     );
     assert_eq!(
-        outcome.game_dir_removed,
+        base_of(&outcome).tree_removed,
         vfs.join("dev_hdd0/game/NPUA80001")
     );
 }
@@ -120,7 +129,13 @@ fn uninstall_round_trip_removes_tree_rap_record() {
 #[test]
 fn uninstall_no_record_errors() {
     let out = scratch();
-    let err = uninstall("NPUA99999", &out.join("vfs"), NO_VERIFY).unwrap_err();
+    let err = uninstall(
+        "NPUA99999",
+        &out.join("vfs"),
+        &UninstallScope::Base,
+        NO_VERIFY,
+    )
+    .unwrap_err();
     assert!(matches!(err, GameUninstallError::NoRecord { title_id } if title_id == "NPUA99999"));
 }
 
@@ -146,7 +161,7 @@ fn uninstall_verify_detects_modified_tree_and_force_overrides() {
         keep_rap: false,
         force: false,
     };
-    let err = uninstall("NPUA80001", &vfs, verify).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, verify).unwrap_err();
     assert!(
         matches!(err, GameUninstallError::TreeModified { .. }),
         "verify must catch the tamper, got {err:?}"
@@ -158,7 +173,8 @@ fn uninstall_verify_detects_modified_tree_and_force_overrides() {
         keep_rap: false,
         force: true,
     };
-    let outcome = uninstall("NPUA80001", &vfs, forced).expect("force uninstall");
+    let outcome =
+        uninstall("NPUA80001", &vfs, &UninstallScope::Base, forced).expect("force uninstall");
     assert!(!vfs.join("dev_hdd0/game/NPUA80001").exists());
     assert_eq!(outcome.files_verified, Some(0));
     assert_eq!(
@@ -183,7 +199,8 @@ fn verify_on_an_intact_tree_counts_every_recorded_file_and_the_rap() {
         Some(("UP9000-NPUA80001_00-X.rap", &[7u8; 16])),
     );
 
-    let outcome = uninstall("NPUA80001", &vfs, VERIFY).expect("intact tree verifies");
+    let outcome =
+        uninstall("NPUA80001", &vfs, &UninstallScope::Base, VERIFY).expect("intact tree verifies");
     // Two recorded files plus the recorded RAP.
     assert_eq!(outcome.files_verified, Some(3));
     assert_eq!(outcome.files_diverged, Some(0));
@@ -204,7 +221,8 @@ fn a_record_with_no_rap_verifies_only_its_files() {
         None,
     );
 
-    let outcome = uninstall("NPUA80001", &vfs, VERIFY).expect("intact tree verifies");
+    let outcome =
+        uninstall("NPUA80001", &vfs, &UninstallScope::Base, VERIFY).expect("intact tree verifies");
     assert_eq!(outcome.files_verified, Some(2));
     assert_eq!(outcome.files_diverged, Some(0));
 }
@@ -223,7 +241,7 @@ fn verify_detects_a_tampered_rap_and_leaves_it_in_place() {
     let rap = vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap");
     std::fs::write(&rap, [8u8; 16]).unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, VERIFY).unwrap_err();
     assert!(
         matches!(&err, GameUninstallError::TreeModified { path, .. } if path == &rap),
         "verify must name the RAP, got {err:?}"
@@ -250,7 +268,7 @@ fn keep_rap_leaves_the_rap_in_exdata() {
         keep_rap: true,
         force: false,
     };
-    let outcome = uninstall("NPUA80001", &vfs, keep).expect("uninstall");
+    let outcome = uninstall("NPUA80001", &vfs, &UninstallScope::Base, keep).expect("uninstall");
     assert!(
         vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap")
             .exists(),
@@ -269,7 +287,7 @@ fn a_record_that_does_not_parse_is_named_and_removes_nothing() {
     let record = record_path(&vfs, "NPUA80001");
     std::fs::write(&record, "format_version = ").unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, NO_VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
     assert!(
         matches!(err, GameUninstallError::RecordParse(_)),
         "an unparseable record is not a NoRecord miss, got {err:?}"
@@ -291,7 +309,7 @@ fn uninstall_tree_already_gone_still_succeeds() {
     );
     std::fs::remove_dir_all(vfs.join("dev_hdd0/game/NPUA80001")).unwrap();
 
-    uninstall("NPUA80001", &vfs, NO_VERIFY).expect("idempotent uninstall");
+    uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).expect("idempotent uninstall");
     assert!(!record_path(&vfs, "NPUA80001").exists());
     assert!(!vfs.join("dev_hdd0/home/00000001/exdata/R.rap").exists());
 }
@@ -301,8 +319,8 @@ fn uninstall_twice_second_is_no_record() {
     let out = scratch();
     let vfs = out.join("vfs");
     stage_synthetic_install(&vfs, "NPUA80001", false, &[("X", b"x")], None);
-    uninstall("NPUA80001", &vfs, NO_VERIFY).expect("first uninstall");
-    let err = uninstall("NPUA80001", &vfs, NO_VERIFY).unwrap_err();
+    uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).expect("first uninstall");
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
     assert!(matches!(err, GameUninstallError::NoRecord { .. }));
 }
 
@@ -321,7 +339,8 @@ fn uninstall_disc_touches_no_exdata() {
         None,
     );
 
-    let outcome = uninstall("BCES00664", &vfs, NO_VERIFY).expect("disc uninstall");
+    let outcome =
+        uninstall("BCES00664", &vfs, &UninstallScope::Base, NO_VERIFY).expect("disc uninstall");
     assert!(!vfs.join("dev_bdvd/BCES00664").exists());
     assert!(
         exdata.join("FOREIGN.rap").exists(),
@@ -340,7 +359,8 @@ fn uninstall_clears_stale_tombstone_on_entry() {
     std::fs::create_dir_all(&tombstone).unwrap();
     std::fs::write(tombstone.join("junk"), b"junk").unwrap();
 
-    uninstall("NPUA80001", &vfs, NO_VERIFY).expect("uninstall over stale tombstone");
+    uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY)
+        .expect("uninstall over stale tombstone");
     assert!(!tombstone.exists(), "stale tombstone swept");
     assert!(!record_path(&vfs, "NPUA80001").exists());
 }
@@ -369,7 +389,7 @@ fn a_deleted_zero_byte_file_is_a_divergence_not_a_match() {
     assert!(empty.is_file(), "the record covers a zero-byte entry");
     std::fs::remove_file(&empty).unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, VERIFY).unwrap_err();
     assert!(
         matches!(&err, GameUninstallError::RecordedFileMissing { path } if path == &empty),
         "an absent recorded file must be named, got {err:?}"
@@ -401,7 +421,8 @@ fn force_counts_the_divergences_it_waves_through() {
     )
     .unwrap();
 
-    let outcome = uninstall("NPUA80001", &vfs, FORCED_VERIFY).expect("force uninstall");
+    let outcome = uninstall("NPUA80001", &vfs, &UninstallScope::Base, FORCED_VERIFY)
+        .expect("force uninstall");
     assert_eq!(outcome.files_verified, Some(1));
     // One tampered file, one deleted file, one tampered RAP.
     assert_eq!(outcome.files_diverged, Some(3));
@@ -413,7 +434,7 @@ fn a_verify_that_finds_nothing_wrong_reports_zero_divergences() {
     let vfs = out.join("vfs");
     stage_synthetic_install(&vfs, "NPUA80001", false, &[("X", b"x")], None);
 
-    let outcome = uninstall("NPUA80001", &vfs, VERIFY).expect("intact tree");
+    let outcome = uninstall("NPUA80001", &vfs, &UninstallScope::Base, VERIFY).expect("intact tree");
     assert_eq!(outcome.files_verified, Some(1));
     assert_eq!(outcome.files_diverged, Some(0));
 }
@@ -424,7 +445,8 @@ fn without_verify_neither_witness_is_reported() {
     let vfs = out.join("vfs");
     stage_synthetic_install(&vfs, "NPUA80001", false, &[("X", b"x")], None);
 
-    let outcome = uninstall("NPUA80001", &vfs, NO_VERIFY).expect("uninstall");
+    let outcome =
+        uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).expect("uninstall");
     assert_eq!(outcome.files_verified, None);
     assert_eq!(outcome.files_diverged, None);
 }
@@ -445,7 +467,8 @@ fn an_unsafe_title_id_is_refused_before_any_path_is_built() {
         "a/b",
         "a\\b",
     ] {
-        let err = uninstall(bad, &vfs, NO_VERIFY).expect_err("must be refused");
+        let err =
+            uninstall(bad, &vfs, &UninstallScope::Base, NO_VERIFY).expect_err("must be refused");
         assert!(
             matches!(&err, GameUninstallError::UnsafeTitleId { title_id, .. } if title_id == bad),
             "expected UnsafeTitleId for {bad:?}, got {err:?}"
@@ -467,7 +490,8 @@ fn a_rap_that_was_already_gone_is_not_reported_as_removed() {
     let rap = vfs.join("dev_hdd0/home/00000001/exdata/UP9000-NPUA80001_00-X.rap");
     std::fs::remove_file(&rap).unwrap();
 
-    let outcome = uninstall("NPUA80001", &vfs, NO_VERIFY).expect("uninstall");
+    let outcome =
+        uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).expect("uninstall");
     assert_eq!(
         outcome.rap_removed, None,
         "the outcome names what this call took away, not what the record listed"
@@ -491,7 +515,7 @@ fn a_record_naming_another_titles_tree_is_refused_before_anything_is_removed() {
         .replace("dev_hdd0/game/NPUA80001", "dev_hdd0/game/NPUA80002");
     std::fs::write(&path, text).unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, NO_VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
     assert!(
         matches!(
             &err,
@@ -507,6 +531,38 @@ fn a_record_naming_another_titles_tree_is_refused_before_anything_is_removed() {
     assert!(vfs.join("dev_hdd0/game/NPUA80001/X").exists());
 }
 
+/// The id appears on the path to every entry of a title. A base record
+/// that names an update entry under the same id still names a tree the
+/// base does not own.
+#[test]
+fn a_base_record_naming_an_update_tree_is_refused() {
+    let out = scratch();
+    let vfs = out.join("vfs");
+    stage_synthetic_install(&vfs, "NPUA80001", false, &[("X", b"x")], None);
+    let update = vfs.join("titles/NPUA80001/updates/02.51");
+    std::fs::create_dir_all(update.join("game")).unwrap();
+    std::fs::write(update.join("game/EBOOT.BIN"), b"patched").unwrap();
+    let path = record_path(&vfs, "NPUA80001");
+    let text = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("dev_hdd0/game/NPUA80001", "titles/NPUA80001/updates/02.51");
+    std::fs::write(&path, text).unwrap();
+
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            GameUninstallError::RecordTreeForeign { store_path, .. }
+                if store_path == "titles/NPUA80001/updates/02.51"
+        ),
+        "expected RecordTreeForeign, got {err:?}"
+    );
+    assert!(
+        update.join("game/EBOOT.BIN").exists(),
+        "the update entry is not the base record's to remove"
+    );
+}
+
 #[test]
 fn a_record_naming_a_whole_mount_root_is_refused() {
     let out = scratch();
@@ -518,7 +574,7 @@ fn a_record_naming_a_whole_mount_root_is_refused() {
         .replace("dev_hdd0/game/NPUA80001", "dev_hdd0");
     std::fs::write(&path, text).unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, NO_VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
     assert!(
         matches!(
             &err,
@@ -552,11 +608,11 @@ fn a_firmware_record_filed_under_a_title_is_refused_by_kind() {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, record.to_toml().unwrap()).unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, NO_VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
     assert!(
         matches!(
             &err,
-            GameUninstallError::RecordKindMismatch { kind, .. } if *kind == ArtifactKind::Firmware
+            GameUninstallError::RecordKindMismatch { found, .. } if *found == ArtifactKind::Firmware
         ),
         "expected RecordKindMismatch, got {err:?}"
     );
@@ -583,7 +639,7 @@ fn a_recorded_rap_filename_that_is_not_one_path_component_is_refused() {
         .replace("UP9000-NPUA80001_00-X.rap", "../OUTSIDE.rap");
     std::fs::write(&path, text).unwrap();
 
-    let err = uninstall("NPUA80001", &vfs, NO_VERIFY).unwrap_err();
+    let err = uninstall("NPUA80001", &vfs, &UninstallScope::Base, NO_VERIFY).unwrap_err();
     assert!(
         matches!(
             &err,

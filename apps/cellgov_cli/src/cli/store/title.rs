@@ -1,11 +1,10 @@
-//! `cellgov title install | install-update | uninstall`.
+//! `cellgov title install` and `cellgov title install-update`.
 
 use std::path::Path;
 
-use cellgov_install::game_uninstall;
 use cellgov_terminal::caps::RenderFlags;
 
-use crate::cli::parse::{InstallContainerArgs, TitleInstallArgs, UninstallArgs};
+use crate::cli::parse::{InstallContainerArgs, TitleInstallArgs};
 
 #[cfg(feature = "decrypt")]
 use crate::cli::exit::die;
@@ -90,7 +89,7 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
         Err(e) => {
             bar.abort();
             eprintln!("title install failed: {e}");
-            std::process::exit(1);
+            std::process::exit(crate::cli::exit_codes::FAILED);
         }
     };
 
@@ -168,7 +167,7 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
         Err(e) => {
             bar.abort();
             eprintln!("title install-update failed: {e}");
-            std::process::exit(1);
+            std::process::exit(crate::cli::exit_codes::FAILED);
         }
     };
 
@@ -190,33 +189,4 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
             outcome.title_id
         );
     }
-}
-
-pub(crate) fn uninstall(args: &UninstallArgs, store: &Path) {
-    let opts = game_uninstall::UninstallOptions {
-        verify: args.verify,
-        keep_rap: args.keep_rap,
-        force: args.force,
-    };
-    let outcome = game_uninstall::uninstall(&args.title_id, store, opts).unwrap_or_else(|e| {
-        eprintln!("uninstall failed: {e}");
-        std::process::exit(1);
-    });
-
-    println!("cellgov: uninstalled {}", outcome.title_id);
-    println!("  removed game dir {}", outcome.game_dir_removed.display());
-    if let Some(rap) = &outcome.rap_removed {
-        println!("  removed RAP {}", rap.display());
-    }
-    if let Some(n) = outcome.files_verified {
-        println!("  verified {n} files against the record before removal");
-    }
-    // Non-zero only under --force, the one way a divergence passes the
-    // gate. The override still names each file it accepted.
-    if let Some(n) = outcome.files_diverged {
-        if n > 0 {
-            eprintln!("  --force overrode {n} recorded files that were missing or modified");
-        }
-    }
-    println!("  removed record {}", outcome.record_removed.display());
 }

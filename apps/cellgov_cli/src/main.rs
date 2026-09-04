@@ -24,6 +24,8 @@ use cli::parse::{
     KeysCommand, ScenarioCommand, SelfCommand, TitleCommand,
 };
 use cli::scenarios::{report, run_scenario, SCENARIOS};
+use cli::store::confirm::Answers;
+use cli::store::read;
 
 fn main() {
     let argv = collect_args_or_die();
@@ -33,7 +35,40 @@ fn main() {
 
 fn dispatch(command: &Command, globals: &Globals) {
     let vfs_flag = globals.vfs_root.as_deref();
+    let answers = Answers {
+        yes: globals.yes,
+        no_input: globals.no_input,
+    };
     match command {
+        Command::Status => {
+            read::status(&read::store_root(vfs_flag), globals.format, globals.quiet);
+        }
+        Command::Firmware(FirmwareCommand::List) => {
+            read::firmware_list(&read::store_root(vfs_flag), globals.format);
+        }
+        Command::Firmware(FirmwareCommand::Show { version }) => {
+            read::firmware_show(&read::store_root(vfs_flag), version, globals.format);
+        }
+        Command::Firmware(FirmwareCommand::Verify { version }) => {
+            read::firmware_verify(&read::store_root(vfs_flag), version, globals.format);
+        }
+        Command::Firmware(FirmwareCommand::Uninstall(args)) => {
+            cli::store::uninstall::firmware(args, &read::store_root(vfs_flag), answers);
+        }
+        Command::Title(TitleCommand::List) => {
+            read::title_list(&read::store_root(vfs_flag), globals.format);
+        }
+        Command::Title(TitleCommand::Show { title_id }) => {
+            read::title_show(&read::store_root(vfs_flag), title_id, globals.format);
+        }
+        Command::Title(TitleCommand::Verify { title_id, ver }) => {
+            read::title_verify(
+                &read::store_root(vfs_flag),
+                title_id,
+                ver.as_deref(),
+                globals.format,
+            );
+        }
         Command::Firmware(FirmwareCommand::Install(args)) => {
             let store = store_root(&args.output, vfs_flag);
             cli::store::firmware::install(args, &store, globals.render(), globals.verbose);
@@ -48,7 +83,7 @@ fn dispatch(command: &Command, globals: &Globals) {
         }
         Command::Title(TitleCommand::Uninstall(args)) => {
             let store = store_root(&args.output, vfs_flag);
-            cli::store::title::uninstall(args, &store);
+            cli::store::uninstall::title(args, &store, answers);
         }
         Command::Keys(keys) => {
             let output = match keys {

@@ -107,6 +107,17 @@ identity (PUP hash + image version) binds into
 install produce byte-identical state hashes, and a different
 install moves them.
 
+The boot checks the modules it loads. Checking the whole manifest is a
+separate, on-demand pass, because the digests cover post-decrypt bytes
+and decrypting every entry costs more than a boot should: it reports
+each module that is missing, that no longer yields the recorded image,
+or that yields no module image at all. A vault short of a key stops
+that pass rather than reporting the tree as changed -- a module the
+current vault cannot open is a gap in the vault, and reading it as a
+divergence would blame the store for the reader's configuration. A
+manifest covering no module is refused rather than passing over zero
+entries.
+
 Common boot sequence (per-title numbers below):
 
 1. Load `EBOOT.elf` into guest memory; parse import tables.

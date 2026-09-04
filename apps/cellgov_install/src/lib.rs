@@ -31,6 +31,8 @@
 
 pub mod container;
 pub mod firmware_install;
+pub mod firmware_uninstall;
+pub mod firmware_verify;
 pub mod game_install;
 pub mod game_uninstall;
 pub mod iso;

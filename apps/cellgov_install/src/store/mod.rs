@@ -6,11 +6,13 @@
 //! directories are indexed by. The records are the index -- there is no
 //! separate index file, so a reader enumerating installs scans
 //! [`StoreLayout::installs_dir`]. [`pre_store`] refuses a root that
-//! still holds the layout that came before this one.
+//! still holds the layout that came before this one. [`verify`] holds
+//! a tree against the record that describes it.
 
 pub mod layout;
 pub mod pre_store;
 pub mod record;
+pub mod verify;
 
 pub use layout::{
     record_rel_path, staging_sibling, tombstone_sibling, Artifact, ArtifactKind, StoreKeyError,
@@ -21,3 +23,4 @@ pub use record::{
     ArtifactRecord, InstallRecord, InstallRecordParseError, RapRecord, SourceRecord, TitleRecord,
     INSTALL_RECORD_FORMAT_VERSION,
 };
+pub use verify::{verify_record_tree, Divergence, DivergenceKind, VerifyReadError, VerifyReport};

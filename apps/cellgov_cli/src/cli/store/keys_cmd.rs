@@ -9,13 +9,11 @@ use cellgov_install::keys::{
 use crate::cli::parse::{KeysCommand, KeysPathArgs};
 
 use super::StoreCliError;
+use crate::cli::exit_codes;
 
 /// Exit status of `keys show` when a decrypt path would find a key
 /// missing.
-///
-/// The value sits above the shared 0-5 contract, which reserves 2 for
-/// the usage error this command also returns.
-const EXIT_KEYS_INCOMPLETE: i32 = 40;
+const EXIT_KEYS_INCOMPLETE: i32 = exit_codes::command_specific(40);
 
 /// Run one `keys` command against the vault under `store`.
 pub(crate) fn run(command: &KeysCommand, store: &Path) {

@@ -102,6 +102,15 @@ Per-cell files start empty rather than inheriting anything: a reader
 that has to treat absence as "some earlier firmware" cannot say what it
 is looking at.
 
+An anchor also constrains the store it was measured against. Removing a
+firmware version a committed anchor names is refused unless overridden,
+because the cells naming that version would otherwise fail their next
+measurement on an unresolved firmware rather than on a missing one. The
+gate reads the registry and the anchor tree from the same root, so it
+answers the same wherever the process was started; resolving one of
+them against the working directory would make it a refusal that only
+fires from inside the checkout.
+
 The gate holds a run against the anchor of the cell the run composed,
 and against nothing else. A cell with no committed anchor reports
 `NOT RECORDED` and gates nothing, the same way a retargeted run reports

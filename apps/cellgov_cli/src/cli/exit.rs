@@ -10,14 +10,14 @@ use cellgov_ps3_abi::elf::ELF_MAGIC;
 
 use crate::game::manifest::TitleManifest;
 
-/// Print `msg` to stderr and exit with status 1.
+/// Print `msg` to stderr and exit with the failed-operation status.
 ///
 /// A refusal can land while a bar is up; `process::exit` runs no
 /// destructor, so the restore happens here or not at all.
 pub(crate) fn die(msg: &str) -> ! {
     cellgov_terminal::progress::release_terminal();
     eprintln!("{msg}");
-    std::process::exit(1)
+    std::process::exit(super::exit_codes::FAILED)
 }
 
 /// The note on SCE-wrapped input carried in the help of every command

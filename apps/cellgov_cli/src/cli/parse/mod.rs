@@ -20,16 +20,14 @@ pub(crate) use diff::{
     CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, OutputFormat, ScenarioCommand,
 };
 pub(crate) use store::{
-    FirmwareCommand, InstallContainerArgs, KeysCommand, KeysPathArgs, SelfCommand, SelfDecryptArgs,
-    TitleCommand, TitleInstallArgs, UninstallArgs, VfsOutput,
+    FirmwareCommand, FirmwareUninstallArgs, InstallContainerArgs, KeysCommand, KeysPathArgs,
+    SelfCommand, SelfDecryptArgs, TitleCommand, TitleInstallArgs, UninstallArgs, VfsOutput,
 };
-
-pub(crate) const EXIT_USAGE: i32 = 2;
 
 /// Print `msg` to stderr and exit with the usage status.
 pub(crate) fn die_usage(msg: &str) -> ! {
     eprintln!("{msg}");
-    std::process::exit(EXIT_USAGE)
+    std::process::exit(crate::cli::exit_codes::USAGE)
 }
 
 /// The deterministic oracle's one command-line entry point.
@@ -42,7 +40,7 @@ pub(crate) fn die_usage(msg: &str) -> ! {
     long_about = None,
     propagate_version = true,
     disable_help_subcommand = false,
-    after_help = EXIT_CODE_HELP,
+    after_help = crate::cli::exit_codes::CONTRACT,
 )]
 pub(crate) struct Cli {
     #[command(flatten)]
@@ -50,17 +48,6 @@ pub(crate) struct Cli {
     #[command(subcommand)]
     pub command: Command,
 }
-
-/// The exit-code contract, printed under every top-level help.
-const EXIT_CODE_HELP: &str = "\
-Exit codes:
-  0    success
-  1    the operation ran and failed
-  2    usage error
-  3    the two runs of a pair disagreed
-  4    a subprocess failed, or a verification diverged
-  5    a boot moved off its committed anchor
-  >=10 an outcome particular to one command; its own help names it";
 
 const VFS_ROOT_HELP: &str = if cfg!(feature = "decrypt") {
     "PS3 VFS root; NPDRM inputs resolve their RAP and the key vault under it \
@@ -116,6 +103,8 @@ impl Globals {
 /// The top-level nouns.
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
+    /// What this machine holds, and which cells have an anchor.
+    Status,
     /// Installed PS3 system software.
     #[command(subcommand)]
     Firmware(FirmwareCommand),
@@ -160,7 +149,7 @@ pub(crate) enum BootCommand {
 ///
 /// This function does not always return:
 ///
-/// - A usage error exits [`EXIT_USAGE`].
+/// - A usage error exits [`crate::cli::exit_codes::USAGE`].
 /// - `--help` and `--version` print their text and exit 0.
 pub(crate) fn parse_or_exit(argv: &[String]) -> Cli {
     let cli = match Cli::try_parse_from(argv) {
@@ -195,8 +184,8 @@ fn global_refusal(cli: &Cli) -> Option<String> {
     if g.format != OutputFormat::Human && !reads_format(&cli.command) {
         return Some(format!("--format applies to {FORMAT_READERS} only"));
     }
-    if g.quiet && !renders_progress(&cli.command) {
-        return Some(format!("--quiet applies to {PROGRESS_READERS} only"));
+    if g.quiet && !reads_quiet(&cli.command) {
+        return Some(format!("--quiet applies to {QUIET_READERS} only"));
     }
     if g.verbose && !reads_verbose(&cli.command) {
         return Some(format!("--verbose applies to {VERBOSE_READERS} only"));
@@ -208,10 +197,17 @@ fn global_refusal(cli: &Cli) -> Option<String> {
 fn names_its_own_store_root(command: &Command) -> bool {
     match command {
         Command::Firmware(FirmwareCommand::Install(a)) => a.output.output.is_some(),
+        Command::Firmware(
+            FirmwareCommand::List
+            | FirmwareCommand::Show { .. }
+            | FirmwareCommand::Verify { .. }
+            | FirmwareCommand::Uninstall(_),
+        ) => false,
         Command::Title(title) => match title {
             TitleCommand::Install(a) => a.output.output.is_some(),
             TitleCommand::InstallUpdate(a) => a.output.output.is_some(),
             TitleCommand::Uninstall(a) => a.output.output.is_some(),
+            TitleCommand::List | TitleCommand::Show { .. } | TitleCommand::Verify { .. } => false,
         },
         Command::Keys(keys) => match keys {
             KeysCommand::Show { output, .. } | KeysCommand::Remove { output } => {
@@ -219,7 +215,8 @@ fn names_its_own_store_root(command: &Command) -> bool {
             }
             KeysCommand::Import(a) => a.output.output.is_some(),
         },
-        Command::SelfCmd(_)
+        Command::Status
+        | Command::SelfCmd(_)
         | Command::Boot(_)
         | Command::Diff(_)
         | Command::Explore(_)
@@ -234,26 +231,33 @@ const VFS_ROOT_READERS: &str =
      and dev disasm / prx-imports / funcs / fixture-gen";
 
 /// The commands [`reads_format`] answers for, as help text.
-const FORMAT_READERS: &str = "diff compare, diff observations, and explore";
+const FORMAT_READERS: &str = "status, the firmware and title list / show / verify commands, \
+     diff compare, diff observations, and explore";
 
-/// The commands [`renders_progress`] answers for, as help text.
-const PROGRESS_READERS: &str = "firmware install, title install, title install-update, \
+/// The commands [`reads_quiet`] answers for, as help text.
+const QUIET_READERS: &str = "status, firmware install, title install, title install-update, \
      the boot family, and dev record-anchors";
 
 /// The commands [`reads_verbose`] answers for, as help text.
 const VERBOSE_READERS: &str = "firmware install";
 
-/// Whether `command` renders the progress bar `--quiet` silences.
+/// Whether `--quiet` silences anything `command` would print.
+fn reads_quiet(command: &Command) -> bool {
+    matches!(command, Command::Status) || renders_progress(command)
+}
+
+/// Whether `command` renders a progress bar.
 fn renders_progress(command: &Command) -> bool {
     match command {
-        Command::Firmware(FirmwareCommand::Install(_)) => true,
+        Command::Firmware(fw) => matches!(fw, FirmwareCommand::Install(_)),
         Command::Title(title) => matches!(
             title,
             TitleCommand::Install(_) | TitleCommand::InstallUpdate(_)
         ),
         Command::Boot(_) => true,
         Command::Dev(dev) => matches!(dev, DevCommand::RecordAnchors(_)),
-        Command::Keys(_)
+        Command::Status
+        | Command::Keys(_)
         | Command::SelfCmd(_)
         | Command::Diff(_)
         | Command::Explore(_)
@@ -269,7 +273,8 @@ fn reads_verbose(command: &Command) -> bool {
 /// Whether `command` resolves a PS3 VFS root.
 fn reads_vfs_root(command: &Command) -> bool {
     match command {
-        Command::Firmware(_)
+        Command::Status
+        | Command::Firmware(_)
         | Command::Title(_)
         | Command::Keys(_)
         | Command::SelfCmd(_)
@@ -292,10 +297,16 @@ fn reads_format(command: &Command) -> bool {
             diff,
             DiffCommand::Compare(_) | DiffCommand::Observations { .. }
         ),
-        Command::Explore(_) => true,
-        Command::Firmware(_)
-        | Command::Title(_)
-        | Command::Keys(_)
+        Command::Status | Command::Explore(_) => true,
+        Command::Firmware(fw) => matches!(
+            fw,
+            FirmwareCommand::List | FirmwareCommand::Show { .. } | FirmwareCommand::Verify { .. }
+        ),
+        Command::Title(title) => matches!(
+            title,
+            TitleCommand::List | TitleCommand::Show { .. } | TitleCommand::Verify { .. }
+        ),
+        Command::Keys(_)
         | Command::SelfCmd(_)
         | Command::Boot(_)
         | Command::Scenario(_)

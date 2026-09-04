@@ -11,6 +11,7 @@ use cellgov_testkit::fixtures::ScenarioFixture;
 use super::exit::{die, load_file_or_die};
 use super::parse::{die_usage, CompareArgs, OutputFormat};
 use super::scenarios::scenario_factory;
+use crate::cli::exit_codes;
 
 // -- compare dispatch (top-level) --
 
@@ -119,7 +120,7 @@ fn compare_against_baseline(
         }
     }
     if result.classification == Classification::Divergence {
-        std::process::exit(1);
+        std::process::exit(exit_codes::FAILED);
     }
 }
 
@@ -249,7 +250,7 @@ fn run_manifest_compare(
             }
         }
         if result.classification.exits_failure() {
-            std::process::exit(1);
+            std::process::exit(exit_codes::FAILED);
         }
     } else if let Some(path) = against_path {
         let baseline = cellgov_compare::baseline::load(std::path::Path::new(&path))
@@ -274,7 +275,7 @@ fn run_manifest_compare(
             }
         }
         if result.classification == Classification::Divergence {
-            std::process::exit(1);
+            std::process::exit(exit_codes::FAILED);
         }
     } else {
         match format {
@@ -412,19 +413,18 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str, format: Outpu
         }
     }
     if result.has_divergence() {
-        std::process::exit(1);
+        std::process::exit(exit_codes::FAILED);
     }
 }
 
 // -- diverge --
 
 /// Exit code: a state or zoom trace failed to decode, so no verdict
-/// covers the records past the cut. The value sits above the shared
-/// 0-5 contract, which gives 3 to a disagreeing pair.
-const EXIT_CORRUPT_TRACE: i32 = 31;
+/// covers the records past the cut.
+const EXIT_CORRUPT_TRACE: i32 = exit_codes::command_specific(31);
 
 /// Exit code: `diff zoom` found the requested step in neither window.
-const EXIT_MISSING_STEP: i32 = 30;
+const EXIT_MISSING_STEP: i32 = exit_codes::command_specific(30);
 
 /// Streaming scan of two per-step state-trace files.
 ///
@@ -465,7 +465,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
             println!(
                 "DIVERGE step={step} field={field_str}  a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  a_hash=0x{a_hash:x} b_hash=0x{b_hash:x}"
             );
-            std::process::exit(1);
+            std::process::exit(exit_codes::FAILED);
         }
         DivergeReport::LengthDiffers {
             common_count,
@@ -475,7 +475,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
             println!(
                 "LENGTH_DIFFERS  common={common_count}  a={a_count}  b={b_count}  ({a_path} vs {b_path})"
             );
-            std::process::exit(1);
+            std::process::exit(exit_codes::FAILED);
         }
         DivergeReport::CorruptTrace {
             common_count,
@@ -536,7 +536,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
                     println!(
                         "PC_DIFF step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  registers agree but control flow diverged; the PC split is the divergence"
                     );
-                    std::process::exit(1);
+                    std::process::exit(exit_codes::FAILED);
                 }
                 println!("NO_FIELD_DIFF step={step} pc=0x{a_pc:x}  snapshots agree on every fingerprint field and PC; if the hash stream diverged at this step, the harness is skewing snapshots against hashes -- investigate, do not resume the scan");
             } else {
@@ -547,7 +547,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
                 for d in &diffs {
                     println!("  {:<5}  a=0x{:016x}  b=0x{:016x}", d.field, d.a, d.b);
                 }
-                std::process::exit(1);
+                std::process::exit(exit_codes::FAILED);
             }
         }
         ZoomLookup::MissingStep {

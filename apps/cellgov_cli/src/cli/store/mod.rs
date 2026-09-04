@@ -1,12 +1,15 @@
 //! Handlers for the commands that read and write the content store:
-//! `firmware`, `title`, `keys`, and `self decrypt`.
+//! `status`, `firmware`, `title`, `keys`, and `self decrypt`.
 
+pub(crate) mod confirm;
 pub(crate) mod firmware;
 pub(crate) mod keys_cmd;
 #[cfg(feature = "decrypt")]
 pub(crate) mod rap;
+pub(crate) mod read;
 pub(crate) mod self_decrypt;
 pub(crate) mod title;
+pub(crate) mod uninstall;
 
 #[cfg(test)]
 #[path = "tests/scratch.rs"]
@@ -19,6 +22,15 @@ mod tests;
 #[cfg(feature = "decrypt")]
 use std::path::Path;
 use std::path::PathBuf;
+
+/// The title registry the store commands read.
+///
+/// The path resolves from the compiled-in workspace root, so it pairs
+/// with the committed anchors under `tests/fixtures/`, which resolve the
+/// same way.
+pub(crate) fn registry_dir() -> PathBuf {
+    crate::paths::workspace_root().join(crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR)
+}
 
 /// Why a store command's own resolution failed, before it reaches the
 /// library it drives.
