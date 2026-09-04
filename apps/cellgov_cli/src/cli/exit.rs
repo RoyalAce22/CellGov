@@ -11,7 +11,11 @@ use cellgov_ps3_abi::elf::ELF_MAGIC;
 use crate::game::manifest::TitleManifest;
 
 /// Print `msg` to stderr and exit with status 1.
+///
+/// A refusal can land while a bar is up; `process::exit` runs no
+/// destructor, so the restore happens here or not at all.
 pub(crate) fn die(msg: &str) -> ! {
+    cellgov_terminal::progress::release_terminal();
     eprintln!("{msg}");
     std::process::exit(1)
 }

@@ -369,6 +369,10 @@ fn a_global_the_command_reads_passes_the_check() {
         vec!["--format", "json", "diff", "compare", "fairness"],
         vec!["--quiet", "firmware", "install", "fw.pup"],
         vec!["--verbose", "firmware", "install", "fw.pup"],
+        vec!["--quiet", "boot", "bench", "--title", "synthetic"],
+        vec!["--quiet", "boot", "run", "--title", "synthetic"],
+        vec!["--quiet", "boot", "bench-once", "--title", "synthetic"],
+        vec!["--quiet", "dev", "record-anchors", "--all"],
         vec![
             "--no-color",
             "--no-progress",
@@ -530,7 +534,10 @@ fn a_global_that_forbids_an_absent_behaviour_is_accepted_anywhere() {
 #[test]
 fn a_global_that_promises_output_is_refused_where_there_is_none() {
     assert!(refusal(&["diff", "diverge", "a", "b", "--quiet"]).is_some());
+    assert!(refusal(&["dev", "titles-gen", "--quiet"]).is_some());
+    // The boot family answers `--no-progress`, never `--verbose`.
     assert!(refusal(&["boot", "bench", "--title", "synthetic", "--verbose"]).is_some());
+    assert!(refusal(&["boot", "run", "--title", "synthetic", "--verbose"]).is_some());
     assert_eq!(
         refusal(&["firmware", "install", "fw.pup", "--verbose"]),
         None

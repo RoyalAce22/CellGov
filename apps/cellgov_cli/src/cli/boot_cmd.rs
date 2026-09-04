@@ -4,10 +4,13 @@
 use std::path::Path;
 
 use cellgov_compare::BootOutcome;
+use cellgov_terminal::caps::RenderFlags;
+use cellgov_terminal::progress::ProgressBar;
 use cellgov_time::Budget;
 
 use crate::composition::{banner, compose_boot, BootComposition, ComposeInputs, FirmwareChoice};
 use crate::game;
+use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 
 use super::env::parse_env_bool;
 use super::exit::die;
@@ -244,7 +247,7 @@ fn resolve_boot_inputs(
     }
 }
 
-pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>) {
+pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
     let observation_regions: Option<Vec<cellgov_compare::RegionDescriptor>> =
         args.observation_manifest.as_deref().map(|path| {
             cellgov_compare::checkpoint_manifest::load(Path::new(path))
@@ -260,6 +263,8 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>) {
         "boot run",
     );
     let firmware_dir = firmware_module_dir(&inputs.composition);
+    let bar = ProgressBar::start(render.caps(), &RUN_TASK, inputs.title.name());
+    let sink = bar.sink();
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -286,10 +291,20 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>) {
         budget_override: args.budget.map(Budget::new),
         prescan: args.prescan,
         guest_args: &args.guest_arg,
+        progress: &*sink,
     });
+    // Down before any exit: `process::exit` runs no destructor, so a
+    // bar left standing keeps its render thread and a hidden cursor.
+    // The failure arm takes `abort`, which flags the terminal-native
+    // progress state as an error instead of clearing it as a run that
+    // completed.
     let summary = match result {
-        Ok(s) => s,
+        Ok(s) => {
+            bar.finish();
+            s
+        }
         Err(e) => {
+            bar.abort();
             eprintln!("boot run: {e}");
             std::process::exit(EXIT_RUN_GAME_SAVE_ARTIFACT);
         }
@@ -327,7 +342,7 @@ fn default_bench_max_steps(title: &game::manifest::TitleManifest) -> usize {
     })
 }
 
-pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>) {
+pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
     let vfs_root = resolve_ps3_vfs_root(vfs_flag);
     let inputs = resolve_boot_inputs(
         &args.selector,
@@ -341,6 +356,8 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>) {
         .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
     let firmware_dir = firmware_module_dir(&inputs.composition);
     let selection = selection_args(&args.selection, vfs_flag);
+    let bar = ProgressBar::start(render.caps(), &BENCH_TASK, inputs.title.name());
+    let sink = bar.sink();
     game::bench_boot_one_run(
         game::BenchOptions {
             title: &inputs.title,
@@ -362,10 +379,17 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>) {
         inputs.elf_data,
         inputs.authority_id,
         inputs.control_flags1,
+        &*sink,
     );
+    bar.finish();
 }
 
-pub(crate) fn bench_boot(args: &BenchArgs, check_anchor: bool, vfs_flag: Option<&Path>) {
+pub(crate) fn bench_boot(
+    args: &BenchArgs,
+    check_anchor: bool,
+    vfs_flag: Option<&Path>,
+    render: RenderFlags,
+) {
     let vfs_root = resolve_ps3_vfs_root(vfs_flag);
     let inputs = resolve_boot_inputs(
         &args.selector,
@@ -379,23 +403,29 @@ pub(crate) fn bench_boot(args: &BenchArgs, check_anchor: bool, vfs_flag: Option<
         .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
     let firmware_dir = firmware_module_dir(&inputs.composition);
     let selection = selection_args(&args.selection, vfs_flag);
-    let outcome = match game::bench_boot_pair(game::BenchOptions {
-        title: &inputs.title,
-        elf_path: &inputs.elf_path,
-        max_steps,
-        firmware_dir: firmware_dir.as_deref(),
-        composed_mounts: &inputs.composition.mounts,
-        identity: &inputs.composition.identity,
-        selection: selection.as_args(),
-        strict_reserved: args.strict_reserved,
-        checkpoint_override: args.checkpoint,
-        budget_override: args.budget.map(Budget::new),
-        prescan: args.prescan,
-        guest_args: &args.guest_arg,
-        check_anchor,
-    }) {
+    let bar = ProgressBar::start(render.caps(), &BENCH_PAIR_TASK, inputs.title.name());
+    let sink = bar.sink();
+    let outcome = match game::bench_boot_pair(
+        game::BenchOptions {
+            title: &inputs.title,
+            elf_path: &inputs.elf_path,
+            max_steps,
+            firmware_dir: firmware_dir.as_deref(),
+            composed_mounts: &inputs.composition.mounts,
+            identity: &inputs.composition.identity,
+            selection: selection.as_args(),
+            strict_reserved: args.strict_reserved,
+            checkpoint_override: args.checkpoint,
+            budget_override: args.budget.map(Budget::new),
+            prescan: args.prescan,
+            guest_args: &args.guest_arg,
+            check_anchor,
+        },
+        &*sink,
+    ) {
         Ok(o) => o,
         Err(e) => {
+            bar.abort();
             eprintln!("boot bench: {e}");
             let captured_stdout = e.captured_stdout();
             if !captured_stdout.is_empty() {
@@ -408,6 +438,9 @@ pub(crate) fn bench_boot(args: &BenchArgs, check_anchor: bool, vfs_flag: Option<
             std::process::exit(EXIT_SUBPROCESS_FAIL);
         }
     };
+    // Down before the gate: every arm below it exits the process, and
+    // `process::exit` runs no destructor.
+    bar.finish();
     match outcome.gate {
         game::BenchGate::Pass => {}
         game::BenchGate::DeterminismBreak => {

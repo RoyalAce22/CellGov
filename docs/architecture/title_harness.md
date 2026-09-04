@@ -196,3 +196,19 @@ The diagnostic surface is:
   `.sprx` (SCE wrappers auto-detected and decrypted via
   `cellgov_install::sce`) and prints the module's internal name,
   export namespaces, and full import table.
+
+Every boot command splits its two streams by audience. stdout carries
+the run's result and the guest's own output; stderr carries the
+selection banner, the witness lines the anchor check reads, and the
+progress bar. The split is what lets a parent spawn a boot and parse
+both: the pair reads its child's result line off stdout and the same
+child's witnesses off stderr, and a parent that captures either stream
+passes `--no-progress` so a bar cannot render into a pipe.
+
+Progress reports against `cellgov_terminal`'s sink, denominated in the
+runtime's step-call cap -- which the boot parameters derive by
+dividing the instruction cap by the step budget, and which a title's
+`module_start` passes have already drawn against before the step loop
+begins. A command that writes lines while it works declares that when
+it starts the bar, and the renderer then reports at thresholds instead
+of redrawing a frame in place.

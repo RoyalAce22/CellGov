@@ -14,12 +14,15 @@ use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
 use cellgov_compare::witnesses::{record, BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
 use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
+use cellgov_terminal::caps::RenderFlags;
+use cellgov_terminal::progress::{ProgressBar, ProgressSink as _};
 
 use crate::cli::exit::die;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use crate::game::manifest::TitleRegistry;
 
 use crate::paths::{anchor_max_steps, boot_anchor_path, history_path, workspace_root};
+use crate::progress::RECORD_ANCHORS_TASK;
 
 use crate::cli::parse::RecordAnchorsArgs;
 
@@ -60,6 +63,9 @@ fn measure(entry: &Entry) -> Option<Measurement> {
     let output = Command::new(exe)
         .arg("boot")
         .arg("bench-once")
+        // Both of the child's streams are captured and parsed here, so
+        // a child bar would render into a pipe rather than a terminal.
+        .arg("--no-progress")
         .arg("--title")
         .arg(&entry.short_name)
         .arg("--max-steps")
@@ -313,7 +319,7 @@ fn reject_unforwardable_registry(registry: &Path, default: &Path) {
     }
 }
 
-pub(crate) fn run(args: &RecordAnchorsArgs) {
+pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
     let default_registry = workspace_root().join(DEFAULT_TITLE_REGISTRY_DIR);
     let registry = match &args.registry {
         Some(given) => {
@@ -347,11 +353,18 @@ pub(crate) fn run(args: &RecordAnchorsArgs) {
     let strict = one.is_some();
     let mut recorded = 0usize;
     let total = selected.len();
-    for entry in selected {
+    let bar = ProgressBar::start(render.caps(), &RECORD_ANCHORS_TASK, "titles");
+    let sink = bar.sink();
+    sink.totals(0, total as u64);
+    for (index, entry) in selected.into_iter().enumerate() {
+        sink.item_started(&format!("{} ({}/{total})", entry.short_name, index + 1));
         if record_one(entry, strict) {
             recorded += 1;
         }
+        sink.advanced(1);
     }
+    sink.finished();
+    bar.finish();
     // --all over a machine with zero installed titles must not exit 0
     // having recorded nothing.
     if recorded == 0 {

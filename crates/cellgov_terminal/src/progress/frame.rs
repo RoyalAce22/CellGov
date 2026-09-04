@@ -230,6 +230,9 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
     out
 }
 
+/// Longest item name a plain line carries before it middle-elides.
+const PLAIN_ITEM_BUDGET: usize = 48;
+
 /// One plain-mode threshold line.
 pub(crate) fn plain_line(snap: &Snapshot, task: &Task, ratio: f64) -> String {
     let mut line = format!(
@@ -246,7 +249,23 @@ pub(crate) fn plain_line(snap: &Snapshot, task: &Task, ratio: f64) -> String {
             snap.done_items, snap.total_items, task.items
         ));
     }
+    push_current_item(&mut line, snap);
     line
+}
+
+/// One plain-mode line for a phase with no denominator.
+pub(crate) fn plain_indeterminate_line(snap: &Snapshot, task: &Task) -> String {
+    let mut line = format!("[{}] {}", task.tag, task.phase_label(snap.phase));
+    push_current_item(&mut line, snap);
+    line
+}
+
+/// The plain line is the whole display, so it names the running item.
+fn push_current_item(line: &mut String, snap: &Snapshot) {
+    if !snap.current.is_empty() {
+        line.push_str("  ");
+        line.push_str(&elide(&ascii_only(&snap.current), PLAIN_ITEM_BUDGET));
+    }
 }
 
 /// OSC 9;4 terminal-native progress (taskbar / dock).

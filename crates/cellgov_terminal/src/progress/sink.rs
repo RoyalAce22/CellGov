@@ -26,6 +26,14 @@ pub trait ProgressSink: Sync {
     /// The current item finished.
     fn item_finished(&self);
     /// The work completed successfully.
+    ///
+    /// A live bar stops drawing within one render tick of this call.
+    /// The stop is not a rendezvous. To keep later output off the
+    /// bar's last frame, wait for the render thread:
+    ///
+    /// - [`super::ProgressBar::finish`] joins the thread.
+    /// - [`super::release_terminal`] stops the thread on an exit path
+    ///   that runs no destructor.
     fn finished(&self);
 }
 

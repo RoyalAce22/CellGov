@@ -39,4 +39,6 @@ pub(in crate::game) struct StepLoopCtx<'a> {
     /// Init plans the spawn loader staged for children parked behind
     /// their module_start pass.
     pub(in crate::game) child_init: &'a crate::game::child_init::ChildInitPlans,
+    /// Where the loop reports retired steps.
+    pub(in crate::game) progress: &'a dyn crate::progress::ProgressSink,
 }

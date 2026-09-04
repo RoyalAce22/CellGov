@@ -1,7 +1,7 @@
 //! The live display: a render thread that owns stderr, and the
 //! teardown paths that leave the screen sane however the run ends.
 
-use super::frame::{compose_frame, osc_progress, plain_line, FrameCtx};
+use super::frame::{compose_frame, osc_progress, plain_indeterminate_line, plain_line, FrameCtx};
 use super::state::ProgressState;
 use super::task::Task;
 use crate::caps::{RenderMode, TermCaps};
@@ -126,6 +126,19 @@ fn install_panic_hook() {
     });
 }
 
+/// Stop the live bar and restore the terminal.
+///
+/// This serves an exit path that does not unwind -- `process::exit`
+/// after a refusal -- where [`ProgressBar`]'s [`Drop`] never runs and
+/// the cursor stays hidden for the shell that follows.
+///
+/// The call is safe with no bar running, and safe to repeat. It
+/// deregisters the bar without joining it, so the owning
+/// [`ProgressBar`] still completes its own teardown.
+pub fn release_terminal() {
+    quiesce_for_panic();
+}
+
 /// Stop the render thread and restore the terminal, before the
 /// previous hook prints.
 ///
@@ -134,15 +147,26 @@ fn install_panic_hook() {
 /// bounded: the panicking thread may be the render thread itself.
 fn quiesce_for_panic() {
     let live = live_bar_slot().take();
-    if let Some(stop) = live {
+    let stalled = live.is_some_and(|stop| {
         stop.request_stop();
         stop.wait_for_exit(PANIC_DRAIN);
-    }
+        !stop.lock().exited
+    });
+    let mut err = std::io::stderr();
     if BAR_ACTIVE.swap(false, Ordering::Relaxed) {
-        let mut err = std::io::stderr();
         let _ = err.write_all(b"\x1b[?25h\x1b]9;4;0\x07\n");
-        let _ = err.flush();
     }
+    // A drain that spent its whole budget leaves a render thread free
+    // to cursor-up over whatever prints next.
+    if stalled {
+        let _ = writeln!(
+            err,
+            "cellgov: the progress render thread did not stop within {} ms; \
+             the output below may be overwritten",
+            PANIC_DRAIN.as_millis(),
+        );
+    }
+    let _ = err.flush();
 }
 
 /// The live progress display: owns the render thread and stderr while
@@ -183,16 +207,19 @@ impl ProgressBar {
                 if mode == RenderMode::Ansi {
                     BAR_ACTIVE.store(true, Ordering::Relaxed);
                 }
-                // Registered before the spawn, so a panic between the
-                // two still finds a handshake to signal. The slot lock
-                // is released before the assert: the panic hook takes
-                // that same lock.
-                let displaced = live_bar_slot().replace(Arc::clone(&stop)).is_some();
+                // The assert reads the slot without claiming it, so a
+                // debug build's panic leaves the live bar registered
+                // and joinable instead of a handshake no thread
+                // answers. The slot lock is released before the
+                // assert: the panic hook takes that same lock.
                 debug_assert!(
-                    !displaced,
+                    live_bar_slot().is_none(),
                     "one live bar per process: a second bar leaves the first's \
                      render thread unreachable from the panic hook"
                 );
+                // Registered before the spawn, so a panic between the
+                // two still finds a handshake to signal.
+                live_bar_slot().replace(Arc::clone(&stop));
                 let st = Arc::clone(&state);
                 let sp = Arc::clone(&stop);
                 let label = label.to_string();
@@ -285,6 +312,35 @@ impl Drop for ProgressBar {
     }
 }
 
+/// One tick's inputs to the plain-mode threshold decision.
+struct PlainDue {
+    /// Zero until the caller declares its denominator.
+    total_amount: u64,
+    /// The task wrote no plain line yet.
+    first: bool,
+    /// The render loop breaks after this tick.
+    ending: bool,
+    /// Tenths of the high-water ratio this tick sees.
+    decile: u64,
+    /// The decile the last written line reported.
+    last_decile: u64,
+    /// Time since the last written line.
+    since_last: Duration,
+}
+
+/// How long a plain-mode task may run without saying anything.
+const PLAIN_SILENCE: Duration = Duration::from_secs(10);
+
+/// Whether this tick writes a plain-mode threshold line.
+///
+/// - A measured task also speaks on its first tick and its last, so
+///   one that never crosses a decile still prints.
+/// - A phase with no denominator answers the silence budget alone.
+fn plain_due(t: &PlainDue) -> bool {
+    t.since_last >= PLAIN_SILENCE
+        || (t.total_amount > 0 && (t.first || t.ending || t.decile > t.last_decile))
+}
+
 fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Task, label: &str) {
     let mut err = std::io::stderr();
     let start = Instant::now();
@@ -296,6 +352,7 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
     let mut last_osc: Option<(u8, Option<u8>)> = None;
     let mut last_plain = Instant::now();
     let mut last_plain_decile = 0u64;
+    let mut first_plain = true;
     let spinner_frames = ['|', '/', '-', '\\'];
     let mut tick_n = 0usize;
 
@@ -305,6 +362,10 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
 
     loop {
         let stopped = stop.wait_tick();
+        // Sampled before the snapshot: the tick that draws the closing
+        // line must not read counters from before the finish it acts
+        // on.
+        let ending = stopped || state.finished.load(Ordering::Relaxed);
         let snap = state.snapshot();
         let now = Instant::now();
 
@@ -367,14 +428,24 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
                 first = false;
             }
             RenderMode::Plain | RenderMode::Off => {
-                // Threshold lines: every 10% or every 10 s.
                 let decile = (hi_ratio * 10.0).floor() as u64;
                 if caps.mode == RenderMode::Plain
-                    && snap.total_amount > 0
-                    && (decile > last_plain_decile
-                        || now.duration_since(last_plain) >= Duration::from_secs(10))
+                    && plain_due(&PlainDue {
+                        total_amount: snap.total_amount,
+                        first: first_plain,
+                        ending,
+                        decile,
+                        last_decile: last_plain_decile,
+                        since_last: now.duration_since(last_plain),
+                    })
                 {
-                    let _ = writeln!(err, "{}", plain_line(&snap, task, hi_ratio));
+                    let line = if snap.total_amount > 0 {
+                        plain_line(&snap, task, hi_ratio)
+                    } else {
+                        plain_indeterminate_line(&snap, task)
+                    };
+                    let _ = writeln!(err, "{line}");
+                    first_plain = false;
                     last_plain = now;
                     last_plain_decile = decile;
                 }
@@ -382,7 +453,7 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
         }
 
         tick_n += 1;
-        if stopped {
+        if ending {
             break;
         }
     }

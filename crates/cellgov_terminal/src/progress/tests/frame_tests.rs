@@ -523,10 +523,11 @@ fn a_resumed_transfer_opens_at_its_preset_ratio() {
 }
 
 #[test]
-fn plain_threshold_lines_carry_the_tag_and_drop_an_absent_item_counter() {
+fn plain_threshold_lines_carry_the_tag_the_item_and_drop_an_absent_item_counter() {
     assert_eq!(
         plain_line(&staging_snapshot(), &INSTALL, 0.5),
-        "[install] staging   50%  512.0 MiB / 1.00 GiB  (50/100 files)"
+        "[install] staging   50%  512.0 MiB / 1.00 GiB  (50/100 files)  \
+         PS3_GAME/USRDIR/EBOOT.BIN"
     );
 
     const BENCH: Task = Task {
@@ -542,11 +543,46 @@ fn plain_threshold_lines_carry_the_tag_and_drop_an_absent_item_counter() {
         phase: STAGING,
         total_amount: 100_000_000,
         done_amount: 30_000_000,
+        current: String::new(),
         ..staging_snapshot()
     };
     assert_eq!(
         plain_line(&snap, &BENCH, 0.3),
         "[boot] stepping   30%  30.0M / 100.0M"
+    );
+}
+
+#[test]
+fn an_indeterminate_plain_line_names_its_phase_and_item_instead_of_a_ratio() {
+    const ANCHORS: Task = Task {
+        verb: "Recording",
+        tag: "anchors",
+        phases: &["measuring"],
+        measured: 0,
+        unit: Unit::Items,
+        items: "",
+        streaming: true,
+    };
+    let snap = Snapshot {
+        phase: 0,
+        total_amount: 0,
+        done_amount: 0,
+        current: "synthetic (2/5)".to_string(),
+        ..staging_snapshot()
+    };
+    assert_eq!(
+        plain_indeterminate_line(&snap, &ANCHORS),
+        "[anchors] measuring  synthetic (2/5)"
+    );
+    assert_eq!(
+        plain_indeterminate_line(
+            &Snapshot {
+                current: String::new(),
+                ..snap
+            },
+            &ANCHORS
+        ),
+        "[anchors] measuring"
     );
 }
 

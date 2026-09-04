@@ -12,7 +12,7 @@ mod sink;
 mod state;
 mod task;
 
-pub use bar::ProgressBar;
+pub use bar::{release_terminal, ProgressBar};
 pub use sink::ProgressSink;
 pub use state::ProgressState;
 pub use task::{Task, Unit};

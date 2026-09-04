@@ -20,13 +20,32 @@ pub(in crate::game) fn step_loop(
     rt: &mut Runtime,
     ctx: &mut StepLoopCtx<'_>,
 ) -> (String, cellgov_compare::BootOutcome) {
+    // The tail report takes `steps` modulo the batch. That remainder
+    // is the partial batch only when the count starts at zero.
+    debug_assert_eq!(*ctx.steps, 0, "the step counter enters the loop at zero");
+    let terminal = drive(rt, ctx);
+    // The loop reports whole batches, so the bar needs the partial
+    // batch it ended on to reach the step count the run reports.
+    ctx.progress
+        .advanced((*ctx.steps % crate::progress::STEP_REPORT_BATCH) as u64);
+    terminal
+}
+
+/// Split from the wrapper so every exit passes the tail report.
+fn drive(rt: &mut Runtime, ctx: &mut StepLoopCtx<'_>) -> (String, cellgov_compare::BootOutcome) {
     use cellgov_compare::BootOutcome;
     loop {
         // A parked child's staged init pass runs before the scheduler
         // sees it: an entry still pending at `rt.step()` reads as
         // AllBlocked once every other unit blocks.
         if rt.has_pending_child_init() {
+            let before = rt.steps_taken();
             crate::game::child_init::run_pending_child_inits(rt, ctx.child_init);
+            // The pass retires `rt.step()` calls that `ctx.steps` never
+            // counts. The denominator counts them, so an unreported pass
+            // leaves the bar short.
+            ctx.progress
+                .advanced(rt.steps_taken().saturating_sub(before) as u64);
         }
 
         let t0 = Instant::now();
@@ -45,15 +64,9 @@ pub(in crate::game) fn step_loop(
                     ctx.pc_ring.push((space, pc));
                 }
 
-                if (*ctx.steps).is_multiple_of(10_000) {
-                    let elapsed = ctx.loop_start.elapsed();
-                    println!(
-                        "  [{:>6}] {:.1?} elapsed, {} distinct PCs, {} HLE calls",
-                        ctx.steps,
-                        elapsed,
-                        ctx.distinct_pcs.len(),
-                        ctx.hle_calls.values().sum::<usize>(),
-                    );
+                if (*ctx.steps).is_multiple_of(crate::progress::STEP_REPORT_BATCH) {
+                    ctx.progress
+                        .advanced(crate::progress::STEP_REPORT_BATCH as u64);
                 }
 
                 if ctx.trace {

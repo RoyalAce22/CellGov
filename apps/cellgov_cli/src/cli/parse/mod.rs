@@ -237,7 +237,8 @@ const VFS_ROOT_READERS: &str =
 const FORMAT_READERS: &str = "diff compare, diff observations, and explore";
 
 /// The commands [`renders_progress`] answers for, as help text.
-const PROGRESS_READERS: &str = "firmware install, title install, and title install-update";
+const PROGRESS_READERS: &str = "firmware install, title install, title install-update, \
+     the boot family, and dev record-anchors";
 
 /// The commands [`reads_verbose`] answers for, as help text.
 const VERBOSE_READERS: &str = "firmware install";
@@ -250,13 +251,13 @@ fn renders_progress(command: &Command) -> bool {
             title,
             TitleCommand::Install(_) | TitleCommand::InstallUpdate(_)
         ),
+        Command::Boot(_) => true,
+        Command::Dev(dev) => matches!(dev, DevCommand::RecordAnchors(_)),
         Command::Keys(_)
         | Command::SelfCmd(_)
-        | Command::Boot(_)
         | Command::Diff(_)
         | Command::Explore(_)
-        | Command::Scenario(_)
-        | Command::Dev(_) => false,
+        | Command::Scenario(_) => false,
     }
 }
 

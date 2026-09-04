@@ -15,6 +15,7 @@ mod dump_prx_imports;
 mod funcs;
 mod game;
 mod paths;
+mod progress;
 
 use std::path::Path;
 
@@ -62,12 +63,19 @@ fn dispatch(command: &Command, globals: &Globals) {
             let store = cli::keys::install_root_of(&vfs_root);
             cli::store::self_decrypt::run(args, &vfs_root, &store);
         }
-        Command::Boot(BootCommand::Run(args)) => cli::boot_cmd::run_game(args, vfs_flag),
+        Command::Boot(BootCommand::Run(args)) => {
+            cli::boot_cmd::run_game(args, vfs_flag, globals.render());
+        }
         Command::Boot(BootCommand::Bench(args)) => {
-            cli::boot_cmd::bench_boot(&args.bench, !args.no_anchor_check, vfs_flag);
+            cli::boot_cmd::bench_boot(
+                &args.bench,
+                !args.no_anchor_check,
+                vfs_flag,
+                globals.render(),
+            );
         }
         Command::Boot(BootCommand::BenchOnce(args)) => {
-            cli::boot_cmd::bench_boot_once(args, vfs_flag);
+            cli::boot_cmd::bench_boot_once(args, vfs_flag, globals.render());
         }
         Command::Diff(DiffCommand::Compare(args)) => {
             cli::compare::run(args, globals.format, SCENARIOS);
@@ -91,11 +99,11 @@ fn dispatch(command: &Command, globals: &Globals) {
             )),
         },
         Command::Scenario(ScenarioCommand::Dump { name }) => cli::dump::run(name, SCENARIOS),
-        Command::Dev(dev) => dispatch_dev(dev, vfs_flag),
+        Command::Dev(dev) => dispatch_dev(dev, vfs_flag, globals),
     }
 }
 
-fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>) {
+fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>, globals: &Globals) {
     match dev {
         DevCommand::Disasm(args) => disasm::run(args, vfs_flag),
         DevCommand::PrxImports(args) => dump_prx_imports::run(args, vfs_flag),
@@ -104,7 +112,7 @@ fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>) {
         DevCommand::FixtureGen(args) => cli::fixture_gen::run(args, vfs_flag),
         DevCommand::TitlesGen(args) => cli::titles_gen::run(args),
         DevCommand::GenManifest(args) => cli::gen_manifest::run(args),
-        DevCommand::RecordAnchors(args) => cli::record_anchors::run(args),
+        DevCommand::RecordAnchors(args) => cli::record_anchors::run(args, globals.render()),
     }
 }
 

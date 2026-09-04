@@ -53,6 +53,8 @@ pub struct RunGameOptions<'a> {
     /// Guest argv for the primary thread, `argv[0]` included. Empty
     /// keeps the no-args entry state (r3..r6 = 0).
     pub guest_args: &'a [String],
+    /// Where the boot reports its phases and retired steps.
+    pub progress: &'a dyn crate::progress::ProgressSink,
 }
 
 /// Terminal-state summary from [`run_game`].
@@ -111,6 +113,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         budget_override,
         prescan,
         guest_args,
+        progress,
     } = opts;
     for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
         debug_assert!(
@@ -129,6 +132,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         title.name(),
         title.display_name()
     );
+    progress.phase(crate::progress::BootPhase::Loading.code());
     let prepared = boot::prepare(boot::PrepareOptions {
         title,
         elf_path,
@@ -207,11 +211,23 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         dump_mem_fault_ranges,
         obs_null_sink: crate::cli::env::parse_env_bool("CELLGOV_OBS_NULL_SINK"),
         child_init: &child_init,
+        progress,
     };
     let t_loop_start = Instant::now();
     loop_ctx.loop_start = t_loop_start;
+    // The denominator is the runtime's own cap, in the same unit the
+    // loop counts: `--max-steps` is an instruction cap, which
+    // `resolve_boot_params` divides by the budget to get step() calls.
+    // Every module_start the boot ran is already charged against it.
+    progress.totals(0, rt.max_steps() as u64);
+    progress.preset_done(rt.steps_taken() as u64);
+    progress.phase(crate::progress::BootPhase::Stepping.code());
     let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
     let t_loop = t_loop_start.elapsed();
+    // The diagnostics below are the run's result, not its progress. A
+    // live bar stops drawing within a tick of this call rather than
+    // running until teardown; see `ProgressSink::finished`.
+    progress.finished();
     let t_after_steploop = Instant::now();
     let dirty_pages_after_steploop = rt.memory().dirty_page_count();
     let tty_oob_count = loop_ctx.tty_oob_count;

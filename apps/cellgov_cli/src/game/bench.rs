@@ -66,6 +66,9 @@ impl BenchOptions<'_> {
     fn encode_to_command(&self, cmd: &mut std::process::Command) {
         cmd.arg("boot")
             .arg("bench-once")
+            // The parent captures the child's streams and replays them
+            // after exit, so a child bar would render into a pipe.
+            .arg("--no-progress")
             .arg("--title")
             .arg(self.title.name())
             .arg("--max-steps")
@@ -158,7 +161,9 @@ pub fn bench_boot(
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
     control_flags1: Option<u32>,
+    progress: &dyn crate::progress::ProgressSink,
 ) -> BenchBootResult {
+    progress.phase(crate::progress::BootPhase::Loading.code());
     let prepared = boot::prepare(boot::PrepareOptions {
         title: opts.title,
         elf_path: opts.elf_path,
@@ -192,8 +197,23 @@ pub fn bench_boot(
 
     let mut steps: usize = 0;
     let t0 = Instant::now();
-    let outcome = bench_step_loop(&mut rt, active_checkpoint, &mut steps, &child_init);
+    // The denominator is `rt.max_steps()`, the cap on step() calls that
+    // `resolve_boot_params` derived from the `--max-steps` instruction
+    // cap. module_start already spent part of it.
+    progress.totals(0, rt.max_steps() as u64);
+    progress.preset_done(rt.steps_taken() as u64);
+    progress.phase(crate::progress::BootPhase::Stepping.code());
+    let outcome = bench_step_loop(
+        &mut rt,
+        active_checkpoint,
+        &mut steps,
+        &child_init,
+        progress,
+    );
     let wall = t0.elapsed();
+    // Stop the bar before the witness block prints; see
+    // `ProgressSink::finished`.
+    progress.finished();
 
     // VRSAVE liveness witness: sum mfvrsave_executed across every
     // PPU unit so the integration gate can scrape it from stderr.
@@ -543,8 +563,9 @@ pub fn bench_boot_one_run(
     elf_data: Vec<u8>,
     authority_id: Option<u64>,
     control_flags1: Option<u32>,
+    progress: &dyn crate::progress::ProgressSink,
 ) -> BenchBootResult {
-    let r = bench_boot(opts, elf_data, authority_id, control_flags1);
+    let r = bench_boot(opts, elf_data, authority_id, control_flags1, progress);
     println!("{}", format_bench_result(&r));
     r
 }
@@ -635,7 +656,10 @@ fn spawn_one_run(opts: BenchOptions<'_>) -> Result<(BenchBootResult, String), Sp
 
 /// Run [`bench_boot_one_run`] twice in separate subprocesses and
 /// classify the pair against the gate.
-pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, SpawnError> {
+pub fn bench_boot_pair(
+    opts: BenchOptions<'_>,
+    progress: &dyn crate::progress::ProgressSink,
+) -> Result<BenchPairOutcome, SpawnError> {
     // Optional trailing tokens, each carrying its own leading space
     // so the banner has no gap when both are absent.
     let mut overrides = String::new();
@@ -655,7 +679,13 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         opts.elf_path,
         opts.max_steps
     );
+    progress.phase(crate::progress::BenchPairPhase::Measuring.code());
+    // Both counters track the same two runs.
+    progress.totals(2, 2);
+    progress.item_started("run 1 of 2");
     let (r1, r1_stderr) = spawn_one_run(opts)?;
+    progress.advanced(1);
+    progress.item_finished();
     println!(
         "  run 1: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
         r1.steps,
@@ -663,7 +693,11 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         r1.steps_per_sec(),
         r1.outcome,
     );
+    progress.item_started("run 2 of 2");
     let (r2, r2_stderr) = spawn_one_run(opts)?;
+    progress.advanced(1);
+    progress.item_finished();
+    progress.phase(crate::progress::BenchPairPhase::Comparing.code());
     println!(
         "  run 2: steps={} wall_ms={:.3} steps_per_sec={:.0} outcome={}",
         r2.steps,
@@ -714,6 +748,7 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         }
     }
     let gate = classify_pair(&r1, &r2, drift_pct, &witness_break, &anchor);
+    progress.finished();
     match gate {
         BenchGate::Pass => {
             let d = drift_pct.expect("Pass implies finite drift");
@@ -1214,6 +1249,8 @@ mod child_command_tests {
         assert!(child.prescan);
         assert!(child.strict_reserved);
         assert_eq!(child.guest_arg, guest_args);
+        // A child bar renders into the pipe the parent parses.
+        assert!(cli.globals.no_progress);
     }
 
     #[test]

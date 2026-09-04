@@ -153,6 +153,144 @@ fn starting_a_second_bar_names_the_invariant_it_breaks() {
     drop(first);
 }
 
+/// The baseline tick, which writes no line:
+///
+/// - it crosses no decile,
+/// - it is neither the first tick nor the last,
+/// - it sits well inside the silence budget.
+fn mid_run() -> PlainDue {
+    PlainDue {
+        total_amount: 100_000_000,
+        first: false,
+        ending: false,
+        decile: 0,
+        last_decile: 0,
+        since_last: Duration::from_secs(1),
+    }
+}
+
+#[test]
+fn a_plain_task_says_something_at_both_ends_however_little_of_it_runs() {
+    assert!(plain_due(&PlainDue {
+        first: true,
+        ..mid_run()
+    }));
+    assert!(plain_due(&PlainDue {
+        ending: true,
+        ..mid_run()
+    }));
+    assert!(!plain_due(&mid_run()), "a quiet mid-run tick stays quiet");
+}
+
+#[test]
+fn a_plain_task_without_a_denominator_answers_the_silence_budget_and_nothing_else() {
+    assert!(plain_due(&PlainDue {
+        total_amount: 0,
+        since_last: PLAIN_SILENCE,
+        ..mid_run()
+    }));
+    for quiet in [
+        PlainDue {
+            total_amount: 0,
+            first: true,
+            ..mid_run()
+        },
+        PlainDue {
+            total_amount: 0,
+            ending: true,
+            ..mid_run()
+        },
+        PlainDue {
+            total_amount: 0,
+            decile: 5,
+            ..mid_run()
+        },
+    ] {
+        assert!(!plain_due(&quiet));
+    }
+}
+
+#[test]
+fn a_plain_task_that_finishes_inside_its_first_tick_still_speaks() {
+    assert!(plain_due(&PlainDue {
+        first: true,
+        ending: true,
+        ..mid_run()
+    }));
+}
+
+#[test]
+fn a_plain_task_stays_quiet_for_a_ratio_that_went_backwards() {
+    assert!(!plain_due(&PlainDue {
+        decile: 3,
+        last_decile: 7,
+        ..mid_run()
+    }));
+}
+
+#[test]
+fn a_plain_task_stays_quiet_one_tick_short_of_the_silence_budget() {
+    assert!(!plain_due(&PlainDue {
+        since_last: PLAIN_SILENCE - TICK,
+        ..mid_run()
+    }));
+}
+
+#[test]
+fn a_plain_task_speaks_on_a_decile_or_after_the_silence_budget() {
+    assert!(plain_due(&PlainDue {
+        decile: 1,
+        ..mid_run()
+    }));
+    assert!(
+        !plain_due(&PlainDue {
+            decile: 4,
+            last_decile: 4,
+            ..mid_run()
+        }),
+        "a decile already reported must not repeat"
+    );
+    assert!(plain_due(&PlainDue {
+        since_last: PLAIN_SILENCE,
+        ..mid_run()
+    }));
+}
+
+/// `BAR_ACTIVE` is false for every bar these tests start, so the
+/// release writes no escape sequence past the harness.
+#[test]
+fn releasing_the_terminal_with_no_live_bar_is_a_no_op_however_often_it_runs() {
+    let _s = serial();
+    release_terminal();
+    release_terminal();
+    assert!(live_bar_slot().is_none());
+    assert!(!BAR_ACTIVE.load(Ordering::Relaxed));
+}
+
+#[test]
+fn releasing_the_terminal_stops_the_bar_and_leaves_its_teardown_safe() {
+    let _s = serial();
+    let bar = ProgressBar::start(caps(RenderMode::Plain), &QUIET, "x.pkg");
+    assert!(live_bar_slot().is_some());
+    release_terminal();
+    assert!(
+        live_bar_slot().is_none(),
+        "the release must deregister the bar the panic hook would reach"
+    );
+    let other = Arc::new(BarStop::default());
+    *live_bar_slot() = Some(Arc::clone(&other));
+    bar.finish();
+    let kept = {
+        let slot = live_bar_slot();
+        slot.as_ref().is_some_and(|s| Arc::ptr_eq(s, &other))
+    };
+    *live_bar_slot() = None;
+    assert!(
+        kept,
+        "a released bar cleared a registration it no longer owns"
+    );
+}
+
 #[test]
 fn the_stop_handshake_reports_an_exit_and_times_out_without_one() {
     let stop = Arc::new(BarStop::default());
