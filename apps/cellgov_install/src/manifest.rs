@@ -26,6 +26,12 @@ use crate::store::layout::is_safe_component;
 /// The only schema this build reads or writes.
 pub const SUPPORTED_FORMAT_VERSION: u32 = 2;
 
+/// Filename the installer writes and every reader opens.
+///
+/// The manifest sits inside the mount it covers, so a reader that
+/// walks up from a module finds the manifest that names it.
+pub const MANIFEST_FILE: &str = "firmware.toml";
+
 /// Fixed-width SHA-256 digest. On-disk form is 64 lowercase hex
 /// chars; in-memory form is `[u8; 32]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

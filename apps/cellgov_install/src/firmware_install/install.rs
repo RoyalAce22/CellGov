@@ -36,7 +36,7 @@ use super::manifest_build::ManifestOmission;
 use super::prune::is_install_excluded;
 use super::version_txt::read_version;
 use crate::keys::KeyVault;
-use crate::manifest::{self, serialize_manifest};
+use crate::manifest::{self, serialize_manifest, MANIFEST_FILE};
 use crate::progress::{FirmwarePhase, ProgressSink};
 use crate::store::layout::{Artifact, ArtifactKind, StoreLayout, VersionKey};
 use crate::store::record::{
@@ -48,10 +48,6 @@ use crate::{pup, sce, tar};
 /// Mount under a firmware entry that holds the image and its
 /// `firmware.toml`.
 pub const DEV_FLASH_MOUNT: &str = "dev_flash";
-
-/// `firmware.toml` sits inside the mount it covers, so a reader that
-/// walks up from a module finds the manifest that names it.
-const MANIFEST_FILE: &str = "firmware.toml";
 
 /// `source.kind` every firmware record carries.
 const FIRMWARE_SOURCE_KIND: &str = "pup";

@@ -10,14 +10,12 @@
 use std::path::{Path, PathBuf};
 
 use cellgov_compare::{FirmwareIdentity, GameIdentity, RunIdentity};
+use cellgov_install::manifest::MANIFEST_FILE;
 
 use super::compose::{GameChoice, StoredGame};
 use super::inventory::FirmwareEntry;
 use super::select::{FirmwareChoice, GameVersion};
 use crate::game::manifest::BASE_GAME_VER;
-
-/// The manifest the firmware install writes inside the tree it covers.
-const FIRMWARE_MANIFEST_FILE: &str = "firmware.toml";
 
 /// Why the selected firmware's identity could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -94,7 +92,7 @@ pub(crate) fn run_identity(
 }
 
 fn firmware_identity(entry: &FirmwareEntry) -> Result<FirmwareIdentity, FirmwareIdentityError> {
-    let path = entry.dev_flash_dir().join(FIRMWARE_MANIFEST_FILE);
+    let path = entry.dev_flash_dir().join(MANIFEST_FILE);
     let manifest = parse_manifest(&path)?;
     // One install writes both the record and the manifest from one PUP,
     // so a correct store keeps the two in agreement.

@@ -9,10 +9,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::keys::KeyVault;
-use crate::manifest::{self, FirmwareManifest, ManifestError, Sha256 as HexSha256};
-
-/// `firmware.toml` sits inside the mount it covers.
-const MANIFEST_FILE: &str = "firmware.toml";
+use crate::manifest::{self, FirmwareManifest, ManifestError, Sha256 as HexSha256, MANIFEST_FILE};
 
 /// Why one module did not match the manifest entry that names it.
 ///

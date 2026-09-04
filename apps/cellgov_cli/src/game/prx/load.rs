@@ -64,7 +64,7 @@ fn locate_and_parse_manifest(
 ) -> (PathBuf, cellgov_install::manifest::FirmwareManifest) {
     let mut root = dir_path.to_path_buf();
     for _ in 0..3 {
-        let candidate = root.join("firmware.toml");
+        let candidate = root.join(cellgov_install::manifest::MANIFEST_FILE);
         if candidate.is_file() {
             let text = std::fs::read_to_string(&candidate)
                 .unwrap_or_else(|e| die(&format!("read {}: {e}", candidate.display())));
