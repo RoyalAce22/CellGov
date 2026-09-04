@@ -1,0 +1,218 @@
+//! `diverge` and `compare-observations` report when their two sides
+//! come from different triples.
+//!
+//! The fixtures are built in-test from `cellgov_compare`'s public
+//! types and carry no title or corpus state.
+
+#![allow(
+    clippy::unwrap_used,
+    reason = "integration test: unwrap panics on unexpected failure are the right behavior"
+)]
+
+use std::process::Command;
+
+use cellgov_compare::{
+    FirmwareIdentity, GameIdentity, Observation, ObservationMetadata, ObservedOutcome, RunIdentity,
+};
+use cellgov_trace::{StateHash, TraceRecord, TraceWriter};
+
+/// A scratch directory unique to this process, removed on drop.
+struct ScratchDir {
+    path: std::path::PathBuf,
+}
+
+impl ScratchDir {
+    fn new(label: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("cellgov_triple_{label}_{}", std::process::id()));
+        std::fs::remove_dir_all(&path).ok();
+        std::fs::create_dir_all(&path).unwrap();
+        Self { path }
+    }
+
+    fn join(&self, name: &str) -> std::path::PathBuf {
+        self.path.join(name)
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.path).ok();
+    }
+}
+
+fn identity(fw_version: &str) -> RunIdentity {
+    RunIdentity {
+        firmware: Some(FirmwareIdentity {
+            version: fw_version.into(),
+            image_version: format!("0x{}", fw_version.replace('.', "")),
+            pup_sha256: "ab".repeat(32),
+        }),
+        game: Some(GameIdentity {
+            title_id: "NPAA00001".into(),
+            version: "base".into(),
+            app_ver: "01.00".into(),
+        }),
+    }
+}
+
+fn observation(id: RunIdentity) -> Observation {
+    Observation {
+        outcome: ObservedOutcome::Completed,
+        memory_regions: vec![cellgov_compare::NamedMemoryRegion {
+            name: "scratch".into(),
+            addr: 0x0001_0000,
+            data: vec![0u8; 4],
+        }],
+        events: Vec::new(),
+        state_hashes: None,
+        metadata: ObservationMetadata {
+            runner: "cellgov-boot".into(),
+            steps: Some(1),
+        },
+        tty_log: Vec::new(),
+        identity: id,
+    }
+}
+
+/// The header for `id`, then one `PpuStateHash` record, so the scanner
+/// has something to agree on past the header.
+fn state_trace(id: &RunIdentity) -> Vec<u8> {
+    let mut writer = TraceWriter::new();
+    writer.record_header(&id.trace_header());
+    writer.record(&TraceRecord::PpuStateHash {
+        step: 0,
+        pc: 0x0001_0000,
+        hash: StateHash::new(7),
+    });
+    writer.take_bytes()
+}
+
+/// The same stream with no header record, the shape of a trace written
+/// before the header existed.
+fn headerless_trace() -> Vec<u8> {
+    let mut writer = TraceWriter::new();
+    writer.record(&TraceRecord::PpuStateHash {
+        step: 0,
+        pc: 0x0001_0000,
+        hash: StateHash::new(7),
+    });
+    writer.take_bytes()
+}
+
+fn run(args: &[&std::path::Path], subcommand: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_cellgov_cli"))
+        .arg(subcommand)
+        .args(args)
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn diverge_warns_when_the_two_traces_carry_different_triples() {
+    let dir = ScratchDir::new("diverge_cross");
+    let a = dir.join("a.state");
+    let b = dir.join("b.state");
+    std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
+    std::fs::write(&b, state_trace(&identity("4.93"))).unwrap();
+
+    let out = run(&[&a, &b], "diverge");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("cross-triple comparison"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("disagree on firmware"), "stderr: {stderr}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("IDENTICAL"),
+        "the streams still agree past the header; the triple is context, not a verdict"
+    );
+}
+
+#[test]
+fn diverge_is_quiet_when_the_two_traces_carry_one_triple() {
+    let dir = ScratchDir::new("diverge_same");
+    let a = dir.join("a.state");
+    let b = dir.join("b.state");
+    std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
+    std::fs::write(&b, state_trace(&identity("4.91"))).unwrap();
+
+    let stderr = String::from_utf8_lossy(&run(&[&a, &b], "diverge").stderr).into_owned();
+    assert!(!stderr.contains("cross-triple"), "stderr: {stderr}");
+}
+
+/// A zero fingerprint must not read as "no firmware".
+#[test]
+fn diverge_does_not_warn_when_one_trace_predates_the_header() {
+    let dir = ScratchDir::new("diverge_half");
+    let a = dir.join("a.state");
+    let b = dir.join("b.state");
+    std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
+    std::fs::write(&b, headerless_trace()).unwrap();
+
+    let out = run(&[&a, &b], "diverge");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(!stderr.contains("cross-triple"), "stderr: {stderr}");
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("IDENTICAL"),
+        "the header is skipped by the hash scan, so the two streams still match"
+    );
+}
+
+#[test]
+fn compare_observations_prints_both_triples_and_warns_across_them() {
+    let dir = ScratchDir::new("obs_cross");
+    let a = dir.join("a.json");
+    let b = dir.join("b.json");
+    for (path, fw) in [(&a, "4.91"), (&b, "4.93")] {
+        let text = serde_json::to_string(&observation(identity(fw))).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    let out = run(&[&a, &b], "compare-observations");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("4.91"), "stderr: {stderr}");
+    assert!(stderr.contains("4.93"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("cross-firmware comparison"),
+        "stderr: {stderr}"
+    );
+    assert!(
+        out.status.success(),
+        "differing triples alone are not a divergence"
+    );
+}
+
+#[test]
+fn compare_observations_of_one_triple_prints_it_without_a_warning() {
+    let dir = ScratchDir::new("obs_same");
+    let a = dir.join("a.json");
+    let b = dir.join("b.json");
+    for path in [&a, &b] {
+        let text = serde_json::to_string(&observation(identity("4.91"))).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    let stderr =
+        String::from_utf8_lossy(&run(&[&a, &b], "compare-observations").stderr).into_owned();
+    assert!(stderr.contains("4.91"), "stderr: {stderr}");
+    assert!(!stderr.contains("WARN"), "stderr: {stderr}");
+}
+
+/// A default identity makes no claim, so it contradicts nothing.
+#[test]
+fn compare_observations_names_an_unidentified_side_without_warning() {
+    let dir = ScratchDir::new("obs_half");
+    let a = dir.join("a.json");
+    let b = dir.join("b.json");
+    for (path, id) in [(&a, identity("4.91")), (&b, RunIdentity::default())] {
+        let text = serde_json::to_string(&observation(id)).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+
+    let stderr =
+        String::from_utf8_lossy(&run(&[&a, &b], "compare-observations").stderr).into_owned();
+    assert!(stderr.contains("4.91"), "stderr: {stderr}");
+    assert!(stderr.contains("(unidentified)"), "stderr: {stderr}");
+    assert!(!stderr.contains("WARN"), "stderr: {stderr}");
+}

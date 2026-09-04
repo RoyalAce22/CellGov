@@ -82,6 +82,7 @@ fn synthetic_divergent_pair() -> (Observation, Observation) {
             steps: None,
         },
         tty_log: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
     };
     (
         make(regions_a, "synthetic-a"),

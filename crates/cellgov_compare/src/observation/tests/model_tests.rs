@@ -1,4 +1,5 @@
-//! Observation equality sensitivity and JSON round-trips, including legacy baselines without tty_log.
+//! Observation equality sensitivity and JSON round-trips, including
+//! legacy baselines that carry neither `tty_log` nor an identity.
 
 use super::*;
 use crate::observation::event::ObservedEventKind;
@@ -59,6 +60,7 @@ fn rpcs3_style_observation_has_no_hashes_or_steps() {
             steps: None,
         },
         tty_log: Vec::new(),
+        identity: crate::identity::RunIdentity::default(),
     };
     assert!(obs.state_hashes.is_none());
     assert!(obs.metadata.steps.is_none());
@@ -84,6 +86,7 @@ fn observation_without_hashes_roundtrips() {
             steps: None,
         },
         tty_log: Vec::new(),
+        identity: crate::identity::RunIdentity::default(),
     };
     let json = serde_json::to_string(&obs).expect("serialize");
     let loaded: Observation = serde_json::from_str(&json).expect("deserialize");

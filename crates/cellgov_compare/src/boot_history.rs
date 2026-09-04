@@ -12,6 +12,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::identity::RunIdentity;
+
+/// The `changed` name a move of the identity triple is recorded under.
+const IDENTITY_FIELD: &str = "identity";
+
 /// One recorded move.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BootHistoryEntry {
@@ -24,6 +29,11 @@ pub struct BootHistoryEntry {
     /// Fields that differ from the previous entry, sorted. Never
     /// empty -- an unchanged run is not appended.
     pub changed: Vec<String>,
+    /// Which firmware and title version this measurement was taken
+    /// against. Empty on a line written before the store carried
+    /// versions.
+    #[serde(flatten)]
+    pub identity: RunIdentity,
 }
 
 impl BootHistoryEntry {
@@ -32,11 +42,15 @@ impl BootHistoryEntry {
     /// `previous` is the last entry in the file, if any. A first
     /// recording always produces an entry, with `changed` naming
     /// every field as newly recorded.
+    ///
+    /// A triple that differs from the previous line's is a move on its
+    /// own, even when every witness and the step count hold.
     pub fn new_if_changed(
         previous: Option<&Self>,
         steps: u64,
         outcome: &str,
         witnesses: BTreeMap<String, u64>,
+        identity: RunIdentity,
     ) -> Option<Self> {
         let changed = match previous {
             None => {
@@ -64,6 +78,9 @@ impl BootHistoryEntry {
                         names.push(format!("{name} (no longer emitted)"));
                     }
                 }
+                if let Some(name) = identity_move(&prev.identity, &identity) {
+                    names.push(name);
+                }
                 names.sort();
                 names
             }
@@ -76,7 +93,24 @@ impl BootHistoryEntry {
             outcome: outcome.to_string(),
             witnesses,
             changed,
+            identity,
         })
+    }
+}
+
+/// How the triple this run was taken against differs from the one the
+/// previous line names, or `None` when it does not.
+///
+/// The caller appends only when something moved, so a first triple
+/// over a pre-versioning line has to count as a move: without it the
+/// last line keeps an empty identity and the axis never moves again.
+fn identity_move(previous: &RunIdentity, current: &RunIdentity) -> Option<String> {
+    match (previous.is_empty(), current.is_empty()) {
+        (true, true) => None,
+        (true, false) => Some(format!("{IDENTITY_FIELD} (first recorded)")),
+        (false, true) => Some(format!("{IDENTITY_FIELD} (no longer recorded)")),
+        (false, false) if previous == current => None,
+        (false, false) => Some(IDENTITY_FIELD.to_string()),
     }
 }
 
@@ -117,3 +151,7 @@ pub fn parse(text: &str) -> Result<Vec<BootHistoryEntry>, BootHistoryParseError>
 pub fn render_line(entry: &BootHistoryEntry) -> Result<String, serde_json::Error> {
     Ok(serde_json::to_string(entry)? + "\n")
 }
+
+#[cfg(test)]
+#[path = "tests/boot_history_identity_tests.rs"]
+mod identity_tests;

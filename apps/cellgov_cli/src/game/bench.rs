@@ -42,6 +42,8 @@ pub struct BenchOptions<'a> {
     /// The `sys/external` directory the firmware loader reads.
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// The triple this run is measured against.
+    pub identity: &'a cellgov_compare::RunIdentity,
     /// What the child re-resolves its own composition from.
     pub selection: SelectionArgs<'a>,
     pub strict_reserved: bool,
@@ -164,6 +166,7 @@ pub fn bench_boot(
         control_flags1,
         firmware_dir: opts.firmware_dir,
         composed_mounts: opts.composed_mounts,
+        identity: opts.identity,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,
         dump_skip: 0,

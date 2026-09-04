@@ -74,6 +74,9 @@ pub(in crate::game) struct PrepareOptions<'a> {
     pub firmware_dir: Option<&'a str>,
     /// Store-composed mounts, registered before the manifest's own.
     pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// Which firmware and title version the store composed for this
+    /// run; written as the trace stream's header record.
+    pub identity: &'a cellgov_compare::RunIdentity,
     pub strict_reserved: bool,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,

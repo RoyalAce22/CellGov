@@ -39,9 +39,30 @@ impl TraceWriter {
     }
 
     /// Append `record` if its level passes the filter; returns whether it was written.
+    ///
+    /// Refuses [`TraceRecord::RunIdentity`], which enters the stream only
+    /// through [`Self::record_header`].
     pub fn record(&mut self, record: &TraceRecord) -> bool {
+        if matches!(record, TraceRecord::RunIdentity { .. }) {
+            return false;
+        }
         let level_bit = 1u8 << (record.level() as u8);
         if self.enabled_mask & level_bit == 0 {
+            return false;
+        }
+        record.encode(&mut self.buf);
+        self.record_count += 1;
+        true
+    }
+
+    /// Append the stream's [`TraceRecord::RunIdentity`] header whatever
+    /// the level filter says; returns whether it was written.
+    ///
+    /// Returns `false` and writes nothing when:
+    /// - `record` is not [`TraceRecord::RunIdentity`];
+    /// - the writer already holds bytes.
+    pub fn record_header(&mut self, record: &TraceRecord) -> bool {
+        if !matches!(record, TraceRecord::RunIdentity { .. }) || !self.buf.is_empty() {
             return false;
         }
         record.encode(&mut self.buf);
@@ -86,3 +107,7 @@ impl TraceWriter {
 #[cfg(test)]
 #[path = "tests/writer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/writer_header_tests.rs"]
+mod header_tests;

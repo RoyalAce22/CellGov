@@ -52,6 +52,8 @@ pub fn observe(
         },
         // Scenario runner has no LV2 host with a TTY surface.
         tty_log: Vec::new(),
+        // A synthetic scenario composes no firmware and no title.
+        identity: crate::identity::RunIdentity::default(),
     })
 }
 

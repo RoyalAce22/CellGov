@@ -118,6 +118,7 @@ fn compare_against_baseline(
     let baseline = cellgov_compare::baseline::load(std::path::Path::new(path))
         .unwrap_or_else(|e| die(&format!("failed to load baseline from {path}: {e:?}")));
 
+    report_identity(&baseline, path, &obs, name);
     let result = compare(&baseline, &obs, mode);
     match format {
         OutputFormat::Human => {
@@ -136,6 +137,13 @@ fn compare_against_baseline(
     }
     if result.classification == Classification::Divergence {
         std::process::exit(1);
+    }
+}
+
+/// Name both sides' triples on stderr, and warn when they disagree.
+fn report_identity(a: &Observation, a_label: &str, b: &Observation, b_label: &str) {
+    for line in cellgov_compare::identity_report(&a.identity, a_label, &b.identity, b_label) {
+        eprintln!("{line}");
     }
 }
 
@@ -233,9 +241,13 @@ fn run_manifest_compare(
     let obs = require_determinism(&factory, test_name, &regions);
 
     if let Some(dir) = observations_dir {
-        let baselines = load_observations_from_dir(&dir);
+        let (baseline_paths, baselines): (Vec<std::path::PathBuf>, Vec<Observation>) =
+            load_observations_with_paths(&dir).into_iter().unzip();
         if baselines.is_empty() {
             die(&format!("no observation .json files found in {dir}"));
+        }
+        for (path, baseline) in baseline_paths.iter().zip(&baselines) {
+            report_identity(baseline, &path.display().to_string(), &obs, test_name);
         }
         let result = compare_multi(&baselines, &obs, mode);
         match format {
@@ -261,6 +273,7 @@ fn run_manifest_compare(
         let baseline = cellgov_compare::baseline::load(std::path::Path::new(&path))
             .unwrap_or_else(|e| die(&format!("failed to load baseline from {path}: {e:?}")));
 
+        report_identity(&baseline, &path, &obs, test_name);
         let result = compare(&baseline, &obs, mode);
         match format {
             OutputFormat::Human => {
@@ -320,6 +333,15 @@ fn run_manifest_compare(
 /// Load every `.json` observation in a directory, sorted by name.
 /// Read failures die via [`die`].
 pub(crate) fn load_observations_from_dir(dir: &str) -> Vec<Observation> {
+    load_observations_with_paths(dir)
+        .into_iter()
+        .map(|(_, obs)| obs)
+        .collect()
+}
+
+/// [`load_observations_from_dir`] with the file each observation was
+/// read from, so a report can name the file.
+fn load_observations_with_paths(dir: &str) -> Vec<(std::path::PathBuf, Observation)> {
     let rd = std::fs::read_dir(dir)
         .unwrap_or_else(|e| die(&format!("failed to read observations directory {dir}: {e}")));
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
@@ -337,14 +359,15 @@ pub(crate) fn load_observations_from_dir(dir: &str) -> Vec<Observation> {
     entries.sort();
 
     entries
-        .iter()
+        .into_iter()
         .map(|path| {
-            cellgov_compare::baseline::load(path).unwrap_or_else(|e| {
+            let obs = cellgov_compare::baseline::load(&path).unwrap_or_else(|e| {
                 die(&format!(
                     "failed to load observation {}: {e:?}",
                     path.display()
                 ))
-            })
+            });
+            (path, obs)
         })
         .collect()
 }
@@ -366,6 +389,11 @@ pub(crate) fn run_compare_observations(args: &[String]) {
         serde_json::from_slice(&b_bytes).unwrap_or_else(|e| die(&format!("parse {b_path}: {e}")));
 
     let result = cellgov_compare::compare_observations(&a, &b);
+    // Before the verdict, so a reader who stops at the first line still
+    // knows whether the store composed the two sides the same way.
+    for line in result.identity_report(a_path, b_path) {
+        eprintln!("{line}");
+    }
     match format {
         super::args::OutputFormat::Human => {
             print!(
@@ -425,6 +453,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
     use cellgov_compare::{diverge, DivergeField, DivergeReport, TraceDecodeError};
     let a_bytes = load_file_or_die(a_path);
     let b_bytes = load_file_or_die(b_path);
+    report_trace_identity(&a_bytes, a_path, &b_bytes, b_path);
     match diverge(&a_bytes, &b_bytes) {
         DivergeReport::Identical { count } => {
             println!("IDENTICAL  {count} PpuStateHash records matched");
@@ -475,6 +504,17 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
             );
             std::process::exit(3);
         }
+    }
+}
+
+fn report_trace_identity(a: &[u8], a_path: &str, b: &[u8], b_path: &str) {
+    for line in cellgov_compare::cross_trace_identity_warning(
+        cellgov_compare::trace_identity(a),
+        a_path,
+        cellgov_compare::trace_identity(b),
+        b_path,
+    ) {
+        eprintln!("{line}");
     }
 }
 

@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::identity::{identity_report, RunIdentity};
 use crate::observation::{
     NamedMemoryRegion, Observation, ObservedEvent, ObservedHashes, ObservedOutcome,
 };
@@ -39,6 +40,12 @@ pub struct ObservationCompareResult {
     pub a_runner: String,
     /// Runner name from `b.metadata.runner`.
     pub b_runner: String,
+    /// Identity triple from `a.identity`.
+    #[serde(default, skip_serializing_if = "RunIdentity::is_empty")]
+    pub a_identity: RunIdentity,
+    /// Identity triple from `b.identity`.
+    #[serde(default, skip_serializing_if = "RunIdentity::is_empty")]
+    pub b_identity: RunIdentity,
 }
 
 /// Aggregate of per-region pair outcomes plus the raw region counts.
@@ -351,7 +358,8 @@ impl ObservationCompareResult {
     /// outcome mismatch, any region-side mismatch, an event-sequence
     /// mismatch, a same-runner step mismatch, or a same-runner
     /// state-hash mismatch. Cross-runner step / state-hash mismatches
-    /// are notes, not divergences.
+    /// are notes, not divergences. An identity-triple mismatch is also
+    /// a note; see [`Self::identity_report`].
     pub fn has_divergence(&self) -> bool {
         !self.outcome_match
             || self.region_compare.is_count_mismatch()
@@ -381,6 +389,15 @@ impl ObservationCompareResult {
         } else {
             None
         }
+    }
+
+    /// Both sides' triples, then the cross-triple warning when they
+    /// disagree.
+    ///
+    /// Pass labels that tell the two sides apart, such as the two file
+    /// paths: the runner names are often the same string.
+    pub fn identity_report(&self, a_label: &str, b_label: &str) -> Vec<String> {
+        identity_report(&self.a_identity, a_label, &self.b_identity, b_label)
     }
 }
 
@@ -424,6 +441,8 @@ pub fn compare_observations(a: &Observation, b: &Observation) -> ObservationComp
         step_compare,
         a_runner: a.metadata.runner.clone(),
         b_runner: b.metadata.runner.clone(),
+        a_identity: a.identity.clone(),
+        b_identity: b.identity.clone(),
     }
 }
 
@@ -734,3 +753,7 @@ fn steps_pair(sc: &StepCompare) -> (Option<usize>, Option<usize>) {
 #[cfg(test)]
 #[path = "tests/observation_compare_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/observation_compare_identity_tests.rs"]
+mod identity_tests;

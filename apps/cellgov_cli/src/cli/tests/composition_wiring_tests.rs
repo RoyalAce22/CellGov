@@ -22,6 +22,7 @@ fn managed(entry_dir: &str) -> BootComposition {
         mounts: Vec::new(),
         eboot_dirs: Vec::new(),
         understated_firmware: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
     }
 }
 

@@ -16,6 +16,7 @@ pub mod classify;
 pub mod compare;
 pub mod diverge;
 pub mod format;
+pub mod identity;
 pub mod manifest;
 pub mod observation;
 pub mod observation_compare;
@@ -43,6 +44,11 @@ pub use compare::{
 };
 pub use diverge::{diverge, zoom_lookup, DivergeField, DivergeReport, RegDiff, ZoomLookup};
 pub use format::format_with_commas;
+pub use identity::{
+    cross_identity_warning, cross_trace_identity_warning, identity_report, trace_identity,
+    FirmwareIdentity, GameIdentity, RunIdentity, SentinelParseError, TraceIdentity,
+    RUN_IDENTITY_SENTINEL,
+};
 pub use observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
     ObservedHashes, ObservedOutcome, CODE_REGION_NAME,

@@ -9,8 +9,10 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use cellgov_compare::RunIdentity;
 use cellgov_install::store::TitleTree;
 
+use super::identity::{run_identity, FirmwareIdentityError};
 use super::inventory::{dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry};
 use super::select::{
     select_firmware, select_game_version, FirmwareChoice, FirmwareSelectError, GameVersion,
@@ -51,6 +53,11 @@ pub(crate) enum ComposeError {
     /// `--game-ver` did not resolve to one installed version.
     #[error("{0}")]
     GameVersion(#[from] GameVersionSelectError),
+    /// The selected firmware entry's identity could not be read, so
+    /// the run cannot name the PUP it tests against. Boxed: its
+    /// mismatch variant carries two version/digest pairs.
+    #[error("reading the selected firmware's identity: {0}")]
+    FirmwareIdentity(#[from] Box<FirmwareIdentityError>),
     /// A title with no store entry could not derive its executable
     /// directory from the VFS root. Boxed: its not-found variant
     /// carries four probe lists.
@@ -190,6 +197,8 @@ pub(crate) struct BootComposition {
     /// Updates whose declared minimum firmware the selection does not
     /// meet. The boot reports these and continues.
     pub understated_firmware: Vec<UnderstatedFirmware>,
+    /// The triple every machine artifact this boot writes embeds.
+    pub identity: RunIdentity,
 }
 
 /// An update whose declared minimum firmware the selection does not
@@ -296,12 +305,14 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
         });
     }
 
+    let identity = run_identity(&firmware, &game).map_err(Box::new)?;
     Ok(BootComposition {
         firmware,
         game,
         mounts,
         eboot_dirs,
         understated_firmware,
+        identity,
     })
 }
 

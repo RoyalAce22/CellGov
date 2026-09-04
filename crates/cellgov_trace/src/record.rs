@@ -244,10 +244,31 @@ impl DecodeError {
     }
 }
 
+/// Version of the binary trace format, carried by the
+/// [`TraceRecord::RunIdentity`] header record.
+///
+/// A stream whose first record is not `RunIdentity` is version 1 and
+/// carries no run identity.
+pub const TRACE_FORMAT_VERSION: u32 = 2;
+
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TraceRecord {
+    /// Header record: the format version and a fingerprint of the
+    /// identity triple the run was composed from.
+    ///
+    /// The header leads the stream and never repeats.
+    RunIdentity {
+        /// [`TRACE_FORMAT_VERSION`] at the time the stream was written.
+        format_version: u32,
+        /// Fingerprint of the firmware half; 0 when the run named no
+        /// managed firmware.
+        firmware: u64,
+        /// Fingerprint of the game half; 0 when the run named no store
+        /// entry.
+        game: u64,
+    },
     /// Scheduler selected a unit and granted it a budget.
     UnitScheduled {
         /// Unit that was scheduled.
@@ -428,11 +449,13 @@ const TAG_HOST_INVARIANT_BREAK: u8 = 0x09;
 const TAG_SYSCALL_ENTERED: u8 = 0x0a;
 const TAG_RESERVED_REGION_READ: u8 = 0x0b;
 const TAG_SYSCALL_RETURNED: u8 = 0x0c;
+const TAG_RUN_IDENTITY: u8 = 0x0d;
 
 impl TraceRecord {
     /// Tag byte that leads this record on the wire.
     pub fn tag(&self) -> u8 {
         match self {
+            TraceRecord::RunIdentity { .. } => TAG_RUN_IDENTITY,
             TraceRecord::UnitScheduled { .. } => TAG_UNIT_SCHEDULED,
             TraceRecord::StepCompleted { .. } => TAG_STEP_COMPLETED,
             TraceRecord::CommitApplied { .. } => TAG_COMMIT_APPLIED,
@@ -466,6 +489,7 @@ impl TraceRecord {
             TAG_SYSCALL_ENTERED => 1 + 8 + 8 + 8 * 8 + 1,
             TAG_RESERVED_REGION_READ => 1 + 8 * 3 + 4 + 4,
             TAG_SYSCALL_RETURNED => 1 + 8 * 3,
+            TAG_RUN_IDENTITY => 1 + 4 + 8 + 8,
             _ => return None,
         })
     }
@@ -473,6 +497,7 @@ impl TraceRecord {
     /// Trace level this record belongs to.
     pub fn level(&self) -> TraceLevel {
         match self {
+            TraceRecord::RunIdentity { .. } => TraceLevel::Scheduling,
             TraceRecord::UnitScheduled { .. }
             | TraceRecord::StepCompleted { .. }
             | TraceRecord::UnitBlocked { .. }
@@ -494,6 +519,15 @@ impl TraceRecord {
         let start = buf.len();
         buf.push(self.tag());
         match self {
+            TraceRecord::RunIdentity {
+                format_version,
+                firmware,
+                game,
+            } => {
+                write_u32(buf, *format_version);
+                write_u64(buf, *firmware);
+                write_u64(buf, *game);
+            }
             TraceRecord::UnitScheduled {
                 unit,
                 granted_budget,
@@ -646,6 +680,16 @@ impl TraceRecord {
             return Err(DecodeError::Truncated);
         }
         let record = match tag {
+            TAG_RUN_IDENTITY => {
+                let format_version = read_u32(bytes, &mut pos)?;
+                let firmware = read_u64(bytes, &mut pos)?;
+                let game = read_u64(bytes, &mut pos)?;
+                TraceRecord::RunIdentity {
+                    format_version,
+                    firmware,
+                    game,
+                }
+            }
             TAG_UNIT_SCHEDULED => {
                 let unit = UnitId::new(read_u64(bytes, &mut pos)?);
                 let granted_budget = Budget::new(read_u64(bytes, &mut pos)?);
@@ -842,3 +886,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/record_len_tests.rs"]
 mod len_tests;
+
+#[cfg(test)]
+#[path = "tests/record_identity_tests.rs"]
+mod identity_tests;

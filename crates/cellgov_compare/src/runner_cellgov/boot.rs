@@ -1,6 +1,7 @@
 //! Boot adapter: converts a finished boot run into the shared
 //! [`Observation`] schema.
 
+use crate::identity::RunIdentity;
 use crate::observation::{Observation, ObservationMetadata, ObservedOutcome};
 
 use super::region::{extract_regions, RegionDescriptor};
@@ -98,6 +99,7 @@ pub fn observe_from_boot(
     steps_taken: usize,
     regions: &[RegionDescriptor],
     tty_log: &[u8],
+    identity: RunIdentity,
 ) -> Observation {
     let observed_outcome = match outcome {
         BootOutcome::ProcessExit => ObservedOutcome::ProcessExit,
@@ -118,9 +120,14 @@ pub fn observe_from_boot(
             steps: Some(steps_taken),
         },
         tty_log: tty_log.to_vec(),
+        identity,
     }
 }
 
 #[cfg(test)]
 #[path = "tests/boot_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/boot_identity_tests.rs"]
+mod identity_tests;

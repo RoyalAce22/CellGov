@@ -20,6 +20,7 @@ fn obs(
             steps,
         },
         tty_log: Vec::new(),
+        identity: crate::identity::RunIdentity::default(),
     }
 }
 

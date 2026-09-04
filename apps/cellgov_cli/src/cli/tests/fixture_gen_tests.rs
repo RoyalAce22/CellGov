@@ -16,6 +16,7 @@ fn obs(outcome: ObservedOutcome, regions: Vec<NamedMemoryRegion>) -> Observation
             steps: Some(1),
         },
         tty_log: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
     }
 }
 
@@ -407,6 +408,8 @@ fn classify_all_panics_on_addr_mismatch_in_debug() {
         step_compare: StepCompare::NoStepInfo,
         a_runner: "cellgov".to_string(),
         b_runner: "rpcs3".to_string(),
+        a_identity: cellgov_compare::RunIdentity::default(),
+        b_identity: cellgov_compare::RunIdentity::default(),
     };
     let _ = classify_all(
         &result,

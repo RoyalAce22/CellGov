@@ -38,7 +38,22 @@ impl SyntheticStore {
         );
         self.write_record(&["firmware"], &format!("{version}.install.toml"), &record);
         if tree {
-            std::fs::create_dir_all(self.firmware_dev_flash(version)).unwrap();
+            let dev_flash = self.firmware_dev_flash(version);
+            std::fs::create_dir_all(&dev_flash).unwrap();
+            std::fs::write(
+                dev_flash.join("firmware.toml"),
+                format!(
+                    "format_version = {}\n\n\
+                     [firmware]\n\
+                     image_version = \"{}\"\n\
+                     version = \"{version}\"\n\
+                     pup_sha256 = \"{}\"\n",
+                    cellgov_install::manifest::SUPPORTED_FORMAT_VERSION,
+                    image_version(version),
+                    digest('f'),
+                ),
+            )
+            .unwrap();
         }
         self
     }
@@ -166,4 +181,17 @@ impl Drop for SyntheticStore {
 /// tell which record a rendered digest came from.
 fn digest(fill: char) -> String {
     std::iter::repeat_n(fill, 64).collect()
+}
+
+/// The `image_version` the synthetic store's `firmware.toml` declares
+/// for one firmware version. Distinct per version, so a test can tell
+/// two entries apart.
+pub(super) fn image_version(version: &str) -> String {
+    format!("0x{}", version.replace('.', ""))
+}
+
+/// The PUP digest every synthetic firmware entry records, and the one
+/// its `firmware.toml` repeats.
+pub(super) fn firmware_pup_sha256() -> String {
+    digest('f')
 }

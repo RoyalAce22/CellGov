@@ -32,6 +32,16 @@ fn dump_trace(result: &ScenarioResult) {
             rec.unwrap_or_else(|e| die(&format!("trace decode failed at record index {i}: {e:?}")));
         count = i + 1;
         match rec {
+            TraceRecord::RunIdentity {
+                format_version,
+                firmware,
+                game,
+            } => {
+                println!(
+                    "{i:4}  RunIdentity        format_version={format_version} \
+                     firmware=0x{firmware:016x} game=0x{game:016x}"
+                );
+            }
             TraceRecord::UnitScheduled {
                 unit,
                 granted_budget,

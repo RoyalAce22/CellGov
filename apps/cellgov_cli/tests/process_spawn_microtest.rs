@@ -328,7 +328,14 @@ fn a_child_space_region_captures_the_child_image_not_the_parent() {
         header_at("parent_hdr", AddressSpaceId::BOOT),
         header_at("child_hdr", AddressSpaceId::new(1)),
     ];
-    let obs = observe_from_boot(&spaces, BootOutcome::ProcessExit, 0, &regions, &[]);
+    let obs = observe_from_boot(
+        &spaces,
+        BootOutcome::ProcessExit,
+        0,
+        &regions,
+        &[],
+        cellgov_compare::RunIdentity::default(),
+    );
     assert_eq!(&obs.memory_regions[0].data[..], &parent_elf[..0x40]);
     assert_eq!(&obs.memory_regions[1].data[..], &child_elf[..0x40]);
 }

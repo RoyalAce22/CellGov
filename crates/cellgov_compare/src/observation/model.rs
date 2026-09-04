@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::identity::RunIdentity;
 use crate::observation::event::ObservedEvent;
 use crate::observation::hashes::ObservedHashes;
 use crate::observation::memory::NamedMemoryRegion;
@@ -39,8 +40,16 @@ pub struct Observation {
     /// TTY output was captured.
     #[serde(default)]
     pub tty_log: Vec<u8>,
+    /// Which firmware and title version the run composed; see
+    /// [`RunIdentity`] for when it is empty.
+    #[serde(flatten)]
+    pub identity: RunIdentity,
 }
 
 #[cfg(test)]
 #[path = "tests/model_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/model_identity_tests.rs"]
+mod identity_tests;

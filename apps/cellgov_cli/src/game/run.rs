@@ -31,6 +31,8 @@ pub struct RunGameOptions<'a> {
     pub profile: bool,
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// The triple every artifact this run writes embeds.
+    pub identity: &'a cellgov_compare::RunIdentity,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
     pub patch_bytes: &'a [(u64, u8)],
@@ -94,6 +96,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         profile,
         firmware_dir,
         composed_mounts,
+        identity,
         dump_at_pc,
         dump_skip,
         patch_bytes,
@@ -134,6 +137,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         control_flags1,
         firmware_dir,
         composed_mounts,
+        identity,
         strict_reserved,
         dump_at_pc,
         dump_skip,
@@ -334,15 +338,16 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             .address_spaces()
             .map(|(id, mem)| (id, mem.clone()))
             .collect();
-        save_boot_observation(
+        save_boot_observation(observation::ObservationInputs {
             path,
-            &elf_data,
-            &final_spaces,
-            boot_outcome,
+            elf_data: &elf_data,
+            final_spaces: &final_spaces,
+            outcome: boot_outcome,
             steps,
-            observation_regions,
-            &rt.lv2_host().observability().tty_log,
-        )
+            manifest_regions: observation_regions,
+            tty_log: &rt.lv2_host().observability().tty_log,
+            identity,
+        })
         .map_err(RunError::SaveObservation)?;
     }
     if let Some(path) = save_boot_summary {
@@ -354,6 +359,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             steps,
             step_budget,
             host_invariant_breaks,
+            identity.clone(),
         )
         .map_err(RunError::SaveBootSummary)?;
     }

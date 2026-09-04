@@ -127,6 +127,26 @@ pub enum ObservationSaveError {
     },
 }
 
+/// What one boot-checkpoint observation is built from.
+pub(super) struct ObservationInputs<'a> {
+    /// Where the JSON is written.
+    pub path: &'a str,
+    /// The title image, read for its PT_LOAD segments when the caller
+    /// named no regions.
+    pub elf_data: &'a [u8],
+    /// End-of-run memory, one snapshot per address space the run
+    /// created.
+    pub final_spaces: &'a cellgov_compare::SpaceSnapshots,
+    pub outcome: cellgov_compare::BootOutcome,
+    pub steps: usize,
+    /// Regions from a `--observation-manifest` the caller parsed.
+    pub manifest_regions: Option<&'a [cellgov_compare::RegionDescriptor]>,
+    /// Captured `sys_tty_write` byte stream.
+    pub tty_log: &'a [u8],
+    /// The triple this run was composed from.
+    pub identity: &'a cellgov_compare::RunIdentity,
+}
+
 /// Build a boot-checkpoint observation and write it as JSON.
 ///
 /// Regions default to one per PT_LOAD segment, named
@@ -140,14 +160,18 @@ pub enum ObservationSaveError {
 /// failure, or when a manifest region names an address space the run
 /// never created.
 pub(super) fn save_boot_observation(
-    path: &str,
-    elf_data: &[u8],
-    final_spaces: &cellgov_compare::SpaceSnapshots,
-    outcome: cellgov_compare::BootOutcome,
-    steps: usize,
-    manifest_regions: Option<&[cellgov_compare::RegionDescriptor]>,
-    tty_log: &[u8],
+    inputs: ObservationInputs<'_>,
 ) -> Result<(), ObservationSaveError> {
+    let ObservationInputs {
+        path,
+        elf_data,
+        final_spaces,
+        outcome,
+        steps,
+        manifest_regions,
+        tty_log,
+        identity,
+    } = inputs;
     let regions: Vec<cellgov_compare::RegionDescriptor> = match manifest_regions {
         Some(named) => named.to_vec(),
         None => {
@@ -181,8 +205,14 @@ pub(super) fn save_boot_observation(
             present: final_spaces.keys().map(|s| s.raw()).collect(),
         });
     }
-    let observation =
-        cellgov_compare::observe_from_boot(final_spaces, outcome, steps, &regions, tty_log);
+    let observation = cellgov_compare::observe_from_boot(
+        final_spaces,
+        outcome,
+        steps,
+        &regions,
+        tty_log,
+        identity.clone(),
+    );
     // Pretty-print matches `rpcs3_to_observation`'s shape so the two
     // observation files diff cleanly under line-diff tools.
     let file =
@@ -240,8 +270,9 @@ pub(super) fn save_boot_summary_json(
     steps: usize,
     step_budget: cellgov_time::Budget,
     host_invariant_breaks: u64,
+    identity: cellgov_compare::RunIdentity,
 ) -> Result<(), ObservationSaveError> {
-    let summary = cellgov_compare::BootSummary::new_with_breaks(
+    let mut summary = cellgov_compare::BootSummary::new_with_breaks(
         checkpoint_to_kind(title.checkpoint_trigger()),
         outcome,
         steps as u64,
@@ -249,6 +280,7 @@ pub(super) fn save_boot_summary_json(
         host_invariant_breaks,
     )
     .map_err(ObservationSaveError::InvalidBootSummary)?;
+    summary.identity = identity;
     let file =
         std::fs::File::create(path).map_err(|source| ObservationSaveError::CreateOutput {
             path: path.to_string(),

@@ -7,10 +7,13 @@
 //!   to one choice or one refusal.
 //! - [`compose`] builds the ordered host roots the mount table and the
 //!   EBOOT probe use.
+//! - [`identity`] names the choice in the form every machine artifact
+//!   the boot writes embeds.
 //! - [`banner`] prints the choice before any other output.
 
 pub(crate) mod banner;
 pub(crate) mod compose;
+pub(crate) mod identity;
 pub(crate) mod inventory;
 pub(crate) mod select;
 

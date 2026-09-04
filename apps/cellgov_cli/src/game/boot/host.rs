@@ -109,7 +109,12 @@ pub(super) fn build_runtime(
     verified_firmware: Option<&VerifiedFirmware>,
     host_link: HostLinkMaps,
 ) -> (Runtime, AuthorityIdSource) {
-    let mut rt = Runtime::new(mem, params.step_budget, params.adjusted_max_steps);
+    // The header leads the stream, so the writer takes it before the
+    // runtime that appends to it exists.
+    let mut trace = cellgov_trace::TraceWriter::new();
+    trace.record_header(&opts.identity.trace_header());
+    let mut rt =
+        Runtime::with_trace_writer(mem, params.step_budget, params.adjusted_max_steps, trace);
     rt.set_mode(params.mode);
     rt.lv2_host_mut().set_mem_alloc_base(alloc_base);
     // Bind the manifest-verified PUP identity so the boot's state hash

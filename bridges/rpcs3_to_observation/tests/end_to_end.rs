@@ -117,6 +117,7 @@ size = "0x8"
             steps: Some(1234),
         },
         tty_log: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
     };
     let cellgov_obs_path = work.join("cellgov.json");
     fs::write(
@@ -203,6 +204,7 @@ size = "0x4"
             steps: Some(1),
         },
         tty_log: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
     };
     let cellgov_obs_path = work.join("cellgov.json");
     fs::write(

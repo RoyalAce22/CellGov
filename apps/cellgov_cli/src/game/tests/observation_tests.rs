@@ -85,15 +85,16 @@ fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
     let out = temp_path("missing_space");
     let spaces = snapshots_with(&[(0, cellgov_mem::GuestMemory::new(0x1000))]);
 
-    let err = save_boot_observation(
-        out.to_str().unwrap(),
-        &[],
-        &spaces,
-        cellgov_compare::BootOutcome::ProcessExit,
-        0,
-        Some(&child_result_region()),
-        &[],
-    )
+    let err = save_boot_observation(ObservationInputs {
+        path: out.to_str().unwrap(),
+        elf_data: &[],
+        final_spaces: &spaces,
+        outcome: cellgov_compare::BootOutcome::ProcessExit,
+        steps: 0,
+        manifest_regions: Some(&child_result_region()),
+        tty_log: &[],
+        identity: &cellgov_compare::RunIdentity::default(),
+    })
     .expect_err("space 1 was never created");
     match err {
         ObservationSaveError::RegionSpaceMissing {
@@ -124,15 +125,16 @@ fn a_region_in_a_created_child_space_captures_that_space() {
         .expect("range inside the child region");
     let spaces = snapshots_with(&[(0, cellgov_mem::GuestMemory::new(0x1000)), (1, child)]);
 
-    save_boot_observation(
-        out.to_str().unwrap(),
-        &[],
-        &spaces,
-        cellgov_compare::BootOutcome::ProcessExit,
-        0,
-        Some(&child_result_region()),
-        &[],
-    )
+    save_boot_observation(ObservationInputs {
+        path: out.to_str().unwrap(),
+        elf_data: &[],
+        final_spaces: &spaces,
+        outcome: cellgov_compare::BootOutcome::ProcessExit,
+        steps: 0,
+        manifest_regions: Some(&child_result_region()),
+        tty_log: &[],
+        identity: &cellgov_compare::RunIdentity::default(),
+    })
     .expect("space 1 exists");
     let text = std::fs::read_to_string(&out).expect("read observation");
     let obs: cellgov_compare::Observation = serde_json::from_str(&text).expect("parses");

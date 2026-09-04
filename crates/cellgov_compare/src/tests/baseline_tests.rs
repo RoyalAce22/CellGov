@@ -117,6 +117,7 @@ fn rpcs3_tty_baseline_roundtrip() {
             steps: None,
         },
         tty_log: Vec::new(),
+        identity: crate::identity::RunIdentity::default(),
     };
 
     let dir = TempDir::new("rpcs3_baseline_test");

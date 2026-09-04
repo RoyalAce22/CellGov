@@ -619,6 +619,10 @@ fn bench_options<'a>(
         max_steps: DEFAULT_BENCH_MAX_STEPS as usize,
         firmware_dir: None,
         composed_mounts: &[],
+        identity: &cellgov_compare::RunIdentity {
+            firmware: None,
+            game: None,
+        },
         selection: SelectionArgs::default(),
         strict_reserved: false,
         checkpoint_override: None,

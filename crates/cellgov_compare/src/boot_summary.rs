@@ -6,6 +6,7 @@ use cellgov_mem::GuestAddr;
 use cellgov_time::Budget;
 use serde::{Deserialize, Serialize};
 
+use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::runner_cellgov::BootOutcome;
 use crate::witnesses::WitnessSet;
 
@@ -40,6 +41,11 @@ pub struct BootSummary {
     /// name the boot path emits. Empty until the title is recorded.
     #[serde(default, skip_serializing_if = "WitnessSet::is_empty")]
     pub witnesses: WitnessSet,
+    /// Which firmware and title version the measurement was taken
+    /// against. Empty in a summary recorded before the store carried
+    /// versions.
+    #[serde(flatten)]
+    pub identity: RunIdentity,
 }
 
 impl BootSummary {
@@ -79,6 +85,7 @@ impl BootSummary {
             budget,
             host_invariant_breaks,
             witnesses: WitnessSet::new(),
+            identity: RunIdentity::default(),
         };
         s.validate()?;
         Ok(s)
@@ -160,6 +167,10 @@ struct BootSummaryShadow {
     host_invariant_breaks: u64,
     #[serde(default)]
     witnesses: WitnessSet,
+    #[serde(default)]
+    firmware: Option<FirmwareIdentity>,
+    #[serde(default)]
+    game: Option<GameIdentity>,
 }
 
 impl TryFrom<BootSummaryShadow> for BootSummary {
@@ -174,6 +185,10 @@ impl TryFrom<BootSummaryShadow> for BootSummary {
             s.host_invariant_breaks,
         )?;
         summary.witnesses = s.witnesses;
+        summary.identity = RunIdentity {
+            firmware: s.firmware,
+            game: s.game,
+        };
         Ok(summary)
     }
 }
@@ -250,3 +265,7 @@ impl CheckpointKind {
 #[cfg(test)]
 #[path = "tests/boot_summary_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/boot_summary_identity_tests.rs"]
+mod identity_tests;

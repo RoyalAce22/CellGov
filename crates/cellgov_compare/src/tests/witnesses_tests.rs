@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use crate::boot_history::{parse, render_line, BootHistoryEntry};
+use crate::identity::RunIdentity;
 use crate::witness_parse::{
     diagnostic_lines, known_witness_names, line_of, parse_witness_lines, tracked_line_prefixes,
     ParsedWitnesses,
@@ -333,12 +334,24 @@ fn a_malformed_value_is_an_error_not_a_zero() {
 
 #[test]
 fn history_appends_nothing_when_nothing_moved() {
-    let first =
-        BootHistoryEntry::new_if_changed(None, 100, "ProcessExit", obs(&[("ldarx", 1)])).unwrap();
+    let first = BootHistoryEntry::new_if_changed(
+        None,
+        100,
+        "ProcessExit",
+        obs(&[("ldarx", 1)]),
+        RunIdentity::default(),
+    )
+    .unwrap();
     assert!(first.changed.contains(&"steps".to_string()));
     assert!(
-        BootHistoryEntry::new_if_changed(Some(&first), 100, "ProcessExit", obs(&[("ldarx", 1)]))
-            .is_none(),
+        BootHistoryEntry::new_if_changed(
+            Some(&first),
+            100,
+            "ProcessExit",
+            obs(&[("ldarx", 1)]),
+            RunIdentity::default(),
+        )
+        .is_none(),
         "an identical run is not a move"
     );
 }
@@ -350,6 +363,7 @@ fn history_names_exactly_what_moved() {
         100,
         "ProcessExit",
         obs(&[("ldarx", 1), ("dcbz", 2)]),
+        RunIdentity::default(),
     )
     .unwrap();
     let second = BootHistoryEntry::new_if_changed(
@@ -357,6 +371,7 @@ fn history_names_exactly_what_moved() {
         101,
         "ProcessExit",
         obs(&[("ldarx", 1), ("dcbz", 5)]),
+        RunIdentity::default(),
     )
     .expect("steps and dcbz moved");
     assert_eq!(
@@ -367,10 +382,22 @@ fn history_names_exactly_what_moved() {
 
 #[test]
 fn history_flags_a_witness_that_stopped_being_emitted() {
-    let first =
-        BootHistoryEntry::new_if_changed(None, 1, "ProcessExit", obs(&[("gone", 1)])).unwrap();
-    let second = BootHistoryEntry::new_if_changed(Some(&first), 1, "ProcessExit", obs(&[]))
-        .expect("losing a witness is a move");
+    let first = BootHistoryEntry::new_if_changed(
+        None,
+        1,
+        "ProcessExit",
+        obs(&[("gone", 1)]),
+        RunIdentity::default(),
+    )
+    .unwrap();
+    let second = BootHistoryEntry::new_if_changed(
+        Some(&first),
+        1,
+        "ProcessExit",
+        obs(&[]),
+        RunIdentity::default(),
+    )
+    .expect("losing a witness is a move");
     assert!(second
         .changed
         .iter()
@@ -379,7 +406,14 @@ fn history_flags_a_witness_that_stopped_being_emitted() {
 
 #[test]
 fn history_lines_round_trip() {
-    let e = BootHistoryEntry::new_if_changed(None, 7, "MaxSteps", obs(&[("a", 1)])).unwrap();
+    let e = BootHistoryEntry::new_if_changed(
+        None,
+        7,
+        "MaxSteps",
+        obs(&[("a", 1)]),
+        RunIdentity::default(),
+    )
+    .unwrap();
     let line = render_line(&e).unwrap();
     assert!(line.ends_with('\n'), "one entry per line");
     assert_eq!(parse(&line).unwrap(), vec![e]);
@@ -388,7 +422,14 @@ fn history_lines_round_trip() {
 #[test]
 fn history_parse_names_the_bad_line() {
     let good = render_line(
-        &BootHistoryEntry::new_if_changed(None, 1, "ProcessExit", obs(&[("a", 1)])).unwrap(),
+        &BootHistoryEntry::new_if_changed(
+            None,
+            1,
+            "ProcessExit",
+            obs(&[("a", 1)]),
+            RunIdentity::default(),
+        )
+        .unwrap(),
     )
     .unwrap();
     let err = parse(&format!("{good}not json\n")).expect_err("line 2 is not JSON");

@@ -443,6 +443,8 @@ fn build_observation(
         // The regions above carry the payload; the surrounding TTY
         // stream is left out.
         tty_log: Vec::new(),
+        // A capture carries no firmware or title version.
+        identity: cellgov_compare::RunIdentity::default(),
     }
 }
 

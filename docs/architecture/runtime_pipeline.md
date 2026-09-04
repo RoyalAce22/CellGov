@@ -145,6 +145,14 @@ The full vocabulary of guest-visible operations:
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`.
 - **Trace record variants** in `cellgov_trace::TraceRecord`:
+  - one header, `RunIdentity`, written first and never repeated:
+    the format version plus a fingerprint of each half of the
+    identity triple the run was composed from, so a comparison
+    across two differently-composed runs is visible from the
+    stream alone. It is the one record the level filter does not
+    gate, and the writer refuses it anywhere but the front of an
+    empty stream -- a header a reader would not find is worse than
+    none, because absence reads as a run that made no claim;
   - decision-level: `UnitScheduled`, `StepCompleted`,
     `CommitApplied`, `StateHashCheckpoint`, `EffectEmitted`,
     `UnitBlocked`, `UnitWoken`;

@@ -35,6 +35,9 @@ pub fn observe(config: &Rpcs3Config, test: &Rpcs3TestConfig) -> Result<Observati
             steps: None,
         },
         tty_log: Vec::new(),
+        // Neither the memory dump nor the CGOV frame in the TTY log
+        // carries a version.
+        identity: crate::identity::RunIdentity::default(),
     })
 }
 
@@ -56,6 +59,8 @@ pub fn observe_from_tty(
             steps: None,
         },
         tty_log: Vec::new(),
+        // The CGOV frame in the TTY log carries no version.
+        identity: crate::identity::RunIdentity::default(),
     })
 }
 

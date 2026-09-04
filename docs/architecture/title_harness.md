@@ -69,6 +69,12 @@ baseline (outcome included), and appends one line per real move
 to the title's append-only `boot_history.jsonl`, so blessing a
 change is a reviewable data diff.
 
+The summary and every history line also carry the identity triple
+the measurement was taken against -- which firmware answered, and
+which of the title's installed versions ran. A line that names
+none was recorded before the store carried versions, which is why
+a first triple over such a line is not itself a move.
+
 ```mermaid
 flowchart LR
   bb["bench-boot --title NAME"] --> boot["two subprocess-isolated boots"]

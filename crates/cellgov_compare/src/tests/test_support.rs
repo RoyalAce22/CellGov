@@ -1,5 +1,6 @@
 //! Shared fixtures for `cellgov_compare` unit tests.
 
+use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
     ObservedHashes, ObservedOutcome,
@@ -46,6 +47,7 @@ pub fn obs(
         state_hashes: None,
         metadata: meta("test"),
         tty_log: Vec::new(),
+        identity: RunIdentity::default(),
     }
 }
 
@@ -85,6 +87,24 @@ pub fn sample_observation() -> Observation {
             steps: Some(42),
         },
         tty_log: b"sample tty\n".to_vec(),
+        identity: identity("4.91", "NPAA00001", "base"),
+    }
+}
+
+/// A fully populated identity triple, with the image version derived
+/// from `fw`.
+pub fn identity(fw: &str, title_id: &str, version: &str) -> RunIdentity {
+    RunIdentity {
+        firmware: Some(FirmwareIdentity {
+            version: fw.into(),
+            image_version: format!("0x{}", fw.replace('.', "")),
+            pup_sha256: "00".repeat(32),
+        }),
+        game: Some(GameIdentity {
+            title_id: title_id.into(),
+            version: version.into(),
+            app_ver: "02.00".into(),
+        }),
     }
 }
 

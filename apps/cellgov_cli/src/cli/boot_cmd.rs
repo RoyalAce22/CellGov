@@ -100,6 +100,12 @@ pub(super) fn resolve_composition(
     for line in banner::render_firmware_notes(&composition.understated_firmware) {
         eprintln!("{line}");
     }
+    // The machine form of the banner above, so a parent process that
+    // spawned this boot can record what the run was measured against.
+    match composition.identity.render_sentinel_line() {
+        Ok(line) => eprintln!("{line}"),
+        Err(e) => die(&format!("boot: serializing the run identity: {e}")),
+    }
     composition
 }
 
@@ -293,6 +299,7 @@ pub(crate) fn run_game(args: &[String]) {
         profile,
         firmware_dir: firmware_dir.as_deref(),
         composed_mounts: &inputs.composition.mounts,
+        identity: &inputs.composition.identity,
         dump_at_pc,
         dump_skip,
         patch_bytes: &patch_bytes,
@@ -465,6 +472,7 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             max_steps,
             firmware_dir: firmware_dir.as_deref(),
             composed_mounts: &inputs.composition.mounts,
+            identity: &inputs.composition.identity,
             selection: selection.as_args(),
             strict_reserved,
             checkpoint_override,
@@ -502,6 +510,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         max_steps,
         firmware_dir: firmware_dir.as_deref(),
         composed_mounts: &inputs.composition.mounts,
+        identity: &inputs.composition.identity,
         selection: selection.as_args(),
         strict_reserved,
         checkpoint_override,

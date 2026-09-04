@@ -13,7 +13,7 @@ use cellgov_compare::boot_history::{self, BootHistoryEntry};
 use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
 use cellgov_compare::witnesses::{record, BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
-use cellgov_compare::BootSummary;
+use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
 
 use crate::cli::exit::die;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
@@ -44,11 +44,19 @@ fn read_registry(dir: &Path) -> Vec<Entry> {
     out
 }
 
+/// What one boot measured.
+struct Measurement {
+    witnesses: BTreeMap<String, u64>,
+    steps: u64,
+    outcome: String,
+    identity: RunIdentity,
+}
+
 /// Boot one title; `None` when its dump is not installed (the boot
 /// printed the not-installed marker). Any other failure dies: past
 /// the boot-inputs sentinel, a broken run must never look like a
 /// skip.
-fn measure(entry: &Entry) -> Option<(BTreeMap<String, u64>, u64, String)> {
+fn measure(entry: &Entry) -> Option<Measurement> {
     let exe = std::env::current_exe().unwrap_or_else(|e| die(&format!("current_exe: {e}")));
     let output = Command::new(exe)
         .arg("bench-boot-once")
@@ -108,7 +116,24 @@ fn measure(entry: &Entry) -> Option<(BTreeMap<String, u64>, u64, String)> {
             entry.short_name
         ))
     });
-    Some((witnesses.values, steps, outcome))
+    // A run the store named nothing for still prints the line, with an
+    // empty payload. A missing line therefore means the child was not
+    // this binary, or its stderr never arrived.
+    let identity = RunIdentity::parse_sentinel_lines(&stderr)
+        .unwrap_or_else(|e| die(&format!("{}: {e}", entry.short_name)))
+        .unwrap_or_else(|| {
+            die(&format!(
+                "{}: the boot printed no {RUN_IDENTITY_SENTINEL} line; refusing to record an \
+                 anchor that cannot name what it was measured against",
+                entry.short_name
+            ))
+        });
+    Some(Measurement {
+        witnesses: witnesses.values,
+        steps,
+        outcome,
+        identity,
+    })
 }
 
 /// Read and parse the existing history, dying on any error other than
@@ -159,7 +184,13 @@ fn read_previous_anchor(short_name: &str, path: &Path) -> BootSummary {
 /// class. Returns `false` when the title is not installed: `--all`
 /// skips it by name, `--title` treats it as an error.
 fn record_one(entry: &Entry, strict: bool) -> bool {
-    let Some((witnesses, steps, outcome)) = measure(entry) else {
+    let Some(Measurement {
+        witnesses,
+        steps,
+        outcome,
+        identity,
+    }) = measure(entry)
+    else {
         if strict {
             die(&format!(
                 "{}: the title's dump is not installed",
@@ -175,6 +206,7 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
 
     let path = boot_anchor_path(&workspace_root(), &entry.content_id);
     let mut summary = read_previous_anchor(&entry.short_name, &path);
+    let previous_identity = summary.identity.clone();
 
     // History is parsed BEFORE the baseline is written: a malformed
     // history line must abort while the anchor is still untouched,
@@ -188,6 +220,7 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
         steps,
         &outcome,
         witnesses.clone(),
+        identity.clone(),
     );
 
     let before = summary.witnesses.clone();
@@ -200,6 +233,7 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
     });
     summary.host_invariant_breaks = witnesses.get("host_invariant_breaks").copied().unwrap_or(0);
     summary.witnesses = record(Some(&before), &witnesses);
+    summary.identity = identity;
     summary.validate().unwrap_or_else(|e| {
         die(&format!(
             "{}: recorded summary is invalid: {e}",
@@ -211,6 +245,22 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
         .unwrap_or_else(|e| die(&format!("serialize {}: {e}", path.display())));
     std::fs::write(&path, json + "\n")
         .unwrap_or_else(|e| die(&format!("write {}: {e}", path.display())));
+
+    // The history's move rule compares against the previous history
+    // line, which can carry no triple. The anchor's own previous triple
+    // is the only record that can say the measurement basis moved.
+    if !previous_identity.is_empty() && previous_identity != summary.identity {
+        println!(
+            "{}: measured against a different triple than the previous anchor named",
+            entry.short_name
+        );
+        for line in previous_identity.render_lines() {
+            println!("  was  {line}");
+        }
+        for line in summary.identity.render_lines() {
+            println!("  now  {line}");
+        }
+    }
 
     match history_entry {
         None => println!(

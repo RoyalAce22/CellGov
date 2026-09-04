@@ -46,6 +46,7 @@ fn obs_with(regions: Vec<NamedMemoryRegion>) -> Observation {
             steps: Some(1),
         },
         tty_log: Vec::new(),
+        identity: crate::identity::RunIdentity::default(),
     }
 }
 

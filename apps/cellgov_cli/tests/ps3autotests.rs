@@ -662,6 +662,7 @@ fn observation_with(outcome: ObservedOutcome, steps: usize) -> Observation {
             steps: Some(steps),
         },
         tty_log: Vec::new(),
+        identity: cellgov_compare::RunIdentity::default(),
     }
 }
 

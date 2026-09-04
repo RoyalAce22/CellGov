@@ -3,7 +3,7 @@
 `cellgov_compare` reduces a run of any runner (CellGov, RPCS3, future
 recompiled output) to a normalized `Observation`: outcome, named
 memory regions, ordered events, optional state hashes, runner
-metadata. Each named region carries its `AddressSpaceId` (space 0 for
+metadata, and the identity triple the run was composed from. Each named region carries its `AddressSpaceId` (space 0 for
 the boot process, spawned children numbered from 1 in spawn order;
 see [guest_memory.md](guest_memory.md#per-process-address-spaces)),
 so a checkpoint manifest can observe a child's memory; RPCS3 captures
@@ -24,6 +24,19 @@ from `run-game` outputs; `cellgov_cli compare-observations` reads
 two JSON files and reports MATCH or the first differing field. The
 determinism check requires two CellGov runs of the same ELF to
 produce byte-identical observations.
+
+Which firmware answered a run, and which of a title's installed
+versions it composed, travel with the observation rather than beside
+it. Every comparator prints both sides' triples before its verdict and
+says out loud when the two differ, because a divergence between two
+differently-composed runs is a difference between versions until it is
+shown otherwise. The triple is context, not a verdict: a mismatch
+never drives an exit code on its own. State traces carry the same
+identity as a fixed-width fingerprint in their header record, so
+`diverge` reports a cross-triple scan from the stream alone. An
+artifact naming no triple was written before the store carried
+versions, or by a runner that reports none; absence never reads as a
+mismatch.
 
 ```mermaid
 flowchart LR
