@@ -217,7 +217,7 @@ pub(crate) fn load_ppu_image_with_title_or_die(
 /// the `decrypt` feature, or a run whose key vault is missing or lacks
 /// the keyset, dies at the first SCE-wrapped candidate: the manifest
 /// lists the SCE-wrapped binary first so an in-tree plaintext copy
-/// cannot shadow it (`titles/manifest_template.README.md`,
+/// cannot shadow it (`title_manifests/manifest_template.README.md`,
 /// `eboot_candidates`).
 ///
 /// The walk runs in the first entry of `eboot_dirs` that holds any

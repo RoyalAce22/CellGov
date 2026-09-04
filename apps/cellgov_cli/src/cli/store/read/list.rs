@@ -11,7 +11,7 @@ use crate::cli::parse::OutputFormat;
 use super::model::{FirmwareDoc, FirmwareListDoc, TitleDoc, TitleListDoc};
 use super::{emit, view};
 
-/// The label a title with no `titles/*.toml` renders under.
+/// The label a title renders under when no registry manifest names it.
 const NO_MANIFEST: &str = "<no manifest>";
 
 /// What a record line reads when the key names no record path.
@@ -165,8 +165,9 @@ fn orphan_notes(title: &TitleDoc) -> Vec<String> {
     let mut out = Vec::new();
     if title.short_name.is_none() {
         out.push(format!(
-            "{}: orphan -- no titles/*.toml declares this title, so no cell names it",
-            title.title_id
+            "{}: orphan -- no {}/*.toml declares this title, so no cell names it",
+            title.title_id,
+            crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR
         ));
     }
     if title.base.is_none() && !title.updates.is_empty() {

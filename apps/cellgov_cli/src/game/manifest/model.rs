@@ -82,7 +82,7 @@ impl Distribution {
     }
 }
 
-/// One title's manifest as loaded from `titles/<content-id>.toml`.
+/// One title's manifest as loaded from `title_manifests/<content-id>.toml`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TitleManifest {
     /// PSN content id; primary lookup key and, for

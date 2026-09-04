@@ -122,8 +122,8 @@ pub(crate) struct AnchorDoc {
 pub(crate) struct TitleDoc {
     /// The store key, and the guest directory name.
     pub title_id: String,
-    /// Registry short name, absent when no `titles/*.toml` names this
-    /// title.
+    /// Registry short name, absent when no `title_manifests/*.toml`
+    /// names this title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub short_name: Option<String>,
     /// Registry display name.

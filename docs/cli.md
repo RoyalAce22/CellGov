@@ -1047,7 +1047,7 @@ Usage: cellgov dev rpcs3-attribute [OPTIONS] --trace <PATH> <--addr <HEX>|--list
 Regenerate a title's cross-runner fixture directory.
 
 ```console
-$ cellgov dev fixture-gen --manifest titles/NPUA80001.toml --cellgov cellgov.json --rpcs3 rpcs3.json --output-dir tests/fixtures/NPUA80001 --fw 4.93
+$ cellgov dev fixture-gen --manifest title_manifests/NPUA80001.toml --cellgov cellgov.json --rpcs3 rpcs3.json --output-dir tests/fixtures/NPUA80001 --fw 4.93
 ```
 
 ```

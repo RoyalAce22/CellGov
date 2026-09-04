@@ -36,8 +36,8 @@ byte, what a PS3 game would produce under any legal schedule.
   converge with RPCS3. This is where current status lives.
 - [docs/lv2_fidelity.md](docs/lv2_fidelity.md) -- generated
   per-syscall fidelity map.
-- [titles/](titles/manifest_template.README.md) -- the title
-  registry: one manifest per title.
+- [title_manifests/](title_manifests/manifest_template.README.md) --
+  the title registry: one manifest per title.
 
 ## Building
 
@@ -132,7 +132,7 @@ disc encryption is refused. A PSN package lands under
 `vfs/dev_hdd0/game/<title-id>/`, a disc image under
 `vfs/dev_bdvd/<title-id>/`, each with an install record of per-file
 digests. A title becomes bootable once it has a manifest
-under [titles/](titles/manifest_template.README.md);
+under [title_manifests/](title_manifests/manifest_template.README.md);
 `cellgov dev gen-manifest --title-id <id>` writes the stub from the
 install record.
 

@@ -1,7 +1,7 @@
 //! Every installed title in the registry must reproduce its reference
 //! cell's recorded baseline.
 //!
-//! Titles come from `titles/`; expectations come from the anchor of
+//! Titles come from `title_manifests/`; expectations come from the anchor of
 //! the cell each manifest marks `reference = true`. Adding a title
 //! needs no change here -- drop in a manifest, record it, commit the
 //! baseline.

@@ -14,7 +14,7 @@ over those JSONs.
 
 ```bash
 cargo run --release -p cellgov_cli -- boot run \
-  --title-manifest titles/NPUA80068.toml \
+  --title-manifest title_manifests/NPUA80068.toml \
   --max-steps <N> \
   --save-observation tests/fixtures/NPUA80068/cellgov/observation.json \
   --observation-manifest tests/fixtures/NPUA80068/checkpoint.toml
@@ -65,7 +65,7 @@ the code-region base.
 
 ```bash
 cargo run --release -p cellgov_cli -- dev fixture-gen \
-  --manifest titles/NPUA80068.toml \
+  --manifest title_manifests/NPUA80068.toml \
   --cellgov tests/fixtures/NPUA80068/cellgov/observation.json \
   --rpcs3 tests/fixtures/NPUA80068/rpcs3/observation.json \
   --output-dir tests/fixtures/NPUA80068/cross_runner

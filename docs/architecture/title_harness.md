@@ -1,7 +1,7 @@
 # Title harness (`cellgov_cli`)
 
 Title-specific configuration lives in TOML manifests under
-`titles/<content-id>.toml`; no library crate below
+`title_manifests/<content-id>.toml`; no library crate below
 `cellgov_cli` knows that titles exist. `cellgov_cli` scans the
 directory at startup into a registry the CLI looks up by short
 name (`--title <name>`), content id (`--content-id <id>`), or
@@ -185,7 +185,7 @@ passing over. That keeps every suite reading one layout, and moves each
 of them with the artifact when an installer's target changes.
 
 Adding a title is a single-file TOML commit under
-`titles/`; no Rust change is needed while the title
+`title_manifests/`; no Rust change is needed while the title
 fits the existing checkpoint kinds (`process-exit`,
 `first-rsx-write`, `pc`) and the standard PS3 VFS layout.
 `--checkpoint <kind>` overrides the manifest default per run for
@@ -263,7 +263,7 @@ checkout for offline baselines only.
 
 ```mermaid
 flowchart TD
-  sel["--title / --content-id / --title-manifest"] --> reg["registry from titles/*.toml"]
+  sel["--title / --content-id / --title-manifest"] --> reg["registry from title_manifests/*.toml"]
   reg --> ver["--fw / --game-ver against the install records"]
   ver --> kind{"source kind"}
   kind -->|"PSN HDD (default)"| hdd["game tree USRDIR/, update ahead of base"]

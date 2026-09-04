@@ -429,7 +429,7 @@ flowchart TD
 ```
 
 Per-title content lands in the store at boot via the manifest
-schema in `titles/<content-id>.toml`:
+schema in `title_manifests/<content-id>.toml`:
 
 ```toml
 [content]

@@ -23,7 +23,7 @@ outcome = "completed"
 
 # CellGov title manifest. Consumed by `cellgov boot run
 # --title-manifest <this file>`. Same schema shape as the
-# per-title files under titles/, but nested under
+# per-title files under title_manifests/, but nested under
 # [cellgov] so one file carries both the RPCS3 harness config
 # (above) and the CellGov boot run config (below).
 #

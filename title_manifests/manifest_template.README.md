@@ -1,7 +1,7 @@
 # Title manifest guide
 
 A title manifest is a single TOML file under
-`titles/` that tells `cellgov_cli` how to boot one
+`title_manifests/` that tells `cellgov_cli` how to boot one
 PS3 title: where its EBOOT lives, what its boot harness should
 treat as the stopping point, and which pieces of content the
 boot path needs visible through the LV2 VFS.
@@ -11,7 +11,7 @@ analysis. It does not configure gameplay.
 
 ## Where they live and how they are discovered
 
-- Path: `titles/<content_id>.toml`. The filename
+- Path: `title_manifests/<content_id>.toml`. The filename
   is convention only; the loader keys off the `content_id`
   field inside the file.
 - The registry at startup scans this directory
@@ -281,7 +281,7 @@ unpopulated out-params and bails.
    memory via `cellgov_install::sce::decrypt_self_to_elf`; do
    NOT write the decrypted bytes back to `EBOOT.elf`; a stale
    on-disk copy can shadow the canonical SELF.
-3. Write `titles/<content_id>.toml` with the
+3. Write `title_manifests/<content_id>.toml` with the
    schema above.
 4. Run `cellgov boot run --title <short_name>` once to
    confirm the boot path resolves the EBOOT.

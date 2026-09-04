@@ -55,7 +55,7 @@ kind = "process-exit"
 }
 
 fn origin() -> &'static Path {
-    Path::new("titles/cell-fixture.toml")
+    Path::new("title_manifests/cell-fixture.toml")
 }
 
 fn load(text: &str) -> TitleManifest {

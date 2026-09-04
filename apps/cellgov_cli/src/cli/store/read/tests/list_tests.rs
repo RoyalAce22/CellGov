@@ -93,7 +93,10 @@ fn a_title_no_manifest_declares_is_flagged_as_an_orphan() {
     )]));
     assert!(rendered.contains(NO_MANIFEST), "{rendered}");
     assert!(
-        rendered.contains("orphan") && rendered.contains("titles/*.toml"),
+        rendered.contains(&format!(
+            "{TITLE_ID}: orphan -- no {}/*.toml declares this title",
+            crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR
+        )),
         "{rendered}"
     );
 }

@@ -19,8 +19,7 @@ use cellgov_install::store::{
 
 use crate::cli::exit::die;
 use crate::cli::parse::GenManifestArgs;
-
-const DEFAULT_REGISTRY: &str = "titles";
+use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 
 /// The install-record directory under the default store root, where
 /// the installers write. `--installs` names that directory directly,
@@ -58,7 +57,7 @@ pub(crate) fn run(args: &GenManifestArgs) {
     let registry = args
         .registry
         .clone()
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_REGISTRY));
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_TITLE_REGISTRY_DIR));
     let force = args.force;
 
     let text = std::fs::read_to_string(&record_path)

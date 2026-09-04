@@ -464,7 +464,8 @@ fn normalize(text: &str) -> String {
 
 fn render_committed_matrix() -> String {
     let root = repo_root();
-    let registry = TitleRegistry::scan_dir(&root.join("titles")).expect("scan titles");
+    let registry =
+        TitleRegistry::scan_dir(&root.join(DEFAULT_TITLE_REGISTRY_DIR)).expect("scan titles");
     let (body, n) =
         render_doc(registry.iter(), &root.join("tests/fixtures")).expect("render titles.md body");
     assert!(n > 0, "registry is empty; the gate would pass vacuously");

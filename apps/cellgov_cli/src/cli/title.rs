@@ -10,7 +10,10 @@ use crate::game;
 /// Registry directory every title-driven subcommand resolves
 /// `--title` / `--content-id` against, relative to the working
 /// directory.
-pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "titles";
+///
+/// The store's `vfs/titles/` is a separate directory: it holds the
+/// installed content, and this one holds the manifests that select it.
+pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "title_manifests";
 
 /// The per-user license directory under a PS3 VFS root, where an
 /// installed RAP lives.
@@ -116,3 +119,7 @@ fn resolve_ps3_vfs_root_inner(
 #[cfg(test)]
 #[path = "tests/title_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/title_registry_tests.rs"]
+mod title_registry_tests;

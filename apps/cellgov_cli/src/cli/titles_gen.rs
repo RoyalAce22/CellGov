@@ -11,11 +11,11 @@ use cellgov_compare::{format_with_commas, BootSummary, CrossRunnerSummary};
 
 use super::exit::die;
 use super::parse::TitlesGenArgs;
+use super::title::DEFAULT_TITLE_REGISTRY_DIR;
 use crate::game::manifest::{TitleManifest, TitleRegistry};
 
 const TITLES_TEMPLATE: &str = include_str!("templates/titles.md.template");
 
-const DEFAULT_REGISTRY_DIR: &str = "titles";
 const DEFAULT_FIXTURES_DIR: &str = "tests/fixtures";
 const DEFAULT_OUTPUT: &str = "docs/titles.md";
 
@@ -41,7 +41,7 @@ pub(crate) fn run(args: &TitlesGenArgs) {
     let registry_dir = args
         .registry
         .clone()
-        .unwrap_or_else(|| DEFAULT_REGISTRY_DIR.to_string());
+        .unwrap_or_else(|| DEFAULT_TITLE_REGISTRY_DIR.to_string());
     let fixtures_dir = args
         .fixtures_dir
         .clone()

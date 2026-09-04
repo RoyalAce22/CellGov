@@ -302,7 +302,7 @@ previous unit while it holds an lwmutex or after a non-waking
 syscall, capped at 64 consecutive sticky yields.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
 
-**Title manifest.** The TOML under `titles/<content-id>.toml`
+**Title manifest.** The TOML under `title_manifests/<content-id>.toml`
 that registers a title: source kind, EBOOT candidates, checkpoint
 kind, RSX flags, content blobs. No crate below `cellgov_cli` knows
 titles exist.
