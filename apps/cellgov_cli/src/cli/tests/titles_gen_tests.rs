@@ -1,4 +1,4 @@
-//! Titles-gen flag coverage and per-title markdown row rendering from fixture summaries.
+//! Per-title markdown row rendering from fixture summaries.
 
 use super::*;
 use cellgov_compare::{
@@ -7,36 +7,6 @@ use cellgov_compare::{
 };
 use cellgov_time::Budget;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-
-#[test]
-fn known_flags_covers_every_find_flag_value_call() {
-    let source = include_str!("../titles_gen.rs");
-    let mut used: BTreeSet<&str> = BTreeSet::new();
-    for (idx, _) in source.match_indices("find_flag_value(args, \"") {
-        let tail = &source[idx + "find_flag_value(args, \"".len()..];
-        if let Some(end) = tail.find('"') {
-            used.insert(&tail[..end]);
-        }
-    }
-    let declared: BTreeSet<&str> = KNOWN_FLAGS.iter().copied().collect();
-    // A real flag is `--` plus lowercase letters / hyphens only;
-    // strip doc-comment placeholders that the grep can hit.
-    let used: BTreeSet<&str> = used
-        .into_iter()
-        .filter(|s| {
-            s.starts_with("--")
-                && s[2..].chars().all(|c| c.is_ascii_lowercase() || c == '-')
-                && s.len() > 2
-        })
-        .collect();
-    assert_eq!(
-        used, declared,
-        "KNOWN_FLAGS ({declared:?}) and find_flag_value call sites ({used:?}) disagree; \
-         a flag in find_flag_value but not KNOWN_FLAGS lets typos through, \
-         a flag in KNOWN_FLAGS but not in find_flag_value is dead-list drift",
-    );
-}
 
 fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleManifest {
     use crate::game::manifest::{CheckpointTrigger, Distribution, GameSource};
@@ -482,7 +452,7 @@ fn committed_titles_doc_matches_generator() {
         normalize(&committed),
         normalize(&render_committed_matrix()),
         "docs/titles.md is stale; regenerate with:\n  \
-         cargo run --release -p cellgov_cli -- titles-gen"
+         cargo run --release -p cellgov_cli -- dev titles-gen"
     );
 }
 

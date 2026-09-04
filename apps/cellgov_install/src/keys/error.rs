@@ -26,7 +26,7 @@ pub enum HexError {
 #[derive(Debug, thiserror::Error)]
 pub enum KeyVaultError {
     /// Neither the environment nor the VFS names a vault.
-    #[error("no key vault: set {ENV_KEYS} to a keys file or directory, or run `cellgov_install keys import <keys>` (looked for {})", installed.display())]
+    #[error("no key vault: set {ENV_KEYS} to a keys file or directory, or run `cellgov keys import <keys>` (looked for {})", installed.display())]
     NotConfigured {
         /// The installed-vault path that was probed.
         installed: PathBuf,
@@ -108,12 +108,12 @@ pub enum KeyVaultError {
         value: String,
     },
     /// A decrypt path asked for a scalar the vault does not hold.
-    #[error("key vault has no {slot} (needed here); check `cellgov_install keys show`")]
+    #[error("key vault has no {slot} (needed here); check `cellgov keys show`")]
     MissingSlot {
         /// The slot asked for.
         slot: Slot,
     },
     /// A decrypt path asked for an SCE package key and the vault holds none.
-    #[error("key vault has no SCE package (scepkg) key; check `cellgov_install keys show`")]
+    #[error("key vault has no SCE package (scepkg) key; check `cellgov keys show`")]
     MissingScepkg,
 }

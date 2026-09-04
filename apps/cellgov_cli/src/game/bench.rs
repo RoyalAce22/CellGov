@@ -1,4 +1,4 @@
-//! `bench-boot` / `bench-boot-once` / `bench-boot-pair` machinery.
+//! `boot bench` / `boot bench-once` machinery.
 //! A pair runs two subprocesses and gates on per-run agreement.
 
 use std::path::Path;
@@ -33,7 +33,7 @@ pub struct SelectionArgs<'a> {
     pub vfs_root: Option<&'a str>,
 }
 
-/// Inputs common to every bench-boot entry point.
+/// Inputs common to every `boot bench` entry point.
 #[derive(Debug, Clone, Copy)]
 pub struct BenchOptions<'a> {
     pub title: &'a TitleManifest,
@@ -62,9 +62,10 @@ pub struct BenchOptions<'a> {
 }
 
 impl BenchOptions<'_> {
-    /// Append the `bench-boot-once` CLI form of this struct onto `cmd`.
+    /// Append the `boot bench-once` CLI form of this struct onto `cmd`.
     fn encode_to_command(&self, cmd: &mut std::process::Command) {
-        cmd.arg("bench-boot-once")
+        cmd.arg("boot")
+            .arg("bench-once")
             .arg("--title")
             .arg(self.title.name())
             .arg("--max-steps")
@@ -600,7 +601,7 @@ impl SpawnError {
     }
 }
 
-/// Spawn the current binary as `bench-boot-once` and parse its
+/// Spawn the current binary as `boot bench-once` and parse its
 /// `BENCH_RESULT` line. Subprocess stderr is forwarded so warnings
 /// reach the parent on the success path.
 /// Returns the parsed result alongside the subprocess stderr, which
@@ -649,7 +650,7 @@ pub fn bench_boot_pair(opts: BenchOptions<'_>) -> Result<BenchPairOutcome, Spawn
         overrides.push_str(&format!(" guest_args={:?}", opts.guest_args));
     }
     println!(
-        "bench-boot: title={} elf={} max_steps={}{overrides}",
+        "boot bench: title={} elf={} max_steps={}{overrides}",
         opts.title.name(),
         opts.elf_path,
         opts.max_steps
@@ -759,7 +760,7 @@ enum AnchorVerdict {
     NotComparable(Vec<String>),
     /// No anchor is committed for this title, so there is nothing to
     /// compare against. A title being benchmarked before its first
-    /// `record-anchors` is an ordinary state, not a failure.
+    /// `dev record-anchors` is an ordinary state, not a failure.
     NoBaseline,
     /// The run reproduced every recorded value.
     Match,
@@ -769,7 +770,7 @@ enum AnchorVerdict {
 
 /// Why this invocation cannot be held against the committed anchor.
 ///
-/// The anchor is measured by `record-anchors`, which boots the title
+/// The anchor is measured by `dev record-anchors`, which boots the title
 /// under its manifest defaults and nothing else. An override that
 /// moves the trajectory yields a legitimately different run, so gating
 /// it would report a regression that is not one. `--prescan` is absent
@@ -785,7 +786,7 @@ fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
     }
     // An anchor is keyed by content id alone, so it cannot say which
     // firmware or which content version it was recorded under. Naming
-    // either here is a selection `record-anchors` never made.
+    // either here is a selection `dev record-anchors` never made.
     if let Some(fw) = opts.selection.fw {
         reasons.push(format!(
             "--fw {fw} selects a firmware; the anchor names none, so nothing can say the two \
@@ -883,7 +884,7 @@ fn witness_disagreements(r1_stderr: &str, r2_stderr: &str) -> Vec<String> {
 /// disagreement.
 ///
 /// Mirrors the comparison in `tests/title_witnesses.rs`: the two must
-/// agree, or `bench-boot` would pass a run the witness suite rejects.
+/// agree, or `boot bench` would pass a run the witness suite rejects.
 fn anchor_disagreements(
     baseline: &BootSummary,
     steps: u64,
@@ -1116,3 +1117,142 @@ pub(crate) fn wall_disagreement_percent(
 #[cfg(test)]
 #[path = "tests/bench_tests.rs"]
 mod tests;
+
+/// The encoded child invocation, read back through the command tree the
+/// child parses it with.
+#[cfg(test)]
+mod child_command_tests {
+    use clap::Parser as _;
+
+    use super::*;
+    use crate::cli::parse::{BootCommand, Cli, Command};
+
+    fn bench_manifest() -> TitleManifest {
+        use manifest::{CheckpointTrigger, Distribution, GameSource};
+        TitleManifest {
+            content_id: "CG_TEST".to_string(),
+            short_name: "test".to_string(),
+            display_name: "test".to_string(),
+            eboot_candidates: vec!["EBOOT.BIN".to_string()],
+            year: 2007,
+            developer: "test-developer".to_string(),
+            engine: "test-engine".to_string(),
+            distribution: Distribution::PsnHdd,
+            rap_filename: None,
+            bench_max_steps: Some(4_000),
+            checkpoint: CheckpointTrigger::ProcessExit,
+            source: GameSource::Hdd,
+            rsx_mirror: false,
+            rsx_consume: false,
+            content: None,
+            mounts: Vec::new(),
+        }
+    }
+
+    /// Every forwarded flag must survive the round trip. The pair
+    /// re-enters the binary as a child process, and it forwards the
+    /// selection flags for the child to resolve on its own. A spelling
+    /// the child parses differently makes the two runs measure
+    /// different things while the gate still reports agreement. See
+    /// `docs/architecture/title_harness.md`, "Title anchors and
+    /// witnesses".
+    #[test]
+    fn the_encoded_child_invocation_parses_back_into_the_same_run() {
+        let title = bench_manifest();
+        let identity = cellgov_compare::RunIdentity::default();
+        let guest_args = vec!["--trace".to_string(), "argv1".to_string()];
+        let opts = BenchOptions {
+            title: &title,
+            elf_path: "EBOOT.BIN",
+            max_steps: 4_000,
+            // The resolved directory, which must not reach the child.
+            firmware_dir: Some("resolved/4.91/dev_flash/sys/external"),
+            composed_mounts: &[],
+            identity: &identity,
+            selection: SelectionArgs {
+                fw: Some("4.91"),
+                game_ver: Some("02.51"),
+                firmware_dir: None,
+                vfs_root: Some("elsewhere/dev_hdd0"),
+            },
+            strict_reserved: true,
+            checkpoint_override: Some(manifest::CheckpointTrigger::Pc(0x1_0000)),
+            budget_override: Some(Budget::new(512)),
+            prescan: true,
+            guest_args: &guest_args,
+            check_anchor: true,
+        };
+
+        let mut cmd = std::process::Command::new("cellgov");
+        opts.encode_to_command(&mut cmd);
+        let mut argv = vec!["cellgov".to_string()];
+        argv.extend(cmd.get_args().map(|a| a.to_string_lossy().into_owned()));
+
+        let cli = Cli::try_parse_from(&argv)
+            .unwrap_or_else(|e| panic!("child argv {argv:?} does not parse: {e}"));
+        assert_eq!(
+            cli.globals.vfs_root.as_deref(),
+            Some(Path::new("elsewhere/dev_hdd0")),
+        );
+        // `bench-once`, never `bench`: the gating pair must not spawn
+        // another gating pair.
+        let Command::Boot(BootCommand::BenchOnce(child)) = cli.command else {
+            panic!("child argv {argv:?} did not select `boot bench-once`");
+        };
+        assert_eq!(child.selector.title.as_deref(), Some(title.name()));
+        assert_eq!(child.selector.content_id, None);
+        assert_eq!(child.selector.title_manifest, None);
+        assert_eq!(child.selection.fw.as_deref(), Some("4.91"));
+        assert_eq!(child.selection.game_ver.as_deref(), Some("02.51"));
+        assert_eq!(child.selection.firmware_dir, None);
+        assert_eq!(child.max_steps, Some(4_000));
+        assert_eq!(child.budget, Some(512));
+        assert_eq!(
+            child.checkpoint,
+            Some(manifest::CheckpointTrigger::Pc(0x1_0000)),
+        );
+        assert!(child.prescan);
+        assert!(child.strict_reserved);
+        assert_eq!(child.guest_arg, guest_args);
+    }
+
+    #[test]
+    fn an_unmanaged_firmware_tree_reaches_the_child_as_the_flag() {
+        let title = bench_manifest();
+        let identity = cellgov_compare::RunIdentity::default();
+        let opts = BenchOptions {
+            title: &title,
+            elf_path: "EBOOT.BIN",
+            max_steps: 4_000,
+            firmware_dir: Some("elsewhere/sys/external"),
+            composed_mounts: &[],
+            identity: &identity,
+            selection: SelectionArgs {
+                firmware_dir: Some("elsewhere/sys/external"),
+                ..SelectionArgs::default()
+            },
+            strict_reserved: false,
+            checkpoint_override: None,
+            budget_override: None,
+            prescan: false,
+            guest_args: &[],
+            check_anchor: true,
+        };
+
+        let mut cmd = std::process::Command::new("cellgov");
+        opts.encode_to_command(&mut cmd);
+        let mut argv = vec!["cellgov".to_string()];
+        argv.extend(cmd.get_args().map(|a| a.to_string_lossy().into_owned()));
+
+        let cli = Cli::try_parse_from(&argv)
+            .unwrap_or_else(|e| panic!("child argv {argv:?} does not parse: {e}"));
+        let Command::Boot(BootCommand::BenchOnce(child)) = cli.command else {
+            panic!("child argv {argv:?} did not select `boot bench-once`");
+        };
+        assert_eq!(
+            child.selection.firmware_dir.as_deref(),
+            Some(Path::new("elsewhere/sys/external")),
+        );
+        assert_eq!(child.selection.fw, None);
+    }
+}

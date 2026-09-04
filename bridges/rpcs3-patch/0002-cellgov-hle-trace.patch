@@ -10,7 +10,7 @@ arguments, return value, and -- if a watch list is supplied --
 the bytes that changed at any watch address during the call.
 
 The CellGov side consumes the trace via
-`cellgov_cli rpcs3-attribute --trace <file> --addr 0xADDR` to
+`cellgov dev rpcs3-attribute --trace <file> --addr 0xADDR` to
 answer "which HLE call wrote this guest address?" in one run,
 replacing per-NID Ghidra investigation.
 

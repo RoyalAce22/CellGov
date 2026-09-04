@@ -46,7 +46,7 @@ producer-fed wait.
 
 ## Boot pipeline
 
-The `run-game` CLI subcommand loads a PS3 ELF, raw or SCE-wrapped
+The `boot run` CLI subcommand loads a PS3 ELF, raw or SCE-wrapped
 (`SCE\0` magic dispatches to
 `cellgov_install::sce::decrypt_self_to_elf` at load time), and
 runs the PPU at the mode's default step budget (256; `--budget`
@@ -90,7 +90,7 @@ not their downstream consumers. `start_modules` then invokes each
 module's `module_start` in topo order.
 
 Every loaded module is verified against the corpus's
-`firmware.toml` manifest, written by `cellgov_install install`
+`firmware.toml` manifest, written by `cellgov firmware install`
 and located at or up to two levels above the firmware dir. The
 post-decrypt SHA-256 must match the manifest entry; a file
 missing from the manifest, a digest mismatch, or a firmware dir

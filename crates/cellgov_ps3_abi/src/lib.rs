@@ -94,7 +94,7 @@ macro_rules! nid_module {
         /// test `nid::tests::every_classified_nid_has_explicit_arm`
         /// walks every module's slice to enforce the contract.
         ///
-        /// Consulted by `cellgov_cli dump-prx-imports` when
+        /// Consulted by `cellgov dev prx-imports` when
         /// classifying unresolved-or-zero-bound PRX imports.
         pub const CLASSIFIED_NIDS: &[u32] = &[ $( $cname ),* ];
     };

@@ -14,7 +14,7 @@
 //! Re-record with:
 //!
 //! ```text
-//! cargo run --release -p cellgov_cli -- record-anchors --all
+//! cargo run --release -p cellgov_cli -- dev record-anchors --all
 //! ```
 
 #![allow(
@@ -47,15 +47,15 @@ enum Boot {
 }
 
 fn boot(title: &TitleUnderTest) -> Boot {
-    let output = Command::new(env!("CARGO_BIN_EXE_cellgov_cli"))
-        .arg("bench-boot-once")
+    let output = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args(["boot", "bench-once"])
         .arg("--title")
         .arg(&title.short_name)
         .arg("--max-steps")
         .arg(title.max_steps.to_string())
         .current_dir(workspace_root())
         .output()
-        .expect("spawn cellgov_cli bench-boot-once");
+        .expect("spawn cellgov boot bench-once");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -123,7 +123,7 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Some(vec![format!(
             "{}: installed but no baseline at {}. Record it with:\n    \
-             cargo run --release -p cellgov_cli -- record-anchors --title {}",
+             cargo run --release -p cellgov_cli -- dev record-anchors --title {}",
             title.short_name,
             path.display(),
             title.short_name
@@ -160,7 +160,7 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
     if baseline.witnesses.is_empty() {
         failures.push(format!(
             "{}: baseline records no witnesses. Re-record with:\n    \
-             cargo run --release -p cellgov_cli -- record-anchors --title {}",
+             cargo run --release -p cellgov_cli -- dev record-anchors --title {}",
             title.short_name, title.short_name
         ));
         return Some(failures);

@@ -1,4 +1,4 @@
-//! `rpcs3-attribute` subcommand: read an RPCS3 HLE trace produced by
+//! `dev rpcs3-attribute` subcommand: read an RPCS3 HLE trace produced by
 //! the patched build (`bridges/rpcs3-patch/0002-cellgov-hle-trace.patch`)
 //! and answer "which HLE call wrote this guest address?"
 //!
@@ -14,15 +14,15 @@
 //! CELLGOV_HLE_WATCH=0x101e3cb8:8 \
 //! tools/rpcs3-src/build-msvc/bin/rpcs3.exe --headless title.elf
 //!
-//! cellgov_cli rpcs3-attribute --trace title.htrc --addr 0x101e3cb8
+//! cellgov dev rpcs3-attribute --trace title.htrc --addr 0x101e3cb8
 //! ```
 
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-use super::args::{find_flag_value, has_bool_flag, parse_hex_u64};
 use super::exit::die;
+use super::parse::Rpcs3AttributeArgs;
 
 const HEADER_MAGIC: u32 = 0xC0E6_0001;
 const RECORD_MAGIC: u32 = 0xC0E6_0002;
@@ -238,36 +238,21 @@ fn read_u64<R: Read>(r: &mut R, field: &'static str) -> Result<u64, ParseError> 
     Ok(u64::from_le_bytes(buf))
 }
 
-/// Parse CLI args and run one of the query modes (`--addr`,
-/// `--list`, `--ranked`, `--name`). All modes stream the trace.
-pub fn run(args: &[String]) {
-    let trace_path = find_flag_value(args, "--trace")
-        .unwrap_or_else(|| die("usage: cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR] [--len N] [--list] [--ranked] [--name SUBSTR]"));
-    let path = Path::new(&trace_path);
+/// Run one of the query modes (`--addr`, `--list`, `--ranked`,
+/// `--name`). All modes stream the trace.
+pub fn run(args: &Rpcs3AttributeArgs) {
+    let path: &Path = &args.trace;
+    let trace_path = path.display();
     if !path.is_file() {
         die(&format!(
-            "trace file not found: {trace_path} (did the patched RPCS3 produce one?)"
+            "trace file not found: {trace_path} (did the patched runner produce one?)"
         ));
     }
 
-    let want_list = has_bool_flag(args, "--list");
-    let want_ranked = has_bool_flag(args, "--ranked");
-    let addr_arg = find_flag_value(args, "--addr");
-    let name_filter = find_flag_value(args, "--name");
-
-    if !want_list && !want_ranked && addr_arg.is_none() && name_filter.is_none() {
-        die(
-            "rpcs3-attribute: pick a query mode: --addr 0xADDR, --list, --ranked, or --name SUBSTR",
-        );
-    }
-
-    let addr_filter: Option<(u64, u64)> = addr_arg.map(|addr_s| {
-        let addr = parse_hex_u64(&addr_s, "--addr");
-        let len = find_flag_value(args, "--len")
-            .map(|s| parse_hex_u64(&s, "--len"))
-            .unwrap_or(1);
-        (addr, len)
-    });
+    let want_list = args.list;
+    let want_ranked = args.ranked;
+    let name_filter = args.name.clone();
+    let addr_filter: Option<(u64, u64)> = args.addr.map(|addr| (addr, args.len.unwrap_or(1)));
 
     let mut total_records = 0usize;
     let mut hits: Vec<CallRecord> = Vec::new();
@@ -323,7 +308,7 @@ pub fn run(args: &[String]) {
     if let Some((addr, len)) = addr_filter {
         if hits.is_empty() {
             println!(
-                "no records wrote to [0x{addr:016x}, 0x{:016x}). Address may be untouched, or the watch list passed to RPCS3 did not include it.",
+                "no records wrote to [0x{addr:016x}, 0x{:016x}). Address may be untouched, or the watch list the trace was captured under did not cover it.",
                 addr.saturating_add(len),
             );
         } else {

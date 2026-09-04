@@ -63,20 +63,6 @@ pub struct RenderFlags {
 }
 
 impl RenderFlags {
-    /// Absorb a render flag, reporting whether `arg` was one.
-    ///
-    /// `--format json` is a two-token flag the caller's own parser
-    /// owns; it sets [`Self::json`] directly.
-    pub fn accept(&mut self, arg: &str) -> bool {
-        match arg {
-            "--no-progress" => self.no_progress = true,
-            "--no-color" => self.no_color = true,
-            "--quiet" => self.quiet = true,
-            _ => return false,
-        }
-        true
-    }
-
     /// Resolve these flags against the process environment.
     #[must_use]
     pub fn caps(self) -> TermCaps {
@@ -153,10 +139,16 @@ pub fn detect(flags: RenderFlags, env: &dyn TermEnv) -> TermCaps {
     }
     TermCaps {
         mode: RenderMode::Ansi,
-        color: !flags.no_color && !non_empty(env, "NO_COLOR"),
+        // `NO_COLOR` is the cross-tool convention; `CELLGOV_NO_COLOR`
+        // scopes the same decision to this program, for an operator who
+        // wants color everywhere else.
+        color: !flags.no_color && !non_empty(env, "NO_COLOR") && !non_empty(env, ENV_NO_COLOR),
         width,
     }
 }
+
+/// App-scoped companion to `NO_COLOR`.
+pub const ENV_NO_COLOR: &str = "CELLGOV_NO_COLOR";
 
 /// SGR helpers that collapse to nothing when color is off.
 #[derive(Debug, Clone, Copy)]

@@ -2,8 +2,8 @@
 //!
 //! No source reads an RPCS3 install tree. CellGov owns its corpus:
 //!
-//! - `cellgov_install install` writes firmware into `dev_flash`.
-//! - `install-game` / `install-iso` write titles.
+//! - `cellgov firmware install` writes firmware into `dev_flash`.
+//! - `cellgov title install` writes titles.
 //! - Committed data under `tests/fixtures/` holds what RPCS3 alone
 //!   can answer.
 //!
@@ -453,7 +453,7 @@ fn no_source_reads_an_rpcs3_install_tree() {
     assert!(
         violations.is_empty(),
         "sources naming an RPCS3 install tree. CellGov's corpus is \
-         vfs/ (from cellgov_install) plus committed data under \
+         vfs/ (from the cellgov install commands) plus committed data under \
          tests/fixtures/; an RPCS3 install is one operator's machine \
          state, not a fixture location. The RPCS3 source checkout \
          (tools/rpcs3-src/) is allowed and unaffected:\n{report}"

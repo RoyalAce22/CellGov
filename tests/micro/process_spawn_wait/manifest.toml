@@ -27,7 +27,7 @@ memory_regions = [
 [expect]
 outcome = "completed"
 
-# CellGov title manifest. Consumed by `cellgov_cli run-game
+# CellGov title manifest. Consumed by `cellgov boot run
 # --title-manifest <this file>`; both processes load straight out of
 # build/.
 #

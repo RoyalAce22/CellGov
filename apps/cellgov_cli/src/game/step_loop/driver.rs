@@ -1,4 +1,4 @@
-//! `run-game` step driver: full diagnostics, ring buffers, TTY
+//! `boot run` step driver: full diagnostics, ring buffers, TTY
 //! capture, and per-step coverage tracking. The bench loop with
 //! the same shared verdict classifier lives in [`super::bench`].
 

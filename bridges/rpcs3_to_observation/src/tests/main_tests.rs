@@ -328,7 +328,7 @@ fn an_output_named_for_the_other_decoder_is_rejected() {
 }
 
 /// The per-title fixture tree writes a fixed `rpcs3/observation.json`
-/// that `cellgov_cli fixture-gen --rpcs3` reads by that name. A name
+/// that `cellgov dev fixture-gen --rpcs3` reads by that name. A name
 /// that claims no decoder cannot file one decoder's answer under the
 /// other's name, so the rule has nothing to say about it.
 #[test]

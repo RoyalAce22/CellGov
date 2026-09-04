@@ -1,4 +1,4 @@
-//! `cellgov_cli fixture-gen` -- regenerate the cross-runner fixture
+//! `cellgov dev fixture-gen` -- regenerate the cross-runner fixture
 //! triple (`compare_report.txt`, `REPRODUCTION.md`,
 //! `cross_runner_summary.json`) from two observations plus a title
 //! manifest.
@@ -14,8 +14,8 @@ use cellgov_compare::{
 };
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
-use super::args::{find_flag_value, has_bool_flag};
 use super::exit::{die, load_file_or_die};
+use super::parse::FixtureGenArgs;
 use super::title::resolve_ps3_vfs_root;
 use crate::game::manifest::TitleManifest;
 
@@ -66,7 +66,7 @@ pub(crate) enum ElfHeaderParseError {
     },
 }
 
-/// Errors `fixture-gen` raises before the report writers.
+/// Errors `dev fixture-gen` raises before the report writers.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum FixtureGenError {
     #[error("{context}: {source}")]
@@ -126,23 +126,18 @@ pub(crate) fn apply_subs(template: &str, subs: &[(&str, &str)]) -> String {
     out
 }
 
-pub(crate) fn run(args: &[String]) {
-    let manifest_path = find_flag_value(args, "--manifest")
-        .unwrap_or_else(|| die("fixture-gen: --manifest <path> is required"));
-    let cellgov_path = find_flag_value(args, "--cellgov")
-        .unwrap_or_else(|| die("fixture-gen: --cellgov <path> is required"));
-    let rpcs3_path = find_flag_value(args, "--rpcs3")
-        .unwrap_or_else(|| die("fixture-gen: --rpcs3 <path> is required"));
-    let output_dir = find_flag_value(args, "--output-dir")
-        .unwrap_or_else(|| die("fixture-gen: --output-dir <path> is required"));
-    let allow_divergence = has_bool_flag(args, "--allow-divergence");
+pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
+    let cellgov_path = args.cellgov.clone();
+    let rpcs3_path = args.rpcs3.clone();
+    let output_dir = args.output_dir.display().to_string();
+    let allow_divergence = args.allow_divergence;
 
-    let manifest = TitleManifest::load_from_path(Path::new(&manifest_path))
+    let manifest = TitleManifest::load_from_path(&args.manifest)
         .unwrap_or_else(|e| die(&format!("fixture-gen: load manifest: {e}")));
-    let vfs_root = resolve_ps3_vfs_root(args);
-    // The fixture names the EBOOT composition resolves, on the same
-    // selection contract as the boot family.
-    let composition = super::boot_cmd::resolve_composition(args, &manifest);
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    // The fixture must name the EBOOT a boot run picks, so the
+    // selection goes through the boot family's resolver.
+    let composition = super::boot_cmd::resolve_composition(&args.selection, &vfs_root, &manifest);
     let eboot_path = manifest
         .resolve_eboot_in(&composition.eboot_dirs)
         .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
@@ -169,7 +164,7 @@ pub(crate) fn run(args: &[String]) {
         die(&format!(
             "fixture-gen: CellGov observation at {cellgov_path} has zero \
              memory regions but reports outcome={}; the dump is incomplete. \
-             Re-capture via `run-game --save-observation`.",
+             Re-capture via `boot run --save-observation`.",
             cellgov.outcome,
         ));
     }

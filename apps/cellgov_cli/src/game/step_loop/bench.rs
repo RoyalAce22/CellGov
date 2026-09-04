@@ -1,6 +1,6 @@
-//! `bench-boot` step driver: throughput-only loop with the shared
+//! `boot bench` step driver: throughput-only loop with the shared
 //! [`super::verdict::classify_step_outcome`] precedence rules. The
-//! `run-game` driver with full diagnostics lives in [`super::driver`].
+//! `boot run` driver with full diagnostics lives in [`super::driver`].
 
 use cellgov_core::{Runtime, StepError};
 
@@ -43,9 +43,9 @@ pub(in crate::game) fn bench_step_loop(
             Err(StepError::MaxStepsExceeded) => return BootOutcome::MaxSteps,
             Err(StepError::TimeOverflow) => return BootOutcome::TimeOverflow,
             Err(StepError::SchedulerNotReinstalled) => {
-                // bench-boot does not call Runtime::restore_into.
+                // boot bench does not call Runtime::restore_into.
                 unreachable!(
-                    "bench-boot does not call Runtime::restore_into; \
+                    "boot bench does not call Runtime::restore_into; \
                      reaching this arm means a new caller added a \
                      restore path without rethinking the dispatch."
                 );

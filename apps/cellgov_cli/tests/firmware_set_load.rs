@@ -7,7 +7,7 @@
 //! as `ConflictingExport` long before any title boot sees it.
 //!
 //! Requires the `firmware-corpus` feature and a firmware set
-//! installed by `cellgov_install install`.
+//! installed by `cellgov firmware install`.
 
 #![allow(
     clippy::print_stderr,

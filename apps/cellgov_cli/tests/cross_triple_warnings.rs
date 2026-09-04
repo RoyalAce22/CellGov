@@ -1,4 +1,4 @@
-//! `diverge` and `compare-observations` report when their two sides
+//! `diff diverge` and `diff observations` report when their two sides
 //! come from different triples.
 //!
 //! The fixtures are built in-test from `cellgov_compare`'s public
@@ -100,9 +100,10 @@ fn headerless_trace() -> Vec<u8> {
     writer.take_bytes()
 }
 
-fn run(args: &[&std::path::Path], subcommand: &str) -> std::process::Output {
-    Command::new(env!("CARGO_BIN_EXE_cellgov_cli"))
-        .arg(subcommand)
+fn run(args: &[&std::path::Path], verb: &str) -> std::process::Output {
+    Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .arg("diff")
+        .arg(verb)
         .args(args)
         .output()
         .unwrap()
@@ -137,7 +138,12 @@ fn diverge_is_quiet_when_the_two_traces_carry_one_triple() {
     std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
     std::fs::write(&b, state_trace(&identity("4.91"))).unwrap();
 
-    let stderr = String::from_utf8_lossy(&run(&[&a, &b], "diverge").stderr).into_owned();
+    let out = run(&[&a, &b], "diverge");
+    // A spawn that never parsed is silent too, so pin the verdict the
+    // run has to have reached before reading anything into the silence.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("IDENTICAL"), "stdout: {stdout}");
+    let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(!stderr.contains("cross-triple"), "stderr: {stderr}");
 }
 
@@ -169,7 +175,7 @@ fn compare_observations_prints_both_triples_and_warns_across_them() {
         std::fs::write(path, text).unwrap();
     }
 
-    let out = run(&[&a, &b], "compare-observations");
+    let out = run(&[&a, &b], "observations");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("4.91"), "stderr: {stderr}");
     assert!(stderr.contains("4.93"), "stderr: {stderr}");
@@ -193,8 +199,7 @@ fn compare_observations_of_one_triple_prints_it_without_a_warning() {
         std::fs::write(path, text).unwrap();
     }
 
-    let stderr =
-        String::from_utf8_lossy(&run(&[&a, &b], "compare-observations").stderr).into_owned();
+    let stderr = String::from_utf8_lossy(&run(&[&a, &b], "observations").stderr).into_owned();
     assert!(stderr.contains("4.91"), "stderr: {stderr}");
     assert!(!stderr.contains("WARN"), "stderr: {stderr}");
 }
@@ -210,8 +215,7 @@ fn compare_observations_names_an_unidentified_side_without_warning() {
         std::fs::write(path, text).unwrap();
     }
 
-    let stderr =
-        String::from_utf8_lossy(&run(&[&a, &b], "compare-observations").stderr).into_owned();
+    let stderr = String::from_utf8_lossy(&run(&[&a, &b], "observations").stderr).into_owned();
     assert!(stderr.contains("4.91"), "stderr: {stderr}");
     assert!(stderr.contains("(unidentified)"), "stderr: {stderr}");
     assert!(!stderr.contains("WARN"), "stderr: {stderr}");

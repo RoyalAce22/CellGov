@@ -1,10 +1,10 @@
 //! PS3 firmware (PUP) parsing, SELF (SCE) decryption, and TAR extraction.
 //!
-//! Two consumers share one pipeline: the `cellgov_install` binary's
-//! `install` subcommand peels the outer SCE/PUP wrapping at install
-//! time, and `cellgov_cli`'s boot path calls
+//! Two consumers share one pipeline: the store commands peel the outer
+//! SCE/PUP wrapping at install time, and the boot path calls
 //! [`self_image::to_plaintext_elf`] to peel the inner SELF at load
-//! time. That wrapper routes to `sce::decrypt_self_to_elf`
+//! time. Both live in `cellgov_cli`. That wrapper routes to
+//! `sce::decrypt_self_to_elf`
 //! (APP-keyed) or `npdrm::decrypt_self_to_elf_auto` (auto-detect
 //! APP vs NPDRM) according to the caller's declared key policy.
 //!
@@ -25,10 +25,11 @@
 #![allow(
     clippy::print_stdout,
     clippy::print_stderr,
-    reason = "shared with the cellgov_install binary's user-facing output"
+    reason = "the CELLGOV_FW_DEBUG section trace writes to the operator's terminal"
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+pub mod container;
 pub mod firmware_install;
 pub mod game_install;
 pub mod game_uninstall;

@@ -58,7 +58,7 @@ static const char SPU_ELF_PATH[] = "/app_home/spu_main.elf";
 static unsigned char buf[512] __attribute__((aligned(256)));
 
 /* Static globals so their addresses land in .bss (main-memory
- * view), not on the stack. The CellGov run-game memory view is
+ * view), not on the stack. The CellGov boot run memory view is
  * single-region main memory; stack addresses at 0xD0000000 are
  * not readable via read_committed. */
 static sysSpuImage g_image;

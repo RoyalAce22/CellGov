@@ -1,4 +1,4 @@
-//! `run-game` entry point and its option / summary / error types.
+//! `boot run` entry point and its option / summary / error types.
 
 use std::time::Instant;
 
@@ -125,7 +125,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     let profile_run = crate::cli::env::parse_env_bool("CELLGOV_RUNGAME_PROFILE");
     let t_run_start = Instant::now();
     eprintln!(
-        "run-game: title = {} ({})",
+        "boot run: title = {} ({})",
         title.name(),
         title.display_name()
     );

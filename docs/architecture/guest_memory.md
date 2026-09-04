@@ -8,7 +8,7 @@ search, returning the region entirely containing the range, or
 `None` if the access straddles a boundary or falls in an unmapped
 gap.
 
-The `run-game` driver builds these regions, matching the canonical
+The `boot run` driver builds these regions, matching the canonical
 PS3 LV2 virtual-address layout:
 
 | Guest VA                   | Size       | Label          | Access                           | Purpose                                                                                                                                                                  |
@@ -41,7 +41,7 @@ variants cannot be collapsed by accident:
   bytes and bump `GuestMemory::provisional_read_count`; writes fault
   with `MemError::ReservedWrite`. The default for RSX and
   SPU-reserved: it maps the address space without real semantics
-  and surfaces silent zero-reads in `run-game`'s end-of-boot
+  and surfaces silent zero-reads in `boot run`'s end-of-boot
   summary.
 - **`ReservedStrict`**: reads via the legacy `GuestMemory::read`
   return `None`; reads via `GuestMemory::read_checked` fault with

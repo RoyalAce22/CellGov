@@ -1,11 +1,11 @@
-//! `record-anchors`: re-measure a title's boot and rewrite its
+//! `dev record-anchors`: re-measure a title's boot and rewrite its
 //! committed baseline.
 //!
 //! The witness suite asserts against `boot_summary.json`; this is the
 //! only thing that writes it.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::str::FromStr;
 
@@ -21,7 +21,7 @@ use crate::game::manifest::TitleRegistry;
 
 use crate::paths::{anchor_max_steps, boot_anchor_path, history_path, workspace_root};
 
-use crate::cli::args::{find_flag_value, has_bool_flag};
+use crate::cli::parse::RecordAnchorsArgs;
 
 struct Entry {
     short_name: String,
@@ -44,7 +44,6 @@ fn read_registry(dir: &Path) -> Vec<Entry> {
     out
 }
 
-/// What one boot measured.
 struct Measurement {
     witnesses: BTreeMap<String, u64>,
     steps: u64,
@@ -59,14 +58,15 @@ struct Measurement {
 fn measure(entry: &Entry) -> Option<Measurement> {
     let exe = std::env::current_exe().unwrap_or_else(|e| die(&format!("current_exe: {e}")));
     let output = Command::new(exe)
-        .arg("bench-boot-once")
+        .arg("boot")
+        .arg("bench-once")
         .arg("--title")
         .arg(&entry.short_name)
         .arg("--max-steps")
         .arg(entry.max_steps.to_string())
         .current_dir(workspace_root())
         .output()
-        .unwrap_or_else(|e| die(&format!("spawn bench-boot-once: {e}")));
+        .unwrap_or_else(|e| die(&format!("spawn boot bench-once: {e}")));
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -116,9 +116,9 @@ fn measure(entry: &Entry) -> Option<Measurement> {
             entry.short_name
         ))
     });
-    // A run the store named nothing for still prints the line, with an
-    // empty payload. A missing line therefore means the child was not
-    // this binary, or its stderr never arrived.
+    // The boot prints the line even when the store names nothing, with
+    // an empty payload. A missing line therefore means the child was
+    // not this binary, or its stderr never arrived.
     let identity = RunIdentity::parse_sentinel_lines(&stderr)
         .unwrap_or_else(|e| die(&format!("{}: {e}", entry.short_name)))
         .unwrap_or_else(|| {
@@ -163,7 +163,7 @@ fn read_previous_anchor(short_name: &str, path: &Path) -> BootSummary {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => die(&format!(
             "{short_name}: no existing {} to update. The baseline carries checkpoint and \
              budget, which this command does not measure; create it first with \
-             run-game --save-boot-summary.",
+             boot run --save-boot-summary.",
             path.display()
         )),
         Err(e) => die(&format!(
@@ -290,7 +290,7 @@ fn record_one(entry: &Entry, strict: bool) -> bool {
 
 /// Refuse a `--registry` the spawned measurement cannot honour.
 ///
-/// `measure` re-enters the binary as `bench-boot-once --title <name>`,
+/// `measure` re-enters the binary as `boot bench-once --title <name>`,
 /// and that path resolves the name against the compiled-in registry
 /// directory. A `--registry` pointing elsewhere would enumerate one
 /// set of manifests, boot the same-named title from another, and then
@@ -303,7 +303,7 @@ fn reject_unforwardable_registry(registry: &Path, default: &Path) {
     if !same {
         die(&format!(
             "record-anchors: --registry {} is not the registry the measurement reads. \
-             The boot is re-entered as `bench-boot-once --title <name>`, which resolves \
+             The boot is re-entered as `boot bench-once --title <name>`, which resolves \
              names against {}, so the anchor would be measured from one manifest and \
              filed under another. Point --registry at {} or drop it.",
             registry.display(),
@@ -313,24 +313,16 @@ fn reject_unforwardable_registry(registry: &Path, default: &Path) {
     }
 }
 
-pub(crate) fn run(args: &[String]) {
+pub(crate) fn run(args: &RecordAnchorsArgs) {
     let default_registry = workspace_root().join(DEFAULT_TITLE_REGISTRY_DIR);
-    // The shared parsers, not a local scan: they refuse `--flag=value`
-    // and a duplicate, both of which a bare `position(|a| a == name)`
-    // reads as absent.
-    let registry = match find_flag_value(args, "--registry") {
-        Some(p) => {
-            let given = PathBuf::from(p);
-            reject_unforwardable_registry(&given, &default_registry);
-            given
+    let registry = match &args.registry {
+        Some(given) => {
+            reject_unforwardable_registry(given, &default_registry);
+            given.clone()
         }
         None => default_registry,
     };
-    let all = has_bool_flag(args, "--all");
-    let one = find_flag_value(args, "--title");
-    if all == one.is_some() {
-        die("record-anchors requires exactly one of --all or --title <name>");
-    }
+    let one = args.scope.title.clone();
 
     let entries = read_registry(&registry);
     if entries.is_empty() {

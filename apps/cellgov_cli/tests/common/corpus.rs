@@ -50,7 +50,7 @@ pub fn dev_flash() -> PathBuf {
     let entries = std::fs::read_dir(&records).unwrap_or_else(|e| {
         panic!(
             "firmware-corpus: no firmware install records at {}: {e}. Run \
-             `cellgov_install install <PS3UPDAT.PUP>` to populate the store.",
+             `cellgov firmware install <PS3UPDAT.PUP>` to populate the store.",
             records.display()
         )
     });
@@ -115,7 +115,7 @@ pub fn firmware_external_dir() -> PathBuf {
     let dir = dev_flash().join("sys").join("external");
     assert!(
         dir.is_dir(),
-        "no PS3 firmware corpus at {}. Run `cellgov_install install <PS3UPDAT.PUP>` \
+        "no PS3 firmware corpus at {}. Run `cellgov firmware install <PS3UPDAT.PUP>` \
          to populate it.",
         dir.display()
     );

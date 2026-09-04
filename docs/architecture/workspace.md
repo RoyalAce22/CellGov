@@ -95,6 +95,7 @@ graph BT
   ppu ~~~ spu
   firmware --> cli
   terminal --> firmware
+  terminal --> cli
 ```
 
 Five structural rules:
@@ -114,28 +115,32 @@ Five structural rules:
   as `cellgov_testkit`: in the tree, outside the runtime DAG. It reads
   the host clock and the process environment, so no guest-visible path
   reaches it.
-- `cellgov_install` is a lib+bin. The binary exposes the `install`,
-  `install-game`, `install-iso`, `install-update`, `uninstall`, `keys`
-  and `decrypt-self` subcommands; the library exposes the same PUP / SCE /
-  SELF / TAR primitives, the operator key-vault loader (`keys`), and
-  the firmware and game installers, which report progress through
-  `cellgov_terminal`'s sink trait; the binary attaches the renderer.
-  `cellgov_cli` depends on the library to decrypt SCE-wrapped SELFs at boot
-  through `self_image::to_plaintext_elf`, the one place that probes
-  for the SCE wrapper and routes to the APP-keyed or
+- `cellgov_install` is a library: the PUP / SCE / SELF / TAR
+  primitives, the operator key-vault loader (`keys`), and the firmware
+  and game installers, which report progress through
+  `cellgov_terminal`'s sink trait. `cellgov_cli` depends on it both to
+  drive those installers from the `firmware` / `title` / `keys` /
+  `self` commands, attaching the renderer, and to decrypt SCE-wrapped
+  SELFs at boot through `self_image::to_plaintext_elf`, the one place
+  that probes for the SCE wrapper and routes to the APP-keyed or
   klicensee-resolving decrypt per the caller's `KeyPolicy`. Only
   `cellgov_install` pulls the crypto crates (`aes`, `cbc`, `ctr`,
   `hmac`, `sha1`, `flate2` -- optional, linked by the default-off
   `decrypt` feature that also gates every key-consuming path;
-  `sha2` for hashing in every build) and `filebuffer`, whose safe
-  read-only file mapping lets the installer walk disc images larger
-  than host memory. `cellgov_cli/decrypt` forwards to it.
+  `sha2` for hashing in every build); `cellgov_cli/decrypt` forwards to
+  it. `cellgov_cli` takes `filebuffer`, whose safe read-only file
+  mapping lets an install walk disc images larger than host memory.
+- `cellgov_cli` builds the workspace's one binary, `cellgov`: a
+  two-level noun-verb tree parsed by `clap` in `cli::parse`, with
+  every command's behavior a function over the plain structs that
+  module produces.
 
 External dependencies: `serde`, `serde_json`, and `toml` in
 `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and
-`cellgov_cli`; crypto crates and `filebuffer` in `cellgov_install`
-only. Everything else is workspace-internal. The workspace compiles
-under `unsafe_code = "forbid"`.
+`cellgov_cli`; `clap` and `filebuffer` in `cellgov_cli`; crypto crates
+in `cellgov_install` only.
+Everything else is workspace-internal. The workspace compiles under
+`unsafe_code = "forbid"`.
 
 ## Per-crate responsibilities
 
@@ -158,7 +163,7 @@ under `unsafe_code = "forbid"`.
 | `cellgov_terminal`             | Terminal presentation for the host tools: startup capability detection (`Off` / `Plain` / `Ansi`, color policy, width) and the shared progress bar -- a `ProgressSink` event seam instrumented code emits against, and a render thread that owns stderr. Callers describe their work as a `Task` (verb, phase labels, `Bytes`/`Files`/`Steps`/`Items` denominator), so no command's vocabulary is baked in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| `cellgov_cli`                  | The user-facing binary: `run-game`, `bench-boot`, `bench-boot-once`, `dump`, `dump-prx-imports`, `disasm`, `compare`, `explore`, `compare-observations`, `diverge`, `zoom`, `rpcs3-attribute`, `fixture-gen`, `titles-gen`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `cellgov_cli`                  | The workspace's one binary, `cellgov`: `firmware`, `title`, `keys`, `self`, `boot`, `diff`, `explore`, `scenario`, and the `dev` tools.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `cellgov_mkelf`                | Standalone generator of PPU ELF fixtures for the microtest corpus. Depends on `cellgov_ps3_abi` only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `cellgov_install`              | PS3 firmware and SELF decrypter, lib + bin. The `install` subcommand peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction) and writes per-module SELFs into a store entry keyed on the version the extracted tree's own `vsh/etc/version.txt` names, holding the `dev_flash` mount with `dev_flash2` / `dev_flash3` as siblings beside it. The extraction stages under one hidden sibling of the firmware root and commits with a rename, since the version that names the entry is unreadable until the tree is out. `decrypt-self` decrypts one SELF at a time. `cellgov_cli`'s boot path calls the library's `sce::decrypt_self_to_elf` to peel encrypted SELFs at load time. Every decrypt path takes a `keys::KeyVault` the operator supplies (`CELLGOV_KEYS`, or the vault `keys import` normalized into `vfs/.cellgov/keys/keys.toml`); no build carries a key value, and a SELF whose key revision the vault lacks is refused by name. Firmware modules from the user's PUP decrypt bit-identically to committed per-module reference digests, held by a parity gate over the stems the reference set covers; the user supplies the PUP, since CellGov ships no firmware. Nothing in the decrypt path depends on another runner. |
+| `cellgov_install`              | PS3 firmware and SELF decrypter library. Its firmware installer peels the outer SCE/PUP wrapping of a `PS3UPDAT.PUP` (PUP container parse, SHA-1 HMAC validation, AES-256-CBC / AES-128-CTR decryption, zlib decompression, nested TAR extraction) and writes per-module SELFs into a store entry keyed on the version the extracted tree's own `vsh/etc/version.txt` names, holding the `dev_flash` mount with `dev_flash2` / `dev_flash3` as siblings beside it. The extraction stages under one hidden sibling of the firmware root and commits with a rename, since the version that names the entry is unreadable until the tree is out. A SELF decrypts one at a time behind `cellgov self decrypt`. `cellgov_cli`'s boot path calls the library's `sce::decrypt_self_to_elf` to peel encrypted SELFs at load time. Every decrypt path takes a `keys::KeyVault` the operator supplies (`CELLGOV_KEYS`, or the vault `keys import` normalized into `vfs/.cellgov/keys/keys.toml`); no build carries a key value, and a SELF whose key revision the vault lacks is refused by name. Firmware modules from the user's PUP decrypt bit-identically to committed per-module reference digests, held by a parity gate over the stems the reference set covers; the user supplies the PUP, since CellGov ships no firmware. Nothing in the decrypt path depends on another runner. |
 | `bridges/rpcs3_to_observation` | RPCS3 dump -> `Observation` JSON adapter. Lives under `bridges/`, excluded from the workspace's `default-members`, so a plain `cargo build` pulls in no RPCS3-aware code; build with `cargo build -p rpcs3_to_observation`. Paired with the C++ patch under `bridges/rpcs3-patch/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |

@@ -18,13 +18,15 @@ pub enum SceError {
         got: u32,
     },
     /// The key vault holds no APP keyset for the SELF revision.
-    #[error("SCE: no APP key configured for SELF revision 0x{revision:04x}; check `cellgov_install keys show`")]
+    #[error(
+        "SCE: no APP key configured for SELF revision 0x{revision:04x}; check `cellgov keys show`"
+    )]
     NoAppKey {
         /// SELF revision (low 15 bits of `revision_flags`) the vault has no APP key for.
         revision: u16,
     },
     /// The key vault holds no NPDRM keyset for the SELF revision.
-    #[error("SCE: no NPDRM key configured for SELF revision 0x{revision:04x}; check `cellgov_install keys show`")]
+    #[error("SCE: no NPDRM key configured for SELF revision 0x{revision:04x}; check `cellgov keys show`")]
     NoNpdrmKey {
         /// SELF revision (low 15 bits of `revision_flags`) the vault has no NPDRM key for.
         revision: u16,
@@ -43,7 +45,7 @@ pub enum SceError {
     },
     /// The vault's RAP permutation table is not a permutation of
     /// 0..15, so no klicensee can be derived through it.
-    #[error("SCE: the vault's rap_pbox is not a permutation of 0..15 (entry {index} is past 15 or repeats an earlier entry); check `cellgov_install keys show`")]
+    #[error("SCE: the vault's rap_pbox is not a permutation of 0..15 (entry {index} is past 15 or repeats an earlier entry); check `cellgov keys show`")]
     RapPboxNotAPermutation {
         /// Zero-based position of the first entry that breaks the
         /// permutation.

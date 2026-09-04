@@ -1,99 +1,102 @@
-//! Subcommand token dispatch and step-count parsing.
+//! Dispatch coverage: every command the tree declares reaches a
+//! handler.
+
+use clap::CommandFactory as _;
 
 use super::*;
 
-#[test]
-fn parse_step_count_accepts_decimal() {
-    assert_eq!(parse_step_count("123").unwrap(), 123);
+/// Every leaf `dispatch` and `dispatch_dev` route, as the path an
+/// operator types.
+fn declared_paths() -> Vec<String> {
+    let mut out = Vec::new();
+    collect(&Cli::command(), &mut Vec::new(), &mut out);
+    out
 }
 
-#[test]
-fn parse_step_count_accepts_lower_hex_prefix() {
-    assert_eq!(parse_step_count("0xff").unwrap(), 0xff);
-}
-
-#[test]
-fn parse_step_count_accepts_upper_hex_prefix() {
-    assert_eq!(parse_step_count("0XFF").unwrap(), 0xff);
-}
-
-#[test]
-fn parse_step_count_rejects_garbage() {
-    assert!(parse_step_count("nope").is_err());
-    assert!(parse_step_count("0xnope").is_err());
-}
-
-#[test]
-fn subcommands_const_is_exhaustive() {
-    for sub in SUBCOMMANDS {
-        for tok in sub.tokens() {
-            assert_eq!(
-                Subcommand::from_token(tok),
-                Some(*sub),
-                "token {tok:?} did not round-trip to {sub:?}"
-            );
+fn collect(command: &clap::Command, prefix: &mut Vec<String>, out: &mut Vec<String>) {
+    let mut leaf = true;
+    for sub in command.get_subcommands() {
+        // `help` is clap's own, not one this binary dispatches.
+        if sub.get_name() == "help" {
+            continue;
         }
+        leaf = false;
+        prefix.push(sub.get_name().to_string());
+        collect(sub, prefix, out);
+        prefix.pop();
     }
-    let expected: &[Subcommand] = &[
-        Subcommand::Help,
-        Subcommand::Version,
-        Subcommand::Compare,
-        Subcommand::CompareObservations,
-        Subcommand::Diverge,
-        Subcommand::Zoom,
-        Subcommand::Explore,
-        Subcommand::RunGame,
-        Subcommand::BenchBoot,
-        Subcommand::BenchBootOnce,
-        Subcommand::Dump,
-        Subcommand::DumpPrxImports,
-        Subcommand::Disasm,
-        Subcommand::Funcs,
-        Subcommand::Rpcs3Attribute,
-        Subcommand::FixtureGen,
-        Subcommand::TitlesGen,
-        Subcommand::GenManifest,
-        Subcommand::RecordAnchors,
-    ];
-    assert_eq!(
-        SUBCOMMANDS.len(),
-        expected.len(),
-        "SUBCOMMANDS missing a variant present in `expected`"
-    );
-    for (a, b) in SUBCOMMANDS.iter().zip(expected.iter()) {
-        assert_eq!(a, b, "SUBCOMMANDS ordering drifted from `expected`");
+    if leaf && !prefix.is_empty() {
+        out.push(prefix.join(" "));
     }
 }
 
-#[test]
-fn tokens_have_no_duplicates_across_variants() {
-    let mut seen: std::collections::BTreeMap<&str, Subcommand> = std::collections::BTreeMap::new();
-    for sub in SUBCOMMANDS {
-        for tok in sub.tokens() {
-            if let Some(prev) = seen.insert(*tok, *sub) {
-                panic!(
-                    "token {tok:?} claimed by both {prev:?} and {sub:?}",
-                    prev = prev,
-                    sub = sub
-                );
-            }
-        }
-    }
-}
+/// The routes `dispatch` matches on, spelled the way an operator types
+/// them. A command declared in the tree and missing here would parse
+/// and then reach no handler.
+const DISPATCHED: &[&str] = &[
+    "firmware install",
+    "title install",
+    "title install-update",
+    "title uninstall",
+    "keys show",
+    "keys import",
+    "keys remove",
+    "self decrypt",
+    "boot run",
+    "boot bench",
+    "boot bench-once",
+    "diff compare",
+    "diff observations",
+    "diff diverge",
+    "diff zoom",
+    "explore",
+    "explore micro",
+    "scenario list",
+    "scenario run",
+    "scenario dump",
+    "dev disasm",
+    "dev prx-imports",
+    "dev funcs",
+    "dev rpcs3-attribute",
+    "dev fixture-gen",
+    "dev titles-gen",
+    "dev gen-manifest",
+    "dev record-anchors",
+];
 
 #[test]
-fn scenarios_disjoint_from_subcommand_tokens() {
-    for s in SCENARIOS {
+fn every_declared_command_is_dispatched() {
+    let declared = declared_paths();
+    for path in &declared {
         assert!(
-            Subcommand::from_token(s).is_none(),
-            "scenario {s:?} shadowed by dispatcher token"
+            DISPATCHED.contains(&path.as_str()),
+            "{path} is in the tree but not in the dispatch table",
+        );
+    }
+    for path in DISPATCHED {
+        // `explore` is the one command with both a positional form and
+        // a subcommand, so the walk reports only the subcommand.
+        if *path == "explore" {
+            continue;
+        }
+        assert!(
+            declared.contains(&(*path).to_string()),
+            "{path} is dispatched but no longer in the tree",
         );
     }
 }
 
 #[test]
-fn from_token_returns_none_for_unknown() {
-    assert_eq!(Subcommand::from_token(""), None);
-    assert_eq!(Subcommand::from_token("nope"), None);
-    assert_eq!(Subcommand::from_token("compaer"), None);
+fn a_scenario_name_no_longer_shadows_a_top_level_command() {
+    let command = Cli::command();
+    let top: Vec<&str> = command
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        .collect();
+    for name in SCENARIOS {
+        assert!(
+            !top.contains(name),
+            "scenario {name:?} collides with a top-level command",
+        );
+    }
 }

@@ -80,7 +80,7 @@ pub(crate) enum FirmwareSelectError {
     /// The store holds no firmware.
     #[error(
         "no firmware is installed under {root}; install one with \
-         `cellgov_install install <PS3UPDAT.PUP>`, name a tree with --firmware-dir, or set \
+         `cellgov firmware install <PS3UPDAT.PUP>`, name a tree with --firmware-dir, or set \
          {disable_env}=1 to boot with no firmware at all (every import then answers through \
          the unresolved-import trampoline)"
     )]
@@ -166,7 +166,7 @@ pub(crate) enum GameVersionSelectError {
     #[error(
         "{title_id} has update(s) {} installed but no base; an update tree patches a base \
          and cannot be composed alone. Install the base with \
-         `cellgov_install install-game <PKG>` or `install-iso <ISO>`",
+         `cellgov title install <PKG|ISO>`",
         render_list(updates)
     )]
     OrphanUpdates {

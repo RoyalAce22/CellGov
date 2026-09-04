@@ -2,7 +2,7 @@
 //!
 //! One JSON object per line in
 //! `tests/fixtures/<content-id>/cellgov/boot_history.jsonl`, appended
-//! by `record-anchors` and read by nobody at runtime -- it exists so a
+//! by `dev record-anchors` and read by nobody at runtime -- it exists so a
 //! reader can answer "when did this anchor change, and to what".
 //! Lines carry no timestamp or commit id, so a re-record is
 //! byte-reproducible: same code, same line. A run that changes nothing

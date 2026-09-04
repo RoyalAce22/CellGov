@@ -2,7 +2,7 @@
 //!
 //! The corpus suites decrypt real containers, so they need the real
 //! key material: `CELLGOV_KEYS` naming a keys file or directory, or the
-//! vault `cellgov_install keys import` wrote under the workspace's
+//! vault `cellgov keys import` wrote under the workspace's
 //! `vfs/`. A missing vault fails the suite; nothing skips.
 
 // Each integration test binary compiles this module separately and
@@ -35,7 +35,7 @@ pub fn location() -> PathBuf {
         panic!(
             "this suite decrypts real containers and needs the operator's key \
              vault: set {ENV_KEYS} to a keys file or directory, or run \
-             `cellgov_install keys import <keys>` ({e})"
+             `cellgov keys import <keys>` ({e})"
         )
     })
 }
@@ -51,7 +51,7 @@ pub fn vault() -> KeyVault {
         panic!(
             "this suite decrypts real containers and needs the operator's key \
              vault: set {ENV_KEYS} to a keys file or directory, or run \
-             `cellgov_install keys import <keys>` ({e})"
+             `cellgov keys import <keys>` ({e})"
         )
     })
 }

@@ -1,4 +1,4 @@
-//! Step drivers for `run-game` (diagnostic) and `bench-boot` (throughput).
+//! Step drivers for `boot run` (diagnostic) and `boot bench` (throughput).
 //!
 //! Both loops share [`verdict::classify_step_outcome`] for verdict
 //! precedence.

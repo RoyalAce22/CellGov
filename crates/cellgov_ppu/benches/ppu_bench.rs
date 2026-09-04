@@ -267,9 +267,9 @@ fn bench_execute_rlwinm(c: &mut Criterion) {
     });
 }
 
-// Budget=1: single-step mode, matching run-game's per-call pattern.
+// Budget=1: single-step mode, matching `boot run`'s per-call pattern.
 // Plain `iter()` keeps PPU construction + context inside the timed
-// region because run-game pays that construction cost on every
+// region because `boot run` pays that construction cost on every
 // single-step iteration.
 fn bench_run_until_yield_budget_1(c: &mut Criterion) {
     let addi_word: u32 = (14 << 26) | (3 << 21) | (3 << 16) | 1;

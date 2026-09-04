@@ -1,4 +1,4 @@
-//! Instruction-stream emitter for the `disasm` subcommand.
+//! Instruction-stream emitter for `dev disasm`.
 //!
 //! Owns vaddr-to-file-offset resolution (`select_segment`) over the
 //! validated `PtLoad` list and the per-instruction print loop
@@ -13,8 +13,8 @@ use std::io::{self, Write};
 
 use cellgov_ppu::funcmap::FunctionMap;
 
-use super::args::MAX_COUNT;
 use super::elf::PtLoad;
+use crate::cli::parse::MAX_DISASM_COUNT as MAX_COUNT;
 
 /// Number of consecutive `decode` failures after which the user almost
 /// certainly pointed the disassembler at data, not code. One stderr
@@ -119,9 +119,15 @@ pub(super) fn disassemble<W: Write>(
     symbols: Option<&FunctionMap>,
     out: &mut W,
 ) -> Result<DisasmStats, StreamError> {
-    debug_assert!(vaddr.is_multiple_of(4), "parse_args must enforce alignment");
-    debug_assert!(count > 0, "parse_args must reject count == 0");
-    debug_assert!(count <= MAX_COUNT, "parse_args must enforce the count cap");
+    debug_assert!(
+        vaddr.is_multiple_of(4),
+        "args::check_alignment must enforce alignment"
+    );
+    debug_assert!(count > 0, "the --count value parser must reject 0");
+    debug_assert!(
+        count <= MAX_COUNT,
+        "the --count value parser must enforce the cap"
+    );
 
     let seg = select_segment(segments, vaddr).map_err(StreamError::BadVaddr)?;
 

@@ -7,6 +7,11 @@
 )]
 
 use cellgov_compare::{diverge, DivergeField, DivergeReport};
+
+/// `diff zoom` was asked for a step neither window covers.
+const EXIT_MISSING_STEP: i32 = 30;
+/// A state or zoom trace failed to decode.
+const EXIT_CORRUPT_TRACE: i32 = 31;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
@@ -142,9 +147,9 @@ fn cli_diverge_subcommand_reports_identical_on_match() {
     std::fs::write(&a, &bytes).unwrap();
     std::fs::write(&b, &bytes).unwrap();
 
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
     let out = Command::new(bin)
-        .args(["diverge", a.to_str().unwrap(), b.to_str().unwrap()])
+        .args(["diff", "diverge", a.to_str().unwrap(), b.to_str().unwrap()])
         .output()
         .expect("cli runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -177,9 +182,9 @@ fn cli_diverge_subcommand_reports_diverge_on_mismatch() {
     std::fs::write(&a, &a_bytes).unwrap();
     std::fs::write(&b, &b_bytes).unwrap();
 
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
     let out = Command::new(bin)
-        .args(["diverge", a.to_str().unwrap(), b.to_str().unwrap()])
+        .args(["diff", "diverge", a.to_str().unwrap(), b.to_str().unwrap()])
         .output()
         .expect("cli runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -252,9 +257,15 @@ fn cli_zoom_subcommand_names_mutated_register_field() {
     std::fs::write(&a, &a_zoom).unwrap();
     std::fs::write(&b, &b_zoom).unwrap();
 
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
     let out = Command::new(bin)
-        .args(["zoom", a.to_str().unwrap(), b.to_str().unwrap(), "5"])
+        .args([
+            "diff",
+            "zoom",
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+            "5",
+        ])
         .output()
         .expect("cli runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -288,9 +299,15 @@ fn cli_zoom_reports_no_field_diff_when_full_states_match() {
     std::fs::write(&a, &z).unwrap();
     std::fs::write(&b, &z).unwrap();
 
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
     let out = Command::new(bin)
-        .args(["zoom", a.to_str().unwrap(), b.to_str().unwrap(), "5"])
+        .args([
+            "diff",
+            "zoom",
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+            "5",
+        ])
         .output()
         .expect("cli runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -320,10 +337,16 @@ fn cli_zoom_reports_missing_step_when_window_excluded_it() {
     std::fs::write(&a, &z).unwrap();
     std::fs::write(&b, &z).unwrap();
 
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
     let zoom_at = |step: &str| {
         let out = Command::new(&bin)
-            .args(["zoom", a.to_str().unwrap(), b.to_str().unwrap(), step])
+            .args([
+                "diff",
+                "zoom",
+                a.to_str().unwrap(),
+                b.to_str().unwrap(),
+                step,
+            ])
             .output()
             .expect("cli runs");
         (
@@ -348,7 +371,7 @@ fn cli_zoom_reports_missing_step_when_window_excluded_it() {
     );
 
     let (code, stdout) = zoom_at("10");
-    assert_eq!(code, Some(2));
+    assert_eq!(code, Some(EXIT_MISSING_STEP));
     assert!(
         stdout.contains("MISSING_STEP"),
         "expected MISSING_STEP line, got: {stdout}"
@@ -405,16 +428,16 @@ fn cli_diverge_reports_corrupt_trace_instead_of_a_verdict() {
     std::fs::write(&a, &a_bytes).unwrap();
     std::fs::write(&b, &b_bytes).unwrap();
 
-    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov_cli"));
+    let bin = PathBuf::from(env!("CARGO_BIN_EXE_cellgov"));
     let out = Command::new(bin)
-        .args(["diverge", a.to_str().unwrap(), b.to_str().unwrap()])
+        .args(["diff", "diverge", a.to_str().unwrap(), b.to_str().unwrap()])
         .output()
         .expect("cli runs");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert_eq!(
         out.status.code(),
-        Some(3),
-        "corrupt input exits 3: {stdout}"
+        Some(EXIT_CORRUPT_TRACE),
+        "corrupt input exits {EXIT_CORRUPT_TRACE}: {stdout}"
     );
     assert!(
         stdout.contains("CORRUPT_TRACE  common=7  a: ok  b: trace record 7"),

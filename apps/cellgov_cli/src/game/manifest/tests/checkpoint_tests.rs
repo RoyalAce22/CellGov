@@ -33,38 +33,6 @@ fn checkpoint_unprefixed_hex_is_rejected() {
     assert!(CheckpointTrigger::parse_cli_value("pc=1ce8").is_err());
 }
 
-#[test]
-fn parse_from_args_rejects_repeated_flag() {
-    let args = vec![
-        "run-game".to_string(),
-        "--checkpoint".to_string(),
-        "process-exit".to_string(),
-        "--checkpoint".to_string(),
-        "first-rsx-write".to_string(),
-    ];
-    let got = CheckpointTrigger::parse_from_args(&args);
-    assert!(
-        matches!(got, Some(Err(_))),
-        "repeated --checkpoint must surface as Some(Err)"
-    );
-}
-
-#[test]
-fn parse_from_args_rejects_missing_value() {
-    let args = vec!["run-game".to_string(), "--checkpoint".to_string()];
-    let got = CheckpointTrigger::parse_from_args(&args);
-    assert!(
-        matches!(got, Some(Err(_))),
-        "--checkpoint with no value must be Some(Err), not None"
-    );
-}
-
-#[test]
-fn parse_from_args_returns_none_when_flag_absent() {
-    let args = vec!["run-game".to_string(), "--other".to_string()];
-    assert!(CheckpointTrigger::parse_from_args(&args).is_none());
-}
-
 // Same PC used in `boot_summary_cross_check` in observation.rs;
 // grep `0x10381ce8` to find all wire-form pins.
 const SAMPLE_PC: u64 = 0x10381ce8;

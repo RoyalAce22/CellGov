@@ -1,9 +1,12 @@
-//! Integration tests for `cellgov_install install` against a real
+//! Integration tests for the firmware install pipeline against a real
 //! PS3UPDAT.PUP.
 //!
-//! `--output` names the VFS root; the firmware lands in the store entry
-//! its own `vsh/etc/version.txt` names, beside whatever `install-game`
-//! put in `dev_hdd0` / `dev_bdvd`.
+//! The `cellgov` binary lives in a crate that depends on this one, so
+//! the suite drives `install_pup` rather than the command: the store
+//! root it is handed is what `cellgov firmware install --output`
+//! names, and the firmware lands in the entry its own
+//! `vsh/etc/version.txt` keys, beside whatever a title install put in
+//! `dev_hdd0` / `dev_bdvd`.
 //!
 //! The PUP is operator-owned and read from the dump root
 //! (`common/dumps.rs`); nothing in the repo ships one. This suite is
@@ -17,9 +20,10 @@
 )]
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
-use cellgov_install::firmware_install::DEV_FLASH_MOUNT;
+use cellgov_install::firmware_install::{
+    FirmwareInstallError, FirmwareInstallOutcome, DEV_FLASH_MOUNT,
+};
 use cellgov_install::store::{Artifact, ArtifactKind, InstallRecord, StoreLayout, VersionKey};
 
 #[path = "common/digests.rs"]
@@ -48,32 +52,26 @@ fn locate_pup() -> PathBuf {
     p
 }
 
-fn run_install(pup: &PathBuf, vfs_root: &Path, force: bool) -> std::process::Output {
-    let bin = env!("CARGO_BIN_EXE_cellgov_install");
-    let mut cmd = Command::new(bin);
-    cmd.arg("install")
-        .arg(pup)
-        .arg("--output")
-        .arg(vfs_root.as_os_str())
-        // The binary resolves its vault relative to `--output`, a
-        // scratch root where nothing was imported.
-        .env(cellgov_install::keys::ENV_KEYS, keys::location());
-    if force {
-        cmd.arg("--force");
-    }
-    cmd.output().expect("spawn cellgov_install install")
+/// The vault is loaded from the operator's own location rather than
+/// from the scratch store, where nothing was imported.
+fn run_install(
+    pup: &Path,
+    store_root: &Path,
+    force: bool,
+) -> Result<FirmwareInstallOutcome, FirmwareInstallError> {
+    let vault = cellgov_install::keys::KeyVault::load_from_path(Path::new(&keys::location()))
+        .expect("the operator vault this suite declares");
+    let pup_data = std::fs::read(pup).expect("read the PUP this suite located");
+    cellgov_install::firmware_install::install_pup(&pup_data, &vault, store_root, force, &())
 }
 
 /// # Panics
 ///
-/// If the run exited non-zero, dumping both streams.
-fn assert_succeeded(result: &std::process::Output, what: &str) {
-    assert!(
-        result.status.success(),
-        "{what} failed.\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr),
-    );
+/// If the install failed, naming the refusal.
+fn assert_succeeded(result: Result<FirmwareInstallOutcome, FirmwareInstallError>, what: &str) {
+    if let Err(e) = result {
+        panic!("{what} failed: {e}");
+    }
 }
 
 /// The single firmware entry under `vfs_root`, and the version keying
@@ -148,7 +146,7 @@ fn sys_external(entry: &Path) -> PathBuf {
 fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
     let pup = locate_pup();
     let output = scratch::ScratchDir::new("fw_happy");
-    assert_succeeded(&run_install(&pup, &output, false), "install");
+    assert_succeeded(run_install(&pup, &output, false), "install");
 
     let (version, entry) = sole_entry(&output);
     assert_pinned_modules_present(&sys_external(&entry));
@@ -211,27 +209,21 @@ fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
 fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
     let pup = locate_pup();
     let output = scratch::ScratchDir::new("fw_refuse");
-    assert_succeeded(&run_install(&pup, &output, false), "first install");
+    assert_succeeded(run_install(&pup, &output, false), "first install");
     let (_, entry) = sole_entry(&output);
     let before = std::fs::read_dir(entry.join(DEV_FLASH_MOUNT))
         .unwrap()
         .count();
 
-    let result = run_install(&pup, &output, false);
-    assert!(
-        !result.status.success(),
-        "expected the second install to refuse an installed version\n\
-         stdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&result.stdout),
-        String::from_utf8_lossy(&result.stderr),
-    );
-    let stderr = String::from_utf8_lossy(&result.stderr);
+    let refusal = run_install(&pup, &output, false)
+        .expect_err("the second install must refuse an installed version");
     // The same PUP twice has its own refusal, distinct from the one for
     // a second PUP claiming the same version; a bare "already installed"
     // would pass on either.
+    let text = refusal.to_string();
     assert!(
-        stderr.contains("is already installed, from this same PUP"),
-        "expected the same-PUP duplicate refusal in stderr, got:\n{stderr}",
+        text.contains("is already installed, from this same PUP"),
+        "expected the same-PUP duplicate refusal, got: {text}",
     );
 
     // The version cannot be read before the tree is extracted, so a
@@ -256,12 +248,12 @@ fn a_populated_vfs_root_does_not_block_a_firmware_install() {
     std::fs::create_dir_all(output.join("dev_hdd0/game/NPUA80001")).unwrap();
     std::fs::write(output.join("dev_hdd0/game/NPUA80001/x.bin"), b"game").unwrap();
 
-    assert_succeeded(&run_install(&pup, &output, false), "install");
+    assert_succeeded(run_install(&pup, &output, false), "install");
     assert!(
         output.join("dev_hdd0/game/NPUA80001/x.bin").is_file(),
         "the firmware install must not disturb a sibling mount"
     );
-    // A zero-exit install that wrote nothing would satisfy the
+    // A successful install that wrote nothing would satisfy the
     // assertion above, so hold this run to the same output floor as the
     // empty-VFS one.
     let (_, entry) = sole_entry(&output);
@@ -272,12 +264,12 @@ fn a_populated_vfs_root_does_not_block_a_firmware_install() {
 fn force_replaces_an_installed_version_whole() {
     let pup = locate_pup();
     let output = scratch::ScratchDir::new("fw_force");
-    assert_succeeded(&run_install(&pup, &output, false), "first install");
+    assert_succeeded(run_install(&pup, &output, false), "first install");
     let (_, entry) = sole_entry(&output);
     let stale = entry.join(DEV_FLASH_MOUNT).join("stale.bin");
     std::fs::write(&stale, b"left over from the previous install").unwrap();
 
-    assert_succeeded(&run_install(&pup, &output, true), "install --force");
+    assert_succeeded(run_install(&pup, &output, true), "install --force");
     assert!(
         !stale.exists(),
         "--force replaces the entry whole rather than merging into it"

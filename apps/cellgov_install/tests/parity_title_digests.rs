@@ -54,7 +54,7 @@ fn bin_path_for(content_id: &str, key: &str) -> PathBuf {
     }
 }
 
-/// The directory `install-game` / `install-iso` creates for a title.
+/// The directory `cellgov title install` creates for a title.
 ///
 /// Its presence separates an uninstalled title (a pass-over) from a
 /// derived EBOOT path that no longer matches where the installer
@@ -242,8 +242,8 @@ fn eboot_byte_identity_against_committed_digests() {
     assert!(
         compared > 0,
         "title-corpus is on but none of the {} pinned titles is installed. \
-         Install one with `cellgov_install install-game` / `install-iso`, \
-         or build without the feature.",
+         Install one with `cellgov title install`, or build without \
+         the feature.",
         titles.len()
     );
     // Only npdrm rows carry an RPCS3-derived hash. A run of app rows

@@ -1,5 +1,7 @@
-//! Dispatch for the boot-family subcommands: `run-game`,
-//! `bench-boot-once`, and `bench-boot`.
+//! Dispatch for the boot-family subcommands: `boot run`,
+//! `boot bench-once`, and `boot bench`.
+
+use std::path::Path;
 
 use cellgov_compare::BootOutcome;
 use cellgov_time::Budget;
@@ -7,14 +9,10 @@ use cellgov_time::Budget;
 use crate::composition::{banner, compose_boot, BootComposition, ComposeInputs, FirmwareChoice};
 use crate::game;
 
-use super::args::{
-    find_flag_value, find_run_game_elf_path, has_bool_flag, parse_flag_value, parse_hex_flag,
-    parse_hex_u64, parse_patch_byte_pair, require_at_most_one, split_off_flag_values,
-    GUEST_ARG_FLAG,
-};
 use super::env::parse_env_bool;
 use super::exit::die;
-use super::title::{resolve_checkpoint_override, resolve_ps3_vfs_root, resolve_title_manifest};
+use super::parse::{BenchArgs, BootRunArgs, BootSelection, TitleSelector};
+use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
 use crate::paths::anchor_max_steps;
 
 use game::BENCH_AGREEMENT_GATE_PCT;
@@ -23,38 +21,34 @@ use game::BENCH_AGREEMENT_GATE_PCT;
 /// entry's `dev_flash` mount.
 const FIRMWARE_EXTERNAL: [&str; 2] = ["sys", "external"];
 
-/// The flags that each name a firmware, refused together by
-/// [`require_at_most_one`].
-const FIRMWARE_SELECTORS: [&str; 2] = ["--fw", "--firmware-dir"];
-
 /// Set to `1` by synthetic harnesses (e.g. ps3autotests) to suppress
 /// the auto-default.
 const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 
-/// Exit code: two bench-boot runs disagreed on step count or
-/// outcome.
+/// Exit code: two bench runs disagreed on step count or outcome.
 const EXIT_DETERMINISM_BREAK: i32 = 3;
 
 /// Exit code: wall-time disagreement exceeded the gate or was
-/// unmeasurable.
-const EXIT_WALL_DRIFT: i32 = 2;
+/// unmeasurable. The value sits above the shared 0-5 contract, which
+/// gives 2 to a usage error `boot bench` can also return.
+const EXIT_WALL_DRIFT: i32 = 15;
 
-/// Exit code: a bench-boot subprocess failed or its `BENCH_RESULT`
-/// line was unparseable.
+/// Exit code: a bench subprocess failed or its `BENCH_RESULT` line was
+/// unparseable.
 const EXIT_SUBPROCESS_FAIL: i32 = 4;
 
 /// Exit code: the run disagreed with the title's committed anchor.
 const EXIT_ANCHOR_DRIFT: i32 = 5;
 
-/// `run-game` terminated with a guest fault.
+/// `boot run` terminated with a guest fault.
 const EXIT_RUN_GAME_FAULT: i32 = 10;
-/// `run-game` reached `--max-steps` without hitting the configured
+/// `boot run` reached `--max-steps` without hitting the configured
 /// checkpoint.
 const EXIT_RUN_GAME_MAX_STEPS: i32 = 11;
-/// `run-game` exhausted simulated time before reaching a terminal
+/// `boot run` exhausted simulated time before reaching a terminal
 /// state.
 const EXIT_RUN_GAME_TIME_OVERFLOW: i32 = 12;
-/// `run-game` completed but the loop logged an anomaly that violates
+/// `boot run` completed but the loop logged an anomaly that violates
 /// the determinism contract (lost syscall-wake responses).
 const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = 13;
 /// A `--save-observation` / `--save-boot-summary` artifact was
@@ -68,26 +62,26 @@ const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = 14;
 /// firmware binds no import and dies dozens of steps later naming a
 /// NID, which says nothing about the firmware.
 pub(super) fn resolve_composition(
-    args: &[String],
+    selection: &BootSelection,
+    vfs_root: &Path,
     title: &game::manifest::TitleManifest,
 ) -> BootComposition {
-    require_at_most_one(args, &FIRMWARE_SELECTORS);
-    let firmware_dir = find_flag_value(args, "--firmware-dir").inspect(|explicit| {
-        if !std::path::Path::new(explicit).is_dir() {
+    if let Some(explicit) = &selection.firmware_dir {
+        if !explicit.is_dir() {
             die(&format!(
-                "--firmware-dir: {explicit:?} is not an existing directory"
+                "--firmware-dir: {} is not an existing directory",
+                explicit.display()
             ));
         }
-    });
-    let vfs_root = resolve_ps3_vfs_root(args);
-    let install_root = super::keys::install_root_of(&vfs_root);
+    }
+    let install_root = super::keys::install_root_of(vfs_root);
     let composition = compose_boot(&ComposeInputs {
         title,
-        vfs_root: &vfs_root,
+        vfs_root,
         install_root: &install_root,
-        fw: find_flag_value(args, "--fw").as_deref(),
-        game_ver: find_flag_value(args, "--game-ver").as_deref(),
-        firmware_dir: firmware_dir.as_deref().map(std::path::Path::new),
+        fw: selection.fw.as_deref(),
+        game_ver: selection.game_ver.as_deref(),
+        firmware_dir: selection.firmware_dir.as_deref(),
         // The value decides: `CELLGOV_NO_FIRMWARE_DIR=0` leaves the
         // default in place.
         no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV),
@@ -154,12 +148,27 @@ impl OwnedSelection {
     }
 }
 
-fn selection_args(args: &[String]) -> OwnedSelection {
+/// A path a child invocation must be able to spell back on its own
+/// command line.
+fn forwardable(path: Option<&Path>, flag: &str) -> Option<String> {
+    path.map(|p| {
+        p.to_str()
+            .unwrap_or_else(|| {
+                die(&format!(
+                    "{flag} {} is not valid UTF-8, so the paired run cannot be given it",
+                    p.display()
+                ))
+            })
+            .to_string()
+    })
+}
+
+fn selection_args(selection: &BootSelection, vfs_flag: Option<&Path>) -> OwnedSelection {
     OwnedSelection {
-        fw: find_flag_value(args, "--fw"),
-        game_ver: find_flag_value(args, "--game-ver"),
-        firmware_dir: find_flag_value(args, "--firmware-dir"),
-        vfs_root: find_flag_value(args, "--vfs-root"),
+        fw: selection.fw.clone(),
+        game_ver: selection.game_ver.clone(),
+        firmware_dir: forwardable(selection.firmware_dir.as_deref(), "--firmware-dir"),
+        vfs_root: forwardable(vfs_flag, "--vfs-root"),
     }
 }
 
@@ -179,31 +188,24 @@ struct BootInputs {
     control_flags1: Option<u32>,
 }
 
-/// Resolve the title manifest plus the ELF path the boot will run. A
-/// positional ELF override is honoured only when `allow_explicit_elf`
-/// is set; bench subcommands pass `false`.
-fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) -> BootInputs {
-    let title = resolve_title_manifest(args, subcmd);
-    let composition = resolve_composition(args, &title);
-    let vfs_root = resolve_ps3_vfs_root(args);
-    let explicit = find_run_game_elf_path(args);
-    if !allow_explicit_elf {
-        if let Some(p) = explicit.as_ref() {
-            die(&format!(
-                "{subcmd} is title-driven; positional ELF path {p:?} is not accepted here \
-                 (use `run-game` for explicit ELF paths)"
-            ));
-        }
-    }
-    let (elf_path, image) = match explicit {
+fn resolve_boot_inputs(
+    selector: &TitleSelector,
+    selection: &BootSelection,
+    vfs_root: &Path,
+    explicit_elf: Option<&str>,
+    subcmd: &str,
+) -> BootInputs {
+    let title = resolve_title_manifest(selector, subcmd);
+    let composition = resolve_composition(selection, vfs_root, &title);
+    let (elf_path, image) = match explicit_elf {
         Some(p) => {
-            let image = crate::cli::exit::load_ppu_image_with_title_or_die(&p, &title, &vfs_root);
-            (p, image)
+            let image = crate::cli::exit::load_ppu_image_with_title_or_die(p, &title, vfs_root);
+            (p.to_string(), image)
         }
         None => {
             let (image, path) = crate::cli::exit::load_ppu_image_walk_candidates_or_die(
                 &title,
-                &vfs_root,
+                vfs_root,
                 &composition.eboot_dirs,
             );
             let path_str = path
@@ -242,51 +244,21 @@ fn resolve_boot_inputs(args: &[String], subcmd: &str, allow_explicit_elf: bool) 
     }
 }
 
-pub(crate) fn run_game(args: &[String]) {
-    // Guest argv pairs come out first so a guest token that spells a
-    // host flag (a guest `--trace`, `--prescan`, ...) cannot reach
-    // the host-side scans below.
-    let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
-    let args = &args[..];
-    // Every flag is parsed before the boot inputs resolve: a malformed
-    // artifact request must cost seconds, not the run it would have
-    // saved.
-    let save_observation = find_flag_value(args, "--save-observation");
-    let observation_manifest = find_flag_value(args, "--observation-manifest");
-    if observation_manifest.is_some() && save_observation.is_none() {
-        die("--observation-manifest is meaningless without --save-observation");
-    }
+pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>) {
     let observation_regions: Option<Vec<cellgov_compare::RegionDescriptor>> =
-        observation_manifest.as_deref().map(|path| {
-            cellgov_compare::checkpoint_manifest::load(std::path::Path::new(path))
+        args.observation_manifest.as_deref().map(|path| {
+            cellgov_compare::checkpoint_manifest::load(Path::new(path))
                 .unwrap_or_else(|e| die(&format!("--observation-manifest: {e}")))
                 .region_descriptors()
         });
-    let max_steps: usize = parse_flag_value(args, "--max-steps").unwrap_or(100_000);
-    let trace = has_bool_flag(args, "--trace");
-    let profile = has_bool_flag(args, "--profile");
-    let dump_at_pc = parse_hex_flag(args, "--dump-at-pc");
-    let dump_skip: u32 = parse_flag_value(args, "--dump-skip").unwrap_or(0);
-    if dump_skip > 0 && dump_at_pc.is_none() {
-        die("--dump-skip is meaningless without --dump-at-pc");
-    }
-    let dump_mem_boot_addrs: Vec<u64> = find_flag_value(args, "--dump-mem-boot")
-        .map(|v| parse_hex_csv(&v, "--dump-mem-boot"))
-        .unwrap_or_default();
-    let dump_mem_fault_ranges: Vec<(u64, u64)> = find_flag_value(args, "--dump-mem-fault")
-        .map(|v| parse_dump_mem_fault_csv(&v))
-        .unwrap_or_default();
-    let patch_bytes: Vec<(u64, u8)> = find_flag_value(args, "--patch-byte")
-        .map(|v| parse_patch_byte_csv(&v))
-        .unwrap_or_default();
-    let save_boot_summary = find_flag_value(args, "--save-boot-summary");
-    let save_state_trace = find_flag_value(args, "--save-state-trace");
-    let strict_reserved = has_bool_flag(args, "--strict-reserved");
-    let profile_pairs = has_bool_flag(args, "--profile-pairs");
-    let budget_override: Option<Budget> =
-        parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    let prescan = has_bool_flag(args, "--prescan");
-    let inputs = resolve_boot_inputs(args, "run-game", true);
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    let inputs = resolve_boot_inputs(
+        &args.selector,
+        &args.selection,
+        &vfs_root,
+        args.elf_path.as_deref(),
+        "boot run",
+    );
     let firmware_dir = firmware_module_dir(&inputs.composition);
     let result = game::run_game(game::RunGameOptions {
         title: &inputs.title,
@@ -294,31 +266,31 @@ pub(crate) fn run_game(args: &[String]) {
         elf_data: inputs.elf_data,
         authority_id: inputs.authority_id,
         control_flags1: inputs.control_flags1,
-        max_steps,
-        trace,
-        profile,
+        max_steps: args.max_steps,
+        trace: args.trace,
+        profile: args.profile,
         firmware_dir: firmware_dir.as_deref(),
         composed_mounts: &inputs.composition.mounts,
         identity: &inputs.composition.identity,
-        dump_at_pc,
-        dump_skip,
-        patch_bytes: &patch_bytes,
-        dump_mem_boot_addrs: &dump_mem_boot_addrs,
-        dump_mem_fault_ranges: &dump_mem_fault_ranges,
-        save_observation: save_observation.as_deref(),
+        dump_at_pc: args.dump_at_pc,
+        dump_skip: args.dump_skip,
+        patch_bytes: args.patch_byte.as_deref().unwrap_or(&[]),
+        dump_mem_boot_addrs: args.dump_mem_boot.as_deref().unwrap_or(&[]),
+        dump_mem_fault_ranges: args.dump_mem_fault.as_deref().unwrap_or(&[]),
+        save_observation: args.save_observation.as_deref(),
         observation_regions: observation_regions.as_deref(),
-        save_boot_summary: save_boot_summary.as_deref(),
-        save_state_trace: save_state_trace.as_deref(),
-        strict_reserved,
-        profile_pairs,
-        budget_override,
-        prescan,
-        guest_args: &guest_args,
+        save_boot_summary: args.save_boot_summary.as_deref(),
+        save_state_trace: args.save_state_trace.as_deref(),
+        strict_reserved: args.strict_reserved,
+        profile_pairs: args.profile_pairs,
+        budget_override: args.budget.map(Budget::new),
+        prescan: args.prescan,
+        guest_args: &args.guest_arg,
     });
     let summary = match result {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("run-game: {e}");
+            eprintln!("boot run: {e}");
             std::process::exit(EXIT_RUN_GAME_SAVE_ARTIFACT);
         }
     };
@@ -343,104 +315,8 @@ fn classify_run_game_exit(summary: &game::RunSummary) -> i32 {
     outcome_code
 }
 
-/// Sanity cap, in bytes, on a single `--dump-mem-fault` range.
-const MAX_DUMP_LEN: u64 = 64 * 1024;
-
-/// Default LEN when `--dump-mem-fault` is given only an address.
-const DEFAULT_DUMP_LEN: u64 = 0x40;
-
-/// Parse `0xADDR` (default LEN) or `0xADDR:LEN`. Both fields parse as
-/// hex. LEN must be in `1..=MAX_DUMP_LEN`; ADDR + LEN must not
-/// overflow `u64`. Extra `:` segments are rejected.
-fn parse_dump_mem_fault_range_inner(spec: &str) -> Result<(u64, u64), String> {
-    let mut parts = spec.splitn(3, ':');
-    let addr_str = parts.next().unwrap_or("");
-    let len_str = parts.next();
-    if let Some(rest) = parts.next() {
-        return Err(format!(
-            "--dump-mem-fault: extra ':' segment {rest:?} in {spec:?} (expected ADDR[:LEN])"
-        ));
-    }
-    let addr = super::args::parse_hex_u64(addr_str, "--dump-mem-fault address");
-    let len = match len_str {
-        Some(l) => super::args::parse_hex_u64(l, "--dump-mem-fault length"),
-        None => DEFAULT_DUMP_LEN,
-    };
-    if len == 0 {
-        return Err(format!(
-            "--dump-mem-fault: zero-byte length in {spec:?} (LEN must be > 0)"
-        ));
-    }
-    if len > MAX_DUMP_LEN {
-        return Err(format!(
-            "--dump-mem-fault: LEN 0x{len:x} exceeds maximum 0x{MAX_DUMP_LEN:x} in {spec:?}"
-        ));
-    }
-    if addr.checked_add(len - 1).is_none() {
-        return Err(format!(
-            "--dump-mem-fault: ADDR 0x{addr:x} + LEN 0x{len:x} overflows u64 in {spec:?}"
-        ));
-    }
-    Ok((addr, len))
-}
-
-/// Parse a comma-separated list of hex addresses; empty entries
-/// are rejected.
-fn parse_hex_csv(value: &str, flag: &str) -> Vec<u64> {
-    parse_hex_csv_inner(value, flag).unwrap_or_else(|e| die(&e))
-}
-
-fn parse_hex_csv_inner(value: &str, flag: &str) -> Result<Vec<u64>, String> {
-    let mut out = Vec::new();
-    for entry in value.split(',') {
-        if entry.is_empty() {
-            return Err(format!(
-                "{flag}: empty entry (leading/trailing/duplicate comma) in {value:?}"
-            ));
-        }
-        out.push(parse_hex_u64(entry, flag));
-    }
-    Ok(out)
-}
-
-/// Parse a comma-separated list of `ADDR[:LEN]` fault-range specs.
-fn parse_dump_mem_fault_csv(value: &str) -> Vec<(u64, u64)> {
-    parse_dump_mem_fault_csv_inner(value).unwrap_or_else(|e| die(&e))
-}
-
-fn parse_dump_mem_fault_csv_inner(value: &str) -> Result<Vec<(u64, u64)>, String> {
-    let mut out = Vec::new();
-    for entry in value.split(',') {
-        if entry.is_empty() {
-            return Err(format!(
-                "--dump-mem-fault: empty entry (leading/trailing/duplicate comma) in {value:?}"
-            ));
-        }
-        out.push(parse_dump_mem_fault_range_inner(entry)?);
-    }
-    Ok(out)
-}
-
-/// Parse a comma-separated list of `ADDR=VALUE` patch-byte pairs.
-fn parse_patch_byte_csv(value: &str) -> Vec<(u64, u8)> {
-    parse_patch_byte_csv_inner(value).unwrap_or_else(|e| die(&e))
-}
-
-fn parse_patch_byte_csv_inner(value: &str) -> Result<Vec<(u64, u8)>, String> {
-    let mut out = Vec::new();
-    for entry in value.split(',') {
-        if entry.is_empty() {
-            return Err(format!(
-                "--patch-byte: empty entry (leading/trailing/duplicate comma) in {value:?}"
-            ));
-        }
-        out.push(parse_patch_byte_pair(entry));
-    }
-    Ok(out)
-}
-
 /// [`anchor_max_steps`] as a step count, so an un-overridden bench run
-/// stays comparable to the anchor `record-anchors` measured.
+/// stays comparable to the anchor `dev record-anchors` measured.
 fn default_bench_max_steps(title: &game::manifest::TitleManifest) -> usize {
     let cap = anchor_max_steps(title);
     usize::try_from(cap).unwrap_or_else(|_| {
@@ -451,20 +327,20 @@ fn default_bench_max_steps(title: &game::manifest::TitleManifest) -> usize {
     })
 }
 
-pub(crate) fn bench_boot_once(args: &[String]) {
-    // See run_game: guest argv pairs must not reach the host scans.
-    let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
-    let args = &args[..];
-    let inputs = resolve_boot_inputs(args, "bench-boot-once", false);
-    let max_steps: usize = parse_flag_value(args, "--max-steps")
+pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>) {
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    let inputs = resolve_boot_inputs(
+        &args.selector,
+        &args.selection,
+        &vfs_root,
+        None,
+        "boot bench-once",
+    );
+    let max_steps = args
+        .max_steps
         .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
     let firmware_dir = firmware_module_dir(&inputs.composition);
-    let selection = selection_args(args);
-    let strict_reserved = has_bool_flag(args, "--strict-reserved");
-    let checkpoint_override = resolve_checkpoint_override(args, "bench-boot-once");
-    let budget_override: Option<Budget> =
-        parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    let prescan = has_bool_flag(args, "--prescan");
+    let selection = selection_args(&args.selection, vfs_flag);
     game::bench_boot_one_run(
         game::BenchOptions {
             title: &inputs.title,
@@ -474,11 +350,11 @@ pub(crate) fn bench_boot_once(args: &[String]) {
             composed_mounts: &inputs.composition.mounts,
             identity: &inputs.composition.identity,
             selection: selection.as_args(),
-            strict_reserved,
-            checkpoint_override,
-            budget_override,
-            prescan,
-            guest_args: &guest_args,
+            strict_reserved: args.strict_reserved,
+            checkpoint_override: args.checkpoint,
+            budget_override: args.budget.map(Budget::new),
+            prescan: args.prescan,
+            guest_args: &args.guest_arg,
             // This entry point is the raw measurement the pair spawns
             // twice; only the pair gates on the anchor.
             check_anchor: false,
@@ -489,21 +365,20 @@ pub(crate) fn bench_boot_once(args: &[String]) {
     );
 }
 
-pub(crate) fn bench_boot(args: &[String]) {
-    // See run_game: guest argv pairs must not reach the host scans.
-    let (args, guest_args) = split_off_flag_values(args, GUEST_ARG_FLAG);
-    let args = &args[..];
-    let inputs = resolve_boot_inputs(args, "bench-boot", false);
-    let max_steps: usize = parse_flag_value(args, "--max-steps")
+pub(crate) fn bench_boot(args: &BenchArgs, check_anchor: bool, vfs_flag: Option<&Path>) {
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    let inputs = resolve_boot_inputs(
+        &args.selector,
+        &args.selection,
+        &vfs_root,
+        None,
+        "boot bench",
+    );
+    let max_steps = args
+        .max_steps
         .unwrap_or_else(|| default_bench_max_steps(&inputs.title));
     let firmware_dir = firmware_module_dir(&inputs.composition);
-    let selection = selection_args(args);
-    let strict_reserved = has_bool_flag(args, "--strict-reserved");
-    let checkpoint_override = resolve_checkpoint_override(args, "bench-boot");
-    let budget_override: Option<Budget> =
-        parse_flag_value::<u64>(args, "--budget").map(Budget::new);
-    let prescan = has_bool_flag(args, "--prescan");
-    let check_anchor = !has_bool_flag(args, "--no-anchor-check");
+    let selection = selection_args(&args.selection, vfs_flag);
     let outcome = match game::bench_boot_pair(game::BenchOptions {
         title: &inputs.title,
         elf_path: &inputs.elf_path,
@@ -512,16 +387,16 @@ pub(crate) fn bench_boot(args: &[String]) {
         composed_mounts: &inputs.composition.mounts,
         identity: &inputs.composition.identity,
         selection: selection.as_args(),
-        strict_reserved,
-        checkpoint_override,
-        budget_override,
-        prescan,
-        guest_args: &guest_args,
+        strict_reserved: args.strict_reserved,
+        checkpoint_override: args.checkpoint,
+        budget_override: args.budget.map(Budget::new),
+        prescan: args.prescan,
+        guest_args: &args.guest_arg,
         check_anchor,
     }) {
         Ok(o) => o,
         Err(e) => {
-            eprintln!("bench-boot: {e}");
+            eprintln!("boot bench: {e}");
             let captured_stdout = e.captured_stdout();
             if !captured_stdout.is_empty() {
                 eprintln!("stdout:\n{captured_stdout}");
@@ -540,7 +415,7 @@ pub(crate) fn bench_boot(args: &[String]) {
             // between runs is also a determinism break, and the pair
             // printed those disagreements to stdout above.
             eprintln!(
-                "bench-boot: determinism break: run 1 steps={} outcome={}, \
+                "boot bench: determinism break: run 1 steps={} outcome={}, \
                  run 2 steps={} outcome={}. Identical steps and outcome here mean \
                  the runs disagreed on a witness; see the disagreements above. \
                  Exiting with status {EXIT_DETERMINISM_BREAK}",
@@ -550,7 +425,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         }
         game::BenchGate::AnchorDrift => {
             eprintln!(
-                "bench-boot: {} disagreement(s) with the committed anchor for {} \
+                "boot bench: {} disagreement(s) with the committed anchor for {} \
                  (content id {}):",
                 outcome.anchor_failures.len(),
                 inputs.title.name(),
@@ -563,7 +438,7 @@ pub(crate) fn bench_boot(args: &[String]) {
                 "this run used the configuration the anchor was recorded under, so \
                  the movement is a regression until it is attributed to a change. \
                  Once it is, re-bless with:\n  \
-                 cargo run --release -p cellgov_cli -- record-anchors --title {}\n\
+                 cargo run --release -p cellgov_cli -- dev record-anchors --title {}\n\
                  --no-anchor-check drops this gate for a measurement-only run.\n\
                  exiting with status {EXIT_ANCHOR_DRIFT}",
                 inputs.title.name(),
@@ -572,7 +447,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         }
         game::BenchGate::WallUnmeasurable => {
             eprintln!(
-                "bench-boot: wall measurement unusable (zero / non-finite); \
+                "boot bench: wall measurement unusable (zero / non-finite); \
                  run 1 wall {:?}, run 2 wall {:?}; exiting with status {EXIT_WALL_DRIFT}",
                 outcome.run1.wall, outcome.run2.wall
             );
@@ -581,7 +456,7 @@ pub(crate) fn bench_boot(args: &[String]) {
         game::BenchGate::WallDriftExceeded => {
             let drift = outcome.drift_pct.unwrap_or(f64::NAN);
             eprintln!(
-                "bench-boot: wall disagreement {drift:.2}% exceeds {BENCH_AGREEMENT_GATE_PCT:.1}% gate; \
+                "boot bench: wall disagreement {drift:.2}% exceeds {BENCH_AGREEMENT_GATE_PCT:.1}% gate; \
                  exiting with status {EXIT_WALL_DRIFT}"
             );
             std::process::exit(EXIT_WALL_DRIFT);

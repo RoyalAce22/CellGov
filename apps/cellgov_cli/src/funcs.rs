@@ -1,7 +1,7 @@
-//! `funcs` subcommand: print the OPD-derived function map for a
-//! main ELF or PRX.
+//! `dev funcs`: print the OPD-derived function map for a main ELF or
+//! PRX.
 //!
-//! Accepts the same input forms as `dump-prx-imports`: a plaintext
+//! Accepts the same input forms as `dev prx-imports`: a plaintext
 //! ELF / PRX and, in a build with the `decrypt` feature, an APP-keyed
 //! SCE wrapper or an NPDRM SELF (retail EBOOT). NPDRM titles resolve
 //! their RAP from the standard vfs exdata directory by content id;
@@ -11,66 +11,21 @@
 
 use cellgov_ppu::funcmap::{self, FunctionMap, FunctionName};
 
-use crate::cli::exit::{
-    decrypt_ppu_self_or_die, die, load_file_or_die, SCE_INPUT_USAGE_NOTE as SCE_NOTE,
-};
+use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
+use crate::cli::parse::FuncsArgs;
 use crate::cli::title::resolve_ps3_vfs_root;
 
-pub(crate) fn usage() -> String {
-    format!("cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]\n{SCE_NOTE}")
-}
-
-#[derive(Debug)]
-struct FuncsArgs<'a> {
-    path: &'a str,
-    json: bool,
-}
-
-fn parse_args(args: &[String]) -> Result<FuncsArgs<'_>, String> {
-    let mut path: Option<&str> = None;
-    let mut json = false;
-    let mut i = 2;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--json" => {
-                json = true;
-                i += 1;
-            }
-            // Consumed here so it is not rejected as unknown; the
-            // value is re-read by `resolve_ps3_vfs_root`.
-            "--vfs-root" => {
-                if args.get(i + 1).is_none() {
-                    return Err(format!("funcs: --vfs-root requires a path\n{}", usage()));
-                }
-                i += 2;
-            }
-            flag if flag.starts_with("--") => {
-                return Err(format!("funcs: unknown flag {flag}\n{}", usage()));
-            }
-            positional => {
-                if path.replace(positional).is_some() {
-                    return Err(format!("funcs: more than one path argument\n{}", usage()));
-                }
-                i += 1;
-            }
-        }
-    }
-    let path = path.ok_or_else(|| format!("funcs: missing <elf-path>\n{}", usage()))?;
-    Ok(FuncsArgs { path, json })
-}
-
-pub(crate) fn run(args: &[String]) {
-    let parsed = parse_args(args).unwrap_or_else(|msg| die(&msg));
-    let vfs_root = resolve_ps3_vfs_root(args);
-    let raw = load_file_or_die(parsed.path);
-    let elf = decrypt_ppu_self_or_die(&raw, parsed.path, &vfs_root);
+pub(crate) fn run(args: &FuncsArgs, vfs_flag: Option<&std::path::Path>) {
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    let raw = load_file_or_die(&args.path);
+    let elf = decrypt_ppu_self_or_die(&raw, &args.path, &vfs_root);
     let mut map =
-        funcmap::build(&elf).unwrap_or_else(|e| die(&format!("funcs: {}: {e}", parsed.path)));
+        funcmap::build(&elf).unwrap_or_else(|e| die(&format!("funcs: {}: {e}", args.path)));
     resolve_nids(&mut map);
     if let Some(note) = truncation_note(&map) {
         eprintln!("{note}");
     }
-    if parsed.json {
+    if args.json {
         println!(
             "{}",
             serde_json::to_string_pretty(&render_json(&map)).expect("funcmap JSON is plain data")

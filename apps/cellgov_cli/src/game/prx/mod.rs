@@ -1,5 +1,5 @@
 //! Firmware PRX loading, module_start execution, and TLS pre-init
-//! for `run-game`.
+//! for `boot run`.
 
 mod got;
 mod load;

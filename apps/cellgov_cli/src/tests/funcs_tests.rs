@@ -1,14 +1,8 @@
-//! `funcs` argument parsing and rendering.
+//! `dev funcs` human and JSON rendering.
 
 use cellgov_ppu::funcmap::{FunctionMap, FunctionName, FunctionOrigin, FunctionSpan};
 
 use super::*;
-
-fn argv(rest: &[&str]) -> Vec<String> {
-    let mut v = vec!["cellgov_cli".to_string(), "funcs".to_string()];
-    v.extend(rest.iter().map(|s| s.to_string()));
-    v
-}
 
 fn sample_map() -> FunctionMap {
     FunctionMap {
@@ -41,49 +35,6 @@ fn empty_map() -> FunctionMap {
         functions: Vec::new(),
         truncated: false,
     }
-}
-
-#[test]
-fn parse_args_accepts_path_and_json_flag() {
-    let args = argv(&["a.elf", "--json"]);
-    let parsed = parse_args(&args).unwrap();
-    assert_eq!(parsed.path, "a.elf");
-    assert!(parsed.json);
-
-    let args = argv(&["a.elf"]);
-    let parsed = parse_args(&args).unwrap();
-    assert!(!parsed.json);
-}
-
-#[test]
-fn parse_args_accepts_flag_before_path_and_duplicate_flag() {
-    let args = argv(&["--json", "a.elf"]);
-    let parsed = parse_args(&args).unwrap();
-    assert_eq!(parsed.path, "a.elf");
-    assert!(parsed.json);
-
-    let args = argv(&["--json", "a.elf", "--json"]);
-    let parsed = parse_args(&args).unwrap();
-    assert_eq!(parsed.path, "a.elf");
-    assert!(parsed.json);
-}
-
-#[test]
-fn parse_args_rejects_missing_path() {
-    let err = parse_args(&argv(&[])).unwrap_err();
-    assert!(err.contains("missing <elf-path>"), "{err}");
-}
-
-#[test]
-fn parse_args_rejects_unknown_flag() {
-    let err = parse_args(&argv(&["a.elf", "--frob"])).unwrap_err();
-    assert!(err.contains("unknown flag --frob"), "{err}");
-}
-
-#[test]
-fn parse_args_rejects_extra_path() {
-    let err = parse_args(&argv(&["a.elf", "b.elf"])).unwrap_err();
-    assert!(err.contains("more than one path"), "{err}");
 }
 
 /// Golden block: pins the header, every column's width and

@@ -32,7 +32,7 @@ const EXIT_STUB: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
 /// guest stack would grow down onto it.
 const STACK_TOP: u64 = (MEM_SIZE as u64) - 0x1000;
 
-/// Mirrors `child_exit_stub_addr` in the run-game boot pipeline: the
+/// Mirrors `child_exit_stub_addr` in the boot pipeline: the
 /// stub sits just above the image's highest PT_LOAD, so no segment can
 /// overwrite it, with 0 reserved as null.
 fn exit_stub_addr_for(required: usize) -> u64 {
@@ -108,7 +108,7 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
         Box::new(unit)
     });
     rt.set_process_spawn_loader(|elf_bytes, mem| {
-        // Same call the run-game spawn loader makes: the content store
+        // Same call the boot spawn loader makes: the content store
         // hands over whatever the title shipped, so an SCE-wrapped
         // child.self decrypts here rather than at staging time.
         let plaintext = cellgov_install::self_image::to_plaintext_elf(

@@ -1,4 +1,4 @@
-//! Boots every run-game-bootable microtest under `tests/micro/` and
+//! Boots every bootable microtest under `tests/micro/` and
 //! checks the `CGOV` payload it reports against the values its design
 //! fixes.
 //!
@@ -267,8 +267,8 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
     let observation_path = scratch.join("observation.json");
     std::fs::remove_file(&observation_path).ok();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_cellgov_cli"))
-        .arg("run-game")
+    let output = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args(["boot", "run"])
         .arg("--title-manifest")
         .arg(&manifest)
         .arg("--max-steps")
@@ -281,7 +281,7 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         // same on a machine that happens to have firmware installed.
         .env("CELLGOV_NO_FIRMWARE_DIR", "1")
         .output()
-        .expect("spawn cellgov_cli run-game");
+        .expect("spawn cellgov boot run");
 
     if !output.status.success() {
         eprintln!(
@@ -292,7 +292,7 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
             "--- stderr ---\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
-        panic!("{}: cellgov_cli run-game exited non-zero", case.name);
+        panic!("{}: cellgov boot run exited non-zero", case.name);
     }
 
     // Every microtest writes its CGOV length word from a stack buffer;
@@ -302,7 +302,7 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         .lines()
         .find(|l| l.starts_with("tty_oob_captures_dropped:"))
     {
-        panic!("{}: run-game dropped TTY captures: {line}", case.name);
+        panic!("{}: boot run dropped TTY captures: {line}", case.name);
     }
 
     let json = std::fs::read_to_string(&observation_path).unwrap_or_else(|e| {
@@ -404,7 +404,7 @@ fn check_outcome(case: &Case, observation: &Observation) -> Option<String> {
     }
 }
 
-/// Does this manifest declare a title `run-game` can boot?
+/// Does this manifest declare a title `boot run` can boot?
 ///
 /// Mirrors `TitleManifest::load_from_text`'s layout acceptance: a
 /// `title` table under `[cellgov]`, or -- when the file carries no

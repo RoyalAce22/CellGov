@@ -6,12 +6,6 @@ pub enum CheckpointParseError {
     /// Unknown checkpoint kind keyword.
     #[error("unknown checkpoint kind '{0}' (accepted: process-exit, first-rsx-write, pc=0xADDR)")]
     UnknownKind(String),
-    /// `--checkpoint` was specified more than once.
-    #[error("--checkpoint was specified more than once; pass it exactly once.")]
-    RepeatedFlag,
-    /// `--checkpoint` had no following value.
-    #[error("--checkpoint requires a value (process-exit, first-rsx-write, or pc=0xADDR)")]
-    MissingValue,
     /// `pc=` value has `0x`/`0X` prefix but is not valid hex u64.
     #[error("checkpoint pc value '{0}' is not a hex u64")]
     PcNotHex(String),
@@ -58,30 +52,6 @@ impl CheckpointTrigger {
             Self::FirstRsxWrite => "first-rsx-write".to_string(),
             Self::Pc(addr) => format!("pc=0x{addr:x}"),
         }
-    }
-
-    /// `None` means the flag was absent; `Some(Err)` covers malformed,
-    /// repeated, or value-missing cases.
-    pub fn parse_from_args(args: &[String]) -> Option<Result<Self, CheckpointParseError>> {
-        let mut found: Option<Result<Self, CheckpointParseError>> = None;
-        let mut i = 0;
-        while i < args.len() {
-            if args[i] != "--checkpoint" {
-                i += 1;
-                continue;
-            }
-            if found.is_some() {
-                return Some(Err(CheckpointParseError::RepeatedFlag));
-            }
-            let parsed = match args.get(i + 1) {
-                Some(v) => Self::parse_cli_value(v.as_str()),
-                None => Err(CheckpointParseError::MissingValue),
-            };
-            found = Some(parsed);
-            // Skip past the value so it cannot rematch as a flag.
-            i += 2;
-        }
-        found
     }
 }
 

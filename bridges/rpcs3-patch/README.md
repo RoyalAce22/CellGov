@@ -6,7 +6,7 @@ investigation. There are currently three:
 | Patch                                | Purpose                                                                                                                                                                                            |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `0001-cellgov-checkpoint-dump.patch` | Memory dump at `_sys_process_exit` for observation comparison.                                                                                                                                     |
-| `0002-cellgov-hle-trace.patch`       | Per-HLE-call trace stream with watch-address diff. Lets `cellgov_cli rpcs3-attribute` answer "which HLE call wrote this guest address?" in one run.                                                |
+| `0002-cellgov-hle-trace.patch`       | Per-HLE-call trace stream with watch-address diff. Lets `cellgov dev rpcs3-attribute` answer "which HLE call wrote this guest address?" in one run.                                                |
 | `0003-cellgov-ppu-trace.patch`       | Per-PPU-instruction trace stream for the differential harness. Captures (pre_state, instruction, post_state, mem_diff) tuples that `cellgov_ppu::differential` replays against CellGov's executor. |
 
 ## License
@@ -290,16 +290,16 @@ with optional `0x` prefix; the per-region cap is 1 MiB.
 
 ```bash
 # "Which HLE call wrote 0x101e3cb8?"
-cellgov_cli rpcs3-attribute --trace /tmp/flow.htrc --addr 0x101e3cb8
+cellgov dev rpcs3-attribute --trace /tmp/flow.htrc --addr 0x101e3cb8
 
 # Watch a multi-byte field; --len in hex.
-cellgov_cli rpcs3-attribute --trace /tmp/flow.htrc --addr 0x101e3ca0 --len 0x20
+cellgov dev rpcs3-attribute --trace /tmp/flow.htrc --addr 0x101e3ca0 --len 0x20
 
 # Rank HLE functions by total writes (which calls do real work?).
-cellgov_cli rpcs3-attribute --trace /tmp/flow.htrc --ranked
+cellgov dev rpcs3-attribute --trace /tmp/flow.htrc --ranked
 
 # Dump every record (verbose; useful for narrow watch lists).
-cellgov_cli rpcs3-attribute --trace /tmp/flow.htrc --list
+cellgov dev rpcs3-attribute --trace /tmp/flow.htrc --list
 ```
 
 The `--addr` query returns hits sorted by step ascending, so the

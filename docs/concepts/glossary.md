@@ -12,8 +12,8 @@ alias. [guest_memory.md](../architecture/guest_memory.md#per-process-address-spa
 
 **Anchor** (boot anchor). A title's committed expected boot
 behaviour: step count, outcome, and witness set in
-`tests/fixtures/<content-id>/cellgov/boot_summary.json`. `bench-boot`
-gates a run against it; `record-anchors` is its only writer.
+`tests/fixtures/<content-id>/cellgov/boot_summary.json`. `boot bench`
+gates a run against it; `dev record-anchors` is its only writer.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Atomic batch.** The effects one unit emits in one step, validated
@@ -88,7 +88,7 @@ observations that agree.
 **Cross-runner triple.** The generated fixture under
 `tests/fixtures/<content-id>/cross_runner/`: `compare_report.txt`,
 `cross_runner_summary.json`, `REPRODUCTION.md`, beside the
-hand-maintained `NOTES.md`. Produced by `cellgov_cli fixture-gen`.
+hand-maintained `NOTES.md`. Produced by `cellgov dev fixture-gen`.
 [titles.md](../titles.md)
 
 **Declared high-level divergence.** A firmware initializer CellGov
@@ -221,7 +221,7 @@ counted, and reaches the trace as a `ReservedRegionRead` record.
 **PRX / SPRX / SELF / PUP.** PS3 binary formats. A PRX is a
 relocatable module; an SPRX is its SCE-wrapped (encrypted) form; a
 SELF is an SCE-wrapped executable; the PUP is the firmware update
-package `cellgov_install` unpacks into the VFS.
+package `cellgov firmware install` unpacks into the VFS.
 [workspace.md](../architecture/workspace.md#per-crate-responsibilities)
 
 **Region.** One contiguous range of a guest address space with a
@@ -303,7 +303,7 @@ diagnostic instead of a jump into junk.
 
 **VFS.** The CellGov-owned PS3 filesystem layout under `vfs/`
 (`dev_flash` for firmware, `dev_hdd0` for installed titles,
-`dev_bdvd` for disc images), populated by `cellgov_install`.
+`dev_bdvd` for disc images), populated by the install commands.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Witness.** A named counter in a title's anchor with a class:
@@ -312,6 +312,6 @@ diagnostic instead of a jump into junk.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
 **Zoom.** The bounded-window `PpuStateFull` stream and the
-`cellgov_cli zoom` lookup that names which fingerprint fields differ
+`cellgov diff zoom` lookup that names which fingerprint fields differ
 at a step `diverge` flagged.
 [comparison.md](../architecture/comparison.md#per-step-divergence-localization)

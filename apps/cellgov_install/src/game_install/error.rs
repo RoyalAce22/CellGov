@@ -52,7 +52,8 @@ pub enum GameInstallError {
     /// magic: the image is still carrying its disc encryption.
     #[error(
         "ISO {path} opens with 0x{:02x}{:02x}{:02x}{:02x} rather than its format's magic; \
-         install-iso takes a decrypted dump of a disc you own, and this image reads as still encrypted",
+         `cellgov title install` takes a decrypted dump of a disc you own, and this \
+         image reads as still encrypted",
         head[0], head[1], head[2], head[3]
     )]
     DiscImageEncrypted {

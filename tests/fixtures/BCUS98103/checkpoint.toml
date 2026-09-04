@@ -6,7 +6,7 @@
 #     addr and size expressed as hex pairs in declaration order),
 #   - apps/rpcs3_to_observation, which reads this file to slice the
 #     RPCS3 dump into named Observation regions, and
-#   - the CellGov `run-game --save-observation` path with the
+#   - the CellGov `boot run --save-observation` path with the
 #     `--observation-manifest` flag, which uses the same region
 #     names and addresses.
 #

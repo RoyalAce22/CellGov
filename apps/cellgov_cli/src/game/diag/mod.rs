@@ -1,4 +1,4 @@
-//! Diagnostic formatting for `run-game`: reads runtime state, produces strings.
+//! Diagnostic formatting for `boot run`: reads runtime state, produces strings.
 //!
 //! `pc_ring` readers assume a single-threaded stepper; a concurrent writer
 //! would tear reads.

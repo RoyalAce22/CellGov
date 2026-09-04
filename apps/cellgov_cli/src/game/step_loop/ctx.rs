@@ -30,7 +30,7 @@ pub(in crate::game) struct StepLoopCtx<'a> {
     /// `sys_tty_write` calls whose fd exceeded `u32::MAX` (narrowed to sentinel).
     pub(in crate::game) bogus_fd_count: usize,
     /// Address+length pairs to hex-dump from guest memory at fault
-    /// time. Empty by default; set via `run-game --dump-mem-fault`.
+    /// time. Empty by default; set via `boot run --dump-mem-fault`.
     pub(in crate::game) dump_mem_fault_ranges: &'a [(u64, u64)],
     /// Wipe the host's observability after every committed step
     /// (`CELLGOV_OBS_NULL_SINK=1`). The inertness gate: a boot run

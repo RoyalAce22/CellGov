@@ -16,20 +16,19 @@ pub(crate) fn die(msg: &str) -> ! {
     std::process::exit(1)
 }
 
-/// The `--vfs-root` clause for the usage text of every subcommand that
-/// accepts an SCE-wrapped path. Tab-indented to splice under a synopsis
-/// line.
+/// The note on SCE-wrapped input carried in the help of every command
+/// that accepts such a path.
 pub(crate) const SCE_INPUT_USAGE_NOTE: &str = if cfg!(feature = "decrypt") {
-    "\t--vfs-root   PS3 vfs root: NPDRM EBOOTs resolve their RAP from\n\
-     \t             <vfs-root>/home/00000001/exdata/, the key vault from\n\
-     \t             CELLGOV_KEYS, else <vfs-root>/../.cellgov/keys/\n\
-     \t             (default: CELLGOV_PS3_VFS_ROOT, then vfs/dev_hdd0)"
+    "SCE-wrapped input:\n  \
+     NPDRM EBOOTs resolve their RAP from <vfs-root>/home/00000001/exdata/,\n  \
+     and the key vault from CELLGOV_KEYS, else <vfs-root>/../.cellgov/keys/."
 } else {
     // `--vfs-root` is still parsed, and an empty value still refused
     // (`super::title::resolve_ps3_vfs_root`); only what it names is unread.
-    "\t(this build has no decrypt support: plaintext ELF / PRX only. An\n\
-     \t SCE-wrapped input is refused by name, and --vfs-root names no path\n\
-     \t this build reads; rebuild with --features decrypt to read one.)"
+    "SCE-wrapped input:\n  \
+     this build has no decrypt support: plaintext ELF / PRX only. An\n  \
+     SCE-wrapped input is refused by name, and --vfs-root names no path\n  \
+     this build reads; rebuild with --features decrypt to read one."
 };
 
 /// The decrypt-capability words a usage text may carry only in a build
@@ -55,7 +54,7 @@ pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
 /// to the vault's free klicensee, Network / Local titles surface
 /// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.
 pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path) -> Vec<u8> {
-    let exdata = vfs_root.join("home").join("00000001").join("exdata");
+    let exdata = super::title::exdata_dir(vfs_root);
     let resolver = |npd: &NpdHeaderInfo| -> Option<Rap> {
         let rap_path = exdata.join(format!("{}.rap", npd.content_id));
         // Only "no such file" is an absent RAP. Any other read failure
@@ -100,7 +99,7 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
 
 /// The one line every vault refusal ends with.
 const KEYS_HINT: &str = "supply keys with CELLGOV_KEYS=<file-or-dir> or \
-                         `cellgov_install keys import <file-or-dir>`";
+                         `cellgov keys import <file-or-dir>`";
 
 /// A refusal every SCE-wrapped image in the run answers the same: the
 /// vault did not load, or holds no keyset for the image's class and
@@ -125,7 +124,6 @@ enum LoadCandidateError {
     NotElf,
 }
 
-/// RAP path layout is `<vfs_root>/home/00000001/exdata/<rap>`.
 fn rap_resolver(
     title: &TitleManifest,
     vfs_root: PathBuf,
@@ -135,11 +133,7 @@ fn rap_resolver(
         // license 3 (free) falls back to the vault's free klicensee
         // downstream when None.
         let rap_filename = rap_filename.as_ref()?;
-        let rap_path = vfs_root
-            .join("home")
-            .join("00000001")
-            .join("exdata")
-            .join(rap_filename);
+        let rap_path = super::title::exdata_dir(&vfs_root).join(rap_filename);
         let rap_bytes = match std::fs::read(&rap_path) {
             Ok(b) => b,
             Err(e) => die(&format!(
@@ -364,7 +358,3 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
 #[cfg(test)]
 #[path = "tests/exit_tests.rs"]
 mod tests;
-
-#[cfg(test)]
-#[path = "tests/usage_note_tests.rs"]
-mod usage_note_tests;

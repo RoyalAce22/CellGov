@@ -4,42 +4,43 @@
 use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::args::{find_flag_value, parse_output_format, reject_flag_here, OutputFormat};
 use super::compare::load_observations_from_dir;
 use super::exit::{die, load_file_or_die};
+use super::parse::{ExploreArgs, ExploreCommand, OutputFormat};
 use super::scenarios::{build_lv2_fixture, microtest_region_defs, scenario_factory, MICROTESTS};
 
-pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
-    let target = args.get(2).map(String::as_str).unwrap_or_else(|| {
-        die(
-            "usage: cellgov_cli explore <scenario> [--format human|json]\n       cellgov_cli explore micro <name> [--format human|json]",
-        )
-    });
-    let format = parse_output_format(args);
-    if target == "micro" {
-        let name = args.get(3).map(String::as_str).unwrap_or_else(|| {
-            die(&format!(
-                "usage: cellgov_cli explore micro <name> [--format human|json]\n       cellgov_cli explore micro <name> --observations-dir <dir> [--format human|json]\navailable microtests: {}",
-                MICROTESTS.join(", ")
-            ))
-        });
-        let observations_dir = find_flag_value(args, "--observations-dir");
-        if let Some(dir) = observations_dir {
-            run_explore_micro_oracle(name, &dir, format);
-        } else {
-            run_explore_micro(name, format);
+pub(crate) fn run(args: &ExploreArgs, format: OutputFormat, scenarios_list: &[&str]) {
+    match (&args.micro, &args.scenario) {
+        (
+            Some(ExploreCommand::Micro {
+                name,
+                observations_dir,
+            }),
+            _,
+        ) => {
+            if !MICROTESTS.contains(&name.as_str()) {
+                die(&format!(
+                    "unknown microtest: {name}
+available: {}",
+                    MICROTESTS.join(", ")
+                ));
+            }
+            match observations_dir {
+                Some(dir) => run_explore_micro_oracle(name, &dir.display().to_string(), format),
+                None => run_explore_micro(name, format),
+            }
         }
-    } else {
-        // Only the microtest path carries region specs to compare, so
-        // the flag would be read and then never used here.
-        reject_flag_here(args, "--observations-dir", "`explore micro <name>`");
-        match scenario_factory(target) {
+        (None, Some(target)) => match scenario_factory(target) {
             Some(factory) => run_explore(&factory, target, format),
             None => die(&format!(
-                "unknown scenario: {target}\navailable: {}",
+                "unknown scenario: {target}
+available: {}",
                 scenarios_list.join(", ")
             )),
-        }
+        },
+        // clap requires the positional unless the subcommand is
+        // present, so no argv reaches this arm.
+        (None, None) => die("explore: no scenario or micro-test named"),
     }
 }
 

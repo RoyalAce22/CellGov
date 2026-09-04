@@ -1,18 +1,18 @@
-//! `disasm` subcommand entry point: parse args, read the ELF, drive
+//! `dev disasm` entry point: check the address, read the ELF, drive
 //! the streaming disassembler, and translate stream errors into the
 //! documented exit-code contract.
 
 use std::io::Write;
 
 use crate::cli::exit::die;
+use crate::cli::parse::{die_usage, DisasmArgs};
 use crate::disasm::stream::StreamError;
 use crate::disasm::{args, elf, stream};
 
 /// Process exit code when at least one decoded word was an unsupported
-/// encoding. Distinct from 1 (fatal CLI error via `die`) so wrappers
-/// can tell apart "bad inputs" from "decoded the bytes; some weren't
-/// instructions".
-const DECODE_ERROR_EXIT_CODE: i32 = 2;
+/// encoding. Above the shared 0-5 contract, so wrappers can tell apart
+/// "bad inputs" from "decoded the bytes; some weren't instructions".
+const DECODE_ERROR_EXIT_CODE: i32 = 20;
 
 /// Process exit code for a stdout closed by a downstream pipe reader
 /// (`| head`, `| less` quit early). Matches coreutils' 128 + SIGPIPE
@@ -20,13 +20,13 @@ const DECODE_ERROR_EXIT_CODE: i32 = 2;
 /// any of our other exit modes.
 const BROKEN_PIPE_EXIT_CODE: i32 = 141;
 
-pub(crate) fn run(args: &[String]) {
-    let parsed = args::parse_args(args).unwrap_or_else(|e| die(&e.message()));
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
-    let raw = crate::cli::exit::load_file_or_die(parsed.elf_path);
+pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
+    args::check_alignment(parsed.vaddr).unwrap_or_else(|e| die_usage(&e.to_string()));
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
+    let raw = crate::cli::exit::load_file_or_die(&parsed.elf_path);
     // Transparently decrypt an SCE/SELF wrapper (including NPDRM
     // EBOOTs); plaintext ELF input passes through unchanged.
-    let elf_bytes = crate::cli::exit::decrypt_ppu_self_or_die(&raw, parsed.elf_path, &vfs_root);
+    let elf_bytes = crate::cli::exit::decrypt_ppu_self_or_die(&raw, &parsed.elf_path, &vfs_root);
     let segments = elf::parse_pt_loads(&elf_bytes).unwrap_or_else(|e| die(&e.message()));
 
     let symbols = parsed.symbolize.then(|| {

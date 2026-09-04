@@ -29,7 +29,7 @@ outcome = "completed"
 #     -v "$(pwd)/tests/micro/common:/common" \
 #     -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
-#   cargo run --release -p cellgov_cli -- run-game \
+#   cargo run --release -p cellgov_cli -- boot run \
 #     --title-manifest tests/micro/spu_atomic_cross_spu/manifest.toml \
 #     --max-steps 5000000
 

@@ -5,7 +5,7 @@ mod step_call_cap_tests {
 
     #[test]
     fn an_exact_multiple_reaches_every_requested_instruction() {
-        // The bench-boot default: 100M instructions at the
+        // The boot bench default: 100M instructions at the
         // architectural 256-instruction step grant.
         assert_eq!(step_call_cap(100_000_000, 256), (390_625, 100_000_000));
         assert_eq!(step_call_cap(256, 256), (1, 256));
@@ -13,7 +13,7 @@ mod step_call_cap_tests {
 
     #[test]
     fn a_remainder_is_unreachable_and_shows_in_the_effective_cap() {
-        // The run-game default: 100_000 is not a multiple of 256, so
+        // The boot run default: 100_000 is not a multiple of 256, so
         // 160 requested instructions can never be retired.
         assert_eq!(step_call_cap(100_000, 256), (390, 99_840));
         // Just under two grants still buys only one.

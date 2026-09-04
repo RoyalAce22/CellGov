@@ -23,7 +23,7 @@
 //                            traces).
 //
 // The CellGov side consumes the trace via
-// `cellgov_cli rpcs3-attribute --trace <file> --addr 0xADDR`,
+// `cellgov dev rpcs3-attribute --trace <file> --addr 0xADDR`,
 // which prints the HLE call(s) whose write set covers `addr`.
 //
 // File format (little-endian, no padding between records):

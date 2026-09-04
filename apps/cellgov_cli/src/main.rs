@@ -1,4 +1,5 @@
-//! cellgov_cli -- run scenarios, dump traces, compare observations, explore schedules.
+//! `cellgov` -- install a PS3 game, boot it through the
+//! deterministic runtime, and diff the result.
 
 #![allow(
     clippy::print_stdout,
@@ -15,249 +16,105 @@ mod funcs;
 mod game;
 mod paths;
 
-use cli::exit::die;
+use std::path::Path;
+
+use cli::parse::{
+    self, BootCommand, Cli, Command, DevCommand, DiffCommand, FirmwareCommand, Globals,
+    KeysCommand, ScenarioCommand, SelfCommand, TitleCommand,
+};
 use cli::scenarios::{report, run_scenario, SCENARIOS};
 
-/// Usage lines for the fixed-arity subcommands.
-const USAGE_COMPARE_OBSERVATIONS: &str =
-    "cellgov_cli compare-observations <a.json> <b.json> [--format human|json]";
-const USAGE_DIVERGE: &str = "cellgov_cli diverge <a.state> <b.state>";
-const USAGE_ZOOM: &str = "cellgov_cli zoom <a.zoom.state> <b.zoom.state> <step>";
-
-const USAGE_COMPARE: &str = "\
-cellgov_cli compare <scenario|manifest.toml> [--mode strict|memory|events|prefix] [--format human|json]
-cellgov_cli compare <scenario|manifest.toml> --save-baseline <path>
-cellgov_cli compare <scenario|manifest.toml> --against-baseline <path> [--mode ...] [--format ...]
-cellgov_cli compare <manifest.toml> --observations-dir <dir> [--mode ...] [--format ...]";
-const USAGE_EXPLORE: &str = "\
-cellgov_cli explore <scenario> [--format human|json]
-cellgov_cli explore micro <name> [--observations-dir <dir>] [--format human|json]";
-const USAGE_RUN_GAME: &str = "\
-cellgov_cli run-game <--title NAME|--content-id ID|--title-manifest PATH> [elf-path]
-\t\t[--fw VERSION] [--game-ver base|VERSION] [--max-steps N] [--budget N] [--trace] [--profile]
-\t\t[--firmware-dir DIR] [--dump-mem-boot 0xADDR[,...]] [--dump-mem-fault 0xADDR[:LEN][,...]]
-\t\t(--fw and --game-ver name the installed firmware and title version; each may be
-\t\t omitted when its candidate set holds exactly one. --game-ver is refused for a
-\t\t title the store does not hold and for one shipping inside the firmware, whose
-\t\t version axis is --fw. --firmware-dir names a tree outside the store, is
-\t\t mutually exclusive with --fw, and marks the run unmanaged)";
-const USAGE_BENCH_BOOT: &str = "\
-cellgov_cli bench-boot <--title NAME|--content-id ID|--title-manifest PATH>
-\t\t[--fw VERSION] [--game-ver base|VERSION]
-\t\t[--max-steps N] [--budget N] [--firmware-dir DIR] [--vfs-root PATH]
-\t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan] [--guest-arg VAL]
-\t\t[--strict-reserved] [--no-anchor-check]
-\t\t(--max-steps defaults to the manifest's bench_max_steps, the cap the
-\t\t anchor is recorded at; the run is held against the title's committed
-\t\t anchor, and an override that retargets the boot reports as not
-\t\t compared rather than failing)";
-const USAGE_BENCH_BOOT_ONCE: &str = "\
-cellgov_cli bench-boot-once <--title NAME|--content-id ID|--title-manifest PATH>
-\t\t[--fw VERSION] [--game-ver base|VERSION]
-\t\t[--max-steps N] [--budget N] [--firmware-dir DIR] [--vfs-root PATH]
-\t\t[--checkpoint process-exit|first-rsx-write|pc=0xADDR] [--prescan]
-\t\t[--strict-reserved] [--guest-arg VAL]";
-const USAGE_DUMP: &str = "cellgov_cli dump <scenario>";
-const USAGE_DUMP_PRX_IMPORTS: &str = "\
-cellgov_cli dump-prx-imports <path-to-prx-or-sprx> [--at 0xADDR] [--module NAME]
-\t\t[--save-elf PATH] [--vfs-root PATH]";
-const USAGE_DISASM: &str =
-    "cellgov_cli disasm <elf-path> --vaddr <hex> [--count N] [--symbolize] [--vfs-root PATH]";
-const USAGE_FUNCS: &str = "cellgov_cli funcs <elf-path> [--json] [--vfs-root PATH]";
-const USAGE_RPCS3_ATTRIBUTE: &str = "\
-cellgov_cli rpcs3-attribute --trace <path> [--addr 0xADDR [--len N]] [--list] [--ranked]
-\t\t[--name SUBSTR]  (at least one query mode is required)";
-const USAGE_FIXTURE_GEN: &str = "\
-cellgov_cli fixture-gen --manifest <path> --cellgov <path> --rpcs3 <path> --output-dir <path>
-\t\t[--fw VERSION] [--game-ver base|VERSION] [--firmware-dir DIR] [--vfs-root PATH]
-\t\t[--allow-divergence]
-\t\t(the EBOOT is the one the boot family would compose, so the selection flags
-\t\t resolve exactly as they do there; defaults: CELLGOV_PS3_VFS_ROOT env, then
-\t\t vfs/dev_hdd0)";
-const USAGE_TITLES_GEN: &str = "\
-cellgov_cli titles-gen [--registry DIR] [--fixtures-dir DIR] [--output PATH]
-\t\t(defaults: titles, tests/fixtures, docs/titles.md)";
-const USAGE_GEN_MANIFEST: &str = "\
-cellgov_cli gen-manifest <--record PATH | --title-id ID> [--registry DIR] [--installs DIR] [--force]
-\t\temit a title-manifest stub from an install record; never overwrites an
-\t\texisting manifest (curated fields preserved) unless --force is given";
-const USAGE_RECORD_ANCHORS: &str = "\
-cellgov_cli record-anchors <--all | --title NAME> [--registry DIR]
-\t\tre-measure each title and rewrite its committed boot_summary.json
-\t\tbaseline; appends to boot_history.jsonl only when a value moved.
-\t\tWitness classes already set in the baseline are preserved.
-\t\t--registry must name the default titles: the boot is
-\t\tre-entered as `bench-boot-once --title NAME`, which reads only that
-\t\tdirectory, so any other DIR is refused rather than measured wrong.";
-
-/// Top-level dispatcher routes.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Subcommand {
-    Help,
-    Version,
-    Compare,
-    CompareObservations,
-    Diverge,
-    Zoom,
-    Explore,
-    RunGame,
-    BenchBoot,
-    BenchBootOnce,
-    Dump,
-    DumpPrxImports,
-    Disasm,
-    Funcs,
-    Rpcs3Attribute,
-    FixtureGen,
-    TitlesGen,
-    GenManifest,
-    RecordAnchors,
-}
-
-impl Subcommand {
-    fn tokens(self) -> &'static [&'static str] {
-        match self {
-            Self::Help => &["--help", "-h", "help"],
-            Self::Version => &["--version"],
-            Self::Compare => &["compare"],
-            Self::CompareObservations => &["compare-observations"],
-            Self::Diverge => &["diverge"],
-            Self::Zoom => &["zoom"],
-            Self::Explore => &["explore"],
-            Self::RunGame => &["run-game"],
-            Self::BenchBoot => &["bench-boot"],
-            Self::BenchBootOnce => &["bench-boot-once"],
-            Self::Dump => &["dump"],
-            Self::DumpPrxImports => &["dump-prx-imports"],
-            Self::Disasm => &["disasm"],
-            Self::Funcs => &["funcs"],
-            Self::Rpcs3Attribute => &["rpcs3-attribute"],
-            Self::FixtureGen => &["fixture-gen"],
-            Self::TitlesGen => &["titles-gen"],
-            Self::GenManifest => &["gen-manifest"],
-            Self::RecordAnchors => &["record-anchors"],
-        }
-    }
-
-    /// Usage block printed by [`print_usage`], or `None` for variants
-    /// rolled into the trailing summary line.
-    fn usage(self) -> Option<&'static str> {
-        match self {
-            Self::Help | Self::Version => None,
-            Self::Compare => Some(USAGE_COMPARE),
-            Self::CompareObservations => Some(USAGE_COMPARE_OBSERVATIONS),
-            Self::Diverge => Some(USAGE_DIVERGE),
-            Self::Zoom => Some(USAGE_ZOOM),
-            Self::Explore => Some(USAGE_EXPLORE),
-            Self::RunGame => Some(USAGE_RUN_GAME),
-            Self::BenchBoot => Some(USAGE_BENCH_BOOT),
-            Self::BenchBootOnce => Some(USAGE_BENCH_BOOT_ONCE),
-            Self::Dump => Some(USAGE_DUMP),
-            Self::DumpPrxImports => Some(USAGE_DUMP_PRX_IMPORTS),
-            Self::Disasm => Some(USAGE_DISASM),
-            Self::Funcs => Some(USAGE_FUNCS),
-            Self::Rpcs3Attribute => Some(USAGE_RPCS3_ATTRIBUTE),
-            Self::FixtureGen => Some(USAGE_FIXTURE_GEN),
-            Self::TitlesGen => Some(USAGE_TITLES_GEN),
-            Self::GenManifest => Some(USAGE_GEN_MANIFEST),
-            Self::RecordAnchors => Some(USAGE_RECORD_ANCHORS),
-        }
-    }
-
-    fn from_token(t: &str) -> Option<Self> {
-        SUBCOMMANDS
-            .iter()
-            .copied()
-            .find(|s| s.tokens().contains(&t))
-    }
-}
-
-/// Canonical iteration order driving [`print_usage`] layout.
-const SUBCOMMANDS: &[Subcommand] = &[
-    Subcommand::Help,
-    Subcommand::Version,
-    Subcommand::Compare,
-    Subcommand::CompareObservations,
-    Subcommand::Diverge,
-    Subcommand::Zoom,
-    Subcommand::Explore,
-    Subcommand::RunGame,
-    Subcommand::BenchBoot,
-    Subcommand::BenchBootOnce,
-    Subcommand::Dump,
-    Subcommand::DumpPrxImports,
-    Subcommand::Disasm,
-    Subcommand::Funcs,
-    Subcommand::Rpcs3Attribute,
-    Subcommand::FixtureGen,
-    Subcommand::TitlesGen,
-    Subcommand::GenManifest,
-    Subcommand::RecordAnchors,
-];
-
 fn main() {
-    debug_assert!(
-        SCENARIOS
-            .iter()
-            .all(|s| Subcommand::from_token(s).is_none()),
-        "scenario name collides with a dispatcher token"
-    );
+    let argv = collect_args_or_die();
+    let Cli { globals, command } = parse::parse_or_exit(&argv);
+    dispatch(&command, &globals);
+}
 
-    let args = collect_args_or_die();
-    if args.len() < 2 {
-        print_usage();
-        die("missing subcommand or scenario");
-    }
-
-    let token = args[1].as_str();
-    match Subcommand::from_token(token) {
-        Some(Subcommand::Help) => print_usage(),
-        Some(Subcommand::Version) => println!("cellgov_cli {}", env!("CARGO_PKG_VERSION")),
-        Some(Subcommand::Compare) => cli::compare::run(&args, SCENARIOS),
-        Some(Subcommand::CompareObservations) => {
-            if args.len() < 4 {
-                die(USAGE_COMPARE_OBSERVATIONS);
-            }
-            cli::compare::run_compare_observations(&args);
+fn dispatch(command: &Command, globals: &Globals) {
+    let vfs_flag = globals.vfs_root.as_deref();
+    match command {
+        Command::Firmware(FirmwareCommand::Install(args)) => {
+            let store = store_root(&args.output, vfs_flag);
+            cli::store::firmware::install(args, &store, globals.render(), globals.verbose);
         }
-        Some(Subcommand::Diverge) => {
-            if args.len() != 4 {
-                die(USAGE_DIVERGE);
-            }
-            cli::compare::run_diverge(&args[2], &args[3]);
+        Command::Title(TitleCommand::Install(args)) => {
+            let store = store_root(&args.output, vfs_flag);
+            cli::store::title::install(args, &store, globals.render());
         }
-        Some(Subcommand::Zoom) => {
-            if args.len() != 5 {
-                die(USAGE_ZOOM);
-            }
-            let step_str = &args[4];
-            let step = parse_step_count(step_str)
-                .unwrap_or_else(|e| die(&format!("invalid step '{step_str}': {e}")));
-            cli::compare::run_zoom(&args[2], &args[3], step);
+        Command::Title(TitleCommand::InstallUpdate(args)) => {
+            let store = store_root(&args.output, vfs_flag);
+            cli::store::title::install_update(args, &store, globals.render());
         }
-        Some(Subcommand::Explore) => cli::explore::run(&args, SCENARIOS),
-        Some(Subcommand::RunGame) => cli::boot_cmd::run_game(&args),
-        Some(Subcommand::BenchBoot) => cli::boot_cmd::bench_boot(&args),
-        Some(Subcommand::BenchBootOnce) => cli::boot_cmd::bench_boot_once(&args),
-        Some(Subcommand::Dump) => cli::dump::run(&args, SCENARIOS),
-        Some(Subcommand::DumpPrxImports) => dump_prx_imports::run(&args),
-        Some(Subcommand::Disasm) => disasm::run(&args),
-        Some(Subcommand::Funcs) => funcs::run(&args),
-        Some(Subcommand::Rpcs3Attribute) => cli::rpcs3_attribute::run(&args),
-        Some(Subcommand::FixtureGen) => cli::fixture_gen::run(&args),
-        Some(Subcommand::TitlesGen) => cli::titles_gen::run(&args),
-        Some(Subcommand::GenManifest) => cli::gen_manifest::run(&args),
-        Some(Subcommand::RecordAnchors) => cli::record_anchors::run(&args),
-        None => match run_scenario(token) {
+        Command::Title(TitleCommand::Uninstall(args)) => {
+            let store = store_root(&args.output, vfs_flag);
+            cli::store::title::uninstall(args, &store);
+        }
+        Command::Keys(keys) => {
+            let output = match keys {
+                KeysCommand::Show { output, .. } | KeysCommand::Remove { output } => output,
+                KeysCommand::Import(args) => &args.output,
+            };
+            let store = store_root(output, vfs_flag);
+            cli::store::keys_cmd::run(keys, &store);
+        }
+        Command::SelfCmd(SelfCommand::Decrypt(args)) => {
+            let vfs_root = cli::title::resolve_ps3_vfs_root(vfs_flag);
+            let store = cli::keys::install_root_of(&vfs_root);
+            cli::store::self_decrypt::run(args, &vfs_root, &store);
+        }
+        Command::Boot(BootCommand::Run(args)) => cli::boot_cmd::run_game(args, vfs_flag),
+        Command::Boot(BootCommand::Bench(args)) => {
+            cli::boot_cmd::bench_boot(&args.bench, !args.no_anchor_check, vfs_flag);
+        }
+        Command::Boot(BootCommand::BenchOnce(args)) => {
+            cli::boot_cmd::bench_boot_once(args, vfs_flag);
+        }
+        Command::Diff(DiffCommand::Compare(args)) => {
+            cli::compare::run(args, globals.format, SCENARIOS);
+        }
+        Command::Diff(DiffCommand::Observations { a, b }) => {
+            cli::compare::run_compare_observations(a, b, globals.format);
+        }
+        Command::Diff(DiffCommand::Diverge { a, b }) => cli::compare::run_diverge(a, b),
+        Command::Diff(DiffCommand::Zoom { a, b, step }) => cli::compare::run_zoom(a, b, *step),
+        Command::Explore(args) => cli::explore::run(args, globals.format, SCENARIOS),
+        Command::Scenario(ScenarioCommand::List) => {
+            for name in SCENARIOS {
+                println!("{name}");
+            }
+        }
+        Command::Scenario(ScenarioCommand::Run { name }) => match run_scenario(name) {
             Some((label, result)) => println!("{}", report(label, &result)),
-            None => die(&format!(
-                "unknown subcommand or scenario: {token}\n\
-                 available subcommands: {}\n\
-                 available scenarios: {}",
-                all_subcommand_tokens().join(", "),
-                SCENARIOS.join(", "),
+            None => cli::exit::die(&format!(
+                "unknown scenario: {name}\navailable: {}",
+                SCENARIOS.join(", ")
             )),
         },
+        Command::Scenario(ScenarioCommand::Dump { name }) => cli::dump::run(name, SCENARIOS),
+        Command::Dev(dev) => dispatch_dev(dev, vfs_flag),
+    }
+}
+
+fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>) {
+    match dev {
+        DevCommand::Disasm(args) => disasm::run(args, vfs_flag),
+        DevCommand::PrxImports(args) => dump_prx_imports::run(args, vfs_flag),
+        DevCommand::Funcs(args) => funcs::run(args, vfs_flag),
+        DevCommand::Rpcs3Attribute(args) => cli::rpcs3_attribute::run(args),
+        DevCommand::FixtureGen(args) => cli::fixture_gen::run(args, vfs_flag),
+        DevCommand::TitlesGen(args) => cli::titles_gen::run(args),
+        DevCommand::GenManifest(args) => cli::gen_manifest::run(args),
+        DevCommand::RecordAnchors(args) => cli::record_anchors::run(args),
+    }
+}
+
+/// The store root a command writes under. Without `--output` it is
+/// the directory enclosing the resolved PS3 VFS root, so one root flag
+/// serves the whole binary.
+fn store_root(output: &parse::VfsOutput, vfs_flag: Option<&Path>) -> std::path::PathBuf {
+    match &output.output {
+        Some(dir) => dir.clone(),
+        None => cli::keys::install_root_of(&cli::title::resolve_ps3_vfs_root(vfs_flag)),
     }
 }
 
@@ -268,52 +125,12 @@ fn collect_args_or_die() -> Vec<String> {
     for (i, raw) in std::env::args_os().enumerate() {
         match raw.into_string() {
             Ok(s) => out.push(s),
-            Err(os) => die(&format!(
-                "argv[{i}]: not valid UTF-8 ({os:?}); cellgov_cli accepts only UTF-8 arguments"
+            Err(os) => parse::die_usage(&format!(
+                "argv[{i}]: not valid UTF-8 ({os:?}); cellgov accepts only UTF-8 arguments"
             )),
         }
     }
     out
-}
-
-/// Parse a step count for `zoom`, accepting `0x` hex like the CLI's
-/// other address-shaped flags.
-fn parse_step_count(s: &str) -> Result<u64, std::num::ParseIntError> {
-    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        u64::from_str_radix(hex, 16)
-    } else {
-        s.parse()
-    }
-}
-
-fn all_subcommand_tokens() -> Vec<&'static str> {
-    SUBCOMMANDS
-        .iter()
-        .flat_map(|s| s.tokens().iter().copied())
-        .collect()
-}
-
-fn print_usage() {
-    let mut lines: Vec<&str> = Vec::new();
-    lines.push("cellgov_cli <scenario>");
-    for sub in SUBCOMMANDS {
-        if let Some(text) = sub.usage() {
-            lines.extend(text.lines());
-        }
-    }
-    lines.push("cellgov_cli --help | --version");
-    for (i, line) in lines.iter().enumerate() {
-        if i == 0 {
-            println!("usage: {line}");
-        } else {
-            println!("       {line}");
-        }
-    }
-    println!();
-    println!("available scenarios:");
-    for name in SCENARIOS {
-        println!("  {name}");
-    }
 }
 
 #[cfg(test)]

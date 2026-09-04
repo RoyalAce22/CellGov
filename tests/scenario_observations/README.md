@@ -8,8 +8,8 @@ snapshot of guest-visible state at a checkpoint.
 
 Boot anchors are a separate tree. An anchor holds CellGov's own
 witnesses for a real title at
-`tests/fixtures/<content-id>/cellgov/boot_summary.json`. `bench-boot`
-gates against anchors. `record-anchors` writes them.
+`tests/fixtures/<content-id>/cellgov/boot_summary.json`. `boot bench`
+gates against anchors. `dev record-anchors` writes them.
 
 ## Layout
 
@@ -32,8 +32,8 @@ Each name matches a directory under `tests/micro/`. That directory's
 | `crates/cellgov_spu/src/tests/spu_tests.rs`                    | all six           |
 | `crates/cellgov_ppu/src/tests/ppu_tests.rs`                    | by microtest name |
 | `crates/cellgov_compare/src/tests/baseline_tests.rs`           | `spu_fixed_value` |
-| `cellgov_cli compare <manifest.toml> --observations-dir <dir>` | any               |
-| `cellgov_cli explore micro <name> --observations-dir <dir>`    | any               |
+| `cellgov diff compare <manifest.toml> --observations-dir <dir>` | any               |
+| `cellgov explore micro <name> --observations-dir <dir>`    | any               |
 
 The SPU and PPU suites also need the built micro-test ELFs. They sit
 behind `cellgov_spu/spu-microtests` and `cellgov_ppu/ppu-microtests`.
@@ -133,8 +133,8 @@ observation then describes a program that no longer exists.
 A failing comparison is a different case. The diff is the finding these
 files exist to produce. Overwriting the reference deletes the evidence
 and makes the suite agree with whatever CellGov does today. Localize
-first with `cellgov_cli diverge` on the state captures and
-`cellgov_cli zoom` on the step it names. Re-record only after you can
+first with `cellgov diff diverge` on the state captures and
+`cellgov diff zoom` on the step it names. Re-record only after you can
 name the cause.
 
 If the two decoders disagree with each other, re-recording either one

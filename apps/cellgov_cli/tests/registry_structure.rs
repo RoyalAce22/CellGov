@@ -13,7 +13,7 @@ fn every_registered_title_has_a_committed_baseline() {
         assert!(
             p.is_file(),
             "{}: no committed baseline at {} -- record it with \
-             `record-anchors --title {}` on a machine with the dump",
+             `dev record-anchors --title {}` on a machine with the dump",
             t.short_name,
             p.display(),
             t.short_name

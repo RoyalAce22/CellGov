@@ -2,7 +2,7 @@
 //! instruments after every committed step must produce the same
 //! binary state trace as one that records them.
 //!
-//! Two `run-game` runs per title -- one normal, one under
+//! Two `boot run` runs per title -- one normal, one under
 //! `CELLGOV_OBS_NULL_SINK=1` -- with `--save-state-trace`; the
 //! trace streams must be byte-identical. Any drift means an
 //! instrument steered execution, which is the boundary
@@ -30,15 +30,15 @@ use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
 
 enum Run {
     NotInstalled,
-    /// Trace bytes plus the process exit code; `run-game` maps the
+    /// Trace bytes plus the process exit code; `boot run` maps the
     /// boot outcome to its exit status, so the pair must agree
     /// between the two runs.
     Trace(Vec<u8>, Option<i32>),
 }
 
 fn boot_with_trace(title: &TitleUnderTest, trace_path: &PathBuf, null_sink: bool) -> Run {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_cellgov_cli"));
-    cmd.arg("run-game")
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_cellgov"));
+    cmd.args(["boot", "run"])
         .arg("--title")
         .arg(&title.short_name)
         .arg("--max-steps")
@@ -54,12 +54,12 @@ fn boot_with_trace(title: &TitleUnderTest, trace_path: &PathBuf, null_sink: bool
     } else {
         cmd.env_remove("CELLGOV_OBS_NULL_SINK");
     }
-    let output = cmd.output().expect("spawn cellgov_cli run-game");
+    let output = cmd.output().expect("spawn cellgov boot run");
     let stderr = String::from_utf8_lossy(&output.stderr);
     if stderr.contains(TITLE_NOT_INSTALLED_SENTINEL) {
         return Run::NotInstalled;
     }
-    // The trace file is the boot's own completion witness: run-game
+    // The trace file is the boot's own completion witness: boot run
     // writes it after the step loop regardless of outcome, so a boot
     // that died before running leaves no file.
     let bytes = std::fs::read(trace_path).unwrap_or_else(|e| {

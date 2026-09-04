@@ -106,6 +106,18 @@ fn suppressing_color_keeps_the_bar() {
     assert!(!caps.color);
     let caps = detect(RenderFlags::default(), &FakeEnv::tty().with("NO_COLOR", ""));
     assert!(caps.color);
+
+    let caps = detect(
+        RenderFlags::default(),
+        &FakeEnv::tty().with(ENV_NO_COLOR, "1"),
+    );
+    assert_eq!(caps.mode, RenderMode::Ansi);
+    assert!(!caps.color);
+    let caps = detect(
+        RenderFlags::default(),
+        &FakeEnv::tty().with(ENV_NO_COLOR, ""),
+    );
+    assert!(caps.color);
 }
 
 #[test]
@@ -160,18 +172,6 @@ fn width_comes_from_columns_and_is_clamped() {
         tty: true,
     };
     assert_eq!(detect(RenderFlags::default(), &bare).width, 80);
-}
-
-#[test]
-fn accept_takes_only_the_render_flags() {
-    let mut flags = RenderFlags::default();
-    assert!(flags.accept("--no-progress"));
-    assert!(flags.accept("--no-color"));
-    assert!(flags.accept("--quiet"));
-    assert!(!flags.accept("--force"));
-    assert!(!flags.accept("--format"));
-    assert!(flags.no_progress && flags.no_color && flags.quiet);
-    assert!(!flags.json, "--format json is the caller's two-token flag");
 }
 
 #[test]

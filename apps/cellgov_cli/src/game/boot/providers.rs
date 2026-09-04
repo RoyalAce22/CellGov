@@ -22,7 +22,7 @@ pub(super) fn register_sibling_images(rt: &mut Runtime, elf_path: &str) {
         if candidate.exists() {
             let bytes = std::fs::read(&candidate).unwrap_or_else(|e| {
                 die(&format!(
-                    "run-game: cannot read {}: {e}",
+                    "boot run: cannot read {}: {e}",
                     candidate.display()
                 ))
             });

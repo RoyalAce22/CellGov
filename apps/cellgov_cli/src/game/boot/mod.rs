@@ -1,4 +1,4 @@
-//! Boot preparation shared between `run-game` and `bench-boot`.
+//! Boot preparation shared between `boot run` and `boot bench`.
 //!
 //! One module per stage of [`prepare()`], which owns the order they
 //! run in.

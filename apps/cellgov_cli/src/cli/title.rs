@@ -1,8 +1,10 @@
-//! Title / VFS-root / checkpoint resolution shared by run-game,
-//! bench-boot, and bench-boot-once.
+//! Title and VFS-root resolution shared by the boot family and the
+//! dev commands that compose the same guest tree.
 
-use super::args::find_flag_value;
+use std::path::{Path, PathBuf};
+
 use super::exit::die;
+use super::parse::TitleSelector;
 use crate::game;
 
 /// Registry directory every title-driven subcommand resolves
@@ -10,37 +12,43 @@ use crate::game;
 /// directory.
 pub(crate) const DEFAULT_TITLE_REGISTRY_DIR: &str = "titles";
 
+/// The per-user license directory under a PS3 VFS root, where an
+/// installed RAP lives.
+pub(crate) fn exdata_dir(vfs_root: &Path) -> PathBuf {
+    vfs_root.join("home").join(HDD0_USER).join("exdata")
+}
+
+/// The single modelled user profile on the internal HDD.
+const HDD0_USER: &str = "00000001";
+
 /// Resolve the active [`game::manifest::TitleManifest`] for a
 /// subcommand, in priority order: `--title-manifest <path>`,
 /// `--content-id <SERIAL>`, `--title <shortname>`.
 ///
 /// # Errors
 ///
-/// Any error in flag parsing or file loading prints a diagnostic
-/// prefixed with `subcmd` and exits with status 1. A flag written
-/// without a value hard-errors rather than falling through to the
-/// next lookup.
+/// Any error in file loading or registry lookup prints a diagnostic
+/// prefixed with `subcmd` and exits with status 1.
 pub(crate) fn resolve_title_manifest(
-    args: &[String],
+    selector: &TitleSelector,
     subcmd: &str,
 ) -> game::manifest::TitleManifest {
-    if let Some(p) = find_flag_value(args, "--title-manifest") {
-        return game::manifest::TitleManifest::load_from_path(std::path::Path::new(&p))
+    if let Some(p) = &selector.title_manifest {
+        return game::manifest::TitleManifest::load_from_path(p)
             .unwrap_or_else(|e| die(&format!("{subcmd}: {e}")));
     }
-    let registry =
-        game::manifest::TitleRegistry::scan_dir(std::path::Path::new(DEFAULT_TITLE_REGISTRY_DIR))
-            .unwrap_or_else(|e| die(&format!("{subcmd}: title registry: {e}")));
-    if let Some(cid) = find_flag_value(args, "--content-id") {
-        return registry.by_content_id(&cid).cloned().unwrap_or_else(|| {
+    let registry = game::manifest::TitleRegistry::scan_dir(Path::new(DEFAULT_TITLE_REGISTRY_DIR))
+        .unwrap_or_else(|e| die(&format!("{subcmd}: title registry: {e}")));
+    if let Some(cid) = &selector.content_id {
+        return registry.by_content_id(cid).cloned().unwrap_or_else(|| {
             die(&format!(
                 "{subcmd}: unknown content id '{cid}'. Known titles: {}",
                 registry.known_names_csv()
             ))
         });
     }
-    if let Some(sn) = find_flag_value(args, "--title") {
-        return registry.by_short_name(&sn).cloned().unwrap_or_else(|| {
+    if let Some(sn) = &selector.title {
+        return registry.by_short_name(sn).cloned().unwrap_or_else(|| {
             die(&format!(
                 "{subcmd}: unknown title '{sn}'. Known titles: {}",
                 registry.known_names_csv()
@@ -53,31 +61,19 @@ pub(crate) fn resolve_title_manifest(
     ));
 }
 
-pub(crate) fn resolve_checkpoint_override(
-    args: &[String],
-    subcmd: &str,
-) -> Option<game::manifest::CheckpointTrigger> {
-    match game::manifest::CheckpointTrigger::parse_from_args(args) {
-        Some(Ok(cp)) => Some(cp),
-        Some(Err(msg)) => die(&format!("{subcmd}: {msg}")),
-        None => None,
-    }
-}
-
-/// Resolve the PS3 VFS root using, in priority order: `--vfs-root
-/// <path>`, `CELLGOV_PS3_VFS_ROOT` env var, then `vfs/dev_hdd0` (the
-/// CellGov-owned VFS that `cellgov_install install-game` / `install-iso`
-/// populate). An empty value from either override is refused rather
-/// than resolved against the current directory. Existence is not
-/// verified here.
+/// Resolve the PS3 VFS root using, in priority order: the `--vfs-root`
+/// value, `CELLGOV_PS3_VFS_ROOT`, then `vfs/dev_hdd0` (the CellGov-owned
+/// VFS the installers populate). An empty value from either override is
+/// refused rather than resolved against the current directory. Existence
+/// is not verified here.
 ///
 /// Also fixes the root the operator's key vault is read under
 /// ([`super::keys::fix_vault_root`]), so a subcommand that names a
-/// relocated VFS decrypts under that VFS's imported vault. Resolve
-/// the root before opening any guest image: the vault loads once, on
-/// the first SCE-wrapped one.
-pub(crate) fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
-    let root = resolve_ps3_vfs_root_inner(args, std::env::var_os("CELLGOV_PS3_VFS_ROOT"))
+/// relocated VFS decrypts under that VFS's imported vault. Resolve the
+/// root before opening any guest image: the vault loads once, on the
+/// first SCE-wrapped one.
+pub(crate) fn resolve_ps3_vfs_root(flag: Option<&Path>) -> PathBuf {
+    let root = resolve_ps3_vfs_root_inner(flag, std::env::var_os("CELLGOV_PS3_VFS_ROOT"))
         .unwrap_or_else(|msg| die(&msg));
     super::keys::fix_vault_root(&root);
     root
@@ -90,9 +86,9 @@ pub(crate) fn resolve_ps3_vfs_root(args: &[String]) -> std::path::PathBuf {
 /// current directory. The manifest loader refuses an empty
 /// `[source] path` for the same reason.
 fn resolve_ps3_vfs_root_inner(
-    args: &[String],
+    flag: Option<&Path>,
     env: Option<std::ffi::OsString>,
-) -> Result<std::path::PathBuf, String> {
+) -> Result<PathBuf, String> {
     let empty = |origin: &str| {
         format!(
             "{origin} is empty; an empty VFS root names no directory and would leave \
@@ -100,11 +96,11 @@ fn resolve_ps3_vfs_root_inner(
              directory. Name the root, or unset it to take the vfs/dev_hdd0 default."
         )
     };
-    if let Some(p) = find_flag_value(args, "--vfs-root") {
-        if p.is_empty() {
+    if let Some(p) = flag {
+        if p.as_os_str().is_empty() {
             return Err(empty("--vfs-root"));
         }
-        return Ok(std::path::PathBuf::from(p));
+        return Ok(p.to_path_buf());
     }
     // A root path the platform accepts but that is not UTF-8 must
     // still reach the resolver.
@@ -112,9 +108,9 @@ fn resolve_ps3_vfs_root_inner(
         if p.is_empty() {
             return Err(empty("CELLGOV_PS3_VFS_ROOT"));
         }
-        return Ok(std::path::PathBuf::from(p));
+        return Ok(PathBuf::from(p));
     }
-    Ok(std::path::PathBuf::from("vfs/dev_hdd0"))
+    Ok(PathBuf::from("vfs/dev_hdd0"))
 }
 
 #[cfg(test)]

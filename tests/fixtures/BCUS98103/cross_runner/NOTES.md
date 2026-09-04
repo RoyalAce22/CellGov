@@ -12,7 +12,7 @@ byte_parity: 666 non-semantic + 57 pending
 ---
 
 Reaches `FirstRsxWrite` at step 7,119 deterministically across
-two runs (`bench-boot --title uncharted` matches the committed
+two runs (`boot bench --title uncharted` matches the committed
 anchor). Both runners are sampled at the same checkpoint: CG at
 its `MemError::ReservedWrite` trap on the put-store, RP at the
 `CELLGOV_DUMP_PATH_RSX` trigger. The RSX1 and RSX2 dumps are

@@ -598,7 +598,7 @@ fn compare_steps(
 }
 
 /// Render the compare result to the stdout format the
-/// `compare-observations` CLI emits.
+/// `diff observations` CLI emits.
 ///
 /// Fields are walked in fixed order (outcome -> regions -> events ->
 /// state hashes -> steps); every divergent section emits its own

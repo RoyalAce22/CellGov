@@ -31,7 +31,7 @@ outcome = "completed"
 #          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
 #   2. Run:
-#        cargo run --release -p cellgov_cli -- run-game \
+#        cargo run --release -p cellgov_cli -- boot run \
 #          --title-manifest tests/micro/ppu_cond_prodcons/\
 # manifest.toml --max-steps 10000000
 

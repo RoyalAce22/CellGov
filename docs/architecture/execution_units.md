@@ -56,7 +56,7 @@ silently dropped. The selected set loads in topological-sort order,
 OPD; a `module_start` that faults in guest code is skipped with a
 named witness instead of aborting the boot.
 
-`run-game` exposes two env vars for firmware-loading experiments:
+`boot run` exposes two env vars for firmware-loading experiments:
 `CELLGOV_PRX_BASE` overrides the firmware PRX load address, and
 `CELLGOV_SKIP_MODULE_START=1` bypasses `module_start` for a
 firmware PRX whose initializer corrupts state under CellGov's LV2

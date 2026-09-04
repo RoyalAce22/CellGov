@@ -398,8 +398,8 @@ fn parse_program_authority_id_matches_known_corpus_values() {
         p.pop();
         p
     };
-    // (label, fixture, the directory `install-game` / `install-iso`
-    // creates for that title, expected authority id).
+    // (label, fixture, the directory `title install` creates for that
+    // title, expected authority id).
     let cases = [
         (
             "flOw (NPDRM SELF)",
@@ -816,8 +816,8 @@ fn parse_control_flags1_matches_known_corpus_values() {
         p.pop();
         p
     };
-    // (label, fixture, the directory `cellgov_install` creates when
-    // that module / title is installed, whether the SELF carries a
+    // (label, fixture, the directory the installer creates when that
+    // module / title is installed, whether the SELF carries a
     // plaintext capability record at all, expected ctrl_flags1).
     let cases = [
         (

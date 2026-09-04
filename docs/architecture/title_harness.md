@@ -64,7 +64,7 @@ carries no witness (a run-dependent key set, a line repeated per
 module, a line suppressed on the quiet path), and a test holds
 the emitters to that split.
 
-`record-anchors` is the only writer: it re-measures, rewrites the
+`dev record-anchors` is the only writer: it re-measures, rewrites the
 baseline (outcome included), and appends one line per real move
 to the title's append-only `boot_history.jsonl`, so blessing a
 change is a reviewable data diff.
@@ -77,7 +77,7 @@ a first triple over such a line is not itself a move.
 
 ```mermaid
 flowchart LR
-  bb["bench-boot --title NAME"] --> boot["two subprocess-isolated boots"]
+  bb["boot bench --title NAME"] --> boot["two subprocess-isolated boots"]
   boot --> lines["BENCH_* stderr lines"]
   lines --> chk["witness checker: exact / at-least / absent / informational; every recorded emitter must appear"]
   base["tests/fixtures/ID/cellgov/boot_summary.json"] --> chk
@@ -103,7 +103,7 @@ fits the existing checkpoint kinds (`process-exit`,
 targeted diagnostics, e.g. `--checkpoint pc=0xADDR` for
 step-count-aligned A/B measurements.
 
-`bench-boot` measures a pair of subprocess boots, so it forwards the
+`boot bench` measures a pair of subprocess boots, so it forwards the
 selection flags to its child rather than the paths they resolved to.
 Handing the child a resolved directory would make it read an unmanaged
 tree and compose no store mounts, and the pair would measure two
@@ -160,8 +160,8 @@ CellGov decrypts the encrypted `EBOOT.BIN` in memory at boot through
 titles, RAP-keyed NPDRM for PSN-HDD titles (the RAP file named by the
 manifest's `rap_filename` is read from
 `<vfs-root>/home/00000001/exdata/`). `<vfs-root>` defaults to
-`vfs/dev_hdd0`, the CellGov-owned VFS that `cellgov_install
-install-game` / `install-iso` populate from a user's PKG/ISO dumps;
+`vfs/dev_hdd0`, the CellGov-owned VFS that `cellgov title install`
+populates from a user's PKG or disc-image dumps;
 `--vfs-root` or `$CELLGOV_PS3_VFS_ROOT` overrides it, and also decides
 which store the selection reads. `tools/rpcs3/` holds an RPCS3
 checkout for offline baselines only.
@@ -184,15 +184,15 @@ flowchart TD
 
 The diagnostic surface is:
 
-- `run-game --title <name>`: fault-driven bring-up run with full
+- `boot run --title <name>`: fault-driven bring-up run with full
   per-step coverage (insn tally, PC hit counts, syscall summary).
-- `bench-boot --title <name>`: two subprocess-isolated boot runs
+- `boot bench --title <name>`: two subprocess-isolated boot runs
   per invocation for reproducible wall-time measurement; the
   split sidesteps wall-time drift from guest-memory allocation /
   page-commit reuse across `Runtime` instances in one process.
   `--checkpoint pc=0xADDR` stops at a specific retired PC for A/B
   measurements that need identical step counts across runs.
-- `dump-prx-imports <path>`: decodes any raw `.prx` or SCE-wrapped
+- `dev prx-imports <path>`: decodes any raw `.prx` or SCE-wrapped
   `.sprx` (SCE wrappers auto-detected and decrypted via
   `cellgov_install::sce`) and prints the module's internal name,
   export namespaces, and full import table.

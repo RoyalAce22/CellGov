@@ -1,4 +1,5 @@
-//! `dump <scenario>` -- run a scenario and print every trace record.
+//! `scenario dump <name>` -- run a scenario and print every trace
+//! record.
 
 use cellgov_testkit::runner::ScenarioResult;
 use cellgov_trace::TraceReader;
@@ -6,11 +7,7 @@ use cellgov_trace::TraceReader;
 use super::exit::die;
 use super::scenarios::run_scenario;
 
-pub(crate) fn run(args: &[String], scenarios_list: &[&str]) {
-    let name = args
-        .get(2)
-        .map(String::as_str)
-        .unwrap_or_else(|| die("usage: cellgov_cli dump <scenario>"));
+pub(crate) fn run(name: &str, scenarios_list: &[&str]) {
     match run_scenario(name) {
         Some((_label, result)) => dump_trace(&result),
         None => die(&format!(

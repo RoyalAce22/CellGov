@@ -78,7 +78,7 @@ fn every_microtest_boots_bit_identically_twice() {
     );
 }
 
-/// A microtest that boots under `run-game` but is absent from [`CASES`]
+/// A microtest that boots under `boot run` but is absent from [`CASES`]
 /// is watched by nothing -- the state that let four of them sit broken.
 #[test]
 fn every_bootable_microtest_is_covered_by_the_table() {
@@ -129,7 +129,7 @@ fn every_bootable_microtest_is_covered_by_the_table() {
     covered.sort();
     assert_eq!(
         bootable, covered,
-        "tests/micro holds run-game-bootable manifests that this gate does not check \
+        "tests/micro holds bootable manifests that this gate does not check \
          (or names cases whose manifest is gone); add the missing ones to CASES",
     );
 }

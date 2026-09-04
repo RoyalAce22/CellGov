@@ -11,10 +11,6 @@ repository.workspace = true
 name = "cellgov_install"
 path = "src/lib.rs"
 
-[[bin]]
-name = "cellgov_install"
-path = "src/main.rs"
-
 [dependencies]
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
 cellgov_terminal = { path = "../../crates/cellgov_terminal" }
@@ -27,11 +23,6 @@ hmac = { version = "0.12", optional = true }
 sha1 = { version = "0.10", optional = true }
 sha2 = "0.10"
 flate2 = { version = "1", optional = true }
-# Read-only file mapping with a safe API, for disc images too large to
-# hold resident (a BD-DL ISO is up to 50 GB; fs::read commits it all).
-# Chosen over memmap2 because its map call is not `unsafe fn`, keeping
-# the workspace's forbid(unsafe_code) intact.
-filebuffer = "1"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 thiserror = "2"

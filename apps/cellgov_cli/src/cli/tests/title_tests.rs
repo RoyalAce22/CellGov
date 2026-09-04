@@ -2,10 +2,6 @@
 
 use super::*;
 
-fn sv(parts: &[&str]) -> Vec<String> {
-    parts.iter().map(|s| s.to_string()).collect()
-}
-
 /// RAII env-var scrubber: snapshots the current value, unsets it,
 /// restores on drop.
 struct EnvGuard {
@@ -32,36 +28,28 @@ impl Drop for EnvGuard {
 
 #[test]
 fn resolve_ps3_vfs_root_prefers_cli_flag() {
-    let args = sv(&[
-        "cli",
-        "run-game",
-        "--title",
-        "flow",
-        "--vfs-root",
-        "/custom/path",
-    ]);
-    let got = resolve_ps3_vfs_root_inner(&args, None).expect("flag names a root");
-    assert_eq!(got, std::path::PathBuf::from("/custom/path"));
+    let got = resolve_ps3_vfs_root_inner(Some(Path::new("/custom/path")), None)
+        .expect("flag names a root");
+    assert_eq!(got, PathBuf::from("/custom/path"));
 }
 
 #[test]
 fn resolve_ps3_vfs_root_default_is_project_relative() {
     let _guard = EnvGuard::unset("CELLGOV_PS3_VFS_ROOT");
-    let args = sv(&["cli", "run-game", "--title", "flow"]);
-    let default_root = std::path::Path::new(cellgov_install::store::DEFAULT_VFS_ROOT);
-    let got = resolve_ps3_vfs_root(&args);
+    let default_root = Path::new(cellgov_install::store::DEFAULT_VFS_ROOT);
+    let got = resolve_ps3_vfs_root(None);
     assert_eq!(got, default_root.join("dev_hdd0"));
     assert_eq!(
         crate::cli::keys::fixed_vault_root(),
         Some(default_root),
-        "the vault is read beside dev_hdd0, where `cellgov_install` writes it",
+        "the vault is read beside dev_hdd0, where the installers write it",
     );
 }
 
 #[test]
 fn an_empty_vfs_root_flag_is_refused_rather_than_meaning_the_current_directory() {
-    let args = sv(&["cli", "run-game", "--title", "flow", "--vfs-root", ""]);
-    let err = resolve_ps3_vfs_root_inner(&args, None).expect_err("empty root names no directory");
+    let err = resolve_ps3_vfs_root_inner(Some(Path::new("")), None)
+        .expect_err("empty root names no directory");
     assert!(
         err.contains("--vfs-root"),
         "message names the origin: {err}"
@@ -70,8 +58,7 @@ fn an_empty_vfs_root_flag_is_refused_rather_than_meaning_the_current_directory()
 
 #[test]
 fn an_empty_vfs_root_env_var_is_refused_rather_than_meaning_the_current_directory() {
-    let args = sv(&["cli", "run-game", "--title", "flow"]);
-    let err = resolve_ps3_vfs_root_inner(&args, Some(std::ffi::OsString::new()))
+    let err = resolve_ps3_vfs_root_inner(None, Some(std::ffi::OsString::new()))
         .expect_err("empty root names no directory");
     assert!(
         err.contains("CELLGOV_PS3_VFS_ROOT"),
@@ -81,16 +68,17 @@ fn an_empty_vfs_root_env_var_is_refused_rather_than_meaning_the_current_director
 
 #[test]
 fn a_set_vfs_root_env_var_beats_the_default() {
-    let args = sv(&["cli", "run-game", "--title", "flow"]);
-    let got = resolve_ps3_vfs_root_inner(&args, Some(std::ffi::OsString::from("/from/env")))
+    let got = resolve_ps3_vfs_root_inner(None, Some(std::ffi::OsString::from("/from/env")))
         .expect("non-empty env root resolves");
-    assert_eq!(got, std::path::PathBuf::from("/from/env"));
+    assert_eq!(got, PathBuf::from("/from/env"));
 }
 
 #[test]
 fn the_vfs_root_flag_beats_a_set_env_var() {
-    let args = sv(&["cli", "run-game", "--vfs-root", "/from/flag"]);
-    let got = resolve_ps3_vfs_root_inner(&args, Some(std::ffi::OsString::from("/from/env")))
-        .expect("flag wins");
-    assert_eq!(got, std::path::PathBuf::from("/from/flag"));
+    let got = resolve_ps3_vfs_root_inner(
+        Some(Path::new("/from/flag")),
+        Some(std::ffi::OsString::from("/from/env")),
+    )
+    .expect("flag wins");
+    assert_eq!(got, PathBuf::from("/from/flag"));
 }

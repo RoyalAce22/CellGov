@@ -66,7 +66,7 @@ fn firmware_external_dir() -> PathBuf {
     let entries = std::fs::read_dir(&records).unwrap_or_else(|e| {
         panic!(
             "firmware-corpus: no firmware install records at {}: {e}. Run \
-             `cellgov_install install <PS3UPDAT.PUP>` to populate the store.",
+             `cellgov firmware install <PS3UPDAT.PUP>` to populate the store.",
             records.display()
         )
     });

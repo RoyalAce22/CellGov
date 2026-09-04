@@ -134,9 +134,9 @@ pub enum PrxParseError {
 /// Parse a decrypted PRX (ELF64 type 0xFFA4) into its components.
 ///
 /// Input must already be decrypted, not a raw SCE-encrypted SELF. Unwrap one
-/// with `cellgov_install` built with the `decrypt` feature, or through
-/// `cellgov_cli dump-prx-imports`, which detects the SCE wrapper and decrypts
-/// before parsing.
+/// with `cellgov self decrypt` from a build carrying the `decrypt` feature, or
+/// through `cellgov dev prx-imports`, which detects the SCE wrapper and
+/// decrypts before parsing.
 pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
     if data.len() < ELF_HEADER_SIZE {
         return Err(PrxParseError::TooSmall);

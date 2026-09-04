@@ -4,7 +4,7 @@
 //!
 //! The vault is located by [`KeyVault::load`]: the `CELLGOV_KEYS`
 //! environment variable names a file or directory used in place, and
-//! without it the keys `cellgov_install keys import` normalized into
+//! without it the keys `cellgov keys import` normalized into
 //! `<vfs>/.cellgov/keys/keys.toml` are read. Parsing lives in every
 //! build; only the `decrypt` feature reads the values.
 //!
@@ -25,7 +25,7 @@
 //! selects the one that fits.
 //!
 //! Whatever the loose forms leave unplaced is listed with a reason
-//! (`cellgov_install keys show`); `keys.toml` is the exact form.
+//! (`cellgov keys show`); `keys.toml` is the exact form.
 
 mod error;
 mod hex;

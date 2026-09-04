@@ -1,5 +1,5 @@
 //! Boots whitelisted `.ppu.elf` files from `tests/ps3autotests/` via
-//! `cellgov_cli run-game` and compares captured TTY against the
+//! `cellgov boot run` and compares captured TTY against the
 //! real-PS3 `.expected` file.
 //!
 //! Compiled only under the `ps3autotests` feature: the corpus is a
@@ -220,7 +220,7 @@ fn firmware_set_reject_reason(dir: &Path) -> Option<String> {
 
 /// The installed `sys/external` firmware directory.
 ///
-/// The harness passes this path to `run-game` explicitly, so a move in
+/// The harness passes this path to `boot run` explicitly, so a move in
 /// that command's default cannot change which modules boot here.
 /// `vfs/dev_flash/sys/external` comes first: it is the default the
 /// boot pipeline documents, so this suite boots the same modules as
@@ -305,7 +305,7 @@ fn ps3autotests_root() -> PathBuf {
     dir
 }
 
-/// `cellgov_cli run-game` resolves the ELF from argv rather than from
+/// `cellgov boot run` resolves the ELF from argv rather than from
 /// the manifest's `eboot_candidates`; ps3autotests ELFs do not live in
 /// a PS3 VFS layout, so the manifest carries the candidate purely so
 /// the schema validates.
@@ -382,11 +382,11 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
         });
     }
 
-    let cli_bin = env!("CARGO_BIN_EXE_cellgov_cli");
+    let cli_bin = env!("CARGO_BIN_EXE_cellgov");
     let output = {
         let _permit = subprocess_permit();
         Command::new(cli_bin)
-            .arg("run-game")
+            .args(["boot", "run"])
             .arg("--title-manifest")
             .arg(&manifest_path)
             .arg("--max-steps")
@@ -395,18 +395,18 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
             .arg(&observation_path)
             .arg(&elf_path)
             .current_dir(workspace_root())
-            // These ELFs import firmware namespaces: `cellgov_cli
-            // dump-prx-imports` on cpu/basic lists 12 sysPrxForUser
+            // These ELFs import firmware namespaces: `cellgov dev
+            // prx-imports` on cpu/basic lists 12 sysPrxForUser
             // NIDs. No HLE module binds them, so the boot must reach
             // the installed firmware for the real PRX to fill those
             // GOT slots.
             .arg("--firmware-dir")
             .arg(firmware_dir())
             .output()
-            .expect("spawn cellgov_cli run-game")
+            .expect("spawn cellgov boot run")
     };
 
-    // `run-game` exits non-zero on Fault and on MaxSteps, and writes a
+    // `boot run` exits non-zero on Fault and on MaxSteps, and writes a
     // full observation for both. Those are outcomes for
     // [`report_verdict`] to classify, so the exit status decides
     // nothing here -- a run that left no readable observation is the
@@ -414,7 +414,7 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
     let json = std::fs::read_to_string(&observation_path).unwrap_or_else(|e| {
         dump_run_output(case, &output);
         panic!(
-            "ps3autotests {}/{}: run-game {} and left no observation at {} ({e})",
+            "ps3autotests {}/{}: boot run {} and left no observation at {} ({e})",
             case.rel_dir,
             case.stem,
             describe_exit(&output.status),
@@ -453,11 +453,11 @@ fn describe_exit(status: &std::process::ExitStatus) -> String {
     }
 }
 
-/// Both streams of a `run-game` whose observation the harness could
+/// Both streams of a `boot run` whose observation the harness could
 /// not read; the failure itself is only visible in the child's output.
 fn dump_run_output(case: &Case, output: &std::process::Output) {
     eprintln!(
-        "ps3autotests {}/{}: cellgov_cli run-game {}",
+        "ps3autotests {}/{}: cellgov boot run {}",
         case.rel_dir,
         case.stem,
         describe_exit(&output.status),
@@ -501,14 +501,14 @@ fn report_verdict(case: &Case, observation: &Observation, expected: &[u8]) {
         ObservedOutcome::Timeout => panic!(
             "ps3autotests {label}: outcome=Timeout (max_steps={} reached). \
              Either the test wedged in an infinite loop or the cap is too \
-             low. Investigate via `cellgov_cli run-game --max-steps N` \
+             low. Investigate via `cellgov boot run --max-steps N` \
              before raising the cap.",
             case.max_steps
         ),
         ObservedOutcome::Fault => panic!(
             "ps3autotests {label}: outcome=Fault. The runtime took an \
              architectural fault before reaching sys_process_exit. Run \
-             `cellgov_cli run-game` on the ELF to inspect."
+             `cellgov boot run` on the ELF to inspect."
         ),
         ObservedOutcome::Stalled => panic!(
             "ps3autotests {label}: outcome=Stalled. No runnable units but \

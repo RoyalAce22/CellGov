@@ -20,7 +20,7 @@ Multi-baseline mode checks oracle agreement across, e.g., the RPCS3
 interpreter and LLVM before declaring a CellGov divergence.
 
 For long boot snapshots, `observe_from_boot` builds observations
-from `run-game` outputs; `cellgov_cli compare-observations` reads
+from `boot run` outputs; `cellgov diff observations` reads
 two JSON files and reports MATCH or the first differing field. The
 determinism check requires two CellGov runs of the same ELF to
 produce byte-identical observations.
@@ -42,11 +42,11 @@ mismatch.
 flowchart LR
   man["checkpoint manifest (regions, spaces)"] --> cg
   man --> br
-  cg["cellgov_cli run-game --save-observation"] --> oc["Observation JSON (CellGov)"]
+  cg["cellgov boot run --save-observation"] --> oc["Observation JSON (CellGov)"]
   r3["patched RPCS3, oracle-mode config"] -->|"CELLGOV_DUMP_PATH / CELLGOV_DUMP_REGIONS"| dump["binary dump at _sys_process_exit"]
   dump --> br["rpcs3_to_observation --config-hash"]
   br --> orr["Observation JSON (RPCS3)"]
-  oc --> cmp["compare-observations (field by field) / compare --against-baseline (strict, memory, events, prefix)"]
+  oc --> cmp["diff observations (field by field) / compare --against-baseline (strict, memory, events, prefix)"]
   orr --> cmp
   cmp --> out["MATCH, or the first differing field"]
 ```
@@ -67,7 +67,7 @@ Two scanners turn per-step state-trace files into diff reports:
   verdict on the runs, since nothing past the cut was compared.
   Checks run step count -> PC -> hash, so the report names the
   highest-level divergence first. Surfaced via
-  `cellgov_cli diverge <a.state> <b.state>` (exit 3 on a corrupt
+  `cellgov diff diverge <a.state> <b.state>` (exit 3 on a corrupt
   trace). The scan is linear in record count.
 - `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
   separate zoom-trace files (`PpuStateFull` records emitted only
@@ -79,9 +79,9 @@ Two scanners turn per-step state-trace files into diff reports:
   states agree on everything the hash folds; if `PpuStateHash`
   diverged at that step, the harness is skewing snapshots against
   hashes and the scan must not resume past it. Surfaced via
-  `cellgov_cli zoom <a> <b> <step>`.
+  `cellgov diff zoom <a> <b> <step>`.
 
-`run-game --save-state-trace <path>` writes the runtime's per-step
+`boot run --save-state-trace <path>` writes the runtime's per-step
 `PpuStateHash` trace to disk, switching the runtime mode from
 `FaultDriven` to `DeterminismCheck` for the run; that file is what
 `diverge` and `zoom` consume. With `--patch-byte` for boot-time
@@ -91,12 +91,12 @@ during the boot?"
 
 ```mermaid
 flowchart LR
-  a["run-game --save-state-trace a.state"] --> dv["cellgov_cli diverge a b"]
-  b["run-game --save-state-trace b.state (e.g. with --patch-byte)"] --> dv
+  a["boot run --save-state-trace a.state"] --> dv["cellgov diff diverge a b"]
+  b["boot run --save-state-trace b.state (e.g. with --patch-byte)"] --> dv
   dv -->|Identical / LengthDiffers| done["verdict"]
   dv -->|"Differs at step N, field Pc or Hash"| win["re-capture both with a full-state window around N"]
   dv -->|CorruptTrace| bad["exit 3, no verdict"]
-  win --> zm["cellgov_cli zoom a.zoom b.zoom N"]
+  win --> zm["cellgov diff zoom a.zoom b.zoom N"]
   zm --> rd["RegDiff list: the fingerprint fields that differ"]
 ```
 
@@ -109,7 +109,7 @@ the configured guest memory regions (parsed as `addr:size` hex
 pairs, appended contiguously in declaration order) to a binary
 file on process exit. `bridges/rpcs3_to_observation` converts that
 dump plus a shared region manifest into the same `Observation` JSON
-`cellgov_cli compare-observations` reads.
+`cellgov diff observations` reads.
 
 The user builds the patched RPCS3 binary; the CellGov library has no
 Cargo or runtime dependency on RPCS3, and the bridge is a

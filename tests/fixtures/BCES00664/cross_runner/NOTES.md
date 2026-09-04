@@ -40,7 +40,7 @@ with value `0x0000000001000000`. In BE order this places
 store; there is no separate writer for `+0x0c`.
 
 Block containing the store (firmware-PRX text, reachable
-via `cellgov_cli disasm` against the loaded firmware
+via `cellgov dev disasm` against the loaded firmware
 image at PC `0x01664EE4`):
 
 ```
@@ -75,7 +75,7 @@ threading through `StoreBuffer::Entry` / `flush()` /
 `SharedWriteIntent` / `apply_commit`.
 
 Supporting observation from shipped tooling:
-`target/release/cellgov_cli.exe bench-boot --title wipeout
+`target/release/cellgov_cli.exe boot bench --title wipeout
 --checkpoint pc=0x6516F0 --max-steps 100000000` halts at
 step 43,040 / Fault without firing the PC check at
 `0x6516F0` (the title call site preceding the path that
@@ -90,7 +90,7 @@ title's data segment.
 
 Inert at FirstRsxWrite: CG reaches FirstRsxWrite at
 step 43,040, `host_invariant_breaks=2`, bit-identical
-across two `bench-boot --title wipeout` runs. CG and RP
+across two `boot bench --title wipeout` runs. CG and RP
 read divergent values at `+0x0c` along their respective
 pre-checkpoint trajectories with no resulting step-count
 divergence.

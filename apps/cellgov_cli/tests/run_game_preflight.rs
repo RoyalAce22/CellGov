@@ -1,4 +1,4 @@
-//! `run-game` refuses a malformed artifact request before the boot
+//! `boot run` refuses a malformed artifact request before the boot
 //! inputs resolve, so a bad `--observation-manifest` costs seconds
 //! rather than the run it would have saved. Needs no installed title:
 //! every case must die before the boot-started sentinel.
@@ -43,16 +43,16 @@ impl Drop for Scratch {
     }
 }
 
-/// Run `run-game` with `extra` and return `(exit ok, stderr)`. The
+/// Run `boot run` with `extra` and return `(exit ok, stderr)`. The
 /// title selector is never resolved: every case dies first.
 fn run_game(extra: &[&str]) -> (bool, String) {
-    let out = Command::new(env!("CARGO_BIN_EXE_cellgov_cli"))
-        .arg("run-game")
+    let out = Command::new(env!("CARGO_BIN_EXE_cellgov"))
+        .args(["boot", "run"])
         .args(["--title", "preflight-only", "--max-steps", "1"])
         .args(extra)
         .current_dir(workspace_root())
         .output()
-        .expect("spawn cellgov_cli run-game");
+        .expect("spawn cellgov boot run");
     (
         out.status.success(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
@@ -118,8 +118,8 @@ fn a_manifest_without_a_save_target_is_refused() {
     let (ok, stderr) = run_game(&["--observation-manifest", &manifest]);
     assert!(!ok, "a manifest with nothing to save must fail:\n{stderr}");
     assert!(
-        stderr.contains("--observation-manifest is meaningless without --save-observation"),
-        "{stderr}"
+        stderr.contains("--observation-manifest") && stderr.contains("--save-observation"),
+        "the refusal names both flags:\n{stderr}"
     );
     assert_died_before_boot(&stderr);
 }

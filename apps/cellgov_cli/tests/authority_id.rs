@@ -56,9 +56,9 @@ fn parse_authority_witness(stderr: &str) -> Option<AuthorityWitness> {
 /// failure panics: past the not-installed marker there is no
 /// legitimate reason for this boot to break.
 fn boot(title: &TitleUnderTest, force_system_authid: bool) -> Option<AuthorityWitness> {
-    let cli_bin = env!("CARGO_BIN_EXE_cellgov_cli");
+    let cli_bin = env!("CARGO_BIN_EXE_cellgov");
     let mut cmd = Command::new(cli_bin);
-    cmd.arg("bench-boot-once")
+    cmd.args(["boot", "bench-once"])
         .arg("--title")
         .arg(&title.short_name)
         .arg("--max-steps")
@@ -67,7 +67,7 @@ fn boot(title: &TitleUnderTest, force_system_authid: bool) -> Option<AuthorityWi
     if force_system_authid {
         cmd.env("CELLGOV_FORCE_SYSTEM_AUTHID", "1");
     }
-    let output = cmd.output().expect("spawn cellgov_cli bench-boot-once");
+    let output = cmd.output().expect("spawn cellgov boot bench-once");
     let stderr = String::from_utf8_lossy(&output.stderr);
     if !output.status.success() {
         if stderr.contains(TITLE_NOT_INSTALLED_SENTINEL) {

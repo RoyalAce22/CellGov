@@ -78,7 +78,7 @@ fn locate_and_parse_manifest(
     }
     die(&format!(
         "no firmware.toml at or above {}; the firmware corpus is unverifiable. \
-         Reinstall with `cellgov_install install`, which writes the manifest.",
+         Reinstall with `cellgov firmware install`, which writes the manifest.",
         dir_path.display()
     ))
 }
@@ -111,7 +111,7 @@ fn verify_against_manifest(
         VerifyOutcome::Match => {}
         VerifyOutcome::NotInManifest => die(&format!(
             "{}: not listed in firmware.toml ({rel:?}); the corpus and its \
-             manifest disagree. Reinstall with `cellgov_install install`.",
+             manifest disagree. Reinstall with `cellgov firmware install`.",
             file.display()
         )),
         VerifyOutcome::Mismatch { expected, actual } => die(&format!(

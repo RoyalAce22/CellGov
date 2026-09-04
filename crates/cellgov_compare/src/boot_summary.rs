@@ -1,5 +1,5 @@
-//! Boot-side summary written by `run-game --save-boot-summary` and
-//! consumed by `titles-gen` for the `titles.md` matrix's
+//! Boot-side summary written by `boot run --save-boot-summary` and
+//! consumed by `dev titles-gen` for the `titles.md` matrix's
 //! checkpoint / step / instruction-count columns.
 
 use cellgov_mem::GuestAddr;

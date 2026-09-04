@@ -1,96 +1,32 @@
-//! Disasm argument parsing -- hex values, vaddr alignment, and count bounds.
+//! Instruction-word alignment of a `dev disasm` address.
 
 use super::*;
 
-fn args_vec(extra: &[&str]) -> Vec<String> {
-    let mut v: Vec<String> = ["cellgov_cli", "disasm", "/tmp/elf"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
-    for s in extra {
-        v.push(s.to_string());
+#[test]
+fn an_aligned_address_is_accepted() {
+    for vaddr in [0, 4, 0x1_0000, u64::MAX - 3] {
+        assert!(check_alignment(vaddr).is_ok(), "0x{vaddr:x}");
     }
-    v
 }
 
 #[test]
-fn parse_hex_accepts_with_and_without_prefix() {
-    assert_eq!(parse_hex_u64("0x10"), Some(0x10));
-    assert_eq!(parse_hex_u64("0X10"), Some(0x10));
-    assert_eq!(parse_hex_u64("10"), Some(0x10));
-    assert_eq!(parse_hex_u64("deadbeef"), Some(0xdead_beef));
-}
-
-#[test]
-fn parse_hex_rejects_garbage() {
-    assert_eq!(parse_hex_u64(""), None);
-    assert_eq!(parse_hex_u64("0x"), None);
-    assert_eq!(parse_hex_u64("0xZZ"), None);
-    assert_eq!(parse_hex_u64("ffffffffffffffff0"), None); // overflow
-}
-
-#[test]
-fn parse_args_requires_vaddr() {
-    let err = parse_args(&args_vec(&[])).unwrap_err();
-    assert_eq!(err, ArgError::Usage);
-}
-
-#[test]
-fn parse_args_rejects_unaligned_vaddr() {
-    let err = parse_args(&args_vec(&["--vaddr", "0x10002"])).unwrap_err();
-    assert_eq!(err, ArgError::UnalignedVaddr(0x10002));
-}
-
-#[test]
-fn parse_args_rejects_count_zero() {
-    let err = parse_args(&args_vec(&["--vaddr", "0x10000", "--count", "0"])).unwrap_err();
-    assert_eq!(err, ArgError::CountIsZero);
-}
-
-#[test]
-fn parse_args_rejects_count_over_max() {
-    let err = parse_args(&args_vec(&["--vaddr", "0x10000", "--count", "1000000"])).unwrap_err();
-    assert_eq!(err, ArgError::CountTooLarge(1_000_000));
-}
-
-#[test]
-fn parse_args_reports_missing_value_for_specific_flag() {
-    let err = parse_args(&args_vec(&["--vaddr"])).unwrap_err();
-    assert_eq!(err, ArgError::MissingValueFor("--vaddr"));
-    let err = parse_args(&args_vec(&["--vaddr", "0x10000", "--count"])).unwrap_err();
-    assert_eq!(err, ArgError::MissingValueFor("--count"));
-}
-
-#[test]
-fn parse_args_unknown_flag_is_specific() {
-    let err = parse_args(&args_vec(&["--vaddr", "0x10000", "--lol"])).unwrap_err();
-    assert_eq!(err, ArgError::UnknownFlag("--lol".to_string()));
-}
-
-#[test]
-fn parse_args_invalid_hex_includes_value() {
-    let err = parse_args(&args_vec(&["--vaddr", "nothex!"])).unwrap_err();
+fn every_unaligned_offset_within_a_word_is_refused() {
+    for offset in [1, 2, 3] {
+        let vaddr = 0x1_0000 + offset;
+        assert_eq!(
+            check_alignment(vaddr).unwrap_err(),
+            ArgError::UnalignedVaddr(vaddr)
+        );
+    }
     assert_eq!(
-        err,
-        ArgError::InvalidHex {
-            flag: "--vaddr",
-            value: "nothex!".to_string()
-        }
+        check_alignment(u64::MAX).unwrap_err(),
+        ArgError::UnalignedVaddr(u64::MAX)
     );
 }
 
 #[test]
-fn parse_args_happy_path() {
-    let argv = args_vec(&["--vaddr", "0x10000", "--count", "32"]);
-    let p = parse_args(&argv).unwrap();
-    assert_eq!(p.vaddr, 0x10000);
-    assert_eq!(p.count, 32);
-    assert_eq!(p.elf_path, "/tmp/elf");
-}
-
-#[test]
-fn parse_args_accepts_count_at_max() {
-    let argv = args_vec(&["--vaddr", "0x10000", "--count", "65536"]);
-    let p = parse_args(&argv).unwrap();
-    assert_eq!(p.count, MAX_COUNT);
+fn an_unaligned_address_is_refused_naming_it() {
+    let err = check_alignment(0x10002).unwrap_err();
+    assert_eq!(err, ArgError::UnalignedVaddr(0x10002));
+    assert!(err.to_string().contains("0x0000000000010002"), "{err}");
 }

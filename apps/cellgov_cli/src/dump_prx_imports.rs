@@ -1,4 +1,4 @@
-//! `dump-prx-imports` subcommand: parse any PRX/SPRX's import table
+//! `dev prx-imports`: parse any PRX/SPRX's import table
 //! and print it. Handles both raw `.prx` (plaintext ELF) and `.sprx`
 //! (SCE-wrapped) inputs. `--at` matches `ImportedFunction::stub_addr`
 //! by exact equality against the file-relative vaddr at parse time
@@ -6,6 +6,8 @@
 //!
 //! `--save-elf <path>` writes the decrypted plaintext ELF to `path`:
 //! the same bytes the parser consumed for the printed table.
+
+use crate::cli::parse::PrxImportsArgs;
 
 const NAME_COLUMN_WIDTH: usize = 49;
 
@@ -16,120 +18,6 @@ fn fit_name_column(name: &str) -> String {
         let head: String = name.chars().take(NAME_COLUMN_WIDTH - 3).collect();
         format!("{head}...")
     }
-}
-
-#[derive(Debug)]
-struct Args {
-    path: std::path::PathBuf,
-    filter_addr: Option<u32>,
-    filter_module: Option<String>,
-    save_elf: Option<std::path::PathBuf>,
-}
-
-/// The token after `flag`, refusing a flag-like token in the value
-/// slot as [`crate::cli::args::find_flag_value`] does.
-fn value_after<'a>(
-    args: &'a [String],
-    i: usize,
-    flag: &str,
-    what: &str,
-) -> Result<&'a str, String> {
-    match args.get(i + 1) {
-        None => Err(format!("{flag} requires {what}")),
-        Some(v) if v.starts_with("--") => Err(format!(
-            "{flag} expects {what} but got flag-like token {v:?}; \
-             likely a missing value upstream"
-        )),
-        Some(v) => Ok(v.as_str()),
-    }
-}
-
-/// Parse argv into [`Args`]; `Err` is a usage-format string ready
-/// for `die`.
-fn try_parse_args(args: &[String]) -> Result<Args, String> {
-    debug_assert!(
-        args.len() >= 2 && args[1] == "dump-prx-imports",
-        "dump_prx_imports::run was dispatched with unexpected argv head: {args:?}",
-    );
-
-    let mut path: Option<std::path::PathBuf> = None;
-    let mut filter_addr: Option<u32> = None;
-    let mut filter_module: Option<String> = None;
-    let mut save_elf: Option<std::path::PathBuf> = None;
-
-    let mut i = 2;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--at" => {
-                if filter_addr.is_some() {
-                    return Err("dump-prx-imports: --at specified more than once".to_string());
-                }
-                let v = value_after(args, i, "--at", "a hex value (e.g. --at 0x009bff10)")?;
-                let stripped = v
-                    .strip_prefix("0x")
-                    .or_else(|| v.strip_prefix("0X"))
-                    .unwrap_or(v);
-                let parsed = u32::from_str_radix(stripped, 16)
-                    .map_err(|e| format!("--at {v:?}: not a hex u32 ({e})"))?;
-                filter_addr = Some(parsed);
-                i += 2;
-            }
-            "--module" => {
-                if filter_module.is_some() {
-                    return Err("dump-prx-imports: --module specified more than once".to_string());
-                }
-                let v = value_after(args, i, "--module", "a name")?;
-                filter_module = Some(v.to_string());
-                i += 2;
-            }
-            "--save-elf" => {
-                if save_elf.is_some() {
-                    return Err("dump-prx-imports: --save-elf specified more than once".to_string());
-                }
-                let v = value_after(args, i, "--save-elf", "an output path")?;
-                save_elf = Some(std::path::PathBuf::from(v));
-                i += 2;
-            }
-            // Consumed so it is not rejected as unknown; re-read by
-            // `resolve_ps3_vfs_root` for NPDRM RAP resolution and the
-            // key vault.
-            "--vfs-root" => {
-                value_after(args, i, "--vfs-root", "a path")?;
-                i += 2;
-            }
-            other if other.starts_with("--") => {
-                return Err(format!("dump-prx-imports: unknown flag {other}"));
-            }
-            "" => {
-                // Same refusal the shared positional scanner makes:
-                // an empty token names no file.
-                return Err("dump-prx-imports: unexpected empty positional argument".to_string());
-            }
-            _ => {
-                if path.is_some() {
-                    return Err(
-                        "dump-prx-imports: only one positional path argument is accepted"
-                            .to_string(),
-                    );
-                }
-                path = Some(std::path::PathBuf::from(&args[i]));
-                i += 1;
-            }
-        }
-    }
-
-    let path = path.ok_or_else(|| {
-        "usage: cellgov_cli dump-prx-imports <path-to-prx-or-sprx> \
-         [--at 0xADDR] [--module NAME] [--save-elf <path>]"
-            .to_string()
-    })?;
-
-    Ok(Args {
-        path,
-        filter_addr,
-        filter_module,
-        save_elf,
-    })
 }
 
 use cellgov_ps3_abi::elf::ELF_MAGIC;
@@ -163,7 +51,7 @@ enum LoadError {
 /// SELFs resolve their RAP from `vfs_root`'s exdata directory.
 fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8>, SourceKind) {
     let raw = std::fs::read(path).unwrap_or_else(|e| {
-        crate::cli::exit::die(&format!("dump-prx-imports: read {}: {e}", path.display()))
+        crate::cli::exit::die(&format!("prx-imports: read {}: {e}", path.display()))
     });
     match classify_source(&raw) {
         Ok(SourceKind::Elf) => (raw, SourceKind::Elf),
@@ -176,12 +64,12 @@ fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8
             (elf, SourceKind::SceWrapped)
         }
         Err(LoadError::TooSmall { len }) => crate::cli::exit::die(&format!(
-            "dump-prx-imports: {} is {len} byte(s); needs at least {} for an ELF64 header",
+            "prx-imports: {} is {len} byte(s); needs at least {} for an ELF64 header",
             path.display(),
             cellgov_ps3_abi::elf::ELF_HEADER_SIZE,
         )),
         Err(LoadError::BadMagic { magic }) => crate::cli::exit::die(&format!(
-            "dump-prx-imports: {} has unrecognized magic 0x{:02x}{:02x}{:02x}{:02x} \
+            "prx-imports: {} has unrecognized magic 0x{:02x}{:02x}{:02x}{:02x} \
              (expected ELF or SCE)",
             path.display(),
             magic[0],
@@ -230,20 +118,19 @@ fn module_identity(
     }
 }
 
-pub(crate) fn run(args: &[String]) {
-    let parsed = try_parse_args(args).unwrap_or_else(|msg| crate::cli::exit::die(&msg));
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(args);
+pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
     let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path, &vfs_root);
 
     if let Some(out) = &parsed.save_elf {
         std::fs::write(out, &elf_bytes).unwrap_or_else(|e| {
             crate::cli::exit::die(&format!(
-                "dump-prx-imports: --save-elf write {}: {e}",
+                "prx-imports: --save-elf write {}: {e}",
                 out.display()
             ))
         });
         println!(
-            "dump-prx-imports: wrote {} byte(s) of plaintext ELF to {}",
+            "prx-imports: wrote {} byte(s) of plaintext ELF to {}",
             elf_bytes.len(),
             out.display()
         );
@@ -253,7 +140,7 @@ pub(crate) fn run(args: &[String]) {
         Ok(p) => p,
         Err(e) => {
             eprintln!(
-                "dump-prx-imports: {}: PRX module info: {e}; \
+                "prx-imports: {}: PRX module info: {e}; \
                  module name and export namespaces omitted from the listing",
                 parsed.path.display(),
             );
@@ -262,7 +149,7 @@ pub(crate) fn run(args: &[String]) {
     };
 
     let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).unwrap_or_else(|e| {
-        crate::cli::exit::die(&format!("dump-prx-imports: parse_imports failed: {e}"))
+        crate::cli::exit::die(&format!("prx-imports: parse_imports failed: {e}"))
     });
 
     let total_funcs: usize = modules.iter().map(|m| m.functions.len()).sum();
@@ -283,20 +170,20 @@ pub(crate) fn run(args: &[String]) {
     }
     println!("- Modules imported: {}", modules.len());
     println!("- Functions imported: {total_funcs}");
-    if let Some(a) = parsed.filter_addr {
+    if let Some(a) = parsed.at {
         println!("- Filter: --at 0x{a:08x}");
     }
-    if let Some(m) = &parsed.filter_module {
+    if let Some(m) = &parsed.module {
         println!("- Filter: --module {m}");
     }
     println!();
 
     let mut matched = 0usize;
-    let mut filter_module_seen = parsed.filter_module.is_none();
+    let mut filter_module_seen = parsed.module.is_none();
     let mut empty_modules: Vec<String> = Vec::new();
 
     for module in &modules {
-        if let Some(want) = &parsed.filter_module {
+        if let Some(want) = &parsed.module {
             if module.name != *want {
                 continue;
             }
@@ -310,7 +197,7 @@ pub(crate) fn run(args: &[String]) {
         let matches: Vec<_> = module
             .functions
             .iter()
-            .filter(|f| parsed.filter_addr.is_none_or(|a| f.stub_addr == a))
+            .filter(|f| parsed.at.is_none_or(|a| f.stub_addr == a))
             .collect();
         if matches.is_empty() {
             continue;
@@ -347,39 +234,38 @@ pub(crate) fn run(args: &[String]) {
         println!();
     }
 
-    if parsed.filter_addr.is_some() || parsed.filter_module.is_some() {
+    if parsed.at.is_some() || parsed.module.is_some() {
         println!("Matched {matched} import(s).");
     }
 
-    if let Some(want) = &parsed.filter_module {
+    if let Some(want) = &parsed.module {
         if !filter_module_seen {
             eprintln!(
-                "dump-prx-imports: --module {want:?} not found in {} imported module(s)",
+                "prx-imports: --module {want:?} not found in {} imported module(s)",
                 modules.len()
             );
         } else if empty_modules.iter().any(|n| n == want) {
-            eprintln!("dump-prx-imports: --module {want:?} declares no functions");
+            eprintln!("prx-imports: --module {want:?} declares no functions");
         }
     }
 
-    if let Some(target) = parsed.filter_addr {
+    if let Some(target) = parsed.at {
         if matched == 0 {
-            let scope: Vec<&cellgov_ppu::prx::ImportedModule> = match &parsed.filter_module {
+            let scope: Vec<&cellgov_ppu::prx::ImportedModule> = match &parsed.module {
                 Some(want) => modules.iter().filter(|m| m.name == *want).collect(),
                 None => modules.iter().collect(),
             };
             if let Some(hint) = nearest_stub_hint(&scope, target) {
-                eprintln!("dump-prx-imports: {hint}");
+                eprintln!("prx-imports: {hint}");
             }
         }
     }
 
     // Skip the empty-modules trailer on filtered runs; the count
     // would misleadingly read as file-wide.
-    let unfiltered = parsed.filter_addr.is_none() && parsed.filter_module.is_none();
-    if unfiltered && !empty_modules.is_empty() {
+    if parsed.is_unfiltered() && !empty_modules.is_empty() {
         eprintln!(
-            "dump-prx-imports: {} module(s) declared in the import table have no functions; \
+            "prx-imports: {} module(s) declared in the import table have no functions; \
              omitted from the listing:",
             empty_modules.len()
         );

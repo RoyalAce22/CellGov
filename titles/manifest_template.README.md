@@ -25,7 +25,7 @@ analysis. It does not configure gameplay.
 
 The matrix rendered into [../titles.md](../docs/titles.md) is
 generated from this directory plus per-title fixture summaries
-via `cellgov_cli titles-gen`.
+via `cellgov dev titles-gen`.
 
 ## Schema overview
 
@@ -48,7 +48,7 @@ load error.
 | `engine`           | string   | yes      | Engine name (e.g. `"PhyreEngine"`, `"<studio> proprietary"`).                                                                                                                                                                        |
 | `distribution`     | string   | yes      | One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`, `"firmware-exec"`, `"microtest"`. Lowercase kebab; the loader rejects other casings.                                                                                               |
 | `rap_filename`     | string   | no       | NPDRM license file under the VFS `exdata/` dir; needed to decrypt PSN EBOOTs whose RAP name does not match the content id.                                                                                                            |
-| `bench_max_steps`  | integer  | no       | Per-title instruction cap for `bench-boot-once` and the title suites; defaults to 100,000,000. Raise it when a title's checkpoint sits past the default cap.                                                                          |
+| `bench_max_steps`  | integer  | no       | Per-title instruction cap for `boot bench-once` and the title suites; defaults to 100,000,000. Raise it when a title's checkpoint sits past the default cap.                                                                          |
 
 ### `[checkpoint]` (required)
 
@@ -198,21 +198,21 @@ unpopulated out-params and bails.
 
 ## Adding a new title
 
-1. Install the title with `cellgov_install install-game <pkg> --rap <rap>`
-   (PSN/HDD) or `cellgov_install install-iso <iso>` (a decrypted
+1. Install the title with `cellgov title install <pkg> --rap <rap>`
+   (PSN/HDD) or `cellgov title install <iso>` (a decrypted
    disc dump), which populates `vfs/dev_hdd0/game/<content_id>/USRDIR/`
    or `vfs/dev_bdvd/<content_id>/PS3_GAME/USRDIR/` respectively (both
-   gitignored). `gen-manifest` can then emit a stub of this file.
+   gitignored). `dev gen-manifest` can then emit a stub of this file.
 2. Confirm `EBOOT.BIN` is present. CellGov decrypts it in
    memory via `cellgov_install::sce::decrypt_self_to_elf`; do
    NOT write the decrypted bytes back to `EBOOT.elf`; a stale
    on-disk copy can shadow the canonical SELF.
 3. Write `titles/<content_id>.toml` with the
    schema above.
-4. Run `cellgov_cli run-game --title <short_name>` once to
+4. Run `cellgov boot run --title <short_name>` once to
    confirm the boot path resolves the EBOOT.
 5. If a cross-runner fixture exists or will be captured, run
-   `cellgov_cli titles-gen` to refresh
+   `cellgov dev titles-gen` to refresh
    [../titles.md](../docs/titles.md).
 
 ## Validation summary

@@ -10,6 +10,12 @@ repository.workspace = true
 [lints]
 workspace = true
 
+# One binary for the whole project. The crate keeps its name so the
+# workspace DAG reads the same; the command operators type is `cellgov`.
+[[bin]]
+name = "cellgov"
+path = "src/main.rs"
+
 [dependencies]
 cellgov_compare = { path = "../../crates/cellgov_compare" }
 cellgov_core = { path = "../../crates/cellgov_core" }
@@ -23,9 +29,19 @@ cellgov_mem = { path = "../../crates/cellgov_mem" }
 cellgov_ppu = { path = "../../crates/cellgov_ppu" }
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }
 cellgov_spu = { path = "../../crates/cellgov_spu" }
+cellgov_terminal = { path = "../../crates/cellgov_terminal" }
 cellgov_testkit = { path = "../../crates/cellgov_testkit" }
 cellgov_time = { path = "../../crates/cellgov_time" }
 cellgov_trace = { path = "../../crates/cellgov_trace" }
+# The command tree, its help, and its typo suggestions are declarative
+# here; the hand-rolled equivalent for a two-level tree with global
+# flags is a subsystem this crate would own outright.
+clap = { version = "4", features = ["derive"] }
+# Read-only file mapping with a safe API, for containers too large to
+# hold resident (a BD-DL ISO is up to 50 GB; fs::read commits it all).
+# Chosen over memmap2 because its map call is not `unsafe fn`, keeping
+# the workspace's forbid(unsafe_code) intact.
+filebuffer = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

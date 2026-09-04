@@ -1,4 +1,4 @@
-//! Checkpoint observation capture for `run-game --save-observation`.
+//! Checkpoint observation capture for `boot run --save-observation`.
 //!
 //! The region manifest is `cellgov_compare::CheckpointManifest`, the
 //! schema the RPCS3 bridge reads too, and the caller parses it before

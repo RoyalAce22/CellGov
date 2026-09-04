@@ -148,7 +148,7 @@ the same ELF to the same checkpoint and their observations agree,
 that is **cross-runner agreement**: the same program-level answer
 derived by two independent paths.
 
-The comparison tool (`cellgov_cli compare-observations`) walks
+The comparison tool (`cellgov diff observations`) walks
 both observations field by field. Any difference in outcome,
 memory bytes, or event sequence produces a `DIVERGE` line naming
 the first divergent field. If every field matches exactly, the
@@ -172,7 +172,7 @@ The tree's `README.md` carries the capture procedure.
 A **boot anchor** is CellGov's own witness set for one real title,
 under `tests/fixtures/<content-id>/cellgov/`. It records the step
 count, outcome, and named counters a boot must reproduce.
-`bench-boot` gates a run against the anchor; `record-anchors`
+`boot bench` gates a run against the anchor; `dev record-anchors`
 writes it.
 
 ## Semantic vs non-semantic divergence

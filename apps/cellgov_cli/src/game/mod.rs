@@ -1,5 +1,5 @@
 //! Boot a PS3 title ELF and drive the PPU step loop for the
-//! `run-game` and bench-boot subcommands.
+//! `boot run` and `boot bench` subcommands.
 
 mod bench;
 mod boot;

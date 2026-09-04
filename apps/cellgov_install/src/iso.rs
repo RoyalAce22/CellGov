@@ -11,10 +11,10 @@
 //! fit in host memory.
 
 /// ISO9660 logical sector size.
-const SECTOR: usize = 2048;
+pub(crate) const SECTOR: usize = 2048;
 /// Standard identifier offset within a volume descriptor (after the
 /// 1-byte type), and the sector where the descriptor set begins.
-const VDS_START_SECTOR: usize = 16;
+pub(crate) const VDS_START_SECTOR: usize = 16;
 /// Volume descriptor type: Primary Volume Descriptor.
 const VD_PRIMARY: u8 = 1;
 /// Volume descriptor type: Supplementary (Joliet) Volume Descriptor.
@@ -258,7 +258,9 @@ pub fn read_iso(image: &[u8]) -> Result<Vec<IsoEntry>, IsoError> {
     if image.len() < (VDS_START_SECTOR + 1) * SECTOR {
         return Err(IsoError::TooSmall { len: image.len() });
     }
-    // CD001 at sector 16, byte 1 (the is_file_iso gate).
+    // CD001 at sector 16, byte 1 -- the same identifier
+    // `container::sniff` routes on, re-checked here because a caller
+    // may hand this reader an image it never sniffed.
     if &image[VDS_START_SECTOR * SECTOR + 1..VDS_START_SECTOR * SECTOR + 6] != b"CD001" {
         return Err(IsoError::NotIso);
     }

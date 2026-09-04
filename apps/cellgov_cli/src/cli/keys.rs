@@ -14,11 +14,11 @@ static VAULT_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
 /// The install root enclosing the PS3 VFS root a subcommand was given.
 ///
-/// `--vfs-root` names the `dev_hdd0` mount, while `cellgov_install`
-/// writes the vault, the install records and the `dev_flash` mount one
+/// `--vfs-root` names the `dev_hdd0` mount, while the store commands
+/// write the vault, the install records and the `dev_flash` mount one
 /// level up; the two must agree or an operator who installed under a
 /// non-default root gets `NotConfigured` from a vault
-/// `cellgov_install keys show` finds.
+/// `cellgov keys show` finds.
 pub(crate) fn install_root_of(ps3_vfs_root: &Path) -> PathBuf {
     let mut comps = ps3_vfs_root.components();
     match comps.next_back() {

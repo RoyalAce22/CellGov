@@ -1,6 +1,6 @@
 //! Workspace-relative locations the anchor machinery shares.
 //!
-//! `record-anchors` writes the boot anchors and `bench-boot` gates
+//! `dev record-anchors` writes the boot anchors and `boot bench` gates
 //! against them. They must agree on where an anchor lives and on the
 //! instruction cap it was measured under -- a silent disagreement
 //! there would make the gate compare a run against the wrong file, or
@@ -15,13 +15,13 @@ use std::path::{Path, PathBuf};
 
 /// Instruction cap a title boots under when its manifest sets none.
 ///
-/// `record-anchors` measures with it, and `bench-boot` reads it to
+/// `dev record-anchors` measures with it, and `boot bench` reads it to
 /// tell a default-parameter run from one the operator retargeted.
 pub(crate) const DEFAULT_BENCH_MAX_STEPS: u64 = 100_000_000;
 
 /// Instruction cap the anchor for `title` is recorded and gated under.
 ///
-/// `record-anchors` measures with it and `bench-boot` must default to
+/// `dev record-anchors` measures with it and `boot bench` must default to
 /// it: a bench run at any other cap is reported incomparable and gates
 /// nothing, so a title that raises the cap would silently lose its
 /// anchor check.

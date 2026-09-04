@@ -1,4 +1,4 @@
-//! ELF64-BE program-header parser for the `disasm` subcommand.
+//! ELF64-BE program-header parser for `dev disasm`.
 //!
 //! Owns the producer-side validation described on [`parse_pt_loads`],
 //! rejecting anything that is not a PS3 PPE object at the entry point.

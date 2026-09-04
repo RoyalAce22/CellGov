@@ -23,11 +23,11 @@ memory_regions = [
 [expect]
 outcome = "completed"
 
-# CellGov title manifest. Consumed by `cellgov_cli run-game
+# CellGov title manifest. Consumed by `cellgov boot run
 # --title-manifest <this file>`. Same schema shape as the
 # per-title files under titles/, but nested under [cellgov]
 # so one file carries both the RPCS3 harness config (above) and
-# the CellGov run-game config (below).
+# the CellGov boot run config (below).
 #
 # Usage:
 #   1. Build the ELF (requires a ps3dev+PSL1GHT toolchain image; see
@@ -38,7 +38,7 @@ outcome = "completed"
 #          -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
 #
 #   2. Run:
-#        cargo run --release -p cellgov_cli -- run-game \
+#        cargo run --release -p cellgov_cli -- boot run \
 #          --title-manifest tests/micro/ppu_atomic_spinlock/\
 # manifest.toml --max-steps 1000000
 #

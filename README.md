@@ -66,7 +66,6 @@ corpus needs it:
 
 ```bash
 cargo build --release -p cellgov_cli --features decrypt
-cargo build --release -p cellgov_install --features decrypt
 ```
 
 ### Keys
@@ -77,8 +76,8 @@ SCE-wrapped image, and a run with no vault refuses that image by
 name. Supply the vault one of two ways:
 
 ```bash
-CELLGOV_KEYS=<file-or-dir> target/release/cellgov_cli run-game --title <name>   # used in place
-cargo run --release -p cellgov_install -- keys import <file-or-dir>            # normalized into vfs/.cellgov/keys/keys.toml
+CELLGOV_KEYS=<file-or-dir> target/release/cellgov boot run --title <name>   # used in place
+cargo run --release -p cellgov_cli -- keys import <file-or-dir>            # normalized into vfs/.cellgov/keys/keys.toml
 ```
 
 An import under a non-default root (`keys import --output <root>`) is
@@ -108,7 +107,7 @@ official update (`PS3UPDAT.PUP`) from
 and install it:
 
 ```bash
-cargo run --release -p cellgov_install --features decrypt -- install /path/to/PS3UPDAT.PUP
+cargo run --release -p cellgov_cli --features decrypt -- firmware install /path/to/PS3UPDAT.PUP
 ```
 
 The install unwraps the SCE/PUP envelope and writes per-module SELFs
@@ -121,30 +120,31 @@ succeed; a failure names what it dropped and exits nonzero.
 Titles install from your own dumps:
 
 ```bash
-cargo run --release -p cellgov_install --features decrypt -- install-game <title>.pkg --rap <title>.rap
-cargo run --release -p cellgov_install --features decrypt -- install-iso <disc>.iso
+cargo run --release -p cellgov_cli --features decrypt -- title install <title>.pkg --rap <title>.rap
+cargo run --release -p cellgov_cli --features decrypt -- title install <disc>.iso
 ```
 
-`install-iso` takes a decrypted dump of a disc you own; an image still
-carrying its disc encryption is refused. A PSN package lands under
+`title install` reads the container kind from the file. A disc image
+must be a decrypted dump of a disc you own; one still carrying its
+disc encryption is refused. A PSN package lands under
 `vfs/dev_hdd0/game/<title-id>/`, a disc image under
 `vfs/dev_bdvd/<title-id>/`, each with an install record of per-file
 digests. A title becomes bootable once it has a manifest
 under [titles/](titles/manifest_template.README.md);
-`cellgov_cli gen-manifest --title-id <id>` writes the stub from the
+`cellgov dev gen-manifest --title-id <id>` writes the stub from the
 install record.
 
 ## Running
 
 ```bash
 cargo build --release -p cellgov_cli --features decrypt
-target/release/cellgov_cli run-game --title <name>       # boot to the manifest's checkpoint
-target/release/cellgov_cli bench-boot --title <name>     # boot twice, check the committed anchor
-target/release/cellgov_cli dump-prx-imports <path>       # inspect a PRX / SPRX / EBOOT
-target/release/cellgov_cli --help                        # the full surface
+target/release/cellgov boot run --title <name>     # boot to the manifest's checkpoint
+target/release/cellgov boot bench --title <name>   # boot twice, check the committed anchor
+target/release/cellgov dev prx-imports <path>      # inspect a PRX / SPRX / EBOOT
+target/release/cellgov --help                     # the full surface
 ```
 
-`run-game` reads the firmware install record to find the installed
+`boot run` reads the firmware install record to find the installed
 firmware; `--firmware-dir DIR` overrides it and
 `CELLGOV_NO_FIRMWARE_DIR=1` boots with none at all. With no firmware
 installed and no override, the boot is refused rather than run.

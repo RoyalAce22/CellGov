@@ -1,5 +1,5 @@
 //! Checkpoint region manifest shared by every producer of a boot
-//! observation: the CellGov `run-game --observation-manifest` path
+//! observation: the CellGov `boot run --observation-manifest` path
 //! and the RPCS3 dump bridge read the same file, so the regions they
 //! capture pair by name.
 

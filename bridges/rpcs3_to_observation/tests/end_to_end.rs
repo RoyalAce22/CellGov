@@ -1,4 +1,4 @@
-//! End-to-end tests: adapter output feeds `cellgov_cli compare-observations`.
+//! End-to-end tests: adapter output feeds `cellgov diff observations`.
 
 #![allow(
     clippy::unwrap_used,
@@ -37,13 +37,13 @@ fn expected_config_hash_hex() -> String {
     String::from_utf8(out.stdout).unwrap().trim().to_string()
 }
 
-/// Locates the sibling `cellgov_cli` binary; `CARGO_BIN_EXE_<name>` only
+/// Locates the sibling `cellgov` binary; `CARGO_BIN_EXE_<name>` only
 /// covers binaries in the same package.
-fn cellgov_cli_bin() -> PathBuf {
+fn cellgov_bin() -> PathBuf {
     let me = PathBuf::from(env!("CARGO_BIN_EXE_rpcs3_to_observation"));
     let target_dir = me.parent().expect("adapter has parent dir");
     let exe_suffix = if cfg!(windows) { ".exe" } else { "" };
-    target_dir.join(format!("cellgov_cli{exe_suffix}"))
+    target_dir.join(format!("cellgov{exe_suffix}"))
 }
 
 #[test]
@@ -126,9 +126,10 @@ size = "0x8"
     )
     .unwrap();
 
-    let out = Command::new(cellgov_cli_bin())
+    let out = Command::new(cellgov_bin())
         .args([
-            "compare-observations",
+            "diff",
+            "observations",
             cellgov_obs_path.to_str().unwrap(),
             rpcs3_obs_path.to_str().unwrap(),
         ])
@@ -137,7 +138,7 @@ size = "0x8"
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
-        "compare-observations exited non-zero. stdout={stdout} stderr={}",
+        "diff observations exited non-zero. stdout={stdout} stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(
@@ -213,9 +214,10 @@ size = "0x4"
     )
     .unwrap();
 
-    let out = Command::new(cellgov_cli_bin())
+    let out = Command::new(cellgov_bin())
         .args([
-            "compare-observations",
+            "diff",
+            "observations",
             cellgov_obs_path.to_str().unwrap(),
             rpcs3_obs_path.to_str().unwrap(),
         ])
@@ -290,7 +292,7 @@ size = "0x10"
 
 /// The per-title fixture flow in every `cross_runner/REPRODUCTION.md`
 /// writes `tests/fixtures/<id>/rpcs3/observation.json`, a fixed name
-/// `cellgov_cli fixture-gen --rpcs3` reads back. The decoder rule must
+/// `cellgov dev fixture-gen --rpcs3` reads back. The decoder rule must
 /// not forbid it.
 #[test]
 fn adapter_accepts_the_fixture_tree_output_name() {

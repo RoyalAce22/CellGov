@@ -11,7 +11,7 @@ mod schema;
 #[path = "tests/test_fixtures.rs"]
 mod test_fixtures;
 
-pub use checkpoint::CheckpointTrigger;
+pub use checkpoint::{CheckpointParseError, CheckpointTrigger};
 pub use model::{ContentManifest, MountEntry, TitleManifest};
 pub use registry::TitleRegistry;
 

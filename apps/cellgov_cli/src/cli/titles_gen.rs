@@ -1,4 +1,4 @@
-//! `cellgov_cli titles-gen` -- regenerate `docs/titles.md` from
+//! `cellgov dev titles-gen` -- regenerate `docs/titles.md` from
 //! `TitleRegistry::scan_dir` + per-title `boot_summary.json` and
 //! `cross_runner_summary.json`. ENOENT on a summary renders as `--`;
 //! any other I/O or parse failure surfaces as a typed error so a
@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_compare::{format_with_commas, BootSummary, CrossRunnerSummary};
 
-use super::args::find_flag_value;
 use super::exit::die;
+use super::parse::TitlesGenArgs;
 use crate::game::manifest::{TitleManifest, TitleRegistry};
 
 const TITLES_TEMPLATE: &str = include_str!("templates/titles.md.template");
@@ -18,8 +18,6 @@ const TITLES_TEMPLATE: &str = include_str!("templates/titles.md.template");
 const DEFAULT_REGISTRY_DIR: &str = "titles";
 const DEFAULT_FIXTURES_DIR: &str = "tests/fixtures";
 const DEFAULT_OUTPUT: &str = "docs/titles.md";
-
-const KNOWN_FLAGS: &[&str] = &["--registry", "--fixtures-dir", "--output"];
 
 /// Why loading a per-title summary JSON file failed. ENOENT is
 /// `Ok(None)` upstream, never this error.
@@ -39,14 +37,19 @@ pub(crate) enum SummaryLoadError {
     },
 }
 
-pub(crate) fn run(args: &[String]) {
-    reject_unknown_flags(args);
-
-    let registry_dir =
-        find_flag_value(args, "--registry").unwrap_or_else(|| DEFAULT_REGISTRY_DIR.to_string());
-    let fixtures_dir =
-        find_flag_value(args, "--fixtures-dir").unwrap_or_else(|| DEFAULT_FIXTURES_DIR.to_string());
-    let output = find_flag_value(args, "--output").unwrap_or_else(|| DEFAULT_OUTPUT.to_string());
+pub(crate) fn run(args: &TitlesGenArgs) {
+    let registry_dir = args
+        .registry
+        .clone()
+        .unwrap_or_else(|| DEFAULT_REGISTRY_DIR.to_string());
+    let fixtures_dir = args
+        .fixtures_dir
+        .clone()
+        .unwrap_or_else(|| DEFAULT_FIXTURES_DIR.to_string());
+    let output = args
+        .output
+        .clone()
+        .unwrap_or_else(|| DEFAULT_OUTPUT.to_string());
 
     let registry = TitleRegistry::scan_dir(Path::new(&registry_dir))
         .unwrap_or_else(|e| die(&format!("titles-gen: scan {registry_dir}: {e}")));
@@ -76,17 +79,6 @@ fn render_doc<'a>(
     let body =
         super::fixture_gen::apply_subs(TITLES_TEMPLATE, &[("matrix_rows", &rows.join("\n"))]);
     Ok((body, rows.len()))
-}
-
-/// Refuse any `--flag` (or `--flag=value`) not in [`KNOWN_FLAGS`]
-/// so a typo cannot silently fall back to a default.
-fn reject_unknown_flags(args: &[String]) {
-    for arg in args {
-        let name = arg.split('=').next().unwrap_or(arg);
-        if name.starts_with("--") && !KNOWN_FLAGS.contains(&name) {
-            die(&format!("titles-gen: unknown flag `{arg}`"));
-        }
-    }
 }
 
 /// Render every title's row in `content_id`-ascending order.

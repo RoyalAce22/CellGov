@@ -186,7 +186,7 @@ impl StubClass {
     }
 }
 
-/// Diagnostic class for `nid`. Used by `cellgov_cli dump-prx-imports`
+/// Diagnostic class for `nid`. Used by `cellgov dev prx-imports`
 /// to label unresolved-or-zero-bound PRX imports as `noop-safe` /
 /// `stateful` / `unsafe-to-stub`. Reviewed NIDs are classified
 /// explicitly; everything else defaults to `NoopSafe`. The default
@@ -197,7 +197,7 @@ impl StubClass {
 ///
 /// For "is this NID explicitly classified or did it fall through the
 /// default" use [`stub_classification_explicit`]; this wrapper is the
-/// total form for consumers (e.g. `dump-prx-imports`) that just want
+/// total form for consumers (e.g. `dev prx-imports`) that just want
 /// a label.
 ///
 /// NOT a dispatch table. The project does not substitute Rust

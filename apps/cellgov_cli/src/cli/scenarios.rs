@@ -34,7 +34,7 @@ pub(crate) fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
 }
 
 /// Return a closure that builds a fresh ScenarioFixture for the named
-/// scenario. `compare` uses this to run the scenario twice for the
+/// scenario. `diff compare` uses this to run the scenario twice for the
 /// determinism check.
 pub(crate) fn scenario_factory(name: &str) -> Option<Box<dyn Fn() -> ScenarioFixture>> {
     let factory: Box<dyn Fn() -> ScenarioFixture> = match name {
