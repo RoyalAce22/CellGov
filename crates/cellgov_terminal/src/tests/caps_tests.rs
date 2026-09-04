@@ -5,21 +5,28 @@ use super::*;
 struct FakeEnv {
     vars: Vec<(&'static str, &'static str)>,
     tty: bool,
+    vt_opt_in: bool,
 }
 
 impl FakeEnv {
-    /// Sets `TERM` so the Windows VT-marker check passes and the same
-    /// expectations hold on every platform.
     fn tty() -> Self {
         Self {
             vars: vec![("TERM", "xterm-256color")],
             tty: true,
+            vt_opt_in: false,
         }
     }
     fn pipe() -> Self {
         Self {
-            vars: vec![("TERM", "xterm-256color")],
             tty: false,
+            ..Self::tty()
+        }
+    }
+    fn bare_windows() -> Self {
+        Self {
+            vars: vec![],
+            tty: true,
+            vt_opt_in: true,
         }
     }
     fn with(mut self, key: &'static str, value: &'static str) -> Self {
@@ -38,6 +45,9 @@ impl TermEnv for FakeEnv {
     }
     fn stderr_is_terminal(&self) -> bool {
         self.tty
+    }
+    fn vt_is_opt_in(&self) -> bool {
+        self.vt_opt_in
     }
 }
 
@@ -129,35 +139,98 @@ fn flags_outrank_the_environment() {
     assert_eq!(mode(flags, &FakeEnv::tty()), RenderMode::Off);
 }
 
-#[cfg(windows)]
+#[test]
+fn a_host_that_needs_no_vt_switch_animates_without_any_marker() {
+    let bare = FakeEnv {
+        vt_opt_in: false,
+        ..FakeEnv::bare_windows()
+    };
+    assert_eq!(mode(RenderFlags::default(), &bare), RenderMode::Ansi);
+}
+
 #[test]
 fn a_windows_console_with_no_vt_marker_falls_back_to_plain() {
-    let bare = FakeEnv {
-        vars: vec![],
-        tty: true,
-    };
-    assert_eq!(mode(RenderFlags::default(), &bare), RenderMode::Plain);
+    assert_eq!(
+        mode(RenderFlags::default(), &FakeEnv::bare_windows()),
+        RenderMode::Plain
+    );
     for marker in [
         ("WT_SESSION", "1"),
         ("ConEmuANSI", "ON"),
+        ("ANSICON", "120x1000 (120x30)"),
         ("TERM_PROGRAM", "vscode"),
+        ("TERM", "xterm-256color"),
     ] {
-        let env = FakeEnv {
-            vars: vec![marker],
-            tty: true,
-        };
+        let env = FakeEnv::bare_windows().with(marker.0, marker.1);
         assert_eq!(
             mode(RenderFlags::default(), &env),
             RenderMode::Ansi,
             "{marker:?}"
         );
     }
-    // Present but empty is not a marker.
-    let empty = FakeEnv {
-        vars: vec![("WT_SESSION", "")],
-        tty: true,
+    // An empty value is not a marker, and ConEmu's marker counts only
+    // when it reads `ON`.
+    for absent in [("WT_SESSION", ""), ("ANSICON", ""), ("ConEmuANSI", "OFF")] {
+        let env = FakeEnv::bare_windows().with(absent.0, absent.1);
+        assert_eq!(
+            mode(RenderFlags::default(), &env),
+            RenderMode::Plain,
+            "{absent:?}"
+        );
+    }
+}
+
+#[test]
+fn forcing_ansi_answers_for_a_console_that_exports_no_marker() {
+    let flags = RenderFlags {
+        force_ansi: true,
+        ..Default::default()
     };
-    assert_eq!(mode(RenderFlags::default(), &empty), RenderMode::Plain);
+    assert_eq!(mode(flags, &FakeEnv::bare_windows()), RenderMode::Ansi);
+    assert_eq!(
+        mode(
+            RenderFlags::default(),
+            &FakeEnv::bare_windows().with(ENV_FORCE_ANSI, "1")
+        ),
+        RenderMode::Ansi
+    );
+    for off in ["", "0", "false", "no", "OFF", " off "] {
+        assert_eq!(
+            mode(
+                RenderFlags::default(),
+                &FakeEnv::bare_windows().with(ENV_FORCE_ANSI, off)
+            ),
+            RenderMode::Plain,
+            "{off:?}"
+        );
+    }
+}
+
+#[test]
+fn forcing_ansi_does_not_outrank_the_rungs_above_the_marker_check() {
+    let forced = RenderFlags {
+        force_ansi: true,
+        ..Default::default()
+    };
+    let piped = FakeEnv {
+        tty: false,
+        ..FakeEnv::bare_windows()
+    };
+    assert_eq!(mode(forced, &piped), RenderMode::Plain);
+    assert_eq!(
+        mode(forced, &FakeEnv::bare_windows().with("TERM", "dumb")),
+        RenderMode::Plain
+    );
+    assert_eq!(
+        mode(
+            RenderFlags {
+                quiet: true,
+                ..forced
+            },
+            &FakeEnv::bare_windows()
+        ),
+        RenderMode::Off
+    );
 }
 
 #[test]
@@ -167,10 +240,7 @@ fn width_comes_from_columns_and_is_clamped() {
         let caps = detect(RenderFlags::default(), &FakeEnv::tty().with("COLUMNS", set));
         assert_eq!(caps.width, expected, "COLUMNS={set}");
     }
-    let bare = FakeEnv {
-        vars: vec![("TERM", "xterm")],
-        tty: true,
-    };
+    let bare = FakeEnv::tty();
     assert_eq!(detect(RenderFlags::default(), &bare).width, 80);
 }
 

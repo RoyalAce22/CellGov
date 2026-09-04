@@ -60,6 +60,8 @@ pub struct RenderFlags {
     pub quiet: bool,
     /// `--format json`: machine mode never animates.
     pub json: bool,
+    /// `--force-ansi`: treat a Windows console with no VT marker as ANSI.
+    pub force_ansi: bool,
 }
 
 impl RenderFlags {
@@ -76,6 +78,8 @@ pub trait TermEnv {
     fn var(&self, key: &str) -> Option<String>;
     /// Whether stderr is attached to a terminal.
     fn stderr_is_terminal(&self) -> bool;
+    /// Whether a terminal must turn VT on before escape sequences work.
+    fn vt_is_opt_in(&self) -> bool;
 }
 
 /// [`TermEnv`] over the real process environment.
@@ -93,22 +97,47 @@ impl TermEnv for HostEnv {
     fn stderr_is_terminal(&self) -> bool {
         std::io::IsTerminal::is_terminal(&std::io::stderr())
     }
+    fn vt_is_opt_in(&self) -> bool {
+        cfg!(windows)
+    }
 }
 
 fn non_empty(env: &dyn TermEnv, var: &str) -> bool {
     env.var(var).is_some_and(|v| !v.is_empty())
 }
 
-/// Whether the environment carries a marker of a VT-capable terminal.
+/// Whether `var` is set to anything but an off value.
 ///
-/// Windows only, and a marker search rather than `SetConsoleMode`,
-/// which is FFI the workspace's `forbid(unsafe_code)` rules out.
-fn ansi_capable_console(env: &dyn TermEnv) -> bool {
-    if !cfg!(windows) {
+/// Reads the off tokens the CLI's strict env parse accepts, so
+/// `CELLGOV_FORCE_ANSI=0` leaves the override off.
+fn env_enables(env: &dyn TermEnv, var: &str) -> bool {
+    env.var(var).is_some_and(|v| {
+        !matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "" | "0" | "false" | "no" | "off"
+        )
+    })
+}
+
+/// Whether a Windows console processes VT sequences.
+///
+/// `SetConsoleMode` is both the query and the switch, and it is FFI that
+/// `forbid(unsafe_code)` rules out. So this searches for markers a host
+/// left when it made escape sequences work. A bare `conhost` exports no
+/// marker, so [`ENV_FORCE_ANSI`] is how an operator answers for it.
+fn ansi_capable_console(flags: RenderFlags, env: &dyn TermEnv) -> bool {
+    if !env.vt_is_opt_in() {
         return true;
     }
-    non_empty(env, "WT_SESSION")
+    flags.force_ansi
+        || env_enables(env, ENV_FORCE_ANSI)
+        // Each marker names a host that makes escape sequences work:
+        // - Windows Terminal and ConEmu turn VT on.
+        // - ANSICON's injected DLL interprets the sequences itself.
+        // - `TERM_PROGRAM` and `TERM` name the VS Code and MSYS hosts.
+        || non_empty(env, "WT_SESSION")
         || env.var("ConEmuANSI").is_some_and(|v| v == "ON")
+        || non_empty(env, "ANSICON")
         || non_empty(env, "TERM_PROGRAM")
         || non_empty(env, "TERM")
 }
@@ -130,7 +159,7 @@ pub fn detect(flags: RenderFlags, env: &dyn TermEnv) -> TermCaps {
         };
     }
     let dumb = env.var("TERM").is_some_and(|t| t == "dumb");
-    if !env.stderr_is_terminal() || dumb || !ansi_capable_console(env) {
+    if !env.stderr_is_terminal() || dumb || !ansi_capable_console(flags, env) {
         return TermCaps {
             mode: RenderMode::Plain,
             color: false,
@@ -149,6 +178,12 @@ pub fn detect(flags: RenderFlags, env: &dyn TermEnv) -> TermCaps {
 
 /// App-scoped companion to `NO_COLOR`.
 pub const ENV_NO_COLOR: &str = "CELLGOV_NO_COLOR";
+
+/// Env-var form of `--force-ansi`.
+///
+/// This one honours `0`, `false`, `no`, and `off`; [`ENV_NO_COLOR`]
+/// follows `NO_COLOR` and reads any non-empty value as set.
+pub const ENV_FORCE_ANSI: &str = "CELLGOV_FORCE_ANSI";
 
 /// SGR helpers that collapse to nothing when color is off.
 #[derive(Debug, Clone, Copy)]

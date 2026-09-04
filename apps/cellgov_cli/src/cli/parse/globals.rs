@@ -33,6 +33,9 @@ pub(crate) fn global_refusal(cli: &Cli) -> Option<String> {
     if g.verbose && !reads_verbose(&cli.command) {
         return Some(format!("--verbose applies to {VERBOSE_READERS} only"));
     }
+    if g.force_ansi && !renders_progress(&cli.command) {
+        return Some(format!("--force-ansi applies to {FORCE_ANSI_READERS} only"));
+    }
     None
 }
 
@@ -83,6 +86,10 @@ const QUIET_READERS: &str = "status, firmware install, title install, title inst
 
 /// The commands [`reads_verbose`] answers for, as help text.
 const VERBOSE_READERS: &str = "firmware install";
+
+/// The commands [`renders_progress`] answers for, as help text.
+const FORCE_ANSI_READERS: &str = "firmware install, title install, title install-update, \
+     the boot family, and dev record-anchors";
 
 /// Whether `--quiet` silences anything `command` would print.
 fn reads_quiet(command: &Command) -> bool {

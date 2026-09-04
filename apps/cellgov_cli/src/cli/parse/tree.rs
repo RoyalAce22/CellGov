@@ -54,6 +54,9 @@ pub(crate) struct Globals {
     /// Never render a progress bar.
     #[arg(long, global = true)]
     pub no_progress: bool,
+    /// Assume a Windows console with no VT marker processes ANSI sequences.
+    #[arg(long, global = true)]
+    pub force_ansi: bool,
     /// Never prompt; a needed confirmation becomes a usage error.
     #[arg(long, global = true)]
     pub no_input: bool,
@@ -73,6 +76,7 @@ impl Globals {
             no_color: self.no_color,
             quiet: self.quiet,
             json: false,
+            force_ansi: self.force_ansi,
         }
     }
 }

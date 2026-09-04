@@ -579,29 +579,64 @@ fn a_global_flag_is_accepted_before_and_after_the_command() {
     }
 }
 
+/// Every global the tree declares, as argv tokens with their values.
+const EVERY_GLOBAL: &[&str] = &[
+    "--vfs-root",
+    "vfs/dev_hdd0",
+    "--format",
+    "human",
+    "--quiet",
+    "--verbose",
+    "--no-color",
+    "--no-progress",
+    "--force-ansi",
+    "--no-input",
+    "--yes",
+];
+
 #[test]
 fn every_global_flag_parses_on_a_leaf() {
-    let cli = parse(&[
-        "boot",
-        "bench",
-        "--title",
-        "synthetic",
-        "--vfs-root",
-        "vfs/dev_hdd0",
-        "--quiet",
-        "--verbose",
-        "--no-color",
-        "--no-progress",
-        "--no-input",
-        "--yes",
-    ])
-    .unwrap();
+    let mut argv = vec!["boot", "bench", "--title", "synthetic"];
+    argv.extend_from_slice(EVERY_GLOBAL);
+    let cli = parse(&argv).unwrap();
     let g = &cli.globals;
     assert_eq!(
         g.vfs_root.as_deref(),
         Some(std::path::Path::new("vfs/dev_hdd0"))
     );
+    assert_eq!(g.format, OutputFormat::Human);
     assert!(g.quiet && g.verbose && g.no_color && g.no_progress && g.no_input && g.yes);
+    assert!(g.force_ansi && g.render().force_ansi);
+}
+
+#[test]
+fn a_global_the_tree_declares_reaches_the_invocation_that_parses_them_all() {
+    let mut tree = Cli::command();
+    tree.build();
+    for arg in tree.get_arguments() {
+        // Clap injects `--help` and `--version` itself; the tree owns
+        // every other global.
+        if matches!(
+            arg.get_action(),
+            clap::ArgAction::Help
+                | clap::ArgAction::HelpShort
+                | clap::ArgAction::HelpLong
+                | clap::ArgAction::Version
+        ) {
+            continue;
+        }
+        if !arg.is_global_set() {
+            continue;
+        }
+        let Some(long) = arg.get_long() else {
+            continue;
+        };
+        let spelled = format!("--{long}");
+        assert!(
+            EVERY_GLOBAL.contains(&spelled.as_str()),
+            "{spelled} is a global no invocation here passes"
+        );
+    }
 }
 
 #[test]
@@ -636,6 +671,13 @@ fn a_global_that_promises_output_is_refused_where_there_is_none() {
     assert!(refusal(&["boot", "run", "--title", "synthetic", "--verbose"]).is_some());
     assert_eq!(
         refusal(&["firmware", "install", "fw.pup", "--verbose"]),
+        None
+    );
+    // `--force-ansi` needs a bar, and `status` renders none.
+    assert!(refusal(&["diff", "diverge", "a", "b", "--force-ansi"]).is_some());
+    assert!(refusal(&["status", "--force-ansi"]).is_some());
+    assert_eq!(
+        refusal(&["boot", "run", "--title", "synthetic", "--force-ansi"]),
         None
     );
 }

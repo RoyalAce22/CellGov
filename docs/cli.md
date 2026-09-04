@@ -41,6 +41,7 @@ silent no-op, so a flag that reached the wrong command is visible.
 | `-v, --verbose` | -- | Print more detail about what the command did. |
 | `--no-color` | -- | Never emit SGR colour sequences. |
 | `--no-progress` | -- | Never render a progress bar. |
+| `--force-ansi` | -- | Assume a Windows console with no VT marker processes ANSI sequences. |
 | `--no-input` | -- | Never prompt; a needed confirmation becomes a usage error. |
 | `-y, --yes` | -- | Answer every confirmation prompt yes. |
 
@@ -53,9 +54,15 @@ can therefore read stdout blind.
 
 ## Terminal behavior
 
-Two properties of the progress display hold for every command that
+Three properties of the progress display hold for every command that
 renders one.
 
+- **Escape sequences on Windows.** A console processes them only when
+  its terminal turned VT on, and nothing reports which one did, so the
+  bar animates when `WT_SESSION`, `ConEmuANSI=ON`, `ANSICON`,
+  `TERM_PROGRAM` or `TERM` names a terminal that does, and falls back to
+  plain threshold lines otherwise. `--force-ansi`, or `CELLGOV_FORCE_ANSI`
+  set once for the console, answers for a host that exports none of them.
 - **Interruption.** There is no SIGINT handler, so a hard Ctrl-C can
   leave the cursor hidden; `tput cnorm`, or any command that resets the
   terminal, restores it. The interruption itself costs nothing: an
