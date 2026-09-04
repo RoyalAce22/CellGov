@@ -233,8 +233,8 @@ fn every_store_path_stays_under_the_root_it_was_built_from() {
         for a in &artifacts {
             paths.push(l.entry_dir(a));
             paths.push(l.record_path(a));
-            paths.push(staging_sibling(&l.entry_dir(a)));
-            paths.push(tombstone_sibling(&l.entry_dir(a)));
+            paths.push(staging_sibling(&l.entry_dir(a)).expect("an entry dir names an entry"));
+            paths.push(tombstone_sibling(&l.entry_dir(a)).expect("an entry dir names an entry"));
         }
         for p in paths {
             assert!(
@@ -258,8 +258,8 @@ fn two_vfs_roots_do_not_share_one_record_directory() {
 #[test]
 fn staging_and_tombstone_are_hidden_siblings_of_their_target() {
     let target = joined(&["vfs", "titles", SYNTHETIC_TITLE_ID, "base"]);
-    let staging = staging_sibling(&target);
-    let tombstone = tombstone_sibling(&target);
+    let staging = staging_sibling(&target).expect("the target names an entry");
+    let tombstone = tombstone_sibling(&target).expect("the target names an entry");
     assert_eq!(staging.parent(), target.parent());
     assert_eq!(tombstone.parent(), target.parent());
     assert_eq!(
@@ -272,13 +272,54 @@ fn staging_and_tombstone_are_hidden_siblings_of_their_target() {
     );
 }
 
-/// A path with no final component has no sibling to name; the bare
-/// `.staging` the fallback would build lands in the working directory.
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "no entry to name a sibling of")]
-fn a_directory_with_no_final_component_has_no_staging_sibling() {
-    let _ = staging_sibling(Path::new(""));
+fn a_directory_with_no_final_component_names_no_hidden_sibling() {
+    let mut dirs = vec!["", ".", "/", "..", "a/..", "/.."];
+    // A drive or UNC prefix is a component only Win32 parses; POSIX
+    // reads `C:` as an ordinary directory name that does name a sibling.
+    if cfg!(windows) {
+        dirs.extend(["C:", "C:\\", "\\\\server\\share", "\\\\?\\C:\\", "a\\.."]);
+    }
+    for dir in dirs {
+        let dir = Path::new(dir);
+        assert!(
+            staging_sibling(dir).is_err(),
+            "{} was given a staging sibling",
+            dir.display()
+        );
+        assert!(
+            tombstone_sibling(dir).is_err(),
+            "{} was given a tombstone sibling",
+            dir.display()
+        );
+    }
+}
+
+#[test]
+fn the_refusal_names_the_directory_that_has_no_sibling() {
+    let err = staging_sibling(Path::new("a/..")).expect_err("a/.. names no entry");
+    assert_eq!(err.dir, Path::new("a/.."));
+    assert!(
+        err.to_string().contains("a/.."),
+        "refusal does not name the directory: {err}"
+    );
+}
+
+/// `Path::parent` of a single component is the empty path, so the
+/// sibling stays relative and resolves beside the target.
+#[test]
+fn a_single_component_target_gets_its_own_sibling_beside_it() {
+    let staging = staging_sibling(Path::new("X")).expect("X names an entry");
+    assert_eq!(staging, Path::new(".staging-X"));
+    assert_eq!(
+        tombstone_sibling(Path::new("X")).expect("X names an entry"),
+        Path::new(".uninstalling-X")
+    );
+    assert_ne!(
+        staging,
+        staging_sibling(Path::new("Y")).expect("Y names an entry"),
+        "two targets must not share one staging directory"
+    );
 }
 
 #[test]
@@ -401,6 +442,7 @@ fn a_directory_the_record_gate_refuses_gets_no_store_path() {
         joined(&["vfs", "titles", "a b"]),
         joined(&["vfs", "titles", "entry."]),
         joined(&["vfs", "titles", "entry:stream"]),
+        joined(&["vfs", "firmware", "NUL"]),
     ] {
         assert!(
             matches!(
@@ -411,6 +453,117 @@ fn a_directory_the_record_gate_refuses_gets_no_store_path() {
             dir.display()
         );
     }
+}
+
+#[test]
+fn a_component_that_is_not_utf8_has_no_store_path() {
+    let dir = Path::new("vfs").join("titles").join(not_utf8());
+    assert!(matches!(
+        layout().store_path_of(&dir),
+        Err(StorePathError::NonUtf8 { .. })
+    ));
+}
+
+#[test]
+fn two_names_that_differ_only_outside_utf8_get_two_siblings() {
+    let a = Path::new("vfs").join("titles").join(not_utf8());
+    let b = Path::new("vfs").join("titles").join(other_not_utf8());
+    assert_ne!(a, b, "the two fixtures are one name");
+    assert_ne!(
+        staging_sibling(&a).expect("a names an entry"),
+        staging_sibling(&b).expect("b names an entry")
+    );
+    assert_ne!(
+        tombstone_sibling(&a).expect("a names an entry"),
+        tombstone_sibling(&b).expect("b names an entry")
+    );
+}
+
+#[cfg(windows)]
+fn not_utf8() -> std::ffi::OsString {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    // 0xD800 is an unpaired surrogate: UTF-16 holds it, UTF-8 cannot
+    // encode it.
+    OsString::from_wide(&[0xD800])
+}
+
+#[cfg(windows)]
+fn other_not_utf8() -> std::ffi::OsString {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    OsString::from_wide(&[0xD801])
+}
+
+#[cfg(unix)]
+fn not_utf8() -> std::ffi::OsString {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    OsString::from_vec(vec![0xFF])
+}
+
+#[cfg(unix)]
+fn other_not_utf8() -> std::ffi::OsString {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    OsString::from_vec(vec![0xFE])
+}
+
+/// Win32 matches a device name on the part before the first dot, which
+/// is why `NUL.install` is a key the gate refuses.
+#[test]
+fn a_reserved_device_name_is_not_a_store_key() {
+    for bad in ["CON", "nul", "Aux", "PRN", "COM1", "lpt9", "NUL.install"] {
+        assert!(
+            VersionKey::new(bad).is_err(),
+            "{bad:?} was accepted as a version key"
+        );
+        assert!(
+            TitleId::new(bad).is_err(),
+            "{bad:?} was accepted as a title id"
+        );
+    }
+    for ok in [
+        "CONSOLE",
+        "COM10",
+        "NULL",
+        "AUXILIARY",
+        SYNTHETIC_TITLE_ID,
+        "4.91",
+    ] {
+        assert!(
+            is_safe_component(ok),
+            "{ok:?} names no device and must be accepted"
+        );
+    }
+}
+
+/// Two keys differing only in case are two entries here and one
+/// directory on a case-insensitive filesystem.
+#[test]
+fn keys_differing_only_in_case_are_different_entries() {
+    let l = layout();
+    let miscased = SYNTHETIC_TITLE_ID.to_lowercase();
+    assert_ne!(miscased, SYNTHETIC_TITLE_ID, "the id has to have a case");
+
+    assert_ne!(title(SYNTHETIC_TITLE_ID), title(&miscased));
+    assert_ne!(version("02.51A"), version("02.51a"));
+    assert_ne!(
+        l.entry_dir(&Artifact::TitleBase {
+            title_id: title(SYNTHETIC_TITLE_ID)
+        }),
+        l.entry_dir(&Artifact::TitleBase {
+            title_id: title(&miscased)
+        })
+    );
+    assert_ne!(
+        l.record_path(&Artifact::TitleBase {
+            title_id: title(SYNTHETIC_TITLE_ID)
+        }),
+        l.record_path(&Artifact::TitleBase {
+            title_id: title(&miscased)
+        })
+    );
 }
 
 #[test]

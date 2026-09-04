@@ -130,7 +130,7 @@ fn verify_against_record(
 /// # Errors
 ///
 /// Every [`plan`] refusal, since `uninstall` resolves the scope before
-/// it touches anything, plus the verify and filesystem failures.
+/// it touches anything, plus every [`execute`] refusal.
 pub fn uninstall(
     title_id: &str,
     output_dir: &Path,
@@ -147,7 +147,9 @@ pub fn uninstall(
 ///
 /// # Errors
 ///
-/// The verify and filesystem failures.
+/// The verify and filesystem failures, plus
+/// [`GameUninstallError::HiddenSibling`] for a recorded tree with no
+/// tombstone sibling.
 pub fn execute(
     plan: &UninstallPlan,
     opts: UninstallOptions,
@@ -166,19 +168,26 @@ pub fn execute(
         }
     }
 
+    // Resolve every tombstone before the first rename, for the same
+    // reason the verify gate runs first.
+    let tombstones = plan
+        .entries
+        .iter()
+        .map(|e| tombstone_sibling(&e.tree_dir))
+        .collect::<Result<Vec<_>, _>>()?;
+
     let mut removed = Vec::with_capacity(plan.entries.len());
     let mut rap_removed = None;
-    for entry in &plan.entries {
-        let tombstone = tombstone_sibling(&entry.tree_dir);
+    for (entry, tombstone) in plan.entries.iter().zip(&tombstones) {
         // Clear any stale tombstone left by a prior interrupted
         // uninstall.
-        remove_dir_if_present(&tombstone)?;
+        remove_dir_if_present(tombstone)?;
 
         // Tombstone rename: the atomic point. An absent tree is
         // idempotent; a stat that fails refuses here, since the record
         // removal below would otherwise leave the tree unnamed.
         if std::fs::exists(&entry.tree_dir).map_err(uio_err("stat", &entry.tree_dir))? {
-            std::fs::rename(&entry.tree_dir, &tombstone)
+            std::fs::rename(&entry.tree_dir, tombstone)
                 .map_err(uio_err("rename", &entry.tree_dir))?;
         }
 
@@ -203,7 +212,7 @@ pub fn execute(
         }
 
         // Tombstone last. An orphan tombstone is acceptable residue.
-        remove_dir_if_present(&tombstone)?;
+        remove_dir_if_present(tombstone)?;
 
         removed.push(RemovedEntry {
             version: entry.version.clone(),

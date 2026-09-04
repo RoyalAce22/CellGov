@@ -13,6 +13,7 @@
 //!   directory they stand in for, so the commit and teardown renames
 //!   stay inside one directory, and so on one filesystem.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -26,19 +27,51 @@ pub const DEFAULT_VFS_ROOT: &str = "vfs";
 const HDD0_USER: &str = "00000001";
 
 /// Whether a string is safe to use as a single path component under a
-/// store root: non-empty, no leading or trailing dot, and
-/// `[A-Za-z0-9._-]` only.
+/// store root: non-empty, no leading or trailing dot, no Win32 device
+/// name, and `[A-Za-z0-9._-]` only.
 ///
 /// A leading dot collides with the `.staging-*` / `.uninstalling-*`
 /// residue sharing the directory. A trailing dot is dropped when Win32
 /// normalizes a path component, so `4.91.` and `4.91` would be two keys
 /// naming one directory.
+///
+/// Win32 resolves a reserved device name to a character device. A
+/// firmware version keyed `NUL` writes its record to `NUL.install.toml`,
+/// which the null device discards and reads back empty.
 pub(crate) fn is_safe_component(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('.')
         && !s.ends_with('.')
+        && !is_reserved_device_name(s)
         && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Whether `s` resolves to a Win32 character device.
+///
+/// The match is case-insensitive and covers the part before the first
+/// dot. Every host refuses the name, so a record one platform writes is
+/// a record the other reads.
+fn is_reserved_device_name(s: &str) -> bool {
+    let stem = s.split('.').next().unwrap_or_default();
+    if ["CON", "PRN", "AUX", "NUL"]
+        .iter()
+        .any(|name| stem.eq_ignore_ascii_case(name))
+    {
+        return true;
+    }
+    // Ports number from 1: `COM0` and `LPT0` name no device.
+    match stem.as_bytes() {
+        [a, b, c, d] if d.is_ascii_digit() && *d != b'0' => {
+            let head = [
+                a.to_ascii_uppercase(),
+                b.to_ascii_uppercase(),
+                c.to_ascii_uppercase(),
+            ];
+            head == *b"COM" || head == *b"LPT"
+        }
+        _ => false,
+    }
 }
 
 /// Whether a record `store_path` stays under the root it is resolved
@@ -105,8 +138,28 @@ pub enum StorePathError {
     },
 }
 
-/// A title id used as a store directory name: the PARAM.SFO
-/// `TITLE_ID`, nine characters of `[A-Z]` and digits.
+/// A directory that names no entry, so no hidden sibling can stand
+/// beside it:
+///
+/// - the empty path, `.`, or `..`,
+/// - a path that ends in `.` or `..`,
+/// - a filesystem root,
+/// - a bare Win32 drive or UNC prefix.
+///
+/// The sibling is a rename target and a `remove_dir_all` argument, so a
+/// name derived from no entry would act on the process working
+/// directory.
+#[derive(Debug, thiserror::Error)]
+#[error("{} has no final component, so it names no staging or tombstone sibling", dir.display())]
+pub struct HiddenSiblingError {
+    /// The directory the sibling was to stand beside.
+    pub dir: PathBuf,
+}
+
+/// A title id used as a store directory name.
+///
+/// [`Self::new`] does not check the PARAM.SFO `TITLE_ID` shape of nine
+/// `[A-Z]` and digit characters.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TitleId(String);
 
@@ -115,8 +168,8 @@ impl TitleId {
     ///
     /// # Errors
     ///
-    /// [`StoreKeyError::UnsafeTitleId`] unless the id is a non-empty
-    /// `[A-Za-z0-9._-]` run with no leading dot.
+    /// [`StoreKeyError::UnsafeTitleId`] unless the id is usable as a
+    /// single store path component.
     pub fn new(id: &str) -> Result<Self, StoreKeyError> {
         if is_safe_component(id) {
             Ok(Self(id.to_string()))
@@ -144,8 +197,8 @@ impl VersionKey {
     ///
     /// # Errors
     ///
-    /// [`StoreKeyError::UnsafeVersion`] unless the string is a
-    /// non-empty `[A-Za-z0-9._-]` run with no leading dot.
+    /// [`StoreKeyError::UnsafeVersion`] unless the string is usable as
+    /// a single store path component.
     pub fn new(version: &str) -> Result<Self, StoreKeyError> {
         if is_safe_component(version) {
             Ok(Self(version.to_string()))
@@ -255,8 +308,11 @@ impl Artifact {
 /// The name is a function of the target, so an install interrupted
 /// mid-stage leaves residue the next install of that target sweeps by
 /// name.
-#[must_use]
-pub fn staging_sibling(final_dir: &Path) -> PathBuf {
+///
+/// # Errors
+///
+/// [`HiddenSiblingError`] when `final_dir` names no entry.
+pub fn staging_sibling(final_dir: &Path) -> Result<PathBuf, HiddenSiblingError> {
     hidden_sibling(final_dir, "staging")
 }
 
@@ -269,33 +325,29 @@ pub fn staging_sibling(final_dir: &Path) -> PathBuf {
 const FIRMWARE_STAGING_DIR: &str = ".firmware-staging";
 
 /// The tombstone sibling of `final_dir`: `<parent>/.uninstalling-<name>`.
-#[must_use]
-pub fn tombstone_sibling(final_dir: &Path) -> PathBuf {
+///
+/// # Errors
+///
+/// [`HiddenSiblingError`] when `final_dir` names no entry.
+pub fn tombstone_sibling(final_dir: &Path) -> Result<PathBuf, HiddenSiblingError> {
     hidden_sibling(final_dir, "uninstalling")
 }
 
 /// `<parent>/.<prefix>-<final component>`.
 ///
-/// # Panics
-///
-/// Debug builds only, when `final_dir` has no final component. The bare
-/// `.<prefix>` the fallback yields lands in the process working
-/// directory, and callers rename over and remove it.
-fn hidden_sibling(final_dir: &Path, prefix: &str) -> PathBuf {
-    debug_assert!(
-        final_dir.file_name().is_some(),
-        "hidden_sibling has no entry to name a sibling of: {}",
-        final_dir.display()
-    );
-    let name = final_dir
-        .file_name()
-        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-    let sibling = if name.is_empty() {
-        format!(".{prefix}")
-    } else {
-        format!(".{prefix}-{name}")
-    };
-    final_dir.parent().unwrap_or(Path::new("")).join(sibling)
+/// The sibling name carries the entry name verbatim, so two names that
+/// differ only outside UTF-8 get two siblings.
+fn hidden_sibling(final_dir: &Path, prefix: &str) -> Result<PathBuf, HiddenSiblingError> {
+    match (final_dir.parent(), final_dir.file_name()) {
+        (Some(parent), Some(name)) => {
+            let mut sibling = OsString::from(format!(".{prefix}-"));
+            sibling.push(name);
+            Ok(parent.join(sibling))
+        }
+        _ => Err(HiddenSiblingError {
+            dir: final_dir.to_path_buf(),
+        }),
+    }
 }
 
 /// A record's path relative to [`StoreLayout::installs_dir`].
@@ -409,6 +461,15 @@ impl StoreLayout {
 
     /// Express `dir` as a record `store_path`: relative to this root,
     /// `/`-separated, so a record moves with the tree it describes.
+    ///
+    /// This function measures containment lexically, on the path as
+    /// written:
+    ///
+    /// - it refuses a `dir` that reaches this root through a symlink,
+    /// - it accepts a `dir` that leaves this root through a symlink.
+    ///
+    /// The callers build `dir` by joining onto the root, where the two
+    /// agree.
     ///
     /// # Errors
     ///

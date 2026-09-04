@@ -223,6 +223,63 @@ fn an_update_record_naming_another_versions_tree_is_refused() {
     );
 }
 
+/// Store keys never fold case, so the miscased id names the same record
+/// only on a case-folding volume. The test probes this volume first,
+/// then expects the refusal that follows.
+#[test]
+fn a_title_id_differing_only_in_case_removes_nothing() {
+    let root = store_with(&[]);
+    let miscased = SYNTHETIC_TITLE_ID.to_lowercase();
+    assert_ne!(miscased, SYNTHETIC_TITLE_ID, "the id has to have a case");
+
+    let layout = StoreLayout::new(&*root);
+    let folds_case = layout
+        .record_path(&Artifact::TitleBase {
+            title_id: TitleId::new(&miscased).expect("a lowercase id is a store key"),
+        })
+        .exists();
+
+    let err = plan(&miscased, &root, &UninstallScope::Base)
+        .expect_err("a miscased id names no entry of this store");
+    if folds_case {
+        assert!(
+            matches!(&err, GameUninstallError::RecordTreeForeign { .. }),
+            "the record is readable here, so the refusal is the identity check; got {err}"
+        );
+    } else {
+        assert!(
+            matches!(&err, GameUninstallError::NoRecord { .. }),
+            "got {err}"
+        );
+    }
+    assert!(
+        root.join(format!(
+            "dev_hdd0/game/{SYNTHETIC_TITLE_ID}/USRDIR/EBOOT.BIN"
+        ))
+        .exists(),
+        "the correctly-cased title's tree is untouched"
+    );
+}
+
+/// The scope matches an update version against the byte-exact record
+/// filenames before anything opens a record, so a miscased version
+/// misses on every host.
+#[test]
+fn an_update_version_differing_only_in_case_is_not_installed() {
+    let root = store_with(&["02.51A"]);
+    let err = plan(
+        SYNTHETIC_TITLE_ID,
+        &root,
+        &UninstallScope::Update("02.51a".to_string()),
+    )
+    .expect_err("only 02.51A is installed");
+    assert!(
+        matches!(&err, GameUninstallError::NoUpdateRecord { version, .. } if version == "02.51a"),
+        "got {err}"
+    );
+    assert!(err.to_string().contains("02.51A"), "{err}");
+}
+
 #[test]
 fn a_title_with_no_base_record_is_refused_by_name() {
     let root = scratch();

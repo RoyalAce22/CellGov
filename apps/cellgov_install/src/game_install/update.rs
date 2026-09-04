@@ -176,7 +176,7 @@ pub fn install_update_pkg(
     let entry_dir = layout.entry_dir(&artifact);
     let store_path = layout.store_path_of(&entry_dir)?;
     let record_path = layout.record_path(&artifact);
-    let staging_root = staging_sibling(&entry_dir);
+    let staging_root = staging_sibling(&entry_dir)?;
 
     let orphan = check_base_entry(
         &layout.record_path(&Artifact::TitleBase { title_id: key }),

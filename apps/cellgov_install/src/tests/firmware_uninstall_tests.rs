@@ -107,7 +107,9 @@ fn uninstall_removes_the_entry_the_record_and_the_tombstone() {
     assert_eq!(outcome.version, "4.91");
     assert!(!entry_dir(&root, "4.91").exists());
     assert!(!outcome.record_removed.exists());
-    assert!(!tombstone_sibling(&entry_dir(&root, "4.91")).exists());
+    assert!(!tombstone_sibling(&entry_dir(&root, "4.91"))
+        .expect("an entry dir names an entry")
+        .exists());
     assert!(
         entry_dir(&root, "3.55").exists(),
         "the other installed version is untouched"
@@ -132,7 +134,7 @@ fn a_version_that_is_not_installed_names_the_ones_that_are() {
 #[test]
 fn a_stale_tombstone_is_swept_before_the_rename() {
     let root = store_with(&["4.91"]);
-    let stale = tombstone_sibling(&entry_dir(&root, "4.91"));
+    let stale = tombstone_sibling(&entry_dir(&root, "4.91")).expect("an entry dir names an entry");
     write(&stale.join("residue"), "from an interrupted run");
 
     uninstall("4.91", &root).expect("uninstall over the stale tombstone");
@@ -209,6 +211,40 @@ fn a_record_naming_another_versions_tree_is_refused() {
         "got {err}"
     );
     assert!(entry_dir(&root, "3.55").exists());
+}
+
+/// A version key accepts letters and never folds case, so the miscased
+/// version names the same record only on a case-folding volume. The
+/// test probes this volume first, then expects the refusal that
+/// follows.
+#[test]
+fn a_version_differing_only_in_case_names_no_entry() {
+    let root = store_with(&["4.91B"]);
+    let miscased = "4.91b";
+    let folds_case = StoreLayout::new(&*root)
+        .record_path(&Artifact::Firmware {
+            version: VersionKey::new(miscased).expect("synthetic version"),
+        })
+        .exists();
+
+    let err = plan(miscased, &root).expect_err("only 4.91B is installed");
+    if folds_case {
+        assert!(
+            matches!(&err, FirmwareUninstallError::RecordTreeForeign { .. }),
+            "the record is readable here, so the refusal is the identity check; got {err}"
+        );
+    } else {
+        assert!(
+            matches!(&err, FirmwareUninstallError::NoRecord { .. }),
+            "got {err}"
+        );
+    }
+    assert!(
+        entry_dir(&root, "4.91B")
+            .join("dev_flash/vsh/etc/version.txt")
+            .exists(),
+        "the installed version's tree is untouched"
+    );
 }
 
 #[test]

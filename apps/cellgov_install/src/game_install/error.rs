@@ -23,6 +23,9 @@ pub enum GameInstallError {
     /// Reading the EBOOT's NPD header failed.
     #[error("NPD header: {0}")]
     Npd(#[source] crate::sce::SceError),
+    /// The target directory names no staging sibling to stage into.
+    #[error("{0}")]
+    HiddenSibling(#[from] crate::store::layout::HiddenSiblingError),
     /// The package carried no PARAM.SFO.
     #[error("PKG has no PARAM.SFO")]
     NoParamSfo,

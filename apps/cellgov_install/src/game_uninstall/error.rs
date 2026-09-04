@@ -12,6 +12,9 @@ pub enum GameUninstallError {
     /// The pre-store check refused the root.
     #[error("{0}")]
     PreStore(#[from] crate::store::pre_store::PreStoreError),
+    /// The recorded tree names no tombstone sibling to rename onto.
+    #[error("{0}")]
+    HiddenSibling(#[from] crate::store::layout::HiddenSiblingError),
     /// The title has no base install record. An update installs with no
     /// base present, so this does not say the title holds no entry.
     #[error("no base install record for title {title_id:?}")]

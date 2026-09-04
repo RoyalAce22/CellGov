@@ -175,7 +175,7 @@ pub fn install_pkg(
     let layout = StoreLayout::new(output_dir);
     let exdata = layout.live_exdata_dir();
     let final_dir = output_dir.join("dev_hdd0").join("game").join(&title_id);
-    let staging_root = staging_sibling(&final_dir);
+    let staging_root = staging_sibling(&final_dir)?;
     let tree_staging = staging_root.join("tree");
     // Resolved before staging: only `run_or_clean` discards the staging
     // root, so a fallible step between it and `commit` would leave the
@@ -355,7 +355,7 @@ pub fn install_iso(
 
     let layout = StoreLayout::new(output_dir);
     let final_dir = output_dir.join("dev_bdvd").join(&title_id);
-    let staging_dir = staging_sibling(&final_dir);
+    let staging_dir = staging_sibling(&final_dir)?;
     // Resolved before staging, as in `install_pkg`.
     let artifact = Artifact::TitleBase {
         title_id: TitleId::new(&title_id)?,

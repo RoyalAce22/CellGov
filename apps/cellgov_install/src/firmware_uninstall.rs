@@ -20,6 +20,9 @@ pub enum FirmwareUninstallError {
     /// The pre-store check refused the root.
     #[error("{0}")]
     PreStore(#[from] crate::store::pre_store::PreStoreError),
+    /// The entry directory names no tombstone sibling to rename onto.
+    #[error("{0}")]
+    HiddenSibling(#[from] crate::store::layout::HiddenSiblingError),
     /// The version is not usable as a store directory name, so it names
     /// no entry.
     #[error("unsafe firmware version {version:?}")]
@@ -271,7 +274,7 @@ fn check_record_describes(
 ///
 /// # Errors
 ///
-/// Every [`plan`] refusal, plus the filesystem failures.
+/// Every [`plan`] refusal, plus every [`execute`] refusal.
 pub fn uninstall(
     version: &str,
     output_dir: &Path,
@@ -283,11 +286,13 @@ pub fn uninstall(
 ///
 /// # Errors
 ///
-/// The filesystem failures.
+/// The filesystem failures, plus
+/// [`FirmwareUninstallError::HiddenSibling`] for an entry directory
+/// with no tombstone sibling.
 pub fn execute(
     plan: &FirmwareUninstallPlan,
 ) -> Result<FirmwareUninstallOutcome, FirmwareUninstallError> {
-    let tombstone = tombstone_sibling(&plan.entry_dir);
+    let tombstone = tombstone_sibling(&plan.entry_dir)?;
     remove_dir_if_present(&tombstone)?;
 
     // `Path::exists` answers false both for an absent tree and for a

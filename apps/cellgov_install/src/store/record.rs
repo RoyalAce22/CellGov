@@ -124,7 +124,8 @@ pub struct ArtifactRecord {
 /// the wire, so their presence is what marks one.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceRecord {
-    /// Container kind: `pkg`, `iso`, or `pup`.
+    /// Container kind: `pkg`, `iso`, or `pup`. No consumer joins it
+    /// onto a path, so the parse gate leaves it ungated.
     pub kind: String,
     /// SHA-256 over the source container bytes.
     pub sha256: HexSha256,
@@ -193,6 +194,13 @@ pub struct TitleRecord {
 
 /// A store entry's record: enough to verify a reinstall reproduces the
 /// same tree from the same source, and to find that tree again.
+///
+/// Only [`Self::parse`] runs the gate. A record built field by field
+/// never met it. Before a caller hands such a `store_path` to
+/// [`StoreLayout::resolve_store_path`], it must satisfy that function's
+/// precondition.
+///
+/// [`StoreLayout::resolve_store_path`]: crate::store::layout::StoreLayout::resolve_store_path
 #[derive(Debug, Clone, Serialize)]
 pub struct InstallRecord {
     /// Schema version.

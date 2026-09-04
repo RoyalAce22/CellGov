@@ -15,8 +15,9 @@ pub mod record;
 pub mod verify;
 
 pub use layout::{
-    record_rel_path, staging_sibling, tombstone_sibling, Artifact, ArtifactKind, StoreKeyError,
-    StoreLayout, StorePathError, TitleId, TitleTree, VersionKey, DEFAULT_VFS_ROOT,
+    record_rel_path, staging_sibling, tombstone_sibling, Artifact, ArtifactKind,
+    HiddenSiblingError, StoreKeyError, StoreLayout, StorePathError, TitleId, TitleTree, VersionKey,
+    DEFAULT_VFS_ROOT,
 };
 pub use pre_store::{preflight, PreStoreArtifact, PreStoreError, PreStoreResidue};
 pub use record::{
