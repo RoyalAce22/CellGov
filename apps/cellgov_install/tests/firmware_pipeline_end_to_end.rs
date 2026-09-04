@@ -144,7 +144,7 @@ fn sys_external(entry: &Path) -> PathBuf {
 #[test]
 fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
     let pup = locate_pup();
-    let output = scratch::ScratchDir::new("fw_happy");
+    let output = scratch::scratch_labeled("fw_happy");
     assert_succeeded(run_install(&pup, &output, false), "install");
 
     let (version, entry) = sole_entry(&output);
@@ -207,7 +207,7 @@ fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
 #[test]
 fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
     let pup = locate_pup();
-    let output = scratch::ScratchDir::new("fw_refuse");
+    let output = scratch::scratch_labeled("fw_refuse");
     assert_succeeded(run_install(&pup, &output, false), "first install");
     let (_, entry) = sole_entry(&output);
     let before = std::fs::read_dir(entry.join(FLASH_MOUNT)).unwrap().count();
@@ -239,7 +239,7 @@ fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
 #[test]
 fn a_populated_vfs_root_does_not_block_a_firmware_install() {
     let pup = locate_pup();
-    let output = scratch::ScratchDir::new("fw_sibling");
+    let output = scratch::scratch_labeled("fw_sibling");
     std::fs::create_dir_all(output.join("dev_hdd0/game/NPUA80001")).unwrap();
     std::fs::write(output.join("dev_hdd0/game/NPUA80001/x.bin"), b"game").unwrap();
 
@@ -258,7 +258,7 @@ fn a_populated_vfs_root_does_not_block_a_firmware_install() {
 #[test]
 fn force_replaces_an_installed_version_whole() {
     let pup = locate_pup();
-    let output = scratch::ScratchDir::new("fw_force");
+    let output = scratch::scratch_labeled("fw_force");
     assert_succeeded(run_install(&pup, &output, false), "first install");
     let (_, entry) = sole_entry(&output);
     let stale = entry.join(FLASH_MOUNT).join("stale.bin");

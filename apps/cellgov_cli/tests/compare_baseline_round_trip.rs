@@ -15,7 +15,8 @@
     reason = "integration test: unwrap panics on unexpected failure are the right behavior"
 )]
 
-use std::path::{Path, PathBuf};
+use cellgov_testkit::scratch::scratch_labeled;
+use std::path::Path;
 use std::process::Command;
 
 /// The `dma` scenario copies `de ad be ef` from address 0 to address
@@ -38,26 +39,15 @@ outcome = "completed"
 
 const DMA_PAYLOAD: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
 
-struct Scratch(PathBuf);
+struct Scratch(cellgov_testkit::scratch::ScratchDir);
 
 impl Scratch {
     fn new() -> Self {
-        let dir = std::env::temp_dir().join(format!(
-            "cellgov_compare_baseline_round_trip_{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        Self(dir)
+        Self(scratch_labeled("compare_baseline_round_trip"))
     }
 
     fn path(&self) -> &Path {
         &self.0
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).ok();
     }
 }
 

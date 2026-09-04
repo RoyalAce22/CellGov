@@ -660,16 +660,7 @@ fn region_slice_offset_plus_length_past_end_is_none() {
 
 #[test]
 fn fixture_gen_produces_byte_deterministic_output_across_two_invocations() {
-    let tmp = std::env::temp_dir().join(format!("cellgov_fixture_gen_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&tmp);
-    std::fs::create_dir_all(&tmp).unwrap();
-    struct CleanUp(std::path::PathBuf);
-    impl Drop for CleanUp {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-    let _guard = CleanUp(tmp.clone());
+    let tmp = cellgov_testkit::scratch::scratch_labeled("fixture_gen");
 
     let a_obs = obs(
         ObservedOutcome::Completed,

@@ -2,6 +2,7 @@
 //! Each refusal goes through `die`, so it is only observable from a
 //! spawned process. Needs no corpus: every record here is hand-written.
 
+use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -25,18 +26,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 /// A scratch directory holding one record and the registry the
 /// command writes its stub into.
 struct Scratch {
-    root: PathBuf,
+    root: cellgov_testkit::scratch::ScratchDir,
 }
 
 impl Scratch {
     fn new(label: &str) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "cellgov_gen_manifest_{label}_{}",
-            std::process::id()
-        ));
-        std::fs::remove_dir_all(&root).ok();
-        std::fs::create_dir_all(&root).expect("create the scratch root");
-        Self { root }
+        Self {
+            root: scratch_labeled(label),
+        }
     }
 
     fn write(&self, rel: &str, text: &str) -> PathBuf {
@@ -74,12 +71,6 @@ impl Scratch {
             String::from_utf8_lossy(&out.stdout).into_owned(),
             String::from_utf8_lossy(&out.stderr).into_owned(),
         )
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.root).ok();
     }
 }
 

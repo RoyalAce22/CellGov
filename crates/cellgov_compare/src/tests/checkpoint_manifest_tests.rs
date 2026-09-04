@@ -1,4 +1,5 @@
 use super::*;
+use cellgov_testkit::scratch::scratch_labeled;
 
 fn parse(text: &str) -> CheckpointManifest {
     CheckpointManifest::from_toml(text).expect("parses")
@@ -114,12 +115,7 @@ fn region_descriptors_carry_the_named_space() {
 
 #[test]
 fn load_separates_a_missing_file_from_a_malformed_one() {
-    let scratch = std::env::temp_dir().join(format!(
-        "cellgov_checkpoint_manifest_{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&scratch).expect("scratch dir");
-
+    let scratch = scratch_labeled("checkpoint_manifest");
     let missing = scratch.join("missing.toml");
     match load(&missing).expect_err("no file") {
         CheckpointManifestError::Read { path, .. } => {
@@ -137,7 +133,6 @@ fn load_separates_a_missing_file_from_a_malformed_one() {
         }
         other => panic!("expected Parse, got {other:?}"),
     }
-    std::fs::remove_dir_all(&scratch).ok();
 }
 
 #[test]

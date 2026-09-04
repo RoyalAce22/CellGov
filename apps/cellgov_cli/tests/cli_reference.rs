@@ -1,6 +1,7 @@
 //! The help an operator reads, and the two generators that publish it.
 //! Needs no corpus.
 
+use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -232,9 +233,7 @@ fn every_example_the_help_prints_invokes_the_command_it_appears_under() {
 
 #[test]
 fn cli_gen_writes_the_committed_reference() {
-    let out_dir = std::env::temp_dir().join(format!("cellgov_cli_gen_{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&out_dir);
-    std::fs::create_dir_all(&out_dir).expect("create temp dir");
+    let out_dir = scratch_labeled("cli_gen");
     let generated = out_dir.join("cli.md");
 
     let out = cellgov(&[
@@ -256,7 +255,6 @@ fn cli_gen_writes_the_committed_reference() {
         normalize(&written),
         "docs/cli.md is stale; regenerate with `cellgov dev cli-gen`"
     );
-    let _ = std::fs::remove_dir_all(&out_dir);
 }
 
 /// Stands in for a region that switches on the `decrypt` feature.

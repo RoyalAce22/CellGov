@@ -14,32 +14,8 @@ use std::process::Command;
 use cellgov_compare::{
     FirmwareIdentity, GameIdentity, Observation, ObservationMetadata, ObservedOutcome, RunIdentity,
 };
+use cellgov_testkit::scratch::scratch_labeled;
 use cellgov_trace::{StateHash, TraceRecord, TraceWriter};
-
-/// A scratch directory unique to this process, removed on drop.
-struct ScratchDir {
-    path: std::path::PathBuf,
-}
-
-impl ScratchDir {
-    fn new(label: &str) -> Self {
-        let path =
-            std::env::temp_dir().join(format!("cellgov_triple_{label}_{}", std::process::id()));
-        std::fs::remove_dir_all(&path).ok();
-        std::fs::create_dir_all(&path).unwrap();
-        Self { path }
-    }
-
-    fn join(&self, name: &str) -> std::path::PathBuf {
-        self.path.join(name)
-    }
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.path).ok();
-    }
-}
 
 fn identity(fw_version: &str) -> RunIdentity {
     RunIdentity {
@@ -111,7 +87,7 @@ fn run(args: &[&std::path::Path], verb: &str) -> std::process::Output {
 
 #[test]
 fn diverge_warns_when_the_two_traces_carry_different_triples() {
-    let dir = ScratchDir::new("diverge_cross");
+    let dir = scratch_labeled("diverge_cross");
     let a = dir.join("a.state");
     let b = dir.join("b.state");
     std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
@@ -132,7 +108,7 @@ fn diverge_warns_when_the_two_traces_carry_different_triples() {
 
 #[test]
 fn diverge_is_quiet_when_the_two_traces_carry_one_triple() {
-    let dir = ScratchDir::new("diverge_same");
+    let dir = scratch_labeled("diverge_same");
     let a = dir.join("a.state");
     let b = dir.join("b.state");
     std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
@@ -150,7 +126,7 @@ fn diverge_is_quiet_when_the_two_traces_carry_one_triple() {
 /// A zero fingerprint must not read as "no firmware".
 #[test]
 fn diverge_does_not_warn_when_one_trace_predates_the_header() {
-    let dir = ScratchDir::new("diverge_half");
+    let dir = scratch_labeled("diverge_half");
     let a = dir.join("a.state");
     let b = dir.join("b.state");
     std::fs::write(&a, state_trace(&identity("4.91"))).unwrap();
@@ -167,7 +143,7 @@ fn diverge_does_not_warn_when_one_trace_predates_the_header() {
 
 #[test]
 fn compare_observations_prints_both_triples_and_warns_across_them() {
-    let dir = ScratchDir::new("obs_cross");
+    let dir = scratch_labeled("obs_cross");
     let a = dir.join("a.json");
     let b = dir.join("b.json");
     for (path, fw) in [(&a, "4.91"), (&b, "4.93")] {
@@ -191,7 +167,7 @@ fn compare_observations_prints_both_triples_and_warns_across_them() {
 
 #[test]
 fn compare_observations_of_one_triple_prints_it_without_a_warning() {
-    let dir = ScratchDir::new("obs_same");
+    let dir = scratch_labeled("obs_same");
     let a = dir.join("a.json");
     let b = dir.join("b.json");
     for path in [&a, &b] {
@@ -207,7 +183,7 @@ fn compare_observations_of_one_triple_prints_it_without_a_warning() {
 /// A default identity makes no claim, so it contradicts nothing.
 #[test]
 fn compare_observations_names_an_unidentified_side_without_warning() {
-    let dir = ScratchDir::new("obs_half");
+    let dir = scratch_labeled("obs_half");
     let a = dir.join("a.json");
     let b = dir.join("b.json");
     for (path, id) in [(&a, identity("4.91")), (&b, RunIdentity::default())] {

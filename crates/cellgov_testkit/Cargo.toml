@@ -10,6 +10,13 @@ repository.workspace = true
 [lints]
 workspace = true
 
+[features]
+# The scratch-directory helper. Off by default so `tempfile` stays out
+# of the binaries that depend on this crate at runtime; every consumer
+# turns it on from `[dev-dependencies]`, which resolver 2 keeps out of
+# a normal build.
+scratch = ["dep:tempfile"]
+
 [dependencies]
 cellgov_core = { path = "../cellgov_core" }
 cellgov_dma = { path = "../cellgov_dma" }
@@ -20,8 +27,18 @@ cellgov_mem = { path = "../cellgov_mem" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 cellgov_trace = { path = "../cellgov_trace" }
+# Random scratch names and unwind-safe removal, so a failed test leaks
+# nothing and two runs of one test never resolve to the same path.
+# 3.20 is the floor: `TempDir::into_path` became `TempDir::keep` there,
+# and the retain path calls `keep`.
+tempfile = { version = "3.20", optional = true }
 
 [dev-dependencies]
+# This crate's own tests, on itself: without it the `scratch` feature is
+# on only when some other crate's dev-dependency turns it on, so
+# `cargo test -p cellgov_testkit` would silently run none of the
+# helper's tests.
+cellgov_testkit = { path = ".", features = ["scratch"] }
 # Convention enforcement: the test-layout guard parses every workspace
 # src file to ban inline / bare `mod tests` declarations.
 proc-macro2 = { version = "1", features = ["span-locations"] }

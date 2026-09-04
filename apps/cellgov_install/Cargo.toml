@@ -97,3 +97,6 @@ required-features = ["firmware-corpus"]
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+cellgov_testkit = { path = "../../crates/cellgov_testkit", features = ["scratch"] }

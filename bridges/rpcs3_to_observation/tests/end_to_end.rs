@@ -8,17 +8,14 @@
 use cellgov_compare::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedHashes, ObservedOutcome,
 };
+use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 use cellgov_trace::StateHash;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
-fn tmp(name: &str) -> PathBuf {
-    let pid = std::process::id();
-    let dir = std::env::temp_dir().join(format!("cellgov_adapter_e2e_{name}_{pid}"));
-    fs::remove_dir_all(&dir).ok();
-    fs::create_dir_all(&dir).unwrap();
-    dir
+fn tmp(name: &str) -> ScratchDir {
+    scratch_labeled(name)
 }
 
 fn adapter_bin() -> PathBuf {

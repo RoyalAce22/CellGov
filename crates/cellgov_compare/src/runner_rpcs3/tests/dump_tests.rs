@@ -1,26 +1,23 @@
 //! Dump-file region extraction with out-of-bounds and offset-overflow rejection.
 
 use super::*;
+use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
-static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-fn write_temp_dump(data: &[u8]) -> PathBuf {
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("cellgov_rpcs3_test_{}", std::process::id()));
-    std::fs::create_dir_all(&dir)
-        .unwrap_or_else(|e| panic!("scratch dir {} not creatable: {e}", dir.display()));
-    let path = dir.join(format!("dump_{n}.bin"));
+/// The caller must hold the returned guard while it uses the path.
+fn write_temp_dump(data: &[u8]) -> (ScratchDir, PathBuf) {
+    let dir = scratch_labeled("rpcs3_dump");
+    let path = dir.join("dump.bin");
     let mut f = std::fs::File::create(&path).expect("create dump");
     f.write_all(data).expect("write dump");
-    path
+    (dir, path)
 }
 
 #[test]
 fn parse_dump_extracts_single_region() {
     let data = vec![0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44];
-    let path = write_temp_dump(&data);
+    let (_dir, path) = write_temp_dump(&data);
     let regions = vec![DumpRegion {
         name: "result".into(),
         offset: 4,
@@ -32,13 +29,12 @@ fn parse_dump_extracts_single_region() {
     assert_eq!(parsed[0].name, "result");
     assert_eq!(parsed[0].addr, 0x10000);
     assert_eq!(parsed[0].data, vec![0x11, 0x22, 0x33, 0x44]);
-    std::fs::remove_file(&path).ok();
 }
 
 #[test]
 fn parse_dump_extracts_multiple_regions() {
     let data = vec![0; 32];
-    let path = write_temp_dump(&data);
+    let (_dir, path) = write_temp_dump(&data);
     let regions = vec![
         DumpRegion {
             name: "a".into(),
@@ -57,13 +53,12 @@ fn parse_dump_extracts_multiple_regions() {
     assert_eq!(parsed.len(), 2);
     assert_eq!(parsed[0].name, "a");
     assert_eq!(parsed[1].name, "b");
-    std::fs::remove_file(&path).ok();
 }
 
 #[test]
 fn parse_dump_rejects_region_past_end() {
     let data = vec![0; 8];
-    let path = write_temp_dump(&data);
+    let (_dir, path) = write_temp_dump(&data);
     let regions = vec![DumpRegion {
         name: "oob".into(),
         offset: 4,
@@ -85,13 +80,12 @@ fn parse_dump_rejects_region_past_end() {
         }
         other => panic!("expected DumpTooSmall, got {other:?}"),
     }
-    std::fs::remove_file(&path).ok();
 }
 
 #[test]
 fn parse_dump_rejects_offset_size_overflow() {
     let data = vec![0; 8];
-    let path = write_temp_dump(&data);
+    let (_dir, path) = write_temp_dump(&data);
     let regions = vec![DumpRegion {
         name: "overflow".into(),
         offset: u64::MAX - 4,
@@ -110,16 +104,14 @@ fn parse_dump_rejects_offset_size_overflow() {
         }
         other => panic!("expected DumpOffsetOverflow, got {other:?}"),
     }
-    std::fs::remove_file(&path).ok();
 }
 
 #[test]
 fn parse_dump_empty_regions_returns_empty_vec() {
     let data = vec![0; 8];
-    let path = write_temp_dump(&data);
+    let (_dir, path) = write_temp_dump(&data);
     let parsed = parse_dump(&path, &[]).expect("parse");
     assert!(parsed.is_empty());
-    std::fs::remove_file(&path).ok();
 }
 
 #[test]

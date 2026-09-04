@@ -8,6 +8,16 @@ use cellgov_compare::{
 use cellgov_time::Budget;
 use std::collections::BTreeMap;
 
+struct TmpDir(cellgov_testkit::scratch::ScratchDir);
+impl TmpDir {
+    fn new(name: &str) -> Self {
+        Self(cellgov_testkit::scratch::scratch_labeled(name))
+    }
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// The cell every synthetic title in this file declares as its
 /// reference, and whose anchor the headline row renders.
 const REFERENCE_FW: &str = "4.93";
@@ -55,25 +65,6 @@ fn title(content_id: &str, display: &str, year: u16, developer: &str) -> TitleMa
             bench_max_steps: None,
             checkpoint: None,
         }],
-    }
-}
-
-struct TmpDir(PathBuf);
-impl TmpDir {
-    fn new(name: &str) -> Self {
-        let p =
-            std::env::temp_dir().join(format!("cellgov_titles_gen_{name}_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        Self(p)
-    }
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-impl Drop for TmpDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

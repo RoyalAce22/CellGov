@@ -18,4 +18,5 @@ toml = "0.8"
 thiserror = "2"
 
 [dev-dependencies]
+cellgov_testkit = { path = "../../crates/cellgov_testkit", features = ["scratch"] }
 cellgov_trace = { path = "../../crates/cellgov_trace" }

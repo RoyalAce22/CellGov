@@ -1,41 +1,34 @@
-//! Convention guard: scratch directories carry the process id.
+//! Convention guard: one source of temporary test paths.
 //!
-//! `cargo test` and `cargo test --release` are separate processes over
-//! one `std::env::temp_dir()`, so a scratch path fixed at compile time
-//! is shared by both and one process's `remove_dir_all` races the
-//! other's writes. Every `std::env::temp_dir()` call under `crates/`,
-//! `apps/`, and `bridges/` must reach `std::process::id()` in the same
-//! statement, or through a `let pid = std::process::id();` binding in
-//! the same function interpolated as `{pid}`.
+//! Two rules, both about `cellgov_testkit::scratch`:
+//!
+//! 1. No file under `crates/`, `apps/` or `bridges/` calls
+//!    `std::env::temp_dir()`, except the sites [`ALLOWED`] names. A
+//!    hand-rolled scratch path leaks whenever an assertion fails, and
+//!    a leaked fixture tree costs gigabytes.
+//! 2. Only a `[dev-dependencies]` entry turns the `scratch` feature
+//!    on. The feature pulls `tempfile` in, and shipped binaries
+//!    depend on `cellgov_testkit` at runtime.
+//!
+//! This guard names `std::env::temp_dir()` only inside comments and
+//! string literals, both of which the scan masks.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The `let` form a function may bind once and interpolate as `{pid}`.
-const PID_BINDING: &str = "let pid = std::process::id();";
-
-/// Closers that end the statement the guard reads around a match. `{`
-/// and `}` are in the set because a scratch path is often the tail
-/// expression of a helper, where no `;` follows the call at all.
-const STATEMENT_ENDS: [char; 3] = [';', '{', '}'];
-
-/// Byte offset of the end of the statement `masked[from..]` opens.
-///
-/// A closer counts only at `(`/`[` depth zero: a scratch name built
-/// through a `match`, an `if`, or a closure inside the call's argument
-/// list carries braces nested in parentheses.
-fn statement_end(masked: &str, from: usize) -> usize {
-    let mut depth = 0usize;
-    for (off, ch) in masked[from..].char_indices() {
-        match ch {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.saturating_sub(1),
-            c if depth == 0 && STATEMENT_ENDS.contains(&c) => return from + off,
-            _ => {}
-        }
-    }
-    masked.len()
-}
+/// Files that may call `std::env::temp_dir()`, workspace-relative with
+/// `/` separators, each with the reason it is not the helper's job.
+const ALLOWED: [(&str, &str); 2] = [
+    (
+        "crates/cellgov_testkit/src/tests/scratch_tests.rs",
+        "asserts where the helper puts a directory",
+    ),
+    (
+        "apps/cellgov_cli/src/game/bench/divergence.rs",
+        "a shipped diagnostic writes two state traces and removes them; \
+         the helper is a dev-dependency and never reaches a release build",
+    ),
+];
 
 fn rs_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     let entries =
@@ -190,43 +183,14 @@ fn mask_comments_and_literals(source: &str) -> String {
     String::from_utf8(out).expect("blanking bytes with ASCII spaces preserves UTF-8")
 }
 
-/// Byte offset of the `fn` keyword opening the innermost item start
-/// before `at`, or 0 when the call sits outside any function.
-fn enclosing_fn_start(masked: &str, at: usize) -> usize {
-    masked[..at]
-        .match_indices("fn ")
-        .filter(|(i, _)| *i == 0 || !is_ident_byte(masked.as_bytes()[i - 1]))
-        .last()
-        .map_or(0, |(i, _)| i)
-}
-
-/// Every `std::env::temp_dir()` call site in `source` as
-/// `(line, reaches_the_process_id)`.
-fn call_sites(source: &str) -> Vec<(usize, bool)> {
+/// Lines (1-indexed) of every `std::env::temp_dir()` call in `source`.
+fn call_sites(source: &str) -> Vec<usize> {
     let masked = mask_comments_and_literals(source);
-    let mut sites = Vec::new();
-    for (at, _) in masked.match_indices("temp_dir()") {
+    masked
+        .match_indices("temp_dir()")
         // `fn fresh_temp_dir()` and calls to it are not the std call.
-        if at > 0 && is_ident_byte(masked.as_bytes()[at - 1]) {
-            continue;
-        }
-        let end = statement_end(&masked, at);
-        let binds_pid = masked[enclosing_fn_start(&masked, at)..at].contains(PID_BINDING);
-        // The `{pid}` marker lives inside a format string, so it is read
-        // from the unmasked source; the offsets line up byte for byte.
-        let discriminated = masked[at..end].contains("process::id()")
-            || (binds_pid && source[at..end].contains("{pid}"));
-        sites.push((line_of(source, at), discriminated));
-    }
-    sites
-}
-
-/// Lines (1-indexed) of the `temp_dir()` calls in `source` whose scratch
-/// path does not reach `std::process::id()`.
-fn violation_lines(source: &str) -> Vec<usize> {
-    call_sites(source)
-        .into_iter()
-        .filter_map(|(line, ok)| (!ok).then_some(line))
+        .filter(|(at, _)| *at == 0 || !is_ident_byte(masked.as_bytes()[*at - 1]))
+        .map(|(at, _)| line_of(source, at))
         .collect()
 }
 
@@ -244,6 +208,15 @@ fn scanned_rs_files(root: &Path) -> Vec<PathBuf> {
         rs_files_under(&root.join(group), &mut files);
     }
     files
+}
+
+/// `file` relative to `root`, `/`-separated so [`ALLOWED`] reads the
+/// same on either host.
+fn rel(root: &Path, file: &Path) -> String {
+    file.strip_prefix(root)
+        .unwrap_or(file)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 /// The scan reaches nested `tests/` directories, so an empty result is
@@ -267,34 +240,88 @@ fn the_scan_set_contains_this_guard() {
 
 /// Floor on the population the rule polices.
 ///
-/// The scan reaching files says nothing about the matcher still
-/// recognising a call site: a rename of `std::env::temp_dir`, a helper
-/// that wraps it, or a stray edit to the needle would leave this guard
-/// green while it inspects nothing. The workspace has kept well over a
-/// dozen scratch paths for several phases, so a collapse to single
-/// digits is a broken matcher, not a tidied workspace.
-const MIN_CALL_SITES: usize = 10;
+/// The value sits well under the current count, so ordinary churn does
+/// not trip it.
+const MIN_HELPER_CALLS: usize = 150;
 
-#[test]
-fn the_scan_finds_real_temp_dir_call_sites() {
-    let mut sites = 0usize;
-    for file in scanned_rs_files(&workspace_root()) {
-        let source = fs::read_to_string(&file)
-            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        sites += call_sites(&source).len();
-    }
-    assert!(
-        sites >= MIN_CALL_SITES,
-        "gate went vacuous: only {sites} std::env::temp_dir() call site(s) \
-         found across crates/apps/bridges, expected at least \
-         {MIN_CALL_SITES}. Either the matcher no longer recognises the \
-         call or the scan lost its root"
-    );
+/// Helper calls in `source`, comments and string literals masked out.
+fn helper_calls(source: &str) -> usize {
+    let masked = mask_comments_and_literals(source);
+    masked.matches("scratch_labeled(").count() + masked.matches("scratch()").count()
 }
 
 #[test]
-fn scratch_paths_carry_the_process_id() {
-    let files = scanned_rs_files(&workspace_root());
+fn the_helper_has_callers_across_the_workspace() {
+    let root = workspace_root();
+    let mut calls = 0usize;
+    for file in scanned_rs_files(&root) {
+        if rel(&root, &file).starts_with("crates/cellgov_testkit/") {
+            continue;
+        }
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
+        calls += helper_calls(&source);
+    }
+    assert!(
+        calls >= MIN_HELPER_CALLS,
+        "gate went vacuous: only {calls} call(s) of the scratch helper \
+         outside cellgov_testkit, expected at least {MIN_HELPER_CALLS}"
+    );
+}
+
+/// The workspace-wide floor cannot see one crate that takes its
+/// scratch paths back. The other crates' calls keep the total over any
+/// threshold worth setting.
+#[test]
+fn every_crate_that_declares_the_feature_still_calls_the_helper() {
+    let root = workspace_root();
+    let files = scanned_rs_files(&root);
+    let mut checked = 0usize;
+    for manifest in scanned_manifests(&root) {
+        let text = fs::read_to_string(&manifest)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", manifest.display()));
+        if !declares_scratch_feature(&text) {
+            continue;
+        }
+        let Some(dir) = manifest.parent() else {
+            continue;
+        };
+        let prefix = rel(&root, dir) + "/";
+        let calls: usize = files
+            .iter()
+            .filter(|f| rel(&root, f).starts_with(&prefix))
+            .map(|f| {
+                let source = fs::read_to_string(f)
+                    .unwrap_or_else(|e| panic!("cannot read {}: {e}", f.display()));
+                helper_calls(&source)
+            })
+            .sum();
+        assert!(
+            calls > 0,
+            "{prefix} declares the scratch feature but calls the helper \
+             nowhere; either it took its scratch paths back, or the \
+             dependency is dead and should go"
+        );
+        checked += 1;
+    }
+    assert!(
+        checked > 0,
+        "no manifest declares the scratch feature, so this gate inspected nothing"
+    );
+}
+
+/// Whether `manifest` turns the helper's feature on anywhere.
+fn declares_scratch_feature(manifest: &str) -> bool {
+    manifest
+        .lines()
+        .map(|raw| raw.split('#').next().unwrap_or("").trim())
+        .any(|line| line.starts_with("cellgov_testkit") && line.contains("scratch"))
+}
+
+#[test]
+fn no_file_outside_the_helper_reaches_for_the_temp_directory() {
+    let root = workspace_root();
+    let files = scanned_rs_files(&root);
     assert!(
         !files.is_empty(),
         "no .rs files found under crates/apps/bridges"
@@ -302,81 +329,181 @@ fn scratch_paths_carry_the_process_id() {
 
     let mut violations = Vec::new();
     for file in &files {
+        let name = rel(&root, file);
+        if ALLOWED.iter().any(|(allowed, _)| *allowed == name) {
+            continue;
+        }
         let source = fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        for line in violation_lines(&source) {
-            violations.push((file.clone(), line));
+        for line in call_sites(&source) {
+            violations.push(format!("  {name}:{line}\n"));
         }
     }
     violations.sort();
 
-    let mut report = String::new();
-    for (file, line) in &violations {
-        report.push_str(&format!("  {}:{line}\n", file.display()));
-    }
+    let report: String = violations.concat();
     assert!(
         violations.is_empty(),
-        "scratch paths fixed at compile time (two concurrent `cargo test` \
-         invocations would share them -- put `std::process::id()` in the \
-         same statement, or bind `{PID_BINDING}` earlier in the same \
-         function and interpolate it as {{pid}}):\n{report}"
+        "these reach for the OS temp directory directly, and a scratch \
+         path that is not the helper's leaks whenever an assertion \
+         fails. Use cellgov_testkit::scratch::scratch() or \
+         scratch_labeled(label), and hold the guard for as long as the \
+         path is read:\n{report}"
+    );
+}
+
+/// A rename must not leave a permission behind that covers nothing.
+#[test]
+fn every_allowance_names_a_file_that_exists() {
+    let root = workspace_root();
+    for (name, reason) in ALLOWED {
+        assert!(
+            root.join(name).is_file(),
+            "allowance {name:?} ({reason}) names no file"
+        );
+    }
+}
+
+#[test]
+fn every_allowance_still_makes_the_call_it_permits() {
+    let root = workspace_root();
+    for (name, reason) in ALLOWED {
+        let source = fs::read_to_string(root.join(name))
+            .unwrap_or_else(|e| panic!("cannot read {name}: {e}"));
+        assert!(
+            !call_sites(&source).is_empty(),
+            "allowance {name:?} ({reason}) no longer calls temp_dir(); drop the row"
+        );
+    }
+}
+
+/// Lines (1-indexed) of `manifest` that turn the `scratch` feature on
+/// from a runtime dependency table.
+///
+/// This reads two spellings:
+///
+/// - a `cellgov_testkit = { .., features = [..] }` entry under
+///   `[dependencies]`
+/// - a `[dependencies.cellgov_testkit]` table of its own
+fn runtime_scratch_enablers(manifest: &str) -> Vec<usize> {
+    let mut hits = Vec::new();
+    let mut runtime = false;
+    let mut own_table = false;
+    for (i, raw) in manifest.lines().enumerate() {
+        let line = raw.split('#').next().unwrap_or("").trim();
+        if let Some(header) = line.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
+            runtime = header.contains("dependencies")
+                && !header.contains("dev-dependencies")
+                && !header.contains("build-dependencies");
+            own_table = header.ends_with(".cellgov_testkit");
+            continue;
+        }
+        if !runtime {
+            continue;
+        }
+        let names_the_dep = own_table || line.starts_with("cellgov_testkit");
+        if names_the_dep && line.contains("scratch") {
+            hits.push(i + 1);
+        }
+    }
+    hits
+}
+
+/// Manifests of the workspace members, one directory deep under each
+/// scanned group.
+fn scanned_manifests(root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for group in ["crates", "apps", "bridges"] {
+        let dir = root.join(group);
+        let entries =
+            fs::read_dir(&dir).unwrap_or_else(|e| panic!("cannot read {}: {e}", dir.display()));
+        for entry in entries {
+            let entry =
+                entry.unwrap_or_else(|e| panic!("cannot read entry under {}: {e}", dir.display()));
+            let manifest = entry.path().join("Cargo.toml");
+            if manifest.is_file() {
+                out.push(manifest);
+            }
+        }
+    }
+    out
+}
+
+/// Floor on the manifest population, so a broken walk is not a pass.
+const MIN_MANIFESTS: usize = 15;
+
+#[test]
+fn no_runtime_dependency_turns_the_scratch_feature_on() {
+    let root = workspace_root();
+    let manifests = scanned_manifests(&root);
+    assert!(
+        manifests.len() >= MIN_MANIFESTS,
+        "manifest scan went vacuous: {} found, expected at least {MIN_MANIFESTS}",
+        manifests.len()
+    );
+
+    let mut hits = Vec::new();
+    for manifest in &manifests {
+        let text = fs::read_to_string(manifest)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", manifest.display()));
+        for line in runtime_scratch_enablers(&text) {
+            hits.push(format!("  {}:{line}\n", rel(&root, manifest)));
+        }
+    }
+    hits.sort();
+
+    let report: String = hits.concat();
+    assert!(
+        hits.is_empty(),
+        "the scratch feature pulls `tempfile` in, and resolver 2 only \
+         keeps it out of a normal build while every enabler sits under \
+         [dev-dependencies]. Move these:\n{report}"
     );
 }
 
 #[test]
-fn a_fixed_scratch_name_is_a_violation() {
+fn a_runtime_dependency_on_the_scratch_feature_is_an_enabler() {
+    let manifest =
+        "[dependencies]\ncellgov_testkit = { path = \"..\", features = [\"scratch\"] }\n";
+    assert_eq!(runtime_scratch_enablers(manifest), vec![2]);
+}
+
+#[test]
+fn a_runtime_dependency_in_a_table_of_its_own_is_an_enabler() {
+    let manifest = "[dependencies.cellgov_testkit]\npath = \"..\"\nfeatures = [\"scratch\"]\n";
+    assert_eq!(runtime_scratch_enablers(manifest), vec![3]);
+}
+
+#[test]
+fn a_dev_dependency_on_the_scratch_feature_is_not_an_enabler() {
+    let manifest =
+        "[dev-dependencies]\ncellgov_testkit = { path = \"..\", features = [\"scratch\"] }\n";
+    assert!(runtime_scratch_enablers(manifest).is_empty());
+}
+
+#[test]
+fn a_runtime_dependency_without_the_feature_is_not_an_enabler() {
+    let manifest = "[dependencies]\ncellgov_testkit = { path = \"..\" }\n";
+    assert!(runtime_scratch_enablers(manifest).is_empty());
+}
+
+#[test]
+fn the_feature_named_only_in_a_manifest_comment_is_not_an_enabler() {
+    let manifest =
+        "[dependencies]\n# scratch stays a dev-dependency\ncellgov_testkit = { path = \"..\" }\n";
+    assert!(runtime_scratch_enablers(manifest).is_empty());
+}
+
+#[test]
+fn a_scratch_path_outside_the_helper_is_a_call_site() {
     let source = "fn f() {\n    let d = std::env::temp_dir().join(\"cellgov_fixed\");\n}\n";
-    assert_eq!(violation_lines(source), vec![2]);
+    assert_eq!(call_sites(source), vec![2]);
 }
 
 #[test]
-fn an_inline_process_id_satisfies_the_rule() {
-    let source = "fn f() {\n    let d = std::env::temp_dir()\n        .join(format!(\"cellgov_{}\", std::process::id()));\n}\n";
-    // The pair, not `violation_lines(..).is_empty()`: an empty violation
-    // list is also what a matcher that never saw the call returns.
-    assert_eq!(call_sites(source), vec![(2, true)]);
-}
-
-#[test]
-fn a_pid_binding_in_the_same_function_satisfies_the_rule() {
-    let source = "fn f(name: &str) {\n    let pid = std::process::id();\n    let d = std::env::temp_dir().join(format!(\"cellgov_{name}_{pid}\"));\n}\n";
-    assert_eq!(call_sites(source), vec![(3, true)]);
-}
-
-#[test]
-fn a_pid_binding_in_another_function_does_not_satisfy_the_rule() {
-    let source = "fn a() {\n    let pid = std::process::id();\n    let _ = pid;\n}\n\nfn b(pid: u32) {\n    let d = std::env::temp_dir().join(format!(\"cellgov_{pid}\"));\n}\n";
-    assert_eq!(violation_lines(source), vec![7]);
-}
-
-#[test]
-fn a_pid_interpolated_inside_a_braced_arm_satisfies_the_rule() {
-    let source = "fn f(k: u8) {\n    let pid = std::process::id();\n    let d = std::env::temp_dir().join(match k {\n        0 => format!(\"a_{pid}\"),\n        _ => format!(\"b_{pid}\"),\n    });\n}\n";
-    assert_eq!(call_sites(source), vec![(3, true)]);
-}
-
-#[test]
-fn an_inline_process_id_inside_a_closure_argument_satisfies_the_rule() {
-    let source = "fn f() {\n    let d = std::env::temp_dir().join((|| {\n        format!(\"cellgov_{}\", std::process::id())\n    })());\n}\n";
-    assert_eq!(call_sites(source), vec![(2, true)]);
-}
-
-#[test]
-fn a_tail_expression_scratch_path_is_a_violation() {
-    let source = "fn base() -> PathBuf {\n    std::env::temp_dir().join(\"cellgov_fixed\")\n}\n\nfn other() {\n    let _ = std::process::id();\n}\n";
-    assert_eq!(violation_lines(source), vec![2]);
-}
-
-#[test]
-fn a_comment_naming_process_id_does_not_satisfy_the_rule() {
-    let source = "fn f() {\n    let d = std::env::temp_dir() // process::id() would go here\n        .join(\"cellgov_fixed\");\n}\n";
-    assert_eq!(violation_lines(source), vec![2]);
-}
-
-#[test]
-fn a_string_literal_naming_process_id_does_not_satisfy_the_rule() {
-    let source = "fn f() {\n    let d = std::env::temp_dir().join(\"cellgov_process::id()\");\n}\n";
-    assert_eq!(violation_lines(source), vec![2]);
+fn a_tail_expression_scratch_path_is_a_call_site() {
+    let source = "fn base() -> PathBuf {\n    std::env::temp_dir().join(\"cellgov_fixed\")\n}\n";
+    assert_eq!(call_sites(source), vec![2]);
 }
 
 #[test]
@@ -386,16 +513,30 @@ fn temp_dir_named_only_in_prose_is_not_a_call_site() {
 }
 
 #[test]
+fn temp_dir_named_only_in_a_string_is_not_a_call_site() {
+    let source = "fn f() {\n    let s = \"std::env::temp_dir()\";\n}\n";
+    assert!(call_sites(source).is_empty());
+}
+
+#[test]
 fn a_helper_named_after_temp_dir_is_not_the_std_call() {
-    let source = "fn fresh_temp_dir() -> PathBuf {\n    let pid = std::process::id();\n    std::env::temp_dir().join(format!(\"cellgov_{pid}\"))\n}\n";
-    // The `fn` name is skipped; the std call on line 3 is still counted.
-    assert_eq!(call_sites(source), vec![(3, true)]);
+    let source = "fn fresh_temp_dir() -> PathBuf {\n    std::env::temp_dir().join(\"x\")\n}\n";
+    // The `fn` name is skipped; the std call on line 2 is still counted.
+    assert_eq!(call_sites(source), vec![2]);
 }
 
 #[test]
 fn a_lifetime_does_not_swallow_the_following_code() {
     let source = "fn f<'a>(x: &'a str) -> Cow<'a, str> {\n    let d = std::env::temp_dir().join(\"cellgov_fixed\");\n    let _ = (x, d);\n    Cow::Borrowed(x)\n}\n";
-    assert_eq!(violation_lines(source), vec![2]);
+    assert_eq!(call_sites(source), vec![2]);
+}
+
+/// A raw string may hold an unbalanced quote.
+#[test]
+fn a_raw_string_does_not_swallow_the_following_code() {
+    let source =
+        "fn f() {\n    let s = r#\"a \" b\"#;\n    let d = std::env::temp_dir().join(s);\n}\n";
+    assert_eq!(call_sites(source), vec![3]);
 }
 
 #[test]
@@ -405,5 +546,5 @@ fn masking_preserves_byte_offsets_and_lines() {
     let masked = mask_comments_and_literals(source);
     assert_eq!(masked.len(), source.len());
     assert_eq!(masked.matches('\n').count(), source.matches('\n').count());
-    assert_eq!(violation_lines(source), vec![3]);
+    assert_eq!(call_sites(source), vec![3]);
 }

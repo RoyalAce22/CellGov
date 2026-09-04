@@ -71,7 +71,7 @@ fn only_with_ext(dir: &Path, ext: &str) -> PathBuf {
 
 #[test]
 fn only_with_ext_returns_the_single_match_and_names_every_other_outcome() {
-    let scratch = scratch::ScratchDir::new("only_with_ext");
+    let scratch = scratch::scratch_labeled("only_with_ext");
     let dir = scratch.join("dump");
     std::fs::create_dir_all(&dir).unwrap();
 
@@ -127,7 +127,7 @@ fn flow_pkg_install_matches_the_rpcs3_extracted_eboot() {
     let pkg = std::fs::read(&pkg_path).unwrap();
     let rap = std::fs::read(&rap_path).unwrap();
 
-    let scratch = scratch::ScratchDir::new("flow_parity");
+    let scratch = scratch::scratch_labeled("flow_parity");
     let vfs = scratch.join("vfs");
 
     // install_pkg runs the decrypt-proof gate internally, so a

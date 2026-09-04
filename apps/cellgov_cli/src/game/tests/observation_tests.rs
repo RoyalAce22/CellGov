@@ -73,16 +73,16 @@ fn child_result_region() -> Vec<cellgov_compare::RegionDescriptor> {
     }]
 }
 
-fn temp_path(name: &str) -> std::path::PathBuf {
-    std::env::temp_dir().join(format!(
-        "cellgov_observation_{name}_{}.json",
-        std::process::id()
-    ))
+/// The caller must hold the returned guard while it uses the path.
+fn temp_path(name: &str) -> (cellgov_testkit::scratch::ScratchDir, std::path::PathBuf) {
+    let dir = cellgov_testkit::scratch::scratch_labeled(name);
+    let path = dir.join("observation.json");
+    (dir, path)
 }
 
 #[test]
 fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
-    let out = temp_path("missing_space");
+    let (_dir, out) = temp_path("missing_space");
     let spaces = snapshots_with(&[(0, cellgov_mem::GuestMemory::new(0x1000))]);
 
     let err = save_boot_observation(ObservationInputs {
@@ -116,7 +116,7 @@ fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
 
 #[test]
 fn a_region_in_a_created_child_space_captures_that_space() {
-    let out = temp_path("child_space");
+    let (_dir, out) = temp_path("child_space");
     let mut child = cellgov_mem::GuestMemory::new(0x1000);
     let range =
         cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x100), 4).expect("4-byte range");
@@ -145,7 +145,6 @@ fn a_region_in_a_created_child_space_captures_that_space() {
         vec![0xDE, 0xAD, 0xBE, 0xEF],
         "the bytes come from space 1, whose boot-space twin at the same address is zero"
     );
-    std::fs::remove_file(&out).expect("remove temp observation");
 }
 
 mod boot_summary_cross_check {

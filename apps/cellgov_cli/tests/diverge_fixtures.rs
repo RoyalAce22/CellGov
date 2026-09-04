@@ -16,34 +16,9 @@ use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::PpuExecutionUnit;
+use cellgov_testkit::scratch::scratch_labeled;
 use cellgov_time::Budget;
 use cellgov_trace::{StateHash, TraceRecord, TraceWriter};
-
-/// A scratch directory unique to this process, removed on drop so a
-/// failing assertion leaves nothing for the next run to trip over.
-struct ScratchDir {
-    path: std::path::PathBuf,
-}
-
-impl ScratchDir {
-    fn new(label: &str) -> Self {
-        let pid = std::process::id();
-        let path = std::env::temp_dir().join(format!("cellgov_diverge_{label}_{pid}"));
-        std::fs::remove_dir_all(&path).ok();
-        std::fs::create_dir_all(&path).unwrap();
-        Self { path }
-    }
-
-    fn join(&self, name: &str) -> std::path::PathBuf {
-        self.path.join(name)
-    }
-}
-
-impl Drop for ScratchDir {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.path).ok();
-    }
-}
 
 /// Encode N back-to-back `addi` instructions starting at address 0.
 /// rT cycles 3,4,5 so adjacent state hashes differ.
@@ -139,7 +114,7 @@ fn seeded_gpr_mutation_locates_at_expected_step() {
 fn cli_diverge_subcommand_reports_identical_on_match() {
     use std::path::PathBuf;
     use std::process::Command;
-    let dir = ScratchDir::new("match");
+    let dir = scratch_labeled("match");
     let mem = linear_addi_program(8);
     let bytes = ppu_trace_bytes(&mem, 8);
     let a = dir.join("a.state");
@@ -168,7 +143,7 @@ fn cli_diverge_subcommand_reports_identical_on_match() {
 fn cli_diverge_subcommand_reports_diverge_on_mismatch() {
     use std::path::PathBuf;
     use std::process::Command;
-    let dir = ScratchDir::new("diverge");
+    let dir = scratch_labeled("diverge");
     let mem = linear_addi_program(8);
     let a_bytes = ppu_trace_bytes(&mem, 8);
     let mut mutated = linear_addi_program(8);
@@ -238,7 +213,7 @@ fn ppu_zoom_bytes(mem: &GuestMemory, n: usize, window: (u64, u64)) -> Vec<u8> {
 fn cli_zoom_subcommand_names_mutated_register_field() {
     use std::path::PathBuf;
     use std::process::Command;
-    let dir = ScratchDir::new("zoom");
+    let dir = scratch_labeled("zoom");
 
     let n = 20usize;
     let window = (4u64, 6u64);
@@ -291,7 +266,7 @@ fn cli_zoom_subcommand_names_mutated_register_field() {
 fn cli_zoom_reports_no_field_diff_when_full_states_match() {
     use std::path::PathBuf;
     use std::process::Command;
-    let dir = ScratchDir::new("collision");
+    let dir = scratch_labeled("collision");
     let mem = linear_addi_program(20);
     let z = ppu_zoom_bytes(&mem, 20, (4, 6));
     let a = dir.join("a.zoom.state");
@@ -329,7 +304,7 @@ fn cli_zoom_reports_no_field_diff_when_full_states_match() {
 fn cli_zoom_reports_missing_step_when_window_excluded_it() {
     use std::path::PathBuf;
     use std::process::Command;
-    let dir = ScratchDir::new("missing");
+    let dir = scratch_labeled("missing");
     let mem = linear_addi_program(20);
     let z = ppu_zoom_bytes(&mem, 20, (0, 2));
     let a = dir.join("a.zoom.state");
@@ -417,7 +392,7 @@ fn corrupted_b_reports_the_cut_not_a_length_mismatch() {
 fn cli_diverge_reports_corrupt_trace_instead_of_a_verdict() {
     use std::path::PathBuf;
     use std::process::Command;
-    let dir = ScratchDir::new("corrupt");
+    let dir = scratch_labeled("corrupt");
     let mem = linear_addi_program(20);
     let a_bytes = ppu_trace_bytes(&mem, 20);
     let mut b_bytes = a_bytes.clone();

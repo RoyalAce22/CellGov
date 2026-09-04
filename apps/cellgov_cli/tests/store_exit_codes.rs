@@ -2,6 +2,7 @@
 //! asserted against a synthetic store the test builds. Needs no corpus:
 //! every tree and record here is hand-written.
 
+use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -24,18 +25,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 struct Store {
-    root: PathBuf,
+    root: cellgov_testkit::scratch::ScratchDir,
 }
 
 impl Store {
     /// A store root holding one base install of [`TITLE_ID`].
     fn new(label: &str) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "cellgov_store_exit_codes_{label}_{}",
-            std::process::id()
-        ));
-        std::fs::remove_dir_all(&root).ok();
-        let store = Self { root };
+        let store = Self {
+            root: scratch_labeled(label),
+        };
         store.write("dev_hdd0/game/TEST00000/USRDIR/EBOOT.BIN", b"eboot");
         store.write("dev_hdd0/game/TEST00000/PARAM.SFO", b"sfo");
         store.write(
@@ -75,12 +73,6 @@ impl Store {
             String::from_utf8_lossy(&out.stdout).into_owned(),
             String::from_utf8_lossy(&out.stderr).into_owned(),
         )
-    }
-}
-
-impl Drop for Store {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.root).ok();
     }
 }
 
@@ -450,8 +442,7 @@ fn status_reports_a_store_with_no_firmware() {
 
 #[test]
 fn a_pre_store_root_is_refused_by_every_read_command() {
-    let root = std::env::temp_dir().join(format!("cellgov_pre_store_{}", std::process::id()));
-    std::fs::remove_dir_all(&root).ok();
+    let root = scratch_labeled("pre_store");
     std::fs::create_dir_all(root.join("dev_flash")).expect("create the pre-store mount");
     std::fs::write(
         root.join("dev_flash").join("firmware.toml"),
@@ -478,14 +469,11 @@ fn a_pre_store_root_is_refused_by_every_read_command() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
-    std::fs::remove_dir_all(&root).ok();
 }
 
 #[test]
 fn an_empty_root_reads_as_an_empty_store() {
-    let root = std::env::temp_dir().join(format!("cellgov_empty_store_{}", std::process::id()));
-    std::fs::remove_dir_all(&root).ok();
-    std::fs::create_dir_all(&root).expect("create the empty root");
+    let root = scratch_labeled("empty_store");
 
     let out = Command::new(env!("CARGO_BIN_EXE_cellgov"))
         .args(["title", "list"])
@@ -496,7 +484,6 @@ fn an_empty_root_reads_as_an_empty_store() {
         .expect("spawn cellgov");
     assert_eq!(out.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&out.stdout).contains("no title installed"));
-    std::fs::remove_dir_all(&root).ok();
 }
 
 /// `firmware uninstall --verify` re-hashes the tree against its

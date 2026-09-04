@@ -26,6 +26,7 @@ use std::process::Command;
 
 use cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL;
 use cellgov_compare::BootSummary;
+use cellgov_testkit::scratch::scratch_labeled;
 use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
 
 enum Run {
@@ -93,9 +94,7 @@ fn boot_with_trace(title: &TitleUnderTest, trace_path: &PathBuf, null_sink: bool
 
 #[test]
 fn observability_is_inert_wiping_it_every_step_leaves_the_state_trace_byte_identical() {
-    let scratch =
-        std::env::temp_dir().join(format!("cellgov_obs_null_sink_{}", std::process::id()));
-    std::fs::create_dir_all(&scratch).expect("create scratch dir");
+    let scratch = scratch_labeled("obs_null_sink");
 
     // Every registered title carries a committed baseline
     // (`registry_structure` gates that), so an unreadable or malformed
@@ -157,7 +156,6 @@ fn observability_is_inert_wiping_it_every_step_leaves_the_state_trace_byte_ident
         ran += 1;
         break;
     }
-    std::fs::remove_dir_all(&scratch).ok();
     assert!(
         ran > 0,
         "no title in the registry is installed; the inertness gate did not run"

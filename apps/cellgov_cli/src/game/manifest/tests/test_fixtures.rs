@@ -2,26 +2,15 @@
 //! and the canonical manifest TOML strings used across loader and
 //! registry tests.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-pub(super) struct TmpDir(PathBuf);
-
+pub(super) struct TmpDir(cellgov_testkit::scratch::ScratchDir);
 impl TmpDir {
     pub(super) fn new(name: &str) -> Self {
-        let p = std::env::temp_dir().join(format!("cellgov_{name}_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        Self(p)
+        Self(cellgov_testkit::scratch::scratch_labeled(name))
     }
-
     pub(super) fn path(&self) -> &Path {
         &self.0
-    }
-}
-
-impl Drop for TmpDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 

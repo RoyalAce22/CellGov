@@ -13,6 +13,8 @@ pub mod assertions;
 pub mod fixtures;
 pub mod golden;
 pub mod runner;
+#[cfg(feature = "scratch")]
+pub mod scratch;
 pub mod world;
 
 pub use fixtures::ScenarioFixture;

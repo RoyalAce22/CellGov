@@ -42,7 +42,7 @@ fn decrypted_disc_install_matches_the_rpcs3_extracted_eboot() {
     );
 
     let iso = std::fs::read(&iso_path).expect("read disc ISO");
-    let scratch = scratch::ScratchDir::new("disc_parity");
+    let scratch = scratch::scratch_labeled("disc_parity");
     let vfs = scratch.join("vfs");
 
     // install_iso runs the APP-keyed decrypt-proof internally; success

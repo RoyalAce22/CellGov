@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use cellgov_compare::witnesses::{BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
+use cellgov_testkit::scratch::scratch_labeled;
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -14,16 +15,11 @@ fn workspace_root() -> PathBuf {
         .join("..")
 }
 
-struct Scratch(PathBuf);
+struct Scratch(cellgov_testkit::scratch::ScratchDir);
 
 impl Scratch {
     fn new(label: &str) -> Self {
-        let path = std::env::temp_dir().join(format!(
-            "cellgov_run_game_preflight_{label}_{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&path).expect("scratch dir");
-        Self(path)
+        Self(scratch_labeled(label))
     }
 
     fn file(&self, name: &str, text: &str) -> String {
@@ -34,12 +30,6 @@ impl Scratch {
 
     fn path(&self, name: &str) -> String {
         self.0.join(name).to_string_lossy().into_owned()
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        std::fs::remove_dir_all(&self.0).ok();
     }
 }
 

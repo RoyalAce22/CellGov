@@ -5,15 +5,13 @@ use std::path::{Path, PathBuf};
 
 /// A store root removed when the guard drops.
 pub(super) struct SyntheticStore {
-    root: PathBuf,
+    root: cellgov_testkit::scratch::ScratchDir,
 }
 
 impl SyntheticStore {
     /// A store with nothing installed.
     pub(super) fn new(tag: &str) -> Self {
-        let root =
-            std::env::temp_dir().join(format!("cellgov_composition_{tag}_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let root = cellgov_testkit::scratch::scratch_labeled(tag);
         std::fs::create_dir_all(root.join(".cellgov").join("installs")).unwrap();
         Self { root }
     }
@@ -188,12 +186,6 @@ impl SyntheticStore {
             });
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(name), body).unwrap();
-    }
-}
-
-impl Drop for SyntheticStore {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 

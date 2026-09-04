@@ -365,17 +365,16 @@ pub(super) fn extract_pos(d: Lv2Dispatch, expected_addr: u64) -> u64 {
 /// Per-test scratch dir under the host temp directory.
 pub(super) struct TempMountDir {
     pub(super) path: std::path::PathBuf,
+    _dir: cellgov_testkit::scratch::ScratchDir,
 }
 
 impl TempMountDir {
     pub(super) fn new(label: &str) -> Self {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let pid = std::process::id();
-        let path = std::env::temp_dir().join(format!("cellgov_lv2_mount_{label}_{pid}_{n}"));
-        std::fs::create_dir_all(&path).expect("temp mount dir");
-        Self { path }
+        let dir = cellgov_testkit::scratch::scratch_labeled(label);
+        Self {
+            path: dir.to_path_buf(),
+            _dir: dir,
+        }
     }
 
     pub(super) fn write(&self, rel: &str, bytes: &[u8]) {
@@ -388,11 +387,5 @@ impl TempMountDir {
 
     pub(super) fn mkdir(&self, rel: &str) {
         std::fs::create_dir_all(self.path.join(rel)).expect("temp subdir");
-    }
-}
-
-impl Drop for TempMountDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.path);
     }
 }
