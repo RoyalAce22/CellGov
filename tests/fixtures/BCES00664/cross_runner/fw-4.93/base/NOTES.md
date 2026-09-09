@@ -49,9 +49,8 @@ runners now hold `0x01000000` and the residual is empty.
 The RP value is unchanged across every capture of this title held here,
 so the CG side is what moved: CG now reaches the firmware-PRX helper
 that writes the record, along a path the earlier boot did not take. The
-evidence captured while the byte was divergent is in
-`docs/dev/bug_investigations/b1_byte_at_0x91FE9C.md`, which describes a
-state neither runner is in any more.
+evidence captured while the byte was divergent describes a state
+neither runner is in any more, and this fixture does not carry it.
 
 ## Next step
 
