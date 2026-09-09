@@ -11,12 +11,13 @@
 #   3. this test directory mounted/available at /src and the shared
 #      tests/micro/common at /common (or as /src/../common).
 #
-# Any ps3dev+PSL1GHT container works, e.g. one built from the
-# ps3dev/ps3toolchain and ps3dev/PSL1GHT projects:
+# Any ps3dev+PSL1GHT container works; the pinned one is built from
+# tests/micro/toolchain/Dockerfile:
 #
+#   docker build -t ps3dev tests/micro/toolchain
 #   docker run --rm -v /path/to/ppu_two_threads_disjoint_writes:/src \
 #       -v /path/to/common:/common \
-#       -e COMMON=/common <your-ps3dev-psl1ght-image> bash /src/build.sh
+#       -e COMMON=/common ps3dev bash /src/build.sh
 #
 # Git Bash on Windows rewrites the /src and /common mount targets
 # to Windows paths, which leaves stray "<dir>;C" directories on the

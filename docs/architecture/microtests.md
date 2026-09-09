@@ -24,7 +24,10 @@ those subsystems without SPU threads. A representative selection:
 | rsx_semaphore_post     | NV4097 semaphore release polled by PPU.                        |
 | process_spawn_wait     | Parent spawns an SCE-wrapped child into its own address space and waits while the child runs a PPU thread on a stack there. |
 
-See `tests/micro/` for the full set.
+See `tests/micro/` for the full set. The toolchain that builds them
+is pinned by `tests/micro/toolchain/Dockerfile`, which wraps a named
+ps3dev nightly release (PPU and SPU gcc, PSL1GHT, make_self); each
+`build.sh` header carries the `docker build` and `docker run` recipe.
 
 Each test has interpreter and LLVM scenario observations under
 `tests/scenario_observations/`, settled when both decoders agree.
