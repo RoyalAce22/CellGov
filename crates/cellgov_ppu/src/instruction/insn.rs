@@ -960,7 +960,7 @@ pub enum PpuInstruction {
     Mtxer {
         rs: u8,
     },
-    // [AltiVec-PEM p:48 s:2.3.2 VRSAVE Register] VRSAVE is SPR 256, 32-bit, problem-state read/write via mfspr/mtspr.
+    // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] VRSAVE is SPR 256, 32-bit, problem-state read/write via mfspr/mtspr.
     /// Move From VRSAVE (`mfspr rT, 256`).
     Mfvrsave {
         rt: u8,
@@ -1053,7 +1053,7 @@ pub enum PpuInstruction {
     },
 
     // -- Vector (AltiVec / VMX) --
-    // [AltiVec-PEM p:2] AltiVec architectural overview; VX/VA-form encoding under primary opcode 4.
+    // [AltiVec-PEM p:6-1 s:6.1 Instruction Formats] VX/VA-form encoding under primary opcode 4.
     /// Generic VX-form (and VXR-form with `rc`). Execution
     /// dispatches on [`op`](crate::instruction::ops::VxOp) rather
     /// than opening a new variant per VMX op.

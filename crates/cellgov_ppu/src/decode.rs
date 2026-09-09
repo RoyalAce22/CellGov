@@ -878,7 +878,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 // surfacing as a spurious EncodingNotRecognized.
                 268 => Ok(PpuInstruction::Mftb { rt }),
                 269 => Ok(PpuInstruction::Mftbu { rt }),
-                // [AltiVec-PEM p:48 s:2.3.2 VRSAVE Register] VRSAVE
+                // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] VRSAVE
                 // is SPR 256, a 32-bit user-accessible register the
                 // compiler uses to mark which VRs need save/restore
                 // across function calls. Half-swap encoding for
@@ -903,7 +903,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
                 1 => Ok(PpuInstruction::Mtxer { rs: rt }),
                 8 => Ok(PpuInstruction::Mtlr { rs: rt }),
                 9 => Ok(PpuInstruction::Mtctr { rs: rt }),
-                // [AltiVec-PEM p:48 s:2.3.2 VRSAVE Register]
+                // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register]
                 // mtspr 256, rS writes the AltiVec save-mask SPR.
                 // Raw word 0x7c0043a6 observed in retail EBOOTs
                 // is mtvrsave with rS=0.

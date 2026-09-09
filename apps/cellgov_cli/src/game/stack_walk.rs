@@ -1,7 +1,7 @@
 //! Stack-frame walker for `outcome: FAULT` diagnostics.
 //!
 //! ABI back-chain walk per [CBE-Handbook p:398 s:14.3.1.3 Figure 14-3
-//! PPE 64-Bit Standard Stack Frame] and [AltiVec-PIM p:34 s:3]:
+//! PPE 64-Bit Standard Stack Frame] and [AltiVec-PIM p:3-4 s:3.3]:
 //! SP+0 holds the back-chain pointer (caller's SP), and the function's
 //! own saved LR lives at the **caller's** SP+16 -- the prologue runs
 //! `mflr r0; std r0, 16(r1)` BEFORE `stdu r1, -frame_size(r1)`, so the

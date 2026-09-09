@@ -220,7 +220,7 @@ fn classify_call_at_debug_asserts_alignment() {
     let _ = classify_call_at(rt.memory(), 0x0010_0001);
 }
 
-/// Layout per [AltiVec-PIM p:34 s:3]:
+/// Layout per [AltiVec-PIM p:3-4 s:3.3]:
 ///   sp_a (innermost) -> sp_b -> sp_c -> NULL.
 /// sp_a's saved LR lives at sp_b+16; sp_b's saved LR at sp_c+16.
 #[test]

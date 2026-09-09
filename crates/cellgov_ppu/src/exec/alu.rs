@@ -846,7 +846,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             state.set_xer(state.gpr[rs as usize]);
             ExecuteVerdict::Continue
         }
-        // [AltiVec-PEM p:48 s:2.3.2 VRSAVE Register] mfvrsave:
+        // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] mfvrsave:
         // extended mnemonic for mfspr RT, VRSAVE (SPR 256). Reads
         // the 32-bit VR-usage mask into rT; the upper 32 bits of
         // rT are zero (standard widening for a 32-bit SPR read).
@@ -879,7 +879,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             state.set_gpr(rt as usize, state.vrsave as u64);
             ExecuteVerdict::Continue
         }
-        // [AltiVec-PEM p:48 s:2.3.2 VRSAVE Register] mtvrsave:
+        // [AltiVec-PEM p:2-6 s:2.3.3 VRSAVE Register] mtvrsave:
         // extended mnemonic for mtspr VRSAVE, RS (SPR 256). Writes
         // the low 32 bits of rS into VRSAVE; the upper 32 bits of
         // rS are architecturally ignored (VRSAVE is 32-bit). Marks

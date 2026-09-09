@@ -41,7 +41,7 @@ pub struct PpuState {
     // [PPC-Book1 p:97 s:4.2] FPRs hold floating-point values in double format.
     pub fpr: RegBank<u64, FPR_COUNT>,
     /// Vector registers v0..v31; big-endian (byte 0 is MSB).
-    // [AltiVec-PEM p:40 s:2.3.1] 128-bit vector registers.
+    // [AltiVec-PEM p:2-4 s:2.3.1] 128-bit vector registers.
     pub vr: RegBank<u128, VR_COUNT>,
     /// Program counter.
     pub pc: u64,
@@ -63,7 +63,7 @@ pub struct PpuState {
     /// write-only-then-read-back -- enforced by the `Mfvrsave` arm's
     /// `debug_assert!` with [`Self::mfvrsave_executed`] as liveness
     /// witness.
-    // [AltiVec-PEM p:48 s:2.3.2] VRSAVE is SPR 256, 32 bits.
+    // [AltiVec-PEM p:2-6 s:2.3.3] VRSAVE is SPR 256, 32 bits.
     pub vrsave: u32,
     /// Instrument flag (hash-excluded): set by `mtvrsave`. Guards the
     /// read-before-write tripwire in `Mfvrsave`.
