@@ -1,4 +1,5 @@
-//! `diff compare` refusal of a manifest region the run cannot read.
+//! `diff compare` refusal of a manifest region the run cannot read or
+//! that declares zero bytes.
 //!
 //! The manifests name the synthetic `dma` scenario, so the tests need
 //! no corpus and no key vault.
@@ -40,6 +41,23 @@ scenario = "dma"
 [observe]
 memory_regions = [
   { name = "ghost", space = 7, addr = 0, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+"#;
+
+/// Zero bytes match any baseline.
+const EMPTY: &str = r#"
+[test]
+name = "region_of_zero_bytes"
+
+[cellgov]
+scenario = "dma"
+
+[observe]
+memory_regions = [
+  { name = "nothing", addr = 0, size = 0 },
 ]
 
 [expect]
@@ -120,4 +138,9 @@ fn a_region_past_the_end_of_the_space_does_not_round_trip_green() {
 #[test]
 fn a_region_in_a_space_the_run_never_created_does_not_round_trip_green() {
     assert_refused_naming_region("absent_space", ABSENT_SPACE, "ghost");
+}
+
+#[test]
+fn a_region_of_zero_bytes_does_not_round_trip_green() {
+    assert_refused_naming_region("empty", EMPTY, "nothing");
 }

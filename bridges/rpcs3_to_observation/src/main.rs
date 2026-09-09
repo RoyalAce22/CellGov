@@ -186,6 +186,12 @@ enum Rpcs3BridgeError {
          guest-visible state and compare as a match against anything"
     )]
     ManifestHasNoRegions,
+    /// A region declares zero bytes.
+    #[error(
+        "region {region} declares zero bytes; the observation would carry \
+         nothing for it and compare as a match against anything"
+    )]
+    EmptyRegion { region: String },
     /// A region names an address space no RPCS3 capture can hold.
     #[error(
         "region {region} names address space {space}, but RPCS3 emulates one \
@@ -363,8 +369,12 @@ fn parse_args(argv: Vec<String>) -> Result<ParsedArgs, Rpcs3BridgeError> {
 ///
 /// # Errors
 ///
-/// Returns `Err` on an empty region list, on two regions sharing a
-/// name, or on a region outside space 0.
+/// Returns `Err` on:
+///
+/// - an empty region list;
+/// - a region outside space 0;
+/// - a region of zero bytes;
+/// - two regions that share a name.
 fn check_manifest(manifest: &CheckpointManifest) -> Result<(), Rpcs3BridgeError> {
     if manifest.regions.is_empty() {
         return Err(Rpcs3BridgeError::ManifestHasNoRegions);
@@ -375,6 +385,11 @@ fn check_manifest(manifest: &CheckpointManifest) -> Result<(), Rpcs3BridgeError>
             return Err(Rpcs3BridgeError::ChildSpaceRegion {
                 region: r.name.clone(),
                 space: r.space,
+            });
+        }
+        if r.size == 0 {
+            return Err(Rpcs3BridgeError::EmptyRegion {
+                region: r.name.clone(),
             });
         }
         // `find_memory_divergence` in cellgov_compare pairs regions by

@@ -20,7 +20,7 @@ pub enum ObserveError {
     /// The run's trace stream did not decode end to end.
     #[error("trace decode: {0}")]
     TraceDecode(#[from] TraceDecodeError),
-    /// The run could not read a requested region.
+    /// The extractor refused a requested region.
     #[error("{0}")]
     Region(#[from] RegionExtractError),
 }
@@ -29,7 +29,7 @@ pub enum ObserveError {
 ///
 /// # Errors
 ///
-/// - [`ObserveError::Region`] when the run cannot read one of `regions`.
+/// - [`ObserveError::Region`] when the extractor refuses one of `regions`.
 /// - [`ObserveError::TraceDecode`] when the run's trace stream does not
 ///   decode end to end.
 pub fn observe(

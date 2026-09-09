@@ -96,7 +96,7 @@ impl std::str::FromStr for BootOutcome {
 ///
 /// # Errors
 ///
-/// [`RegionExtractError`] when the run cannot read one of `regions`.
+/// [`RegionExtractError`] when the extractor refuses one of `regions`.
 pub fn observe_from_boot(
     final_spaces: &super::region::SpaceSnapshots,
     outcome: BootOutcome,

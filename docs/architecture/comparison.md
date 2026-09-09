@@ -8,7 +8,8 @@ the boot process, spawned children numbered from 1 in spawn order;
 see [guest_memory.md](guest_memory.md#per-process-address-spaces)),
 so a checkpoint manifest can observe a child's memory; RPCS3 captures
 hold space 0 only, and the bridge refuses a manifest naming any
-other. A region the CellGov run cannot read -- a space it never
+other or declaring a region of zero bytes. A region the CellGov run
+cannot read -- one declaring zero bytes, a space it never
 created, a range no single mapped region holds, a reserved range
 that refuses reads, or a `ReservedZeroReadable` range whose reads are
 provisional zeros the run never wrote -- refuses the whole

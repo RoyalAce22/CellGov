@@ -1,4 +1,4 @@
-//! Named-region extraction across address spaces; the extractor refuses a descriptor the run cannot read.
+//! Named-region extraction across address spaces; the extractor refuses a descriptor the run cannot read or that declares zero bytes.
 
 use super::*;
 use cellgov_mem::{PageSize, Region, RegionAccess};
@@ -187,21 +187,30 @@ fn a_region_whose_end_overflows_the_address_space_is_refused_as_overflow() {
 }
 
 #[test]
-fn a_zero_length_region_inside_memory_yields_no_bytes() {
+fn a_zero_length_region_inside_memory_is_refused_as_empty() {
     let spaces = boot_only(&[0x11; 8]);
-    let extracted =
-        extract_regions(&spaces, &[desc("inside", AddressSpaceId::BOOT, 4, 0)]).unwrap();
-    assert!(extracted[0].data.is_empty());
+    let err = extract_regions(&spaces, &[desc("inside", AddressSpaceId::BOOT, 4, 0)])
+        .expect_err("zero bytes would match any baseline");
+    assert_eq!(
+        err,
+        RegionExtractError::Empty {
+            name: "inside".into(),
+            addr: 4,
+        }
+    );
 }
 
 #[test]
-fn the_exclusive_end_of_memory_admits_a_zero_length_region_but_not_one_byte() {
+fn the_exclusive_end_of_memory_holds_neither_an_empty_region_nor_one_byte() {
     // `Region::contains` (cellgov_mem guest.rs) admits `addr + length
-    // <= end`, so the exclusive end holds an empty range and nothing
-    // else.
+    // <= end`, so the memory layer serves an empty range at the
+    // exclusive end; the extractor refuses it before any read.
     let spaces = boot_only(&[0x11; 8]);
-    let empty = extract_regions(&spaces, &[desc("end", AddressSpaceId::BOOT, 8, 0)]).unwrap();
-    assert!(empty[0].data.is_empty());
+    let err = extract_regions(&spaces, &[desc("end", AddressSpaceId::BOOT, 8, 0)]).unwrap_err();
+    assert!(
+        matches!(&err, RegionExtractError::Empty { addr: 8, .. }),
+        "{err:?}"
+    );
     let err = extract_regions(&spaces, &[desc("end", AddressSpaceId::BOOT, 8, 1)])
         .expect_err("byte 8 is the first byte past an 8-byte space");
     assert!(
@@ -219,17 +228,21 @@ fn the_exclusive_end_of_memory_admits_a_zero_length_region_but_not_one_byte() {
 }
 
 #[test]
-fn a_zero_length_region_outside_memory_is_still_refused() {
+fn a_zero_length_region_is_refused_as_empty_before_its_space_or_address_is_checked() {
     let spaces = boot_only(&[0x11; 8]);
-    let err = extract_regions(
-        &spaces,
-        &[desc("outside", AddressSpaceId::BOOT, 999_999, 0)],
-    )
-    .expect_err("the address itself is unmapped");
-    assert!(
-        matches!(&err, RegionExtractError::Unreadable { name, .. } if name == "outside"),
-        "{err:?}"
-    );
+    let cases = [
+        desc("outside", AddressSpaceId::BOOT, 999_999, 0),
+        desc("ghost", AddressSpaceId::new(3), 0, 0),
+        desc("top", AddressSpaceId::BOOT, u64::MAX, 0),
+    ];
+    for case in cases {
+        let name = case.name.clone();
+        let err = extract_regions(&spaces, &[case]).unwrap_err();
+        assert!(
+            matches!(&err, RegionExtractError::Empty { name: n, .. } if *n == name),
+            "{err:?}"
+        );
+    }
 }
 
 #[test]
@@ -261,6 +274,7 @@ fn a_reserved_strict_region_is_refused_with_the_memory_layer_reason() {
 fn every_refusal_names_the_region_in_its_message() {
     let spaces = boot_only(&[0x11; 8]);
     let cases = [
+        desc("empty", AddressSpaceId::BOOT, 0, 0),
         desc("ghost", AddressSpaceId::new(3), 0, 4),
         desc("wrap", AddressSpaceId::BOOT, u64::MAX - 1, 4),
         desc("oob", AddressSpaceId::BOOT, 999_999, 4),

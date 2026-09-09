@@ -37,6 +37,16 @@ fn a_region_outside_space_zero_is_refused_by_name() {
 }
 
 #[test]
+fn a_region_of_zero_bytes_is_refused_by_name() {
+    let mut manifest = manifest_fixture();
+    manifest.regions[1].size = 0;
+    match check_manifest(&manifest).expect_err("zero bytes compare as a match against anything") {
+        Rpcs3BridgeError::EmptyRegion { region } => assert_eq!(region, "second"),
+        other => panic!("expected EmptyRegion, got {other:?}"),
+    }
+}
+
+#[test]
 fn the_space_field_defaults_to_zero_when_absent() {
     let manifest: CheckpointManifest = toml::from_str(
         r#"

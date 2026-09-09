@@ -124,32 +124,16 @@ fn a_range_crossing_out_of_the_reserved_region_is_unreadable_not_provisional() {
 }
 
 #[test]
-fn a_zero_length_range_at_the_shared_boundary_resolves_to_the_user_side() {
+fn a_zero_length_range_is_refused_as_empty_on_either_side_of_the_reserved_boundary() {
     let spaces = reserved_zero_abutting_user();
-    let extracted = extract_regions(&spaces, &[desc("boundary", 0x1100, 0)]).unwrap();
-    assert!(extracted[0].data.is_empty());
+    for addr in [0x1010, 0x1100] {
+        let err = extract_regions(&spaces, &[desc("empty", addr, 0)]).unwrap_err();
+        assert!(
+            matches!(&err, RegionExtractError::Empty { addr: a, .. } if *a == addr),
+            "{err:?}"
+        );
+    }
     assert_eq!(spaces[&AddressSpaceId::BOOT].provisional_read_count(), 0);
-}
-
-#[test]
-fn a_zero_length_range_inside_the_reserved_region_is_still_provisional() {
-    // The memory layer resolves a zero-length range to its region the
-    // same way it resolves a one-byte one (a zero-length strict read
-    // still faults), so the extractor's answer does not change with
-    // the size.
-    let spaces = reserved_zero_abutting_user();
-    let err = extract_regions(&spaces, &[desc("empty", 0x1010, 0)]).unwrap_err();
-    assert!(
-        matches!(
-            &err,
-            RegionExtractError::Provisional {
-                region: "rsx",
-                size: 0,
-                ..
-            }
-        ),
-        "{err:?}"
-    );
 }
 
 #[test]

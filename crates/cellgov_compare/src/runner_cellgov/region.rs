@@ -31,6 +31,19 @@ pub struct RegionDescriptor {
 /// in the manifest that declared it.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RegionExtractError {
+    /// The descriptor declares zero bytes, and an observation of nothing
+    /// matches any baseline.
+    #[error(
+        "region {name} at 0x{addr:016x} declares zero bytes; an observation of \
+         nothing compares as a match against anything, so the region cannot be \
+         observed"
+    )]
+    Empty {
+        /// Region name as declared.
+        name: String,
+        /// Declared start address.
+        addr: u64,
+    },
     /// The descriptor names an address space the run never created.
     #[error(
         "region {name} names address space {space}, but the run created \
@@ -97,7 +110,8 @@ pub enum RegionExtractError {
 
 /// Read each region through its own space.
 ///
-/// The extractor refuses a range in a `ReservedZeroReadable` region
+/// The extractor refuses a descriptor of zero bytes before it resolves
+/// the space. It refuses a range in a `ReservedZeroReadable` region
 /// before any read, so the snapshot's provisional-read counter does
 /// not change.
 ///
@@ -112,6 +126,12 @@ pub(super) fn extract_regions(
     regions
         .iter()
         .map(|desc| {
+            if desc.size == 0 {
+                return Err(RegionExtractError::Empty {
+                    name: desc.name.clone(),
+                    addr: desc.addr,
+                });
+            }
             let memory =
                 spaces
                     .get(&desc.space)
