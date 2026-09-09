@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use crate::store::layout::tombstone_sibling;
 use crate::store::lock::lock_artifact;
 use crate::store::record::InstallRecord;
-use crate::store::rename::rename_with_retry;
+use crate::store::rename::{rename_with_retry, RenameRefused};
 use crate::store::verify::{verify_record_tree, verify_recorded_rap, DivergenceKind, VerifyReport};
 
 use super::error::{uio_err, GameUninstallError};
@@ -167,6 +167,19 @@ pub fn execute(
     plan: &UninstallPlan,
     opts: UninstallOptions,
 ) -> Result<GameUninstallOutcome, GameUninstallError> {
+    execute_with(plan, opts, rename_with_retry)
+}
+
+/// [`execute`] over an injected tombstone rename.
+///
+/// A test drives it with a rename that refuses on a chosen entry, so
+/// the multi-entry shape (earlier entries removed, a later rename
+/// refused) holds without a held handle or a clock.
+pub(super) fn execute_with(
+    plan: &UninstallPlan,
+    opts: UninstallOptions,
+    mut rename: impl FnMut(&Path, &Path) -> Result<u32, RenameRefused>,
+) -> Result<GameUninstallOutcome, GameUninstallError> {
     // The removal claims every entry before the verify gate reads a
     // byte: no installer may commit into a tree this pass is about to
     // take. One entry held by another writer refuses the whole pass, so
@@ -218,7 +231,7 @@ pub fn execute(
         // idempotent; a stat that fails refuses here, since the record
         // removal below would otherwise leave the tree unnamed.
         if std::fs::exists(&entry.tree_dir).map_err(uio_err("stat", &entry.tree_dir))? {
-            rename_retries += rename_with_retry(&entry.tree_dir, tombstone).map_err(|source| {
+            rename_retries += rename(&entry.tree_dir, tombstone).map_err(|source| {
                 GameUninstallError::Rename {
                     path: entry.tree_dir.clone(),
                     source,
@@ -274,3 +287,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/scope_tests.rs"]
 mod scope_tests;
+
+#[cfg(test)]
+#[path = "tests/rename_refusal_tests.rs"]
+mod rename_refusal_tests;
