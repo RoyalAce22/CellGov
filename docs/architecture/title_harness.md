@@ -205,11 +205,11 @@ and against nothing else. A cell with no committed anchor reports
 `NOT COMPARED`. A run that composed no cell at all -- an unmanaged
 `--firmware-dir` tree, or a title the store does not hold -- has no key
 to file evidence under, so it is reported incomparable rather than held
-against a neighbouring cell. The gate also compares the triple the
-anchor embeds against the one the run composed, so a file hand-edited,
-copied in from another cell, or measured before one side of the triple
-was installed says so instead of standing in for this cell's
-measurement.
+against a neighbouring cell. The gate also compares the identity triple
+the anchor embeds against the one the run composed, so a file
+hand-edited, copied in from another cell, or measured before one half
+of the identity triple was installed says so instead of standing in for
+this cell's measurement.
 
 `boot bench --all` runs that gate over every declared cell of every
 registry title, one cell after another in registry order, and prints
@@ -345,7 +345,7 @@ record of the tree that leads the executable probe -- the selected
 update's, else the base's -- and from that tree's own `PARAM.SFO`: the
 version is published under the key the table named it by, `APP_VER`,
 or `VERSION` standing in for a table that carries none, and the same
-string under the two keys is two different triples. A table that
+string under the two keys is two different identity triples. A table that
 disagrees with its record, is missing, or does not parse refuses the
 composition by name rather than letting the run claim a version its
 tree does not carry.

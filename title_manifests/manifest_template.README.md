@@ -199,7 +199,7 @@ Per-cell overrides are whitelisted to `bench_max_steps` and
 `checkpoint`, and no other key is accepted. Both are genuinely
 properties of a cell: a different firmware library moves
 steps-to-first-RSX-write, so a cap that makes a run reproducible
-belongs to the triple, and a checkpoint reachable on one firmware
+belongs to the cell, and a checkpoint reachable on one firmware
 may be unreachable on another. Everything else stays title-level,
 because two rows differing in a field the rendered document does
 not show are two incomparable measurements presented as

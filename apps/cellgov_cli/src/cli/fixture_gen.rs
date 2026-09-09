@@ -1,5 +1,5 @@
-//! `cellgov dev fixture-gen` -- regenerate the cross-runner fixture
-//! triple (`compare_report.txt`, `REPRODUCTION.md`,
+//! `cellgov dev fixture-gen` -- regenerate the cross-runner triple
+//! (`compare_report.txt`, `REPRODUCTION.md`,
 //! `cross_runner_summary.json`) from two observations plus a title
 //! manifest.
 
@@ -244,7 +244,7 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
 
     let (conv_str, parity_str) = summary.display_matrix_columns();
     println!(
-        "fixture-gen: wrote triple to {}: convergence={}, byte-parity={}",
+        "fixture-gen: wrote cross-runner triple to {}: convergence={}, byte-parity={}",
         out_dir.display(),
         conv_str,
         parity_str,

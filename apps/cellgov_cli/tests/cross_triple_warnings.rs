@@ -1,5 +1,5 @@
 //! `diff diverge` and `diff observations` report when their two sides
-//! come from different triples.
+//! come from different identity triples.
 //!
 //! The fixtures are built in-test from `cellgov_compare`'s public
 //! types and carry no title or corpus state.
@@ -104,7 +104,7 @@ fn diverge_warns_when_the_two_traces_carry_different_triples() {
     assert!(stderr.contains("disagree on firmware"), "stderr: {stderr}");
     assert!(
         String::from_utf8_lossy(&out.stdout).contains("IDENTICAL"),
-        "the streams still agree past the header; the triple is context, not a verdict"
+        "the streams still agree past the header; the identity triple is context, not a verdict"
     );
 }
 
@@ -163,7 +163,7 @@ fn compare_observations_prints_both_triples_and_warns_across_them() {
     );
     assert!(
         out.status.success(),
-        "differing triples alone are not a divergence"
+        "differing identity triples alone are not a divergence"
     );
 }
 

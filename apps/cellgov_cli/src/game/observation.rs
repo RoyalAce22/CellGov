@@ -143,7 +143,7 @@ pub(super) struct ObservationInputs<'a> {
     pub manifest_regions: Option<&'a [cellgov_compare::RegionDescriptor]>,
     /// Captured `sys_tty_write` byte stream.
     pub tty_log: &'a [u8],
-    /// The triple this run was composed from.
+    /// The identity triple the observation embeds.
     pub identity: &'a cellgov_compare::RunIdentity,
 }
 

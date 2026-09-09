@@ -1,5 +1,5 @@
-//! The guest-visible tree a (firmware, title, game-version) triple
-//! produces.
+//! The guest-visible tree an identity triple (firmware, title, game
+//! version) produces.
 //!
 //! Composition is path arithmetic over the store's install records,
 //! plus one existence probe per root. It copies and merges nothing: an
@@ -195,7 +195,8 @@ pub(crate) struct BootComposition {
     /// Updates whose declared minimum firmware the selection does not
     /// meet. The boot reports these and continues.
     pub understated_firmware: Vec<UnderstatedFirmware>,
-    /// The triple every machine artifact this boot writes embeds.
+    /// The identity triple every machine artifact this boot writes
+    /// embeds.
     pub identity: RunIdentity,
 }
 

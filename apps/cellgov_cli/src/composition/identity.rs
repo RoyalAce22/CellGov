@@ -20,7 +20,7 @@ use super::inventory::FirmwareEntry;
 use super::select::{FirmwareChoice, GameVersion};
 use crate::game::manifest::BASE_GAME_VER;
 
-/// Why a composed boot could not name the triple it runs.
+/// Why a composed boot could not name the identity triple it runs.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum IdentityError {
     /// The selected firmware entry's identity could not be read, so
@@ -126,7 +126,7 @@ fn render_named_version(found: &Option<AppVersion>) -> String {
         .map_or_else(|| "no version key".to_string(), ToString::to_string)
 }
 
-/// Build the triple for a composed boot.
+/// Build the identity triple for a composed boot.
 ///
 /// # Errors
 ///

@@ -73,7 +73,7 @@ pub(super) fn test_cell() -> CellKey {
     }
 }
 
-/// The triple [`anchor_fixture`] embeds.
+/// The identity triple [`anchor_fixture`] embeds.
 pub(super) fn test_identity() -> RunIdentity {
     anchor_fixture(0).identity
 }

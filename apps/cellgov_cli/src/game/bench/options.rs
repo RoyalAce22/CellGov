@@ -52,7 +52,7 @@ pub struct BenchOptions<'a> {
     /// The `sys/external` directory the firmware loader reads.
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
-    /// The triple this run is measured against.
+    /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,
     /// What the child re-resolves its own composition from.
     pub selection: SelectionArgs<'a>,

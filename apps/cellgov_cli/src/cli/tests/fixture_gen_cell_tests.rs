@@ -1,4 +1,4 @@
-//! Where a cell's fixture triple lands, and where the generated
+//! Where a cell's cross-runner triple lands, and where the generated
 //! reproduction's links resolve from there.
 
 use super::*;

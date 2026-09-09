@@ -360,8 +360,8 @@ impl CrossRunnerSummary {
         Ok(())
     }
 
-    /// Name what each runner ran: CellGov's composed triple, and the
-    /// firmware version from the other runner's installation.
+    /// Name what each runner ran: CellGov's composed identity triple,
+    /// and the firmware version from the other runner's installation.
     ///
     /// # Errors
     ///

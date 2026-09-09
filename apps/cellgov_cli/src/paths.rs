@@ -82,8 +82,9 @@ pub(crate) fn cell_anchor_dir_in(fixtures: &Path, content_id: &str, cell: &CellK
 /// Directory holding one cell's committed cross-runner triple, under a
 /// fixture tree.
 ///
-/// The triple is `compare_report.txt`, `cross_runner_summary.json` and
-/// `REPRODUCTION.md`, beside the hand-maintained `NOTES.md`.
+/// The cross-runner triple is `compare_report.txt`,
+/// `cross_runner_summary.json` and `REPRODUCTION.md`, beside the
+/// hand-maintained `NOTES.md`.
 pub(crate) fn cell_cross_runner_dir_in(
     fixtures: &Path,
     content_id: &str,

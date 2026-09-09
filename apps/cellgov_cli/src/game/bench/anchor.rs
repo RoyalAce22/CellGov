@@ -84,13 +84,13 @@ pub(super) fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
     reasons
 }
 
-/// How the triple a summary embeds disagrees with the one the run
-/// composed.
+/// How the identity triple a summary embeds disagrees with the one
+/// the run composed.
 ///
 /// The anchor's directory names the cell it is filed under; the
-/// embedded triple is what the recording run itself composed. A file
-/// whose two accounts disagree was measured elsewhere, so the numbers
-/// below compare two different cells.
+/// embedded identity triple is what the recording run itself
+/// composed. A file whose two accounts disagree came from a run of
+/// another cell, so the numbers below compare two different cells.
 fn mislabelled_anchor(recorded: &RunIdentity, run: &RunIdentity) -> Vec<String> {
     let mut failures = Vec::new();
     if recorded.firmware != run.firmware {
@@ -266,9 +266,9 @@ fn check_anchor_under(
             );
         }
     };
-    // The triple comes out of the measuring child's own stream. The
-    // steps and the witnesses below came out of that same stream, and
-    // a triple the parent resolved would hide the mismatch this
+    // The identity triple comes from the measuring child's own stream.
+    // The steps and the witnesses below come from that same stream. An
+    // identity triple the parent resolved would hide the mismatch this
     // comparison exists to catch.
     let identity = match RunIdentity::parse_sentinel_lines(run.stderr) {
         Ok(Some(i)) => i,

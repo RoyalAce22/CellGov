@@ -68,8 +68,8 @@ fn identity_game_version(game_ver: &str) -> String {
     }
 }
 
-/// Every way the run's own identity contradicts the cell its result
-/// would be filed under; empty when the two name one triple.
+/// Every way the run's own identity contradicts the cell that would
+/// receive its result; empty when the two name one identity triple.
 ///
 /// The child re-resolves its composition, and not every flag reaches
 /// that resolution. A boot asked for no firmware never consults `--fw`;
@@ -207,8 +207,8 @@ fn measure(job: &Job) -> Option<Measurement> {
     if !disagreements.is_empty() {
         die(&format!(
             "{}: the run {}; refusing to file a measurement under a cell it did not \
-             compose. The anchor tree is keyed by the composed triple, so the gate would \
-             hold one configuration against another configuration's run",
+             compose. The anchor tree is keyed by the composed identity triple, so the \
+             gate would hold one configuration against another configuration's run",
             job.label(),
             disagreements.join(", and ")
         ));
@@ -339,11 +339,12 @@ fn record_one(job: &Job, strict: bool) -> bool {
         .unwrap_or_else(|e| die(&format!("write {}: {e}", path.display())));
 
     // The history's move rule compares against the previous history
-    // line, which can carry no triple. The anchor's own previous triple
-    // is the only record that can say the measurement basis moved.
+    // line, which can carry no identity triple. The anchor's own
+    // previous identity triple is the only record that can say the
+    // measurement basis moved.
     if !previous_identity.is_empty() && previous_identity != summary.identity {
         println!(
-            "{}: measured against a different triple than the previous anchor named",
+            "{}: measured against a different identity triple than the previous anchor named",
             job.label()
         );
         for line in previous_identity.render_lines() {

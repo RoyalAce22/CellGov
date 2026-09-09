@@ -38,21 +38,21 @@ produce byte-identical observations.
 
 Which firmware answered a run, and which of a title's installed
 versions it composed, travel with the observation rather than beside
-it. Every comparator prints both sides' triples before its verdict and
-says out loud when the two differ, because a divergence between two
-differently-composed runs is a difference between versions until it is
-shown otherwise. The triple is context, not a verdict: a mismatch
-never drives an exit code on its own. The game half carries the
-title's version under the `PARAM.SFO` key its tree named it by, so a
-warning names the key beside the value. State traces carry the same
-identity as a fixed-width fingerprint in their header record, so
-`diverge` reports a cross-triple scan from the stream alone. An
-artifact naming no triple was written before the store carried
-versions, or by a runner that reports none; absence never reads as a
-mismatch.
+it. Every comparator prints both sides' identity triples before its
+verdict and says out loud when the two differ, because a divergence
+between two differently-composed runs is a difference between versions
+until it is shown otherwise. The identity triple is context, not a
+verdict: a mismatch never drives an exit code on its own. The game half
+carries the title's version under the `PARAM.SFO` key its tree named it
+by, so a warning names the key beside the value. State traces carry the
+same identity as a fixed-width fingerprint in their header record, so
+`diverge` reports two identity triples disagreeing from the stream
+alone. An artifact naming no identity triple was written before the
+store carried versions, or by a runner that reports none; absence never
+reads as a mismatch.
 
-A runner CellGov does not compose for names no triple, because no store
-entry describes it. It still names a firmware. Its capture carries
+A runner CellGov does not compose for names no identity triple, because
+no store entry describes it. It still names a firmware. Its capture carries
 `runner_firmware`, the version read out of that runner's own
 installation -- the guest-path mapping in its configuration, then the
 console version file in whichever tree that mapping names. The read
@@ -63,8 +63,8 @@ whose conversion was given no installation to read names no version, and
 a verdict built from it is refused rather than assumed.
 
 A byte-parity verdict is a statement about two runs of one firmware
-library, so `CrossRunnerSummary` carries the cell triple and the other
-runner's version together. Three shapes are refused on load rather than
+library, so `CrossRunnerSummary` carries CellGov's identity triple and
+the other runner's version together. Three shapes are refused on load rather than
 rendered: the two versions disagreeing, either side named alone, and a
 file whose recorded firmware differs from the cell its directory names.
 A summary naming neither side predates the schema and makes no claim to

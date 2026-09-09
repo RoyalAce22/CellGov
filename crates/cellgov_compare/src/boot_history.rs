@@ -25,8 +25,9 @@ pub struct BootHistoryEntry {
     pub outcome: String,
     /// Every witness value measured on this run.
     pub witnesses: BTreeMap<String, u64>,
-    /// Fields that differ from the previous entry, sorted. Never
-    /// empty -- an unchanged run is not appended.
+    /// Fields that differ from the previous entry, sorted on every
+    /// line but the first. Never empty -- an unchanged run is not
+    /// appended.
     pub changed: Vec<String>,
     /// Which firmware and title version this measurement was taken
     /// against. Empty on a line written before the store carried
@@ -38,12 +39,13 @@ pub struct BootHistoryEntry {
 impl BootHistoryEntry {
     /// Build an entry, or `None` when nothing moved.
     ///
-    /// `previous` is the last entry in the file, if any. A first
-    /// recording always produces an entry, with `changed` naming
-    /// every field as newly recorded.
+    /// `previous` is the last entry in the file, if any. With no
+    /// `previous`, the result is always an entry. Its `changed` names
+    /// the step count, the outcome and every witness, and omits the
+    /// identity.
     ///
-    /// A triple that differs from the previous line's is a move on its
-    /// own, even when every witness and the step count hold.
+    /// An identity triple that differs from the previous line's is a
+    /// move on its own, even when every witness and the step count hold.
     pub fn new_if_changed(
         previous: Option<&Self>,
         steps: u64,
@@ -97,12 +99,13 @@ impl BootHistoryEntry {
     }
 }
 
-/// How the triple this run was taken against differs from the one the
-/// previous line names, or `None` when it does not.
+/// How this run's identity triple differs from the one the previous
+/// line names, or `None` when it does not.
 ///
-/// The caller appends only when something moved, so a first triple
-/// over a pre-versioning line has to count as a move: without it the
-/// last line keeps an empty identity and the axis never moves again.
+/// The caller appends only when something moved, so a first identity
+/// triple over a pre-versioning line counts as a move. Without that
+/// move, the last line keeps an empty identity and the axis never
+/// moves again.
 fn identity_move(previous: &RunIdentity, current: &RunIdentity) -> Option<String> {
     match (previous.is_empty(), current.is_empty()) {
         (true, true) => None,

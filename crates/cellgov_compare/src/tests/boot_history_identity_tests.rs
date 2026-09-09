@@ -23,7 +23,7 @@ fn a_line_carries_the_triple_it_was_measured_under() {
     assert_eq!(
         parse(&line).expect("parse")[0].identity,
         id,
-        "the triple survives the round trip"
+        "the identity triple survives the round trip"
     );
 }
 
@@ -52,7 +52,7 @@ fn a_pre_versioning_line_parses_with_an_empty_identity() {
 fn a_different_triple_is_a_move_on_its_own() {
     let first = entry(None, identity("4.91", "NPAA00001", "base")).expect("first");
     let second = entry(Some(&first), identity("4.93", "NPAA00001", "base"))
-        .expect("the firmware changed, so the measurement is against a different triple");
+        .expect("the firmware changed, so the measurement is against a different identity triple");
     assert_eq!(second.changed, vec!["identity".to_string()]);
 }
 
@@ -79,7 +79,7 @@ fn two_pre_versioning_lines_do_not_move_the_identity() {
     let first = entry(None, RunIdentity::default()).expect("first");
     assert!(
         entry(Some(&first), RunIdentity::default()).is_none(),
-        "neither line names a triple, so there is nothing to have moved"
+        "neither line names an identity triple, so there is nothing to have moved"
     );
 }
 
@@ -116,7 +116,7 @@ fn an_identity_move_is_named_alongside_the_witnesses_that_moved() {
         BTreeMap::from([("ldarx".to_string(), 2)]),
         identity("4.93", "NPAA00001", "base"),
     )
-    .expect("a witness and the triple both moved");
+    .expect("a witness and the identity triple both moved");
     assert_eq!(
         second.changed,
         vec!["identity".to_string(), "ldarx".to_string()]

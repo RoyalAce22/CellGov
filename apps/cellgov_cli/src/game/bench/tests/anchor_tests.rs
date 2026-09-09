@@ -135,8 +135,8 @@ fn a_run_at_another_budget_is_reported() {
     );
 }
 
-/// The steps and the witnesses come out of the measuring child, so the
-/// triple must come out of that same stream.
+/// The steps and the witnesses come from the measuring child, so the
+/// identity triple must come from that same stream.
 #[test]
 fn a_measured_run_that_named_no_triple_is_a_disagreement() {
     let root = crate::paths::workspace_root();
@@ -158,7 +158,7 @@ fn a_measured_run_that_named_no_triple_is_a_disagreement() {
 }
 
 /// A file copied from another cell reproduces every witness of its own
-/// run, so only the embedded triple names the wrong cell.
+/// run, so only the embedded identity triple names the wrong cell.
 #[test]
 fn an_anchor_measured_against_another_firmware_reports_the_triple() {
     let mut ran = test_identity();
@@ -245,7 +245,8 @@ fn two_title_trees_sharing_a_version_are_still_told_apart_in_the_report() {
     );
 }
 
-/// An anchor can predate the install of one half of the triple.
+/// An anchor can predate the install of one half of the identity
+/// triple.
 #[test]
 fn a_half_the_anchor_never_named_is_reported_as_unidentified() {
     let mut ran = test_identity();
@@ -306,7 +307,7 @@ fn a_cell_with_no_committed_anchor_is_skipped_not_failed() {
     assert_eq!(verdict, AnchorVerdict::NotRecorded("fw 4.93 x base".into()));
 }
 
-/// The anchor tree is keyed by the whole triple, so a file one path
+/// The whole identity triple keys the anchor tree, so a file one path
 /// segment away is another cell's anchor.
 #[test]
 fn a_sibling_cells_anchor_does_not_stand_in_for_an_unrecorded_one() {

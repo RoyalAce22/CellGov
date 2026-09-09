@@ -20,8 +20,8 @@ skeleton into
 fill in the frontmatter, and keep whichever body sections apply.
 
 The generator never reads or writes NOTES.md. The machine-readable
-surface is the triple `compare_report.txt` / `REPRODUCTION.md` /
-`cross_runner_summary.json`; this file is for the per-cluster
+surface is the cross-runner triple `compare_report.txt` /
+`REPRODUCTION.md` / `cross_runner_summary.json`; this file is for the per-cluster
 hypotheses and the next-step plan that do not belong in generated
 output.
 
@@ -76,7 +76,7 @@ new structurally-grounded DivergenceClass, etc.>
   + the cell's anchor + `cross_runner_summary.json`.
   Duplicates the headline so a reader scanning multiple NOTES.md
   files gets the title at a glance without opening the generated
-  triple.
+  cross-runner triple.
 - The opening prose line restates the convergence headline in
   human terms. Match the wording the matrix renders.
 - **Classifier coverage** appears only when convergence is `Yes`

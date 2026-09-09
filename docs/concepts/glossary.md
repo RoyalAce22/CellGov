@@ -95,7 +95,8 @@ observations that agree.
 `tests/fixtures/<content-id>/cross_runner/fw-<ver>/<game-ver>/`:
 `compare_report.txt`, `cross_runner_summary.json`, `REPRODUCTION.md`,
 beside the hand-maintained `NOTES.md`. Produced by `cellgov dev
-fixture-gen`.
+fixture-gen`. Always written with its qualifier: a bare "triple" is
+this or the identity triple, and the two share nothing.
 [titles.md](../titles.md)
 
 **Declared cell.** A cell a title's manifest names: the reference
@@ -168,6 +169,20 @@ through the null backend rather than fabricating a result. Whether
 the runners' observations differ splits it into divergent and
 convergent honest gaps. [README.md](README.md#the-null-backend-honest-vs-contaminating-divergence)
 
+**Identity triple.** The `(firmware, title, game version)` statement
+every machine artifact a boot writes embeds -- anchors, boot history
+lines, observations, summaries, and the header record of a state
+trace. The firmware half comes from the selected store entry's
+record; the game half from the record and `PARAM.SFO` of the tree
+that leads the executable probe. It names, from inside the file,
+the cell the run composed, so a file's directory and its contents
+can be held against each other. Two runs with different identity
+triples make a cross-triple comparison: every comparator says so
+before its verdict and never exits on it. A half is absent when no
+store entry names it. Always written with its qualifier; a bare
+"triple" is this or the cross-runner triple.
+[title_harness.md](../architecture/title_harness.md#version-selection)
+
 **Invariant break.** A named host-side diagnostic (`HostInvariantBreak`
 trace record) for a path the model does not cover, such as
 `dispatch.unsupported_stub`. Counted as witnesses; never a silent
@@ -227,6 +242,13 @@ the main text region, with quickening (idiom rewrites) and
 super-pairing (fused two-instruction dispatches).
 [execution_units.md](../architecture/execution_units.md#predecoded-instruction-shadow)
 
+**Pre-versioning artifact.** A machine artifact written before the
+store carried versions, or by a runner CellGov does not compose for:
+it names no identity triple. Absence makes no claim, so it never
+reads as a cross-triple mismatch, and a first identity triple
+recorded over a pre-versioning history line counts as a move.
+[comparison.md](../architecture/comparison.md)
+
 **Provisional read.** A read from a `ReservedZeroReadable` region
 (RSX local memory, the SPU-shared range): it returns zero, is
 counted, and reaches the trace as a `ReservedRegionRead` record. An
@@ -271,6 +293,14 @@ of tripping `FirstRsxWrite`; `[rsx] consume = true` additionally
 runs the FIFO consumer at commit boundaries.
 [rsx.md](../architecture/rsx.md#rsx-cpu-side-completion)
 
+**`RUN_IDENTITY` line.** The one machine-readable stderr line a boot
+prints naming the identity triple it composed, as `RUN_IDENTITY
+{json}`. A parent process (`boot bench`, `dev record-anchors`) reads
+the triple its child ran from this line rather than from its own
+resolution, so a child that composed something else is caught. A
+repeated or malformed line is refused.
+[title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
+
 **Scenario observation.** RPCS3's answer for one synthetic scenario
 under `tests/scenario_observations/<scenario>/`, recorded once per
 RPCS3 decoder so the two can be checked against each other.
@@ -307,6 +337,13 @@ divergence localization.
 previous unit while it holds an lwmutex or after a non-waking
 syscall, capped at 64 consecutive sticky yields.
 [runtime_pipeline.md](../architecture/runtime_pipeline.md#per-step-pipeline)
+
+**Store entry.** One installed firmware version or one installed
+title version (a base or an update) under `vfs/`, described by its
+install record, the store's only index. The entries `--fw` and
+`--game-ver` select are what a composed boot mounts, and each half
+of the identity triple is read from the entry it names.
+[title_harness.md](../architecture/title_harness.md#version-selection)
 
 **Title manifest.** The TOML under `title_manifests/<content-id>.toml`
 that registers a title: source kind, EBOOT candidates, checkpoint

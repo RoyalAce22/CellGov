@@ -391,8 +391,8 @@ impl ObservationCompareResult {
         }
     }
 
-    /// Both sides' triples, then the cross-triple warning when they
-    /// disagree.
+    /// Both sides' identity triples, then the cross-triple warning when
+    /// they disagree.
     ///
     /// Pass labels that tell the two sides apart, such as the two file
     /// paths: the runner names are often the same string.

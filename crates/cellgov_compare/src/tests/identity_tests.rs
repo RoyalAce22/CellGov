@@ -313,7 +313,11 @@ fn a_format_difference_warns_even_when_neither_side_names_a_triple() {
         Some(anonymous(cellgov_trace::TRACE_FORMAT_VERSION + 1)),
         "b.state",
     );
-    assert_eq!(lines.len(), 1, "the format line, and no triple line");
+    assert_eq!(
+        lines.len(),
+        1,
+        "the format line, and no identity-triple line"
+    );
     assert!(lines[0].contains("cross-format"), "{lines:?}");
 }
 
@@ -334,7 +338,7 @@ fn a_headerless_trace_never_warns() {
     let a = identity("4.91", "NPAA00001", "base");
     assert!(
         cross_trace_identity_warning(trace_identity_of(&a), "a.state", None, "b.state").is_empty(),
-        "a stream that names no triple makes no claim to contradict"
+        "a stream that names no identity triple makes no claim to contradict"
     );
 }
 

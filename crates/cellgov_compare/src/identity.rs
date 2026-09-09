@@ -1,10 +1,10 @@
 //! The identity triple a run is composed from, and the cross-triple
 //! check every comparison runs before it reports agreement.
 //!
-//! A divergence between two runs composed from different triples says
-//! nothing about a regression. Every machine artifact a boot writes
-//! carries the triple, and every comparator reports a mismatch between
-//! the two sides.
+//! A divergence between two runs composed from different identity
+//! triples says nothing about a regression. Every machine artifact a
+//! boot writes carries the identity triple. Every comparator reports
+//! a mismatch between the two sides.
 
 use std::fmt;
 
@@ -14,7 +14,8 @@ use cellgov_mem::Fnv1aHasher;
 use cellgov_trace::{TraceReader, TraceRecord};
 
 /// Prefix of the one-line, machine-readable form a boot prints on
-/// stderr so a parent process can recover the triple its child ran.
+/// stderr so a parent process can recover the identity triple its
+/// child ran.
 pub const RUN_IDENTITY_SENTINEL: &str = "RUN_IDENTITY";
 
 /// Which firmware answered the run.
@@ -143,7 +144,7 @@ impl TryFrom<GameIdentityWire> for GameIdentity {
 #[error("game identity names both app_ver and sfo_version; a tree's version comes from one key")]
 pub struct TwoVersionKeys;
 
-/// The triple every machine artifact a boot writes embeds.
+/// The identity triple every machine artifact a boot writes embeds.
 ///
 /// A half is absent when the run has no store entry to name it:
 ///
@@ -339,13 +340,14 @@ pub fn trace_identity(bytes: &[u8]) -> Option<TraceIdentity> {
 /// The lines a trace comparison prints when its two streams lead with
 /// different identity headers, empty when they agree.
 ///
-/// A state file carries the triple as a fingerprint, so these lines
-/// report that the two runs were composed differently without naming
-/// how; the JSON artifacts of the same runs carry the names.
+/// A state file carries the identity triple as a fingerprint, so these
+/// lines name only the half that differs. The JSON artifacts of the
+/// same runs name the versions.
 ///
 /// A stream makes no claim when it has no header, or when its header
-/// names neither half. Such a stream never warns, which matches
-/// [`cross_identity_warning`] on the same pair of runs.
+/// names neither half. Such a stream never warns about identity, which
+/// matches [`cross_identity_warning`] on the same pair of runs. Two
+/// headers that differ in format version still warn.
 pub fn cross_trace_identity_warning(
     a: Option<TraceIdentity>,
     a_label: &str,
@@ -357,7 +359,8 @@ pub fn cross_trace_identity_warning(
     };
     let mut out = Vec::new();
     // The version says how to read the rest of the stream, so a
-    // disagreement is reported even when neither side names a triple.
+    // disagreement warns even when neither side names an identity
+    // triple.
     if a_id.format_version != b_id.format_version {
         out.push(format!(
             "WARN: cross-format comparison: {a_label} is trace format {}, {b_label} is {}. \
@@ -397,7 +400,8 @@ pub fn cross_trace_identity_warning(
     out
 }
 
-/// Both sides' triples, then [`cross_identity_warning`]'s lines.
+/// Both sides' identity triples, then [`cross_identity_warning`]'s
+/// lines.
 ///
 /// Empty when neither side is identified, so a comparison of two
 /// synthetic scenarios prints nothing.
@@ -420,7 +424,7 @@ pub fn identity_report(
 }
 
 /// The lines a comparison prints when its two sides were not composed
-/// from the same triple, empty when they were.
+/// from the same identity triple, empty when they were.
 ///
 /// An unidentified side never produces one: a pre-versioning artifact
 /// makes no claim to contradict.

@@ -31,7 +31,7 @@ pub struct RunGameOptions<'a> {
     pub profile: bool,
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
-    /// The triple every artifact this run writes embeds.
+    /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,

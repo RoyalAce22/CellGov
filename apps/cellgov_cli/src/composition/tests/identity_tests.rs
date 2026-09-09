@@ -1,4 +1,4 @@
-//! The triple a composed boot names itself by.
+//! The identity triple a composed boot names itself by.
 
 use std::path::Path;
 
