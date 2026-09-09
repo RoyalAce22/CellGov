@@ -1,0 +1,47 @@
+# cargo-deny configuration, read by the `deny` job in
+# .github/workflows/ci.yml. Run locally with `cargo deny check`.
+
+[graph]
+# Optional dependencies behind every feature are checked, not only
+# the default build's.
+all-features = true
+
+# Known vulnerabilities, from the RustSec advisory database. A new
+# advisory against a pinned version fails the job with no change to
+# this tree; the fix is a `cargo update -p <crate>`, or an entry in
+# `ignore` with the reason, never a downgrade of this section.
+[advisories]
+yanked = "deny"
+ignore = []
+
+# Dependency shape. A wildcard version pins nothing and is refused,
+# except the unversioned path dependencies between workspace crates;
+# a crate present at two versions is reported so the duplicate is
+# noticed, and fails nothing until the tree is free of them.
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+# Every dependency's declared license has to be one of these. The
+# workspace itself is MIT OR Apache-2.0; nothing copyleft is
+# permitted in the tree.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.8
+
+# Every dependency comes from crates.io. A git or path dependency is
+# refused here before it can reach Cargo.lock.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = []

@@ -56,6 +56,10 @@ rust-version = "1.89"
 license = "MIT OR Apache-2.0"
 authors = ["Aidan Bennie / RoyalAce"]
 repository = "https://github.com/RoyalAce22/CellGov"
+# No crate in this tree is published; the path dependencies between
+# them are the whole dependency contract, and deny.toml's wildcard
+# check exempts only path dependencies of unpublished crates.
+publish = false
 
 [workspace.dependencies]
 criterion = { version = "0.5", default-features = false }

@@ -14,7 +14,6 @@
 # tests/scenario_observations/ or tests/fixtures/.
 #
 # Requires bash >= 4.0 (associative-array / empty-array semantics).
-# macOS ships bash 3.2 by default; `brew install bash` for a modern one.
 #
 # 'compare' mode assumes the saved run came from the same machine,
 # same toolchain, and same bench-ID set. Cross-machine compare is

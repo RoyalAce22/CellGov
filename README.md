@@ -15,7 +15,8 @@ synchronization it must preserve.
 
 One rule governs the design: no execution unit publishes
 guest-visible state directly. Threads propose changes as effects;
-the runtime is the only thing that applies them.
+the runtime is the only thing that applies them. The whole workspace
+compiles under `unsafe_code = "forbid"`.
 
 CellGov does not run games. There is no rasterisation, vblank,
 audio, networking, input, JIT, host-speed execution, or per-title
@@ -41,8 +42,12 @@ byte, what a PS3 game would produce under any legal schedule.
 
 ## Building
 
-Rust 1.89 or newer. `rust-toolchain.toml` pins development to the
-version CI lints against; the 1.89 floor is what CI tests.
+Developed on Windows; supported on Windows and Linux.
+
+Importing the crates needs Rust 1.89 or newer, the workspace's
+`rust-version`. Working in the repository needs nothing chosen:
+`rust-toolchain.toml` pins the exact version CI lints with, and
+rustup installs it on the first `cargo` command.
 
 ```bash
 cargo build --workspace
@@ -52,7 +57,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-The workspace compiles under `unsafe_code = "forbid"` and has no
+CI runs those on both platforms and additionally `cargo test
+--release`, the `cellgov_install` tests with `--features decrypt`,
+and `cellgov_compare` with `--no-default-features`.
+
+The workspace has no
 runtime dependency on RPCS3. `cellgov_compare` gates its RPCS3
 process-spawning runner behind the default-on `rpcs3-runner`
 feature; importers that want only the `Observation` schema and the
@@ -62,13 +71,19 @@ A default build contains no decryption. SCE/SELF, PKG, and PUP
 decryption -- every path that consumes a key -- sits behind the
 default-off `decrypt` feature of `cellgov_install` and
 `cellgov_cli`. Without it the tools parse containers and boot
-plaintext ELFs, and refuse an SCE-wrapped input by name; installed
+plaintext ELFs; an input whose header shows an SCE wrapper is
+refused with a message naming the missing feature. Installed
 firmware and titles stay SCE-wrapped on disk, so booting a real
 corpus needs it:
 
 ```bash
 cargo build --release -p cellgov_cli --features decrypt
 ```
+
+The other features (`*-corpus`, `*-dumps`, `*-microtests`,
+`rpcs3-src`, `ps3autotests`) select test suites that read local dumps
+or built fixtures. None is needed to build, and `--all-features`
+fails without those assets.
 
 ### Keys
 
@@ -103,39 +118,44 @@ back on. Vault files are gitignored and never vendored.
 
 ## Installing firmware and titles
 
-Booting anything real needs PS3 system firmware. Download the
-official update (`PS3UPDAT.PUP`) from
-[playstation.com](https://www.playstation.com/en-us/support/hardware/ps3/system-software/)
-and install it:
+Titles install from your own dumps:
+
+```bash
+cargo run --release -p cellgov_cli --features decrypt -- title install <disc>.iso
+cargo run --release -p cellgov_cli --features decrypt -- title install <title>.pkg --rap <title>.rap
+```
+
+A disc image must be a decrypted dump of a disc you own. It lands
+under `vfs/dev_bdvd/<title-id>/`, a PSN package under
+`vfs/dev_hdd0/game/<title-id>/`, each with an install record.
+
+**A disc image needs no separate firmware.** The install registers the
+disc's own `PS3_UPDATE/PS3UPDAT.PUP` as a `vfs/firmware/<version>/`
+entry and records the version on the title; `boot run` boots the disc
+on it by default. `--no-firmware` skips this.
+
+**A PSN package needs firmware installed by hand.** Its `PARAM.SFO`
+declares the lowest system software it runs on; `title show` prints
+that floor as `needs fw` (`system_ver` in `--format json`):
+
+```bash
+target/release/cellgov title show <title-id>
+```
+
+Install that version or the latest `PS3UPDAT.PUP` from
+[playstation.com](https://www.playstation.com/en-us/support/hardware/ps3/system-software/):
 
 ```bash
 cargo run --release -p cellgov_cli --features decrypt -- firmware install /path/to/PS3UPDAT.PUP
 ```
 
-The install unwraps the SCE/PUP envelope and writes per-module SELFs
-under `vfs/firmware/<version>/dev_flash/`, keyed on the version the
-extracted image names (gitignored; firmware bytes are never
-vendored). SELFs stay encrypted on disk and decrypt at boot. Every
-package must decrypt and every entry must extract for the install to
-succeed; a failure names what it dropped and exits nonzero.
+The install writes per-module SELFs under
+`vfs/firmware/<version>/dev_flash/` (gitignored; firmware bytes are
+never vendored); they stay encrypted on disk and decrypt at boot. With
+several firmwares installed, `boot run --fw <version>` picks one, and
+a boot below the title's floor warns.
 
-Titles install from your own dumps:
-
-```bash
-cargo run --release -p cellgov_cli --features decrypt -- title install <title>.pkg --rap <title>.rap
-cargo run --release -p cellgov_cli --features decrypt -- title install <disc>.iso
-```
-
-`title install` reads the container kind from the file. A disc image
-must be a decrypted dump of a disc you own; one still carrying its
-disc encryption is refused. A PSN package lands under
-`vfs/dev_hdd0/game/<title-id>/`, a disc image under
-`vfs/dev_bdvd/<title-id>/`, each with an install record of per-file
-digests. A disc also carries the system software it was certified
-against, in `PS3_UPDATE/PS3UPDAT.PUP`; the install registers that as
-an ordinary `vfs/firmware/<version>/` entry, skipping the unpack when
-the version is already installed, and records the version on the
-title. `--no-firmware` leaves it alone. A title becomes bootable once it has a manifest
+A title becomes bootable once it has a manifest
 under [title_manifests/](title_manifests/manifest_template.README.md);
 `cellgov dev gen-manifest --title-id <id>` writes the stub from the
 install record.

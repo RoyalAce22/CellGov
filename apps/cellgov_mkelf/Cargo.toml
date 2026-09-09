@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+publish.workspace = true
 
 [dependencies]
 cellgov_ps3_abi = { path = "../../crates/cellgov_ps3_abi" }

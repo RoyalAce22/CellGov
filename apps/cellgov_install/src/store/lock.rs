@@ -6,9 +6,11 @@
 //!   file conflicts with the first, even inside one process.
 //!   `std::fs::File::try_lock` reports that as `WouldBlock`.
 //! - The host releases the claim when the handle closes, so a
-//!   terminated writer blocks nothing. Win32 releases the locks of a
-//!   killed process on its own schedule. A reader that waits on a
-//!   killed holder must retry.
+//!   terminated writer blocks nothing. The release is not instant:
+//!   Win32 releases the locks of a killed process on its own schedule,
+//!   and on Unix a child this process spawns holds a copy of the
+//!   handle from fork until exec. A reader that waits on a release
+//!   must retry.
 //! - A writer creates a lock file and never removes it.
 //! - Contention refuses rather than blocks, so no acquisition order can
 //!   deadlock.

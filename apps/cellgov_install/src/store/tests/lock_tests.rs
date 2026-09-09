@@ -24,12 +24,36 @@ const HOLDER_TEST: &str = "store::lock::tests::hold_lock_until_killed";
 /// on its own.
 const HOLD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// How many times a reader retries a killed holder's claim before it
-/// calls the claim leaked.
+/// How many times a reader retries a released claim before it calls
+/// the claim leaked.
 const RELEASE_POLLS: u32 = 100;
 
 /// How long a reader waits between those attempts.
 const RELEASE_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Claims `artifact` once its previous holder's release has reached the
+/// host, and fails when the bound runs out.
+///
+/// A release is not instant. Win32 drops a killed process's locks on
+/// its own schedule, and on Unix a child that another test in this
+/// binary is spawning holds a copy of every open handle until it
+/// execs, so a claim dropped inside that window still reads as held.
+/// The bound turns a genuine leak into a failure rather than a hang.
+fn claim_once_released(layout: &StoreLayout, artifact: &Artifact) -> StoreLock {
+    let mut last = None;
+    for _ in 0..RELEASE_POLLS {
+        match lock_artifact(layout, artifact) {
+            Ok(lock) => return lock,
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(RELEASE_POLL_INTERVAL);
+    }
+    panic!(
+        "a released claim still reads as held after {:?}: {}",
+        RELEASE_POLLS * RELEASE_POLL_INTERVAL,
+        last.expect("a refusal from every attempt")
+    );
+}
 
 fn base(title_id: &str) -> Artifact {
     Artifact::TitleBase {
@@ -86,7 +110,7 @@ fn dropping_the_guard_frees_the_artifact() {
     assert_eq!(held_name(&err), "firmware 4.91");
     drop(first);
 
-    let _second = lock_artifact(&layout, &artifact).expect("the artifact is free again");
+    let _second = claim_once_released(&layout, &artifact);
 }
 
 #[test]
@@ -261,22 +285,7 @@ fn a_terminated_holder_leaves_the_artifact_free() {
     child.kill().expect("kill the holder");
     child.wait().expect("reap the holder");
 
-    // Win32 releases the file locks of a killed process on its own
-    // schedule, so the claim can still read as held after the reap. The
-    // bound makes a genuine leak fail rather than hang.
-    let mut last = None;
-    for _ in 0..RELEASE_POLLS {
-        match lock_artifact(&layout, &artifact) {
-            Ok(_) => return,
-            Err(e) => last = Some(e),
-        }
-        std::thread::sleep(RELEASE_POLL_INTERVAL);
-    }
-    panic!(
-        "a killed holder still holds its claim after {:?}: {}",
-        RELEASE_POLLS * RELEASE_POLL_INTERVAL,
-        last.expect("a refusal from every attempt")
-    );
+    let _freed = claim_once_released(&layout, &artifact);
 }
 
 /// Claims a title base under `CELLGOV_LOCK_HOLD_ROOT` and waits to be

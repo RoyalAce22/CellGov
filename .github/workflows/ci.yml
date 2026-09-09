@@ -6,6 +6,24 @@ on:
   pull_request:
     branches: [main]
 
+# Nothing in this workflow writes to the repository: no release, no
+# comment, no push. A leaked token from any step can only read.
+permissions:
+  contents: read
+
+# A second push to one branch makes the earlier run's verdict stale
+# before it finishes; cancel it instead of paying for both.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # windows-latest defaults to pwsh, where `$CORPUS_FEATURES` is not
+    # an environment variable and `grep | cut` does not exist. Every
+    # `run:` below reads the same under bash on both runners.
+    shell: bash
+
 env:
   CARGO_TERM_COLOR: always
   # RUSTFLAGS is per-job: `-D warnings` on a floating channel lets a new
@@ -17,10 +35,12 @@ env:
 
 jobs:
   # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix
-  # as a job output rather than a second copy of the number.
+  # as a job output rather than a second copy of the number. Only the
+  # output is consumed downstream; nothing assumes which runner read it.
   config:
     name: config
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       msrv: ${{ steps.read.outputs.msrv }}
     steps:
@@ -34,20 +54,35 @@ jobs:
           echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
           echo "MSRV is $msrv"
 
-  # Blocking. The only job that denies warnings, on a version that moves
-  # only when this file does.
+  # The only job that denies warnings. The pinned entry is blocking, on
+  # a version that moves only when this file does; the stable entry is
+  # informational, so lints added upstream show up before the pin is
+  # bumped. Linux only: fmt and clippy output does not vary by platform.
+  #
+  # The pinned version is written once, in the matrix; the job name is
+  # derived from it so the number is not copied.
   lint:
-    name: lint (pinned 1.95.0)
+    name: lint (${{ matrix.informational && 'stable, informational' || format('pinned {0}', matrix.toolchain) }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.informational }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - toolchain: "1.95.0"
+            informational: false
+          - toolchain: stable
+            informational: true
     env:
       RUSTFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install pinned toolchain
+      - name: Install ${{ matrix.toolchain }} toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.95.0"
+          toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
 
       - name: Cache cargo
@@ -57,9 +92,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-lint-1.95.0-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-lint-${{ matrix.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-lint-1.95.0-
+            ${{ runner.os }}-cargo-lint-${{ matrix.toolchain }}-
 
       - name: cargo fmt --check
         run: cargo fmt --check
@@ -80,61 +115,46 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --locked
 
-  # Informational. Same commands on stable, so lints added upstream show
-  # up before the pinned version is bumped.
-  lint-stable:
-    name: lint (stable, informational)
+  # Blocking. Known vulnerabilities in the dependency tree, from the
+  # RustSec advisory database; every dependency's declared license
+  # against the allow list in deny.toml; a refusal of any git or
+  # unknown-registry source; and the dependency shape (no wildcard
+  # version, duplicates reported). cargo-deny over cargo-audit: audit
+  # reads advisories only; deny checks all four from the same lock file
+  # in one run. A new advisory fails this job with no change to the
+  # tree; deny.toml says how to answer it.
+  deny:
+    name: deny
     runs-on: ubuntu-latest
-    continue-on-error: true
-    env:
-      RUSTFLAGS: -D warnings
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          components: rustfmt, clippy
-
-      - name: Cache cargo
-        uses: actions/cache@v5
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-lint-stable-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-lint-stable-
-
-      - name: cargo fmt --check
-        run: cargo fmt --check
-
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: cargo clippy (corpus suites)
-        run: cargo clippy --workspace --all-targets --locked --features "$CORPUS_FEATURES" -- -D warnings
-
-      - name: cargo clippy (cellgov_compare without rpcs3-runner)
-        run: cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
-
-      - name: cargo doc
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --locked
+          command: check advisories bans licenses sources
 
   # No `-D warnings`: a warning is not a test failure. `beta` is
   # informational. The release run is required -- debug_assert! compiles
   # out, so a #[should_panic] on a debug-only assertion only fails there.
+  #
+  # Every toolchain runs on both runners: the project is developed on
+  # Windows and ships for Windows and Linux, and a path, line-ending,
+  # console or file-locking assumption only fails on the other one.
   test:
-    name: test (${{ matrix.name }})
+    name: test (${{ matrix.name }}, ${{ matrix.os }})
     needs: config
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    # Windows builds run slower than Linux; the bound is for a hung
+    # job, not a slow one.
+    timeout-minutes: 45
     continue-on-error: ${{ matrix.informational }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
+        name: [msrv, stable, beta]
         include:
           - name: msrv
             toolchain: ${{ needs.config.outputs.msrv }}
