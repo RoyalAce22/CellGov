@@ -235,7 +235,8 @@ impl Lv2Host {
     ///   identification header via
     ///   [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
     ///   spawned children serve the retail-application fallback.
-    /// - Any other `pkg_id` answers SS-domain status `0x8001_051D`.
+    /// - Any other `pkg_id` answers the SS-domain status
+    ///   [`cellgov_ps3_abi::sys_ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID`].
     ///   All fourteen syscall-871 sites in the installed firmware --
     ///   eight modules, each site an immediate load -- put 1, 2 or 3
     ///   in `r3`. Nothing in that set reaches this arm, and the status
@@ -284,7 +285,9 @@ impl Lv2Host {
                     }
                 }
             },
-            _ => Lv2Dispatch::immediate(0x8001_051D),
+            _ => Lv2Dispatch::immediate(u64::from(
+                cellgov_ps3_abi::sys_ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID,
+            )),
         }
     }
 

@@ -23,6 +23,7 @@ pub mod sys_process;
 pub mod sys_prx;
 pub mod sys_rsx;
 pub mod sys_spu;
+pub mod sys_ss;
 pub mod sys_sync;
 pub mod sys_uart;
 pub mod sys_usbd;
