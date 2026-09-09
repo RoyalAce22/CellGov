@@ -100,7 +100,7 @@ Two scanners turn per-step state-trace files into diff reports:
   verdict on the runs, since nothing past the cut was compared.
   Checks run step count -> PC -> hash, so the report names the
   highest-level divergence first. Surfaced via
-  `cellgov diff diverge <a.state> <b.state>` (exit 3 on a corrupt
+  `cellgov diff diverge <a.state> <b.state>` (exit 31 on a corrupt
   trace). The scan is linear in record count.
 - `cellgov_compare::zoom_lookup(a_zoom, b_zoom, step)` consumes
   separate zoom-trace files (`PpuStateFull` records emitted only
@@ -128,7 +128,7 @@ flowchart LR
   b["boot run --save-state-trace b.state (e.g. with --patch-byte)"] --> dv
   dv -->|Identical / LengthDiffers| done["verdict"]
   dv -->|"Differs at step N, field Pc or Hash"| win["re-capture both with a full-state window around N"]
-  dv -->|CorruptTrace| bad["exit 3, no verdict"]
+  dv -->|CorruptTrace| bad["exit 31, no verdict"]
   win --> zm["cellgov diff zoom a.zoom b.zoom N"]
   zm --> rd["RegDiff list: the fingerprint fields that differ"]
 ```
