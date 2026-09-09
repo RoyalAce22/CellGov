@@ -229,7 +229,9 @@ super-pairing (fused two-instruction dispatches).
 
 **Provisional read.** A read from a `ReservedZeroReadable` region
 (RSX local memory, the SPU-shared range): it returns zero, is
-counted, and reaches the trace as a `ReservedRegionRead` record.
+counted, and reaches the trace as a `ReservedRegionRead` record. An
+observation never carries provisional bytes; a region over such a
+range is refused.
 [guest_memory.md](../architecture/guest_memory.md#region-access-modes)
 
 **PRX / SPRX / SELF / PUP.** PS3 binary formats. A PRX is a

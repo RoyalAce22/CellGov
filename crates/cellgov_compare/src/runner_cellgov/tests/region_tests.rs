@@ -258,23 +258,6 @@ fn a_reserved_strict_region_is_refused_with_the_memory_layer_reason() {
 }
 
 #[test]
-fn a_reserved_zero_readable_region_reads_zeros_and_counts_the_provisional_read() {
-    let mem = GuestMemory::from_regions(vec![Region::with_access(
-        0x1000,
-        0x10,
-        "reserved",
-        PageSize::Page4K,
-        RegionAccess::ReservedZeroReadable,
-    )])
-    .unwrap();
-    let spaces = SpaceSnapshots::from([(AddressSpaceId::BOOT, mem)]);
-    let extracted =
-        extract_regions(&spaces, &[desc("rsx", AddressSpaceId::BOOT, 0x1000, 8)]).unwrap();
-    assert_eq!(extracted[0].data, vec![0u8; 8]);
-    assert_eq!(spaces[&AddressSpaceId::BOOT].provisional_read_count(), 1);
-}
-
-#[test]
 fn every_refusal_names_the_region_in_its_message() {
     let spaces = boot_only(&[0x11; 8]);
     let cases = [

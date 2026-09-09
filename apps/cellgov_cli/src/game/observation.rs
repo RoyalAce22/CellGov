@@ -112,7 +112,7 @@ pub enum ObservationSaveError {
     /// checkpoint/outcome/steps tuple.
     #[error("invalid boot summary: {0}")]
     InvalidBootSummary(#[source] cellgov_compare::BootSummaryError),
-    /// A manifest region the run cannot read.
+    /// A manifest region the extractor refused.
     #[error("{0}")]
     Region(#[from] cellgov_compare::RegionExtractError),
 }
@@ -146,7 +146,7 @@ pub(super) struct ObservationInputs<'a> {
 ///
 /// # Errors
 ///
-/// - [`ObservationSaveError::Region`] when the run cannot read a
+/// - [`ObservationSaveError::Region`] when the extractor refuses a
 ///   manifest region. The function creates no file in that case.
 /// - Another [`ObservationSaveError`] variant on an I/O or
 ///   serialization failure.
@@ -286,3 +286,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/observation_refusal_tests.rs"]
 mod refusal_tests;
+
+#[cfg(test)]
+#[path = "tests/observation_provisional_tests.rs"]
+mod provisional_tests;

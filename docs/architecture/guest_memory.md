@@ -42,7 +42,8 @@ variants cannot be collapsed by accident:
   with `MemError::ReservedWrite`. The default for RSX and
   SPU-reserved: it maps the address space without real semantics
   and surfaces silent zero-reads in `boot run`'s end-of-boot
-  summary.
+  summary. An observation region over such a range is refused
+  ([comparison.md](comparison.md)).
 - **`ReservedStrict`**: reads via the legacy `GuestMemory::read`
   return `None`; reads via `GuestMemory::read_checked` fault with
   `MemError::ReservedStrictRead { addr, region }`; writes fault

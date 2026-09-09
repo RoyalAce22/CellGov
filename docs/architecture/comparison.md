@@ -9,10 +9,16 @@ see [guest_memory.md](guest_memory.md#per-process-address-spaces)),
 so a checkpoint manifest can observe a child's memory; RPCS3 captures
 hold space 0 only, and the bridge refuses a manifest naming any
 other. A region the CellGov run cannot read -- a space it never
-created, a range no single mapped region holds, or a reserved range
-that refuses reads -- refuses the whole observation and names the
-region, so an observation never carries bytes nobody read and a
-same-runner round trip cannot match on them. The comparison layer diffs two observations field by field in
+created, a range no single mapped region holds, a reserved range
+that refuses reads, or a `ReservedZeroReadable` range whose reads are
+provisional zeros the run never wrote -- refuses the whole
+observation and names the region, so an observation never carries
+bytes nobody read and a same-runner round trip cannot match on them.
+The RSX and SPU-reserved windows are therefore unobservable under the
+default access mode as well as under `--strict-reserved`. The refusal
+names the reserved region, and it applies on the CellGov side of a
+cross-runner pair too: a manifest naming one of those windows is
+refused before the other runner's capture is read against it. The comparison layer diffs two observations field by field in
 four modes: strict (outcome + memory + events), memory-only,
 events-only, prefix. Under every mode, two observations from the same
 runner that both carry CellGov state hashes must agree on them: a
