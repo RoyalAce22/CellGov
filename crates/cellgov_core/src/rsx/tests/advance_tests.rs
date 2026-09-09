@@ -798,7 +798,7 @@ fn call_overflow_emits_overflow_raw_not_underflow_raw() {
     // CALL_STACK_DEPTH + 1 Call headers each redirecting to
     // itself, so the walker pushes CAP times successfully and
     // the (CAP + 1)th push fails. Asserts the failed-push
-    // Malformed carries CALL_STACK_OVERFLOW_RAW, NOT
+    // Malformed carries CALL_STACK_OVERFLOW_RAW, not
     // RSX_ADVANCE_UNDERFLOW_RAW. A swap of the two raw
     // constants between push's err-arm and pop's err-arm
     // type-checks cleanly; only this assertion catches it.
@@ -914,8 +914,8 @@ fn self_pointing_jump_terminates_at_iteration_cap() {
     // asserts the cap raw, asserts-ne the two control-flow
     // raws, so a future raw-constant swap is caught.
     //
-    // get = put = FIFO_BASE + 4 is intentional: the Jump's
-    // target is FIFO_BASE itself (back to the header), so after
+    // With get = put = FIFO_BASE + 4, the Jump's target is
+    // FIFO_BASE itself (back to the header), so after
     // every redirect get == FIFO_BASE < put. The loop never
     // hits the break condition; only the cap saves it.
     let mut memory = make_memory();
@@ -1061,7 +1061,7 @@ fn partial_increment_dispatches_known_and_counts_unknown_per_sub_method() {
     let mut sem_offset = 0u32;
     let mut table = NvMethodTable::new();
     table.register_unique(method_a, record).unwrap();
-    // method_a + 4 (= 0x0504) intentionally NOT registered.
+    // method_a + 4 (= 0x0504) is not registered.
     let mut emitted: Vec<Effect> = Vec::new();
     let mut call_stack = RsxCallStack::new();
     let outcome = rsx_advance(

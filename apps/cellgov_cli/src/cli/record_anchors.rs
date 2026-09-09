@@ -291,7 +291,7 @@ fn record_one(job: &Job, strict: bool) -> bool {
         .map(|p| p.identity.clone())
         .unwrap_or_default();
 
-    // History is parsed BEFORE the baseline is written: a malformed
+    // History is parsed before the baseline is written: a malformed
     // history line must abort while the anchor is still untouched,
     // never leave a moved anchor with no history entry.
     let hist_path = history_path(&root, &job.content_id, &job.cell);

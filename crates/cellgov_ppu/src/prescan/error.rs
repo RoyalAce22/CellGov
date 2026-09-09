@@ -16,7 +16,7 @@ pub enum PrescanError {
     /// Section-header table is present (`e_shoff != 0`) but
     /// malformed: undersized entries, out-of-range slot, or a
     /// section whose `sh_offset + sh_size` exceeds the file. A
-    /// stripped binary (`e_shoff == 0`) does NOT take this path --
+    /// stripped binary (`e_shoff == 0`) does not take this path --
     /// it routes through the segment-walk fallback.
     #[error("prescan: ELF section-header table malformed")]
     MalformedSectionTable,

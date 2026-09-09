@@ -99,7 +99,7 @@ pub(super) fn print_boot_banner(
 
 /// Build the runtime and bind the boot's identity into its LV2 host.
 ///
-/// Runs BEFORE any `module_start` so every PRX's init runs in the same
+/// Runs before any `module_start` so every PRX's init runs in the same
 /// host the title later runs against.
 pub(super) fn build_runtime(
     mem: cellgov_mem::GuestMemory,

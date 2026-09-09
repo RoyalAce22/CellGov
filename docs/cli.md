@@ -685,7 +685,8 @@ Exit codes particular to this command:
   11  the step cap was reached before the checkpoint
   12  simulated time ran out before a terminal state
   13  the run completed but lost a syscall-wake response
-  14  a requested artifact could not be written
+  14  a --save-observation or --save-boot-summary artifact could not
+      be produced
 ```
 
 #### `cellgov boot bench`

@@ -333,7 +333,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
     // already occupies. The handler checks the caller's committed
     // layout and refuses with CELL_EBUSY before staging anything; the
     // runtime's install-overlap witness stays as defense in depth and
-    // must NOT fire on this path. Which code the kernel picks for an
+    // must not fire on this path. Which code the kernel picks for an
     // occupied window is unestablished. CELL_EBUSY is CellGov's
     // choice, and a console probe of a colliding map would settle it.
     use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
@@ -413,7 +413,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
 
 #[test]
 fn lv2_memory_validation_and_commit_resolve_the_same_space() {
-    // The intent's address is mapped in boot memory but NOT in the
+    // The intent's address is mapped in boot memory but not in the
     // target space: validation must fail against the target space
     // (named invariant break, memory subset rolled back) and never
     // fall through to a commit against boot memory.

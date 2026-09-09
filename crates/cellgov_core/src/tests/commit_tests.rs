@@ -690,7 +690,7 @@ fn unknown_signal_aborts_batch_atomically() {
             signal: unknown
         }
     );
-    // The valid first update must NOT have been applied -- the
+    // The valid first update must not have been applied -- the
     // batch is atomic, all-or-nothing.
     assert_eq!(bed.signals.get(known).unwrap().value(), 0);
 }

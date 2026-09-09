@@ -23,7 +23,7 @@ pub struct ExecutionContext<'a> {
     reservations: Option<&'a ReservationTable>,
     current_tick: GuestTicks,
     /// When `true`, units that support per-instruction state
-    /// fingerprinting MUST capture `(pc, state_hash)` on every
+    /// fingerprinting must capture `(pc, state_hash)` on every
     /// retired instruction so the runtime can drain them via
     /// `drain_retired_state_hashes`.
     trace_per_step: bool,

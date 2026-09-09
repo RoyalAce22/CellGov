@@ -68,7 +68,7 @@ impl YieldReason {
     /// Whether the commit pipeline's trivial-step fast path is
     /// eligible for this yield. The fast path skips per-step LV2
     /// drain / syscall-response arbitration; a yield reason that
-    /// implies runtime arbitration (`Syscall`, `Finished`) must NOT
+    /// implies runtime arbitration (`Syscall`, `Finished`) must not
     /// take the fast path.
     pub fn allows_trivial_fast_path(&self) -> bool {
         match self {

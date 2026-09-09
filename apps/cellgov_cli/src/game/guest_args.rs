@@ -72,7 +72,7 @@ pub(crate) struct GuestArgsBlock {
 
 /// Lay out `args` below `stack_top`. Caller skips the call when
 /// `args` is empty; an empty slice here still produces a valid
-/// argc=0 block, which is NOT the no-args boot shape (r3..r6 = 0).
+/// argc=0 block, which is not the no-args boot shape (r3..r6 = 0).
 ///
 /// # Errors
 ///

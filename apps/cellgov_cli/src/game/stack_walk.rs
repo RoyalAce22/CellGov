@@ -4,7 +4,7 @@
 //! PPE 64-Bit Standard Stack Frame] and [AltiVec-PIM p:3-4 s:3.3]:
 //! SP+0 holds the back-chain pointer (caller's SP), and the function's
 //! own saved LR lives at the **caller's** SP+16 -- the prologue runs
-//! `mflr r0; std r0, 16(r1)` BEFORE `stdu r1, -frame_size(r1)`, so the
+//! `mflr r0; std r0, 16(r1)` before `stdu r1, -frame_size(r1)`, so the
 //! walker reads saved LR at `next_sp + 16` where
 //! `next_sp = *(sp+0)`.
 

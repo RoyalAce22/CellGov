@@ -334,7 +334,7 @@ fn manifest_verifier_finish_returns_unmatched_paths_in_manifest_order() {
 fn manifest_verifier_mismatch_does_not_count_as_matched() {
     let m = sample_manifest();
     let mut v = ManifestVerifier::new(&m).expect("non-empty");
-    // Wrong digest: returns Mismatch and does NOT flip matched[].
+    // Wrong digest: returns Mismatch and does not flip matched[].
     assert!(matches!(
         v.verify_one("sys/external/libfs.sprx", &[0xFF; 32]),
         VerifyOutcome::Mismatch { .. }

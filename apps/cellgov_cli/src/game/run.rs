@@ -84,8 +84,15 @@ pub(in crate::game) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &Tit
 ///
 /// # Errors
 ///
-/// Returns [`RunError::SaveObservation`] when `--save-observation`
-/// was requested but writing the JSON failed.
+/// - [`RunError::SaveObservation`] when `save_observation` is set and
+///   the save fails.
+/// - [`RunError::SaveBootSummary`] when `save_boot_summary` is set and
+///   the save fails.
+///
+/// [`observation::ObservationSaveError`] says which failures leave a
+/// partial file. The function saves the observation first, so a
+/// refused observation leaves the summary unwritten. A
+/// `--save-state-trace` write failure exits the process instead.
 pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     let RunGameOptions {
         title,

@@ -26,7 +26,7 @@ impl Lv2Host {
     /// 1. `nwrite_ptr == 0` -> `CELL_EFAULT`, no effects.
     /// 2. `buf_ptr == 0` -> `CELL_EFAULT`, 8-byte zero write to `nwrite_ptr`.
     /// 3. fd not in FsStore -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`.
-    ///    The fd gate runs BEFORE the zero-size short-circuit, so a bad
+    ///    The fd gate runs before the zero-size short-circuit, so a bad
     ///    fd is EBADF even when `size == 0`.
     /// 4. fd valid, `size == 0` -> `CELL_OK`, 8-byte zero write to `nwrite_ptr`.
     /// 5. fd valid, `size > 0` -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`,

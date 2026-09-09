@@ -399,7 +399,7 @@ pub fn is_active() -> bool {
 }
 
 /// Real NIDs the instrument is watching; empty when inactive.
-/// Raw-PC watches are pre-resolved at init and are NOT included
+/// Raw-PC watches are pre-resolved at init and are not included
 /// here -- the caller (firmware PRX-load resolution) should not
 /// look them up in the export table.
 pub fn watched_nids() -> Vec<u32> {

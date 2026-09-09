@@ -55,7 +55,7 @@ impl Lv2Host {
             }
             // Only the RECURSIVE enumerant enables re-locking;
             // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means
-            // NOT recursive, and no third value is defined.
+            // not recursive, and no third value is defined.
             match recursive_raw {
                 cellgov_ps3_abi::sys_sync::SYS_SYNC_RECURSIVE
                 | cellgov_ps3_abi::sys_sync::SYS_SYNC_NOT_RECURSIVE => {}

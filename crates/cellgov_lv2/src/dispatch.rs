@@ -20,7 +20,7 @@ use crate::sync_primitives::EventPayload;
 pub enum Lv2Dispatch {
     /// Commit `effects`, then write `code` (0 = `CELL_OK`) to r3.
     ///
-    /// Effects commit regardless of `code`, so error paths MUST emit
+    /// Effects commit regardless of `code`, so error paths must emit
     /// `effects = vec![]` -- otherwise a `SharedWriteIntent` paired
     /// with an error return still commits the write.
     Immediate {
@@ -426,7 +426,7 @@ pub enum PendingResponse {
     ///
     /// # Invariant
     /// The target mutex is alive -- `sys_mutex_destroy` /
-    /// `sys_lwmutex_destroy` MUST reject with `CELL_EBUSY` while any
+    /// `sys_lwmutex_destroy` reject with `CELL_EBUSY` while any
     /// cond waiter references it. An empty table entry at wake time
     /// is a host-level invariant break.
     CondWakeReacquire {

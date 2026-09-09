@@ -16,7 +16,7 @@ use crate::game::prx::TLS_BASE;
 /// guest args block when the caller supplied one.
 ///
 /// r3..r10 follow the PS3 LV2 process-start convention; the args-block
-/// layout lives in [`crate::game::guest_args`]. Called BEFORE the
+/// layout lives in [`crate::game::guest_args`]. Called before the
 /// primary unit is registered so `module_start` aliases bind to the
 /// real entry state.
 pub(super) fn seed_primary_entry_state(
@@ -92,7 +92,7 @@ pub(super) fn seed_primary_entry_state(
 /// Build the predecode shadow the primary unit registers with.
 ///
 /// Bounded by [`MemoryPlacement::alloc_floor`], where code stops and
-/// the heap begins. Built BEFORE `module_start`, which only mutates
+/// the heap begins. Built before `module_start`, which only mutates
 /// data segments (mutex tables, allocator state), so the shadow still
 /// holds for the title's first instruction; transient `module_start`
 /// units decode on demand.
@@ -121,7 +121,7 @@ pub(super) fn build_instruction_shadow(
 
 /// Register the title's primary unit and seed its `PpuThreadId`.
 ///
-/// Both happen BEFORE `module_start`s run: real LV2 attributes
+/// Both happen before `module_start`s run: real LV2 attributes
 /// `module_start` syscalls to the calling (primary) PPU thread, and
 /// transient `module_start` units alias to this `PpuThreadId` for
 /// caller resolution. The primary is marked non-runnable via the

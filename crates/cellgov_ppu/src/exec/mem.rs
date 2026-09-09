@@ -735,7 +735,7 @@ pub(crate) fn execute(
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-21 s:6.2] lvsl: VRT[i] = sh + i for i in 0..16, where sh = EA[60:63].
-        // Memory is NOT read; the result is a permute control vector derived from the low 4 bits of EA.
+        // Memory is not read; the result is a permute control vector derived from the low 4 bits of EA.
         PpuInstruction::Lvsl { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let sh = (base.wrapping_add(state.gpr[rb as usize]) & 0xF) as u8;
@@ -747,7 +747,7 @@ pub(crate) fn execute(
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-22 s:6.2] lvsr: VRT[i] = 16 + i - sh for i in 0..16, where sh = EA[60:63].
-        // Memory is NOT read; symmetric companion to lvsl.
+        // Memory is not read; symmetric companion to lvsl.
         PpuInstruction::Lvsr { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let sh = (base.wrapping_add(state.gpr[rb as usize]) & 0xF) as u8;

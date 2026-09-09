@@ -8,7 +8,7 @@
 //! # Validation order
 //!
 //! Per-entry: pure-shape validation (prefix and host string) runs
-//! BEFORE any I/O or env lookup, so a multi-error manifest surfaces
+//! before any I/O or env lookup, so a multi-error manifest surfaces
 //! shape problems before I/O problems.
 
 use std::path::{Path, PathBuf};
@@ -88,9 +88,8 @@ fn render_override_hint(override_env: &Option<String>) -> String {
 /// POSIX-shape resolution: leading `/` is absolute on every host;
 /// otherwise relative to `base`. Pure path arithmetic.
 ///
-/// `Path::is_absolute` is NOT used -- on Windows `/abs/path` is
-/// drive-relative, which would silently diverge from Linux and break
-/// byte-identical replay. `validate_host_shape` pre-rejects Windows-shape
+/// `Path::is_absolute` is not used: on Windows `/abs/path` is
+/// drive-relative. `validate_host_shape` pre-rejects Windows-shape
 /// inputs so they never reach this resolver.
 fn resolve_against(base: &Path, path: &str) -> PathBuf {
     if path.starts_with('/') {
@@ -115,7 +114,7 @@ fn canonicalize_existing(
     })
 }
 
-/// Pure-shape prefix validation. Runs BEFORE any I/O or env lookup.
+/// Pure-shape prefix validation. Runs before any I/O or env lookup.
 fn validate_prefix(prefix: &str) -> Result<(), MountRegisterError> {
     if prefix.is_empty() {
         return Err(MountRegisterError::InvalidPrefix {
@@ -138,7 +137,7 @@ fn validate_prefix(prefix: &str) -> Result<(), MountRegisterError> {
     Ok(())
 }
 
-/// Pure-shape host-string validation. Runs BEFORE any I/O.
+/// Pure-shape host-string validation. Runs before any I/O.
 ///
 /// Rejects: empty, any `..` segment, and non-POSIX absolute shapes
 /// (`C:\foo`, `C:/foo`, `\\server\share`).
@@ -150,7 +149,7 @@ fn validate_host_shape(prefix: &str, host: &str) -> Result<(), MountRegisterErro
             reason: "host string is empty".to_string(),
         });
     }
-    // Backslash rejection MUST precede components(): a string like
+    // Backslash rejection must precede components(): a string like
     // `foo\..\bar` parses as one Normal segment on POSIX but as
     // `[Normal, ParentDir, Normal]` on Windows, so the dotdot
     // detector would differ across platforms.

@@ -3,7 +3,7 @@
 //!
 //! Octal literals match the canonical PS3 open-flag spelling (using
 //! hex risks silent transcription errors on the order-of-magnitude
-//! nibble: `O_CREAT = 0o100 = 0x40`, NOT `0x4`).
+//! nibble: `O_CREAT = 0o100 = 0x40`, not `0x4`).
 
 /// Starting fd value the kernel hands out for file and directory
 /// opens.

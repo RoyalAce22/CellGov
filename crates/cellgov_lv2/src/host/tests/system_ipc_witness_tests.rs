@@ -357,7 +357,7 @@ fn a_second_keyed_create_on_the_same_key_is_eexist() {
 }
 
 /// Connecting by key is how a second referent reaches the queue --
-/// the path a duplicate create does NOT provide.
+/// the path a duplicate create does not provide.
 #[test]
 fn connect_ipc_resolves_a_namespace_key_and_bumps_the_connect_witness() {
     let mut host = Lv2Host::new();

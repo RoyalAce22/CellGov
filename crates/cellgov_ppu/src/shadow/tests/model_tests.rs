@@ -108,7 +108,7 @@ fn invalidate_just_consumed_widens_to_super_pair_head() {
         Some(PpuInstruction::LwzCmpwi { .. })
     ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    // Invalidate ONLY slot 4 (byte range [4..8)).
+    // Invalidate only slot 4 (byte range [4..8)).
     shadow.invalidate_range(4, 4);
     assert!(
         shadow.get(0).is_none(),
@@ -130,7 +130,7 @@ fn invalidate_just_super_pair_head_widens_to_consumed() {
         Some(PpuInstruction::LwzCmpwi { .. })
     ));
     assert_eq!(shadow.get(4), Some(PpuInstruction::Consumed));
-    // Invalidate ONLY slot 0 (byte range [0..4)).
+    // Invalidate only slot 0 (byte range [0..4)).
     shadow.invalidate_range(0, 4);
     assert!(shadow.get(0).is_none());
     assert!(

@@ -12,7 +12,7 @@ use cellgov_ps3_abi::sys_fs::{
 ///
 /// # Cross-module contract
 ///
-/// Each path in this list MUST also be registered as a synthetic
+/// Each path in this list must also be registered as a synthetic
 /// zero-byte blob in [`crate::host::Lv2Host::new`] so existence
 /// checks succeed. The `tty_sink_paths_are_pre_registered`
 /// regression test in `super::tests` pins this.

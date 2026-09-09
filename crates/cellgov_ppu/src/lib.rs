@@ -223,7 +223,7 @@ impl PpuExecutionUnit {
     /// Retirements discarded by the rollback never reach the trace
     /// stream: their `PpuStateHash` / `PpuStateFull` entries are
     /// truncated and `retirement_counter` is restored. Callers capture
-    /// diagnostics BEFORE calling this so `fault_regs` reflects the
+    /// diagnostics before calling this so `fault_regs` reflects the
     /// fault site, not the entry snapshot.
     fn discard_batch(
         &mut self,

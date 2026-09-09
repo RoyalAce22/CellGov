@@ -74,7 +74,8 @@ const BOOT_RUN_EXIT_CODES: &str = "Exit codes particular to this command:
   11  the step cap was reached before the checkpoint
   12  simulated time ran out before a terminal state
   13  the run completed but lost a syscall-wake response
-  14  a requested artifact could not be written";
+  14  a --save-observation or --save-boot-summary artifact could not
+      be produced";
 
 /// The outcomes `boot bench` has beyond the shared 0-5 contract, and
 /// how a sweep folds its cells' outcomes into one status.

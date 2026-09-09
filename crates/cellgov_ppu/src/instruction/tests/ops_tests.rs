@@ -131,7 +131,7 @@ fn vxr_rc_pairing_law() {
         }
         // Every discriminant decodes to itself with rc = false --
         // including non-VXR ops whose discriminant has bit 10 set
-        // (vand 1028, vor 1156, ...), which must NOT read as Rc
+        // (vand 1028, vor 1156, ...), which must not read as Rc
         // forms.
         assert_eq!(VxOp::decode(base), Some((op, false)));
     }

@@ -106,7 +106,6 @@ fn disassemble_marks_past_segment_end_when_outside_memsz_too() {
 /// Primary opcode 1 has no top-level arm in `cellgov_ppu::decode`
 /// and no `known_encodings` row, so any word of the form
 /// `0x04xxxxxx` returns `PpuDecodeError::EncodingNotRecognized`.
-/// 0xFFFFFFFF would NOT work -- primary 63 routes to `Fp63`.
 const UNSUPPORTED_WORD: [u8; 4] = [0x04, 0x00, 0x00, 0x00];
 
 #[test]

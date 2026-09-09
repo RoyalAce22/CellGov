@@ -410,7 +410,7 @@ impl Runtime {
     /// coverage mirrors; sub-word stores still apply to memory but
     /// leave the cursor alone.
     ///
-    /// `get` (`0xC000_0044`) is NOT mirrored here. The walker owns
+    /// `get` (`0xC000_0044`) is not mirrored here. The walker owns
     /// `get` in steady state. libgcm's published control structure
     /// carries `put`, `get` and `ref` as three separate words. In the
     /// NV4-family DMA pusher the envytools / nouveau project

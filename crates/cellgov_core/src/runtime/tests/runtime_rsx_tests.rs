@@ -261,7 +261,7 @@ fn rsx_mirror_writes_does_not_route_get_to_cursor() {
     // `put`, `get` and `ref` as three separate words. In the
     // NV4-family DMA pusher the envytools / nouveau project documents,
     // the CPU advances `put` and the engine advances `get` as it
-    // consumes commands. The mirror must NOT pull a guest
+    // consumes commands. The mirror must not pull a guest
     // SharedWriteIntent to GET_ADDR into rsx_cursor; doing so would
     // let the guest desynchronize the walker (the advance pass reads
     // `get` as its start cursor). The memory write still applies; the

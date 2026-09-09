@@ -408,7 +408,7 @@ impl ObservationCompareResult {
 /// `state_hashes` (same-runner only; see [`StateHashCompare`]), and
 /// `metadata.steps`.
 ///
-/// `tty_log` is informational and is NOT compared; cross-runner TTY
+/// `tty_log` is informational and is not compared; cross-runner TTY
 /// streams can legitimately differ in trailing newlines / framing.
 ///
 /// Per region, all differing bytes are recorded as coalesced runs;

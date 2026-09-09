@@ -598,7 +598,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         }
         // [PPC-Book1 p:70 s:3.3.13] popcntb is defined by Book I, but
         // [CBE-Handbook p:738 s:A.2.4.1] lists it as one of the Book-I
-        // instructions the Cell PPE does NOT implement; real hardware
+        // instructions the Cell PPE does not implement; real hardware
         // traps. The oracle mirrors the PPE by faulting rather than
         // computing a per-byte popcount.
         PpuInstruction::Popcntb { ra: _, rs: _ } => {
@@ -858,7 +858,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // would not have surfaced through any prior GPR diff. If
         // this assert ever trips, reopen the exclusion decision
         // (see the VRSAVE note in state.rs) before trusting the
-        // title's differential results. NOT a fault: reading
+        // title's differential results. This is not a fault: reading
         // VRSAVE before writing is legal PPC; faulting would
         // impersonate a non-existent architectural error.
         //

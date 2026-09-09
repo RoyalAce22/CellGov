@@ -26,7 +26,7 @@
 //! it and no test here asserts it. The process capture prints no
 //! errno at all.
 //!
-//! What the captures do NOT settle stays out: no test here claims a
+//! What the captures do not settle stays out: no test here claims a
 //! gate order. Every line that passes a bad id passes arguments that
 //! are otherwise legal, so those lines pin an answer without ordering
 //! two gates. Two such arguments recur:

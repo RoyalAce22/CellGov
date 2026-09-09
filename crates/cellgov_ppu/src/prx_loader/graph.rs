@@ -46,7 +46,7 @@ pub struct DependencyGraph {
 /// participate in a cycle: members of any strongly-connected
 /// component of size >= 2, plus any node with a self-loop. Innocent
 /// downstream consumers of cycle members (e.g., `C` in `A -> B -> A,
-/// A -> C`) are NOT reported.
+/// A -> C`) are not reported.
 ///
 /// # Self-imports
 ///

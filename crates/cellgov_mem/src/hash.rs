@@ -49,13 +49,11 @@ impl Fnv1aHasher {
     /// Return the current hash value. Borrows so an in-progress hash
     /// can be observed without consuming the hasher.
     ///
-    /// Deliberately does not implement `core::hash::Hasher`: the trait's
-    /// default `write_u32` / `write_u64` / `write_usize` shims call
-    /// `to_ne_bytes`, which would silently diverge between LE and BE
-    /// hosts and undermine the determinism contract this module
-    /// promises. Callers feeding multi-byte values must serialize them
-    /// in a fixed byte order (CellGov uses little-endian) before
-    /// invoking [`Self::write`].
+    /// This type is not a `core::hash::Hasher`: that trait's default
+    /// `write_u32` / `write_u64` / `write_usize` call `to_ne_bytes`,
+    /// which differs between LE and BE hosts. Callers feeding
+    /// multi-byte values must serialize them in a fixed byte order
+    /// (CellGov uses little-endian) before invoking [`Self::write`].
     #[inline]
     pub fn finish(&self) -> u64 {
         self.state

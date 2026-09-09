@@ -1512,7 +1512,7 @@ impl PpuInstruction {
     /// Whether this instruction is a fused 2-instruction super-pair
     /// requiring a [`PpuInstruction::Consumed`] placeholder at PC+4.
     /// One-instruction quickenings (`Li`, `Slwi`, `Srwi`, `Clrlwi`)
-    /// are NOT super-pairs.
+    /// are not super-pairs.
     ///
     /// Exhaustive: every variant must declare its super-pair status
     /// at compile time. Producer side lives in
@@ -1749,7 +1749,7 @@ impl PpuInstruction {
     /// Whether this variant is a decode-only stub: the decoder
     /// produced it (so the scan counts it as "accepted") but the
     /// executor will fault via `UnimplementedInstruction` for at
-    /// least some sub-opcodes. New typed variants are NOT stubs by
+    /// least some sub-opcodes. New typed variants are not stubs by
     /// default; the predicate names the catch-all family-dispatch
     /// variants explicitly.
     ///

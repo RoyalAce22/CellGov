@@ -91,8 +91,7 @@ pub fn spr_gap(direction: SprDirection, spr: u16) -> Option<SprGap> {
 /// Table 1: documented `(primary, xo)` encodings the decoder
 /// cannot yet handle.
 ///
-/// MUST stay sorted by `(primary, xo)`; [`opcode_gap`] is a binary
-/// search.
+/// Sorted by `(primary, xo)`; [`opcode_gap`] is a binary search.
 pub const OPCODE_GAPS: &[OpcodeGap] = &[];
 
 // The primary-4 VX / VA gate directories formerly here
@@ -105,7 +104,7 @@ pub const OPCODE_GAPS: &[OpcodeGap] = &[];
 /// the read for. The XFX opcode itself is decoded (XO 339); the
 /// SPR selector is what's missing.
 ///
-/// MUST stay sorted by `spr`; [`spr_gap`] is a binary search.
+/// Sorted by `spr`; [`spr_gap`] is a binary search.
 pub const MFSPR_GAPS: &[SprGap] = &[
     SprGap {
         spr: 18,
@@ -167,7 +166,7 @@ pub const MFTB_GAPS: &[SprGap] = &[];
 /// implement the write for. Mirrors [`MFSPR_GAPS`]'s structure;
 /// the entries differ because some SPRs are read-only.
 ///
-/// MUST stay sorted by `spr`; [`spr_gap`] is a binary search.
+/// Sorted by `spr`; [`spr_gap`] is a binary search.
 pub const MTSPR_GAPS: &[SprGap] = &[
     SprGap {
         spr: 18,

@@ -205,7 +205,7 @@ fn clear_covering_spanning_write_clears_all_covered_lines() {
 fn clear_covering_write_ending_at_next_line_start_does_not_touch_it() {
     // Boundary pin: a 256-byte write at 0x1000 covers bytes
     // [0x1000, 0x10FF], so it touches lines 0x1000 and 0x1080 but
-    // NOT 0x1100.
+    // not 0x1100.
     let mut t = ReservationTable::new();
     t.insert_or_replace(unit(1), ReservedLine::containing(0x1000));
     t.insert_or_replace(unit(2), ReservedLine::containing(0x1080));

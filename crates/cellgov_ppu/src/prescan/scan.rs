@@ -179,7 +179,7 @@ pub struct ElfTextCoverage {
 /// walk" from "could not run."
 ///
 /// The scan reads program-header offsets out of the loader-validated
-/// `LoadSegment` list; it does NOT need guest memory or a runtime.
+/// `LoadSegment` list; it does not need guest memory or a runtime.
 /// Trailing bytes that don't form a full 32-bit word are ignored per
 /// [`scan_be_bytes`].
 pub fn scan_elf_text(elf_data: &[u8]) -> Result<(PrescanReport, ElfTextCoverage), PrescanError> {

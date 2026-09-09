@@ -21,7 +21,7 @@ impl Lv2Host {
     /// 1. `nread_out_ptr` misaligned / unwritable -> CELL_EFAULT.
     /// 2. Unknown `fd` -> CELL_EBADF.
     /// 3. `nbytes > 0` and `buf_ptr` unwritable -> CELL_EFAULT. Checked
-    ///    BEFORE the FS layer advances the offset (POSIX: a failed
+    ///    before the FS layer advances the offset (POSIX: a failed
     ///    read leaves the file position unchanged).
     /// 4. Otherwise CELL_OK with up to two effects (buffer write only
     ///    if bytes were returned, plus the nread write).

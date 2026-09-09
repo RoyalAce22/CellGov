@@ -209,7 +209,7 @@ fn primary_zero_always_rejects_as_encoding_not_recognized() {
 #[test]
 fn primary4_unknown_vx_xo_rejects_does_not_fabricate_stub() {
     // The decoder previously routed any primary-4 word with
-    // xo_6 NOT in 0x20..=0x2F through `_ => Ok(Vx { xo })`,
+    // xo_6 not in 0x20..=0x2F through `_ => Ok(Vx { xo })`,
     // silently fabricating a typed stub for AltiVec-PEM
     // unmapped encodings. After S1 the catch-all is bounded
     // by KNOWN_VX_XOS. Pick xo_11=1 (odd low value, no PEM
@@ -266,7 +266,7 @@ fn srawi_sradi_xo10_keys_do_not_collide_with_xo9_first_pass() {
     // on miss it falls through to the 10-bit XO match where
     // srawi (824), sradi (826/827) live. The fall-through only
     // works because 824, 826, 827 mask to xo_9 projections
-    // (312, 314, 315) that are NOT in the xo_9 first-pass arms.
+    // (312, 314, 315) that are not in the xo_9 first-pass arms.
     // This test pins that non-collision: if a future arm adds
     // xo_9 = 312/314/315, srawi/sradi will silently decode as
     // the wrong instruction.

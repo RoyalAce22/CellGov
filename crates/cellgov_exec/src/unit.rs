@@ -131,7 +131,7 @@ pub trait ExecutionUnit {
     ///
     /// Any unit that caches decoded instructions, a translation-block
     /// index, a shadow PC ring, or anything else derived from guest
-    /// code MUST override this to mark affected slots stale; the
+    /// code must override this to mark affected slots stale; the
     /// default no-op is correct only for units that derive nothing
     /// from guest code (synthetic / scenario units).
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}

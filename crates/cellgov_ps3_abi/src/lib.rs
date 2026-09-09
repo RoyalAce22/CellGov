@@ -66,7 +66,7 @@ macro_rules! nid_const {
 /// `stub_classification_explicit`" contract.
 ///
 /// The optional `unclassified { ... }` block emits the same per-NID
-/// `pub const` declarations but does NOT include them in
+/// `pub const` declarations but does not include them in
 /// `CLASSIFIED_NIDS`; use it for NIDs defined at a typed callsite
 /// that have not yet been reviewed for a stub-class verdict. Such
 /// NIDs keep surfacing through the unclaimed-NID log path until a
@@ -93,7 +93,7 @@ macro_rules! nid_module {
 
         /// NIDs grouped under this module that must classify
         /// explicitly in `cellgov_ps3_abi::nid::stub_classification_explicit`
-        /// (i.e. NOT fall to the default `NoopSafe` catch-all). The
+        /// (i.e. not fall to the default `NoopSafe` catch-all). The
         /// test `nid::tests::every_classified_nid_has_explicit_arm`
         /// walks every module's slice to enforce the contract.
         ///

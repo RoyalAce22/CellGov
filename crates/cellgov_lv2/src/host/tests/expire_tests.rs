@@ -683,7 +683,7 @@ fn cond_timeout_with_contended_mutex_reparks_untimed() {
         sleeper,
         cellgov_time::GuestTicks::ZERO,
     );
-    // ETIMEDOUT is staged but the unit is NOT woken: it waits
+    // ETIMEDOUT is staged but the unit is not woken: it waits
     // untimed on the mutex and returns holding it after the unlock.
     assert!(out.woken_unit_ids.is_empty());
     assert_eq!(

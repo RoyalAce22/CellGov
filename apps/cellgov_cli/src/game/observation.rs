@@ -75,7 +75,16 @@ pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
     max_end
 }
 
-/// Why writing the boot-checkpoint observation JSON failed.
+/// Why the save of a boot-checkpoint observation or a boot summary failed.
+///
+/// Three variants return before the save creates any file:
+///
+/// - [`PtLoadEnum`](Self::PtLoadEnum)
+/// - [`Region`](Self::Region)
+/// - [`InvalidBootSummary`](Self::InvalidBootSummary)
+///
+/// Every other variant fails at or after file creation, so a partial
+/// file may remain at the path.
 #[derive(Debug, thiserror::Error)]
 pub enum ObservationSaveError {
     /// Enumerating PT_LOAD segments from the ELF failed.
@@ -112,7 +121,8 @@ pub enum ObservationSaveError {
     /// checkpoint/outcome/steps tuple.
     #[error("invalid boot summary: {0}")]
     InvalidBootSummary(#[source] cellgov_compare::BootSummaryError),
-    /// A manifest region the extractor refused.
+    /// A region the extractor refused, whether the manifest named it
+    /// or it was a PT_LOAD default.
     #[error("{0}")]
     Region(#[from] cellgov_compare::RegionExtractError),
 }
@@ -146,8 +156,12 @@ pub(super) struct ObservationInputs<'a> {
 ///
 /// # Errors
 ///
+/// - [`ObservationSaveError::PtLoadEnum`] when no manifest named the
+///   regions and `elf_data` enumerates no PT_LOAD table. The function
+///   creates no file in that case.
 /// - [`ObservationSaveError::Region`] when the extractor refuses a
-///   manifest region. The function creates no file in that case.
+///   region, manifest-named or PT_LOAD default. The function creates
+///   no file in that case.
 /// - Another [`ObservationSaveError`] variant on an I/O or
 ///   serialization failure.
 pub(super) fn save_boot_observation(
@@ -237,9 +251,11 @@ fn checkpoint_to_kind(cp: super::manifest::CheckpointTrigger) -> cellgov_compare
 ///
 /// # Errors
 ///
-/// Returns `Err(message)` on any I/O or serialization failure, or
-/// if the checkpoint/outcome pair is inconsistent (see
-/// [`cellgov_compare::BootSummaryError`]).
+/// - [`ObservationSaveError::InvalidBootSummary`] when the
+///   checkpoint/outcome pair is inconsistent or `steps * budget`
+///   overflows `u64`. The function creates no file in that case.
+/// - Another [`ObservationSaveError`] variant on an I/O or
+///   serialization failure.
 pub(super) fn save_boot_summary_json(
     path: &str,
     title: &super::manifest::TitleManifest,
@@ -290,3 +306,7 @@ mod refusal_tests;
 #[cfg(test)]
 #[path = "tests/observation_provisional_tests.rs"]
 mod provisional_tests;
+
+#[cfg(test)]
+#[path = "tests/observation_prewrite_refusal_tests.rs"]
+mod prewrite_refusal_tests;

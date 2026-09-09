@@ -200,7 +200,7 @@ impl StubClass {
 /// total form for consumers (e.g. `dev prx-imports`) that just want
 /// a label.
 ///
-/// NOT a dispatch table. The project does not substitute Rust
+/// The project does not substitute Rust
 /// handlers for PRX libraries; PRX-side surfaces are bound via
 /// `cellgov_ppu::prx_loader::patch_imports_against` to firmware
 /// OPDs at boot.

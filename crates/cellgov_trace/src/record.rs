@@ -389,7 +389,7 @@ pub enum TraceRecord {
         /// Category of the break.
         reason: TracedInvariantBreakReason,
     },
-    /// One record per syscall entry, emitted by the runtime BEFORE
+    /// One record per syscall entry, emitted by the runtime before
     /// `Lv2Host::dispatch` runs (or, for the `TIMER_USLEEP` /
     /// `TIMER_SLEEP` fast-path, before guest-time advance).
     SyscallEntered {

@@ -257,7 +257,7 @@ fn mutex_create_decodes_attr_ptr() {
 
 #[test]
 fn a_not_recursive_attr_creates_a_non_recursive_mutex() {
-    // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means NOT
+    // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means not
     // recursive; only SYS_SYNC_RECURSIVE (0x10) enables re-locking.
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
     let attr_bytes = [

@@ -59,8 +59,10 @@ const EXIT_RUN_GAME_TIME_OVERFLOW: i32 = exit_codes::command_specific(12);
 /// `boot run` completed but the loop logged an anomaly that violates
 /// the determinism contract (lost syscall-wake responses).
 const EXIT_RUN_GAME_CRITICAL_ANOMALY: i32 = exit_codes::command_specific(13);
-/// A `--save-observation` / `--save-boot-summary` artifact was
-/// requested but writing its JSON failed.
+/// `boot run` failed to save a requested `--save-observation` /
+/// `--save-boot-summary` artifact; `ObservationSaveError` says which
+/// failures leave a partial file. A `--save-state-trace` write failure
+/// takes the shared failed status instead.
 const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = exit_codes::command_specific(14);
 
 /// Resolve `--fw`, `--game-ver` and `--firmware-dir` against the

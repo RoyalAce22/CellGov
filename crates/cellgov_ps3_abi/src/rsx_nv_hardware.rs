@@ -16,7 +16,7 @@ pub const CELL_GCM_DISPLAY_FLIP_STATUS_WAITING: u8 = 1;
 
 // NVIDIA RSX command header bit flags / shifts / masks.
 
-/// Header bit: arguments do NOT increment the method register.
+/// Header bit: arguments do not increment the method register.
 pub const NV_FLAG_NON_INCREMENT: u32 = 0x4000_0000;
 
 /// Header bit: this header is a JUMP (FIFO control transfer).

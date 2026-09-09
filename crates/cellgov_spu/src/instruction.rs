@@ -139,7 +139,7 @@ pub enum SpuInstruction {
         /// 10-bit signed immediate.
         imm: i16,
     },
-    /// NOR: rt = ~(ra | rb). Used as NOT when ra == rb.
+    /// NOR: rt = ~(ra | rb). Used as `NOT` when ra == rb.
     Nor {
         /// Destination register.
         rt: u8,

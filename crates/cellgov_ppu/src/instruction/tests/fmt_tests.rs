@@ -259,7 +259,7 @@ fn fmt_branch_nonzero_bi_on_ignored_field_stays_canonical() {
 fn fmt_nop_li_lis() {
     // [PPC-Book1 p:162 s:B.9] nop = ori 0,0,0.
     assert_eq!(fmt(0x6000_0000), "nop");
-    // ori with any nonzero field is NOT nop.
+    // ori with any nonzero field is not nop.
     assert_eq!(fmt(enc_d(24, 0, 0, 1)), "ori        r0, r0, 0x1");
     // li r3, -1 = addi r3, 0, -1.
     assert_eq!(fmt(enc_d(14, 3, 0, 0xFFFF)), "li         r3, -1");

@@ -150,7 +150,7 @@ fn bc_beq_not_taken() {
 
 #[test]
 fn bca_branches_to_absolute_address() {
-    // bca with aa=true: target is sign-extended BD || 0b00, NOT
+    // bca with aa=true: target is sign-extended BD || 0b00, not
     // PC + BD. A regression that ignored aa would compute
     // 0x2000 + 0x100 = 0x2100 instead of 0x100.
     let mut s = PpuState::new();
