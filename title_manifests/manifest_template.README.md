@@ -299,13 +299,6 @@ kind = "process-exit"
 [rsx]
 mirror = true
 
-[content]
-override_base_env = "CELLGOV_<CONTENT_ID>_CONTENT_DIR"
-files = [
-    { guest_path = "/app_home/Data/Resources/first.xml",  host_path = "Data/Resources/first.xml" },
-    { guest_path = "/app_home/Data/Local/Localization.xml", host_path = "Data/Local/Localization.xml" },
-]
-
 [[fs.mounts]]
 prefix = "/app_home"
 override_env = "CELLGOV_<CONTENT_ID>_CONTENT_DIR"
@@ -316,10 +309,12 @@ something other than `first-rsx-write`; `process-exit` is the
 usual choice for titles whose boot path probes for
 unpopulated out-params and bails.
 
-Both blocks above read from the installed title's own USRDIR: the
-content entries resolve under the EBOOT's directory, and the
-`/app_home` mount, declaring no `host`, maps to that same directory.
-The one env var redirects both.
+The `/app_home` mount, declaring no `host`, maps to the installed
+title's own USRDIR, so every file the resource loader opens under
+that prefix is served from the EBOOT's directory on demand. A
+`[content]` block naming the same files would register the same
+bytes ahead of the mount and change nothing the guest observes; it
+is for a blob the guest opens at a path no mount serves.
 
 ## Adding a new title
 
