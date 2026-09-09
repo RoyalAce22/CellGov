@@ -69,7 +69,9 @@ The directory comes from the install record under
 `<vfs>/.cellgov/installs/firmware/`, so it follows a relocated or
 re-versioned entry; a store with no firmware entry, or one whose tree
 is gone, refuses the boot instead of running without firmware, and a
-store holding several refuses until `--fw` names one. A root still
+store holding several refuses until `--fw` names one or the title's
+record names the firmware its disc shipped
+([title_harness.md](title_harness.md#version-selection)). A root still
 holding the layout that came before the store -- a flash mount at the
 root, or a record filed where the store files none -- is refused by
 name, listing what to remove and the install command that rebuilds it.

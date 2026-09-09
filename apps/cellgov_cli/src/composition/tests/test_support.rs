@@ -62,7 +62,20 @@ impl SyntheticStore {
     /// backs. The tree's PARAM.SFO declares `version` under `APP_VER`,
     /// the shape a real install leaves, and no `PS3_SYSTEM_VER`.
     pub(super) fn add_base(&self, title_id: &str, version: &str, disc: bool) -> &Self {
-        self.write_base(title_id, version, disc, None)
+        self.write_base(title_id, version, disc, None, None)
+    }
+
+    /// Install a disc title's base tree whose record names `shipped` as
+    /// the firmware its disc shipped, as a disc install that registered
+    /// its PUP writes it. The test adds the firmware entry itself, or
+    /// leaves it out.
+    pub(super) fn add_disc_base_shipping(
+        &self,
+        title_id: &str,
+        version: &str,
+        shipped: &str,
+    ) -> &Self {
+        self.write_base(title_id, version, true, None, Some(shipped))
     }
 
     /// Install a title's base tree whose PARAM.SFO declares
@@ -75,7 +88,7 @@ impl SyntheticStore {
         disc: bool,
         system_ver: &str,
     ) -> &Self {
-        self.write_base(title_id, version, disc, Some(system_ver))
+        self.write_base(title_id, version, disc, Some(system_ver), None)
     }
 
     fn write_base(
@@ -84,6 +97,7 @@ impl SyntheticStore {
         version: &str,
         disc: bool,
         system_ver: Option<&str>,
+        shipped_firmware: Option<&str>,
     ) -> &Self {
         let (distribution, store_path) = if disc {
             ("disc-iso", format!("titles/{title_id}/base/disc"))
@@ -92,7 +106,10 @@ impl SyntheticStore {
         };
         let declared = system_ver
             .map(|v| format!("system_ver = \"{v}\"\n"))
-            .unwrap_or_default();
+            .unwrap_or_default()
+            + &shipped_firmware
+                .map(|v| format!("shipped_firmware = \"{v}\"\n"))
+                .unwrap_or_default();
         let record = format!(
             "format_version = 3\n\n\
              [artifact]\n\

@@ -87,10 +87,11 @@ A disc ships the PUP its floor names in `PS3_UPDATE/PS3UPDAT.PUP`. The
 disc install registers it as an ordinary `firmware/<version>` entry --
 validated and its version read in place, unpacked only when the store
 records no entry under that version -- and writes the version on the
-title record as `[title] shipped_firmware`. One dump of one disc is
-then a closed fixture: executable, data, and the system software it was
-certified against. A network title states the same floor and ships
-nothing to satisfy it.
+title record as `[title] shipped_firmware`, and a boot of that title
+with no `--fw` selects it. One dump of one disc is then a closed
+fixture: executable, data, and the system software it was certified
+against. A network title states the same floor and ships nothing to
+satisfy it.
 
 [titles.md](../titles.md) tracks per-title status (boot checkpoint
 reached, cross-runner observation match), one row per game title at its
@@ -326,6 +327,19 @@ candidate, and no flag with zero or several refuses and lists what is
 installed. There is no `latest` -- a lexical winner would decide
 silently which of two versions a measurement was taken against, and
 version strings are compared verbatim rather than normalized.
+
+A disc title has its firmware candidate before the count is taken.
+Its record names the version the disc shipped, so with no `--fw` that
+version selects whatever else the store holds, and the banner says so
+(`firmware 3.55  (shipped with this disc; ...)`). A recorded version
+that is no longer installed is refused by name, with the disc reinstall
+and the firmware install as the ways back, rather than replaced by
+whichever firmware happens to be the only one left. A disc whose record
+names none -- installed before the record carried the field, carrying
+no update package, or installed with `--no-firmware` -- and every
+network title take the count. Nothing prompts: the
+refusal that lists what is installed and names `--fw` is the question,
+because the boot commands run headless, under `boot bench`, and in CI.
 
 `--game-ver` is refused for a `firmware-exec` title: its executable
 ships inside the firmware, so its version axis is the firmware axis

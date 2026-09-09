@@ -132,9 +132,9 @@ pub(super) fn try_resolve_composition(
 /// from, or `None` for a boot with no firmware.
 pub(super) fn firmware_module_dir(composition: &BootComposition) -> Option<String> {
     let dir = match &composition.firmware {
-        FirmwareChoice::Managed(entry) => FIRMWARE_EXTERNAL
+        FirmwareChoice::Managed(managed) => FIRMWARE_EXTERNAL
             .iter()
-            .fold(entry.dev_flash_dir(), |d, part| d.join(part)),
+            .fold(managed.entry.dev_flash_dir(), |d, part| d.join(part)),
         // `--firmware-dir` names a `sys/external` tree directly, so
         // this arm joins nothing onto it.
         FirmwareChoice::Unmanaged { dir } => dir.clone(),
@@ -750,3 +750,7 @@ mod composition_wiring_tests;
 #[cfg(test)]
 #[path = "tests/boot_run_finish_line_tests.rs"]
 mod boot_run_finish_line_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_firmware_cell_tests.rs"]
+mod shipped_firmware_cell_tests;

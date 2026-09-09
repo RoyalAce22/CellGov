@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use super::*;
 use crate::composition::compose::GameChoice;
 use crate::composition::inventory::FirmwareEntry;
+use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
 
 fn selection(fw: Option<&str>, game_ver: Option<&str>, dir: Option<&str>) -> BootSelection {
     BootSelection {
@@ -17,10 +18,13 @@ fn selection(fw: Option<&str>, game_ver: Option<&str>, dir: Option<&str>) -> Boo
 
 fn managed(entry_dir: &str) -> BootComposition {
     BootComposition {
-        firmware: FirmwareChoice::Managed(FirmwareEntry {
-            version: "4.93".to_string(),
-            entry_dir: PathBuf::from(entry_dir),
-            pup_sha256: "0".repeat(64),
+        firmware: FirmwareChoice::Managed(ManagedFirmware {
+            entry: FirmwareEntry {
+                version: "4.93".to_string(),
+                entry_dir: PathBuf::from(entry_dir),
+                pup_sha256: "0".repeat(64),
+            },
+            selected_by: FirmwareSelectedBy::Flag,
         }),
         game: GameChoice::Unstored,
         mounts: Vec::new(),

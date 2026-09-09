@@ -70,10 +70,11 @@ fn render_game(composition: &BootComposition) -> String {
 
 fn render_firmware(firmware: &FirmwareChoice) -> String {
     match firmware {
-        FirmwareChoice::Managed(entry) => format!(
-            "firmware {}  (pup sha256 {})",
-            entry.version,
-            short_digest(&entry.pup_sha256)
+        FirmwareChoice::Managed(managed) => format!(
+            "firmware {}  ({}; pup sha256 {})",
+            managed.entry.version,
+            managed.selected_by,
+            short_digest(&managed.entry.pup_sha256)
         ),
         FirmwareChoice::Unmanaged { dir } => {
             format!("firmware unmanaged  {}", dir.display())

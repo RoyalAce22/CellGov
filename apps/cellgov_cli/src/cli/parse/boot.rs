@@ -54,8 +54,10 @@ pub(crate) struct TitleSelector {
 /// Which firmware and which content version the store composes.
 #[derive(Debug, Clone, clap::Args)]
 pub(crate) struct BootSelection {
-    /// Installed firmware version; may be omitted when exactly one is
-    /// a candidate.
+    /// Installed firmware version. Without it, a disc title boots the
+    /// firmware its record says it shipped with. Any other title, or a
+    /// disc whose record names none, boots the only installed firmware.
+    /// With none or several installed, the store refuses.
     #[arg(long, value_name = "VERSION")]
     pub fw: Option<String>,
     /// Installed content version; may be omitted when exactly one is a

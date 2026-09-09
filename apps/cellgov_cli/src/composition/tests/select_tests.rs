@@ -11,14 +11,15 @@ fn inventory(store: &SyntheticStore) -> StoreInventory {
 fn one_installed_firmware_is_selected_without_the_flag() {
     let store = SyntheticStore::new("sel_fw_one");
     store.add_firmware("4.93", true);
-    let entry = select_firmware(&inventory(&store), None, DISABLE_ENV).unwrap();
-    assert_eq!(entry.version, "4.93");
+    let selected = select_firmware(&inventory(&store), None, None, DISABLE_ENV).unwrap();
+    assert_eq!(selected.entry.version, "4.93");
+    assert_eq!(selected.selected_by, FirmwareSelectedBy::Sole);
 }
 
 #[test]
 fn no_installed_firmware_names_the_install_command_and_the_opt_out() {
     let store = SyntheticStore::new("sel_fw_none");
-    let err = select_firmware(&inventory(&store), None, DISABLE_ENV).unwrap_err();
+    let err = select_firmware(&inventory(&store), None, None, DISABLE_ENV).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("no firmware is installed"), "got: {msg}");
     assert!(msg.contains(DISABLE_ENV), "got: {msg}");
@@ -29,7 +30,7 @@ fn several_installed_firmwares_refuse_and_list_them() {
     let store = SyntheticStore::new("sel_fw_many");
     store.add_firmware("3.55", true);
     store.add_firmware("4.91", true);
-    let err = select_firmware(&inventory(&store), None, DISABLE_ENV).unwrap_err();
+    let err = select_firmware(&inventory(&store), None, None, DISABLE_ENV).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("3.55, 4.91"), "got: {msg}");
     assert!(msg.contains("--fw"), "got: {msg}");
@@ -40,15 +41,16 @@ fn the_flag_picks_one_of_several() {
     let store = SyntheticStore::new("sel_fw_pick");
     store.add_firmware("3.55", true);
     store.add_firmware("4.91", true);
-    let entry = select_firmware(&inventory(&store), Some("3.55"), DISABLE_ENV).unwrap();
-    assert_eq!(entry.version, "3.55");
+    let selected = select_firmware(&inventory(&store), Some("3.55"), None, DISABLE_ENV).unwrap();
+    assert_eq!(selected.entry.version, "3.55");
+    assert_eq!(selected.selected_by, FirmwareSelectedBy::Flag);
 }
 
 #[test]
 fn fw_naming_an_uninstalled_version_lists_the_installed_ones() {
     let store = SyntheticStore::new("sel_fw_miss");
     store.add_firmware("4.91", true);
-    let err = select_firmware(&inventory(&store), Some("4.93"), DISABLE_ENV).unwrap_err();
+    let err = select_firmware(&inventory(&store), Some("4.93"), None, DISABLE_ENV).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("\"4.93\" is not installed"), "got: {msg}");
     assert!(msg.contains("installed: 4.91"), "got: {msg}");
@@ -58,7 +60,7 @@ fn fw_naming_an_uninstalled_version_lists_the_installed_ones() {
 fn a_recorded_firmware_whose_tree_is_gone_is_refused() {
     let store = SyntheticStore::new("sel_fw_gone");
     store.add_firmware("4.93", false);
-    let err = select_firmware(&inventory(&store), None, DISABLE_ENV).unwrap_err();
+    let err = select_firmware(&inventory(&store), None, None, DISABLE_ENV).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("4.93 is recorded"), "got: {msg}");
     assert!(msg.contains("is missing"), "got: {msg}");

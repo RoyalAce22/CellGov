@@ -100,7 +100,7 @@ pub(crate) enum Command {
     #[command(name = "self")]
     SelfCmd(SelfCommand),
     /// Boot a title through the deterministic runtime.
-    #[command(subcommand)]
+    #[command(subcommand, after_help = FIRMWARE_SELECTION)]
     Boot(BootCommand),
     /// Compare two runs.
     #[command(subcommand)]
@@ -114,6 +114,20 @@ pub(crate) enum Command {
     #[command(subcommand)]
     Dev(DevCommand),
 }
+
+/// How every boot-family command picks its firmware.
+const FIRMWARE_SELECTION: &str = "Firmware selection:
+  --fw names an installed version and outranks the record. Without it,
+  a disc title boots the firmware its install record says it shipped
+  with. When the store does not hold that version, it refuses by name.
+  Any other title, and a disc whose record names none, boots the only
+  installed firmware. With none or several installed, the store
+  refuses. A disc record names none when:
+    - the disc carried no update package;
+    - the install declined it;
+    - the record is older than the field.
+  Nothing prompts. --firmware-dir names a tree outside the store and
+  marks the run unmanaged.";
 
 /// `cellgov boot ...`
 #[derive(Debug, Subcommand)]

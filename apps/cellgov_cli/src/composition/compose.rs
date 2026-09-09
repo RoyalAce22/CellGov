@@ -259,16 +259,19 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
             dir: dir.to_path_buf(),
         },
         (None, true) => FirmwareChoice::None,
-        (None, false) => {
-            FirmwareChoice::Managed(select_firmware(&inventory, inputs.fw, inputs.disable_env)?)
-        }
+        (None, false) => FirmwareChoice::Managed(select_firmware(
+            &inventory,
+            inputs.fw,
+            shipped_firmware(&inventory, inputs.title),
+            inputs.disable_env,
+        )?),
     };
 
     let mut mounts = Vec::new();
-    if let FirmwareChoice::Managed(entry) = &firmware {
+    if let FirmwareChoice::Managed(managed) = &firmware {
         mounts.push(ComposedMount {
             prefix: GUEST_FLASH_MOUNT.to_string(),
-            roots: vec![entry.dev_flash_dir()],
+            roots: vec![managed.entry.dev_flash_dir()],
         });
     }
 
@@ -317,6 +320,23 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
     })
 }
 
+/// The firmware version the title's disc shipped, when its base record
+/// names one.
+///
+/// A title that ships inside the firmware has no record to name one,
+/// and its version axis is the firmware's.
+fn shipped_firmware<'a>(inventory: &'a StoreInventory, title: &TitleManifest) -> Option<&'a str> {
+    if matches!(title.source, GameSource::FirmwareExec { .. }) {
+        return None;
+    }
+    inventory
+        .title(&title.content_id)?
+        .base
+        .as_ref()?
+        .shipped_firmware
+        .as_deref()
+}
+
 /// Apply the selection contract to the title's own version axis.
 fn resolve_game(
     inputs: &ComposeInputs<'_>,
@@ -334,8 +354,8 @@ fn resolve_game(
         // entry, so one manifest boots against every installed
         // firmware. Anything else keeps the path the manifest named.
         return match firmware {
-            FirmwareChoice::Managed(entry) if dir.is_relative() => Ok(GameChoice::Firmware {
-                dir: entry.entry_dir.join(dir),
+            FirmwareChoice::Managed(managed) if dir.is_relative() => Ok(GameChoice::Firmware {
+                dir: managed.entry.entry_dir.join(dir),
                 unmanaged_path: false,
             }),
             // An absolute path names its own tree, so it needs no
@@ -575,3 +595,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/firmware_floor_tests.rs"]
 mod firmware_floor_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_firmware_tests.rs"]
+mod shipped_firmware_tests;

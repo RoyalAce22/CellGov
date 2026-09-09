@@ -145,7 +145,9 @@ pub(crate) fn run_identity(
 ) -> Result<RunIdentity, IdentityError> {
     Ok(RunIdentity {
         firmware: match firmware {
-            FirmwareChoice::Managed(entry) => Some(firmware_identity(entry).map_err(Box::new)?),
+            FirmwareChoice::Managed(managed) => {
+                Some(firmware_identity(&managed.entry).map_err(Box::new)?)
+            }
             FirmwareChoice::Unmanaged { .. } | FirmwareChoice::None => None,
         },
         game: match game {

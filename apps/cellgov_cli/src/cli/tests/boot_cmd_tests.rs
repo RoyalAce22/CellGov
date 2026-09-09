@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use super::*;
 use crate::composition::compose::StoredGame;
 use crate::composition::inventory::{BaseEntry, FirmwareEntry};
+use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
 use crate::game::manifest::{CellExpectation, MatrixCell};
 
 fn manifest(
@@ -65,10 +66,13 @@ fn composition(firmware: FirmwareChoice, game: GameChoice) -> BootComposition {
 }
 
 fn managed(version: &str) -> FirmwareChoice {
-    FirmwareChoice::Managed(FirmwareEntry {
-        version: version.to_string(),
-        entry_dir: PathBuf::from("store/firmware"),
-        pup_sha256: "0".repeat(64),
+    FirmwareChoice::Managed(ManagedFirmware {
+        entry: FirmwareEntry {
+            version: version.to_string(),
+            entry_dir: PathBuf::from("store/firmware"),
+            pup_sha256: "0".repeat(64),
+        },
+        selected_by: FirmwareSelectedBy::Flag,
     })
 }
 

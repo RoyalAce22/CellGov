@@ -649,6 +649,21 @@ Boot a title through the deterministic runtime.
 Usage: cellgov boot [OPTIONS] <COMMAND>
 ```
 
+```
+Firmware selection:
+  --fw names an installed version and outranks the record. Without it,
+  a disc title boots the firmware its install record says it shipped
+  with. When the store does not hold that version, it refuses by name.
+  Any other title, and a disc whose record names none, boots the only
+  installed firmware. With none or several installed, the store
+  refuses. A disc record names none when:
+    - the disc carried no update package;
+    - the install declined it;
+    - the record is older than the field.
+  Nothing prompts. --firmware-dir names a tree outside the store and
+  marks the run unmanaged.
+```
+
 #### `cellgov boot run`
 
 Boot a title and report where it stopped.
@@ -672,7 +687,7 @@ Usage: cellgov boot run [OPTIONS] <--title <NAME>|--content-id <ID>|--title-mani
 | `--title` | `NAME` | Short name from the title registry. |
 | `--content-id` | `ID` | Content id (serial) from the title registry. |
 | `--title-manifest` | `PATH` | A title manifest outside the registry. |
-| `--fw` | `VERSION` | Installed firmware version; may be omitted when exactly one is a candidate. |
+| `--fw` | `VERSION` | Installed firmware version. Without it, a disc title boots the firmware its record says it shipped with. Any other title, or a disc whose record names none, boots the only installed firmware. With none or several installed, the store refuses. |
 | `--game-ver` | `base\|VERSION` | Installed content version; may be omitted when exactly one is a candidate. |
 | `--firmware-dir` | `DIR` | A `sys/external` tree outside the store. Marks the run unmanaged, so it carries no firmware version. |
 | `--max-steps` | `N` | Retire at most this many steps. Default `100000`. |
@@ -722,7 +737,7 @@ Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-ma
 | `--title` | `NAME` | Short name from the title registry. |
 | `--content-id` | `ID` | Content id (serial) from the title registry. |
 | `--title-manifest` | `PATH` | A title manifest outside the registry. |
-| `--fw` | `VERSION` | Installed firmware version; may be omitted when exactly one is a candidate. |
+| `--fw` | `VERSION` | Installed firmware version. Without it, a disc title boots the firmware its record says it shipped with. Any other title, or a disc whose record names none, boots the only installed firmware. With none or several installed, the store refuses. |
 | `--game-ver` | `base\|VERSION` | Installed content version; may be omitted when exactly one is a candidate. |
 | `--firmware-dir` | `DIR` | A `sys/external` tree outside the store. Marks the run unmanaged, so it carries no firmware version. |
 | `--max-steps` | `N` | Step cap; defaults to the cap the anchor was recorded at. |
@@ -769,7 +784,7 @@ Usage: cellgov boot bench-once [OPTIONS] <--title <NAME>|--content-id <ID>|--tit
 | `--title` | `NAME` | Short name from the title registry. |
 | `--content-id` | `ID` | Content id (serial) from the title registry. |
 | `--title-manifest` | `PATH` | A title manifest outside the registry. |
-| `--fw` | `VERSION` | Installed firmware version; may be omitted when exactly one is a candidate. |
+| `--fw` | `VERSION` | Installed firmware version. Without it, a disc title boots the firmware its record says it shipped with. Any other title, or a disc whose record names none, boots the only installed firmware. With none or several installed, the store refuses. |
 | `--game-ver` | `base\|VERSION` | Installed content version; may be omitted when exactly one is a candidate. |
 | `--firmware-dir` | `DIR` | A `sys/external` tree outside the store. Marks the run unmanaged, so it carries no firmware version. |
 | `--max-steps` | `N` | Step cap; defaults to the cap the anchor was recorded at. |
@@ -1122,7 +1137,7 @@ Usage: cellgov dev fixture-gen [OPTIONS] --manifest <PATH> --cellgov <PATH> --rp
 | `--rpcs3` | `PATH` | The other runner's observation JSON. Required. |
 | `--fixtures-dir` | `DIR` | Fixture tree the cell's directory is created under. |
 | `--allow-divergence` | -- | Write the fixture even when the two observations disagree. |
-| `--fw` | `VERSION` | Installed firmware version; may be omitted when exactly one is a candidate. |
+| `--fw` | `VERSION` | Installed firmware version. Without it, a disc title boots the firmware its record says it shipped with. Any other title, or a disc whose record names none, boots the only installed firmware. With none or several installed, the store refuses. |
 | `--game-ver` | `base\|VERSION` | Installed content version; may be omitted when exactly one is a candidate. |
 | `--firmware-dir` | `DIR` | A `sys/external` tree outside the store. Marks the run unmanaged, so it carries no firmware version. |
 
