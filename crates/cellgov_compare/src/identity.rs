@@ -6,6 +6,8 @@
 //! carries the triple, and every comparator reports a mismatch between
 //! the two sides.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use cellgov_mem::Fnv1aHasher;
@@ -28,18 +30,118 @@ pub struct FirmwareIdentity {
     pub pup_sha256: String,
 }
 
+/// The version a title tree's PARAM.SFO names, under the key it came
+/// from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppVersion {
+    /// PARAM.SFO `APP_VER`.
+    AppVer(String),
+    /// PARAM.SFO `VERSION`, which names the version when the table has
+    /// no `APP_VER`.
+    SfoVersion(String),
+}
+
+impl AppVersion {
+    /// The key the version came from, as the wire form spells it.
+    #[must_use]
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::AppVer(_) => "app_ver",
+            Self::SfoVersion(_) => "sfo_version",
+        }
+    }
+
+    /// The version string.
+    #[must_use]
+    pub fn value(&self) -> &str {
+        match self {
+            Self::AppVer(v) | Self::SfoVersion(v) => v,
+        }
+    }
+}
+
+impl fmt::Display for AppVersion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.key(), self.value())
+    }
+}
+
 /// Which of a title's installed versions the run composed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "GameIdentityWire", into = "GameIdentityWire")]
 pub struct GameIdentity {
     /// The store key, and the guest directory name the title mounts
     /// under.
     pub title_id: String,
     /// The selected version: `"base"`, or `"update:<ver>"`.
     pub version: String,
-    /// PARAM.SFO `APP_VER` of whichever tree the executable came from.
-    pub app_ver: String,
+    /// The version the executable's tree names in its PARAM.SFO.
+    /// `None` when the table names none.
+    pub app_version: Option<AppVersion>,
 }
+
+impl GameIdentity {
+    /// The version as a report prints it: the key and the value, or a
+    /// note that the tree named none.
+    #[must_use]
+    pub fn app_version_label(&self) -> String {
+        self.app_version
+            .as_ref()
+            .map_or_else(|| "no version key".to_string(), ToString::to_string)
+    }
+}
+
+/// The wire shape of [`GameIdentity`], with the version under the key
+/// its tree named it by.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GameIdentityWire {
+    title_id: String,
+    version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app_ver: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sfo_version: Option<String>,
+}
+
+impl From<GameIdentity> for GameIdentityWire {
+    fn from(id: GameIdentity) -> Self {
+        let (app_ver, sfo_version) = match id.app_version {
+            Some(AppVersion::AppVer(v)) => (Some(v), None),
+            Some(AppVersion::SfoVersion(v)) => (None, Some(v)),
+            None => (None, None),
+        };
+        Self {
+            title_id: id.title_id,
+            version: id.version,
+            app_ver,
+            sfo_version,
+        }
+    }
+}
+
+impl TryFrom<GameIdentityWire> for GameIdentity {
+    type Error = TwoVersionKeys;
+
+    fn try_from(wire: GameIdentityWire) -> Result<Self, Self::Error> {
+        let app_version = match (wire.app_ver, wire.sfo_version) {
+            (Some(_), Some(_)) => return Err(TwoVersionKeys),
+            (Some(v), None) => Some(AppVersion::AppVer(v)),
+            (None, Some(v)) => Some(AppVersion::SfoVersion(v)),
+            (None, None) => None,
+        };
+        Ok(Self {
+            title_id: wire.title_id,
+            version: wire.version,
+            app_version,
+        })
+    }
+}
+
+/// A game identity that names its version under both keys.
+#[derive(Debug, thiserror::Error)]
+#[error("game identity names both app_ver and sfo_version; a tree's version comes from one key")]
+pub struct TwoVersionKeys;
 
 /// The triple every machine artifact a boot writes embeds.
 ///
@@ -76,9 +178,13 @@ impl RunIdentity {
 
     /// Fingerprint of the game half; 0 when it is absent.
     pub fn game_fingerprint(&self) -> u64 {
-        self.game
-            .as_ref()
-            .map_or(0, |g| fingerprint(&[&g.title_id, &g.version, &g.app_ver]))
+        self.game.as_ref().map_or(0, |g| {
+            let (key, value) = g
+                .app_version
+                .as_ref()
+                .map_or(("", ""), |v| (v.key(), v.value()));
+            fingerprint(&[&g.title_id, &g.version, key, value])
+        })
     }
 
     /// The trace header record for this identity.
@@ -95,8 +201,10 @@ impl RunIdentity {
         let mut out = Vec::new();
         match &self.game {
             Some(g) => out.push(format!(
-                "game     {} {}  (app_ver {})",
-                g.title_id, g.version, g.app_ver
+                "game     {} {}  ({})",
+                g.title_id,
+                g.version,
+                g.app_version_label()
             )),
             None => out.push("game     (unidentified)".to_string()),
         }
@@ -360,10 +468,14 @@ fn describe_firmware(id: &RunIdentity) -> String {
 fn describe_game(id: &RunIdentity) -> String {
     id.game.as_ref().map_or_else(
         || "no store entry".to_string(),
-        |g| format!("{} {}", g.title_id, g.version),
+        |g| format!("{} {} ({})", g.title_id, g.version, g.app_version_label()),
     )
 }
 
 #[cfg(test)]
 #[path = "tests/identity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/app_version_tests.rs"]
+mod app_version_tests;

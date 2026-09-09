@@ -13,6 +13,8 @@ use cellgov_install::store::{
     StoreLayout, TitleId, TitleTree,
 };
 use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
+use cellgov_ps3_abi::param_sfo::PARAM_SFO_FILE;
+use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
 
 use crate::game::manifest::BASE_GAME_VER;
 
@@ -152,8 +154,10 @@ impl FirmwareEntry {
 /// A title's base install: the one full tree per title id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BaseEntry {
-    /// PARAM.SFO `APP_VER`.
-    pub app_ver: String,
+    /// The version the record names the base by: PARAM.SFO `APP_VER`,
+    /// or `VERSION` when the tree's table carries no `APP_VER`. The
+    /// table itself says which; see [`Self::param_sfo_path`].
+    pub version: String,
     /// The tree directory, from the record's `store_path`.
     pub dir: PathBuf,
     /// Which mount the tree backs.
@@ -164,10 +168,21 @@ pub(crate) struct BaseEntry {
     pub source_sha256: String,
 }
 
+impl BaseEntry {
+    /// The PARAM.SFO the version was read from.
+    pub(crate) fn param_sfo_path(&self) -> PathBuf {
+        match self.tree {
+            TitleTree::Disc => self.dir.join(DISC_GAME_DIR).join(PARAM_SFO_FILE),
+            TitleTree::Game => self.dir.join(PARAM_SFO_FILE),
+        }
+    }
+}
+
 /// One installed update version of a title.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UpdateEntry {
-    /// The update PKG's `APP_VER`, verbatim.
+    /// The store key, verbatim from the update PKG's PARAM.SFO:
+    /// `APP_VER`, or `VERSION` when the table carries no `APP_VER`.
     pub version: String,
     /// The `dev_hdd0/game` tree this update installs: the `game` child
     /// of the entry directory the record's `store_path` names.
@@ -176,6 +191,13 @@ pub(crate) struct UpdateEntry {
     pub source_sha256: String,
     /// Lowest firmware the publishing metadata declared for the update.
     pub min_system_ver: Option<String>,
+}
+
+impl UpdateEntry {
+    /// The PARAM.SFO the version key was read from.
+    pub(crate) fn param_sfo_path(&self) -> PathBuf {
+        self.dir.join(PARAM_SFO_FILE)
+    }
 }
 
 /// Every store entry belonging to one title id.
@@ -294,7 +316,7 @@ impl StoreInventory {
                 let entry_dir = layout.resolve_store_path(&record.artifact.store_path);
                 if is_base {
                     entry.base = Some(BaseEntry {
-                        app_ver: record.artifact.version.clone(),
+                        version: record.artifact.version.clone(),
                         dir: entry_dir,
                         tree: if title.distribution == DISC_DISTRIBUTION {
                             TitleTree::Disc

@@ -11,7 +11,7 @@ use serde::Serialize;
 ///
 /// Bump it only for a change a reader of the previous version could not
 /// survive; a new field is additive and leaves it alone.
-pub(crate) const STORE_FORMAT_VERSION: u32 = 1;
+pub(crate) const STORE_FORMAT_VERSION: u32 = 2;
 
 /// A path as a document names it: relative to the store root and
 /// `/`-separated, the form an install record's `store_path` takes.
@@ -59,11 +59,19 @@ pub(crate) struct FirmwareDoc {
     pub manifest_error: Option<String>,
 }
 
+/// What a human report prints for a base whose PARAM.SFO named no
+/// version. A boot summary's game identity prints the same words for
+/// that tree.
+pub(crate) const NO_VERSION_KEY: &str = "no version key";
+
 /// A title's base install.
 #[derive(Debug, Serialize)]
 pub(crate) struct BaseDoc {
-    /// PARAM.SFO `APP_VER`.
-    pub app_ver: String,
+    /// The version the record names the base by, verbatim: PARAM.SFO
+    /// `APP_VER`, or `VERSION` when the tree's table carries no
+    /// `APP_VER`. A base install accepts a table that names neither and
+    /// records the empty string, so this can be `""`.
+    pub version: String,
     /// The install tree, as a store path.
     pub dir: String,
     /// Which tree the base holds: `game` or `disc`.
@@ -78,10 +86,23 @@ pub(crate) struct BaseDoc {
     pub record: Option<String>,
 }
 
+impl BaseDoc {
+    /// The version as a human report prints it, so an empty version
+    /// does not read as a blank cell.
+    pub(crate) fn version_label(&self) -> &str {
+        if self.version.is_empty() {
+            NO_VERSION_KEY
+        } else {
+            &self.version
+        }
+    }
+}
+
 /// One installed update version.
 #[derive(Debug, Serialize)]
 pub(crate) struct UpdateDoc {
-    /// The update PKG's `APP_VER`, verbatim.
+    /// The store key, verbatim from the update PKG's PARAM.SFO:
+    /// `APP_VER`, or `VERSION` when the table carries no `APP_VER`.
     pub version: String,
     /// The `dev_hdd0/game` tree this update installs.
     pub dir: String,

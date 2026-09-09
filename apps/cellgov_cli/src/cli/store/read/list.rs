@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::cli::exit::die;
 use crate::cli::parse::OutputFormat;
 
-use super::model::{FirmwareDoc, FirmwareListDoc, TitleDoc, TitleListDoc};
+use super::model::{BaseDoc, FirmwareDoc, FirmwareListDoc, TitleDoc, TitleListDoc};
 use super::{emit, view};
 
 /// The label a title renders under when no registry manifest names it.
@@ -129,7 +129,12 @@ fn render_title_list(doc: &TitleListDoc) -> String {
     if doc.titles.is_empty() {
         return format!("no title installed under {}\n", doc.store);
     }
-    let mut out = String::from("  TITLE ID   NAME                  BASE      UPDATES\n");
+    // The base column is wide enough for the no-version label, so a
+    // base whose table named none does not push its row out of line.
+    let mut out = format!(
+        "  {:<9}  {:<20}  {:<14}  UPDATES\n",
+        "TITLE ID", "NAME", "BASE"
+    );
     for title in &doc.titles {
         let updates = if title.updates.is_empty() {
             "--".to_string()
@@ -142,13 +147,10 @@ fn render_title_list(doc: &TitleListDoc) -> String {
                 .join(", ")
         };
         out.push_str(&format!(
-            "  {:<9}  {:<20}  {:<8}  {updates}\n",
+            "  {:<9}  {:<20}  {:<14}  {updates}\n",
             title.title_id,
             title.short_name.as_deref().unwrap_or(NO_MANIFEST),
-            title
-                .base
-                .as_ref()
-                .map_or("--", |base| base.app_ver.as_str()),
+            title.base.as_ref().map_or("--", BaseDoc::version_label),
         ));
     }
     for title in &doc.titles {
@@ -190,7 +192,9 @@ fn render_title_detail(title: &TitleDoc) -> String {
         Some(base) => {
             out.push_str(&format!(
                 "  base       {} ({}, {} tree)\n",
-                base.app_ver, base.distribution, base.tree
+                base.version_label(),
+                base.distribution,
+                base.tree
             ));
             out.push_str(&format!("  dir        {}\n", base.dir));
             out.push_str(&format!(

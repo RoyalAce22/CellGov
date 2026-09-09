@@ -274,8 +274,13 @@ pub(super) fn dir_non_empty(path: &Path) -> Result<bool, GameInstallError> {
     Ok(entries.next().is_some())
 }
 
-/// Parse the shared identity fields from a PARAM.SFO blob, returning
-/// `(title_id, category, title, app_version)`.
+/// Parse the shared identity fields from a PARAM.SFO blob into
+/// `(title_id, category, title, version)`.
+///
+/// `version` is the value [`ParamSfo::named_version`] returns, or
+/// empty when the table names none.
+///
+/// [`ParamSfo::named_version`]: crate::param_sfo::ParamSfo::named_version
 pub(super) fn parse_identity(
     sfo_bytes: &[u8],
 ) -> Result<(String, String, String, String), GameInstallError> {
@@ -286,16 +291,11 @@ pub(super) fn parse_identity(
         .to_string();
     let category = sfo.get_string("CATEGORY").unwrap_or_default().to_string();
     let title = sfo.get_string("TITLE").unwrap_or_default().to_string();
-    // An empty APP_VER falls through to VERSION rather than winning the
-    // `or_else`: a container that carries the key with no value names no
-    // version, and for an update that string is a directory name.
-    let app_version = sfo
-        .get_string("APP_VER")
-        .filter(|v| !v.is_empty())
-        .or_else(|| sfo.get_string("VERSION"))
-        .unwrap_or_default()
-        .to_string();
-    Ok((title_id, category, title, app_version))
+    let version = sfo
+        .named_version()
+        .map(|(_, v)| v.to_string())
+        .unwrap_or_default();
+    Ok((title_id, category, title, version))
 }
 
 /// Clear and recreate a staging directory, so no foreign residue

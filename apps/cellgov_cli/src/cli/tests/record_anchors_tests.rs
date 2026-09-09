@@ -107,7 +107,7 @@ fn identity(fw: Option<&str>, game_ver: Option<&str>) -> RunIdentity {
         game: game_ver.map(|v| cellgov_compare::GameIdentity {
             title_id: "CG_TEST".to_string(),
             version: v.to_string(),
-            app_ver: "01.00".to_string(),
+            app_version: Some(cellgov_compare::AppVersion::AppVer("01.00".to_string())),
         }),
     }
 }

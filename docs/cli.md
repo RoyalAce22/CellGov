@@ -96,7 +96,7 @@ comparison records rather than a published API: they carry no
 
 ```json
 {
-  "format_version": 1,
+  "format_version": 2,
   "store": "vfs",
   "store_bytes": 21474836480,
   "unreadable_paths": 0,
@@ -116,7 +116,7 @@ comparison records rather than a published API: they carry no
       "short_name": "flow",
       "display_name": "flOw",
       "base": {
-        "app_ver": "01.00",
+        "version": "01.00",
         "dir": "dev_hdd0/game/NPUA80001",
         "tree": "game",
         "distribution": "psn-hdd",
@@ -152,7 +152,7 @@ comparison records rather than a published API: they carry no
 
 ```json
 {
-  "format_version": 1,
+  "format_version": 2,
   "store": "vfs",
   "firmware": [
     {
@@ -171,7 +171,7 @@ comparison records rather than a published API: they carry no
 
 ```json
 {
-  "format_version": 1,
+  "format_version": 2,
   "store": "vfs",
   "titles": [
     {
@@ -179,7 +179,7 @@ comparison records rather than a published API: they carry no
       "short_name": "flow",
       "display_name": "flOw",
       "base": {
-        "app_ver": "01.00",
+        "version": "01.00",
         "dir": "dev_hdd0/game/NPUA80001",
         "tree": "game",
         "distribution": "psn-hdd",
@@ -215,7 +215,7 @@ comparison records rather than a published API: they carry no
 
 ```json
 {
-  "format_version": 1,
+  "format_version": 2,
   "store": "vfs",
   "subject": "NPUA80001",
   "entries": [

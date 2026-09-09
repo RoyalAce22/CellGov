@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use cellgov_testkit::param_sfo::build_param_sfo;
+
 /// A store root removed when the guard drops.
 pub(super) struct SyntheticStore {
     root: cellgov_testkit::scratch::ScratchDir,
@@ -57,8 +59,9 @@ impl SyntheticStore {
     }
 
     /// Install a title's base tree; `disc` selects which mount it
-    /// backs.
-    pub(super) fn add_base(&self, title_id: &str, app_ver: &str, disc: bool) -> &Self {
+    /// backs. The tree's PARAM.SFO declares `version` under `APP_VER`,
+    /// the shape a real install leaves.
+    pub(super) fn add_base(&self, title_id: &str, version: &str, disc: bool) -> &Self {
         let (distribution, store_path) = if disc {
             ("disc-iso", format!("titles/{title_id}/base/disc"))
         } else {
@@ -68,7 +71,7 @@ impl SyntheticStore {
             "format_version = 3\n\n\
              [artifact]\n\
              kind = \"title-base\"\n\
-             version = \"{app_ver}\"\n\
+             version = \"{version}\"\n\
              store_path = \"{store_path}\"\n\n\
              [source]\n\
              kind = \"pkg\"\n\
@@ -83,6 +86,34 @@ impl SyntheticStore {
         );
         self.write_record(&["titles", title_id], "base.install.toml", &record);
         std::fs::create_dir_all(self.root.join(&store_path)).unwrap();
+        self.write_base_param_sfo(
+            title_id,
+            disc,
+            &[("TITLE_ID", title_id), ("APP_VER", version)],
+        );
+        self
+    }
+
+    /// The PARAM.SFO of a title's base tree.
+    pub(super) fn base_param_sfo(&self, title_id: &str, disc: bool) -> PathBuf {
+        let tree = self.root.join("titles").join(title_id).join("base");
+        if disc {
+            tree.join("disc").join("PS3_GAME").join("PARAM.SFO")
+        } else {
+            tree.join("game").join("PARAM.SFO")
+        }
+    }
+
+    /// Replace a base tree's PARAM.SFO with one holding `entries`.
+    pub(super) fn write_base_param_sfo(
+        &self,
+        title_id: &str,
+        disc: bool,
+        entries: &[(&str, &str)],
+    ) -> &Self {
+        let path = self.base_param_sfo(title_id, disc);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, build_param_sfo(entries)).unwrap();
         self
     }
 
@@ -128,7 +159,13 @@ impl SyntheticStore {
             &format!("update-{version}.install.toml"),
             &record,
         );
-        std::fs::create_dir_all(self.root.join(&store_path).join("game")).unwrap();
+        let tree = self.root.join(&store_path).join("game");
+        std::fs::create_dir_all(&tree).unwrap();
+        std::fs::write(
+            tree.join("PARAM.SFO"),
+            build_param_sfo(&[("TITLE_ID", title_id), ("APP_VER", version)]),
+        )
+        .unwrap();
         self
     }
 

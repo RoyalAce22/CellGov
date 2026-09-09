@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 use cellgov_compare::RunIdentity;
 use cellgov_install::store::TitleTree;
 use cellgov_ps3_abi::dev_flash::GUEST_FLASH_MOUNT;
+use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
 
-use super::identity::{run_identity, FirmwareIdentityError};
+use super::identity::{run_identity, IdentityError};
 use super::inventory::{dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry};
 use super::select::{
     select_firmware, select_game_version, FirmwareChoice, FirmwareSelectError, GameVersion,
@@ -34,7 +35,7 @@ const GUEST_GAME: &str = "/dev_hdd0/game";
 const GUEST_EXDATA: &str = "/dev_hdd0/home/00000001/exdata";
 
 /// Where a disc tree holds its executable, under the entry directory.
-const DISC_USRDIR: [&str; 2] = ["PS3_GAME", "USRDIR"];
+const DISC_USRDIR: [&str; 2] = [DISC_GAME_DIR, "USRDIR"];
 
 /// Where an HDD game tree holds its executable.
 const GAME_USRDIR: &str = "USRDIR";
@@ -51,11 +52,10 @@ pub(crate) enum ComposeError {
     /// `--game-ver` did not resolve to one installed version.
     #[error("{0}")]
     GameVersion(#[from] GameVersionSelectError),
-    /// The selected firmware entry's identity could not be read, so
-    /// the run cannot name the PUP it tests against. Boxed: its
-    /// mismatch variant carries two version/digest pairs.
-    #[error("reading the selected firmware's identity: {0}")]
-    FirmwareIdentity(#[from] Box<FirmwareIdentityError>),
+    /// A composed half's tree disagrees with the record that names it,
+    /// or cannot be read, so the run cannot name what it tests.
+    #[error("{0}")]
+    Identity(#[from] IdentityError),
     /// A title with no store entry could not derive its executable
     /// directory from the VFS root. Boxed: its not-found variant
     /// carries four probe lists.
@@ -245,6 +245,8 @@ pub(crate) struct ComposeInputs<'a> {
 /// - the record walk;
 /// - both selection contracts;
 /// - a record whose tree is gone or cannot be probed;
+/// - a composed half whose tree cannot be read against its record, or
+///   disagrees with it;
 /// - a license-directory union that holds two different files of one
 ///   name.
 pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition, ComposeError> {
@@ -282,7 +284,7 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
                 update,
                 ..
             } = stored.as_ref();
-            check_tree(title_id, &base.app_ver, &base.dir)?;
+            check_tree(title_id, &base.version, &base.dir)?;
             if let Some(u) = update {
                 check_tree(title_id, &u.version, &u.dir)?;
                 if let Some(note) = firmware_shortfall(u, &firmware) {
@@ -303,7 +305,7 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
         });
     }
 
-    let identity = run_identity(&firmware, &game).map_err(Box::new)?;
+    let identity = run_identity(&firmware, &game)?;
     Ok(BootComposition {
         firmware,
         game,

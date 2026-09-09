@@ -26,7 +26,7 @@ fn disc_distribution_selects_the_disc_tree() {
     let inventory = StoreInventory::read(store.root()).unwrap();
     let base = inventory.title("BLAA00001").unwrap().base.as_ref().unwrap();
     assert_eq!(base.tree, TitleTree::Disc);
-    assert_eq!(base.app_ver, "02.00");
+    assert_eq!(base.version, "02.00");
 }
 
 #[test]

@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use cellgov_compare::AppVersion;
+
 use crate::composition::compose::{compose_boot, BootComposition, ComposeInputs};
 use crate::composition::test_support::{firmware_pup_sha256, image_version, SyntheticStore};
 use crate::game::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
@@ -67,7 +69,10 @@ fn a_base_boot_names_both_halves() {
     let game = id.game.expect("a store entry was composed");
     assert_eq!(game.title_id, "NPAA00001");
     assert_eq!(game.version, "base");
-    assert_eq!(game.app_ver, "01.00");
+    assert_eq!(
+        game.app_version,
+        Some(AppVersion::AppVer("01.00".to_string()))
+    );
 }
 
 #[test]
@@ -83,7 +88,8 @@ fn a_selected_update_names_its_own_version_and_app_ver() {
     let game = id.game.expect("a store entry was composed");
     assert_eq!(game.version, "update:02.51");
     assert_eq!(
-        game.app_ver, "02.51",
+        game.app_version,
+        Some(AppVersion::AppVer("02.51".to_string())),
         "the executable comes from the update tree, so its APP_VER is the update's"
     );
 }

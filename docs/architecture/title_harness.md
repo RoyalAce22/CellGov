@@ -298,6 +298,19 @@ root, so the bytes under test are the bytes that were installed
 (ordered roots in
 [lv2_host.md](lv2_host.md#in-memory-filesystem)).
 
+The composition names itself by an identity triple, and each half is
+held against the tree it names. The firmware half comes from the
+entry's record and the `firmware.toml` inside its tree; the two must
+agree on version and source digest. The game half comes from the
+record of the tree that leads the executable probe -- the selected
+update's, else the base's -- and from that tree's own `PARAM.SFO`: the
+version is published under the key the table named it by, `APP_VER`,
+or `VERSION` standing in for a table that carries none, and the same
+string under the two keys is two different triples. A table that
+disagrees with its record, is missing, or does not parse refuses the
+composition by name rather than letting the run claim a version its
+tree does not carry.
+
 `--firmware-dir` remains as an expert escape hatch naming a tree
 outside the store. It is mutually exclusive with `--fw`, composes no
 `/dev_flash` mount, and marks the run as carrying no firmware version,

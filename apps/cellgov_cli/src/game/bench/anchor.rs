@@ -129,7 +129,7 @@ fn render_firmware(half: Option<&FirmwareIdentity>) -> String {
 /// the reason [`render_firmware`] gives.
 fn render_game(half: Option<&GameIdentity>) -> String {
     half.map_or_else(unidentified, |g| {
-        format!("{} {} (app_ver {})", g.title_id, g.version, g.app_ver)
+        format!("{} {} ({})", g.title_id, g.version, g.app_version_label())
     })
 }
 

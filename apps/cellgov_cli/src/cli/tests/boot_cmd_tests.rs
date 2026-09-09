@@ -77,7 +77,7 @@ fn stored(version: GameVersion) -> GameChoice {
         title_id: "CG_TEST".to_string(),
         version,
         base: BaseEntry {
-            app_ver: "01.00".to_string(),
+            version: "01.00".to_string(),
             dir: PathBuf::from("store/titles/CG_TEST/base"),
             tree: cellgov_install::store::TitleTree::Game,
             distribution: "psn-hdd".to_string(),

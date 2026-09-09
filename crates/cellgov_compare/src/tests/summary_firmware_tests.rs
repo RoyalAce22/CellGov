@@ -2,7 +2,7 @@
 //! parity verdict.
 
 use super::*;
-use crate::identity::{FirmwareIdentity, GameIdentity};
+use crate::identity::{AppVersion, FirmwareIdentity, GameIdentity};
 
 fn equivalent() -> CrossRunnerSummary {
     CrossRunnerSummary {
@@ -27,7 +27,7 @@ fn identity(fw: &str) -> RunIdentity {
         game: Some(GameIdentity {
             title_id: "NPUA80001".to_string(),
             version: "base".to_string(),
-            app_ver: "01.00".to_string(),
+            app_version: Some(AppVersion::AppVer("01.00".to_string())),
         }),
     }
 }

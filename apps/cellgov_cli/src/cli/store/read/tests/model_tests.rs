@@ -70,7 +70,7 @@ fn a_title_document_serializes_under_the_names_the_schema_declares() {
             display_name: None,
             ships_in_firmware: false,
             base: Some(BaseDoc {
-                app_ver: "01.00".to_string(),
+                version: "01.00".to_string(),
                 dir: "dev_hdd0/game/TEST00000".to_string(),
                 tree: "game".to_string(),
                 distribution: "psn-hdd".to_string(),
@@ -95,7 +95,11 @@ fn a_title_document_serializes_under_the_names_the_schema_declares() {
     let title = &json["titles"][0];
     assert_eq!(title["title_id"], "TEST00000");
     assert_eq!(title["short_name"], "synthetic");
-    assert_eq!(title["base"]["app_ver"], "01.00");
+    assert_eq!(title["base"]["version"], "01.00");
+    assert!(
+        title["base"].get("app_ver").is_none(),
+        "the base names its version by the key the record holds it under: {title}"
+    );
     assert_eq!(title["anchors"][0]["fw"], "4.91");
     assert_eq!(title["anchors"][0]["recorded"], false);
     assert!(

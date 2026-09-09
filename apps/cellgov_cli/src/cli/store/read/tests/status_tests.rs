@@ -1,6 +1,8 @@
 use super::*;
 
-use crate::cli::store::read::model::{AnchorDoc, BaseDoc, FirmwareDoc, STORE_FORMAT_VERSION};
+use crate::cli::store::read::model::{
+    AnchorDoc, BaseDoc, FirmwareDoc, NO_VERSION_KEY, STORE_FORMAT_VERSION,
+};
 
 /// Placeholder identity: these cases build every document by hand and
 /// name no installed corpus.
@@ -20,7 +22,7 @@ fn firmware(version: &str) -> FirmwareDoc {
 
 fn base() -> BaseDoc {
     BaseDoc {
-        app_ver: "01.00".to_string(),
+        version: "01.00".to_string(),
         dir: format!("dev_hdd0/game/{TITLE_ID}"),
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
@@ -113,6 +115,31 @@ fn a_declared_title_with_nothing_installed_is_named_as_such() {
     let rendered = render(&doc(vec![firmware("4.91")], vec![title(None, Vec::new())]));
     assert!(
         rendered.contains("declared, nothing installed"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_installed_base_is_summarised_by_its_distribution_and_version() {
+    let rendered = render(&doc(
+        vec![firmware("4.91")],
+        vec![title(Some(base()), Vec::new())],
+    ));
+    assert!(rendered.contains("psn-hdd base 01.00"), "{rendered}");
+}
+
+#[test]
+fn a_base_whose_table_named_no_version_is_labelled_rather_than_blank() {
+    let unversioned = BaseDoc {
+        version: String::new(),
+        ..base()
+    };
+    let rendered = render(&doc(
+        vec![firmware("4.91")],
+        vec![title(Some(unversioned), Vec::new())],
+    ));
+    assert!(
+        rendered.contains(&format!("psn-hdd base {NO_VERSION_KEY}")),
         "{rendered}"
     );
 }

@@ -88,7 +88,7 @@ impl StoreView {
         let manifest = self.registry.by_content_id(&entry.title_id);
         let key = TitleId::new(&entry.title_id).ok();
         let base = entry.base.as_ref().map(|base| BaseDoc {
-            app_ver: base.app_ver.clone(),
+            version: base.version.clone(),
             dir: self.rel(&base.dir),
             tree: base.tree.dir_name().to_string(),
             distribution: base.distribution.clone(),

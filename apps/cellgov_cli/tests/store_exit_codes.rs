@@ -410,12 +410,46 @@ fn every_read_command_emits_one_json_document_carrying_its_schema_version() {
         assert_eq!(code, 0, "{args:?}: stdout:\n{stdout}stderr:\n{stderr}");
         let doc: serde_json::Value =
             serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("{args:?}: {e}\n{stdout}"));
-        assert_eq!(doc["format_version"], 1, "{args:?}: {doc}");
+        assert_eq!(doc["format_version"], 2, "{args:?}: {doc}");
         assert!(
             !stdout.contains('\u{1b}'),
             "{args:?}: JSON output carries no ANSI:\n{stdout}"
         );
     }
+}
+
+#[test]
+fn a_base_version_the_record_holds_reaches_every_document_that_carries_titles() {
+    let store = Store::new("json_base_version");
+    for args in [
+        vec!["status"],
+        vec!["title", "list"],
+        vec!["title", "show", TITLE_ID],
+    ] {
+        let mut with_json = args.clone();
+        with_json.extend(["--format", "json"]);
+        let (code, stdout, stderr) = store.run(&with_json);
+        assert_eq!(code, 0, "{args:?}: stdout:\n{stdout}stderr:\n{stderr}");
+        let doc: serde_json::Value =
+            serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("{args:?}: {e}\n{stdout}"));
+        // `status` also lists every registry title, so find ours by id.
+        let title = doc["titles"]
+            .as_array()
+            .and_then(|titles| titles.iter().find(|t| t["title_id"] == TITLE_ID))
+            .unwrap_or_else(|| panic!("{args:?}: {TITLE_ID} is not in the document: {doc}"));
+        assert_eq!(title["base"]["version"], "01.00", "{args:?}: {doc}");
+        assert!(
+            title["base"].get("app_ver").is_none(),
+            "{args:?}: the base names its version under one key: {doc}"
+        );
+    }
+
+    let (code, stdout, stderr) = store.run(&["title", "show", TITLE_ID]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        stdout.contains("base       01.00 (psn-hdd, game tree)"),
+        "{stdout}"
+    );
 }
 
 #[test]

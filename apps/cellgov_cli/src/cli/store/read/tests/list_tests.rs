@@ -1,6 +1,8 @@
 use super::*;
 
-use crate::cli::store::read::model::{AnchorDoc, BaseDoc, UpdateDoc, STORE_FORMAT_VERSION};
+use crate::cli::store::read::model::{
+    AnchorDoc, BaseDoc, UpdateDoc, NO_VERSION_KEY, STORE_FORMAT_VERSION,
+};
 
 /// Placeholder identity: these cases build every document by hand and
 /// name no installed corpus.
@@ -18,9 +20,9 @@ fn title(short_name: Option<&str>, base: Option<BaseDoc>, updates: Vec<UpdateDoc
     }
 }
 
-fn base(app_ver: &str) -> BaseDoc {
+fn base(version: &str) -> BaseDoc {
     BaseDoc {
-        app_ver: app_ver.to_string(),
+        version: version.to_string(),
         dir: format!("dev_hdd0/game/{TITLE_ID}"),
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
@@ -82,6 +84,32 @@ fn a_listed_title_names_its_base_and_every_update() {
     assert!(rendered.contains("synthetic"), "{rendered}");
     assert!(rendered.contains("01.00"), "{rendered}");
     assert!(rendered.contains("02.10, 02.51"), "{rendered}");
+}
+
+#[test]
+fn a_base_whose_table_named_no_version_is_labelled_rather_than_blank() {
+    let rendered = render_title_list(&title_doc(vec![title(
+        Some("synthetic"),
+        Some(base("")),
+        Vec::new(),
+    )]));
+    assert!(rendered.contains(NO_VERSION_KEY), "{rendered}");
+
+    let rendered = render_title_detail(&title(Some("synthetic"), Some(base("")), Vec::new()));
+    assert!(
+        rendered.contains(&format!("base       {NO_VERSION_KEY} (psn-hdd, game tree)")),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn a_base_with_a_version_prints_it_and_not_the_no_version_label() {
+    let rendered = render_title_detail(&title(Some("synthetic"), Some(base("01.00")), Vec::new()));
+    assert!(
+        rendered.contains("base       01.00 (psn-hdd, game tree)"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains(NO_VERSION_KEY), "{rendered}");
 }
 
 #[test]

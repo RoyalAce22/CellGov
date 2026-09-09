@@ -137,7 +137,7 @@ pub fn install_pkg(
         .iter()
         .find(|f| f.name == "PARAM.SFO")
         .ok_or(GameInstallError::NoParamSfo)?;
-    let (title_id, category, title, app_version) = parse_identity(archive.file_data(sfo_file))?;
+    let (title_id, category, title, version) = parse_identity(archive.file_data(sfo_file))?;
     if category != "HG" {
         return Err(GameInstallError::NotHddGame { category });
     }
@@ -264,7 +264,7 @@ pub fn install_pkg(
         pkg_bytes,
         ArtifactRecord {
             kind: artifact.kind(),
-            version: app_version,
+            version,
             store_path,
         },
         file_digests,
@@ -336,7 +336,7 @@ pub fn install_iso(
         .find(|e| e.path == "PS3_GAME/PARAM.SFO")
         .ok_or(GameInstallError::NoDiscParamSfo)?;
     let sfo_bytes = sfo_entry.read_data(image)?;
-    let (title_id, category, title, app_version) = match parse_identity(&sfo_bytes) {
+    let (title_id, category, title, version) = match parse_identity(&sfo_bytes) {
         Err(GameInstallError::Sfo(param_sfo::SfoError::BadMagic(head))) => {
             return Err(GameInstallError::DiscImageEncrypted {
                 path: "PS3_GAME/PARAM.SFO",
@@ -417,7 +417,7 @@ pub fn install_iso(
         image,
         ArtifactRecord {
             kind: artifact.kind(),
-            version: app_version,
+            version,
             store_path,
         },
         file_digests,

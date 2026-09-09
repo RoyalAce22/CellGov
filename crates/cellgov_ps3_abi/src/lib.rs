@@ -8,6 +8,7 @@ pub mod dev_flash;
 pub mod elf;
 pub mod hardware;
 pub mod nid;
+pub mod param_sfo;
 pub mod ppc_isa;
 pub mod process_address_space;
 pub mod pup;
@@ -28,6 +29,7 @@ pub mod sys_usbd;
 pub mod syscall;
 pub mod syscall_namespace;
 pub mod system_ipc;
+pub mod title_tree;
 pub mod trampoline_codegen;
 
 pub mod rsx_nv_hardware;

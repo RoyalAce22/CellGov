@@ -60,7 +60,7 @@ fn field_boundaries_are_hashed() {
             game: Some(GameIdentity {
                 title_id: title_id.into(),
                 version: version.into(),
-                app_ver: String::new(),
+                app_version: None,
             }),
         }
         .game_fingerprint()
@@ -76,7 +76,7 @@ fn a_field_that_embeds_the_separator_still_fingerprints_apart() {
             game: Some(GameIdentity {
                 title_id: title_id.into(),
                 version: version.into(),
-                app_ver: String::new(),
+                app_version: None,
             }),
         }
         .game_fingerprint()

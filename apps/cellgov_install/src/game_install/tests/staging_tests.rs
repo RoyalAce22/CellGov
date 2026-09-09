@@ -157,7 +157,7 @@ fn parse_identity_requires_title_id_and_prefers_app_ver_over_version() {
     let err = parse_identity(&build_param_sfo(&[("CATEGORY", "HG")])).unwrap_err();
     assert!(matches!(err, GameInstallError::MissingTitleId), "{err:?}");
 
-    let (title_id, category, title, app_version) = parse_identity(&build_param_sfo(&[
+    let (title_id, category, title, version) = parse_identity(&build_param_sfo(&[
         ("TITLE_ID", "NPUA80001"),
         ("CATEGORY", "HG"),
         ("TITLE", "flOw"),
@@ -167,29 +167,26 @@ fn parse_identity_requires_title_id_and_prefers_app_ver_over_version() {
     assert_eq!(title_id, "NPUA80001");
     assert_eq!(category, "HG");
     assert_eq!(title, "flOw");
-    assert_eq!(
-        app_version, "01.02",
-        "VERSION stands in when APP_VER is absent"
-    );
+    assert_eq!(version, "01.02", "VERSION stands in when APP_VER is absent");
 
-    let (_, category, title, app_version) = parse_identity(&build_param_sfo(&[
+    let (_, category, title, version) = parse_identity(&build_param_sfo(&[
         ("TITLE_ID", "NPUA80001"),
         ("APP_VER", "01.05"),
         ("VERSION", "01.02"),
     ]))
     .unwrap();
-    assert_eq!(app_version, "01.05", "APP_VER wins over VERSION");
+    assert_eq!(version, "01.05", "APP_VER wins over VERSION");
 
     // A key present with no value names no version, and for an update
     // that string is a directory name.
-    let (_, _, _, app_version) = parse_identity(&build_param_sfo(&[
+    let (_, _, _, version) = parse_identity(&build_param_sfo(&[
         ("TITLE_ID", "NPUA80001"),
         ("APP_VER", ""),
         ("VERSION", "01.02"),
     ]))
     .unwrap();
     assert_eq!(
-        app_version, "01.02",
+        version, "01.02",
         "an empty APP_VER falls through to VERSION rather than winning"
     );
     assert_eq!(

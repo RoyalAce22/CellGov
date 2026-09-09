@@ -1,21 +1,38 @@
 //! The identity triple a composed boot writes into every machine
 //! artifact it produces.
 //!
-//! Each half comes from the store. A firmware entry names the version
-//! and the PUP it was installed from. The `firmware.toml` inside its
-//! tree names the PUP-header `image_version`. A half the store did not
-//! compose -- an unmanaged `--firmware-dir` tree, a title with no store
-//! entry -- is `None`, because no version key names it.
+//! Each half comes from the store, held against the tree it names. A
+//! firmware entry names the version and the PUP it was installed from.
+//! The `firmware.toml` inside its tree names the PUP-header
+//! `image_version`. A title entry names the version its record holds.
+//! The PARAM.SFO inside its tree says which key named it. A half the
+//! store did not compose -- an unmanaged `--firmware-dir` tree, a title
+//! with no store entry -- is `None`, because no version key names it.
 
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::{FirmwareIdentity, GameIdentity, RunIdentity};
+use cellgov_compare::{AppVersion, FirmwareIdentity, GameIdentity, RunIdentity};
 use cellgov_install::manifest::MANIFEST_FILE;
+use cellgov_install::param_sfo::{self, SfoVersionKey};
 
 use super::compose::{GameChoice, StoredGame};
 use super::inventory::FirmwareEntry;
 use super::select::{FirmwareChoice, GameVersion};
 use crate::game::manifest::BASE_GAME_VER;
+
+/// Why a composed boot could not name the triple it runs.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum IdentityError {
+    /// The selected firmware entry's identity could not be read, so
+    /// the run cannot name the PUP it tests against. Boxed: its
+    /// mismatch variant carries two version/digest pairs.
+    #[error("reading the selected firmware's identity: {0}")]
+    Firmware(#[from] Box<FirmwareIdentityError>),
+    /// The selected title tree's version could not be read, so the run
+    /// cannot name the content it tests.
+    #[error("reading the selected title's identity: {0}")]
+    Game(#[from] GameIdentityError),
+}
 
 /// Why the selected firmware's identity could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -66,26 +83,73 @@ pub(crate) struct FirmwareClaims {
     pub found_sha256: String,
 }
 
+/// Why the selected title tree's version could not be read.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum GameIdentityError {
+    /// The PARAM.SFO inside the tree could not be read.
+    #[error("read {}: {source}", path.display())]
+    Read {
+        /// The PARAM.SFO file.
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    /// The PARAM.SFO does not parse.
+    #[error("{}: {source}", path.display())]
+    Parse {
+        /// The PARAM.SFO file.
+        path: PathBuf,
+        #[source]
+        source: param_sfo::SfoError,
+    },
+    /// The tree's PARAM.SFO names a different version than the store's
+    /// record for the entry.
+    #[error(
+        "{} names {}, but the store's record files this tree as version {recorded:?}; one of \
+         the two is stale, so the run cannot name the content it is testing. Reinstall the \
+         title",
+        path.display(), render_named_version(found)
+    )]
+    Mismatch {
+        /// The PARAM.SFO file.
+        path: PathBuf,
+        /// Version the record declares.
+        recorded: String,
+        /// What the tree's PARAM.SFO names, under its key.
+        found: Option<AppVersion>,
+    },
+}
+
+fn render_named_version(found: &Option<AppVersion>) -> String {
+    found
+        .as_ref()
+        .map_or_else(|| "no version key".to_string(), ToString::to_string)
+}
+
 /// Build the triple for a composed boot.
 ///
 /// # Errors
 ///
-/// [`FirmwareIdentityError`] when a managed firmware entry's manifest:
+/// [`IdentityError::Firmware`] when a managed firmware entry's
+/// manifest:
 ///
 /// - cannot be read;
 /// - does not parse;
 /// - names another install than the store's record does.
+///
+/// [`IdentityError::Game`] on the same three failures of the selected
+/// title tree's PARAM.SFO.
 pub(crate) fn run_identity(
     firmware: &FirmwareChoice,
     game: &GameChoice,
-) -> Result<RunIdentity, FirmwareIdentityError> {
+) -> Result<RunIdentity, IdentityError> {
     Ok(RunIdentity {
         firmware: match firmware {
-            FirmwareChoice::Managed(entry) => Some(firmware_identity(entry)?),
+            FirmwareChoice::Managed(entry) => Some(firmware_identity(entry).map_err(Box::new)?),
             FirmwareChoice::Unmanaged { .. } | FirmwareChoice::None => None,
         },
         game: match game {
-            GameChoice::Stored(stored) => Some(game_identity(stored)),
+            GameChoice::Stored(stored) => Some(game_identity(stored)?),
             GameChoice::Firmware { .. } | GameChoice::Unstored => None,
         },
     })
@@ -128,34 +192,69 @@ fn parse_manifest(
     })
 }
 
-/// The game half: the selected version, and the `APP_VER` of the tree
-/// that leads the executable probe.
+/// The game half: the selected version, and the PARAM.SFO version of
+/// the tree that leads the executable probe.
 ///
 /// That tree is the update's when one is selected, and the base's
 /// otherwise. This names the composed version. The executable that
 /// loads can still come from another tree: the probe falls back to the
 /// base when the update holds no candidate, and an explicit path
 /// bypasses the probe.
-fn game_identity(stored: &StoredGame) -> GameIdentity {
-    let (version, app_ver) = match &stored.version {
-        GameVersion::Base => (BASE_GAME_VER.to_string(), stored.base.app_ver.clone()),
-        GameVersion::Update(v) => (
-            format!("update:{v}"),
-            stored
+fn game_identity(stored: &StoredGame) -> Result<GameIdentity, GameIdentityError> {
+    let (version, recorded, path) = match &stored.version {
+        GameVersion::Base => (
+            BASE_GAME_VER.to_string(),
+            &stored.base.version,
+            stored.base.param_sfo_path(),
+        ),
+        GameVersion::Update(v) => {
+            let update = stored
                 .update
                 .as_ref()
-                .expect("invariant: resolve_game carries the entry of the selected update")
-                .version
-                .clone(),
-        ),
+                .expect("invariant: resolve_game carries the entry of the selected update");
+            (
+                format!("update:{v}"),
+                &update.version,
+                update.param_sfo_path(),
+            )
+        }
     };
-    GameIdentity {
+    let app_version = read_app_version(&path)?;
+    // The install wrote the record's version from this same table, so a
+    // correct store keeps the two in agreement.
+    if app_version.as_ref().map_or("", AppVersion::value) != recorded {
+        return Err(GameIdentityError::Mismatch {
+            path,
+            recorded: recorded.clone(),
+            found: app_version,
+        });
+    }
+    Ok(GameIdentity {
         title_id: stored.title_id.clone(),
         version,
-        app_ver,
-    }
+        app_version,
+    })
+}
+
+fn read_app_version(path: &Path) -> Result<Option<AppVersion>, GameIdentityError> {
+    let bytes = std::fs::read(path).map_err(|source| GameIdentityError::Read {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let sfo = param_sfo::parse(&bytes).map_err(|source| GameIdentityError::Parse {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    Ok(sfo.named_version().map(|(key, value)| match key {
+        SfoVersionKey::AppVer => AppVersion::AppVer(value.to_string()),
+        SfoVersionKey::Version => AppVersion::SfoVersion(value.to_string()),
+    }))
 }
 
 #[cfg(test)]
 #[path = "tests/identity_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/game_identity_tests.rs"]
+mod game_identity_tests;

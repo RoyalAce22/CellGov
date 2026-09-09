@@ -46,8 +46,8 @@ pub use diverge::{diverge, zoom_lookup, DivergeField, DivergeReport, RegDiff, Zo
 pub use format::format_with_commas;
 pub use identity::{
     cross_identity_warning, cross_trace_identity_warning, identity_report, trace_identity,
-    FirmwareIdentity, GameIdentity, RunIdentity, SentinelParseError, TraceIdentity,
-    RUN_IDENTITY_SENTINEL,
+    AppVersion, FirmwareIdentity, GameIdentity, RunIdentity, SentinelParseError, TraceIdentity,
+    TwoVersionKeys, RUN_IDENTITY_SENTINEL,
 };
 pub use observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,

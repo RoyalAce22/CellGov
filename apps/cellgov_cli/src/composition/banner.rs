@@ -39,7 +39,7 @@ fn render_game(composition: &BootComposition) -> String {
             let detail = match (version, update) {
                 (GameVersion::Update(_), Some(u)) => format!(
                     "(base {}, {}; update sha256 {})",
-                    base.app_ver,
+                    base.version,
                     base.distribution,
                     short_digest(&u.source_sha256),
                 ),

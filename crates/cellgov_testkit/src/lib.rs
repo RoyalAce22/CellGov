@@ -12,6 +12,7 @@
 pub mod assertions;
 pub mod fixtures;
 pub mod golden;
+pub mod param_sfo;
 pub mod runner;
 #[cfg(feature = "scratch")]
 pub mod scratch;

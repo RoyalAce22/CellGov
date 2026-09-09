@@ -12,7 +12,8 @@
 use std::process::Command;
 
 use cellgov_compare::{
-    FirmwareIdentity, GameIdentity, Observation, ObservationMetadata, ObservedOutcome, RunIdentity,
+    AppVersion, FirmwareIdentity, GameIdentity, Observation, ObservationMetadata, ObservedOutcome,
+    RunIdentity,
 };
 use cellgov_testkit::scratch::scratch_labeled;
 use cellgov_trace::{StateHash, TraceRecord, TraceWriter};
@@ -27,7 +28,7 @@ fn identity(fw_version: &str) -> RunIdentity {
         game: Some(GameIdentity {
             title_id: "NPAA00001".into(),
             version: "base".into(),
-            app_ver: "01.00".into(),
+            app_version: Some(AppVersion::AppVer("01.00".into())),
         }),
     }
 }

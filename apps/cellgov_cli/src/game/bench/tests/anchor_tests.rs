@@ -227,7 +227,8 @@ fn two_firmwares_sharing_a_version_are_still_told_apart_in_the_report() {
 #[test]
 fn two_title_trees_sharing_a_version_are_still_told_apart_in_the_report() {
     let mut ran = test_identity();
-    ran.game.as_mut().expect("game half").app_ver = "01.01".to_string();
+    ran.game.as_mut().expect("game half").app_version =
+        Some(cellgov_compare::AppVersion::AppVer("01.01".to_string()));
     let failures = anchor_disagreements(
         &anchor_fixture(73),
         &ran,

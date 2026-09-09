@@ -5,9 +5,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use cellgov_compare::{
-    BootOutcome, BootSummary, ByteParity, CheckpointKind, Convergence, ConvergenceFailure,
-    CrossRunnerSummary, DivergenceClass, FirmwareIdentity, GameIdentity, ObservedOutcome,
-    RunIdentity,
+    AppVersion, BootOutcome, BootSummary, ByteParity, CheckpointKind, Convergence,
+    ConvergenceFailure, CrossRunnerSummary, DivergenceClass, FirmwareIdentity, GameIdentity,
+    ObservedOutcome, RunIdentity,
 };
 use cellgov_time::Budget;
 
@@ -215,7 +215,7 @@ pub(crate) fn stamped(
         game: Some(GameIdentity {
             title_id: "NPAA60001".to_string(),
             version: BASE.to_string(),
-            app_ver: "01.00".to_string(),
+            app_version: Some(AppVersion::AppVer("01.00".to_string())),
         }),
     };
     summary.rpcs3_firmware = rpcs3_fw.map(str::to_string);

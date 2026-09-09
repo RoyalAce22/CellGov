@@ -1,10 +1,14 @@
 //! The update installer: one update PKG becomes one immutable store
-//! entry at `titles/<ID>/updates/<APP_VER>/`, holding the `game/` tree
-//! the update patches into `dev_hdd0/game/<ID>` at boot.
+//! entry at `titles/<ID>/updates/<version>/`, holding the `game/` tree
+//! the update patches into `dev_hdd0/game/<ID>` at boot. The version
+//! key is the version the PKG's PARAM.SFO names
+//! ([`ParamSfo::named_version`]).
 //!
 //! Nothing here proves the installed EBOOT decrypts: an update may be
 //! installed with no base present, and the klicensee that would
 //! decrypt it comes from the base's RAP.
+//!
+//! [`ParamSfo::named_version`]: crate::param_sfo::ParamSfo::named_version
 
 #![cfg_attr(
     not(feature = "decrypt"),
@@ -47,7 +51,7 @@ pub struct UpdateInstallOutcome {
     /// Full content id from the PKG header, or the title-id when the
     /// header carries none.
     pub content_id: String,
-    /// PARAM.SFO `APP_VER`, verbatim -- the version key.
+    /// The version key: the version the PKG's PARAM.SFO names, verbatim.
     pub version: String,
     /// The committed entry directory, holding the `game/` tree.
     pub update_dir: PathBuf,
@@ -109,7 +113,7 @@ fn check_base_entry(base_record_path: &Path, title_id: &str) -> Result<bool, Gam
 }
 
 /// Install one update PKG into `output_dir`'s versioned store, at
-/// `titles/<TITLE_ID>/updates/<APP_VER>/`.
+/// `titles/<TITLE_ID>/updates/<version>/`.
 ///
 /// The entry is immutable: an already-installed version is refused by
 /// name unless `opts.force`, which replaces it whole. No base is
@@ -148,7 +152,7 @@ pub fn install_update_pkg(
         .iter()
         .find(|f| f.name == "PARAM.SFO")
         .ok_or(GameInstallError::NoParamSfo)?;
-    let (title_id, category, title, app_version) = parse_identity(archive.file_data(sfo_file))?;
+    let (title_id, category, title, version) = parse_identity(archive.file_data(sfo_file))?;
     if !UPDATE_CATEGORIES.contains(&category.as_str()) {
         return Err(GameInstallError::NotUpdatePackage { category });
     }
@@ -168,13 +172,13 @@ pub fn install_update_pkg(
     validate_content_id(&title_id)?;
     validate_content_id(&content_id)?;
 
-    if app_version.is_empty() {
+    if version.is_empty() {
         return Err(GameInstallError::MissingAppVersion);
     }
     let key = TitleId::new(&title_id)?;
     let artifact = Artifact::TitleUpdate {
         title_id: key.clone(),
-        version: VersionKey::new(&app_version)?,
+        version: VersionKey::new(&version)?,
     };
     let layout = StoreLayout::new(output_dir);
     let entry_dir = layout.entry_dir(&artifact);
@@ -198,7 +202,7 @@ pub fn install_update_pkg(
     if let Some(existing) = &existing {
         if !opts.force {
             return Err(GameInstallError::UpdateVersionInstalled {
-                version: app_version,
+                version,
                 existing_source: existing.source.sha256,
             });
         }
@@ -235,7 +239,7 @@ pub fn install_update_pkg(
         pkg_bytes,
         ArtifactRecord {
             kind: artifact.kind(),
-            version: app_version.clone(),
+            version: version.clone(),
             store_path,
         },
         file_digests,
@@ -264,7 +268,7 @@ pub fn install_update_pkg(
     Ok(UpdateInstallOutcome {
         title_id,
         content_id,
-        version: app_version,
+        version,
         update_dir: entry_dir,
         orphan,
         file_count: record.files.len(),

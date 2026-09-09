@@ -81,58 +81,7 @@ pub fn synthetic_vault() -> KeyVault {
         .expect("the synthetic vault is well-formed")
 }
 
-/// `format::string` tag.
-const SFO_FMT_STRING: u16 = 0x0204;
-
-/// Build a minimal PARAM.SFO holding the given string entries (the
-/// keys the installer reads), laid out as the real format.
-pub fn build_param_sfo(entries: &[(&str, &str)]) -> Vec<u8> {
-    let header_len = 0x14usize;
-    let index_len = 0x10usize;
-
-    let mut key_table = Vec::new();
-    let mut key_offs = Vec::new();
-    for (k, _) in entries {
-        key_offs.push(key_table.len() as u16);
-        key_table.extend_from_slice(k.as_bytes());
-        key_table.push(0);
-    }
-    while key_table.len() % 4 != 0 {
-        key_table.push(0);
-    }
-
-    let mut data_table = Vec::new();
-    let mut recs: Vec<(u16, u32, u32, u32)> = Vec::new(); // key_off, len, max, data_off
-    for (i, (_, v)) in entries.iter().enumerate() {
-        let data_off = data_table.len() as u32;
-        let mut b = v.as_bytes().to_vec();
-        b.push(0);
-        let l = b.len() as u32;
-        data_table.extend_from_slice(&b);
-        recs.push((key_offs[i], l, l, data_off));
-    }
-
-    let n = entries.len();
-    let off_key_table = (header_len + n * index_len) as u32;
-    let off_data_table = off_key_table + key_table.len() as u32;
-
-    let mut buf = Vec::new();
-    buf.extend_from_slice(&[0x00, b'P', b'S', b'F']);
-    buf.extend_from_slice(&0x0101u32.to_le_bytes());
-    buf.extend_from_slice(&off_key_table.to_le_bytes());
-    buf.extend_from_slice(&off_data_table.to_le_bytes());
-    buf.extend_from_slice(&(n as u32).to_le_bytes());
-    for (key_off, len, max, data_off) in &recs {
-        buf.extend_from_slice(&key_off.to_le_bytes());
-        buf.extend_from_slice(&SFO_FMT_STRING.to_le_bytes());
-        buf.extend_from_slice(&len.to_le_bytes());
-        buf.extend_from_slice(&max.to_le_bytes());
-        buf.extend_from_slice(&data_off.to_le_bytes());
-    }
-    buf.extend_from_slice(&key_table);
-    buf.extend_from_slice(&data_table);
-    buf
-}
+pub use cellgov_testkit::param_sfo::build_param_sfo;
 
 /// One item in a synthetic PKG.
 #[cfg(feature = "decrypt")]

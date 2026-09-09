@@ -54,7 +54,7 @@ fn title_entry(base: Option<BaseEntry>, updates: &[&str]) -> TitleEntry {
 
 fn base_entry() -> BaseEntry {
     BaseEntry {
-        app_ver: "01.00".to_string(),
+        version: "01.00".to_string(),
         dir: PathBuf::from("vfs")
             .join("dev_hdd0")
             .join("game")

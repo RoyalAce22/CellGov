@@ -434,7 +434,7 @@ mod tests;
 
 #[cfg(test)]
 mod cell_game_version_tests {
-    use cellgov_compare::BootOutcome;
+    use cellgov_compare::{AppVersion, BootOutcome};
 
     use super::super::test_fixtures::*;
     use super::*;
@@ -448,7 +448,7 @@ mod cell_game_version_tests {
             game: game.map(|v| GameIdentity {
                 title_id: "NPAA61000".to_string(),
                 version: v.to_string(),
-                app_ver: "01.00".to_string(),
+                app_version: Some(AppVersion::AppVer("01.00".to_string())),
             }),
         };
         b

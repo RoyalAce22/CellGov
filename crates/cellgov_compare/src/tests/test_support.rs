@@ -1,6 +1,6 @@
 //! Shared fixtures for `cellgov_compare` unit tests.
 
-use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
+use crate::identity::{AppVersion, FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::observation::{
     NamedMemoryRegion, Observation, ObservationMetadata, ObservedEvent, ObservedEventKind,
     ObservedHashes, ObservedOutcome,
@@ -105,7 +105,7 @@ pub fn identity(fw: &str, title_id: &str, version: &str) -> RunIdentity {
         game: Some(GameIdentity {
             title_id: title_id.into(),
             version: version.into(),
-            app_ver: "02.00".into(),
+            app_version: Some(AppVersion::AppVer("02.00".into())),
         }),
     }
 }

@@ -50,7 +50,7 @@ fn title_doc() -> TitleDoc {
         short_name: Some("flow".to_string()),
         display_name: Some("flOw".to_string()),
         base: Some(BaseDoc {
-            app_ver: "01.00".to_string(),
+            version: "01.00".to_string(),
             dir: "dev_hdd0/game/NPUA80001".to_string(),
             tree: "game".to_string(),
             distribution: "psn-hdd".to_string(),

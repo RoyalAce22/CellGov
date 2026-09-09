@@ -12,9 +12,9 @@
 //!   here, so no record read off disk can name a file outside the tree
 //!   it describes.
 //! - The version of a kind whose store path encodes one (firmware,
-//!   update) is a usable directory name. A base's version is its
-//!   `APP_VER`, which the path does not encode and a container may leave
-//!   empty.
+//!   update) is a usable directory name. A base's version is the one
+//!   its PARAM.SFO names, which the path does not encode and a container
+//!   may leave empty.
 
 use std::collections::BTreeMap;
 
@@ -110,8 +110,12 @@ pub enum InstallRecordParseError {
 pub struct ArtifactRecord {
     /// What the entry holds.
     pub kind: ArtifactKind,
-    /// Sony's version string verbatim. For a base this is the
-    /// PARAM.SFO `APP_VER`, which the store path does not encode.
+    /// Sony's version string verbatim: for a title entry, the version
+    /// its PARAM.SFO names ([`ParamSfo::named_version`]). The record
+    /// does not say which key named it; read the tree's own PARAM.SFO
+    /// for the key. A base's store path does not encode it.
+    ///
+    /// [`ParamSfo::named_version`]: crate::param_sfo::ParamSfo::named_version
     pub version: String,
     /// The entry's directory, `/`-separated and relative to the VFS
     /// root -- where the tree actually is, which a move rewrites.

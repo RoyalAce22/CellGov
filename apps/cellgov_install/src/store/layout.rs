@@ -276,7 +276,7 @@ impl TitleTree {
 /// and -- where the path encodes one -- which version.
 ///
 /// A base carries no version key: there is exactly one base per title
-/// id, and its `APP_VER` is recorded in the install record.
+/// id, and its install record carries the version its PARAM.SFO names.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Artifact {
     /// An installed firmware, `firmware/<version>/`.
@@ -293,7 +293,10 @@ pub enum Artifact {
     TitleUpdate {
         /// The title this update patches.
         title_id: TitleId,
-        /// Version from the update PKG's `APP_VER` (`02.51`).
+        /// Version the update PKG's PARAM.SFO names
+        /// ([`ParamSfo::named_version`], `02.51`).
+        ///
+        /// [`ParamSfo::named_version`]: crate::param_sfo::ParamSfo::named_version
         version: VersionKey,
     },
 }

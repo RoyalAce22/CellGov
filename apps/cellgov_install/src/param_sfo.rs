@@ -35,6 +35,27 @@ pub enum SfoValue {
     Array(Vec<u8>),
 }
 
+/// Which PARAM.SFO key named a tree's version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SfoVersionKey {
+    /// `APP_VER`, the application version a title or update declares.
+    AppVer,
+    /// `VERSION`, the package or disc version; it names the version
+    /// when `APP_VER` is absent or empty.
+    Version,
+}
+
+impl SfoVersionKey {
+    /// The key as PARAM.SFO spells it.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AppVer => "APP_VER",
+            Self::Version => "VERSION",
+        }
+    }
+}
+
 /// A parsed PARAM.SFO: its key/value entries in sorted key order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParamSfo {
@@ -42,6 +63,21 @@ pub struct ParamSfo {
 }
 
 impl ParamSfo {
+    /// The version the table names and the key it came from.
+    ///
+    /// `VERSION` names the version only when `APP_VER` is absent or
+    /// empty.
+    #[must_use]
+    pub fn named_version(&self) -> Option<(SfoVersionKey, &str)> {
+        [SfoVersionKey::AppVer, SfoVersionKey::Version]
+            .into_iter()
+            .find_map(|key| {
+                self.get_string(key.as_str())
+                    .filter(|v| !v.is_empty())
+                    .map(|v| (key, v))
+            })
+    }
+
     /// Look up a raw entry by key.
     pub fn get(&self, key: &str) -> Option<&SfoValue> {
         self.entries.get(key)
@@ -319,3 +355,7 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
 #[cfg(test)]
 #[path = "tests/param_sfo_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/named_version_tests.rs"]
+mod named_version_tests;

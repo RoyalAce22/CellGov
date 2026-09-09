@@ -120,11 +120,11 @@ fn installed_summary(title: &TitleDoc) -> String {
         }
         (None, 0) => "declared, nothing installed".to_string(),
         (None, n) => format!("{n} update(s), no base -- orphan"),
-        (Some(base), 0) => format!("{} base {}", base.distribution, base.app_ver),
+        (Some(base), 0) => format!("{} base {}", base.distribution, base.version_label()),
         (Some(base), _) => format!(
             "{} base {} + updates: {}",
             base.distribution,
-            base.app_ver,
+            base.version_label(),
             title
                 .updates
                 .iter()

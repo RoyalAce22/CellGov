@@ -31,7 +31,9 @@ it. Every comparator prints both sides' triples before its verdict and
 says out loud when the two differ, because a divergence between two
 differently-composed runs is a difference between versions until it is
 shown otherwise. The triple is context, not a verdict: a mismatch
-never drives an exit code on its own. State traces carry the same
+never drives an exit code on its own. The game half carries the
+title's version under the `PARAM.SFO` key its tree named it by, so a
+warning names the key beside the value. State traces carry the same
 identity as a fixed-width fingerprint in their header record, so
 `diverge` reports a cross-triple scan from the stream alone. An
 artifact naming no triple was written before the store carried
