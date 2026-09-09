@@ -32,6 +32,19 @@ impl From<CompareModeArg> for cellgov_compare::CompareMode {
     }
 }
 
+/// Which of the shared statuses `diff compare` gives, and for what.
+///
+/// The command runs its target twice before any comparison, so a
+/// disagreement between those two runs is the shared status 3. The 0
+/// and 1 rows follow `cellgov_compare::Classification::exits_failure`.
+const COMPARE_EXIT_CODES: &str = "Exit codes:
+  0   the two runs agreed and no comparison diverged, or the manifest
+      names no scenario this runner has (reported UNSUPPORTED)
+  1   a run produced no observation, a file failed to load or save,
+      the comparison found a divergence, or with --observations-dir
+      the baselines disagreed with each other (UNSETTLED_ORACLE)
+  3   the two runs that had to reproduce each other disagreed";
+
 /// The outcomes `diff diverge` has beyond the shared 0-5 contract.
 const DIVERGE_EXIT_CODES: &str = "Exit codes particular to this command:
   31  a trace failed to decode, so nothing past the cut was compared";
@@ -45,6 +58,7 @@ const ZOOM_EXIT_CODES: &str = "Exit codes particular to this command:
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum DiffCommand {
     /// Run a scenario or manifest and compare it against a baseline.
+    #[command(after_help = COMPARE_EXIT_CODES)]
     Compare(CompareArgs),
     /// Diff two saved observation JSONs.
     Observations {

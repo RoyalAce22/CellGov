@@ -799,6 +799,16 @@ Usage: cellgov diff compare [OPTIONS] <scenario|manifest.toml>
 | `--against-baseline` | `PATH` | Compare the scenario against this recorded baseline. |
 | `--observations-dir` | `DIR` | Compare every observation in this directory; manifest targets only. |
 
+```
+Exit codes:
+  0   the two runs agreed and no comparison diverged, or the manifest
+      names no scenario this runner has (reported UNSUPPORTED)
+  1   a run produced no observation, a file failed to load or save,
+      the comparison found a divergence, or with --observations-dir
+      the baselines disagreed with each other (UNSETTLED_ORACLE)
+  3   the two runs that had to reproduce each other disagreed
+```
+
 #### `cellgov diff observations`
 
 Diff two saved observation JSONs.

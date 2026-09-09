@@ -9,7 +9,7 @@ use cellgov_compare::{
 };
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::exit::{die, load_file_or_die};
+use super::exit::{die, die_with_status, load_file_or_die};
 use super::parse::{die_usage, CompareArgs, OutputFormat};
 use super::scenarios::scenario_factory;
 use crate::cli::exit_codes;
@@ -76,10 +76,29 @@ fn require_determinism(
     name: &str,
     regions: &[RegionDescriptor],
 ) -> Observation {
-    observe_with_determinism_check(factory, regions).unwrap_or_else(|e| match e {
-        DeterminismError::Observe(e) => die(&format!("observing {name}: {e}")),
-        e => die(&format!("determinism check FAILED for {name}: {e}")),
+    observe_with_determinism_check(factory, regions).unwrap_or_else(|e| {
+        let msg = match &e {
+            DeterminismError::Observe(e) => format!("observing {name}: {e}"),
+            e => format!("determinism break for {name}: {e}"),
+        };
+        die_with_status(&msg, determinism_exit_status(&e))
     })
+}
+
+/// The status a failed twice-run check exits with.
+///
+/// The two runs took identical inputs, so a field that differs between
+/// them is the shared "runs that had to reproduce each other disagreed"
+/// outcome. A run that produced no observation compared nothing; it ran
+/// and failed.
+fn determinism_exit_status(e: &DeterminismError) -> i32 {
+    match e {
+        DeterminismError::Observe(_) => exit_codes::FAILED,
+        DeterminismError::OutcomeMismatch
+        | DeterminismError::MemoryMismatch
+        | DeterminismError::EventMismatch
+        | DeterminismError::HashMismatch => exit_codes::DISAGREED,
+    }
 }
 
 /// `regions` must match what the `--against-baseline` run observes with.
@@ -592,3 +611,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/compare_tests.rs"]
+mod tests;

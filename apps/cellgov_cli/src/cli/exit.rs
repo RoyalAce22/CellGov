@@ -11,13 +11,20 @@ use cellgov_ps3_abi::elf::ELF_MAGIC;
 use crate::game::manifest::{ResolveEbootError, TitleManifest};
 
 /// Print `msg` to stderr and exit with the failed-operation status.
+pub(crate) fn die(msg: &str) -> ! {
+    die_with_status(msg, super::exit_codes::FAILED)
+}
+
+/// [`die`] with the status the caller names.
+///
+/// `status` is a shared status or one a command names in its own help.
 ///
 /// A refusal can land while a bar is up; `process::exit` runs no
 /// destructor, so the restore happens here or not at all.
-pub(crate) fn die(msg: &str) -> ! {
+pub(crate) fn die_with_status(msg: &str, status: i32) -> ! {
     cellgov_terminal::progress::release_terminal();
     eprintln!("{msg}");
-    std::process::exit(super::exit_codes::FAILED)
+    std::process::exit(status)
 }
 
 /// The note on SCE-wrapped input carried in the help of every command
