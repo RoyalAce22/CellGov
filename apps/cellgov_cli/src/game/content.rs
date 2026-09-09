@@ -5,6 +5,7 @@
 //! `guest_path`. A missing host file is a startup error rather than a
 //! silent ENOENT-at-runtime.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use cellgov_lv2::{FsError, Lv2Host};
@@ -42,6 +43,18 @@ pub enum ContentRegisterError {
         guest_path: String,
         first_host_path: PathBuf,
         second_host_path: PathBuf,
+    },
+    /// A manifest entry names a `guest_path` the host registers itself
+    /// before any manifest is read.
+    #[error(
+        "content: guest path {:?} (host source {}) is one the LV2 host registers itself; a \
+         manifest cannot supply it",
+        guest_path,
+        host_path.display(),
+    )]
+    GuestPathBuiltIn {
+        guest_path: String,
+        host_path: PathBuf,
     },
     /// No base directory: the override env var is unset or empty, and
     /// the caller gave no EBOOT directory.
@@ -112,6 +125,10 @@ pub enum ContentBaseSource {
 /// - [`ContentRegisterError::NoBase`]: both bases are `None`.
 /// - [`ContentRegisterError::HostFileRead`]: a file is missing under
 ///   the chosen base; the error names the path it probed.
+/// - [`ContentRegisterError::DuplicateGuestPath`]: an earlier entry of
+///   this manifest registered the same `guest_path`.
+/// - [`ContentRegisterError::GuestPathBuiltIn`]: the host registered
+///   the `guest_path` itself, before this manifest was read.
 ///
 /// Registration stops at the first failure; the `FsStore` keeps
 /// whatever earlier entries registered.
@@ -152,6 +169,10 @@ pub fn register_content_blobs(
         ContentBaseSource::Override { env } => Some(env.clone()),
         ContentBaseSource::Usrdir { .. } => None,
     };
+    // The host source each guest path of this manifest registered
+    // from, so a collision can say whether the earlier registration
+    // was the manifest's own or the host's built-in set.
+    let mut registered: BTreeMap<&str, PathBuf> = BTreeMap::new();
     for entry in &manifest.files {
         let host_path = resolve(&base, &entry.host_path);
         let bytes =
@@ -165,20 +186,19 @@ pub fn register_content_blobs(
             .fs_store_mut()
             .register_blob(entry.guest_path.clone(), bytes)
         {
-            // Surface both colliding host sources so the developer
-            // sees the duplicate at a glance.
-            let prior = manifest
-                .files
-                .iter()
-                .find(|e| e.guest_path == entry.guest_path)
-                .map(|e| resolve(&base, &e.host_path))
-                .unwrap_or_else(|| host_path.clone());
-            return Err(ContentRegisterError::DuplicateGuestPath {
-                guest_path: entry.guest_path.clone(),
-                first_host_path: prior,
-                second_host_path: host_path,
+            return Err(match registered.get(entry.guest_path.as_str()) {
+                Some(prior) => ContentRegisterError::DuplicateGuestPath {
+                    guest_path: entry.guest_path.clone(),
+                    first_host_path: prior.clone(),
+                    second_host_path: host_path,
+                },
+                None => ContentRegisterError::GuestPathBuiltIn {
+                    guest_path: entry.guest_path.clone(),
+                    host_path,
+                },
             });
         }
+        registered.insert(entry.guest_path.as_str(), host_path);
     }
     Ok(source)
 }
@@ -206,3 +226,7 @@ where
 #[cfg(test)]
 #[path = "tests/content_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/content_collision_tests.rs"]
+mod collision_tests;
