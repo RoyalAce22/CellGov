@@ -162,6 +162,7 @@ pub(super) fn bench_options<'a>(
         },
         firmware_dir: None,
         composed_mounts: &[],
+        eboot_dirs: &[],
         identity: &cellgov_compare::RunIdentity {
             firmware: None,
             game: None,

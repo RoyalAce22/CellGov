@@ -110,18 +110,23 @@ file off disk and registers it in `Lv2Host::fs_store` at the
 named `guest_path` before the step loop runs.
 
 The block names no base directory of its own. A relative
-`host_path` resolves against the directory the EBOOT sits in,
-which for a PSN or disc install is the USRDIR holding the title's
-data tree, unless the override env var points elsewhere. Neither
-being available (the env var unset and the EBOOT path without a
-parent directory) is a startup error, and so is any file missing
-under the selected base; the error names the path it probed. The
-repository carries no content of its own.
+`host_path` is read under the composition's EBOOT directories in
+probe order, a selected update's USRDIR ahead of the base's (led
+by the directory of an explicit executable named outside the
+store), and the first directory that holds the file supplies it;
+the override
+env var, set non-empty, replaces that list with its one directory.
+No directory at all (the env var unset and the composition naming
+no EBOOT directory) is a startup error, and so is a file missing
+under every directory; the error names the first path it probed
+and the others found absent. A read that fails for a reason other
+than absence stops at that directory. The repository carries no
+content of its own.
 
 | Field               | Type                          | Required                 | Notes                                                                                                                                                          |
 | ------------------- | ----------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `override_base_env` | string                        | no                       | Env-var name that, when set non-empty at run time, names the base directory in place of the EBOOT's own. Use it to point a boot at a stripped or modded tree. |
-| `files`             | `{ guest_path, host_path }[]` | yes (when block present) | Each entry registers one blob. `host_path` is resolved against the selected base when relative; absolute paths pass through.                                  |
+| `override_base_env` | string                        | no                       | Env-var name that, when set non-empty at run time, names the one base directory in place of the EBOOT directories. Use it to point a boot at a stripped or modded tree. |
+| `files`             | `{ guest_path, host_path }[]` | yes (when block present) | Each entry registers one blob. `host_path` is read under each selected base in turn when relative; absolute paths pass through and are probed once.             |
 
 ### `[[fs.mounts]]` (optional, array-of-tables)
 
@@ -134,8 +139,8 @@ resource enumerator.
 | Field          | Type   | Required | Notes                                                                                                                                                                     |
 | -------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `prefix`       | string | yes      | Guest-side path prefix. MUST start with `/`. Each prefix must be unique within the manifest; duplicates are rejected.                                                     |
-| `host`         | string | no       | Host-side directory the prefix maps to, POSIX-shaped, relative to the workspace root. Omitted, the prefix maps to the directory the EBOOT sits in.                        |
-| `override_env` | string | no       | Env-var name whose non-empty value replaces `host` (or the EBOOT directory) at run time. Same role as `[content].override_base_env`.                                      |
+| `host`         | string | no       | Host-side directory the prefix maps to, POSIX-shaped, relative to the workspace root. Omitted, the prefix maps to the composition's USRDIRs, a selected update's ahead of the base's. |
+| `override_env` | string | no       | Env-var name whose non-empty value replaces `host` (or the EBOOT directories) at run time. Same role as `[content].override_base_env`.                                    |
 
 ### `[[bench.matrix]]` (optional, array-of-tables)
 
@@ -310,8 +315,10 @@ usual choice for titles whose boot path probes for
 unpopulated out-params and bails.
 
 The `/app_home` mount, declaring no `host`, maps to the installed
-title's own USRDIR, so every file the resource loader opens under
-that prefix is served from the EBOOT's directory on demand. A
+title's own USRDIRs in the order the composition probes them for
+the EBOOT, a selected update's ahead of the base's, so every file
+the resource loader opens under that prefix is served from the same
+tree the composed game mount would serve it from. A
 `[content]` block naming the same files would register the same
 bytes ahead of the mount and change nothing the guest observes; it
 is for a blob the guest opens at a path no mount serves.

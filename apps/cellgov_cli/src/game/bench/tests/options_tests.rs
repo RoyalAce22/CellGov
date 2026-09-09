@@ -70,6 +70,7 @@ fn the_encoded_child_invocation_parses_back_into_the_same_run() {
         // The resolved directory, which must not reach the child.
         firmware_dir: Some("resolved/4.91/dev_flash/sys/external"),
         composed_mounts: &[],
+        eboot_dirs: &[],
         identity: &identity,
         selection: SelectionArgs {
             fw: Some("4.91"),
@@ -137,6 +138,7 @@ fn an_unmanaged_firmware_tree_reaches_the_child_as_the_flag() {
         },
         firmware_dir: Some("elsewhere/sys/external"),
         composed_mounts: &[],
+        eboot_dirs: &[],
         identity: &identity,
         selection: SelectionArgs {
             firmware_dir: Some("elsewhere/sys/external"),

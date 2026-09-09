@@ -52,6 +52,10 @@ pub struct BenchOptions<'a> {
     /// The `sys/external` directory the firmware loader reads.
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// The directories the candidate walk probes for the EBOOT, a
+    /// selected update's first; see
+    /// [`crate::game::boot::PrepareOptions::eboot_dirs`].
+    pub eboot_dirs: &'a [std::path::PathBuf],
     /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,
     /// What the child re-resolves its own composition from.

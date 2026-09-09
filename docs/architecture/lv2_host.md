@@ -442,21 +442,25 @@ files = [
 
 The boot-time content provider in
 `apps/cellgov_cli/src/game/content.rs` resolves each entry
-against one of two bases, in priority order:
+against the first of two base sets that is present:
 
 1. `override_base_env`'s value, when the env var is set to a
-   non-empty path. Hard-fail on any missing file with a diagnostic
-   naming the env var, so the developer who set the override knows
-   which knob to fix.
-2. The EBOOT's own directory (`<eboot>.parent()`), where a PSN
-   install keeps the title's data tree. Hard-fail on any missing
-   file, naming the path probed.
+   non-empty path: one directory. Hard-fail on any missing file with
+   a diagnostic naming the env var, so the developer who set the
+   override knows which knob to fix.
+2. The composition's EBOOT directories, in the order the executable
+   was probed for: a selected update's USRDIR ahead of the base's,
+   the same shadowing the composed game mount applies. The first
+   directory that holds the file supplies it; a file under none of
+   them hard-fails naming the first path and the others found
+   absent. An explicit executable the composition did not name keeps
+   its own directory alone.
 
-Neither base being selectable, because the env var is unset and the
-EBOOT path has no parent directory, is a startup error too. The
-manifest names no base of its own. A `[[fs.mounts]]` entry follows
-the same rule: its `override_env`, else its declared `host`, else the
-EBOOT's directory.
+Neither set being present, because the env var is unset and the boot
+names no EBOOT directory, is a startup error too. The manifest names
+no base of its own. A `[[fs.mounts]]` entry follows the same rule:
+its `override_env`, else its declared `host`, else every one of the
+composition's EBOOT directories as an ordered root of the mount.
 
 The firmware cellFs surface routes through the raw `sys_fs_*` LV2
 syscall path, backed by the same `FsStore` model.

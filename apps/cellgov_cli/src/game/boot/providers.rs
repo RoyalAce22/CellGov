@@ -50,6 +50,37 @@ fn eboot_dir(elf_path: &str) -> Option<&std::path::Path> {
     })
 }
 
+/// The roots of a mount that declares no host and the bases of a
+/// `[content]` entry, in shadowing order.
+///
+/// - An executable the candidate walk found sits in `eboot_dirs`, so
+///   that list is the answer. A selected update's directory leads and
+///   the base's follows: the shadowing the composed game mount applies.
+/// - An explicit executable outside `eboot_dirs` (a build outside the
+///   store) keeps its own directory alone. The composition's
+///   directories describe the store's executable, which this boot does
+///   not run, and one of them may not exist.
+fn usrdir_bases(elf_path: &str, eboot_dirs: &[std::path::PathBuf]) -> Vec<std::path::PathBuf> {
+    match eboot_dir(elf_path) {
+        Some(dir) if !eboot_dirs.iter().any(|b| same_directory(b, dir)) => vec![dir.to_path_buf()],
+        _ => eboot_dirs.to_vec(),
+    }
+}
+
+/// Whether two spellings name one directory.
+///
+/// The operator spells an explicit executable, so it can name a
+/// composed directory another way (a relative path, `..`, a symlink);
+/// the canonical forms settle that when both resolve. When either does
+/// not resolve, the component-wise comparison decides; on Windows it
+/// folds `/` and `\`.
+fn same_directory(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
 /// The override env var's value, or `None` when it is unset.
 ///
 /// A value that is not Unicode stops the boot with an error that
@@ -78,7 +109,7 @@ pub(super) fn register_content(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
         content,
         &workspace_root,
         override_base.as_deref(),
-        eboot_dir(opts.elf_path),
+        &usrdir_bases(opts.elf_path, opts.eboot_dirs),
         rt.lv2_host_mut(),
     );
     match registration_result {
@@ -107,7 +138,7 @@ pub(super) fn register_mounts(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
     let n = match crate::game::mounts::register_mounts(
         &opts.title.mounts,
         &workspace_root,
-        eboot_dir(opts.elf_path),
+        &usrdir_bases(opts.elf_path, opts.eboot_dirs),
         env_override,
         rt.lv2_host_mut(),
     ) {
@@ -178,9 +209,14 @@ fn content_source_label(
 ) -> String {
     use crate::game::content::ContentBaseSource;
     match source {
-        ContentBaseSource::Usrdir { path } => {
-            format!("EBOOT directory ({})", path.display())
-        }
+        ContentBaseSource::Usrdir { paths } => format!(
+            "EBOOT directories ({})",
+            paths
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
         ContentBaseSource::Override { env } => format!(
             "override env {env}={}",
             override_base
@@ -193,3 +229,7 @@ fn content_source_label(
 #[cfg(test)]
 #[path = "tests/providers_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/providers_bases_tests.rs"]
+mod bases_tests;

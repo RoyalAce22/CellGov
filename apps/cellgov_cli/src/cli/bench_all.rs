@@ -343,6 +343,7 @@ fn gate_cell(
             plan: plan.as_plan(),
             firmware_dir: firmware_dir.as_deref(),
             composed_mounts: &inputs.composition.mounts,
+            eboot_dirs: &inputs.composition.eboot_dirs,
             identity: &inputs.composition.identity,
             selection: owned.as_args(),
             strict_reserved: args.strict_reserved,

@@ -74,9 +74,9 @@ pub enum MountRegisterError {
     #[error("mounts: prefix {prefix:?} is already registered (FsMountTable rejected it)")]
     DuplicatePrefix { prefix: String },
     /// The entry declares no `host`, its override env var is unset,
-    /// and the EBOOT path has no parent directory to default to.
+    /// and the composition names no EBOOT directory to default to.
     #[error(
-        "mounts: prefix {prefix:?} declares no host, {} and the EBOOT path has no parent \
+        "mounts: prefix {prefix:?} declares no host, {} and the composition names no EBOOT \
          directory to default to",
         render_no_override(override_env)
     )]
@@ -90,7 +90,7 @@ fn render_override_hint(override_env: &Option<String>) -> String {
     match override_env {
         Some(env) => format!(
             " (override env var {env} is set; either point it at a real directory or \
-             unset {env} to mount the EBOOT's own directory)"
+             unset {env} to mount the composition's EBOOT directories)"
         ),
         None => String::new(),
     }
@@ -288,11 +288,14 @@ fn check_host_root_is_dir(
 ///
 /// 1. the value of `override_env`, when `getter` returns it non-empty;
 /// 2. the manifest's `host`;
-/// 3. `usrdir_base`, the EBOOT's directory.
+/// 3. `usrdir_bases`, the EBOOT directories in probe order (a
+///    selected update's first). Every one becomes a root of the
+///    mount, so an earlier one shadows a later one, as the composed
+///    game mount layers them.
 ///
 /// A relative string from the first two resolves against
-/// `workspace_root`. `usrdir_base` resolves as given; an empty path
-/// counts as absent.
+/// `workspace_root`. Each of `usrdir_bases` resolves as given; an
+/// empty path counts as absent.
 ///
 /// # Per-entry validation order
 ///
@@ -301,10 +304,10 @@ fn check_host_root_is_dir(
 /// 3. Manifest `host` shape, if the entry declares one.
 /// 4. Host directory choice; a chosen env value also passes the
 ///    `host` shape check.
-/// 5. Host directory probe.
-/// 6. `std::fs::canonicalize`.
-/// 7. `FsMount::new`, then in-slice and cross-call duplicate check
-///    using the normalized prefix.
+/// 5. Host directory probe, of every root.
+/// 6. `std::fs::canonicalize`, of every root.
+/// 7. `FsMount::with_roots`, then in-slice and cross-call duplicate
+///    check using the normalized prefix.
 ///
 /// # Atomicity
 ///
@@ -318,7 +321,7 @@ fn check_host_root_is_dir(
 pub fn register_mounts<F>(
     mounts: &[MountEntry],
     workspace_root: &Path,
-    usrdir_base: Option<&Path>,
+    usrdir_bases: &[PathBuf],
     mut getter: F,
     host: &mut Lv2Host,
 ) -> Result<usize, MountRegisterError>
@@ -338,7 +341,11 @@ where
     let mut prepared: Vec<FsMount> = Vec::with_capacity(mounts.len());
     // `Path::parent` of a bare filename is `Some("")`, which names no
     // directory.
-    let usrdir_base = usrdir_base.filter(|p| !p.as_os_str().is_empty());
+    let usrdir_bases: Vec<&Path> = usrdir_bases
+        .iter()
+        .map(PathBuf::as_path)
+        .filter(|p| !p.as_os_str().is_empty())
+        .collect();
 
     for entry in mounts {
         validate_prefix(&entry.prefix)?;
@@ -347,20 +354,20 @@ where
             validate_host_shape(&entry.prefix, declared)?;
         }
 
-        let (host_path, override_env_for_err) = match override_host_from_env(entry, &mut getter) {
+        let (host_paths, override_env_for_err) = match override_host_from_env(entry, &mut getter) {
             Some(v) => {
                 // Re-validate the env value: it obeys the same shape
                 // rules as the committed manifest path.
                 validate_host_shape(&entry.prefix, &v)?;
                 (
-                    resolve_against(workspace_root, &v),
+                    vec![resolve_against(workspace_root, &v)],
                     entry.override_env.clone(),
                 )
             }
-            None => match (&entry.host, usrdir_base) {
-                (Some(declared), _) => (resolve_against(workspace_root, declared), None),
-                (None, Some(usrdir)) => (usrdir.to_path_buf(), None),
-                (None, None) => {
+            None => match (&entry.host, usrdir_bases.is_empty()) {
+                (Some(declared), _) => (vec![resolve_against(workspace_root, declared)], None),
+                (None, false) => (usrdir_bases.iter().map(|p| p.to_path_buf()).collect(), None),
+                (None, true) => {
                     return Err(MountRegisterError::NoHost {
                         prefix: entry.prefix.clone(),
                         override_env: entry.override_env.clone(),
@@ -368,16 +375,24 @@ where
                 }
             },
         };
-        check_host_root_is_dir(&host_path, &entry.prefix, &override_env_for_err)?;
-        let canonical = canonicalize_existing(&entry.prefix, &host_path, &override_env_for_err)?;
+        let mut roots = Vec::with_capacity(host_paths.len());
+        for host_path in &host_paths {
+            check_host_root_is_dir(host_path, &entry.prefix, &override_env_for_err)?;
+            roots.push(canonicalize_existing(
+                &entry.prefix,
+                host_path,
+                &override_env_for_err,
+            )?);
+        }
 
-        // Prefix was just validated, so FsMount::new must succeed.
-        // A None here means validate_prefix and FsMount::new have
-        // diverged; surface as InvalidPrefix rather than panicking.
-        let mount = FsMount::new(entry.prefix.clone(), canonical).ok_or_else(|| {
+        // validate_prefix passed the prefix and the root list is
+        // non-empty, so FsMount::with_roots succeeds. A None means
+        // validate_prefix and the mount diverged; report InvalidPrefix
+        // instead of a panic.
+        let mount = FsMount::with_roots(entry.prefix.clone(), roots).ok_or_else(|| {
             MountRegisterError::InvalidPrefix {
                 prefix: entry.prefix.clone(),
-                reason: "FsMount::new rejected a prefix that passed validate_prefix; \
+                reason: "FsMount::with_roots rejected a prefix that passed validate_prefix; \
                          contract drift between the two validators"
                     .to_string(),
             }
@@ -405,3 +420,7 @@ where
 #[cfg(test)]
 #[path = "tests/mounts_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/mounts_roots_tests.rs"]
+mod roots_tests;

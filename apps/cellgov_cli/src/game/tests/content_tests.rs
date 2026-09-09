@@ -50,7 +50,7 @@ fn registers_all_entries_in_fs_store() {
         &manifest,
         Path::new("/unused"),
         None,
-        Some(tmp.path()),
+        &[tmp.path().to_path_buf()],
         &mut host,
     )
     .unwrap();
@@ -82,7 +82,7 @@ fn missing_host_file_is_a_startup_error() {
         &manifest,
         Path::new("/unused"),
         None,
-        Some(tmp.path()),
+        &[tmp.path().to_path_buf()],
         &mut host,
     )
     .expect_err("missing host file must surface");
@@ -117,7 +117,7 @@ fn relative_override_base_is_resolved_against_workspace_root() {
     };
     let mut host = Lv2Host::new();
     let source =
-        register_content_blobs(&manifest, workspace, Some(Path::new("fx")), None, &mut host)
+        register_content_blobs(&manifest, workspace, Some(Path::new("fx")), &[], &mut host)
             .unwrap();
     assert!(matches!(source, ContentBaseSource::Override { .. }));
     assert_eq!(
@@ -143,7 +143,7 @@ fn absolute_host_path_overrides_base() {
         &manifest,
         Path::new("/unused"),
         None,
-        Some(unrelated.path()),
+        &[unrelated.path().to_path_buf()],
         &mut host,
     )
     .unwrap();
@@ -176,7 +176,7 @@ fn duplicate_guest_path_is_a_startup_error() {
         &manifest,
         Path::new("/unused"),
         None,
-        Some(tmp.path()),
+        &[tmp.path().to_path_buf()],
         &mut host,
     )
     .expect_err("duplicate guest_path must surface");
@@ -206,7 +206,7 @@ fn override_base_alone_is_sufficient() {
         &manifest,
         Path::new("/unused"),
         Some(real.path()),
-        None,
+        &[],
         &mut host,
     )
     .unwrap();
@@ -233,7 +233,7 @@ fn override_base_missing_file_error_carries_env_name() {
         &manifest,
         Path::new("/unused"),
         Some(real.path()),
-        None,
+        &[],
         &mut host,
     )
     .expect_err("missing override file must surface");
@@ -342,14 +342,14 @@ fn usrdir_is_selected_when_no_override_is_set() {
         &manifest,
         Path::new("/unused"),
         None,
-        Some(usrdir.path()),
+        &[usrdir.path().to_path_buf()],
         &mut host,
     )
     .unwrap();
     assert_eq!(
         source,
         ContentBaseSource::Usrdir {
-            path: usrdir.path().to_path_buf()
+            paths: vec![usrdir.path().to_path_buf()]
         }
     );
     assert_eq!(
@@ -369,7 +369,7 @@ fn partial_usrdir_is_a_missing_file_error() {
         &manifest,
         Path::new("/unused"),
         None,
-        Some(usrdir.path()),
+        &[usrdir.path().to_path_buf()],
         &mut host,
     )
     .expect_err("a USRDIR missing one entry must surface that entry");
@@ -412,7 +412,7 @@ fn override_takes_priority_over_usrdir() {
         &manifest,
         Path::new("/unused"),
         Some(override_dir.path()),
-        Some(usrdir.path()),
+        &[usrdir.path().to_path_buf()],
         &mut host,
     )
     .unwrap();
@@ -428,7 +428,7 @@ fn override_takes_priority_over_usrdir() {
 fn no_override_and_no_usrdir_is_a_startup_error() {
     let manifest = flow_shaped_manifest();
     let mut host = Lv2Host::new();
-    let err = register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host)
+    let err = register_content_blobs(&manifest, Path::new("/unused"), None, &[], &mut host)
         .expect_err("no base at all must surface");
     let msg = err.to_string();
     match err {
@@ -460,7 +460,7 @@ fn no_base_error_without_a_declared_override_env_says_so() {
         }],
     };
     let mut host = Lv2Host::new();
-    let err = register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host)
+    let err = register_content_blobs(&manifest, Path::new("/unused"), None, &[], &mut host)
         .expect_err("no base at all must surface");
     let msg = err.to_string();
     assert!(matches!(err, ContentRegisterError::NoBase { n: 1, .. }));

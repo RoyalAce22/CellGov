@@ -26,8 +26,14 @@ fn register(dir: &Path, files: Vec<ContentEntry>, host: &mut Lv2Host) -> Content
         override_base_env: None,
         files,
     };
-    register_content_blobs(&manifest, Path::new("/unused"), None, Some(dir), host)
-        .expect_err("the manifest collides with an earlier registration")
+    register_content_blobs(
+        &manifest,
+        Path::new("/unused"),
+        None,
+        &[dir.to_path_buf()],
+        host,
+    )
+    .expect_err("the manifest collides with an earlier registration")
 }
 
 /// A guest path `Lv2Host::new()` registers before any manifest is read.

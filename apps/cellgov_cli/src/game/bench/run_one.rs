@@ -38,6 +38,7 @@ fn bench_boot(
         control_flags1,
         firmware_dir: opts.firmware_dir,
         composed_mounts: opts.composed_mounts,
+        eboot_dirs: opts.eboot_dirs,
         identity: opts.identity,
         strict_reserved: opts.strict_reserved,
         dump_at_pc: None,

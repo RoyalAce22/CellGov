@@ -1,6 +1,7 @@
 //! Types the boot stages pass between each other, and the refusals
 //! that reject a boot before any stage runs.
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use cellgov_core::Runtime;
@@ -74,6 +75,10 @@ pub(in crate::game) struct PrepareOptions<'a> {
     pub firmware_dir: Option<&'a str>,
     /// Store-composed mounts, registered before the manifest's own.
     pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// The directories the candidate walk probes for the EBOOT, a
+    /// selected update's first: the roots of a mount that declares no
+    /// host, and the bases of a `[content]` entry.
+    pub eboot_dirs: &'a [PathBuf],
     /// Which firmware and title version the store composed for this
     /// run; written as the trace stream's header record.
     pub identity: &'a cellgov_compare::RunIdentity,

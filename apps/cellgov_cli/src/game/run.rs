@@ -31,6 +31,9 @@ pub struct RunGameOptions<'a> {
     pub profile: bool,
     pub firmware_dir: Option<&'a str>,
     pub composed_mounts: &'a [crate::composition::ComposedMount],
+    /// The directories the candidate walk probes for the EBOOT, a
+    /// selected update's first; see [`boot::PrepareOptions::eboot_dirs`].
+    pub eboot_dirs: &'a [std::path::PathBuf],
     /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,
     pub dump_at_pc: Option<u64>,
@@ -108,6 +111,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         profile,
         firmware_dir,
         composed_mounts,
+        eboot_dirs,
         identity,
         dump_at_pc,
         dump_skip,
@@ -152,6 +156,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         control_flags1,
         firmware_dir,
         composed_mounts,
+        eboot_dirs,
         identity,
         strict_reserved,
         dump_at_pc,
