@@ -23,6 +23,8 @@ fn firmware(version: &str) -> FirmwareDoc {
 fn base() -> BaseDoc {
     BaseDoc {
         version: "01.00".to_string(),
+        version_key: Some("app_ver".to_string()),
+        param_sfo_error: None,
         dir: format!("dev_hdd0/game/{TITLE_ID}"),
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
@@ -120,12 +122,15 @@ fn a_declared_title_with_nothing_installed_is_named_as_such() {
 }
 
 #[test]
-fn an_installed_base_is_summarised_by_its_distribution_and_version() {
+fn an_installed_base_is_summarised_by_its_distribution_and_version_under_its_key() {
     let rendered = render(&doc(
         vec![firmware("4.91")],
         vec![title(Some(base()), Vec::new())],
     ));
-    assert!(rendered.contains("psn-hdd base 01.00"), "{rendered}");
+    assert!(
+        rendered.contains("psn-hdd base app_ver 01.00"),
+        "{rendered}"
+    );
 }
 
 #[test]

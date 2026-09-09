@@ -23,6 +23,8 @@ fn title(short_name: Option<&str>, base: Option<BaseDoc>, updates: Vec<UpdateDoc
 fn base(version: &str) -> BaseDoc {
     BaseDoc {
         version: version.to_string(),
+        version_key: None,
+        param_sfo_error: None,
         dir: format!("dev_hdd0/game/{TITLE_ID}"),
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
@@ -36,6 +38,8 @@ fn base(version: &str) -> BaseDoc {
 fn update(version: &str) -> UpdateDoc {
     UpdateDoc {
         version: version.to_string(),
+        version_key: None,
+        param_sfo_error: None,
         dir: format!("titles/{TITLE_ID}/updates/{version}/game"),
         source_sha256: "cd".repeat(32),
         min_system_ver: None,

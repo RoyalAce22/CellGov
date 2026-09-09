@@ -122,6 +122,7 @@ comparison records rather than a published API: they carry no
       "display_name": "flOw",
       "base": {
         "version": "01.00",
+        "version_key": "app_ver",
         "dir": "dev_hdd0/game/NPUA80001",
         "tree": "game",
         "distribution": "psn-hdd",
@@ -132,6 +133,7 @@ comparison records rather than a published API: they carry no
       "updates": [
         {
           "version": "1.02",
+          "version_key": "app_ver",
           "dir": "titles/NPUA80001/updates/1.02/game",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "min_system_ver": "03.5500",
@@ -193,6 +195,7 @@ comparison records rather than a published API: they carry no
       "display_name": "flOw",
       "base": {
         "version": "01.00",
+        "version_key": "app_ver",
         "dir": "dev_hdd0/game/NPUA80001",
         "tree": "game",
         "distribution": "psn-hdd",
@@ -203,6 +206,7 @@ comparison records rather than a published API: they carry no
       "updates": [
         {
           "version": "1.02",
+          "version_key": "app_ver",
           "dir": "titles/NPUA80001/updates/1.02/game",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "min_system_ver": "03.5500",

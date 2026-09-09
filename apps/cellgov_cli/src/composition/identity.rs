@@ -219,21 +219,42 @@ fn game_identity(stored: &StoredGame) -> Result<GameIdentity, GameIdentityError>
             )
         }
     };
+    let app_version = tree_app_version(path, recorded)?;
+    Ok(GameIdentity {
+        title_id: stored.title_id.clone(),
+        version,
+        app_version,
+    })
+}
+
+/// The version a tree's PARAM.SFO names, under its key, held against
+/// the version the tree's record holds.
+///
+/// `Ok(None)` is a table that names no version over a record that
+/// holds the empty string, the pair a base install writes for such a
+/// table.
+///
+/// # Errors
+///
+/// - [`GameIdentityError::Read`] when the table cannot be read.
+/// - [`GameIdentityError::Parse`] when the table does not parse.
+/// - [`GameIdentityError::Mismatch`] when the version the table names
+///   is not `recorded`.
+pub(crate) fn tree_app_version(
+    path: PathBuf,
+    recorded: &str,
+) -> Result<Option<AppVersion>, GameIdentityError> {
     let app_version = read_app_version(&path)?;
     // The install wrote the record's version from this same table, so a
     // correct store keeps the two in agreement.
     if app_version.as_ref().map_or("", AppVersion::value) != recorded {
         return Err(GameIdentityError::Mismatch {
             path,
-            recorded: recorded.clone(),
+            recorded: recorded.to_string(),
             found: app_version,
         });
     }
-    Ok(GameIdentity {
-        title_id: stored.title_id.clone(),
-        version,
-        app_version,
-    })
+    Ok(app_version)
 }
 
 fn read_app_version(path: &Path) -> Result<Option<AppVersion>, GameIdentityError> {

@@ -129,10 +129,11 @@ fn render_title_list(doc: &TitleListDoc) -> String {
     if doc.titles.is_empty() {
         return format!("no title installed under {}\n", doc.store);
     }
-    // The base column is wide enough for the no-version label, so a
-    // base whose table named none does not push its row out of line.
+    // The base column is wide enough for a version under its longer
+    // key and for the no-version label, so neither pushes its row out
+    // of line.
     let mut out = format!(
-        "  {:<9}  {:<20}  {:<14}  UPDATES\n",
+        "  {:<9}  {:<20}  {:<17}  UPDATES\n",
         "TITLE ID", "NAME", "BASE"
     );
     for title in &doc.titles {
@@ -147,10 +148,13 @@ fn render_title_list(doc: &TitleListDoc) -> String {
                 .join(", ")
         };
         out.push_str(&format!(
-            "  {:<9}  {:<20}  {:<14}  {updates}\n",
+            "  {:<9}  {:<20}  {:<17}  {updates}\n",
             title.title_id,
             title.short_name.as_deref().unwrap_or(NO_MANIFEST),
-            title.base.as_ref().map_or("--", BaseDoc::version_label),
+            title
+                .base
+                .as_ref()
+                .map_or_else(|| "--".to_string(), BaseDoc::version_label),
         ));
     }
     for title in &doc.titles {
@@ -196,6 +200,9 @@ fn render_title_detail(title: &TitleDoc) -> String {
                 base.distribution,
                 base.tree
             ));
+            if let Some(why) = &base.param_sfo_error {
+                out.push_str(&format!("  param.sfo  {why}\n"));
+            }
             out.push_str(&format!("  dir        {}\n", base.dir));
             out.push_str(&format!(
                 "  record     {}\n",
@@ -206,7 +213,10 @@ fn render_title_detail(title: &TitleDoc) -> String {
         None => out.push_str("  base       -- (not installed)\n"),
     }
     for update in &title.updates {
-        out.push_str(&format!("  update {}\n", update.version));
+        out.push_str(&format!("  update {}\n", update.version_label()));
+        if let Some(why) = &update.param_sfo_error {
+            out.push_str(&format!("    param.sfo {why}\n"));
+        }
         out.push_str(&format!("    dir      {}\n", update.dir));
         out.push_str(&format!(
             "    record   {}\n",
@@ -247,3 +257,7 @@ fn render_title_detail(title: &TitleDoc) -> String {
 #[cfg(test)]
 #[path = "tests/list_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/version_label_tests.rs"]
+mod version_label_tests;

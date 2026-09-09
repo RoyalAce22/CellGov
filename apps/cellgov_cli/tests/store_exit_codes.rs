@@ -2,6 +2,7 @@
 //! asserted against a synthetic store the test builds. Needs no corpus:
 //! every tree and record here is hand-written.
 
+use cellgov_testkit::param_sfo::build_param_sfo;
 use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -35,7 +36,7 @@ impl Store {
             root: scratch_labeled(label),
         };
         store.write("dev_hdd0/game/TEST00000/USRDIR/EBOOT.BIN", b"eboot");
-        store.write("dev_hdd0/game/TEST00000/PARAM.SFO", b"sfo");
+        store.write("dev_hdd0/game/TEST00000/PARAM.SFO", &base_param_sfo());
         store.write(
             ".cellgov/installs/titles/TEST00000/base.install.toml",
             base_record().as_bytes(),
@@ -76,6 +77,12 @@ impl Store {
     }
 }
 
+/// The base tree's PARAM.SFO; it names the record's version under
+/// `APP_VER`.
+fn base_param_sfo() -> Vec<u8> {
+    build_param_sfo(&[("TITLE_ID", TITLE_ID), ("APP_VER", "01.00")])
+}
+
 fn base_record() -> String {
     format!(
         "format_version = 3\n\
@@ -97,7 +104,7 @@ fn base_record() -> String {
          \"PARAM.SFO\" = \"{}\"\n",
         sha256_hex(b"container"),
         sha256_hex(b"eboot"),
-        sha256_hex(b"sfo"),
+        sha256_hex(&base_param_sfo()),
     )
 }
 
@@ -442,12 +449,55 @@ fn a_base_version_the_record_holds_reaches_every_document_that_carries_titles() 
             title["base"].get("app_ver").is_none(),
             "{args:?}: the base names its version under one key: {doc}"
         );
+        assert_eq!(
+            title["base"]["version_key"], "app_ver",
+            "{args:?}: the key the tree's PARAM.SFO named it by: {doc}"
+        );
+        assert!(
+            title["base"].get("param_sfo_error").is_none(),
+            "{args:?}: a table that confirms the record names no error: {doc}"
+        );
     }
 
     let (code, stdout, stderr) = store.run(&["title", "show", TITLE_ID]);
     assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
     assert!(
+        stdout.contains("base       app_ver 01.00 (psn-hdd, game tree)"),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn a_param_sfo_that_does_not_parse_leaves_the_key_absent_and_names_why() {
+    let store = Store::new("json_stub_sfo");
+    store.write("dev_hdd0/game/TEST00000/PARAM.SFO", b"sfo");
+
+    let (code, stdout, stderr) = store.run(&["title", "show", TITLE_ID, "--format", "json"]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    let doc: serde_json::Value =
+        serde_json::from_str(&stdout).unwrap_or_else(|e| panic!("{e}\n{stdout}"));
+    let base = &doc["titles"][0]["base"];
+    assert_eq!(
+        base["version"], "01.00",
+        "the record's version stands: {doc}"
+    );
+    assert!(
+        base.get("version_key").is_none(),
+        "a table that did not parse names no key: {doc}"
+    );
+    let why = base["param_sfo_error"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the document names why: {doc}"));
+    assert!(why.contains("PARAM.SFO"), "{why}");
+
+    let (code, stdout, stderr) = store.run(&["title", "show", TITLE_ID]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
         stdout.contains("base       01.00 (psn-hdd, game tree)"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!("  param.sfo  {why}\n")),
         "{stdout}"
     );
 }

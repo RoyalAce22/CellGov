@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::store::{Artifact, StoreLayout, TitleId, VersionKey};
 
+use crate::composition::identity::tree_app_version;
 use crate::composition::inventory::{FirmwareEntry, StoreInventory, TitleEntry};
 use crate::game::manifest::{CellKey, GameSource, TitleManifest, TitleRegistry, BASE_GAME_VER};
 
@@ -84,35 +85,49 @@ impl StoreView {
     }
 
     /// One title as a document, with its registry identity and cells.
+    ///
+    /// The view reads each installed tree's PARAM.SFO for the key that
+    /// named its version: one file read per base and per update.
     pub(crate) fn title_doc(&self, entry: &TitleEntry) -> TitleDoc {
         let manifest = self.registry.by_content_id(&entry.title_id);
         let key = TitleId::new(&entry.title_id).ok();
-        let base = entry.base.as_ref().map(|base| BaseDoc {
-            version: base.version.clone(),
-            dir: self.rel(&base.dir),
-            tree: base.tree.dir_name().to_string(),
-            distribution: base.distribution.clone(),
-            source_sha256: base.source_sha256.clone(),
-            record: key
-                .clone()
-                .map(|title_id| self.record_rel(&Artifact::TitleBase { title_id })),
+        let base = entry.base.as_ref().map(|base| {
+            let (version_key, param_sfo_error) = version_key(base.param_sfo_path(), &base.version);
+            BaseDoc {
+                version: base.version.clone(),
+                version_key,
+                param_sfo_error,
+                dir: self.rel(&base.dir),
+                tree: base.tree.dir_name().to_string(),
+                distribution: base.distribution.clone(),
+                source_sha256: base.source_sha256.clone(),
+                record: key
+                    .clone()
+                    .map(|title_id| self.record_rel(&Artifact::TitleBase { title_id })),
+            }
         });
         let updates = entry
             .updates
             .values()
-            .map(|update| UpdateDoc {
-                version: update.version.clone(),
-                dir: self.rel(&update.dir),
-                source_sha256: update.source_sha256.clone(),
-                min_system_ver: update.min_system_ver.clone(),
-                record: match (key.clone(), VersionKey::new(&update.version)) {
-                    (Some(title_id), Ok(version)) => {
-                        Some(self.record_rel(&Artifact::TitleUpdate { title_id, version }))
-                    }
-                    // The store filed this entry under both keys, so it
-                    // accepted both as directory names.
-                    _ => None,
-                },
+            .map(|update| {
+                let (version_key, param_sfo_error) =
+                    version_key(update.param_sfo_path(), &update.version);
+                UpdateDoc {
+                    version: update.version.clone(),
+                    version_key,
+                    param_sfo_error,
+                    dir: self.rel(&update.dir),
+                    source_sha256: update.source_sha256.clone(),
+                    min_system_ver: update.min_system_ver.clone(),
+                    record: match (key.clone(), VersionKey::new(&update.version)) {
+                        (Some(title_id), Ok(version)) => {
+                            Some(self.record_rel(&Artifact::TitleUpdate { title_id, version }))
+                        }
+                        // The store filed this entry under both keys, so it
+                        // accepted both as directory names.
+                        _ => None,
+                    },
+                }
             })
             .collect();
         TitleDoc {
@@ -185,6 +200,16 @@ impl StoreView {
     }
 }
 
+/// The `version_key` and `param_sfo_error` pair of a base or update
+/// document. The first names the PARAM.SFO key that named `recorded`;
+/// the second says why the tree's table did not confirm it.
+fn version_key(param_sfo: PathBuf, recorded: &str) -> (Option<String>, Option<String>) {
+    match tree_app_version(param_sfo, recorded) {
+        Ok(found) => (found.map(|v| v.key().to_string()), None),
+        Err(e) => (None, Some(e.to_string())),
+    }
+}
+
 /// Whether one title entry holds the game version a cell names, in a
 /// form that composes into a boot.
 ///
@@ -208,3 +233,7 @@ fn ships_in_firmware(manifest: &TitleManifest) -> bool {
 #[cfg(test)]
 #[path = "tests/collect_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/version_key_tests.rs"]
+mod version_key_tests;

@@ -71,6 +71,8 @@ fn a_title_document_serializes_under_the_names_the_schema_declares() {
             ships_in_firmware: false,
             base: Some(BaseDoc {
                 version: "01.00".to_string(),
+                version_key: Some("app_ver".to_string()),
+                param_sfo_error: None,
                 dir: "dev_hdd0/game/TEST00000".to_string(),
                 tree: "game".to_string(),
                 distribution: "psn-hdd".to_string(),
@@ -96,9 +98,17 @@ fn a_title_document_serializes_under_the_names_the_schema_declares() {
     assert_eq!(title["title_id"], "TEST00000");
     assert_eq!(title["short_name"], "synthetic");
     assert_eq!(title["base"]["version"], "01.00");
+    assert_eq!(
+        title["base"]["version_key"], "app_ver",
+        "the key that named the version is a field of its own: {title}"
+    );
     assert!(
         title["base"].get("app_ver").is_none(),
         "the base names its version by the key the record holds it under: {title}"
+    );
+    assert!(
+        title["base"].get("param_sfo_error").is_none(),
+        "a confirmed table names no error: {title}"
     );
     assert_eq!(title["anchors"][0]["fw"], "4.91");
     assert_eq!(title["anchors"][0]["recorded"], false);

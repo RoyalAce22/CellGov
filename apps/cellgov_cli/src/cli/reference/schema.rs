@@ -98,6 +98,8 @@ fn title_doc() -> TitleDoc {
         display_name: Some("flOw".to_string()),
         base: Some(BaseDoc {
             version: "01.00".to_string(),
+            version_key: Some("app_ver".to_string()),
+            param_sfo_error: None,
             // The PKG installer writes a base as the live
             // `dev_hdd0/game/<id>` mount directory, which the layout
             // names no entry for.
@@ -110,6 +112,8 @@ fn title_doc() -> TitleDoc {
         ships_in_firmware: false,
         updates: vec![UpdateDoc {
             version: SAMPLE_UPDATE_VERSION.to_string(),
+            version_key: Some("app_ver".to_string()),
+            param_sfo_error: None,
             dir: rel(&layout().entry_dir(&update).join(TitleTree::Game.dir_name())),
             source_sha256: SAMPLE_SHA.to_string(),
             min_system_ver: Some("03.5500".to_string()),

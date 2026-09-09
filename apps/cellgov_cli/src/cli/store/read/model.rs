@@ -64,6 +64,19 @@ pub(crate) struct FirmwareDoc {
 /// that tree.
 pub(crate) const NO_VERSION_KEY: &str = "no version key";
 
+/// A version as a human report prints it: under the key that named
+/// it, the way a boot summary's game identity prints one.
+///
+/// An empty version prints [`NO_VERSION_KEY`] so it does not read as a
+/// blank cell.
+fn version_label(version: &str, key: Option<&str>) -> String {
+    match key {
+        _ if version.is_empty() => NO_VERSION_KEY.to_string(),
+        Some(key) => format!("{key} {version}"),
+        None => version.to_string(),
+    }
+}
+
 /// A title's base install.
 #[derive(Debug, Serialize)]
 pub(crate) struct BaseDoc {
@@ -72,6 +85,20 @@ pub(crate) struct BaseDoc {
     /// `APP_VER`. A base install accepts a table that names neither and
     /// records the empty string, so this can be `""`.
     pub version: String,
+    /// Which PARAM.SFO key named [`Self::version`], spelled as a boot
+    /// summary's game identity spells it: `app_ver` or `sfo_version`.
+    ///
+    /// The key is absent when:
+    ///
+    /// - the table names no version;
+    /// - the tree's table did not confirm the record
+    ///   ([`Self::param_sfo_error`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_key: Option<String>,
+    /// Why the tree's PARAM.SFO did not confirm [`Self::version`], when
+    /// it did not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub param_sfo_error: Option<String>,
     /// The install tree, as a store path.
     pub dir: String,
     /// Which tree the base holds: `game` or `disc`.
@@ -87,14 +114,9 @@ pub(crate) struct BaseDoc {
 }
 
 impl BaseDoc {
-    /// The version as a human report prints it, so an empty version
-    /// does not read as a blank cell.
-    pub(crate) fn version_label(&self) -> &str {
-        if self.version.is_empty() {
-            NO_VERSION_KEY
-        } else {
-            &self.version
-        }
+    /// The version as a human report prints it; see [`version_label`].
+    pub(crate) fn version_label(&self) -> String {
+        version_label(&self.version, self.version_key.as_deref())
     }
 }
 
@@ -104,6 +126,14 @@ pub(crate) struct UpdateDoc {
     /// The store key, verbatim from the update PKG's PARAM.SFO:
     /// `APP_VER`, or `VERSION` when the table carries no `APP_VER`.
     pub version: String,
+    /// Which PARAM.SFO key named [`Self::version`]; see
+    /// [`BaseDoc::version_key`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version_key: Option<String>,
+    /// Why the tree's PARAM.SFO did not confirm [`Self::version`], when
+    /// it did not; see [`BaseDoc::param_sfo_error`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub param_sfo_error: Option<String>,
     /// The `dev_hdd0/game` tree this update installs.
     pub dir: String,
     /// SHA-256 over the update PKG.
@@ -116,6 +146,13 @@ pub(crate) struct UpdateDoc {
     /// path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub record: Option<String>,
+}
+
+impl UpdateDoc {
+    /// The version as a human report prints it; see [`version_label`].
+    pub(crate) fn version_label(&self) -> String {
+        version_label(&self.version, self.version_key.as_deref())
+    }
 }
 
 /// One cell of a title's declared matrix, and whether it has an anchor.
