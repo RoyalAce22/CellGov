@@ -60,13 +60,39 @@ impl SyntheticStore {
 
     /// Install a title's base tree; `disc` selects which mount it
     /// backs. The tree's PARAM.SFO declares `version` under `APP_VER`,
-    /// the shape a real install leaves.
+    /// the shape a real install leaves, and no `PS3_SYSTEM_VER`.
     pub(super) fn add_base(&self, title_id: &str, version: &str, disc: bool) -> &Self {
+        self.write_base(title_id, version, disc, None)
+    }
+
+    /// Install a title's base tree whose PARAM.SFO declares
+    /// `system_ver` under `PS3_SYSTEM_VER`, recorded as `[title]
+    /// system_ver` the way the installer writes it.
+    pub(super) fn add_base_declaring(
+        &self,
+        title_id: &str,
+        version: &str,
+        disc: bool,
+        system_ver: &str,
+    ) -> &Self {
+        self.write_base(title_id, version, disc, Some(system_ver))
+    }
+
+    fn write_base(
+        &self,
+        title_id: &str,
+        version: &str,
+        disc: bool,
+        system_ver: Option<&str>,
+    ) -> &Self {
         let (distribution, store_path) = if disc {
             ("disc-iso", format!("titles/{title_id}/base/disc"))
         } else {
             ("psn-hdd", format!("titles/{title_id}/base/game"))
         };
+        let declared = system_ver
+            .map(|v| format!("system_ver = \"{v}\"\n"))
+            .unwrap_or_default();
         let record = format!(
             "format_version = 3\n\n\
              [artifact]\n\
@@ -81,16 +107,17 @@ impl SyntheticStore {
              content_id = \"{title_id}\"\n\
              category = \"HG\"\n\
              title = \"Synthetic\"\n\
-             distribution = \"{distribution}\"\n",
+             distribution = \"{distribution}\"\n\
+             {declared}",
             digest('b'),
         );
         self.write_record(&["titles", title_id], "base.install.toml", &record);
         std::fs::create_dir_all(self.root.join(&store_path)).unwrap();
-        self.write_base_param_sfo(
-            title_id,
-            disc,
-            &[("TITLE_ID", title_id), ("APP_VER", version)],
-        );
+        let mut entries = vec![("TITLE_ID", title_id), ("APP_VER", version)];
+        if let Some(v) = system_ver {
+            entries.push(("PS3_SYSTEM_VER", v));
+        }
+        self.write_base_param_sfo(title_id, disc, &entries);
         self
     }
 
@@ -119,22 +146,49 @@ impl SyntheticStore {
 
     /// Install one update version of a title.
     pub(super) fn add_update(&self, title_id: &str, version: &str) -> &Self {
-        self.add_update_needing(title_id, version, None)
+        self.write_update(title_id, version, None, None)
     }
 
-    /// Install one update version that declares a minimum firmware.
-    ///
-    /// The record names the entry directory; the tree sits under its
-    /// `game/` child, the shape `install_update` writes.
+    /// Install one update version whose publisher metadata declares a
+    /// minimum firmware (`[source] min_system_ver`), and whose own
+    /// PARAM.SFO declares none.
     pub(super) fn add_update_needing(
         &self,
         title_id: &str,
         version: &str,
         min_system_ver: Option<&str>,
     ) -> &Self {
+        self.write_update(title_id, version, min_system_ver, None)
+    }
+
+    /// Install one update version whose own PARAM.SFO declares
+    /// `system_ver` under `PS3_SYSTEM_VER`, recorded as `[title]
+    /// system_ver`, beside whatever the publisher metadata declares.
+    pub(super) fn add_update_declaring(
+        &self,
+        title_id: &str,
+        version: &str,
+        min_system_ver: Option<&str>,
+        system_ver: &str,
+    ) -> &Self {
+        self.write_update(title_id, version, min_system_ver, Some(system_ver))
+    }
+
+    /// The record names the entry directory; the tree sits under its
+    /// `game/` child, the shape `install_update` writes.
+    fn write_update(
+        &self,
+        title_id: &str,
+        version: &str,
+        min_system_ver: Option<&str>,
+        system_ver: Option<&str>,
+    ) -> &Self {
         let store_path = format!("titles/{title_id}/updates/{version}");
         let min = min_system_ver
             .map(|v| format!("min_system_ver = \"{v}\"\n"))
+            .unwrap_or_default();
+        let declared = system_ver
+            .map(|v| format!("system_ver = \"{v}\"\n"))
             .unwrap_or_default();
         let record = format!(
             "format_version = 3\n\n\
@@ -151,7 +205,8 @@ impl SyntheticStore {
              content_id = \"{title_id}\"\n\
              category = \"GD\"\n\
              title = \"Synthetic\"\n\
-             distribution = \"update-pkg\"\n",
+             distribution = \"update-pkg\"\n\
+             {declared}",
             digest('c'),
         );
         self.write_record(
@@ -161,11 +216,11 @@ impl SyntheticStore {
         );
         let tree = self.root.join(&store_path).join("game");
         std::fs::create_dir_all(&tree).unwrap();
-        std::fs::write(
-            tree.join("PARAM.SFO"),
-            build_param_sfo(&[("TITLE_ID", title_id), ("APP_VER", version)]),
-        )
-        .unwrap();
+        let mut entries = vec![("TITLE_ID", title_id), ("APP_VER", version)];
+        if let Some(v) = system_ver {
+            entries.push(("PS3_SYSTEM_VER", v));
+        }
+        std::fs::write(tree.join("PARAM.SFO"), build_param_sfo(&entries)).unwrap();
         self
     }
 

@@ -192,21 +192,23 @@ pub(crate) struct BootComposition {
     pub mounts: Vec<ComposedMount>,
     /// Directories the EBOOT is probed in, first hit wins.
     pub eboot_dirs: Vec<PathBuf>,
-    /// Updates whose declared minimum firmware the selection does not
-    /// meet. The boot reports these and continues.
+    /// Composed entries whose declared minimum firmware the selection
+    /// does not meet, base first. The boot reports these and continues.
     pub understated_firmware: Vec<UnderstatedFirmware>,
     /// The identity triple every machine artifact this boot writes
     /// embeds.
     pub identity: RunIdentity,
 }
 
-/// An update whose declared minimum firmware the selection does not
-/// meet, or whose declared minimum could not be ordered against it.
+/// A composed entry whose declared minimum firmware the selection does
+/// not meet, or whose declared minimum [`version_key`] cannot order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct UnderstatedFirmware {
-    /// The update version that declared the minimum.
-    pub update: String,
-    /// The version the update's metadata declared.
+    /// The entry that declared the minimum: the base, or the selected
+    /// update.
+    pub entry: GameVersion,
+    /// The version the entry declared, spelled as its source spells it:
+    /// `03.4000` from a PARAM.SFO, or the publisher metadata's form.
     pub declared: String,
     /// The firmware the boot selected.
     pub selected: String,
@@ -288,10 +290,8 @@ pub(crate) fn compose_boot(inputs: &ComposeInputs<'_>) -> Result<BootComposition
             check_tree(title_id, &base.version, &base.dir)?;
             if let Some(u) = update {
                 check_tree(title_id, &u.version, &u.dir)?;
-                if let Some(note) = firmware_shortfall(u, &firmware) {
-                    understated_firmware.push(note);
-                }
             }
+            understated_firmware = firmware_shortfalls(base, update.as_ref(), &firmware);
             mounts.extend(title_mounts(title_id, base, update.as_ref()));
             title_eboot_dirs(base, update.as_ref())
         }
@@ -504,16 +504,41 @@ fn check_tree(title_id: &str, version: &str, dir: &Path) -> Result<(), ComposeEr
     }
 }
 
-/// Whether the selected firmware is older than the update declared it
-/// needs.
-fn firmware_shortfall(
-    update: &UpdateEntry,
+/// One note per composed entry whose declared minimum firmware the
+/// selection does not meet, base first.
+///
+/// An update's own table outranks the publisher's metadata: the table
+/// is the title's claim, the metadata a third party's.
+fn firmware_shortfalls(
+    base: &BaseEntry,
+    update: Option<&UpdateEntry>,
     firmware: &FirmwareChoice,
+) -> Vec<UnderstatedFirmware> {
+    let Some(selected) = firmware.version() else {
+        return Vec::new();
+    };
+    let mut claims = vec![(GameVersion::Base, base.system_ver.as_deref())];
+    if let Some(u) = update {
+        claims.push((
+            GameVersion::Update(u.version.clone()),
+            u.system_ver.as_deref().or(u.min_system_ver.as_deref()),
+        ));
+    }
+    claims
+        .into_iter()
+        .filter_map(|(entry, declared)| firmware_shortfall(entry, declared?, selected))
+        .collect()
+}
+
+/// A note when the selected firmware is older than `entry` declared it
+/// needs, or when [`version_key`] reads no order between the two.
+fn firmware_shortfall(
+    entry: GameVersion,
+    declared: &str,
+    selected: &str,
 ) -> Option<UnderstatedFirmware> {
-    let declared = update.min_system_ver.as_deref()?;
-    let selected = firmware.version()?;
     let note = |incomparable| UnderstatedFirmware {
-        update: update.version.clone(),
+        entry,
         declared: declared.to_string(),
         selected: selected.to_string(),
         incomparable,
@@ -528,9 +553,9 @@ fn firmware_shortfall(
 /// A Sony version string as a comparable `(major, minor)` pair.
 ///
 /// `4.93` and `04.9300` are one version written two ways: the
-/// console's `version.txt` form and the update metadata's. This
-/// right-pads the fraction to the metadata form's four digits, so both
-/// normalize to `(4, 9300)`.
+/// console's `version.txt` form, and the form a PARAM.SFO and the
+/// update metadata share. This right-pads the fraction to the four-digit
+/// form, so both normalize to `(4, 9300)`.
 fn version_key(s: &str) -> Option<(u32, u32)> {
     let (major, minor) = s.split_once('.')?;
     if minor.is_empty() || minor.len() > 4 || !minor.bytes().all(|b| b.is_ascii_digit()) {
@@ -546,3 +571,7 @@ fn version_key(s: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 #[path = "tests/compose_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/firmware_floor_tests.rs"]
+mod firmware_floor_tests;

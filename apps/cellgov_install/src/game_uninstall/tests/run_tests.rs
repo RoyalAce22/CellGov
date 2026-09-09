@@ -70,6 +70,7 @@ fn stage_synthetic_install(
             category: if is_disc { "DG" } else { "HG" }.to_string(),
             title: "T".to_string(),
             distribution: if is_disc { "disc-iso" } else { "psn-hdd" }.to_string(),
+            system_ver: None,
         }),
         files: filemap,
         rap: rap_rec,

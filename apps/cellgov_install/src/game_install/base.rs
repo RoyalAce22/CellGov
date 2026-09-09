@@ -24,7 +24,7 @@ use crate::game_install::error::GameInstallError;
 use crate::game_install::staging::{
     build_record, commit, dir_non_empty, emit_totals, parse_identity, prepare_staging,
     run_or_clean, sha256_of, stage_tree, validate_content_id, write_and_sync, InstallOptions,
-    StagedData, StagedFile, StagedRap,
+    SfoIdentity, StagedData, StagedFile, StagedRap,
 };
 use crate::iso;
 use crate::keys::KeyVault;
@@ -140,7 +140,13 @@ pub fn install_pkg(
         .iter()
         .find(|f| f.name == "PARAM.SFO")
         .ok_or(GameInstallError::NoParamSfo)?;
-    let (title_id, category, title, version) = parse_identity(archive.file_data(sfo_file))?;
+    let SfoIdentity {
+        title_id,
+        category,
+        title,
+        version,
+        system_ver,
+    } = parse_identity(archive.file_data(sfo_file))?;
     if category != "HG" {
         return Err(GameInstallError::NotHddGame { category });
     }
@@ -277,6 +283,7 @@ pub fn install_pkg(
             category,
             title,
             distribution: "psn-hdd".to_string(),
+            system_ver,
         },
         staged_rap.as_ref().map(|r| r.record.clone()),
     );
@@ -340,7 +347,13 @@ pub fn install_iso(
         .find(|e| e.path == "PS3_GAME/PARAM.SFO")
         .ok_or(GameInstallError::NoDiscParamSfo)?;
     let sfo_bytes = sfo_entry.read_data(image)?;
-    let (title_id, category, title, version) = match parse_identity(&sfo_bytes) {
+    let SfoIdentity {
+        title_id,
+        category,
+        title,
+        version,
+        system_ver,
+    } = match parse_identity(&sfo_bytes) {
         Err(GameInstallError::Sfo(param_sfo::SfoError::BadMagic(head))) => {
             return Err(GameInstallError::DiscImageEncrypted {
                 path: "PS3_GAME/PARAM.SFO",
@@ -431,6 +444,7 @@ pub fn install_iso(
             category,
             title,
             distribution: "disc-iso".to_string(),
+            system_ver,
         },
         None,
     );

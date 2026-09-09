@@ -12,7 +12,7 @@ manifest path (`--title-manifest <file>`). A manifest declares:
   `rap_filename` names the operator-supplied RAP (decrypt path
   below). `[source] kind = "disc"` resolves under the disc tree's
   `PS3_GAME/USRDIR/` instead, APP-keyed (no RAP). `[source] kind =
-  "firmware-exec"` points the resolver at a module directory inside a
+"firmware-exec"` points the resolver at a module directory inside a
   firmware image, where the manifest's `path` is relative to the
   selected firmware entry and `eboot_candidates` names the
   executable. That relative path is what lets one manifest boot
@@ -60,9 +60,12 @@ firmware it shipped against in its own `PARAM.SFO`, under
 The manifest repeats that value as `[title] system_ver` in the store's
 key spelling, a `title-corpus` suite holds the repetition to the
 installed table, and the loader builds the reference cell from it:
-`(system_ver, base)`. No manifest key points the headline row
-elsewhere, so the cell a title is measured at is a fact the title
-carries rather than a choice the registry records.
+`(system_ver, base)`. The installer records the same table entry,
+verbatim, as `[title] system_ver` in the install record of every base
+and update it writes, and a boot composed under it warns. No manifest
+key points the headline row elsewhere, so the cell a title is measured
+at is a fact the title carries rather than a choice the registry
+records.
 
 The floor is the frontier map's honest surface. At it the title and the
 firmware were shipped and tested together, so a divergence there is
@@ -412,7 +415,12 @@ The diagnostic surface is:
 Every boot command splits its two streams by audience. stdout carries
 the run's result and the guest's own output; stderr carries the
 selection banner, the witness lines the anchor check reads, and the
-progress bar. The split is what lets a parent spawn a boot and parse
+progress bar. The banner is followed by one warning line per composed
+entry (the base, and the selected update) whose recorded
+`PS3_SYSTEM_VER` names a newer firmware than the one selected. It is a
+warning and never a refusal: booting a title under its floor is a
+supported experiment, and the line is what tells a fault on a missing
+module or NID apart from a fidelity regression. The split is what lets a parent spawn a boot and parse
 both: the pair reads its child's result line off stdout and the same
 child's witnesses off stderr, and a parent that captures either stream
 passes `--no-progress` so a bar cannot render into a pipe.

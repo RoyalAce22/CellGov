@@ -97,6 +97,7 @@ fn write_record(vfs: &Path, artifact: &Artifact, tree: &Path, files: &[&str]) {
                 category: "HG".to_string(),
                 title: "Synthetic".to_string(),
                 distribution: "psn-hdd".to_string(),
+                system_ver: None,
             }),
         },
         files: files

@@ -86,6 +86,7 @@ fn record(
             category: "HG".to_string(),
             title: "Synthetic".to_string(),
             distribution: "psn-hdd".to_string(),
+            system_ver: None,
         }),
         files,
         rap: None,

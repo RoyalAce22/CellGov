@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 const TITLE_ID: &str = "BCES00664";
 const CONTENT_ID: &str = "EP9000-BCES00664_00-WIPEOUTHD0000000";
 const VERSION: &str = "02.51";
+const SYSTEM_VER: &str = "03.5500";
 
 const KLIC: [u8; 16] = [
     0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0, 0x01,
@@ -33,6 +34,7 @@ fn update_pkg(category: &str, app_ver: &str, eboot: &[u8]) -> Vec<u8> {
         ("CATEGORY", category),
         ("TITLE", "WipEout HD"),
         ("APP_VER", app_ver),
+        ("PS3_SYSTEM_VER", SYSTEM_VER),
     ]);
     build_pkg(
         &keys(),
@@ -79,6 +81,7 @@ fn write_base_record(vfs: &Path, title_id: &str) -> PathBuf {
             category: "DG".to_string(),
             title: "WipEout HD".to_string(),
             distribution: "disc-iso".to_string(),
+            system_ver: None,
         },
         None,
     );
@@ -145,6 +148,15 @@ fn the_record_keys_the_entry_and_its_files_under_the_version() {
     assert_eq!(title.title_id, TITLE_ID);
     assert_eq!(title.category, "GD");
     assert_eq!(title.distribution, UPDATE_DISTRIBUTION);
+    assert_eq!(
+        title.system_ver.as_deref(),
+        Some(SYSTEM_VER),
+        "the PKG's own PS3_SYSTEM_VER lands in the record, spelled as the table spells it"
+    );
+    assert!(
+        record.source.min_system_ver.is_none(),
+        "a hand-supplied PKG carries no publisher metadata; the two keys stay distinct"
+    );
     assert!(record.rap.is_none(), "an update installs no RAP");
     // Keys stay relative to the entry the record names, so `game/` is
     // part of every key rather than implied by the reader.
@@ -413,6 +425,7 @@ fn a_base_record_declaring_an_update_entry_is_not_a_base() {
             category: "GD".to_string(),
             title: "WipEout HD".to_string(),
             distribution: UPDATE_DISTRIBUTION.to_string(),
+            system_ver: None,
         },
         None,
     );

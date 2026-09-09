@@ -82,6 +82,7 @@ fn stored(version: GameVersion) -> GameChoice {
             tree: cellgov_install::store::TitleTree::Game,
             distribution: "psn-hdd".to_string(),
             source_sha256: "0".repeat(64),
+            system_ver: None,
         },
         update: None,
     }))

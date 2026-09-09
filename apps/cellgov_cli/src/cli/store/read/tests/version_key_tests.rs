@@ -60,6 +60,7 @@ impl Fixture {
             tree: TitleTree::Game,
             distribution: "psn-hdd".to_string(),
             source_sha256: "ab".repeat(32),
+            system_ver: None,
         }
     }
 
@@ -77,6 +78,7 @@ impl Fixture {
                             dir: self.update_dir(version),
                             source_sha256: "cd".repeat(32),
                             min_system_ver: None,
+                            system_ver: None,
                         },
                     )
                 })
@@ -207,6 +209,7 @@ fn a_disc_base_reads_the_table_under_its_game_directory() {
         tree: TitleTree::Disc,
         distribution: "disc".to_string(),
         source_sha256: "ab".repeat(32),
+        system_ver: None,
     };
     let doc = fx.view().title_doc(&fx.entry(base, &[]));
     let base = base_of(&doc);

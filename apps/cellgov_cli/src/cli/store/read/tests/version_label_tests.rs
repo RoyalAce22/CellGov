@@ -15,6 +15,7 @@ fn base(version: &str, key: Option<&str>, error: Option<&str>) -> BaseDoc {
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
         source_sha256: "ab".repeat(32),
+        system_ver: None,
         record: None,
     }
 }
@@ -27,6 +28,7 @@ fn update(version: &str, key: Option<&str>, error: Option<&str>) -> UpdateDoc {
         dir: format!("titles/{TITLE_ID}/updates/{version}/game"),
         source_sha256: "cd".repeat(32),
         min_system_ver: None,
+        system_ver: None,
         record: None,
     }
 }

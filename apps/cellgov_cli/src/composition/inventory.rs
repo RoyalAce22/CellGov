@@ -166,6 +166,10 @@ pub(crate) struct BaseEntry {
     pub distribution: String,
     /// SHA-256 over the container the base was installed from.
     pub source_sha256: String,
+    /// The tree's PARAM.SFO `PS3_SYSTEM_VER` as the record holds it;
+    /// `None` when the table declared none or the record predates the
+    /// field.
+    pub system_ver: Option<String>,
 }
 
 impl BaseEntry {
@@ -191,6 +195,9 @@ pub(crate) struct UpdateEntry {
     pub source_sha256: String,
     /// Lowest firmware the publishing metadata declared for the update.
     pub min_system_ver: Option<String>,
+    /// The tree's PARAM.SFO `PS3_SYSTEM_VER` as the record holds it;
+    /// see [`BaseEntry::system_ver`].
+    pub system_ver: Option<String>,
 }
 
 impl UpdateEntry {
@@ -325,6 +332,7 @@ impl StoreInventory {
                         },
                         distribution: title.distribution.clone(),
                         source_sha256: record.source.sha256.to_hex(),
+                        system_ver: title.system_ver.clone(),
                     });
                 } else {
                     expect_record_name(
@@ -343,6 +351,7 @@ impl StoreInventory {
                             dir: entry_dir.join(TitleTree::Game.dir_name()),
                             source_sha256: record.source.sha256.to_hex(),
                             min_system_ver: record.source.min_system_ver.clone(),
+                            system_ver: title.system_ver.clone(),
                         },
                     );
                 }

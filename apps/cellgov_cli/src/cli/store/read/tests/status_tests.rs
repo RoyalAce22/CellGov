@@ -29,6 +29,7 @@ fn base() -> BaseDoc {
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
         source_sha256: "cd".repeat(32),
+        system_ver: None,
         record: Some(format!(
             ".cellgov/installs/titles/{TITLE_ID}/base.install.toml"
         )),

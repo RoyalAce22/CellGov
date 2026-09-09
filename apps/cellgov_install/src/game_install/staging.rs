@@ -55,6 +55,7 @@ use crate::store::record::{
     INSTALL_RECORD_FORMAT_VERSION,
 };
 use crate::store::rename::rename_with_retry;
+use cellgov_ps3_abi::param_sfo::PS3_SYSTEM_VER_KEY;
 
 /// Knobs shared by every installer.
 #[derive(Clone, Copy)]
@@ -276,16 +277,33 @@ pub(super) fn dir_non_empty(path: &Path) -> Result<bool, GameInstallError> {
     Ok(entries.next().is_some())
 }
 
-/// Parse the shared identity fields from a PARAM.SFO blob into
-/// `(title_id, category, title, version)`.
+/// The identity fields every installer reads from a PARAM.SFO.
+#[derive(Debug)]
+pub(super) struct SfoIdentity {
+    /// `TITLE_ID`, the one key that must be present.
+    pub(super) title_id: String,
+    /// `CATEGORY`, or empty when absent; the category gates refuse an
+    /// empty one downstream.
+    pub(super) category: String,
+    /// `TITLE`, or empty when absent.
+    pub(super) title: String,
+    /// The value [`ParamSfo::named_version`] returns, or empty when the
+    /// table names none.
+    ///
+    /// [`ParamSfo::named_version`]: crate::param_sfo::ParamSfo::named_version
+    pub(super) version: String,
+    /// `PS3_SYSTEM_VER` verbatim, or `None` when the key is absent or
+    /// empty; a homebrew or synthetic table carries none.
+    pub(super) system_ver: Option<String>,
+}
+
+/// Parse the shared identity fields from a PARAM.SFO blob.
 ///
-/// `version` is the value [`ParamSfo::named_version`] returns, or
-/// empty when the table names none.
+/// # Errors
 ///
-/// [`ParamSfo::named_version`]: crate::param_sfo::ParamSfo::named_version
-pub(super) fn parse_identity(
-    sfo_bytes: &[u8],
-) -> Result<(String, String, String, String), GameInstallError> {
+/// [`GameInstallError::Sfo`] when the table does not parse, and
+/// [`GameInstallError::MissingTitleId`] when it names no `TITLE_ID`.
+pub(super) fn parse_identity(sfo_bytes: &[u8]) -> Result<SfoIdentity, GameInstallError> {
     let sfo = param_sfo::parse(sfo_bytes)?;
     let title_id = sfo
         .get_string("TITLE_ID")
@@ -297,7 +315,17 @@ pub(super) fn parse_identity(
         .named_version()
         .map(|(_, v)| v.to_string())
         .unwrap_or_default();
-    Ok((title_id, category, title, version))
+    let system_ver = sfo
+        .get_string(PS3_SYSTEM_VER_KEY)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    Ok(SfoIdentity {
+        title_id,
+        category,
+        title,
+        version,
+        system_ver,
+    })
 }
 
 /// Clear and recreate a staging directory, so no foreign residue

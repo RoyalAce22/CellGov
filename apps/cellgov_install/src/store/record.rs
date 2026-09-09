@@ -182,7 +182,12 @@ pub struct RapRecord {
 }
 
 /// Title identity for an install record, all PARAM.SFO-derived.
+///
+/// `deny_unknown_fields` for the reason the wire shape carries it:
+/// `system_ver` has a `default`, so without the gate a misspelling of
+/// that key reads as a table that declared no `PS3_SYSTEM_VER`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TitleRecord {
     /// PARAM.SFO `TITLE_ID` (store-directory key).
     pub title_id: String,
@@ -194,6 +199,17 @@ pub struct TitleRecord {
     pub title: String,
     /// Install distribution tag (`psn-hdd` / `disc-iso`).
     pub distribution: String,
+    /// PARAM.SFO `PS3_SYSTEM_VER`, spelled as the table spells it
+    /// (`03.4000`): the lowest system software the title says it runs
+    /// on. Distinct from [`SourceRecord::min_system_ver`], the
+    /// publisher's claim.
+    ///
+    /// `None`, which is no claim about the title, when:
+    ///
+    /// - the table carries no such key, or an empty one;
+    /// - the installer that wrote the record predates the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub system_ver: Option<String>,
 }
 
 /// A store entry's record: enough to verify a reinstall reproduces the
@@ -381,3 +397,7 @@ impl InstallRecord {
 #[cfg(test)]
 #[path = "tests/record_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/title_block_gate_tests.rs"]
+mod title_block_gate_tests;

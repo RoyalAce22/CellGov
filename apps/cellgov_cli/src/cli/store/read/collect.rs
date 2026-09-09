@@ -101,6 +101,7 @@ impl StoreView {
                 tree: base.tree.dir_name().to_string(),
                 distribution: base.distribution.clone(),
                 source_sha256: base.source_sha256.clone(),
+                system_ver: base.system_ver.clone(),
                 record: key
                     .clone()
                     .map(|title_id| self.record_rel(&Artifact::TitleBase { title_id })),
@@ -119,6 +120,7 @@ impl StoreView {
                     dir: self.rel(&update.dir),
                     source_sha256: update.source_sha256.clone(),
                     min_system_ver: update.min_system_ver.clone(),
+                    system_ver: update.system_ver.clone(),
                     record: match (key.clone(), VersionKey::new(&update.version)) {
                         (Some(title_id), Ok(version)) => {
                             Some(self.record_rel(&Artifact::TitleUpdate { title_id, version }))

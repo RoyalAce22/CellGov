@@ -107,6 +107,7 @@ fn title_doc() -> TitleDoc {
             tree: TitleTree::Game.dir_name().to_string(),
             distribution: "psn-hdd".to_string(),
             source_sha256: SAMPLE_SHA.to_string(),
+            system_ver: Some("01.5000".to_string()),
             record: record(&base),
         }),
         ships_in_firmware: false,
@@ -117,6 +118,7 @@ fn title_doc() -> TitleDoc {
             dir: rel(&layout().entry_dir(&update).join(TitleTree::Game.dir_name())),
             source_sha256: SAMPLE_SHA.to_string(),
             min_system_ver: Some("03.5500".to_string()),
+            system_ver: Some("03.5500".to_string()),
             record: record(&update),
         }],
         anchors: vec![

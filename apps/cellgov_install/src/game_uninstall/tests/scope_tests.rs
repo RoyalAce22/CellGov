@@ -89,6 +89,7 @@ fn stage_base(vfs: &Path) {
             category: "HG".to_string(),
             title: "Synthetic".to_string(),
             distribution: "psn-hdd".to_string(),
+            system_ver: None,
         }),
         files,
         rap: Some(RapRecord {
@@ -132,6 +133,7 @@ fn stage_update(vfs: &Path, version: &str) {
             category: "GD".to_string(),
             title: "Synthetic".to_string(),
             distribution: "psn-update".to_string(),
+            system_ver: None,
         }),
         files,
         rap: None,

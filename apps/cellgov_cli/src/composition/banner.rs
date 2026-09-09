@@ -82,23 +82,24 @@ fn render_firmware(firmware: &FirmwareChoice) -> String {
     }
 }
 
-/// One line per update whose declared minimum firmware the selection
-/// does not meet.
+/// One line per composed entry whose declared minimum firmware the
+/// selection does not meet. The caller prints them after the banner,
+/// on the same stream.
 pub(crate) fn render_firmware_notes(notes: &[UnderstatedFirmware]) -> Vec<String> {
     notes
         .iter()
         .map(|n| {
             if n.incomparable {
                 format!(
-                    "warning: update {} declares system version {:?}, which does not compare \
-                     with the selected firmware {:?}",
-                    n.update, n.declared, n.selected,
+                    "warning: {} declares system version {:?}, which does not compare with \
+                     the selected firmware {:?}",
+                    n.entry, n.declared, n.selected,
                 )
             } else {
                 format!(
-                    "warning: update {} declares system version {}, and the selected firmware \
-                     is {}",
-                    n.update, n.declared, n.selected,
+                    "warning: {} declares system version {}, and the selected firmware {} is \
+                     older",
+                    n.entry, n.declared, n.selected,
                 )
             }
         })

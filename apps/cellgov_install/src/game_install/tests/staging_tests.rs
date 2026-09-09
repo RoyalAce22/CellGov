@@ -157,43 +157,69 @@ fn parse_identity_requires_title_id_and_prefers_app_ver_over_version() {
     let err = parse_identity(&build_param_sfo(&[("CATEGORY", "HG")])).unwrap_err();
     assert!(matches!(err, GameInstallError::MissingTitleId), "{err:?}");
 
-    let (title_id, category, title, version) = parse_identity(&build_param_sfo(&[
+    let id = parse_identity(&build_param_sfo(&[
         ("TITLE_ID", "NPUA80001"),
         ("CATEGORY", "HG"),
         ("TITLE", "flOw"),
         ("VERSION", "01.02"),
     ]))
     .unwrap();
-    assert_eq!(title_id, "NPUA80001");
-    assert_eq!(category, "HG");
-    assert_eq!(title, "flOw");
-    assert_eq!(version, "01.02", "VERSION stands in when APP_VER is absent");
+    assert_eq!(id.title_id, "NPUA80001");
+    assert_eq!(id.category, "HG");
+    assert_eq!(id.title, "flOw");
+    assert_eq!(
+        id.version, "01.02",
+        "VERSION stands in when APP_VER is absent"
+    );
 
-    let (_, category, title, version) = parse_identity(&build_param_sfo(&[
+    let id = parse_identity(&build_param_sfo(&[
         ("TITLE_ID", "NPUA80001"),
         ("APP_VER", "01.05"),
         ("VERSION", "01.02"),
     ]))
     .unwrap();
-    assert_eq!(version, "01.05", "APP_VER wins over VERSION");
+    assert_eq!(id.version, "01.05", "APP_VER wins over VERSION");
 
     // A key present with no value names no version, and for an update
     // that string is a directory name.
-    let (_, _, _, version) = parse_identity(&build_param_sfo(&[
+    let id = parse_identity(&build_param_sfo(&[
         ("TITLE_ID", "NPUA80001"),
         ("APP_VER", ""),
         ("VERSION", "01.02"),
     ]))
     .unwrap();
     assert_eq!(
-        version, "01.02",
+        id.version, "01.02",
         "an empty APP_VER falls through to VERSION rather than winning"
     );
     assert_eq!(
-        category, "",
+        id.category, "",
         "an absent CATEGORY reads as empty; the category gate refuses it downstream"
     );
-    assert_eq!(title, "");
+    assert_eq!(id.title, "");
+}
+
+#[test]
+fn parse_identity_reads_the_declared_system_version_verbatim_and_treats_an_empty_one_as_absent() {
+    let declared = parse_identity(&build_param_sfo(&[
+        ("TITLE_ID", "TEST00000"),
+        ("PS3_SYSTEM_VER", "03.4000"),
+    ]))
+    .unwrap();
+    assert_eq!(declared.system_ver.as_deref(), Some("03.4000"));
+
+    let absent = parse_identity(&build_param_sfo(&[("TITLE_ID", "TEST00000")])).unwrap();
+    assert_eq!(absent.system_ver, None);
+
+    let empty = parse_identity(&build_param_sfo(&[
+        ("TITLE_ID", "TEST00000"),
+        ("PS3_SYSTEM_VER", ""),
+    ]))
+    .unwrap();
+    assert_eq!(
+        empty.system_ver, None,
+        "an empty key declares nothing, so the boot has nothing to hold the firmware against"
+    );
 }
 
 // --- Staging ----------------------------------------------------------
@@ -522,6 +548,7 @@ fn title_base_record(files: BTreeMap<String, HexSha256>, rap: Option<RapRecord>)
             category: "HG".to_string(),
             title: "T".to_string(),
             distribution: "psn-hdd".to_string(),
+            system_ver: None,
         },
         rap,
     )

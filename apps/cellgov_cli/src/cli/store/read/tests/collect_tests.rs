@@ -41,6 +41,7 @@ fn title_entry(base: Option<BaseEntry>, updates: &[&str]) -> TitleEntry {
                             .join("game"),
                         source_sha256: "cd".repeat(32),
                         min_system_ver: Some("03.5000".to_string()),
+                        system_ver: Some("03.5500".to_string()),
                     },
                 )
             })
@@ -62,6 +63,7 @@ fn base_entry() -> BaseEntry {
         tree: TitleTree::Game,
         distribution: "psn-hdd".to_string(),
         source_sha256: "ab".repeat(32),
+        system_ver: Some("01.5000".to_string()),
     }
 }
 
@@ -99,6 +101,20 @@ fn a_title_no_manifest_declares_carries_no_short_name_and_no_cells() {
 fn an_update_carries_the_minimum_firmware_its_metadata_declared() {
     let doc = view().title_doc(&title_entry(Some(base_entry()), &["02.51"]));
     assert_eq!(doc.updates[0].min_system_ver.as_deref(), Some("03.5000"));
+}
+
+#[test]
+fn each_entry_carries_the_system_version_its_own_record_holds() {
+    let doc = view().title_doc(&title_entry(Some(base_entry()), &["02.51"]));
+    assert_eq!(
+        doc.base.as_ref().and_then(|b| b.system_ver.as_deref()),
+        Some("01.5000")
+    );
+    assert_eq!(
+        doc.updates[0].system_ver.as_deref(),
+        Some("03.5500"),
+        "the update's own table, distinct from the metadata's 03.5000"
+    );
 }
 
 #[test]

@@ -127,6 +127,7 @@ comparison records rather than a published API: they carry no
         "tree": "game",
         "distribution": "psn-hdd",
         "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "system_ver": "01.5000",
         "record": ".cellgov/installs/titles/NPUA80001/base.install.toml"
       },
       "ships_in_firmware": false,
@@ -137,6 +138,7 @@ comparison records rather than a published API: they carry no
           "dir": "titles/NPUA80001/updates/1.02/game",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "min_system_ver": "03.5500",
+          "system_ver": "03.5500",
           "record": ".cellgov/installs/titles/NPUA80001/update-1.02.install.toml"
         }
       ],
@@ -200,6 +202,7 @@ comparison records rather than a published API: they carry no
         "tree": "game",
         "distribution": "psn-hdd",
         "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+        "system_ver": "01.5000",
         "record": ".cellgov/installs/titles/NPUA80001/base.install.toml"
       },
       "ships_in_firmware": false,
@@ -210,6 +213,7 @@ comparison records rather than a published API: they carry no
           "dir": "titles/NPUA80001/updates/1.02/game",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "min_system_ver": "03.5500",
+          "system_ver": "03.5500",
           "record": ".cellgov/installs/titles/NPUA80001/update-1.02.install.toml"
         }
       ],

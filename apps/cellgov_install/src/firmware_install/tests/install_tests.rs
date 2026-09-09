@@ -310,6 +310,7 @@ fn a_record_describing_something_else_is_refused_before_force_can_replace_it() {
         category: "GD".to_string(),
         title: "T".to_string(),
         distribution: "update-pkg".to_string(),
+        system_ver: None,
     });
     write_record(&record, &other);
     assert!(matches!(

@@ -107,6 +107,11 @@ pub(crate) struct BaseDoc {
     pub distribution: String,
     /// SHA-256 over the container it was installed from.
     pub source_sha256: String,
+    /// PARAM.SFO `PS3_SYSTEM_VER` as the record holds it: the lowest
+    /// system software the title says it runs on. Absent when the table
+    /// declared none or the record predates the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_ver: Option<String>,
     /// The install record describing it, absent when the title id is
     /// not a store directory name and so names no record path.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -141,6 +146,11 @@ pub(crate) struct UpdateDoc {
     /// Lowest firmware the publishing metadata declared.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_system_ver: Option<String>,
+    /// PARAM.SFO `PS3_SYSTEM_VER` as the record holds it; see
+    /// [`BaseDoc::system_ver`]. Distinct from [`Self::min_system_ver`],
+    /// the publisher's claim.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_ver: Option<String>,
     /// The install record describing it, absent when the title id or
     /// version key is not a store directory name and so names no record
     /// path.

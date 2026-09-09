@@ -115,28 +115,55 @@ fn an_unmanaged_firmware_is_marked_as_such() {
 }
 
 #[test]
-fn a_shortfall_note_names_both_versions() {
+fn a_shortfall_note_names_the_entry_and_both_versions() {
     let notes = vec![UnderstatedFirmware {
-        update: "02.51".to_string(),
+        entry: GameVersion::Update("02.51".to_string()),
         declared: "04.5300".to_string(),
         selected: "3.55".to_string(),
         incomparable: false,
     }];
     let lines = render_firmware_notes(&notes);
     assert_eq!(lines.len(), 1);
-    assert!(lines[0].starts_with("warning:"), "got: {}", lines[0]);
+    assert!(
+        lines[0].starts_with("warning: update 02.51 "),
+        "got: {}",
+        lines[0]
+    );
     assert!(lines[0].contains("04.5300"), "got: {}", lines[0]);
     assert!(lines[0].contains("3.55"), "got: {}", lines[0]);
 }
 
 #[test]
+fn a_base_shortfall_note_names_the_base() {
+    let store = SyntheticStore::new("ban_base_shortfall");
+    store.add_firmware("1.00", true);
+    store.add_base_declaring("NPAA00001", "01.00", false, "03.4000");
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let composition = compose(&store, &title, None);
+    assert_eq!(
+        render(&title, &composition).len(),
+        3,
+        "the banner itself is unchanged"
+    );
+    let lines = render_firmware_notes(&composition.understated_firmware);
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].starts_with("warning: base declares system version 03.4000"),
+        "got: {}",
+        lines[0]
+    );
+    assert!(lines[0].contains("1.00"), "got: {}", lines[0]);
+}
+
+#[test]
 fn an_uncomparable_note_says_so_rather_than_claiming_an_order() {
     let notes = vec![UnderstatedFirmware {
-        update: "02.51".to_string(),
+        entry: GameVersion::Base,
         declared: "latest".to_string(),
         selected: "3.55".to_string(),
         incomparable: true,
     }];
     let lines = render_firmware_notes(&notes);
+    assert!(lines[0].starts_with("warning: base "), "got: {}", lines[0]);
     assert!(lines[0].contains("does not compare"), "got: {}", lines[0]);
 }

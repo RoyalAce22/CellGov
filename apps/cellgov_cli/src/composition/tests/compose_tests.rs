@@ -293,10 +293,193 @@ fn an_update_needing_newer_firmware_is_reported_not_refused() {
     let mut i = inputs(&title, &store, &vfs);
     i.game_ver = Some("02.51");
     let c = compose_boot(&i).unwrap();
+    assert_eq!(
+        c.understated_firmware,
+        vec![UnderstatedFirmware {
+            entry: GameVersion::Update("02.51".to_string()),
+            declared: "04.5300".to_string(),
+            selected: "3.55".to_string(),
+            incomparable: false,
+        }]
+    );
+}
+
+#[test]
+fn a_base_needing_newer_firmware_is_reported_not_refused() {
+    let store = SyntheticStore::new("cmp_base_shortfall");
+    store.add_firmware("1.00", true);
+    store.add_base_declaring("NPAA00001", "01.00", false, "03.4000");
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+    let c = compose_boot(&inputs(&title, &store, &vfs)).unwrap();
+    assert_eq!(
+        c.understated_firmware,
+        vec![UnderstatedFirmware {
+            entry: GameVersion::Base,
+            declared: "03.4000".to_string(),
+            selected: "1.00".to_string(),
+            incomparable: false,
+        }]
+    );
+}
+
+#[test]
+fn a_firmware_at_or_above_the_bases_declared_minimum_reports_nothing() {
+    for fw in ["3.40", "4.90"] {
+        let store = SyntheticStore::new(&format!("cmp_base_floor_met_{fw}"));
+        store.add_firmware(fw, true);
+        store.add_base_declaring("NPAA00001", "01.00", false, "03.4000");
+        let title = manifest("NPAA00001", GameSource::Hdd);
+        let vfs = store.root().join("dev_hdd0");
+        let c = compose_boot(&inputs(&title, &store, &vfs)).unwrap();
+        assert!(c.understated_firmware.is_empty(), "under {fw}");
+    }
+}
+
+#[test]
+fn a_base_declaring_no_minimum_reports_nothing_under_any_firmware() {
+    let store = SyntheticStore::new("cmp_base_undeclared");
+    store.add_firmware("1.00", true);
+    store.add_base("NPAA00001", "01.00", false);
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+    let c = compose_boot(&inputs(&title, &store, &vfs)).unwrap();
+    assert!(c.understated_firmware.is_empty());
+}
+
+#[test]
+fn a_declared_minimum_no_order_can_be_read_from_is_reported_as_incomparable() {
+    let store = SyntheticStore::new("cmp_base_incomparable");
+    store.add_firmware("4.93", true);
+    store.add_base_declaring("NPAA00001", "01.00", false, "latest");
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+    let c = compose_boot(&inputs(&title, &store, &vfs)).unwrap();
+    assert_eq!(
+        c.understated_firmware,
+        vec![UnderstatedFirmware {
+            entry: GameVersion::Base,
+            declared: "latest".to_string(),
+            selected: "4.93".to_string(),
+            incomparable: true,
+        }]
+    );
+}
+
+#[test]
+fn a_disc_base_is_held_to_its_declared_minimum_too() {
+    let store = SyntheticStore::new("cmp_disc_shortfall");
+    store.add_firmware("1.00", true);
+    store.add_base_declaring("BLAA00001", "02.00", true, "02.7600");
+    let title = manifest("BLAA00001", GameSource::Disc);
+    let vfs = store.root().join("dev_hdd0");
+    let c = compose_boot(&inputs(&title, &store, &vfs)).unwrap();
     assert_eq!(c.understated_firmware.len(), 1);
-    assert_eq!(c.understated_firmware[0].declared, "04.5300");
-    assert_eq!(c.understated_firmware[0].selected, "3.55");
-    assert!(!c.understated_firmware[0].incomparable);
+    assert_eq!(c.understated_firmware[0].entry, GameVersion::Base);
+    assert_eq!(c.understated_firmware[0].declared, "02.7600");
+}
+
+#[test]
+fn a_selected_update_is_held_beside_the_base_it_patches() {
+    let store = SyntheticStore::new("cmp_both_shortfall");
+    store.add_firmware("1.00", true);
+    store.add_firmware("2.00", true);
+    store.add_base_declaring("NPAA00001", "01.00", false, "01.5000");
+    store.add_update_declaring("NPAA00001", "02.51", None, "03.5500");
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+    let mut i = inputs(&title, &store, &vfs);
+    i.game_ver = Some("02.51");
+
+    i.fw = Some("1.00");
+    let c = compose_boot(&i).unwrap();
+    assert_eq!(
+        c.understated_firmware
+            .iter()
+            .map(|n| (n.entry.clone(), n.declared.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (GameVersion::Base, "01.5000"),
+            (GameVersion::Update("02.51".to_string()), "03.5500"),
+        ]
+    );
+
+    i.fw = Some("2.00");
+    let c = compose_boot(&i).unwrap();
+    assert_eq!(
+        c.understated_firmware
+            .iter()
+            .map(|n| n.entry.clone())
+            .collect::<Vec<_>>(),
+        vec![GameVersion::Update("02.51".to_string())],
+        "a base the firmware satisfies is silent while the update still falls short"
+    );
+
+    i.game_ver = Some("base");
+    i.fw = Some("1.00");
+    let c = compose_boot(&i).unwrap();
+    assert_eq!(
+        c.understated_firmware
+            .iter()
+            .map(|n| n.entry.clone())
+            .collect::<Vec<_>>(),
+        vec![GameVersion::Base],
+        "an update that is not selected is not composed, so it is not held"
+    );
+}
+
+#[test]
+fn an_update_declaring_nothing_leaves_the_bases_claim_standing() {
+    let store = SyntheticStore::new("cmp_update_undeclared");
+    store.add_firmware("1.00", true);
+    store.add_base_declaring("NPAA00001", "01.00", false, "03.4000");
+    store.add_update("NPAA00001", "02.51");
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+    let mut i = inputs(&title, &store, &vfs);
+    i.game_ver = Some("02.51");
+    let c = compose_boot(&i).unwrap();
+    assert_eq!(c.understated_firmware.len(), 1);
+    assert_eq!(c.understated_firmware[0].entry, GameVersion::Base);
+}
+
+#[test]
+fn an_updates_own_table_outranks_the_publishers_metadata() {
+    let store = SyntheticStore::new("cmp_sfo_over_metadata");
+    store.add_firmware("4.00", true);
+    store.add_base("NPAA00001", "01.00", false);
+    store.add_update_declaring("NPAA00001", "02.51", Some("04.5300"), "03.5500");
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+    let mut i = inputs(&title, &store, &vfs);
+    i.game_ver = Some("02.51");
+    let c = compose_boot(&i).unwrap();
+    assert!(
+        c.understated_firmware.is_empty(),
+        "the table's 03.5500 is met, so the metadata's 04.5300 is not consulted: {:?}",
+        c.understated_firmware
+    );
+}
+
+#[test]
+fn a_run_with_no_managed_firmware_holds_nothing_against_a_declared_minimum() {
+    let store = SyntheticStore::new("cmp_shortfall_unmanaged");
+    store.add_firmware("4.93", true);
+    store.add_base_declaring("NPAA00001", "01.00", false, "03.4000");
+    let raw = store.root().join("raw_external");
+    std::fs::create_dir_all(&raw).unwrap();
+    let title = manifest("NPAA00001", GameSource::Hdd);
+    let vfs = store.root().join("dev_hdd0");
+
+    let mut i = inputs(&title, &store, &vfs);
+    i.firmware_dir = Some(&raw);
+    let c = compose_boot(&i).unwrap();
+    assert!(c.understated_firmware.is_empty(), "unmanaged tree");
+
+    let mut i = inputs(&title, &store, &vfs);
+    i.no_firmware = true;
+    let c = compose_boot(&i).unwrap();
+    assert!(c.understated_firmware.is_empty(), "no firmware at all");
 }
 
 #[test]

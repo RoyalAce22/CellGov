@@ -14,6 +14,7 @@ fn title_block() -> TitleRecord {
         category: "HG".to_string(),
         title: "synthetic record".to_string(),
         distribution: "psn-hdd".to_string(),
+        system_ver: None,
     }
 }
 
@@ -135,6 +136,39 @@ fn acquisition_fields_round_trip_when_present() {
         Some("https://example.invalid/p.pkg")
     );
     assert_eq!(back.source.min_system_ver.as_deref(), Some("03.55"));
+}
+
+#[test]
+fn a_declared_system_version_round_trips_under_title_and_is_omitted_when_absent() {
+    let text = toml_of(&base_record());
+    assert!(!text.contains("system_ver"), "{text}");
+    let back = InstallRecord::parse(&text).expect("parse");
+    assert_eq!(back.title.and_then(|t| t.system_ver), None);
+
+    let mut record = base_record();
+    record
+        .title
+        .as_mut()
+        .expect("base record has a [title]")
+        .system_ver = Some("03.4000".to_string());
+    let text = toml_of(&record);
+    let title_block = text
+        .split("[title]")
+        .nth(1)
+        .expect("the record carries a [title] block");
+    assert!(
+        title_block
+            .split("\n[")
+            .next()
+            .expect("a block")
+            .contains("system_ver = \"03.4000\""),
+        "the declared version sits beside the other PARAM.SFO fields:\n{text}"
+    );
+    let back = InstallRecord::parse(&text).expect("parse");
+    assert_eq!(
+        back.title.and_then(|t| t.system_ver).as_deref(),
+        Some("03.4000")
+    );
 }
 
 #[test]

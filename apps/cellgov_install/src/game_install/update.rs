@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 use crate::game_install::error::GameInstallError;
 use crate::game_install::staging::{
     build_record, commit, dir_non_empty, emit_totals, io_err, parse_identity, prefixed_entry_path,
-    prepare_staging, run_or_clean, stage_tree, validate_content_id, InstallOptions, StagedData,
-    StagedFile,
+    prepare_staging, run_or_clean, stage_tree, validate_content_id, InstallOptions, SfoIdentity,
+    StagedData, StagedFile,
 };
 use crate::keys::KeyVault;
 use crate::pkg::{self, PkgEntryKind};
@@ -155,7 +155,13 @@ pub fn install_update_pkg(
         .iter()
         .find(|f| f.name == "PARAM.SFO")
         .ok_or(GameInstallError::NoParamSfo)?;
-    let (title_id, category, title, version) = parse_identity(archive.file_data(sfo_file))?;
+    let SfoIdentity {
+        title_id,
+        category,
+        title,
+        version,
+        system_ver,
+    } = parse_identity(archive.file_data(sfo_file))?;
     if !UPDATE_CATEGORIES.contains(&category.as_str()) {
         return Err(GameInstallError::NotUpdatePackage { category });
     }
@@ -252,6 +258,7 @@ pub fn install_update_pkg(
             category,
             title,
             distribution: UPDATE_DISTRIBUTION.to_string(),
+            system_ver,
         },
         None,
     );

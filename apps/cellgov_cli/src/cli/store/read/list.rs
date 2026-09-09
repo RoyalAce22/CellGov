@@ -209,6 +209,9 @@ fn render_title_detail(title: &TitleDoc) -> String {
                 base.record.as_deref().unwrap_or(NO_RECORD)
             ));
             out.push_str(&format!("  source     {}\n", base.source_sha256));
+            if let Some(v) = &base.system_ver {
+                out.push_str(&format!("  needs fw   {v}\n"));
+            }
         }
         None => out.push_str("  base       -- (not installed)\n"),
     }
@@ -223,6 +226,9 @@ fn render_title_detail(title: &TitleDoc) -> String {
             update.record.as_deref().unwrap_or(NO_RECORD)
         ));
         out.push_str(&format!("    source   {}\n", update.source_sha256));
+        if let Some(v) = &update.system_ver {
+            out.push_str(&format!("    needs fw {v}\n"));
+        }
         if let Some(min) = &update.min_system_ver {
             out.push_str(&format!("    min fw   {min}\n"));
         }

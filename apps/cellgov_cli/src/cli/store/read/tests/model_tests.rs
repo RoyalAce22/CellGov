@@ -77,6 +77,7 @@ fn a_title_document_serializes_under_the_names_the_schema_declares() {
                 tree: "game".to_string(),
                 distribution: "psn-hdd".to_string(),
                 source_sha256: "ab".repeat(32),
+                system_ver: None,
                 record: Some(".cellgov/installs/titles/TEST00000/base.install.toml".to_string()),
             }),
             updates: Vec::new(),

@@ -29,6 +29,7 @@ fn base(version: &str) -> BaseDoc {
         tree: "game".to_string(),
         distribution: "psn-hdd".to_string(),
         source_sha256: "ab".repeat(32),
+        system_ver: None,
         record: Some(format!(
             ".cellgov/installs/titles/{TITLE_ID}/base.install.toml"
         )),
@@ -43,6 +44,7 @@ fn update(version: &str) -> UpdateDoc {
         dir: format!("titles/{TITLE_ID}/updates/{version}/game"),
         source_sha256: "cd".repeat(32),
         min_system_ver: None,
+        system_ver: None,
         record: Some(format!(
             ".cellgov/installs/titles/{TITLE_ID}/update-{version}.install.toml"
         )),
@@ -114,6 +116,33 @@ fn a_base_with_a_version_prints_it_and_not_the_no_version_label() {
         "{rendered}"
     );
     assert!(!rendered.contains(NO_VERSION_KEY), "{rendered}");
+}
+
+#[test]
+fn a_declared_system_version_is_printed_per_entry_and_omitted_when_absent() {
+    let silent = render_title_detail(&title(
+        Some("synthetic"),
+        Some(base("01.00")),
+        vec![update("02.51")],
+    ));
+    assert!(!silent.contains("needs fw"), "{silent}");
+
+    let mut declaring_base = base("01.00");
+    declaring_base.system_ver = Some("01.5000".to_string());
+    let mut declaring_update = update("02.51");
+    declaring_update.system_ver = Some("03.5500".to_string());
+    declaring_update.min_system_ver = Some("03.5000".to_string());
+    let rendered = render_title_detail(&title(
+        Some("synthetic"),
+        Some(declaring_base),
+        vec![declaring_update],
+    ));
+    assert!(rendered.contains("  needs fw   01.5000\n"), "{rendered}");
+    assert!(rendered.contains("    needs fw 03.5500\n"), "{rendered}");
+    assert!(
+        rendered.contains("    min fw   03.5000\n"),
+        "the metadata's claim stays its own line: {rendered}"
+    );
 }
 
 #[test]
