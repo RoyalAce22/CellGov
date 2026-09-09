@@ -158,13 +158,13 @@ outcome = "{text}"
 #[test]
 fn invalid_toml_returns_error() {
     let result = parse("not valid toml {{{}}}");
-    assert!(result.is_err());
+    assert!(matches!(result, Err(ManifestError::Parse(_))), "{result:?}");
 }
 
 #[test]
 fn missing_required_field_returns_error() {
     let result = parse("[test]\n[observe]\n[expect]\noutcome = \"completed\"");
-    assert!(result.is_err());
+    assert!(matches!(result, Err(ManifestError::Parse(_))), "{result:?}");
 }
 
 #[test]

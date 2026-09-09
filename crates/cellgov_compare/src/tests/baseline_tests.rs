@@ -50,7 +50,10 @@ fn an_observation_without_the_field_names_no_runner_firmware() {
 #[test]
 fn load_nonexistent_file_returns_error() {
     let result = load(Path::new("/nonexistent/path/baseline.json"));
-    assert!(result.is_err());
+    assert!(
+        matches!(&result, Err(BaselineError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound),
+        "{result:?}"
+    );
 }
 
 #[test]

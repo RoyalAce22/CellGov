@@ -60,5 +60,9 @@ fn untracked_saturates_on_arithmetic_overflow() {
         Duration::from_millis(1),
         Duration::from_millis(1),
     );
-    assert!(result.is_err());
+    assert_eq!(
+        result,
+        Err(Duration::MAX - Duration::from_millis(100)),
+        "the tracked sum saturates at Duration::MAX and the excess is reported"
+    );
 }

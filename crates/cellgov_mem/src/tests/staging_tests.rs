@@ -235,16 +235,13 @@ fn drain_into_zero_length_write_to_reserved_region_faults() {
     s.clear();
 }
 
+#[cfg(debug_assertions)]
 #[test]
+#[should_panic(expected = "dropped with 1 pending writes")]
 fn drop_with_pending_writes_panics_in_debug() {
-    if cfg!(debug_assertions) {
-        let result = std::panic::catch_unwind(|| {
-            let mut s = StagingMemory::new();
-            s.stage(staged(0, &[1]));
-            // s drops here with one pending write.
-        });
-        assert!(result.is_err(), "expected debug-build panic on leak");
-    }
+    let mut s = StagingMemory::new();
+    s.stage(staged(0, &[1]));
+    // s drops here with one pending write.
 }
 
 impl StagingMemory {

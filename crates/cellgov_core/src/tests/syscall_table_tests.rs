@@ -46,18 +46,12 @@ fn peek_borrows_without_removing() {
 
 #[cfg(debug_assertions)]
 #[test]
+#[should_panic(expected = "already has a pending response")]
 fn insert_duplicate_panics_in_debug_builds() {
     let mut t = SyscallResponseTable::new();
     let id = UnitId::new(1);
     ins(&mut t, id, PendingResponse::ReturnCode { code: 10 });
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        ins(&mut t, id, PendingResponse::ReturnCode { code: 20 });
-    }));
-    assert!(
-        result.is_err(),
-        "debug build must panic on duplicate insert; the debug_assert \
-         is what keeps silent overwrites from shipping"
-    );
+    ins(&mut t, id, PendingResponse::ReturnCode { code: 20 });
 }
 
 #[cfg(not(debug_assertions))]

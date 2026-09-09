@@ -113,7 +113,7 @@ fn explore_single_unit_returns_none() {
 // `#[ignore]` is unrelated to the corpus -- it is the ~7 min runtime.
 #[cfg(feature = "microtests")]
 #[test]
-#[ignore] // ~7 min: runs 3 ELF microtests with full exploration
+#[ignore = "about seven minutes: runs three ELF microtests with full exploration"]
 fn explore_micro_runs_for_elf_microtests() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let repo_root = std::path::Path::new(&manifest_dir)

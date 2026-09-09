@@ -257,9 +257,13 @@ fn disassemble_symbolize_emits_separators_and_target_suffixes() {
 #[test]
 fn unsupported_word_constant_is_actually_unsupported() {
     let raw = u32::from_be_bytes(UNSUPPORTED_WORD);
+    let result = cellgov_ppu::decode::decode(raw);
     assert!(
-        cellgov_ppu::decode::decode(raw).is_err(),
-        "UNSUPPORTED_WORD ({raw:#010x}) decoded successfully; pick a different sentinel"
+        matches!(
+            result,
+            Err(cellgov_ppu::instruction::PpuDecodeError::EncodingNotRecognized { .. })
+        ),
+        "UNSUPPORTED_WORD ({raw:#010x}) must miss the encoding directory outright; got {result:?}"
     );
 }
 

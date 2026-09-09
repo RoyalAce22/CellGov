@@ -99,18 +99,12 @@ fn cancel_is_idempotent() {
 
 #[cfg(debug_assertions)]
 #[test]
+#[should_panic(expected = "already has a pending wake")]
 fn insert_duplicate_unit_panics_in_debug_builds() {
     let mut q = TimerWakeQueue::new();
     let unit = UnitId::new(1);
     q.insert(tick(10), unit, TimerWakeKind::Sleep);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        q.insert(tick(20), unit, TimerWakeKind::Sleep);
-    }));
-    assert!(
-        result.is_err(),
-        "debug build must panic on duplicate insert; the debug_assert \
-         is what keeps missed cancels from shipping"
-    );
+    q.insert(tick(20), unit, TimerWakeKind::Sleep);
 }
 
 #[cfg(not(debug_assertions))]

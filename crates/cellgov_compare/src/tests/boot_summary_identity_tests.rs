@@ -56,7 +56,11 @@ fn an_identity_key_the_schema_does_not_own_is_refused() {
         "budget": 64,
         "firmware": {"version": "4.91", "image_version": "0x1", "pup_sha256": "ab", "extra": 1}
     }"#;
-    assert!(serde_json::from_str::<BootSummary>(text).is_err());
+    let err = serde_json::from_str::<BootSummary>(text).expect_err("an unknown firmware key");
+    assert!(
+        err.to_string().starts_with("unknown field `extra`"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -85,7 +89,11 @@ fn a_game_key_the_schema_does_not_own_is_refused() {
         "budget": 64,
         "game": {"title_id": "NPAA00001", "version": "base", "app_ver": "02.00", "extra": 1}
     }"#;
-    assert!(serde_json::from_str::<BootSummary>(text).is_err());
+    let err = serde_json::from_str::<BootSummary>(text).expect_err("an unknown game key");
+    assert!(
+        err.to_string().starts_with("unknown field `extra`"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -97,10 +105,10 @@ fn a_key_no_half_of_the_schema_owns_is_refused() {
         "budget": 64,
         "disc": {"version": "1.00"}
     }"#;
-    assert!(
-        serde_json::from_str::<BootSummary>(text).is_err(),
-        "the shadow denies unknown fields, so a flattened key it does not name cannot slip past"
+    let err = serde_json::from_str::<BootSummary>(text).expect_err(
+        "the shadow denies unknown fields, so a flattened key it does not name cannot slip past",
     );
+    assert!(err.to_string().starts_with("unknown field `disc`"), "{err}");
 }
 
 #[test]

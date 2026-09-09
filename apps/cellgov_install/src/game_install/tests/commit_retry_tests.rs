@@ -111,11 +111,15 @@ fn a_rap_rename_that_is_refused_leaves_the_record_and_the_target_untouched() {
     assert!(!staged_rap.final_path.exists(), "nothing reached exdata");
 }
 
+/// How long the other thread keeps the handle open: past the first
+/// backoff, so at least one refusal is outwaited, and well inside the
+/// eleven seconds the whole backoff spans, so the commit still lands.
+#[cfg(windows)]
+const HANDLE_HOLD: std::time::Duration = std::time::Duration::from_millis(350);
+
 #[cfg(windows)]
 #[test]
 fn a_handle_held_under_the_staged_tree_is_outwaited_and_the_sequence_lands_whole() {
-    use std::time::Duration;
-
     use crate::store::rename::RENAME_ATTEMPTS;
 
     let out = scratch();
@@ -138,7 +142,7 @@ fn a_handle_held_under_the_staged_tree_is_outwaited_and_the_sequence_lands_whole
 
     let held = std::fs::File::open(tree.join("USRDIR").join("EBOOT.BIN")).unwrap();
     let releaser = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(350));
+        std::thread::sleep(HANDLE_HOLD);
         drop(held);
     });
 

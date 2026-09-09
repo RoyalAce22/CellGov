@@ -62,9 +62,11 @@ addr = "0x10000"
 size = "0x10"
 "#,
     );
+    let err =
+        bad.expect_err("a negative space names nothing and must not default to the boot space");
     assert!(
-        bad.is_err(),
-        "a negative space names nothing and must not default to the boot space"
+        err.to_string().contains("invalid value: integer `-1`"),
+        "the u32 field rejects the sign, not some later check: {err}"
     );
 }
 

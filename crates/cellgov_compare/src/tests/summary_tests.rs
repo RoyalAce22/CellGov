@@ -827,7 +827,15 @@ fn deserialize_routes_through_validate_and_rejects_invalid_pair() {
         "lowest_offset_class": null
     });
     let parsed: Result<CrossRunnerSummary, _> = serde_json::from_value(bad);
-    assert!(parsed.is_err());
+    let err = parsed.expect_err("a Yes / Diverge pair fails validation on the way in");
+    assert_eq!(err.classify(), serde_json::error::Category::Data);
+    assert_eq!(
+        err.to_string()
+            .split(" at line ")
+            .next()
+            .unwrap_or_default(),
+        CrossRunnerSummaryError::ConvergedButByteParityDiverged.to_string()
+    );
 }
 
 #[test]

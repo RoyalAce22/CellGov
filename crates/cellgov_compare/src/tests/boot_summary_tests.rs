@@ -180,9 +180,15 @@ fn deserialize_rejects_invalid_pair() {
         "budget": 1
     }"#;
     let res: Result<BootSummary, _> = serde_json::from_str(json);
-    assert!(
-        res.is_err(),
-        "deserialize must reject mismatched checkpoint/outcome"
+    let err = res.expect_err("deserialize must reject mismatched checkpoint/outcome");
+    assert!(err.is_data());
+    let message = err.to_string();
+    assert_eq!(
+        message.split(" at line ").next().unwrap_or_default(),
+        BootSummaryError::RsxWriteOutcomeWithoutRsxCheckpoint {
+            checkpoint: CheckpointKind::ProcessExit,
+        }
+        .to_string()
     );
 }
 

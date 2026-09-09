@@ -8,7 +8,10 @@ use crate::test_support::synthetic_vault;
 
 #[test]
 fn parse_rejects_short_data() {
-    assert!(parse(&[0u8; 10]).is_err());
+    assert!(matches!(
+        parse(&[0u8; 10]),
+        Err(PupError::TooSmall { len: 10 })
+    ));
 }
 
 #[test]

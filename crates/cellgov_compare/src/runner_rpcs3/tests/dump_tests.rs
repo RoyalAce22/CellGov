@@ -117,5 +117,8 @@ fn parse_dump_empty_regions_returns_empty_vec() {
 #[test]
 fn parse_dump_nonexistent_file_returns_error() {
     let result = parse_dump(Path::new("/nonexistent/dump.bin"), &[]);
-    assert!(result.is_err());
+    assert!(
+        matches!(&result, Err(Rpcs3Error::DumpRead(e)) if e.kind() == std::io::ErrorKind::NotFound),
+        "{result:?}"
+    );
 }

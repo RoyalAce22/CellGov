@@ -159,8 +159,9 @@ fn a_negative_space_is_a_parse_error_not_space_zero() {
         size = "0x10"
         "#,
     );
+    let err = bad.expect_err("a negative space cannot name any address space and must not wrap");
     assert!(
-        bad.is_err(),
-        "a negative space cannot name any address space and must not wrap"
+        err.to_string().contains("invalid value: integer `-1`"),
+        "the u32 field rejects the sign, not some later check: {err}"
     );
 }

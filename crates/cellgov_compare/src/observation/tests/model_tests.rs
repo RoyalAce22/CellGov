@@ -141,8 +141,12 @@ fn null_on_required_field_rejects() {
         "state_hashes": null,
         "metadata": { "runner": "rpcs3", "steps": null }
     }"#;
+    let err = serde_json::from_str::<Observation>(json)
+        .expect_err("null memory_regions must fail to deserialize, not default to empty");
+    assert!(err.is_data());
     assert!(
-        serde_json::from_str::<Observation>(json).is_err(),
-        "null memory_regions must fail to deserialize, not default to empty"
+        err.to_string()
+            .starts_with("invalid type: null, expected a sequence"),
+        "{err}"
     );
 }

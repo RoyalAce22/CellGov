@@ -30,7 +30,10 @@ fn checkpoint_unprefixed_digits_parse_as_decimal_not_hex() {
 
 #[test]
 fn checkpoint_unprefixed_hex_is_rejected() {
-    assert!(CheckpointTrigger::parse_cli_value("pc=1ce8").is_err());
+    assert!(matches!(
+        CheckpointTrigger::parse_cli_value("pc=1ce8"),
+        Err(CheckpointParseError::PcNotDecimal(v)) if v == "1ce8"
+    ));
 }
 
 // Same PC used in `boot_summary_cross_check` in observation.rs;
