@@ -114,8 +114,8 @@ Five structural rules:
 - `cellgov_terminal` is a host-tooling leaf with no workspace
   dependency, and no runtime crate depends on it -- the same standing
   as `cellgov_testkit`: in the tree, outside the runtime DAG. It reads
-  the host clock and the process environment, so no guest-visible path
-  reaches it.
+  the host clock, the process environment and the console size, so no
+  guest-visible path reaches it.
 - `cellgov_install` is a library: the PUP / SCE / SELF / TAR
   primitives, the operator key-vault loader (`keys`), and the firmware
   and game installers, which report progress through
@@ -143,7 +143,9 @@ Five structural rules:
 External dependencies: `serde`, `serde_json`, and `toml` in
 `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and
 `cellgov_cli`; `clap`, `clap_complete` and `filebuffer` in
-`cellgov_cli`; crypto crates in `cellgov_install` only.
+`cellgov_cli`; `terminal_size` in `cellgov_terminal`, for the console
+width query that is FFI on both platforms; crypto crates in
+`cellgov_install` only.
 Everything else is workspace-internal. The workspace compiles under
 `unsafe_code = "forbid"`.
 

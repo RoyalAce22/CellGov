@@ -11,3 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+# The console width query: an ioctl on Unix and a console-info call on
+# Windows, both FFI that forbid(unsafe_code) keeps out of this tree.
+# `COLUMNS` is a shell variable that is almost never exported, so
+# without the query every terminal reads as 80 columns.
+terminal_size = "0.4"

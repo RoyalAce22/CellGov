@@ -5,6 +5,7 @@ use super::*;
 struct FakeEnv {
     vars: Vec<(&'static str, &'static str)>,
     tty: bool,
+    columns: Option<usize>,
     vt_opt_in: bool,
 }
 
@@ -13,7 +14,14 @@ impl FakeEnv {
         Self {
             vars: vec![("TERM", "xterm-256color")],
             tty: true,
+            columns: None,
             vt_opt_in: false,
+        }
+    }
+    fn columns(self, columns: usize) -> Self {
+        Self {
+            columns: Some(columns),
+            ..self
         }
     }
     fn pipe() -> Self {
@@ -26,6 +34,7 @@ impl FakeEnv {
         Self {
             vars: vec![],
             tty: true,
+            columns: None,
             vt_opt_in: true,
         }
     }
@@ -45,6 +54,9 @@ impl TermEnv for FakeEnv {
     }
     fn stderr_is_terminal(&self) -> bool {
         self.tty
+    }
+    fn stderr_columns(&self) -> Option<usize> {
+        self.columns
     }
     fn vt_is_opt_in(&self) -> bool {
         self.vt_opt_in
@@ -233,15 +245,65 @@ fn forcing_ansi_does_not_outrank_the_rungs_above_the_marker_check() {
     );
 }
 
+fn width(env: &FakeEnv) -> usize {
+    detect(RenderFlags::default(), env).width
+}
+
 #[test]
 fn width_comes_from_columns_and_is_clamped() {
-    let widths = [("10", 40usize), ("100", 100), ("9000", 200), ("wide", 80)];
+    let widths = [
+        ("10", 40usize),
+        ("100", 100),
+        ("9000", 200),
+        ("wide", 80),
+        ("0", 80),
+    ];
     for (set, expected) in widths {
-        let caps = detect(RenderFlags::default(), &FakeEnv::tty().with("COLUMNS", set));
-        assert_eq!(caps.width, expected, "COLUMNS={set}");
+        assert_eq!(
+            width(&FakeEnv::tty().with("COLUMNS", set)),
+            expected,
+            "COLUMNS={set}"
+        );
     }
-    let bare = FakeEnv::tty();
-    assert_eq!(detect(RenderFlags::default(), &bare).width, 80);
+    assert_eq!(width(&FakeEnv::tty()), 80);
+}
+
+#[test]
+fn width_comes_from_the_terminal_query_when_columns_is_unset() {
+    for (queried, expected) in [(10usize, 40usize), (132, 132), (9000, 200)] {
+        assert_eq!(
+            width(&FakeEnv::tty().columns(queried)),
+            expected,
+            "queried {queried}"
+        );
+    }
+    // A console that reports no window is not a 40-column terminal.
+    assert_eq!(width(&FakeEnv::tty().columns(0)), 80);
+    // The query answers for every mode, so a plain or silent run sizes
+    // the same as the bar would have.
+    assert_eq!(width(&FakeEnv::pipe().columns(132)), 132);
+    let quiet = RenderFlags {
+        quiet: true,
+        ..Default::default()
+    };
+    assert_eq!(detect(quiet, &FakeEnv::tty().columns(132)).width, 132);
+}
+
+#[test]
+fn a_numeric_columns_outranks_the_terminal_query() {
+    assert_eq!(
+        width(&FakeEnv::tty().columns(132).with("COLUMNS", "100")),
+        100
+    );
+    // An unparseable or zero value is no override, so the query still
+    // answers.
+    for unset in ["wide", "0"] {
+        assert_eq!(
+            width(&FakeEnv::tty().columns(132).with("COLUMNS", unset)),
+            132,
+            "COLUMNS={unset}"
+        );
+    }
 }
 
 #[test]

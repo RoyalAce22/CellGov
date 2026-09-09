@@ -22,10 +22,11 @@ pub struct TermCaps {
     pub mode: RenderMode,
     /// Whether SGR color/style sequences are emitted (Ansi mode only).
     pub color: bool,
-    /// Terminal width in columns.
+    /// Terminal width in columns, clamped to `40..=200`.
     ///
-    /// Read from `COLUMNS`, which shells rarely export, so this is 80
-    /// in practice.
+    /// A numeric `COLUMNS` outranks the queried width of the terminal
+    /// on stderr, so an operator can pin the frame width; with neither,
+    /// 80.
     pub width: usize,
 }
 
@@ -78,6 +79,8 @@ pub trait TermEnv {
     fn var(&self, key: &str) -> Option<String>;
     /// Whether stderr is attached to a terminal.
     fn stderr_is_terminal(&self) -> bool;
+    /// The column count of the terminal on stderr, if it is one.
+    fn stderr_columns(&self) -> Option<usize>;
     /// Whether a terminal must turn VT on before escape sequences work.
     fn vt_is_opt_in(&self) -> bool;
 }
@@ -96,6 +99,11 @@ impl TermEnv for HostEnv {
     }
     fn stderr_is_terminal(&self) -> bool {
         std::io::IsTerminal::is_terminal(&std::io::stderr())
+    }
+    fn stderr_columns(&self) -> Option<usize> {
+        // The bar renders on stderr, which can be a different terminal
+        // from stdout, so the query reads stderr.
+        terminal_size::terminal_size_of(std::io::stderr()).map(|(w, _)| usize::from(w.0))
     }
     fn vt_is_opt_in(&self) -> bool {
         cfg!(windows)
@@ -146,9 +154,15 @@ fn ansi_capable_console(flags: RenderFlags, env: &dyn TermEnv) -> bool {
 /// flags outranking it.
 #[must_use]
 pub fn detect(flags: RenderFlags, env: &dyn TermEnv) -> TermCaps {
+    // `COLUMNS` comes first, as the terminal libraries read it: it is
+    // the operator's override. A zero from either source is not a width
+    // (an unset override, or a console that reports no window), so it
+    // falls through like an absent value.
     let width = env
         .var("COLUMNS")
         .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&w| w > 0)
+        .or_else(|| env.stderr_columns().filter(|&w| w > 0))
         .unwrap_or(80)
         .clamp(40, 200);
     if flags.quiet || flags.no_progress || flags.json {
