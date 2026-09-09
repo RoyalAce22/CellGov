@@ -1,13 +1,50 @@
 //! The `--format json` documents, rendered from their own `Serialize`
 //! impls.
+//!
+//! [`StoreLayout`] resolves every record path and entry directory a
+//! sample names, the way the read commands resolve the real ones.
+
+use std::path::Path;
+
+use cellgov_install::store::{Artifact, StoreLayout, TitleId, TitleTree, VersionKey};
 
 use crate::cli::store::read::model::{
-    AnchorDoc, BaseDoc, DivergenceDoc, FirmwareDoc, FirmwareListDoc, StatusDoc, TitleDoc,
-    TitleListDoc, UpdateDoc, VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
+    store_rel, AnchorDoc, BaseDoc, DivergenceDoc, FirmwareDoc, FirmwareListDoc, StatusDoc,
+    TitleDoc, TitleListDoc, UpdateDoc, VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
 };
 
 /// A SHA-256 as a document spells one: 64 lowercase hex digits.
 const SAMPLE_SHA: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// The store root of every sample path.
+const SAMPLE_ROOT: &str = "vfs";
+
+const SAMPLE_FIRMWARE_VERSION: &str = "4.93";
+const SAMPLE_TITLE_ID: &str = "NPUA80001";
+const SAMPLE_UPDATE_VERSION: &str = "1.02";
+
+fn layout() -> StoreLayout {
+    StoreLayout::new(SAMPLE_ROOT)
+}
+
+/// A store path, relative to [`SAMPLE_ROOT`], as a document spells it.
+fn rel(path: &Path) -> String {
+    store_rel(Path::new(SAMPLE_ROOT), path)
+}
+
+/// Where the store files the record for `artifact`, as a document
+/// spells it.
+fn record(artifact: &Artifact) -> Option<String> {
+    Some(rel(&layout().record_path(artifact)))
+}
+
+fn sample_title_id() -> TitleId {
+    TitleId::new(SAMPLE_TITLE_ID).expect("invariant: the sample title id is a store key")
+}
+
+fn sample_version(version: &str) -> VersionKey {
+    VersionKey::new(version).expect("invariant: the sample versions are store keys")
+}
 
 /// Every versioned document, each under the commands that emit it.
 pub(crate) fn render() -> String {
@@ -33,10 +70,13 @@ fn push<T: serde::Serialize>(out: &mut String, commands: &str, doc: &T) {
 }
 
 fn firmware_doc() -> FirmwareDoc {
+    let artifact = Artifact::Firmware {
+        version: sample_version(SAMPLE_FIRMWARE_VERSION),
+    };
     FirmwareDoc {
-        version: "4.93".to_string(),
-        entry_dir: "firmware/4.93".to_string(),
-        record: Some(".cellgov/installs/firmware/4.93.toml".to_string()),
+        version: SAMPLE_FIRMWARE_VERSION.to_string(),
+        entry_dir: rel(&layout().entry_dir(&artifact)),
+        record: record(&artifact),
         pup_sha256: SAMPLE_SHA.to_string(),
         image_version: Some("0x0004009300000000".to_string()),
         modules: Some(370),
@@ -45,25 +85,35 @@ fn firmware_doc() -> FirmwareDoc {
 }
 
 fn title_doc() -> TitleDoc {
+    let base = Artifact::TitleBase {
+        title_id: sample_title_id(),
+    };
+    let update = Artifact::TitleUpdate {
+        title_id: sample_title_id(),
+        version: sample_version(SAMPLE_UPDATE_VERSION),
+    };
     TitleDoc {
-        title_id: "NPUA80001".to_string(),
+        title_id: SAMPLE_TITLE_ID.to_string(),
         short_name: Some("flow".to_string()),
         display_name: Some("flOw".to_string()),
         base: Some(BaseDoc {
             version: "01.00".to_string(),
-            dir: "dev_hdd0/game/NPUA80001".to_string(),
-            tree: "game".to_string(),
+            // The PKG installer writes a base as the live
+            // `dev_hdd0/game/<id>` mount directory, which the layout
+            // names no entry for.
+            dir: format!("dev_hdd0/game/{SAMPLE_TITLE_ID}"),
+            tree: TitleTree::Game.dir_name().to_string(),
             distribution: "psn-hdd".to_string(),
             source_sha256: SAMPLE_SHA.to_string(),
-            record: Some(".cellgov/installs/NPUA80001/base.toml".to_string()),
+            record: record(&base),
         }),
         ships_in_firmware: false,
         updates: vec![UpdateDoc {
-            version: "1.02".to_string(),
-            dir: "dev_hdd0/game/NPUA80001".to_string(),
+            version: SAMPLE_UPDATE_VERSION.to_string(),
+            dir: rel(&layout().entry_dir(&update).join(TitleTree::Game.dir_name())),
             source_sha256: SAMPLE_SHA.to_string(),
             min_system_ver: Some("03.5500".to_string()),
-            record: Some(".cellgov/installs/NPUA80001/1.02.toml".to_string()),
+            record: record(&update),
         }],
         anchors: vec![
             AnchorDoc {

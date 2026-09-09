@@ -19,5 +19,9 @@ mod examples_tests;
 mod schema_tests;
 
 #[cfg(test)]
+#[path = "tests/schema_layout_tests.rs"]
+mod schema_layout_tests;
+
+#[cfg(test)]
 #[path = "tests/drift_tests.rs"]
 mod drift_tests;

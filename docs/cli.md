@@ -104,7 +104,7 @@ comparison records rather than a published API: they carry no
     {
       "version": "4.93",
       "entry_dir": "firmware/4.93",
-      "record": ".cellgov/installs/firmware/4.93.toml",
+      "record": ".cellgov/installs/firmware/4.93.install.toml",
       "pup_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "image_version": "0x0004009300000000",
       "modules": 370
@@ -121,16 +121,16 @@ comparison records rather than a published API: they carry no
         "tree": "game",
         "distribution": "psn-hdd",
         "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "record": ".cellgov/installs/NPUA80001/base.toml"
+        "record": ".cellgov/installs/titles/NPUA80001/base.install.toml"
       },
       "ships_in_firmware": false,
       "updates": [
         {
           "version": "1.02",
-          "dir": "dev_hdd0/game/NPUA80001",
+          "dir": "titles/NPUA80001/updates/1.02/game",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "min_system_ver": "03.5500",
-          "record": ".cellgov/installs/NPUA80001/1.02.toml"
+          "record": ".cellgov/installs/titles/NPUA80001/update-1.02.install.toml"
         }
       ],
       "anchors": [
@@ -166,7 +166,7 @@ comparison records rather than a published API: they carry no
     {
       "version": "4.93",
       "entry_dir": "firmware/4.93",
-      "record": ".cellgov/installs/firmware/4.93.toml",
+      "record": ".cellgov/installs/firmware/4.93.install.toml",
       "pup_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "image_version": "0x0004009300000000",
       "modules": 370
@@ -192,16 +192,16 @@ comparison records rather than a published API: they carry no
         "tree": "game",
         "distribution": "psn-hdd",
         "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
-        "record": ".cellgov/installs/NPUA80001/base.toml"
+        "record": ".cellgov/installs/titles/NPUA80001/base.install.toml"
       },
       "ships_in_firmware": false,
       "updates": [
         {
           "version": "1.02",
-          "dir": "dev_hdd0/game/NPUA80001",
+          "dir": "titles/NPUA80001/updates/1.02/game",
           "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
           "min_system_ver": "03.5500",
-          "record": ".cellgov/installs/NPUA80001/1.02.toml"
+          "record": ".cellgov/installs/titles/NPUA80001/update-1.02.install.toml"
         }
       ],
       "anchors": [
