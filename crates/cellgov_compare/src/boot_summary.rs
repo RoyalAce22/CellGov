@@ -213,7 +213,7 @@ pub enum BootSummaryError {
     },
     /// `BootOutcome::PcReached(a)` and `CheckpointKind::Pc { addr: b }`
     /// must address-match.
-    #[error("Pc checkpoint addr {checkpoint} does not match PcReached addr {outcome}")]
+    #[error("pc checkpoint addr {checkpoint} does not match PcReached addr {outcome}")]
     PcAddressMismatch {
         /// Address declared in the `CheckpointKind::Pc` checkpoint.
         checkpoint: GuestAddr,

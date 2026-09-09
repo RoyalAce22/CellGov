@@ -1,0 +1,13 @@
+# Workspace-wide clippy configuration. Crate directories carry no
+# clippy.toml of their own, so this file applies to every crate.
+
+# Error handling: a fallible signature carries a local typed error.
+# Neither framework is a dependency; the entries keep one from
+# becoming one without a lint firing at the first use. The trait
+# object `dyn std::error::Error` is not listed: naming the trait here
+# fires on every `thiserror` derive, so the boxed-return shape is the
+# error_style_guard test's instead.
+disallowed-types = [
+    { path = "anyhow::Error", reason = "errors are local thiserror types, not an opaque report", allow-invalid = true },
+    { path = "eyre::Report", reason = "errors are local thiserror types, not an opaque report", allow-invalid = true },
+]

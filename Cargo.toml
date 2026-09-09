@@ -85,6 +85,11 @@ print_stderr = "deny"
 # scaffolding crate opt out via crate-root `#![allow]` / `#![cfg_attr]`.
 unwrap_used = "deny"
 
+# Type policy. The disallowed list lives in the workspace clippy.toml;
+# it names the error-framework types every error type in this tree
+# stands in place of.
+disallowed_types = "deny"
+
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 invalid_rust_codeblocks = "deny"
