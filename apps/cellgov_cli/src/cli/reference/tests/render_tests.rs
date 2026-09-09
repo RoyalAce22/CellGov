@@ -115,7 +115,7 @@ fn clap_builtins_are_left_out_of_the_tables() {
 #[test]
 fn the_terminal_caveats_are_stated_once() {
     let body = body();
-    assert_eq!(body.matches("no SIGINT handler").count(), 1);
+    assert_eq!(body.matches("A Ctrl-C while a bar is up").count(), 1);
     assert_eq!(
         body.matches("render thread is presentation-only").count(),
         1

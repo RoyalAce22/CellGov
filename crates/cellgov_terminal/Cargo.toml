@@ -16,3 +16,12 @@ workspace = true
 # `COLUMNS` is a shell variable that is almost never exported, so
 # without the query every terminal reads as 80 columns.
 terminal_size = "0.4"
+# The Ctrl-C handler that restores the terminal: `sigaction` on Unix
+# and `SetConsoleCtrlHandler` on Windows, the same FFI standing as the
+# width query.
+ctrlc = "3.5"
+
+[target.'cfg(unix)'.dev-dependencies]
+# Delivers the interrupt in the Ctrl-C test without a shell. Already
+# in the graph through ctrlc.
+nix = { version = "0.31", default-features = false, features = ["signal"] }

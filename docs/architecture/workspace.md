@@ -143,9 +143,9 @@ Five structural rules:
 External dependencies: `serde`, `serde_json`, and `toml` in
 `cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and
 `cellgov_cli`; `clap`, `clap_complete` and `filebuffer` in
-`cellgov_cli`; `terminal_size` in `cellgov_terminal`, for the console
-width query that is FFI on both platforms; crypto crates in
-`cellgov_install` only.
+`cellgov_cli`; `terminal_size` and `ctrlc` in `cellgov_terminal`, for
+the console width query and the Ctrl-C handler, each FFI on both
+platforms; crypto crates in `cellgov_install` only.
 Everything else is workspace-internal. The workspace compiles under
 `unsafe_code = "forbid"`.
 

@@ -20,6 +20,20 @@ const TICK: Duration = Duration::from_millis(100);
 /// short enough not to stall a crash.
 const PANIC_DRAIN: Duration = Duration::from_millis(250);
 
+/// Hides the cursor for the in-place frame; every restore answers it.
+const HIDE_CURSOR: &[u8] = b"\x1b[?25l";
+/// The restore the non-unwinding paths write: cursor back, taskbar
+/// state cleared, and a newline off the frame's last line.
+const RESTORE: &[u8] = b"\x1b[?25h\x1b]9;4;0\x07\n";
+
+/// The status of a process the default Ctrl-C action ended, so a
+/// caller that checks for an interrupt sees the value it expects:
+/// 128 + SIGINT on Unix, `STATUS_CONTROL_C_EXIT` on Windows.
+#[cfg(windows)]
+const INTERRUPT_EXIT: i32 = 0xC000_013A_u32 as i32;
+#[cfg(not(windows))]
+const INTERRUPT_EXIT: i32 = 130;
+
 /// Stop/exit handshake between a bar and its render thread.
 #[derive(Debug, Default)]
 struct StopFlags {
@@ -97,7 +111,8 @@ impl BarStop {
 ///
 /// Whoever swaps it false claims the restore. The panic hook and the
 /// [`Drop`] that follows it both run on the way out of a panicking
-/// command; only one of them may write.
+/// command, and the Ctrl-C handler runs beside whatever the main
+/// thread is doing; only one of them may write.
 static BAR_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 /// The live bar's handshake, for the panic hook to reach.
@@ -126,11 +141,39 @@ fn install_panic_hook() {
     });
 }
 
+/// Install the Ctrl-C handler once: the restore, then the exit status
+/// of the default action.
+///
+/// The handler runs on the signal crate's own thread while the render
+/// thread may be mid-tick. [`quiesce_for_panic`] bounds the wait for
+/// that thread, and the stderr handle locks per write, so a tick in
+/// flight delays the restore by one write. The hook reports a handler
+/// the OS refuses once, before the render thread starts; the bar then
+/// owes its restore to the unwinding paths alone.
+fn install_interrupt_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let installed = ctrlc::set_handler(|| {
+            release_terminal();
+            std::process::exit(INTERRUPT_EXIT);
+        });
+        if let Err(e) = installed {
+            let mut err = std::io::stderr();
+            let _ = writeln!(
+                err,
+                "cellgov: no Ctrl-C handler installed ({e}); an interrupted bar \
+                 leaves the cursor hidden"
+            );
+        }
+    });
+}
+
 /// Stop the live bar and restore the terminal.
 ///
-/// This serves an exit path that does not unwind -- `process::exit`
-/// after a refusal -- where [`ProgressBar`]'s [`Drop`] never runs and
-/// the cursor stays hidden for the shell that follows.
+/// This serves the exit paths that do not unwind -- `process::exit`
+/// after a refusal, and the Ctrl-C handler -- where [`ProgressBar`]'s
+/// [`Drop`] never runs and the cursor stays hidden for the shell that
+/// follows.
 ///
 /// The call is safe with no bar running, and safe to repeat. It
 /// deregisters the bar without joining it, so the owning
@@ -154,7 +197,7 @@ fn quiesce_for_panic() {
     });
     let mut err = std::io::stderr();
     if BAR_ACTIVE.swap(false, Ordering::Relaxed) {
-        let _ = err.write_all(b"\x1b[?25h\x1b]9;4;0\x07\n");
+        let _ = err.write_all(RESTORE);
     }
     // A drain that spent its whole budget leaves a render thread free
     // to cursor-up over whatever prints next.
@@ -172,9 +215,10 @@ fn quiesce_for_panic() {
 /// The live progress display: owns the render thread and stderr while
 /// running.
 ///
-/// Known limitation: a hard Ctrl-C kills the process without
-/// unwinding, which can leave the cursor hidden and a stale taskbar
-/// state.
+/// A Ctrl-C runs [`release_terminal`] on the handler's thread and
+/// exits with the interrupted status, so the shell that follows gets
+/// its cursor back. A kill that runs no handler, or a crash past the
+/// panic hook, still leaves it hidden.
 pub struct ProgressBar {
     state: Arc<ProgressState>,
     stop: Arc<BarStop>,
@@ -205,7 +249,15 @@ impl ProgressBar {
             mode => {
                 install_panic_hook();
                 if mode == RenderMode::Ansi {
+                    install_interrupt_hook();
                     BAR_ACTIVE.store(true, Ordering::Relaxed);
+                    // The hide goes out on the thread that claimed the
+                    // restore, so a restore that finds the claim finds
+                    // the hide ahead of it on the stream, whether or
+                    // not the render thread has started.
+                    let mut err = std::io::stderr();
+                    let _ = err.write_all(HIDE_CURSOR);
+                    let _ = err.flush();
                 }
                 // The assert reads the slot without claiming it, so a
                 // debug build's panic leaves the live bar registered
@@ -356,10 +408,6 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
     let spinner_frames = ['|', '/', '-', '\\'];
     let mut tick_n = 0usize;
 
-    if caps.mode == RenderMode::Ansi {
-        let _ = err.write_all(b"\x1b[?25l");
-    }
-
     loop {
         let stopped = stop.wait_tick();
         // Sampled before the snapshot: the tick that draws the closing
@@ -488,3 +536,7 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
 #[cfg(test)]
 #[path = "tests/bar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/interrupt_tests.rs"]
+mod interrupt_tests;

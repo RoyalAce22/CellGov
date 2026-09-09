@@ -63,12 +63,15 @@ renders one.
   `TERM_PROGRAM` or `TERM` names a terminal that does, and falls back to
   plain threshold lines otherwise. `--force-ansi`, or `CELLGOV_FORCE_ANSI`
   set once for the console, answers for a host that exports none of them.
-- **Interruption.** There is no SIGINT handler, so a hard Ctrl-C can
-  leave the cursor hidden; `tput cnorm`, or any command that resets the
-  terminal, restores it. The interruption itself costs nothing: an
-  install writes into a `.staging-*` sibling and commits by rename, so
-  an interrupted run leaves the previous tree intact and the next run
-  sweeps the residue.
+- **Interruption.** A Ctrl-C while a bar is up stops the render
+  thread, restores the cursor and clears the taskbar state, then exits
+  with the status the default action gives: 130 on Unix,
+  `STATUS_CONTROL_C_EXIT` on Windows. A `kill -9` or a crash skips
+  that; `tput cnorm`, or any command that resets the terminal, restores
+  the cursor. The interruption itself costs nothing: an install writes
+  into a `.staging-*` sibling and commits by rename, so an interrupted
+  run leaves the previous tree intact and the next run sweeps the
+  residue.
 - **The render thread is presentation-only.** Worker threads never
   block on it, so a wedged or redirected stderr cannot stall an install
   or a bench run.
