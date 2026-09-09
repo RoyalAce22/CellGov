@@ -1,7 +1,7 @@
 //! Region descriptor and the shared per-space extractor used by both
 //! the scenario and boot paths.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cellgov_core::AddressSpaceId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, RegionAccess};
@@ -31,6 +31,17 @@ pub struct RegionDescriptor {
 /// in the manifest that declared it.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RegionExtractError {
+    /// The descriptor repeats the name of an earlier descriptor. The
+    /// comparison pairs regions by name and takes the first match, so
+    /// it would never compare the second copy.
+    #[error(
+        "region {name} is declared twice; observations are matched region by name \
+         and the first match wins, so the second copy would never be compared"
+    )]
+    Duplicate {
+        /// Region name as declared.
+        name: String,
+    },
     /// The descriptor declares zero bytes, and an observation of nothing
     /// matches any baseline.
     #[error(
@@ -110,10 +121,10 @@ pub enum RegionExtractError {
 
 /// Read each region through its own space.
 ///
-/// The extractor refuses a descriptor of zero bytes before it resolves
-/// the space. It refuses a range in a `ReservedZeroReadable` region
-/// before any read, so the snapshot's provisional-read counter does
-/// not change.
+/// The extractor refuses a repeated name, then a descriptor of zero
+/// bytes, before it resolves the space. It refuses a range in a
+/// `ReservedZeroReadable` region before any read, so the snapshot's
+/// provisional-read counter does not change.
 ///
 /// # Errors
 ///
@@ -123,9 +134,15 @@ pub(super) fn extract_regions(
     spaces: &SpaceSnapshots,
     regions: &[RegionDescriptor],
 ) -> Result<Vec<NamedMemoryRegion>, RegionExtractError> {
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
     regions
         .iter()
         .map(|desc| {
+            if !seen.insert(desc.name.as_str()) {
+                return Err(RegionExtractError::Duplicate {
+                    name: desc.name.clone(),
+                });
+            }
             if desc.size == 0 {
                 return Err(RegionExtractError::Empty {
                     name: desc.name.clone(),
@@ -184,3 +201,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/region_provisional_tests.rs"]
 mod provisional_tests;
+
+#[cfg(test)]
+#[path = "tests/region_duplicate_tests.rs"]
+mod duplicate_tests;

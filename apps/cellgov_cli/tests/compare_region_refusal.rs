@@ -47,6 +47,25 @@ memory_regions = [
 outcome = "completed"
 "#;
 
+/// The comparison pairs regions by name, so it would never compare the
+/// second `twice`.
+const DUPLICATE_NAME: &str = r#"
+[test]
+name = "region_named_twice"
+
+[cellgov]
+scenario = "dma"
+
+[observe]
+memory_regions = [
+  { name = "twice", addr = 0, size = 16 },
+  { name = "twice", addr = 16, size = 16 },
+]
+
+[expect]
+outcome = "completed"
+"#;
+
 /// Zero bytes match any baseline.
 const EMPTY: &str = r#"
 [test]
@@ -138,6 +157,11 @@ fn a_region_past_the_end_of_the_space_does_not_round_trip_green() {
 #[test]
 fn a_region_in_a_space_the_run_never_created_does_not_round_trip_green() {
     assert_refused_naming_region("absent_space", ABSENT_SPACE, "ghost");
+}
+
+#[test]
+fn a_region_name_declared_twice_does_not_round_trip_green() {
+    assert_refused_naming_region("duplicate_name", DUPLICATE_NAME, "twice");
 }
 
 #[test]
