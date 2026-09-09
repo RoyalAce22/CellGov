@@ -39,6 +39,7 @@ pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&s
             save_path,
             against_path,
             args.observations_dir.clone(),
+            scenarios_list,
         );
     } else {
         // Multi-observation compare needs a manifest's memory-region
@@ -206,6 +207,30 @@ fn run_compare(
     }
 }
 
+/// Report, or refuse, a manifest that names no scenario this runner has.
+///
+/// A plain run reports it: UNSUPPORTED is the classification for a
+/// manifest another runner owns. A run with a baseline flag has
+/// nothing to record and nothing to compare, so it refuses instead of
+/// exiting green.
+fn unsupported_manifest(
+    manifest_path: &str,
+    test_name: &str,
+    reason: &str,
+    baseline_flag: Option<&str>,
+) {
+    match baseline_flag {
+        Some(flag) => die(&format!(
+            "manifest {manifest_path}: {reason}; {flag} needs a CellGov run, and this manifest names none"
+        )),
+        None => {
+            println!("test: {test_name}");
+            println!("classification: UNSUPPORTED");
+            println!("reason: {reason}");
+        }
+    }
+}
+
 fn run_manifest_compare(
     manifest_path: &str,
     mode: CompareMode,
@@ -213,11 +238,23 @@ fn run_manifest_compare(
     save_path: Option<String>,
     against_path: Option<String>,
     observations_dir: Option<String>,
+    scenarios_list: &[&str],
 ) {
     let manifest = cellgov_compare::manifest::load(std::path::Path::new(manifest_path))
         .unwrap_or_else(|e| die(&format!("failed to load manifest {manifest_path}: {e:?}")));
 
     let test_name = &manifest.test.name;
+
+    // Whichever flag asked for a baseline names itself in a refusal.
+    let baseline_flag = if save_path.is_some() {
+        Some("--save-baseline")
+    } else if against_path.is_some() {
+        Some("--against-baseline")
+    } else if observations_dir.is_some() {
+        Some("--observations-dir")
+    } else {
+        None
+    };
 
     let regions: Vec<RegionDescriptor> = manifest
         .observe
@@ -234,9 +271,12 @@ fn run_manifest_compare(
     let cellgov_section = match &manifest.cellgov {
         Some(cg) => cg,
         None => {
-            println!("test: {test_name}");
-            println!("classification: UNSUPPORTED");
-            println!("reason: no [cellgov] section in manifest");
+            unsupported_manifest(
+                manifest_path,
+                test_name,
+                "no [cellgov] section in manifest",
+                baseline_flag,
+            );
             return;
         }
     };
@@ -244,11 +284,15 @@ fn run_manifest_compare(
     let factory = match scenario_factory(&cellgov_section.scenario) {
         Some(f) => f,
         None => {
-            println!("test: {test_name}");
-            println!("classification: UNSUPPORTED");
-            println!(
-                "reason: unknown CellGov scenario \"{}\"",
-                cellgov_section.scenario
+            unsupported_manifest(
+                manifest_path,
+                test_name,
+                &format!(
+                    "unknown CellGov scenario \"{}\" (available: {})",
+                    cellgov_section.scenario,
+                    scenarios_list.join(", ")
+                ),
+                baseline_flag,
             );
             return;
         }
