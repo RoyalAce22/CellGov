@@ -175,6 +175,64 @@ fn an_attribute_query_names_a_mode() {
 }
 
 #[test]
+fn boot_bench_all_stands_in_for_the_title_selector() {
+    assert!(parse(&["boot", "bench", "--all"]).is_ok());
+    assert!(parse(&[
+        "boot",
+        "bench",
+        "--all",
+        "--fw",
+        "4.93",
+        "--game-ver",
+        "base"
+    ])
+    .is_ok());
+    for named in [
+        ["--title", "synthetic"],
+        ["--content-id", "CG_TEST"],
+        ["--title-manifest", "t.toml"],
+    ] {
+        let argv = [&["boot", "bench", "--all"][..], &named[..]].concat();
+        assert_eq!(
+            err_kind(&argv),
+            clap::error::ErrorKind::ArgumentConflict,
+            "{argv:?}"
+        );
+    }
+    assert_eq!(
+        err_kind(&["boot", "bench"]),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+    for other in [&["boot", "run"][..], &["boot", "bench-once"][..]] {
+        let argv = [other, &["--all"][..]].concat();
+        assert_eq!(
+            err_kind(&argv),
+            clap::error::ErrorKind::UnknownArgument,
+            "{argv:?}: only the run set sweeps"
+        );
+    }
+}
+
+#[test]
+fn boot_bench_all_with_firmware_dir_reaches_the_usage_refusal() {
+    // clap accepts the pair: `bench_all::refuse_firmware_dir` names the
+    // refusal, and it runs only on a parsed invocation.
+    assert!(parse(&["boot", "bench", "--all", "--firmware-dir", "ext"]).is_ok());
+    assert_eq!(
+        err_kind(&[
+            "boot",
+            "bench",
+            "--all",
+            "--firmware-dir",
+            "ext",
+            "--fw",
+            "4.93"
+        ]),
+        clap::error::ErrorKind::ArgumentConflict
+    );
+}
+
+#[test]
 fn record_anchors_takes_all_or_one_title_and_not_both() {
     assert_eq!(
         err_kind(&["dev", "record-anchors"]),

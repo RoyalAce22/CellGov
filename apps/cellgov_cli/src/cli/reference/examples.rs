@@ -127,6 +127,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &[
             "cellgov boot bench --title flow --fw 4.93",
             "cellgov boot bench --title wipeout --fw 4.93 --runs 5 --no-anchor-check",
+            "cellgov boot bench --all --runs 1",
         ],
     },
     Examples {

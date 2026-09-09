@@ -8,7 +8,7 @@ use cellgov_install::sce::SceError;
 use cellgov_install::self_image::{is_sce_wrapped, to_plaintext_elf, KeyPolicy};
 use cellgov_ps3_abi::elf::ELF_MAGIC;
 
-use crate::game::manifest::TitleManifest;
+use crate::game::manifest::{ResolveEbootError, TitleManifest};
 
 /// Print `msg` to stderr and exit with the failed-operation status.
 ///
@@ -211,36 +211,120 @@ pub(crate) fn load_ppu_image_with_title_or_die(
     }
 }
 
-/// Walk `eboot_candidates` in declaration order, returning the first
-/// plaintext ELF that loads. The die-message enumerates each
-/// candidate's typed cause when every candidate fails. A build without
-/// the `decrypt` feature, or a run whose key vault is missing or lacks
-/// the keyset, dies at the first SCE-wrapped candidate: the manifest
-/// lists the SCE-wrapped binary first so an in-tree plaintext copy
-/// cannot shadow it (`title_manifests/manifest_template.README.md`,
-/// `eboot_candidates`).
+/// Why a title's dump is not on this machine.
 ///
-/// The walk runs in the first entry of `eboot_dirs` that holds any
-/// candidate. A selected update's executable therefore shadows the
-/// base one, and the two directories never interleave.
+/// Only an absence is one of these. A file that exists and fails to
+/// decrypt or parse is a broken dump. The walk dies on it without the
+/// not-installed marker, so the suites report it as a boot failure.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum TitleNotInstalled {
+    /// Every candidate is a plain miss in every content directory
+    /// probed; see [`is_plain_miss`].
+    #[error("resolve_eboot for title {title}: {source}")]
+    NoContentDirectory {
+        title: String,
+        /// Boxed: its not-found variant carries four probe lists.
+        #[source]
+        source: Box<ResolveEbootError>,
+    },
+    /// The content directory exists and every candidate is missing.
+    #[error("every eboot_candidate for title {title} failed under {usrdir}:\n{attempts}")]
+    NoEbootCandidate {
+        title: String,
+        usrdir: String,
+        /// One line per candidate, each with its own read failure.
+        attempts: String,
+    },
+}
+
+impl TitleNotInstalled {
+    /// The parenthetical the not-installed marker line carries.
+    fn marker_note(&self) -> &'static str {
+        match self {
+            Self::NoContentDirectory { .. } => "no content directory",
+            Self::NoEbootCandidate { .. } => "no eboot candidate present",
+        }
+    }
+}
+
+/// Whether a probe refusal says only that nothing is there.
+///
+/// The probe folds three other findings into the same variant, and
+/// none of them is an absence:
+///
+/// - a name taken by a directory or special file;
+/// - a metadata read that failed for a reason other than not-found;
+/// - a manifest that lists nothing to probe.
+///
+/// Each is a dump or manifest that is present and wrong, so it takes
+/// the broken-dump path.
+fn is_plain_miss(e: &ResolveEbootError) -> bool {
+    matches!(
+        e,
+        ResolveEbootError::NotFound {
+            searched: _,
+            candidates,
+            probe_errors,
+            not_regular,
+        } if !candidates.is_empty() && probe_errors.is_empty() && not_regular.is_empty()
+    )
+}
+
+/// [`load_ppu_image_walk_candidates`]; when the dump is not on this
+/// machine, it prints the not-installed marker and dies.
 pub(crate) fn load_ppu_image_walk_candidates_or_die(
     title: &TitleManifest,
     vfs_root: &Path,
     eboot_dirs: &[PathBuf],
 ) -> (LoadedPpuImage, PathBuf) {
-    let resolved = title.resolve_eboot_in(eboot_dirs).unwrap_or_else(|e| {
-        // No content directory at all: the dump is not on this machine.
+    load_ppu_image_walk_candidates(title, vfs_root, eboot_dirs).unwrap_or_else(|e| {
         eprintln!(
-            "{} title={} (no content directory)",
+            "{} title={} ({})",
             cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL,
-            title.name()
-        );
-        die(&format!(
-            "load ppu image: resolve_eboot for title {}: {}",
             title.name(),
-            e,
-        ))
-    });
+            e.marker_note()
+        );
+        die(&format!("load ppu image: {e}"))
+    })
+}
+
+/// Walk `eboot_candidates` in declaration order and return the first
+/// plaintext ELF that loads. A build without the `decrypt` feature
+/// dies at the first SCE-wrapped candidate, and so does a run whose
+/// key vault is missing or lacks the keyset. The manifest lists the
+/// SCE-wrapped binary first so an in-tree plaintext copy cannot
+/// shadow it (`title_manifests/manifest_template.README.md`,
+/// `eboot_candidates`).
+///
+/// The walk runs in the first entry of `eboot_dirs` that holds any
+/// candidate. A selected update's executable therefore shadows the
+/// base one, and the two directories never interleave.
+///
+/// # Errors
+///
+/// The dump is not on this machine. A candidate that exists and fails
+/// to load dies here instead and names each candidate's cause.
+pub(crate) fn load_ppu_image_walk_candidates(
+    title: &TitleManifest,
+    vfs_root: &Path,
+    eboot_dirs: &[PathBuf],
+) -> Result<(LoadedPpuImage, PathBuf), TitleNotInstalled> {
+    let resolved = match title.resolve_eboot_in(eboot_dirs) {
+        Ok(p) => p,
+        // A plain miss in every probed directory: the dump is not on
+        // this machine. Anything else is present and wrong; see
+        // `is_plain_miss`.
+        Err(e) if is_plain_miss(&e) => {
+            return Err(TitleNotInstalled::NoContentDirectory {
+                title: title.name().to_string(),
+                source: Box::new(e),
+            })
+        }
+        Err(e) => die(&format!(
+            "load ppu image: resolve_eboot for title {}: {e}",
+            title.name(),
+        )),
+    };
     let usrdir = resolved
         .parent()
         .unwrap_or_else(|| die("load ppu image: resolved EBOOT has no parent directory"))
@@ -289,14 +373,14 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                 KeyPolicy::Auto(&resolver),
             ) {
                 Ok(elf) => {
-                    return (
+                    return Ok((
                         LoadedPpuImage {
                             elf_data: elf.into_owned(),
                             authority_id,
                             control_flags1,
                         },
                         path,
-                    )
+                    ))
                 }
                 // The next candidate answers the same if it is
                 // SCE-wrapped, and a plaintext one would boot in place
@@ -320,14 +404,14 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
                 }
             }
         } else if bytes.len() >= 4 && bytes[..4] == ELF_MAGIC {
-            return (
+            return Ok((
                 LoadedPpuImage {
                     elf_data: bytes,
                     authority_id: None,
                     control_flags1: None,
                 },
                 path,
-            );
+            ));
         } else {
             attempts.push((candidate.clone(), LoadCandidateError::NotElf));
             continue;
@@ -335,24 +419,22 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
     }
     // Missing dump vs broken dump: only when every candidate failed
     // because the file does not exist is the title "not installed".
-    // An existing file that failed to decrypt or parse must die
-    // without the marker so the suites surface it as a boot failure.
     let all_missing = attempts.iter().all(|(_, why)| {
         matches!(why, LoadCandidateError::Io(e) if e.kind() == std::io::ErrorKind::NotFound)
     });
-    if all_missing {
-        eprintln!(
-            "{} title={} (no eboot candidate present)",
-            cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL,
-            title.name()
-        );
-    }
-    let usrdir_str = usrdir.display();
+    let usrdir_str = usrdir.display().to_string();
     let attempts_str = attempts
         .iter()
         .map(|(name, why)| format!("    {name}: {why}"))
         .collect::<Vec<_>>()
         .join("\n");
+    if all_missing {
+        return Err(TitleNotInstalled::NoEbootCandidate {
+            title: title.name().to_string(),
+            usrdir: usrdir_str,
+            attempts: attempts_str,
+        });
+    }
     die(&format!(
         "load ppu image: every eboot_candidate for title {} failed under {usrdir_str}:\n{attempts_str}",
         title.name(),
@@ -362,3 +444,7 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
 #[cfg(test)]
 #[path = "tests/exit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/exit_not_installed_tests.rs"]
+mod not_installed_tests;

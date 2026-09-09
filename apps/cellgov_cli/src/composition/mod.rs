@@ -21,5 +21,7 @@ pub(crate) mod select;
 #[path = "tests/test_support.rs"]
 mod test_support;
 
-pub(crate) use compose::{compose_boot, BootComposition, ComposeInputs, ComposedMount, GameChoice};
-pub(crate) use select::{FirmwareChoice, GameVersion};
+pub(crate) use compose::{
+    compose_boot, BootComposition, ComposeError, ComposeInputs, ComposedMount, GameChoice,
+};
+pub(crate) use select::{FirmwareChoice, FirmwareSelectError, GameVersion, GameVersionSelectError};

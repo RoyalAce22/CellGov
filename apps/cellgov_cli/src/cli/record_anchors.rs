@@ -20,74 +20,21 @@ use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::{ProgressBar, ProgressSink as _};
 use cellgov_time::Budget;
 
+use crate::cli::declared_cells::{
+    declared_cells, filter_declared, read_registry, refuse_undeclared, select_titles,
+    split_pending, DeclaredCell,
+};
 use crate::cli::exit::die;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
-use crate::game::manifest::{
-    CellKey, CheckpointTrigger, TitleManifest, TitleRegistry, BASE_GAME_VER,
-};
+use crate::game::manifest::{CellKey, BASE_GAME_VER};
 
-use crate::paths::{
-    boot_anchor_path, cell_checkpoint, cell_max_steps, checkpoint_kind, history_path,
-    workspace_root,
-};
+use crate::paths::{boot_anchor_path, checkpoint_kind, history_path, workspace_root};
 use crate::progress::RECORD_ANCHORS_TASK;
 
 use crate::cli::parse::RecordAnchorsArgs;
 
 /// One declared cell to re-measure.
-struct Job {
-    short_name: String,
-    content_id: String,
-    cell: CellKey,
-    max_steps: u64,
-    checkpoint: CheckpointTrigger,
-    /// The registry's reason this cell has no measurement yet.
-    pending: Option<String>,
-}
-
-impl Job {
-    /// How a report and a refusal name this job.
-    fn label(&self) -> String {
-        format!("{} {}", self.short_name, self.cell.label())
-    }
-}
-
-/// Every cell `title` declares, in declaration order.
-fn jobs_for(title: &TitleManifest) -> Vec<Job> {
-    title
-        .matrix
-        .iter()
-        .map(|cell| Job {
-            short_name: title.short_name.clone(),
-            content_id: title.content_id.clone(),
-            cell: cell.key.clone(),
-            max_steps: cell_max_steps(title, Some(cell)),
-            checkpoint: cell_checkpoint(title, Some(cell)),
-            pending: cell.pending.clone(),
-        })
-        .collect()
-}
-
-/// Separate the cells the registry declares `pending`, unless `--fw`
-/// or `--game-ver` narrowed the selection.
-///
-/// Something outside the registry stops a pending cell. A sweep that
-/// measures it dies at that boot and takes every other cell of the
-/// title with it. A named selection asks for the measurement
-/// regardless; once the anchor exists, the structure gate says to drop
-/// the marker.
-fn skip_pending(jobs: Vec<Job>, narrowed: bool) -> (Vec<Job>, Vec<Job>) {
-    jobs.into_iter()
-        .partition(|j| narrowed || j.pending.is_none())
-}
-
-fn read_registry(dir: &Path) -> Vec<TitleManifest> {
-    let registry = TitleRegistry::scan_dir(dir)
-        .unwrap_or_else(|e| die(&format!("scan registry {}: {e}", dir.display())));
-    let mut out: Vec<TitleManifest> = registry.iter().cloned().collect();
-    out.sort_by(|a, b| a.short_name.cmp(&b.short_name));
-    out
-}
+type Job = DeclaredCell;
 
 struct Measurement {
     witnesses: BTreeMap<String, u64>,
@@ -457,56 +404,6 @@ fn reject_unforwardable_registry(registry: &Path, default: &Path) {
     }
 }
 
-/// The one title `--title` names, or every registered title.
-fn select_titles<'a>(titles: &'a [TitleManifest], one: Option<&str>) -> Vec<&'a TitleManifest> {
-    let Some(name) = one else {
-        return titles.iter().collect();
-    };
-    let Some(hit) = titles.iter().find(|t| t.short_name == name) else {
-        let known: Vec<&str> = titles.iter().map(|t| t.short_name.as_str()).collect();
-        die(&format!(
-            "unknown title {name:?}; registry has: {}",
-            known.join(", ")
-        ));
-    };
-    vec![hit]
-}
-
-/// Narrow one title's declared cells to those `--fw` / `--game-ver`
-/// name, and refuse a cell the manifest does not declare.
-fn filter_declared(jobs: Vec<Job>, fw: Option<&str>, game_ver: Option<&str>) -> Vec<Job> {
-    if fw.is_none() && game_ver.is_none() {
-        return jobs;
-    }
-    let declared: Vec<String> = jobs.iter().map(|j| j.cell.label()).collect();
-    let kept: Vec<Job> = jobs
-        .into_iter()
-        .filter(|j| {
-            fw.is_none_or(|f| j.cell.fw == f)
-                && game_ver.is_none_or(|v| j.cell.game_ver.as_deref() == Some(v))
-        })
-        .collect();
-    if kept.is_empty() {
-        let asked = match (fw, game_ver) {
-            (Some(f), Some(v)) => format!("fw {f} x {v}"),
-            (Some(f), None) => format!("fw {f}"),
-            (None, Some(v)) => format!("game version {v}"),
-            (None, None) => unreachable!("an unfiltered selection returned above"),
-        };
-        die(&format!(
-            "record-anchors: the registry declares no cell matching {asked}; declared: {}. \
-             The gate reads declared cells, so an anchor recorded outside the declaration \
-             would be compared against by nothing. Add the row to [[bench.matrix]] first",
-            if declared.is_empty() {
-                "none".to_string()
-            } else {
-                declared.join(", ")
-            }
-        ));
-    }
-    kept
-}
-
 pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
     let default_registry = workspace_root().join(DEFAULT_TITLE_REGISTRY_DIR);
     let registry = match &args.registry {
@@ -524,30 +421,18 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
 
     let one = args.scope.title.as_deref();
     let selected = select_titles(&titles, one);
-    let undeclared: Vec<&str> = selected
-        .iter()
-        .filter(|t| t.matrix.is_empty())
-        .map(|t| t.short_name.as_str())
-        .collect();
-    // A title with a PARAM.SFO always declares the cell its `system_ver`
-    // derives. Only a title shipped inside the firmware, or built beside
-    // its manifest, can reach here with nothing declared.
-    if !undeclared.is_empty() {
-        die(&format!(
-            "no cells declared for: {}. An anchor is keyed by (content id, firmware, game \
-             version), and a title with no floor of its own declares its cells as \
-             [[bench.matrix]] rows alone; with none it has nothing to record and nothing \
-             for the gate to read",
-            undeclared.join(", ")
-        ));
-    }
+    refuse_undeclared(&selected);
     let jobs = filter_declared(
-        selected.into_iter().flat_map(jobs_for).collect(),
+        selected.into_iter().flat_map(declared_cells).collect(),
         args.fw.as_deref(),
         args.game_ver.as_deref(),
+        "record-anchors",
     );
+    // A named selection asks for the measurement of a pending cell
+    // regardless; once the anchor exists, the structure gate says to
+    // drop the marker.
     let narrowed = args.fw.is_some() || args.game_ver.is_some();
-    let (jobs, pending) = skip_pending(jobs, narrowed);
+    let (jobs, pending) = split_pending(jobs, narrowed);
     for job in &pending {
         println!(
             "{}: skipped -- declared pending ({})",

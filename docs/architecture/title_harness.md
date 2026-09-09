@@ -211,8 +211,24 @@ copied in from another cell, or measured before one side of the triple
 was installed says so instead of standing in for this cell's
 measurement.
 
+`boot bench --all` runs that gate over every declared cell of every
+registry title, one cell after another in registry order, and prints
+one summary line per cell and a tally. The cell list is the
+registry's, the same list `dev record-anchors --all` records, so a
+declared cell that was never recorded is a finding (`not recorded`,
+exit 1). A cell whose firmware or dump this machine does not hold, or
+that a `[[bench.matrix]]` row declares pending, is reported by name
+and gates nothing, and a sweep that holds no cell at all exits 1. The
+sweep's status is its worst cell's, in the single run set's order: a
+determinism break, then a moved anchor, then a failed boot. The cells
+run serially, so the report reads the same every time and no two
+boots contend for host memory; each cell is composed by the firmware
+and game version its row names, and the composed key is checked
+against the declared one before anything is measured.
+
 ```mermaid
 flowchart LR
+  all["boot bench --all"] -->|one declared cell at a time| bb
   bb["boot bench --title NAME --fw F --game-ver V"] --> boot["N subprocess-isolated boots (--runs, default 3)"]
   boot --> lines["BENCH_* stderr lines"]
   lines --> chk["witness checker: exact / at-least / absent / informational; every recorded emitter must appear"]

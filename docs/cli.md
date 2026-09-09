@@ -695,10 +695,11 @@ Boot a title several times and gate the set against its anchor.
 ```console
 $ cellgov boot bench --title flow --fw 4.93
 $ cellgov boot bench --title wipeout --fw 4.93 --runs 5 --no-anchor-check
+$ cellgov boot bench --all --runs 1
 ```
 
 ```
-Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-manifest <PATH>>
+Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-manifest <PATH>|--all>
 ```
 
 | Option | Value | Description |
@@ -717,6 +718,7 @@ Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-ma
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. It records a state hash per step, which makes the run a divergence diagnostic instead of a throughput measurement. |
 | `--run-index` | `N` | Index this measurement reports on its `BENCH_RESULT` line. A run set stamps each of its children. |
+| `--all` | -- | Gate every declared cell of every registry title, one after another; `--fw` / `--game-ver` narrow the cells. |
 | `--no-anchor-check` | -- | Drop the anchor gate for a measurement-only run. |
 | `--runs` | `N` | Subprocess measurements to take. With `1` the determinism gate compares nothing, and the set reports that. Default `3`. |
 | `--strict-perf` | -- | Fail when the runs reach no throughput verdict. Use it only on a host that runs nothing else; elsewhere the spread measures the host. |
@@ -725,6 +727,14 @@ Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-ma
 Exit codes particular to this command:
   15  --strict-perf is set and the run set reaches no throughput
       verdict
+
+With --all, every declared cell of every registry title runs in turn,
+one summary line each, and the status is the worst cell's: 3 when a
+set broke determinism, 5 when a cell moved off its anchor, 4 when a
+cell's boot failed, 15 as above, 1 when a declared cell has no anchor
+or no cell ran at all. A cell the registry declares pending, or whose
+firmware or dump is not installed, is reported by name and gates
+nothing.
 ```
 
 #### `cellgov boot bench-once`

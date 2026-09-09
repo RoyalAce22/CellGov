@@ -20,6 +20,7 @@ mod witnesses;
 #[path = "tests/test_fixtures.rs"]
 mod test_fixtures;
 
+pub use anchor::AnchorVerdict;
 pub use options::{AnchorPlan, BenchOptions, SelectionArgs, BENCH_DEFAULT_RUNS};
 pub use run_one::bench_boot_one_run;
 pub use runs::bench_boot_runs;

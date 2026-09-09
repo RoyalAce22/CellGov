@@ -9,14 +9,15 @@ use cellgov_terminal::progress::ProgressBar;
 use cellgov_time::Budget;
 
 use crate::composition::{
-    banner, compose_boot, BootComposition, ComposeInputs, FirmwareChoice, GameChoice, GameVersion,
+    banner, compose_boot, BootComposition, ComposeError, ComposeInputs, FirmwareChoice, GameChoice,
+    GameVersion,
 };
 use crate::game;
 use crate::game::manifest::{CellKey, BASE_GAME_VER};
 use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 
 use super::env::parse_env_bool;
-use super::exit::die;
+use super::exit::{die, LoadedPpuImage, TitleNotInstalled};
 use super::exit_codes;
 use super::parse::{
     die_usage, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
@@ -38,7 +39,7 @@ const EXIT_DETERMINISM_BREAK: i32 = exit_codes::DISAGREED;
 
 /// Exit code: `--strict-perf` is set and the run set reaches no
 /// throughput verdict.
-const EXIT_SPREAD_EXCEEDED: i32 = exit_codes::command_specific(15);
+pub(super) const EXIT_SPREAD_EXCEEDED: i32 = exit_codes::command_specific(15);
 
 /// Exit code: a bench subprocess failed or its `BENCH_RESULT` line was
 /// unparseable.
@@ -73,6 +74,22 @@ pub(super) fn resolve_composition(
     vfs_root: &Path,
     title: &game::manifest::TitleManifest,
 ) -> BootComposition {
+    try_resolve_composition(selection, vfs_root, title)
+        .unwrap_or_else(|e| die(&format!("boot: {e}")))
+}
+
+/// [`resolve_composition`] with the refusal returned, so a sweep can
+/// name the cell it stops and continue to the next.
+///
+/// # Errors
+///
+/// Every [`ComposeError`]; the banner prints only for a composition
+/// that resolved.
+pub(super) fn try_resolve_composition(
+    selection: &BootSelection,
+    vfs_root: &Path,
+    title: &game::manifest::TitleManifest,
+) -> Result<BootComposition, ComposeError> {
     if let Some(explicit) = &selection.firmware_dir {
         if !explicit.is_dir() {
             die(&format!(
@@ -93,8 +110,7 @@ pub(super) fn resolve_composition(
         // default in place.
         no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV),
         disable_env: DISABLE_DEFAULT_ENV,
-    })
-    .unwrap_or_else(|e| die(&format!("boot: {e}")));
+    })?;
     for line in banner::render(title, &composition) {
         eprintln!("{line}");
     }
@@ -107,12 +123,12 @@ pub(super) fn resolve_composition(
         Ok(line) => eprintln!("{line}"),
         Err(e) => die(&format!("boot: serializing the run identity: {e}")),
     }
-    composition
+    Ok(composition)
 }
 
 /// The `sys/external` directory the firmware loader reads its modules
 /// from, or `None` for a boot with no firmware.
-fn firmware_module_dir(composition: &BootComposition) -> Option<String> {
+pub(super) fn firmware_module_dir(composition: &BootComposition) -> Option<String> {
     let dir = match &composition.firmware {
         FirmwareChoice::Managed(entry) => FIRMWARE_EXTERNAL
             .iter()
@@ -137,7 +153,7 @@ fn firmware_module_dir(composition: &BootComposition) -> Option<String> {
 /// The selection flags this process received, owned so a
 /// [`game::SelectionArgs`] can borrow them across the call that
 /// encodes a child invocation.
-struct OwnedSelection {
+pub(super) struct OwnedSelection {
     fw: Option<String>,
     game_ver: Option<String>,
     firmware_dir: Option<String>,
@@ -145,7 +161,7 @@ struct OwnedSelection {
 }
 
 impl OwnedSelection {
-    fn as_args(&self) -> game::SelectionArgs<'_> {
+    pub(super) fn as_args(&self) -> game::SelectionArgs<'_> {
         game::SelectionArgs {
             fw: self.fw.as_deref(),
             game_ver: self.game_ver.as_deref(),
@@ -170,7 +186,7 @@ fn forwardable(path: Option<&Path>, flag: &str) -> Option<String> {
     })
 }
 
-fn selection_args(selection: &BootSelection, vfs_flag: Option<&Path>) -> OwnedSelection {
+pub(super) fn selection_args(selection: &BootSelection, vfs_flag: Option<&Path>) -> OwnedSelection {
     OwnedSelection {
         fw: selection.fw.clone(),
         game_ver: selection.game_ver.clone(),
@@ -179,20 +195,20 @@ fn selection_args(selection: &BootSelection, vfs_flag: Option<&Path>) -> OwnedSe
     }
 }
 
-struct BootInputs {
-    title: game::manifest::TitleManifest,
+pub(super) struct BootInputs {
+    pub(super) title: game::manifest::TitleManifest,
     /// What the store composed for this run: the firmware, the game
     /// version, and the guest tree the two produce.
-    composition: BootComposition,
-    elf_path: String,
+    pub(super) composition: BootComposition,
+    pub(super) elf_path: String,
     /// Pre-loaded plaintext ELF bytes from the loader (explicit
     /// path or candidate walk). Passed to `prepare()` so the
     /// decrypt happens exactly once.
-    elf_data: Vec<u8>,
+    pub(super) elf_data: Vec<u8>,
     /// Program authority id from the SELF identification header;
     /// `None` for raw-ELF inputs (boot serves the retail fallback).
-    authority_id: Option<u64>,
-    control_flags1: Option<u32>,
+    pub(super) authority_id: Option<u64>,
+    pub(super) control_flags1: Option<u32>,
 }
 
 fn resolve_boot_inputs(
@@ -215,21 +231,60 @@ fn resolve_boot_inputs(
                 vfs_root,
                 &composition.eboot_dirs,
             );
-            let path_str = path
-                .to_str()
-                .map(|s| s.replace('\\', "/"))
-                .unwrap_or_else(|| {
-                    die(&format!(
-                        "{subcmd}: resolved EBOOT path is not valid UTF-8: {}",
-                        path.display()
-                    ))
-                });
-            (path_str, image)
+            (forwardable_eboot_path(&path, subcmd), image)
         }
     };
-    // Past this line a failing run is a boot failure, never a missing
-    // dump; the suites key their skip/fail split on it.
-    //
+    boot_inputs(title, composition, elf_path, image)
+}
+
+/// The inputs a sweep resolves for one declared cell, or the reason
+/// the title's dump is not on this machine.
+///
+/// The composition is the caller's: the sweep composes each cell by
+/// name and classifies a composition refusal itself, so this covers
+/// the image walk alone.
+///
+/// # Errors
+///
+/// The dump is not on this machine. A candidate that exists and fails
+/// to load dies in the walk.
+pub(super) fn try_resolve_cell_inputs(
+    title: game::manifest::TitleManifest,
+    composition: BootComposition,
+    vfs_root: &Path,
+    subcmd: &str,
+) -> Result<BootInputs, TitleNotInstalled> {
+    let (image, path) = crate::cli::exit::load_ppu_image_walk_candidates(
+        &title,
+        vfs_root,
+        &composition.eboot_dirs,
+    )?;
+    let elf_path = forwardable_eboot_path(&path, subcmd);
+    Ok(boot_inputs(title, composition, elf_path, image))
+}
+
+/// A resolved EBOOT path as a child invocation spells it.
+fn forwardable_eboot_path(path: &Path, subcmd: &str) -> String {
+    path.to_str()
+        .map(|s| s.replace('\\', "/"))
+        .unwrap_or_else(|| {
+            die(&format!(
+                "{subcmd}: resolved EBOOT path is not valid UTF-8: {}",
+                path.display()
+            ))
+        })
+}
+
+/// Announce the loaded image and assemble the inputs.
+///
+/// Past the line this prints, a run that fails is a boot failure and
+/// never a missing dump; the suites key their skip/fail split on it.
+fn boot_inputs(
+    title: game::manifest::TitleManifest,
+    composition: BootComposition,
+    elf_path: String,
+    image: LoadedPpuImage,
+) -> BootInputs {
     // `eboot` and `elf_bytes` name the image that was actually loaded,
     // so a stale build cannot pass for a fresh one. `elf_bytes` counts
     // the plaintext ELF, which for a SELF input differs from the file
@@ -369,14 +424,17 @@ pub(super) fn composed_cell(composition: &BootComposition) -> Option<CellKey> {
 ///
 /// The run and the cell's anchor use the same cap and the same
 /// checkpoint.
-struct ResolvedPlan {
-    cell: Option<CellKey>,
+pub(super) struct ResolvedPlan {
+    pub(super) cell: Option<CellKey>,
     max_steps: u64,
     checkpoint: game::manifest::CheckpointTrigger,
 }
 
 impl ResolvedPlan {
-    fn resolve(title: &game::manifest::TitleManifest, composition: &BootComposition) -> Self {
+    pub(super) fn resolve(
+        title: &game::manifest::TitleManifest,
+        composition: &BootComposition,
+    ) -> Self {
         let cell = composed_cell(composition);
         // A cell the matrix does not declare takes the title's own
         // defaults.
@@ -388,7 +446,7 @@ impl ResolvedPlan {
         }
     }
 
-    fn as_plan(&self) -> game::AnchorPlan<'_> {
+    pub(super) fn as_plan(&self) -> game::AnchorPlan<'_> {
         game::AnchorPlan {
             cell: self.cell.as_ref(),
             max_steps: self.max_steps,
@@ -398,7 +456,7 @@ impl ResolvedPlan {
 
     /// The cap as a step count, so an un-overridden bench run stays
     /// comparable to the anchor `dev record-anchors` measured.
-    fn max_steps_usize(&self, title: &game::manifest::TitleManifest) -> usize {
+    pub(super) fn max_steps_usize(&self, title: &game::manifest::TitleManifest) -> usize {
         usize::try_from(self.max_steps).unwrap_or_else(|_| {
             die(&format!(
                 "{}: bench_max_steps {} does not fit this host's usize",
@@ -494,6 +552,9 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
     // first read the store.
     refuse_bench_once_only_flags(args);
     refuse_strict_perf_without_a_spread(gate_args);
+    if gate_args.all {
+        super::bench_all::run(gate_args, vfs_flag, render);
+    }
     let vfs_root = resolve_ps3_vfs_root(vfs_flag);
     let inputs = resolve_boot_inputs(
         &args.selector,
@@ -576,6 +637,9 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
             std::process::exit(EXIT_DETERMINISM_BREAK);
         }
         game::BenchGate::AnchorDrift => {
+            let game::AnchorVerdict::Drift(failures) = &outcome.anchor else {
+                unreachable!("invariant: only a drift verdict reaches the anchor-drift gate")
+            };
             let cell = plan
                 .cell
                 .as_ref()
@@ -583,11 +647,11 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
             eprintln!(
                 "boot bench: {} disagreement(s) with the committed anchor for {} \
                  (content id {}{cell}):",
-                outcome.anchor_failures.len(),
+                failures.len(),
                 inputs.title.name(),
                 inputs.title.content_id,
             );
-            for failure in &outcome.anchor_failures {
+            for failure in failures {
                 eprintln!("  {failure}");
             }
             eprintln!(

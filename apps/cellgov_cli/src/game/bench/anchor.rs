@@ -16,7 +16,7 @@ use crate::paths::{boot_anchor_path, workspace_root};
 
 /// How a run compared against its cell's committed anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum AnchorVerdict {
+pub enum AnchorVerdict {
     /// The check was not requested.
     Skipped,
     /// The comparison is meaningless for this invocation; each string

@@ -31,9 +31,14 @@ fn bench_runs(s: &str) -> Result<usize, CliArgError> {
     Ok(n)
 }
 
+/// The group [`TitleSelector`] declares; `boot bench --all` joins it,
+/// so a sweep and a named title exclude each other the way two named
+/// titles do.
+const TITLE_SELECTOR_GROUP: &str = "title_selector";
+
 /// Which installed title the boot runs.
 #[derive(Debug, Clone, clap::Args)]
-#[group(required = true, multiple = false)]
+#[group(id = TITLE_SELECTOR_GROUP, required = true, multiple = false)]
 pub(crate) struct TitleSelector {
     /// Short name from the title registry.
     #[arg(long, value_name = "NAME")]
@@ -71,10 +76,19 @@ const BOOT_RUN_EXIT_CODES: &str = "Exit codes particular to this command:
   13  the run completed but lost a syscall-wake response
   14  a requested artifact could not be written";
 
-/// The outcomes `boot bench` has beyond the shared 0-5 contract.
+/// The outcomes `boot bench` has beyond the shared 0-5 contract, and
+/// how a sweep folds its cells' outcomes into one status.
 const BOOT_BENCH_EXIT_CODES: &str = "Exit codes particular to this command:
   15  --strict-perf is set and the run set reaches no throughput
-      verdict";
+      verdict
+
+With --all, every declared cell of every registry title runs in turn,
+one summary line each, and the status is the worst cell's: 3 when a
+set broke determinism, 5 when a cell moved off its anchor, 4 when a
+cell's boot failed, 15 as above, 1 when a declared cell has no anchor
+or no cell ran at all. A cell the registry declares pending, or whose
+firmware or dump is not installed, is reported by name and gates
+nothing.";
 
 /// `cellgov boot run`
 #[derive(Debug, Clone, clap::Args)]
@@ -184,6 +198,10 @@ pub(crate) struct BenchArgs {
 pub(crate) struct BenchGateArgs {
     #[command(flatten)]
     pub bench: BenchArgs,
+    /// Gate every declared cell of every registry title, one after
+    /// another; `--fw` / `--game-ver` narrow the cells.
+    #[arg(long, group = TITLE_SELECTOR_GROUP)]
+    pub all: bool,
     /// Drop the anchor gate for a measurement-only run.
     #[arg(long)]
     pub no_anchor_check: bool,

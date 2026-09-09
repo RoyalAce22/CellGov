@@ -151,10 +151,7 @@ pub fn bench_boot_runs(
         runs,
         throughput,
         gate,
-        anchor_failures: match anchor {
-            AnchorVerdict::Drift(f) => f,
-            _ => Vec::new(),
-        },
+        anchor,
         determinism_failures,
     })
 }
