@@ -20,8 +20,13 @@ pub(crate) const DETAIL_DIR: &str = "titles";
 /// Marks the reference cell -- the one the index renders.
 const REFERENCE_MARK: &str = "*";
 
-/// The index, from inside [`DETAIL_DIR`].
-const INDEX_LINK: &str = "../titles.md";
+/// The index a game title's page points back to, from inside
+/// [`DETAIL_DIR`].
+const INDEX_LINK: &str = "the [matrix](../titles.md)";
+
+/// The page a firmware-shipped title's page points back to, from
+/// inside [`DETAIL_DIR`].
+const FIRMWARE_LINK: &str = "the [firmware page](../firmware.md)";
 
 /// The index's link to one title's page.
 pub(crate) fn detail_page_link(content_id: &str) -> String {
@@ -67,12 +72,17 @@ pub(crate) fn render(docs: &TitleDocs<'_>) -> String {
     let title = docs.title;
     assert_table_safe("title manifest field `content_id`", &title.content_id);
     assert_table_safe("title manifest field `display_name`", &title.display_name);
+    let back = if docs.ships_in_firmware() {
+        FIRMWARE_LINK
+    } else {
+        INDEX_LINK
+    };
     super::super::fixture_gen::apply_subs(
         DETAIL_TEMPLATE,
         &[
             ("content_id", &title.content_id),
             ("display_name", &title.display_name),
-            ("index_link", INDEX_LINK),
+            ("index_link", back),
             ("grid", &render_grid(docs)),
         ],
     )
@@ -83,10 +93,10 @@ fn render_grid(docs: &TitleDocs<'_>) -> String {
     if docs.cells.is_empty() {
         return "This title declares no cells.".to_string();
     }
-    let reference = docs.title.reference_cell().map(|c| &c.key);
+    let reference = docs.title.reference_key();
     let by_cell: BTreeMap<&CellKey, &CellResult> =
-        docs.cells.iter().map(|(key, r)| (key, r)).collect();
-    let firmwares: BTreeSet<&str> = docs.cells.iter().map(|(k, _)| k.fw.as_str()).collect();
+        docs.cells.iter().map(|c| (&c.key, &c.result)).collect();
+    let firmwares: BTreeSet<&str> = docs.cells.iter().map(|c| c.key.fw.as_str()).collect();
 
     // A title shipped inside the firmware has no game-version axis, so
     // its grid is one column of results.
@@ -101,10 +111,10 @@ fn render_grid(docs: &TitleDocs<'_>) -> String {
     for fw in firmwares {
         let mut row = vec![fw.to_string()];
         match games.as_slice() {
-            [] => row.push(render_token(&by_cell, reference, fw, None)),
+            [] => row.push(render_token(&by_cell, reference.as_ref(), fw, None)),
             gs => row.extend(
                 gs.iter()
-                    .map(|g| render_token(&by_cell, reference, fw, Some(g))),
+                    .map(|g| render_token(&by_cell, reference.as_ref(), fw, Some(g))),
             ),
         }
         out.push(format!("| {} |", row.join(" | ")));
@@ -121,7 +131,7 @@ fn game_versions<'a>(docs: &'a TitleDocs<'_>) -> Vec<&'a str> {
     let declared: BTreeSet<&str> = docs
         .cells
         .iter()
-        .filter_map(|(k, _)| k.game_ver.as_deref())
+        .filter_map(|c| c.key.game_ver.as_deref())
         .collect();
     let mut out: Vec<&str> = declared
         .iter()

@@ -22,6 +22,7 @@ fn manifest(content_id: &str, source: GameSource) -> TitleManifest {
         distribution: Distribution::PsnHdd,
         rap_filename: None,
         bench_max_steps: None,
+        system_ver: None,
         checkpoint: CheckpointTrigger::ProcessExit,
         source,
         rsx_mirror: false,

@@ -19,8 +19,24 @@ kind = "process-exit"
 mirror = false
 consume = false
 
-# The one cell this title is gated and rendered at; see
-# docs/architecture/title_harness.md.
+# The system software ships inside every firmware image and states no
+# floor of its own, so every cell it is measured at is a row here; each
+# renders on docs/firmware.md. See docs/architecture/title_harness.md.
+# One row per firmware a registered title's floor names, plus the
+# newest.
+[[bench.matrix]]
+fw = "1.50"
+pending = "the firmware-exec boot requires sys/internal/libfs_utility2 before the first step, and firmware 1.50 ships no such module"
+
+[[bench.matrix]]
+fw = "1.94"
+pending = "the boot faults at step 327, before the checkpoint: liblv2's once-mutex slot names a mutex the host never created, and the debug build's LV2 handoff witness panics on it"
+
+[[bench.matrix]]
+fw = "2.76"
+
+[[bench.matrix]]
+fw = "3.70"
+
 [[bench.matrix]]
 fw = "4.93"
-reference = true

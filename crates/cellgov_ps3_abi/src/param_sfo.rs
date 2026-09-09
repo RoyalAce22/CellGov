@@ -8,6 +8,10 @@
 /// The table's filename inside a title tree.
 pub const PARAM_SFO_FILE: &str = "PARAM.SFO";
 
+/// Key of the lowest system software the title runs on, as a
+/// `MM.mmmm` string (`01.5000` names firmware 1.50).
+pub const PS3_SYSTEM_VER_KEY: &str = "PS3_SYSTEM_VER";
+
 /// Header magic in on-disk byte order (`\0PSF`).
 pub const SFO_MAGIC: [u8; 4] = [0x00, b'P', b'S', b'F'];
 

@@ -73,15 +73,14 @@ pub(crate) fn cell_key(fw: &str, game_ver: Option<&str>) -> CellKey {
     }
 }
 
-/// Every title from [`title`] marks this cell as its reference.
+/// The cell every title from [`title`] derives from its `system_ver`.
 pub(crate) fn reference_key() -> CellKey {
     cell_key(REFERENCE_FW, Some(BASE))
 }
 
-pub(crate) fn matrix_cell(key: CellKey, reference: bool) -> MatrixCell {
+pub(crate) fn matrix_cell(key: CellKey) -> MatrixCell {
     MatrixCell {
         key,
-        reference,
         expect: CellExpectation::Frontier,
         bench_max_steps: None,
         checkpoint: None,
@@ -101,14 +100,31 @@ pub(crate) fn title(content_id: &str, display: &str, year: u16, developer: &str)
         distribution: Distribution::PsnHdd,
         rap_filename: None,
         bench_max_steps: None,
+        system_ver: Some(REFERENCE_FW.to_string()),
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,
         rsx_consume: false,
         content: None,
         mounts: Vec::new(),
-        matrix: vec![matrix_cell(reference_key(), true)],
+        matrix: vec![matrix_cell(reference_key())],
     }
+}
+
+/// A title shipped inside the firmware: no `system_ver`, and one
+/// declared cell per firmware in `fws`.
+pub(crate) fn firmware_exec_title(content_id: &str, display: &str, fws: &[&str]) -> TitleManifest {
+    let mut t = title(content_id, display, 2006, "Studio");
+    t.distribution = Distribution::FirmwareExec;
+    t.source = GameSource::FirmwareExec {
+        dir: PathBuf::from("dev_flash/vsh/module"),
+    };
+    t.system_ver = None;
+    t.matrix = fws
+        .iter()
+        .map(|fw| matrix_cell(cell_key(fw, None)))
+        .collect();
+    t
 }
 
 pub(crate) fn boot(outcome: BootOutcome, steps: u64) -> BootSummary {

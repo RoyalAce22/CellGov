@@ -129,7 +129,9 @@ pub(crate) struct AnchorDoc {
     pub game_ver: Option<String>,
     /// What the registry declares the cell to show.
     pub expect: String,
-    /// True on the one cell the generated documents render.
+    /// True on the cell the generated documents render: the firmware
+    /// the title's own PARAM.SFO asks for, times its base install.
+    /// False on every cell of a title shipped inside the firmware.
     pub reference: bool,
     /// Whether a `boot_summary.json` is committed for the cell.
     pub recorded: bool,

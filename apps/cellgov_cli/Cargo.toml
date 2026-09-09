@@ -114,3 +114,7 @@ required-features = ["title-corpus"]
 [[test]]
 name = "bench_stdout_purity"
 required-features = ["title-corpus"]
+
+[[test]]
+name = "system_ver_floor"
+required-features = ["title-corpus"]

@@ -13,7 +13,6 @@ fn key(fw: &str, game_ver: Option<&str>) -> CellKey {
 fn cell(bench_max_steps: Option<u64>, checkpoint: Option<CheckpointTrigger>) -> MatrixCell {
     MatrixCell {
         key: key("4.93", Some("base")),
-        reference: true,
         expect: CellExpectation::Frontier,
         bench_max_steps,
         checkpoint,
@@ -34,6 +33,7 @@ fn manifest() -> TitleManifest {
         distribution: Distribution::PsnHdd,
         rap_filename: None,
         bench_max_steps: Some(7_000),
+        system_ver: Some("4.93".to_string()),
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,

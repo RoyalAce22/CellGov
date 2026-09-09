@@ -20,7 +20,7 @@ fn one_library_on_both_sides_loads_the_verdict() {
         &stamped(converged(0), Some(REFERENCE_FW), Some(REFERENCE_FW)),
     );
     let docs = load_title(&t, fixtures.path()).unwrap();
-    assert!(docs.reference.cross.is_some());
+    assert!(docs.reference().unwrap().artifacts.cross.is_some());
 }
 
 #[test]
@@ -105,7 +105,9 @@ fn a_summary_naming_no_firmware_still_loads() {
     fixtures.write_cross("NPAA60007", &reference_key(), &converged(0));
     assert!(load_title(&t, fixtures.path())
         .unwrap()
-        .reference
+        .reference()
+        .unwrap()
+        .artifacts
         .cross
         .is_some());
 }
@@ -145,7 +147,7 @@ fn swapping_two_cells_summaries_is_refused_at_each_of_them() {
     let fixtures = Fixtures::new("fw-swapped");
     let other = cell_key("2.76", Some(BASE));
     let mut t = title("NPAA60008", "Swapped", 2008, "Studio");
-    t.matrix.push(matrix_cell(other.clone(), false));
+    t.matrix.push(matrix_cell(other.clone()));
 
     // Each cell now holds the summary measured at the other.
     fixtures.write_cross(
@@ -252,21 +254,24 @@ fn a_declared_cell_with_nothing_recorded_is_not_an_undeclared_result() {
     let t = title("NPAA70005", "Empty", 2009, "Studio");
     let docs = load_title(&t, fixtures.path()).unwrap();
     assert_eq!(docs.cells.len(), 1);
-    assert!(docs.reference.boot.is_none());
+    assert!(docs.reference().unwrap().artifacts.boot.is_none());
 }
 
 #[test]
 fn a_firmware_shipped_titles_cell_sits_one_level_up_and_is_accepted() {
     let fixtures = Fixtures::new("firmware-exec");
-    let mut t = title("VSHTEST", "Firmware Exec", 2006, "Studio");
-    t.matrix = vec![matrix_cell(cell_key(REFERENCE_FW, None), true)];
+    let t = firmware_exec_title("VSHTEST", "Firmware Exec", &[REFERENCE_FW]);
     fixtures.write_anchor(
         "VSHTEST",
         &cell_key(REFERENCE_FW, None),
         &boot(BootOutcome::MaxSteps, 389_859),
     );
     let docs = load_title(&t, fixtures.path()).unwrap();
-    assert!(docs.reference.boot.is_some());
+    assert!(
+        docs.reference().is_none(),
+        "a firmware-shipped title derives no reference"
+    );
+    assert!(docs.cells[0].artifacts.boot.is_some());
 }
 
 #[test]

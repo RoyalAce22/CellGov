@@ -11,14 +11,19 @@ fn paths(docs: &[GeneratedDoc]) -> Vec<String> {
 }
 
 #[test]
-fn the_output_set_is_the_index_plus_one_page_per_title() {
+fn the_output_set_is_the_two_indexes_plus_one_page_per_title() {
     let a = title("NPAA90001", "A", 2009, "Studio");
     let b = title("NPAA90002", "B", 2009, "Studio");
     let fixtures = Fixtures::new("output-set");
     let docs = render_docs([&a, &b], fixtures.path()).unwrap();
     assert_eq!(
         paths(&docs),
-        ["titles.md", "titles/NPAA90001.md", "titles/NPAA90002.md"]
+        [
+            "titles.md",
+            "firmware.md",
+            "titles/NPAA90001.md",
+            "titles/NPAA90002.md"
+        ]
     );
 }
 
@@ -33,6 +38,7 @@ fn the_pages_follow_content_id_order_whatever_order_the_registry_yields() {
         paths(&docs),
         [
             "titles.md",
+            "firmware.md",
             "titles/NPAA90001.md",
             "titles/NPAA90002.md",
             "titles/NPAA90003.md"
@@ -41,10 +47,21 @@ fn the_pages_follow_content_id_order_whatever_order_the_registry_yields() {
 }
 
 #[test]
-fn an_empty_registry_still_emits_the_index_alone() {
+fn an_empty_registry_still_emits_both_indexes() {
     let fixtures = Fixtures::new("output-empty");
     let docs = render_docs(std::iter::empty(), fixtures.path()).unwrap();
-    assert_eq!(paths(&docs), ["titles.md"]);
+    assert_eq!(paths(&docs), ["titles.md", "firmware.md"]);
+}
+
+#[test]
+fn a_firmware_shipped_title_gets_a_detail_page_under_the_same_directory() {
+    let t = firmware_exec_title("VSHTEST", "Firmware Exec", &["4.93"]);
+    let fixtures = Fixtures::new("output-firmware-exec");
+    let docs = render_docs([&t], fixtures.path()).unwrap();
+    assert_eq!(
+        paths(&docs),
+        ["titles.md", "firmware.md", "titles/VSHTEST.md"]
+    );
 }
 
 #[test]

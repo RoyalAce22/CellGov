@@ -4,8 +4,10 @@
 //! lives in a binary crate, so this mirrors its acceptance rules:
 //!
 //! - tables at the root or under `[cellgov]`,
-//! - one `[[bench.matrix]]` row marked `reference = true`,
-//! - a `game_ver` on every cell of a stored title, and none on a
+//! - `[title] system_ver` on every title with a PARAM.SFO; it derives
+//!   the reference cell `(system_ver, base)`. None on a firmware-shipped
+//!   title, whose `[[bench.matrix]]` rows are its whole declaration,
+//! - a `game_ver` on every row of a stored title, and none on a
 //!   firmware-shipped one.
 //!
 //! This reader panics on a duplicate short name, a duplicate content
@@ -29,20 +31,23 @@ pub fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// One title's identity, read from its manifest TOML.
+/// One title at the cell a suite boots and holds against its anchor.
+///
+/// A game title yields one of these, at its reference cell. A title
+/// shipped inside the firmware yields one per declared row; the suites
+/// gate every such row alike.
 pub struct TitleUnderTest {
     pub short_name: String,
     #[allow(dead_code, reason = "not every suite reads every field")]
     pub content_id: String,
     #[allow(dead_code, reason = "not every suite reads every field")]
     pub max_steps: u64,
-    /// The cell the manifest marks `reference = true`, which is the
-    /// one a suite boots and holds against its anchor.
+    /// The cell this entry boots.
     #[allow(dead_code, reason = "not every suite reads every field")]
     pub reference: ReferenceCell,
 }
 
-/// The `(firmware, game version)` key of a title's reference cell.
+/// The `(firmware, game version)` key of a gated cell.
 pub struct ReferenceCell {
     pub fw: String,
     /// `None` for a title shipped inside the firmware, whose version
@@ -77,7 +82,7 @@ fn manifest_root(doc: &toml::Value) -> &toml::Value {
 /// Whether `[source] kind` marks the title as shipped inside the
 /// firmware.
 ///
-/// Such a title carries no game-version axis.
+/// Such a title carries no game-version axis and no floor.
 fn is_firmware_exec(root: &toml::Value) -> bool {
     root.get("source")
         .and_then(|s| s.get("kind"))
@@ -85,53 +90,21 @@ fn is_firmware_exec(root: &toml::Value) -> bool {
         == Some("firmware-exec")
 }
 
-/// The one `[[bench.matrix]]` row marked `reference = true`.
-///
-/// The loader refuses a manifest that marks no row or several, so every
-/// manifest this suite reads has exactly one.
+/// The `[[bench.matrix]]` rows, or none when the table is absent.
 ///
 /// # Panics
 ///
-/// Panics if the manifest:
-///
-/// - declares no `[[bench.matrix]]` row,
-/// - marks other than one row `reference = true`, or
-/// - spells `reference` as a non-boolean.
-fn reference_row<'a>(path: &Path, root: &'a toml::Value) -> &'a toml::Value {
-    let rows = root
-        .get("bench")
-        .and_then(|b| b.get("matrix"))
-        .and_then(toml::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    assert!(
-        !rows.is_empty(),
-        "{}: no [[bench.matrix]] row. An anchor is keyed by (content id, firmware, game \
-         version), so a title declaring no cell has nothing for this suite to boot or gate",
-        path.display()
-    );
-    for row in rows {
-        if let Some(v) = row.get("reference") {
-            assert!(
-                v.as_bool().is_some(),
-                "{}: [[bench.matrix]] reference must be a boolean, got {v:?}",
+/// Panics if `matrix` is present and is not an array.
+fn matrix_rows<'a>(path: &Path, root: &'a toml::Value) -> &'a [toml::Value] {
+    match root.get("bench").and_then(|b| b.get("matrix")) {
+        None => &[],
+        Some(v) => v.as_array().map(Vec::as_slice).unwrap_or_else(|| {
+            panic!(
+                "{}: [bench] matrix must be an array of tables, got {v:?}",
                 path.display()
-            );
-        }
+            )
+        }),
     }
-    let marked: Vec<&toml::Value> = rows
-        .iter()
-        .filter(|r| r.get("reference").and_then(toml::Value::as_bool) == Some(true))
-        .collect();
-    let [row] = marked.as_slice() else {
-        panic!(
-            "{}: [[bench.matrix]] marks {} rows reference = true; exactly one is the cell \
-             this suite boots",
-            path.display(),
-            marked.len()
-        );
-    };
-    row
 }
 
 /// One version key of the anchor tree's path.
@@ -151,46 +124,13 @@ fn version_key(path: &Path, what: &str, v: &str) -> String {
     v.to_string()
 }
 
-/// The `(fw, game_ver)` key the reference row declares.
-///
-/// Every cell of a title the store holds carries a `game_ver`. A title
-/// shipped inside the firmware carries none.
+/// The `pending` reason a row states, when it states one.
 ///
 /// # Panics
 ///
-/// Panics if the row states no `fw`, or if its `game_ver` disagrees
-/// with the title's source kind.
-fn reference_cell(path: &Path, root: &toml::Value, row: &toml::Value) -> ReferenceCell {
-    let Some(fw) = row.get("fw").and_then(toml::Value::as_str) else {
-        panic!(
-            "{}: the reference [[bench.matrix]] row has no fw string",
-            path.display()
-        );
-    };
-    let firmware_exec = is_firmware_exec(root);
-    let game_ver = match (row.get("game_ver"), firmware_exec) {
-        (None, true) => None,
-        (None, false) => panic!(
-            "{}: the reference [[bench.matrix]] row states no game_ver; name \"base\" or an \
-             update version key",
-            path.display()
-        ),
-        (Some(v), true) => panic!(
-            "{}: the reference [[bench.matrix]] row states game_ver {v:?}, which does not \
-             apply to a title shipped inside the firmware",
-            path.display()
-        ),
-        (Some(v), false) => {
-            let raw = v.as_str().unwrap_or_else(|| {
-                panic!(
-                    "{}: [[bench.matrix]] game_ver must be a string, got {v:?}",
-                    path.display()
-                )
-            });
-            Some(version_key(path, "game_ver", raw))
-        }
-    };
-    let pending = row.get("pending").map(|v| {
+/// Panics if the key is present and is not a non-empty string.
+fn pending_of(path: &Path, row: &toml::Value) -> Option<String> {
+    row.get("pending").map(|v| {
         let reason = v.as_str().unwrap_or_else(|| {
             panic!(
                 "{}: [[bench.matrix]] pending must be a string stating why, got {v:?}",
@@ -204,17 +144,115 @@ fn reference_cell(path: &Path, root: &toml::Value, row: &toml::Value) -> Referen
             path.display()
         );
         reason.to_string()
+    })
+}
+
+/// The `fw` a row names.
+///
+/// # Panics
+///
+/// Panics if the row states no `fw` string.
+fn fw_of(path: &Path, row: &toml::Value) -> String {
+    let Some(fw) = row.get("fw").and_then(toml::Value::as_str) else {
+        panic!(
+            "{}: a [[bench.matrix]] row has no fw string",
+            path.display()
+        );
+    };
+    version_key(path, "fw", fw)
+}
+
+/// The `game_ver` a row of a stored title names.
+///
+/// # Panics
+///
+/// Panics if the row states no `game_ver` string.
+fn game_ver_of(path: &Path, row: &toml::Value) -> String {
+    let Some(v) = row.get("game_ver") else {
+        panic!(
+            "{}: a [[bench.matrix]] row states no game_ver; name \"base\" or an update \
+             version key",
+            path.display()
+        );
+    };
+    let raw = v.as_str().unwrap_or_else(|| {
+        panic!(
+            "{}: [[bench.matrix]] game_ver must be a string, got {v:?}",
+            path.display()
+        )
     });
+    version_key(path, "game_ver", raw)
+}
+
+/// The reference cell `[title] system_ver` derives for a stored title:
+/// the floor times the base install. It carries the `pending` of a row
+/// that repeats it, if any.
+///
+/// # Panics
+///
+/// Panics if:
+///
+/// - the title states no `system_ver` string,
+/// - `system_ver` uses the PARAM.SFO spelling, or
+/// - a row states no `fw` or `game_ver` string.
+fn derived_cell(path: &Path, root: &toml::Value, title: &toml::Table) -> ReferenceCell {
+    let Some(system_ver) = title.get("system_ver").and_then(toml::Value::as_str) else {
+        panic!(
+            "{}: [title] system_ver is required on a title with a PARAM.SFO; it is the \
+             PS3_SYSTEM_VER the table states, as a firmware version key, and derives the \
+             cell this suite boots",
+            path.display()
+        );
+    };
+    // The loader refuses the PARAM.SFO spelling (`01.5000`): it names a
+    // firmware directory nothing installs.
+    assert!(
+        cellgov_install::system_ver::firmware_version_key(system_ver).is_err(),
+        "{}: [title] system_ver {system_ver:?} is spelled the way PARAM.SFO spells it; write \
+         the store's version key ({})",
+        path.display(),
+        cellgov_install::system_ver::firmware_version_key(system_ver).unwrap_or_default()
+    );
+    let fw = version_key(path, "system_ver", system_ver);
+    let pending = matrix_rows(path, root)
+        .iter()
+        .find(|row| fw_of(path, row) == fw && game_ver_of(path, row) == BASE_GAME_VER)
+        .and_then(|row| pending_of(path, row));
     ReferenceCell {
-        fw: version_key(path, "fw", fw),
-        game_ver,
+        fw,
+        game_ver: Some(BASE_GAME_VER.to_string()),
         pending,
     }
 }
 
-/// Read every registered title, accepting both manifest layouts and
-/// failing loudly on duplicates or missing identity fields.
-pub fn titles() -> Vec<TitleUnderTest> {
+/// One registered manifest, parsed and checked for identity.
+struct Parsed {
+    path: PathBuf,
+    doc: toml::Value,
+    short_name: String,
+    content_id: String,
+}
+
+impl Parsed {
+    fn root(&self) -> &toml::Value {
+        manifest_root(&self.doc)
+    }
+
+    fn title(&self) -> &toml::Table {
+        self.root()
+            .get("title")
+            .and_then(toml::Value::as_table)
+            .expect("a parsed manifest carries the [title] table it was checked for")
+    }
+
+    /// The cap for every cell of this title, unless a row overrides it.
+    fn title_max_steps(&self) -> Option<u64> {
+        max_steps_key(&self.path, self.title().get("bench_max_steps"), "[title]")
+    }
+}
+
+/// Every registered manifest, in either layout, sorted by short name.
+fn parsed_manifests() -> Vec<Parsed> {
     let dir = workspace_root().join("title_manifests");
     let mut out = Vec::new();
     let mut short_names: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -238,8 +276,7 @@ pub fn titles() -> Vec<TitleUnderTest> {
         let doc: toml::Value = text
             .parse()
             .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
-        let root = manifest_root(&doc);
-        let title = root
+        let title = manifest_root(&doc)
             .get("title")
             .and_then(toml::Value::as_table)
             .unwrap_or_else(|| {
@@ -274,28 +311,104 @@ pub fn titles() -> Vec<TitleUnderTest> {
                 path.display()
             );
         }
-        let row = reference_row(&path, root);
-        let reference = reference_cell(&path, root, row);
-        let max_steps = max_steps_key(
-            &path,
-            row.get("bench_max_steps"),
-            "the reference [[bench.matrix]] row",
-        )
-        .or_else(|| max_steps_key(&path, title.get("bench_max_steps"), "[title]"))
-        .unwrap_or(DEFAULT_BENCH_MAX_STEPS);
-        out.push(TitleUnderTest {
+        out.push(Parsed {
+            path,
+            doc,
             short_name,
             content_id,
-            max_steps,
-            reference,
         });
     }
-    out.sort_by(|a, b| a.short_name.cmp(&b.short_name));
     assert!(
         !out.is_empty(),
         "no title manifests found in {}",
         dir.display()
     );
+    out.sort_by(|a, b| a.short_name.cmp(&b.short_name));
+    out
+}
+
+/// Every registered game title at its reference cell, by short name.
+///
+/// A title shipped inside the firmware has no reference cell and is not
+/// here; see [`firmware_exec_titles`].
+pub fn titles() -> Vec<TitleUnderTest> {
+    parsed_manifests()
+        .into_iter()
+        .filter(|m| !is_firmware_exec(m.root()))
+        .map(|m| {
+            let reference = derived_cell(&m.path, m.root(), m.title());
+            // A row that repeats the derived cell may override the cap.
+            let row_cap = matrix_rows(&m.path, m.root())
+                .iter()
+                .find(|row| {
+                    fw_of(&m.path, row) == reference.fw
+                        && game_ver_of(&m.path, row) == BASE_GAME_VER
+                })
+                .and_then(|row| {
+                    max_steps_key(
+                        &m.path,
+                        row.get("bench_max_steps"),
+                        "the [[bench.matrix]] row repeating the derived cell",
+                    )
+                });
+            TitleUnderTest {
+                max_steps: row_cap
+                    .or_else(|| m.title_max_steps())
+                    .unwrap_or(DEFAULT_BENCH_MAX_STEPS),
+                short_name: m.short_name,
+                content_id: m.content_id,
+                reference,
+            }
+        })
+        .collect()
+}
+
+/// Every declared cell of every registered title shipped inside the
+/// firmware, one entry per cell, by short name then declaration order.
+///
+/// # Panics
+///
+/// Panics if a firmware-shipped manifest carries `[title] system_ver`,
+/// or a row of one states a `game_ver`.
+#[allow(dead_code, reason = "not every suite boots the system software")]
+pub fn firmware_exec_titles() -> Vec<TitleUnderTest> {
+    let mut out = Vec::new();
+    for m in parsed_manifests()
+        .into_iter()
+        .filter(|m| is_firmware_exec(m.root()))
+    {
+        assert!(
+            m.title().get("system_ver").is_none(),
+            "{}: [title] system_ver does not apply to a title shipped inside the firmware; \
+             it has no PARAM.SFO to state a floor",
+            m.path.display()
+        );
+        for row in matrix_rows(&m.path, m.root()) {
+            if let Some(v) = row.get("game_ver") {
+                panic!(
+                    "{}: a [[bench.matrix]] row states game_ver {v:?}, which does not apply \
+                     to a title shipped inside the firmware",
+                    m.path.display()
+                );
+            }
+            out.push(TitleUnderTest {
+                short_name: m.short_name.clone(),
+                content_id: m.content_id.clone(),
+                max_steps: max_steps_key(
+                    &m.path,
+                    row.get("bench_max_steps"),
+                    "a [[bench.matrix]] row",
+                )
+                .or_else(|| m.title_max_steps())
+                .unwrap_or(DEFAULT_BENCH_MAX_STEPS),
+                reference: ReferenceCell {
+                    fw: fw_of(&m.path, row),
+                    game_ver: None,
+                    pending: pending_of(&m.path, row),
+                },
+            });
+        }
+    }
     out
 }
 

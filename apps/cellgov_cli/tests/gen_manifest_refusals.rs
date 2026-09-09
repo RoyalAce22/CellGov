@@ -1,8 +1,9 @@
 //! Which install records `dev gen-manifest` generates a manifest from,
 //! and which it refuses. Each refusal goes through `die`, so it is only
-//! observable from a spawned process. Needs no corpus: every record here
-//! is hand-written.
+//! observable from a spawned process. Needs no corpus: every record and
+//! every PARAM.SFO here is hand-written.
 
+use cellgov_testkit::param_sfo::build_param_sfo;
 use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,6 +13,18 @@ const EXIT_FAILED: i32 = 1;
 
 /// Placeholder identity: nothing here names an installed corpus.
 const TITLE_ID: &str = "TEST00000";
+
+/// Where a base record's tree sits under the default store root, which
+/// the scratch root encloses as `vfs/`.
+const BASE_STORE_PATH: &str = "dev_hdd0/game/TEST00000";
+
+/// The floor the synthetic tree states, and the key the stub carries.
+const SYSTEM_VER_SFO: &str = "01.5000";
+const SYSTEM_VER_KEY: &str = "1.50";
+
+/// What the base tree's PARAM.SFO states: the title id and its floor.
+const BASE_TREE_ENTRIES: &[(&str, &str)] =
+    &[("TITLE_ID", TITLE_ID), ("PS3_SYSTEM_VER", SYSTEM_VER_SFO)];
 
 /// SHA-256 in the hex form a record writes.
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -49,6 +62,26 @@ impl Scratch {
         self.root.join("registry")
     }
 
+    /// The PARAM.SFO of the base tree [`base_record`] names, under the
+    /// default store root.
+    fn base_param_sfo(&self) -> PathBuf {
+        self.root
+            .join("vfs")
+            .join(BASE_STORE_PATH)
+            .join("PARAM.SFO")
+    }
+
+    fn write_base_param_sfo(&self, entries: &[(&str, &str)]) {
+        let path = self.base_param_sfo();
+        std::fs::create_dir_all(path.parent().expect("a tree path has a parent"))
+            .expect("create the base tree");
+        std::fs::write(path, build_param_sfo(entries)).expect("write PARAM.SFO");
+    }
+
+    fn write_base_tree(&self) {
+        self.write_base_param_sfo(BASE_TREE_ENTRIES);
+    }
+
     /// Generate from `record`, with the registry pointed inside the
     /// scratch root so a stub cannot land in the committed one.
     fn gen_from(&self, record: &Path) -> (i32, String, String) {
@@ -58,6 +91,9 @@ impl Scratch {
     /// Generate with the registry pointed inside the scratch root, and
     /// the scratch root as the working directory, so a default store
     /// root resolves to `<scratch>/vfs`.
+    ///
+    /// The spawn drops `CELLGOV_PS3_VFS_ROOT`: an operator's exported
+    /// root would move every tree read here.
     fn gen(&self, args: &[&std::ffi::OsStr]) -> (i32, String, String) {
         let out = Command::new(env!("CARGO_BIN_EXE_cellgov"))
             .args(["dev", "gen-manifest"])
@@ -65,6 +101,7 @@ impl Scratch {
             .arg("--registry")
             .arg(self.registry())
             .current_dir(&self.root)
+            .env_remove("CELLGOV_PS3_VFS_ROOT")
             .output()
             .expect("spawn cellgov");
         (
@@ -92,9 +129,17 @@ fn firmware_record(version: &str) -> String {
 }
 
 /// A title record of `kind` at `version`, with the `distribution` tag
-/// its installer writes.
-fn title_record(kind: &str, version: &str, store_path: &str, distribution: &str) -> String {
-    format!(
+/// its installer writes. Its `[files]` digests the EBOOT and every
+/// `(path, sha256)` in `files`.
+fn title_record_recording(
+    kind: &str,
+    version: &str,
+    store_path: &str,
+    distribution: &str,
+    files: &[(&str, &str)],
+) -> String {
+    use std::fmt::Write as _;
+    let mut record = format!(
         "format_version = 3\n\
          [artifact]\n\
          kind = \"{kind}\"\n\
@@ -113,16 +158,32 @@ fn title_record(kind: &str, version: &str, store_path: &str, distribution: &str)
          \"USRDIR/EBOOT.BIN\" = \"{}\"\n",
         sha256_hex(b"container"),
         sha256_hex(b"eboot"),
-    )
+    );
+    for (path, sha256) in files {
+        let _ = writeln!(record, "\"{path}\" = \"{sha256}\"");
+    }
+    record
+}
+
+/// A title record whose `[files]` digests the EBOOT alone.
+fn title_record(kind: &str, version: &str, store_path: &str, distribution: &str) -> String {
+    title_record_recording(kind, version, store_path, distribution, &[])
 }
 
 /// The one record shape `gen-manifest` generates from.
 fn base_record() -> String {
-    title_record(
+    title_record("title-base", "01.00", BASE_STORE_PATH, "psn-hdd")
+}
+
+/// [`base_record`] whose `[files]` also digests the tree's PARAM.SFO,
+/// as an install records it.
+fn base_record_recording_param_sfo(sha256: &str) -> String {
+    title_record_recording(
         "title-base",
         "01.00",
-        &format!("dev_hdd0/game/{TITLE_ID}"),
+        BASE_STORE_PATH,
         "psn-hdd",
+        &[("PARAM.SFO", sha256)],
     )
 }
 
@@ -304,12 +365,15 @@ fn a_title_id_lookup_names_a_root_the_store_cannot_read() {
 }
 
 /// The paired case for the root check: `--record` names a file and
-/// resolves no root, so residue under the default one refuses nothing.
+/// runs no store preflight, so residue under the default root refuses
+/// nothing. The command still reads the tree's PARAM.SFO under that
+/// root.
 #[test]
 fn a_record_path_is_read_where_the_default_root_holds_residue() {
     let scratch = Scratch::new("record_reaches_no_root");
     std::fs::create_dir_all(scratch.root.join("vfs").join("dev_flash"))
         .expect("create the mount the store refuses");
+    scratch.write_base_tree();
     let record = scratch.write("base.install.toml", &base_record());
 
     let (code, stdout, stderr) = scratch.gen_from(&record);
@@ -328,14 +392,10 @@ fn a_record_path_is_read_where_the_default_root_holds_residue() {
 #[test]
 fn a_base_record_whose_distribution_no_manifest_holds_is_refused_before_the_write() {
     let scratch = Scratch::new("unknown_distribution");
+    scratch.write_base_tree();
     let record = scratch.write(
         "base.install.toml",
-        &title_record(
-            "title-base",
-            "01.00",
-            &format!("dev_hdd0/game/{TITLE_ID}"),
-            "psn-update",
-        ),
+        &title_record("title-base", "01.00", BASE_STORE_PATH, "psn-update"),
     );
 
     let (code, stdout, stderr) = scratch.gen_from(&record);
@@ -357,8 +417,9 @@ fn a_base_record_whose_distribution_no_manifest_holds_is_refused_before_the_writ
 /// The one kind that does generate, so the refusals above are the
 /// gate's doing and not a shared read failure.
 #[test]
-fn a_title_base_record_generates_a_stub() {
+fn a_title_base_record_generates_a_stub_carrying_the_trees_floor() {
     let scratch = Scratch::new("base");
+    scratch.write_base_tree();
     let record = scratch.write("base.install.toml", &base_record());
 
     let (code, stdout, stderr) = scratch.gen_from(&record);
@@ -367,4 +428,175 @@ fn a_title_base_record_generates_a_stub() {
     assert!(stub.is_file(), "stdout:\n{stdout}stderr:\n{stderr}");
     let text = std::fs::read_to_string(&stub).expect("read the generated stub");
     assert!(text.contains("distribution = \"psn-hdd\""), "{text}");
+    assert!(
+        text.contains(&format!("system_ver = \"{SYSTEM_VER_KEY}\"")),
+        "the floor is read from the tree's PARAM.SFO, normalized:\n{text}"
+    );
+    assert!(
+        !text.contains(SYSTEM_VER_SFO),
+        "the stub carries the store's key, not the table's spelling:\n{text}"
+    );
+}
+
+/// `--vfs-root` moves the store root the command reads the tree under.
+#[test]
+fn a_vfs_root_names_the_store_the_trees_param_sfo_is_read_under() {
+    let scratch = Scratch::new("vfs_root");
+    let store = scratch.root.join("elsewhere");
+    let sfo = store.join(BASE_STORE_PATH).join("PARAM.SFO");
+    std::fs::create_dir_all(sfo.parent().expect("a tree path has a parent"))
+        .expect("create the base tree");
+    std::fs::write(
+        &sfo,
+        build_param_sfo(&[("TITLE_ID", TITLE_ID), ("PS3_SYSTEM_VER", "03.7000")]),
+    )
+    .expect("write PARAM.SFO");
+    let record = scratch.write("base.install.toml", &base_record());
+
+    let vfs_root = store.join("dev_hdd0");
+    let (code, stdout, stderr) = scratch.gen(&[
+        "--vfs-root".as_ref(),
+        vfs_root.as_os_str(),
+        "--record".as_ref(),
+        record.as_os_str(),
+    ]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    let text = std::fs::read_to_string(scratch.registry().join(format!("{TITLE_ID}.toml")))
+        .expect("read the generated stub");
+    assert!(text.contains("system_ver = \"3.70\""), "{text}");
+}
+
+#[test]
+fn a_base_record_whose_tree_has_no_param_sfo_is_refused_naming_the_file() {
+    let scratch = Scratch::new("no_param_sfo");
+    let record = scratch.write("base.install.toml", &base_record());
+
+    let (code, stdout, stderr) = scratch.gen_from(&record);
+    assert_eq!(code, EXIT_FAILED, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        stderr.contains("PARAM.SFO") && stderr.contains(TITLE_ID),
+        "the refusal names the file it looked for:\n{stderr}"
+    );
+    assert!(stderr.contains("system_ver"), "{stderr}");
+    assert!(
+        !scratch.registry().exists(),
+        "a refused generation writes no stub"
+    );
+}
+
+#[test]
+fn a_param_sfo_stating_no_floor_is_refused_naming_the_key() {
+    let scratch = Scratch::new("no_system_ver");
+    scratch.write_base_param_sfo(&[("TITLE_ID", TITLE_ID)]);
+    let record = scratch.write("base.install.toml", &base_record());
+
+    let (code, stdout, stderr) = scratch.gen_from(&record);
+    assert_eq!(code, EXIT_FAILED, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(stderr.contains("PS3_SYSTEM_VER"), "{stderr}");
+    assert!(!scratch.registry().exists());
+}
+
+#[test]
+fn a_floor_outside_the_mm_mmmm_shape_is_refused_quoting_it() {
+    let scratch = Scratch::new("bad_system_ver");
+    scratch.write_base_param_sfo(&[("TITLE_ID", TITLE_ID), ("PS3_SYSTEM_VER", "1.50")]);
+    let record = scratch.write("base.install.toml", &base_record());
+
+    let (code, stdout, stderr) = scratch.gen_from(&record);
+    assert_eq!(code, EXIT_FAILED, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        stderr.contains("\"1.50\"") && stderr.contains("MM.mmmm"),
+        "{stderr}"
+    );
+    assert!(!scratch.registry().exists());
+}
+
+#[test]
+fn a_vfs_root_moves_the_title_id_lookup_with_the_tree_it_reads() {
+    let scratch = Scratch::new("vfs_root_lookup");
+    let store = scratch.root.join("elsewhere");
+    let record = store
+        .join(".cellgov")
+        .join("installs")
+        .join("titles")
+        .join(TITLE_ID)
+        .join("base.install.toml");
+    std::fs::create_dir_all(record.parent().expect("a record path has a parent"))
+        .expect("create the record directory");
+    std::fs::write(&record, base_record()).expect("write the record");
+    let sfo = store.join(BASE_STORE_PATH).join("PARAM.SFO");
+    std::fs::create_dir_all(sfo.parent().expect("a tree path has a parent"))
+        .expect("create the base tree");
+    std::fs::write(
+        &sfo,
+        build_param_sfo(&[("TITLE_ID", TITLE_ID), ("PS3_SYSTEM_VER", "02.7600")]),
+    )
+    .expect("write PARAM.SFO");
+
+    let vfs_root = store.join("dev_hdd0");
+    let (code, stdout, stderr) = scratch.gen(&[
+        "--vfs-root".as_ref(),
+        vfs_root.as_os_str(),
+        "--title-id".as_ref(),
+        TITLE_ID.as_ref(),
+    ]);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    let text = std::fs::read_to_string(scratch.registry().join(format!("{TITLE_ID}.toml")))
+        .expect("read the generated stub");
+    assert!(text.contains("system_ver = \"2.76\""), "{text}");
+    assert!(
+        !scratch.root.join("vfs").exists(),
+        "nothing was resolved under the working directory's default root"
+    );
+}
+
+#[test]
+fn a_tree_whose_param_sfo_is_not_the_recorded_one_is_refused_naming_both_digests() {
+    let scratch = Scratch::new("param_sfo_digest_mismatch");
+    scratch.write_base_tree();
+    let recorded = sha256_hex(b"the table another install wrote");
+    let record = scratch.write(
+        "base.install.toml",
+        &base_record_recording_param_sfo(&recorded),
+    );
+
+    let (code, stdout, stderr) = scratch.gen_from(&record);
+    assert_eq!(code, EXIT_FAILED, "stdout:\n{stdout}stderr:\n{stderr}");
+    assert!(
+        stderr.contains("PARAM.SFO") && stderr.contains(&recorded),
+        "the refusal names the table and the digest the record holds:\n{stderr}"
+    );
+    let found = sha256_hex(&build_param_sfo(BASE_TREE_ENTRIES));
+    assert!(
+        stderr.contains(&found),
+        "and the digest the tree has:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("base.install.toml"),
+        "and the record:\n{stderr}"
+    );
+    assert!(
+        !scratch.registry().exists(),
+        "a refused generation writes no stub"
+    );
+}
+
+#[test]
+fn a_recorded_param_sfo_digest_the_tree_matches_generates_the_floor() {
+    let scratch = Scratch::new("param_sfo_digest_match");
+    scratch.write_base_tree();
+    let recorded = sha256_hex(&build_param_sfo(BASE_TREE_ENTRIES));
+    let record = scratch.write(
+        "base.install.toml",
+        &base_record_recording_param_sfo(&recorded),
+    );
+
+    let (code, stdout, stderr) = scratch.gen_from(&record);
+    assert_eq!(code, 0, "stdout:\n{stdout}stderr:\n{stderr}");
+    let text = std::fs::read_to_string(scratch.registry().join(format!("{TITLE_ID}.toml")))
+        .expect("read the generated stub");
+    assert!(
+        text.contains(&format!("system_ver = \"{SYSTEM_VER_KEY}\"")),
+        "{text}"
+    );
 }

@@ -19,7 +19,7 @@ pub use registry::TitleRegistry;
 
 #[allow(
     unused_imports,
-    reason = "the types of TitleManifest's matrix field and reference_cell return"
+    reason = "the types of TitleManifest's matrix field and reference_key return"
 )]
 pub use matrix::{CellExpectation, CellKey, MatrixCell};
 

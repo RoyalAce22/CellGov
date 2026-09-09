@@ -98,7 +98,8 @@ beside the hand-maintained `NOTES.md`. Produced by `cellgov dev
 fixture-gen`.
 [titles.md](../titles.md)
 
-**Declared cell.** A cell a title's `[[bench.matrix]]` names. The
+**Declared cell.** A cell a title's manifest names: the reference
+cell its `system_ver` derives, plus every `[[bench.matrix]]` row. The
 registry declares every cell; the gate and the generated documents
 read the declared set rather than enumerating the store, and
 `dev record-anchors` refuses a cell no manifest declares.
@@ -237,11 +238,13 @@ SELF is an SCE-wrapped executable; the PUP is the firmware update
 package `cellgov firmware install` unpacks into the VFS.
 [workspace.md](../architecture/workspace.md#per-crate-responsibilities)
 
-**Reference cell.** The one `[[bench.matrix]]` row marked
-`reference = true`, naming the configuration a headline row is
-measured at. The loader refuses a matrix that marks none or several,
-and refuses a probe as the reference.
-[title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
+**Reference cell.** The cell a title's headline row is measured at:
+the firmware its own `PARAM.SFO` asks for (`PS3_SYSTEM_VER`, carried
+in the manifest as `[title] system_ver`) times its base install.
+Derived, never chosen; a `[[bench.matrix]]` row may attach an override
+or a `pending` reason to it but cannot move it. A title shipped inside
+the firmware has none.
+[title_harness.md](../architecture/title_harness.md#which-firmware-a-title-is-measured-against)
 
 **Region.** One contiguous range of a guest address space with a
 label, page-size class, and access mode (`ReadWrite`,

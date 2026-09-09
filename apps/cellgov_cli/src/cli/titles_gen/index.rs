@@ -1,89 +1,86 @@
-//! `docs/titles.md`: one row per title, measured at the cell its
-//! manifest marks the reference, plus a coverage count over every
-//! declared cell.
+//! `docs/titles.md`: one row per game title at its reference cell,
+//! plus a coverage count over every cell those titles declare. The
+//! reference cell is the title's floor times its base install.
 //!
 //! The Config column names that cell, so a reader can tell which
-//! firmware and game version produced a step count.
+//! firmware and game version produced a step count. A title shipped
+//! inside the firmware has no such cell and renders on the firmware
+//! page instead ([`super::firmware`]).
 
 use std::collections::BTreeSet;
 
 use cellgov_compare::{format_with_commas, BootSummary};
 
+use super::cell::CellArtifacts;
 use super::detail::detail_page_link;
 use super::load::TitleDocs;
 use crate::game::manifest::TitleManifest;
 
 const TITLES_TEMPLATE: &str = include_str!("../templates/titles.md.template");
 
-/// Rendered in every data cell of a title that has nothing recorded at
-/// its reference cell.
-const NO_DATA: &str = "--";
+/// Rendered in a table cell that has nothing to quote.
+pub(super) const NO_DATA: &str = "--";
 
-/// Render the whole `docs/titles.md` body.
+/// Render the whole `docs/titles.md` body from the game titles in
+/// `docs`.
 pub(crate) fn render(docs: &[TitleDocs<'_>]) -> String {
-    let rows: Vec<String> = docs.iter().map(render_row).collect();
+    let games: Vec<&TitleDocs<'_>> = docs.iter().filter(|d| !d.ships_in_firmware()).collect();
+    let rows: Vec<String> = games.iter().map(|d| render_row(d)).collect();
     super::super::fixture_gen::apply_subs(
         TITLES_TEMPLATE,
         &[
             ("matrix_rows", &rows.join("\n")),
-            ("coverage", &render_coverage(docs)),
+            ("coverage", &render_coverage(&games)),
         ],
     )
 }
 
 /// The index's one-line coverage count: how much of the declared space
-/// carries a result.
-fn render_coverage(docs: &[TitleDocs<'_>]) -> String {
-    let firmwares: BTreeSet<&str> = docs
-        .iter()
-        .flat_map(|d| d.cells.iter().map(|(key, _)| key.fw.as_str()))
-        .collect();
-    let declared: usize = docs.iter().map(|d| d.cells.len()).sum();
-    let recorded = docs
-        .iter()
-        .flat_map(|d| d.cells.iter())
-        .filter(|(_, result)| result.is_recorded())
-        .count();
+/// carries a result, over the game titles alone.
+fn render_coverage(games: &[&TitleDocs<'_>]) -> String {
+    let (firmwares, declared, recorded) = coverage_counts(games.iter().copied());
     format!(
-        "{} title(s), {} firmware(s), {declared} declared cell(s), {recorded} recorded.",
-        docs.len(),
-        firmwares.len(),
+        "{} game title(s), {firmwares} firmware(s), {declared} declared cell(s), {recorded} \
+         recorded.",
+        games.len(),
     )
+}
+
+/// `(distinct firmwares, declared cells, recorded cells)` over `docs`.
+pub(super) fn coverage_counts<'a>(
+    docs: impl IntoIterator<Item = &'a TitleDocs<'a>>,
+) -> (usize, usize, usize) {
+    let mut firmwares: BTreeSet<&str> = BTreeSet::new();
+    let mut declared = 0;
+    let mut recorded = 0;
+    for doc in docs {
+        for cell in &doc.cells {
+            firmwares.insert(cell.key.fw.as_str());
+            declared += 1;
+            if cell.result.is_recorded() {
+                recorded += 1;
+            }
+        }
+    }
+    (firmwares.len(), declared, recorded)
 }
 
 /// One markdown table row, at the title's reference cell.
 fn render_row(docs: &TitleDocs<'_>) -> String {
     let title = docs.title;
-    let (checkpoint_cell, steps_cell, insns_cell) = match &docs.reference.boot {
-        Some(b) => (
-            format_checkpoint(b),
-            format_with_commas(b.steps),
-            format_with_commas(b.insns()),
-        ),
-        None => (
-            NO_DATA.to_string(),
-            NO_DATA.to_string(),
-            NO_DATA.to_string(),
-        ),
-    };
-    let (convergence_cell, byte_parity_cell) = match &docs.reference.cross {
-        Some(c) => c.display_matrix_columns(),
-        None => (NO_DATA.to_string(), NO_DATA.to_string()),
-    };
+    let empty = CellArtifacts::default();
+    let reference = docs.reference().map_or(&empty, |c| &c.artifacts);
+    let (checkpoint_cell, steps_cell, insns_cell, convergence_cell, byte_parity_cell) =
+        data_cells(reference);
     let config_cell = title
-        .reference_cell()
-        .map_or_else(|| NO_DATA.to_string(), |c| c.key.label());
+        .reference_key()
+        .map_or_else(|| NO_DATA.to_string(), |k| k.label());
 
     assert_table_safe("title manifest field `content_id`", &title.content_id);
     assert_table_safe("title manifest field `display_name`", &title.display_name);
     assert_table_safe("title manifest field `developer`", &title.developer);
     assert_table_safe("title manifest field `engine`", &title.engine);
     assert_table_safe("the reference cell's label", &config_cell);
-    // These three quote a committed summary; no loader checks a
-    // summary against the table's rules.
-    assert_table_safe("the reference cell's checkpoint", &checkpoint_cell);
-    assert_table_safe("the reference cell's convergence", &convergence_cell);
-    assert_table_safe("the reference cell's byte parity", &byte_parity_cell);
 
     format!(
         "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
@@ -100,6 +97,34 @@ fn render_row(docs: &TitleDocs<'_>) -> String {
         convergence_cell,
         byte_parity_cell,
     )
+}
+
+/// The five measurement columns for one cell's artifacts:
+/// `(checkpoint, steps, insns, convergence, byte parity)`, each
+/// [`NO_DATA`] when the file behind it is absent.
+pub(super) fn data_cells(artifacts: &CellArtifacts) -> (String, String, String, String, String) {
+    let (checkpoint, steps, insns) = match &artifacts.boot {
+        Some(b) => (
+            format_checkpoint(b),
+            format_with_commas(b.steps),
+            format_with_commas(b.insns()),
+        ),
+        None => (
+            NO_DATA.to_string(),
+            NO_DATA.to_string(),
+            NO_DATA.to_string(),
+        ),
+    };
+    let (convergence, byte_parity) = match &artifacts.cross {
+        Some(c) => c.display_matrix_columns(),
+        None => (NO_DATA.to_string(), NO_DATA.to_string()),
+    };
+    // These three quote a committed summary; no loader checks a
+    // summary against the table's rules.
+    assert_table_safe("the cell's checkpoint", &checkpoint);
+    assert_table_safe("the cell's convergence", &convergence);
+    assert_table_safe("the cell's byte parity", &byte_parity);
+    (checkpoint, steps, insns, convergence, byte_parity)
 }
 
 /// `<checkpoint kind> -> <observed outcome>`; both columns render so

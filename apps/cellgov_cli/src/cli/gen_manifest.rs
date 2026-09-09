@@ -2,15 +2,15 @@
 //! stub, closing the loop from "installed a PKG/ISO" to "registered,
 //! bootable title".
 //!
-//! For a title, the PARAM.SFO-derived fields (`content_id`,
-//! `display_name`, `eboot_candidates`, `distribution`, `rap_filename`)
-//! are filled from the install record; the curated fields
-//! (`short_name`, `year`, `developer`, `engine`, `rsx`, `content`,
-//! `mounts`) are written as placeholders for an author to fill. For a
-//! firmware entry the generated fields are the position the system
-//! software holds inside a firmware tree. The stub names no version:
-//! the store holds the versions, and `--fw` selects the one a boot
-//! resolves against.
+//! For a title, the install record fills the generated fields
+//! (`content_id`, `display_name`, `eboot_candidates`, `distribution`,
+//! `rap_filename`), and the `PS3_SYSTEM_VER` in the installed tree's
+//! own PARAM.SFO fills `system_ver`. The curated fields (`short_name`,
+//! `year`, `developer`, `engine`, `rsx`, `content`, `mounts`) are
+//! placeholders for an author to fill. For a firmware entry the
+//! generated fields are the position the system software holds inside
+//! a firmware tree. That stub names no version: the store holds the
+//! versions, and `--fw` selects the one a boot resolves against.
 //!
 //! `gen-manifest` never overwrites an existing manifest, so its curated
 //! fields survive. It writes a stub only where no manifest exists, and
@@ -18,16 +18,26 @@
 
 use std::path::{Path, PathBuf};
 
+use cellgov_install::manifest::{sha256_of, Sha256};
+use cellgov_install::param_sfo;
 use cellgov_install::store::{
     preflight, record_rel_path, Artifact, ArtifactKind, InstallRecord, StoreLayout, TitleId,
-    TitleRecord, VersionKey, DEFAULT_VFS_ROOT,
+    TitleRecord, VersionKey,
 };
+use cellgov_install::system_ver::firmware_version_key;
 use cellgov_ps3_abi::dev_flash::{FLASH_MOUNT, VSH_MODULE_DIR, VSH_SELF};
+use cellgov_ps3_abi::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
+use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
 
 use crate::cli::exit::die;
+use crate::cli::keys::install_root_of;
 use crate::cli::parse::GenManifestArgs;
-use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
+use crate::cli::title::{resolve_ps3_vfs_root, DEFAULT_TITLE_REGISTRY_DIR};
 use crate::game::manifest::TitleManifest;
+
+/// The `distribution` tag a disc install records; its PARAM.SFO sits
+/// under `PS3_GAME/`.
+const DISC_DISTRIBUTION: &str = "disc-iso";
 
 /// Registry key of the system software a firmware image ships.
 const VSH_CONTENT_ID: &str = "VSH";
@@ -41,22 +51,21 @@ fn vsh_source_path() -> String {
 /// The system software's `[title] distribution` tag.
 const VSH_DISTRIBUTION: &str = "firmware-exec";
 
-/// The install-record directory under the default store root, where
-/// the installers write. `--installs` names that directory directly,
-/// for a store rooted elsewhere.
-fn default_installs() -> PathBuf {
-    StoreLayout::new(DEFAULT_VFS_ROOT).installs_dir()
+/// The store root `--vfs-root` implies: the install root that encloses
+/// the PS3 VFS root, where the read commands look too.
+fn store_root_of(vfs_flag: Option<&Path>) -> PathBuf {
+    install_root_of(&resolve_ps3_vfs_root(vfs_flag))
 }
 
-/// The default install-record directory, refusing a root the store
-/// cannot read.
+/// The install-record directory under `store_root`, where the
+/// installers write.
 ///
-/// The default is the only invocation that resolves a store root:
-/// `--installs` and `--record` each name a path directly.
-fn default_installs_checked() -> PathBuf {
-    preflight(Path::new(DEFAULT_VFS_ROOT))
-        .unwrap_or_else(|e| die(&format!("gen-manifest failed: {e}")));
-    default_installs()
+/// The store preflight runs here because only this lookup resolves a
+/// root: `--installs` names a record directory and `--record` names a
+/// file.
+fn installs_checked(store_root: &Path) -> PathBuf {
+    preflight(store_root).unwrap_or_else(|e| die(&format!("gen-manifest failed: {e}")));
+    StoreLayout::new(store_root).installs_dir()
 }
 
 /// The base record for `title_id` under an `installs/` directory.
@@ -84,8 +93,15 @@ fn toml_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-pub(crate) fn run(args: &GenManifestArgs) {
-    let (record_path, asked) = resolve_record_path(args);
+pub(crate) fn run(args: &GenManifestArgs, vfs_flag: Option<&Path>) {
+    // The closure resolves the root only where a read needs it: the
+    // record directory a `--title-id` / `--firmware` lookup defaults
+    // to, and the tree a title's `system_ver` comes from. One root
+    // serves both, so a record and the floor written beside it never
+    // come from two stores. A firmware record named by path resolves
+    // none.
+    let store_root = || store_root_of(vfs_flag);
+    let (record_path, asked) = resolve_record_path(args, &store_root);
     let registry = args
         .registry
         .clone()
@@ -100,7 +116,7 @@ pub(crate) fn run(args: &GenManifestArgs) {
         die(&refusal);
     }
 
-    let gen = Generated::from_record(&record, &record_path);
+    let gen = Generated::from_record(&record, &record_path, store_root);
     let manifest_path = registry.join(format!("{}.toml", gen.content_id()));
 
     let stub = gen.render_stub(&record_path);
@@ -142,12 +158,15 @@ pub(crate) fn run(args: &GenManifestArgs) {
 /// own kind is the answer. `--title-id` and `--firmware` each resolve
 /// one kind's records directory; clap requires exactly one of the
 /// three.
-fn resolve_record_path(args: &GenManifestArgs) -> (PathBuf, Option<ArtifactKind>) {
+fn resolve_record_path(
+    args: &GenManifestArgs,
+    store_root: &impl Fn() -> PathBuf,
+) -> (PathBuf, Option<ArtifactKind>) {
     let lookup = |id: &str, resolve: fn(&Path, &str) -> PathBuf| {
         let installs = args
             .installs
             .clone()
-            .unwrap_or_else(default_installs_checked);
+            .unwrap_or_else(|| installs_checked(&store_root()));
         resolve(&installs, id)
     };
     match (&args.record, &args.title_id, &args.firmware) {
@@ -197,7 +216,13 @@ enum Generated {
 }
 
 impl Generated {
-    fn from_record(record: &InstallRecord, record_path: &Path) -> Self {
+    /// Only a title record calls `store_root`, to find the installed
+    /// tree that states its `system_ver`.
+    fn from_record(
+        record: &InstallRecord,
+        record_path: &Path,
+        store_root: impl FnOnce() -> PathBuf,
+    ) -> Self {
         match (record.artifact.kind, record.title.as_ref()) {
             (ArtifactKind::Firmware, _) => Self::Firmware,
             // An update record names a title, but its `distribution`
@@ -208,7 +233,10 @@ impl Generated {
                 record.artifact.kind.as_str()
             )),
             (ArtifactKind::TitleBase, Some(title)) => {
-                Self::Title(TitleFields::from_record(record, title))
+                let sfo = param_sfo_path(&store_root(), record, title);
+                let recorded = record.files.get(&param_sfo_rel(title));
+                let system_ver = read_system_ver(&sfo, recorded, record_path);
+                Self::Title(TitleFields::from_record(record, title, system_ver))
             }
             (ArtifactKind::TitleBase, None) => die(&format!(
                 "{} describes a {} entry, which names no title",
@@ -253,6 +281,70 @@ impl Generated {
     }
 }
 
+/// The PARAM.SFO's path inside the installed base tree, spelled the way
+/// the record's `[files]` keys it.
+///
+/// A disc tree holds it under `PS3_GAME/`; an HDD tree holds it at the
+/// root.
+fn param_sfo_rel(title: &TitleRecord) -> String {
+    if title.distribution == DISC_DISTRIBUTION {
+        format!("{DISC_GAME_DIR}/{PARAM_SFO_FILE}")
+    } else {
+        PARAM_SFO_FILE.to_string()
+    }
+}
+
+/// The PARAM.SFO the installed base tree carries, resolved from the
+/// record's `store_path` under `store_root`.
+fn param_sfo_path(store_root: &Path, record: &InstallRecord, title: &TitleRecord) -> PathBuf {
+    let mut path = StoreLayout::new(store_root).resolve_store_path(&record.artifact.store_path);
+    path.extend(param_sfo_rel(title).split('/'));
+    path
+}
+
+/// The `system_ver` the stub carries: the tree's `PS3_SYSTEM_VER` as a
+/// firmware version key.
+///
+/// The record does not carry the floor, so a tree that cannot answer
+/// refuses the generation by name. `recorded` is the digest the record
+/// holds for this table, when its `[files]` lists one.
+fn read_system_ver(sfo: &Path, recorded: Option<&Sha256>, record_path: &Path) -> String {
+    let bytes = std::fs::read(sfo).unwrap_or_else(|e| {
+        die(&format!(
+            "read {}: {e}; the stub's system_ver is the PS3_SYSTEM_VER this table states, so \
+             the installed tree must be present under the store root (--vfs-root names it)",
+            sfo.display()
+        ))
+    });
+    // The record digests every file it installed, and the uninstall
+    // gate holds the tree to those digests. A table that hashes
+    // differently belongs to some other install of this title id, so
+    // its floor is not this record's.
+    if let Some(recorded) = recorded {
+        let found = Sha256(sha256_of(&bytes));
+        if found.0 != recorded.0 {
+            die(&format!(
+                "{}: SHA-256 {} is not the {} that {} recorded for it; the tree under the \
+                 store root is not the one the record describes, so its {PS3_SYSTEM_VER_KEY} \
+                 is not this record's floor (--vfs-root names the store root)",
+                sfo.display(),
+                found.to_hex(),
+                recorded.to_hex(),
+                record_path.display()
+            ));
+        }
+    }
+    let table =
+        param_sfo::parse(&bytes).unwrap_or_else(|e| die(&format!("{}: {e}", sfo.display())));
+    let raw = table.get_string(PS3_SYSTEM_VER_KEY).unwrap_or_else(|| {
+        die(&format!(
+            "{}: no {PS3_SYSTEM_VER_KEY} string; the stub's system_ver has nothing to derive from",
+            sfo.display()
+        ))
+    });
+    firmware_version_key(raw).unwrap_or_else(|e| die(&format!("{}: {e}", sfo.display())))
+}
+
 /// The PARAM.SFO / install-derived fields of a title manifest.
 struct TitleFields {
     content_id: String,
@@ -260,10 +352,12 @@ struct TitleFields {
     distribution: String,
     eboot_candidate: String,
     rap_filename: Option<String>,
+    /// The floor as a firmware version key; see [`read_system_ver`].
+    system_ver: String,
 }
 
 impl TitleFields {
-    fn from_record(record: &InstallRecord, title: &TitleRecord) -> Self {
+    fn from_record(record: &InstallRecord, title: &TitleRecord, system_ver: String) -> Self {
         // The manifest's `content_id` directory key holds the title-id
         // value (a pre-existing field-name misnomer); the RAP, by
         // contrast, is keyed by the full NPD content id.
@@ -297,6 +391,7 @@ impl TitleFields {
             distribution: title.distribution.clone(),
             eboot_candidate,
             rap_filename,
+            system_ver,
         }
     }
 
@@ -309,6 +404,7 @@ impl TitleFields {
             "    rap_filename = {}",
             self.rap_filename.as_deref().unwrap_or("(none)")
         );
+        println!("    system_ver   = {}", self.system_ver);
     }
 
     fn render_stub(&self, record_path: &Path) -> String {
@@ -320,7 +416,9 @@ impl TitleFields {
         s.push_str(
             "# Curated fields below are placeholders -- fill them in. The\n\
              # generated fields (content_id, display_name, eboot_candidates,\n\
-             # distribution, rap_filename) come from the install / PARAM.SFO.\n\n",
+             # distribution, rap_filename, system_ver) come from the install /\n\
+             # PARAM.SFO. system_ver is the floor the title's own PARAM.SFO\n\
+             # states and derives the one cell the headline row is measured at.\n\n",
         );
         s.push_str("[title]\n");
         s.push_str(&format!(
@@ -349,9 +447,13 @@ impl TitleFields {
         if let Some(rap) = &self.rap_filename {
             s.push_str(&format!("rap_filename = \"{}\"\n", toml_escape(rap)));
         }
+        s.push_str(&format!(
+            "system_ver = \"{}\"\n",
+            toml_escape(&self.system_ver)
+        ));
         // The loader's `[source]` default is hdd; a disc title left on
         // that default resolves under dev_hdd0 and never finds its EBOOT.
-        if self.distribution == "disc-iso" {
+        if self.distribution == DISC_DISTRIBUTION {
             s.push_str("\n[source]\nkind = \"disc\"\n");
         }
         s.push_str("\n[checkpoint]\nkind = \"process-exit\"\n");

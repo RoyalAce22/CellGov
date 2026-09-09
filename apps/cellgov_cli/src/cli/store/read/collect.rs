@@ -149,6 +149,7 @@ impl StoreView {
     /// whether an anchor is committed and whether this machine holds the
     /// versions the cell names.
     fn anchor_docs(&self, manifest: &TitleManifest, entry: Option<&TitleEntry>) -> Vec<AnchorDoc> {
+        let reference = manifest.reference_key();
         manifest
             .matrix
             .iter()
@@ -156,7 +157,7 @@ impl StoreView {
                 fw: cell.key.fw.clone(),
                 game_ver: cell.key.game_ver.clone(),
                 expect: cell.expect.label().to_string(),
-                reference: cell.reference,
+                reference: reference.as_ref() == Some(&cell.key),
                 recorded: crate::paths::boot_anchor_path_in(
                     &self.fixtures,
                     &manifest.content_id,

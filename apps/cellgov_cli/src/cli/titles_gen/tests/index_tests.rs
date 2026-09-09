@@ -47,6 +47,7 @@ fn the_config_column_names_the_reference_cell() {
 #[test]
 fn a_title_declaring_no_cells_names_no_configuration() {
     let mut t = title("NPAA00011", "NoCells", 2009, "Studio");
+    t.system_ver = None;
     t.matrix.clear();
     let tmp = Fixtures::new("config-none");
     let row = headline_row(&t, tmp.path());
@@ -283,10 +284,8 @@ fn sort_by_content_id_with_empty_input_returns_empty_vec() {
 #[test]
 fn coverage_counts_declared_and_recorded_cells_apart() {
     let mut t = title("NPAA60010", "Coverage", 2009, "Studio");
-    t.matrix
-        .push(matrix_cell(cell_key("3.55", Some(BASE)), false));
-    t.matrix
-        .push(matrix_cell(cell_key("1.50", Some(BASE)), false));
+    t.matrix.push(matrix_cell(cell_key("3.55", Some(BASE))));
+    t.matrix.push(matrix_cell(cell_key("1.50", Some(BASE))));
     let tmp = Fixtures::new("coverage");
     tmp.write_cross("NPAA60010", &reference_key(), &converged(0));
     tmp.write_anchor(
@@ -294,10 +293,10 @@ fn coverage_counts_declared_and_recorded_cells_apart() {
         &cell_key("3.55", Some(BASE)),
         &boot(BootOutcome::Fault, 44),
     );
-    let docs = [load_title(&t, tmp.path()).unwrap()];
+    let docs = load_title(&t, tmp.path()).unwrap();
     assert_eq!(
-        render_coverage(&docs),
-        "1 title(s), 3 firmware(s), 3 declared cell(s), 2 recorded."
+        render_coverage(&[&docs]),
+        "1 game title(s), 3 firmware(s), 3 declared cell(s), 2 recorded."
     );
 }
 
@@ -306,13 +305,11 @@ fn coverage_counts_a_firmware_once_across_titles_that_share_it() {
     let a = title("NPAA60011", "A", 2009, "Studio");
     let b = title("NPAA60012", "B", 2009, "Studio");
     let tmp = Fixtures::new("coverage-shared");
-    let docs = [
-        load_title(&a, tmp.path()).unwrap(),
-        load_title(&b, tmp.path()).unwrap(),
-    ];
+    let a = load_title(&a, tmp.path()).unwrap();
+    let b = load_title(&b, tmp.path()).unwrap();
     assert_eq!(
-        render_coverage(&docs),
-        "2 title(s), 1 firmware(s), 2 declared cell(s), 0 recorded."
+        render_coverage(&[&a, &b]),
+        "2 game title(s), 1 firmware(s), 2 declared cell(s), 0 recorded."
     );
 }
 
@@ -322,7 +319,7 @@ fn the_index_carries_the_coverage_line() {
     let tmp = Fixtures::new("coverage-index");
     let body = render(&[load_title(&t, tmp.path()).unwrap()]);
     assert!(
-        body.contains("Coverage: 1 title(s), 1 firmware(s), 1 declared cell(s), 0 recorded."),
+        body.contains("Coverage: 1 game title(s), 1 firmware(s), 1 declared cell(s), 0 recorded."),
         "{body}"
     );
 }
@@ -376,7 +373,7 @@ fn render_committed_docs() -> Vec<GeneratedDoc> {
     let docs =
         render_docs(registry.iter(), &root.join("tests/fixtures")).expect("render title documents");
     assert!(
-        docs.len() > 1,
+        docs.len() > 2,
         "registry is empty; the gate would pass vacuously"
     );
     docs
@@ -441,10 +438,54 @@ fn drift_gate_keeps_column_alignment_distinct() {
 }
 
 #[test]
+fn a_firmware_shipped_title_has_no_row_in_the_index_and_is_not_counted() {
+    let game = title("NPAA00020", "Game", 2007, "Studio");
+    let shipped = firmware_exec_title("VSHIDX", "System Software", &[REFERENCE_FW, "1.50"]);
+    let tmp = Fixtures::new("index-no-firmware-exec");
+    tmp.write_anchor(
+        "VSHIDX",
+        &cell_key(REFERENCE_FW, None),
+        &boot(BootOutcome::MaxSteps, 389_859),
+    );
+    let body = render(&[
+        load_title(&game, tmp.path()).unwrap(),
+        load_title(&shipped, tmp.path()).unwrap(),
+    ]);
+    assert!(body.contains("[NPAA00020](titles/NPAA00020.md)"), "{body}");
+    assert!(!body.contains("VSHIDX"), "{body}");
+    assert!(!body.contains("389,859"), "{body}");
+    assert!(
+        body.contains("Coverage: 1 game title(s), 1 firmware(s), 1 declared cell(s), 0 recorded."),
+        "the firmware-shipped title's two cells must not reach the count: {body}"
+    );
+}
+
+#[test]
+fn the_config_column_names_the_floor_whatever_else_is_declared() {
+    let mut t = title("NPAA00021", "Floored", 2007, "Studio");
+    t.system_ver = Some("1.50".to_string());
+    t.matrix = vec![
+        matrix_cell(cell_key("1.50", Some(BASE))),
+        matrix_cell(reference_key()),
+    ];
+    let tmp = Fixtures::new("config-floor");
+    tmp.write_anchor(
+        "NPAA00021",
+        &reference_key(),
+        &boot(BootOutcome::ProcessExit, 4_444_444),
+    );
+    let row = headline_row(&t, tmp.path());
+    assert!(row.contains("| fw 1.50 x base |"), "{row}");
+    assert!(
+        !row.contains("4,444,444"),
+        "the newer firmware's anchor is not the headline: {row}"
+    );
+}
+
+#[test]
 fn a_non_reference_cells_anchor_is_never_the_headline_row() {
     let mut t = title("NPAA50001", "TwoCells", 2009, "Studio");
-    t.matrix
-        .push(matrix_cell(cell_key("3.55", Some(BASE)), false));
+    t.matrix.push(matrix_cell(cell_key("3.55", Some(BASE))));
     let tmp = Fixtures::new("twocells");
     tmp.write_anchor(
         "NPAA50001",

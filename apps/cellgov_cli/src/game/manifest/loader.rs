@@ -420,6 +420,7 @@ impl TitleManifest {
         }
         let matrix = matrix::build(
             file.bench.map(|b| b.matrix).unwrap_or_default(),
+            file.title.system_ver.as_deref(),
             &source,
             rsx_mirror,
             origin,
@@ -435,6 +436,7 @@ impl TitleManifest {
             distribution,
             rap_filename: file.title.rap_filename,
             bench_max_steps: file.title.bench_max_steps,
+            system_ver: file.title.system_ver,
             checkpoint,
             source,
             rsx_mirror,

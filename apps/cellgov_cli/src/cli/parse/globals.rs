@@ -74,7 +74,7 @@ fn names_its_own_store_root(command: &Command) -> bool {
 /// The commands [`reads_vfs_root`] answers for, as help text.
 const VFS_ROOT_READERS: &str =
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
-     keys, self, boot, and dev disasm / prx-imports / funcs / fixture-gen";
+     keys, self, boot, and dev disasm / prx-imports / funcs / fixture-gen / gen-manifest";
 
 /// The commands [`reads_format`] answers for, as help text.
 const FORMAT_READERS: &str = "status, the firmware and title list / show / verify commands, \
@@ -135,6 +135,7 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
                 | DevCommand::PrxImports(_)
                 | DevCommand::Funcs(_)
                 | DevCommand::FixtureGen(_)
+                | DevCommand::GenManifest(_)
         ),
         Command::Diff(_) | Command::Explore(_) | Command::Scenario(_) => false,
     }

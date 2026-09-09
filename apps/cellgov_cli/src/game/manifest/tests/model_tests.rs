@@ -239,6 +239,7 @@ fn hdd_manifest(content_id: &str, short: &str, candidates: &[&str]) -> TitleMani
         distribution: Distribution::PsnHdd,
         rap_filename: None,
         bench_max_steps: None,
+        system_ver: None,
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,
@@ -433,13 +434,12 @@ fn a_title_with_no_candidates_names_the_gap_rather_than_listing_nothing() {
 mod reference_cell_tests {
     use super::*;
 
-    fn base_cell(fw: &str, reference: bool) -> MatrixCell {
+    fn base_cell(fw: &str) -> MatrixCell {
         MatrixCell {
             key: CellKey {
                 fw: fw.to_string(),
                 game_ver: Some("base".to_string()),
             },
-            reference,
             expect: CellExpectation::Frontier,
             bench_max_steps: None,
             checkpoint: None,
@@ -448,20 +448,31 @@ mod reference_cell_tests {
     }
 
     #[test]
-    fn the_reference_cell_is_the_marked_row_not_the_first_row() {
+    fn the_reference_key_is_the_floor_times_the_base_install() {
         let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
-        m.matrix = vec![base_cell("4.91", false), base_cell("3.55", true)];
+        m.system_ver = Some("3.55".to_string());
+        m.matrix = vec![base_cell("4.91"), base_cell("3.55")];
         assert_eq!(
-            m.reference_cell().map(|c| c.key.fw.as_str()),
-            Some("3.55"),
-            "the marked row answers, not the first declared one"
+            m.reference_key(),
+            Some(CellKey {
+                fw: "3.55".to_string(),
+                game_ver: Some("base".to_string()),
+            }),
+            "the floor answers, not the first declared cell"
         );
+    }
+
+    #[test]
+    fn a_title_with_no_floor_has_no_reference_key() {
+        let m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
+        assert_eq!(m.system_ver, None);
+        assert_eq!(m.reference_key(), None);
     }
 
     #[test]
     fn a_cell_lookup_matches_the_whole_key() {
         let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
-        m.matrix = vec![base_cell("4.91", true)];
+        m.matrix = vec![base_cell("4.91")];
         let base = CellKey {
             fw: "4.91".to_string(),
             game_ver: Some("base".to_string()),
@@ -486,7 +497,7 @@ mod reference_cell_tests {
     #[test]
     fn an_absent_game_version_is_not_the_base_one() {
         let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
-        m.matrix = vec![base_cell("4.91", true)];
+        m.matrix = vec![base_cell("4.91")];
         assert!(m
             .cell(&CellKey {
                 fw: "4.91".to_string(),
@@ -500,7 +511,6 @@ mod reference_cell_tests {
                 fw: "4.91".to_string(),
                 game_ver: None,
             },
-            reference: true,
             expect: CellExpectation::Frontier,
             bench_max_steps: None,
             checkpoint: None,
@@ -512,14 +522,5 @@ mod reference_cell_tests {
                 game_ver: Some("base".to_string()),
             })
             .is_none());
-    }
-
-    #[test]
-    #[cfg(debug_assertions)]
-    #[should_panic(expected = "more than one reference cell")]
-    fn a_second_reference_cell_breaks_the_accessor_rather_than_being_picked_between() {
-        let mut m = hdd_manifest("NPAA00001", "t", &["EBOOT.BIN"]);
-        m.matrix = vec![base_cell("4.91", true), base_cell("3.55", true)];
-        let _ = m.reference_cell();
     }
 }

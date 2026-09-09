@@ -24,6 +24,7 @@ year = 2007
 developer = "test-developer"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -39,6 +40,7 @@ year = 2007
 developer = "test-developer"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "first-rsx-write"
@@ -54,6 +56,7 @@ year = 2007
 developer = "test-developer"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "pc"

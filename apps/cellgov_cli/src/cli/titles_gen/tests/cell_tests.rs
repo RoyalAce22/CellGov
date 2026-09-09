@@ -7,7 +7,7 @@ use super::super::test_fixtures::*;
 use super::*;
 
 fn cell(expect: CellExpectation) -> MatrixCell {
-    let mut c = matrix_cell(reference_key(), true);
+    let mut c = matrix_cell(reference_key());
     c.expect = expect;
     c
 }

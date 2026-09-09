@@ -29,8 +29,6 @@ pub(super) struct ManifestMatrixRow {
     /// [`super::CellKey::game_ver`].
     #[serde(default)]
     pub(super) game_ver: Option<String>,
-    #[serde(default)]
-    pub(super) reference: bool,
     /// One of `"frontier"`, `"probe"`; defaults to `"frontier"`.
     #[serde(default)]
     pub(super) expect: Option<String>,
@@ -130,6 +128,10 @@ pub(super) struct ManifestTitle {
     /// only at the same cap.
     #[serde(default)]
     pub(super) bench_max_steps: Option<u64>,
+    /// The title's floor as a store version key (`PS3_SYSTEM_VER =
+    /// 01.5000` is `"1.50"`); see [`super::TitleManifest::system_ver`].
+    #[serde(default)]
+    pub(super) system_ver: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]

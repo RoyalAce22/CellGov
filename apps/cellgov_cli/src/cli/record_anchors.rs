@@ -2,9 +2,9 @@
 //! rewrite their committed anchors.
 //!
 //! The witness suite asserts against each cell's `boot_summary.json`;
-//! this is the only thing that writes one. It records the
-//! `[[bench.matrix]]` rows the registry declares, and refuses a cell it
-//! does not.
+//! this is the only thing that writes one. It records the cells the
+//! registry declares -- the one `[title] system_ver` derives and every
+//! `[[bench.matrix]]` row -- and refuses a cell it does not.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -41,6 +41,8 @@ struct Job {
     cell: CellKey,
     max_steps: u64,
     checkpoint: CheckpointTrigger,
+    /// The registry's reason this cell has no measurement yet.
+    pending: Option<String>,
 }
 
 impl Job {
@@ -61,8 +63,22 @@ fn jobs_for(title: &TitleManifest) -> Vec<Job> {
             cell: cell.key.clone(),
             max_steps: cell_max_steps(title, Some(cell)),
             checkpoint: cell_checkpoint(title, Some(cell)),
+            pending: cell.pending.clone(),
         })
         .collect()
+}
+
+/// Separate the cells the registry declares `pending`, unless `--fw`
+/// or `--game-ver` narrowed the selection.
+///
+/// Something outside the registry stops a pending cell. A sweep that
+/// measures it dies at that boot and takes every other cell of the
+/// title with it. A named selection asks for the measurement
+/// regardless; once the anchor exists, the structure gate says to drop
+/// the marker.
+fn skip_pending(jobs: Vec<Job>, narrowed: bool) -> (Vec<Job>, Vec<Job>) {
+    jobs.into_iter()
+        .partition(|j| narrowed || j.pending.is_none())
 }
 
 fn read_registry(dir: &Path) -> Vec<TitleManifest> {
@@ -479,8 +495,8 @@ fn filter_declared(jobs: Vec<Job>, fw: Option<&str>, game_ver: Option<&str>) -> 
         };
         die(&format!(
             "record-anchors: the registry declares no cell matching {asked}; declared: {}. \
-             The gate reads declared cells, so an anchor recorded outside the matrix would \
-             be compared against by nothing. Add the row to [[bench.matrix]] first",
+             The gate reads declared cells, so an anchor recorded outside the declaration \
+             would be compared against by nothing. Add the row to [[bench.matrix]] first",
             if declared.is_empty() {
                 "none".to_string()
             } else {
@@ -513,11 +529,15 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
         .filter(|t| t.matrix.is_empty())
         .map(|t| t.short_name.as_str())
         .collect();
+    // A title with a PARAM.SFO always declares the cell its `system_ver`
+    // derives. Only a title shipped inside the firmware, or built beside
+    // its manifest, can reach here with nothing declared.
     if !undeclared.is_empty() {
         die(&format!(
             "no cells declared for: {}. An anchor is keyed by (content id, firmware, game \
-             version), so a title with no [[bench.matrix]] row has nothing to record and \
-             nothing for the gate to read",
+             version), and a title with no floor of its own declares its cells as \
+             [[bench.matrix]] rows alone; with none it has nothing to record and nothing \
+             for the gate to read",
             undeclared.join(", ")
         ));
     }
@@ -526,6 +546,26 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
         args.fw.as_deref(),
         args.game_ver.as_deref(),
     );
+    let narrowed = args.fw.is_some() || args.game_ver.is_some();
+    let (jobs, pending) = skip_pending(jobs, narrowed);
+    for job in &pending {
+        println!(
+            "{}: skipped -- declared pending ({})",
+            job.label(),
+            job.pending.as_deref().unwrap_or_default()
+        );
+    }
+    if jobs.is_empty() {
+        die(&format!(
+            "every selected cell is declared pending ({}); nothing to record. Name one with \
+             --fw / --game-ver to measure it regardless",
+            pending
+                .iter()
+                .map(Job::label)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
 
     let strict = one.is_some();
     let mut recorded = 0usize;

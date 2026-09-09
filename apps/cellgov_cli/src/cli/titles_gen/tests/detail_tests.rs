@@ -7,13 +7,21 @@ use super::super::test_fixtures::*;
 use super::*;
 use crate::game::manifest::TitleManifest;
 
-/// The first entry of `cells` becomes the title's reference cell.
+/// The first entry's firmware is the title's floor, so that cell
+/// becomes the reference. Cells with no game version make the title
+/// one shipped inside the firmware, which derives no reference.
 fn title_with(content_id: &str, cells: &[(&str, Option<&str>)]) -> TitleManifest {
-    let mut t = title(content_id, "Gridded", 2009, "Studio");
+    let mut t = match cells.first() {
+        Some((fw, Some(_))) => {
+            let mut t = title(content_id, "Gridded", 2009, "Studio");
+            t.system_ver = Some(fw.to_string());
+            t
+        }
+        _ => firmware_exec_title(content_id, "Gridded", &[]),
+    };
     t.matrix = cells
         .iter()
-        .enumerate()
-        .map(|(i, (fw, game))| matrix_cell(cell_key(fw, *game), i == 0))
+        .map(|(fw, game)| matrix_cell(cell_key(fw, *game)))
         .collect();
     t
 }
@@ -97,8 +105,36 @@ fn a_firmware_shipped_title_has_no_game_axis() {
     );
     let grid = grid_of(&t, fixtures.path());
     assert!(grid.starts_with("| fw | result |"), "{grid}");
-    assert!(grid.contains("| 4.93 | anchor (MaxSteps)* |"), "{grid}");
+    assert!(grid.contains("| 4.93 | anchor (MaxSteps) |"), "{grid}");
     assert!(grid.contains("| 4.91 | . |"), "{grid}");
+    assert!(
+        !grid.contains('*'),
+        "a firmware-shipped title derives no reference, so no cell carries the mark: {grid}"
+    );
+}
+
+#[test]
+fn the_star_follows_the_floor_not_the_first_declared_row() {
+    let mut t = title_with(
+        "NPAA80008",
+        &[("1.50", Some(BASE)), (REFERENCE_FW, Some(BASE))],
+    );
+    // Declaration order puts the newer firmware first; the floor still
+    // carries the mark.
+    t.matrix.reverse();
+    let fixtures = Fixtures::new("grid-star-floor");
+    let grid = grid_of(&t, fixtures.path());
+    assert!(grid.contains("| 1.50 | .* |"), "{grid}");
+    assert!(grid.contains("| 4.93 | . |"), "{grid}");
+}
+
+#[test]
+fn a_firmware_shipped_titles_page_links_back_to_the_firmware_page() {
+    let t = title_with("VSHTEST2", &[(REFERENCE_FW, None)]);
+    let fixtures = Fixtures::new("page-firmware-back");
+    let page = render(&load_title(&t, fixtures.path()).unwrap());
+    assert!(page.contains("[firmware page](../firmware.md)"), "{page}");
+    assert!(!page.contains("../titles.md"), "{page}");
 }
 
 #[test]

@@ -222,10 +222,14 @@ pub(crate) enum CompletionShell {
 /// Which record `gen-manifest` generates from.
 const GEN_MANIFEST_SCOPE: &str = "Notes:
   A title's base record generates that title's manifest; a title-update
-  record is refused by name. A firmware record generates the manifest
-  for the system software the firmware ships. That manifest names no
-  firmware version: the store holds the version, and the manifest
-  resolves against whichever firmware --fw selects.";
+  record is refused by name. The stub's system_ver is read from the
+  installed tree's PARAM.SFO. That tree, and the record directory
+  --title-id and --firmware default to, sit under the store root
+  --vfs-root names, so the tree must be present there. A firmware
+  record generates the manifest for the system software the firmware
+  ships. That manifest names no firmware version: the store holds the
+  version, and the manifest resolves against whichever firmware --fw
+  selects.";
 
 /// `cellgov dev gen-manifest`
 #[derive(Debug, clap::Args)]

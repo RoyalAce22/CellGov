@@ -23,10 +23,6 @@ analysis. It does not configure gameplay.
   - `--content-id <SERIAL>`
   - `--title-manifest <path>` (bypass the registry)
 
-The matrix rendered into [../titles.md](../docs/titles.md) is
-generated from this directory plus per-title fixture summaries
-via `cellgov dev titles-gen`.
-
 ## Schema overview
 
 The file has one required `[title]` block, one required
@@ -34,6 +30,11 @@ The file has one required `[title]` block, one required
 `[rsx]`, `[content]`, `[[fs.mounts]]`, `[[bench.matrix]]`). The
 TOML parser runs with `deny_unknown_fields`; a typo in a key name
 surfaces as a load error.
+
+The matrix rendered into [../titles.md](../docs/titles.md) is
+generated from this directory plus per-title fixture summaries
+via `cellgov dev titles-gen`; the system software renders on
+[../firmware.md](../docs/firmware.md) from the same run.
 
 ### `[title]` (required)
 
@@ -49,6 +50,7 @@ surfaces as a load error.
 | `distribution`     | string   | yes      | One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`, `"firmware-exec"`, `"microtest"`. Lowercase kebab; the loader rejects other casings.                                                                                               |
 | `rap_filename`     | string   | no       | NPDRM license file under the VFS `exdata/` dir; needed to decrypt PSN EBOOTs whose RAP name does not match the content id.                                                                                                            |
 | `bench_max_steps`  | integer  | no       | Per-title instruction cap for `boot bench-once` and the title suites; defaults to 100,000,000. Raise it when a title's checkpoint sits past the default cap.                                                                          |
+| `system_ver`       | string   | hdd/disc | The firmware the title's own `PARAM.SFO` asks for (`PS3_SYSTEM_VER`), as a store version key: `01.5000` is `"1.50"`. Required on every `hdd` / `disc` title, refused on `firmware-exec` and `manifest-relative` ones, which have no PARAM.SFO. Derives the reference cell; see `[[bench.matrix]]` below. A `title-corpus` suite holds it to the installed table. |
 
 ### `[checkpoint]` (required)
 
@@ -129,12 +131,35 @@ resource enumerator.
 
 ### `[[bench.matrix]]` (optional, array-of-tables)
 
-Which **cells** this title declares. A cell is the title at one
-firmware and one game version, and it is the unit a result is
-keyed by: there is no "the result for `<disc serial>`", only a
-result for `(<disc serial>, fw 4.91, base)`.
+The **cells** this title declares beyond the one it derives. A cell
+is the title at one firmware and one game version, and it is the
+unit a result is keyed by: there is no "the result for `<disc
+serial>`", only a result for `(<disc serial>, fw 4.91, base)`.
 
-Three readers consume the matrix: `dev record-anchors` walks it,
+A title with a PARAM.SFO declares one cell without any row: its
+`system_ver` times its base install. That is the **reference cell**,
+the one the headline row of `docs/titles.md` renders, and it is
+derived rather than declared so that nobody chooses it -- the title
+was shipped and tested against that firmware, so a divergence there
+is CellGov's and the syscall it names is one the title used on
+hardware. Rows exist for exceptions:
+
+- a further cell somebody wants measured (the newest firmware as a
+  drift study, an update version),
+- a per-cell `bench_max_steps` or `checkpoint` override, or a
+  `pending` reason, attached to the derived cell by a row that
+  repeats it,
+- a `probe` at another cell.
+
+A row that repeats the derived cell and carries none of those is
+refused: it declares nothing the manifest has not. A row that repeats
+it with `expect = "probe"` is refused too; the headline row states
+whether the title converged.
+
+A `firmware-exec` title has no PARAM.SFO, so its rows are its whole
+declaration, one per firmware. A `manifest-relative` one likewise.
+
+Three readers consume the declared set: `dev record-anchors` walks it,
 `boot bench` gates the run against the selected cell's anchor under
 that cell's cap and checkpoint, and `dev titles-gen` renders it.
 
@@ -146,16 +171,10 @@ forty cells.
 | ----------------- | ------- | --------------------------- | ------------------------------------------------------------------------------------------- |
 | `fw`              | string  | yes                         | Firmware version key; the name of a `vfs/firmware/<key>/` entry.                          |
 | `game_ver`        | string  | yes, except `firmware-exec` | `"base"` or an update version key. Refused on a `firmware-exec` title, whose version axis is the firmware's. |
-| `reference`       | bool    | exactly one row per title   | The cell the headline row of `docs/titles.md` renders.                                    |
 | `expect`          | string  | no (default `"frontier"`)   | `"frontier"` or `"probe"`; see below.                                                     |
 | `bench_max_steps` | integer | no                          | Per-cell override of the `[title]` cap.                                                   |
 | `checkpoint`      | table   | no                          | Per-cell override of the `[checkpoint]` block; same `kind` / `pc` fields and refusals.    |
 | `pending`         | string  | no                          | Why the cell carries no measurement yet; rendered beside the cell on the title's page.    |
-
-The reference cell is declared rather than inferred for the same
-reason `--fw` refuses to guess `latest`: a headline row whose
-configuration was picked by lexical sort is a real number that
-nothing on the page attributes.
 
 `expect` says what the cell is for:
 
@@ -186,11 +205,14 @@ because two rows differing in a field the rendered document does
 not show are two incomparable measurements presented as
 comparable.
 
+A title whose `[title]` states `system_ver = "2.76"` declares
+`fw 2.76 x base` with no row. These two rows add a drift-study cell
+and a probe beside it:
+
 ```toml
 [[bench.matrix]]
 fw = "4.91"
 game_ver = "base"
-reference = true
 
 [[bench.matrix]]
 fw = "3.55"
@@ -199,13 +221,22 @@ bench_max_steps = 250_000_000
 expect = "probe"
 ```
 
+This row repeats the derived cell to raise its cap; without the
+override it would be refused as adding nothing:
+
+```toml
+[[bench.matrix]]
+fw = "2.76"
+game_ver = "base"
+bench_max_steps = 250_000_000
+```
+
 A `firmware-exec` title's matrix is one row per firmware, with no
 `game_ver` at all:
 
 ```toml
 [[bench.matrix]]
 fw = "4.91"
-reference = true
 ```
 
 ## Worked examples
@@ -222,13 +253,14 @@ year = <release year>
 developer = "<developer credit>"
 engine = "<engine name>"
 distribution = "psn-hdd"
+system_ver = "<PS3_SYSTEM_VER as a version key, e.g. 1.50>"
 
 [checkpoint]
 kind = "first-rsx-write"
 ```
 
 Defaults: `[source]` -> hdd, `[rsx] mirror` -> false, no
-content / mounts.
+content / mounts, one declared cell (`fw <system_ver> x base`).
 
 ### Disc-ISO title
 
@@ -237,6 +269,7 @@ content / mounts.
 content_id = "<disc serial>"
 ...
 distribution = "disc-iso"
+system_ver = "<PS3_SYSTEM_VER as a version key, e.g. 2.76>"
 
 [source]
 kind = "disc"
@@ -283,7 +316,8 @@ unpopulated out-params and bails.
    (PSN/HDD) or `cellgov title install <iso>` (a decrypted
    disc dump), which populates `vfs/dev_hdd0/game/<content_id>/USRDIR/`
    or `vfs/dev_bdvd/<content_id>/PS3_GAME/USRDIR/` respectively (both
-   gitignored). `dev gen-manifest` can then emit a stub of this file.
+   gitignored). `dev gen-manifest` can then emit a stub of this file,
+   with `system_ver` read from the installed tree's `PARAM.SFO`.
 2. Confirm `EBOOT.BIN` is present. CellGov decrypts it in
    memory via `cellgov_install::sce::decrypt_self_to_elf`; do
    NOT write the decrypted bytes back to `EBOOT.elf`; a stale
@@ -313,21 +347,23 @@ The loader enforces, in addition to TOML well-formedness:
   are not combined.
 - Every `[[fs.mounts]].prefix` starts with `/`; no two
   mounts share a prefix.
-- A declared `[[bench.matrix]]` marks exactly one row
-  `reference = true`; zero and two are both refused, naming the
-  rows. An absent or empty matrix declares no cells and is
-  accepted.
+- `system_ver` is present on every `hdd` / `disc` title and absent
+  from every `firmware-exec` / `manifest-relative` one. It is usable
+  as a store directory name, like every `fw`.
 - Every `fw`, and every `game_ver` other than `"base"`, is usable
   as a store directory name. This checks the key's shape only; the
   loader never consults the store, so a cell may name a firmware
   that is not installed.
 - `game_ver` is present on every row of a title with a version
   axis, and absent from every row of a `firmware-exec` title.
-- No two rows name the same cell.
+- No two rows name the same cell. A row repeating the cell
+  `system_ver` derives is accepted once, and only when it carries a
+  `bench_max_steps`, `checkpoint` or `pending`; one carrying nothing
+  is refused as adding nothing.
+- A row repeating the derived cell is not a `probe`: the headline
+  row states whether the title converged, and a probe cell's datum
+  is the error the guest received instead.
 - `pending` is neither empty nor carrying a `|` or a newline.
-- The reference row is not a `probe`: a headline row states whether
-  the title converged, and a probe cell's datum is the error the
-  guest received instead.
 
 Any of these failures surfaces as a typed `ManifestError` at
 startup, carrying the offending file path; a malformed

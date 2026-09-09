@@ -7,6 +7,10 @@ year = 2007
 developer = "Naughty Dog"
 engine = "Naughty Dog proprietary"
 distribution = "disc-iso"
+# PS3_SYSTEM_VER from the title's own PARAM.SFO (01.9400), held against
+# the installed content by the title-corpus suite. Derives the one cell
+# the headline row is measured at: fw 1.94 x base.
+system_ver = "1.94"
 
 [source]
 kind = "disc"
@@ -14,15 +18,9 @@ kind = "disc"
 [checkpoint]
 kind = "first-rsx-write"
 
-# The firmware this title's own PARAM.SFO asks for
-# (PS3_SYSTEM_VER = 01.9400).
-[[bench.matrix]]
-fw = "1.94"
-game_ver = "base"
-
-# The cell this title is gated and rendered at. See
-# docs/architecture/title_harness.md.
+# Drift study: the same title on the newest firmware. Recorded evidence
+# about how much of a divergence is the firmware's rather than the
+# title's.
 [[bench.matrix]]
 fw = "4.93"
 game_ver = "base"
-reference = true

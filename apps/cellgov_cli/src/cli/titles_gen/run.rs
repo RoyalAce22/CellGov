@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use super::detail::{detail_page_path, DETAIL_DIR};
 use super::load::{load_title, SummaryLoadError};
-use super::{detail, index};
+use super::{detail, firmware, index};
 use crate::cli::exit::die;
 use crate::cli::parse::TitlesGenArgs;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
@@ -15,8 +15,11 @@ use crate::game::manifest::{TitleManifest, TitleRegistry};
 /// Directory the generated documents are written under.
 const DEFAULT_OUTPUT_DIR: &str = "docs";
 
-/// The index, which sits at the output directory's root.
+/// The title index, which sits at the output directory's root.
 const INDEX_FILE: &str = "titles.md";
+
+/// The firmware page, beside the index.
+const FIRMWARE_FILE: &str = "firmware.md";
 
 /// One generated file, at a path relative to the output directory.
 pub(crate) struct GeneratedDoc {
@@ -48,6 +51,7 @@ pub(crate) fn run(args: &TitlesGenArgs) {
     let registry = TitleRegistry::scan_dir(Path::new(&registry_dir))
         .unwrap_or_else(|e| die(&format!("titles-gen: scan {registry_dir}: {e}")));
 
+    let titles = registry.iter().count();
     let docs = render_docs(registry.iter(), Path::new(&fixtures_dir))
         .unwrap_or_else(|e| die(&format!("titles-gen: {e}")));
 
@@ -75,14 +79,13 @@ pub(crate) fn run(args: &TitlesGenArgs) {
         );
     }
     println!(
-        "titles-gen: wrote {} file(s) under {output_dir} ({} title(s))",
+        "titles-gen: wrote {} file(s) under {output_dir} ({titles} title(s))",
         docs.len(),
-        docs.len().saturating_sub(1),
     );
 }
 
-/// Render every file the generator owns: the index, then one page per
-/// title in `content_id`-ascending order.
+/// Render every file the generator owns: the title index, the firmware
+/// page, then one page per title in `content_id`-ascending order.
 ///
 /// [`run`] and the committed-doc drift gate both call this, so the
 /// gate checks the bytes and the file set the generator writes.
@@ -102,10 +105,16 @@ pub(crate) fn render_docs<'a>(
         .map(|t| load_title(t, fixtures))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut out = vec![GeneratedDoc {
-        path: PathBuf::from(INDEX_FILE),
-        body: index::render(&loaded),
-    }];
+    let mut out = vec![
+        GeneratedDoc {
+            path: PathBuf::from(INDEX_FILE),
+            body: index::render(&loaded),
+        },
+        GeneratedDoc {
+            path: PathBuf::from(FIRMWARE_FILE),
+            body: firmware::render(&loaded),
+        },
+    ];
     out.extend(loaded.iter().map(|d| GeneratedDoc {
         path: detail_page_path(&d.title.content_id),
         body: detail::render(d),

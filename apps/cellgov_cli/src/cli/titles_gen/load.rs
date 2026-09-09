@@ -22,7 +22,7 @@ use cellgov_compare::{
 };
 
 use super::cell::{CellArtifacts, CellResult};
-use crate::game::manifest::{CellKey, TitleManifest, BASE_GAME_VER};
+use crate::game::manifest::{CellKey, GameSource, TitleManifest, BASE_GAME_VER};
 use crate::paths::CROSS_RUNNER_SUMMARY_FILE;
 
 /// The anchor file every cell's boot measurement is written to.
@@ -114,18 +114,50 @@ pub(crate) enum SummaryLoadError {
     },
 }
 
-/// One title's whole rendered state, read once and used by both
-/// documents.
+/// One declared cell with what its directories hold.
+#[derive(Debug)]
+pub(crate) struct LoadedCell {
+    pub(crate) key: CellKey,
+    /// The grid token's verdict, read from `artifacts`.
+    pub(crate) result: CellResult,
+    /// The committed files themselves, which a table row quotes.
+    pub(crate) artifacts: CellArtifacts,
+}
+
+/// One title's whole rendered state, read once and used by every
+/// document.
 ///
 /// `cells` follows the manifest's declaration order, so the grid and
 /// the coverage count read the same set the registry declares.
 #[derive(Debug)]
 pub(crate) struct TitleDocs<'a> {
     pub(crate) title: &'a TitleManifest,
-    pub(crate) cells: Vec<(CellKey, CellResult)>,
-    /// The reference cell's own artifacts, which the headline row
-    /// renders in full. Empty when the title declares no reference.
-    pub(crate) reference: CellArtifacts,
+    pub(crate) cells: Vec<LoadedCell>,
+}
+
+impl TitleDocs<'_> {
+    /// The loaded reference cell, which the headline row renders in
+    /// full. `None` for a title that derives no reference.
+    pub(crate) fn reference(&self) -> Option<&LoadedCell> {
+        let key = self.title.reference_key()?;
+        let found = self.cells.iter().find(|c| c.key == key);
+        // The manifest loader puts the derived cell first in every
+        // matrix, so a miss is a manifest built outside it. The Config
+        // column would then name a cell the row quotes nothing for.
+        debug_assert!(
+            found.is_some(),
+            "titles-gen: {} derives {} from system_ver, but its matrix does not declare it",
+            self.title.content_id,
+            key.label()
+        );
+        found
+    }
+
+    /// Whether the title belongs on the firmware page: it ships inside
+    /// every firmware image, so its rows are firmware versions.
+    pub(crate) fn ships_in_firmware(&self) -> bool {
+        matches!(self.title.source, GameSource::FirmwareExec { .. })
+    }
 }
 
 /// Read every declared cell of one title, after refusing any result
@@ -140,21 +172,16 @@ pub(crate) fn load_title<'a>(
     fixtures: &Path,
 ) -> Result<TitleDocs<'a>, SummaryLoadError> {
     refuse_undeclared_cells(title, fixtures)?;
-    let reference_key = title.reference_cell().map(|c| c.key.clone());
     let mut cells = Vec::with_capacity(title.matrix.len());
-    let mut reference = CellArtifacts::default();
     for cell in &title.matrix {
         let artifacts = load_cell(title, fixtures, &cell.key)?;
-        cells.push((cell.key.clone(), CellResult::classify(cell, &artifacts)));
-        if reference_key.as_ref() == Some(&cell.key) {
-            reference = artifacts;
-        }
+        cells.push(LoadedCell {
+            key: cell.key.clone(),
+            result: CellResult::classify(cell, &artifacts),
+            artifacts,
+        });
     }
-    Ok(TitleDocs {
-        title,
-        cells,
-        reference,
-    })
+    Ok(TitleDocs { title, cells })
 }
 
 /// Read one declared cell's anchor and cross-runner summary.
@@ -476,25 +503,22 @@ mod cell_game_version_tests {
         let fixtures = Fixtures::new("gamever-update");
         let key = cell_key(REFERENCE_FW, Some("02.51"));
         let mut t = title("NPAA61001", "Updated", 2008, "Studio");
-        t.matrix = vec![matrix_cell(key.clone(), true)];
+        t.matrix.push(matrix_cell(key.clone()));
         fixtures.write_anchor(
             "NPAA61001",
             &key,
             &boot_at(REFERENCE_FW, Some("update:02.51")),
         );
-        assert!(load_title(&t, fixtures.path())
-            .unwrap()
-            .reference
-            .boot
-            .is_some());
+        let docs = load_title(&t, fixtures.path()).unwrap();
+        let update = docs.cells.iter().find(|c| c.key == key).unwrap();
+        assert!(update.artifacts.boot.is_some());
     }
 
     #[test]
     fn a_firmware_shipped_cell_refuses_an_anchor_naming_a_store_entry() {
         let fixtures = Fixtures::new("gamever-firmware-exec");
         let key = cell_key(REFERENCE_FW, None);
-        let mut t = title("VSHVER", "Firmware Exec", 2006, "Studio");
-        t.matrix = vec![matrix_cell(key.clone(), true)];
+        let t = firmware_exec_title("VSHVER", "Firmware Exec", &[REFERENCE_FW]);
         fixtures.write_anchor("VSHVER", &key, &boot_at(REFERENCE_FW, Some(BASE)));
         assert!(matches!(
             load_title(&t, fixtures.path()),
@@ -509,9 +533,36 @@ mod cell_game_version_tests {
         fixtures.write_anchor("NPAA61002", &reference_key(), &boot_at(REFERENCE_FW, None));
         assert!(load_title(&t, fixtures.path())
             .unwrap()
-            .reference
+            .reference()
+            .unwrap()
+            .artifacts
             .boot
             .is_some());
+    }
+}
+
+#[cfg(test)]
+mod reference_lookup_tests {
+    use super::super::test_fixtures::*;
+    use super::*;
+
+    #[test]
+    fn the_reference_is_the_derived_cells_load() {
+        let fixtures = Fixtures::new("reference-derived");
+        let t = title("NPAA62001", "Derived", 2008, "Studio");
+        let docs = load_title(&t, fixtures.path()).unwrap();
+        assert_eq!(docs.reference().unwrap().key, reference_key());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "does not declare it")]
+    fn a_derived_cell_the_matrix_omits_is_an_invariant_break_not_an_unrecorded_cell() {
+        let fixtures = Fixtures::new("reference-omitted");
+        let mut t = title("NPAA62002", "Omitted", 2008, "Studio");
+        t.matrix = vec![matrix_cell(cell_key("3.55", Some(BASE)))];
+        let docs = load_title(&t, fixtures.path()).unwrap();
+        let _ = docs.reference();
     }
 }
 

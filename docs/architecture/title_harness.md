@@ -36,71 +36,91 @@ manifest path (`--title-manifest <file>`). A manifest declares:
   regions both runners capture; an EBOOT with more loadable
   segments names more regions (`code`, `data`, `code_hi`,
   `data_hi`, ...).
-- **`[[bench.matrix]]` cells.** A result is keyed by the cell -- the
-  title at one firmware version and one game version -- and the
-  matrix declares which cells exist. One row carries
-  `reference = true`, naming the configuration a headline row is
-  measured at; the loader refuses a matrix marking none or several,
-  since a reference chosen by sort order is a measurement nothing
-  attributes. A row overrides the title-level cap and checkpoint for
-  its own cell and nothing else, and a row expecting convergence
-  (`frontier`) is distinguished from one that exists to observe an
-  incompatibility (`probe`). A firmware-shipped title states no game
-  version: its version axis is the firmware's, so its matrix is one
-  row per firmware.
+- **`system_ver` and `[[bench.matrix]]` cells.** A result is keyed by
+  the cell -- the title at one firmware version and one game version.
+  A title with a PARAM.SFO declares one cell by carrying `system_ver`,
+  the firmware that table asks for, times its base install; that cell
+  is the reference, the one the headline row is measured at, and
+  nothing in the manifest can move it. `[[bench.matrix]]` rows declare
+  further cells beside it, or repeat it to attach a per-cell cap,
+  checkpoint or `pending` reason; a repeat that carries none of those
+  is refused, and so is one asking the reference to be a probe. A row
+  overrides the title-level cap and checkpoint for its own cell and
+  nothing else, and a row expecting convergence (`frontier`) is
+  distinguished from one that exists to observe an incompatibility
+  (`probe`). A firmware-shipped title has no PARAM.SFO and so no
+  `system_ver`: its version axis is the firmware's, its rows are its
+  whole declaration, and each names a firmware and no game version.
 
 ## Which firmware a title is measured against
 
-The reference cell is declared, not derived. One `[[bench.matrix]]` row
-carries `reference = true`, and that row names the cell a headline row
-is measured at. The loader refuses a matrix marking none or several, so
-the choice is always one somebody made.
+The reference cell is derived from the title. Every title states the
+firmware it shipped against in its own `PARAM.SFO`, under
+`PS3_SYSTEM_VER`, disc and network alike; `02.7600` names firmware 2.76.
+The manifest repeats that value as `[title] system_ver` in the store's
+key spelling, a `title-corpus` suite holds the repetition to the
+installed table, and the loader builds the reference cell from it:
+`(system_ver, base)`. No manifest key points the headline row
+elsewhere, so the cell a title is measured at is a fact the title
+carries rather than a choice the registry records.
 
-Pointing every title's reference at one library is what makes two
-titles' verdicts readable side by side: a divergence that appears in
-one title and not another is then a difference between the titles
-rather than between the firmwares they happened to be measured
-against. Which library each one names is a property of the registry,
-and the generated index renders it per row.
+The floor is the frontier map's honest surface. At it the title and the
+firmware were shipped and tested together, so a divergence there is
+CellGov's, and the syscall a `No` row names as the next implementation
+target is one the title used on hardware. Measured on the newest
+firmware instead, an early title loads a sysmodule set and binds a
+system-software revision nobody who owned the disc ever ran, and a
+divergence there may name a syscall that is on the boot path only
+because the title was booted years out of its era.
 
-A title also states a floor of its own, in its `PARAM.SFO`
-`PS3_SYSTEM_VER` field, which every title carries, disc and network
-alike. `02.7600` names firmware 2.76. A disc ships the matching PUP in
-`PS3_UPDATE/PS3UPDAT.PUP`, so install that PUP and its install-record
-digest matches the one on the disc; a network title states the same
-floor and ships nothing to satisfy it. That floor is the library the
-title was built against, which is why a cell at it is worth declaring.
-It is not what the reference row has to name, and a matrix may declare
-both cells and mark either one.
+The cost is real and is stated rather than hidden: each title is
+measured against the system-software revision and sysmodule set its own
+floor ships, so a bug shared by two titles at two floors will not
+present as shared. That is what the hardware did. A manifest may still
+declare the newest firmware as a further cell -- a drift study -- and
+every declared cell renders on the title's own page.
+
+A disc ships the PUP its floor names in `PS3_UPDATE/PS3UPDAT.PUP`, so
+install that PUP and its install-record digest matches the one on the
+disc; a network title states the same floor and ships nothing to satisfy
+it.
 
 [titles.md](../titles.md) tracks per-title status (boot checkpoint
-reached, cross-runner observation match), one row per title at its
+reached, cross-runner observation match), one row per game title at its
 reference cell, with a Config column naming that cell. Every declared
 cell of one title, measured or not, is on that title's own page under
 `docs/titles/<content-id>.md` -- a grid with firmware down the side and
 game version across.
 
-Splitting the two presentations is what keeps either readable. One
-table cannot express the product of every version and stay the page
-people screenshot, and folding a title's other cells into the headline
-row would state several measurements as one. The grid distinguishes a
+The system software has its own page. It ships inside every firmware
+image, states no floor of its own, and its version axis is the firmware
+axis, so a `Year` or a `Config` column beside the games would mean
+something different from every other row. It renders on
+[firmware.md](../firmware.md), one row per firmware version its
+manifest declares, with the same verdict columns; every one of those
+cells is gated on an anchor, since none is the reference.
+
+Splitting the presentations is what keeps each readable. One table
+cannot express the product of every version and stay the page people
+screenshot, and folding a title's other cells into the headline row
+would state several measurements as one. The grid distinguishes a
 declared cell with nothing recorded from an intersection the manifest
 never declared, because rendering a hole and a boundary the same makes
 a coverage table lie about its own gaps.
 
-`titles-gen` owns the whole set it writes: the index, and one page per
-title in the registry. A page under `docs/titles/` that no title
-claims is removed on the next run and named as it goes, so a title
-dropped from the registry cannot leave a page behind that still reads
-as current. The drift gate compares the set rather than each file, and
-fails on the orphan.
+`titles-gen` owns the whole set it writes: the title index, the
+firmware page, and one page per title in the registry. A page under
+`docs/titles/` that no title claims is removed on the next run and
+named as it goes, so a title dropped from the registry cannot leave a
+page behind that still reads as current. The drift gate compares the
+set rather than each file, and fails on the orphan.
 
 Each committed file is held against the cell it sits in. A summary
 stating a firmware or a title version other than the one its directory
-names is refused, and so is one filed under a cell no
-`[[bench.matrix]]` row declares, or at a path no cell key names at all.
-The path is a claim about what a file is, and an unchecked claim is how
-a curated matrix stops being curated.
+names is refused, and so is one filed under a cell the manifest does
+not declare, or at a path no cell key names at all. The path is a claim
+about what a file is, and an unchecked claim is how a curated matrix
+stops being curated.
 
 ## Title anchors and witnesses
 
@@ -125,13 +145,15 @@ answers for. A committed file states the firmware it was measured
 against, and a file whose statement disagrees with the cell it sits in
 is refused: the directory alone is a claim nothing checks.
 
-A reference cell normally carries a committed anchor. When something
-outside the registry stops it being measured -- a firmware that cannot
-be obtained, a defect that ends the boot before the checkpoint -- the
-cell states the reason, and the gate holds the reason rather than
-tolerating a silent hole. A cell that states a reason and carries an
-anchor anyway is refused too, so the reason cannot outlive what it
-described.
+A gated cell -- a game title's reference cell, or any declared cell of
+the system software -- normally carries a committed anchor. When
+something outside the registry stops it being measured -- a firmware
+that cannot be obtained, a defect that ends the boot before the
+checkpoint -- a `[[bench.matrix]]` row for that cell states the reason,
+and the gate holds the reason rather than tolerating a silent hole. A
+cell that states a reason and carries an anchor anyway is refused too,
+so the reason cannot outlive what it described. A game title's other
+cells are not gated: declaring one stays free.
 
 Each cell's expected boot behaviour is committed data, not test code:
 `boot_summary.json` records the step count, outcome, per-step budget,
@@ -156,10 +178,11 @@ module, a line suppressed on the quiet path), and a test holds
 the emitters to that split.
 
 `dev record-anchors` is the only writer. It records the cells the
-registry declares and refuses one it does not: the store may hold ten
-firmwares, and a gated cell is one somebody reviewed into a
-`[[bench.matrix]]` row. `--fw` and `--game-ver` narrow the recording to
-the declared cells they name. Each recording re-measures the cell at
+registry declares -- the reference cell `system_ver` derives and every
+`[[bench.matrix]]` row -- and refuses one it does not: the store may
+hold ten firmwares, and a declared cell is one the title's own floor
+names or somebody reviewed into a row. `--fw` and `--game-ver` narrow
+the recording to the declared cells they name. Each recording re-measures the cell at
 its own cap and checkpoint, rewrites the anchor (outcome included), and
 appends one line per real move to that cell's append-only
 `boot_history.jsonl`, so blessing a change is a reviewable data diff.

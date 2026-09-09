@@ -8,7 +8,6 @@ fn cell(fw: &str, game_ver: Option<&str>, bench_max_steps: Option<u64>) -> Matri
             fw: fw.to_string(),
             game_ver: game_ver.map(str::to_string),
         },
-        reference: false,
         expect: CellExpectation::Frontier,
         bench_max_steps,
         checkpoint: None,
@@ -28,6 +27,7 @@ fn manifest(matrix: Vec<MatrixCell>) -> TitleManifest {
         distribution: Distribution::PsnHdd,
         rap_filename: None,
         bench_max_steps: Some(4_000),
+        system_ver: Some("4.93".to_string()),
         checkpoint: CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,
@@ -87,6 +87,35 @@ fn no_selection_keeps_every_declared_cell() {
         cell("3.55", Some("base"), None),
     ]);
     assert_eq!(filter_declared(jobs_for(&title), None, None).len(), 2);
+}
+
+#[test]
+fn a_pending_cell_is_skipped_unless_the_selection_names_it() {
+    let mut stopped = cell("1.50", Some("base"), None);
+    stopped.pending = Some("the firmware cannot be obtained".to_string());
+    let title = manifest(vec![stopped, cell("4.93", Some("base"), None)]);
+
+    let (kept, skipped) = skip_pending(jobs_for(&title), false);
+    assert_eq!(
+        kept.iter().map(Job::label).collect::<Vec<_>>(),
+        vec!["test fw 4.93 x base"]
+    );
+    assert_eq!(
+        skipped.iter().map(Job::label).collect::<Vec<_>>(),
+        vec!["test fw 1.50 x base"]
+    );
+    assert_eq!(
+        skipped[0].pending.as_deref(),
+        Some("the firmware cannot be obtained")
+    );
+
+    let (kept, skipped) = skip_pending(jobs_for(&title), true);
+    assert_eq!(
+        kept.len(),
+        2,
+        "a named selection measures the cell regardless"
+    );
+    assert!(skipped.is_empty());
 }
 
 fn key(fw: &str, game_ver: Option<&str>) -> CellKey {

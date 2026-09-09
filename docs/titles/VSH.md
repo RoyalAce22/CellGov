@@ -5,11 +5,15 @@ version across. One cell is one measurement of this title against one
 firmware library and one installed content version; several cells are
 that title measured several times, not a conflict between rows.
 
-Back to the [matrix](../titles.md).
+Back to the [firmware page](../firmware.md).
 
 | fw | result |
 | --- | --- |
-| 4.93 | anchor (MaxSteps)* |
+| 1.50 | . (the firmware-exec boot requires sys/internal/libfs_utility2 before the first step, and firmware 1.50 ships no such module) |
+| 1.94 | . (the boot faults at step 327, before the checkpoint: liblv2's once-mutex slot names a mutex the host never created, and the debug build's LV2 handoff witness panics on it) |
+| 2.76 | anchor (MaxSteps) |
+| 3.70 | anchor (MaxSteps) |
+| 4.93 | anchor (MaxSteps) |
 
 Legend:
 
@@ -22,7 +26,7 @@ Legend:
 | `anchor (<outcome>)` | a boot anchor with no cross-runner verdict beside it |
 | `.` | cell declared, nothing recorded yet |
 | (blank) | cell not declared -- out of scope for this title |
-| `*` | suffix marking the reference cell, the one the matrix renders |
+| `*` | suffix marking the reference cell -- the title's `PARAM.SFO` floor times its base install, the one the matrix renders |
 
 A `.` and a blank say different things. A blank is a boundary somebody
 chose; a `.` is a hole in what was chosen, and a cell that names its

@@ -14,6 +14,18 @@ const HDD_CONTENT_ID: &str = "XX0000-TEST12345_00-SYNTHETICHDDTITLE";
 const HDD_TITLE: &str = "Synthetic HDD Title";
 const DISC_TITLE_ID: &str = "TEST54321";
 const DISC_TITLE: &str = "Synthetic Disc Title";
+/// The floor every stub below carries, as a version key.
+const SYSTEM_VER: &str = "1.50";
+
+fn fields(record: &InstallRecord) -> TitleFields {
+    TitleFields::from_record(record, title_of(record), SYSTEM_VER.to_string())
+}
+
+/// The record directory under the default store root, where a lookup
+/// with no `--installs` and no `--vfs-root` lands.
+fn default_installs() -> PathBuf {
+    StoreLayout::new(DEFAULT_VFS_ROOT).installs_dir()
+}
 
 fn hdd_record() -> InstallRecord {
     InstallRecord {
@@ -84,7 +96,7 @@ fn title_of(record: &InstallRecord) -> &TitleRecord {
 
 fn load_stub(record: &InstallRecord) -> crate::game::manifest::TitleManifest {
     let title = title_of(record);
-    let stub = TitleFields::from_record(record, title).render_stub(std::path::Path::new(&format!(
+    let stub = fields(record).render_stub(std::path::Path::new(&format!(
         "installs/titles/{}/base.install.toml",
         title.title_id
     )));
@@ -95,7 +107,7 @@ fn load_stub(record: &InstallRecord) -> crate::game::manifest::TitleManifest {
 #[test]
 fn hdd_stub_fills_generated_fields_with_rap() {
     let r = hdd_record();
-    let g = TitleFields::from_record(&r, title_of(&r));
+    let g = fields(&r);
     assert_eq!(g.content_id, HDD_TITLE_ID);
     assert_eq!(g.display_name, HDD_TITLE);
     assert_eq!(g.distribution, "psn-hdd");
@@ -108,12 +120,76 @@ fn hdd_stub_fills_generated_fields_with_rap() {
     assert_eq!(manifest.display_name, HDD_TITLE);
     assert_eq!(manifest.rap_filename.as_deref(), Some(rap.as_str()));
     assert!(manifest.eboot_candidates.contains(&"EBOOT.BIN".to_string()));
+    assert_eq!(manifest.system_ver.as_deref(), Some(SYSTEM_VER));
+    assert_eq!(
+        manifest.reference_key().map(|k| k.label()),
+        Some("fw 1.50 x base".to_string()),
+        "the stub declares the floor cell and nothing else"
+    );
+    assert_eq!(manifest.matrix.len(), 1);
+}
+
+#[test]
+fn the_stub_writes_the_floor_and_no_matrix_block() {
+    let r = hdd_record();
+    let stub = fields(&r).render_stub(std::path::Path::new("installs/stub.install.toml"));
+    assert!(
+        stub.contains(
+            "system_ver = \"1.50\"
+"
+        ),
+        "{stub}"
+    );
+    assert!(!stub.contains("bench.matrix"), "{stub}");
+    assert!(!stub.contains("reference"), "{stub}");
+}
+
+#[test]
+fn a_disc_trees_param_sfo_sits_under_ps3_game_and_an_hdd_trees_at_its_root() {
+    let root = Path::new("store");
+    let disc = disc_record();
+    assert_eq!(
+        param_sfo_path(root, &disc, title_of(&disc)),
+        root.join("dev_bdvd")
+            .join(DISC_TITLE_ID)
+            .join("PS3_GAME")
+            .join("PARAM.SFO")
+    );
+    let hdd = hdd_record();
+    assert_eq!(
+        param_sfo_path(root, &hdd, title_of(&hdd)),
+        root.join("dev_hdd0")
+            .join("game")
+            .join(HDD_TITLE_ID)
+            .join("PARAM.SFO")
+    );
+}
+
+#[test]
+fn the_recorded_digest_key_of_the_param_sfo_follows_its_place_in_the_tree() {
+    let disc = disc_record();
+    assert_eq!(param_sfo_rel(title_of(&disc)), "PS3_GAME/PARAM.SFO");
+    let hdd = hdd_record();
+    assert_eq!(param_sfo_rel(title_of(&hdd)), "PARAM.SFO");
+    assert!(
+        hdd.files.contains_key(&param_sfo_rel(title_of(&hdd))),
+        "the fixture records the digest under the key the check looks up"
+    );
+}
+
+#[test]
+fn a_firmware_record_consults_no_store_root() {
+    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
+    let gen = Generated::from_record(&firmware_record(), &record_path, || {
+        panic!("a firmware stub reads no title tree")
+    });
+    assert_eq!(gen.content_id(), "VSH");
 }
 
 #[test]
 fn disc_stub_has_no_rap() {
     let r = disc_record();
-    let g = TitleFields::from_record(&r, title_of(&r));
+    let g = fields(&r);
     assert_eq!(g.content_id, DISC_TITLE_ID);
     assert_eq!(g.distribution, "disc-iso");
     assert_eq!(g.eboot_candidate, "EBOOT.BIN");
@@ -129,7 +205,7 @@ fn disc_stub_has_no_rap() {
 fn a_psn_hdd_record_with_no_installed_rap_names_no_rap_file() {
     let mut r = hdd_record();
     r.rap = None;
-    let g = TitleFields::from_record(&r, title_of(&r));
+    let g = fields(&r);
     assert!(g.rap_filename.is_none());
     let stub = g.render_stub(std::path::Path::new("installs/stub.install.toml"));
     assert!(!stub.contains("rap_filename ="));
@@ -140,7 +216,7 @@ fn a_psn_hdd_record_with_no_installed_rap_names_no_rap_file() {
 fn a_record_with_no_eboot_falls_back_to_the_conventional_name() {
     let mut r = hdd_record();
     r.files = BTreeMap::new();
-    let g = TitleFields::from_record(&r, title_of(&r));
+    let g = fields(&r);
     assert_eq!(g.eboot_candidate, "EBOOT.BIN");
 }
 
@@ -171,7 +247,8 @@ fn the_firmware_stub_spells_no_firmware_version() {
     // Render through the path `--firmware` resolves, so the version
     // reaches the renderer.
     let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
-    let stub = Generated::from_record(&firmware_record(), &record_path).render_stub(&record_path);
+    let stub = Generated::from_record(&firmware_record(), &record_path, || unreachable!())
+        .render_stub(&record_path);
     assert!(
         !stub.contains(FIRMWARE_VERSION),
         "the store holds the version; a manifest repeating it drifts on the next install:\n{stub}"
@@ -204,7 +281,7 @@ fn the_firmware_stub_names_where_a_firmware_tree_puts_the_system_software() {
 #[test]
 fn a_firmware_record_generates_the_system_software_manifest() {
     let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
-    let gen = Generated::from_record(&firmware_record(), &record_path);
+    let gen = Generated::from_record(&firmware_record(), &record_path, || unreachable!());
     assert_eq!(gen.content_id(), "VSH");
     assert_eq!(gen.render_stub(&record_path), render_firmware_stub());
 }

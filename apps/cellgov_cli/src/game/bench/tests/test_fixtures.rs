@@ -132,6 +132,7 @@ pub(super) fn bench_manifest(bench_max_steps: Option<u64>) -> crate::game::manif
         distribution: Distribution::PsnHdd,
         rap_filename: None,
         bench_max_steps,
+        system_ver: Some("4.93".to_string()),
         checkpoint: manifest::CheckpointTrigger::ProcessExit,
         source: GameSource::Hdd,
         rsx_mirror: false,

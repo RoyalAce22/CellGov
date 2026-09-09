@@ -7,6 +7,10 @@ year = 2009
 developer = "Sony Liverpool"
 engine = "Studio Liverpool proprietary"
 distribution = "disc-iso"
+# PS3_SYSTEM_VER from the title's own PARAM.SFO (02.7600), held against
+# the installed content by the title-corpus suite. Derives the one cell
+# the headline row is measured at: fw 2.76 x base.
+system_ver = "2.76"
 
 [source]
 kind = "disc"
@@ -14,16 +18,9 @@ kind = "disc"
 [checkpoint]
 kind = "first-rsx-write"
 
-# The firmware this title's own PARAM.SFO asks for
-# (PS3_SYSTEM_VER = 02.7600). Kept declared so the anchors committed for
-# it stay evidence about a cell somebody chose.
-[[bench.matrix]]
-fw = "2.76"
-game_ver = "base"
-
-# The cell this title is gated and rendered at. See
-# docs/architecture/title_harness.md.
+# Drift study: the same title on the newest firmware. Recorded evidence
+# about how much of a divergence is the firmware's rather than the
+# title's.
 [[bench.matrix]]
 fw = "4.93"
 game_ver = "base"
-reference = true

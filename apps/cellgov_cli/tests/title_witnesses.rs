@@ -1,18 +1,22 @@
-//! Every installed title in the registry must reproduce its reference
-//! cell's recorded baseline.
+//! Every installed title in the registry must reproduce its gated
+//! cells' recorded baselines.
 //!
-//! Titles come from `title_manifests/`; expectations come from the anchor of
-//! the cell each manifest marks `reference = true`. Adding a title
-//! needs no change here -- drop in a manifest, record it, commit the
-//! baseline.
+//! Titles come from `title_manifests/`. Expectations come from the
+//! anchor of each gated cell: a game title's floor times its base
+//! install, or each declared firmware of a firmware-shipped title.
+//! Adding a title needs no change here -- drop in a manifest, record
+//! it, commit the baseline.
 //!
-//! The registry is shared but installs vary per operator, so a title
-//! whose boot prints the not-installed marker skips by name; at least
-//! one title must boot or the suite fails, keeping "green means
-//! something ran" true under the `title-corpus` feature. Any other
-//! failing boot -- including one that dies before its inputs resolve,
-//! e.g. a present-but-undecryptable dump -- is a suite failure.
-//! Re-record with:
+//! The registry is shared but installs vary per operator, so two kinds
+//! of cell skip by name:
+//!
+//! - a title whose boot prints the not-installed marker, and
+//! - a cell the registry declares `pending`.
+//!
+//! At least one cell must boot or the suite fails; under the
+//! `title-corpus` feature, green means something ran. Any other failing
+//! boot -- including one that dies before its inputs resolve, e.g. a
+//! present-but-undecryptable dump -- is a suite failure. Re-record with:
 //!
 //! ```text
 //! cargo run --release -p cellgov_cli -- dev record-anchors --all
@@ -31,7 +35,7 @@ use std::process::Command;
 use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
 use cellgov_compare::witnesses::{check_all, unrecorded, TITLE_NOT_INSTALLED_SENTINEL};
 use cellgov_compare::BootSummary;
-use registry::{boot_anchor_path, titles, workspace_root, TitleUnderTest};
+use registry::{boot_anchor_path, firmware_exec_titles, titles, workspace_root, TitleUnderTest};
 
 struct Observed {
     witnesses: ParsedWitnesses,
@@ -130,28 +134,30 @@ fn boot(title: &TitleUnderTest) -> Boot {
 /// The boot runs before the baseline is read: a missing baseline only
 /// matters for a title this operator can actually record.
 fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
+    // One short name can gate several cells (the system software gates
+    // one per declared firmware), so a failure names the cell.
+    let who = format!("{} ({})", title.short_name, title.reference.label());
     let observed = match boot(title) {
         Boot::NotInstalled => return None,
-        Boot::Failed(e) => return Some(vec![format!("{}: {e}", title.short_name)]),
+        Boot::Failed(e) => return Some(vec![format!("{who}: {e}")]),
         Boot::Ran(o) => o,
     };
 
     let path = boot_anchor_path(&title.content_id, &title.reference);
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Some(vec![format!(
-            "{}: installed but no baseline at {}. Record it with:\n    \
-             cargo run --release -p cellgov_cli -- dev record-anchors --title {}",
-            title.short_name,
+            "{who}: installed but no baseline at {}. Record it with:\n    \
+             cargo run --release -p cellgov_cli -- dev record-anchors --title {} --fw {}",
             path.display(),
-            title.short_name
+            title.short_name,
+            title.reference.fw
         )]);
     };
     let baseline: BootSummary = match serde_json::from_str(&text) {
         Ok(b) => b,
         Err(e) => {
             return Some(vec![format!(
-                "{}: {} failed to parse: {e}",
-                title.short_name,
+                "{who}: {} failed to parse: {e}",
                 path.display()
             )])
         }
@@ -160,8 +166,8 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
     let mut failures = Vec::new();
     if observed.steps != baseline.steps {
         failures.push(format!(
-            "{}: steps {} != recorded {}",
-            title.short_name, observed.steps, baseline.steps
+            "{who}: steps {} != recorded {}",
+            observed.steps, baseline.steps
         ));
     }
     // A cap-bounded anchor stops at the step count the run asked for.
@@ -170,8 +176,7 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
     // at-least bounds and do not catch it.
     if observed.budget != baseline.budget.raw() {
         failures.push(format!(
-            "{}: budget {} != recorded {}",
-            title.short_name,
+            "{who}: budget {} != recorded {}",
             observed.budget,
             baseline.budget.raw()
         ));
@@ -182,25 +187,24 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
     let recorded_outcome = baseline.outcome.to_string();
     if observed.outcome != recorded_outcome {
         failures.push(format!(
-            "{}: outcome {} != recorded {recorded_outcome}",
-            title.short_name, observed.outcome
+            "{who}: outcome {} != recorded {recorded_outcome}",
+            observed.outcome
         ));
     }
     if baseline.witnesses.is_empty() {
         failures.push(format!(
-            "{}: baseline records no witnesses. Re-record with:\n    \
-             cargo run --release -p cellgov_cli -- dev record-anchors --title {}",
-            title.short_name, title.short_name
+            "{who}: baseline records no witnesses. Re-record with:\n    \
+             cargo run --release -p cellgov_cli -- dev record-anchors --title {} --fw {}",
+            title.short_name, title.reference.fw
         ));
         return Some(failures);
     }
     for failure in check_all(&baseline.witnesses, &observed.witnesses) {
-        failures.push(format!("{}: {failure}", title.short_name));
+        failures.push(format!("{who}: {failure}"));
     }
     for name in unrecorded(&baseline.witnesses, &observed.witnesses.values) {
         failures.push(format!(
-            "{}: witness {name} is emitted but not recorded -- re-record the baseline",
-            title.short_name
+            "{who}: witness {name} is emitted but not recorded -- re-record the baseline"
         ));
     }
     Some(failures)
@@ -208,18 +212,31 @@ fn check_title(title: &TitleUnderTest) -> Option<Vec<String>> {
 
 #[test]
 fn every_installed_title_matches_its_recorded_baseline() {
-    let titles = titles();
+    let titles: Vec<TitleUnderTest> = titles().into_iter().chain(firmware_exec_titles()).collect();
     let mut failures: Vec<String> = Vec::new();
-    let mut skipped: Vec<&str> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     let mut checked = 0usize;
     for title in &titles {
+        // Something outside the registry stops a pending cell, and the
+        // structure gate refuses an anchor on it, so there is nothing
+        // here to hold a boot against.
+        if let Some(why) = &title.reference.pending {
+            eprintln!(
+                "{} ({}): skipped -- declared pending ({why})",
+                title.short_name,
+                title.reference.label()
+            );
+            skipped.push(format!("{} {}", title.short_name, title.reference.label()));
+            continue;
+        }
         match check_title(title) {
             None => {
                 eprintln!(
-                    "{}: skipped -- not installed on this machine",
-                    title.short_name
+                    "{} ({}): skipped -- not installed on this machine",
+                    title.short_name,
+                    title.reference.label()
                 );
-                skipped.push(&title.short_name);
+                skipped.push(format!("{} {}", title.short_name, title.reference.label()));
             }
             Some(f) => {
                 checked += 1;
@@ -229,7 +246,7 @@ fn every_installed_title_matches_its_recorded_baseline() {
     }
     assert!(
         failures.is_empty(),
-        "{} failure(s) across {checked} installed title(s):\n\n{}\n",
+        "{} failure(s) across {checked} installed cell(s):\n\n{}\n",
         failures.len(),
         failures.join("\n")
     );
@@ -237,7 +254,7 @@ fn every_installed_title_matches_its_recorded_baseline() {
     // that booted nothing must not report green.
     assert!(
         checked > 0,
-        "title-corpus is enabled but none of the {} registered title(s) is \
+        "title-corpus is enabled but none of the {} gated cell(s) is \
          installed (skipped: {}). Install at least one, or run without the \
          feature.",
         titles.len(),

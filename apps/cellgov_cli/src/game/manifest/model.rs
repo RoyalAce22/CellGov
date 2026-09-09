@@ -111,6 +111,12 @@ pub struct TitleManifest {
     /// Instruction cap the witness suite boots this title under.
     /// `None` uses the recorder's 100M-instruction default.
     pub bench_max_steps: Option<u64>,
+    /// The title's floor: the firmware its own PARAM.SFO requires, as a
+    /// store version key. It is present on every title with a PARAM.SFO
+    /// (an hdd or disc source) and absent on one without
+    /// (firmware-shipped or manifest-relative). It derives
+    /// [`Self::reference_key`].
+    pub system_ver: Option<String>,
     /// Built-in boot checkpoint; CLI `--checkpoint` overrides.
     pub checkpoint: CheckpointTrigger,
     pub source: GameSource,
@@ -124,9 +130,10 @@ pub struct TitleManifest {
     /// Mount-table registration order matches declaration order;
     /// the dispatch layer consults mounts in that order on a miss.
     pub mounts: Vec<MountEntry>,
-    /// The `(firmware, game version)` cells this title declares, in
-    /// declaration order. A non-empty matrix marks exactly one cell as
-    /// the reference.
+    /// The `(firmware, game version)` cells this title declares: the
+    /// cell [`Self::system_ver`] derives first, then every
+    /// `[[bench.matrix]]` row in declaration order. A row that repeats
+    /// the derived cell attaches its override to it and adds no entry.
     pub matrix: Vec<MatrixCell>,
 }
 
@@ -266,23 +273,10 @@ impl TitleManifest {
         self.checkpoint
     }
 
-    /// The cell the headline row renders, or `None` when the title
-    /// declares no cells.
-    ///
-    /// # Panics
-    ///
-    /// Panics in a debug build if the matrix marks more than one cell
-    /// as the reference.
-    pub fn reference_cell(&self) -> Option<&MatrixCell> {
-        // The loader enforces the one-reference rule, but this struct is
-        // constructible without it. Picking the first of two marked
-        // cells would name a configuration nobody chose.
-        debug_assert!(
-            self.matrix.iter().filter(|c| c.reference).count() <= 1,
-            "title '{}' carries more than one reference cell",
-            self.short_name
-        );
-        self.matrix.iter().find(|c| c.reference)
+    /// The cell the headline row renders: the title's floor times its
+    /// base install. It is `None` for a title with no PARAM.SFO.
+    pub fn reference_key(&self) -> Option<CellKey> {
+        self.system_ver.as_deref().map(super::matrix::derived_key)
     }
 
     pub fn cell(&self, key: &CellKey) -> Option<&MatrixCell> {

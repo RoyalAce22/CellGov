@@ -147,6 +147,7 @@ year = 2009
 developer = "e"
 engine = "e"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -174,6 +175,7 @@ year = 2009
 developer = "e"
 engine = "e"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -205,11 +207,15 @@ year = 2009
 developer = "e"
 engine = "e"
 distribution = "{token}"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
 "#
         );
+        // Every variant here keeps the default hdd source, which has a
+        // PARAM.SFO and so states a floor; `distribution` is display
+        // only and decides nothing about it.
         let m = TitleManifest::load_from_text(&text, Path::new("variant.toml")).unwrap();
         assert_eq!(m.distribution, expected, "token {token:?}");
     }
@@ -307,6 +313,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -341,6 +348,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -379,6 +387,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -410,6 +419,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -435,6 +445,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -458,6 +469,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -484,6 +496,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -512,6 +525,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -535,6 +549,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -558,6 +573,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "first-rsx-write"
@@ -588,6 +604,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -626,6 +643,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -651,6 +669,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -676,6 +695,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -705,6 +725,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -736,6 +757,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "pc"
@@ -757,6 +779,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "whatever"
@@ -784,6 +807,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "pc"
@@ -805,6 +829,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "pc"
@@ -877,6 +902,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -893,6 +919,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -920,6 +947,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"
@@ -933,6 +961,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [cellgov.checkpoint]
 kind = "process-exit"
@@ -956,6 +985,7 @@ year = 2007
 developer = "test"
 engine = "test-engine"
 distribution = "psn-hdd"
+system_ver = "4.93"
 
 [checkpoint]
 kind = "process-exit"

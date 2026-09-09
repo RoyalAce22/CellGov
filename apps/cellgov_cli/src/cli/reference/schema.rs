@@ -65,14 +65,24 @@ fn title_doc() -> TitleDoc {
             min_system_ver: Some("03.5500".to_string()),
             record: Some(".cellgov/installs/NPUA80001/1.02.toml".to_string()),
         }],
-        anchors: vec![AnchorDoc {
-            fw: "4.93".to_string(),
-            game_ver: Some("base".to_string()),
-            expect: "frontier".to_string(),
-            reference: true,
-            recorded: true,
-            installed: true,
-        }],
+        anchors: vec![
+            AnchorDoc {
+                fw: "1.50".to_string(),
+                game_ver: Some("base".to_string()),
+                expect: "frontier".to_string(),
+                reference: true,
+                recorded: true,
+                installed: true,
+            },
+            AnchorDoc {
+                fw: "4.93".to_string(),
+                game_ver: Some("base".to_string()),
+                expect: "frontier".to_string(),
+                reference: false,
+                recorded: true,
+                installed: true,
+            },
+        ],
     }
 }
 

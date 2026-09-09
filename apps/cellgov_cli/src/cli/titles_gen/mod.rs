@@ -1,10 +1,11 @@
 //! `cellgov dev titles-gen` -- the generated title documents.
 //!
-//! One generator, two kinds of document:
+//! One generator, three kinds of document:
 //!
-//! - `titles.md` renders one row per title at the cell its manifest
-//!   marks the reference, plus a coverage count over every declared
-//!   cell.
+//! - `titles.md` renders one row per game title at its reference cell,
+//!   plus a coverage count over every cell those titles declare.
+//! - `firmware.md` renders one row per declared cell of every title
+//!   shipped inside the firmware image.
 //! - `titles/<id>.md` renders one title's whole declared matrix as a
 //!   grid.
 //!
@@ -14,6 +15,7 @@
 
 mod cell;
 mod detail;
+mod firmware;
 mod index;
 mod load;
 mod run;
