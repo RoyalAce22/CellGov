@@ -59,6 +59,45 @@ fn decrypted_disc_install_matches_the_rpcs3_extracted_eboot() {
     .expect("decrypted-disc install (incl. decrypt-proof) must succeed");
     assert_eq!(outcome.title_id, CONTENT_ID);
 
+    // A retail disc ships the system software its PARAM.SFO floor names,
+    // and a fresh store records none of it, so the install unpacks the
+    // disc's own package into a firmware entry and keys the title on it.
+    let shipped = outcome
+        .shipped_firmware
+        .as_ref()
+        .expect("a retail disc carries PS3_UPDATE/PS3UPDAT.PUP");
+    assert!(
+        matches!(
+            shipped.disposition,
+            game_install::ShippedFirmwareDisposition::Installed(_)
+        ),
+        "{:?}",
+        shipped.disposition
+    );
+    let firmware = cellgov_install::firmware_install::installed_record(&vfs, &shipped.version)
+        .expect("a readable firmware record")
+        .expect("the shipped version is a recorded firmware entry");
+    assert_eq!(firmware.artifact.version, shipped.version);
+    let title = cellgov_install::store::InstallRecord::parse(
+        &std::fs::read_to_string(&outcome.record_path).expect("read the title record"),
+    )
+    .expect("the title record parses")
+    .title
+    .expect("a title record carries a [title] block");
+    assert_eq!(
+        title.shipped_firmware.as_deref(),
+        Some(shipped.version.as_str())
+    );
+    let floor = title
+        .system_ver
+        .as_deref()
+        .expect("a retail disc's PARAM.SFO states PS3_SYSTEM_VER");
+    assert_eq!(
+        cellgov_install::system_ver::firmware_version_key(floor).expect("MM.mmmm"),
+        shipped.version,
+        "the disc ships the system software its own floor names"
+    );
+
     let installed = vfs
         .join("dev_bdvd")
         .join(&outcome.title_id)

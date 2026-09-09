@@ -64,6 +64,7 @@ fn base_entry() -> BaseEntry {
         distribution: "psn-hdd".to_string(),
         source_sha256: "ab".repeat(32),
         system_ver: Some("01.5000".to_string()),
+        shipped_firmware: None,
     }
 }
 

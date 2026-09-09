@@ -87,6 +87,7 @@ fn record(
             title: "Synthetic".to_string(),
             distribution: "psn-hdd".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         }),
         files,
         rap: None,

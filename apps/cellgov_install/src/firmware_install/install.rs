@@ -235,6 +235,42 @@ fn read_record(path: &Path) -> Result<Option<InstallRecord>, FirmwareInstallErro
         )
 }
 
+/// The record of the firmware entry keyed `version`, when one is
+/// installed.
+///
+/// Records are the store's index: an unrecorded tree under the entry
+/// directory is residue and reads as not installed.
+///
+/// # Errors
+///
+/// - [`FirmwareInstallError::StoreKey`] when `version` is not a store
+///   directory name.
+/// - [`FirmwareInstallError::Io`] for a record that is there and cannot
+///   be read.
+/// - [`FirmwareInstallError::RecordParse`] for a record this build
+///   refuses.
+/// - [`FirmwareInstallError::RecordMismatch`] for a record under that
+///   key that describes something else.
+pub fn installed_record(
+    output_dir: &Path,
+    version: &str,
+) -> Result<Option<InstallRecord>, FirmwareInstallError> {
+    let artifact = Artifact::Firmware {
+        version: VersionKey::new(version)?,
+    };
+    let record_path = StoreLayout::new(output_dir).record_path(&artifact);
+    let Some(existing) = read_record(&record_path)? else {
+        return Ok(None);
+    };
+    if existing.artifact.kind != ArtifactKind::Firmware || existing.artifact.version != version {
+        return Err(FirmwareInstallError::RecordMismatch {
+            path: record_path,
+            version: version.to_string(),
+        });
+    }
+    Ok(Some(existing))
+}
+
 /// Hold the entry this version would commit into.
 ///
 /// Records are the store's index, so an installed version is one with a
@@ -575,3 +611,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/commit_discipline_tests.rs"]
 mod commit_discipline_tests;
+
+#[cfg(test)]
+#[path = "tests/installed_record_tests.rs"]
+mod installed_record_tests;

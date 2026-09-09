@@ -83,10 +83,14 @@ present as shared. That is what the hardware did. A manifest may still
 declare the newest firmware as a further cell -- a drift study -- and
 every declared cell renders on the title's own page.
 
-A disc ships the PUP its floor names in `PS3_UPDATE/PS3UPDAT.PUP`, so
-install that PUP and its install-record digest matches the one on the
-disc; a network title states the same floor and ships nothing to satisfy
-it.
+A disc ships the PUP its floor names in `PS3_UPDATE/PS3UPDAT.PUP`. The
+disc install registers it as an ordinary `firmware/<version>` entry --
+validated and its version read in place, unpacked only when the store
+records no entry under that version -- and writes the version on the
+title record as `[title] shipped_firmware`. One dump of one disc is
+then a closed fixture: executable, data, and the system software it was
+certified against. A network title states the same floor and ships
+nothing to satisfy it.
 
 [titles.md](../titles.md) tracks per-title status (boot checkpoint
 reached, cross-runner observation match), one row per game title at its

@@ -8,6 +8,7 @@ use crate::param_sfo;
 use crate::pkg;
 use crate::store::layout::ArtifactKind;
 use crate::store::rename::RenameRefused;
+use cellgov_ps3_abi::title_tree::DISC_UPDATE_PUP;
 
 /// Why a game install failed.
 #[derive(Debug, thiserror::Error)]
@@ -149,6 +150,38 @@ pub enum GameInstallError {
     /// The decrypt-proof gate failed: the installed tree would not load.
     #[error("decrypt-proof failed (the installed EBOOT does not decrypt): {0}")]
     DecryptProof(#[source] crate::sce::SceError),
+    /// The system software the disc ships did not register as a firmware
+    /// entry. The install staged nothing of the title.
+    #[error(
+        "the disc's {DISC_UPDATE_PUP}: {source}; pass --no-firmware to install the title \
+         without the firmware it ships"
+    )]
+    ShippedFirmware {
+        /// The refusal, from the package check or the firmware installer.
+        #[source]
+        source: crate::firmware_install::FirmwareInstallError,
+    },
+    /// The disc holds a directory where its update package would be.
+    #[error(
+        "the disc's {DISC_UPDATE_PUP} is a directory, not an update package; pass --no-firmware \
+         to install the title without the firmware it ships"
+    )]
+    ShippedFirmwareNotAFile,
+    /// The disc's package names one version in its plaintext
+    /// `version.txt` entry and another in the tree it unpacks to. The
+    /// installer committed the tree as a firmware entry under its own
+    /// version; the title did not install.
+    #[error(
+        "the disc's {DISC_UPDATE_PUP} names firmware {declared} in its version.txt entry, but the \
+         tree it unpacks to names {extracted}; that tree is installed as firmware {extracted}, \
+         and the title was not installed"
+    )]
+    ShippedFirmwareVersionMismatch {
+        /// The version the package's `version.txt` entry spells.
+        declared: String,
+        /// The version the unpacked tree's `vsh/etc/version.txt` spells.
+        extracted: String,
+    },
     /// The install target already exists and `--force` was not set.
     #[error("install target {} already exists; pass --force to overwrite", path.display())]
     TargetExists {

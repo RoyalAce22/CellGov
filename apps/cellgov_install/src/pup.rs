@@ -12,6 +12,7 @@ use sha1::Sha1;
 
 #[cfg(feature = "decrypt")]
 use crate::keys::KeyVault;
+use cellgov_ps3_abi::pup::{parse_pup_version_txt, ENTRY_ID_VERSION_TXT};
 
 /// On-disk PUP header at file offset 0, 0x30 bytes, all fields big-endian.
 #[derive(Debug)]
@@ -124,6 +125,19 @@ pub enum PupError {
         /// `entry_id` field of the offending entry.
         entry_id: u64,
     },
+    /// No entry in the table carries the id a reader asked for.
+    #[error("PUP has no entry 0x{entry_id:x}")]
+    NoEntry {
+        /// The id looked up.
+        entry_id: u64,
+    },
+    /// The `version.txt` payload does not spell a firmware version.
+    #[error("PUP version.txt (entry 0x{ENTRY_ID_VERSION_TXT:x}) reads {text:?}, not a version")]
+    VersionUnparseable {
+        /// The payload's first line, cut at `VERSION_QUOTE_LEN` chars,
+        /// with any bytes that are not UTF-8 replaced.
+        text: String,
+    },
     /// HMAC-SHA1 initialization failed (wrong key length).
     #[cfg(feature = "decrypt")]
     #[error("HMAC init: {0}")]
@@ -151,11 +165,14 @@ pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
     }
 
     let image_version = read_be_u64(data, 0x10);
-    let file_count = read_be_u64(data, 0x18) as usize;
+    // Saturating throughout, so a count near u64::MAX names tables past
+    // the file instead of wrapping into ones that fit.
+    let file_count = usize::try_from(read_be_u64(data, 0x18)).unwrap_or(usize::MAX);
+    let table_len = file_count.saturating_mul(0x20);
 
     let entry_table_start = 0x30usize;
-    let hash_table_start = entry_table_start + file_count * 0x20;
-    let required = hash_table_start + file_count * 0x20;
+    let hash_table_start = entry_table_start.saturating_add(table_len);
+    let required = hash_table_start.saturating_add(table_len);
 
     if required > data.len() {
         return Err(PupError::TablesTruncated {
@@ -194,6 +211,62 @@ pub fn parse(data: &[u8]) -> Result<Pup, PupError> {
     })
 }
 
+/// The payload the entry with `entry_id` names, bounds-checked.
+///
+/// # Errors
+///
+/// - [`PupError::NoEntry`] when the table names no such id.
+/// - [`PupError::EntryPastFile`] when the extent it declares leaves the
+///   buffer.
+pub fn entry_payload<'a>(data: &'a [u8], pup: &Pup, entry_id: u64) -> Result<&'a [u8], PupError> {
+    let (position, entry) = pup
+        .entries
+        .iter()
+        .enumerate()
+        .find(|(_, e)| e.entry_id == entry_id)
+        .ok_or(PupError::NoEntry { entry_id })?;
+    entry_extent(data, entry).ok_or(PupError::EntryPastFile { position, entry_id })
+}
+
+/// The bytes `entry` declares, or `None` when its extent leaves `data`.
+///
+/// Slicing checks the extent without an offset-plus-length sum, so an
+/// extent near `u64::MAX` cannot wrap. A zero-length entry at the end
+/// of the file is an empty payload.
+fn entry_extent<'a>(data: &'a [u8], entry: &PupFileEntry) -> Option<&'a [u8]> {
+    let start = usize::try_from(entry.data_offset).ok()?;
+    let len = usize::try_from(entry.data_length).ok()?;
+    data.get(start..)?.get(..len)
+}
+
+/// Longest prefix of an unparseable `version.txt` a refusal quotes.
+const VERSION_QUOTE_LEN: usize = 32;
+
+/// The firmware version key the PUP's `version.txt` payload names,
+/// read without a key.
+///
+/// The header's `image_version` word also names the version; this text
+/// is the spelling the console shows and the store keys an entry by.
+///
+/// # Errors
+///
+/// - [`PupError::NoEntry`] when the container carries no `version.txt`.
+/// - [`PupError::EntryPastFile`] when its extent leaves the buffer.
+/// - [`PupError::VersionUnparseable`] when the text is not one version.
+pub fn version_key(data: &[u8], pup: &Pup) -> Result<String, PupError> {
+    let payload = entry_payload(data, pup, ENTRY_ID_VERSION_TXT)?;
+    let text = String::from_utf8_lossy(payload);
+    parse_pup_version_txt(&text).ok_or_else(|| PupError::VersionUnparseable {
+        text: text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(VERSION_QUOTE_LEN)
+            .collect(),
+    })
+}
+
 #[cfg(feature = "decrypt")]
 type HmacSha1 = Hmac<Sha1>;
 
@@ -220,16 +293,14 @@ pub fn validate_hashes(data: &[u8], pup: &Pup, keys: &KeyVault) -> Result<(), Pu
                 declared: pup.hashes[i].index,
             });
         }
-        let start = entry.data_offset as usize;
-        let end = start + entry.data_length as usize;
-        if end > data.len() {
+        let Some(payload) = entry_extent(data, entry) else {
             return Err(PupError::EntryPastFile {
                 position: i,
                 entry_id: entry.entry_id,
             });
-        }
+        };
         let mut mac = HmacSha1::new_from_slice(pup_key).map_err(PupError::HmacInit)?;
-        mac.update(&data[start..end]);
+        mac.update(payload);
         let result = mac.finalize().into_bytes();
         if result.as_slice() != pup.hashes[i].hash {
             return Err(PupError::HmacMismatch {
@@ -244,3 +315,7 @@ pub fn validate_hashes(data: &[u8], pup: &Pup, keys: &KeyVault) -> Result<(), Pu
 #[cfg(test)]
 #[path = "tests/pup_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/pup_version_tests.rs"]
+mod version_tests;

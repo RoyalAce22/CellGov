@@ -61,6 +61,7 @@ impl Fixture {
             distribution: "psn-hdd".to_string(),
             source_sha256: "ab".repeat(32),
             system_ver: None,
+            shipped_firmware: None,
         }
     }
 
@@ -210,6 +211,7 @@ fn a_disc_base_reads_the_table_under_its_game_directory() {
         distribution: "disc".to_string(),
         source_sha256: "ab".repeat(32),
         system_ver: None,
+        shipped_firmware: None,
     };
     let doc = fx.view().title_doc(&fx.entry(base, &[]));
     let base = base_of(&doc);

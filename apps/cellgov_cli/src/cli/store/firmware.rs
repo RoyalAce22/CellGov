@@ -110,7 +110,7 @@ fn package_summary_line(p: &PackageSummary) -> String {
 /// Printed whether or not `-v` is set: a tally alone cannot distinguish
 /// an expected missing-key skip from a corrupt install.
 #[cfg(feature = "decrypt")]
-fn report_omissions(omissions: &[ManifestOmission]) {
+pub(super) fn report_omissions(omissions: &[ManifestOmission]) {
     if omissions.is_empty() {
         return;
     }

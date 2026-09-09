@@ -83,6 +83,7 @@ fn stored(version: GameVersion) -> GameChoice {
             distribution: "psn-hdd".to_string(),
             source_sha256: "0".repeat(64),
             system_ver: None,
+            shipped_firmware: None,
         },
         update: None,
     }))

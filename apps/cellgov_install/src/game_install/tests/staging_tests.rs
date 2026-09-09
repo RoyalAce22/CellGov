@@ -549,6 +549,7 @@ fn title_base_record(files: BTreeMap<String, HexSha256>, rap: Option<RapRecord>)
             title: "T".to_string(),
             distribution: "psn-hdd".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         },
         rap,
     )

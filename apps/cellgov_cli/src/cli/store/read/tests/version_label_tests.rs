@@ -16,6 +16,7 @@ fn base(version: &str, key: Option<&str>, error: Option<&str>) -> BaseDoc {
         distribution: "psn-hdd".to_string(),
         source_sha256: "ab".repeat(32),
         system_ver: None,
+        shipped_firmware: None,
         record: None,
     }
 }

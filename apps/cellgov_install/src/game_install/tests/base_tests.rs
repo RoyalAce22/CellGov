@@ -429,6 +429,7 @@ fn a_pre_commit_fault_never_reports_finished() {
         InstallOptions {
             force: false,
             progress: &reporter,
+            ..Default::default()
         },
     )
     .unwrap_err();

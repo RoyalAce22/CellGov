@@ -30,6 +30,7 @@ fn base(version: &str) -> BaseDoc {
         distribution: "psn-hdd".to_string(),
         source_sha256: "ab".repeat(32),
         system_ver: None,
+        shipped_firmware: None,
         record: Some(format!(
             ".cellgov/installs/titles/{TITLE_ID}/base.install.toml"
         )),

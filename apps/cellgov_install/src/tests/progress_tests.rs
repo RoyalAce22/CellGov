@@ -3,7 +3,7 @@
 
 use super::*;
 
-const ALL: [Phase; 7] = [
+const ALL: [Phase; 8] = [
     Phase::Reading,
     Phase::Staging,
     Phase::Proving,
@@ -11,6 +11,7 @@ const ALL: [Phase; 7] = [
     Phase::Committing,
     Phase::Hashing,
     Phase::ClearingStaging,
+    Phase::InstallingFirmware,
 ];
 
 /// The label each variant must carry.
@@ -26,6 +27,7 @@ fn expected_label(phase: Phase) -> &'static str {
         Phase::Committing => "committing",
         Phase::Hashing => "hashing source",
         Phase::ClearingStaging => "clearing staging",
+        Phase::InstallingFirmware => "installing shipped firmware",
     }
 }
 

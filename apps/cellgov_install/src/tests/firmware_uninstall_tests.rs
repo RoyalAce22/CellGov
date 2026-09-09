@@ -171,6 +171,7 @@ fn a_record_declaring_another_kind_is_refused() {
         title: "Synthetic".to_string(),
         distribution: "psn-hdd".to_string(),
         system_ver: None,
+        shipped_firmware: None,
     });
     write(
         &layout.record_path(&artifact),

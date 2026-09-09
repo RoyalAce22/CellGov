@@ -15,6 +15,7 @@ fn title_block() -> TitleRecord {
         title: "synthetic record".to_string(),
         distribution: "psn-hdd".to_string(),
         system_ver: None,
+        shipped_firmware: None,
     }
 }
 

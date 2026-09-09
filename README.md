@@ -131,7 +131,11 @@ must be a decrypted dump of a disc you own; one still carrying its
 disc encryption is refused. A PSN package lands under
 `vfs/dev_hdd0/game/<title-id>/`, a disc image under
 `vfs/dev_bdvd/<title-id>/`, each with an install record of per-file
-digests. A title becomes bootable once it has a manifest
+digests. A disc also carries the system software it was certified
+against, in `PS3_UPDATE/PS3UPDAT.PUP`; the install registers that as
+an ordinary `vfs/firmware/<version>/` entry, skipping the unpack when
+the version is already installed, and records the version on the
+title. `--no-firmware` leaves it alone. A title becomes bootable once it has a manifest
 under [title_manifests/](title_manifests/manifest_template.README.md);
 `cellgov dev gen-manifest --title-id <id>` writes the stub from the
 install record.

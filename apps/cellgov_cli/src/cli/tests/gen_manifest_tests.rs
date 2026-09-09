@@ -43,6 +43,7 @@ fn hdd_record() -> InstallRecord {
             title: HDD_TITLE.to_string(),
             distribution: "psn-hdd".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         }),
         files: BTreeMap::from([
             ("PARAM.SFO".to_string(), Sha256([1u8; 32])),
@@ -71,6 +72,7 @@ fn disc_record() -> InstallRecord {
             title: DISC_TITLE.to_string(),
             distribution: "disc-iso".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         }),
         files: BTreeMap::from([("PS3_GAME/USRDIR/EBOOT.BIN".to_string(), Sha256([2u8; 32]))]),
         rap: None,

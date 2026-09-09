@@ -108,6 +108,7 @@ fn title_doc() -> TitleDoc {
             distribution: "psn-hdd".to_string(),
             source_sha256: SAMPLE_SHA.to_string(),
             system_ver: Some("01.5000".to_string()),
+            shipped_firmware: None,
             record: record(&base),
         }),
         ships_in_firmware: false,

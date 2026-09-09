@@ -71,6 +71,7 @@ fn stage_synthetic_install(
             title: "T".to_string(),
             distribution: if is_disc { "disc-iso" } else { "psn-hdd" }.to_string(),
             system_ver: None,
+            shipped_firmware: None,
         }),
         files: filemap,
         rap: rap_rec,

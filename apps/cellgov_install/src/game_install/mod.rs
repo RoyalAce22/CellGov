@@ -14,9 +14,9 @@ mod update;
 pub use error::GameInstallError;
 pub use staging::InstallOptions;
 
-pub use base::GameInstallOutcome;
 #[cfg(feature = "decrypt")]
 pub use base::{install_iso, install_pkg};
+pub use base::{GameInstallOutcome, ShippedFirmware, ShippedFirmwareDisposition};
 
 #[cfg(feature = "decrypt")]
 pub use update::install_update_pkg;

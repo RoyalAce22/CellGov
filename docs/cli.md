@@ -426,6 +426,7 @@ Usage: cellgov title install [OPTIONS] <PKG|ISO>
 | --- | --- | --- |
 | `--rap` | `PATH` | RAP for a license-1/2 NPDRM title. |
 | `--force` | -- | Replace an existing install of this title. |
+| `--no-firmware` | -- | Leave the system software a disc image ships uninstalled and unrecorded, instead of registering it as the firmware entry the title was certified against. |
 | `--output` | `DIR` | Store root (default: the directory enclosing the PS3 VFS root). |
 
 #### `cellgov title install-update`

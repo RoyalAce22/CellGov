@@ -170,6 +170,16 @@ pub(crate) struct BaseEntry {
     /// `None` when the table declared none or the record predates the
     /// field.
     pub system_ver: Option<String>,
+    /// Version key of the firmware entry the disc install registered
+    /// from the system software the disc shipped in `PS3_UPDATE/`.
+    ///
+    /// `None` when:
+    ///
+    /// - the base came from a PKG;
+    /// - the disc carried no update package;
+    /// - the install declined it (`--no-firmware`);
+    /// - the record predates the field.
+    pub shipped_firmware: Option<String>,
 }
 
 impl BaseEntry {
@@ -333,6 +343,7 @@ impl StoreInventory {
                         distribution: title.distribution.clone(),
                         source_sha256: record.source.sha256.to_hex(),
                         system_ver: title.system_ver.clone(),
+                        shipped_firmware: title.shipped_firmware.clone(),
                     });
                 } else {
                     expect_record_name(

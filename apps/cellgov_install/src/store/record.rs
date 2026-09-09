@@ -4,7 +4,8 @@
 //! # Invariants
 //!
 //! - A record's blocks match its `[artifact] kind`: a firmware record
-//!   has no `[title]` and no `[rap]`, a title record has a `[title]`.
+//!   has no `[title]` and no `[rap]`, a title record has a `[title]`,
+//!   and only a base record's `[title]` carries `shipped_firmware`.
 //!   [`InstallRecord`] has no `Deserialize`; [`InstallRecord::parse`] is
 //!   the only route from text and refuses every other combination.
 //! - Every string a consumer joins onto a path -- `store_path`, the
@@ -61,6 +62,16 @@ pub enum InstallRecordParseError {
     /// manifest for a firmware tree is the `firmware.toml` inside it.
     #[error("firmware record carries a [files] table")]
     UnexpectedFilesBlock,
+    /// An update record carries `[title] shipped_firmware`. Only a disc
+    /// image ships system software, and a disc installs as a base.
+    #[error(
+        "title-update record carries [title] shipped_firmware {version:?}; only a base record \
+         names the firmware its disc shipped"
+    )]
+    UnexpectedShippedFirmware {
+        /// The version the update record named.
+        version: String,
+    },
     /// A version the store path encodes is not a usable directory name.
     #[error(
         "{} record declares version {version:?}, which is not a store directory name",
@@ -80,11 +91,13 @@ pub enum InstallRecordParseError {
         path: String,
     },
     /// A `[title]` key that a consumer joins onto a path -- the store
-    /// directory name, or the registry filename a manifest stub is
-    /// written to -- and that is not a usable component.
+    /// directory name, the registry filename a manifest stub is written
+    /// to, or the firmware entry a shipped version names -- and that is
+    /// not a usable component.
     #[error("[title] {field} {value:?} is not usable as a path component")]
     UnsafeTitleKey {
-        /// Which of `title_id` / `content_id` is at fault.
+        /// Which of `title_id` / `content_id` / `shipped_firmware` is at
+        /// fault.
         field: &'static str,
         /// The offending value.
         value: String,
@@ -210,6 +223,18 @@ pub struct TitleRecord {
     /// - the installer that wrote the record predates the field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub system_ver: Option<String>,
+    /// The version key of the `PS3_UPDATE/PS3UPDAT.PUP` a disc image
+    /// carried, which the disc install registered as a `firmware/<key>`
+    /// entry.
+    ///
+    /// `None` when:
+    ///
+    /// - the title is not a disc install;
+    /// - the disc carried no update package;
+    /// - the operator declined to register it;
+    /// - the installer that wrote the record predates the field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub shipped_firmware: Option<String>,
 }
 
 /// A store entry's record: enough to verify a reinstall reproduces the
@@ -308,8 +333,15 @@ impl TryFrom<RawInstallRecord> for InstallRecord {
                 }
             }
             ArtifactKind::TitleBase | ArtifactKind::TitleUpdate => {
-                if raw.title.is_none() {
+                let Some(title) = &raw.title else {
                     return Err(InstallRecordParseError::MissingTitleBlock { kind });
+                };
+                if kind == ArtifactKind::TitleUpdate {
+                    if let Some(version) = &title.shipped_firmware {
+                        return Err(InstallRecordParseError::UnexpectedShippedFirmware {
+                            version: version.clone(),
+                        });
+                    }
                 }
             }
         }
@@ -326,10 +358,19 @@ impl TryFrom<RawInstallRecord> for InstallRecord {
             }
         }
         if let Some(title) = &raw.title {
+            // The shipped version names a `firmware/<key>` entry, so the
+            // gate treats it as a firmware record's own version.
+            let shipped = title
+                .shipped_firmware
+                .iter()
+                .map(|v| ("shipped_firmware", v));
             for (field, value) in [
                 ("title_id", &title.title_id),
                 ("content_id", &title.content_id),
-            ] {
+            ]
+            .into_iter()
+            .chain(shipped)
+            {
                 if !is_safe_component(value) {
                     return Err(InstallRecordParseError::UnsafeTitleKey {
                         field,
@@ -401,3 +442,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/title_block_gate_tests.rs"]
 mod title_block_gate_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_firmware_tests.rs"]
+mod shipped_firmware_tests;

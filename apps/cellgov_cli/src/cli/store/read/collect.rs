@@ -102,6 +102,7 @@ impl StoreView {
                 distribution: base.distribution.clone(),
                 source_sha256: base.source_sha256.clone(),
                 system_ver: base.system_ver.clone(),
+                shipped_firmware: base.shipped_firmware.clone(),
                 record: key
                     .clone()
                     .map(|title_id| self.record_rel(&Artifact::TitleBase { title_id })),

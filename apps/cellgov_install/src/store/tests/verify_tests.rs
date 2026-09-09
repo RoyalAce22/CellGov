@@ -42,6 +42,7 @@ fn tree_and_record(files: &[(&str, &[u8])]) -> (ScratchDir, InstallRecord) {
             title: "Synthetic".to_string(),
             distribution: "psn-hdd".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         }),
         files: recorded,
         rap: None,

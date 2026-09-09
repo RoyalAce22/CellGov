@@ -18,8 +18,10 @@
     )
 )]
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
+use crate::firmware_install::{self, FirmwareInstallOutcome};
 use crate::game_install::error::GameInstallError;
 use crate::game_install::staging::{
     build_record, commit, dir_non_empty, emit_totals, parse_identity, prepare_staging,
@@ -31,13 +33,15 @@ use crate::keys::KeyVault;
 use crate::npdrm::{self, NpdHeaderInfo, NpdLicense};
 use crate::param_sfo;
 use crate::pkg::{self, PkgEntryKind};
-use crate::progress::Phase;
+use crate::progress::{Phase, ProgressSink};
+use crate::pup;
 use crate::sce;
 use crate::self_image::is_sce_wrapped;
 use crate::store::layout::{staging_sibling, Artifact, StoreLayout, TitleId};
 use crate::store::lock::lock_artifact;
 use crate::store::record::{ArtifactRecord, RapRecord, TitleRecord};
 use cellgov_ps3_abi::elf::ELF_MAGIC;
+use cellgov_ps3_abi::title_tree::DISC_UPDATE_PUP;
 
 /// PARAM.SFO categories that mark a disc title (`DG` disc game,
 /// `GD` disc game/data).
@@ -68,6 +72,184 @@ pub struct GameInstallOutcome {
     /// Refusals the RAP and tree renames outwaited, summed. See
     /// [`rename_with_retry`](crate::store::rename_with_retry).
     pub rename_retries: u32,
+    /// The system software the disc shipped, as the install settled it.
+    ///
+    /// `None` for:
+    ///
+    /// - a PKG;
+    /// - a disc with no update package;
+    /// - an install that declined to open it
+    ///   ([`InstallOptions::shipped_firmware`]).
+    pub shipped_firmware: Option<ShippedFirmware>,
+}
+
+/// The system software a disc image ships in `PS3_UPDATE/`, registered
+/// as a store firmware entry and recorded on the title.
+#[derive(Debug, Clone)]
+pub struct ShippedFirmware {
+    /// Version key of the package, and of the `firmware/<key>` entry it
+    /// names; what the title record carries as `shipped_firmware`.
+    pub version: String,
+    /// Whether this install created the entry.
+    pub disposition: ShippedFirmwareDisposition,
+}
+
+/// Whether this install created the disc's firmware entry, or found one
+/// recorded.
+#[derive(Debug, Clone)]
+pub enum ShippedFirmwareDisposition {
+    /// This install unpacked the disc's package into a new entry.
+    Installed(FirmwareInstallOutcome),
+    /// The store already recorded an entry under that version, so this
+    /// install unpacked nothing.
+    AlreadyInstalled {
+        /// Whether the recorded entry came from a package with the same
+        /// bytes as the disc's.
+        same_pup: bool,
+    },
+}
+
+/// Forwards a nested install's item names and drops everything else.
+///
+/// The firmware installer under a disc install reports to the disc
+/// install's bar, whose phase, totals and file counter describe the
+/// title. The package names pass through, so the indeterminate firmware
+/// phase shows the current package.
+struct ItemsOnly<'a>(&'a dyn ProgressSink);
+
+impl ProgressSink for ItemsOnly<'_> {
+    fn phase(&self, _code: u8) {}
+    fn totals(&self, _items: usize, _amount: u64) {}
+    fn preset_done(&self, _amount: u64) {}
+    fn item_started(&self, name: &str) {
+        self.0.item_started(name);
+    }
+    fn advanced(&self, _delta: u64) {}
+    fn item_finished(&self) {}
+    fn finished(&self) {}
+}
+
+/// The bytes of one disc file: borrowed from the image when the file is
+/// one extent, copied when it is several.
+fn entry_bytes<'i>(entry: &iso::IsoEntry, image: &'i [u8]) -> Result<Cow<'i, [u8]>, iso::IsoError> {
+    let slices = entry.extent_slices(image)?;
+    Ok(match slices.as_slice() {
+        [one] => Cow::Borrowed(one),
+        many => Cow::Owned(many.concat()),
+    })
+}
+
+/// Settle the system software the disc ships, before the caller stages
+/// any of the title.
+///
+/// This function validates the package and reads its version in place.
+/// It does not unpack a version the store already records. An
+/// unrecorded version goes through the firmware installer under its own
+/// entry and lock, with `force` off, so the installer reports an
+/// unrecorded tree under the entry directory and never overwrites it.
+///
+/// Returns `None` when:
+///
+/// - the disc carries no package;
+/// - `opts` declines to open it.
+///
+/// # Errors
+///
+/// [`GameInstallError::ShippedFirmware`] for every refusal of the
+/// package or the entry, and
+/// [`GameInstallError::ShippedFirmwareVersionMismatch`] when the
+/// package's version entry and its unpacked tree disagree.
+#[cfg(feature = "decrypt")]
+fn shipped_firmware(
+    entries: &[iso::IsoEntry],
+    image: &[u8],
+    keys: &KeyVault,
+    output_dir: &Path,
+    opts: InstallOptions<'_>,
+) -> Result<Option<ShippedFirmware>, GameInstallError> {
+    if !opts.shipped_firmware {
+        return Ok(None);
+    }
+    let Some(entry) = entries.iter().find(|e| e.path == DISC_UPDATE_PUP) else {
+        return Ok(None);
+    };
+    // A directory under the package's name is not an absent package:
+    // the image holds something there, and it is not a PUP.
+    if entry.kind != iso::IsoEntryKind::File {
+        return Err(GameInstallError::ShippedFirmwareNotAFile);
+    }
+    let pup_data = entry_bytes(entry, image)?;
+    let refused = |source: firmware_install::FirmwareInstallError| {
+        GameInstallError::ShippedFirmware { source }
+    };
+    let parsed = pup::parse(&pup_data).map_err(|e| refused(e.into()))?;
+    pup::validate_hashes(&pup_data, &parsed, keys).map_err(|e| refused(e.into()))?;
+    let version = pup::version_key(&pup_data, &parsed).map_err(|e| refused(e.into()))?;
+
+    if let Some(existing) =
+        firmware_install::installed_record(output_dir, &version).map_err(refused)?
+    {
+        let same_pup = existing.source.sha256 == sha256_of(&pup_data);
+        return Ok(Some(ShippedFirmware {
+            version,
+            disposition: ShippedFirmwareDisposition::AlreadyInstalled { same_pup },
+        }));
+    }
+
+    let progress = opts.progress;
+    progress.phase(Phase::InstallingFirmware.code());
+    let installed =
+        firmware_install::install_pup(&pup_data, keys, output_dir, false, &ItemsOnly(progress));
+    // The last package name would otherwise stand until the first
+    // staged file replaces it.
+    progress.item_started("");
+    let disposition = match installed {
+        Ok(outcome) if outcome.version != version => {
+            return Err(GameInstallError::ShippedFirmwareVersionMismatch {
+                declared: version,
+                extracted: outcome.version,
+            });
+        }
+        Ok(outcome) => ShippedFirmwareDisposition::Installed(outcome),
+        Err(refusal) => settle_installer_refusal(&version, refusal)?,
+    };
+    Ok(Some(ShippedFirmware {
+        version,
+        disposition,
+    }))
+}
+
+/// What a firmware installer refusal means for the disc install.
+///
+/// The installer learns the tree's version only after it unpacks, so
+/// its duplicate-version refusals name a version the pre-check did not
+/// see recorded. Two cases:
+///
+/// - The version landed between the two reads. Another writer installed
+///   it, and the disc reuses that entry.
+/// - The package's `version.txt` entry does not spell the tree's
+///   version. The package is at odds with its own tree, and the
+///   installer committed that tree under the tree's version.
+///
+/// Every other refusal stands.
+fn settle_installer_refusal(
+    declared: &str,
+    refusal: firmware_install::FirmwareInstallError,
+) -> Result<ShippedFirmwareDisposition, GameInstallError> {
+    use firmware_install::FirmwareInstallError as Fw;
+    let (version, same_pup) = match refusal {
+        Fw::VersionInstalled { version, .. } => (version, true),
+        Fw::VersionInstalledFromAnotherPup { version, .. } => (version, false),
+        other => return Err(GameInstallError::ShippedFirmware { source: other }),
+    };
+    if version == declared {
+        Ok(ShippedFirmwareDisposition::AlreadyInstalled { same_pup })
+    } else {
+        Err(GameInstallError::ShippedFirmwareVersionMismatch {
+            declared: declared.to_string(),
+            extracted: version,
+        })
+    }
 }
 
 /// Whether a license consumes a RAP. Only network/local do; free and
@@ -284,6 +466,7 @@ pub fn install_pkg(
             title,
             distribution: "psn-hdd".to_string(),
             system_ver,
+            shipped_firmware: None,
         },
         staged_rap.as_ref().map(|r| r.record.clone()),
     );
@@ -307,6 +490,7 @@ pub fn install_pkg(
         file_count: record.files.len(),
         record_path: committed.record_path,
         rename_retries: committed.rename_retries,
+        shipped_firmware: None,
     })
 }
 
@@ -318,6 +502,14 @@ pub fn install_pkg(
 /// -- so the decrypt-proof runs through `sce::decrypt_self_to_elf`
 /// under `keys`.
 ///
+/// The install registers the disc's system software in `PS3_UPDATE/` as
+/// an ordinary `firmware/<version>` entry before it stages the title. It
+/// validates the package and reads its version in place. It unpacks the
+/// package only when the store records no entry under that version. The
+/// title record carries the version as `shipped_firmware`. Every disc
+/// that ships the version shares the entry. A later fault in this
+/// install leaves it in place, and a title uninstall never removes it.
+///
 /// # Errors
 ///
 /// [`GameInstallError::PreStore`] when the root still holds the
@@ -325,6 +517,10 @@ pub fn install_pkg(
 ///
 /// [`GameInstallError::DiscImageEncrypted`] for an image still carrying
 /// its disc encryption, refused before anything is staged.
+///
+/// [`GameInstallError::ShippedFirmware`] and
+/// [`GameInstallError::ShippedFirmwareVersionMismatch`] when the disc's
+/// package cannot be registered; nothing of the title is staged.
 ///
 /// [`GameInstallError::Locked`] when another process holds this title's
 /// base. A disc base and an HDD base of one title share one record, so
@@ -404,6 +600,11 @@ pub fn install_iso(
         return Err(GameInstallError::TargetExists { path: final_dir });
     }
 
+    // The disc's own system software goes first: a refusal there stages
+    // none of the title, and a title fault after it leaves an ordinary
+    // firmware entry behind rather than half of one.
+    let shipped = shipped_firmware(&entries, image, keys, output_dir, opts)?;
+
     // Each file stays in the image until stage_tree streams it to disk,
     // so a full BD image installs in bounded memory.
     let staged: Vec<StagedFile> = entries
@@ -445,6 +646,7 @@ pub fn install_iso(
             title,
             distribution: "disc-iso".to_string(),
             system_ver,
+            shipped_firmware: shipped.as_ref().map(|s| s.version.clone()),
         },
         None,
     );
@@ -470,6 +672,7 @@ pub fn install_iso(
         file_count: record.files.len(),
         record_path: committed.record_path,
         rename_retries: committed.rename_retries,
+        shipped_firmware: shipped,
     })
 }
 
@@ -480,3 +683,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/disc_tests.rs"]
 mod disc_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_firmware_tests.rs"]
+mod shipped_firmware_tests;

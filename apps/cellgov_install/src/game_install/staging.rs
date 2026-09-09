@@ -63,6 +63,11 @@ pub struct InstallOptions<'a> {
     /// Overwrite an occupied target: a non-empty target directory, and
     /// for the update installer an already-installed version.
     pub force: bool,
+    /// Register the system software a disc image ships as a firmware
+    /// entry and record its version on the title. Off, the disc install
+    /// does not open the update package, and the title records no
+    /// shipped version. The PKG installers ignore it.
+    pub shipped_firmware: bool,
     /// Where progress events go; `&()` drops them.
     pub progress: &'a dyn ProgressSink,
 }
@@ -71,6 +76,7 @@ impl Default for InstallOptions<'_> {
     fn default() -> Self {
         Self {
             force: false,
+            shipped_firmware: true,
             progress: &(),
         }
     }

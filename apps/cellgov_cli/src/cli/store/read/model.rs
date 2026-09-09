@@ -112,6 +112,14 @@ pub(crate) struct BaseDoc {
     /// declared none or the record predates the field.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_ver: Option<String>,
+    /// Version key of the system software the disc shipped in
+    /// `PS3_UPDATE/`, which the disc install registered as a firmware
+    /// entry. Absent under the conditions [`BaseEntry::shipped_firmware`]
+    /// lists.
+    ///
+    /// [`BaseEntry::shipped_firmware`]: crate::composition::inventory::BaseEntry::shipped_firmware
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shipped_firmware: Option<String>,
     /// The install record describing it, absent when the title id is
     /// not a store directory name and so names no record path.
     #[serde(skip_serializing_if = "Option::is_none")]

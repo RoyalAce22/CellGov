@@ -18,6 +18,7 @@ fn base_record_declaring(system_ver: &str) -> InstallRecord {
             title: "synthetic record".to_string(),
             distribution: "psn-hdd".to_string(),
             system_ver: Some(system_ver.to_string()),
+            shipped_firmware: None,
         }),
         files: BTreeMap::new(),
         rap: None,

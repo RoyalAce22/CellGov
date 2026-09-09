@@ -12,7 +12,9 @@ use crate::cli::exit::die;
 #[cfg(feature = "decrypt")]
 use cellgov_install::container::{self, Container};
 #[cfg(feature = "decrypt")]
-use cellgov_install::game_install::{self, InstallOptions};
+use cellgov_install::game_install::{
+    self, InstallOptions, ShippedFirmware, ShippedFirmwareDisposition,
+};
 #[cfg(feature = "decrypt")]
 use cellgov_install::progress::INSTALL_TASK;
 #[cfg(feature = "decrypt")]
@@ -49,6 +51,9 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
     if kind == Container::Iso && args.rap.is_some() {
         die("--rap names an NPDRM license; a disc image carries none");
     }
+    if kind == Container::Pkg && args.no_firmware {
+        die("--no-firmware declines the system software a disc image ships; a PKG ships none");
+    }
     // Vault before install: a missing one should not cost a full
     // container read first.
     let keys = vault_or_die(store);
@@ -75,6 +80,7 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
     let reporter = bar.sink();
     let options = InstallOptions {
         force: args.force,
+        shipped_firmware: !args.no_firmware,
         progress: &*reporter,
     };
     let outcome = match kind {
@@ -108,6 +114,7 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
                 outcome.game_dir.display(),
             );
             println!("  record {}", outcome.record_path.display());
+            report_shipped_firmware(outcome.shipped_firmware.as_ref(), args.no_firmware);
         }
         Container::Pkg => {
             println!(
@@ -135,6 +142,49 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
         }
     }
     super::report_rename_retries(outcome.rename_retries);
+}
+
+#[cfg(feature = "decrypt")]
+fn report_shipped_firmware(shipped: Option<&ShippedFirmware>, declined: bool) {
+    let Some(shipped) = shipped else {
+        if declined {
+            println!(
+                "  firmware: not registered (--no-firmware); the title records no shipped version"
+            );
+        } else {
+            println!("  firmware: the disc carries no PS3_UPDATE/PS3UPDAT.PUP");
+        }
+        return;
+    };
+    match &shipped.disposition {
+        ShippedFirmwareDisposition::Installed(fw) => {
+            println!(
+                "  firmware {} (shipped with this disc): {} files -> {}",
+                fw.version,
+                fw.files,
+                fw.entry_dir.display(),
+            );
+            println!(
+                "  manifest {} ({} entries), record {}",
+                fw.manifest_path.display(),
+                fw.manifest_entries,
+                fw.record_path.display(),
+            );
+            super::firmware::report_omissions(&fw.omissions);
+            super::report_rename_retries(fw.rename_retries);
+        }
+        ShippedFirmwareDisposition::AlreadyInstalled { same_pup } => {
+            println!(
+                "  firmware {} (shipped with this disc): already installed{}",
+                shipped.version,
+                if *same_pup {
+                    ""
+                } else {
+                    ", from a different PS3UPDAT.PUP of the same version"
+                },
+            );
+        }
+    }
 }
 
 #[cfg(not(feature = "decrypt"))]
@@ -172,6 +222,7 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
         InstallOptions {
             force: args.force,
             progress: &*reporter,
+            ..Default::default()
         },
     );
     let outcome = match outcome {

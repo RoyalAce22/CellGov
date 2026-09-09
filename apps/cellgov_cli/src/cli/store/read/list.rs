@@ -212,6 +212,9 @@ fn render_title_detail(title: &TitleDoc) -> String {
             if let Some(v) = &base.system_ver {
                 out.push_str(&format!("  needs fw   {v}\n"));
             }
+            if let Some(v) = &base.shipped_firmware {
+                out.push_str(&format!("  ships fw   {v}\n"));
+            }
         }
         None => out.push_str("  base       -- (not installed)\n"),
     }
@@ -267,3 +270,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/version_label_tests.rs"]
 mod version_label_tests;
+
+#[cfg(test)]
+#[path = "tests/shipped_firmware_tests.rs"]
+mod shipped_firmware_tests;

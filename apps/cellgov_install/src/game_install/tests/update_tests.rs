@@ -82,6 +82,7 @@ fn write_base_record(vfs: &Path, title_id: &str) -> PathBuf {
             title: "WipEout HD".to_string(),
             distribution: "disc-iso".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         },
         None,
     );
@@ -426,6 +427,7 @@ fn a_base_record_declaring_an_update_entry_is_not_a_base() {
             title: "WipEout HD".to_string(),
             distribution: UPDATE_DISTRIBUTION.to_string(),
             system_ver: None,
+            shipped_firmware: None,
         },
         None,
     );
@@ -590,6 +592,7 @@ fn a_refused_update_stops_the_phase_trail_where_it_faulted() {
         InstallOptions {
             force: false,
             progress: &reporter,
+            ..Default::default()
         },
     )
     .unwrap_err();
@@ -616,6 +619,7 @@ fn a_completed_update_walks_reading_staging_hashing_committing() {
         InstallOptions {
             force: false,
             progress: &reporter,
+            ..Default::default()
         },
     )
     .expect("install");

@@ -114,6 +114,11 @@ pub(crate) struct TitleInstallArgs {
     /// Replace an existing install of this title.
     #[arg(long)]
     pub force: bool,
+    /// Leave the system software a disc image ships uninstalled and
+    /// unrecorded, instead of registering it as the firmware entry the
+    /// title was certified against.
+    #[arg(long)]
+    pub no_firmware: bool,
     #[command(flatten)]
     pub output: VfsOutput,
 }

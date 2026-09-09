@@ -31,6 +31,7 @@ fn synthetic_record(rap: Option<RapRecord>) -> InstallRecord {
             title: "T".to_string(),
             distribution: "psn-hdd".to_string(),
             system_ver: None,
+            shipped_firmware: None,
         },
         rap,
     )

@@ -31,6 +31,9 @@ pub enum Phase {
     Hashing = 5,
     /// Removing the staging tree an interrupted install left behind.
     ClearingStaging = 6,
+    /// Installing the system software a disc image ships, as a firmware
+    /// entry of its own. Runs for minutes.
+    InstallingFirmware = 7,
 }
 
 impl Phase {
@@ -107,6 +110,7 @@ pub const INSTALL_TASK: Task = Task {
         "committing",
         "hashing source",
         "clearing staging",
+        "installing shipped firmware",
     ],
     measured: Phase::Staging as u8,
     unit: Unit::Bytes,

@@ -259,6 +259,7 @@ pub fn install_update_pkg(
             title,
             distribution: UPDATE_DISTRIBUTION.to_string(),
             system_ver,
+            shipped_firmware: None,
         },
         None,
     );
