@@ -64,6 +64,9 @@ pub struct UpdateInstallOutcome {
     pub record_path: PathBuf,
     /// Whether `--force` replaced an already-installed version.
     pub replaced: bool,
+    /// Refusals the tree rename outwaited. See
+    /// [`rename_with_retry`](crate::store::rename_with_retry).
+    pub rename_retries: u32,
 }
 
 /// Read an install record, distinguishing absence from a record that
@@ -254,7 +257,7 @@ pub fn install_update_pkg(
     );
     // The staging root is itself the entry directory, as on the disc
     // path; there is no RAP.
-    let record_path = commit(
+    let committed = commit(
         &staging_root,
         &staging_root,
         &entry_dir,
@@ -272,8 +275,9 @@ pub fn install_update_pkg(
         update_dir: entry_dir,
         orphan,
         file_count: record.files.len(),
-        record_path,
+        record_path: committed.record_path,
         replaced: existing.is_some(),
+        rename_retries: committed.rename_retries,
     })
 }
 

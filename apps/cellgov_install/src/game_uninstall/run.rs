@@ -1,11 +1,16 @@
 //! Executing an [`UninstallPlan`]: the verify gate, then the
 //! tombstone-first teardown of each entry.
+//!
+//! The tombstone rename goes through [`rename_with_retry`]. The verify
+//! gate opens every recorded file just before that rename, which is the
+//! exposure the policy covers.
 
 use std::path::{Path, PathBuf};
 
 use crate::store::layout::tombstone_sibling;
 use crate::store::lock::lock_artifact;
 use crate::store::record::InstallRecord;
+use crate::store::rename::rename_with_retry;
 use crate::store::verify::{verify_record_tree, verify_recorded_rap, DivergenceKind, VerifyReport};
 
 use super::error::{uio_err, GameUninstallError};
@@ -59,6 +64,9 @@ pub struct GameUninstallOutcome {
     /// the same set [`Self::files_verified`] counts. Non-zero only under
     /// `force`, the sole way a divergence passes the gate.
     pub files_diverged: Option<usize>,
+    /// Refusals the tombstone renames outwaited, summed over the
+    /// entries. See [`rename_with_retry`].
+    pub rename_retries: u32,
 }
 
 impl GameUninstallOutcome {
@@ -200,6 +208,7 @@ pub fn execute(
 
     let mut removed = Vec::with_capacity(plan.entries.len());
     let mut rap_removed = None;
+    let mut rename_retries = 0u32;
     for (entry, tombstone) in plan.entries.iter().zip(&tombstones) {
         // Clear any stale tombstone left by a prior interrupted
         // uninstall.
@@ -209,8 +218,12 @@ pub fn execute(
         // idempotent; a stat that fails refuses here, since the record
         // removal below would otherwise leave the tree unnamed.
         if std::fs::exists(&entry.tree_dir).map_err(uio_err("stat", &entry.tree_dir))? {
-            std::fs::rename(&entry.tree_dir, tombstone)
-                .map_err(uio_err("rename", &entry.tree_dir))?;
+            rename_retries += rename_with_retry(&entry.tree_dir, tombstone).map_err(|source| {
+                GameUninstallError::Rename {
+                    path: entry.tree_dir.clone(),
+                    source,
+                }
+            })?;
         }
 
         // RAP: removed with the base, after its tombstone rename, unless
@@ -250,6 +263,7 @@ pub fn execute(
         kept_updates: plan.kept_updates.clone(),
         files_verified: opts.verify.then_some(verified),
         files_diverged: opts.verify.then_some(diverged),
+        rename_retries,
     })
 }
 

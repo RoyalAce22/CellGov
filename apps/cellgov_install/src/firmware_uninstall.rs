@@ -8,12 +8,15 @@
 //!   that is that version's own entry directory.
 //! - The rename of the entry directory to a hidden sibling tombstone is
 //!   the atomic point. The record goes next, then the tombstone.
+//! - That rename goes through [`rename_with_retry`]; a `--verify` pass
+//!   just opened every module under the entry.
 
 use std::path::{Path, PathBuf};
 
 use crate::store::layout::{tombstone_sibling, Artifact, ArtifactKind, StoreLayout, VersionKey};
 use crate::store::lock::lock_artifact;
 use crate::store::record::InstallRecord;
+use crate::store::rename::{rename_with_retry, RenameRefused};
 
 /// Why a firmware uninstall failed.
 #[derive(Debug, thiserror::Error)]
@@ -90,6 +93,16 @@ pub enum FirmwareUninstallError {
         /// The `store_path` the record declared.
         store_path: String,
     },
+    /// The tombstone rename stayed refused through every attempt it
+    /// got.
+    #[error("rename {}: {source}", path.display())]
+    Rename {
+        /// The entry the rename could not move to its tombstone.
+        path: PathBuf,
+        /// The refusal and its attempt count.
+        #[source]
+        source: RenameRefused,
+    },
     /// A filesystem operation failed.
     #[error("{op} {}: {source}", path.display())]
     Io {
@@ -137,6 +150,10 @@ pub struct FirmwareUninstallOutcome {
     pub entry_removed: PathBuf,
     /// The install record that was removed.
     pub record_removed: PathBuf,
+    /// Refusals the tombstone rename outwaited before it landed.
+    /// Non-zero means a handle was open under the entry, typically an
+    /// on-access scanner's.
+    pub rename_retries: u32,
 }
 
 /// Suffix every install-record filename carries.
@@ -316,8 +333,14 @@ pub fn execute(
     // `Path::exists` answers false both for an absent tree and for a
     // stat that failed. A failed stat would drop the rename, then
     // remove the record, and leave the tree with nothing naming it.
+    let mut rename_retries = 0u32;
     if std::fs::exists(&plan.entry_dir).map_err(io_err("stat", &plan.entry_dir))? {
-        std::fs::rename(&plan.entry_dir, &tombstone).map_err(io_err("rename", &plan.entry_dir))?;
+        rename_retries = rename_with_retry(&plan.entry_dir, &tombstone).map_err(|source| {
+            FirmwareUninstallError::Rename {
+                path: plan.entry_dir.clone(),
+                source,
+            }
+        })?;
     }
 
     match std::fs::remove_file(&plan.record_path) {
@@ -332,6 +355,7 @@ pub fn execute(
         version: plan.version.clone(),
         entry_removed: plan.entry_dir.clone(),
         record_removed: plan.record_path.clone(),
+        rename_retries,
     })
 }
 

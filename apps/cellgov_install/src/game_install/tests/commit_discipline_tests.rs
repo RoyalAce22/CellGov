@@ -65,7 +65,7 @@ fn a_replace_whose_rename_fails_leaves_no_record_over_the_cleared_tree() {
             &record,
             &(),
         ),
-        Err(GameInstallError::Io { op: "rename", .. })
+        Err(GameInstallError::Rename { .. })
     ));
     assert!(
         !record_path.exists(),

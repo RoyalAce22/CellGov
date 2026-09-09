@@ -23,6 +23,8 @@
 //! - A commit that fails leaves the staged tree where it is rather than
 //!   discarding it: the next install of any version sweeps it by name,
 //!   and re-extracting a PUP costs minutes.
+//! - The commit rename goes through [`rename_with_retry`]; an on-access
+//!   scanner opens the tree the installer just wrote.
 
 #![cfg_attr(
     not(feature = "decrypt"),
@@ -53,6 +55,7 @@ use crate::store::record::{
     ArtifactRecord, InstallRecord, InstallRecordParseError, SourceRecord,
     INSTALL_RECORD_FORMAT_VERSION,
 };
+use crate::store::rename::rename_with_retry;
 use crate::{pup, sce, tar};
 
 /// `source.kind` every firmware record carries.
@@ -143,6 +146,10 @@ pub struct FirmwareInstallOutcome {
     pub record_path: PathBuf,
     /// Whether `--force` replaced an already-installed version.
     pub replaced: bool,
+    /// Refusals the commit rename outwaited before it landed. Non-zero
+    /// means a handle was open under the staged tree, typically an
+    /// on-access scanner's.
+    pub rename_retries: u32,
 }
 
 fn io_err<'a>(
@@ -484,7 +491,7 @@ pub fn install_pup(
         Ok((staged, version_lock))
     })?;
 
-    commit(&staging_root, &staged, progress)?;
+    let rename_retries = commit(&staging_root, &staged, progress)?;
     progress.finished();
 
     Ok(FirmwareInstallOutcome {
@@ -497,6 +504,7 @@ pub fn install_pup(
         files: staged.files,
         record_path: staged.record_path,
         replaced: staged.replaced,
+        rename_retries,
     })
 }
 
@@ -523,7 +531,7 @@ fn remove_record(record_path: &Path) -> Result<(), FirmwareInstallError> {
 }
 
 /// Drop the entry's record, rename the staged tree onto it, then write
-/// the new record.
+/// the new record. Returns the refusals the rename outwaited.
 ///
 /// No rollback -- see the module invariants for the residue a fault
 /// leaves and which retry clears it.
@@ -531,7 +539,7 @@ fn commit(
     staging_root: &Path,
     staged: &Staged,
     progress: &dyn ProgressSink,
-) -> Result<(), FirmwareInstallError> {
+) -> Result<u32, FirmwareInstallError> {
     progress.phase(FirmwarePhase::Committing.code());
     if let Some(parent) = staged.entry_dir.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
@@ -544,7 +552,7 @@ fn commit(
         std::fs::remove_dir_all(&staged.entry_dir).map_err(io_err("remove", &staged.entry_dir))?;
         progress.phase(FirmwarePhase::Committing.code());
     }
-    std::fs::rename(staging_root, &staged.entry_dir).map_err(|source| {
+    let rename_retries = rename_with_retry(staging_root, &staged.entry_dir).map_err(|source| {
         FirmwareInstallError::CommitFailed {
             staging_root: staging_root.to_path_buf(),
             entry_dir: staged.entry_dir.clone(),
@@ -556,7 +564,8 @@ fn commit(
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
     }
     let text = staged.record.to_toml()?;
-    std::fs::write(&staged.record_path, text).map_err(io_err("write", &staged.record_path))
+    std::fs::write(&staged.record_path, text).map_err(io_err("write", &staged.record_path))?;
+    Ok(rename_retries)
 }
 
 #[cfg(test)]

@@ -8,12 +8,14 @@
 //! [`StoreLayout::installs_dir`]. [`pre_store`] refuses a root that
 //! still holds the layout that came before this one. [`verify`] holds
 //! a tree against the record that describes it. [`lock`] keeps two
-//! writers off one entry; readers take nothing.
+//! writers off one entry; readers take nothing. [`rename`] is the one
+//! policy every publish and teardown rename goes through.
 
 pub mod layout;
 pub mod lock;
 pub mod pre_store;
 pub mod record;
+pub mod rename;
 pub mod verify;
 
 pub use layout::{
@@ -27,4 +29,5 @@ pub use record::{
     ArtifactRecord, InstallRecord, InstallRecordParseError, RapRecord, SourceRecord, TitleRecord,
     INSTALL_RECORD_FORMAT_VERSION,
 };
+pub use rename::{rename_with_retry, RenameRefused};
 pub use verify::{verify_record_tree, Divergence, DivergenceKind, VerifyReadError, VerifyReport};

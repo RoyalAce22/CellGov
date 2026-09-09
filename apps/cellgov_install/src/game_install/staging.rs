@@ -29,6 +29,7 @@
 //!   best-effort and its failure is not reported: the install has
 //!   already committed, and a `.staging-<target>` left behind is swept
 //!   by name by the next [`prepare_staging`] on that target.
+//! - Both commit renames go through [`rename_with_retry`].
 
 #![cfg_attr(
     not(feature = "decrypt"),
@@ -53,6 +54,7 @@ use crate::store::record::{
     tree_rel_path_is_safe, ArtifactRecord, InstallRecord, RapRecord, SourceRecord, TitleRecord,
     INSTALL_RECORD_FORMAT_VERSION,
 };
+use crate::store::rename::rename_with_retry;
 
 /// Knobs shared by every installer.
 #[derive(Clone, Copy)]
@@ -389,6 +391,15 @@ fn remove_record(record_path: &Path) -> Result<(), GameInstallError> {
     }
 }
 
+/// What [`commit`] reports back.
+#[derive(Debug)]
+pub(super) struct Committed {
+    /// The written install record.
+    pub(super) record_path: PathBuf,
+    /// Refusals the RAP and tree renames outwaited, summed.
+    pub(super) rename_retries: u32,
+}
+
 /// Commit a staging batch in a fixed sequence: RAP into `exdata/`
 /// first, then the record removed, then the tree into `final_dir` (the
 /// commit point), then the record written. No rollback -- see the
@@ -408,11 +419,12 @@ pub(super) fn commit(
     record_path: &Path,
     record: &InstallRecord,
     progress: &dyn ProgressSink,
-) -> Result<PathBuf, GameInstallError> {
+) -> Result<Committed, GameInstallError> {
     progress.phase(Phase::Committing.code());
     if let Some(parent) = final_dir.parent() {
         std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
     }
+    let mut rename_retries = 0u32;
 
     // RAP first; an orphan RAP is inert (see the module invariants).
     // rename replaces an existing destination file on both platforms.
@@ -420,9 +432,8 @@ pub(super) fn commit(
         if let Some(parent) = sr.final_path.parent() {
             std::fs::create_dir_all(parent).map_err(io_err("create dir", parent))?;
         }
-        std::fs::rename(&sr.staged_path, &sr.final_path).map_err(|source| {
-            GameInstallError::Io {
-                op: "rename",
+        rename_retries += rename_with_retry(&sr.staged_path, &sr.final_path).map_err(|source| {
+            GameInstallError::Rename {
                 path: sr.final_path.clone(),
                 source,
             }
@@ -442,11 +453,11 @@ pub(super) fn commit(
         std::fs::remove_dir_all(final_dir).map_err(io_err("remove", final_dir))?;
         progress.phase(Phase::Committing.code());
     }
-    std::fs::rename(tree_staging, final_dir).map_err(|source| GameInstallError::Io {
-        op: "rename",
-        path: final_dir.to_path_buf(),
-        source,
-    })?;
+    rename_retries +=
+        rename_with_retry(tree_staging, final_dir).map_err(|source| GameInstallError::Rename {
+            path: final_dir.to_path_buf(),
+            source,
+        })?;
     // Drop the now-treeless staging root; best-effort (already gone
     // wherever the root was itself the tree).
     std::fs::remove_dir_all(staging_root).ok();
@@ -457,7 +468,10 @@ pub(super) fn commit(
     }
     let text = record.to_toml()?;
     std::fs::write(record_path, text).map_err(io_err("write", record_path))?;
-    Ok(record_path.to_path_buf())
+    Ok(Committed {
+        record_path: record_path.to_path_buf(),
+        rename_retries,
+    })
 }
 
 /// Build the install record from [`stage_tree`]'s digests. File hashes
@@ -488,3 +502,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/commit_discipline_tests.rs"]
 mod commit_discipline_tests;
+
+#[cfg(test)]
+#[path = "tests/commit_retry_tests.rs"]
+mod commit_retry_tests;

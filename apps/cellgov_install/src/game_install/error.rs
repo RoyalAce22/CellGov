@@ -7,6 +7,7 @@ use crate::manifest::Sha256 as HexSha256;
 use crate::param_sfo;
 use crate::pkg;
 use crate::store::layout::ArtifactKind;
+use crate::store::rename::RenameRefused;
 
 /// Why a game install failed.
 #[derive(Debug, thiserror::Error)]
@@ -154,10 +155,19 @@ pub enum GameInstallError {
         /// The non-empty target directory.
         path: PathBuf,
     },
+    /// A commit rename stayed refused through every attempt it got.
+    #[error("rename {}: {source}", path.display())]
+    Rename {
+        /// The target of the rename.
+        path: PathBuf,
+        /// The refusal and its attempt count.
+        #[source]
+        source: RenameRefused,
+    },
     /// A filesystem operation failed.
     #[error("{op} {}: {source}", path.display())]
     Io {
-        /// What was being attempted (e.g. "write", "rename").
+        /// The operation, e.g. "write" or "remove".
         op: &'static str,
         /// The path involved.
         path: PathBuf,

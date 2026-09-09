@@ -6,6 +6,7 @@ use cellgov_ps3_abi::pup::ENTRY_ID_UPDATE_FILES;
 
 use crate::manifest::{ManifestError, Sha256 as HexSha256};
 use crate::sce::SceError;
+use crate::store::rename::RenameRefused;
 use crate::tar::{ExtractError, TarParseError};
 
 /// Why one dev_flash package produced no files.
@@ -187,14 +188,14 @@ pub enum FirmwareInstallError {
         staging_root: PathBuf,
         /// The entry it was to become.
         entry_dir: PathBuf,
-        /// Why the rename failed.
+        /// The refusal and its attempt count.
         #[source]
-        source: std::io::Error,
+        source: RenameRefused,
     },
     /// A filesystem operation failed.
     #[error("{op} {}: {source}", path.display())]
     Io {
-        /// What was being attempted (e.g. "write", "rename").
+        /// The operation that failed (e.g. "write", "remove").
         op: &'static str,
         /// The path involved.
         path: PathBuf,

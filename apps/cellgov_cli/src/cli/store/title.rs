@@ -134,6 +134,7 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
             }
         }
     }
+    super::report_rename_retries(outcome.rename_retries);
 }
 
 #[cfg(not(feature = "decrypt"))]
@@ -203,4 +204,5 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
             outcome.title_id
         );
     }
+    super::report_rename_retries(outcome.rename_retries);
 }

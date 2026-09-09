@@ -22,6 +22,19 @@ pub(crate) use container::{
 pub(crate) use error::StoreCliError;
 pub(crate) use registry::registry_dir;
 
+/// Print the note for renames that landed only after a retry.
+///
+/// `retries` sums every rename the command made: a PKG install renames
+/// the RAP and the tree, and an `--all` uninstall renames each entry.
+pub(crate) fn report_rename_retries(retries: u32) {
+    if retries > 0 {
+        eprintln!(
+            "  note: {retries} rename refusal(s) were outwaited before the renames landed; \
+             a handle was open on a path a rename touched, typically an on-access scanner's"
+        );
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/scratch.rs"]
 pub(crate) mod scratch;

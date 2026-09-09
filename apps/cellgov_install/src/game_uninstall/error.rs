@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::manifest::Sha256 as HexSha256;
 use crate::store::layout::ArtifactKind;
+use crate::store::rename::RenameRefused;
 use crate::store::verify::VerifyReadError;
 
 /// Why an uninstall failed.
@@ -157,6 +158,16 @@ pub enum GameUninstallError {
         expected: HexSha256,
         /// Hash found on disk.
         found: HexSha256,
+    },
+    /// The tombstone rename stayed refused through every attempt it
+    /// got.
+    #[error("rename {}: {source}", path.display())]
+    Rename {
+        /// The tree the rename could not move onto its tombstone.
+        path: PathBuf,
+        /// The refusal and its attempt count.
+        #[source]
+        source: RenameRefused,
     },
     /// A filesystem operation failed.
     #[error("{op} {}: {source}", path.display())]

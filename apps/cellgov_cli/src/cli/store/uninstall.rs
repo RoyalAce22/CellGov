@@ -102,6 +102,7 @@ pub(crate) fn title(args: &UninstallArgs, store: &Path, answers: Answers) {
             eprintln!("  --force overrode {n} recorded files that were missing or modified");
         }
     }
+    super::report_rename_retries(outcome.rename_retries);
 }
 
 /// `cellgov firmware uninstall <VERSION>`
@@ -174,6 +175,7 @@ pub(crate) fn firmware(args: &FirmwareUninstallArgs, store: &Path, answers: Answ
     println!("cellgov: uninstalled firmware {}", outcome.version);
     println!("  removed entry {}", outcome.entry_removed.display());
     println!("  removed record {}", outcome.record_removed.display());
+    super::report_rename_retries(outcome.rename_retries);
 }
 
 /// Hold the installed tree against its manifest before removal.

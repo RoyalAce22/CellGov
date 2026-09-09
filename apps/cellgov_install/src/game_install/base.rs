@@ -65,6 +65,9 @@ pub struct GameInstallOutcome {
     pub file_count: usize,
     /// The written install record.
     pub record_path: PathBuf,
+    /// Refusals the RAP and tree renames outwaited, summed. See
+    /// [`rename_with_retry`](crate::store::rename_with_retry).
+    pub rename_retries: u32,
 }
 
 /// Whether a license consumes a RAP. Only network/local do; free and
@@ -277,7 +280,7 @@ pub fn install_pkg(
         },
         staged_rap.as_ref().map(|r| r.record.clone()),
     );
-    let record_path = commit(
+    let committed = commit(
         &staging_root,
         &tree_staging,
         &final_dir,
@@ -295,7 +298,8 @@ pub fn install_pkg(
         rap_installed,
         rap_ignored,
         file_count: record.files.len(),
-        record_path,
+        record_path: committed.record_path,
+        rename_retries: committed.rename_retries,
     })
 }
 
@@ -432,7 +436,7 @@ pub fn install_iso(
     );
     // Disc: the staging root is itself the tree (no `tree/` nesting),
     // and there is no RAP.
-    let record_path = commit(
+    let committed = commit(
         &staging_dir,
         &staging_dir,
         &final_dir,
@@ -450,7 +454,8 @@ pub fn install_iso(
         rap_installed: false,
         rap_ignored: false,
         file_count: record.files.len(),
-        record_path,
+        record_path: committed.record_path,
+        rename_retries: committed.rename_retries,
     })
 }
 

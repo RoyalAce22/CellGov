@@ -748,7 +748,8 @@ fn commit_writes_the_record_where_the_store_says_it_lives() {
     )
     .expect("commit");
 
-    assert_eq!(written, expected);
+    assert_eq!(written.record_path, expected);
+    assert_eq!(written.rename_retries, 0, "an unheld tree lands first time");
     let text = std::fs::read_to_string(&expected).expect("the record was written");
     let back = InstallRecord::parse(&text).expect("the committed record parses");
     assert_eq!(back.artifact.store_path, "dev_hdd0/game/NPUA80001");

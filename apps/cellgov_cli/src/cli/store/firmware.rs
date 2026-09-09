@@ -89,6 +89,7 @@ pub(crate) fn install(
         }
     }
     report_omissions(&outcome.omissions);
+    super::report_rename_retries(outcome.rename_retries);
 }
 
 /// One `-v` line for a package: the counts it actually has.
