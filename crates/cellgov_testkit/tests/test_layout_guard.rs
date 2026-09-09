@@ -1,9 +1,10 @@
 //! Convention guard: unit-test modules live in external files.
 //!
-//! Every module named `tests` under `crates/*/src`, `apps/*/src`, and
-//! `bridges/*/src` must be declared as `#[path = "..."] mod tests;`.
-//! Inline `mod tests { }` bodies and bare `mod tests;` declarations
-//! both fail this test.
+//! Under `crates/*/src`, `apps/*/src`, and `bridges/*/src`, a module
+//! named `tests` is declared as `#[path = "..."] mod tests;`, and no
+//! module under a `#[cfg(test)]` attribute carries an inline body. An
+//! inline `mod name { }` body under `cfg(test)`, and a bare
+//! `mod tests;`, both fail this test.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +24,20 @@ fn rs_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Number of `mod tests` declarations that satisfied the rule.
+/// Whether the attribute is a `#[cfg(...)]` whose predicate names `test`.
+fn is_cfg_test(attr: &syn::Attribute) -> bool {
+    let syn::Meta::List(list) = &attr.meta else {
+        return false;
+    };
+    list.path.is_ident("cfg")
+        && list
+            .tokens
+            .to_string()
+            .split(|c: char| !c.is_alphanumeric() && c != '_')
+            .any(|word| word == "test")
+}
+
+/// Number of test-module declarations that satisfied the rule.
 ///
 /// Tallied so the gate can prove it inspected something: a guard that
 /// recognises no declaration at all reports the same empty violation
@@ -36,19 +50,24 @@ fn check_items(
     let mut conforming = 0;
     for item in items {
         let syn::Item::Mod(m) = item else { continue };
-        if m.ident == "tests" {
+        let named_tests = m.ident == "tests";
+        if named_tests || m.attrs.iter().any(is_cfg_test) {
             let line = m.ident.span().start().line;
+            let name = m.ident.to_string();
             if m.content.is_some() {
                 violations.push((
                     file.to_path_buf(),
                     line,
-                    "inline `mod tests { }` body".to_string(),
+                    format!("inline `mod {name} {{ }}` body"),
                 ));
-            } else if !m.attrs.iter().any(|a| a.path().is_ident("path")) {
+            } else if named_tests && !m.attrs.iter().any(|a| a.path().is_ident("path")) {
+                // A cfg(test) helper module (`mod test_support;`) lives
+                // in its own file already; only `tests` needs the
+                // `#[path]` that keeps it out of a `tests.rs` sibling.
                 violations.push((
                     file.to_path_buf(),
                     line,
-                    "bare `mod tests;` without #[path]".to_string(),
+                    format!("bare `mod {name};` without #[path]"),
                 ));
             } else {
                 conforming += 1;
@@ -100,7 +119,41 @@ mod tests;
 
     let (n, v) = run("mod other;
 ");
-    assert_eq!((n, v.len()), (0, 0), "only a module named tests is policed");
+    assert_eq!(
+        (n, v.len()),
+        (0, 0),
+        "a module neither named tests nor under cfg(test) is not policed"
+    );
+
+    let (n, v) = run("#[cfg(test)]
+mod space_batch_tests {
+    fn f() {}
+}
+");
+    assert_eq!(n, 0);
+    assert_eq!(
+        v,
+        vec!["inline `mod space_batch_tests { }` body".to_string()]
+    );
+
+    let (n, v) = run("#[cfg(test)]
+#[path = \"tests/other_tests.rs\"]
+mod other_tests;
+#[cfg(all(test, feature = \"x\"))]
+#[path = \"tests/gated_tests.rs\"]
+mod gated_tests;
+#[cfg(test)]
+mod test_support;
+#[cfg(feature = \"x\")]
+mod not_a_test_module {
+    fn f() {}
+}
+");
+    assert_eq!(
+        (n, v.len()),
+        (3, 0),
+        "a cfg(test) helper in its own file conforms without #[path]"
+    );
 }
 
 #[test]
