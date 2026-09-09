@@ -112,19 +112,9 @@ pub enum ObservationSaveError {
     /// checkpoint/outcome/steps tuple.
     #[error("invalid boot summary: {0}")]
     InvalidBootSummary(#[source] cellgov_compare::BootSummaryError),
-    /// A manifest region names an address space this run never
-    /// created.
-    #[error(
-        "region {region} names address space {space}, but this run created \
-         only spaces {present:?}; a spawned child's space is numbered from 1 \
-         in spawn order, so either the title never spawned or the manifest \
-         names the wrong space"
-    )]
-    RegionSpaceMissing {
-        region: String,
-        space: u32,
-        present: Vec<u32>,
-    },
+    /// A manifest region the run cannot read.
+    #[error("{0}")]
+    Region(#[from] cellgov_compare::RegionExtractError),
 }
 
 /// What one boot-checkpoint observation is built from.
@@ -156,9 +146,10 @@ pub(super) struct ObservationInputs<'a> {
 ///
 /// # Errors
 ///
-/// Returns [`ObservationSaveError`] on any I/O or serialization
-/// failure, or when a manifest region names an address space the run
-/// never created.
+/// - [`ObservationSaveError::Region`] when the run cannot read a
+///   manifest region. The function creates no file in that case.
+/// - Another [`ObservationSaveError`] variant on an I/O or
+///   serialization failure.
 pub(super) fn save_boot_observation(
     inputs: ObservationInputs<'_>,
 ) -> Result<(), ObservationSaveError> {
@@ -191,20 +182,6 @@ pub(super) fn save_boot_observation(
                 .collect()
         }
     };
-    // The extractor zero-fills a region whose space is absent, and a
-    // second CellGov run zero-fills it identically, so the only place
-    // this misconfiguration can surface is here, before anything is
-    // written.
-    if let Some(r) = regions
-        .iter()
-        .find(|r| !final_spaces.contains_key(&r.space))
-    {
-        return Err(ObservationSaveError::RegionSpaceMissing {
-            region: r.name.clone(),
-            space: r.space.raw(),
-            present: final_spaces.keys().map(|s| s.raw()).collect(),
-        });
-    }
     let observation = cellgov_compare::observe_from_boot(
         final_spaces,
         outcome,
@@ -212,7 +189,7 @@ pub(super) fn save_boot_observation(
         &regions,
         tty_log,
         identity.clone(),
-    );
+    )?;
     // Pretty-print matches `rpcs3_to_observation`'s shape so the two
     // observation files diff cleanly under line-diff tools.
     let file =
@@ -305,3 +282,7 @@ pub(super) fn save_boot_summary_json(
 #[cfg(test)]
 #[path = "tests/observation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/observation_refusal_tests.rs"]
+mod refusal_tests;

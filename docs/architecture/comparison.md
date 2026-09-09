@@ -8,7 +8,11 @@ the boot process, spawned children numbered from 1 in spawn order;
 see [guest_memory.md](guest_memory.md#per-process-address-spaces)),
 so a checkpoint manifest can observe a child's memory; RPCS3 captures
 hold space 0 only, and the bridge refuses a manifest naming any
-other. The comparison layer diffs two observations field by field in
+other. A region the CellGov run cannot read -- a space it never
+created, a range no single mapped region holds, or a reserved range
+that refuses reads -- refuses the whole observation and names the
+region, so an observation never carries bytes nobody read and a
+same-runner round trip cannot match on them. The comparison layer diffs two observations field by field in
 four modes: strict (outcome + memory + events), memory-only,
 events-only, prefix. Under every mode, two observations from the same
 runner that both carry CellGov state hashes must agree on them: a

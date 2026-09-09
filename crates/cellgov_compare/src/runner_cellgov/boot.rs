@@ -4,7 +4,7 @@
 use crate::identity::RunIdentity;
 use crate::observation::{Observation, ObservationMetadata, ObservedOutcome};
 
-use super::region::{extract_regions, RegionDescriptor};
+use super::region::{extract_regions, RegionDescriptor, RegionExtractError};
 
 /// How a boot run terminated. Maps to [`ObservedOutcome`] via
 /// [`observe_from_boot`]; variants here carry more detail than the
@@ -93,6 +93,10 @@ impl std::str::FromStr for BootOutcome {
 ///   stopped the run at a designated checkpoint).
 /// - `MaxSteps`, `TimeOverflow` -> `Timeout`.
 /// - `Fault` -> `Fault`.
+///
+/// # Errors
+///
+/// [`RegionExtractError`] when the run cannot read one of `regions`.
 pub fn observe_from_boot(
     final_spaces: &super::region::SpaceSnapshots,
     outcome: BootOutcome,
@@ -100,7 +104,7 @@ pub fn observe_from_boot(
     regions: &[RegionDescriptor],
     tty_log: &[u8],
     identity: RunIdentity,
-) -> Observation {
+) -> Result<Observation, RegionExtractError> {
     let observed_outcome = match outcome {
         BootOutcome::ProcessExit => ObservedOutcome::ProcessExit,
         BootOutcome::Fault => ObservedOutcome::Fault,
@@ -110,9 +114,9 @@ pub fn observe_from_boot(
         BootOutcome::TimeOverflow => ObservedOutcome::Timeout,
     };
 
-    Observation {
+    Ok(Observation {
         outcome: observed_outcome,
-        memory_regions: extract_regions(final_spaces, regions),
+        memory_regions: extract_regions(final_spaces, regions)?,
         events: Vec::new(),
         state_hashes: None,
         metadata: ObservationMetadata {
@@ -122,7 +126,7 @@ pub fn observe_from_boot(
         tty_log: tty_log.to_vec(),
         identity,
         runner_firmware: None,
-    }
+    })
 }
 
 #[cfg(test)]

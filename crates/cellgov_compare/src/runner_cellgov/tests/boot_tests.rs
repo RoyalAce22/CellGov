@@ -20,7 +20,8 @@ fn observe_from_boot_maps_process_exit_to_process_exit() {
         &[],
         &[],
         RunIdentity::default(),
-    );
+    )
+    .expect("no regions requested");
     assert_eq!(obs.outcome, ObservedOutcome::ProcessExit);
     assert_eq!(obs.metadata.runner, "cellgov-boot");
     assert_eq!(obs.metadata.steps, Some(1000));
@@ -38,7 +39,8 @@ fn observe_from_boot_maps_fault_and_max_steps() {
         &[],
         &[],
         RunIdentity::default(),
-    );
+    )
+    .expect("no regions requested");
     assert_eq!(fault.outcome, ObservedOutcome::Fault);
     let timeout = observe_from_boot(
         &mem,
@@ -47,7 +49,8 @@ fn observe_from_boot_maps_fault_and_max_steps() {
         &[],
         &[],
         RunIdentity::default(),
-    );
+    )
+    .expect("no regions requested");
     assert_eq!(timeout.outcome, ObservedOutcome::Timeout);
 }
 
@@ -61,7 +64,8 @@ fn observe_from_boot_maps_pc_reached_to_completed() {
         &[],
         &[],
         RunIdentity::default(),
-    );
+    )
+    .expect("no regions requested");
     assert_eq!(obs.outcome, ObservedOutcome::Completed);
     assert_eq!(obs.metadata.steps, Some(1402388));
 }
@@ -76,7 +80,8 @@ fn observe_from_boot_maps_rsx_write_checkpoint_to_completed() {
         &[],
         &[],
         RunIdentity::default(),
-    );
+    )
+    .expect("no regions requested");
     assert_eq!(obs.outcome, ObservedOutcome::Completed);
     assert_eq!(obs.metadata.steps, Some(12_345));
 }
@@ -92,7 +97,8 @@ fn observe_from_boot_passes_tty_log_through() {
         &[],
         tty,
         RunIdentity::default(),
-    );
+    )
+    .expect("no regions requested");
     assert_eq!(obs.tty_log, tty);
 }
 

@@ -12,27 +12,36 @@ use crate::observation::{
 };
 use crate::trace_decode::TraceDecodeError;
 
-use super::region::{extract_regions, RegionDescriptor};
+use super::region::{extract_regions, RegionDescriptor, RegionExtractError};
+
+/// Why a scenario run produced no observation.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ObserveError {
+    /// The run's trace stream did not decode end to end.
+    #[error("trace decode: {0}")]
+    TraceDecode(#[from] TraceDecodeError),
+    /// The run could not read a requested region.
+    #[error("{0}")]
+    Region(#[from] RegionExtractError),
+}
 
 /// Convert a `ScenarioResult` into a normalized `Observation`.
 ///
-/// Regions that do not resolve in their space are filled with zeros;
-/// the comparison layer catches the mismatch.
-///
 /// # Errors
 ///
-/// [`TraceDecodeError`] when the run's trace stream does not decode
-/// end to end; no observation is produced from a partial stream.
+/// - [`ObserveError::Region`] when the run cannot read one of `regions`.
+/// - [`ObserveError::TraceDecode`] when the run's trace stream does not
+///   decode end to end.
 pub fn observe(
     result: &ScenarioResult,
     regions: &[RegionDescriptor],
-) -> Result<Observation, TraceDecodeError> {
+) -> Result<Observation, ObserveError> {
     let outcome = match result.outcome {
         ScenarioOutcome::Stalled => ObservedOutcome::Completed,
         ScenarioOutcome::MaxStepsExceeded => ObservedOutcome::Timeout,
     };
 
-    let memory_regions = extract_regions(&result.final_spaces, regions);
+    let memory_regions = extract_regions(&result.final_spaces, regions)?;
     let events = extract_events(&result.trace_bytes)?;
 
     let state_hashes = Some(ObservedHashes {
@@ -129,10 +138,10 @@ fn extract_events(trace_bytes: &[u8]) -> Result<Vec<ObservedEvent>, TraceDecodeE
 /// Why a determinism check failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeterminismError {
-    /// A run's own trace stream did not decode, so there is nothing
-    /// whole to compare.
-    #[error("trace decode: {0}")]
-    TraceDecode(#[from] TraceDecodeError),
+    /// A run produced no observation, so there is nothing whole to
+    /// compare.
+    #[error("{0}")]
+    Observe(#[from] ObserveError),
     /// The two runs produced different outcomes.
     #[error("two runs produced different outcomes")]
     OutcomeMismatch,
@@ -152,9 +161,9 @@ pub enum DeterminismError {
 ///
 /// # Errors
 ///
-/// [`DeterminismError::TraceDecode`] before any field comparison when
-/// either run's trace does not decode; otherwise the first field that
-/// differs between the runs.
+/// - [`DeterminismError::Observe`] when either run produces no
+///   observation; this fires before any field comparison.
+/// - Otherwise, the first field that differs between the runs.
 pub fn observe_with_determinism_check(
     factory: impl Fn() -> ScenarioFixture,
     regions: &[RegionDescriptor],

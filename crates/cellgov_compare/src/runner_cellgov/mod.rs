@@ -9,5 +9,9 @@ mod region;
 mod scenario;
 
 pub use boot::{observe_from_boot, BootOutcome, BootOutcomeParseError};
-pub use region::{RegionDescriptor, SpaceSnapshots};
-pub use scenario::{observe, observe_with_determinism_check, DeterminismError};
+pub use region::{RegionDescriptor, RegionExtractError, SpaceSnapshots};
+pub use scenario::{observe, observe_with_determinism_check, DeterminismError, ObserveError};
+
+#[cfg(test)]
+#[path = "tests/refusal_tests.rs"]
+mod refusal_tests;

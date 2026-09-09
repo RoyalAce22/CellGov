@@ -4,7 +4,8 @@
 
 use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
-    observe_with_determinism_check, Classification, CompareMode, Observation, RegionDescriptor,
+    observe_with_determinism_check, Classification, CompareMode, DeterminismError, Observation,
+    RegionDescriptor,
 };
 use cellgov_testkit::fixtures::ScenarioFixture;
 
@@ -66,13 +67,19 @@ pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&s
     }
 }
 
+/// Observe `name` twice and die unless both runs yield the same observation.
+///
+/// An unreadable region fails both runs the same way. The message for
+/// it names the region, so the operator can find its manifest line.
 fn require_determinism(
     factory: &dyn Fn() -> ScenarioFixture,
     name: &str,
     regions: &[RegionDescriptor],
 ) -> Observation {
-    observe_with_determinism_check(factory, regions)
-        .unwrap_or_else(|e| die(&format!("determinism check FAILED for {name}: {e}")))
+    observe_with_determinism_check(factory, regions).unwrap_or_else(|e| match e {
+        DeterminismError::Observe(e) => die(&format!("observing {name}: {e}")),
+        e => die(&format!("determinism check FAILED for {name}: {e}")),
+    })
 }
 
 /// `regions` must match what the `--against-baseline` run observes with.

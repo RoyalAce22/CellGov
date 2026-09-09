@@ -335,7 +335,8 @@ fn a_child_space_region_captures_the_child_image_not_the_parent() {
         &regions,
         &[],
         cellgov_compare::RunIdentity::default(),
-    );
+    )
+    .expect("both headers are mapped in their own space");
     assert_eq!(&obs.memory_regions[0].data[..], &parent_elf[..0x40]);
     assert_eq!(&obs.memory_regions[1].data[..], &child_elf[..0x40]);
 }

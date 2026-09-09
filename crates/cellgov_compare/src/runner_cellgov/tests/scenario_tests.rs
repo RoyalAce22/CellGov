@@ -115,11 +115,11 @@ fn a_corrupted_record_fails_observation_naming_its_index_and_offset() {
     let err = observe(&result, &[]).expect_err("a bad tag must not be flattened past");
     assert_eq!(
         err,
-        TraceDecodeError {
+        ObserveError::TraceDecode(TraceDecodeError {
             index: 2,
             offset,
             source: cellgov_trace::DecodeError::UnknownTag(0xff),
-        }
+        })
     );
 }
 
@@ -132,6 +132,9 @@ fn a_truncated_trace_fails_observation_at_the_cut_record() {
     result.trace_bytes.truncate(offset + 1);
 
     let err = observe(&result, &[]).expect_err("a mid-record end must not read as a clean end");
+    let ObserveError::TraceDecode(err) = err else {
+        panic!("expected a trace decode failure, got {err:?}");
+    };
     assert_eq!(err.index, 3);
     assert_eq!(err.offset, offset);
     assert_eq!(err.source, cellgov_trace::DecodeError::Truncated);
@@ -143,12 +146,15 @@ fn the_determinism_check_reports_a_decode_failure_before_comparing() {
     // is not constructible from the public fixtures, so the propagation
     // is pinned on the error type instead: a TraceDecodeError converts
     // into the check's own error and displays its position.
-    let err = DeterminismError::from(TraceDecodeError {
+    let err = DeterminismError::from(ObserveError::from(TraceDecodeError {
         index: 4,
         offset: 0x80,
         source: cellgov_trace::DecodeError::Truncated,
-    });
-    assert!(matches!(err, DeterminismError::TraceDecode(_)));
+    }));
+    assert!(matches!(
+        err,
+        DeterminismError::Observe(ObserveError::TraceDecode(_))
+    ));
     let text = err.to_string();
     assert!(text.contains("record 4"), "{text}");
     assert!(text.contains("offset 128"), "{text}");

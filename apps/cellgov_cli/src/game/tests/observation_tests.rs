@@ -97,16 +97,16 @@ fn a_region_naming_a_space_the_run_never_created_is_refused_not_zero_filled() {
     })
     .expect_err("space 1 was never created");
     match err {
-        ObservationSaveError::RegionSpaceMissing {
-            region,
+        ObservationSaveError::Region(cellgov_compare::RegionExtractError::SpaceMissing {
+            name,
             space,
             present,
-        } => {
-            assert_eq!(region, "child_result");
+        }) => {
+            assert_eq!(name, "child_result");
             assert_eq!(space, 1);
             assert_eq!(present, vec![0]);
         }
-        other => panic!("expected RegionSpaceMissing, got {other:?}"),
+        other => panic!("expected Region(SpaceMissing), got {other:?}"),
     }
     assert!(
         !out.exists(),
