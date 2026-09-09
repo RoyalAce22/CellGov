@@ -142,25 +142,28 @@ pub struct TitleManifest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MountEntry {
     pub prefix: String,
-    pub host: String,
+    /// Host directory the prefix maps to; `None` is the directory the
+    /// EBOOT sits in, which is where a PSN title's `/app_home` lives.
+    pub host: Option<String>,
     pub override_env: Option<String>,
 }
 
 /// Per-title content provider; entries map a guest path to a host
 /// file registered in `Lv2Host::fs_store` at boot.
+///
+/// The boot selects the base for a relative `host_path`; see
+/// [`crate::game::content::register_content_blobs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentManifest {
-    /// Base for relative `host_path`s; relative resolves against
-    /// the workspace root.
-    pub base: String,
-    /// When set non-empty in the process env, replaces [`Self::base`].
+    /// Env var whose non-empty value names the content base directory
+    /// in place of the EBOOT's own.
     pub override_base_env: Option<String>,
     pub files: Vec<ContentEntry>,
 }
 
 /// `guest_path` is what `sys_fs_open` sees; `host_path` is the
-/// on-disk source (relative paths resolve against
-/// [`ContentManifest::base`]).
+/// on-disk source (a relative path resolves against the base the boot
+/// selects; see [`ContentManifest`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentEntry {
     pub guest_path: String,

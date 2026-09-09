@@ -20,8 +20,10 @@ kind = "process-exit"
 mirror = true
 consume = true
 
+# Both blocks read from the EBOOT's own USRDIR unless the env var
+# points elsewhere; a PSN install carries every XML the resource
+# loader opens.
 [content]
-base = "boot_content/NPUA80001"
 override_base_env = "CELLGOV_NPUA80001_CONTENT_DIR"
 files = [
     { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
@@ -31,7 +33,6 @@ files = [
 
 [[fs.mounts]]
 prefix = "/app_home"
-host = "boot_content/NPUA80001"
 override_env = "CELLGOV_NPUA80001_CONTENT_DIR"
 
 # Drift study: the same title on the newest firmware, seventeen years

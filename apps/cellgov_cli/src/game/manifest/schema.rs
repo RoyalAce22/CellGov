@@ -52,7 +52,9 @@ pub(super) struct ManifestFs {
 #[serde(deny_unknown_fields)]
 pub(super) struct ManifestMount {
     pub(super) prefix: String,
-    pub(super) host: String,
+    /// When omitted, the prefix maps to the EBOOT's directory.
+    #[serde(default)]
+    pub(super) host: Option<String>,
     #[serde(default)]
     pub(super) override_env: Option<String>,
 }
@@ -60,7 +62,6 @@ pub(super) struct ManifestMount {
 #[derive(Debug, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct ManifestContent {
-    pub(super) base: String,
     #[serde(default)]
     pub(super) override_base_env: Option<String>,
     pub(super) files: Vec<ManifestContentFile>,

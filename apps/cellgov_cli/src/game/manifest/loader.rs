@@ -344,7 +344,6 @@ impl TitleManifest {
             });
         }
         let content = file.content.map(|c| ContentManifest {
-            base: c.base,
             override_base_env: c.override_base_env,
             files: c
                 .files
@@ -355,6 +354,17 @@ impl TitleManifest {
                 })
                 .collect(),
         });
+        // A block with no files registers nothing, yet the provider
+        // would still select a base for it and refuse a boot that has
+        // none.
+        if content.as_ref().is_some_and(|c| c.files.is_empty()) {
+            return Err(ManifestError::Parse {
+                path: origin.to_path_buf(),
+                message: "[content] lists no files; drop the block or name the files it \
+                          registers"
+                    .to_string(),
+            });
+        }
         let mounts: Vec<MountEntry> = file
             .fs
             .map(|f| f.mounts)

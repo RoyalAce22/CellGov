@@ -354,7 +354,6 @@ system_ver = "4.93"
 kind = "process-exit"
 
 [content]
-base = "tests/fixtures/CONTENT_DIR"
 files = [
 { guest_path = "/app_home/Data/Resources/first.xml", host_path = "first.xml" },
 { guest_path = "/app_home/Data/Local/Localization.xml", host_path = "Localization.xml" },
@@ -362,7 +361,6 @@ files = [
 "#;
     let m = parse(text);
     let content = m.content.as_ref().expect("content present");
-    assert_eq!(content.base, "tests/fixtures/CONTENT_DIR");
     assert!(
         content.override_base_env.is_none(),
         "override_base_env defaults to None when omitted",
@@ -393,7 +391,6 @@ system_ver = "4.93"
 kind = "process-exit"
 
 [content]
-base = "tests/fixtures/synthetic"
 override_base_env = "CELLGOV_NPAA77779_CONTENT_DIR"
 files = [
 { guest_path = "/p", host_path = "h.bin" },
@@ -408,7 +405,7 @@ files = [
 }
 
 #[test]
-fn parses_content_block_with_empty_files_array() {
+fn content_block_with_no_files_is_rejected() {
     let text = r#"
 [title]
 content_id = "NPAA77778"
@@ -425,16 +422,23 @@ system_ver = "4.93"
 kind = "process-exit"
 
 [content]
-base = "."
 files = []
 "#;
-    let m = parse(text);
-    let content = m.content.as_ref().expect("content present");
-    assert!(content.files.is_empty());
+    let err = TitleManifest::load_from_text(text, Path::new("no_files.toml"))
+        .expect_err("a content block registering nothing must reject");
+    match err {
+        ManifestError::Parse { message, .. } => {
+            assert!(
+                message.contains("[content] lists no files"),
+                "names the empty block: {message}"
+            );
+        }
+        other => panic!("expected Parse, got {other}"),
+    }
 }
 
 #[test]
-fn content_block_missing_base_is_rejected() {
+fn content_block_with_a_base_is_rejected() {
     let text = r#"
 [title]
 content_id = "x"
@@ -451,10 +455,21 @@ system_ver = "4.93"
 kind = "process-exit"
 
 [content]
+base = "some/checked-in/dir"
 files = []
 "#;
-    let err = TitleManifest::load_from_text(text, Path::new("missing_base.toml")).expect_err("bad");
-    assert!(matches!(err, ManifestError::Parse { .. }));
+    let err = TitleManifest::load_from_text(text, Path::new("has_base.toml")).expect_err("bad");
+    match err {
+        ManifestError::Parse { message, .. } => {
+            // The backticks matter: the "expected ..." list still names
+            // `override_base_env`, and a bare `base` would match inside it.
+            assert!(
+                message.contains("unknown field `base`"),
+                "names the retired key: {message}"
+            );
+        }
+        other => panic!("expected Parse, got {other}"),
+    }
 }
 
 #[test]
@@ -475,7 +490,6 @@ system_ver = "4.93"
 kind = "process-exit"
 
 [content]
-base = "."
 files = [
 { guest_path = "/foo", "host-path" = "bar" },
 ]
@@ -502,14 +516,12 @@ system_ver = "4.93"
 kind = "process-exit"
 
 [cellgov.content]
-base = "fx"
 files = [
 { guest_path = "/p", host_path = "h" },
 ]
 "#;
     let m = parse(text);
     let content = m.content.as_ref().expect("nested content present");
-    assert_eq!(content.base, "fx");
     assert_eq!(content.files.len(), 1);
 }
 
@@ -621,13 +633,80 @@ override_env = "CELLGOV_FLOW_APP_HOME"
     let m = parse(text);
     assert_eq!(m.mounts.len(), 2);
     assert_eq!(m.mounts[0].prefix, "/dev_hdd0");
-    assert_eq!(m.mounts[0].host, "ps3/dev_hdd0");
+    assert_eq!(m.mounts[0].host.as_deref(), Some("ps3/dev_hdd0"));
     assert!(m.mounts[0].override_env.is_none());
     assert_eq!(m.mounts[1].prefix, "/app_home");
-    assert_eq!(m.mounts[1].host, "tests/fixtures/flow_assets");
+    assert_eq!(
+        m.mounts[1].host.as_deref(),
+        Some("tests/fixtures/flow_assets")
+    );
     assert_eq!(
         m.mounts[1].override_env.as_deref(),
         Some("CELLGOV_FLOW_APP_HOME"),
+    );
+}
+
+#[test]
+fn fs_mount_without_host_parses_to_none() {
+    let text = r#"
+[title]
+content_id = "NPAA66667"
+short_name = "hostless-mount"
+display_name = "Hostless mount"
+eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
+system_ver = "4.93"
+
+[checkpoint]
+kind = "process-exit"
+
+[[fs.mounts]]
+prefix = "/app_home"
+override_env = "CELLGOV_HOSTLESS_APP_HOME"
+"#;
+    let m = parse(text);
+    assert_eq!(m.mounts.len(), 1);
+    assert_eq!(m.mounts[0].prefix, "/app_home");
+    assert!(
+        m.mounts[0].host.is_none(),
+        "an omitted host is the EBOOT's directory, decided at boot"
+    );
+    assert_eq!(
+        m.mounts[0].override_env.as_deref(),
+        Some("CELLGOV_HOSTLESS_APP_HOME"),
+    );
+}
+
+#[test]
+fn fs_mount_with_only_a_prefix_parses() {
+    let text = r#"
+[title]
+content_id = "NPAA66666"
+short_name = "prefix-only-mount"
+display_name = "Prefix-only mount"
+eboot_candidates = ["EBOOT.elf"]
+year = 2007
+developer = "test"
+engine = "test-engine"
+distribution = "psn-hdd"
+system_ver = "4.93"
+
+[checkpoint]
+kind = "process-exit"
+
+[[fs.mounts]]
+prefix = "/app_home"
+"#;
+    let m = parse(text);
+    assert_eq!(m.mounts.len(), 1);
+    assert_eq!(m.mounts[0].prefix, "/app_home");
+    assert!(m.mounts[0].host.is_none());
+    assert!(
+        m.mounts[0].override_env.is_none(),
+        "no env var to consult: the EBOOT directory is the only choice at boot"
     );
 }
 

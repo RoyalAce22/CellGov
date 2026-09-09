@@ -109,11 +109,19 @@ Read-only blobs the title's resource loader expects to find via
 file off disk and registers it in `Lv2Host::fs_store` at the
 named `guest_path` before the step loop runs.
 
-| Field               | Type                          | Required                 | Notes                                                                                                                                                                                         |
-| ------------------- | ----------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `base`              | string                        | yes (when block present) | Resolved against the workspace root when relative.                                                                                                                                            |
-| `override_base_env` | string                        | no                       | Env-var name that, when set at run time, replaces `base`. Use it to point at a gitignored local copy of the real title content while a synthetic public copy stays checked in as the default. |
-| `files`             | `{ guest_path, host_path }[]` | yes (when block present) | Each entry registers one blob. `host_path` is resolved against `base` when relative; absolute paths pass through.                                                                             |
+The block names no base directory of its own. A relative
+`host_path` resolves against the directory the EBOOT sits in,
+which for a PSN or disc install is the USRDIR holding the title's
+data tree, unless the override env var points elsewhere. Neither
+being available (the env var unset and the EBOOT path without a
+parent directory) is a startup error, and so is any file missing
+under the selected base; the error names the path it probed. The
+repository carries no content of its own.
+
+| Field               | Type                          | Required                 | Notes                                                                                                                                                          |
+| ------------------- | ----------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `override_base_env` | string                        | no                       | Env-var name that, when set non-empty at run time, names the base directory in place of the EBOOT's own. Use it to point a boot at a stripped or modded tree. |
+| `files`             | `{ guest_path, host_path }[]` | yes (when block present) | Each entry registers one blob. `host_path` is resolved against the selected base when relative; absolute paths pass through.                                  |
 
 ### `[[fs.mounts]]` (optional, array-of-tables)
 
@@ -123,11 +131,11 @@ enumeration). Where `[content]` pre-registers explicit blobs,
 mounts are the lazy disk-on-demand surface for the title's
 resource enumerator.
 
-| Field          | Type   | Required | Notes                                                                                                                 |
-| -------------- | ------ | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| `prefix`       | string | yes      | Guest-side path prefix. MUST start with `/`. Each prefix must be unique within the manifest; duplicates are rejected. |
-| `host`         | string | yes      | Host-side directory the prefix maps to.                                                                               |
-| `override_env` | string | no       | Env-var name that replaces `host` at run time. Same role as `[content].override_base_env`.                            |
+| Field          | Type   | Required | Notes                                                                                                                                                                     |
+| -------------- | ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prefix`       | string | yes      | Guest-side path prefix. MUST start with `/`. Each prefix must be unique within the manifest; duplicates are rejected.                                                     |
+| `host`         | string | no       | Host-side directory the prefix maps to, POSIX-shaped, relative to the workspace root. Omitted, the prefix maps to the directory the EBOOT sits in.                        |
+| `override_env` | string | no       | Env-var name whose non-empty value replaces `host` (or the EBOOT directory) at run time. Same role as `[content].override_base_env`.                                      |
 
 ### `[[bench.matrix]]` (optional, array-of-tables)
 
@@ -292,7 +300,6 @@ kind = "process-exit"
 mirror = true
 
 [content]
-base = "boot_content/<content_id>"
 override_base_env = "CELLGOV_<CONTENT_ID>_CONTENT_DIR"
 files = [
     { guest_path = "/app_home/Data/Resources/first.xml",  host_path = "Data/Resources/first.xml" },
@@ -301,7 +308,6 @@ files = [
 
 [[fs.mounts]]
 prefix = "/app_home"
-host = "boot_content/<content_id>"
 override_env = "CELLGOV_<CONTENT_ID>_CONTENT_DIR"
 ```
 
@@ -309,6 +315,11 @@ When `[rsx] mirror = true` is set, the checkpoint must be
 something other than `first-rsx-write`; `process-exit` is the
 usual choice for titles whose boot path probes for
 unpopulated out-params and bails.
+
+Both blocks above read from the installed title's own USRDIR: the
+content entries resolve under the EBOOT's directory, and the
+`/app_home` mount, declaring no `host`, maps to that same directory.
+The one env var redirects both.
 
 ## Adding a new title
 

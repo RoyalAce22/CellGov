@@ -43,16 +43,37 @@ pub enum ContentRegisterError {
         first_host_path: PathBuf,
         second_host_path: PathBuf,
     },
+    /// No base directory: the override env var is unset or empty, and
+    /// the caller gave no EBOOT directory.
+    #[error(
+        "content: no base directory for {n} manifest entr{}: {} and the EBOOT path has no \
+         parent directory",
+        if *n == 1 { "y" } else { "ies" },
+        render_no_override(override_env)
+    )]
+    NoBase {
+        n: usize,
+        override_env: Option<String>,
+    },
 }
 
 fn render_override_hint(override_env: &Option<String>) -> String {
     match override_env {
         Some(env) => format!(
             " (override env var {env} is set; either drop the \
-             file into that directory or unset {env} to fall \
-             back to the manifest's checked-in base)"
+             file into that directory or unset {env} to read \
+             from the EBOOT's own directory)"
         ),
         None => String::new(),
+    }
+}
+
+/// The hint follows the rule of [`override_base_from_env`]: an empty
+/// value counts as unset.
+fn render_no_override(override_env: &Option<String>) -> String {
+    match override_env {
+        Some(env) => format!("{env} is unset or empty"),
+        None => "the manifest declares no override_base_env".to_string(),
     }
 }
 
@@ -70,36 +91,30 @@ fn resolve(base: &Path, path: &str) -> PathBuf {
 /// Source of the resolved content base directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContentBaseSource {
-    /// Manifest's checked-in `base`.
-    Manifest,
-    /// EBOOT-relative USRDIR auto-discovered.
+    /// The directory the EBOOT sits in, taken as given (no probe).
     Usrdir { path: PathBuf },
     /// Override env var named by `[content] override_base_env`.
     Override { env: String },
 }
 
-/// Soft probe for the USRDIR tier: a partial USRDIR falls through to
-/// the manifest's checked-in base.
-fn all_entries_resolve_under(base: &Path, manifest: &ContentManifest) -> bool {
-    manifest.files.iter().all(|entry| {
-        let p = resolve(base, &entry.host_path);
-        std::fs::metadata(&p).map(|m| m.is_file()).unwrap_or(false)
-    })
-}
-
 /// Read each manifest entry off disk and register the bytes in
 /// `host.fs_store_mut`.
 ///
-/// Base directory, first match wins: `override_base`, then
-/// `usrdir_base` when every manifest entry resolves under it, then
-/// `manifest.base`. A relative base resolves against
-/// `workspace_root`; a relative `host_path` resolves against the
-/// chosen base.
+/// The base directory is the first of these that is `Some`:
+///
+/// 1. `override_base`, joined onto `workspace_root` when relative
+/// 2. `usrdir_base`, taken as given
+///
+/// A relative `host_path` resolves against that base.
 ///
 /// # Errors
 ///
-/// Stops at the first failure; the `FsStore` keeps whatever earlier
-/// entries registered.
+/// - [`ContentRegisterError::NoBase`]: both bases are `None`.
+/// - [`ContentRegisterError::HostFileRead`]: a file is missing under
+///   the chosen base; the error names the path it probed.
+///
+/// Registration stops at the first failure; the `FsStore` keeps
+/// whatever earlier entries registered.
 pub fn register_content_blobs(
     manifest: &ContentManifest,
     workspace_root: &Path,
@@ -107,34 +122,35 @@ pub fn register_content_blobs(
     usrdir_base: Option<&Path>,
     host: &mut Lv2Host,
 ) -> Result<ContentBaseSource, ContentRegisterError> {
-    let (base, source) = if let Some(p) = override_base {
-        // Relative override resolves against workspace_root for parity
-        // with the manifest path.
-        (
-            resolve(workspace_root, &p.to_string_lossy()),
+    let (base, source) = match (override_base, usrdir_base) {
+        // `Path::join` keeps a rooted `p` as is, so a relative override
+        // resolves against `workspace_root` and an absolute one passes
+        // through.
+        (Some(p), _) => (
+            workspace_root.join(p),
             ContentBaseSource::Override {
                 env: manifest
                     .override_base_env
                     .clone()
                     .unwrap_or_else(|| "<no override_base_env declared>".to_string()),
             },
-        )
-    } else if let Some(usrdir) = usrdir_base.filter(|u| all_entries_resolve_under(u, manifest)) {
-        (
+        ),
+        (None, Some(usrdir)) => (
             usrdir.to_path_buf(),
             ContentBaseSource::Usrdir {
                 path: usrdir.to_path_buf(),
             },
-        )
-    } else {
-        (
-            resolve(workspace_root, &manifest.base),
-            ContentBaseSource::Manifest,
-        )
+        ),
+        (None, None) => {
+            return Err(ContentRegisterError::NoBase {
+                n: manifest.files.len(),
+                override_env: manifest.override_base_env.clone(),
+            });
+        }
     };
     let override_env_for_err = match &source {
         ContentBaseSource::Override { env } => Some(env.clone()),
-        ContentBaseSource::Manifest | ContentBaseSource::Usrdir { .. } => None,
+        ContentBaseSource::Usrdir { .. } => None,
     };
     for entry in &manifest.files {
         let host_path = resolve(&base, &entry.host_path);
@@ -168,8 +184,11 @@ pub fn register_content_blobs(
 }
 
 /// Look up the override base directory selected by a manifest's
-/// `override_base_env`. Returns `Some(path)` when the env var is set
-/// non-empty; `None` otherwise.
+/// `override_base_env`.
+///
+/// Returns `Some(path)` when the env var holds more than whitespace,
+/// else `None`. The mount provider applies the same rule to a var a
+/// manifest shares between the two.
 ///
 /// Takes a `getter` so tests can run without mutating process env.
 pub fn override_base_from_env<F>(manifest: &ContentManifest, mut getter: F) -> Option<PathBuf>
@@ -178,7 +197,7 @@ where
 {
     let env_name = manifest.override_base_env.as_deref()?;
     let value = getter(env_name)?;
-    if value.is_empty() {
+    if value.trim().is_empty() {
         return None;
     }
     Some(PathBuf::from(value))

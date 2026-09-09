@@ -433,7 +433,6 @@ schema in `title_manifests/<content-id>.toml`:
 
 ```toml
 [content]
-base = "boot_content/<id>"
 override_base_env = "CELLGOV_<ID>_CONTENT_DIR"
 files = [
     { guest_path = "/app_home/Data/Resources/first.xml", host_path = "Data/Resources/first.xml" },
@@ -443,17 +442,21 @@ files = [
 
 The boot-time content provider in
 `apps/cellgov_cli/src/game/content.rs` resolves each entry
-against three tiers in priority order:
+against one of two bases, in priority order:
 
 1. `override_base_env`'s value, when the env var is set to a
    non-empty path. Hard-fail on any missing file with a diagnostic
    naming the env var, so the developer who set the override knows
    which knob to fix.
-2. EBOOT-adjacent USRDIR (`<eboot>.parent()`), auto-discovered.
-   Soft probe: every entry must resolve under it for the tier
-   to win; a partial USRDIR falls through to (3).
-3. The manifest's checked-in `base` (the synthetic stubs
-   committed to the public repo). Hard-fail on missing files.
+2. The EBOOT's own directory (`<eboot>.parent()`), where a PSN
+   install keeps the title's data tree. Hard-fail on any missing
+   file, naming the path probed.
+
+Neither base being selectable, because the env var is unset and the
+EBOOT path has no parent directory, is a startup error too. The
+manifest names no base of its own. A `[[fs.mounts]]` entry follows
+the same rule: its `override_env`, else its declared `host`, else the
+EBOOT's directory.
 
 The firmware cellFs surface routes through the raw `sys_fs_*` LV2
 syscall path, backed by the same `FsStore` model.

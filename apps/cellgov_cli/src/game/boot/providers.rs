@@ -11,7 +11,7 @@ use crate::cli::exit::die;
 /// Resolves `sysSpuImageOpen("/app_home/spu_main.elf")` against an
 /// EBOOT sibling; same discovery for a spawn microtest's child SELF.
 pub(super) fn register_sibling_images(rt: &mut Runtime, elf_path: &str) {
-    let Some(parent) = std::path::Path::new(elf_path).parent() else {
+    let Some(parent) = eboot_dir(elf_path) else {
         return;
     };
     for (sibling, guest_path) in [
@@ -33,29 +33,58 @@ pub(super) fn register_sibling_images(rt: &mut Runtime, elf_path: &str) {
     }
 }
 
-/// Content-base resolution priority, high to low: the override env
-/// var, then EBOOT-relative USRDIR auto-discovery, then the manifest's
-/// checked-in base.
+/// The directory the EBOOT sits in: the default base for manifest
+/// content and the default host for a mount that declares none.
+///
+/// The loader opens a bare filename from the process cwd (see
+/// `cli::exit::load_file_or_die`), so its directory is `.`.
+/// `Path::parent` spells that directory as the empty path, which
+/// does not canonicalize as a mount root. An empty or root-only path
+/// yields `None`.
+fn eboot_dir(elf_path: &str) -> Option<&std::path::Path> {
+    let parent = std::path::Path::new(elf_path).parent()?;
+    Some(if parent.as_os_str().is_empty() {
+        std::path::Path::new(".")
+    } else {
+        parent
+    })
+}
+
+/// The override env var's value, or `None` when it is unset.
+///
+/// A value that is not Unicode stops the boot with an error that
+/// names the var.
+fn env_override(name: &str) -> Option<String> {
+    match std::env::var(name) {
+        Ok(v) => Some(v),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(raw)) => die(&format!(
+            "override env var {name} is set to a value that is not Unicode ({raw:?}); \
+             set it to a path or unset it"
+        )),
+    }
+}
+
+/// Registers the manifest's content blobs; base selection lives on
+/// [`crate::game::content::register_content_blobs`].
 pub(super) fn register_content(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
     let Some(content) = opts.title.content.as_ref() else {
         return;
     };
     let workspace_root = std::env::current_dir()
         .unwrap_or_else(|e| die(&format!("cannot read CWD for content base resolution: {e}")));
-    let override_base =
-        crate::game::content::override_base_from_env(content, |name| std::env::var(name).ok());
-    let usrdir_base = std::path::Path::new(opts.elf_path).parent();
+    let override_base = crate::game::content::override_base_from_env(content, env_override);
     let registration_result = crate::game::content::register_content_blobs(
         content,
         &workspace_root,
         override_base.as_deref(),
-        usrdir_base,
+        eboot_dir(opts.elf_path),
         rt.lv2_host_mut(),
     );
     match registration_result {
         Ok(source) => {
             if opts.print_banner {
-                let label = content_source_label(&source, &content.base, override_base.as_deref());
+                let label = content_source_label(&source, override_base.as_deref());
                 println!(
                     "content: registered {} blob(s) from {label}",
                     content.files.len(),
@@ -78,7 +107,8 @@ pub(super) fn register_mounts(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
     let n = match crate::game::mounts::register_mounts(
         &opts.title.mounts,
         &workspace_root,
-        |name| std::env::var(name).ok(),
+        eboot_dir(opts.elf_path),
+        env_override,
         rt.lv2_host_mut(),
     ) {
         Ok(n) => n,
@@ -144,14 +174,12 @@ fn register_composed_mounts(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
 
 fn content_source_label(
     source: &crate::game::content::ContentBaseSource,
-    manifest_base: &str,
     override_base: Option<&std::path::Path>,
 ) -> String {
     use crate::game::content::ContentBaseSource;
     match source {
-        ContentBaseSource::Manifest => format!("manifest base ({manifest_base})"),
         ContentBaseSource::Usrdir { path } => {
-            format!("EBOOT-adjacent USRDIR ({})", path.display())
+            format!("EBOOT directory ({})", path.display())
         }
         ContentBaseSource::Override { env } => format!(
             "override env {env}={}",
@@ -161,3 +189,7 @@ fn content_source_label(
         ),
     }
 }
+
+#[cfg(test)]
+#[path = "tests/providers_tests.rs"]
+mod tests;

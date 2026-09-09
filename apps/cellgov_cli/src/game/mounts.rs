@@ -73,15 +73,33 @@ pub enum MountRegisterError {
     /// `FsMountTable::add` rejected the prefix.
     #[error("mounts: prefix {prefix:?} is already registered (FsMountTable rejected it)")]
     DuplicatePrefix { prefix: String },
+    /// The entry declares no `host`, its override env var is unset,
+    /// and the EBOOT path has no parent directory to default to.
+    #[error(
+        "mounts: prefix {prefix:?} declares no host, {} and the EBOOT path has no parent \
+         directory to default to",
+        render_no_override(override_env)
+    )]
+    NoHost {
+        prefix: String,
+        override_env: Option<String>,
+    },
 }
 
 fn render_override_hint(override_env: &Option<String>) -> String {
     match override_env {
         Some(env) => format!(
             " (override env var {env} is set; either point it at a real directory or \
-             unset {env} to fall back to the manifest's checked-in host)"
+             unset {env} to mount the EBOOT's own directory)"
         ),
         None => String::new(),
+    }
+}
+
+fn render_no_override(override_env: &Option<String>) -> String {
+    match override_env {
+        Some(env) => format!("{env} is unset"),
+        None => "it names no override_env".to_string(),
     }
 }
 
@@ -264,16 +282,25 @@ fn check_host_root_is_dir(
     }
 }
 
-/// Register each manifest mount in `host.fs_mounts_mut()`. Relative
-/// `host` paths resolve against `workspace_root`; `override_env`
-/// (when set non-empty via `getter`) replaces the manifest's `host`.
+/// Register each manifest mount in `host.fs_mounts_mut()`.
+///
+/// The host directory of an entry is the first of:
+///
+/// 1. the value of `override_env`, when `getter` returns it non-empty;
+/// 2. the manifest's `host`;
+/// 3. `usrdir_base`, the EBOOT's directory.
+///
+/// A relative string from the first two resolves against
+/// `workspace_root`. `usrdir_base` resolves as given; an empty path
+/// counts as absent.
 ///
 /// # Per-entry validation order
 ///
 /// 1. Prefix shape.
 /// 2. `override_env` name shape.
-/// 3. Manifest `host` shape.
-/// 4. Env override resolution; resolved value re-validated for shape.
+/// 3. Manifest `host` shape, if the entry declares one.
+/// 4. Host directory choice; a chosen env value also passes the
+///    `host` shape check.
 /// 5. Host directory probe.
 /// 6. `std::fs::canonicalize`.
 /// 7. `FsMount::new`, then in-slice and cross-call duplicate check
@@ -283,9 +310,15 @@ fn check_host_root_is_dir(
 ///
 /// All entries are validated and built into `FsMount` values before
 /// any mutation of `host`. On any failure the mount table is untouched.
+///
+/// # Errors
+///
+/// [`MountRegisterError::NoHost`] when none of the three choices
+/// yields a directory.
 pub fn register_mounts<F>(
     mounts: &[MountEntry],
     workspace_root: &Path,
+    usrdir_base: Option<&Path>,
     mut getter: F,
     host: &mut Lv2Host,
 ) -> Result<usize, MountRegisterError>
@@ -303,23 +336,38 @@ where
         .collect();
     let mut seen_in_slice: BTreeSet<String> = BTreeSet::new();
     let mut prepared: Vec<FsMount> = Vec::with_capacity(mounts.len());
+    // `Path::parent` of a bare filename is `Some("")`, which names no
+    // directory.
+    let usrdir_base = usrdir_base.filter(|p| !p.as_os_str().is_empty());
 
     for entry in mounts {
         validate_prefix(&entry.prefix)?;
         validate_override_env_name(&entry.prefix, entry.override_env.as_deref())?;
-        validate_host_shape(&entry.prefix, &entry.host)?;
-
-        let (host_string, override_env_for_err) = match override_host_from_env(entry, &mut getter) {
-            Some(v) => (v, entry.override_env.clone()),
-            None => (entry.host.clone(), None),
-        };
-        // Re-validate the env value: it obeys the same shape rules
-        // as the committed manifest path.
-        if override_env_for_err.is_some() {
-            validate_host_shape(&entry.prefix, &host_string)?;
+        if let Some(declared) = &entry.host {
+            validate_host_shape(&entry.prefix, declared)?;
         }
 
-        let host_path = resolve_against(workspace_root, &host_string);
+        let (host_path, override_env_for_err) = match override_host_from_env(entry, &mut getter) {
+            Some(v) => {
+                // Re-validate the env value: it obeys the same shape
+                // rules as the committed manifest path.
+                validate_host_shape(&entry.prefix, &v)?;
+                (
+                    resolve_against(workspace_root, &v),
+                    entry.override_env.clone(),
+                )
+            }
+            None => match (&entry.host, usrdir_base) {
+                (Some(declared), _) => (resolve_against(workspace_root, declared), None),
+                (None, Some(usrdir)) => (usrdir.to_path_buf(), None),
+                (None, None) => {
+                    return Err(MountRegisterError::NoHost {
+                        prefix: entry.prefix.clone(),
+                        override_env: entry.override_env.clone(),
+                    });
+                }
+            },
+        };
         check_host_root_is_dir(&host_path, &entry.prefix, &override_env_for_err)?;
         let canonical = canonicalize_existing(&entry.prefix, &host_path, &override_env_for_err)?;
 

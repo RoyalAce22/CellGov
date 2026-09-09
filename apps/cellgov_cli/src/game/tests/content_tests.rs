@@ -32,7 +32,6 @@ fn registers_all_entries_in_fs_store() {
     write_file(&tmp.path().join("first.xml"), b"<root/>");
     write_file(&tmp.path().join("Localization.xml"), b"<i18n/>");
     let manifest = ContentManifest {
-        base: tmp.path().to_string_lossy().into_owned(),
         override_base_env: None,
         files: vec![
             ContentEntry {
@@ -47,7 +46,14 @@ fn registers_all_entries_in_fs_store() {
     };
     let mut host = Lv2Host::new();
     let baseline = host.fs_store().blob_count();
-    register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host).unwrap();
+    register_content_blobs(
+        &manifest,
+        Path::new("/unused"),
+        None,
+        Some(tmp.path()),
+        &mut host,
+    )
+    .unwrap();
     assert_eq!(host.fs_store().blob_count(), baseline + 2);
     assert_eq!(
         host.fs_store()
@@ -65,7 +71,6 @@ fn registers_all_entries_in_fs_store() {
 fn missing_host_file_is_a_startup_error() {
     let tmp = TmpDir::new("missing");
     let manifest = ContentManifest {
-        base: tmp.path().to_string_lossy().into_owned(),
         override_base_env: None,
         files: vec![ContentEntry {
             guest_path: "/p".to_string(),
@@ -73,8 +78,14 @@ fn missing_host_file_is_a_startup_error() {
         }],
     };
     let mut host = Lv2Host::new();
-    let err = register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host)
-        .expect_err("missing host file must surface");
+    let err = register_content_blobs(
+        &manifest,
+        Path::new("/unused"),
+        None,
+        Some(tmp.path()),
+        &mut host,
+    )
+    .expect_err("missing host file must surface");
     match err {
         ContentRegisterError::HostFileRead {
             guest_path,
@@ -84,7 +95,7 @@ fn missing_host_file_is_a_startup_error() {
             assert_eq!(guest_path, "/p");
             assert!(
                 override_env.is_none(),
-                "no override env in play for the manifest-base case",
+                "no override env in play for the USRDIR case",
             );
         }
         other => panic!("expected HostFileRead, got {other}"),
@@ -93,20 +104,22 @@ fn missing_host_file_is_a_startup_error() {
 }
 
 #[test]
-fn relative_base_is_resolved_against_workspace_root() {
-    let tmp = TmpDir::new("rel_base");
+fn relative_override_base_is_resolved_against_workspace_root() {
+    let tmp = TmpDir::new("rel_override");
     let workspace = tmp.path();
     write_file(&workspace.join("fx").join("first.xml"), b"<r/>");
     let manifest = ContentManifest {
-        base: "fx".to_string(),
-        override_base_env: None,
+        override_base_env: Some("CELLGOV_TEST_REL_OVERRIDE".to_string()),
         files: vec![ContentEntry {
             guest_path: "/p/first.xml".to_string(),
             host_path: "first.xml".to_string(),
         }],
     };
     let mut host = Lv2Host::new();
-    register_content_blobs(&manifest, workspace, None, None, &mut host).unwrap();
+    let source =
+        register_content_blobs(&manifest, workspace, Some(Path::new("fx")), None, &mut host)
+            .unwrap();
+    assert!(matches!(source, ContentBaseSource::Override { .. }));
     assert_eq!(
         host.fs_store().lookup_blob("/p/first.xml"),
         Some(b"<r/>".as_slice())
@@ -116,9 +129,9 @@ fn relative_base_is_resolved_against_workspace_root() {
 #[test]
 fn absolute_host_path_overrides_base() {
     let tmp = TmpDir::new("abs_host");
+    let unrelated = TmpDir::new("abs_host_unrelated_base");
     write_file(&tmp.path().join("abs.xml"), b"<a/>");
     let manifest = ContentManifest {
-        base: "/some/unrelated/base".to_string(),
         override_base_env: None,
         files: vec![ContentEntry {
             guest_path: "/p/abs.xml".to_string(),
@@ -126,7 +139,14 @@ fn absolute_host_path_overrides_base() {
         }],
     };
     let mut host = Lv2Host::new();
-    register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host).unwrap();
+    register_content_blobs(
+        &manifest,
+        Path::new("/unused"),
+        None,
+        Some(unrelated.path()),
+        &mut host,
+    )
+    .unwrap();
     assert_eq!(
         host.fs_store().lookup_blob("/p/abs.xml"),
         Some(b"<a/>".as_slice())
@@ -139,7 +159,6 @@ fn duplicate_guest_path_is_a_startup_error() {
     write_file(&tmp.path().join("a.xml"), b"a");
     write_file(&tmp.path().join("b.xml"), b"b");
     let manifest = ContentManifest {
-        base: tmp.path().to_string_lossy().into_owned(),
         override_base_env: None,
         files: vec![
             ContentEntry {
@@ -153,8 +172,14 @@ fn duplicate_guest_path_is_a_startup_error() {
         ],
     };
     let mut host = Lv2Host::new();
-    let err = register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host)
-        .expect_err("duplicate guest_path must surface");
+    let err = register_content_blobs(
+        &manifest,
+        Path::new("/unused"),
+        None,
+        Some(tmp.path()),
+        &mut host,
+    )
+    .expect_err("duplicate guest_path must surface");
     match err {
         ContentRegisterError::DuplicateGuestPath { guest_path, .. } => {
             assert_eq!(guest_path, "/dup");
@@ -166,26 +191,10 @@ fn duplicate_guest_path_is_a_startup_error() {
 }
 
 #[test]
-fn empty_files_list_succeeds_without_registering_anything() {
-    let manifest = ContentManifest {
-        base: ".".to_string(),
-        override_base_env: None,
-        files: vec![],
-    };
-    let mut host = Lv2Host::new();
-    let baseline = host.fs_store().blob_count();
-    register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host).unwrap();
-    assert_eq!(host.fs_store().blob_count(), baseline);
-}
-
-#[test]
-fn override_base_replaces_manifest_base_when_files_present() {
-    let synthetic = TmpDir::new("synth_overridden");
+fn override_base_alone_is_sufficient() {
     let real = TmpDir::new("real_override");
-    write_file(&synthetic.path().join("first.xml"), b"SYNTH");
     write_file(&real.path().join("first.xml"), b"REAL");
     let manifest = ContentManifest {
-        base: synthetic.path().to_string_lossy().into_owned(),
         override_base_env: Some("DOES_NOT_MATTER_FOR_THIS_TEST".to_string()),
         files: vec![ContentEntry {
             guest_path: "/first.xml".to_string(),
@@ -213,7 +222,6 @@ fn override_base_replaces_manifest_base_when_files_present() {
 fn override_base_missing_file_error_carries_env_name() {
     let real = TmpDir::new("real_missing");
     let manifest = ContentManifest {
-        base: "tests/fixtures/synthetic_unused".to_string(),
         override_base_env: Some("CELLGOV_TEST_OVERRIDE_DIR".to_string()),
         files: vec![ContentEntry {
             guest_path: "/p".to_string(),
@@ -248,7 +256,6 @@ fn override_base_missing_file_error_carries_env_name() {
 #[test]
 fn override_base_lookup_returns_none_when_env_unset() {
     let manifest = ContentManifest {
-        base: "fx".to_string(),
         override_base_env: Some("UNSET_ENV_VAR_FOR_TEST".to_string()),
         files: vec![],
     };
@@ -259,7 +266,6 @@ fn override_base_lookup_returns_none_when_env_unset() {
 #[test]
 fn override_base_lookup_returns_none_for_empty_string() {
     let manifest = ContentManifest {
-        base: "fx".to_string(),
         override_base_env: Some("MAYBE_EMPTY".to_string()),
         files: vec![],
     };
@@ -271,9 +277,21 @@ fn override_base_lookup_returns_none_for_empty_string() {
 }
 
 #[test]
+fn override_base_lookup_returns_none_for_whitespace_only() {
+    // The mount provider reads the same env var and treats
+    // whitespace as unset; the content provider must agree, or one
+    // exported value redirects one provider and not the other.
+    let manifest = ContentManifest {
+        override_base_env: Some("MAYBE_BLANK".to_string()),
+        files: vec![],
+    };
+    let result = override_base_from_env(&manifest, |_| Some(" \n\t ".to_string()));
+    assert!(result.is_none());
+}
+
+#[test]
 fn override_base_lookup_returns_path_when_env_set() {
     let manifest = ContentManifest {
-        base: "fx".to_string(),
         override_base_env: Some("SET_TO_PATH".to_string()),
         files: vec![],
     };
@@ -287,7 +305,6 @@ fn override_base_lookup_returns_path_when_env_set() {
 #[test]
 fn override_base_lookup_returns_none_when_no_env_var_declared() {
     let manifest = ContentManifest {
-        base: "fx".to_string(),
         override_base_env: None,
         files: vec![],
     };
@@ -297,11 +314,10 @@ fn override_base_lookup_returns_none_when_no_env_var_declared() {
     assert!(result.is_none());
 }
 
-/// Manifest matching flOw's two-XML layout for USRDIR-resolution tests.
-fn flow_shaped_manifest(synthetic_base: &Path) -> ContentManifest {
+/// A PSN title's two-XML data layout for USRDIR-resolution tests.
+fn flow_shaped_manifest() -> ContentManifest {
     ContentManifest {
-        base: synthetic_base.to_string_lossy().into_owned(),
-        override_base_env: Some("CELLGOV_NPUA80001_CONTENT_DIR".to_string()),
+        override_base_env: Some("CELLGOV_TEST_TITLE_CONTENT_DIR".to_string()),
         files: vec![
             ContentEntry {
                 guest_path: "/app_home/Data/Resources/first.xml".to_string(),
@@ -316,40 +332,11 @@ fn flow_shaped_manifest(synthetic_base: &Path) -> ContentManifest {
 }
 
 #[test]
-fn usrdir_with_all_files_present_takes_priority_over_manifest_base() {
-    let synth = TmpDir::new("usrdir_synth");
+fn usrdir_is_selected_when_no_override_is_set() {
     let usrdir = TmpDir::new("usrdir_real");
-    write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
-    write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");
     write_file(&usrdir.path().join("Data/Resources/first.xml"), b"USR");
     write_file(&usrdir.path().join("Data/Local/Localization.xml"), b"USR");
-    let manifest = flow_shaped_manifest(synth.path());
-    let mut host = Lv2Host::new();
-    let source = register_content_blobs(
-        &manifest,
-        Path::new("/unused"),
-        None,
-        Some(usrdir.path()),
-        &mut host,
-    )
-    .unwrap();
-    assert!(matches!(source, ContentBaseSource::Usrdir { .. }));
-    assert_eq!(
-        host.fs_store()
-            .lookup_blob("/app_home/Data/Resources/first.xml"),
-        Some(b"USR".as_slice()),
-        "USRDIR bytes must win when all entries resolve under it",
-    );
-}
-
-#[test]
-fn partial_usrdir_falls_through_to_manifest_base() {
-    let synth = TmpDir::new("partial_synth");
-    let usrdir = TmpDir::new("partial_usrdir");
-    write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
-    write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");
-    write_file(&usrdir.path().join("Data/Resources/first.xml"), b"USR");
-    let manifest = flow_shaped_manifest(synth.path());
+    let manifest = flow_shaped_manifest();
     let mut host = Lv2Host::new();
     let source = register_content_blobs(
         &manifest,
@@ -361,23 +348,54 @@ fn partial_usrdir_falls_through_to_manifest_base() {
     .unwrap();
     assert_eq!(
         source,
-        ContentBaseSource::Manifest,
-        "partial USRDIR must fall through to manifest base",
+        ContentBaseSource::Usrdir {
+            path: usrdir.path().to_path_buf()
+        }
     );
     assert_eq!(
         host.fs_store()
             .lookup_blob("/app_home/Data/Resources/first.xml"),
-        Some(b"SYN".as_slice()),
+        Some(b"USR".as_slice()),
     );
 }
 
 #[test]
+fn partial_usrdir_is_a_missing_file_error() {
+    let usrdir = TmpDir::new("partial_usrdir");
+    write_file(&usrdir.path().join("Data/Resources/first.xml"), b"USR");
+    let manifest = flow_shaped_manifest();
+    let mut host = Lv2Host::new();
+    let err = register_content_blobs(
+        &manifest,
+        Path::new("/unused"),
+        None,
+        Some(usrdir.path()),
+        &mut host,
+    )
+    .expect_err("a USRDIR missing one entry must surface that entry");
+    match err {
+        ContentRegisterError::HostFileRead {
+            guest_path,
+            host_path,
+            override_env,
+            ..
+        } => {
+            assert_eq!(guest_path, "/app_home/Data/Local/Localization.xml");
+            assert_eq!(
+                host_path,
+                usrdir.path().join("Data/Local/Localization.xml"),
+                "the error names the exact path probed under the USRDIR",
+            );
+            assert!(override_env.is_none());
+        }
+        other => panic!("expected HostFileRead, got {other}"),
+    }
+}
+
+#[test]
 fn override_takes_priority_over_usrdir() {
-    let synth = TmpDir::new("prio_synth");
     let usrdir = TmpDir::new("prio_usrdir");
     let override_dir = TmpDir::new("prio_override");
-    write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
-    write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");
     write_file(&usrdir.path().join("Data/Resources/first.xml"), b"USR");
     write_file(&usrdir.path().join("Data/Local/Localization.xml"), b"USR");
     write_file(
@@ -388,7 +406,7 @@ fn override_takes_priority_over_usrdir() {
         &override_dir.path().join("Data/Local/Localization.xml"),
         b"OVR",
     );
-    let manifest = flow_shaped_manifest(synth.path());
+    let manifest = flow_shaped_manifest();
     let mut host = Lv2Host::new();
     let source = register_content_blobs(
         &manifest,
@@ -407,13 +425,48 @@ fn override_takes_priority_over_usrdir() {
 }
 
 #[test]
-fn usrdir_none_uses_manifest_base() {
-    let synth = TmpDir::new("usrdir_none_synth");
-    write_file(&synth.path().join("Data/Resources/first.xml"), b"SYN");
-    write_file(&synth.path().join("Data/Local/Localization.xml"), b"SYN");
-    let manifest = flow_shaped_manifest(synth.path());
+fn no_override_and_no_usrdir_is_a_startup_error() {
+    let manifest = flow_shaped_manifest();
     let mut host = Lv2Host::new();
-    let source =
-        register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host).unwrap();
-    assert_eq!(source, ContentBaseSource::Manifest);
+    let err = register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host)
+        .expect_err("no base at all must surface");
+    let msg = err.to_string();
+    match err {
+        ContentRegisterError::NoBase { n, override_env } => {
+            assert_eq!(n, 2);
+            assert_eq!(
+                override_env.as_deref(),
+                Some("CELLGOV_TEST_TITLE_CONTENT_DIR")
+            );
+        }
+        other => panic!("expected NoBase, got {other}"),
+    }
+    assert!(
+        msg.contains("CELLGOV_TEST_TITLE_CONTENT_DIR is unset or empty"),
+        "Display names the env var the developer can set, and that an \
+         empty value counts as unset, got: {msg}",
+    );
+    assert!(msg.contains("2 manifest entries"), "got: {msg}");
+    assert_eq!(host.fs_store().blob_count(), pristine_blob_count());
+}
+
+#[test]
+fn no_base_error_without_a_declared_override_env_says_so() {
+    let manifest = ContentManifest {
+        override_base_env: None,
+        files: vec![ContentEntry {
+            guest_path: "/p".to_string(),
+            host_path: "p.bin".to_string(),
+        }],
+    };
+    let mut host = Lv2Host::new();
+    let err = register_content_blobs(&manifest, Path::new("/unused"), None, None, &mut host)
+        .expect_err("no base at all must surface");
+    let msg = err.to_string();
+    assert!(matches!(err, ContentRegisterError::NoBase { n: 1, .. }));
+    assert!(msg.contains("1 manifest entry:"), "got: {msg}");
+    assert!(
+        msg.contains("declares no override_base_env"),
+        "Display says there is no env var to set, got: {msg}",
+    );
 }
