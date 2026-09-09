@@ -70,8 +70,9 @@ pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&s
 
 /// Observe `name` twice and die unless both runs yield the same observation.
 ///
-/// An unreadable region fails both runs the same way. The message for
-/// it names the region, so the operator can find its manifest line.
+/// A region both runs refuse the same way is a failed run. The message
+/// names the region so the operator can find its manifest line. A
+/// region only one run refuses is a determinism break.
 fn require_determinism(
     factory: &dyn Fn() -> ScenarioFixture,
     name: &str,
@@ -88,14 +89,16 @@ fn require_determinism(
 
 /// The status a failed twice-run check exits with.
 ///
-/// The two runs took identical inputs, so a field that differs between
+/// The two runs took identical inputs. A field that differs between
 /// them is the shared "runs that had to reproduce each other disagreed"
-/// outcome. A run that produced no observation compared nothing; it ran
-/// and failed.
+/// outcome. A refusal to observe that only one run raised is the same
+/// outcome. Two runs that refused the same way compared nothing; the
+/// check ran and failed.
 fn determinism_exit_status(e: &DeterminismError) -> i32 {
     match e {
         DeterminismError::Observe(_) => exit_codes::FAILED,
-        DeterminismError::OutcomeMismatch
+        DeterminismError::ObserveDisagreement(_)
+        | DeterminismError::OutcomeMismatch
         | DeterminismError::MemoryMismatch
         | DeterminismError::EventMismatch
         | DeterminismError::HashMismatch => exit_codes::DISAGREED,
@@ -659,3 +662,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
 #[cfg(test)]
 #[path = "tests/compare_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/compare_disagreement_tests.rs"]
+mod disagreement_tests;

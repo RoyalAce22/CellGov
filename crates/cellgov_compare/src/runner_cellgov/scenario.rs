@@ -135,13 +135,41 @@ fn extract_events(trace_bytes: &[u8]) -> Result<Vec<ObservedEvent>, TraceDecodeE
     Ok(events)
 }
 
+/// How the two runs of a determinism check disagreed on whether an
+/// observation exists at all.
+///
+/// Most refusals read run state, so two runs of one factory can
+/// refuse differently. Such a refusal is a determinism break.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ObserveDisagreement {
+    /// The first run refused to observe; the second observed.
+    #[error("the first run produced no observation and the second did: {0}")]
+    FirstOnly(ObserveError),
+    /// The second run refused to observe; the first observed.
+    #[error("the second run produced no observation and the first did: {0}")]
+    SecondOnly(ObserveError),
+    /// Both runs refused, for different reasons.
+    #[error(
+        "the two runs refused to observe for different reasons; first: {first}; second: {second}"
+    )]
+    Both {
+        /// Why the first run refused.
+        first: ObserveError,
+        /// Why the second run refused.
+        second: ObserveError,
+    },
+}
+
 /// Why a determinism check failed.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum DeterminismError {
-    /// A run produced no observation, so there is nothing whole to
-    /// compare.
+    /// Both runs refused to observe the same way, so there is nothing
+    /// whole to compare.
     #[error("{0}")]
     Observe(#[from] ObserveError),
+    /// The runs disagreed on whether an observation exists.
+    #[error("{0}")]
+    ObserveDisagreement(#[from] Box<ObserveDisagreement>),
     /// The two runs produced different outcomes.
     #[error("two runs produced different outcomes")]
     OutcomeMismatch,
@@ -161,8 +189,10 @@ pub enum DeterminismError {
 ///
 /// # Errors
 ///
-/// - [`DeterminismError::Observe`] when either run produces no
-///   observation; this fires before any field comparison.
+/// - [`DeterminismError::Observe`] when both runs refuse to observe
+///   the same way; this fires before any field comparison.
+/// - [`DeterminismError::ObserveDisagreement`] when one run observes
+///   and the other refuses, or both refuse for different reasons.
 /// - Otherwise, the first field that differs between the runs.
 pub fn observe_with_determinism_check(
     factory: impl Fn() -> ScenarioFixture,
@@ -170,8 +200,21 @@ pub fn observe_with_determinism_check(
 ) -> Result<Observation, DeterminismError> {
     let r1 = runner::run(factory());
     let r2 = runner::run(factory());
-    let o1 = observe(&r1, regions)?;
-    let o2 = observe(&r2, regions)?;
+    let (o1, o2) = match (observe(&r1, regions), observe(&r2, regions)) {
+        (Ok(o1), Ok(o2)) => (o1, o2),
+        (Err(first), Err(second)) if first == second => {
+            return Err(DeterminismError::Observe(first));
+        }
+        (Err(first), Err(second)) => {
+            return Err(Box::new(ObserveDisagreement::Both { first, second }).into());
+        }
+        (Err(first), Ok(_)) => {
+            return Err(Box::new(ObserveDisagreement::FirstOnly(first)).into());
+        }
+        (Ok(_), Err(second)) => {
+            return Err(Box::new(ObserveDisagreement::SecondOnly(second)).into());
+        }
+    };
 
     if o1.outcome != o2.outcome {
         return Err(DeterminismError::OutcomeMismatch);
@@ -192,3 +235,7 @@ pub fn observe_with_determinism_check(
 #[cfg(test)]
 #[path = "tests/scenario_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/scenario_disagreement_tests.rs"]
+mod disagreement_tests;

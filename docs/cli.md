@@ -813,11 +813,13 @@ Usage: cellgov diff compare [OPTIONS] <scenario|manifest.toml>
 Exit codes:
   0   the two runs agreed and no comparison diverged, or a plain run's
       manifest names no scenario this runner has (reported UNSUPPORTED)
-  1   a run produced no observation, a file failed to load or save,
-      a baseline flag was given a manifest this runner cannot run,
-      the comparison found a divergence, or with --observations-dir
-      the baselines disagreed with each other (UNSETTLED_ORACLE)
-  3   the two runs that had to reproduce each other disagreed
+  1   neither run produced an observation, a file failed to load or
+      save, a baseline flag was given a manifest this runner cannot
+      run, the comparison found a divergence, or with
+      --observations-dir the baselines disagreed with each other
+      (UNSETTLED_ORACLE)
+  3   the two runs that had to reproduce each other disagreed, on a
+      field or on whether an observation exists at all
 ```
 
 #### `cellgov diff observations`
