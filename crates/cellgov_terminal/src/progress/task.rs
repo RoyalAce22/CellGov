@@ -34,6 +34,15 @@ impl Unit {
         }
     }
 
+    /// `n` with its noun: `43.0k steps`, or `512 KiB`, whose format
+    /// already names the unit.
+    pub(crate) fn tally(self, n: u64) -> String {
+        match self {
+            Self::Bytes => fmt_bytes(n),
+            _ => format!("{} {}", fmt_count(n), self.noun()),
+        }
+    }
+
     /// `per_sec` in this unit: `38.2 MiB/s`, or `12.4M steps/s`.
     pub(crate) fn rate(self, per_sec: f64) -> String {
         let n = per_sec.max(0.0) as u64;

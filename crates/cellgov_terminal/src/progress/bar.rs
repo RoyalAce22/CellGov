@@ -1,7 +1,10 @@
 //! The live display: a render thread that owns stderr, and the
 //! teardown paths that leave the screen sane however the run ends.
 
-use super::frame::{compose_frame, osc_progress, plain_indeterminate_line, plain_line, FrameCtx};
+use super::frame::{
+    compose_frame, counting, osc_progress, plain_counting_line, plain_indeterminate_line,
+    plain_line, FrameCtx,
+};
 use super::state::ProgressState;
 use super::task::Task;
 use crate::caps::{RenderMode, TermCaps};
@@ -25,14 +28,6 @@ const HIDE_CURSOR: &[u8] = b"\x1b[?25l";
 /// The restore the non-unwinding paths write: cursor back, taskbar
 /// state cleared, and a newline off the frame's last line.
 const RESTORE: &[u8] = b"\x1b[?25h\x1b]9;4;0\x07\n";
-
-/// The status of a process the default Ctrl-C action ended, so a
-/// caller that checks for an interrupt sees the value it expects:
-/// 128 + SIGINT on Unix, `STATUS_CONTROL_C_EXIT` on Windows.
-#[cfg(windows)]
-const INTERRUPT_EXIT: i32 = 0xC000_013A_u32 as i32;
-#[cfg(not(windows))]
-const INTERRUPT_EXIT: i32 = 130;
 
 /// Stop/exit handshake between a bar and its render thread.
 #[derive(Debug, Default)]
@@ -141,8 +136,8 @@ fn install_panic_hook() {
     });
 }
 
-/// Install the Ctrl-C handler once: the restore, then the exit status
-/// of the default action.
+/// Install the Ctrl-C handler once; it runs
+/// [`crate::interrupt::exit_interrupted`].
 ///
 /// The handler runs on the signal crate's own thread while the render
 /// thread may be mid-tick. [`quiesce_for_panic`] bounds the wait for
@@ -153,10 +148,7 @@ fn install_panic_hook() {
 fn install_interrupt_hook() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
-        let installed = ctrlc::set_handler(|| {
-            release_terminal();
-            std::process::exit(INTERRUPT_EXIT);
-        });
+        let installed = ctrlc::set_handler(|| crate::interrupt::exit_interrupted());
         if let Err(e) = installed {
             let mut err = std::io::stderr();
             let _ = writeln!(
@@ -215,10 +207,11 @@ fn quiesce_for_panic() {
 /// The live progress display: owns the render thread and stderr while
 /// running.
 ///
-/// A Ctrl-C runs [`release_terminal`] on the handler's thread and
-/// exits with the interrupted status, so the shell that follows gets
-/// its cursor back. A kill that runs no handler, or a crash past the
-/// panic hook, still leaves it hidden.
+/// A Ctrl-C runs [`release_terminal`] on the handler's thread, then
+/// ends the process as the default action would. The shell that
+/// follows gets its cursor back, and a loop that drives the command
+/// sees the interrupt. A kill that runs no handler, or a crash past
+/// the panic hook, still leaves the cursor hidden.
 pub struct ProgressBar {
     state: Arc<ProgressState>,
     stop: Arc<BarStop>,
@@ -393,6 +386,20 @@ fn plain_due(t: &PlainDue) -> bool {
         || (t.total_amount > 0 && (t.first || t.ending || t.decile > t.last_decile))
 }
 
+/// Seconds until `done` reaches `total` at `rate`, or `None` when there
+/// is nothing to predict:
+///
+/// - no denominator;
+/// - a rate at or under the unit's floor;
+/// - less than a second elapsed, so no rate exists yet;
+/// - a run at or past its finish line.
+fn eta_secs(elapsed: Duration, rate: f64, floor: f64, done: u64, total: u64) -> Option<u64> {
+    if elapsed.as_secs() < 1 || rate <= floor || total == 0 || done >= total {
+        return None;
+    }
+    Some(((total - done) as f64 / rate).ceil() as u64)
+}
+
 fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Task, label: &str) {
     let mut err = std::io::stderr();
     let start = Instant::now();
@@ -436,14 +443,14 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
         };
         hi_ratio = hi_ratio.max(ratio);
 
-        let eta = if start.elapsed().as_secs() >= 1
-            && rate > task.unit.eta_rate_floor()
-            && snap.total_amount > 0
-        {
-            Some(((snap.total_amount.saturating_sub(snap.done_amount)) as f64 / rate).ceil() as u64)
-        } else {
-            None
-        };
+        let elapsed = start.elapsed();
+        let eta = eta_secs(
+            elapsed,
+            rate,
+            task.unit.eta_rate_floor(),
+            snap.done_amount,
+            snap.total_amount,
+        );
 
         match caps.mode {
             RenderMode::Ansi => {
@@ -458,6 +465,7 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
                         ratio: hi_ratio,
                         rate,
                         eta,
+                        elapsed_secs: elapsed.as_secs(),
                         spinner: spinner_frames[tick_n % spinner_frames.len()],
                         done: false,
                     },
@@ -489,6 +497,8 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
                 {
                     let line = if snap.total_amount > 0 {
                         plain_line(&snap, task, hi_ratio)
+                    } else if counting(&snap, task) {
+                        plain_counting_line(&snap, task, rate, elapsed.as_secs())
                     } else {
                         plain_indeterminate_line(&snap, task)
                     };
@@ -522,6 +532,7 @@ fn render_loop(state: &ProgressState, stop: &BarStop, caps: TermCaps, task: &Tas
                 ratio: 1.0,
                 rate,
                 eta: None,
+                elapsed_secs: start.elapsed().as_secs(),
                 spinner: '=',
                 done: true,
             },
@@ -540,3 +551,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/interrupt_tests.rs"]
 mod interrupt_tests;
+
+#[cfg(test)]
+#[path = "tests/eta_tests.rs"]
+mod eta_tests;

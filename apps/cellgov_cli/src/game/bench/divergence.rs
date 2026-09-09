@@ -193,6 +193,11 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
         match cmd.output() {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
+                // An interrupt ends this process inside the propagate
+                // call, so cleanup of the earlier re-run's trace runs
+                // first.
+                cleanup_traces(&paths);
+                crate::cli::exit::propagate_interrupt(o.status);
                 out.push(format!(
                     "cannot localize: the traced re-run exited {:?}",
                     o.status.code()
@@ -200,7 +205,6 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
                 // The child's own stderr is the only account of why it
                 // refused.
                 out.extend(stderr_tail(&o.stderr));
-                cleanup_traces(&paths);
                 return out;
             }
             Err(e) => {

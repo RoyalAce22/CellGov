@@ -54,33 +54,33 @@ fn bar_fill_is_exact_width_and_monotonic() {
 }
 
 #[test]
-fn fmt_eta_reads_as_seconds_then_minutes_then_hours() {
-    assert_eq!(fmt_eta(0), "0s");
-    assert_eq!(fmt_eta(47), "47s");
-    assert_eq!(fmt_eta(59), "59s");
-    assert_eq!(fmt_eta(60), "1m00s");
-    assert_eq!(fmt_eta(72), "1m12s");
-    assert_eq!(fmt_eta(600), "10m00s");
-    assert_eq!(fmt_eta(3599), "59m59s");
-    assert_eq!(fmt_eta(3600), "1h00m");
-    assert_eq!(fmt_eta(7500), "2h05m");
+fn fmt_secs_reads_as_seconds_then_minutes_then_hours() {
+    assert_eq!(fmt_secs(0), "0s");
+    assert_eq!(fmt_secs(47), "47s");
+    assert_eq!(fmt_secs(59), "59s");
+    assert_eq!(fmt_secs(60), "1m00s");
+    assert_eq!(fmt_secs(72), "1m12s");
+    assert_eq!(fmt_secs(600), "10m00s");
+    assert_eq!(fmt_secs(3599), "59m59s");
+    assert_eq!(fmt_secs(3600), "1h00m");
+    assert_eq!(fmt_secs(7500), "2h05m");
 }
 
 #[test]
-fn fmt_eta_holds_six_columns_and_reads_off_scale_past_its_ceiling() {
-    assert_eq!(fmt_eta(ETA_CEILING_SECS - 1), "99h59m");
-    assert_eq!(fmt_eta(ETA_CEILING_SECS), ETA_OFF_SCALE);
+fn fmt_secs_holds_six_columns_and_reads_off_scale_past_its_ceiling() {
+    assert_eq!(fmt_secs(ETA_CEILING_SECS - 1), "99h59m");
+    assert_eq!(fmt_secs(ETA_CEILING_SECS), ETA_OFF_SCALE);
     // 66666667 s is a 100M-step run at just over one step per second.
     // u64::MAX is what the saturating cast produces at the extreme.
-    assert_eq!(fmt_eta(66_666_667), ETA_OFF_SCALE);
-    assert_eq!(fmt_eta(u64::MAX), ETA_OFF_SCALE);
+    assert_eq!(fmt_secs(66_666_667), ETA_OFF_SCALE);
+    assert_eq!(fmt_secs(u64::MAX), ETA_OFF_SCALE);
     // An edited ceiling must not leave the off-scale string false.
     assert_eq!(ETA_OFF_SCALE, format!(">{}h", ETA_CEILING_SECS / 3600 - 1));
     // The sweep covers every second through both form transitions,
     // then the boundaries above them.
     let range = (0..7200).chain([359_998, 359_999, 360_000, u64::MAX]);
     for secs in range {
-        let e = fmt_eta(secs);
+        let e = fmt_secs(secs);
         assert!(e.len() <= 6, "{secs}s renders {} columns: {e}", e.len());
         assert!(e.is_ascii(), "{secs}s renders non-ASCII: {e}");
     }
@@ -130,6 +130,7 @@ fn frame_ctx(color: bool) -> FrameCtx<'static> {
         ratio: 0.5,
         rate: 0.0,
         eta: None,
+        elapsed_secs: 0,
         spinner: '|',
         done: false,
     }
@@ -137,7 +138,7 @@ fn frame_ctx(color: bool) -> FrameCtx<'static> {
 
 /// The frame with every CSI (`ESC [ ... final`) and OSC (`ESC ] ...
 /// BEL`) sequence removed: what occupies columns on the terminal.
-fn visible(frame: &str) -> String {
+pub(super) fn visible(frame: &str) -> String {
     let mut out = String::new();
     let mut it = frame.chars();
     while let Some(c) = it.next() {
@@ -166,7 +167,7 @@ fn visible(frame: &str) -> String {
     out
 }
 
-fn visible_lines(frame: &str) -> Vec<String> {
+pub(super) fn visible_lines(frame: &str) -> Vec<String> {
     let v = visible(frame);
     v.lines().map(str::to_string).collect()
 }

@@ -417,10 +417,13 @@ both: the pair reads its child's result line off stdout and the same
 child's witnesses off stderr, and a parent that captures either stream
 passes `--no-progress` so a bar cannot render into a pipe.
 
-Progress reports against `cellgov_terminal`'s sink, denominated in the
-runtime's step-call cap -- which the boot parameters derive by
-dividing the instruction cap by the step budget, and which a title's
-`module_start` passes have already drawn against before the step loop
-begins. A command that writes lines while it works declares that when
-it starts the bar, and the renderer then reports at thresholds instead
-of redrawing a frame in place.
+Progress reports against `cellgov_terminal`'s sink, counting the steps
+the loop itself retires -- the count the run prints and the anchor
+records. The finish line is the step count the cell's committed anchor
+recorded, so the ratio and the ETA predict the anchor and a run that
+passes it reads as past it; a cell with no anchor, or a run an override
+retargets, counts steps and predicts nothing. A cap below the anchor is
+where the run ends, so the bar counts down to the cap instead. A
+command that writes lines while it works declares that when it starts
+the bar, and the renderer then reports at thresholds instead of
+redrawing a frame in place.

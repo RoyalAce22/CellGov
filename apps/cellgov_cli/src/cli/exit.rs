@@ -15,6 +15,19 @@ pub(crate) fn die(msg: &str) -> ! {
     die_with_status(msg, super::exit_codes::FAILED)
 }
 
+/// End this process the way an interrupt ended `child`
+/// ([`cellgov_terminal::interrupt::exit_interrupted`]); return when
+/// `child` ended any other way.
+///
+/// A console Ctrl-C reaches the parent and the child alike, so the
+/// parent's own handler may exit first; both exits end the process
+/// the same way.
+pub(crate) fn propagate_interrupt(child: std::process::ExitStatus) {
+    if cellgov_terminal::interrupt::was_interrupted(child) {
+        cellgov_terminal::interrupt::exit_interrupted();
+    }
+}
+
 /// [`die`] with the status the caller names.
 ///
 /// `status` is a shared status or one a command names in its own help.

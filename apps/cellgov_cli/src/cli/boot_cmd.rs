@@ -324,6 +324,14 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
         "boot run",
     );
     let firmware_dir = firmware_module_dir(&inputs.composition);
+    let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
+    let ends_at_cell_checkpoint =
+        run_ends_at_cell_checkpoint(plan.checkpoint, inputs.title.checkpoint_trigger());
+    let finish_line = game::anchor_finish_line(
+        &inputs.title.content_id,
+        plan.cell.as_ref(),
+        run_retargets_anchor(args, !ends_at_cell_checkpoint),
+    );
     let bar = ProgressBar::start(render.caps(), &RUN_TASK, inputs.title.name());
     let sink = bar.sink();
     let result = game::run_game(game::RunGameOptions {
@@ -353,6 +361,7 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
         prescan: args.prescan,
         guest_args: &args.guest_arg,
         progress: &*sink,
+        finish_line,
     });
     // Down before any exit: `process::exit` runs no destructor, so a
     // bar left standing keeps its render thread and a hidden cursor.
@@ -374,6 +383,40 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
     if code != 0 {
         std::process::exit(code);
     }
+}
+
+/// Whether `boot run` ends at the checkpoint the cell's anchor recorded.
+///
+/// `boot run` stops at the title's checkpoint. Its driver sets no
+/// target PC (`step_loop::driver` classifies every step with none), so
+/// the run passes a `pc=` checkpoint and does not stop there. An anchor
+/// recorded at one is therefore not where this run ends, even when the
+/// title declares the same checkpoint.
+fn run_ends_at_cell_checkpoint(
+    cell_checkpoint: game::manifest::CheckpointTrigger,
+    title_checkpoint: game::manifest::CheckpointTrigger,
+) -> bool {
+    cell_checkpoint == title_checkpoint
+        && !matches!(cell_checkpoint, game::manifest::CheckpointTrigger::Pc(_))
+}
+
+/// Whether a `boot run` flag moves the run off the trajectory its
+/// cell's anchor recorded, so the anchor's step count is not where
+/// this run ends.
+///
+/// `checkpoint_elsewhere` says the cell's anchor recorded a checkpoint
+/// this run does not stop at; see [`run_ends_at_cell_checkpoint`]. The
+/// cap is a ceiling the run may stop under, and moves nothing. The
+/// diagnostic flags change only what the run prints. `--dump-at-pc`
+/// ends the run at its break.
+fn run_retargets_anchor(args: &BootRunArgs, checkpoint_elsewhere: bool) -> bool {
+    args.elf_path.is_some()
+        || args.budget.is_some()
+        || args.strict_reserved
+        || !args.guest_arg.is_empty()
+        || args.patch_byte.as_ref().is_some_and(|p| !p.is_empty())
+        || args.dump_at_pc.is_some()
+        || checkpoint_elsewhere
 }
 
 /// Map a [`game::RunSummary`] to a process exit code. A critical
@@ -700,3 +743,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/composition_wiring_tests.rs"]
 mod composition_wiring_tests;
+
+#[cfg(test)]
+#[path = "tests/boot_run_finish_line_tests.rs"]
+mod boot_run_finish_line_tests;

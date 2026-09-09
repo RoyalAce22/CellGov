@@ -75,6 +75,19 @@ pub struct BenchOptions<'a> {
 }
 
 impl BenchOptions<'_> {
+    /// Whether an override moves this run off the trajectory its
+    /// cell's anchor recorded.
+    ///
+    /// The cap is a ceiling the run may hit short of the anchor, so it
+    /// is no retarget.
+    pub(super) fn retargets_trajectory(&self) -> bool {
+        self.checkpoint_override
+            .is_some_and(|cp| cp != self.plan.checkpoint)
+            || self.budget_override.is_some()
+            || self.strict_reserved
+            || !self.guest_args.is_empty()
+    }
+
     /// Append the `boot bench-once` CLI form of this struct onto `cmd`.
     pub(super) fn encode_to_command(&self, cmd: &mut std::process::Command) {
         cmd.arg("boot")
@@ -119,3 +132,7 @@ impl BenchOptions<'_> {
 #[cfg(test)]
 #[path = "tests/options_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/retarget_tests.rs"]
+mod retarget_tests;

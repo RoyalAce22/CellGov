@@ -1,6 +1,6 @@
 //! The Ctrl-C path, end to end: a child process runs an `Ansi` bar,
 //! the test interrupts it, and the child's stderr must end with the
-//! restore while its status is the interrupted one.
+//! restore while the child dies the way the default action kills it.
 //!
 //! The parent half is Unix only. Delivering a console Ctrl-C to one
 //! child on Windows is `GenerateConsoleCtrlEvent`, FFI that
@@ -58,6 +58,7 @@ mod parent {
     use nix::sys::signal::{kill, Signal};
     use nix::unistd::Pid;
     use std::io::Read as _;
+    use std::os::unix::process::ExitStatusExt as _;
     use std::process::{Command, Stdio};
 
     /// How long the parent waits for the child to hide its cursor.
@@ -67,16 +68,13 @@ mod parent {
     /// constants, so a wrong constant cannot agree with itself here.
     const HIDE: &[u8] = b"\x1b[?25l";
     const CURSOR_BACK_AND_TASKBAR_CLEAR: &[u8] = b"\x1b[?25h\x1b]9;4;0\x07\n";
-    /// 128 + SIGINT, what a shell reports for a run the default action
-    /// ended.
-    const INTERRUPTED: i32 = 130;
 
     fn contains(haystack: &[u8], needle: &[u8]) -> bool {
         haystack.windows(needle.len()).any(|w| w == needle)
     }
 
     #[test]
-    fn an_interrupted_ansi_bar_leaves_the_cursor_visible_and_exits_130() {
+    fn an_interrupted_ansi_bar_leaves_the_cursor_visible_and_dies_by_sigint() {
         let exe = std::env::current_exe().expect("the test binary knows its own path");
         let mut child = Command::new(exe)
             .args([
@@ -144,9 +142,13 @@ mod parent {
             "an interrupted bar must end its stderr with the restore; tail: {tail:?}"
         );
         assert_eq!(
-            status.code(),
-            Some(INTERRUPTED),
-            "an interrupted run must exit as the default action would"
+            status.signal(),
+            Some(Signal::SIGINT as i32),
+            "an interrupted run must die as the default action kills it; status {status:?}"
+        );
+        assert!(
+            crate::interrupt::was_interrupted(status),
+            "a parent must recognize that death as an interrupt"
         );
     }
 }

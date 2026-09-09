@@ -28,7 +28,7 @@ pub(crate) const STEP_REPORT_BATCH: usize = 8192;
 pub(crate) enum BootPhase {
     /// Reading the image, loading firmware, and running module_start.
     Loading = 0,
-    /// The step loop, denominated by the runtime's step-call cap.
+    /// The step loop; [`enter_step_loop`] sets its denominator.
     Stepping = 1,
 }
 
@@ -37,6 +37,19 @@ impl BootPhase {
     pub(crate) const fn code(self) -> u8 {
         self as u8
     }
+}
+
+/// Declare `finish_line`, the step count the run should end at, as the
+/// step phase's denominator, then enter the phase.
+///
+/// With no finish line the phase declares no totals: it counts the
+/// steps it retires and predicts nothing.
+/// [`crate::game::anchor_finish_line`] answers the finish line.
+pub(crate) fn enter_step_loop(progress: &dyn ProgressSink, finish_line: Option<u64>) {
+    if let Some(steps) = finish_line {
+        progress.totals(0, steps);
+    }
+    progress.phase(BootPhase::Stepping.code());
 }
 
 /// How a renderer presents one bench measurement.
@@ -118,3 +131,7 @@ pub(crate) const RECORD_ANCHORS_TASK: Task = Task {
 #[cfg(test)]
 #[path = "tests/progress_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/step_loop_entry_tests.rs"]
+mod step_loop_entry_tests;

@@ -6,6 +6,7 @@ mod boot;
 mod child_init;
 mod content;
 mod diag;
+mod finish_line;
 mod guest_args;
 pub mod manifest;
 mod mounts;
@@ -21,4 +22,5 @@ pub use bench::{
     BenchRunsOutcome, SelectionArgs, ThroughputPolicy, ThroughputVerdict, BENCH_DEFAULT_RUNS,
     BENCH_SPREAD_CEILING_PCT,
 };
+pub(crate) use finish_line::{anchor_finish_line, within_runtime_cap};
 pub use run::{run_game, RunGameOptions, RunSummary};

@@ -14,6 +14,9 @@ pub trait ProgressSink: Sync {
     /// secondary unit (staged files, queued downloads), which can
     /// exceed what finally lands; `amount` is the denominator in the
     /// task's unit.
+    ///
+    /// Work with no denominator never calls this: its measured phase
+    /// then shows a tally and no ETA.
     fn totals(&self, items: usize, amount: u64);
     /// Work already done before this run started, for a resumed
     /// transfer; it counts toward the ratio but not the rate. Call

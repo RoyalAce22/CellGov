@@ -21,6 +21,14 @@ terminal_size = "0.4"
 # width query.
 ctrlc = "3.5"
 
+[target.'cfg(unix)'.dependencies]
+# Ends an interrupted process the way the default action would: the
+# disposition back to default, then the signal re-raised, so the
+# process dies by SIGINT rather than exiting 130. A shell loop breaks
+# on the former and not the latter. `sigaction` and `raise`, the same
+# FFI standing as ctrlc; nothing else of the crate is used.
+signal-hook = { version = "0.4", default-features = false }
+
 [target.'cfg(unix)'.dev-dependencies]
 # Delivers the interrupt in the Ctrl-C test without a shell. Already
 # in the graph through ctrlc.

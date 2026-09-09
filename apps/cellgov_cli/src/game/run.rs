@@ -55,6 +55,9 @@ pub struct RunGameOptions<'a> {
     pub guest_args: &'a [String],
     /// Where the boot reports its phases and retired steps.
     pub progress: &'a dyn crate::progress::ProgressSink,
+    /// The step count the run should end at, when its cell's anchor
+    /// recorded one; see [`crate::game::anchor_finish_line`].
+    pub finish_line: Option<u64>,
 }
 
 /// Terminal-state summary from [`run_game`].
@@ -121,6 +124,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         prescan,
         guest_args,
         progress,
+        finish_line,
     } = opts;
     for (i, &(addr, len)) in dump_mem_fault_ranges.iter().enumerate() {
         debug_assert!(
@@ -222,13 +226,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     };
     let t_loop_start = Instant::now();
     loop_ctx.loop_start = t_loop_start;
-    // The denominator is the runtime's own cap, in the same unit the
-    // loop counts: `--max-steps` is an instruction cap, which
-    // `resolve_boot_params` divides by the budget to get step() calls.
-    // Every module_start the boot ran is already charged against it.
-    progress.totals(0, rt.max_steps() as u64);
-    progress.preset_done(rt.steps_taken() as u64);
-    progress.phase(crate::progress::BootPhase::Stepping.code());
+    crate::progress::enter_step_loop(progress, super::within_runtime_cap(finish_line, &rt));
     let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
     let t_loop = t_loop_start.elapsed();
     // The diagnostics below are the run's result, not its progress. A

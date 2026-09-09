@@ -43,13 +43,11 @@ fn drive(
     };
     loop {
         // Same placement as `super::driver`; see the comment there.
+        // The pass retires `rt.step()` calls that `steps` never counts.
+        // The bar counts what `steps` counts: an anchor records its
+        // finish line from `steps`.
         if rt.has_pending_child_init() {
-            let before = rt.steps_taken();
             crate::game::child_init::run_pending_child_inits(rt, child_init);
-            // The pass retires `rt.step()` calls that `steps` never
-            // counts. The denominator counts them, so an unreported
-            // pass leaves the bar short.
-            progress.advanced(rt.steps_taken().saturating_sub(before) as u64);
         }
         match rt.step() {
             Ok(step) => {

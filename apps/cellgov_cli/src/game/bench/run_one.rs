@@ -62,12 +62,12 @@ fn bench_boot(
 
     let mut steps: usize = 0;
     let t0 = Instant::now();
-    // The denominator is `rt.max_steps()`, the cap on step() calls that
-    // `resolve_boot_params` derived from the `--max-steps` instruction
-    // cap. module_start already spent part of it.
-    progress.totals(0, rt.max_steps() as u64);
-    progress.preset_done(rt.steps_taken() as u64);
-    progress.phase(crate::progress::BootPhase::Stepping.code());
+    let finish_line = crate::game::anchor_finish_line(
+        &opts.title.content_id,
+        opts.plan.cell,
+        opts.retargets_trajectory(),
+    );
+    crate::progress::enter_step_loop(progress, crate::game::within_runtime_cap(finish_line, &rt));
     let outcome = bench_step_loop(
         &mut rt,
         active_checkpoint,

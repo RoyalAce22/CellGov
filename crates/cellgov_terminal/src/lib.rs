@@ -10,7 +10,9 @@
 //! against, with `&()` as the no-op implementation.
 //! [`progress::ProgressBar`] plus [`caps`] is the renderer; it owns
 //! stderr while it runs, and one process runs at most one live bar.
-//! All output is ASCII.
+//! [`interrupt`] ends a process the way a Ctrl-C would, and tells a
+//! parent that its child ended that way. All output is ASCII.
 
 pub mod caps;
+pub mod interrupt;
 pub mod progress;

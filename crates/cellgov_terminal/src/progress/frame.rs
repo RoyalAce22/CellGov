@@ -40,7 +40,7 @@ const ETA_OFF_SCALE: &str = ">99h";
 /// [`ETA_CEILING_SECS`].
 ///
 /// The ceiling holds the field to six columns.
-pub(crate) fn fmt_eta(secs: u64) -> String {
+pub(crate) fn fmt_secs(secs: u64) -> String {
     if secs >= ETA_CEILING_SECS {
         ETA_OFF_SCALE.to_string()
     } else if secs >= 3600 {
@@ -135,6 +135,9 @@ pub(crate) struct FrameCtx<'a> {
     /// Smoothed amount per second, in the task's unit.
     pub(crate) rate: f64,
     pub(crate) eta: Option<u64>,
+    /// Seconds since the bar started. A measured phase with no
+    /// denominator shows it where a bar would show the ETA.
+    pub(crate) elapsed_secs: u64,
     pub(crate) spinner: char,
     /// The task completed, so the denominator applies whatever the
     /// phase.
@@ -147,6 +150,12 @@ impl FrameCtx<'_> {
     fn measured(&self, snap: &Snapshot) -> bool {
         snap.total_amount > 0 && (snap.phase == self.task.measured || self.done)
     }
+}
+
+/// Whether the measured phase is under way with no denominator, so it
+/// counts and predicts nothing.
+pub(crate) fn counting(snap: &Snapshot, task: &Task) -> bool {
+    snap.phase == task.measured && snap.total_amount == 0
 }
 
 /// Compose one 3-line ANSI frame into a single buffer, wrapped in DEC
@@ -191,13 +200,14 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
         st.reset(),
     ));
 
-    // Line 2: bar or spinner.
+    // Line 2: bar or spinner. The done amount stays unclipped: a run
+    // past its finish line reads as past it, at a percent that clamps.
     out.push_str("\x1b[2K");
     if ctx.measured(snap) {
         let stats = format!(
             " {:>3}%  {} / {}",
             percent(ctx.ratio),
-            task.unit.amount(snap.done_amount.min(snap.total_amount)),
+            task.unit.amount(snap.done_amount),
             task.unit.amount(snap.total_amount),
         );
         let bar_w = width.saturating_sub(stats.len() + 2).max(10);
@@ -214,7 +224,8 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
         out.push('\n');
     }
 
-    // Line 3: item counter, rate, ETA, current item.
+    // Line 3: item counter, rate, ETA, current item. A counting phase
+    // has no ETA, so it shows its tally and its elapsed time.
     out.push_str("\x1b[2K");
     let mut line = String::new();
     if !task.items.is_empty() {
@@ -223,10 +234,27 @@ pub(crate) fn compose_frame(snap: &Snapshot, ctx: &FrameCtx<'_>) -> String {
             &format!("{}/{} {}", snap.done_items, snap.total_items, task.items),
         );
     }
-    if snap.phase == task.measured && ctx.rate > 1.0 {
-        push_field(&mut line, &task.unit.rate(ctx.rate));
-        if let Some(e) = ctx.eta {
-            push_field(&mut line, &format!("ETA {}", fmt_eta(e)));
+    if snap.phase == task.measured {
+        if counting(snap, task) {
+            // The tally and the time are what a counting line is for.
+            // At the 40-column floor the three fields together can pass
+            // the width, and a clip would cut the time mid-field. So
+            // the rate joins only when all three fit, as the item name
+            // does below.
+            let elapsed = format!("elapsed {}", fmt_secs(ctx.elapsed_secs));
+            push_field(&mut line, &task.unit.tally(snap.done_amount));
+            if ctx.rate > 1.0 {
+                let rate = task.unit.rate(ctx.rate);
+                if line.len() + FIELD_SEP + rate.len() + FIELD_SEP + elapsed.len() <= width {
+                    push_field(&mut line, &rate);
+                }
+            }
+            push_field(&mut line, &elapsed);
+        } else if ctx.rate > 1.0 {
+            push_field(&mut line, &task.unit.rate(ctx.rate));
+            if let Some(e) = ctx.eta {
+                push_field(&mut line, &format!("ETA {}", fmt_secs(e)));
+            }
         }
     }
     // The item name joins only when it and its separator fit; at width
@@ -253,7 +281,7 @@ pub(crate) fn plain_line(snap: &Snapshot, task: &Task, ratio: f64) -> String {
         task.tag,
         task.phase_label(snap.phase),
         percent(ratio),
-        task.unit.amount(snap.done_amount.min(snap.total_amount)),
+        task.unit.amount(snap.done_amount),
         task.unit.amount(snap.total_amount),
     );
     if !task.items.is_empty() {
@@ -269,6 +297,29 @@ pub(crate) fn plain_line(snap: &Snapshot, task: &Task, ratio: f64) -> String {
 /// One plain-mode line for a phase with no denominator.
 pub(crate) fn plain_indeterminate_line(snap: &Snapshot, task: &Task) -> String {
     let mut line = format!("[{}] {}", task.tag, task.phase_label(snap.phase));
+    push_current_item(&mut line, snap);
+    line
+}
+
+/// One plain-mode line for the measured phase when it is
+/// [`counting`]: the tally, the rate, and the elapsed time.
+pub(crate) fn plain_counting_line(
+    snap: &Snapshot,
+    task: &Task,
+    rate: f64,
+    elapsed_secs: u64,
+) -> String {
+    let mut line = format!(
+        "[{}] {}  {}",
+        task.tag,
+        task.phase_label(snap.phase),
+        task.unit.tally(snap.done_amount)
+    );
+    if rate > 1.0 {
+        line.push_str("  ");
+        line.push_str(&task.unit.rate(rate));
+    }
+    line.push_str(&format!("  elapsed {}", fmt_secs(elapsed_secs)));
     push_current_item(&mut line, snap);
     line
 }
@@ -292,3 +343,7 @@ pub(crate) fn osc_progress(state: u8, pct: Option<u8>) -> String {
 #[cfg(test)]
 #[path = "tests/frame_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/counting_tests.rs"]
+mod counting_tests;

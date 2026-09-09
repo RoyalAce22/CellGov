@@ -58,6 +58,7 @@ pub(super) fn spawn_one_run(
     let mut cmd = std::process::Command::new(&exe);
     opts.encode_to_command(&mut cmd);
     let output = cmd.output().map_err(SpawnError::Io)?;
+    crate::cli::exit::propagate_interrupt(output.status);
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {

@@ -130,6 +130,7 @@ fn measure(job: &Job) -> Option<Measurement> {
         .current_dir(workspace_root())
         .output()
         .unwrap_or_else(|e| die(&format!("spawn boot bench-once: {e}")));
+    super::exit::propagate_interrupt(output.status);
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);

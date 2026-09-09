@@ -38,14 +38,12 @@ fn drive(rt: &mut Runtime, ctx: &mut StepLoopCtx<'_>) -> (String, cellgov_compar
         // A parked child's staged init pass runs before the scheduler
         // sees it: an entry still pending at `rt.step()` reads as
         // AllBlocked once every other unit blocks.
+        //
+        // The pass retires `rt.step()` calls that `ctx.steps` never
+        // counts, and the bar counts what `ctx.steps` counts; see
+        // `super::bench`.
         if rt.has_pending_child_init() {
-            let before = rt.steps_taken();
             crate::game::child_init::run_pending_child_inits(rt, ctx.child_init);
-            // The pass retires `rt.step()` calls that `ctx.steps` never
-            // counts. The denominator counts them, so an unreported pass
-            // leaves the bar short.
-            ctx.progress
-                .advanced(rt.steps_taken().saturating_sub(before) as u64);
         }
 
         let t0 = Instant::now();
