@@ -59,7 +59,9 @@ macro_rules! nid_const {
 
 /// Declare a PS3 PRX library NID module from a single declarative
 /// source. Each named NID becomes a SHA-1-verified `pub const` (via
-/// [`nid_const!`]); the `classified { ... }` block additionally
+/// [`nid_const!`]) and a `(nid, name)` row of the per-module
+/// `DECLARED_NIDS` slice that the `nid` table tests reconcile against
+/// `NID_TABLE`; the `classified { ... }` block additionally
 /// contributes to a per-module `CLASSIFIED_NIDS: &[u32]` slice that
 /// `nid::tests::every_classified_nid_has_explicit_arm` walks to
 /// enforce the "every classified NID has an explicit arm in
@@ -100,6 +102,13 @@ macro_rules! nid_module {
         /// Consulted by `cellgov dev prx-imports` when
         /// classifying unresolved-or-zero-bound PRX imports.
         pub const CLASSIFIED_NIDS: &[u32] = &[ $( $cname ),* ];
+
+        /// Every NID this module declares, paired with the guest
+        /// function name behind its literal.
+        pub const DECLARED_NIDS: &[(u32, &str)] = &[
+            $( ($cname, $cfn), )*
+            $( $( ($uname, $ufn), )* )?
+        ];
     };
 }
 

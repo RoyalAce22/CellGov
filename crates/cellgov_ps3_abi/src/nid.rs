@@ -1,10 +1,15 @@
 //! NID -> `(module, function)` lookup for PS3 system libraries.
 //!
 //! Per the PS3 NID algorithm, a NID is the first 4 bytes (little-endian
-//! u32) of SHA-1(name || suffix). The suffix differs by export kind:
-//! named exports use `0x6759659904250490566427499489741A`, while noname
-//! exports (e.g., `module_start`, `module_stop`) use
-//! `0xc1b886af5c31846467e7ba5e2cffd64a`. NIDs are game-independent.
+//! u32) of SHA-1(name || suffix) with the named-export suffix
+//! `0x6759659904250490566427499489741A`; [`crate::sha1::nid_sha1`] is
+//! that derivation, and `table_tests` recomputes every `NID_TABLE` row
+//! through it. Two kinds of row do not recompute: a row whose real
+//! name is unknown carries the placeholder `<module>_<NID:08X>`, and
+//! the module entry points (`module_start`, `module_stop`,
+//! `module_exit`, `module_info`, `module_prologue`, `module_epilogue`)
+//! carry fixed NIDs the derivation does not produce. NIDs are
+//! game-independent.
 
 /// `sysPrxForUser` NIDs: the user-mode PRX shim that wraps LV2
 /// syscalls (TLS init, heap, lwmutex create, time, thread, process).
@@ -5652,3 +5657,7 @@ static NID_TABLE: &[(u32, &str, &str)] = &[
 #[cfg(test)]
 #[path = "tests/nid_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/nid_table_tests.rs"]
+mod table_tests;
