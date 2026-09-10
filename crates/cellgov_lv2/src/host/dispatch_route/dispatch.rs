@@ -4,7 +4,7 @@
 //! methods; shared helpers live in [`super::helpers`].
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv2::syscall;
+use cellgov_ps3_abi::lv2::{errno, syscall};
 
 use crate::dispatch::Lv2Dispatch;
 use crate::request::Lv2Request;
@@ -535,15 +535,34 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_LOCAL,
                 args,
-            } => self.dispatch_event_port_connect_local(args[0] as u32, args[1] as u32),
+            } => match self.narrow_u32_args(
+                syscall::EVENT_PORT_CONNECT_LOCAL,
+                [("event_port_id", args[0]), ("event_queue_id", args[1])],
+            ) {
+                Some([port_id, queue_id]) => {
+                    self.dispatch_event_port_connect_local(port_id, queue_id)
+                }
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_CONNECT_IPC,
                 args,
-            } => self.dispatch_event_port_connect_ipc(args[0] as u32, args[1]),
+            } => match self.narrow_u32_args(
+                syscall::EVENT_PORT_CONNECT_IPC,
+                [("event_port_id", args[0])],
+            ) {
+                Some([port_id]) => self.dispatch_event_port_connect_ipc(port_id, args[1]),
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
             Lv2Request::Unsupported {
                 number: syscall::EVENT_PORT_DISCONNECT,
                 args,
-            } => self.dispatch_event_port_disconnect(args[0] as u32),
+            } => match self
+                .narrow_u32_args(syscall::EVENT_PORT_DISCONNECT, [("event_port_id", args[0])])
+            {
+                Some([port_id]) => self.dispatch_event_port_disconnect(port_id),
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
             Lv2Request::Unsupported {
                 number: syscall::GAMEPAD_YCON_IF,
                 ..
@@ -559,7 +578,14 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::MEMORY_CONTAINER_CREATE_324,
                 args,
-            } => self.dispatch_memory_container_create(args[0] as u32, args[1], requester, tick),
+            } => match self
+                .narrow_u32_args(syscall::MEMORY_CONTAINER_CREATE_324, [("cid", args[0])])
+            {
+                Some([cid_ptr]) => {
+                    self.dispatch_memory_container_create(cid_ptr, args[1], requester, tick)
+                }
+                None => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            },
             Lv2Request::Unsupported {
                 number: syscall::MMAPPER_ALLOCATE_ADDRESS,
                 args,

@@ -41,11 +41,11 @@ flowchart TD
 A u32-typed field arrives in a 64-bit argument register. The
 classifier refuses a register that carries high bits, so a typed
 variant never holds a narrowed field. `Unsupported` hands the raw
-registers past that gate; the `_sys_prx_*` arms bind their own fields
-under the same rule and answer CELL_EINVAL with a
-`dispatch.arg_high_bits` break. Whether the kernel masks such a field
-or refuses it is unestablished -- every corpus caller passes a value
-that already fits in 32 bits.
+registers past that gate; every `Unsupported` arm binds its own u32
+fields under the same rule and answers CELL_EINVAL with a
+`dispatch.arg_high_bits` break, before its own argument tests run.
+Whether the kernel masks such a field or refuses it is unestablished
+-- every corpus caller passes a value that already fits in 32 bits.
 
 Classified into typed `Lv2Request` variants:
 

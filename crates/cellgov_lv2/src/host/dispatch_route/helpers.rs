@@ -18,7 +18,8 @@ impl Lv2Host {
     /// [`crate::request::classify`] gates every u32 slot it binds, so a
     /// typed request never carries a narrowed field. An arm that reads
     /// `Lv2Request::Unsupported`'s raw arguments has no such gate ahead
-    /// of it. Every `_sys_prx_*` arm binds its fields here.
+    /// of it. Every such arm binds its u32 fields here, before its own
+    /// argument tests. That is the position the classifier's gate holds.
     ///
     /// Whether the kernel masks a field to 32 bits or refuses it is
     /// unestablished: every corpus caller passes a value that already

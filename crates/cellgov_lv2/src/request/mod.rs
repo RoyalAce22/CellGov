@@ -11,9 +11,8 @@
 //! GPR has non-zero high 32 bits rather than truncating; downstream
 //! `Lv2Host` handlers therefore never receive a silently-narrowed
 //! pointer. [`Lv2Request::Unsupported`] carries the raw GPRs past
-//! that gate. The `_sys_prx_*` arms apply the same rule to the fields
-//! they bind. The other `Unsupported` arms narrow with a cast, so the
-//! guarantee above covers the typed variants only.
+//! that gate, and each of its arms applies the same rule to the u32
+//! fields it binds.
 //!
 //! Out-pointers carry the convention that the kernel must commit
 //! `*out = id` before returning OK -- the runtime emits the write and

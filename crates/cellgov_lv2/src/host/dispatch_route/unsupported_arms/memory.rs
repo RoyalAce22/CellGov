@@ -82,15 +82,25 @@ impl Lv2Host {
     ///   CellGov's own; no interface or firmware record establishes
     ///   it.
     /// - `CELL_ENOMEM` when the VM window is exhausted.
+    ///
+    /// `CELL_EINVAL` also answers an `alloc_addr` register that carries
+    /// high bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes
+    /// the list above.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_address(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([alloc_addr_ptr]) =
+            self.narrow_u32_args(syscall::MMAPPER_ALLOCATE_ADDRESS, [("alloc_addr", args[3])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let size = args[0];
         let alignment = args[2];
-        let alloc_addr_ptr = args[3] as u32;
         if !size.is_multiple_of(VM_AREA_GRANULE) {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
@@ -157,16 +167,27 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when `mem_id_ptr` is null. The gate is
     ///   CellGov's own; no interface or firmware record establishes
     ///   it.
+    ///
+    /// `CELL_EINVAL` also answers a `mem_id` register that carries high
+    /// bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes the
+    /// list above.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([mem_id_ptr]) = self.narrow_u32_args(
+            syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
+            [("mem_id", args[3])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let ipc_key = args[0];
         let size = args[1];
         let flags = args[2];
-        let mem_id_ptr = args[3] as u32;
         if size == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
@@ -302,6 +323,10 @@ impl Lv2Host {
     ///   already handed out through 334 / 337 -- loader images and
     ///   prior maps alike. Nothing public states that the kernel
     ///   refuses an overlapping claim rather than relocating it.
+    ///
+    /// `CELL_EINVAL` also answers a `mem_id` register that carries high
+    /// bits, per [`Lv2Host::narrow_u32_args`]. The arm reads `addr` at
+    /// its full width, so the window test above refuses a high `addr`.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_map_shared_memory(
         &mut self,
         args: [u64; 8],
@@ -309,8 +334,14 @@ impl Lv2Host {
         rt: &dyn crate::host::Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([mem_id]) =
+            self.narrow_u32_args(syscall::MMAPPER_MAP_SHARED_MEMORY, [("mem_id", args[1])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let addr = args[0];
-        let mem_id = args[1] as u32;
         if !(0x2000_0000..0xC000_0000).contains(&addr) {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
@@ -403,6 +434,9 @@ impl Lv2Host {
     ///   (parallel to sc 334's `mmapper_map_unknown_mem_id` shape;
     ///   logs `dispatch.mmapper_search_and_map_unknown_mem_id`).
     /// - `CELL_ENOMEM` when the search exhausts the mmapper window.
+    /// - `CELL_EINVAL` when `start_addr`, `mem_id` or `alloc_addr`
+    ///   carries high bits, per [`Lv2Host::narrow_u32_args`]. That gate
+    ///   precedes the rest.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_search_and_map(
         &mut self,
         args: [u64; 8],
@@ -410,9 +444,18 @@ impl Lv2Host {
         rt: &dyn crate::host::Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let start_addr = args[0] as u32;
-        let mem_id = args[1] as u32;
-        let alloc_addr_ptr = args[3] as u32;
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([start_addr, mem_id, alloc_addr_ptr]) = self.narrow_u32_args(
+            syscall::MMAPPER_SEARCH_AND_MAP,
+            [
+                ("start_addr", args[0]),
+                ("mem_id", args[1]),
+                ("alloc_addr", args[3]),
+            ],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
         }
@@ -476,16 +519,24 @@ impl Lv2Host {
     /// # Errors
     ///
     /// Same set and same order as
-    /// `dispatch_mmapper_allocate_shared_memory`.
+    /// `dispatch_mmapper_allocate_shared_memory`, including the
+    /// `mem_id` width gate that precedes them.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory_from_container(
         &mut self,
         args: [u64; 8],
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([mem_id_ptr]) = self.narrow_u32_args(
+            syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
+            [("mem_id", args[4])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let size = args[1];
         let flags = args[3];
-        let mem_id_ptr = args[4] as u32;
         if size == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
@@ -549,11 +600,22 @@ impl Lv2Host {
     /// - `CELL_EINVAL` when `flags` carries bits outside the
     ///   granularity field.
     /// - `CELL_EINVAL` when `entry_count` is outside `1..=16`.
+    ///   `entry_count` is an `int`, and the arm reads only the low word
+    ///   of its register. The range test runs on that word, so the arm
+    ///   drops a high word. The `entries` and `mem_id` gates below
+    ///   refuse a high word. Which answer the kernel gives either
+    ///   field is unestablished.
     /// - `CELL_EFAULT` when an entry's `type` word is unreadable.
     /// - `CELL_EPERM` when an entry type is unknown, or privileged
     ///   without 64 KiB pages and debug-or-root capability.
     /// - `CELL_EFAULT` when `mem_id_ptr` is null.
     /// - `CELL_EEXIST` when a keyed `ipc_key` is already registered.
+    ///
+    /// `CELL_EINVAL` also answers a `flags`, `entries` or `mem_id`
+    /// register that carries high bits, per
+    /// [`Lv2Host::narrow_u32_args`]. That gate precedes the list above.
+    /// This arm's `flags` is a 32-bit word, unlike the 64-bit one 332
+    /// and 362 take.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory_ext(
         &mut self,
         args: [u64; 8],
@@ -561,12 +623,22 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([flags, entries_ptr, mem_id_ptr]) = self.narrow_u32_args(
+            syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT,
+            [
+                ("flags", args[2]),
+                ("entries", args[3]),
+                ("mem_id", args[5]),
+            ],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        let flags = u64::from(flags);
         let ipc_key = args[0];
         let size = args[1];
-        let flags = u64::from(args[2] as u32);
-        let entries_ptr = args[3] as u32;
         let entry_count = args[4] as i32;
-        let mem_id_ptr = args[5] as u32;
         if size == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
