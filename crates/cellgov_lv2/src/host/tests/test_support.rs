@@ -205,7 +205,7 @@ pub(super) fn primary_attrs() -> PpuThreadAttrs {
 
 /// Lay out the two-step indirection that `_sys_ppu_thread_create`
 /// expects in guest memory: a `ppu_thread_param_t` at `param_addr`
-/// whose first u32 points at an OPD planted 8 bytes after it, and
+/// whose first u32 addresses an OPD planted 8 bytes after it, and
 /// that OPD's `{ code, toc }` pair as 4-byte BE u32s each.
 ///
 /// # Panics

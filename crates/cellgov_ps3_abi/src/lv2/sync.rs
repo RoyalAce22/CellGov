@@ -1,10 +1,12 @@
 //! PS3 synchronization-primitive attribute flag bits and event-port
 //! type enumerants.
 //!
-//! The `protocol` field selects wake order; the `type` field selects
-//! whether multiple waiters are allowed on the same primitive. These
-//! are shared by `sys_mutex_attribute_t`, `sys_event_flag_attribute_t`,
-//! `sys_semaphore_attribute_t`, `sys_cond_attribute_t`, and so on.
+//! The `protocol` field selects wake order.
+//! `sys_mutex_attribute_t`, `sys_semaphore_attribute_t` and
+//! `sys_event_flag_attribute_t` each carry it. The `type` field
+//! selects whether the primitive admits more than one parked waiter,
+//! and only `sys_event_flag_attribute_t` carries it.
+//! `sys_cond_attribute_t` carries neither.
 //!
 //! Behaviour (the dispatch validators inside
 //! `cellgov_lv2::host::{event_flag,semaphore,mutex,...}`) lives in
@@ -196,6 +198,30 @@ pub mod event_flag_attribute {
     // Same container coupling as `semaphore_attribute`.
     const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
     const _: () = assert!(TYPE_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+}
+
+/// `sys_cond_attribute_t`, the block `sys_cond_create` (105) reads.
+///
+/// `pshared@0` (u32), `flags@4` (s32), `ipc_key@8` (u64), `name@16`
+/// (8 bytes), for a declared [`SIZE`](cond_attribute::SIZE) of 24
+/// bytes.
+// The provenance matches `semaphore_attribute`.
+pub mod cond_attribute {
+    /// `sizeof(sys_cond_attribute_t)`.
+    pub const SIZE: u32 = 0x18;
+
+    /// `pshared` -- [`SYS_SYNC_PROCESS_SHARED`] or
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`].
+    ///
+    /// [`SYS_SYNC_PROCESS_SHARED`]: super::SYS_SYNC_PROCESS_SHARED
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`]: super::SYS_SYNC_NOT_PROCESS_SHARED
+    pub const PSHARED_OFFSET: usize = 0x00;
+    /// `ipc_key` -- the process-shared namespace key.
+    pub const IPC_KEY_OFFSET: usize = 0x08;
+
+    // Same container coupling as `semaphore_attribute`.
+    const _: () = assert!(PSHARED_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(IPC_KEY_OFFSET + core::mem::size_of::<u64>() <= SIZE as usize);
 }
 
 /// `port_type = SYS_EVENT_PORT_LOCAL`: connectable only by queue id,

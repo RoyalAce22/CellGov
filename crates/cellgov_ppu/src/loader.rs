@@ -293,9 +293,8 @@ pub fn load_ppu_elf(
         loaded.push(p_vaddr..end);
     }
 
-    // PPC64 ELF ABI v1: e_entry names a descriptor { u32 code, u32 toc }
-    // in .opd. PS3 effective addresses are 32-bit despite the 64-bit
-    // container.
+    // e_entry names a `function_descriptor` in .opd.
+    use cellgov_ps3_abi::format::elf::function_descriptor;
     let entry_off = entry as usize;
     let mem_bytes = memory.as_bytes();
     // checked_add: a hostile e_entry near u64::MAX would wrap the
@@ -306,25 +305,24 @@ pub fn load_ppu_elf(
     // guest memory reads eight zero bytes and would set pc 0 with no
     // TOC, which is indistinguishable from a successful load.
     let descriptor_loaded = entry
-        .checked_add(8)
+        .checked_add(function_descriptor::SIZE as u64)
         .is_some_and(|end| loaded.iter().any(|r| r.start <= entry && end <= r.end));
     if descriptor_loaded
         && entry_off
-            .checked_add(8)
+            .checked_add(function_descriptor::SIZE)
             .is_some_and(|end| end <= mem_bytes.len())
     {
-        let code_addr = u32::from_be_bytes([
-            mem_bytes[entry_off],
-            mem_bytes[entry_off + 1],
-            mem_bytes[entry_off + 2],
-            mem_bytes[entry_off + 3],
-        ]);
-        let toc = u32::from_be_bytes([
-            mem_bytes[entry_off + 4],
-            mem_bytes[entry_off + 5],
-            mem_bytes[entry_off + 6],
-            mem_bytes[entry_off + 7],
-        ]);
+        let word_at = |field: usize| {
+            let at = entry_off + field;
+            u32::from_be_bytes([
+                mem_bytes[at],
+                mem_bytes[at + 1],
+                mem_bytes[at + 2],
+                mem_bytes[at + 3],
+            ])
+        };
+        let code_addr = word_at(function_descriptor::CODE_OFFSET);
+        let toc = word_at(function_descriptor::TOC_OFFSET);
         state.pc = code_addr as u64;
         state.set_gpr(2, toc as u64);
     } else {

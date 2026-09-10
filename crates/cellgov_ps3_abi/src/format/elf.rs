@@ -175,6 +175,39 @@ const _: () = assert!(ELF64_SH_FLAGS + 8 <= ELF64_SHENT_SIZE);
 const _: () = assert!(ELF64_SH_OFFSET + 8 <= ELF64_SHENT_SIZE);
 const _: () = assert!(ELF64_SH_SIZE + 8 <= ELF64_SHENT_SIZE);
 
+/// The packed function descriptor a PS3 `.opd` entry holds.
+///
+/// `code@0` (u32), `toc@4` (u32), for a
+/// [`SIZE`](function_descriptor::SIZE) of 8 bytes. A PPC64 ELFv1
+/// descriptor is three doublewords. A PS3 effective address is 32
+/// bits, so a PS3 entry packs two words.
+///
+/// The PPU loader dereferences `e_entry` as this pair. A guest
+/// reaches the same pair through the `entry` word of a
+/// [`thread_param`] block.
+///
+/// [`thread_param`]: crate::lv2::ppu_thread::thread_param
+// No public document states the packing.
+pub mod function_descriptor {
+    /// Bytes one descriptor occupies.
+    pub const SIZE: usize = 8;
+
+    /// `code` -- the guest address of the entry point's first
+    /// instruction.
+    pub const CODE_OFFSET: usize = 0;
+    /// `toc` -- the r2 value the entry point runs under.
+    pub const TOC_OFFSET: usize = 4;
+
+    // Container coupling: a reader that bounds-checks `SIZE` reads
+    // both words without a second check.
+    const _: () = assert!(CODE_OFFSET + core::mem::size_of::<u32>() <= SIZE);
+    const _: () = assert!(TOC_OFFSET + core::mem::size_of::<u32>() <= SIZE);
+
+    // `codegen::trampoline::encode_ps3_packed_opd` writes both words
+    // from these offsets.
+    const _: () = assert!(CODE_OFFSET + core::mem::size_of::<u32>() <= TOC_OFFSET);
+}
+
 /// `r_type` for `R_PPC64_ADDR32` (32-bit absolute).
 pub const R_PPC64_ADDR32: u32 = 1;
 

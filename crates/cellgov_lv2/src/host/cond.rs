@@ -397,14 +397,21 @@ impl Lv2Host {
     }
 }
 
-/// Effective ipc_key from a `sys_cond_attribute_t`: the key at +8
-/// iff `pshared` at +0 equals SYS_SYNC_PROCESS_SHARED, else 0.
-/// `None` when the attr struct is unreadable.
+/// Effective ipc_key from a [`cond_attribute`] block: its `ipc_key`
+/// when `pshared` selects a process-shared cond, and 0 otherwise.
+///
+/// Returns `None` when a word this read needs is unmapped. The read
+/// takes the two fields separately, so a process-private block
+/// returns 0 even when the `ipc_key` word is unmapped.
+///
+/// [`cond_attribute`]: cellgov_ps3_abi::lv2::sync::cond_attribute
 fn cond_attr_ipc_key(attr_ptr: u32, rt: &dyn Lv2Runtime) -> Option<u64> {
-    if read_be_u32(rt, u64::from(attr_ptr))? != SYS_SYNC_PROCESS_SHARED {
+    use cellgov_ps3_abi::lv2::sync::cond_attribute as attr_layout;
+    let base = u64::from(attr_ptr);
+    if read_be_u32(rt, base + attr_layout::PSHARED_OFFSET as u64)? != SYS_SYNC_PROCESS_SHARED {
         return Some(0);
     }
-    read_be_u64(rt, u64::from(attr_ptr) + 8)
+    read_be_u64(rt, base + attr_layout::IPC_KEY_OFFSET as u64)
 }
 
 fn wake_with(

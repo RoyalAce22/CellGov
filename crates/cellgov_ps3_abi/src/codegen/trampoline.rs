@@ -81,18 +81,25 @@ const _: () = assert!(
     "blr canonical encoding drifted",
 );
 
-/// PS3 function descriptor: `(code_addr_u32, toc_u32)`, 8 bytes.
+/// One [`function_descriptor`] entry, big-endian.
 ///
-/// PS3 effective addresses are 32-bit, so a title's own `.opd` packs
-/// two words per entry where a PPC64 ELFv1 OPD holds three doublewords.
-/// The loader dereferences `e_entry` as these two words.
+/// [`function_descriptor`]: crate::format::elf::function_descriptor
 #[inline]
-pub const fn encode_ps3_packed_opd(code_addr: u32, toc: u32) -> [u8; 8] {
+pub const fn encode_ps3_packed_opd(
+    code_addr: u32,
+    toc: u32,
+) -> [u8; crate::format::elf::function_descriptor::SIZE] {
+    use crate::format::elf::function_descriptor as layout;
     let code_b = code_addr.to_be_bytes();
     let toc_b = toc.to_be_bytes();
-    [
-        code_b[0], code_b[1], code_b[2], code_b[3], toc_b[0], toc_b[1], toc_b[2], toc_b[3],
-    ]
+    let mut out = [0u8; layout::SIZE];
+    let mut i = 0;
+    while i < code_b.len() {
+        out[layout::CODE_OFFSET + i] = code_b[i];
+        out[layout::TOC_OFFSET + i] = toc_b[i];
+        i += 1;
+    }
+    out
 }
 
 #[cfg(test)]

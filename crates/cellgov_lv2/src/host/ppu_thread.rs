@@ -87,14 +87,14 @@ impl Lv2Host {
         stacksize: u64,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        // r4 is a `ppu_thread_param_t *`: `{ u32 entry_opd_ptr; u32
-        // tls; }`. The OPD it points to is `{ u32 code; u32 toc; }`
-        // (8 bytes, not PowerOpen 24).
-        let Some(param) = GuestStruct::read(rt, param_ptr as u64, 8) else {
+        use cellgov_ps3_abi::format::elf::function_descriptor;
+        use cellgov_ps3_abi::lv2::ppu_thread::thread_param;
+        let Some(param) = GuestStruct::read(rt, param_ptr as u64, thread_param::SIZE as usize)
+        else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let entry_opd_ptr = param.u32_at(0);
-        let param_tls = param.u32_at(4);
+        let entry_opd_ptr = param.u32_at(thread_param::ENTRY_OFFSET);
+        let param_tls = param.u32_at(thread_param::TLS_OFFSET);
 
         // A null entry descriptor is EFAULT. The check runs before
         // the priority range test; that order is a CellGov choice,
@@ -103,21 +103,26 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
-        // A PPU thread priority runs 0 (highest) through 3071, and a
-        // value outside that window is EINVAL. The floor drops to
-        // -512 for a debug-or-root process -- a privileged widening
-        // with no public anchor.
+        // `sys_ppu_thread_set_priority` (47) enforces the same window.
+        use cellgov_ps3_abi::lv2::ppu_thread::{
+            PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN, PPU_THREAD_PRIORITY_MIN_ROOT,
+        };
         let prio = priority as i32;
-        let prio_floor = if self.debug_or_root() { -512 } else { 0 };
-        if prio < prio_floor || prio > 3071 {
+        let prio_floor = if self.debug_or_root() {
+            PPU_THREAD_PRIORITY_MIN_ROOT
+        } else {
+            PPU_THREAD_PRIORITY_MIN
+        };
+        if !(prio_floor..=PPU_THREAD_PRIORITY_MAX).contains(&prio) {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
 
-        let Some(opd) = GuestStruct::read(rt, entry_opd_ptr as u64, 8) else {
+        let Some(opd) = GuestStruct::read(rt, entry_opd_ptr as u64, function_descriptor::SIZE)
+        else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let entry_code = u64::from(opd.u32_at(0));
-        let entry_toc = u64::from(opd.u32_at(4));
+        let entry_code = u64::from(opd.u32_at(function_descriptor::CODE_OFFSET));
+        let entry_toc = u64::from(opd.u32_at(function_descriptor::TOC_OFFSET));
 
         // 0x4000 floor covers the ABI back-chain + register save area.
         let size = stacksize.max(0x4000);
