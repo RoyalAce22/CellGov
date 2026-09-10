@@ -5,7 +5,7 @@
 //! entry discards its wake.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -305,13 +305,12 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let bits = entry.bits();
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(flags_ptr, 8),
-            bytes: WritePayload::from_slice(&bits.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(flags_ptr, 8),
+            WritePayload::from_slice(&bits.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],
@@ -336,13 +335,12 @@ fn event_flag_result_write(
     if result_ptr == 0 {
         return vec![];
     }
-    vec![Effect::SharedWriteIntent {
-        range: ByteRange::contiguous_u32(result_ptr, 8),
-        bytes: WritePayload::from_slice(&observed.to_be_bytes()),
-        ordering: PriorityClass::Normal,
-        source: requester,
-        source_time: tick,
-    }]
+    vec![Effect::shared_write(
+        ByteRange::contiguous_u32(result_ptr, 8),
+        WritePayload::from_slice(&observed.to_be_bytes()),
+        requester,
+        tick,
+    )]
 }
 
 /// The cancelled-waiter count write for `sys_event_flag_cancel`.
@@ -359,13 +357,12 @@ fn event_flag_count_write(
     if num_ptr == 0 {
         return vec![];
     }
-    vec![Effect::SharedWriteIntent {
-        range: ByteRange::contiguous_u32(num_ptr, 4),
-        bytes: WritePayload::from_slice(&count.to_be_bytes()),
-        ordering: PriorityClass::Normal,
-        source: requester,
-        source_time: tick,
-    }]
+    vec![Effect::shared_write(
+        ByteRange::contiguous_u32(num_ptr, 4),
+        WritePayload::from_slice(&count.to_be_bytes()),
+        requester,
+        tick,
+    )]
 }
 
 #[cfg(test)]

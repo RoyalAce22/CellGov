@@ -238,13 +238,12 @@ fn range4(addr: u64) -> cellgov_mem::ByteRange {
 const UNSPECIFIED_SOURCE: UnitId = UnitId::new(0xD0);
 
 fn write_intent(addr: u64, value: u32) -> Effect {
-    Effect::SharedWriteIntent {
-        range: range4(addr),
-        bytes: cellgov_effects::WritePayload::from_slice(&value.to_be_bytes()),
-        ordering: cellgov_event::PriorityClass::Normal,
-        source: UNSPECIFIED_SOURCE,
-        source_time: GuestTicks::new(0),
-    }
+    Effect::shared_write(
+        range4(addr),
+        cellgov_effects::WritePayload::from_slice(&value.to_be_bytes()),
+        UNSPECIFIED_SOURCE,
+        GuestTicks::new(0),
+    )
 }
 
 #[test]

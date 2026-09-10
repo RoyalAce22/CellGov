@@ -1,7 +1,7 @@
 //! PPU thread lifecycle dispatch (create, exit, join).
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -33,13 +33,12 @@ impl Lv2Host {
             if status_out_ptr == 0 {
                 return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
-            let write = Effect::SharedWriteIntent {
-                range: ByteRange::contiguous_u32(status_out_ptr, 8),
-                bytes: WritePayload::from_slice(&exit_value.to_be_bytes()),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            };
+            let write = Effect::shared_write(
+                ByteRange::contiguous_u32(status_out_ptr, 8),
+                WritePayload::from_slice(&exit_value.to_be_bytes()),
+                requester,
+                tick,
+            );
             return Lv2Dispatch::Immediate {
                 code: 0,
                 effects: vec![write],

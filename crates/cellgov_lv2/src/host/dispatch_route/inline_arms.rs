@@ -3,7 +3,7 @@
 //! `Hypercall` catch-alls.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -74,20 +74,18 @@ impl Lv2Host {
             return d;
         }
         let zero = 0i32.to_be_bytes();
-        let tz_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(timezone_ptr, 4),
-            bytes: WritePayload::from_slice(&zero),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
-        let dst_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(summer_time_ptr, 4),
-            bytes: WritePayload::from_slice(&zero),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let tz_write = Effect::shared_write(
+            ByteRange::contiguous_u32(timezone_ptr, 4),
+            WritePayload::from_slice(&zero),
+            requester,
+            tick,
+        );
+        let dst_write = Effect::shared_write(
+            ByteRange::contiguous_u32(summer_time_ptr, 4),
+            WritePayload::from_slice(&zero),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![tz_write, dst_write],
@@ -122,13 +120,12 @@ impl Lv2Host {
         let mut bytes = [0u8; 8];
         bytes[0..4].copy_from_slice(&total.to_be_bytes());
         bytes[4..8].copy_from_slice(&available.to_be_bytes());
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(mem_info_ptr, 8),
-            bytes: WritePayload::from_slice(&bytes),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_info_ptr, 8),
+            WritePayload::from_slice(&bytes),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],
@@ -148,20 +145,18 @@ impl Lv2Host {
             return d;
         }
         let (sec, nsec) = cellgov_time::ticks_to_sec_nsec(tick.raw());
-        let sec_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(sec_ptr, 8),
-            bytes: WritePayload::from_slice(&sec.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
-        let nsec_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(nsec_ptr, 8),
-            bytes: WritePayload::from_slice(&nsec.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let sec_write = Effect::shared_write(
+            ByteRange::contiguous_u32(sec_ptr, 8),
+            WritePayload::from_slice(&sec.to_be_bytes()),
+            requester,
+            tick,
+        );
+        let nsec_write = Effect::shared_write(
+            ByteRange::contiguous_u32(nsec_ptr, 8),
+            WritePayload::from_slice(&nsec.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![sec_write, nsec_write],
@@ -272,13 +267,12 @@ impl Lv2Host {
                         }
                     };
                     let authid_be = authority_id.to_be_bytes();
-                    let write = Effect::SharedWriteIntent {
-                        range: ByteRange::contiguous_u32(addr, 8),
-                        bytes: WritePayload::from_slice(&authid_be),
-                        ordering: PriorityClass::Normal,
-                        source: requester,
-                        source_time: tick,
-                    };
+                    let write = Effect::shared_write(
+                        ByteRange::contiguous_u32(addr, 8),
+                        WritePayload::from_slice(&authid_be),
+                        requester,
+                        tick,
+                    );
                     Lv2Dispatch::Immediate {
                         code: 0,
                         effects: vec![write],

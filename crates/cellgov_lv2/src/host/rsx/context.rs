@@ -1,7 +1,7 @@
 //! `sys_rsx_context_allocate` (670) and `sys_rsx_context_free` (671).
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::rsx::{
@@ -87,30 +87,31 @@ impl Lv2Host {
             ..SysRsxContext::new()
         };
 
-        let mk_write_u32 = |ptr: u32, value: u32| Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(ptr, 4),
-            bytes: WritePayload::from_slice(&value.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
+        let mk_write_u32 = |ptr: u32, value: u32| {
+            Effect::shared_write(
+                ByteRange::contiguous_u32(ptr, 4),
+                WritePayload::from_slice(&value.to_be_bytes()),
+                requester,
+                tick,
+            )
         };
-        let mk_write_u64 = |ptr: u32, value: u32| Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(ptr, 8),
-            bytes: WritePayload::from_slice(&(value as u64).to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
+        let mk_write_u64 = |ptr: u32, value: u32| {
+            Effect::shared_write(
+                ByteRange::contiguous_u32(ptr, 8),
+                WritePayload::from_slice(&(value as u64).to_be_bytes()),
+                requester,
+                tick,
+            )
         };
 
         let mut reports_bytes = vec![0u8; reports::SIZE];
         write_rsx_reports_init(&mut reports_bytes);
-        let reports_init = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(reports_addr, reports::SIZE as u32),
-            bytes: WritePayload::from_slice(&reports_bytes),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let reports_init = Effect::shared_write(
+            ByteRange::contiguous_u32(reports_addr, reports::SIZE as u32),
+            WritePayload::from_slice(&reports_bytes),
+            requester,
+            tick,
+        );
 
         let mut driver_info_bytes = vec![0u8; driver_info::SIZE];
         write_rsx_driver_info_init(
@@ -119,13 +120,12 @@ impl Lv2Host {
             system_mode as u32,
             queue_id,
         );
-        let driver_info_init_effect = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(driver_info_addr, driver_info::SIZE as u32),
-            bytes: WritePayload::from_slice(&driver_info_bytes),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let driver_info_init_effect = Effect::shared_write(
+            ByteRange::contiguous_u32(driver_info_addr, driver_info::SIZE as u32),
+            WritePayload::from_slice(&driver_info_bytes),
+            requester,
+            tick,
+        );
 
         Lv2Dispatch::Immediate {
             code: 0,

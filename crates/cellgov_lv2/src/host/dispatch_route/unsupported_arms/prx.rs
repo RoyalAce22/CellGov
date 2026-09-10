@@ -1,7 +1,7 @@
 //! `_sys_prx_*` module-lifecycle arms.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
@@ -451,13 +451,12 @@ impl Lv2Host {
 
     /// Stage a big-endian `u64` write to guest memory.
     fn write_be_u64(&self, requester: UnitId, addr: u32, value: u64, tick: GuestTicks) -> Effect {
-        Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(addr, 8),
-            bytes: WritePayload::from_slice(&value.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        }
+        Effect::shared_write(
+            ByteRange::contiguous_u32(addr, 8),
+            WritePayload::from_slice(&value.to_be_bytes()),
+            requester,
+            tick,
+        )
     }
 
     /// `_sys_prx_register_module` (484): returns
@@ -633,13 +632,12 @@ impl Lv2Host {
                     self.obs.prx_register_module_unresolved += 1;
                     continue;
                 };
-                effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(slot_at as u32, 4),
-                    bytes: WritePayload::from_slice(&opd.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                });
+                effects.push(Effect::shared_write(
+                    ByteRange::contiguous_u32(slot_at as u32, 4),
+                    WritePayload::from_slice(&opd.to_be_bytes()),
+                    requester,
+                    tick,
+                ));
                 self.obs.prx_register_module_linked += 1;
             }
             let Some(next) = cursor.checked_add(u32::from(entry_size)) else {
@@ -801,23 +799,21 @@ impl Lv2Host {
                      wraps u32: idlist_ptr={idlist_ptr:#010x} count={count}",
                 );
                 let slot = idlist_ptr.wrapping_add(count.wrapping_mul(4));
-                effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(slot, 4),
-                    bytes: WritePayload::from_slice(&kid.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                });
+                effects.push(Effect::shared_write(
+                    ByteRange::contiguous_u32(slot, 4),
+                    WritePayload::from_slice(&kid.to_be_bytes()),
+                    requester,
+                    tick,
+                ));
                 count += 1;
             }
         }
-        effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(count_addr, 4),
-            bytes: WritePayload::from_slice(&count.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        });
+        effects.push(Effect::shared_write(
+            ByteRange::contiguous_u32(count_addr, 4),
+            WritePayload::from_slice(&count.to_be_bytes()),
+            requester,
+            tick,
+        ));
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 }

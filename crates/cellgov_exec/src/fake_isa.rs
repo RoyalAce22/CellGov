@@ -164,13 +164,12 @@ impl ExecutionUnit for FakeIsaUnit {
                 let byte = self.acc as u8;
                 let range = ByteRange::new(GuestAddr::new(addr), len)
                     .expect("SharedStore range must be valid");
-                effects.push(Effect::SharedWriteIntent {
+                effects.push(Effect::shared_write(
                     range,
-                    bytes: WritePayload::new(vec![byte; len as usize]),
-                    ordering: PriorityClass::Normal,
-                    source: self.id,
-                    source_time: GuestTicks::ZERO,
-                });
+                    WritePayload::new(vec![byte; len as usize]),
+                    self.id,
+                    GuestTicks::ZERO,
+                ));
                 YieldReason::BudgetExhausted
             }
             FakeOp::MailboxSend { mailbox } => {

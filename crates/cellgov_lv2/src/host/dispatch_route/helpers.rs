@@ -1,7 +1,7 @@
 //! Effect-building primitives shared across the dispatch_route arms.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -109,13 +109,12 @@ impl Lv2Host {
         if ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(ptr, 4),
-            bytes: WritePayload::from_slice(&value.to_be_bytes()),
-            ordering: PriorityClass::Normal,
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(ptr, 4),
+            WritePayload::from_slice(&value.to_be_bytes()),
             source,
-            source_time: tick,
-        };
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],

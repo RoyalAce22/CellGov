@@ -177,7 +177,6 @@ fn step_then_commit_emits_commit_applied_with_post_epoch() {
 #[test]
 fn step_emits_one_effect_record_per_effect_in_emission_order() {
     use cellgov_effects::{Effect, WritePayload};
-    use cellgov_event::PriorityClass;
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord, TracedEffectKind};
 
@@ -211,13 +210,12 @@ fn step_emits_one_effect_record_per_effect_in_emission_order() {
                 marker: 1,
                 source: self.id,
             });
-            effects.push(Effect::SharedWriteIntent {
+            effects.push(Effect::shared_write(
                 range,
-                bytes: WritePayload::new(vec![1, 2, 3, 4]),
-                ordering: PriorityClass::Normal,
-                source: self.id,
-                source_time: GuestTicks::ZERO,
-            });
+                WritePayload::new(vec![1, 2, 3, 4]),
+                self.id,
+                GuestTicks::ZERO,
+            ));
             effects.push(Effect::TraceMarker {
                 marker: 2,
                 source: self.id,
@@ -276,7 +274,6 @@ fn effect_records_are_filtered_by_level() {
 #[test]
 fn commit_validation_failure_traces_as_fault_discarded() {
     use cellgov_effects::WritePayload;
-    use cellgov_event::PriorityClass;
     use cellgov_mem::{ByteRange, GuestAddr};
     use cellgov_trace::{TraceReader, TraceRecord};
 
@@ -305,13 +302,12 @@ fn commit_validation_failure_traces_as_fault_discarded() {
             effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             self.done.set(true);
-            effects.push(Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(1024), 4).unwrap(),
-                bytes: WritePayload::new(vec![0; 4]),
-                ordering: PriorityClass::Normal,
-                source: self.id,
-                source_time: GuestTicks::ZERO,
-            });
+            effects.push(Effect::shared_write(
+                ByteRange::new(GuestAddr::new(1024), 4).unwrap(),
+                WritePayload::new(vec![0; 4]),
+                self.id,
+                GuestTicks::ZERO,
+            ));
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_cost: InstructionCost::new(budget.raw()),
@@ -365,7 +361,6 @@ fn commit_reserved_write_traces_as_fault_discarded() {
     // branch. Together they ensure both branches of the shared
     // predicate gate the staging-path commit.
     use cellgov_effects::WritePayload;
-    use cellgov_event::PriorityClass;
     use cellgov_mem::{ByteRange, GuestAddr, PageSize, Region, RegionAccess};
     use cellgov_trace::{TraceReader, TraceRecord};
 
@@ -393,13 +388,12 @@ fn commit_reserved_write_traces_as_fault_discarded() {
             effects: &mut Vec<Effect>,
         ) -> ExecutionStepResult {
             self.done.set(true);
-            effects.push(Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(0x10000), 4).unwrap(),
-                bytes: WritePayload::new(vec![0xAB; 4]),
-                ordering: PriorityClass::Normal,
-                source: self.id,
-                source_time: GuestTicks::ZERO,
-            });
+            effects.push(Effect::shared_write(
+                ByteRange::new(GuestAddr::new(0x10000), 4).unwrap(),
+                WritePayload::new(vec![0xAB; 4]),
+                self.id,
+                GuestTicks::ZERO,
+            ));
             ExecutionStepResult {
                 yield_reason: YieldReason::Finished,
                 consumed_cost: InstructionCost::new(budget.raw()),

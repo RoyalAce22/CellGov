@@ -23,7 +23,7 @@
 use std::collections::VecDeque;
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::uart as av;
@@ -751,13 +751,12 @@ impl Lv2Host {
         out[8..].copy_from_slice(&(av::PS3AV_TX_BUF_SIZE as u64).to_be_bytes());
         Lv2Dispatch::Immediate {
             code: 0,
-            effects: vec![Effect::SharedWriteIntent {
-                range: ByteRange::contiguous_u32(params_ptr, av::SYS_UART_PARAMS_LEN as u32),
-                bytes: WritePayload::from_slice(&out),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            }],
+            effects: vec![Effect::shared_write(
+                ByteRange::contiguous_u32(params_ptr, av::SYS_UART_PARAMS_LEN as u32),
+                WritePayload::from_slice(&out),
+                requester,
+                tick,
+            )],
         }
     }
 
@@ -860,13 +859,12 @@ impl Lv2Host {
         let bytes: Vec<u8> = self.state.uart.rx.drain(..n).collect();
         Lv2Dispatch::Immediate {
             code: n as u64,
-            effects: vec![Effect::SharedWriteIntent {
-                range: ByteRange::contiguous_u32(buf_ptr, n as u32),
-                bytes: WritePayload::from_slice(&bytes),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            }],
+            effects: vec![Effect::shared_write(
+                ByteRange::contiguous_u32(buf_ptr, n as u32),
+                WritePayload::from_slice(&bytes),
+                requester,
+                tick,
+            )],
         }
     }
 
@@ -995,13 +993,12 @@ impl Lv2Host {
             let bytes: Vec<u8> = self.state.uart.rx.drain(..n).collect();
             served.push((
                 unit,
-                Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(reader.buf_ptr, n as u32),
-                    bytes: WritePayload::from_slice(&bytes),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                },
+                Effect::shared_write(
+                    ByteRange::contiguous_u32(reader.buf_ptr, n as u32),
+                    WritePayload::from_slice(&bytes),
+                    requester,
+                    tick,
+                ),
                 n as u64,
             ));
         }

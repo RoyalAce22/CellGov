@@ -1,7 +1,7 @@
 //! `sys_process` dispatch handlers.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -392,13 +392,12 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let version: u32 = self.sdk_version();
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(version_out_ptr, 4),
-            bytes: WritePayload::from_slice(&version.to_be_bytes()),
-            ordering: PriorityClass::Normal,
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(version_out_ptr, 4),
+            WritePayload::from_slice(&version.to_be_bytes()),
             source,
-            source_time: tick,
-        };
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],
@@ -425,13 +424,12 @@ impl Lv2Host {
         blob[0] = 0x01;
         blob[23] = 0x04;
         blob[31] = 0x01;
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(buf_ptr, 64),
-            bytes: WritePayload::from_slice(&blob),
-            ordering: PriorityClass::Normal,
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(buf_ptr, 64),
+            WritePayload::from_slice(&blob),
             source,
-            source_time: tick,
-        };
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],

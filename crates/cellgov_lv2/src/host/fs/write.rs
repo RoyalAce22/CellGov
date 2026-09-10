@@ -10,7 +10,7 @@
 //! diverges at its first write.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -44,13 +44,12 @@ impl Lv2Host {
         if nwrite_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let nwrite_zero = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(nwrite_ptr, 8),
-            bytes: WritePayload::from_slice(&0u64.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let nwrite_zero = Effect::shared_write(
+            ByteRange::contiguous_u32(nwrite_ptr, 8),
+            WritePayload::from_slice(&0u64.to_be_bytes()),
+            requester,
+            tick,
+        );
         if buf_ptr == 0 {
             return Lv2Dispatch::Immediate {
                 code: errno::CELL_EFAULT.into(),

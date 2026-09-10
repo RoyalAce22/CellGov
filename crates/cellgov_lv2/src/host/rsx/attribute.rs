@@ -1,7 +1,7 @@
 //! `sys_rsx_context_attribute` (674) dispatch and package-id sub-handlers.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::rsx::{control_register, display_buffer, package};
@@ -239,13 +239,12 @@ fn mmio_init_effects(fifo_get: u32, fifo_put: u32, now: GuestTicks) -> Vec<Effec
     let make = |addr: u32, value: u32| {
         let range = ByteRange::new(GuestAddr::new(addr as u64), 4)
             .expect("MMIO control-register address + 4 fits in u64");
-        Effect::SharedWriteIntent {
+        Effect::shared_write(
             range,
-            bytes: WritePayload::from_slice(&value.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: UnitId::new(0),
-            source_time: now,
-        }
+            WritePayload::from_slice(&value.to_be_bytes()),
+            UnitId::new(0),
+            now,
+        )
     };
     vec![
         make(control_register::PUT_ADDR, fifo_put),

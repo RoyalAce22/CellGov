@@ -164,6 +164,27 @@ pub enum Effect {
     },
 }
 
+impl Effect {
+    /// Stage a `Normal`-class write of `bytes` into `range`.
+    ///
+    /// Every emitter in the workspace writes at that class.
+    #[inline]
+    pub fn shared_write(
+        range: ByteRange,
+        bytes: WritePayload,
+        source: UnitId,
+        source_time: GuestTicks,
+    ) -> Self {
+        Self::SharedWriteIntent {
+            range,
+            bytes,
+            ordering: PriorityClass::Normal,
+            source,
+            source_time,
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/effect_tests.rs"]
 mod tests;

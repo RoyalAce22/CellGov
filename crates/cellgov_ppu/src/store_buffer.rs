@@ -59,13 +59,7 @@ impl StoreEntry {
                 source_time: GuestTicks::ZERO,
             }
         } else {
-            Effect::SharedWriteIntent {
-                range,
-                bytes: payload,
-                ordering: PriorityClass::Normal,
-                source,
-                source_time: GuestTicks::ZERO,
-            }
+            Effect::shared_write(range, payload, source, GuestTicks::ZERO)
         }
     }
 }

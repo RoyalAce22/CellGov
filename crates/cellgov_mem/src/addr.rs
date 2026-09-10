@@ -10,7 +10,7 @@
 /// No `Add<u64>`: overflow on address arithmetic must surface as a
 /// fault rather than wrap. Use [`GuestAddr::checked_offset`] for the
 /// fallible signed form.
-// [PPC-Book1 p:15 s:1.12 Storage Addressing] D/DS-form and indexed EAs use 64-bit two's-complement signed-displacement arithmetic.
+/// [PPC-Book1 p:15 s:1.12 Storage Addressing] D/DS-form and indexed EAs use 64-bit two's-complement signed-displacement arithmetic.
 ///
 /// `repr(transparent)` so the type is ABI-identical to the underlying
 /// `u64`. `Option<GuestAddr>` is still 16 bytes -- `u64` has no niche.

@@ -1,7 +1,7 @@
 //! `sys_rsx_device_map` (675) dispatch.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::rsx::device_map;
@@ -54,13 +54,12 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let device_addr = u64::from(device_map::ADDR);
-        let dev_addr_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(dev_addr_ptr, 8),
-            bytes: WritePayload::from_slice(&device_addr.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let dev_addr_write = Effect::shared_write(
+            ByteRange::contiguous_u32(dev_addr_ptr, 8),
+            WritePayload::from_slice(&device_addr.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: errno::CELL_OK.into(),
             effects: vec![dev_addr_write],

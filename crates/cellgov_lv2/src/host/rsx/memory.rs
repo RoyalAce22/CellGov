@@ -1,7 +1,7 @@
 //! `sys_rsx_memory_allocate` (668) and `sys_rsx_memory_free` (669).
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -43,20 +43,18 @@ impl Lv2Host {
         // instead of bumping the cursor again.
         self.state.rsx_context.pending_mem_addr = addr;
 
-        let handle_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(mem_handle_ptr, 4),
-            bytes: WritePayload::from_slice(&handle.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
-        let addr_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(mem_addr_ptr, 8),
-            bytes: WritePayload::from_slice(&(addr as u64).to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let handle_write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_handle_ptr, 4),
+            WritePayload::from_slice(&handle.to_be_bytes()),
+            requester,
+            tick,
+        );
+        let addr_write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_addr_ptr, 8),
+            WritePayload::from_slice(&(addr as u64).to_be_bytes()),
+            requester,
+            tick,
+        );
 
         Lv2Dispatch::Immediate {
             code: 0,

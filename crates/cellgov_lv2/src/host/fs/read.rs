@@ -1,7 +1,7 @@
 //! `sys_fs_read` host dispatch.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::lv2::errno;
 
@@ -69,22 +69,20 @@ impl Lv2Host {
         let tick = rt.current_tick();
         let mut effects = Vec::with_capacity(2);
         if !bytes_read.is_empty() {
-            effects.push(Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(buf_ptr as u64), bytes_read.len() as u64)
+            effects.push(Effect::shared_write(
+                ByteRange::new(GuestAddr::new(buf_ptr as u64), bytes_read.len() as u64)
                     .expect("buf_ptr range pre-validated by writable() above"),
-                bytes: WritePayload::from_slice(&bytes_read),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            });
+                WritePayload::from_slice(&bytes_read),
+                requester,
+                tick,
+            ));
         }
-        effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(nread_out_ptr, 8),
-            bytes: WritePayload::from_slice(&nread.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        });
+        effects.push(Effect::shared_write(
+            ByteRange::contiguous_u32(nread_out_ptr, 8),
+            WritePayload::from_slice(&nread.to_be_bytes()),
+            requester,
+            tick,
+        ));
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 }

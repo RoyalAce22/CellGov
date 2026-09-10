@@ -1,7 +1,7 @@
 //! `sys_fs_lseek` host dispatch.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
@@ -66,13 +66,12 @@ impl Lv2Host {
             }
         };
 
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(pos_out_ptr, 8),
-            bytes: WritePayload::from_slice(&new_pos.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: rt.current_tick(),
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(pos_out_ptr, 8),
+            WritePayload::from_slice(&new_pos.to_be_bytes()),
+            requester,
+            rt.current_tick(),
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],

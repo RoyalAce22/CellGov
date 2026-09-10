@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cellgov_effects::{Effect, FaultKind, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
@@ -79,13 +79,12 @@ impl ExecutionUnit for OnceWriter {
     ) -> ExecutionStepResult {
         self.done = true;
         let range = ByteRange::new(GuestAddr::new(self.addr), 4).unwrap();
-        effects.push(Effect::SharedWriteIntent {
+        effects.push(Effect::shared_write(
             range,
-            bytes: WritePayload::new(vec![self.value; 4]),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
+            WritePayload::new(vec![self.value; 4]),
+            self.id,
+            GuestTicks::ZERO,
+        ));
         ExecutionStepResult {
             yield_reason: self.reason,
             consumed_cost: InstructionCost::new(budget.raw()),
@@ -192,13 +191,12 @@ fn pending_rsx_effects_defer_past_a_child_space_batch() {
     // Deferred advance-pass effect targeting a space-0 address that
     // the child space also maps: committing it with the child batch
     // would land it in the wrong memory.
-    rt.pending_rsx_effects.push(Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(0x8), 4).unwrap(),
-        bytes: WritePayload::new(vec![0xEE; 4]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(1),
-        source_time: GuestTicks::ZERO,
-    });
+    rt.pending_rsx_effects.push(Effect::shared_write(
+        ByteRange::new(GuestAddr::new(0x8), 4).unwrap(),
+        WritePayload::new(vec![0xEE; 4]),
+        UnitId::new(1),
+        GuestTicks::ZERO,
+    ));
 
     // Child-space batch: only the child's own write commits.
     let s = rt.step().unwrap();

@@ -6,7 +6,7 @@
 //! rather than delivering four zero u64s.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
@@ -297,22 +297,20 @@ impl Lv2Host {
             buf[24..32].copy_from_slice(&payload.data3.to_be_bytes());
             let addr = event_array as u64 + (i as u64) * 32;
             let range = ByteRange::new(GuestAddr::new(addr), 32).expect("validated above");
-            effects.push(Effect::SharedWriteIntent {
+            effects.push(Effect::shared_write(
                 range,
-                bytes: WritePayload::from_slice(&buf),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            });
+                WritePayload::from_slice(&buf),
+                requester,
+                tick,
+            ));
         }
         let count_range = ByteRange::contiguous_u32(count_out, 4);
-        effects.push(Effect::SharedWriteIntent {
-            range: count_range,
-            bytes: WritePayload::from_slice(&count.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        });
+        effects.push(Effect::shared_write(
+            count_range,
+            WritePayload::from_slice(&count.to_be_bytes()),
+            requester,
+            tick,
+        ));
         Lv2Dispatch::Immediate {
             code: 0u64,
             effects,

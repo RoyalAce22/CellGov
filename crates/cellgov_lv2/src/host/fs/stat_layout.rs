@@ -6,7 +6,7 @@
 //! and wraps the write into a `SharedWriteIntent` effect.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::fs::{
     CELL_FS_BLOCK_SIZE, CELL_FS_STAT_SIZE, CELL_FS_S_IFREG, CELL_FS_S_IRGRP, CELL_FS_S_IROTH,
@@ -47,11 +47,10 @@ pub(super) fn cell_fs_stat_write(
     // atime / mtime / ctime at offsets 16 / 24 / 32 stay zero.
     blob[40..48].copy_from_slice(&stat.size.to_be_bytes());
     blob[48..56].copy_from_slice(&CELL_FS_BLOCK_SIZE.to_be_bytes());
-    Effect::SharedWriteIntent {
-        range: ByteRange::contiguous_u32(stat_out_ptr, CELL_FS_STAT_SIZE as u32),
-        bytes: WritePayload::from_slice(&blob),
-        ordering: PriorityClass::Normal,
+    Effect::shared_write(
+        ByteRange::contiguous_u32(stat_out_ptr, CELL_FS_STAT_SIZE as u32),
+        WritePayload::from_slice(&blob),
         source,
         source_time,
-    }
+    )
 }

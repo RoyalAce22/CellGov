@@ -1,7 +1,7 @@
 //! `sys_fs_readdir` host dispatch.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::fs::{
@@ -68,20 +68,18 @@ impl Lv2Host {
         };
 
         let tick = rt.current_tick();
-        let dirent_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(dirent_out_ptr, CELL_FS_DIRENT_SIZE as u32),
-            bytes: WritePayload::from_slice(&dirent_bytes),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
-        let nread_write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(nread_out_ptr, 8),
-            bytes: WritePayload::from_slice(&nread.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let dirent_write = Effect::shared_write(
+            ByteRange::contiguous_u32(dirent_out_ptr, CELL_FS_DIRENT_SIZE as u32),
+            WritePayload::from_slice(&dirent_bytes),
+            requester,
+            tick,
+        );
+        let nread_write = Effect::shared_write(
+            ByteRange::contiguous_u32(nread_out_ptr, 8),
+            WritePayload::from_slice(&nread.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![dirent_write, nread_write],

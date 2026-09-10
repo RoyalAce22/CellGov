@@ -135,13 +135,12 @@ fn write_intent(start: u64, bytes: Vec<u8>) -> Effect {
 }
 
 fn write_intent_from(start: u64, bytes: Vec<u8>, source: UnitId) -> Effect {
-    Effect::SharedWriteIntent {
-        range: range(start, bytes.len() as u64),
-        bytes: WritePayload::new(bytes),
-        ordering: PriorityClass::Normal,
+    Effect::shared_write(
+        range(start, bytes.len() as u64),
+        WritePayload::new(bytes),
         source,
-        source_time: GuestTicks::new(0),
-    }
+        GuestTicks::new(0),
+    )
 }
 
 fn marker() -> Effect {
@@ -235,13 +234,12 @@ fn fault_step_discards_everything() {
 #[test]
 fn payload_length_mismatch_aborts_batch_atomically() {
     let mut bed = CommitTestBed::new(8);
-    let bad = Effect::SharedWriteIntent {
-        range: range(4, 4),
-        bytes: WritePayload::new(vec![9, 9]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
-        source_time: GuestTicks::new(0),
-    };
+    let bad = Effect::shared_write(
+        range(4, 4),
+        WritePayload::new(vec![9, 9]),
+        UnitId::new(0),
+        GuestTicks::new(0),
+    );
     let (r, e) = step_with(
         YieldReason::BudgetExhausted,
         vec![write_intent(0, vec![1, 1, 1, 1]), bad],

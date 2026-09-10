@@ -3,7 +3,7 @@
 //! neighbouring key one namespace over.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
@@ -100,13 +100,12 @@ fn a_shm_outside_the_namespace_leaves_every_witness_silent() {
 }
 
 fn write_effect(addr: u32, len: usize) -> Effect {
-    Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(u64::from(addr)), len as u64).unwrap(),
-        bytes: WritePayload::from_slice(&vec![0u8; len]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
-        source_time: GuestTicks::ZERO,
-    }
+    Effect::shared_write(
+        ByteRange::new(GuestAddr::new(u64::from(addr)), len as u64).unwrap(),
+        WritePayload::from_slice(&vec![0u8; len]),
+        UnitId::new(0),
+        GuestTicks::ZERO,
+    )
 }
 
 #[test]

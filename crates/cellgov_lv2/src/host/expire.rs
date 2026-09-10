@@ -8,7 +8,7 @@
 //! invariant break, not a lost race.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
@@ -104,13 +104,12 @@ impl Lv2Host {
                 // The result is written only through a non-null
                 // pointer; a null result pointer is legal and skipped.
                 if waiter.result_ptr != 0 {
-                    out.effects.push(Effect::SharedWriteIntent {
-                        range: ByteRange::contiguous_u32(waiter.result_ptr, 8),
-                        bytes: WritePayload::from_slice(&bits.to_be_bytes()),
-                        ordering: PriorityClass::Normal,
-                        source: requester,
-                        source_time: tick,
-                    });
+                    out.effects.push(Effect::shared_write(
+                        ByteRange::contiguous_u32(waiter.result_ptr, 8),
+                        WritePayload::from_slice(&bits.to_be_bytes()),
+                        requester,
+                        tick,
+                    ));
                 }
                 out
             }

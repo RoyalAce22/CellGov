@@ -1,7 +1,7 @@
 //! `sys_ppu_thread` priority arms.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::ppu_thread::{
@@ -39,13 +39,12 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[priop]) {
             return d;
         }
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(priop, 4),
-            bytes: WritePayload::from_slice(&thread.attrs.priority.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(priop, 4),
+            WritePayload::from_slice(&thread.attrs.priority.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],

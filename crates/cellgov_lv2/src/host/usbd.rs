@@ -16,7 +16,7 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::usbd as usb;
@@ -180,13 +180,12 @@ impl Lv2Host {
             woken_unit_ids.push(unit);
             response_updates.push((unit, PendingResponse::ReturnCode { code: 0 }));
             for (ptr, value) in w.out_ptrs.into_iter().zip([usb::SYS_USBD_TERMINATE, 0, 0]) {
-                effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(ptr, 8),
-                    bytes: WritePayload::from_slice(&value.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                });
+                effects.push(Effect::shared_write(
+                    ByteRange::contiguous_u32(ptr, 8),
+                    WritePayload::from_slice(&value.to_be_bytes()),
+                    requester,
+                    tick,
+                ));
             }
         }
         if woken_unit_ids.is_empty() {

@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR,
@@ -530,13 +530,12 @@ impl Lv2Host {
         }
         Lv2Dispatch::Immediate {
             code: 0,
-            effects: vec![Effect::SharedWriteIntent {
-                range: ByteRange::contiguous_u32(dst_ptr, record.len() as u32),
-                bytes: WritePayload::from_slice(&record),
-                ordering: PriorityClass::Normal,
-                source: requester,
-                source_time: tick,
-            }],
+            effects: vec![Effect::shared_write(
+                ByteRange::contiguous_u32(dst_ptr, record.len() as u32),
+                WritePayload::from_slice(&record),
+                requester,
+                tick,
+            )],
         }
     }
 
@@ -737,13 +736,12 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(out_ptr, 4),
-            bytes: WritePayload::from_slice(&id.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(out_ptr, 4),
+            WritePayload::from_slice(&id.to_be_bytes()),
+            requester,
+            tick,
+        );
         self.config_finish(0, wakes, vec![write])
     }
 

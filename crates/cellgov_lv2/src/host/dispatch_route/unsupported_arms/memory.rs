@@ -1,7 +1,7 @@
 //! `sys_mmapper_*` and `sys_memory_container_create` arms.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::memory::{
@@ -50,13 +50,12 @@ impl Lv2Host {
         }
         let cid = self.alloc_id();
         self.state.memory_containers.insert(cid);
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(cid_ptr, 4),
-            bytes: WritePayload::from_slice(&cid.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(cid_ptr, 4),
+            WritePayload::from_slice(&cid.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],
@@ -116,13 +115,12 @@ impl Lv2Host {
         }
         match self.mmapper_alloc(size) {
             Some(addr) => {
-                let write = Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
-                    bytes: WritePayload::from_slice(&addr.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                };
+                let write = Effect::shared_write(
+                    ByteRange::contiguous_u32(alloc_addr_ptr, 4),
+                    WritePayload::from_slice(&addr.to_be_bytes()),
+                    requester,
+                    tick,
+                );
                 Lv2Dispatch::Immediate {
                     code: 0,
                     effects: vec![write],
@@ -213,13 +211,12 @@ impl Lv2Host {
                 mem_id
             }
         };
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(mem_id_ptr, 4),
-            bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_id_ptr, 4),
+            WritePayload::from_slice(&mem_id.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],
@@ -279,16 +276,12 @@ impl Lv2Host {
                     "seed write at +{offset:#x} ({} bytes) exceeds shm size {handle_size:#x}",
                     bytes.len(),
                 );
-                Effect::SharedWriteIntent {
-                    range: ByteRange::contiguous_u32(
-                        base_addr.wrapping_add(*offset),
-                        bytes.len() as u32,
-                    ),
-                    bytes: WritePayload::from_slice(bytes),
-                    ordering: PriorityClass::Normal,
-                    source: requester,
-                    source_time: tick,
-                }
+                Effect::shared_write(
+                    ByteRange::contiguous_u32(base_addr.wrapping_add(*offset), bytes.len() as u32),
+                    WritePayload::from_slice(bytes),
+                    requester,
+                    tick,
+                )
             })
             .collect()
     }
@@ -467,13 +460,12 @@ impl Lv2Host {
         );
         self.note_system_ipc_map(mem_id, found_addr, handle.size);
         let mut effects = self.system_seed_effects(mem_id, found_addr, requester, tick);
-        effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(alloc_addr_ptr, 4),
-            bytes: WritePayload::from_slice(&found_addr.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        });
+        effects.push(Effect::shared_write(
+            ByteRange::contiguous_u32(alloc_addr_ptr, 4),
+            WritePayload::from_slice(&found_addr.to_be_bytes()),
+            requester,
+            tick,
+        ));
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 
@@ -517,13 +509,12 @@ impl Lv2Host {
                 align,
             },
         );
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(mem_id_ptr, 4),
-            bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_id_ptr, 4),
+            WritePayload::from_slice(&mem_id.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],
@@ -634,13 +625,12 @@ impl Lv2Host {
                 self.obs.system_ipc_witness.note_key(ipc_key);
             }
         }
-        let write = Effect::SharedWriteIntent {
-            range: ByteRange::contiguous_u32(mem_id_ptr, 4),
-            bytes: WritePayload::from_slice(&mem_id.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: requester,
-            source_time: tick,
-        };
+        let write = Effect::shared_write(
+            ByteRange::contiguous_u32(mem_id_ptr, 4),
+            WritePayload::from_slice(&mem_id.to_be_bytes()),
+            requester,
+            tick,
+        );
         Lv2Dispatch::Immediate {
             code: 0,
             effects: vec![write],

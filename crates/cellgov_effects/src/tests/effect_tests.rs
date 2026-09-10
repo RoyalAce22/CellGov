@@ -11,22 +11,40 @@ fn range(start: u64, length: u64) -> ByteRange {
 
 #[test]
 fn shared_write_intent_roundtrip() {
-    let e = Effect::SharedWriteIntent {
-        range: range(0x1000, 4),
-        bytes: WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(2),
-        source_time: GuestTicks::new(100),
-    };
-    let expected = Effect::SharedWriteIntent {
-        range: range(0x1000, 4),
-        bytes: WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(2),
-        source_time: GuestTicks::new(100),
-    };
+    let e = Effect::shared_write(
+        range(0x1000, 4),
+        WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
+        UnitId::new(2),
+        GuestTicks::new(100),
+    );
+    let expected = Effect::shared_write(
+        range(0x1000, 4),
+        WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
+        UnitId::new(2),
+        GuestTicks::new(100),
+    );
     assert_eq!(e, expected);
     assert_eq!(e.clone(), e);
+}
+
+#[test]
+fn shared_write_fills_every_field_of_the_variant() {
+    let built = Effect::shared_write(
+        range(0x2000, 2),
+        WritePayload::new(vec![0x01, 0x02]),
+        UnitId::new(7),
+        GuestTicks::new(42),
+    );
+    assert_eq!(
+        built,
+        Effect::SharedWriteIntent {
+            range: range(0x2000, 2),
+            bytes: WritePayload::new(vec![0x01, 0x02]),
+            ordering: PriorityClass::Normal,
+            source: UnitId::new(7),
+            source_time: GuestTicks::new(42),
+        }
+    );
 }
 
 #[test]
@@ -284,13 +302,12 @@ fn rsx_variants_distinct_from_existing_and_each_other() {
         value: 0,
     };
     let flip = Effect::RsxFlipRequest { buffer_index: 0 };
-    let write = Effect::SharedWriteIntent {
-        range: range(0x1000, 4),
-        bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(1),
-        source_time: GuestTicks::new(0),
-    };
+    let write = Effect::shared_write(
+        range(0x1000, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    );
     let acq = Effect::ReservationAcquire {
         line_addr: 0x1000,
         source: UnitId::new(1),
@@ -308,13 +325,12 @@ fn reservation_variants_distinct_from_existing() {
         line_addr: 0x1000,
         source: UnitId::new(1),
     };
-    let write = Effect::SharedWriteIntent {
-        range: range(0x1000, 4),
-        bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(1),
-        source_time: GuestTicks::new(0),
-    };
+    let write = Effect::shared_write(
+        range(0x1000, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    );
     let cond = Effect::ConditionalStore {
         range: range(0x1000, 4),
         bytes: WritePayload::new(vec![0; 4]),

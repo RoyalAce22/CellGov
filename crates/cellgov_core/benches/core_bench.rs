@@ -12,20 +12,19 @@ use cellgov_core::commit::{CommitContext, CommitPipeline};
 use cellgov_core::registry::UnitRegistry;
 use cellgov_dma::{DmaQueue, FixedLatency};
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, LocalDiagnostics, YieldReason};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_sync::{MailboxRegistry, ReservationTable, SignalRegistry};
 use cellgov_time::{GuestTicks, InstructionCost};
 
 fn make_write_effect(addr: u64, data: &[u8]) -> Effect {
-    Effect::SharedWriteIntent {
-        range: ByteRange::new(GuestAddr::new(addr), data.len() as u64).unwrap(),
-        bytes: WritePayload::new(data.to_vec()),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
-        source_time: GuestTicks::ZERO,
-    }
+    Effect::shared_write(
+        ByteRange::new(GuestAddr::new(addr), data.len() as u64).unwrap(),
+        WritePayload::new(data.to_vec()),
+        UnitId::new(0),
+        GuestTicks::ZERO,
+    )
 }
 
 fn make_step_result(effects: Vec<Effect>) -> (ExecutionStepResult, Vec<Effect>) {

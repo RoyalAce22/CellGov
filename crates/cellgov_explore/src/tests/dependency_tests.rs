@@ -13,39 +13,35 @@ fn range(start: u64, len: u64) -> ByteRange {
 
 #[test]
 fn overlapping_writes_conflict() {
-    let a = StepFootprint::from_effects(&[Effect::SharedWriteIntent {
-        range: range(0, 8),
-        bytes: WritePayload::new(vec![0; 8]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
-        source_time: GuestTicks::new(0),
-    }]);
-    let b = StepFootprint::from_effects(&[Effect::SharedWriteIntent {
-        range: range(4, 8),
-        bytes: WritePayload::new(vec![0; 8]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(1),
-        source_time: GuestTicks::new(0),
-    }]);
+    let a = StepFootprint::from_effects(&[Effect::shared_write(
+        range(0, 8),
+        WritePayload::new(vec![0; 8]),
+        UnitId::new(0),
+        GuestTicks::new(0),
+    )]);
+    let b = StepFootprint::from_effects(&[Effect::shared_write(
+        range(4, 8),
+        WritePayload::new(vec![0; 8]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    )]);
     assert!(a.conflicts(&b));
 }
 
 #[test]
 fn disjoint_writes_are_independent() {
-    let a = StepFootprint::from_effects(&[Effect::SharedWriteIntent {
-        range: range(0, 4),
-        bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
-        source_time: GuestTicks::new(0),
-    }]);
-    let b = StepFootprint::from_effects(&[Effect::SharedWriteIntent {
-        range: range(8, 4),
-        bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(1),
-        source_time: GuestTicks::new(0),
-    }]);
+    let a = StepFootprint::from_effects(&[Effect::shared_write(
+        range(0, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(0),
+        GuestTicks::new(0),
+    )]);
+    let b = StepFootprint::from_effects(&[Effect::shared_write(
+        range(8, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    )]);
     assert!(!a.conflicts(&b));
 }
 
@@ -172,13 +168,12 @@ fn write_vs_dma_overlapping_conflicts() {
         UnitId::new(1),
     )
     .unwrap();
-    let a = StepFootprint::from_effects(&[Effect::SharedWriteIntent {
-        range: range(0x10, 4),
-        bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
-        source: UnitId::new(0),
-        source_time: GuestTicks::new(0),
-    }]);
+    let a = StepFootprint::from_effects(&[Effect::shared_write(
+        range(0x10, 4),
+        WritePayload::new(vec![0; 4]),
+        UnitId::new(0),
+        GuestTicks::new(0),
+    )]);
     let b = StepFootprint::from_effects(&[Effect::DmaEnqueue {
         request: req,
         payload: None,

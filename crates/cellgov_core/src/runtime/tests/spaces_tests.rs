@@ -52,13 +52,12 @@ impl ExecutionUnit for AddrWriter {
     ) -> ExecutionStepResult {
         self.done.set(true);
         let range = ByteRange::new(GuestAddr::new(self.addr), 4).unwrap();
-        effects.push(Effect::SharedWriteIntent {
+        effects.push(Effect::shared_write(
             range,
-            bytes: WritePayload::new(vec![self.value; 4]),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
+            WritePayload::new(vec![self.value; 4]),
+            self.id,
+            GuestTicks::ZERO,
+        ));
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
             consumed_cost: InstructionCost::new(budget.raw()),

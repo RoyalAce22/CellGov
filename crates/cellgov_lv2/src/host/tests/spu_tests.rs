@@ -166,29 +166,33 @@ fn group_create_allocates_monotonic_ids() {
         UnitId::new(0),
         &rt,
     );
-    if let Lv2Dispatch::Immediate { effects, .. } = r1 {
-        assert_eq!(
-            effects[0].clone(),
-            Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(0x100), 4).unwrap(),
-                bytes: WritePayload::from_slice(&1u32.to_be_bytes()),
-                ordering: PriorityClass::Normal,
-                source: UnitId::new(0),
-                source_time: GuestTicks::ZERO,
-            }
-        );
+    match &r1 {
+        Lv2Dispatch::Immediate { effects, .. } => {
+            assert_eq!(
+                effects[0],
+                Effect::shared_write(
+                    ByteRange::new(GuestAddr::new(0x100), 4).unwrap(),
+                    WritePayload::from_slice(&1u32.to_be_bytes()),
+                    UnitId::new(0),
+                    GuestTicks::ZERO
+                )
+            );
+        }
+        other => panic!("expected Immediate, got {other:?}"),
     }
-    if let Lv2Dispatch::Immediate { effects, .. } = r2 {
-        assert_eq!(
-            effects[0].clone(),
-            Effect::SharedWriteIntent {
-                range: ByteRange::new(GuestAddr::new(0x200), 4).unwrap(),
-                bytes: WritePayload::from_slice(&2u32.to_be_bytes()),
-                ordering: PriorityClass::Normal,
-                source: UnitId::new(0),
-                source_time: GuestTicks::ZERO,
-            }
-        );
+    match &r2 {
+        Lv2Dispatch::Immediate { effects, .. } => {
+            assert_eq!(
+                effects[0],
+                Effect::shared_write(
+                    ByteRange::new(GuestAddr::new(0x200), 4).unwrap(),
+                    WritePayload::from_slice(&2u32.to_be_bytes()),
+                    UnitId::new(0),
+                    GuestTicks::ZERO
+                )
+            );
+        }
+        other => panic!("expected Immediate, got {other:?}"),
     }
 }
 

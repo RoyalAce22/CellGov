@@ -141,7 +141,6 @@ impl ExecutionUnit for WritingUnit {
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         use cellgov_effects::WritePayload;
-        use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -152,13 +151,12 @@ impl ExecutionUnit for WritingUnit {
         };
         let bytes = vec![n as u8; 4];
         let range = ByteRange::new(GuestAddr::new(0), 4).unwrap();
-        effects.push(Effect::SharedWriteIntent {
+        effects.push(Effect::shared_write(
             range,
-            bytes: WritePayload::new(bytes),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
+            WritePayload::new(bytes),
+            self.id,
+            GuestTicks::ZERO,
+        ));
         ExecutionStepResult {
             yield_reason,
             consumed_cost: InstructionCost::new(budget.raw()),
@@ -309,7 +307,6 @@ impl ExecutionUnit for ReservationDriverUnit {
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         use cellgov_effects::WritePayload;
-        use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -322,13 +319,12 @@ impl ExecutionUnit for ReservationDriverUnit {
             }
             2 => {
                 let range = ByteRange::new(GuestAddr::new(self.line_addr), 4).unwrap();
-                effects.push(Effect::SharedWriteIntent {
+                effects.push(Effect::shared_write(
                     range,
-                    bytes: WritePayload::new(vec![0xAA; 4]),
-                    ordering: PriorityClass::Normal,
-                    source: self.id,
-                    source_time: GuestTicks::ZERO,
-                });
+                    WritePayload::new(vec![0xAA; 4]),
+                    self.id,
+                    GuestTicks::ZERO,
+                ));
             }
             _ => {}
         }
@@ -384,27 +380,24 @@ impl ExecutionUnit for RsxFlipCommandEmitterUnit {
         use crate::rsx::control_register;
         use crate::rsx::method::{GCM_FLIP_COMMAND, NV_COUNT_SHIFT};
         use cellgov_effects::WritePayload;
-        use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
         self.steps.set(1);
         let header: u32 = (1u32 << NV_COUNT_SHIFT) | (GCM_FLIP_COMMAND as u32);
         let mut fifo_bytes: Vec<u8> = Vec::with_capacity(8);
         fifo_bytes.extend_from_slice(&header.to_be_bytes());
         fifo_bytes.extend_from_slice(&self.buffer_index.to_be_bytes());
-        effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(self.fifo_base as u64), 8).unwrap(),
-            bytes: WritePayload::new(fifo_bytes),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
-        effects.push(Effect::SharedWriteIntent {
-            range: ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
-            bytes: WritePayload::from_slice(&(self.fifo_base + 8).to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
+        effects.push(Effect::shared_write(
+            ByteRange::new(GuestAddr::new(self.fifo_base as u64), 8).unwrap(),
+            WritePayload::new(fifo_bytes),
+            self.id,
+            GuestTicks::ZERO,
+        ));
+        effects.push(Effect::shared_write(
+            ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
+            WritePayload::from_slice(&(self.fifo_base + 8).to_be_bytes()),
+            self.id,
+            GuestTicks::ZERO,
+        ));
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
             consumed_cost: InstructionCost::new(budget.raw()),
@@ -497,17 +490,15 @@ impl ExecutionUnit for RsxControlWriterUnit {
         effects: &mut Vec<Effect>,
     ) -> ExecutionStepResult {
         use cellgov_effects::WritePayload;
-        use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
         self.steps.set(1);
         let range = ByteRange::new(GuestAddr::new(self.slot_addr), 4).unwrap();
-        effects.push(Effect::SharedWriteIntent {
+        effects.push(Effect::shared_write(
             range,
-            bytes: WritePayload::from_slice(&self.value.to_be_bytes()),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
+            WritePayload::from_slice(&self.value.to_be_bytes()),
+            self.id,
+            GuestTicks::ZERO,
+        ));
         ExecutionStepResult {
             yield_reason: YieldReason::Finished,
             consumed_cost: InstructionCost::new(budget.raw()),
@@ -574,7 +565,6 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
             NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE, NV_COUNT_SHIFT,
         };
         use cellgov_effects::WritePayload;
-        use cellgov_event::PriorityClass;
         use cellgov_mem::{ByteRange, GuestAddr};
         let n = self.steps.get() + 1;
         self.steps.set(n);
@@ -599,21 +589,18 @@ impl ExecutionUnit for RsxOffsetReleaseDriverUnit {
                 for w in words {
                     fifo_bytes.extend_from_slice(&w.to_be_bytes());
                 }
-                effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(self.fifo_base as u64), 16).unwrap(),
-                    bytes: WritePayload::new(fifo_bytes),
-                    ordering: PriorityClass::Normal,
-                    source: self.id,
-                    source_time: GuestTicks::ZERO,
-                });
-                effects.push(Effect::SharedWriteIntent {
-                    range: ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4)
-                        .unwrap(),
-                    bytes: WritePayload::from_slice(&self.put_target.to_be_bytes()),
-                    ordering: PriorityClass::Normal,
-                    source: self.id,
-                    source_time: GuestTicks::ZERO,
-                });
+                effects.push(Effect::shared_write(
+                    ByteRange::new(GuestAddr::new(self.fifo_base as u64), 16).unwrap(),
+                    WritePayload::new(fifo_bytes),
+                    self.id,
+                    GuestTicks::ZERO,
+                ));
+                effects.push(Effect::shared_write(
+                    ByteRange::new(GuestAddr::new(control_register::PUT_ADDR as u64), 4).unwrap(),
+                    WritePayload::from_slice(&self.put_target.to_be_bytes()),
+                    self.id,
+                    GuestTicks::ZERO,
+                ));
             }
             2 => {}
             _ => {}

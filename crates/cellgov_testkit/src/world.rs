@@ -6,7 +6,7 @@
 
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
@@ -136,13 +136,12 @@ impl ExecutionUnit for WritingUnit {
             YieldReason::BudgetExhausted
         };
         let bytes = vec![n as u8; self.range.length() as usize];
-        effects.push(Effect::SharedWriteIntent {
-            range: self.range,
-            bytes: WritePayload::new(bytes),
-            ordering: PriorityClass::Normal,
-            source: self.id,
-            source_time: GuestTicks::ZERO,
-        });
+        effects.push(Effect::shared_write(
+            self.range,
+            WritePayload::new(bytes),
+            self.id,
+            GuestTicks::ZERO,
+        ));
         ExecutionStepResult {
             yield_reason,
             consumed_cost: InstructionCost::new(budget.raw()),
@@ -355,13 +354,12 @@ impl ExecutionUnit for DmaSubmitter {
                 let req =
                     DmaRequest::new(DmaDirection::Put, self.source, self.destination, self.id)
                         .expect("source and destination lengths match");
-                effects.push(Effect::SharedWriteIntent {
-                    range: self.source,
-                    bytes: WritePayload::new(self.seed_bytes.clone()),
-                    ordering: PriorityClass::Normal,
-                    source: self.id,
-                    source_time: GuestTicks::ZERO,
-                });
+                effects.push(Effect::shared_write(
+                    self.source,
+                    WritePayload::new(self.seed_bytes.clone()),
+                    self.id,
+                    GuestTicks::ZERO,
+                ));
                 effects.push(Effect::DmaEnqueue {
                     request: req,
                     payload: None,
