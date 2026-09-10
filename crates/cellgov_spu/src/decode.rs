@@ -42,6 +42,15 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
             rc: (raw & 0x7F) as u8,
         });
     }
+    // [SPU-ISA p:115 s:5 Selb] RRR opcode 0x8.
+    if op4 == 0x8 {
+        return Ok(SpuInstruction::Selb {
+            rt: ((raw >> 21) & 0x7F) as u8,
+            ra: ((raw >> 7) & 0x7F) as u8,
+            rb: ((raw >> 14) & 0x7F) as u8,
+            rc: (raw & 0x7F) as u8,
+        });
+    }
 
     // RR / RI7 (11-bit opcode).
     match op11 {
@@ -119,17 +128,88 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 imm: rb7,
             })
         }
+        // [SPU-ISA p:97 s:5 And] RR opcode 0x0C1.
+        0x0C1 => {
+            return Ok(SpuInstruction::And {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:102 s:5 Or] RR opcode 0x041.
+        0x041 => {
+            return Ok(SpuInstruction::Or {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:94 s:5 Xsbh] RR opcode 0x2B6; RB field unused.
+        0x2B6 => return Ok(SpuInstruction::Xsbh { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:120 s:6 Shl] RR opcode 0x05B.
+        0x05B => {
+            return Ok(SpuInstruction::Shl {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:172 s:7 Clgt] RR opcode 0x2C0.
+        0x2C0 => {
+            return Ok(SpuInstruction::Clgt {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        // [SPU-ISA p:181 s:7 Bisl] RR opcode 0x1A9; the D/E interrupt bits at [12:13] are not modeled.
+        0x1A9 => return Ok(SpuInstruction::Bisl { rt: rt7, ra: ra7 }),
         _ => {}
     }
 
     // RI7: 7-bit immediate shares bit position with rb in RR format.
     let i7 = rb7;
-    if op11 == 0x1FF {
-        return Ok(SpuInstruction::Shlqbyi {
-            rt: rt7,
-            ra: ra7,
-            imm: i7 & 0x1F,
-        });
+    match op11 {
+        0x1FF => {
+            return Ok(SpuInstruction::Shlqbyi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7 & 0x1F,
+            })
+        }
+        // [SPU-ISA p:132 s:6 Rotqbyi] RI7 opcode 0x1FC.
+        0x1FC => {
+            return Ok(SpuInstruction::Rotqbyi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:121 s:6 Shli] RI7 opcode 0x07B.
+        0x07B => {
+            return Ok(SpuInstruction::Shli {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:139 s:6 Rotmi] RI7 opcode 0x079.
+        0x079 => {
+            return Ok(SpuInstruction::Rotmi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:148 s:6 Rotmai] RI7 opcode 0x07A.
+        0x07A => {
+            return Ok(SpuInstruction::Rotmai {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        _ => {}
     }
 
     // RI10 (8-bit opcode, 10-bit immediate at [14:23]).
@@ -189,6 +269,14 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 rt: rt7,
                 ra: ra7,
                 rb: rb7,
+            })
+        }
+        // [SPU-ISA p:167 s:7 Cgti] RI10 opcode 0x4C.
+        0x4C => {
+            return Ok(SpuInstruction::Cgti {
+                rt: rt7,
+                ra: ra7,
+                imm: sign_extend_10(i10),
             })
         }
         _ => {}
@@ -260,6 +348,27 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 imm: i16_raw,
             })
         }
+        // [SPU-ISA p:35 s:3 Lqr] RI16 opcode 0x067.
+        0x067 => {
+            return Ok(SpuInstruction::Lqr {
+                rt: rt7,
+                imm: i16_signed,
+            })
+        }
+        // [SPU-ISA p:39 s:3 Stqr] RI16 opcode 0x047.
+        0x047 => {
+            return Ok(SpuInstruction::Stqr {
+                rt: rt7,
+                imm: i16_signed,
+            })
+        }
+        // [SPU-ISA p:184 s:7 Brhnz] RI16 opcode 0x046.
+        0x046 => {
+            return Ok(SpuInstruction::Brhnz {
+                rt: rt7,
+                offset: i16_offset,
+            })
+        }
         _ => {}
     }
 
@@ -277,7 +386,7 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     Err(SpuDecodeError::Unsupported(raw))
 }
 
-// [SPU-ISA p:171 s:6 Lqd] RI10 imm10 is sign-extended to i16 before address compute.
+// [SPU-ISA p:32 s:3 Lqd] RI10 imm10 is sign-extended before address compute.
 fn sign_extend_10(val: u16) -> i16 {
     if val & 0x200 != 0 {
         (val | 0xFC00) as i16
@@ -289,3 +398,7 @@ fn sign_extend_10(val: u16) -> i16 {
 #[cfg(test)]
 #[path = "tests/decode_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/decode_compiler_forms_tests.rs"]
+mod compiler_forms_tests;

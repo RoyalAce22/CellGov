@@ -4,7 +4,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpuInstruction {
     // [SPU-ISA p:32 s:3 Load/Store Quadword and Generate-Controls family]
-    // Lqd/Lqx/Lqa/Stqd/Stqx/Stqa pp.32-39; Cbd/Cwd pp.40-45.
+    // Lqd/Lqx/Lqa/Lqr/Stqd/Stqx/Stqa/Stqr pp.32-39; Cbd/Cwd pp.40-45.
     /// Load quadword, d-form: rt = LS[(ra + imm*16) & ~0xF].
     Lqd {
         /// Destination register.
@@ -23,7 +23,7 @@ pub enum SpuInstruction {
         /// Index register.
         rb: u8,
     },
-    /// Load quadword, a-form (absolute): rt = LS[imm*16 & ~0xF].
+    /// Load quadword, a-form (absolute): rt = LS[imm*4 & ~0xF].
     Lqa {
         /// Destination register.
         rt: u8,
@@ -48,11 +48,25 @@ pub enum SpuInstruction {
         /// Index register.
         rb: u8,
     },
-    /// Store quadword, a-form (absolute): LS[imm*16 & ~0xF] = rt.
+    /// Store quadword, a-form (absolute): LS[imm*4 & ~0xF] = rt.
     Stqa {
         /// Source register.
         rt: u8,
         /// 16-bit signed immediate.
+        imm: i16,
+    },
+    /// Load quadword, instruction-relative: rt = LS[(pc + imm*4) & ~0xF].
+    Lqr {
+        /// Destination register.
+        rt: u8,
+        /// 16-bit signed word offset from the instruction's own address.
+        imm: i16,
+    },
+    /// Store quadword, instruction-relative: LS[(pc + imm*4) & ~0xF] = rt.
+    Stqr {
+        /// Source register.
+        rt: u8,
+        /// 16-bit signed word offset from the instruction's own address.
         imm: i16,
     },
 
@@ -130,6 +144,43 @@ pub enum SpuInstruction {
     },
 
     // [SPU-ISA p:101 s:5 Logical: Ori (Or Word Immediate) p.106, Nor p.113, Andi p.101]
+    // [SPU-ISA p:97 s:5 Logical: And p.97, Or p.102, Selb p.115, Xsbh p.94]
+    /// AND: rt = ra & rb over the full 128 bits.
+    And {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// OR: rt = ra | rb over the full 128 bits.
+    Or {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
+    /// Select bits: each rt bit comes from rb where rc is 1, else from ra.
+    Selb {
+        /// Destination register.
+        rt: u8,
+        /// Source register A (selected by a 0 bit of rc).
+        ra: u8,
+        /// Source register B (selected by a 1 bit of rc).
+        rb: u8,
+        /// Bit-select mask register.
+        rc: u8,
+    },
+    /// Extend sign byte to halfword: each halfword slot = sign_extend(its low byte).
+    Xsbh {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
     /// OR immediate: all 4 word slots, `rt[i] = ra[i] | sign_extend(imm)`.
     Ori {
         /// Destination register.
@@ -189,6 +240,53 @@ pub enum SpuInstruction {
         /// Shift count register.
         rb: u8,
     },
+    /// Rotate quadword by bytes immediate: rt = ra rotated left by `imm & 0xF` bytes.
+    Rotqbyi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate; only the low 4 bits count.
+        imm: u8,
+    },
+
+    // [SPU-ISA p:120 s:6 Shift/Rotate Word: Shl p.120, Shli p.121, Rotmi p.139, Rotmai p.148]
+    /// Shift left word: per slot, `rt[i] = ra[i] << (rb[i] & 0x3F)`, zero when the count exceeds 31.
+    Shl {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// Per-slot shift count register.
+        rb: u8,
+    },
+    /// Shift left word immediate: per slot, `rt[i] = ra[i] << (imm & 0x3F)`.
+    Shli {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Rotate and mask word immediate: a logical right shift by `(-imm) & 0x3F`.
+    Rotmi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate that holds the two's complement of the shift count.
+        imm: u8,
+    },
+    /// Rotate and mask algebraic word immediate: an arithmetic right shift by `(-imm) & 0x3F`.
+    Rotmai {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate that holds the two's complement of the shift count.
+        imm: u8,
+    },
 
     // [SPU-ISA p:40 s:3 Generate Controls for Byte/Word Insertion d-form: Cbd p.40, Cwd p.44]
     /// Generate controls for byte insertion d-form (shufb mask).
@@ -229,6 +327,25 @@ pub enum SpuInstruction {
         /// 10-bit signed immediate.
         imm: i16,
     },
+    // [SPU-ISA p:167 s:7 Compare Greater Than Word Immediate (Cgti) p.167, Compare Logical Greater Than Word (Clgt) p.172]
+    /// Compare greater than word immediate, signed: `rt[i] = (ra[i] > sign_extend(imm)) ? 0xFFFFFFFF : 0`.
+    Cgti {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 10-bit signed immediate.
+        imm: i16,
+    },
+    /// Compare logical greater than word, unsigned: `rt[i] = (ra[i] > rb[i]) ? 0xFFFFFFFF : 0`.
+    Clgt {
+        /// Destination register.
+        rt: u8,
+        /// Source register A.
+        ra: u8,
+        /// Source register B.
+        rb: u8,
+    },
 
     // [SPU-ISA p:174 s:7 Branch family: Br p.174, Brsl p.176, Brz p.183, Brnz p.182, Bi p.178]
     /// Branch relative: PC = PC + offset * 4.
@@ -236,7 +353,7 @@ pub enum SpuInstruction {
         /// Signed word offset.
         offset: i32,
     },
-    /// Branch relative and set link: LR = PC + 4, PC = PC + offset * 4.
+    /// Branch relative and set link: rt = (PC + 4, 0, 0, 0), PC = PC + offset * 4.
     Brsl {
         /// Link register destination.
         rt: u8,
@@ -261,6 +378,21 @@ pub enum SpuInstruction {
     Bi {
         /// Register containing target address.
         ra: u8,
+    },
+    // [SPU-ISA p:181 s:7 Branch Indirect and Set Link (Bisl) p.181, Branch If Not Zero Halfword (Brhnz) p.184]
+    /// Branch indirect and set link: rt = (PC + 4, 0, 0, 0), PC = ra.
+    Bisl {
+        /// Link register destination.
+        rt: u8,
+        /// Register containing target address.
+        ra: u8,
+    },
+    /// Branch relative if the low halfword of rt's preferred slot is not zero.
+    Brhnz {
+        /// Register to test.
+        rt: u8,
+        /// Signed word offset.
+        offset: i32,
     },
 
     // [SPU-ISA p:248 s:11 Channel Instructions: Rdch p.248, Wrch p.250]

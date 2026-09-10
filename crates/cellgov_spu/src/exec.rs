@@ -72,6 +72,12 @@ fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
     }
 }
 
+// [SPU-ISA p:139 s:6. Shift and Rotate Instructions] The rotate-and-mask immediates carry the two's complement of the right-shift count: count = (0 - sign_extend(I7)) mod 64.
+fn rotate_mask_count(imm: u8) -> u32 {
+    let signed = ((imm as u32) << 25) as i32 >> 25;
+    (0i32.wrapping_sub(signed) as u32) & 0x3F
+}
+
 /// Execute a single decoded SPU instruction.
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
@@ -133,6 +139,28 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:38 s:3. Memory-Load/Store Instructions] Store Quadword (a-form): absolute LSA from I16<<2.
         SpuInstruction::Stqa { rt, imm } => {
             let raw = (imm as i32 as u32) << 2;
+            match ls_addr(raw, state.ls.len()) {
+                Ok(a) => {
+                    state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
+                    SpuStepOutcome::Continue
+                }
+                Err(f) => SpuStepOutcome::Fault(f),
+            }
+        }
+        // [SPU-ISA p:35 s:3. Memory-Load/Store Instructions] Load Quadword Instruction Relative: LSA is PC + sign-extended I16<<2, low 4 bits forced zero.
+        SpuInstruction::Lqr { rt, imm } => {
+            let raw = state.pc.wrapping_add((imm as i32 as u32) << 2);
+            match ls_addr(raw, state.ls.len()) {
+                Ok(a) => {
+                    state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
+                    SpuStepOutcome::Continue
+                }
+                Err(f) => SpuStepOutcome::Fault(f),
+            }
+        }
+        // [SPU-ISA p:39 s:3. Memory-Load/Store Instructions] Store Quadword Instruction Relative: PC-relative LSA, symmetric to lqr.
+        SpuInstruction::Stqr { rt, imm } => {
+            let raw = state.pc.wrapping_add((imm as i32 as u32) << 2);
             match ls_addr(raw, state.ls.len()) {
                 Ok(a) => {
                     state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
@@ -243,6 +271,41 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:97 s:5. Integer and Logical Instructions] And: bitwise AND across the full 128-bit register.
+        SpuInstruction::And { rt, ra, rb } => {
+            for i in 0..16 {
+                state.regs[rt as usize][i] =
+                    state.regs[ra as usize][i] & state.regs[rb as usize][i];
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:102 s:5. Integer and Logical Instructions] Or: bitwise OR across the full 128-bit register.
+        SpuInstruction::Or { rt, ra, rb } => {
+            for i in 0..16 {
+                state.regs[rt as usize][i] =
+                    state.regs[ra as usize][i] | state.regs[rb as usize][i];
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:115 s:5. Integer and Logical Instructions] Select Bits: RC bits pick RB where set and RA where clear.
+        SpuInstruction::Selb { rt, ra, rb, rc } => {
+            for i in 0..16 {
+                let c = state.regs[rc as usize][i];
+                state.regs[rt as usize][i] =
+                    (c & state.regs[rb as usize][i]) | (!c & state.regs[ra as usize][i]);
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:94 s:5. Integer and Logical Instructions] Extend Sign Byte to Halfword: each halfword takes the sign-extended value of its right byte.
+        SpuInstruction::Xsbh { rt, ra } => {
+            for slot in 0..8 {
+                let low = state.regs[ra as usize][slot * 2 + 1];
+                let hw = (low as i8 as i16).to_be_bytes();
+                state.regs[rt as usize][slot * 2] = hw[0];
+                state.regs[rt as usize][slot * 2 + 1] = hw[1];
+            }
+            SpuStepOutcome::Continue
+        }
 
         // [SPU-ISA p:116 s:5. Integer and Logical Instructions] Shuffle Bytes: RC byte selectors choose from RA||RB or generate 0x00/0xFF/0x80 constants.
         SpuInstruction::Shufb { rt, ra, rb, rc } => {
@@ -292,6 +355,54 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             state.regs[rt as usize] = dst;
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:132 s:6. Shift and Rotate Instructions] Rotate Quadword by Bytes Immediate: byte rotate count is the low nibble of I7.
+        SpuInstruction::Rotqbyi { rt, ra, imm } => {
+            let shift = (imm & 0xF) as usize;
+            let src = state.regs[ra as usize];
+            let mut dst = [0u8; 16];
+            for i in 0..16 {
+                dst[i] = src[(i + shift) & 0xF];
+            }
+            state.regs[rt as usize] = dst;
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:120 s:6. Shift and Rotate Instructions] Shift Left Word: per-slot count is the low 6 bits of the RB slot; a count above 31 yields zero.
+        SpuInstruction::Shl { rt, ra, rb } => {
+            for slot in 0..4 {
+                let a = state.reg_word_slot(ra, slot);
+                let s = state.reg_word_slot(rb, slot) & 0x3F;
+                state.set_reg_word_slot(rt, slot, a.checked_shl(s).unwrap_or(0));
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:121 s:6. Shift and Rotate Instructions] Shift Left Word Immediate: count is the low 6 bits of sign-extended I7; a count above 31 yields zero.
+        SpuInstruction::Shli { rt, ra, imm } => {
+            let s = (imm as u32) & 0x3F;
+            for slot in 0..4 {
+                let a = state.reg_word_slot(ra, slot);
+                state.set_reg_word_slot(rt, slot, a.checked_shl(s).unwrap_or(0));
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:139 s:6. Shift and Rotate Instructions] Rotate and Mask Word Immediate: logical right shift by (0 - I7) mod 64; a count above 31 yields zero.
+        SpuInstruction::Rotmi { rt, ra, imm } => {
+            let s = rotate_mask_count(imm);
+            for slot in 0..4 {
+                let a = state.reg_word_slot(ra, slot);
+                state.set_reg_word_slot(rt, slot, a.checked_shr(s).unwrap_or(0));
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:148 s:6. Shift and Rotate Instructions] Rotate and Mask Algebraic Word Immediate: arithmetic right shift by (0 - I7) mod 64; a count above 31 fills with the sign bit.
+        SpuInstruction::Rotmai { rt, ra, imm } => {
+            let s = rotate_mask_count(imm);
+            for slot in 0..4 {
+                let a = state.reg_word_slot(ra, slot) as i32;
+                let shifted = a.checked_shr(s).unwrap_or(a >> 31);
+                state.set_reg_word_slot(rt, slot, shifted as u32);
+            }
+            SpuStepOutcome::Continue
+        }
 
         // [SPU-ISA p:40 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (d-form): build shufb mask whose target byte position holds 0x03.
         SpuInstruction::Cbd { rt, ra, imm } => {
@@ -338,15 +449,35 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:167 s:7. Compare, Branch, and Halt Instructions] Compare Greater Than Word Immediate: signed compare of each RA slot against sign-extended I10.
+        SpuInstruction::Cgti { rt, ra, imm } => {
+            let v = imm as i32;
+            for slot in 0..4 {
+                let a = state.reg_word_slot(ra, slot) as i32;
+                state.set_reg_word_slot(rt, slot, if a > v { 0xFFFFFFFF } else { 0 });
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:172 s:7. Compare, Branch, and Halt Instructions] Compare Logical Greater Than Word: unsigned per-slot compare of RA against RB.
+        SpuInstruction::Clgt { rt, ra, rb } => {
+            for slot in 0..4 {
+                let a = state.reg_word_slot(ra, slot);
+                let b = state.reg_word_slot(rb, slot);
+                state.set_reg_word_slot(rt, slot, if a > b { 0xFFFFFFFF } else { 0 });
+            }
+            SpuStepOutcome::Continue
+        }
 
         // [SPU-ISA p:174 s:7. Compare, Branch, and Halt Instructions] Branch Relative: PC <- PC + sign-extended I16<<2, masked to LS range.
         SpuInstruction::Br { offset } => {
             state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
             SpuStepOutcome::Branch
         }
-        // [SPU-ISA p:176 s:7. Compare, Branch, and Halt Instructions] Branch Relative and Set Link: write PC+4 link into RT then take the relative branch.
+        // [SPU-ISA p:176 s:7. Compare, Branch, and Halt Instructions] Branch Relative and Set Link: the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then the relative branch is taken.
         SpuInstruction::Brsl { rt, offset } => {
-            state.set_reg_word_splat(rt, state.pc + 4);
+            let link = state.pc.wrapping_add(4) & 0x3FFFF;
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, link);
             state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
             SpuStepOutcome::Branch
         }
@@ -372,6 +503,24 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         SpuInstruction::Bi { ra } => {
             state.pc = state.reg_word(ra) & 0x3FFFC;
             SpuStepOutcome::Branch
+        }
+        // [SPU-ISA p:181 s:7. Compare, Branch, and Halt Instructions] Branch Indirect and Set Link: the target is read from RA before RT is written; the link is (PC+4) masked by LSLR in RT's preferred slot with the other slots zeroed, then PC <- RA masked to LS range.
+        SpuInstruction::Bisl { rt, ra } => {
+            let target = state.reg_word(ra) & 0x3FFFC;
+            let link = state.pc.wrapping_add(4) & 0x3FFFF;
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, link);
+            state.pc = target;
+            SpuStepOutcome::Branch
+        }
+        // [SPU-ISA p:184 s:7. Compare, Branch, and Halt Instructions] Branch If Not Zero Halfword: branch when the low halfword of RT's preferred slot is non-zero.
+        SpuInstruction::Brhnz { rt, offset } => {
+            if state.reg_word(rt) & 0xFFFF != 0 {
+                state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+                SpuStepOutcome::Branch
+            } else {
+                SpuStepOutcome::Continue
+            }
         }
 
         // [SPU-ISA p:250 s:11. Channel Instructions] Write Channel: send RT to the addressed channel.
@@ -573,3 +722,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
 #[cfg(test)]
 #[path = "tests/exec_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/exec_compiler_forms_tests.rs"]
+mod compiler_forms_tests;
