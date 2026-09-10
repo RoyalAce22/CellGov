@@ -3,6 +3,7 @@
 use super::*;
 use crate::host::test_support::{opd_runtime, opd_runtime_with_tls, primary_attrs, FakeRuntime};
 use crate::request::Lv2Request;
+use cellgov_ps3_abi::lv2::ppu_thread::PPU_THREAD_PRIORITY_MAX;
 
 #[test]
 fn ppu_thread_exit_marks_thread_finished_with_exit_value() {
@@ -427,26 +428,49 @@ fn ppu_thread_create_null_entry_descriptor_is_efault() {
 }
 
 #[test]
-fn ppu_thread_create_priority_above_3071_is_einval() {
-    // 3071 is the lowest priority any process may assign; the
-    // ceiling does not move with capability.
+fn ppu_thread_create_priority_ceiling_is_inclusive() {
+    // The ceiling is the least urgent priority a process may assign.
+    // The floor widens with debug-or-root capability; the ceiling
+    // does not, so both arms below run under each.
     let mut host = Lv2Host::new();
     let rt = opd_runtime(0x200, 0x10_0000, 0x10_0100);
-    let result = host.dispatch(
-        Lv2Request::PpuThreadCreate {
-            id_ptr: 0x1000,
-            param_ptr: 0x200,
-            arg: 0,
-            unk: 0,
-            priority: 3072,
-            stacksize: 0x8000,
-            flags: 0,
-            threadname_ptr: 0,
-        },
-        UnitId::new(0),
-        &rt,
+    let create = |host: &mut Lv2Host, priority: i32| {
+        host.dispatch(
+            Lv2Request::PpuThreadCreate {
+                id_ptr: 0x1000,
+                param_ptr: 0x200,
+                arg: 0,
+                unk: 0,
+                priority,
+                stacksize: 0x8000,
+                flags: 0,
+                threadname_ptr: 0,
+            },
+            UnitId::new(0),
+            &rt,
+        )
+    };
+    match create(&mut host, PPU_THREAD_PRIORITY_MAX) {
+        Lv2Dispatch::PpuThreadCreate { priority, .. } => {
+            assert_eq!(priority, PPU_THREAD_PRIORITY_MAX as u32);
+        }
+        other => panic!("expected PpuThreadCreate, got {other:?}"),
+    }
+    assert_eq!(
+        create(&mut host, PPU_THREAD_PRIORITY_MAX + 1),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     );
-    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+
+    let mut root = Lv2Host::new();
+    root.set_control_flags1(cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK);
+    assert!(matches!(
+        create(&mut root, PPU_THREAD_PRIORITY_MAX),
+        Lv2Dispatch::PpuThreadCreate { .. }
+    ));
+    assert_eq!(
+        create(&mut root, PPU_THREAD_PRIORITY_MAX + 1),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
+    );
 }
 
 #[test]
