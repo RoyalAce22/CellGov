@@ -1,6 +1,6 @@
 //! `sys_fs_read` dispatch tests: byte counts, offset advancement, EOF behavior, and bad-fd/out-pointer rejection.
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -103,7 +103,7 @@ fn read_unknown_fd_returns_ebadf_with_no_effects() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_read(0xCAFE_BABE, 0x30000, 8, 0x30100)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }
@@ -121,7 +121,7 @@ fn read_bad_buffer_pointer_returns_efault_and_does_not_advance_offset() {
     let _ = rt_with_path;
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30100, 3, 0x40000)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
     // Invariant: EFAULT must not advance the offset.
@@ -143,7 +143,7 @@ fn read_misaligned_nread_pointer_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 1, 0x30001)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -157,7 +157,7 @@ fn read_unmapped_nread_pointer_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 1, 0xFFFF_FF00)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -168,7 +168,7 @@ fn read_unknown_fd_takes_precedence_over_bad_buffer() {
     let rt = PathRuntime::empty(0x100000).reserve(0x30000, 0x31000);
     assert_immediate(
         run(&mut host, &rt, fs_read(0xDEAD_BEEF, 0x30100, 4, 0x40000)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }
@@ -183,7 +183,7 @@ fn read_after_close_returns_ebadf() {
     assert_immediate(run(&mut host, &rt, fs_close(fd)), 0, 0);
     assert_immediate(
         run(&mut host, &rt, fs_read(fd, 0x30000, 3, 0x30100)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }

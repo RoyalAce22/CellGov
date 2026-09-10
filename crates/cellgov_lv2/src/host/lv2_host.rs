@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
+use cellgov_ps3_abi::format::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
 
 use crate::fs_store::{FsMountTable, FsStore};
 use crate::image::ContentStore;
@@ -229,21 +229,21 @@ impl Lv2Host {
     /// debug-or-root, and the debug mask overlaps both.
     #[inline]
     pub fn has_root_perm(&self) -> bool {
-        self.control_flags1() & cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK != 0
+        self.control_flags1() & cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK != 0
     }
 
     /// Whether the booting process holds debug or root privilege; the
     /// widest of the three masks. See [`Self::has_root_perm`].
     #[inline]
     pub fn debug_or_root(&self) -> bool {
-        self.control_flags1() & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
+        self.control_flags1() & cellgov_ps3_abi::format::sce::CTRL_FLAGS1_DEBUG_OR_ROOT_MASK != 0
     }
 
     /// Whether the booting process holds debug privilege. See
     /// [`Self::has_root_perm`].
     #[inline]
     pub fn has_debug_perm(&self) -> bool {
-        self.control_flags1() & cellgov_ps3_abi::sce::CTRL_FLAGS1_DEBUG_MASK != 0
+        self.control_flags1() & cellgov_ps3_abi::format::sce::CTRL_FLAGS1_DEBUG_MASK != 0
     }
 
     /// Whether the booting process is a CoreOS SELF (vsh and the other
@@ -253,7 +253,8 @@ impl Lv2Host {
     /// libraries carry a CoreOS authority id with `ctrl_flags1 == 0`.
     #[inline]
     pub fn is_coreos(&self) -> bool {
-        self.program_authority_id() >> 36 == cellgov_ps3_abi::sce::COREOS_AUTHORITY_ID_PREFIX
+        self.program_authority_id() >> 36
+            == cellgov_ps3_abi::format::sce::COREOS_AUTHORITY_ID_PREFIX
     }
 
     /// Record the verified-firmware identity.
@@ -431,7 +432,7 @@ impl Lv2Host {
         if size == 0 {
             return None;
         }
-        let granule = u32::try_from(cellgov_ps3_abi::sys_memory::VM_AREA_GRANULE).ok()?;
+        let granule = u32::try_from(cellgov_ps3_abi::lv2::memory::VM_AREA_GRANULE).ok()?;
         let rounded = size.checked_add(granule - 1)? & !(granule - 1);
         let base = self.state.mmapper_addr_cursor;
         let next = base.checked_add(rounded)?;

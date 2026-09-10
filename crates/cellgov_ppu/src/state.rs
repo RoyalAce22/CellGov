@@ -1,6 +1,6 @@
 //! PPU architectural state: register banks and SPRs mutated by `exec.rs`.
 
-use cellgov_ps3_abi::hardware::{FPR_COUNT, GPR_COUNT, VR_COUNT};
+use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
 /// Register-bank storage with read-only indexing.

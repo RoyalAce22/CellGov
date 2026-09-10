@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -43,17 +43,17 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        use cellgov_ps3_abi::sys_prx::{
+        use cellgov_ps3_abi::lv2::prx::{
             start_cmd, start_stop_option as opt, CELL_PRX_ERROR_ERROR, SYS_PRX_RESIDENT,
         };
 
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
         if id == 0 || p_opt == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if self.state.prx_registry.lookup_by_id(id).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         // The base struct (through `res`) must fit below the 4 GiB
         // boundary; `entry2`'s reach is gated after `size` is known.
@@ -65,7 +65,7 @@ impl Lv2Host {
                      returning CELL_EFAULT (struct does not fit in 32-bit guest address space)"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let Some(size) = self.read_be_u64(rt, p_opt + opt::SIZE_OFFSET) else {
@@ -76,7 +76,7 @@ impl Lv2Host {
                      returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         // Extended struct: entry2 at +0x20 must also fit.
         if size != opt::MIN_SIZE && p_opt.checked_add(opt::ENTRY2_OFFSET + 8).is_none() {
@@ -87,7 +87,7 @@ impl Lv2Host {
                      (size={size:#x}) wraps u32 at entry2; returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(cmd) = self.read_be_u64(rt, p_opt + opt::CMD_OFFSET) else {
             self.log_invariant_break(
@@ -97,7 +97,7 @@ impl Lv2Host {
                      returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
 
         match cmd & start_cmd::MASK {
@@ -128,7 +128,7 @@ impl Lv2Host {
                              returning CELL_EFAULT"
                         ),
                     );
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 if res == SYS_PRX_RESIDENT {
                     // LV2's STARTING -> STARTED transition: the module
@@ -199,7 +199,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         use crate::prx_registry::PrxState;
-        use cellgov_ps3_abi::sys_prx::{
+        use cellgov_ps3_abi::lv2::prx::{
             start_cmd, start_stop_option as opt, stop_cmd, CELL_PRX_ERROR_ALREADY_STOPPED,
             CELL_PRX_ERROR_ALREADY_STOPPING, CELL_PRX_ERROR_CAN_NOT_STOP, CELL_PRX_ERROR_ERROR,
             CELL_PRX_ERROR_NOT_STARTED,
@@ -208,10 +208,10 @@ impl Lv2Host {
         let id = args[0] as u32;
         let p_opt = args[2] as u32;
         if self.state.prx_registry.lookup_by_id(id).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         if p_opt == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // The base struct (through `res`) must fit below the 4 GiB
         // boundary; `entry2`'s reach is gated after `size` is known.
@@ -223,7 +223,7 @@ impl Lv2Host {
                      returning CELL_EFAULT (struct does not fit in 32-bit guest address space)"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let Some(size) = self.read_be_u64(rt, p_opt + opt::SIZE_OFFSET) else {
@@ -234,7 +234,7 @@ impl Lv2Host {
                      returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         // Extended struct: entry2 at +0x20 must also fit.
         if size != opt::MIN_SIZE && p_opt.checked_add(opt::ENTRY2_OFFSET + 8).is_none() {
@@ -245,7 +245,7 @@ impl Lv2Host {
                      (size={size:#x}) wraps u32 at entry2; returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(cmd) = self.read_be_u64(rt, p_opt + opt::CMD_OFFSET) else {
             self.log_invariant_break(
@@ -255,7 +255,7 @@ impl Lv2Host {
                      returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
 
         // Write NO_ENTRY to `entry` (and `entry2` for the extended
@@ -304,7 +304,7 @@ impl Lv2Host {
                              returning CELL_EFAULT"
                         ),
                     );
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 match res {
                     0 => {
@@ -421,7 +421,7 @@ impl Lv2Host {
         args: [u64; 8],
     ) -> Lv2Dispatch {
         use crate::prx_registry::PrxState;
-        use cellgov_ps3_abi::sys_prx::{
+        use cellgov_ps3_abi::lv2::prx::{
             CELL_PRX_ERROR_NOT_REMOVABLE, CELL_PRX_ERROR_UNKNOWN_MODULE,
         };
 
@@ -476,14 +476,14 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ELF_IS_REGISTERED;
+        use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_ELF_IS_REGISTERED;
 
         let opt = args[1];
         if opt == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let Some(size) = read_be_u64(rt, opt) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         // 0x1c / 0x20 are the legacy option forms, which carry no
         // type word; treating them as type = 0 skips the branch
@@ -492,16 +492,16 @@ impl Lv2Host {
             0x1c | 0x20 => (0u64, 0u32, 0u32),
             0x30 => {
                 let Some(t) = read_be_u64(rt, opt + 0x08) else {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 let (Some(ea), Some(sz)) =
                     (read_be_u32(rt, opt + 0x20), read_be_u32(rt, opt + 0x24))
                 else {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 (t, ea, sz)
             }
-            _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
         };
         self.obs.prx_register_module_count += 1;
 
@@ -536,7 +536,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Vec<Effect> {
-        use cellgov_ps3_abi::elf::{
+        use cellgov_ps3_abi::format::elf::{
             PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET, PRX_IMPORT_NIDS_PTR_OFFSET,
             PRX_IMPORT_NUM_FUNC_OFFSET, PRX_IMPORT_SIZE_OFFSET, PRX_IMPORT_STUB_PTR_OFFSET,
             PRX_NAME_MAX_LEN,
@@ -701,7 +701,7 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let library = args[0];
         if library == 0 || rt.read_committed(library, 1).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         Lv2Dispatch::immediate(0)
     }
@@ -734,7 +734,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let modelled_size = cellgov_ps3_abi::sys_prx::get_module_list_option::SIZE;
+        let modelled_size = cellgov_ps3_abi::lv2::prx::get_module_list_option::SIZE;
 
         let flags = args[0];
         let p_info = args[1] as u32;
@@ -742,7 +742,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(0);
         }
         if p_info == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         if p_info.checked_add(0x18).is_none() {
             self.log_invariant_break(
@@ -753,7 +753,7 @@ impl Lv2Host {
                      32-bit guest address space)"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(declared_size) = self.read_be_u64(rt, p_info) else {
             self.log_invariant_break(
@@ -763,7 +763,7 @@ impl Lv2Host {
                      returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         if declared_size != modelled_size {
             self.log_invariant_break(
@@ -789,7 +789,7 @@ impl Lv2Host {
                      {max_addr:#010x} unreadable; returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let max = u32::from_be_bytes([max_bytes[0], max_bytes[1], max_bytes[2], max_bytes[3]]);
         let Some(idlist_bytes) = rt.read_committed(u64::from(idlist_ptr_addr), 4) else {
@@ -800,7 +800,7 @@ impl Lv2Host {
                      {idlist_ptr_addr:#010x} unreadable; returning CELL_EFAULT"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let idlist_ptr = u32::from_be_bytes([
             idlist_bytes[0],

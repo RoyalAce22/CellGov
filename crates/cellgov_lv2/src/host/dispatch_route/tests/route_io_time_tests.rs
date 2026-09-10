@@ -279,7 +279,7 @@ fn tty_read_returns_eio() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(result, Lv2Dispatch::immediate(cell_errors::CELL_EIO.into()));
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EIO.into()));
 }
 
 #[test]
@@ -294,10 +294,7 @@ fn time_get_timezone_efault_on_null_ptr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -305,8 +302,5 @@ fn immediate_write_u32_efault_on_null_ptr() {
     let host = Lv2Host::new();
     let result =
         host.immediate_write_u32(0xCAFE, 0, UnitId::new(0), cellgov_time::GuestTicks::ZERO);
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }

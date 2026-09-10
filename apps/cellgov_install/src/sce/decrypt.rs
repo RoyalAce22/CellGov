@@ -3,7 +3,7 @@
 
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
-use cellgov_ps3_abi::sce::{
+use cellgov_ps3_abi::format::sce::{
     SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR, SCE_ENC_KIND_PLAIN,
     SCE_SECTION_KIND_PHDR,
 };

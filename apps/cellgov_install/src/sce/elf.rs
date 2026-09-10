@@ -2,9 +2,9 @@
 //! section-header mask.
 
 #[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::elf::ELF_MAGIC_U32;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC_U32;
 #[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::sce::SCE_SECTION_KIND_PHDR;
+use cellgov_ps3_abi::format::sce::SCE_SECTION_KIND_PHDR;
 
 #[cfg(feature = "decrypt")]
 use super::error::SceError;

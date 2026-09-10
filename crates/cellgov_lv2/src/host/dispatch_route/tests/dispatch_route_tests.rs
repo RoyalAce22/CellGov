@@ -6,7 +6,7 @@ use cellgov_event::UnitId;
 
 use cellgov_mem::ByteRange;
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 

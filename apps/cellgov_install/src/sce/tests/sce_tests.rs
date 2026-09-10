@@ -492,7 +492,7 @@ fn installed_vsh_selfs() -> Vec<(String, std::path::PathBuf)> {
             );
             let path = layout
                 .resolve_store_path(&record.artifact.store_path)
-                .join(cellgov_ps3_abi::dev_flash::FLASH_MOUNT)
+                .join(cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT)
                 .join("vsh")
                 .join("module")
                 .join("vsh.self");
@@ -532,7 +532,7 @@ fn parse_program_authority_id_matches_known_corpus_values() {
             std::fs::read(&path).unwrap_or_else(|e| panic!("reading {}: {e}", path.display()));
         assert_eq!(
             parse_program_authority_id(&bytes).unwrap(),
-            cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+            cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
             "{label}: authority id mismatch",
         );
         checked += 1;

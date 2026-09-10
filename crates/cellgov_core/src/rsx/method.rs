@@ -8,16 +8,16 @@
 //! [`NvMethodHeader`]; the advance pass consumes the declared
 //! argument count and looks up the handler in [`NvMethodTable`].
 //! Unregistered methods take the advance pass's unknown-method
-//! fallback. Constants live in `cellgov_ps3_abi::rsx_nv_hardware`;
+//! fallback. Constants live in `cellgov_ps3_abi::hw::rsx`;
 //! this module is the decode and dispatch surface.
 
 use crate::rsx::RsxFifoCursor;
 use cellgov_effects::Effect;
-use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+use cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET;
 use cellgov_time::GuestTicks;
 use std::collections::BTreeMap;
 
-pub use cellgov_ps3_abi::rsx_nv_hardware::{
+pub use cellgov_ps3_abi::hw::rsx::{
     GCM_FLIP_COMMAND, NV406E_SEMAPHORE_ACQUIRE, NV406E_SEMAPHORE_OFFSET, NV406E_SEMAPHORE_RELEASE,
     NV406E_SET_REFERENCE, NV4097_BACK_END_WRITE_SEMAPHORE_RELEASE, NV4097_GET_REPORT,
     NV4097_NO_OPERATION, NV4097_REPORT_OFFSET_MASK, NV4097_SET_SEMAPHORE_OFFSET,
@@ -273,7 +273,7 @@ pub(crate) const NV4097_REPORT_OFFSET_MASK_U: u32 = NV4097_REPORT_OFFSET_MASK;
 /// A zero `label_base` is the absolute-offset regime the commit
 /// pipeline documents, where no block base applies either.
 ///
-/// [`REPORTS_REPORT_OFFSET`]: cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET
+/// [`REPORTS_REPORT_OFFSET`]: cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET
 pub fn nv4097_get_report(ctx: &mut NvDispatchContext<'_>, args: &[u32]) {
     if let Some(&arg) = args.first() {
         let field = arg & NV4097_REPORT_OFFSET_MASK_U;

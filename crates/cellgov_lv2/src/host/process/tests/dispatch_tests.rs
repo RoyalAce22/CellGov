@@ -5,8 +5,8 @@ use crate::host::process::ProcessEntry;
 use crate::host::test_support::FakeRuntime;
 use cellgov_event::UnitId;
 use cellgov_mem::{GuestAddr, GuestMemory};
-use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
-use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+use cellgov_ps3_abi::format::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN;
+use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
 
 fn captured_version(host: &Lv2Host) -> u32 {
     match host.dispatch_process_get_sdk_version(
@@ -143,7 +143,7 @@ fn spawn_with_unwritable_pid_out_returns_efault() {
     let rt = FakeRuntime::with_memory(spawn_memory()).with_writable_at(u64::from(PID_OUT), false);
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
 }
 
@@ -153,7 +153,7 @@ fn spawn_with_unreadable_block_returns_efault() {
     let rt = FakeRuntime::with_memory(spawn_memory());
     assert_eq!(
         do_spawn(&mut host, &rt, 0x2000, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
 }
 
@@ -165,7 +165,7 @@ fn spawn_with_table_off_at_block_size_returns_efault() {
     let rt = FakeRuntime::with_memory(mem);
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
 }
 
@@ -178,7 +178,7 @@ fn spawn_with_empty_pointer_table_returns_efault() {
     let rt = FakeRuntime::with_memory(mem);
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
 }
 
@@ -193,7 +193,7 @@ fn spawn_table_walk_never_reads_entries_past_block_size() {
     let rt = FakeRuntime::with_memory(spawn_memory());
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 24),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
     assert_eq!(
         host.invariant_break_site_count("process.spawn_table_unterminated"),
@@ -212,7 +212,7 @@ fn spawn_with_path_string_missing_its_terminator_returns_efault() {
     let rt = FakeRuntime::with_memory(mem);
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
 }
 
@@ -222,7 +222,7 @@ fn spawn_with_unknown_path_returns_enoent() {
     let rt = FakeRuntime::with_memory(spawn_memory());
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
+        Lv2Dispatch::immediate(errno::CELL_ENOENT.into())
     );
 }
 
@@ -233,7 +233,7 @@ fn spawn_into_a_saturated_pid_space_is_rejected_with_eagain() {
     let rt = FakeRuntime::with_memory(spawn_memory());
     assert_eq!(
         do_spawn(&mut host, &rt, BLOCK, 0x60),
-        Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into())
+        Lv2Dispatch::immediate(errno::CELL_EAGAIN.into())
     );
     assert_eq!(
         host.invariant_break_site_count("process.spawn_pid_space_exhausted"),
@@ -334,7 +334,7 @@ fn get_status_reports_an_unknown_pid_as_esrch() {
     let host = Lv2Host::new();
     assert_eq!(
         host.dispatch_process_get_status(FIRST_CHILD_PID),
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
     );
 }
 
@@ -352,7 +352,7 @@ fn get_status_flips_from_ok_to_esrch_when_the_child_exits() {
     host.mark_process_exited(FIRST_CHILD_PID, -3);
     assert_eq!(
         host.dispatch_process_get_status(FIRST_CHILD_PID),
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
     );
     assert_eq!(host.process_exit_status(FIRST_CHILD_PID), Some(-3));
 }
@@ -392,11 +392,11 @@ fn getpid_and_getppid_answer_for_the_calling_process() {
     // Boot-bound units keep the pre-spawn constants byte-identically.
     assert_eq!(
         host.dispatch_process_get_pid(boot_unit),
-        Lv2Dispatch::immediate(cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID.into())
     );
     assert_eq!(
         host.dispatch_process_get_ppid(boot_unit),
-        Lv2Dispatch::immediate(cellgov_ps3_abi::sys_process::BOOT_PROCESS_PPID.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PPID.into())
     );
 
     // A child-bound unit sees its own pid -- the same value the
@@ -497,7 +497,7 @@ fn getppid_for_a_unit_bound_to_an_unknown_pid_is_not_silent() {
     host.bind_unit_process(UnitId::new(3), FIRST_CHILD_PID);
     assert_eq!(
         host.dispatch_process_get_ppid(UnitId::new(3)),
-        Lv2Dispatch::immediate(cellgov_ps3_abi::sys_process::BOOT_PROCESS_PPID.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PPID.into())
     );
     assert_eq!(
         host.invariant_break_site_count("process.ppid_of_unknown_pid"),

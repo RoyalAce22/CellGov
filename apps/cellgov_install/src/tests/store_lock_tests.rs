@@ -26,7 +26,7 @@ use crate::test_support::{
     pkg_file, IsoNode,
 };
 #[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::pup::ENTRY_ID_UPDATE_FILES;
+use cellgov_ps3_abi::format::pup::ENTRY_ID_UPDATE_FILES;
 
 /// Placeholder identities: every fixture here is hand-built and names
 /// no installed corpus.
@@ -245,7 +245,7 @@ fn an_unheld_base_install_runs_past_the_claim() {
 /// SELF, so an unclaimed run stops at the decrypt-proof.
 #[cfg(feature = "decrypt")]
 fn disc_image() -> Vec<u8> {
-    let mut eboot = cellgov_ps3_abi::sce::SCE_MAGIC.to_vec();
+    let mut eboot = cellgov_ps3_abi::format::sce::SCE_MAGIC.to_vec();
     eboot.extend_from_slice(b" not a SELF");
     build_iso(vec![IsoNode::Dir(
         "PS3_GAME",

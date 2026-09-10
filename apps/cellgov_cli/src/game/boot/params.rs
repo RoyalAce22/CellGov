@@ -3,10 +3,10 @@
 //! the kernel applies to each declaration.
 
 use cellgov_core::{default_budget_for_mode, RuntimeMode};
-use cellgov_ps3_abi::process_address_space::{
+use cellgov_ps3_abi::hw::address_space::{
     PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP,
 };
-use cellgov_ps3_abi::sys_process::SYS_PROCESS_PARAM_PRIO_LIMIT;
+use cellgov_ps3_abi::lv2::process::SYS_PROCESS_PARAM_PRIO_LIMIT;
 use cellgov_time::Budget;
 
 use super::types::{u32_or_die, PrepareOptions};
@@ -142,16 +142,16 @@ fn resolve_primary_prio(declared: Option<i32>) -> u32 {
 /// - A sentinel decodes to the byte count it names, down to 32 KiB,
 ///   with no clamp.
 /// - This clamps a raw count between
-///   [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MIN)
+///   [`PS3_PRIMARY_STACK_SIZE_MIN`](cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_MIN)
 ///   and
-///   [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_SIZE_MAX)
+///   [`PS3_PRIMARY_STACK_SIZE_MAX`](cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_SIZE_MAX)
 ///   -- 4 KiB through 1 MiB, the range the field itself admits -- then
 ///   rounds it up to a page.
 ///
 /// Whether the kernel widens a small declaration is unestablished, so
 /// this keeps a raw count as declared.
 fn decode_primary_stacksize(declared: u32) -> u32 {
-    use cellgov_ps3_abi::process_address_space::{
+    use cellgov_ps3_abi::hw::address_space::{
         PS3_PRIMARY_STACK_SIZE_MAX, PS3_PRIMARY_STACK_SIZE_MIN, PS3_STACK_SIZE_GRANULARITY,
     };
     match declared {
@@ -173,7 +173,7 @@ fn decode_primary_stacksize(declared: u32) -> u32 {
 /// Primary thread r1 for a boot with no guest args.
 ///
 /// [`PS3_PRIMARY_STACK_TOP`] already sits
-/// [`PS3_ABI_MIN_STACK_FRAME`](cellgov_ps3_abi::process_address_space::PS3_ABI_MIN_STACK_FRAME)
+/// [`PS3_ABI_MIN_STACK_FRAME`](cellgov_ps3_abi::hw::address_space::PS3_ABI_MIN_STACK_FRAME)
 /// below the end of the primary stack region, so the no-args entry
 /// takes it unchanged -- subtracting the reserve a second time here
 /// would drop r1 a whole frame below the initial frame.

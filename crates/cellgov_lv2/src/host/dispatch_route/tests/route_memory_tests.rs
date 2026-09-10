@@ -23,8 +23,8 @@ fn mint_mmapper_handle(host: &mut Lv2Host, rt: &FakeRuntime, size: u64, flags: u
 
 #[test]
 fn cell_ps3_user_memory_total_is_213_mib() {
-    assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 0x0D50_0000);
-    assert_eq!(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL, 223_346_688);
+    assert_eq!(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL, 0x0D50_0000);
+    assert_eq!(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL, 223_346_688);
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn syscall_324_sub_granule_size_returns_enomem_and_mints_no_id() {
         );
         assert_eq!(
             result,
-            Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
+            Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
             "size {size:#x} rounds down to zero",
         );
     }
@@ -137,10 +137,7 @@ fn syscall_324_sub_granule_size_outranks_a_null_cid() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()));
 }
 
 #[test]
@@ -155,10 +152,7 @@ fn syscall_324_null_cid_with_an_accepted_size_is_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
     assert_eq!(
         host.alloc_id(),
         Lv2Host::new().alloc_id(),
@@ -199,7 +193,7 @@ fn syscall_330_size_off_the_area_granule_returns_ealign() {
         );
         assert_eq!(
             result,
-            Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+            Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
             "size {size:#x} is not an area multiple",
         );
     }
@@ -220,7 +214,7 @@ fn syscall_330_size_beyond_u32_returns_enomem() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
+        Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
         "the low word alone must not decide the request",
     );
 }
@@ -240,7 +234,7 @@ fn syscall_330_rejects_an_alignment_outside_the_area_sizes() {
         );
         assert_eq!(
             result,
-            Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+            Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
             "alignment {alignment:#x} is not a VM area size",
         );
     }
@@ -264,7 +258,7 @@ fn syscall_330_argument_refusals_outrank_a_null_alloc_addr() {
             UnitId::new(0),
             &rt,
         ),
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
     );
     // Bad alignment, null out-pointer.
     assert_eq!(
@@ -276,7 +270,7 @@ fn syscall_330_argument_refusals_outrank_a_null_alloc_addr() {
             UnitId::new(0),
             &rt,
         ),
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
     );
     // Everything valid but the out-pointer.
     assert_eq!(
@@ -288,7 +282,7 @@ fn syscall_330_argument_refusals_outrank_a_null_alloc_addr() {
             UnitId::new(0),
             &rt,
         ),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
     );
 }
 
@@ -327,10 +321,7 @@ fn syscall_334_unknown_mem_id_returns_esrch_and_logs_break() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
         1
@@ -377,10 +368,7 @@ fn syscall_332_then_334_records_pending_region_install() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result_334,
-        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
-    );
+    assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
     assert_eq!(installs, vec![(0x5000_0000_u64, 0x0400_0000_usize, None)]);
 }
@@ -426,7 +414,7 @@ fn syscall_334_misaligned_returns_ealign() {
     );
     assert_eq!(
         result_334,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into())
     );
 }
 
@@ -442,10 +430,7 @@ fn syscall_334_addr_out_of_range_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -488,10 +473,7 @@ fn syscall_362_records_handle_keyed_on_mem_id() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result_334,
-        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
-    );
+    assert_eq!(result_334, Lv2Dispatch::immediate(errno::CELL_OK.into()));
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
     assert_eq!(installs, vec![(0x5400_0000_u64, 0x00a0_0000_usize, None)]);
 }
@@ -577,7 +559,7 @@ fn syscall_337_unknown_mem_id_returns_esrch_and_logs_break() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
         1
@@ -598,10 +580,7 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        below,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(below, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     // At MMAPPER_REGION_END (exclusive).
     let above = host.dispatch(
         Lv2Request::Unsupported {
@@ -611,10 +590,7 @@ fn syscall_337_rejects_out_of_range_start_addr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        above,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(above, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -630,7 +606,7 @@ fn syscall_337_null_alloc_addr_returns_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -649,7 +625,7 @@ fn syscall_337_exhausted_window_returns_enomem() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()));
 }
 
 /// Non-vacuous coverage for the sc 337 / sc 334 coherence witness: the
@@ -745,7 +721,7 @@ fn syscall_330_returns_enomem_when_cursor_would_cross_mmio_region() {
     let exhausted = host.dispatch(req(), UnitId::new(0), &rt);
     assert_eq!(
         exhausted,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
+        Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
         "the 8th 256 MiB allocation must cap-fail and surface CELL_ENOMEM"
     );
 }
@@ -1010,10 +986,7 @@ fn syscall_332_size_not_multiple_of_64k_granule_returns_ealign() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
 }
 
 #[test]
@@ -1028,10 +1001,7 @@ fn syscall_332_size_not_multiple_of_1m_granule_returns_ealign() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
 }
 
 #[test]
@@ -1055,10 +1025,7 @@ fn syscall_362_size_not_multiple_of_granule_returns_ealign() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
 }
 
 #[test]
@@ -1082,10 +1049,7 @@ fn syscall_362_reads_flags_from_args3_not_args2() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
 }
 
 #[test]
@@ -1127,10 +1091,7 @@ fn memory_get_user_memory_size_efault_on_null_ptr() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -1164,7 +1125,7 @@ fn syscall_334_over_an_occupied_window_returns_ebusy_and_stages_nothing() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into()),
+        Lv2Dispatch::immediate(errno::CELL_EBUSY.into()),
         "an occupied window is EBUSY, not a fabricated OK",
     );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
@@ -1192,10 +1153,7 @@ fn syscall_334_partial_overlap_is_ebusy_too() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EBUSY.into()));
 }
 
 /// The interface carries a hint in and a separate address out. The
@@ -1269,7 +1227,7 @@ fn syscall_334_over_a_window_the_host_already_mapped_returns_ebusy() {
     );
     assert_eq!(
         map(&mut host, second, 0x5000_0000),
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into()),
+        Lv2Dispatch::immediate(errno::CELL_EBUSY.into()),
         "re-mapping a window the ledger already holds is EBUSY",
     );
     let installs: Vec<_> = host.drain_pending_region_installs().collect();
@@ -1300,10 +1258,7 @@ fn syscall_334_partially_overlapping_a_prior_337_map_returns_ebusy() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EBUSY.into()));
 }
 
 /// The gates keep the ledger non-overlapping, so a nested entry is not
@@ -1328,7 +1283,7 @@ fn syscall_334_over_a_window_nested_in_a_longer_ledger_entry_returns_ebusy() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into()),
+        Lv2Dispatch::immediate(errno::CELL_EBUSY.into()),
         "a window covered only by the longer, earlier entry is still busy",
     );
 }
@@ -1375,10 +1330,7 @@ fn syscall_332_zero_size_returns_ealign_and_mints_no_handle() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
     assert!(host.state.mmapper_handles.is_empty());
     assert!(
         host.mmapper_ipc().is_empty(),
@@ -1407,10 +1359,7 @@ fn syscall_362_zero_size_returns_ealign() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
     assert!(host.state.mmapper_handles.is_empty());
 }
 
@@ -1432,7 +1381,7 @@ fn syscall_332_unencodable_granularity_field_returns_einval() {
         );
         assert_eq!(
             result,
-            Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             "flags {flags:#x} must not resolve to a granule",
         );
     }
@@ -1460,10 +1409,7 @@ fn syscall_362_unencodable_granularity_field_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 /// Bits above the granularity field are not part of the encoding.
@@ -1513,19 +1459,19 @@ fn syscall_332_argument_refusals_outrank_a_null_mem_id() {
     };
     assert_eq!(
         call(&mut host, 0, 0x200),
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
     );
     assert_eq!(
         call(&mut host, 0x10_0000, 0x600),
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
     );
     assert_eq!(
         call(&mut host, 0x1_0000, 0x400),
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
     );
     assert_eq!(
         call(&mut host, 0x10_0000, 0x400),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
         "only a request the kernel would have accepted reaches the pointer gate",
     );
     assert!(
@@ -1550,15 +1496,15 @@ fn syscall_362_argument_refusals_outrank_a_null_mem_id() {
     };
     assert_eq!(
         call(&mut host, 0, 0x400),
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into()),
+        Lv2Dispatch::immediate(errno::CELL_EALIGN.into()),
     );
     assert_eq!(
         call(&mut host, 0x10_0000, 0x600),
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
     );
     assert_eq!(
         call(&mut host, 0x10_0000, 0x400),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
     );
     assert!(host.state.mmapper_handles.is_empty());
 }
@@ -1577,8 +1523,5 @@ fn syscall_332_unset_granularity_field_means_the_1m_granule() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EALIGN.into()));
 }

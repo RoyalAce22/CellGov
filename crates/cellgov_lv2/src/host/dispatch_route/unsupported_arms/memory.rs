@@ -3,8 +3,8 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_memory::{
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::memory::{
     ext_entry, page_size, CONTAINER_GRANULE, SYS_MMAPPER_NO_SHM_KEY, VM_AREA_ALIGNMENTS,
     VM_AREA_GRANULE,
 };
@@ -44,7 +44,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if size < CONTAINER_GRANULE {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         if let Some(d) = self.efault_if_null(&[cid_ptr]) {
             return d;
@@ -94,10 +94,10 @@ impl Lv2Host {
         let alignment = args[2];
         let alloc_addr_ptr = args[3] as u32;
         if !size.is_multiple_of(VM_AREA_GRANULE) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         let Ok(size) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         // A zero alignment is outside the accepted set, but it is
         // taken as the default area size. No firmware caller relies on
@@ -110,7 +110,7 @@ impl Lv2Host {
             alignment
         };
         if !VM_AREA_ALIGNMENTS.contains(&alignment) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;
@@ -129,7 +129,7 @@ impl Lv2Host {
                     effects: vec![write],
                 }
             }
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ENOMEM.into()),
         }
     }
 
@@ -171,16 +171,16 @@ impl Lv2Host {
         let flags = args[2];
         let mem_id_ptr = args[3] as u32;
         if size == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         let Some(align) = accepted_granule(flags) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let Ok(size_u32) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         if !size_u32.is_multiple_of(align) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
@@ -320,7 +320,7 @@ impl Lv2Host {
         let addr = args[0];
         let mem_id = args[1] as u32;
         if !(0x2000_0000..0xC000_0000).contains(&addr) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
@@ -330,16 +330,16 @@ impl Lv2Host {
                      332 / 362 must precede 334"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if !addr.is_multiple_of(u64::from(handle.align)) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         let Some(end) = addr.checked_add(u64::from(handle.size)) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         if end > 0xC000_0000 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // A window this host already handed out through 334 / 337 is
         // claimed even before the runtime commits its region, and the
@@ -362,7 +362,7 @@ impl Lv2Host {
                 .committed_overlap_end(addr, u64::from(handle.size))
                 .is_some()
         {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.derived
             .pending_region_installs
@@ -425,7 +425,7 @@ impl Lv2Host {
             return d;
         }
         if !(Lv2Host::MMAPPER_REGION_START..Lv2Host::MMAPPER_REGION_END).contains(&start_addr) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let Some(handle) = self.state.mmapper_handles.get(mem_id) else {
             self.log_invariant_break(
@@ -435,12 +435,12 @@ impl Lv2Host {
                      332 / 362 must precede 337"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         let Some(found_addr) =
             self.mmapper_search_free_range(start_addr, handle.size, handle.align, rt)
         else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         self.derived
             .pending_region_installs
@@ -496,16 +496,16 @@ impl Lv2Host {
         let flags = args[3];
         let mem_id_ptr = args[4] as u32;
         if size == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         let Some(align) = accepted_granule(flags) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let Ok(size_u32) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         if !size_u32.is_multiple_of(align) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
             return d;
@@ -578,39 +578,39 @@ impl Lv2Host {
         let entry_count = args[4] as i32;
         let mem_id_ptr = args[5] as u32;
         if size == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         let Some(align) = accepted_granule(flags) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let Ok(size_u32) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         if !size_u32.is_multiple_of(align) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         if flags & !page_size::GRANULARITY_FIELD != 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if entry_count <= 0 || entry_count > ext_entry::MAX_COUNT {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         for i in 0..entry_count as u32 {
             let Some(type_addr) = entries_ptr
                 .checked_add(i * ext_entry::LEN)
                 .and_then(|e| e.checked_add(ext_entry::TYPE_OFFSET))
             else {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             };
             let Some(entry_type) = read_be_u64(rt, u64::from(type_addr)) else {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             };
             let admitted = ext_entry::PLAIN_TYPES.contains(&entry_type)
                 || (entry_type == ext_entry::PRIVILEGED_TYPE
                     && flags == page_size::FLAG_64K
                     && self.debug_or_root());
             if !admitted {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
+                return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
             }
         }
         if let Some(d) = self.efault_if_null(&[mem_id_ptr]) {
@@ -618,7 +618,7 @@ impl Lv2Host {
         }
         let keyed = names_shared_segment(ipc_key);
         if keyed && self.state.mmapper_ipc.contains_key(&ipc_key) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
+            return Lv2Dispatch::immediate(errno::CELL_EEXIST.into());
         }
         let mem_id = self.alloc_id();
         self.state.mmapper_handles.insert(

@@ -62,7 +62,7 @@ fn mutex_lock_on_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -309,7 +309,7 @@ fn a_not_recursive_attr_creates_a_non_recursive_mutex() {
     );
     match relock {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, u64::from(cellgov_ps3_abi::cell_errors::CELL_EDEADLK));
+            assert_eq!(code, u64::from(cellgov_ps3_abi::lv2::errno::CELL_EDEADLK));
         }
         other => panic!("expected Immediate(EDEADLK), got {other:?}"),
     }
@@ -360,7 +360,7 @@ fn an_unknown_mutex_protocol_is_einval_not_a_default() {
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
     let r = create_with_attr_at_0x200(&mut host, &rt);
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -371,7 +371,7 @@ fn an_unknown_mutex_recursive_value_is_einval() {
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
     let r = create_with_attr_at_0x200(&mut host, &rt);
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -382,7 +382,7 @@ fn an_unknown_mutex_pshared_value_is_einval() {
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
     let r = create_with_attr_at_0x200(&mut host, &rt);
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -394,7 +394,7 @@ fn a_process_shared_mutex_with_zero_ipc_key_is_einval() {
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
     let r = create_with_attr_at_0x200(&mut host, &rt);
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -405,7 +405,7 @@ fn a_process_shared_mutex_with_bad_attach_flags_is_einval() {
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, UnitId::new(0));
     let r = create_with_attr_at_0x200(&mut host, &rt);
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -437,7 +437,7 @@ fn a_null_mutex_id_ptr_is_efault_before_any_state_change() {
         src,
         &rt,
     );
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
     assert_eq!(
         pre,
         host.state_hash(),
@@ -461,7 +461,7 @@ fn an_unreadable_mutex_attr_ptr_is_efault_not_default() {
         src,
         &rt,
     );
-    assert_eq!(r, Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()));
+    assert_eq!(r, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -566,7 +566,7 @@ fn a_saturated_recursive_lock_count_returns_ekresource() {
     let Lv2Dispatch::Immediate { code, .. } = relock else {
         panic!("expected Immediate EKRESOURCE, got {relock:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EKRESOURCE.into());
+    assert_eq!(code, errno::CELL_EKRESOURCE.into());
     assert_eq!(host.mutexes().lookup(id).unwrap().lock_count(), u32::MAX);
     assert_eq!(
         host.mutexes().lookup(id).unwrap().owner(),
@@ -656,7 +656,7 @@ fn mutex_trylock_contended_returns_ebusy_and_does_not_park() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
     assert_eq!(
         host.mutexes().lookup(id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
@@ -674,7 +674,7 @@ fn mutex_trylock_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -724,7 +724,7 @@ fn mutex_unlock_non_owner_returns_eperm() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EPERM.into());
+    assert_eq!(code, errno::CELL_EPERM.into());
 }
 
 #[test]
@@ -761,7 +761,7 @@ fn mutex_lock_from_transient_unit_without_alias_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate ESRCH, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -822,5 +822,5 @@ fn mutex_lock_from_aliased_transient_unit_acquires_as_primary() {
     let Lv2Dispatch::Immediate { code, .. } = after_drop else {
         panic!("expected Immediate ESRCH, got {after_drop:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }

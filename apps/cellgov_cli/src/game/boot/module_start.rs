@@ -1,7 +1,7 @@
 //! Running every loaded PRX's `module_start`.
 
 use cellgov_core::Runtime;
-use cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_BASE;
+use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_BASE;
 
 use super::params::primary_entry_sp;
 use super::types::PrepareOptions;

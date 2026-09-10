@@ -1,4 +1,5 @@
-//! PS3 hardware constants (Cell Broadband Engine PPU).
+//! Cell Broadband Engine PPU constants: timebase, cache geometry,
+//! register-file sizes and the real-address limit.
 //!
 //! Reported to titles via `sys_time_get_timebase_frequency` and used
 //! internally by reservation tracking, dcbz, and PowerPC atomic ops.
@@ -45,12 +46,3 @@ pub const VR_COUNT: usize = 32;
 // [CBE-Handbook p:51 s:2.1] PPE MMU address-space sizes: real address 2^42
 // bytes, effective address 2^64 bytes, virtual address 2^65 bytes.
 pub const CELL_EA_LIMIT: u64 = 0x0000_03FF_FFFF_FFFF;
-
-/// SPU local store size in bytes (256 KiB).
-// [CBE-Handbook p:64 s:3.1.1] Local Store is a 256 KB single-ported memory.
-pub const SPU_LS_SIZE: usize = 256 * 1024;
-
-/// Number of SPU general-purpose 128-bit registers (r0..r127).
-// [SPU-ISA p:25 s:2] The SPU architecture defines 128 general-purpose
-// registers, each holding 128 data bits.
-pub const SPU_REG_COUNT: usize = 128;

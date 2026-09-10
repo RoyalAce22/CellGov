@@ -25,9 +25,9 @@ use cellgov_install::store::{
     TitleRecord, VersionKey,
 };
 use cellgov_install::system_ver::firmware_version_key;
-use cellgov_ps3_abi::dev_flash::{FLASH_MOUNT, VSH_MODULE_DIR, VSH_SELF};
-use cellgov_ps3_abi::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
-use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
+use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, VSH_MODULE_DIR, VSH_SELF};
+use cellgov_ps3_abi::format::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
+use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 
 use crate::cli::exit::die;
 use crate::cli::keys::install_root_of;

@@ -208,7 +208,7 @@ fn a_thread_already_parked_cannot_park_a_second_record() {
         &rt,
     );
     assert!(
-        matches!(d, Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_ESRCH)),
+        matches!(d, Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ESRCH)),
         "got {d:?}"
     );
     assert_eq!(host.state.uart.readers().len(), 1);

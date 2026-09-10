@@ -5,7 +5,7 @@ use std::fs::Metadata;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::fs_store::{DirEntry, FsError};
 use crate::host::Lv2Host;
@@ -19,7 +19,7 @@ pub(super) enum MountResolution {
     /// in-memory FS.
     Cached,
     /// Mount matched but the host-side lookup failed.
-    Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
+    Failed(cellgov_ps3_abi::lv2::errno::Lv2ErrCode),
 }
 
 /// Outcome of a host-side mount-table lookup for a directory path.
@@ -31,7 +31,7 @@ pub(super) enum DirMountResolution {
     /// Entries sorted lexicographically; symlinks, special files, and
     /// non-UTF-8 names dropped.
     Snapshot(Vec<DirEntry>),
-    Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
+    Failed(cellgov_ps3_abi::lv2::errno::Lv2ErrCode),
 }
 
 impl Lv2Host {
@@ -51,7 +51,7 @@ impl Lv2Host {
             Ok(Some((host_path, md))) if md.is_file() => host_path.to_path_buf(),
             // A shadowing root that holds a directory under this name
             // hides whatever a later root holds there.
-            Ok(Some(_)) | Ok(None) => return MountResolution::Failed(cell_errors::CELL_ENOENT),
+            Ok(Some(_)) | Ok(None) => return MountResolution::Failed(errno::CELL_ENOENT),
             Err((candidate, kind)) => {
                 let code = self.mount_candidate_unreadable(path, candidate, kind);
                 return MountResolution::Failed(code);
@@ -60,7 +60,7 @@ impl Lv2Host {
 
         let bytes = match std::fs::read(&host_path) {
             Ok(b) => b,
-            Err(_) => return MountResolution::Failed(cell_errors::CELL_EIO),
+            Err(_) => return MountResolution::Failed(errno::CELL_EIO),
         };
 
         match self.fs_store_mut().register_blob(path.to_string(), bytes) {
@@ -73,7 +73,7 @@ impl Lv2Host {
                          after UnknownPath; contract violated"
                     ),
                 );
-                MountResolution::Failed(cell_errors::CELL_EFAULT)
+                MountResolution::Failed(errno::CELL_EFAULT)
             }
             Err(other) => {
                 self.record_invariant_break(
@@ -82,7 +82,7 @@ impl Lv2Host {
                         "register_blob returned {other:?} for {path:?}; contract violated"
                     ),
                 );
-                MountResolution::Failed(cell_errors::CELL_EFAULT)
+                MountResolution::Failed(errno::CELL_EFAULT)
             }
         }
     }
@@ -114,7 +114,7 @@ impl Lv2Host {
                     // the type; a file there hides every later
                     // root's directory.
                     if present.is_empty() && !md.is_dir() {
-                        return DirMountResolution::Failed(cell_errors::CELL_ENOTDIR);
+                        return DirMountResolution::Failed(errno::CELL_ENOTDIR);
                     }
                     present.push((candidate.as_path(), md));
                 }
@@ -126,7 +126,7 @@ impl Lv2Host {
             }
         }
         if present.is_empty() {
-            return DirMountResolution::Failed(cell_errors::CELL_ENOENT);
+            return DirMountResolution::Failed(errno::CELL_ENOENT);
         }
 
         // The `String` key gives the UTF-8 byte order the contract
@@ -151,7 +151,7 @@ impl Lv2Host {
         path: &str,
         candidate: &Path,
         kind: ErrorKind,
-    ) -> cellgov_ps3_abi::cell_errors::Lv2ErrCode {
+    ) -> cellgov_ps3_abi::lv2::errno::Lv2ErrCode {
         self.log_invariant_break(
             "dispatch.fs.mount_candidate_unreadable",
             format_args!(
@@ -160,9 +160,9 @@ impl Lv2Host {
             ),
         );
         if kind == ErrorKind::PermissionDenied {
-            cell_errors::CELL_EACCES
+            errno::CELL_EACCES
         } else {
-            cell_errors::CELL_EIO
+            errno::CELL_EIO
         }
     }
 }
@@ -255,7 +255,7 @@ enum MountResolveErr {
     #[error("no mount matched")]
     Unmounted,
     #[error("mount resolve failed: lv2 errno 0x{:08x}", .0.code)]
-    Failed(cellgov_ps3_abi::cell_errors::Lv2ErrCode),
+    Failed(cellgov_ps3_abi::lv2::errno::Lv2ErrCode),
 }
 
 /// Shared prefix-resolution step for the file and directory surfaces.
@@ -263,7 +263,7 @@ fn resolve_candidates(host: &mut Lv2Host, path: &str) -> Result<Vec<PathBuf>, Mo
     match host.fs_mounts().resolve_candidates(path) {
         Ok(Some(c)) => Ok(c),
         Ok(None) => Err(MountResolveErr::Unmounted),
-        Err(FsError::PathTraversal) => Err(MountResolveErr::Failed(cell_errors::CELL_EACCES)),
+        Err(FsError::PathTraversal) => Err(MountResolveErr::Failed(errno::CELL_EACCES)),
         Err(other) => {
             host.record_invariant_break(
                 "dispatch.fs.mount_resolve_unexpected",
@@ -272,7 +272,7 @@ fn resolve_candidates(host: &mut Lv2Host, path: &str) -> Result<Vec<PathBuf>, Mo
                      contract violated"
                 ),
             );
-            Err(MountResolveErr::Failed(cell_errors::CELL_EFAULT))
+            Err(MountResolveErr::Failed(errno::CELL_EFAULT))
         }
     }
 }

@@ -5,7 +5,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -27,7 +27,7 @@ impl Lv2Host {
                  not implemented; returning CELL_ENOSYS"
             ),
         );
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `sys_memory_free`: the bump allocator tracks no per-allocation
@@ -114,7 +114,7 @@ impl Lv2Host {
         if let Some(d) = self.efault_if_null(&[mem_info_ptr]) {
             return d;
         }
-        let total = cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL;
+        let total = cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL;
         // ptr starts at base and only grows; set_mem_alloc_base resets both.
         debug_assert!(self.state.mem_alloc_ptr >= self.derived.mem_alloc_base);
         let consumed = self.state.mem_alloc_ptr - self.derived.mem_alloc_base;
@@ -205,7 +205,7 @@ impl Lv2Host {
         // gates run inside dispatch_ppu_thread_create, so this one
         // fires first when more than one would apply.
         if flags & 3 == 3 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
+            return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
         }
         if flags != 0 {
             self.log_invariant_break(
@@ -236,7 +236,7 @@ impl Lv2Host {
     ///   [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
     ///   spawned children serve the retail-application fallback.
     /// - Any other `pkg_id` answers the SS-domain status
-    ///   [`cellgov_ps3_abi::sys_ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID`].
+    ///   [`cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID`].
     ///   All fourteen syscall-871 sites in the installed firmware --
     ///   eight modules, each site an immediate load -- put 1, 2 or 3
     ///   in `r3`. Nothing in that set reaches this arm, and the status
@@ -249,10 +249,10 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         match pkg_id {
-            1 | 3 => Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into()),
+            1 | 3 => Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()),
             2 => match u32::try_from(a2) {
-                Err(_) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
-                Ok(0) => Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+                Err(_) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
+                Ok(0) => Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
                 Ok(addr) => {
                     let pid = self.state.processes.process_of_unit(requester);
                     let authority_id = match self.state.processes.get(pid) {
@@ -286,7 +286,7 @@ impl Lv2Host {
                 }
             },
             _ => Lv2Dispatch::immediate(u64::from(
-                cellgov_ps3_abi::sys_ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID,
+                cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID,
             )),
         }
     }
@@ -346,7 +346,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
     /// `Unsupported` catch-all: CELL_ENOSYS.
@@ -364,7 +364,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `Malformed` rejection: the classifier could not bind the
@@ -383,7 +383,7 @@ impl Lv2Host {
                 args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
             ),
         );
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
     /// `UnresolvedImport`: a trampoline in an unpatched GOT slot
@@ -430,6 +430,6 @@ impl Lv2Host {
                 );
             }
         }
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 }

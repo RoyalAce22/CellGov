@@ -8,7 +8,7 @@ fn new_boot_holds_exactly_the_boot_process() {
     assert_eq!(boot.ppid, BOOT_PROCESS_PPID);
     assert_eq!(
         boot.authority_id,
-        cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID
+        cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID
     );
     assert_eq!(boot.control_flags1, 0);
 }

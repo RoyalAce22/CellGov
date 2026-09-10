@@ -4,7 +4,7 @@
 ///
 /// Re-exported so a child thread's reserve and the primary's are one
 /// value: the ABI crate owns the fact and carries its citation.
-pub use cellgov_ps3_abi::process_address_space::PS3_ABI_MIN_STACK_FRAME as ABI_MIN_STACK_FRAME;
+pub use cellgov_ps3_abi::hw::address_space::PS3_ABI_MIN_STACK_FRAME as ABI_MIN_STACK_FRAME;
 
 /// A reserved stack block for a child PPU thread.
 ///
@@ -78,7 +78,7 @@ impl ThreadStackAllocator {
     /// Lowest address the allocator will hand out; sits directly
     /// above the primary thread's 1 MiB stack at
     /// `0xD0000000..0xD0100000`. Tracks
-    /// [`cellgov_ps3_abi::process_address_space::PS3_CHILD_STACKS_BASE`].
+    /// [`cellgov_ps3_abi::hw::address_space::PS3_CHILD_STACKS_BASE`].
     pub const CHILD_STACK_BASE: u64 = 0xD010_0000;
 
     /// Construct a fresh allocator.

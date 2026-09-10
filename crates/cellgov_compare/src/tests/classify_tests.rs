@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::observation::{NamedMemoryRegion, ObservationMetadata, ObservedOutcome};
-use cellgov_ps3_abi::sys_process::SYS_MUTEX_OBJECT;
+use cellgov_ps3_abi::lv2::process::SYS_MUTEX_OBJECT;
 use strum::VariantArray;
 
 #[test]

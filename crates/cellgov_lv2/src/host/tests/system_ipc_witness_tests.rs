@@ -5,7 +5,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -265,7 +265,7 @@ fn ipc_port(host: &mut Lv2Host, rt: &FakeRuntime, src: UnitId) -> u32 {
     let created = host.dispatch(
         Lv2Request::EventPortCreate {
             id_ptr: 0x380,
-            port_type: cellgov_ps3_abi::sys_sync::SYS_EVENT_PORT_IPC as u32,
+            port_type: cellgov_ps3_abi::lv2::sync::SYS_EVENT_PORT_IPC as u32,
             name: 0,
         },
         src,
@@ -348,10 +348,7 @@ fn a_second_keyed_create_on_the_same_key_is_eexist() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        second,
-        Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into())
-    );
+    assert_eq!(second, Lv2Dispatch::immediate(errno::CELL_EEXIST.into()));
     let w = &host.observability().system_ipc_witness;
     assert_eq!((w.event_queue_creates, w.event_queue_references), (1, 1));
 }
@@ -401,10 +398,7 @@ fn connect_ipc_to_an_unregistered_namespace_key_is_esrch_and_still_witnessed() {
         src,
         &rt,
     );
-    assert_eq!(
-        connected,
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
-    );
+    assert_eq!(connected, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
     // Counted before the resolve, so a miss is visible.
     assert_eq!(
         host.observability().system_ipc_witness.event_port_connects,
@@ -459,7 +453,7 @@ fn a_refused_send_is_not_counted_as_an_enqueue() {
     }
     assert_eq!(
         send(&mut host),
-        Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+        Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
     );
     assert_eq!(
         host.observability().system_ipc_witness.event_queue_enqueues,
@@ -485,10 +479,7 @@ fn a_send_through_an_unconnected_port_is_enotconn() {
         src,
         &rt,
     );
-    assert_eq!(
-        sent,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into())
-    );
+    assert_eq!(sent, Lv2Dispatch::immediate(errno::CELL_ENOTCONN.into()));
     assert_eq!(
         host.observability().system_ipc_witness.event_queue_enqueues,
         0

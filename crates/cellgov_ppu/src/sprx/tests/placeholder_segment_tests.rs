@@ -1,7 +1,7 @@
 //! Parse and load of a module whose PT_LOAD table holds zero-sized
 //! placeholders around its text and data segments.
 
-use cellgov_ps3_abi::elf::{ELF64_RELA_SIZE, ELF_PHENTSIZE};
+use cellgov_ps3_abi::format::elf::{ELF64_RELA_SIZE, ELF_PHENTSIZE};
 
 use crate::sprx::test_fixtures::make_test_prx;
 use crate::sprx::{load_prx, parse_prx, PrxLoadError};

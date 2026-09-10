@@ -23,8 +23,8 @@ use std::path::PathBuf;
 use cellgov_install::param_sfo;
 use cellgov_install::store::{Artifact, InstallRecord, StoreLayout, TitleId, DEFAULT_VFS_ROOT};
 use cellgov_install::system_ver::firmware_version_key;
-use cellgov_ps3_abi::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
-use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
+use cellgov_ps3_abi::format::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
+use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 use registry::{titles, workspace_root};
 
 /// The `distribution` a disc install records; its PARAM.SFO sits under

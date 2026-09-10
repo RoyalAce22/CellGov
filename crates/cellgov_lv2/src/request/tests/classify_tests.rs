@@ -509,7 +509,7 @@ fn classify_event_queue_create_destroy() {
 /// prototype's last argument is non-zero.
 #[test]
 fn classify_config_family_reads_each_register_position() {
-    use cellgov_ps3_abi::sys_config::SYS_CONFIG_SERVICE_USER_LIBPAD;
+    use cellgov_ps3_abi::lv2::config::SYS_CONFIG_SERVICE_USER_LIBPAD;
     assert_eq!(
         classify(syscall::CONFIG_OPEN, &[0x11, 0x2000, 0x77, 0, 0, 0, 0, 0]),
         Lv2Request::ConfigOpen {

@@ -526,7 +526,7 @@ impl ExecutionUnit for RsxLabelWriteEmitterUnit {
 fn build_with_sys_rsx_reservation() -> Runtime {
     use cellgov_lv2::host::Lv2Host;
     use cellgov_mem::{PageSize, Region};
-    use cellgov_ps3_abi::sys_rsx::region;
+    use cellgov_ps3_abi::lv2::rsx::region;
     let regions = vec![
         Region::new(0, 0x10000, "flat", PageSize::Page4K),
         Region::new(
@@ -544,8 +544,8 @@ fn build_with_sys_rsx_reservation() -> Runtime {
 fn a_label_write_resolves_against_the_base_sys_rsx_context_allocate_published() {
     use cellgov_lv2::host::Lv2Host;
     use cellgov_mem::{ByteRange, GuestAddr};
-    use cellgov_ps3_abi::sys_rsx::region;
-    use cellgov_ps3_abi::syscall::SYS_RSX_CONTEXT_ALLOCATE;
+    use cellgov_ps3_abi::lv2::rsx::region;
+    use cellgov_ps3_abi::lv2::syscall::SYS_RSX_CONTEXT_ALLOCATE;
 
     const OFFSET: u32 = 0x40;
     const VALUE: u32 = 0xCAFE_BABE;

@@ -1,7 +1,7 @@
 //! `sys_fs_close` dispatch tests: fd-table removal, EBADF on unknown or double close, fd exhaustion, and the never-decrementing fs-fd object count.
 
 use cellgov_effects::Effect;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -33,7 +33,7 @@ fn close_truly_unknown_fd_returns_ebadf() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_close(0xDEAD_BEEF)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }
@@ -46,11 +46,7 @@ fn double_close_returns_ebadf_on_second_call() {
         .unwrap();
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(run(&mut host, &rt, fs_close(fd)), 0, 0);
-    assert_immediate(
-        run(&mut host, &rt, fs_close(fd)),
-        cell_errors::CELL_EBADF.code,
-        0,
-    );
+    assert_immediate(run(&mut host, &rt, fs_close(fd)), errno::CELL_EBADF.code, 0);
 }
 
 #[test]
@@ -113,7 +109,7 @@ fn fd_exhaustion_returns_emfile() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/hot\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_EMFILE.code,
+        errno::CELL_EMFILE.code,
         0,
     );
 }

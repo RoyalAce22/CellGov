@@ -391,7 +391,7 @@ fn runner_install(work: &ScratchDir, version_txt: Option<&str>) -> PathBuf {
     let root = work.join("runner");
     if let Some(text) = version_txt {
         let mut path = root.join("dev_flash");
-        for c in cellgov_ps3_abi::dev_flash::VERSION_TXT_COMPONENTS {
+        for c in cellgov_ps3_abi::format::dev_flash::VERSION_TXT_COMPONENTS {
             path.push(c);
         }
         fs::create_dir_all(path.parent().unwrap()).unwrap();

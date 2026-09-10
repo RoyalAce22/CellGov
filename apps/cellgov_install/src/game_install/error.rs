@@ -8,7 +8,7 @@ use crate::param_sfo;
 use crate::pkg;
 use crate::store::layout::ArtifactKind;
 use crate::store::rename::RenameRefused;
-use cellgov_ps3_abi::title_tree::DISC_UPDATE_PUP;
+use cellgov_ps3_abi::format::title_tree::DISC_UPDATE_PUP;
 
 /// Why a game install failed.
 #[derive(Debug, thiserror::Error)]

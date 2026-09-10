@@ -48,13 +48,13 @@ fn pad_with_sce_magic(len: usize) -> Vec<u8> {
 
 #[test]
 fn classify_source_routes_elf_magic_to_elf() {
-    let buf = pad_with_elf_magic(cellgov_ps3_abi::elf::ELF_HEADER_SIZE);
+    let buf = pad_with_elf_magic(cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE);
     assert_eq!(classify_source(&buf), Ok(SourceKind::Elf));
 }
 
 #[test]
 fn classify_source_routes_sce_magic_to_sce_wrapped() {
-    let buf = pad_with_sce_magic(cellgov_ps3_abi::elf::ELF_HEADER_SIZE);
+    let buf = pad_with_sce_magic(cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE);
     assert_eq!(classify_source(&buf), Ok(SourceKind::SceWrapped));
 }
 
@@ -66,7 +66,7 @@ fn classify_source_rejects_short_file_even_with_valid_magic() {
 
 #[test]
 fn classify_source_rejects_bad_magic() {
-    let mut buf = vec![0u8; cellgov_ps3_abi::elf::ELF_HEADER_SIZE];
+    let mut buf = vec![0u8; cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE];
     buf[0..4].copy_from_slice(b"BAD!");
     assert_eq!(
         classify_source(&buf),
@@ -129,7 +129,7 @@ fn nearest_stub_hint_returns_none_on_empty_scope() {
 /// to reach its e_type check.
 fn elf64_be_of_type(e_type: u16) -> Vec<u8> {
     let mut data = vec![0u8; 128];
-    data[0..4].copy_from_slice(&cellgov_ps3_abi::elf::ELF_MAGIC);
+    data[0..4].copy_from_slice(&cellgov_ps3_abi::format::elf::ELF_MAGIC);
     data[4] = 2; // ELFCLASS64
     data[5] = 2; // ELFDATA2MSB
     data[16..18].copy_from_slice(&e_type.to_be_bytes());
@@ -138,7 +138,7 @@ fn elf64_be_of_type(e_type: u16) -> Vec<u8> {
 
 #[test]
 fn a_title_executable_has_no_module_info_and_that_is_not_a_refusal() {
-    let eboot = elf64_be_of_type(cellgov_ps3_abi::elf::ET_EXEC);
+    let eboot = elf64_be_of_type(cellgov_ps3_abi::format::elf::ET_EXEC);
     assert!(module_identity(&eboot)
         .expect("ET_EXEC is the EBOOT case")
         .is_none());

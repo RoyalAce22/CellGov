@@ -102,7 +102,7 @@ fn an_sce_module_that_will_not_decrypt_is_omitted_carrying_the_decrypts_reason()
     // Minimal SCE container header: magic, then revision_flags 0x0018
     // at offset 8 -- enough for parse_sce_header, and the empty vault
     // holds no APP key for that revision.
-    let mut sce = cellgov_ps3_abi::sce::SCE_MAGIC.to_vec();
+    let mut sce = cellgov_ps3_abi::format::sce::SCE_MAGIC.to_vec();
     sce.extend_from_slice(&[0u8; 0x1c]);
     sce[9] = 0x18;
     std::fs::write(dir.join("sys/external/libsealed.sprx"), &sce).unwrap();

@@ -3,8 +3,8 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_rsx::{control_register, display_buffer, package};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::rsx::{control_register, display_buffer, package};
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
@@ -58,7 +58,7 @@ impl Lv2Host {
         // passes here. Pinned by
         // sys_rsx_context_attribute_after_free_still_dispatches.
         if !self.state.rsx_context.allocated || context_id != self.state.rsx_context.context_id {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         match package_id {
             package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(a3, a4, tick, rt),
@@ -117,7 +117,7 @@ impl Lv2Host {
     fn sys_rsx_attribute_set_display_buffer(&mut self, a3: u64, a4: u64, a5: u64) -> Lv2Dispatch {
         let id = (a3 & 0xFF) as usize;
         if id >= display_buffer::COUNT_MAX {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let width = (a4 >> 32) as u32;
         let height = a4 as u32;
@@ -220,7 +220,7 @@ impl Lv2Host {
                  internal-invariant violation."
             ),
         );
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 }
 

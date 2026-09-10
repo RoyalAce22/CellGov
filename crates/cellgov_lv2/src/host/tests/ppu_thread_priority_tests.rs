@@ -8,8 +8,8 @@ use crate::ppu_thread::PpuThreadId;
 use crate::request::Lv2Request;
 use cellgov_event::UnitId;
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::sys_ppu_thread::{PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN_ROOT};
-use cellgov_ps3_abi::{cell_errors, syscall};
+use cellgov_ps3_abi::lv2::ppu_thread::{PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN_ROOT};
+use cellgov_ps3_abi::lv2::{errno, syscall};
 
 const PRIO_PTR: u32 = 0x2000;
 
@@ -90,15 +90,15 @@ fn the_range_bounds_are_inclusive() {
     );
     assert_eq!(
         set_priority(&mut host, &rt, id, i64::from(PPU_THREAD_PRIORITY_MAX) + 1),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(
         set_priority(&mut host, &rt, id, -1),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(
         set_priority(&mut host, &rt, id, i64::from(PPU_THREAD_PRIORITY_MIN_ROOT)),
-        u64::from(cell_errors::CELL_EINVAL),
+        u64::from(errno::CELL_EINVAL),
         "a user process does not get the root floor"
     );
     assert_eq!(
@@ -114,7 +114,7 @@ fn a_debug_or_root_process_may_go_down_to_the_root_floor() {
     // zero has no public anchor.
     let rt = rt();
     let mut host = Lv2Host::new();
-    host.set_control_flags1(cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK);
+    host.set_control_flags1(cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK);
     seed_primary_ppu(&mut host, src());
     let id = PpuThreadId::PRIMARY.raw();
     assert_eq!(
@@ -134,11 +134,11 @@ fn a_debug_or_root_process_may_go_down_to_the_root_floor() {
             id,
             i64::from(PPU_THREAD_PRIORITY_MIN_ROOT) - 1
         ),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(
         set_priority(&mut host, &rt, id, i64::from(PPU_THREAD_PRIORITY_MAX) + 1),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
 }
 
@@ -150,11 +150,11 @@ fn a_range_error_precedes_the_id_lookup_and_an_unknown_id_is_esrch() {
     let unknown = 0x7fff_ffff;
     assert_eq!(
         set_priority(&mut host, &rt, unknown, 5000),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(
         set_priority(&mut host, &rt, unknown, 5),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
 }
 
@@ -168,7 +168,7 @@ fn only_the_low_word_of_the_prio_argument_is_read() {
     // guest ABI hands over for a negative s32.
     assert_eq!(
         set_priority(&mut host, &rt, id, -2),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(set_priority(&mut host, &rt, id, 0x1_0000_0000 + 7), 0);
     assert_eq!(get_priority(&mut host, &rt, id), 7);

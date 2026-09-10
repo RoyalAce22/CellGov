@@ -1,7 +1,7 @@
 //! `sys_memory_allocate` bump-allocator dispatch.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -18,7 +18,7 @@ impl Lv2Host {
         // The cursor is left unchanged on ENOMEM.
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(aligned_ptr) = self
             .state
@@ -26,10 +26,10 @@ impl Lv2Host {
             .checked_add(ALIGN - 1)
             .map(|p| p & !(ALIGN - 1))
         else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(next) = aligned_ptr.checked_add(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         // The allocator's budget and sc 352's reported total are the
         // same number, so "this allocation succeeded" and "available
@@ -37,9 +37,9 @@ impl Lv2Host {
         let region_end = self
             .derived
             .mem_alloc_base
-            .saturating_add(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
+            .saturating_add(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL);
         if next > region_end {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         self.state.mem_alloc_ptr = next;
         self.immediate_write_u32(aligned_ptr, alloc_addr_ptr, requester, tick)
@@ -74,23 +74,23 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        use cellgov_ps3_abi::sys_memory::page_size;
+        use cellgov_ps3_abi::lv2::memory::page_size;
         if size == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         let align: u32 = match flags {
             0 | page_size::FLAG_1M => page_size::GRANULE_1M,
             page_size::FLAG_64K => page_size::GRANULE_64K,
-            _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
         };
         if !size.is_multiple_of(u64::from(align)) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EALIGN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
         if !self.state.memory_containers.contains(&cid) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let Ok(size) = u32::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(aligned_ptr) = self
             .state
@@ -98,17 +98,17 @@ impl Lv2Host {
             .checked_add(align - 1)
             .map(|p| p & !(align - 1))
         else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let Some(next) = aligned_ptr.checked_add(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         let region_end = self
             .derived
             .mem_alloc_base
-            .saturating_add(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
+            .saturating_add(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL);
         if next > region_end {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         if let Some(d) = self.efault_if_null(&[alloc_addr_ptr]) {
             return d;

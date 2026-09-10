@@ -12,7 +12,7 @@ use super::types::PrxLoadStageError;
 const UNRESOLVED_TRAMP_BODY_BYTES: usize = 24;
 
 /// Encode the unresolved-import trampoline body for `nid`: load NID
-/// into r4, set r11 to [`cellgov_ps3_abi::syscall::UNRESOLVED_IMPORT`],
+/// into r4, set r11 to [`cellgov_ps3_abi::lv2::syscall::UNRESOLVED_IMPORT`],
 /// `sc`, `blr`.
 ///
 /// The `clrldi r4, r4, 32` clears the upper 32 bits because

@@ -1,11 +1,11 @@
 //! LEV-aware dispatch-hint classifier for `sc` yields.
 //!
 //! Composes the pure namespace partition from
-//! `cellgov_ps3_abi::syscall_namespace` with the hypercall guard so
+//! `cellgov_ps3_abi::lv2::namespace` with the hypercall guard so
 //! the runtime can route an `sc` to LV2, an unresolved-import
 //! trampoline, or a fault path off a single typed value.
 
-use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
+use cellgov_ps3_abi::lv2::namespace::SyscallNamespace;
 
 /// Dispatch hint produced by [`classify`] for a guest `sc` instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

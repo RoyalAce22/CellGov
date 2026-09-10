@@ -18,8 +18,8 @@ use std::collections::{BTreeSet, VecDeque};
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_usbd as usb;
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::usbd as usb;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse};
@@ -164,7 +164,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !self.state.usbd.handles.remove(&handle) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let waiters: Vec<UsbdWaiter> = self.state.usbd.waiters.drain(..).collect();
         if waiters.is_empty() {
@@ -208,7 +208,7 @@ impl Lv2Host {
     /// - `CELL_EINVAL` for a handle no initialize minted.
     pub(super) fn dispatch_usbd_get_device_list(&mut self, handle: u32) -> Lv2Dispatch {
         if !self.state.usbd.handles.contains(&handle) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         Lv2Dispatch::immediate(0)
     }
@@ -221,9 +221,9 @@ impl Lv2Host {
         product_ptr: u32,
         product_len: u32,
         rt: &dyn Lv2Runtime,
-    ) -> Result<Vec<u8>, cell_errors::Lv2ErrCode> {
+    ) -> Result<Vec<u8>, errno::Lv2ErrCode> {
         if !self.state.usbd.handles.contains(&handle) {
-            return Err(cell_errors::CELL_EINVAL);
+            return Err(errno::CELL_EINVAL);
         }
         // The kernel signature carries the length as a u16.
         let len = usize::from(product_len as u16);
@@ -232,7 +232,7 @@ impl Lv2Host {
         }
         rt.read_committed(u64::from(product_ptr), len)
             .map(<[u8]>::to_vec)
-            .ok_or(cell_errors::CELL_EFAULT)
+            .ok_or(errno::CELL_EFAULT)
     }
 
     /// `sys_usbd_register_ldd` (535): records the product string so a
@@ -280,7 +280,7 @@ impl Lv2Host {
             Err(code) => return Lv2Dispatch::immediate(code.into()),
         };
         if !self.state.usbd.ldds.remove(&product) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         Lv2Dispatch::immediate(0)
     }
@@ -300,7 +300,7 @@ impl Lv2Host {
         desc_ptr: u32,
     ) -> Lv2Dispatch {
         if !self.state.usbd.handles.contains(&handle) || desc_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         self.dispatch_usbd_no_device(handle)
     }
@@ -317,7 +317,7 @@ impl Lv2Host {
         if self.state.usbd.handles.contains(&handle) {
             self.obs.usbd_no_device_refusals += 1;
         }
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
     /// `sys_usbd_receive_event` (540): parks the caller until
@@ -336,20 +336,20 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if !self.state.usbd.handles.contains(&handle) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if let Some(d) = self.efault_if_null(&out_ptrs) {
             return d;
         }
         if out_ptrs.iter().any(|&p| !rt.writable(u64::from(p), 8)) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(thread) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             self.log_invariant_break(
                 "dispatch.usbd_receive_caller_without_thread_record",
                 format_args!("sys_usbd_receive_event: unit {requester:?} has no PPU thread record"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if self.state.usbd.waiters.iter().any(|w| w.thread == thread) {
             // A parked thread cannot dispatch; two records for one
@@ -360,7 +360,7 @@ impl Lv2Host {
                     "sys_usbd_receive_event: {thread:?} is already parked; returning CELL_ESRCH"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         self.state.usbd.waiters.push_back(UsbdWaiter {
             thread,

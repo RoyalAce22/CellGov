@@ -384,7 +384,7 @@ lv2_syscalls! {
 /// has no firmware export. The trampoline loads the NID into r4
 /// and the dispatcher emits a structured diagnostic.
 ///
-/// Sits at the start of [`crate::syscall_namespace::SyscallNamespace::UnresolvedImport`]
+/// Sits at the start of [`crate::lv2::namespace::SyscallNamespace::UnresolvedImport`]
 /// so the namespace classifier routes it without colliding with
 /// the LV2 syscall range (0..0x10000). Sits outside the
 /// `lv2_syscalls!{}` macro: it is not in the Lv2 namespace and

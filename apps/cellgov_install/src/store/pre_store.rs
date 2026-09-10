@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::dev_flash::FLASH_MOUNTS;
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNTS;
 
 use crate::store::layout::StoreLayout;
 

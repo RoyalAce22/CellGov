@@ -594,7 +594,7 @@ fn nv4097_get_report_passes_full_u32_as_offset() {
 /// blocks in front of it.
 #[test]
 fn a_report_offset_lands_in_the_report_block_under_a_label_base() {
-    use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    use cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET;
     let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
     let mut ctx = ctx_with_time_and_label_base(
         &mut cursor,
@@ -617,7 +617,7 @@ fn a_report_offset_lands_in_the_report_block_under_a_label_base() {
 /// what an unbased offset of zero would hit.
 #[test]
 fn report_entry_zero_does_not_alias_semaphore_slot_zero() {
-    use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    use cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET;
     let (mut cursor, mut sem_offset, mut emitted) = fresh_state();
     let mut ctx = ctx_with_time_and_label_base(
         &mut cursor,

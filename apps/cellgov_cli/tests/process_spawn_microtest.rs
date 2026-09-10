@@ -22,7 +22,7 @@ const CHILD_SELF: &str = "../../tests/micro/process_spawn_wait/build/child.self"
 // at 0x1000_0000 (same sizing as cellgov_ppu's microtest harness).
 const MEM_SIZE: usize = 0x1002_0000;
 const RESULT_ADDR: u64 = 0x100;
-const EXPECTED_PID: u32 = cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID + 0x100;
+const EXPECTED_PID: u32 = cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID + 0x100;
 const CHILD_MAGIC: u32 = 0x600D_F00D;
 
 /// `li r11, 22; sc` -- a terminal `blr` lands on sys_process_exit.
@@ -350,7 +350,7 @@ fn parent_spawns_a_genuinely_sce_wrapped_child_self() {
     // the wrong-magic message instead of an out-of-range panic.
     assert_eq!(
         child_self.get(..4),
-        Some(cellgov_ps3_abi::sce::SCE_MAGIC.as_slice()),
+        Some(cellgov_ps3_abi::format::sce::SCE_MAGIC.as_slice()),
         "child.self must be genuinely SCE-wrapped; rebuild via build.sh's make_self step",
     );
 
@@ -397,7 +397,7 @@ fn a_wrapped_child_and_its_plaintext_elf_run_identically() {
     // renamed .self makes both sides the same run.
     assert_eq!(
         child_self.get(..4),
-        Some(cellgov_ps3_abi::sce::SCE_MAGIC.as_slice()),
+        Some(cellgov_ps3_abi::format::sce::SCE_MAGIC.as_slice()),
         "child.self must be genuinely SCE-wrapped; rebuild via build.sh's make_self step",
     );
     assert_ne!(

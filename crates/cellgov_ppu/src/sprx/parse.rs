@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE,
     NID_MODULE_START, NID_MODULE_STOP, PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD, PT_PRX_RELOC,
     R_PPC64_ADDR32,

@@ -27,7 +27,7 @@ use std::ops::Range;
 
 use cellgov_lv2::FIRST_KERNEL_ID;
 use cellgov_mem::be::read_u32;
-use cellgov_ps3_abi::sys_process::{
+use cellgov_ps3_abi::lv2::process::{
     ProcessObjectClassId, SYS_COND_OBJECT, SYS_EVENT_FLAG_OBJECT, SYS_EVENT_QUEUE_OBJECT,
     SYS_LWCOND_OBJECT, SYS_LWMUTEX_OBJECT, SYS_MUTEX_OBJECT, SYS_RWLOCK_OBJECT,
     SYS_SEMAPHORE_OBJECT,

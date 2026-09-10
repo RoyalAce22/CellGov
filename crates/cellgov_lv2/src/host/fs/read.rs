@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -35,12 +35,12 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, nread_out_ptr, 8, 8) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         // Peek fd validity (offset unchanged) before any buffer check.
         if self.fs_store().fstat(fd).is_err() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
         }
 
         let nbytes_usize = usize::try_from(nbytes).unwrap_or(usize::MAX);
@@ -48,7 +48,7 @@ impl Lv2Host {
         // POSIX: a failed read must leave the file position unchanged,
         // so the buffer check runs before read_at advances the offset.
         if nbytes > 0 && !rt.writable(buf_ptr as u64, nbytes_usize) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let bytes_read = match self.fs_store_mut().read_at(fd, nbytes_usize) {
@@ -61,7 +61,7 @@ impl Lv2Host {
                          (fstat said valid); contract violated"
                     ),
                 );
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
 

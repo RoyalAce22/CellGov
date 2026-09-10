@@ -11,37 +11,12 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
-pub mod cell_errors;
-pub mod dev_flash;
-pub mod elf;
-pub mod hardware;
+pub mod codegen;
+pub mod format;
+pub mod hw;
+pub mod lv2;
 pub mod nid;
-pub mod param_sfo;
-pub mod ppc_isa;
-pub mod process_address_space;
-pub mod pup;
-pub mod sce;
 pub mod sha1;
-pub mod spu_channels;
-pub mod sys_config;
-pub mod sys_fs;
-pub mod sys_memory;
-pub mod sys_ppu_thread;
-pub mod sys_process;
-pub mod sys_prx;
-pub mod sys_rsx;
-pub mod sys_spu;
-pub mod sys_ss;
-pub mod sys_sync;
-pub mod sys_uart;
-pub mod sys_usbd;
-pub mod syscall;
-pub mod syscall_namespace;
-pub mod system_ipc;
-pub mod title_tree;
-pub mod trampoline_codegen;
-
-pub mod rsx_nv_hardware;
 
 /// Declares a NID constant whose hex literal is verified against
 /// `SHA-1(name || salt)` at compile time.

@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::dev_flash::{parse_version_txt, VERSION_TXT_COMPONENTS};
+use cellgov_ps3_abi::format::dev_flash::{parse_version_txt, VERSION_TXT_COMPONENTS};
 
 use super::error::FirmwareInstallError;
 

@@ -12,8 +12,8 @@ use cellgov_exec::FaultRegisterDump;
 use cellgov_mem::GuestMemory;
 use cellgov_ppu::decode;
 use cellgov_ppu::instruction::PpuInstruction;
-use cellgov_ps3_abi::ppc_isa::PPC_BO_BIT2;
-use cellgov_ps3_abi::process_address_space::PS3_USER_TEXT_FLOOR;
+use cellgov_ps3_abi::hw::address_space::PS3_USER_TEXT_FLOOR;
+use cellgov_ps3_abi::hw::ppc_isa::PPC_BO_BIT2;
 
 const MAX_BACK_CHAIN_FRAMES: usize = 32;
 

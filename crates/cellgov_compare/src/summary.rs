@@ -383,7 +383,7 @@ impl CrossRunnerSummary {
     /// Both sides name one firmware version, or neither side is named.
     ///
     /// The two versions compare as raw strings: both come from
-    /// `cellgov_ps3_abi::dev_flash::parse_version_txt`, which emits one
+    /// `cellgov_ps3_abi::format::dev_flash::parse_version_txt`, which emits one
     /// spelling per release.
     fn validate_firmware(&self) -> Result<(), CrossRunnerSummaryError> {
         match (

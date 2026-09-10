@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_compare::RunIdentity;
 use cellgov_install::store::TitleTree;
-use cellgov_ps3_abi::dev_flash::GUEST_FLASH_MOUNT;
-use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
+use cellgov_ps3_abi::format::dev_flash::GUEST_FLASH_MOUNT;
+use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 
 use super::identity::{run_identity, IdentityError};
 use super::inventory::{dir_exists, BaseEntry, InventoryError, StoreInventory, UpdateEntry};

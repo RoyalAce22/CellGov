@@ -5,7 +5,7 @@
 //! to point at firmware-exported OPDs.
 
 use crate::loader;
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELF_HEADER_SIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET, ELF_PHOFF_OFFSET,
     PHDR_P_FILESZ_OFFSET, PHDR_P_OFFSET_OFFSET, PHDR_P_PADDR_OFFSET, PHDR_P_VADDR_OFFSET,
     PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_ENTRY_VAR_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET,

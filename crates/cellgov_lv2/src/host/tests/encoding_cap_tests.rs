@@ -25,7 +25,7 @@ fn a_num_threads_over_the_encoding_cap_is_refused_with_a_witness() {
     let (d, breaks) = create(MAX_SLOTS_PER_GROUP + 1);
     match d {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -55,7 +55,7 @@ fn a_zero_thread_group_is_refused_without_the_encoding_cap_witness() {
     let (d, breaks) = create(0);
     match d {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }

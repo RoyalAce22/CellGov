@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 
@@ -68,7 +68,7 @@ impl Lv2Host {
         const PATH_CAP: usize = 256;
         const FIRMWARE_DIR: &str = "/dev_flash/sys/external/";
         let Some(bytes) = rt.read_committed_until(path_ptr, PATH_CAP, 0) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         debug_assert!(
             bytes.len() < PATH_CAP,
@@ -76,7 +76,7 @@ impl Lv2Host {
         );
         let Ok(path) = std::str::from_utf8(bytes) else {
             self.obs.prx_load_not_found_count += 1;
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
         };
         if let Some(entry) = self.state.prx_registry.lookup_by_path(path) {
             return Lv2Dispatch::immediate(u64::from(entry.kernel_id()));
@@ -94,7 +94,7 @@ impl Lv2Host {
         }
         self.obs.prx_load_not_found_count += 1;
         *self.obs.prx_load_misses.entry(path.to_owned()).or_insert(0) += 1;
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
+        Lv2Dispatch::immediate(errno::CELL_ENOENT.into())
     }
 
     /// Immediate dispatch writing `value` (BE u32) to `ptr` with
@@ -107,7 +107,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let write = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(ptr, 4),
@@ -124,7 +124,7 @@ impl Lv2Host {
 
     pub(in crate::host) fn efault_if_null(&self, ptrs: &[u32]) -> Option<Lv2Dispatch> {
         if ptrs.contains(&0) {
-            Some(Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()))
+            Some(Lv2Dispatch::immediate(errno::CELL_EFAULT.into()))
         } else {
             None
         }

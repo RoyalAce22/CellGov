@@ -137,7 +137,7 @@ pub enum CoverageMode {
     SectionFiltered,
     /// Section table present with qualifying executable section(s)
     /// but every `sh_name` resolves to `""` (or `e_shstrndx` is
-    /// [`cellgov_ps3_abi::elf::SHN_UNDEF`] / the `.shstrtab` is
+    /// [`cellgov_ps3_abi::format::elf::SHN_UNDEF`] / the `.shstrtab` is
     /// absent or empty). Coverage is segment-grade.
     SectionFilteredAnonymous,
     /// No qualifying `SHT_PROGBITS + SHF_ALLOC + SHF_EXECINSTR`

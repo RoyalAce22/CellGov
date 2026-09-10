@@ -126,5 +126,5 @@ pub fn lookup(code: u32) -> Option<&'static Lv2ErrCode> {
 }
 
 #[cfg(test)]
-#[path = "tests/cell_errors_tests.rs"]
+#[path = "tests/errno_tests.rs"]
 mod tests;

@@ -3,7 +3,7 @@
 //! Owns the producer-side validation described on [`parse_pt_loads`],
 //! rejecting anything that is not a PS3 PPE object at the entry point.
 
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELFCLASS64, ELFDATA2MSB, ELF_EI_CLASS, ELF_EI_DATA, ELF_EI_VERSION, ELF_E_MACHINE_OFFSET,
     ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET,
     ELF_PHOFF_OFFSET, ELF_PN_XNUM, EM_PPC64, EV_CURRENT, PHDR_P_FILESZ_OFFSET, PHDR_P_MEMSZ_OFFSET,

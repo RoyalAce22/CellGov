@@ -15,13 +15,13 @@ use std::collections::BTreeMap;
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_config::{
+use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_EVENT_SOURCE_SERVICE, SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR,
     SYS_CONFIG_SERVICE_EVENT_ANNOUNCED_HEAD_LEN, SYS_CONFIG_SERVICE_EVENT_HEAD_LEN,
     SYS_CONFIG_SERVICE_EVENT_UNREGISTERED_LEN, SYS_CONFIG_SERVICE_LISTENER_ONCE,
     SYS_CONFIG_SERVICE_PADMANAGER, SYS_CONFIG_SERVICE_PADMANAGER2,
 };
+use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
@@ -443,10 +443,10 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if self.state.event_queues.lookup(equeue_id).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         if out_handle_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         if !self.state.config.seeded {
             for service_id in [
@@ -484,7 +484,7 @@ impl Lv2Host {
         if self.state.config.remove_handle(handle) {
             Lv2Dispatch::immediate(0)
         } else {
-            Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+            Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
         }
     }
 
@@ -508,25 +508,25 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if self.state.config.handle(handle).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let Some(event) = self.state.config.event(event_id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if event.handle != handle {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let Some(service) = self.state.config.service(event.service) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if size < service.announced_len() as u64 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         }
         let Some(record) = self.state.config.record(event_id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if dst_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         Lv2Dispatch::Immediate {
             code: 0,
@@ -560,10 +560,10 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(h) = self.state.config.handle(handle) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if out_listener_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let data = match self.config_read_data("add_service_listener", spec.in_ptr, spec.size, rt) {
             Ok(data) => data,
@@ -603,7 +603,7 @@ impl Lv2Host {
         if self.state.config.remove_listener(listener) {
             Lv2Dispatch::immediate(0)
         } else {
-            Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+            Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
         }
     }
 
@@ -626,10 +626,10 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if self.state.config.handle(handle).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         if out_service_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let data = match self.config_read_data("register_service", spec.data_ptr, spec.size, rt) {
             Ok(data) => data,
@@ -654,7 +654,7 @@ impl Lv2Host {
         service: u32,
     ) -> Lv2Dispatch {
         if !self.state.config.unregister(service) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         let wakes = self.config_notify_listeners(service);
         self.state.config.collect_service(service);
@@ -669,7 +669,7 @@ impl Lv2Host {
         ptr: u32,
         size: u64,
         rt: &dyn Lv2Runtime,
-    ) -> Result<Vec<u8>, cell_errors::Lv2ErrCode> {
+    ) -> Result<Vec<u8>, errno::Lv2ErrCode> {
         if size == 0 {
             return Ok(Vec::new());
         }
@@ -680,11 +680,11 @@ impl Lv2Host {
                     "sys_config_{arm}: data buffer of {size} bytes exceeds the {SYS_CONFIG_DATA_CAP}-byte cap; returning CELL_EINVAL"
                 ),
             );
-            return Err(cell_errors::CELL_EINVAL);
+            return Err(errno::CELL_EINVAL);
         }
         match rt.read_committed(u64::from(ptr), size as usize) {
             Some(bytes) => Ok(bytes.to_vec()),
-            None => Err(cell_errors::CELL_EFAULT),
+            None => Err(errno::CELL_EFAULT),
         }
     }
 

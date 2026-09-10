@@ -1,7 +1,7 @@
 use std::num::NonZeroU8;
 
-use cellgov_ps3_abi::syscall;
-use cellgov_ps3_abi::syscall_namespace::SyscallNamespace;
+use cellgov_ps3_abi::lv2::namespace::SyscallNamespace;
+use cellgov_ps3_abi::lv2::syscall;
 
 use super::Lv2Request;
 

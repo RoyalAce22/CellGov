@@ -7,7 +7,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -50,12 +50,12 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if id_ptr == 0 || attr_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // sys_event_flag_attribute_t: protocol@0 u32, pshared@4 u32,
         // ipc_key@8 u64, flags@16 s32, type@20 s32.
         let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let protocol =
             u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
@@ -65,28 +65,28 @@ impl Lv2Host {
             attr_bytes[22],
             attr_bytes[23],
         ]);
-        use cellgov_ps3_abi::sys_sync::{
+        use cellgov_ps3_abi::lv2::sync::{
             SYS_SYNC_FIFO, SYS_SYNC_PRIORITY, SYS_SYNC_WAITER_MULTIPLE, SYS_SYNC_WAITER_SINGLE,
         };
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if kind != SYS_SYNC_WAITER_SINGLE && kind != SYS_SYNC_WAITER_MULTIPLE {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let id = self.alloc_id();
         if self.state.event_flags.create_with_id(id, init).is_err() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_event_flag_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.event_flags.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.event_flags.destroy(id);
         Lv2Dispatch::immediate(0)
@@ -102,7 +102,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         // Every non-park exit stores through a non-null result
         // pointer: an error exit stores 0, and only a satisfied wait
@@ -113,13 +113,13 @@ impl Lv2Host {
         // the two. CellGov validates the mode first.
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             };
         };
         match self.state.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
@@ -140,7 +140,7 @@ impl Lv2Host {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventFlagEnqueueError::UnknownId) => {
                         return Lv2Dispatch::Immediate {
-                            code: cell_errors::CELL_ESRCH.into(),
+                            code: errno::CELL_ESRCH.into(),
                             effects: event_flag_result_write(result_ptr, 0, requester, tick),
                         };
                     }
@@ -149,7 +149,7 @@ impl Lv2Host {
                         // contract above covers every non-park exit,
                         // so this one zeroes the result too.
                         return Lv2Dispatch::Immediate {
-                            code: cell_errors::CELL_EFAULT.into(),
+                            code: errno::CELL_EFAULT.into(),
                             effects: event_flag_result_write(result_ptr, 0, requester, tick),
                         };
                     }
@@ -182,13 +182,13 @@ impl Lv2Host {
         // trace orders the two.
         let Some(mode) = Self::decode_event_flag_mode(mode_raw) else {
             return Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_EINVAL.into(),
+                code: errno::CELL_EINVAL.into(),
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             };
         };
         match self.state.event_flags.try_wait(id, bits, mode) {
             None => Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             },
             Some(crate::sync_primitives::EventFlagWait::Matched { observed }) => {
@@ -198,7 +198,7 @@ impl Lv2Host {
                 }
             }
             Some(crate::sync_primitives::EventFlagWait::NoMatch) => Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_EBUSY.into(),
+                code: errno::CELL_EBUSY.into(),
                 effects: event_flag_result_write(result_ptr, 0, requester, tick),
             },
         }
@@ -206,7 +206,7 @@ impl Lv2Host {
 
     pub(super) fn dispatch_event_flag_set(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         let Some(woken) = self.state.event_flags.set_and_wake(id, bits) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if woken.is_empty() {
             return Lv2Dispatch::immediate(0);
@@ -235,7 +235,7 @@ impl Lv2Host {
 
     pub(super) fn dispatch_event_flag_clear(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         if !self.state.event_flags.clear_bits(id, bits) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         Lv2Dispatch::immediate(0)
     }
@@ -253,13 +253,13 @@ impl Lv2Host {
         // a non-null num pointer on the ESRCH exit.
         let Some(bits) = self.state.event_flags.lookup(id).map(|e| e.bits()) else {
             return Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: event_flag_count_write(num_ptr, 0, requester, tick),
             };
         };
         let Some(waiters) = self.state.event_flags.cancel_waiters(id) else {
             return Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_ESRCH.into(),
+                code: errno::CELL_ESRCH.into(),
                 effects: event_flag_count_write(num_ptr, 0, requester, tick),
             };
         };
@@ -304,10 +304,10 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(entry) = self.state.event_flags.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if flags_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let bits = entry.bits();
         let write = Effect::SharedWriteIntent {

@@ -2,7 +2,7 @@
 
 use cellgov_sync::ReservedLine;
 
-pub use cellgov_ps3_abi::hardware::{SPU_LS_SIZE, SPU_REG_COUNT};
+pub use cellgov_ps3_abi::hw::spu::{SPU_LS_SIZE, SPU_REG_COUNT};
 
 /// Full SPU architectural state.
 #[derive(Clone)]

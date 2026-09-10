@@ -2,7 +2,7 @@
 
 use super::{save_boot_observation, ObservationInputs, ObservationSaveError};
 use cellgov_mem::{PageSize, Region, RegionAccess};
-use cellgov_ps3_abi::process_address_space::PS3_RSX_BASE;
+use cellgov_ps3_abi::hw::address_space::PS3_RSX_BASE;
 
 #[test]
 fn a_region_over_the_reserved_rsx_window_is_refused_and_nothing_is_written() {

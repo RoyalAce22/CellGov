@@ -283,7 +283,7 @@ fn check_relocations_addressable(parsed: &crate::sprx::ParsedPrx) -> Result<(), 
     for r in &parsed.relocations {
         let target_seg = (r.sym & 0xFF) as usize;
         let value_seg = (r.sym >> 8) & 0xFF;
-        if value_seg == cellgov_ps3_abi::elf::PRX_RELOC_NO_VALUE_SEGMENT {
+        if value_seg == cellgov_ps3_abi::format::elf::PRX_RELOC_NO_VALUE_SEGMENT {
             return Err(PrxLoaderError::RelocWithoutValueSegment {
                 module: parsed.module_id,
                 rtype: r.rtype,

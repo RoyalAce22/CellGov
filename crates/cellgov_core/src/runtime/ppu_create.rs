@@ -3,7 +3,7 @@
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::{Lv2Dispatch, PpuThreadAttrs, PpuThreadInitState};
-use cellgov_ps3_abi::cell_errors::{CELL_E2BIG, CELL_ENOMEM};
+use cellgov_ps3_abi::lv2::errno::{CELL_E2BIG, CELL_ENOMEM};
 
 use super::spaces::AddressSpaceId;
 use super::Runtime;
@@ -124,7 +124,7 @@ impl Runtime {
                 .expect("caller's space exists while the caller runs in it");
         }
         let caller_pid = self.lv2_host.process_of_unit(source);
-        if caller_pid != cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID {
+        if caller_pid != cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID {
             self.lv2_host.bind_unit_process(child_unit_id, caller_pid);
         }
 

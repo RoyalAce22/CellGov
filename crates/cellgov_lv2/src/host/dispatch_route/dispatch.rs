@@ -4,7 +4,7 @@
 //! methods; shared helpers live in [`super::helpers`].
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::syscall;
+use cellgov_ps3_abi::lv2::syscall;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::request::Lv2Request;

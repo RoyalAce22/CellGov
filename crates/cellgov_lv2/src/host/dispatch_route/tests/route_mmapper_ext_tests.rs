@@ -4,8 +4,8 @@
 
 use super::*;
 use cellgov_mem::{GuestAddr, GuestMemory};
-use cellgov_ps3_abi::sys_memory::{ext_entry, page_size, SYS_MMAPPER_NO_SHM_KEY};
-use cellgov_ps3_abi::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT;
+use cellgov_ps3_abi::lv2::memory::{ext_entry, page_size, SYS_MMAPPER_NO_SHM_KEY};
+use cellgov_ps3_abi::lv2::syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT;
 
 const ENTRIES: u32 = 0x4000;
 const MEM_ID_PTR: u32 = 0x9000;
@@ -86,7 +86,7 @@ fn a_fresh_key_mints_a_handle_and_registers_the_key() {
 
 #[test]
 fn a_key_in_the_system_ipc_namespace_counts_as_a_witnessed_create() {
-    use cellgov_ps3_abi::system_ipc::SYSTEM_IPC_KEY_NAMESPACE;
+    use cellgov_ps3_abi::lv2::ipc::SYSTEM_IPC_KEY_NAMESPACE;
     let mut host = Lv2Host::new();
     let rt = rt_with_entries(&[0]);
     let key = SYSTEM_IPC_KEY_NAMESPACE | 0x20;
@@ -94,7 +94,7 @@ fn a_key_in_the_system_ipc_namespace_counts_as_a_witnessed_create() {
     assert_eq!(host.obs.system_ipc_witness.shm_creates, 1);
     assert_eq!(
         code_of(&ext(&mut host, &rt, key, SIZE_64K, page_size::FLAG_64K, 1)),
-        u64::from(cell_errors::CELL_EEXIST)
+        u64::from(errno::CELL_EEXIST)
     );
     assert_eq!(host.obs.system_ipc_witness.shm_creates, 1);
 }
@@ -106,7 +106,7 @@ fn a_registered_key_is_eexist_and_the_caller_probes_the_next_key() {
     let first = mem_id_of(&ext(&mut host, &rt, KEY, SIZE_64K, page_size::FLAG_64K, 1));
     assert_eq!(
         code_of(&ext(&mut host, &rt, KEY, SIZE_64K, page_size::FLAG_64K, 1)),
-        u64::from(cell_errors::CELL_EEXIST)
+        u64::from(errno::CELL_EEXIST)
     );
     let second = mem_id_of(&ext(
         &mut host,
@@ -146,8 +146,8 @@ fn a_keyless_create_registers_nothing_and_repeats_without_colliding() {
 fn the_size_and_flag_gates_fire_before_the_entry_table_is_read() {
     let mut host = Lv2Host::new();
     let rt = rt_with_entries(&[7]);
-    let einval = u64::from(cell_errors::CELL_EINVAL);
-    let ealign = u64::from(cell_errors::CELL_EALIGN);
+    let einval = u64::from(errno::CELL_EINVAL);
+    let ealign = u64::from(errno::CELL_EALIGN);
     assert_eq!(
         code_of(&ext(&mut host, &rt, KEY, 0, page_size::FLAG_64K, 1)),
         ealign
@@ -199,7 +199,7 @@ fn an_unknown_entry_type_is_eperm_and_registers_nothing() {
     let rt = rt_with_entries(&[0, 7]);
     assert_eq!(
         code_of(&ext(&mut host, &rt, KEY, SIZE_64K, page_size::FLAG_64K, 2)),
-        u64::from(cell_errors::CELL_EPERM)
+        u64::from(errno::CELL_EPERM)
     );
     assert!(host.state.mmapper_ipc.is_empty());
     assert!(host.state.mmapper_handles.is_empty());
@@ -207,7 +207,7 @@ fn an_unknown_entry_type_is_eperm_and_registers_nothing() {
 
 #[test]
 fn the_privileged_entry_type_needs_64k_pages_and_debug_or_root() {
-    let eperm = u64::from(cell_errors::CELL_EPERM);
+    let eperm = u64::from(errno::CELL_EPERM);
     let rt = rt_with_entries(&[ext_entry::PRIVILEGED_TYPE]);
     // A user process is refused whatever the page size.
     let mut user = Lv2Host::new();
@@ -218,7 +218,7 @@ fn the_privileged_entry_type_needs_64k_pages_and_debug_or_root() {
     assert!(user.state.mmapper_ipc.is_empty());
     // Root: the page-size condition decides.
     let mut root = Lv2Host::new();
-    root.set_control_flags1(cellgov_ps3_abi::sce::CTRL_FLAGS1_ROOT_MASK);
+    root.set_control_flags1(cellgov_ps3_abi::format::sce::CTRL_FLAGS1_ROOT_MASK);
     assert_eq!(
         code_of(&ext(&mut root, &rt, KEY, 0x10_0000, page_size::FLAG_1M, 1)),
         eperm
@@ -236,7 +236,7 @@ fn an_unreadable_entry_table_is_efault() {
     let rt = FakeRuntime::new(0x4000);
     assert_eq!(
         code_of(&ext(&mut host, &rt, KEY, SIZE_64K, page_size::FLAG_64K, 1)),
-        u64::from(cell_errors::CELL_EFAULT)
+        u64::from(errno::CELL_EFAULT)
     );
 }
 
@@ -261,6 +261,6 @@ fn a_null_mem_id_pointer_is_efault_after_the_entries_pass() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
     assert!(host.state.mmapper_ipc.is_empty());
 }

@@ -78,7 +78,7 @@ fn state_hash_unchanged_when_authority_id_is_the_retail_fallback() {
     // set an authid.
     let pre = Lv2Host::new().state_hash();
     let mut host = Lv2Host::new();
-    host.set_program_authority_id(cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID);
+    host.set_program_authority_id(cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID);
     assert_eq!(pre, host.state_hash());
 }
 
@@ -112,7 +112,7 @@ fn state_hash_unchanged_for_unprivileged_control_flags() {
 #[test]
 fn state_hash_changes_when_a_child_process_is_inserted() {
     use crate::host::process::{ProcessEntry, ProcessTable};
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let pre = Lv2Host::new().state_hash();
     let mut host = Lv2Host::new();
     let mut table = ProcessTable::new_boot();
@@ -132,7 +132,7 @@ fn state_hash_changes_when_a_child_process_is_inserted() {
 #[test]
 fn state_hash_differs_between_two_child_authority_ids() {
     use crate::host::process::{ProcessEntry, ProcessTable};
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let build = |authid: u64| {
         let mut host = Lv2Host::new();
         let mut table = ProcessTable::new_boot();
@@ -335,7 +335,7 @@ fn state_hash_differs_when_mmapper_size_and_align_are_transposed() {
 
 #[test]
 fn state_hash_changes_when_the_boot_exit_status_is_recorded() {
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let pre = Lv2Host::new().state_hash();
     let mut host = Lv2Host::new();
     host.mark_process_exited(BOOT_PROCESS_PID, 0);
@@ -347,7 +347,7 @@ fn state_hash_distinguishes_boot_control_flags_from_a_boot_exit_status() {
     // Both fields are gated 4-byte folds on the boot entry; without a
     // discriminant on the exit status, {ctrl_flags1=5, alive} and
     // {ctrl_flags1=0, exited(5)} would produce the same byte stream.
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let mut flags = Lv2Host::new();
     flags.set_control_flags1(5);
     let mut exited = Lv2Host::new();
@@ -358,7 +358,7 @@ fn state_hash_distinguishes_boot_control_flags_from_a_boot_exit_status() {
 #[test]
 fn state_hash_changes_when_a_child_exit_status_is_recorded() {
     use crate::host::process::ProcessEntry;
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let child = BOOT_PROCESS_PID + 0x100;
     let mut host = Lv2Host::new();
     host.state.processes.insert_child(
@@ -377,7 +377,7 @@ fn state_hash_changes_when_a_child_exit_status_is_recorded() {
 
 #[test]
 fn state_hash_changes_when_a_unit_binding_is_added() {
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
     let pre = Lv2Host::new().state_hash();
     let mut host = Lv2Host::new();
     host.bind_unit_process(UnitId::new(3), BOOT_PROCESS_PID + 0x100);

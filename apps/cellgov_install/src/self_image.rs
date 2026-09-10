@@ -11,7 +11,7 @@
 
 use std::borrow::Cow;
 
-use cellgov_ps3_abi::sce::SCE_MAGIC;
+use cellgov_ps3_abi::format::sce::SCE_MAGIC;
 
 use crate::keys::KeyVault;
 use crate::npdrm::{NpdHeaderInfo, Rap};

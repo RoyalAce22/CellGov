@@ -104,7 +104,7 @@ fn syscall_480_non_firmware_unknown_path_returns_enoent() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ENOENT.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_ENOENT.into())
     );
     assert_eq!(host.observability().prx_load_not_found_count, 1);
 
@@ -115,7 +115,7 @@ fn syscall_480_non_firmware_unknown_path_returns_enoent() {
     let start = start_module(&mut host, 0x5000, p_opt, &rt);
     assert_eq!(
         start,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_ESRCH.into())
     );
 }
 
@@ -195,10 +195,7 @@ fn syscall_480_unknown_firmware_name_returns_enoent_not_a_stub() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOENT.into()));
     assert_eq!(host.observability().prx_load_hle_stub_count, 0);
     assert_eq!(host.observability().prx_load_not_found_count, 1);
 }
@@ -371,10 +368,7 @@ fn syscall_486_null_library_is_efault_not_a_fabricated_ok() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -389,10 +383,7 @@ fn syscall_486_unmapped_library_is_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -409,7 +400,7 @@ fn syscall_484_null_option_pointer_is_einval() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EINVAL.into())
     );
 }
 
@@ -429,10 +420,7 @@ fn syscall_462_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 /// Register one module and return `(host, its kernel id)`.
@@ -631,7 +619,7 @@ fn prx_start_module_cmd2_res_with_only_a_high_word_collapses_to_ok_with_a_break(
 fn prx_start_module_unknown_cmd_returns_prx_error_and_logs_break() {
     // CELL_PRX_ERROR_ERROR lies in the 0x8001_1xxx class that
     // liblv2's dispatcher branches on.
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ERROR;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_ERROR;
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 7, 0));
@@ -650,7 +638,7 @@ fn prx_start_module_unknown_id_returns_esrch() {
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
     assert_eq!(
         start_module(&mut host, 0xDEAD_BEEF, p_opt, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
     );
 }
 
@@ -666,7 +654,7 @@ fn unload_module(host: &mut Lv2Host, id: u32, rt: &FakeRuntime) -> Lv2Dispatch {
 
 #[test]
 fn prx_unload_module_started_returns_not_removable_and_counts() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_REMOVABLE;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_NOT_REMOVABLE;
     let (mut host, id) = host_with_one_prx();
     host.prx_registry_mut().mark_started(id);
     let rt = FakeRuntime::new(0x1000);
@@ -687,7 +675,7 @@ fn prx_unload_module_started_returns_not_removable_and_counts() {
 /// freed for a later lookup to miss.
 #[test]
 fn prx_unload_module_unstarted_withdraws_with_ok() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
     let (mut host, id) = host_with_one_prx();
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(unload_module(&mut host, id, &rt), Lv2Dispatch::immediate(0));
@@ -707,7 +695,7 @@ fn prx_unload_module_unstarted_withdraws_with_ok() {
 /// moves the module to STARTED, which unload then refuses.
 #[test]
 fn prx_start_handshake_marks_started_and_blocks_unload() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_REMOVABLE;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_NOT_REMOVABLE;
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 0));
@@ -723,7 +711,7 @@ fn prx_start_handshake_marks_started_and_blocks_unload() {
 
 #[test]
 fn prx_unload_module_unknown_id_returns_unknown_module() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
     let (mut host, _id) = host_with_one_prx();
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(
@@ -762,10 +750,7 @@ fn syscall_481_unreadable_p_opt_returns_efault_and_logs_break() {
     let rt = FakeRuntime::new(0x1000);
     let breaks_before = host.observability().invariant_break_count;
     let result = start_module(&mut host, id, 0x4000_1000, &rt);
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
         1
@@ -786,7 +771,7 @@ fn prx_load_module_unreadable_path_pointer_returns_efault() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
     );
 }
 
@@ -802,10 +787,7 @@ fn syscall_481_rejects_zero_id_with_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -820,10 +802,7 @@ fn syscall_481_rejects_zero_p_opt_with_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 // -- _sys_prx_stop_module (482) --
@@ -854,12 +833,12 @@ fn syscall_482_esrch_precedes_einval() {
     let rt = FakeRuntime::new(0x1000);
     assert_eq!(
         stop_module(&mut host, 0xDEAD_BEEF, 0, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+        Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
         "unknown id with null pOpt reports the id miss, not EINVAL"
     );
     assert_eq!(
         stop_module(&mut host, id, 0, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     );
 }
 
@@ -906,7 +885,7 @@ fn syscall_482_cmd1_extended_size_also_writes_entry2() {
 
 #[test]
 fn syscall_482_cmd1_wrong_states_report_their_codes() {
-    use cellgov_ps3_abi::sys_prx::{
+    use cellgov_ps3_abi::lv2::prx::{
         CELL_PRX_ERROR_ALREADY_STOPPED, CELL_PRX_ERROR_ALREADY_STOPPING, CELL_PRX_ERROR_NOT_STARTED,
     };
     let p_opt: u32 = 0x4000;
@@ -943,7 +922,7 @@ fn syscall_482_cmd1_wrong_states_report_their_codes() {
 /// the two phases.
 #[test]
 fn syscall_482_full_handshake_unblocks_unload() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_UNKNOWN_MODULE;
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
@@ -972,7 +951,7 @@ fn syscall_482_full_handshake_unblocks_unload() {
 
 #[test]
 fn syscall_482_stopping_module_still_refuses_unload() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_REMOVABLE;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_NOT_REMOVABLE;
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 1, 0));
@@ -1011,7 +990,7 @@ fn syscall_482_cmd2_without_phase1_logs_break_and_keeps_state() {
 
 #[test]
 fn syscall_482_cmd2_res1_returns_can_not_stop_and_logs_break() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_CAN_NOT_STOP;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_CAN_NOT_STOP;
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 2, 1));
@@ -1104,7 +1083,7 @@ fn syscall_482_cmd8_is_a_no_op_stub_that_logs_break() {
 
 #[test]
 fn syscall_482_cmd4_wrong_state_reports_not_started() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_NOT_STARTED;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_NOT_STARTED;
     let (mut host, id) = host_with_one_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 4, 0));
@@ -1116,7 +1095,7 @@ fn syscall_482_cmd4_wrong_state_reports_not_started() {
 
 #[test]
 fn syscall_482_unknown_cmd_returns_prx_error_and_logs_break() {
-    use cellgov_ps3_abi::sys_prx::CELL_PRX_ERROR_ERROR;
+    use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_ERROR;
     let (mut host, id) = host_with_one_started_prx();
     let p_opt: u32 = 0x4000;
     let rt = runtime_with(p_opt, &start_stop_option(0x20, 7, 0));
@@ -1135,7 +1114,7 @@ fn syscall_482_unreadable_p_opt_returns_efault_and_logs_break() {
     let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         stop_module(&mut host, id, 0x4000_1000, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
@@ -1155,10 +1134,7 @@ fn syscall_494_rejects_null_p_info_with_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 /// A 0x10000-byte space carrying only the `size` word of a
@@ -1196,7 +1172,7 @@ fn syscall_494_unreadable_max_field_returns_efault_and_logs_break() {
     let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         get_module_list(&mut host, p_info, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
@@ -1213,7 +1189,7 @@ fn syscall_494_unreadable_idlist_field_returns_efault_and_logs_break() {
     let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         get_module_list(&mut host, p_info, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
@@ -1228,7 +1204,7 @@ fn syscall_494_unreadable_size_field_returns_efault_and_logs_break() {
     let breaks_before = host.observability().invariant_break_count;
     assert_eq!(
         get_module_list(&mut host, 0xFFFC, &rt),
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
     );
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
@@ -1477,7 +1453,7 @@ fn prx_start_module_wrapping_p_opt_returns_efault_and_emits_no_writes() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
         "p_opt+24 wraps u32; must return CELL_EFAULT, not CELL_OK with a wrong-address write"
     );
     assert_eq!(
@@ -1534,7 +1510,7 @@ fn prx_get_module_list_wrapping_p_info_returns_efault_and_emits_no_writes() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into()),
+        Lv2Dispatch::immediate(errno::CELL_EFAULT.into()),
         "pInfo+0x18 wraps u32; must return CELL_EFAULT, not silent slot writes at wrong addresses"
     );
     assert_eq!(

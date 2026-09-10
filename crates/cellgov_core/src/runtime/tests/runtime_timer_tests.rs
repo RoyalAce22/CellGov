@@ -3,7 +3,7 @@
 
 use super::*;
 
-use cellgov_ps3_abi::syscall::{PROCESS_EXIT, TIMER_SLEEP, TIMER_USLEEP};
+use cellgov_ps3_abi::lv2::syscall::{PROCESS_EXIT, TIMER_SLEEP, TIMER_USLEEP};
 
 /// Issues one timer syscall, then records the delivered r3 and
 /// finishes on its next scheduling.
@@ -562,7 +562,7 @@ fn sleep_seconds_argument_reads_only_the_low_32_bits() {
 
 #[test]
 fn process_exit_drops_pending_timer_wakes() {
-    use cellgov_ps3_abi::syscall::PROCESS_EXIT;
+    use cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT;
 
     // The exiting step itself crosses the sleeper's deadline, so
     // without the exit-sweep cancel the same commit's timer firing

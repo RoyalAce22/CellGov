@@ -232,7 +232,7 @@ pub(super) fn connected_port(
     let created = host.dispatch(
         Lv2Request::EventPortCreate {
             id_ptr: 0x180,
-            port_type: cellgov_ps3_abi::sys_sync::SYS_EVENT_PORT_LOCAL as u32,
+            port_type: cellgov_ps3_abi::lv2::sync::SYS_EVENT_PORT_LOCAL as u32,
             name: 0,
         },
         src,

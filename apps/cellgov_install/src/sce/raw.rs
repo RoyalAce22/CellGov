@@ -1,7 +1,7 @@
 //! Byte-level readers, SCE header layouts, and the container /
 //! supplemental-chain parses over them.
 
-use cellgov_ps3_abi::sce::SCE_MAGIC_U32;
+use cellgov_ps3_abi::format::sce::SCE_MAGIC_U32;
 
 use super::error::SceError;
 
@@ -212,7 +212,7 @@ pub fn parse_control_flags1(data: &[u8]) -> Result<Option<u32>, SceError> {
     parse_sce_header(data)?;
     let Some(body) = find_supplemental_body(
         data,
-        cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_PLAINTEXT_CAPABILITY,
+        cellgov_ps3_abi::format::sce::SCE_SUPPLEMENTAL_KIND_PLAINTEXT_CAPABILITY,
     )?
     else {
         return Ok(None);

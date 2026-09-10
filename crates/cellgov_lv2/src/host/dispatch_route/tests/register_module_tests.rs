@@ -98,7 +98,7 @@ fn unrecognised_option_size_is_einval() {
     let rt = FakeRuntime::with_memory(memory_with(1, 0x28, &[]));
     assert_eq!(
         call(&mut host, &rt, OPT.into()),
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EINVAL.into())
     );
 }
 

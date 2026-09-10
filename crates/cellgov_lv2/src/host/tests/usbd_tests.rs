@@ -6,7 +6,7 @@ use crate::host::process::ProcessEntry;
 use crate::host::test_support::{primary_attrs, seed_primary_ppu, FakeRuntime};
 use crate::request::Lv2Request;
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
 
 const HANDLE_PTR: u32 = 0x2000;
 const ARGS: [u32; 3] = [0x3000, 0x3008, 0x3010];
@@ -89,7 +89,7 @@ fn initialize_mints_a_handle_and_a_second_initialize_mints_another() {
     assert_eq!(host.state.usbd.handles().len(), 2);
     assert!(!host.state.usbd.is_pristine());
     let d = host.dispatch(Lv2Request::UsbdInitialize { handle_ptr: 0 }, src(), &rt);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
 }
 
 #[test]
@@ -98,7 +98,7 @@ fn every_arm_refuses_a_handle_no_initialize_minted() {
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, src());
     let bogus = 0x7fff_ffff;
-    let einval = u64::from(cell_errors::CELL_EINVAL);
+    let einval = u64::from(errno::CELL_EINVAL);
     assert_eq!(
         code_of(&host.dispatch(Lv2Request::UsbdFinalize { handle: bogus }, src(), &rt)),
         einval
@@ -190,7 +190,7 @@ fn an_empty_bus_lists_no_devices_and_acknowledges_ldd_registration() {
         src(),
         &rt,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
 }
 
 #[test]
@@ -218,7 +218,7 @@ fn device_and_pipe_scoped_calls_on_a_live_handle_are_einval_and_counted() {
     for req in reqs {
         assert_eq!(
             code_of(&host.dispatch(req, src(), &rt)),
-            u64::from(cell_errors::CELL_EINVAL)
+            u64::from(errno::CELL_EINVAL)
         );
     }
     assert_eq!(host.obs.usbd_no_device_refusals, n);
@@ -288,7 +288,7 @@ fn finalize_with_no_reader_is_immediate_and_a_reparked_thread_is_a_named_break()
     let handle = init(&mut host, &rt);
     assert_parked(&receive(&mut host, &rt, src(), handle, ARGS), handle);
     let d = receive(&mut host, &rt, src(), handle, ARGS_B);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
     assert_eq!(
         host.observability()
             .invariant_break_sites
@@ -314,7 +314,7 @@ fn receive_event_refuses_a_null_or_unwritable_out_pointer_before_parking() {
     seed_primary_ppu(&mut host, src());
     let handle = init(&mut host, &rt);
     let d = receive(&mut host, &rt, src(), handle, [ARGS[0], 0, ARGS[2]]);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
     let d = receive(
         &mut host,
         &rt,
@@ -322,12 +322,12 @@ fn receive_event_refuses_a_null_or_unwritable_out_pointer_before_parking() {
         handle,
         [ARGS[0], ARGS[1], 0xffff_fffc],
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
     assert!(host.state.usbd.waiters().is_empty());
     let d = receive(&mut host, &rt, UnitId::new(9), handle, ARGS);
     assert_eq!(
         code_of(&d),
-        u64::from(cell_errors::CELL_ESRCH),
+        u64::from(errno::CELL_ESRCH),
         "no thread record"
     );
 }
@@ -381,7 +381,7 @@ fn a_finalized_handle_is_refused_everywhere_and_counted_nowhere() {
         code_of(&host.dispatch(Lv2Request::UsbdFinalize { handle }, src(), &rt)),
         0
     );
-    let einval = u64::from(cell_errors::CELL_EINVAL);
+    let einval = u64::from(errno::CELL_EINVAL);
     for req in [
         Lv2Request::UsbdFinalize { handle },
         Lv2Request::UsbdGetDeviceList {
@@ -428,10 +428,7 @@ fn unregistering_a_product_no_register_recorded_is_esrch() {
             rt,
         ))
     };
-    assert_eq!(
-        unregister(&mut host, &rt),
-        u64::from(cell_errors::CELL_ESRCH)
-    );
+    assert_eq!(unregister(&mut host, &rt), u64::from(errno::CELL_ESRCH));
     assert_eq!(
         code_of(&host.dispatch(
             Lv2Request::UsbdRegisterLdd {
@@ -447,10 +444,7 @@ fn unregistering_a_product_no_register_recorded_is_esrch() {
     assert_eq!(host.state.usbd.ldds().len(), 1);
     assert_eq!(unregister(&mut host, &rt), 0);
     assert!(host.state.usbd.ldds().is_empty());
-    assert_eq!(
-        unregister(&mut host, &rt),
-        u64::from(cell_errors::CELL_ESRCH)
-    );
+    assert_eq!(unregister(&mut host, &rt), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -468,6 +462,6 @@ fn a_null_descriptor_pointer_is_a_pointer_refusal_not_a_no_device_one() {
         src(),
         &rt,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EINVAL));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EINVAL));
     assert_eq!(host.obs.usbd_no_device_refusals, 0);
 }

@@ -1,6 +1,6 @@
 //! `sys_fs_closedir` dispatch tests: dir-fd draining, EBADF on unknown or repeated fds, and file/dir fd type mixing.
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
@@ -36,7 +36,7 @@ fn closedir_unknown_fd_returns_ebadf() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_closedir(0xDEAD_BEEF)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }
@@ -50,7 +50,7 @@ fn closedir_twice_returns_ebadf_on_second_call() {
     assert_immediate(run(&mut host, &rt, fs_closedir(fd)), 0, 0);
     assert_immediate(
         run(&mut host, &rt, fs_closedir(fd)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }
@@ -67,7 +67,7 @@ fn closedir_on_file_fd_returns_ebadf_and_leaves_file_open() {
     assert_eq!(host.fs_store().open_fd_count(), 1);
     assert_immediate(
         run(&mut host, &rt, fs_closedir(file_fd)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
     assert_eq!(host.fs_store().open_fd_count(), 1);
@@ -84,7 +84,7 @@ fn close_on_dir_fd_returns_ebadf_and_leaves_dir_open() {
     assert_eq!(host.fs_store().open_dir_count(), 1);
     assert_immediate(
         run(&mut host, &rt, fs_close(dir_fd)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
     assert_eq!(host.fs_store().open_dir_count(), 1);

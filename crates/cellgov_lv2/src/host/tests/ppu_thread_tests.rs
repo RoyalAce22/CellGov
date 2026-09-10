@@ -175,7 +175,7 @@ fn ppu_thread_join_unknown_target_returns_esrch() {
     );
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_ESRCH.into());
+            assert_eq!(code, errno::CELL_ESRCH.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate with ESRCH, got {other:?}"),
@@ -202,10 +202,7 @@ fn ppu_thread_join_detached_target_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -229,10 +226,7 @@ fn ppu_thread_join_finished_target_with_null_status_ptr_is_efault_without_write(
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -376,10 +370,7 @@ fn ppu_thread_create_bad_opd_returns_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -406,10 +397,7 @@ fn ppu_thread_create_bad_opd_via_param_returns_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -435,10 +423,7 @@ fn ppu_thread_create_null_entry_descriptor_is_efault() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -461,10 +446,7 @@ fn ppu_thread_create_priority_above_3071_is_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -487,10 +469,7 @@ fn ppu_thread_create_negative_priority_is_einval_for_user_perm() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -522,7 +501,7 @@ fn ppu_thread_create_negative_priority_floor_drops_to_minus_512_with_debug_or_ro
     ));
     assert_eq!(
         create(&mut host, -513),
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     );
 }
 

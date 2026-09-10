@@ -1,6 +1,6 @@
 //! `sys_fs_closedir` host dispatch.
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::fs_store::FsError;
@@ -15,7 +15,7 @@ impl Lv2Host {
     pub(in crate::host) fn dispatch_fs_closedir(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_dir(fd) {
             Ok(()) => Lv2Dispatch::immediate(0),
-            Err(FsError::UnknownDir) => Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into()),
+            Err(FsError::UnknownDir) => Lv2Dispatch::immediate(errno::CELL_EBADF.into()),
             Err(other) => {
                 self.record_invariant_break(
                     "dispatch.fs_closedir.unexpected_fs_error",
@@ -24,7 +24,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

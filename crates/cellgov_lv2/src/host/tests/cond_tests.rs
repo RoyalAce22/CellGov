@@ -54,7 +54,7 @@ fn cond_create_unknown_mutex_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
     assert!(host.conds().is_empty());
 }
 
@@ -99,7 +99,7 @@ fn cond_destroy_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -304,7 +304,7 @@ fn cond_wait_by_non_owner_returns_eperm() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EPERM.into());
+    assert_eq!(code, errno::CELL_EPERM.into());
     assert_eq!(
         host.mutexes().lookup(mutex_id).unwrap().owner(),
         Some(PpuThreadId::PRIMARY),
@@ -329,7 +329,7 @@ fn cond_wait_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn cond_signal_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -833,7 +833,7 @@ fn cond_signal_all_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -892,7 +892,7 @@ fn cond_signal_all_flags_invariant_break_on_double_parked_waker() {
             assert_eq!(response_updates[0].0, waker_unit);
             assert!(matches!(
                 response_updates[0].1,
-                PendingResponse::ReturnCode { code } if code == cell_errors::CELL_ESRCH.into()
+                PendingResponse::ReturnCode { code } if code == errno::CELL_ESRCH.into()
             ));
         }
         other => panic!("expected WakeAndReturn, got {other:?}"),
@@ -1061,7 +1061,7 @@ fn cond_signal_to_target_not_waiting_returns_eperm() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EPERM.into());
+    assert_eq!(code, errno::CELL_EPERM.into());
     assert_eq!(
         host.conds()
             .lookup(cond_id)
@@ -1090,7 +1090,7 @@ fn cond_signal_to_unknown_cond_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -1252,7 +1252,7 @@ fn cond_signal_before_wait_does_not_wake_subsequent_waiter() {
                 };
                 assert_eq!(
                     code,
-                    cell_errors::CELL_EPERM.into(),
+                    errno::CELL_EPERM.into(),
                     "{variant}: signal_to on target-not-parked must EPERM",
                 );
             }
@@ -1416,7 +1416,7 @@ fn cond_destroy_with_waiter_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
 }
 
 /// `FakeRuntime` whose memory carries a `sys_cond_attribute_t` at
@@ -1497,7 +1497,7 @@ fn cond_destroy_drops_captured_ipc_key() {
 /// Mark the cellSysutil seed applied at `base` so the ring-check arm
 /// reads slot state from the test runtime's memory.
 fn mark_seed_applied_at(host: &mut Lv2Host, base: u32) {
-    let key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY;
+    let key = cellgov_ps3_abi::lv2::ipc::CELLSYSUTIL_SHM_IPC_KEY;
     host.derived.system_seeds_applied.insert(key);
     host.derived.system_seed_bases.insert(key, base);
 }

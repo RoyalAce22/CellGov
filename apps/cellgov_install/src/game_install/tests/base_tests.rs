@@ -184,7 +184,7 @@ fn iso_pre_commit_fault_leaves_no_staging_residue() {
     // nesting), so a failed decrypt-proof has to discard the root
     // itself. The EBOOT opens with the SCE magic (so it passes the
     // encrypted-image check) but is no SELF, so the proof faults.
-    let mut eboot = cellgov_ps3_abi::sce::SCE_MAGIC.to_vec();
+    let mut eboot = cellgov_ps3_abi::format::sce::SCE_MAGIC.to_vec();
     eboot.extend_from_slice(b" not a SELF");
     let image = build_iso(vec![IsoNode::Dir(
         "PS3_GAME",

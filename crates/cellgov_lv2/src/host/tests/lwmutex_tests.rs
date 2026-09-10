@@ -53,7 +53,7 @@ fn lwmutex_destroy_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn lwmutex_destroy_with_waiter_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
     assert!(host.lwmutexes().lookup(id).is_some());
 }
 
@@ -136,7 +136,7 @@ fn lwmutex_lock_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -274,7 +274,7 @@ fn lwmutex_trylock_on_fresh_entry_returns_ebusy_kernel_side() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
 }
 
 #[test]
@@ -325,7 +325,7 @@ fn lwmutex_trylock_contended_returns_ebusy_and_does_not_park() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
     let entry = host.lwmutexes().lookup(id).unwrap();
     assert!(!entry.signaled());
     assert_eq!(entry.waiters().len(), 1);
@@ -341,7 +341,7 @@ fn lwmutex_trylock_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -484,7 +484,7 @@ fn lwmutex_unlock_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -648,5 +648,5 @@ fn lwmutex_lock_duplicate_park_returns_edeadlk() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EDEADLK.into());
+    assert_eq!(code, errno::CELL_EDEADLK.into());
 }

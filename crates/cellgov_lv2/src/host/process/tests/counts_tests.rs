@@ -1,10 +1,10 @@
 //! `ProcessCounts` per-class object counting: full class-id coverage, inc/dec wiring, and zero saturation.
 
 use super::*;
-use cellgov_ps3_abi::sys_process::ALL_PROCESS_OBJECT_CLASS_IDS;
+use cellgov_ps3_abi::lv2::process::ALL_PROCESS_OBJECT_CLASS_IDS;
 
 /// Drives off [`ALL_PROCESS_OBJECT_CLASS_IDS`] so a new constant
-/// landing in `cellgov_ps3_abi::sys_process` without a
+/// landing in `cellgov_ps3_abi::lv2::process` without a
 /// `count_for_class` arm shows up as a test failure rather than
 /// as a silent zero forever. Empty host: every documented class
 /// reports 0.

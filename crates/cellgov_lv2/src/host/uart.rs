@@ -25,8 +25,8 @@ use std::collections::VecDeque;
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_uart as av;
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::uart as av;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse};
@@ -713,10 +713,10 @@ impl Lv2Host {
     /// - `CELL_EPERM` once the UART is already claimed.
     pub(super) fn dispatch_uart_initialize(&mut self) -> Lv2Dispatch {
         if !self.has_root_perm() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if self.state.uart.initialized {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into());
+            return Lv2Dispatch::immediate(errno::CELL_EPERM.into());
         }
         self.state.uart.initialized = true;
         Lv2Dispatch::immediate(0)
@@ -737,13 +737,13 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !self.has_root_perm() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if !self.state.uart.initialized {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         if params_ptr == 0 || !rt.writable(u64::from(params_ptr), av::SYS_UART_PARAMS_LEN) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let mut out = [0u8; av::SYS_UART_PARAMS_LEN];
         out[..8].copy_from_slice(&(av::PS3AV_RX_BUF_SIZE as u64).to_be_bytes());
@@ -790,17 +790,17 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !self.has_root_perm() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if size == 0 {
             return Lv2Dispatch::immediate(0);
         }
         if mode & !(av::SYS_UART_MODE_BLOCKING_BIG_OP | av::SYS_UART_MODE_NOT_BLOCKING_BIG_OP) != 0
         {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if !self.state.uart.initialized {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         if size > av::SYS_UART_MAX_TRANSFER {
             self.log_invariant_break(
@@ -810,7 +810,7 @@ impl Lv2Host {
                     av::SYS_UART_MAX_TRANSFER
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let available = self.state.uart.rx.len();
         if available == 0 {
@@ -818,13 +818,13 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(0);
             }
             let Some(thread) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             };
             if !rt.writable(
                 u64::from(buf_ptr),
                 size.min(av::PS3AV_RX_BUF_SIZE as u64) as usize,
             ) {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
             if self.state.uart.readers.iter().any(|r| r.thread == thread) {
                 // A parked thread cannot dispatch; two records for
@@ -836,7 +836,7 @@ impl Lv2Host {
                          returning CELL_ESRCH"
                     ),
                 );
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
             if !self.state.uart.readers.is_empty() {
                 self.obs.uart_readers_queued += 1;
@@ -854,7 +854,7 @@ impl Lv2Host {
         }
         let n = (size as usize).min(available);
         if !rt.writable(u64::from(buf_ptr), n) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let bytes: Vec<u8> = self.state.uart.rx.drain(..n).collect();
         Lv2Dispatch::Immediate {
@@ -892,7 +892,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !self.has_root_perm() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOSYS.into());
         }
         if size == 0 {
             return Lv2Dispatch::immediate(0);
@@ -903,10 +903,10 @@ impl Lv2Host {
                 | av::SYS_UART_MODE_NOT_BLOCKING_BIG_OP)
             != 0
         {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if !self.state.uart.initialized {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         if size > av::SYS_UART_MAX_TRANSFER {
             self.log_invariant_break(
@@ -916,13 +916,13 @@ impl Lv2Host {
                     av::SYS_UART_MAX_TRANSFER
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let Some(tx) = rt.read_committed(u64::from(buf_ptr), size as usize) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         if mode == av::SYS_UART_MODE_NOT_BLOCKING_OP && size > av::PS3AV_TX_BUF_SIZE as u64 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         }
         // Mode 0 pushes its first chunk and, when the ring cannot take
         // that chunk whole, reports the chunk's size rather than the

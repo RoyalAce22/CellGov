@@ -1,7 +1,7 @@
 //! State and case builders the corpus generators share.
 
 use super::super::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
-use cellgov_ps3_abi::hardware::GPR_COUNT;
+use cellgov_ps3_abi::hw::ppu::GPR_COUNT;
 
 /// Zeroed state with one GPR pre-set to `value`.
 pub(super) fn state_with_gpr(index: usize, value: u64) -> PpuStateSnapshot {

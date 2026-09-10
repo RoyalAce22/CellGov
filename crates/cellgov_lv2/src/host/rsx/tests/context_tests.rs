@@ -119,7 +119,7 @@ fn sys_rsx_context_allocate_second_call_rejects_with_einval() {
     );
     assert!(matches!(
         d,
-        Lv2Dispatch::Immediate { code, effects } if code == u64::from(cell_errors::CELL_EINVAL) && effects.is_empty()
+        Lv2Dispatch::Immediate { code, effects } if code == u64::from(errno::CELL_EINVAL) && effects.is_empty()
     ));
 }
 

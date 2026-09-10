@@ -5,7 +5,7 @@
 use crate::sprx::parse_prx;
 use crate::sprx::test_fixtures::{make_test_prx, make_test_prx_graph_node};
 use crate::sprx::R_PPC64_ADDR32;
-use cellgov_ps3_abi::elf::ELF64_RELA_SIZE;
+use cellgov_ps3_abi::format::elf::ELF64_RELA_SIZE;
 
 // Fixture geometry from `make_test_prx`.
 const DATA_VADDR: u32 = 0x100;

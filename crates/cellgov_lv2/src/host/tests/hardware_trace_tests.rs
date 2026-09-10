@@ -37,7 +37,7 @@
 //!   `val` is a documented refusal
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::test_support::{
@@ -131,7 +131,7 @@ fn semaphore_create_rejects_the_four_bound_violations_the_console_rejects() {
         );
         assert_eq!(
             code_of(&r),
-            cell_errors::CELL_EINVAL.into(),
+            errno::CELL_EINVAL.into(),
             "create(initial={initial}, max={max})"
         );
     }
@@ -154,7 +154,7 @@ fn semaphore_create_faults_on_a_null_id_or_attribute_pointer() {
             src,
             &rt,
         );
-        assert_eq!(code_of(&r), cell_errors::CELL_EFAULT.into());
+        assert_eq!(code_of(&r), errno::CELL_EFAULT.into());
     }
 }
 
@@ -174,14 +174,14 @@ fn semaphore_create_rejects_a_zeroed_attribute_block() {
         src,
         &rt,
     );
-    assert_eq!(code_of(&r), cell_errors::CELL_EINVAL.into());
+    assert_eq!(code_of(&r), errno::CELL_EINVAL.into());
 }
 
 #[test]
 fn semaphore_get_value_faults_on_a_null_out_pointer() {
     let (mut host, rt, src, id) = semaphore_host(0, 1);
     let r = host.dispatch(Lv2Request::SemaphoreGetValue { id, out_ptr: 0 }, src, &rt);
-    assert_eq!(code_of(&r), cell_errors::CELL_EFAULT.into());
+    assert_eq!(code_of(&r), errno::CELL_EFAULT.into());
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn semaphore_calls_on_an_id_no_create_returned_answer_esrch() {
             let r = host.dispatch(request, src, &rt);
             assert_eq!(
                 code_of(&r),
-                cell_errors::CELL_ESRCH.into(),
+                errno::CELL_ESRCH.into(),
                 "{request:?} on id {bad:#010x}"
             );
         }
@@ -216,7 +216,7 @@ fn semaphore_calls_on_an_id_no_create_returned_answer_esrch() {
 fn semaphore_trywait_on_an_exhausted_count_answers_ebusy() {
     let (mut host, rt, src, id) = semaphore_host(0, 1);
     let r = host.dispatch(Lv2Request::SemaphoreTryWait { id }, src, &rt);
-    assert_eq!(code_of(&r), cell_errors::CELL_EBUSY.into());
+    assert_eq!(code_of(&r), errno::CELL_EBUSY.into());
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn semaphore_post_to_an_id_no_create_returned_answers_esrch() {
     let (mut host, rt, src, _id) = semaphore_host(0, 1);
     for bad in [STALE_ID, 0] {
         let r = host.dispatch(Lv2Request::SemaphorePost { id: bad, val: 0 }, src, &rt);
-        assert_eq!(code_of(&r), cell_errors::CELL_ESRCH.into());
+        assert_eq!(code_of(&r), errno::CELL_ESRCH.into());
     }
 }
 
@@ -236,9 +236,9 @@ fn semaphore_post_to_an_id_no_create_returned_answers_esrch() {
 fn semaphore_post_separates_a_negative_count_from_one_past_max() {
     let (mut host, rt, src, id) = semaphore_host(0, 1);
     let negative = host.dispatch(Lv2Request::SemaphorePost { id, val: -1 }, src, &rt);
-    assert_eq!(code_of(&negative), cell_errors::CELL_EINVAL.into());
+    assert_eq!(code_of(&negative), errno::CELL_EINVAL.into());
     let past_max = host.dispatch(Lv2Request::SemaphorePost { id, val: 2 }, src, &rt);
-    assert_eq!(code_of(&past_max), cell_errors::CELL_EBUSY.into());
+    assert_eq!(code_of(&past_max), errno::CELL_EBUSY.into());
 }
 
 #[test]
@@ -249,7 +249,7 @@ fn semaphore_destroy_of_an_already_destroyed_id_answers_esrch() {
         0
     );
     let again = host.dispatch(Lv2Request::SemaphoreDestroy { id }, src, &rt);
-    assert_eq!(code_of(&again), cell_errors::CELL_ESRCH.into());
+    assert_eq!(code_of(&again), errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -340,7 +340,7 @@ fn semaphore_post_past_max_wakes_nobody_at_all() {
     );
 
     let r = host.dispatch(Lv2Request::SemaphorePost { id, val: 30 }, src, &rt);
-    assert_eq!(code_of(&r), cell_errors::CELL_EBUSY.into());
+    assert_eq!(code_of(&r), errno::CELL_EBUSY.into());
     assert_eq!(host.semaphores().lookup(id).unwrap().waiters().len(), 1);
     assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
 }
@@ -414,7 +414,7 @@ fn event_flag_create_faults_on_a_null_id_or_attribute_pointer() {
             src,
             &rt,
         );
-        assert_eq!(code_of(&r), cell_errors::CELL_EFAULT.into());
+        assert_eq!(code_of(&r), errno::CELL_EFAULT.into());
     }
 }
 
@@ -433,7 +433,7 @@ fn event_flag_create_rejects_a_zeroed_attribute_block() {
         src,
         &rt,
     );
-    assert_eq!(code_of(&r), cell_errors::CELL_EINVAL.into());
+    assert_eq!(code_of(&r), errno::CELL_EINVAL.into());
 }
 
 #[test]
@@ -458,7 +458,7 @@ fn event_flag_wait_rejects_a_mode_that_names_neither_or_both_match_rules() {
         );
         assert_eq!(
             code_of(&wait),
-            cell_errors::CELL_EINVAL.into(),
+            errno::CELL_EINVAL.into(),
             "wait mode {mode:#x}"
         );
     }
@@ -475,7 +475,7 @@ fn event_flag_wait_rejects_a_mode_that_names_neither_or_both_match_rules() {
         );
         assert_eq!(
             code_of(&trywait),
-            cell_errors::CELL_EINVAL.into(),
+            errno::CELL_EINVAL.into(),
             "trywait mode {mode:#x}"
         );
     }
@@ -510,7 +510,7 @@ fn event_flag_calls_on_an_id_no_create_returned_answer_esrch() {
             let r = host.dispatch(request, src, &rt);
             assert_eq!(
                 code_of(&r),
-                cell_errors::CELL_ESRCH.into(),
+                errno::CELL_ESRCH.into(),
                 "{request:?} on id {bad:#010x}"
             );
         }
@@ -536,7 +536,7 @@ fn event_flag_cancel_on_an_unknown_id_answers_esrch_through_a_null_count_pointer
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, cell_errors::CELL_ESRCH.into());
+                assert_eq!(code, errno::CELL_ESRCH.into());
                 assert!(effects.is_empty(), "a null count pointer stores nothing");
             }
             other => panic!("expected Immediate, got {other:?}"),
@@ -548,7 +548,7 @@ fn event_flag_cancel_on_an_unknown_id_answers_esrch_through_a_null_count_pointer
 fn event_flag_get_faults_on_a_null_out_pointer() {
     let (mut host, rt, src, id) = event_flag_host(0);
     let r = host.dispatch(Lv2Request::EventFlagGet { id, flags_ptr: 0 }, src, &rt);
-    assert_eq!(code_of(&r), cell_errors::CELL_EFAULT.into());
+    assert_eq!(code_of(&r), errno::CELL_EFAULT.into());
 }
 
 #[test]
@@ -559,7 +559,7 @@ fn event_flag_destroy_of_an_already_destroyed_id_answers_esrch() {
         0
     );
     let again = host.dispatch(Lv2Request::EventFlagDestroy { id }, src, &rt);
-    assert_eq!(code_of(&again), cell_errors::CELL_ESRCH.into());
+    assert_eq!(code_of(&again), errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -662,7 +662,7 @@ fn event_flag_cancel_reports_how_many_waiters_it_drained() {
         src,
         &rt,
     );
-    assert_eq!(code_of(&trywait), cell_errors::CELL_EBUSY.into());
+    assert_eq!(code_of(&trywait), errno::CELL_EBUSY.into());
 
     let cancelled = host.dispatch(Lv2Request::EventFlagCancel { id, num_ptr: 0x400 }, src, &rt);
     match cancelled {
@@ -855,7 +855,7 @@ fn process_object_counts_rise_on_create_and_fall_on_destroy() {
         }
     };
 
-    use cellgov_ps3_abi::sys_process::{SYS_EVENT_FLAG_OBJECT, SYS_SEMAPHORE_OBJECT};
+    use cellgov_ps3_abi::lv2::process::{SYS_EVENT_FLAG_OBJECT, SYS_SEMAPHORE_OBJECT};
 
     assert_eq!(count(&mut host, &rt, SYS_SEMAPHORE_OBJECT), 0);
     let created = host.dispatch(

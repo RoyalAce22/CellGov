@@ -16,7 +16,7 @@
 
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockDecrypt, KeyInit};
-use cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
+use cellgov_ps3_abi::format::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
 
 #[cfg(feature = "decrypt")]
 use crate::keys::{KeyVault, KeyVaultError, SelfClass};

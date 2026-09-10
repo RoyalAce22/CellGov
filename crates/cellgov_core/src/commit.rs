@@ -435,12 +435,12 @@ impl CommitPipeline {
                         // and not a bug.
                         debug_assert!(
                             ctx.rsx_label_base == 0
-                                || (*offset as usize) < cellgov_ps3_abi::sys_rsx::reports::SIZE,
+                                || (*offset as usize) < cellgov_ps3_abi::lv2::rsx::reports::SIZE,
                             "RsxLabelWrite offset {:#x} escapes the {:#x}-byte RSX label area \
                          under label base {:#x} (guest bug? semaphores 0..0x1000, notify at \
                          0x1000, reports at 0x1400)",
                             *offset,
-                            cellgov_ps3_abi::sys_rsx::reports::SIZE,
+                            cellgov_ps3_abi::lv2::rsx::reports::SIZE,
                             ctx.rsx_label_base,
                         );
                         *ctx.rsx_label_writes_committed =

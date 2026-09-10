@@ -279,7 +279,7 @@ impl Runtime {
             raw_args[8],
         ];
 
-        use cellgov_ps3_abi::syscall::{TIMER_SLEEP, TIMER_USLEEP};
+        use cellgov_ps3_abi::lv2::syscall::{TIMER_SLEEP, TIMER_USLEEP};
         let is_timer_fast_path = lev == 0 && (num == TIMER_USLEEP || num == TIMER_SLEEP);
 
         // Classify upfront so the entry record can carry the
@@ -749,7 +749,7 @@ impl Runtime {
                     // would settle whether the target is still reaped.
                     self.deliver_syscall_return(
                         waiter,
-                        cellgov_ps3_abi::cell_errors::CELL_EFAULT.into(),
+                        cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into(),
                     );
                 }
             } else {

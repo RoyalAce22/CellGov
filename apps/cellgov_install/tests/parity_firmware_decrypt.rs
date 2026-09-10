@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::keys::KeyVault;
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
-use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 #[path = "common/digests.rs"]
 mod digests;

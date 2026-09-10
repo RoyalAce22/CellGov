@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::dev_flash::{FLASH_MOUNT, VERSION_TXT_COMPONENTS};
+use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, VERSION_TXT_COMPONENTS};
 
 /// The runner's per-installation settings directory.
 const CONFIG_DIR: &str = "config";
@@ -74,7 +74,7 @@ pub(crate) fn firmware_version(install_dir: &Path) -> Result<String, RunnerFirmw
             source,
         }
     })?;
-    cellgov_ps3_abi::dev_flash::parse_version_txt(&text)
+    cellgov_ps3_abi::format::dev_flash::parse_version_txt(&text)
         .ok_or(RunnerFirmwareError::VersionUnparseable { path })
 }
 

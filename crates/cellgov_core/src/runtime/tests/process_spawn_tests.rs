@@ -6,7 +6,7 @@ use cellgov_exec::{
 };
 use cellgov_lv2::request::classify;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize};
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::{Budget, InstructionCost};
 
 use super::super::spaces::AddressSpaceId;
@@ -66,7 +66,7 @@ const CHILD_PATH: &[u8] = b"/test/child.self";
 const PID_OUT: u64 = 0x20;
 const BLOCK: u64 = 0x40;
 const PATH_STR: u64 = 0x80;
-const EXPECTED_PID: u32 = cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID + 0x100;
+const EXPECTED_PID: u32 = cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID + 0x100;
 
 /// Write the decoded marshal layout: `{u64 table_off=16, u64 0,
 /// ptr table [path, 0], path string}`.
@@ -114,7 +114,7 @@ fn build_spawn_ready() -> Runtime {
 
 fn spawn_request() -> cellgov_lv2::Lv2Request {
     classify(
-        cellgov_ps3_abi::syscall::PROCESS_SPAWN,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_SPAWN,
         &[PID_OUT, 1000, 0, BLOCK, 0x60, 0, 0, 0],
     )
 }
@@ -156,7 +156,7 @@ fn child_exit_finishes_only_the_child_process() {
     let child = UnitId::new(1);
 
     let exit = classify(
-        cellgov_ps3_abi::syscall::PROCESS_EXIT,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT,
         &[42, 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(exit, child);
@@ -174,13 +174,13 @@ fn child_exit_finishes_only_the_child_process() {
 
     // Liveness poll flips CELL_OK -> CELL_ESRCH across the exit.
     let status = classify(
-        cellgov_ps3_abi::syscall::PROCESS_GET_STATUS,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_GET_STATUS,
         &[u64::from(EXPECTED_PID), 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(status, UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_ESRCH.into())
+        Some(errno::CELL_ESRCH.into())
     );
 }
 
@@ -189,7 +189,7 @@ fn get_status_reports_live_child_as_ok() {
     let mut rt = build_spawn_ready();
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     let status = classify(
-        cellgov_ps3_abi::syscall::PROCESS_GET_STATUS,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_GET_STATUS,
         &[u64::from(EXPECTED_PID), 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(status, UnitId::new(0));
@@ -210,7 +210,7 @@ fn spawn_unknown_path_returns_enoent() {
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_ENOENT.into())
+        Some(errno::CELL_ENOENT.into())
     );
     assert!(rt.space_memory(AddressSpaceId::new(1)).is_err());
 }
@@ -227,18 +227,18 @@ fn spawn_loader_failure_rolls_back_space_and_pid() {
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_EFAULT.into())
+        Some(errno::CELL_EFAULT.into())
     );
     assert!(rt.space_memory(AddressSpaceId::new(1)).is_err());
     // The minted pid was rolled back: a status poll sees ESRCH.
     let status = classify(
-        cellgov_ps3_abi::syscall::PROCESS_GET_STATUS,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_GET_STATUS,
         &[u64::from(EXPECTED_PID), 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(status, UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_ESRCH.into())
+        Some(errno::CELL_ESRCH.into())
     );
 }
 
@@ -251,7 +251,7 @@ fn spawn_with_max_space_id_in_use_fails_enomem_and_rolls_back() {
     rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_ENOMEM.into())
+        Some(errno::CELL_ENOMEM.into())
     );
     assert_eq!(
         rt.lv2_host()
@@ -261,13 +261,13 @@ fn spawn_with_max_space_id_in_use_fails_enomem_and_rolls_back() {
     // No child unit was registered and the minted pid was rolled back.
     assert!(rt.registry().effective_status(UnitId::new(1)).is_none());
     let status = classify(
-        cellgov_ps3_abi::syscall::PROCESS_GET_STATUS,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_GET_STATUS,
         &[u64::from(EXPECTED_PID), 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(status, UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_ESRCH.into())
+        Some(errno::CELL_ESRCH.into())
     );
 }
 
@@ -344,7 +344,7 @@ fn a_thread_created_by_a_child_process_inherits_its_space_and_pid() {
     // already wrote in the boot space.
     const TID_OUT: u64 = 0x30;
     let create = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_CREATE,
         &[TID_OUT, 0x200, 0, 0, 1000, 0x4000, 0, 0],
     );
     rt.dispatch_lv2_request(create, child);
@@ -369,7 +369,7 @@ fn a_thread_created_by_a_child_process_inherits_its_space_and_pid() {
 
     // The child's exit sweep now covers the thread it created.
     let exit = classify(
-        cellgov_ps3_abi::syscall::PROCESS_EXIT,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT,
         &[0, 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(exit, child);
@@ -393,7 +393,7 @@ fn a_child_process_out_pointer_effect_lands_in_its_own_space() {
 
     const VERSION_OUT: u64 = 0x500;
     let req = classify(
-        cellgov_ps3_abi::syscall::PROCESS_GET_SDK_VERSION,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_GET_SDK_VERSION,
         &[0, VERSION_OUT, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(req, child);
@@ -454,7 +454,7 @@ fn a_join_inside_a_child_process_writes_status_into_its_own_space() {
     // bytes.
     const STATUS_OUT: u64 = 0x600;
     let create = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_CREATE,
         &[TID_OUT, 0x200, 0, 0, 1000, 0x4000, 0, 0],
     );
     rt.dispatch_lv2_request(create, child);
@@ -473,7 +473,7 @@ fn a_join_inside_a_child_process_writes_status_into_its_own_space() {
 
     // Child parks on the join, then the thread exits with 0x77.
     let join = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_JOIN,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_JOIN,
         &[tid, STATUS_OUT, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(join, child);
@@ -482,7 +482,7 @@ fn a_join_inside_a_child_process_writes_status_into_its_own_space() {
         Some(UnitStatus::Blocked)
     );
     let exit = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_EXIT,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_EXIT,
         &[0x77, 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(exit, thread);
@@ -526,13 +526,13 @@ fn a_thread_create_without_a_ppu_factory_is_loud_and_creates_nothing() {
         write(0x214, &0x400u32.to_be_bytes()); // OPD toc
     }
     let create = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_CREATE,
         &[0x30, 0x200, 0, 0, 1000, 0x4000, 0, 0],
     );
     rt.dispatch_lv2_request(create, UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_E2BIG.into())
+        Some(errno::CELL_E2BIG.into())
     );
     assert_eq!(
         rt.lv2_host()
@@ -558,7 +558,7 @@ fn boot_process_exit2_with_empty_argv_finishes_the_run() {
         write(0x300, &0u64.to_be_bytes()); // argv terminator
     }
     let exit2 = classify(
-        cellgov_ps3_abi::syscall::PROCESS_EXIT2,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT2,
         &[0, 0x200, 0x30, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(exit2, UnitId::new(0));
@@ -580,7 +580,7 @@ fn snapshot_after_spawn_restores_child_space_and_process_state() {
 
     // Mutate past the snapshot: the child exits.
     let exit = classify(
-        cellgov_ps3_abi::syscall::PROCESS_EXIT,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT,
         &[9, 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(exit, child);
@@ -628,7 +628,7 @@ fn exit_child_for_an_unbound_pid_is_loud_and_finishes_the_caller() {
 fn an_out_of_range_spawn_prio_is_witnessed_not_silently_clamped() {
     let mut rt = build_spawn_ready();
     let req = classify(
-        cellgov_ps3_abi::syscall::PROCESS_SPAWN,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_SPAWN,
         &[PID_OUT, (-1i64) as u64, 0, BLOCK, 0x60, 0, 0, 0],
     );
     rt.dispatch_lv2_request(req, UnitId::new(0));
@@ -652,7 +652,7 @@ fn spawn_then_exit_hash_stream_is_deterministic() {
         rt.dispatch_lv2_request(spawn_request(), UnitId::new(0));
         hashes.push((rt.sync_state_hash(), rt.committed_memory_hash()));
         let exit = classify(
-            cellgov_ps3_abi::syscall::PROCESS_EXIT,
+            cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT,
             &[7, 0, 0, 0, 0, 0, 0, 0],
         );
         rt.dispatch_lv2_request(exit, UnitId::new(1));
@@ -717,7 +717,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
     let q_id_ptr: u64 = 0x30;
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_QUEUE_CREATE,
+            cellgov_ps3_abi::lv2::syscall::EVENT_QUEUE_CREATE,
             &[q_id_ptr, 0, 0, 4, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -730,7 +730,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
 
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_QUEUE_RECEIVE,
+            cellgov_ps3_abi::lv2::syscall::EVENT_QUEUE_RECEIVE,
             &[queue, 0x50, 0, 0, 0, 0, 0, 0],
         ),
         waiter,
@@ -743,7 +743,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
 
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::PROCESS_EXIT,
+            cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT,
             &[7, 0, 0, 0, 0, 0, 0, 0],
         ),
         child,
@@ -765,7 +765,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
     let port_id_ptr: u64 = 0x34;
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_PORT_CREATE,
+            cellgov_ps3_abi::lv2::syscall::EVENT_PORT_CREATE,
             &[port_id_ptr, 1, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -777,7 +777,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
     let port = u64::from(read_u32(&rt, port_id_ptr));
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_PORT_CONNECT_LOCAL,
+            cellgov_ps3_abi::lv2::syscall::EVENT_PORT_CONNECT_LOCAL,
             &[port, queue, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -788,7 +788,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
     );
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_PORT_SEND,
+            cellgov_ps3_abi::lv2::syscall::EVENT_PORT_SEND,
             &[port, 1, 2, 3, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -814,7 +814,7 @@ fn a_send_after_child_exit_buffers_instead_of_resurrecting_the_dead_waiter() {
     // The event went to the buffer: the boot process receives it.
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_QUEUE_RECEIVE,
+            cellgov_ps3_abi::lv2::syscall::EVENT_QUEUE_RECEIVE,
             &[queue, 0x60, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -873,17 +873,17 @@ fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
     write_boot(
         &mut rt,
         attr_ptr,
-        &cellgov_ps3_abi::sys_sync::SYS_SYNC_FIFO.to_be_bytes(),
+        &cellgov_ps3_abi::lv2::sync::SYS_SYNC_FIFO.to_be_bytes(),
     );
     write_boot(
         &mut rt,
         attr_ptr + 20,
-        &cellgov_ps3_abi::sys_sync::SYS_SYNC_WAITER_SINGLE.to_be_bytes(),
+        &cellgov_ps3_abi::lv2::sync::SYS_SYNC_WAITER_SINGLE.to_be_bytes(),
     );
     let flag_id_ptr: u64 = 0x38;
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_FLAG_CREATE,
+            cellgov_ps3_abi::lv2::syscall::EVENT_FLAG_CREATE,
             &[flag_id_ptr, attr_ptr, 0xABCD, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -908,7 +908,7 @@ fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
     let result_ptr: u64 = 0x200;
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_FLAG_WAIT,
+            cellgov_ps3_abi::lv2::syscall::EVENT_FLAG_WAIT,
             &[flag, 0x10000, 0x01, result_ptr, 0, 0, 0, 0],
         ),
         waiter,
@@ -922,7 +922,7 @@ fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
     let num_ptr: u64 = 0x58;
     rt.dispatch_lv2_request(
         classify(
-            cellgov_ps3_abi::syscall::EVENT_FLAG_CANCEL,
+            cellgov_ps3_abi::lv2::syscall::EVENT_FLAG_CANCEL,
             &[flag, num_ptr, 0, 0, 0, 0, 0, 0],
         ),
         UnitId::new(0),
@@ -939,7 +939,7 @@ fn event_flag_cancel_stores_the_pattern_in_the_waiters_space() {
     );
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),
-        Some(cell_errors::CELL_ECANCELED.into())
+        Some(errno::CELL_ECANCELED.into())
     );
     let child_bytes = rt
         .space_memory(AddressSpaceId::new(1))
@@ -995,7 +995,7 @@ fn a_child_process_thread_gets_a_stack_region_in_its_own_space() {
         write(0x214, &0x400u32.to_be_bytes()); // OPD toc
     }
     let create = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_CREATE,
         &[0x30, 0x200, 0, 0, 1000, 0x4000, 0, 0],
     );
     rt.dispatch_lv2_request(create, child);
@@ -1042,14 +1042,14 @@ fn a_refused_thread_create_returns_its_stack_block_to_the_arena() {
         write(0x214, &0x400u32.to_be_bytes());
     }
     let create = classify(
-        cellgov_ps3_abi::syscall::PPU_THREAD_CREATE,
+        cellgov_ps3_abi::lv2::syscall::PPU_THREAD_CREATE,
         &[0x30, 0x200, 0, 0, 1000, 0x4000, 0, 0],
     );
     // No factory installed: the runtime refuses with E2BIG.
     rt.dispatch_lv2_request(create, UnitId::new(0));
     assert_eq!(
         rt.registry_mut().drain_syscall_return(UnitId::new(0)),
-        Some(cell_errors::CELL_E2BIG.into())
+        Some(errno::CELL_E2BIG.into())
     );
     // The arena rewound: the next block starts at the arena base.
     let next = rt

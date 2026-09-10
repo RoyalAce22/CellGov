@@ -971,7 +971,7 @@ pub enum Lv2Request {
     /// `SysRsxContext`. `context_id` must be `0x5555_5555`, `io` /
     /// `ea` / `size` must be non-zero and 1 MiB aligned, and `size`
     /// must fit in the backed iomap region (see
-    /// `cellgov_ps3_abi::process_address_space::PS3_RSX_IOMAP_SIZE`).
+    /// `cellgov_ps3_abi::hw::address_space::PS3_RSX_IOMAP_SIZE`).
     /// libgcm_sys.prx screens the same arguments before it traps. It
     /// refuses any of the three whose low 20 bits are set. It also
     /// refuses a mapping whose end, counted in MiB, runs past the

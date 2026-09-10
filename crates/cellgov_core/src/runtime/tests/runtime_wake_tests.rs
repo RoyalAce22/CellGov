@@ -297,7 +297,7 @@ fn a_group_join_wake_with_null_cause_writes_nothing_and_returns_efault() {
     assert_eq!(read_guest_u32_be(&rt, 0x200), 0);
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),
-        Some(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()),
+        Some(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()),
     );
 }
 
@@ -333,7 +333,7 @@ fn a_group_join_wake_with_null_status_writes_cause_and_returns_efault() {
     assert_eq!(read_guest_u32_be(&rt, 0x100), 0xDEAD_BEEF);
     assert_eq!(
         rt.registry_mut().drain_syscall_return(waiter),
-        Some(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()),
+        Some(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()),
     );
 }
 

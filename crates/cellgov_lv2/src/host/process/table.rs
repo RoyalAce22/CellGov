@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use cellgov_ps3_abi::sys_process::{BOOT_PROCESS_PID, BOOT_PROCESS_PPID};
+use cellgov_ps3_abi::lv2::process::{BOOT_PROCESS_PID, BOOT_PROCESS_PPID};
 
 /// Per-process identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,7 +42,7 @@ impl ProcessTable {
             BOOT_PROCESS_PID,
             ProcessEntry {
                 ppid: BOOT_PROCESS_PPID,
-                authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+                authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
                 control_flags1: 0,
                 exit_status: None,
             },

@@ -25,7 +25,7 @@ const CELLSYSUTIL_RING_LIMIT: u32 = 256;
 /// per-record memcpy, predicate@+30 (`0` avoids the early-exit
 /// error path).
 pub(super) fn cellsysutil_system_seed() -> cellgov_lv2::SystemStateSeed {
-    use cellgov_ps3_abi::system_ipc::{
+    use cellgov_ps3_abi::lv2::ipc::{
         CELLSYSUTIL_SHM_IPC_KEY, CELLSYSUTIL_SLOT_COUNT, CELLSYSUTIL_SLOT_CURSOR_OFFSET,
         CELLSYSUTIL_SLOT_DATA_OFFSET, CELLSYSUTIL_SLOT_LIMIT_OFFSET, CELLSYSUTIL_SLOT_STRIDE,
     };
@@ -146,7 +146,7 @@ pub(super) fn build_runtime(
     // LoadModule-failure signature reappear.
     let (authid_label, authid_source) = if parse_env_bool("CELLGOV_FORCE_SYSTEM_AUTHID") {
         rt.lv2_host_mut()
-            .set_program_authority_id(cellgov_ps3_abi::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID);
+            .set_program_authority_id(cellgov_ps3_abi::format::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID);
         (
             "forced system authid (CELLGOV_FORCE_SYSTEM_AUTHID)",
             AuthorityIdSource::Forced,
@@ -192,7 +192,7 @@ pub(super) fn build_runtime(
         params
             .proc_param
             .map(|p| p.sdk_version)
-            .unwrap_or(cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN),
+            .unwrap_or(cellgov_ps3_abi::format::elf::SYS_PROCESS_PARAM_SDK_VERSION_UNKNOWN),
         if params.proc_param.is_some() {
             "from sys_proc_param segment"
         } else {

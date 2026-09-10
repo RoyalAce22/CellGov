@@ -3,7 +3,7 @@
 use super::*;
 use crate::host::test_support::FakeRuntime;
 use cellgov_mem::{GuestAddr, GuestMemory};
-use cellgov_ps3_abi::elf::{ELF32_E_ENTRY, ELF32_HEADER_SIZE};
+use cellgov_ps3_abi::format::elf::{ELF32_E_ENTRY, ELF32_HEADER_SIZE};
 use cellgov_time::GuestTicks;
 
 #[test]
@@ -67,7 +67,7 @@ fn image_import_out_of_range_img_ptr_returns_einval() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -87,7 +87,7 @@ fn image_import_unwritable_handle_out_returns_efault() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert_eq!(code, errno::CELL_EFAULT.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -205,7 +205,7 @@ fn group_create_rejects_oversized_num_threads() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -621,7 +621,7 @@ fn join_finished_group(cause_ptr: u32, status_ptr: u32) -> Lv2Dispatch {
 fn a_finished_group_join_with_null_cause_writes_nothing_and_returns_efault() {
     match join_finished_group(0, 0x300) {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert_eq!(code, errno::CELL_EFAULT.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -632,7 +632,7 @@ fn a_finished_group_join_with_null_cause_writes_nothing_and_returns_efault() {
 fn a_finished_group_join_with_both_pointers_null_writes_nothing_and_returns_efault() {
     match join_finished_group(0, 0) {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert_eq!(code, errno::CELL_EFAULT.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -643,7 +643,7 @@ fn a_finished_group_join_with_both_pointers_null_writes_nothing_and_returns_efau
 fn a_finished_group_join_with_null_status_writes_cause_only_and_returns_efault() {
     match join_finished_group(0x300, 0) {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EFAULT.into());
+            assert_eq!(code, errno::CELL_EFAULT.into());
             assert_eq!(effects.len(), 1);
             let Effect::SharedWriteIntent { range, bytes, .. } = &effects[0] else {
                 panic!("expected SharedWriteIntent, got {:?}", effects[0]);
@@ -652,7 +652,7 @@ fn a_finished_group_join_with_null_status_writes_cause_only_and_returns_efault()
             assert_eq!(range.length(), 4);
             assert_eq!(
                 bytes.bytes(),
-                &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes()
+                &spu::group_join_cause::GROUP_EXIT.to_be_bytes()
             );
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -671,7 +671,7 @@ fn a_finished_group_join_with_both_pointers_writes_both_and_returns_ok() {
             assert_eq!(range.start().raw(), 0x300);
             assert_eq!(
                 bytes.bytes(),
-                &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes()
+                &spu::group_join_cause::GROUP_EXIT.to_be_bytes()
             );
             let Effect::SharedWriteIntent { range, bytes, .. } = &effects[1] else {
                 panic!("expected SharedWriteIntent, got {:?}", effects[1]);
@@ -701,7 +701,7 @@ fn an_out_of_range_slot_outranks_an_unreadable_image_pointer() {
     );
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate EINVAL, got {other:?}"),
     }
@@ -723,7 +723,7 @@ fn a_zero_thread_group_create_is_rejected_as_einval() {
     );
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
             assert!(effects.is_empty(), "a refused create writes no group id");
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -753,7 +753,7 @@ fn a_second_start_of_a_running_group_is_rejected_as_estat() {
     );
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_ESTAT.into());
+            assert_eq!(code, errno::CELL_ESTAT.into());
         }
         other => panic!("expected Immediate ESTAT, got {other:?}"),
     }
@@ -770,7 +770,7 @@ fn a_start_of_a_finished_group_is_rejected_as_estat() {
     );
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_ESTAT.into());
+            assert_eq!(code, errno::CELL_ESTAT.into());
         }
         other => panic!("expected Immediate ESTAT, got {other:?}"),
     }
@@ -815,7 +815,7 @@ fn initializing_a_thread_in_a_started_group_is_rejected_as_ebusy() {
     );
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EBUSY.into());
+            assert_eq!(code, errno::CELL_EBUSY.into());
             assert!(effects.is_empty(), "a refused initialize writes no id");
         }
         other => panic!("expected Immediate EBUSY, got {other:?}"),
@@ -878,7 +878,7 @@ fn a_slot_index_past_the_declared_count_is_accepted_and_a_full_group_is_ebusy() 
     );
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EBUSY.into());
+            assert_eq!(code, errno::CELL_EBUSY.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate EBUSY, got {other:?}"),

@@ -1,8 +1,8 @@
 //! `sys_fs_open` dispatch tests: blob and mount path resolution, fd allocation, and the EFAULT/ENOENT/EROFS rejection paths.
 
 use cellgov_effects::Effect;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_fs::{
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::fs::{
     CELL_FS_O_CREAT, CELL_FS_O_RDONLY, CELL_FS_O_TRUNC, CELL_FS_O_WRONLY, LV2_FS_OBJECT_ID_BASE,
 };
 use cellgov_time::GuestTicks;
@@ -20,7 +20,7 @@ fn unknown_path_returns_enoent_with_no_effects() {
 
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0o1101, 0o666)),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
 }
@@ -31,7 +31,7 @@ fn fd_out_ptr_unmapped_returns_efault_no_effects() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0xFFFF_FF00, 0, 0)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -42,7 +42,7 @@ fn fd_out_ptr_misaligned_returns_efault() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20001, 0, 0)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -55,7 +55,7 @@ fn fd_out_ptr_in_reserved_region_returns_efault() {
         .reserve(0x30000, 0x31000);
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x30100, 0, 0)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -66,7 +66,7 @@ fn fd_out_ptr_null_returns_efault() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/foo\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0, 0, 0)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -77,7 +77,7 @@ fn fs_open_bad_fd_out_ptr_takes_precedence_over_bad_path() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_open(0xFFFF_0000, 0xFFFF_FF00, 0, 0)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -92,7 +92,7 @@ fn o_creat_for_missing_path_returns_enoent_no_effects() {
             &rt,
             fs_open(0x10000, 0x20000, CELL_FS_O_CREAT, 0o666),
         ),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
 }
@@ -142,7 +142,7 @@ fn unknown_path_still_enoents_when_other_paths_are_registered() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/missing\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
     // Invariant: failed lookup must not burn an fd id.
@@ -238,7 +238,7 @@ fn fs_open_mounted_missing_returns_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/missing.bin\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
 }
@@ -253,7 +253,7 @@ fn fs_open_mount_path_traversal_returns_eacces() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/../etc/passwd\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_EACCES.code,
+        errno::CELL_EACCES.code,
         0,
     );
 }
@@ -269,7 +269,7 @@ fn fs_open_mounted_directory_returns_enoent_in_slice3() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/savedir\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
 }
@@ -289,7 +289,7 @@ fn fs_open_o_creat_under_mount_returns_erofs() {
             &rt,
             fs_open(0x10000, 0x20000, CELL_FS_O_CREAT, 0o666),
         ),
-        cell_errors::CELL_EROFS.code,
+        errno::CELL_EROFS.code,
         0,
     );
     std::fs::remove_file(dir.path.join("scratch.bin")).expect("remove");
@@ -309,7 +309,7 @@ fn fs_open_with_o_wronly_on_existing_blob_returns_erofs() {
             &rt,
             fs_open(0x10000, 0x20000, CELL_FS_O_WRONLY, 0o666),
         ),
-        cell_errors::CELL_EROFS.code,
+        errno::CELL_EROFS.code,
         0,
     );
 }

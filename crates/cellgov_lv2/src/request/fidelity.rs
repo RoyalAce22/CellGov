@@ -50,7 +50,7 @@ impl ArmFidelity {
 /// `routed_unsupported_fidelity_table_matches_dispatch_exactly` probe
 /// dispatches every slot and fails when the two sets diverge.
 pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
-    use cellgov_ps3_abi::syscall;
+    use cellgov_ps3_abi::lv2::syscall;
     &[
         (
             syscall::PPU_THREAD_SET_PRIORITY,

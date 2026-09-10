@@ -116,12 +116,12 @@ fn initialize_needs_root_and_claims_the_uart_once() {
     let rt = runtime_with_packets(&[]);
     let mut host = Lv2Host::new();
     let d = host.dispatch(Lv2Request::UartInitialize, src(), &rt);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ENOSYS));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ENOSYS));
     assert!(host.state.uart.is_pristine());
     let mut host = root_host();
     init(&mut host, &rt);
     let d = host.dispatch(Lv2Request::UartInitialize, src(), &rt);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EPERM));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EPERM));
 }
 
 #[test]
@@ -131,11 +131,11 @@ fn send_receive_and_get_params_before_initialize_are_esrch() {
     let mut host = root_host();
     assert_eq!(
         code_of(&send(&mut host, &rt, p.len(), 2)),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
     assert_eq!(
         code_of(&recv(&mut host, &rt, 16, 0)),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
     let d = host.dispatch(
         Lv2Request::UartGetParams {
@@ -144,7 +144,7 @@ fn send_receive_and_get_params_before_initialize_are_esrch() {
         src(),
         &rt,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -234,7 +234,7 @@ fn a_blocking_receive_parks_and_the_next_send_wakes_it_with_the_reply() {
     );
     assert_eq!(
         code_of(&second),
-        u64::from(cell_errors::CELL_ESRCH),
+        u64::from(errno::CELL_ESRCH),
         "no thread record"
     );
     let d = send(&mut host, &rt, p.len(), av::SYS_UART_MODE_NOT_BLOCKING_OP);
@@ -289,7 +289,7 @@ fn receive_on_an_empty_stream_returns_zero_without_blocking() {
     );
     assert_eq!(
         code_of(&recv(&mut host, &rt, 64, 2)),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
 }
 
@@ -673,7 +673,7 @@ fn a_send_over_the_tx_ring_is_eagain_whole_or_refuse_and_overflow_otherwise() {
             big.len(),
             av::SYS_UART_MODE_NOT_BLOCKING_OP
         )),
-        u64::from(cell_errors::CELL_EAGAIN)
+        u64::from(errno::CELL_EAGAIN)
     );
     assert_eq!(
         code_of(&send(
@@ -728,7 +728,7 @@ fn a_transfer_over_the_cap_is_einval_with_a_named_break() {
     let mut host = root_host();
     init(&mut host, &rt);
     let d = recv(&mut host, &rt, av::SYS_UART_MAX_TRANSFER + 1, 0);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EINVAL));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EINVAL));
     assert_eq!(
         host.obs.invariant_break_sites["dispatch.uart_transfer_over_cap"],
         1

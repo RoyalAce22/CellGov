@@ -9,10 +9,10 @@ use crate::sce::SceError;
 use crate::test_support::build_npdrm_eboot_header;
 #[cfg(feature = "decrypt")]
 use crate::test_support::synthetic_vault;
-use cellgov_ps3_abi::elf::ELF_MAGIC;
-use cellgov_ps3_abi::sce::SCE_MAGIC;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::sce::SCE_MAGIC;
 #[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
+use cellgov_ps3_abi::format::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
 
 fn plaintext_image() -> Vec<u8> {
     let mut v = vec![0u8; 64];
@@ -152,7 +152,7 @@ fn a_supplemental_chain_that_escapes_the_buffer_is_refused_by_name() {
 #[test]
 fn a_walkable_chain_with_no_npdrm_record_under_app_only_policy_reaches_the_decrypt() {
     let raw = sce_wrapper_with_supplemental(
-        cellgov_ps3_abi::sce::SCE_SUPPLEMENTAL_KIND_PLAINTEXT_CAPABILITY,
+        cellgov_ps3_abi::format::sce::SCE_SUPPLEMENTAL_KIND_PLAINTEXT_CAPABILITY,
         0x20,
     );
     let err = to_plaintext_elf(&raw, &synthetic_vault(), KeyPolicy::AppOnly)

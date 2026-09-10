@@ -1,7 +1,7 @@
 //! `NID_TABLE` reconciled against the SHA-1 derivation and the curated consts.
 
 use super::*;
-use crate::elf::{NID_MODULE_START, NID_MODULE_STOP};
+use crate::format::elf::{NID_MODULE_START, NID_MODULE_STOP};
 use crate::sha1::nid_sha1;
 
 /// The module entry points: the only rows whose key is a fixed value

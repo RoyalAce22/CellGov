@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use cellgov_ps3_abi::pup::ENTRY_ID_UPDATE_FILES;
+use cellgov_ps3_abi::format::pup::ENTRY_ID_UPDATE_FILES;
 
 use crate::manifest::{ManifestError, Sha256 as HexSha256};
 use crate::sce::SceError;

@@ -28,7 +28,7 @@ pub mod device_map {
     // ADDR sits at or above the IO window base a title's own
     // sys_rsx_context_iomap call asks for, and clear of the control
     // region, whose slots a guest reaches by fixed offsets.
-    const _: () = assert!(ADDR as u64 >= crate::process_address_space::PS3_RSX_IOMAP_BASE);
+    const _: () = assert!(ADDR as u64 >= crate::hw::address_space::PS3_RSX_IOMAP_BASE);
     const _: () =
         assert!(ADDR.saturating_add(RESERVATION_SIZE) <= super::control_register::DMA_CONTROL_BASE);
 }

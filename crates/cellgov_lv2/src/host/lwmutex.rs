@@ -7,7 +7,7 @@
 //! sleep queue or sets the signal for the next acquirer.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -21,7 +21,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         let Some(id) = self.state.lwmutexes.create() else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         };
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
@@ -33,17 +33,17 @@ impl Lv2Host {
         requester: UnitId,
     ) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.lwmutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Unknown => {
                 self.obs.lwmutex_unknown_lock_count =
                     self.obs.lwmutex_unknown_lock_count.wrapping_add(1);
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Acquired => Lv2Dispatch::immediate(0),
             crate::sync_primitives::LwMutexAcquireOrEnqueue::WouldDeadlock => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into())
+                Lv2Dispatch::immediate(errno::CELL_EDEADLK.into())
             }
             crate::sync_primitives::LwMutexAcquireOrEnqueue::Enqueued => Lv2Dispatch::Block {
                 reason: crate::dispatch::Lv2BlockReason::LwMutex { id },
@@ -58,24 +58,24 @@ impl Lv2Host {
 
     pub(super) fn dispatch_lwmutex_trylock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.lwmutexes.try_acquire(id, caller) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::LwMutexAcquire::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::LwMutexAcquire::Contended) => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
             }
         }
     }
 
     pub(super) fn dispatch_lwmutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.lwmutexes.release_and_wake_next(id, caller) {
             crate::sync_primitives::LwMutexRelease::Unknown => {
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
             crate::sync_primitives::LwMutexRelease::Signaled => Lv2Dispatch::immediate(0),
             crate::sync_primitives::LwMutexRelease::Transferred { new_owner } => {
@@ -94,12 +94,12 @@ impl Lv2Host {
 
     pub(super) fn dispatch_lwmutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.lwmutexes.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         // Only parked waiters block destroy; the signal flag does
         // not (user-space ownership is invisible to the kernel).
         if !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.lwmutexes.destroy(id);
         Lv2Dispatch::immediate(0)

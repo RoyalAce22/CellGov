@@ -1,5 +1,5 @@
 use super::*;
-use cellgov_ps3_abi::dev_flash::FIRMWARE_MODULE_STEMS;
+use cellgov_ps3_abi::format::dev_flash::FIRMWARE_MODULE_STEMS;
 
 #[test]
 fn stems_are_sorted_and_unique() {

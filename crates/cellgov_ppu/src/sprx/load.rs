@@ -7,9 +7,9 @@ use std::collections::BTreeMap;
 
 use super::{ParsedPrx, PrxRelocation, PrxSegment};
 
-use cellgov_ps3_abi::elf::PRX_RELOC_NO_VALUE_SEGMENT;
+use cellgov_ps3_abi::format::elf::PRX_RELOC_NO_VALUE_SEGMENT;
 
-pub use cellgov_ps3_abi::elf::{
+pub use cellgov_ps3_abi::format::elf::{
     R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR16_LO_DS, R_PPC64_ADDR32,
     R_PPC64_ADDR64, R_PPC64_REL24,
 };

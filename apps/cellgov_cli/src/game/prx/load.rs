@@ -11,7 +11,7 @@ use crate::cli::exit::die;
 use super::got::patch_got_atomic;
 use super::types::{HostLinkMaps, PrxLoadInfo, PrxLoadStageError, VerifiedFirmware};
 
-use cellgov_ps3_abi::dev_flash::FIRMWARE_INTERNAL_PRX_STEMS;
+use cellgov_ps3_abi::format::dev_flash::FIRMWARE_INTERNAL_PRX_STEMS;
 
 /// Locate the firmware module file for `stem` under `dir_path`.
 ///

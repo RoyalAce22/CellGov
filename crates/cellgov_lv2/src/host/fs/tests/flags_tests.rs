@@ -1,6 +1,6 @@
 //! FS open-flag bit values and the TTY-sink path pre-registration contract.
 
-use cellgov_ps3_abi::sys_fs::CELL_FS_O_CREAT;
+use cellgov_ps3_abi::lv2::fs::CELL_FS_O_CREAT;
 
 use crate::host::Lv2Host;
 

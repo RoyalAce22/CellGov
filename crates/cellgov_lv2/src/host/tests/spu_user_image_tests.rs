@@ -9,8 +9,8 @@ use crate::image::LsSegment;
 use crate::request::Lv2Request;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_spu::{image, segment};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::spu::{image, segment};
 
 const IMG: u32 = 0x200;
 const SEGS: u32 = 0x300;
@@ -185,7 +185,7 @@ fn a_user_image_without_a_copy_segment_is_einval() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(host.content_store().user_image_count(), 0);
 }
@@ -200,7 +200,7 @@ fn overlapping_loadable_segments_are_einval() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
 }
 
@@ -213,7 +213,7 @@ fn an_info_segment_overlapping_a_copy_is_not_a_conflict() {
 
 #[test]
 fn a_misaligned_ls_or_size_and_an_out_of_store_segment_are_einval() {
-    let einval = u64::from(cell_errors::CELL_EINVAL);
+    let einval = u64::from(errno::CELL_EINVAL);
     for seg in [
         copy(0x108, 0x10, COPY_SRC),
         copy(0x100, 0x18, COPY_SRC),
@@ -231,7 +231,7 @@ fn a_misaligned_ls_or_size_and_an_out_of_store_segment_are_einval() {
 
 #[test]
 fn the_record_bounds_are_gated_before_the_table_is_read() {
-    let einval = u64::from(cell_errors::CELL_EINVAL);
+    let einval = u64::from(errno::CELL_EINVAL);
     for (entry, nsegs) in [
         (image::ENTRY_MAX + 1, 1),
         (ENTRY, 0),
@@ -261,7 +261,7 @@ fn the_record_bounds_are_gated_before_the_table_is_read() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EFAULT)
+        u64::from(errno::CELL_EFAULT)
     );
 }
 
@@ -285,18 +285,14 @@ fn a_record_at_the_top_of_the_address_space_is_efault() {
         let Lv2Dispatch::Immediate { code, .. } = d else {
             panic!("expected Immediate, got {d:?}");
         };
-        assert_eq!(
-            code,
-            u64::from(cell_errors::CELL_EFAULT),
-            "img_ptr {img_ptr:#x}"
-        );
+        assert_eq!(code, u64::from(errno::CELL_EFAULT), "img_ptr {img_ptr:#x}");
     }
     // A table row at the top of the space is refused the same way.
     let rt = record_runtime(ENTRY, u32::MAX - 0x17, 1);
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EFAULT)
+        u64::from(errno::CELL_EFAULT)
     );
 }
 
@@ -340,7 +336,7 @@ fn the_segment_record_layout_is_24_bytes_with_the_source_word_at_0x10() {
     // 4-byte aligned.
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
     assert_eq!(host.content_store().user_image_count(), 0);
 }
@@ -351,7 +347,7 @@ fn a_kernel_record_naming_an_unknown_id_is_esrch_at_initialize() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
     assert!(host.thread_groups().get(1).unwrap().slots.is_empty());
 }
@@ -365,7 +361,7 @@ fn a_kernel_record_naming_a_user_image_handle_is_esrch() {
     let forged = kernel_runtime(user_handle.raw());
     assert_eq!(
         initialize(&mut host, &forged, 1, 1),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
     assert_eq!(host.thread_groups().get(1).unwrap().slots.len(), 1);
     assert_eq!(host.content_store().user_image_count(), 1);
@@ -395,7 +391,7 @@ fn destroying_a_group_withdraws_its_user_images_and_keeps_kernel_images() {
 
 #[test]
 fn a_second_or_oversized_info_segment_is_einval() {
-    let einval = u64::from(cell_errors::CELL_EINVAL);
+    let einval = u64::from(errno::CELL_EINVAL);
     let rt = runtime(ENTRY, 3, &[copy(0x100, 0x10, COPY_SRC), info(0), info(0)]);
     let mut host = host_with_group(&rt, 1);
     assert_eq!(initialize(&mut host, &rt, 1, 0), einval);
@@ -417,7 +413,7 @@ fn an_unreadable_copy_source_is_efault_and_registers_nothing() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EFAULT)
+        u64::from(errno::CELL_EFAULT)
     );
     assert_eq!(host.content_store().user_image_count(), 0);
 }
@@ -428,13 +424,13 @@ fn a_refused_slot_withdraws_the_user_image_it_registered() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 7, 0),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
     assert_eq!(host.content_store().user_image_count(), 0);
     assert_eq!(initialize(&mut host, &rt, 1, 0), 0);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EBUSY)
+        u64::from(errno::CELL_EBUSY)
     );
     assert_eq!(host.content_store().user_image_count(), 1);
 }
@@ -445,6 +441,6 @@ fn an_unknown_image_type_is_einval() {
     let mut host = host_with_group(&rt, 1);
     assert_eq!(
         initialize(&mut host, &rt, 1, 0),
-        u64::from(cell_errors::CELL_EINVAL)
+        u64::from(errno::CELL_EINVAL)
     );
 }

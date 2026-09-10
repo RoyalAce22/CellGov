@@ -38,7 +38,7 @@ fn valid_call_records_mapping_and_returns_ok() {
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
     };
-    assert_eq!(code, u64::from(cell_errors::CELL_OK));
+    assert_eq!(code, u64::from(errno::CELL_OK));
     assert!(effects.is_empty(), "iomap is purely state-recording");
     let ctx = host.sys_rsx_context();
     assert_eq!(ctx.iomap_io, 0);
@@ -57,7 +57,7 @@ fn nonzero_io_records_offset() {
         0x0020_0000,
         0x0010_0000,
     );
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_OK.into()));
     assert_eq!(host.sys_rsx_context().iomap_io, 0x0010_0000);
 }
 
@@ -66,7 +66,7 @@ fn wrong_context_id_returns_einval() {
     let mut host = Lv2Host::new();
     allocate_context(&mut host);
     let d = iomap(&mut host, 0xDEAD_BEEF, 0, 0x0010_0000, 0x0010_0000);
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn iomap_before_allocate_keys_only_on_context_id() {
     // here.
     let mut host = Lv2Host::new();
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, 0x0010_0000);
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_OK.into()));
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn zero_size_returns_einval() {
     let mut host = Lv2Host::new();
     allocate_context(&mut host);
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, 0);
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn misaligned_io_ea_or_size_returns_einval() {
         let d = iomap(&mut host, iomap::CONTEXT_ID, io, ea, size);
         assert_eq!(
             d,
-            Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             "misaligned {label} must reject",
         );
     }
@@ -115,7 +115,7 @@ fn io_plus_size_overflow_returns_einval_and_logs() {
     allocate_context(&mut host);
     let before = host.observability().invariant_break_count;
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0xFFF0_0000, 0, 0x0010_0000);
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert_eq!(host.observability().invariant_break_count - before, 1);
 }
 
@@ -131,7 +131,7 @@ fn io_plus_size_at_exact_cap_is_ok() {
         0,
         0x0010_0000,
     );
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_OK.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_OK.into()));
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn oversized_size_returns_einval_and_logs_invariant_break() {
     let breaks_before = host.observability().invariant_break_count;
     let too_big = u32::try_from(PS3_RSX_IOMAP_SIZE).unwrap() + 0x0010_0000;
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, 0x0010_0000, too_big);
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert_eq!(
         host.observability().invariant_break_count - breaks_before,
         1
@@ -159,7 +159,7 @@ fn ea_plus_size_exceeds_local_mem_returns_einval() {
     let before = host.observability().invariant_break_count;
     let local_mem_base = u32::try_from(PS3_RSX_BASE).unwrap();
     let d = iomap(&mut host, iomap::CONTEXT_ID, 0, local_mem_base, 0x0010_0000);
-    assert_eq!(d, Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()));
+    assert_eq!(d, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert_eq!(host.observability().invariant_break_count, before);
 }
 

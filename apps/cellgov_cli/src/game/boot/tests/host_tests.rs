@@ -7,7 +7,7 @@ fn cellsysutil_seed_covers_both_slots_with_v256_ring() {
     let seed = cellsysutil_system_seed();
     assert_eq!(
         seed.shm_ipc_key,
-        cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY
+        cellgov_ps3_abi::lv2::ipc::CELLSYSUTIL_SHM_IPC_KEY
     );
     for slot_base in [0u32, 0x8000] {
         let field = |off: u32| -> &[u8] {

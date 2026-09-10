@@ -940,7 +940,7 @@ impl ExecutionUnit for ParkingUnit {
         self.steps.set(n);
         if n == 1 {
             let mut args = [0u64; 9];
-            args[0] = cellgov_ps3_abi::syscall::TIMER_USLEEP;
+            args[0] = cellgov_ps3_abi::lv2::syscall::TIMER_USLEEP;
             args[1] = 50;
             ExecutionStepResult {
                 yield_reason: YieldReason::Syscall,

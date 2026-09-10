@@ -15,7 +15,7 @@ pub use budget::{Budget, Consume, InstructionCost};
 pub use epoch::Epoch;
 pub use ticks::GuestTicks;
 
-pub use cellgov_ps3_abi::hardware::CELL_PPU_TIMEBASE_HZ;
+pub use cellgov_ps3_abi::hw::ppu::CELL_PPU_TIMEBASE_HZ;
 
 /// Simulated rate at which the interpreted PPU "runs", in instructions
 /// per simulated wall-clock second.

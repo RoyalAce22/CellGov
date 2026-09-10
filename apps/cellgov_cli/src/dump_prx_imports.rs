@@ -20,8 +20,8 @@ fn fit_name_column(name: &str) -> String {
     }
 }
 
-use cellgov_ps3_abi::elf::ELF_MAGIC;
-use cellgov_ps3_abi::sce::SCE_MAGIC;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::sce::SCE_MAGIC;
 
 #[derive(Debug, PartialEq, Eq)]
 enum SourceKind {
@@ -66,7 +66,7 @@ fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8
         Err(LoadError::TooSmall { len }) => crate::cli::exit::die(&format!(
             "prx-imports: {} is {len} byte(s); needs at least {} for an ELF64 header",
             path.display(),
-            cellgov_ps3_abi::elf::ELF_HEADER_SIZE,
+            cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE,
         )),
         Err(LoadError::BadMagic { magic }) => crate::cli::exit::die(&format!(
             "prx-imports: {} has unrecognized magic 0x{:02x}{:02x}{:02x}{:02x} \
@@ -82,7 +82,7 @@ fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8
 
 /// Classify `raw`'s first 4 bytes as ELF or SCE magic.
 fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
-    if raw.len() < cellgov_ps3_abi::elf::ELF_HEADER_SIZE {
+    if raw.len() < cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall { len: raw.len() });
     }
     let magic: [u8; 4] = raw[0..4].try_into().expect("4-byte prefix");
@@ -101,7 +101,7 @@ fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
 /// `Ok(None)` is the title-executable case: `e_type` is ET_EXEC, so
 /// no `sys_prx_module_info_t` exists and none is expected. A PPU
 /// object on this platform carries one of exactly two ELF types, both
-/// in [`cellgov_ps3_abi::elf`]. `ET_EXEC` names a title executable.
+/// in [`cellgov_ps3_abi::format::elf`]. `ET_EXEC` names a title executable.
 /// The PS3 relocatable-module type names every firmware module under
 /// `dev_flash/sys/external`. Every other `e_type` is a structural
 /// anomaly in a file whose import table the caller prints as
@@ -111,7 +111,9 @@ fn module_identity(
 ) -> Result<Option<cellgov_ppu::sprx::ParsedPrx>, cellgov_ppu::sprx::PrxParseError> {
     match cellgov_ppu::sprx::parse_prx(elf_bytes) {
         Ok(p) => Ok(Some(p)),
-        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(t)) if t == cellgov_ps3_abi::elf::ET_EXEC => {
+        Err(cellgov_ppu::sprx::PrxParseError::NotPrx(t))
+            if t == cellgov_ps3_abi::format::elf::ET_EXEC =>
+        {
             Ok(None)
         }
         Err(e) => Err(e),

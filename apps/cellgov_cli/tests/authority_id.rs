@@ -20,7 +20,7 @@ mod registry;
 use std::process::Command;
 
 use cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL;
-use cellgov_ps3_abi::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID;
+use cellgov_ps3_abi::format::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID;
 use registry::{titles, workspace_root, TitleUnderTest};
 
 struct AuthorityWitness {

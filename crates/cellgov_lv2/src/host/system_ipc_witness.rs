@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use cellgov_ps3_abi::system_ipc::{SYSTEM_IPC_KEY_NAMESPACE, SYSTEM_IPC_KEY_NAMESPACE_MASK};
+use cellgov_ps3_abi::lv2::ipc::{SYSTEM_IPC_KEY_NAMESPACE, SYSTEM_IPC_KEY_NAMESPACE_MASK};
 
 /// `true` when `ipc_key` names an object in the firmware system-IPC
 /// namespace.

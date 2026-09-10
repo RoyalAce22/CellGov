@@ -66,7 +66,7 @@ const CHILD_PATH: &[u8] = b"/test/child.self";
 const PID_OUT: u64 = 0x20;
 const BLOCK: u64 = 0x40;
 const PATH_STR: u64 = 0x80;
-const EXPECTED_PID: u32 = cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID + 0x100;
+const EXPECTED_PID: u32 = cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID + 0x100;
 const TOKEN: u64 = 0x00C0_FFEE;
 
 fn build(init_token: Option<u64>) -> Runtime {
@@ -102,7 +102,7 @@ fn build(init_token: Option<u64>) -> Runtime {
 
 fn spawn(rt: &mut Runtime) {
     let req = classify(
-        cellgov_ps3_abi::syscall::PROCESS_SPAWN,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_SPAWN,
         &[PID_OUT, 1000, 0, BLOCK, 0x60, 0, 0, 0],
     );
     rt.dispatch_lv2_request(req, UnitId::new(0));
@@ -197,7 +197,7 @@ fn a_child_that_exited_during_its_init_pass_is_not_resumed_by_release() {
     // A unit bound to the child's pid exits the process while the
     // primary is still parked; the exit sweep finishes the primary.
     let exit = classify(
-        cellgov_ps3_abi::syscall::PROCESS_EXIT,
+        cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT,
         &[7, 0, 0, 0, 0, 0, 0, 0],
     );
     rt.dispatch_lv2_request(exit, pending.primary_unit);

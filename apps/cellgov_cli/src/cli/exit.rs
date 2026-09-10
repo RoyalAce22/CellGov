@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
 use cellgov_install::sce::SceError;
 use cellgov_install::self_image::{is_sce_wrapped, to_plaintext_elf, KeyPolicy};
-use cellgov_ps3_abi::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
 use crate::game::manifest::{ResolveEbootError, TitleManifest};
 

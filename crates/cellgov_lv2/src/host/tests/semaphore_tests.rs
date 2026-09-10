@@ -52,7 +52,7 @@ fn semaphore_create_rejects_initial_above_max() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EINVAL.into());
+    assert_eq!(code, errno::CELL_EINVAL.into());
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn semaphore_destroy_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn semaphore_destroy_with_waiter_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = d else {
         panic!("expected Immediate, got {d:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn semaphore_trywait_with_zero_count_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = w else {
         panic!("expected Immediate, got {w:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
     assert_eq!(host.semaphores().lookup(id).unwrap().count(), 0);
     assert!(host.semaphores().lookup(id).unwrap().waiters().is_empty());
 }
@@ -251,7 +251,7 @@ fn semaphore_trywait_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -305,7 +305,7 @@ fn semaphore_get_value_null_out_ptr_returns_efault() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EFAULT.into());
+    assert_eq!(code, errno::CELL_EFAULT.into());
 }
 
 #[test]
@@ -323,7 +323,7 @@ fn semaphore_get_value_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -338,7 +338,7 @@ fn semaphore_post_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -385,7 +385,7 @@ fn semaphore_post_unknown_id_returns_esrch_even_for_invalid_val() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]
@@ -504,7 +504,7 @@ fn semaphore_post_past_max_with_no_waiters_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = post else {
         panic!("expected Immediate, got {post:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
     assert_eq!(host.semaphores().lookup(id).unwrap().count(), 3);
 }
 
@@ -518,5 +518,5 @@ fn semaphore_wait_unknown_id_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }

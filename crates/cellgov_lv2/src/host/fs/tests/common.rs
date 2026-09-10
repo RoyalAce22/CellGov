@@ -10,7 +10,7 @@ use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
 
-use cellgov_ps3_abi::sys_fs::CELL_FS_STAT_SIZE;
+use cellgov_ps3_abi::lv2::fs::CELL_FS_STAT_SIZE;
 
 /// Test runtime: a flat host-side buffer that mimics guest memory,
 /// with optional reserved subranges that mirror unwritable regions.
@@ -315,7 +315,10 @@ pub(super) fn extract_readdir(
     let dirent_bytes = match &effects[0] {
         Effect::SharedWriteIntent { range, bytes, .. } => {
             assert_eq!(range.start().raw(), expected_dirent_addr);
-            assert_eq!(range.length(), cellgov_ps3_abi::sys_fs::CELL_FS_DIRENT_SIZE,);
+            assert_eq!(
+                range.length(),
+                cellgov_ps3_abi::lv2::fs::CELL_FS_DIRENT_SIZE,
+            );
             bytes.bytes().to_vec()
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),

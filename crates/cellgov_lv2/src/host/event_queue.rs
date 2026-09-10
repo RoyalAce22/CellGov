@@ -8,8 +8,8 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::sync::{SYS_EVENT_PORT_IPC, SYS_EVENT_PORT_LOCAL};
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::Lv2Host;
@@ -42,13 +42,13 @@ impl Lv2Host {
                 self.obs.system_ipc_witness.event_queue_references += 1;
                 self.obs.system_ipc_witness.note_key(ipc_key);
             }
-            return Lv2Dispatch::immediate(cell_errors::CELL_EEXIST.into());
+            return Lv2Dispatch::immediate(errno::CELL_EEXIST.into());
         }
         // size == 0 defaults to EQUEUE_MAX_RECV_EVENT (127).
         let effective_size = if size == 0 { 127 } else { size };
         let id = self.alloc_id();
         if !self.state.event_queues.create_with_id(id, effective_size) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         if ipc_key != 0 {
             self.derived.event_queue_ipc_keys.insert(id, ipc_key);
@@ -85,7 +85,7 @@ impl Lv2Host {
                 "dispatch.event_port_create_bad_type",
                 format_args!("sys_event_port_create: port_type {port_type} is neither LOCAL(1) nor IPC(3); returning CELL_EINVAL"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         self.state.process_counts.event_port_inc();
         let id = self.alloc_id();
@@ -106,8 +106,8 @@ impl Lv2Host {
                 self.state.process_counts.event_port_dec();
                 Lv2Dispatch::immediate(0)
             }
-            Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
-            Err(E::Connected) => Lv2Dispatch::immediate(cell_errors::CELL_EISCONN.into()),
+            Err(E::UnknownPort) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            Err(E::Connected) => Lv2Dispatch::immediate(errno::CELL_EISCONN.into()),
         }
     }
 
@@ -134,10 +134,10 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         use crate::sync_primitives::EventPortConnectError as E;
         let Some(queue_id) = queue_id else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if self.state.event_queues.lookup(queue_id).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
         match self
             .state
@@ -145,9 +145,9 @@ impl Lv2Host {
             .connect(port_id, queue_id, required_type)
         {
             Ok(()) => Lv2Dispatch::immediate(0),
-            Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
-            Err(E::WrongType) => Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
-            Err(E::AlreadyConnected) => Lv2Dispatch::immediate(cell_errors::CELL_EISCONN.into()),
+            Err(E::UnknownPort) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            Err(E::WrongType) => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            Err(E::AlreadyConnected) => Lv2Dispatch::immediate(errno::CELL_EISCONN.into()),
         }
     }
 
@@ -167,7 +167,7 @@ impl Lv2Host {
         ipc_key: u64,
     ) -> Lv2Dispatch {
         if ipc_key == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let queue_id = self.derived.event_queue_ipc.get(&ipc_key).copied();
         self.obs.event_port_ipc_connects.0 += 1;
@@ -191,17 +191,17 @@ impl Lv2Host {
         use crate::sync_primitives::EventPortDisconnectError as E;
         match self.state.event_ports.disconnect(port_id) {
             Ok(()) => Lv2Dispatch::immediate(0),
-            Err(E::UnknownPort) => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
-            Err(E::NotConnected) => Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into()),
+            Err(E::UnknownPort) => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
+            Err(E::NotConnected) => Lv2Dispatch::immediate(errno::CELL_ENOTCONN.into()),
         }
     }
 
     pub(super) fn dispatch_event_queue_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.event_queues.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.event_queues.destroy(id);
         self.state.event_ports.unbind_queue(id);
@@ -227,10 +227,10 @@ impl Lv2Host {
                 "dispatch.event_queue_receive_caller_without_thread_record",
                 format_args!("equeue 0x{id:08x}: unit {requester:?} has no PPU thread record"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.event_queues.try_receive(id) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
                 // The kernel returns the event's four words in
                 // r4..=r7, and the guest's own stub stores them into
@@ -246,10 +246,10 @@ impl Lv2Host {
                 match self.state.event_queues.enqueue_waiter(id, caller, out_ptr) {
                     Ok(()) => {}
                     Err(crate::sync_primitives::EventQueueEnqueueError::UnknownId) => {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
                     }
                     Err(crate::sync_primitives::EventQueueEnqueueError::DuplicateWaiter) => {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                        return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                     }
                 }
                 Lv2Dispatch::Block {
@@ -276,16 +276,16 @@ impl Lv2Host {
         // try_receive_batch drains destructively; every output
         // ByteRange is validated up front.
         if ByteRange::new(GuestAddr::new(count_out as u64), 4).is_none() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         for i in 0..size as u64 {
             let addr = event_array as u64 + i * 32;
             if ByteRange::new(GuestAddr::new(addr), 32).is_none() {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         }
         let Some(batch) = self.state.event_queues.try_receive_batch(id, size as usize) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         let count = batch.len() as u32;
         let mut effects: Vec<Effect> = Vec::with_capacity(batch.len() + 1);
@@ -329,10 +329,10 @@ impl Lv2Host {
         // The event's `source` is the port, but delivery goes to the
         // queue the port is connected to.
         let Some(port) = self.state.event_ports.lookup(port_id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         let Some(queue_id) = port.queue() else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOTCONN.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOTCONN.into());
         };
         let payload = EventPayload {
             source: port_id as u64,
@@ -359,10 +359,10 @@ impl Lv2Host {
         }
         match sent {
             crate::sync_primitives::EventQueueSend::Unknown => {
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
             crate::sync_primitives::EventQueueSend::Full => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
             }
             crate::sync_primitives::EventQueueSend::Enqueued => Lv2Dispatch::immediate(0),
             crate::sync_primitives::EventQueueSend::Woke {

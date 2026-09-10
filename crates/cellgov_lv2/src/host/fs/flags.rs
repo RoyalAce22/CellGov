@@ -1,7 +1,7 @@
 //! Open-flag validation and the TTY-sink path allowlist.
 
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_fs::{
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::fs::{
     CELL_FS_O_ACCMODE, CELL_FS_O_APPEND, CELL_FS_O_CREAT, CELL_FS_O_RDWR, CELL_FS_O_TRUNC,
     CELL_FS_O_WRONLY,
 };
@@ -24,16 +24,16 @@ pub(super) const FS_TTY_SINK_PATHS: &[&str] = &["/app_home/output.txt"];
 pub(super) fn validate_open_flags(
     flags: u32,
     path: &str,
-) -> Option<cellgov_ps3_abi::cell_errors::Lv2ErrCode> {
+) -> Option<cellgov_ps3_abi::lv2::errno::Lv2ErrCode> {
     if FS_TTY_SINK_PATHS.contains(&path) {
         return None;
     }
     let access = flags & CELL_FS_O_ACCMODE;
     if access == CELL_FS_O_WRONLY || access == CELL_FS_O_RDWR {
-        return Some(cell_errors::CELL_EROFS);
+        return Some(errno::CELL_EROFS);
     }
     if flags & (CELL_FS_O_CREAT | CELL_FS_O_TRUNC | CELL_FS_O_APPEND) != 0 {
-        return Some(cell_errors::CELL_EROFS);
+        return Some(errno::CELL_EROFS);
     }
     None
 }

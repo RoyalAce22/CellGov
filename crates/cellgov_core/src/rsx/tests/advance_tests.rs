@@ -1148,7 +1148,7 @@ fn unpaired_release_emits_label_write_at_offset_zero() {
 /// block rather than onto the semaphore slot the bare offset names.
 #[test]
 fn a_drain_under_a_label_base_emits_a_report_into_the_report_block() {
-    use cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    use cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET;
     const LABEL_BASE: u32 = 0x3020_0000;
     let mut memory = make_memory();
     let words = [

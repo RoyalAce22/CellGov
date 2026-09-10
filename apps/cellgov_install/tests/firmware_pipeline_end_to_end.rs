@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::firmware_install::{FirmwareInstallError, FirmwareInstallOutcome};
 use cellgov_install::store::{Artifact, ArtifactKind, InstallRecord, StoreLayout, VersionKey};
-use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 #[path = "common/digests.rs"]
 mod digests;

@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -20,7 +20,7 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let target_id = PpuThreadId::new(target);
         let Some(target_thread) = self.state.ppu_threads.get(target_id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if target_thread.state.is_finished() {
             let exit_value = target_thread.exit_value.unwrap_or(0);
@@ -30,7 +30,7 @@ impl Lv2Host {
             // call; that the join runs first is a CellGov choice,
             // unestablished against the console.
             if status_out_ptr == 0 {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
             let write = Effect::SharedWriteIntent {
                 range: ByteRange::contiguous_u32(status_out_ptr, 8),
@@ -45,7 +45,7 @@ impl Lv2Host {
             };
         }
         let Some(caller_thread_id) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self
             .state
@@ -60,13 +60,11 @@ impl Lv2Host {
                 },
                 effects: vec![],
             },
-            AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into()),
+            AddJoinWaiter::SelfJoin => Lv2Dispatch::immediate(errno::CELL_EDEADLK.into()),
             // A join against a target that is not joinable is EINVAL.
             // ESRCH is reserved for ids that name no thread or an
             // already-reaped one.
-            AddJoinWaiter::TargetDetached => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-            }
+            AddJoinWaiter::TargetDetached => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             AddJoinWaiter::UnknownTarget | AddJoinWaiter::TargetAlreadyFinished => {
                 self.record_invariant_break(
                     "ppu_thread_join.add_join_waiter_unreachable",
@@ -75,7 +73,7 @@ impl Lv2Host {
                          for target {target_id:?}"
                     ),
                 );
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
         }
     }
@@ -98,7 +96,7 @@ impl Lv2Host {
         {
             Some(arr) => arr,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
         let entry_opd_ptr = u32::from_be_bytes([
@@ -118,7 +116,7 @@ impl Lv2Host {
         // the priority range test; that order is a CellGov choice,
         // unestablished against the console.
         if entry_opd_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         // A PPU thread priority runs 0 (highest) through 3071, and a
@@ -128,7 +126,7 @@ impl Lv2Host {
         let prio = priority as i32;
         let prio_floor = if self.debug_or_root() { -512 } else { 0 };
         if prio < prio_floor || prio > 3071 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
 
         let opd_bytes: [u8; 8] = match rt
@@ -137,7 +135,7 @@ impl Lv2Host {
         {
             Some(arr) => arr,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
         let entry_code =
@@ -150,7 +148,7 @@ impl Lv2Host {
         let stack = match self.allocate_child_stack(size, 0x10) {
             Some(s) => s,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
             }
         };
 

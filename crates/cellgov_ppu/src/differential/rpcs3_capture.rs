@@ -7,7 +7,7 @@
 //! verbatim into the `u128` representation that
 //! [`crate::state::PpuState::vr`] uses (`u128::from_be_bytes`).
 
-use cellgov_ps3_abi::hardware::{FPR_COUNT, GPR_COUNT, VR_COUNT};
+use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use thiserror::Error;
 
 use super::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};

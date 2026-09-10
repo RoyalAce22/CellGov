@@ -108,7 +108,7 @@ impl Runtime {
                     }
                     self.deliver_syscall_return(
                         waiter,
-                        cellgov_ps3_abi::cell_errors::CELL_ECANCELED.into(),
+                        cellgov_ps3_abi::lv2::errno::CELL_ECANCELED.into(),
                     );
                 }
                 Some(PendingResponse::LwMutexWake { mutex_ptr, caller }) => {
@@ -283,11 +283,11 @@ impl Runtime {
             // through.
             let waiter_space = self.spaces.space_of(waiter_id);
             let code = if cause_ptr == 0 {
-                cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()
+                cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()
             } else {
                 self.commit_bytes_at(waiter_space, cause_ptr as u64, &cause.to_be_bytes());
                 if status_ptr == 0 {
-                    cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()
+                    cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()
                 } else {
                     self.commit_bytes_at(waiter_space, status_ptr as u64, &status.to_be_bytes());
                     code

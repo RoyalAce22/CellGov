@@ -3,7 +3,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -28,7 +28,7 @@ impl Lv2Host {
     /// finishes only that process.
     pub(in crate::host) fn dispatch_process_exit(&self, code: i32, source: UnitId) -> Lv2Dispatch {
         let pid = self.state.processes.process_of_unit(source);
-        if pid == cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID {
+        if pid == cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID {
             return Lv2Dispatch::immediate(0u64);
         }
         Lv2Dispatch::ProcessExitChild {
@@ -158,16 +158,16 @@ impl Lv2Host {
             );
         }
         if !rt.writable(u64::from(pid_out_ptr), 4) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(table_off) = rt
             .read_committed(u64::from(block_ptr), 8)
             .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
         else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         if table_off >= u64::from(block_size) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let table_base = u64::from(block_ptr) + table_off;
         // `block_size` is the caller-declared extent of the marshalled
@@ -183,7 +183,7 @@ impl Lv2Host {
                 .read_committed(table_base + idx * 8, 8)
                 .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
             else {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             };
             if entry == 0 {
                 argv_terminated = true;
@@ -204,13 +204,13 @@ impl Lv2Host {
                      table_off={table_off:#x}, walked={walk_limit}); rejecting"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(path) = path else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let Some(record) = self.state.content.lookup_by_path(&path) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
         };
         let elf_bytes = record.elf_bytes.clone();
         let pid = self.state.processes.next_child_pid();
@@ -219,7 +219,7 @@ impl Lv2Host {
             pid,
             super::ProcessEntry {
                 ppid,
-                authority_id: cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+                authority_id: cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
                 control_flags1: 0,
                 exit_status: None,
             },
@@ -234,7 +234,7 @@ impl Lv2Host {
                 "process.spawn_pid_space_exhausted",
                 format_args!("next_child_pid returned occupied pid {pid:#x}; spawn rejected"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into());
+            return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
         }
         Lv2Dispatch::ProcessSpawn {
             pid,
@@ -258,7 +258,7 @@ impl Lv2Host {
     pub(in crate::host) fn dispatch_process_get_status(&self, pid: u32) -> Lv2Dispatch {
         let code = match self.state.processes.get(pid) {
             Some(entry) if entry.exit_status.is_none() => 0u64,
-            _ => cell_errors::CELL_ESRCH.into(),
+            _ => errno::CELL_ESRCH.into(),
         };
         Lv2Dispatch::immediate(code)
     }
@@ -287,7 +287,7 @@ impl Lv2Host {
                          no table entry; serving the boot ppid"
                     ),
                 );
-                cellgov_ps3_abi::sys_process::BOOT_PROCESS_PPID
+                cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PPID
             }
         };
         Lv2Dispatch::immediate(ppid.into())
@@ -326,19 +326,19 @@ impl Lv2Host {
     ) -> Lv2Dispatch {
         let known_bits = SYS_MEMORY_ACCESS_RIGHT_SPU_THR | SYS_MEMORY_ACCESS_RIGHT_RAW_SPU;
         if flags == 0 || (flags & !known_bits) != 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let code = match addr >> 28 {
             0x0 | 0x1 | 0x2 | 0xc | 0xe => 0u64,
             0xf => {
                 if flags & SYS_MEMORY_ACCESS_RIGHT_RAW_SPU != 0 {
-                    cell_errors::CELL_EPERM.into()
+                    errno::CELL_EPERM.into()
                 } else {
                     0
                 }
             }
-            0xd => cell_errors::CELL_EPERM.into(),
-            _ => cell_errors::CELL_EINVAL.into(),
+            0xd => errno::CELL_EPERM.into(),
+            _ => errno::CELL_EINVAL.into(),
         };
         Lv2Dispatch::Immediate {
             code,
@@ -357,7 +357,7 @@ impl Lv2Host {
         max_raw_spu: u32,
     ) -> Lv2Dispatch {
         if max_raw_spu > 5 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         self.log_invariant_break(
             "dispatch.spu_initialize_limits_unpersisted",

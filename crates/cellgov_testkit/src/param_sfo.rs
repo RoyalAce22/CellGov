@@ -1,9 +1,9 @@
 //! A minimal PARAM.SFO emitter for synthetic title trees.
 //!
-//! The layout follows [`cellgov_ps3_abi::param_sfo`], so the production
+//! The layout follows [`cellgov_ps3_abi::format::param_sfo`], so the production
 //! parser reads what this writes.
 
-use cellgov_ps3_abi::param_sfo::{
+use cellgov_ps3_abi::format::param_sfo::{
     SFO_FMT_STRING, SFO_FORMAT_VERSION, SFO_HEADER_LEN, SFO_INDEX_LEN, SFO_MAGIC,
 };
 

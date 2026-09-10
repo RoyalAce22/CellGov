@@ -21,7 +21,7 @@ fn a_receive_from_a_unit_without_a_thread_record_is_esrch_and_logged() {
     );
     assert_eq!(
         d,
-        Lv2Dispatch::immediate(u64::from(cellgov_ps3_abi::cell_errors::CELL_ESRCH))
+        Lv2Dispatch::immediate(u64::from(cellgov_ps3_abi::lv2::errno::CELL_ESRCH))
     );
     assert!(host.observability().invariant_break_count > breaks_before);
 }
@@ -106,7 +106,7 @@ fn event_queue_destroy_with_waiters_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = d else {
         panic!("expected Immediate, got {d:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
 }
 
 #[test]
@@ -430,7 +430,7 @@ fn event_queue_tryreceive_unknown_returns_esrch() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_ESRCH.into());
+    assert_eq!(code, errno::CELL_ESRCH.into());
 }
 
 #[test]

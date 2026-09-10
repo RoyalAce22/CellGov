@@ -334,7 +334,7 @@ fn cell_error_codes_are_named_in_the_abi_crate() {
     assert!(
         violations.is_empty(),
         "{} Cell error-code literal(s) outside {ABI_CRATE}. Name the code in \
-         cellgov_ps3_abi::cell_errors (or the subsystem module that owns the domain) and \
+         cellgov_ps3_abi::lv2::errno (or the subsystem module that owns the domain) and \
          refer to it:\n{}",
         violations.len(),
         violations.concat()
@@ -364,7 +364,7 @@ fn syscall_numbers_reach_the_classifier_and_the_tables_by_name() {
     assert!(
         violations.is_empty(),
         "{} syscall number(s) appear as bare integers. Declare the number in \
-         cellgov_ps3_abi::syscall and match on the name:\n{}",
+         cellgov_ps3_abi::lv2::syscall and match on the name:\n{}",
         violations.len(),
         violations.concat()
     );

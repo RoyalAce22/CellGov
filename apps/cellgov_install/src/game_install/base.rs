@@ -40,8 +40,8 @@ use crate::self_image::is_sce_wrapped;
 use crate::store::layout::{staging_sibling, Artifact, StoreLayout, TitleId};
 use crate::store::lock::lock_artifact;
 use crate::store::record::{ArtifactRecord, RapRecord, TitleRecord};
-use cellgov_ps3_abi::elf::ELF_MAGIC;
-use cellgov_ps3_abi::title_tree::DISC_UPDATE_PUP;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::title_tree::DISC_UPDATE_PUP;
 
 /// PARAM.SFO categories that mark a disc title (`DG` disc game,
 /// `GD` disc game/data).

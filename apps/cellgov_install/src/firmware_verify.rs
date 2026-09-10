@@ -296,7 +296,7 @@ pub fn verify_firmware_tree(
     dev_flash_dir: &Path,
     keys: &KeyVault,
 ) -> Result<FirmwareVerifyReport, FirmwareVerifyError> {
-    use cellgov_ps3_abi::elf::ELF_MAGIC;
+    use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
     let firmware = load_manifest(dev_flash_dir)?;
     if firmware.files.is_empty() {

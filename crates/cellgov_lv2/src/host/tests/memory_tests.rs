@@ -74,7 +74,7 @@ fn user_memory_size_available_falls_with_allocation() {
     host.set_mem_alloc_base(0x008A_0000);
     let rt = FakeRuntime::new(0x10000);
     let source = UnitId::new(0);
-    let total = cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL;
+    let total = cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL;
 
     let query = |host: &mut Lv2Host| -> u32 {
         match host.dispatch(
@@ -165,8 +165,8 @@ fn memory_get_user_memory_size_writes_info_struct() {
                     let b = bytes.bytes();
                     let total = u32::from_be_bytes([b[0], b[1], b[2], b[3]]);
                     let avail = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);
-                    assert_eq!(total, cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
-                    assert_eq!(avail, cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
+                    assert_eq!(total, cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL);
+                    assert_eq!(avail, cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL);
                 }
                 other => panic!("expected SharedWriteIntent, got {other:?}"),
             }
@@ -214,7 +214,7 @@ fn memory_container_create_sub_granule_size_is_enomem_on_both_syscall_numbers() 
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
     let source = UnitId::new(0);
-    let enomem = Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+    let enomem = Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
 
     assert_eq!(
         host.dispatch(

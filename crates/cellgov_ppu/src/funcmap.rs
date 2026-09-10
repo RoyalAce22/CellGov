@@ -13,7 +13,7 @@ use core::fmt;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ET_PRX};
+use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ET_PRX};
 
 use crate::loader::{pt_load_segments, LoadError, LoadSegment};
 use crate::sprx::{parse_prx, PrxParseError};

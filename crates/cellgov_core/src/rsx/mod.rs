@@ -10,7 +10,7 @@ pub mod method;
 pub mod reports;
 
 pub use call_stack::{CallStackOverflow, RsxCallStack, CALL_STACK_DEPTH, CALL_STACK_OVERFLOW_RAW};
-pub use cellgov_ps3_abi::sys_rsx::control_register;
+pub use cellgov_ps3_abi::lv2::rsx::control_register;
 pub use cursor::{RsxFifoCursor, STATE_HASH_FORMAT_VERSION};
 pub use flip::RSX_FLIP_STATUS_MIRROR_ADDR;
 pub use iomap::IoMap;

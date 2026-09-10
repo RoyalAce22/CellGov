@@ -24,7 +24,7 @@ fn event_flag_create_null_id_ptr_returns_efault() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EFAULT.into());
+    assert_eq!(code, errno::CELL_EFAULT.into());
     assert!(host.event_flags().is_empty());
 }
 
@@ -44,7 +44,7 @@ fn event_flag_create_null_attr_ptr_returns_efault() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EFAULT.into());
+    assert_eq!(code, errno::CELL_EFAULT.into());
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn event_flag_create_zeroed_attr_returns_einval() {
     let Lv2Dispatch::Immediate { code, .. } = r else {
         panic!("expected Immediate, got {r:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EINVAL.into());
+    assert_eq!(code, errno::CELL_EINVAL.into());
 }
 
 #[test]
@@ -374,5 +374,5 @@ fn event_flag_trywait_no_match_returns_ebusy() {
     let Lv2Dispatch::Immediate { code, .. } = w else {
         panic!("expected Immediate, got {w:?}");
     };
-    assert_eq!(code, cell_errors::CELL_EBUSY.into());
+    assert_eq!(code, errno::CELL_EBUSY.into());
 }

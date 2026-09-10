@@ -228,10 +228,10 @@ fn handle_syscall_args(
     if args[0] >= 0x10000 {
         let idx = (args[0] - 0x10000) as u32;
         *ctx.hle_calls.entry(idx).or_insert(0) += 1;
-    } else if args[0] == cellgov_ps3_abi::syscall::TTY_WRITE {
+    } else if args[0] == cellgov_ps3_abi::lv2::syscall::TTY_WRITE {
         handle_tty_capture(args, ctx, pc, mem);
-    } else if args[0] == cellgov_ps3_abi::syscall::PROCESS_EXIT
-        || args[0] == cellgov_ps3_abi::syscall::PPU_THREAD_EXIT
+    } else if args[0] == cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT
+        || args[0] == cellgov_ps3_abi::lv2::syscall::PPU_THREAD_EXIT
     {
         ctx.last_exit = Some(ProcessExitInfo {
             code: args[1] as u32,

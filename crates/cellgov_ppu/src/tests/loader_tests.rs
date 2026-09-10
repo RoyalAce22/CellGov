@@ -402,7 +402,7 @@ fn a_symbol_table_whose_offset_plus_size_wraps_usize_is_not_searched() {
         shoff,
         1,
         &Sh {
-            sh_type: cellgov_ps3_abi::elf::SHT_STRTAB,
+            sh_type: cellgov_ps3_abi::format::elf::SHT_STRTAB,
             sh_offset: 0,
             sh_size: 16,
             sh_link: 0,

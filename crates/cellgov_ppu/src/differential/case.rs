@@ -1,6 +1,6 @@
 //! Per-instruction differential input and its provenance tag.
 
-use cellgov_ps3_abi::hardware::{FPR_COUNT, GPR_COUNT, VR_COUNT};
+use cellgov_ps3_abi::hw::ppu::{FPR_COUNT, GPR_COUNT, VR_COUNT};
 use cellgov_sync::ReservedLine;
 
 use crate::state::PpuState;

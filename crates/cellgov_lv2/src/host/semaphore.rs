@@ -4,7 +4,7 @@
 //! off directly without incrementing; over-max post with no waiter is EBUSY.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -31,25 +31,25 @@ impl Lv2Host {
         // pointer and an out-of-range bound only one at a time, so
         // this order is CellGov's.
         if id_ptr == 0 || attr_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // sys_semaphore_attribute_t: protocol u32 at +0, type s32 at +20
         // (shared with event_flag/mutex/cond). Memset-zero fails validation.
         let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let protocol =
             u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
-        use cellgov_ps3_abi::sys_sync::{SYS_SYNC_FIFO, SYS_SYNC_PRIORITY};
+        use cellgov_ps3_abi::lv2::sync::{SYS_SYNC_FIFO, SYS_SYNC_PRIORITY};
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // The hardware trace in
         // tests/ps3autotests/tests/lv2/sys_semaphore covers all four
         // refusals, `max == 0` among them: LV2 refuses a semaphore
         // that nothing can ever acquire.
         if max <= 0 || initial < 0 || initial > max {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let id = self.alloc_id();
         match self.state.semaphores.create_with_id(id, initial, max) {
@@ -57,10 +57,10 @@ impl Lv2Host {
             Err(crate::sync_primitives::SemaphoreCreateError::IdCollision(_)) => {
                 // Host-invariant break; ENOMEM is the best-effort errno
                 // (no Cell OS code maps to "allocator handed me a live id").
-                return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+                return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
             }
             Err(crate::sync_primitives::SemaphoreCreateError::InvalidBounds) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         }
         self.immediate_write_u32(id, id_ptr, requester, tick)
@@ -68,10 +68,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_semaphore_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.semaphores.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.semaphores.destroy(id);
         Lv2Dispatch::immediate(0)
@@ -79,10 +79,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_semaphore_wait(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.semaphores.try_wait(id) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
                 // A finite timeout parks like any wait; the runtime's
@@ -98,7 +98,7 @@ impl Lv2Host {
                         crate::sync_primitives::SemaphoreEnqueueError::UnknownId
                         | crate::sync_primitives::SemaphoreEnqueueError::DuplicateWaiter,
                     ) => {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                        return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
                     }
                 }
                 Lv2Dispatch::Block {
@@ -112,10 +112,10 @@ impl Lv2Host {
 
     pub(super) fn dispatch_semaphore_trywait(&mut self, id: u32) -> Lv2Dispatch {
         match self.state.semaphores.try_wait(id) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::SemaphoreWait::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::SemaphoreWait::Empty) => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
             }
         }
     }
@@ -133,10 +133,10 @@ impl Lv2Host {
         // The post arm's order is the reverse, and there the trace
         // does settle it.
         if out_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let Some(entry) = self.state.semaphores.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         let count = entry.count() as u32;
         self.immediate_write_u32(count, out_ptr, requester, tick)
@@ -157,22 +157,22 @@ impl Lv2Host {
         // waiters and only the leftover counts toward `max`. The
         // trace does settle that half -- see `post_and_wake_n`.
         let Some(entry) = self.state.semaphores.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if val <= 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let waiters_len = entry.waiters().len() as i32;
         let leftover = (val - waiters_len).max(0);
         if leftover > entry.max() - entry.count() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         match self.state.semaphores.post_and_wake_n(id, val as u32) {
             crate::sync_primitives::SemaphorePostN::Unknown => {
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
             crate::sync_primitives::SemaphorePostN::OverMax => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
             }
             crate::sync_primitives::SemaphorePostN::Posted { woken, .. } => {
                 if woken.is_empty() {

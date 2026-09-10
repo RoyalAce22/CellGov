@@ -30,7 +30,7 @@ fn sys_rsx_device_map_dev_id_8_writes_rsx_device_addr_only_and_returns_ok() {
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
     };
-    assert_eq!(code, u64::from(cell_errors::CELL_OK));
+    assert_eq!(code, u64::from(errno::CELL_OK));
     assert_eq!(effects.len(), 1);
     assert_eq!(extract_write_u64(&effects[0]), u64::from(device_map::ADDR));
 }
@@ -77,7 +77,7 @@ fn sys_rsx_device_map_dev_id_8_is_idempotent_across_calls() {
         let Lv2Dispatch::Immediate { code, effects } = d else {
             panic!("expected Immediate, got {d:?}");
         };
-        assert_eq!(code, u64::from(cell_errors::CELL_OK));
+        assert_eq!(code, u64::from(errno::CELL_OK));
         assert_eq!(effects.len(), 1);
         assert_eq!(extract_write_u64(&effects[0]), u64::from(device_map::ADDR));
     }
@@ -92,11 +92,7 @@ fn sys_rsx_device_map_dev_id_not_8_returns_einval_and_bumps_count() {
         let Lv2Dispatch::Immediate { code, effects } = &d else {
             panic!("dev_id {bad_dev_id}: expected Immediate, got {d:?}");
         };
-        assert_eq!(
-            *code,
-            u64::from(cell_errors::CELL_EINVAL),
-            "dev_id {bad_dev_id}"
-        );
+        assert_eq!(*code, u64::from(errno::CELL_EINVAL), "dev_id {bad_dev_id}");
         assert!(effects.is_empty(), "dev_id {bad_dev_id}");
     }
     assert_eq!(
@@ -115,7 +111,7 @@ fn sys_rsx_device_map_null_dev_addr_returns_efault_and_emits_no_writes() {
     };
     assert_eq!(
         code,
-        u64::from(cell_errors::CELL_EFAULT),
+        u64::from(errno::CELL_EFAULT),
         "null dev_addr_ptr must yield CELL_EFAULT, not CELL_OK"
     );
     assert!(

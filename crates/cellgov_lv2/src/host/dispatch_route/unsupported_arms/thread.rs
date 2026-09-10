@@ -3,8 +3,8 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_ppu_thread::{
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::ppu_thread::{
     PPU_THREAD_PRIORITY_MAX, PPU_THREAD_PRIORITY_MIN, PPU_THREAD_PRIORITY_MIN_ROOT,
 };
 use cellgov_time::GuestTicks;
@@ -34,7 +34,7 @@ impl Lv2Host {
             .ppu_threads
             .get(crate::ppu_thread::PpuThreadId::new(thread_id as u64))
         else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if let Some(d) = self.efault_if_null(&[priop]) {
             return d;
@@ -79,11 +79,11 @@ impl Lv2Host {
             PPU_THREAD_PRIORITY_MIN
         };
         if !(floor..=PPU_THREAD_PRIORITY_MAX).contains(&prio) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let id = crate::ppu_thread::PpuThreadId::new(thread_id as u64);
         let Some(thread) = self.state.ppu_threads.get_mut(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         thread.attrs.priority = prio as u32;
         Lv2Dispatch::immediate(0)

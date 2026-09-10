@@ -9,8 +9,8 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
     // SharedWriteIntents that must land via the direct-commit path.
     use crate::rsx::control_register;
     use cellgov_mem::{ByteRange, GuestAddr};
-    use cellgov_ps3_abi::sys_rsx::package;
-    use cellgov_ps3_abi::syscall::SYS_RSX_CONTEXT_ATTRIBUTE;
+    use cellgov_ps3_abi::lv2::rsx::package;
+    use cellgov_ps3_abi::lv2::syscall::SYS_RSX_CONTEXT_ATTRIBUTE;
 
     const RSX_CONTEXT_ID: u32 = 0x5555_5555;
     const FIFO_GET: u32 = 0x1100;
@@ -254,7 +254,9 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
     // argument, so the caller's space is the only one it can name. The
     // handler validated the window against the caller's view, and the
     // caller's own loads/stores resolve through that space.
-    use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
+    use cellgov_ps3_abi::lv2::syscall::{
+        MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY,
+    };
 
     let mut rt = build(0x10000, 1, 100);
     let source = rt
@@ -275,7 +277,7 @@ fn mmapper_map_installs_the_window_in_the_callers_space() {
             args: [
                 0,
                 0x10000,
-                cellgov_ps3_abi::sys_memory::page_size::FLAG_64K,
+                cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
                 MEM_ID_PTR,
                 0,
                 0,
@@ -336,7 +338,9 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
     // must not fire on this path. Which code the kernel picks for an
     // occupied window is unestablished. CELL_EBUSY is CellGov's
     // choice, and a console probe of a colliding map would settle it.
-    use cellgov_ps3_abi::syscall::{MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY};
+    use cellgov_ps3_abi::lv2::syscall::{
+        MMAPPER_ALLOCATE_SHARED_MEMORY, MMAPPER_MAP_SHARED_MEMORY,
+    };
 
     let mut rt = build(0x10000, 1, 100);
     let source = rt
@@ -357,7 +361,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
             args: [
                 0,
                 0x10000,
-                cellgov_ps3_abi::sys_memory::page_size::FLAG_64K,
+                cellgov_ps3_abi::lv2::memory::page_size::FLAG_64K,
                 MEM_ID_PTR,
                 0,
                 0,
@@ -396,7 +400,7 @@ fn a_map_over_the_callers_own_layout_is_refused_with_ebusy() {
 
     assert_eq!(
         rt.registry_mut().drain_syscall_return(source),
-        Some(cellgov_ps3_abi::cell_errors::CELL_EBUSY.into()),
+        Some(cellgov_ps3_abi::lv2::errno::CELL_EBUSY.into()),
         "an occupied window is EBUSY at dispatch, not a fabricated OK",
     );
     assert_eq!(
@@ -563,7 +567,7 @@ fn a_join_completing_with_a_null_status_pointer_returns_efault() {
     );
     assert_eq!(
         rt.registry_mut().drain_syscall_return(joiner),
-        Some(cellgov_ps3_abi::cell_errors::CELL_EFAULT.into()),
+        Some(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()),
         "a completed join through a NULL out-pointer reports CELL_EFAULT, not success",
     );
     assert_eq!(

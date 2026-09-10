@@ -5,7 +5,7 @@
 //! FIFO waiter list) are distinguished in one call.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -24,7 +24,7 @@ impl Lv2Host {
         // A null out-pointer is EFAULT before any kernel-object state
         // mutates, so the refused create mints no id.
         if id_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // `sys_mutex_attribute_t`: protocol@0 u32, recursive@4 u32,
         // pshared@8 u32 (BE); ipc_key@16 u64 and flags@24 u32 are
@@ -45,24 +45,24 @@ impl Lv2Host {
             // CellGov choice -- which EINVAL fires first when two
             // words are both bad is unestablished.
             match protocol {
-                cellgov_ps3_abi::sys_sync::SYS_SYNC_FIFO
-                | cellgov_ps3_abi::sys_sync::SYS_SYNC_PRIORITY => {}
+                cellgov_ps3_abi::lv2::sync::SYS_SYNC_FIFO
+                | cellgov_ps3_abi::lv2::sync::SYS_SYNC_PRIORITY => {}
                 // SYS_SYNC_PRIORITY_INHERIT, the third accepted
                 // scheduling policy; the enumerant is not yet in
-                // cellgov_ps3_abi::sys_sync.
+                // cellgov_ps3_abi::lv2::sync.
                 0x3 => {}
-                _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+                _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             }
             // Only the RECURSIVE enumerant enables re-locking;
             // SYS_SYNC_NOT_RECURSIVE (0x20) is nonzero but means
             // not recursive, and no third value is defined.
             match recursive_raw {
-                cellgov_ps3_abi::sys_sync::SYS_SYNC_RECURSIVE
-                | cellgov_ps3_abi::sys_sync::SYS_SYNC_NOT_RECURSIVE => {}
-                _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+                cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE
+                | cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_RECURSIVE => {}
+                _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             }
             match pshared {
-                cellgov_ps3_abi::sys_sync::SYS_SYNC_PROCESS_SHARED => {
+                cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED => {
                     // Process-shared creates carry an ipc_key and an
                     // attach policy. A valid key starts at 1, so a
                     // zero key is out of range; the attach flag must
@@ -71,14 +71,14 @@ impl Lv2Host {
                     // CellGov choice -- the key range is established,
                     // the code for breaking it is not.
                     let Some(tail) = rt.read_committed(attr_ptr as u64 + 16, 12) else {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                        return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                     };
                     let ipc_key = u64::from_be_bytes([
                         tail[0], tail[1], tail[2], tail[3], tail[4], tail[5], tail[6], tail[7],
                     ]);
                     let flags = u32::from_be_bytes([tail[8], tail[9], tail[10], tail[11]]);
                     if ipc_key == 0 || !(1..=3).contains(&flags) {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                        return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
                     }
                     // No mutex ipc-key registry exists yet, so the key
                     // is not published and NOT_CREATE cannot attach; the
@@ -95,34 +95,34 @@ impl Lv2Host {
                 }
                 // SYS_SYNC_NOT_PROCESS_SHARED (0x200), the only other
                 // accepted pshared value; the enumerant is not yet in
-                // cellgov_ps3_abi::sys_sync.
+                // cellgov_ps3_abi::lv2::sync.
                 0x200 => {}
-                _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+                _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             }
             MutexAttrs {
                 priority_policy: protocol,
-                recursive: recursive_raw == cellgov_ps3_abi::sys_sync::SYS_SYNC_RECURSIVE,
+                recursive: recursive_raw == cellgov_ps3_abi::lv2::sync::SYS_SYNC_RECURSIVE,
                 protocol,
             }
         } else {
             // The kernel reads the attribute struct unconditionally;
             // an unreadable attr pointer is a guest fault, not the
             // default-attribute arm.
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let id = self.alloc_id();
         if self.state.mutexes.create_with_id(id, attrs).is_err() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOMEM.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());
         }
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
     pub(super) fn dispatch_mutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.mutexes.lookup(id) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         if entry.owner().is_some() || !entry.waiters().is_empty() {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into());
+            return Lv2Dispatch::immediate(errno::CELL_EBUSY.into());
         }
         self.state.mutexes.destroy(id);
         Lv2Dispatch::immediate(0)
@@ -134,21 +134,21 @@ impl Lv2Host {
                 "dispatch.mutex_caller_without_thread_record",
                 format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.mutexes.acquire_or_enqueue(id, caller) {
             crate::sync_primitives::MutexAcquireOrEnqueue::Unknown => {
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
             crate::sync_primitives::MutexAcquireOrEnqueue::Acquired
             | crate::sync_primitives::MutexAcquireOrEnqueue::Recursed => Lv2Dispatch::immediate(0),
             // Recursive locking is counted, and a re-lock past the
             // 2^32 - 1 limit is EKRESOURCE.
             crate::sync_primitives::MutexAcquireOrEnqueue::CountSaturated => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EKRESOURCE.into())
+                Lv2Dispatch::immediate(errno::CELL_EKRESOURCE.into())
             }
             crate::sync_primitives::MutexAcquireOrEnqueue::WouldDeadlock => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EDEADLK.into())
+                Lv2Dispatch::immediate(errno::CELL_EDEADLK.into())
             }
             crate::sync_primitives::MutexAcquireOrEnqueue::Enqueued => Lv2Dispatch::Block {
                 reason: crate::dispatch::Lv2BlockReason::Mutex { id },
@@ -164,13 +164,13 @@ impl Lv2Host {
                 "dispatch.mutex_caller_without_thread_record",
                 format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         match self.state.mutexes.try_acquire(id, caller) {
-            None => Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into()),
+            None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::MutexAcquire::Acquired) => Lv2Dispatch::immediate(0),
             Some(crate::sync_primitives::MutexAcquire::Contended) => {
-                Lv2Dispatch::immediate(cell_errors::CELL_EBUSY.into())
+                Lv2Dispatch::immediate(errno::CELL_EBUSY.into())
             }
         }
     }
@@ -181,7 +181,7 @@ impl Lv2Host {
                 "dispatch.mutex_caller_without_thread_record",
                 format_args!("mutex 0x{id:08x}: unit {requester:?} has no PPU thread record"),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
         // A recursive hold is counted, so it needs a matching unlock:
         // an owner unlock with holds outstanding consumes one and
@@ -193,11 +193,11 @@ impl Lv2Host {
         }
         match self.state.mutexes.release_and_wake_next(id, caller) {
             crate::sync_primitives::MutexRelease::Unknown => {
-                Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
+                Lv2Dispatch::immediate(errno::CELL_ESRCH.into())
             }
             crate::sync_primitives::MutexRelease::NotOwner => {
                 self.obs.mutex_unlock_not_owner_count += 1;
-                Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
+                Lv2Dispatch::immediate(errno::CELL_EPERM.into())
             }
             crate::sync_primitives::MutexRelease::Freed => Lv2Dispatch::immediate(0),
             crate::sync_primitives::MutexRelease::Transferred { new_owner } => {

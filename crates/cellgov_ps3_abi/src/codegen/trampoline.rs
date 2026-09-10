@@ -96,5 +96,5 @@ pub const fn encode_ps3_packed_opd(code_addr: u32, toc: u32) -> [u8; 8] {
 }
 
 #[cfg(test)]
-#[path = "tests/trampoline_codegen_tests.rs"]
+#[path = "tests/trampoline_tests.rs"]
 mod tests;

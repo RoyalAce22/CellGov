@@ -5,7 +5,7 @@ use crate::host::test_support::{extract_write_u32, seed_primary_ppu, FakeRuntime
 use crate::request::Lv2Request;
 use crate::sync_primitives::EventQueueReceive;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
-use cellgov_ps3_abi::sys_config::{
+use cellgov_ps3_abi::lv2::config::{
     SYS_CONFIG_SERVICE_LISTENER_REPEATING, SYS_CONFIG_SERVICE_USER_LIBPAD,
 };
 
@@ -168,7 +168,7 @@ fn open_on_an_unknown_queue_is_esrch() {
         src(),
         &rt,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
     assert!(host.state.config.is_pristine());
 }
 
@@ -349,13 +349,13 @@ fn get_service_event_with_a_short_buffer_is_eagain() {
     );
     let ev = drain(&mut host, queue)[0];
     let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3 - 1);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EAGAIN));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EAGAIN));
     let written =
         (SYS_CONFIG_SERVICE_EVENT_HEAD_LEN + SYS_CONFIG_PADMANAGER_DS3_DESCRIPTOR.len()) as u64;
     let d = get_record(&mut host, &rt, handle, ev.data2 as u32, written);
     assert_eq!(
         code_of(&d),
-        u64::from(cell_errors::CELL_EAGAIN),
+        u64::from(errno::CELL_EAGAIN),
         "a buffer sized to the bytes written is still below the announced floor"
     );
     let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3);
@@ -479,9 +479,9 @@ fn get_service_event_through_another_handle_is_esrch() {
     );
     let ev = drain(&mut host, queue)[0];
     let d = get_record(&mut host, &rt, other, ev.data2 as u32, ev.data3);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
     let d = get_record(&mut host, &rt, handle, 99, ev.data3);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -645,7 +645,7 @@ fn unregister_notifies_with_registered_zero_and_writes_the_short_record() {
         src(),
         &rt,
     );
-    assert_eq!(code_of(&again), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&again), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -681,14 +681,14 @@ fn removing_a_listener_drops_its_records_and_collects_the_dead_service() {
     assert!(host.state.config.service(service).is_none());
     for ev in events {
         let d = get_record(&mut host, &rt, handle, ev.data2 as u32, ev.data3);
-        assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+        assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
     }
     let d = host.dispatch(
         Lv2Request::ConfigRemoveServiceListener { handle, listener },
         src(),
         &rt,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -709,13 +709,13 @@ fn close_stops_record_reads_but_not_delivery() {
     let d = host.dispatch(Lv2Request::ConfigClose { handle }, src(), &rt);
     assert_eq!(code_of(&d), 0);
     let d = host.dispatch(Lv2Request::ConfigClose { handle }, src(), &rt);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
     let other = open(&mut host, &rt, queue);
     register_user_service(&mut host, &rt, other);
     let ev = drain(&mut host, queue);
     assert_eq!(ev.len(), 1, "the closed handle's listener still delivers");
     let d = get_record(&mut host, &rt, handle, ev[0].data2 as u32, ev[0].data3);
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_ESRCH));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_ESRCH));
 }
 
 #[test]
@@ -733,7 +733,7 @@ fn listener_data_over_the_cap_is_einval_and_an_unreadable_buffer_is_efault() {
         SYS_CONFIG_DATA_CAP + 1,
         SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EINVAL));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EINVAL));
     assert_eq!(
         host.obs.invariant_break_sites["dispatch.config_data_over_cap"],
         1
@@ -747,7 +747,7 @@ fn listener_data_over_the_cap_is_einval_and_an_unreadable_buffer_is_efault() {
         0x20,
         SYS_CONFIG_SERVICE_LISTENER_REPEATING,
     );
-    assert_eq!(code_of(&d), u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code_of(&d), u64::from(errno::CELL_EFAULT));
     assert_eq!(host.state.config.event_count(), 0);
 }
 

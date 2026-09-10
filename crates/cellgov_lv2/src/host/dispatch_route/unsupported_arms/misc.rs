@@ -1,6 +1,6 @@
 //! Unsupported arms whose whole behaviour is a single answer.
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -9,13 +9,13 @@ impl Lv2Host {
     /// `sys_tty_read` (402): returns EIO (matches retail LV2 outside
     /// debug-console mode).
     pub(in crate::host::dispatch_route) fn dispatch_tty_read(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(cell_errors::CELL_EIO.into())
+        Lv2Dispatch::immediate(errno::CELL_EIO.into())
     }
 
     /// DEX-only slot (462): retail liblv2 takes its fallback path on
     /// ENOSYS.
     pub(in crate::host::dispatch_route) fn dispatch_uns_func_462(&self) -> Lv2Dispatch {
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
     }
 
     /// `sys_hid_manager_is_process_permission_root` (512): returns 0

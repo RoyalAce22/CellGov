@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::observation::{Observation, CODE_REGION_NAME};
 use crate::observation_compare::ByteDivergence;
 
-pub use cellgov_ps3_abi::elf::ELF_HEADER_SIZE;
+pub use cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE;
 
 /// Classified shape of a single byte-divergence run.
 ///

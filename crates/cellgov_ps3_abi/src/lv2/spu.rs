@@ -6,9 +6,10 @@
 /// Maximum bytes `sys_spu_image_open` scans for the path NUL terminator.
 pub const IMAGE_PATH_MAX: usize = 256;
 
-/// Local-store size in bytes; segment placement is bounded by it.
+/// Local-store size in bytes at the width of the kernel's 32-bit image
+/// fields; it bounds segment placement.
 // [CBE-Handbook p:64 s:3.1.1] each SPE local store is 256 KB.
-pub const LS_SIZE: u32 = 0x4_0000;
+pub const LS_SIZE: u32 = crate::hw::spu::SPU_LS_SIZE as u32;
 
 /// The 16-byte `sys_spu_image` record `sys_spu_thread_initialize`
 /// reads: `type`, `entry_point`, `segs`, `nsegs`, each a big-endian

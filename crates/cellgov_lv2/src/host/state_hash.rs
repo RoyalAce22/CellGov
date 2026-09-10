@@ -163,7 +163,7 @@ impl Lv2State {
             hasher.write(&fw.pup_sha256_bytes);
         }
         for (pid, entry) in processes.iter() {
-            if *pid == cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID {
+            if *pid == cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID {
                 // Boot-entry gating preserves the pre-table byte
                 // stream: a raw-ELF boot (no authid) and one set to
                 // the retail-application fallback serve byte-identical
@@ -172,7 +172,9 @@ impl Lv2State {
                 // system-process authid folds in. Same rationale for
                 // `ctrl_flags1`: an unprivileged boot carries 0 and
                 // hashes as it did before the field existed.
-                if entry.authority_id != cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID {
+                if entry.authority_id
+                    != cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID
+                {
                     hasher.write(&entry.authority_id.to_le_bytes());
                 }
                 if entry.control_flags1 != 0 {
@@ -182,7 +184,7 @@ impl Lv2State {
                 // deviation folds; the tag byte keeps the 4-byte ppid
                 // distinct from an untagged `control_flags1` of the
                 // same value.
-                if entry.ppid != cellgov_ps3_abi::sys_process::BOOT_PROCESS_PPID {
+                if entry.ppid != cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PPID {
                     hasher.write(&[2u8]);
                     hasher.write(&entry.ppid.to_le_bytes());
                 }

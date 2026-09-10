@@ -1,7 +1,7 @@
 //! `sys_fs_open` host dispatch.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::fs_store::FsError;
@@ -42,7 +42,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, fd_out_ptr, 4, 4) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let path_bytes_owned = match read_path_bytes(rt, path_ptr) {
@@ -53,7 +53,7 @@ impl Lv2Host {
         };
 
         let Ok(p) = std::str::from_utf8(&path_bytes_owned) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+            return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
         };
 
         let flag_err = validate_open_flags(flags, p);
@@ -75,7 +75,7 @@ impl Lv2Host {
                 self.open_existing_blob(p, fd_out_ptr, requester, tick)
             }
             MountResolution::Failed(err) => Lv2Dispatch::immediate(err.into()),
-            MountResolution::Unmounted => Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into()),
+            MountResolution::Unmounted => Lv2Dispatch::immediate(errno::CELL_ENOENT.into()),
         }
     }
 
@@ -98,7 +98,7 @@ impl Lv2Host {
                 self.fs_fd_count_inc();
                 self.immediate_write_u32(fd, fd_out_ptr, requester, tick)
             }
-            Err(FsError::FdExhausted) => Lv2Dispatch::immediate(cell_errors::CELL_EMFILE.into()),
+            Err(FsError::FdExhausted) => Lv2Dispatch::immediate(errno::CELL_EMFILE.into()),
             Err(other) => {
                 self.record_invariant_break(
                     "dispatch.fs_open.path_table_vs_fd_allocator_drift",
@@ -108,7 +108,7 @@ impl Lv2Host {
                          fd allocator disagree about the same path"
                     ),
                 );
-                Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

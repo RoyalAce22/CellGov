@@ -1,6 +1,6 @@
 //! Which dev_flash entries an install drops before they reach disk.
 
-use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 use crate::tar;
 

@@ -59,7 +59,7 @@ mod primary_prio_tests {
 
 mod primary_entry_sp_tests {
     use super::super::primary_entry_sp;
-    use cellgov_ps3_abi::process_address_space::{
+    use cellgov_ps3_abi::hw::address_space::{
         PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_CHILD_STACKS_BASE,
         PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
     };
@@ -88,7 +88,7 @@ mod primary_entry_sp_tests {
 
 mod primary_stacksize_tests {
     use super::super::{decode_primary_stacksize, primary_entry_sp, primary_stack_base_for};
-    use cellgov_ps3_abi::process_address_space::{
+    use cellgov_ps3_abi::hw::address_space::{
         PS3_ABI_MIN_STACK_FRAME as ENTRY_FRAME_RESERVE, PS3_PRIMARY_STACK_BASE,
         PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_SIZE_MIN,
     };

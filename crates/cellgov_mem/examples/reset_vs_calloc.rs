@@ -11,7 +11,7 @@ use std::time::Instant;
 
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region, RegionAccess};
 
-// Constants mirror `cellgov_ps3_abi::process_address_space` so this
+// Constants mirror `cellgov_ps3_abi::hw::address_space` so this
 // example does not pull the ABI crate into `cellgov_mem`'s
 // dev-deps.
 //

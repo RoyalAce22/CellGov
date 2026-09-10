@@ -3,7 +3,7 @@ use super::*;
 use std::collections::BTreeMap;
 
 use cellgov_install::store::TitleTree;
-use cellgov_ps3_abi::title_tree::DISC_GAME_DIR;
+use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 use cellgov_testkit::param_sfo::build_param_sfo;
 use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 

@@ -1,14 +1,14 @@
 //! `CellFsStat` builder and the stat-pointer guard.
 //!
 //! Wire-format constants (`CELL_FS_STAT_SIZE`, `CELL_FS_BLOCK_SIZE`,
-//! the `S_*` mode bits) live in [`cellgov_ps3_abi::sys_fs`]. This
+//! the `S_*` mode bits) live in [`cellgov_ps3_abi::lv2::fs`]. This
 //! module composes them into the regular-file mode CellGov emits
 //! and wraps the write into a `SharedWriteIntent` effect.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::sys_fs::{
+use cellgov_ps3_abi::lv2::fs::{
     CELL_FS_BLOCK_SIZE, CELL_FS_STAT_SIZE, CELL_FS_S_IFREG, CELL_FS_S_IRGRP, CELL_FS_S_IROTH,
     CELL_FS_S_IRUSR,
 };

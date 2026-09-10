@@ -5,7 +5,7 @@ use super::*;
 use crate::host::test_support::FakeRuntime;
 use crate::request::Lv2Request;
 use cellgov_mem::GuestMemory;
-use cellgov_ps3_abi::sys_memory::page_size;
+use cellgov_ps3_abi::lv2::memory::page_size;
 
 const OUT: u32 = 0x2000;
 
@@ -104,16 +104,16 @@ fn an_unknown_container_id_is_esrch_after_the_argument_gates() {
             bogus,
             page_size::FLAG_64K
         )),
-        u64::from(cell_errors::CELL_ESRCH)
+        u64::from(errno::CELL_ESRCH)
     );
     assert_eq!(
         code_of(&allocate(&mut host, &rt, 0, bogus, page_size::FLAG_64K)),
-        u64::from(cell_errors::CELL_EALIGN),
+        u64::from(errno::CELL_EALIGN),
         "a zero size is refused before the id is looked up"
     );
     assert_eq!(
         code_of(&allocate(&mut host, &rt, 0x1_0000, bogus, 0x100)),
-        u64::from(cell_errors::CELL_EINVAL),
+        u64::from(errno::CELL_EINVAL),
         "an unknown page-size flag is refused before the id is looked up"
     );
     assert_eq!(
@@ -124,7 +124,7 @@ fn an_unknown_container_id_is_esrch_after_the_argument_gates() {
             bogus,
             page_size::FLAG_1M
         )),
-        u64::from(cell_errors::CELL_EALIGN),
+        u64::from(errno::CELL_EALIGN),
         "64 KiB is not a multiple of the 1 MiB page"
     );
 }
@@ -144,7 +144,7 @@ fn a_null_out_pointer_is_efault_after_the_budget_gates_and_moves_no_cursor() {
             page_size::FLAG_64K,
             0
         )),
-        u64::from(cell_errors::CELL_EFAULT)
+        u64::from(errno::CELL_EFAULT)
     );
     assert_eq!(
         host.state.mem_alloc_ptr, cursor,
@@ -159,7 +159,7 @@ fn a_null_out_pointer_is_efault_after_the_budget_gates_and_moves_no_cursor() {
             page_size::FLAG_64K,
             0
         )),
-        u64::from(cell_errors::CELL_ESRCH),
+        u64::from(errno::CELL_ESRCH),
         "the id gate fires before the pointer gate"
     );
 }
@@ -170,7 +170,7 @@ fn an_exhausted_budget_is_enomem_and_leaves_the_cursor() {
     let mut host = Lv2Host::new();
     let cid = create_container(&mut host, &rt);
     let cursor = host.state.mem_alloc_ptr;
-    let total = u64::from(cellgov_ps3_abi::sys_memory::USER_MEMORY_TOTAL);
+    let total = u64::from(cellgov_ps3_abi::lv2::memory::USER_MEMORY_TOTAL);
     for size in [
         total + u64::from(page_size::GRANULE_1M),
         0x1_0000_0000,
@@ -178,7 +178,7 @@ fn an_exhausted_budget_is_enomem_and_leaves_the_cursor() {
     ] {
         assert_eq!(
             code_of(&allocate(&mut host, &rt, size, cid, 0)),
-            u64::from(cell_errors::CELL_ENOMEM),
+            u64::from(errno::CELL_ENOMEM),
             "size {size:#x}"
         );
         assert_eq!(host.state.mem_alloc_ptr, cursor, "size {size:#x}");

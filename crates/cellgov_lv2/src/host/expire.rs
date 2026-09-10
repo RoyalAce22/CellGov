@@ -10,7 +10,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{CondMutexKind, ExpiredWait, Lv2BlockReason, PendingResponse};
@@ -177,7 +177,7 @@ impl Lv2Host {
                              {err:?}; waking with ESRCH to avoid stranding"
                         ),
                     );
-                    return coded_wake(requester, cell_errors::CELL_ESRCH.into());
+                    return coded_wake(requester, errno::CELL_ESRCH.into());
                 }
                 // Response staged, no wake: the next mutex unlock
                 // resolves it through the ordinary sync-wake path.
@@ -186,7 +186,7 @@ impl Lv2Host {
                     response_updates: vec![(
                         requester,
                         PendingResponse::ReturnCode {
-                            code: cell_errors::CELL_ETIMEDOUT.into(),
+                            code: errno::CELL_ETIMEDOUT.into(),
                         },
                     )],
                     effects: vec![],
@@ -197,7 +197,7 @@ impl Lv2Host {
                     "expire_wait.cond_destroyed_mutex",
                     format_args!("cond {id} timeout references destroyed mutex {mutex_id}"),
                 );
-                coded_wake(requester, cell_errors::CELL_ESRCH.into())
+                coded_wake(requester, errno::CELL_ESRCH.into())
             }
         }
     }
@@ -228,7 +228,7 @@ impl Lv2Host {
 }
 
 fn timed_out_wake(unit: UnitId) -> ExpiredWait {
-    coded_wake(unit, cell_errors::CELL_ETIMEDOUT.into())
+    coded_wake(unit, errno::CELL_ETIMEDOUT.into())
 }
 
 fn coded_wake(unit: UnitId, code: u64) -> ExpiredWait {

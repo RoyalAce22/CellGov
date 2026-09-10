@@ -12,7 +12,7 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -42,7 +42,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if nwrite_ptr == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let nwrite_zero = Effect::SharedWriteIntent {
             range: ByteRange::contiguous_u32(nwrite_ptr, 8),
@@ -53,7 +53,7 @@ impl Lv2Host {
         };
         if buf_ptr == 0 {
             return Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_EFAULT.into(),
+                code: errno::CELL_EFAULT.into(),
                 effects: vec![nwrite_zero],
             };
         }
@@ -62,7 +62,7 @@ impl Lv2Host {
         // fd reads as UnknownFd here.
         if self.fs_store().fstat(fd).is_err() {
             return Lv2Dispatch::Immediate {
-                code: cell_errors::CELL_EBADF.into(),
+                code: errno::CELL_EBADF.into(),
                 effects: vec![nwrite_zero],
             };
         }
@@ -82,7 +82,7 @@ impl Lv2Host {
             ),
         );
         Lv2Dispatch::Immediate {
-            code: cell_errors::CELL_EBADF.into(),
+            code: errno::CELL_EBADF.into(),
             effects: vec![nwrite_zero],
         }
     }

@@ -20,10 +20,7 @@ fn unsupported_dispatch_returns_cell_enosys() {
         args: [0; 8],
     };
     let result = host.dispatch(req, UnitId::new(0), &rt);
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 #[test]
@@ -77,7 +74,7 @@ fn unresolved_import_dispatch_returns_cell_einval() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EINVAL.into())
     );
 }
 
@@ -89,7 +86,7 @@ fn unresolved_import_dispatch_handles_unknown_nid() {
     let result = host.dispatch(req, UnitId::new(0), &rt);
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_EINVAL.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EINVAL.into())
     );
 }
 
@@ -150,10 +147,7 @@ fn syscall_136_event_port_connect_local_on_unknown_ids_returns_esrch() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ESRCH.into()));
 }
 
 #[test]
@@ -170,10 +164,7 @@ fn malformed_request_records_invariant_break_and_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert!(host.observability().invariant_break_count > before);
 }
 
@@ -191,10 +182,7 @@ fn hypercall_records_invariant_break_and_returns_einval() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
     assert!(host.observability().invariant_break_count > before);
 }
 
@@ -211,10 +199,7 @@ fn spu_thread_group_terminate_logs_invariant_break_and_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
     assert!(host.observability().invariant_break_count > before);
 }
 
@@ -287,10 +272,7 @@ fn ppu_thread_create_joinable_plus_interrupt_flags_return_eperm() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EPERM.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EPERM.into()));
     assert_eq!(
         host.observability().invariant_break_count,
         before,

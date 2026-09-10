@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 use sha2::{Digest, Sha256};
 
 use super::error::FirmwareInstallError;

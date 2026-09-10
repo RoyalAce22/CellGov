@@ -5,7 +5,7 @@ use std::cell::RefCell;
 
 use cellgov_core::Runtime;
 use cellgov_ppu::PpuExecutionUnit;
-use cellgov_ps3_abi::process_address_space::{PS3_PRIMARY_STACK_SIZE, PS3_RSX_IOMAP_BASE};
+use cellgov_ps3_abi::hw::address_space::{PS3_PRIMARY_STACK_SIZE, PS3_RSX_IOMAP_BASE};
 
 use super::types::{BootDebugOptions, PrepareOptions};
 use crate::game::child_init::{ChildInitPlan, ChildInitPlans};
@@ -113,7 +113,7 @@ pub(super) fn install_spawn_loader(rt: &mut Runtime, opts: &PrepareOptions<'_>) 
         let exit_stub_addr = child_exit_stub_addr(required);
         // li r11, 22; sc -- the child enters this when its entry
         // returns. r11 is the LV2 syscall number, and 22 is
-        // `cellgov_ps3_abi::syscall::PROCESS_EXIT`. The exit status is
+        // `cellgov_ps3_abi::lv2::syscall::PROCESS_EXIT`. The exit status is
         // whatever the entry left in r3.
         let stub: [u8; 8] = [0x39, 0x60, 0x00, 0x16, 0x44, 0x00, 0x00, 0x02];
         let range = cellgov_mem::ByteRange::new(

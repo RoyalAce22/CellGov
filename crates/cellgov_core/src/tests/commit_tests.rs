@@ -1148,7 +1148,7 @@ fn rsx_label_write_past_the_label_area_trips_the_guard_under_a_label_base() {
     let mut bed = CommitTestBed::new(0x2_0000);
     bed.label_base = 0x2000;
     let effect = Effect::RsxLabelWrite {
-        offset: cellgov_ps3_abi::sys_rsx::reports::SIZE as u32,
+        offset: cellgov_ps3_abi::lv2::rsx::reports::SIZE as u32,
         value: 1,
     };
     let (r, e) = step_with(YieldReason::BudgetExhausted, vec![effect]);
@@ -1179,7 +1179,7 @@ fn rsx_label_write_inside_the_semaphore_region_commits_relative_to_the_label_bas
 fn rsx_label_write_into_the_report_region_commits_without_tripping_the_guard() {
     let mut bed = CommitTestBed::new(0x1_0000);
     bed.label_base = 0x2000;
-    let offset = cellgov_ps3_abi::sys_rsx::driver_info_init::REPORTS_REPORT_OFFSET;
+    let offset = cellgov_ps3_abi::lv2::rsx::driver_info_init::REPORTS_REPORT_OFFSET;
     let effect = Effect::RsxLabelWrite {
         offset,
         value: 0x0BAD_F00D,

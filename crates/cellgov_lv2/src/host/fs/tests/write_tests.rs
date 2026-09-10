@@ -2,7 +2,7 @@
 //! responses, and the order the gates fire in.
 
 use cellgov_effects::Effect;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -37,7 +37,7 @@ fn null_nwrite_ptr_returns_efault_and_emits_no_effects() {
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
     };
-    assert_eq!(code, u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code, u64::from(errno::CELL_EFAULT));
     assert!(effects.is_empty(), "null nwrite_ptr must emit zero effects");
 }
 
@@ -49,7 +49,7 @@ fn null_buf_ptr_returns_efault_and_zeros_nwrite() {
     let Lv2Dispatch::Immediate { code, effects } = d else {
         panic!("expected Immediate, got {d:?}");
     };
-    assert_eq!(code, u64::from(cell_errors::CELL_EFAULT));
+    assert_eq!(code, u64::from(errno::CELL_EFAULT));
     extract_nwrite_zero(&effects, 0x2000);
 }
 
@@ -93,7 +93,7 @@ fn write_to_dir_fd_returns_ebadf_not_ok_for_both_zero_and_nonzero_size() {
         };
         assert_eq!(
             code,
-            u64::from(cell_errors::CELL_EBADF),
+            u64::from(errno::CELL_EBADF),
             "sys_fs_write(dir_fd, _, {size:#x}, _) must yield CELL_EBADF: a dir fd \
              is not a file, and that arm fires before any size check"
         );
@@ -112,7 +112,7 @@ fn zero_size_with_bad_fd_returns_ebadf_not_ok() {
     };
     assert_eq!(
         code,
-        u64::from(cell_errors::CELL_EBADF),
+        u64::from(errno::CELL_EBADF),
         "bad fd at size==0 must yield CELL_EBADF: the file-existence check \
          precedes the size==0 short-circuit"
     );
@@ -134,7 +134,7 @@ fn nonzero_size_with_valid_fd_returns_ebadf_zeros_nwrite_and_logs_break() {
     };
     assert_eq!(
         code,
-        u64::from(cell_errors::CELL_EBADF),
+        u64::from(errno::CELL_EBADF),
         "non-zero write to a read-only-model fd must return CELL_EBADF, not CELL_OK"
     );
     extract_nwrite_zero(&effects, 0x2000);
@@ -160,7 +160,7 @@ fn u32_max_plus_one_size_does_not_truncate_and_returns_ebadf() {
     };
     assert_eq!(
         code,
-        u64::from(cell_errors::CELL_EBADF),
+        u64::from(errno::CELL_EBADF),
         "oversize sys_fs_write still rejects honestly via CELL_EBADF"
     );
     extract_nwrite_zero(&effects, 0x2000);

@@ -374,7 +374,7 @@ fn sys_rsx_context_attribute_set_display_buffer_rejects_id_over_7() {
     );
     assert!(matches!(
         d,
-        Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_EINVAL)
+        Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
     ));
 }
 
@@ -397,7 +397,7 @@ fn sys_rsx_context_attribute_unknown_package_returns_einval() {
         source,
         &rt,
     );
-    let expected = u64::from(cell_errors::CELL_EINVAL);
+    let expected = u64::from(errno::CELL_EINVAL);
     assert!(matches!(
         d,
         Lv2Dispatch::Immediate { code, effects } if code == expected && effects.is_empty()
@@ -422,7 +422,7 @@ fn sys_rsx_context_attribute_rejects_unallocated_context() {
     );
     assert!(matches!(
         d,
-        Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_EINVAL)
+        Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
     ));
 }
 
@@ -685,6 +685,6 @@ fn sys_rsx_context_attribute_rejects_wrong_context_id() {
     );
     assert!(matches!(
         d,
-        Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_EINVAL)
+        Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_EINVAL)
     ));
 }

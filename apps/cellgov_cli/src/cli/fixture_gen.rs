@@ -12,7 +12,7 @@ use cellgov_compare::{
     DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome, RegionPairOutcome,
     UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
 };
-use cellgov_ps3_abi::elf::ELF_MAGIC;
+use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
 use super::exit::{die, load_file_or_die};
 use super::parse::FixtureGenArgs;

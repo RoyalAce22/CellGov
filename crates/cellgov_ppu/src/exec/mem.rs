@@ -13,7 +13,7 @@ use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_sync::ReservedLine;
 
-use cellgov_ps3_abi::hardware::DCBZ_BLOCK_BYTES;
+use cellgov_ps3_abi::hw::ppu::DCBZ_BLOCK_BYTES;
 
 pub(crate) fn execute(
     insn: &PpuInstruction,

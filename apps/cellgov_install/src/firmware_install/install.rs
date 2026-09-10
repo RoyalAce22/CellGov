@@ -37,8 +37,8 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
-use cellgov_ps3_abi::pup::ENTRY_ID_UPDATE_FILES;
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
+use cellgov_ps3_abi::format::pup::ENTRY_ID_UPDATE_FILES;
 
 use super::error::{FirmwareInstallError, PackageFailure};
 #[cfg(feature = "decrypt")]

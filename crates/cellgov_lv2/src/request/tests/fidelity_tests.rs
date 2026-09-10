@@ -29,7 +29,7 @@ fn routed_unsupported_numbers_are_unique() {
 fn unlisted_number_reads_null_backend() {
     assert_eq!(unsupported_arm_fidelity(9999), ArmFidelity::NullBackend);
     assert_eq!(
-        unsupported_arm_fidelity(cellgov_ps3_abi::syscall::TTY_READ),
+        unsupported_arm_fidelity(cellgov_ps3_abi::lv2::syscall::TTY_READ),
         ArmFidelity::Modeled
     );
 }

@@ -1,7 +1,7 @@
 //! `sys_fs_opendir` host dispatch.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::fs_store::FsError;
@@ -38,7 +38,7 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         if !out_ptr_writable(rt, fd_out_ptr, 4, 4) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
         let path_bytes_owned = match read_path_bytes(rt, path_ptr) {
@@ -51,7 +51,7 @@ impl Lv2Host {
         let path = match std::str::from_utf8(&path_bytes_owned) {
             Ok(s) => s,
             Err(_) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
 
@@ -62,7 +62,7 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(err.into());
             }
             DirMountResolution::Unmounted => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
 
@@ -71,7 +71,7 @@ impl Lv2Host {
                 self.fs_fd_count_inc();
                 self.immediate_write_u32(fd, fd_out_ptr, requester, tick)
             }
-            Err(FsError::FdExhausted) => Lv2Dispatch::immediate(cell_errors::CELL_EMFILE.into()),
+            Err(FsError::FdExhausted) => Lv2Dispatch::immediate(errno::CELL_EMFILE.into()),
             Err(other) => {
                 self.record_invariant_break(
                     "dispatch.fs_opendir.unexpected_fs_error",
@@ -80,7 +80,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
+                Lv2Dispatch::immediate(errno::CELL_EFAULT.into())
             }
         }
     }

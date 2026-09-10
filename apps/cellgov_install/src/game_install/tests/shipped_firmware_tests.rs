@@ -12,7 +12,7 @@ use crate::store::record::{InstallRecord, SourceRecord, INSTALL_RECORD_FORMAT_VE
 use crate::test_support::{build_iso, build_param_sfo, codes, IsoNode, RecordingReporter};
 #[cfg(feature = "decrypt")]
 use crate::test_support::{build_pup, build_tar};
-use cellgov_ps3_abi::pup::{ENTRY_ID_UPDATE_FILES, ENTRY_ID_VERSION_TXT};
+use cellgov_ps3_abi::format::pup::{ENTRY_ID_UPDATE_FILES, ENTRY_ID_VERSION_TXT};
 
 /// Placeholder identity: no real title and no installed corpus.
 const TITLE_ID: &str = "TEST00000";
@@ -27,7 +27,7 @@ fn keys() -> KeyVault {
 /// an install that reaches the proof faults there; `PS3_UPDATE/` holds
 /// `pup` when given.
 fn disc(pup: Option<Vec<u8>>) -> Vec<u8> {
-    let mut eboot = cellgov_ps3_abi::sce::SCE_MAGIC.to_vec();
+    let mut eboot = cellgov_ps3_abi::format::sce::SCE_MAGIC.to_vec();
     eboot.extend_from_slice(b" not a SELF");
     let mut roots = vec![IsoNode::Dir(
         "PS3_GAME",
@@ -439,7 +439,7 @@ fn the_shipped_firmware_is_settled_before_any_of_the_title_is_staged() {
 #[cfg(feature = "decrypt")]
 #[test]
 fn a_directory_where_the_package_would_be_is_refused_not_read_as_no_package() {
-    let mut eboot = cellgov_ps3_abi::sce::SCE_MAGIC.to_vec();
+    let mut eboot = cellgov_ps3_abi::format::sce::SCE_MAGIC.to_vec();
     eboot.extend_from_slice(b" not a SELF");
     let image = build_iso(vec![
         IsoNode::Dir(

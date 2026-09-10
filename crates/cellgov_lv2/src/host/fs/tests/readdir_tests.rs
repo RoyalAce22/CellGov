@@ -1,7 +1,7 @@
 //! `sys_fs_readdir` dispatch tests: lexicographic entry walking, dirent layout, EOF reporting, and bad-fd/out-pointer rejection.
 
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_fs::{CELL_FS_DIRENT_SIZE, CELL_FS_TYPE_DIRECTORY, CELL_FS_TYPE_REGULAR};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::fs::{CELL_FS_DIRENT_SIZE, CELL_FS_TYPE_DIRECTORY, CELL_FS_TYPE_REGULAR};
 
 use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
@@ -34,7 +34,7 @@ fn nread_out_ptr_unmapped_returns_efault() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_readdir(fd, 0x20000, 0xFFFF_FF00)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -46,7 +46,7 @@ fn dirent_out_ptr_unmapped_returns_efault() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_readdir(fd, 0xFFFF_FF00, 0x20000)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -57,7 +57,7 @@ fn unknown_dir_fd_returns_ebadf() {
     let rt = PathRuntime::empty(0x40000);
     assert_immediate(
         run(&mut host, &rt, fs_readdir(0xDEAD_BEEF, 0x20000, 0x21000)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }

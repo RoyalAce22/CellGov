@@ -631,7 +631,7 @@ fn system_state_seeds_iterate_in_key_order() {
 
 mod process_identity_bookkeeping {
     use super::*;
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
 
     #[test]
     fn a_second_process_exit_for_the_same_pid_keeps_the_first_status_and_reports() {
@@ -764,7 +764,9 @@ mod privilege_predicates {
 
         // A retail application is neither.
         let mut game = Lv2Host::new();
-        game.set_program_authority_id(cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID);
+        game.set_program_authority_id(
+            cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+        );
         assert!(!game.is_coreos());
         assert!(!game.has_root_perm());
     }
@@ -783,7 +785,7 @@ mod process_exit_waiter_purge {
     use crate::host::process::ProcessEntry;
     use crate::ppu_thread::EventFlagWaitMode;
     use crate::sync_primitives::MutexAttrs;
-    use cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID;
+    use cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID;
 
     const CHILD_PID: u32 = BOOT_PROCESS_PID + 0x100;
     const MUTEX: u32 = 0x100;

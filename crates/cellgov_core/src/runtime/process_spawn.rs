@@ -11,7 +11,7 @@
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::{Lv2Dispatch, PpuThreadAttrs, PpuThreadInitState};
-use cellgov_ps3_abi::cell_errors::{CELL_EFAULT, CELL_ENOMEM, CELL_ENOSYS};
+use cellgov_ps3_abi::lv2::errno::{CELL_EFAULT, CELL_ENOMEM, CELL_ENOSYS};
 
 use super::spaces::AddressSpaceId;
 use super::Runtime;

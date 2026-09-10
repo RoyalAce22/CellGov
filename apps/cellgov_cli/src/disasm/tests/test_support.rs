@@ -2,7 +2,7 @@
 
 #![cfg(test)]
 
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELFCLASS64, ELFDATA2MSB, ELF_HEADER_SIZE, ELF_PHENTSIZE, EM_PPC64, ET_EXEC, EV_CURRENT, PF_R,
     PF_X, PT_LOAD,
 };
@@ -87,4 +87,4 @@ pub(super) fn build_elf64_be(segs: &[SegSpec]) -> Vec<u8> {
 
 /// Re-exports of the PPC ISA byte-encoded instructions shared across
 /// disasm tests.
-pub(super) use cellgov_ps3_abi::ppc_isa::{PPC_BLR_BYTES, PPC_NOP_BYTES};
+pub(super) use cellgov_ps3_abi::hw::ppc_isa::{PPC_BLR_BYTES, PPC_NOP_BYTES};

@@ -12,7 +12,7 @@ use sha1::Sha1;
 
 #[cfg(feature = "decrypt")]
 use crate::keys::KeyVault;
-use cellgov_ps3_abi::pup::{parse_pup_version_txt, ENTRY_ID_VERSION_TXT};
+use cellgov_ps3_abi::format::pup::{parse_pup_version_txt, ENTRY_ID_VERSION_TXT};
 
 /// On-disk PUP header at file offset 0, 0x30 bytes, all fields big-endian.
 #[derive(Debug)]

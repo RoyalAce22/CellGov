@@ -17,7 +17,7 @@ use cellgov_event::UnitId;
 use std::collections::BTreeMap;
 
 // [CBE-Handbook p:577 s:20.2] CBE reservation granule is 128 bytes = PPE cache line.
-pub use cellgov_ps3_abi::hardware::RESERVATION_LINE_BYTES;
+pub use cellgov_ps3_abi::hw::ppu::RESERVATION_LINE_BYTES;
 
 // `containing()`'s line-mask arithmetic only aligns correctly when
 // the granule is a power of two; catch a future non-power-of-two
@@ -27,7 +27,7 @@ const _: () = assert!(
     "line mask arithmetic requires power-of-two granule"
 );
 
-use cellgov_ps3_abi::hardware::CELL_EA_LIMIT;
+use cellgov_ps3_abi::hw::ppu::CELL_EA_LIMIT;
 
 /// 128-byte-aligned guest address. Low 7 bits are always zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

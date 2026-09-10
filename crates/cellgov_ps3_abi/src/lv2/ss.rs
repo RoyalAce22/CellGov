@@ -5,7 +5,7 @@
 /// than 1, 2 or 3.
 ///
 /// The value sits in the SS error domain, not in the LV2 errno block
-/// of [`crate::cell_errors`]. Every call site in the installed firmware
+/// of [`crate::lv2::errno`]. Every call site in the installed firmware
 /// loads 1, 2 or 3, so no witness reaches this status and its symbol is
 /// unestablished; the name is CellGov's.
 pub const SS_ACCESS_CONTROL_UNKNOWN_PKG_ID: u32 = 0x8001_051D;

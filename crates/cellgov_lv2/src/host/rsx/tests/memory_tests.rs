@@ -62,7 +62,7 @@ fn sys_rsx_memory_allocate_rejects_zero_size() {
     );
     assert!(matches!(
         d,
-        Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_ENOMEM)
+        Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ENOMEM)
     ));
 }
 
@@ -85,7 +85,7 @@ fn sys_rsx_memory_allocate_rejects_beyond_region_end() {
     );
     assert!(matches!(
         d,
-        Lv2Dispatch::Immediate { code, .. } if code == u64::from(cell_errors::CELL_ENOMEM)
+        Lv2Dispatch::Immediate { code, .. } if code == u64::from(errno::CELL_ENOMEM)
     ));
 }
 

@@ -18,7 +18,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use cellgov_install::store::{ArtifactKind, InstallRecord, StoreLayout, DEFAULT_VFS_ROOT};
-use cellgov_ps3_abi::dev_flash::FLASH_MOUNT;
+use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 /// Workspace root, found by walking up to the manifest carrying
 /// `[workspace]`. Integration tests run with the crate directory as

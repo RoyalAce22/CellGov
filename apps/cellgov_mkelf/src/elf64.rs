@@ -4,7 +4,7 @@
 //! PROC_PARAM segment (p_type 0x60000001) that lv2 scans for
 //! `process_param_t` during ELF load.
 
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELFCLASS64, ELFDATA2MSB, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, EM_PPC64, ET_EXEC,
     EV_CURRENT, PF_R, PF_W, PF_X, PT_LOAD, PT_PROC_PARAM, SYS_PROCESS_PARAM_MAGIC,
     SYS_PROCESS_PARAM_VERSION_330_0,
@@ -16,7 +16,7 @@ const ELF64_EHDR_SIZE: u16 = ELF_HEADER_SIZE as u16;
 /// `e_phentsize` field value.
 const ELF64_PHDR_SIZE: u16 = ELF_PHENTSIZE as u16;
 
-pub use cellgov_ps3_abi::elf::PROC_PARAM_SIZE;
+pub use cellgov_ps3_abi::format::elf::PROC_PARAM_SIZE;
 
 /// Build a `process_param_t` structure (32 bytes, big-endian).
 ///

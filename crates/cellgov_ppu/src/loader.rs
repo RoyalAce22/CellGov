@@ -69,7 +69,7 @@ pub enum LoadError {
     },
 }
 
-use cellgov_ps3_abi::elf::{ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, PT_LOAD};
+use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, PT_LOAD};
 
 /// Byte offset of program-header slot `i`.
 ///
@@ -414,7 +414,7 @@ pub fn pt_load_segments(data: &[u8]) -> Result<Vec<LoadSegment>, LoadError> {
     Ok(out)
 }
 
-use cellgov_ps3_abi::elf::PT_TLS;
+use cellgov_ps3_abi::format::elf::PT_TLS;
 
 /// TLS segment info extracted from an ELF's PT_TLS program header.
 #[derive(Debug, Clone, Copy)]
@@ -489,7 +489,7 @@ pub fn find_tls_program_header(data: &[u8]) -> Option<TlsProgramHeader> {
     None
 }
 
-use cellgov_ps3_abi::elf::SYS_PROCESS_PARAM_MAGIC;
+use cellgov_ps3_abi::format::elf::SYS_PROCESS_PARAM_MAGIC;
 
 /// Parsed `sys_process_param_t`. The caller passes `malloc_pagesize`
 /// into the game entry via `r12` so the CRT0 sizes its allocator.
@@ -734,7 +734,7 @@ pub fn find_indirect_opd_tables(data: &[u8]) -> Vec<IndirectOpdTable> {
     out
 }
 
-use cellgov_ps3_abi::elf::{ELF64_SHENT_SIZE, SHT_DYNSYM, SHT_SYMTAB};
+use cellgov_ps3_abi::format::elf::{ELF64_SHENT_SIZE, SHT_DYNSYM, SHT_SYMTAB};
 
 /// Symbol address by name, or `None` if not found or the ELF has no
 /// symbol table. Searches every `SHT_SYMTAB` and `SHT_DYNSYM` section

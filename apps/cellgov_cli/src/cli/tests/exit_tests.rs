@@ -40,9 +40,9 @@ fn a_plaintext_image_is_given_an_empty_vault_without_reading_any_keys() {
 #[cfg(not(feature = "decrypt"))]
 #[test]
 fn without_the_decrypt_feature_an_sce_wrapper_is_given_an_empty_vault() {
-    let keys = crate::cli::keys::key_vault_for(&cellgov_ps3_abi::sce::SCE_MAGIC);
+    let keys = crate::cli::keys::key_vault_for(&cellgov_ps3_abi::format::sce::SCE_MAGIC);
     assert!(keys.sources().is_empty());
-    let same = crate::cli::keys::try_key_vault_for(&cellgov_ps3_abi::sce::SCE_MAGIC)
+    let same = crate::cli::keys::try_key_vault_for(&cellgov_ps3_abi::format::sce::SCE_MAGIC)
         .expect("no vault is consulted without the feature");
     assert!(same.sources().is_empty());
 }

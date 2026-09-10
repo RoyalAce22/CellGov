@@ -310,7 +310,7 @@ pub(in crate::game) fn run_module_start(
                     let sc_pc = step.result.local_diagnostics.pc.unwrap_or(0);
                     sc_ring.push((args[0], sc_pc));
 
-                    if args[0] == cellgov_ps3_abi::syscall::TTY_WRITE {
+                    if args[0] == cellgov_ps3_abi::lv2::syscall::TTY_WRITE {
                         handle_module_start_tty(args, space_memory(rt, env.space));
                     }
                 }
@@ -497,7 +497,7 @@ pub(in crate::game) fn run_module_start(
     }
     // Seeded-ring stall witnesses; the producer-fed waits these count
     // are the declared cellSysutil module_start wall.
-    if host.system_seed_applied(cellgov_ps3_abi::system_ipc::CELLSYSUTIL_SHM_IPC_KEY) {
+    if host.system_seed_applied(cellgov_ps3_abi::lv2::ipc::CELLSYSUTIL_SHM_IPC_KEY) {
         println!(
             "  module_start seed witnesses: ring_wakes={} cond0_producer_waits={} cond_signals={}",
             host.observability().cond_ring_wakes,
@@ -527,7 +527,7 @@ pub(in crate::game) fn run_module_start(
         }
         // Parsed by the cellSysutil stall-signature tripwire; every
         // field must stay a machine-readable integer.
-        let cond0_slot0_key = cellgov_ps3_abi::system_ipc::CELLSYSUTIL_COND0_IPC_KEY_BASE;
+        let cond0_slot0_key = cellgov_ps3_abi::lv2::ipc::CELLSYSUTIL_COND0_IPC_KEY_BASE;
         let cond0_slot0_signals = host
             .observability()
             .cond_keyed_signal_counts

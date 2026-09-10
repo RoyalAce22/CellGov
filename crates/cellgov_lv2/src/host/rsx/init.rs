@@ -1,7 +1,7 @@
 //! Bit-exact initial-state writers for the reports and driver-info
 //! sub-regions of an RSX context.
 
-use cellgov_ps3_abi::sys_rsx::{driver_info, driver_info_init, reports};
+use cellgov_ps3_abi::lv2::rsx::{driver_info, driver_info_init, reports};
 
 /// Fill `buf` with the bytes `sys_rsx_context_allocate` writes into
 /// the driver-info region.

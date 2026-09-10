@@ -5,7 +5,7 @@
     reason = "integration test: .unwrap() panics on unexpected failure are the right behavior"
 )]
 
-use cellgov_ps3_abi::cell_errors::{
+use cellgov_ps3_abi::lv2::errno::{
     self, Lv2ErrCode, CELL_EFAULT, CELL_EINVAL, CELL_EPERM, ENTRIES,
 };
 
@@ -47,10 +47,10 @@ fn every_symbol_matches_its_constant_name() {
 
 #[test]
 fn lookup_hits_known_code_and_misses_unknown() {
-    assert_eq!(cell_errors::lookup(0x8001_0009), Some(&CELL_EPERM));
-    assert!(cell_errors::lookup(0xDEAD_BEEF).is_none());
+    assert_eq!(errno::lookup(0x8001_0009), Some(&CELL_EPERM));
+    assert!(errno::lookup(0xDEAD_BEEF).is_none());
     // CELL_OK belongs to CellNotAnError, not CellError.
-    assert!(cell_errors::lookup(0).is_none());
+    assert!(errno::lookup(0).is_none());
 }
 
 /// Firmware materializes all three of these at its own refusal sites.

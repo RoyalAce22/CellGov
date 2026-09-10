@@ -11,7 +11,7 @@ use cellgov_ppu::sprx::{
     load_prx, ParsedPrx, PrxLoadError, PrxRelocation, PrxSegment, RelocMisalignedKind,
     R_PPC64_REL24,
 };
-use cellgov_ps3_abi::ppc_isa::PPC_BL_OPCODE_LK;
+use cellgov_ps3_abi::hw::ppc_isa::PPC_BL_OPCODE_LK;
 
 const TEXT_VADDR: u64 = 0x0000;
 const DATA_VADDR: u64 = 0x1_0000;
@@ -201,7 +201,7 @@ fn rel24_preserves_opcode_and_link_bits() {
         0x800,
         0,
         0,
-        cellgov_ps3_abi::ppc_isa::PPC_B_OPCODE_NO_LK,
+        cellgov_ps3_abi::hw::ppc_isa::PPC_B_OPCODE_NO_LK,
     );
     let _ = load_prx(&parsed, &mut mem, BASE).expect("load");
     let patched = read_u32(&mem, BASE + TEXT_VADDR + 0x400);

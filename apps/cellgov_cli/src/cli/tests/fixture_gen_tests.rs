@@ -333,7 +333,7 @@ fn build_classifier_context_overflows_on_code_region_addr_near_u64_max() {
 /// Synthetic EBOOT with a single PT_LOAD covering a
 /// sys_proc_param magic struct at file offset 0x100.
 fn synthetic_eboot_with_sys_proc_param_at(p_vaddr: u64, struct_size: u32) -> Vec<u8> {
-    use cellgov_ps3_abi::elf::{PT_LOAD, SYS_PROCESS_PARAM_MAGIC};
+    use cellgov_ps3_abi::format::elf::{PT_LOAD, SYS_PROCESS_PARAM_MAGIC};
     let phoff: usize = 64;
     let phentsize: usize = 56;
     let pt_load_offset: usize = 0x100;

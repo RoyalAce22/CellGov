@@ -19,7 +19,7 @@ pub const ENTRY_ID_VERSION_TXT: u64 = 0x100;
 ///
 /// The payload's first line is `<major>.<minor>` with a two-digit
 /// minor. The key drops a leading zero on the major, so it spells the
-/// version the way [`crate::dev_flash::parse_version_txt`] reads it out
+/// version the way [`crate::format::dev_flash::parse_version_txt`] reads it out
 /// of the installed tree. `None` unless the first line has that shape.
 pub fn parse_pup_version_txt(text: &str) -> Option<String> {
     let line = text.lines().next()?.trim();

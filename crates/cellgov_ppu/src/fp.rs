@@ -228,7 +228,7 @@ pub fn execute_fp59(
     ExecuteVerdict::Continue
 }
 
-use cellgov_ps3_abi::ppc_isa::{PPC_F64_QUIET_BIT, PPC_GENERATED_QNAN_F64};
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_F64_QUIET_BIT, PPC_GENERATED_QNAN_F64};
 
 /// Result bits for a computational arm, with the architected NaN
 /// answer substituted for the host's whenever the result is a NaN.

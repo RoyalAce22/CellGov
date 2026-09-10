@@ -10,7 +10,7 @@
 use cellgov_ppu::decode::decode;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::shadow::PredecodedShadow;
-use cellgov_ps3_abi::ppc_isa::{PPC_ADDI_R3_R3_1, PPC_BLR};
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_ADDI_R3_R3_1, PPC_BLR};
 
 const SHADOW_BASE: u64 = 0x1000;
 

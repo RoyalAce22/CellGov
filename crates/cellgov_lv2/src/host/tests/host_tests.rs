@@ -15,7 +15,7 @@ fn a_mutex_call_from_a_unit_without_a_thread_record_is_esrch_and_logged() {
     let src = UnitId::new(0);
     seed_primary_ppu(&mut host, src);
     let id = create_mutex_host(&mut host, src, &rt);
-    let esrch = Lv2Dispatch::immediate(u64::from(cellgov_ps3_abi::cell_errors::CELL_ESRCH));
+    let esrch = Lv2Dispatch::immediate(u64::from(cellgov_ps3_abi::lv2::errno::CELL_ESRCH));
     let stranger = UnitId::new(7);
     let requests = [
         Lv2Request::MutexLock {
@@ -703,7 +703,7 @@ fn lost_wake_event_flag_set_before_wait_is_immediately_matched() {
 mod ss_access_control_engine {
     use super::*;
     use cellgov_effects::Effect;
-    use cellgov_ps3_abi::cell_errors;
+    use cellgov_ps3_abi::lv2::errno;
 
     fn dispatch_ss(
         host: &mut Lv2Host,
@@ -732,7 +732,7 @@ mod ss_access_control_engine {
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, u64::from(cell_errors::CELL_ENOSYS));
+                assert_eq!(code, u64::from(errno::CELL_ENOSYS));
                 assert!(effects.is_empty(), "pkg_id=1 must not stage any write");
             }
             other => panic!("expected Immediate, got {other:?}"),
@@ -793,7 +793,7 @@ mod ss_access_control_engine {
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, u64::from(cell_errors::CELL_EFAULT));
+                assert_eq!(code, u64::from(errno::CELL_EFAULT));
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate, got {other:?}"),
@@ -818,7 +818,7 @@ mod ss_access_control_engine {
         );
         match r {
             Lv2Dispatch::Immediate { code, effects } => {
-                assert_eq!(code, u64::from(cell_errors::CELL_ENOSYS));
+                assert_eq!(code, u64::from(errno::CELL_ENOSYS));
                 assert!(effects.is_empty());
             }
             other => panic!("expected Immediate, got {other:?}"),
@@ -871,7 +871,10 @@ mod ss_access_control_engine {
             0,
             0,
         ];
-        let req = classify(cellgov_ps3_abi::syscall::SS_ACCESS_CONTROL_ENGINE, &args);
+        let req = classify(
+            cellgov_ps3_abi::lv2::syscall::SS_ACCESS_CONTROL_ENGINE,
+            &args,
+        );
         assert_eq!(
             req,
             Lv2Request::SsAccessControlEngine {

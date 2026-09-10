@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use cellgov_ps3_abi::process_address_space::{
+use cellgov_ps3_abi::hw::address_space::{
     PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE,
     PS3_RSX_BASE, PS3_RSX_IOMAP_BASE, PS3_RSX_IOMAP_SIZE, PS3_RSX_SIZE, PS3_SPU_RESERVED_BASE,
     PS3_SPU_RESERVED_SIZE,

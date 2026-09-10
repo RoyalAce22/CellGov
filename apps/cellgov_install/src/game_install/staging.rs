@@ -55,7 +55,7 @@ use crate::store::record::{
     INSTALL_RECORD_FORMAT_VERSION,
 };
 use crate::store::rename::rename_with_retry;
-use cellgov_ps3_abi::param_sfo::PS3_SYSTEM_VER_KEY;
+use cellgov_ps3_abi::format::param_sfo::PS3_SYSTEM_VER_KEY;
 
 /// Knobs shared by every installer.
 #[derive(Clone, Copy)]

@@ -1,8 +1,8 @@
 //! `sys_rsx_context_iomap` (672) dispatch.
 
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::process_address_space::{PS3_RSX_BASE, PS3_RSX_IOMAP_SIZE};
-use cellgov_ps3_abi::sys_rsx::iomap;
+use cellgov_ps3_abi::hw::address_space::{PS3_RSX_BASE, PS3_RSX_IOMAP_SIZE};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::rsx::iomap;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -32,20 +32,20 @@ impl Lv2Host {
         _flags: u64,
     ) -> Lv2Dispatch {
         if context_id != iomap::CONTEXT_ID {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if size == 0
             || (io & iomap::ALIGN_MASK) != 0
             || (ea & iomap::ALIGN_MASK) != 0
             || (size & iomap::ALIGN_MASK) != 0
         {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // An iomap `ea` names main storage, and the RSX MMIO window
         // opens at PS3_RSX_BASE. The mapped range must therefore end
         // at or below that base. u64 catches u32 wrap.
         if u64::from(ea) + u64::from(size) > PS3_RSX_BASE {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // u64 catches u32 wrap (e.g. io=0xFFF0_0000+size=0x10_0000
         // wraps to 0).
@@ -58,12 +58,12 @@ impl Lv2Host {
                      region {BAKED_IOMAP_SIZE:#x}; returning CELL_EINVAL"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         self.state.rsx_context.iomap_io = io;
         self.state.rsx_context.iomap_ea = ea;
         self.state.rsx_context.iomap_size = size;
-        Lv2Dispatch::immediate(cell_errors::CELL_OK.into())
+        Lv2Dispatch::immediate(errno::CELL_OK.into())
     }
 }
 

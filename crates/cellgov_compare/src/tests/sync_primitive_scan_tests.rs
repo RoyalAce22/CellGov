@@ -1,7 +1,7 @@
 //! Heuristic scanning of guest data for sys_lwmutex handle slots, with sentinel and field validation.
 
 use super::*;
-use cellgov_ps3_abi::sys_process::{
+use cellgov_ps3_abi::lv2::process::{
     ALL_PROCESS_OBJECT_CLASS_IDS, SYS_EVENT_PORT_OBJECT, SYS_FS_FD_OBJECT, SYS_TIMER_OBJECT,
 };
 
@@ -132,7 +132,7 @@ fn an_lwcond_pointing_elsewhere_or_holding_no_kernel_id_is_skipped() {
     emit_lwcond(
         &mut data,
         0x860000,
-        (cellgov_ps3_abi::sys_process::SYS_LWCOND_OBJECT << 24) | 0x100,
+        (cellgov_ps3_abi::lv2::process::SYS_LWCOND_OBJECT << 24) | 0x100,
     );
     let lwmutex = find_sys_lwmutex_handle_slots(&data, base);
     assert!(find_sys_lwcond_handle_slots(&data, base, &lwmutex).is_empty());

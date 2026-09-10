@@ -62,7 +62,7 @@ fn syscall_48_unknown_id_returns_esrch_without_writing_priop() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into())
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_ESRCH.into())
     );
 }
 
@@ -80,7 +80,7 @@ fn syscall_48_unknown_id_beats_null_priop() {
     );
     assert_eq!(
         result,
-        Lv2Dispatch::immediate(cellgov_ps3_abi::cell_errors::CELL_ESRCH.into()),
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_ESRCH.into()),
         "id lookup precedes the priop null gate"
     );
 }
@@ -98,10 +98,7 @@ fn ss_access_control_engine_pkg_id_1_returns_enosys() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_ENOSYS.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
 }
 
 #[test]
@@ -159,7 +156,7 @@ fn ss_access_control_engine_pkg_id_2_defaults_to_retail_fallback() {
     let v = u64::from_be_bytes(bytes.bytes().try_into().unwrap());
     assert_eq!(
         v,
-        cellgov_ps3_abi::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
+        cellgov_ps3_abi::format::sce::RETAIL_APP_PROGRAM_AUTHORITY_ID,
         "raw-ELF default must be the retail-application authority id",
     );
 }
@@ -177,10 +174,7 @@ fn ss_access_control_engine_pkg_id_2_efault_on_zero_a2() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -196,10 +190,7 @@ fn ss_access_control_engine_pkg_id_2_efault_when_a2_overflows_u32() {
         UnitId::new(0),
         &rt,
     );
-    assert_eq!(
-        result,
-        Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into())
-    );
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EFAULT.into()));
 }
 
 #[test]
@@ -293,7 +284,7 @@ fn process_is_spu_lock_line_reservation_address_zero_flags_is_einval() {
     let result = dispatch_lock_line(0xE000_0000, 0);
     match result {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
             assert!(effects.is_empty());
         }
         other => panic!("expected Immediate, got {other:?}"),
@@ -305,7 +296,7 @@ fn process_is_spu_lock_line_reservation_address_unknown_flag_bit_is_einval() {
     let result = dispatch_lock_line(0xE000_0000, 0x4);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -328,7 +319,7 @@ fn process_is_spu_lock_line_reservation_address_private_spu_rejects_raw_flag() {
     let result = dispatch_lock_line(0xF000_0000, 0x1);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EPERM.into());
+            assert_eq!(code, errno::CELL_EPERM.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -348,7 +339,7 @@ fn process_is_spu_lock_line_reservation_address_ppu_stack_is_eperm() {
     let result = dispatch_lock_line(0xD000_0000, 0x2);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EPERM.into());
+            assert_eq!(code, errno::CELL_EPERM.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -359,7 +350,7 @@ fn process_is_spu_lock_line_reservation_address_unknown_region_is_einval() {
     let result = dispatch_lock_line(0x3000_0000, 0x2);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -395,7 +386,7 @@ fn spu_initialize_rejects_max_raw_above_five() {
     let result = dispatch_spu_init(6, 6);
     match result {
         Lv2Dispatch::Immediate { code, .. } => {
-            assert_eq!(code, cell_errors::CELL_EINVAL.into());
+            assert_eq!(code, errno::CELL_EINVAL.into());
         }
         other => panic!("expected Immediate, got {other:?}"),
     }
@@ -420,7 +411,7 @@ fn spu_thread_group_destroy_unknown_id_is_esrch() {
         &rt,
     );
     match result {
-        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, cell_errors::CELL_ESRCH.into()),
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, errno::CELL_ESRCH.into()),
         other => panic!("expected Immediate, got {other:?}"),
     }
 }
@@ -468,7 +459,7 @@ fn spu_thread_group_destroy_created_group_returns_ok() {
         &rt,
     );
     match second {
-        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, cell_errors::CELL_ESRCH.into()),
+        Lv2Dispatch::Immediate { code, .. } => assert_eq!(code, errno::CELL_ESRCH.into()),
         other => panic!("expected Immediate, got {other:?}"),
     }
 }

@@ -6,7 +6,7 @@
 //! instead of being derived from a primary store like the other
 //! [`Lv2Host`] tables.
 
-use cellgov_ps3_abi::sys_process::{
+use cellgov_ps3_abi::lv2::process::{
     ProcessObjectClassId, SYS_COND_OBJECT, SYS_EVENT_FLAG_OBJECT, SYS_EVENT_PORT_OBJECT,
     SYS_EVENT_QUEUE_OBJECT, SYS_FS_FD_OBJECT, SYS_LWCOND_OBJECT, SYS_LWMUTEX_OBJECT,
     SYS_MUTEX_OBJECT, SYS_RWLOCK_OBJECT, SYS_SEMAPHORE_OBJECT, SYS_TIMER_OBJECT,

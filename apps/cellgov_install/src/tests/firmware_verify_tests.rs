@@ -41,7 +41,7 @@ fn mount_with(files: &[(&str, &[u8])]) -> ScratchDir {
 
 /// A plaintext PRX: ELF magic is all the verifier reads to route it.
 fn prx(tail: &[u8]) -> Vec<u8> {
-    let mut out = cellgov_ps3_abi::elf::ELF_MAGIC.to_vec();
+    let mut out = cellgov_ps3_abi::format::elf::ELF_MAGIC.to_vec();
     out.extend_from_slice(tail);
     out
 }

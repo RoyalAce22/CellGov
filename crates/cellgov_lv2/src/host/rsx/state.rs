@@ -1,7 +1,7 @@
 //! Per-context bookkeeping for `sys_rsx`: [`SysRsxContext`], its per-slot
 //! [`RsxDisplayBuffer`] payload, and the [`RSX_CONTEXT_ID`] sentinel.
 
-use cellgov_ps3_abi::sys_rsx::display_buffer;
+use cellgov_ps3_abi::lv2::rsx::display_buffer;
 
 /// Fixed `context_id` returned from `sys_rsx_context_allocate`. CellGov
 /// sentinel; the PS3 ABI does not pin a value.

@@ -1,6 +1,6 @@
 //! `sys_fs_lseek` dispatch tests: SET/CUR/END whence semantics, error precedence, and pos-out-pointer validation.
 
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::host::Lv2Host;
 
@@ -72,7 +72,7 @@ fn lseek_unknown_fd_returns_ebadf() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_lseek(0xCAFE_BABE, 0, 0, 0x30200)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }
@@ -86,7 +86,7 @@ fn lseek_bad_whence_returns_einval() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, 0, 3, 0x30200)),
-        cell_errors::CELL_EINVAL.code,
+        errno::CELL_EINVAL.code,
         0,
     );
 }
@@ -100,7 +100,7 @@ fn lseek_negative_past_zero_returns_einval() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, -1, 0 /* SET */, 0x30200)),
-        cell_errors::CELL_EINVAL.code,
+        errno::CELL_EINVAL.code,
         0,
     );
 }
@@ -115,7 +115,7 @@ fn lseek_failed_seek_does_not_advance_offset() {
     let _ = run(&mut host, &rt, fs_lseek(fd, 1, 0, 0x30200));
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, -10, 1 /* CUR */, 0x30200)),
-        cell_errors::CELL_EINVAL.code,
+        errno::CELL_EINVAL.code,
         0,
     );
     let (n, b) = extract_read(
@@ -136,7 +136,7 @@ fn lseek_misaligned_pos_out_ptr_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, 0, 0, 0x30201)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -150,7 +150,7 @@ fn lseek_unmapped_pos_out_ptr_returns_efault() {
     let (fd, rt) = open_registered(&mut host, b"/foo");
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, 0, 0, 0xFFFF_FF00)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -161,7 +161,7 @@ fn lseek_bad_pos_out_ptr_takes_precedence_over_bad_whence_and_fd() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_lseek(0xDEAD_BEEF, 0, 99, 0x30201)),
-        cell_errors::CELL_EFAULT.code,
+        errno::CELL_EFAULT.code,
         0,
     );
 }
@@ -172,7 +172,7 @@ fn lseek_bad_whence_takes_precedence_over_bad_fd() {
     let rt = PathRuntime::empty(0x100000);
     assert_immediate(
         run(&mut host, &rt, fs_lseek(0xDEAD_BEEF, 0, 99, 0x30200)),
-        cell_errors::CELL_EINVAL.code,
+        errno::CELL_EINVAL.code,
         0,
     );
 }
@@ -187,7 +187,7 @@ fn lseek_after_close_returns_ebadf() {
     assert_immediate(run(&mut host, &rt, fs_close(fd)), 0, 0);
     assert_immediate(
         run(&mut host, &rt, fs_lseek(fd, 0, 0, 0x30000)),
-        cell_errors::CELL_EBADF.code,
+        errno::CELL_EBADF.code,
         0,
     );
 }

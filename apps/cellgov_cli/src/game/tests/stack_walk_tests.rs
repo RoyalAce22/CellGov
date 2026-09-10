@@ -3,7 +3,7 @@
 use super::*;
 use cellgov_core::Runtime;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
-use cellgov_ps3_abi::ppc_isa::{PPC_BCCTR_XO, PPC_BCLR_XO};
+use cellgov_ps3_abi::hw::ppc_isa::{PPC_BCCTR_XO, PPC_BCLR_XO};
 use cellgov_time::Budget;
 
 fn rt_with_layout() -> Runtime {

@@ -269,7 +269,7 @@ reduced to disjoint bits.
 The LV2 host carries a process identity table, one entry per guest
 process (ppid, authority id, capability flags, exit status); the
 boot process is pre-seeded under the pid LV2 assigns the first user
-process (`cellgov_ps3_abi::sys_process::BOOT_PROCESS_PID`). Units
+process (`cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID`). Units
 bind to a pid after spawn; unbound units belong to the boot
 process. Every entry field folds into the host state hash.
 

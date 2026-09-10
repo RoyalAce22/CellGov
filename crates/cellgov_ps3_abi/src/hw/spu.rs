@@ -1,8 +1,8 @@
-//! SPU channel numbers and MFC command opcodes.
+//! SPU local store and register-file sizes, channel numbers and MFC
+//! command opcodes.
 //!
-//! Architectural constants for `rdch`/`wrch`/`rchcnt` and the MFC
-//! command opcodes written to `MFC_CMD`. Channel-access semantics
-//! live in `cellgov_spu`; this module is data only.
+//! Channel-access semantics live in `cellgov_spu`; this module is
+//! data only.
 // [CBEA p:112 s:9.1 MFC SPU Command Parameter Channels] SPU channel architecture overview.
 
 // MFC command channels
@@ -70,3 +70,12 @@ pub const MFC_GETLLAR: u32 = 0xD0;
 /// Atomic: put conditional (putllc).
 // [CBEA p:65 s:7.8 MFC Atomic Update Commands] putllc opcode 0xB4.
 pub const MFC_PUTLLC: u32 = 0xB4;
+
+/// SPU local store size in bytes (256 KiB).
+// [CBE-Handbook p:64 s:3.1.1] Local Store is a 256 KB single-ported memory.
+pub const SPU_LS_SIZE: usize = 256 * 1024;
+
+/// Number of SPU general-purpose 128-bit registers (r0..r127).
+// [SPU-ISA p:25 s:2] The SPU architecture defines 128 general-purpose
+// registers, each holding 128 data bits.
+pub const SPU_REG_COUNT: usize = 128;

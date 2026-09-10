@@ -1,7 +1,7 @@
 //! `sys_fs_fstat` and `sys_fs_stat` host dispatch.
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::fs_store::FsError;
@@ -28,12 +28,12 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if !is_stat_ptr_writable(rt, stat_out_ptr) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let stat = match self.fs_store().fstat(fd) {
             Ok(s) => s,
             Err(FsError::UnknownFd) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EBADF.into());
+                return Lv2Dispatch::immediate(errno::CELL_EBADF.into());
             }
             Err(other) => {
                 self.record_invariant_break(
@@ -43,7 +43,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
         Lv2Dispatch::Immediate {
@@ -74,7 +74,7 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
         if !is_stat_ptr_writable(rt, stat_out_ptr) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let path_bytes_owned = match read_path_bytes(rt, path_ptr) {
             Ok(b) => b,
@@ -85,7 +85,7 @@ impl Lv2Host {
         let path_str = match std::str::from_utf8(&path_bytes_owned) {
             Ok(s) => s,
             Err(_) => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
         let stat = match self.fs_store().stat_path(path_str) {
@@ -103,14 +103,14 @@ impl Lv2Host {
                                      after caching; contract violated"
                                 ),
                             );
-                            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                         }
                     },
                     MountResolution::Failed(err) => {
                         return Lv2Dispatch::immediate(err.into());
                     }
                     MountResolution::Unmounted => {
-                        return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+                        return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
                     }
                 }
             }
@@ -122,7 +122,7 @@ impl Lv2Host {
                          contract violated"
                     ),
                 );
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
         Lv2Dispatch::Immediate {

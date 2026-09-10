@@ -1,8 +1,8 @@
 //! Multi-root mount tests: file lookup order, shadowing, and merged
 //! directory listing.
 
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_fs::{CELL_FS_TYPE_DIRECTORY, CELL_FS_TYPE_REGULAR};
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::fs::{CELL_FS_TYPE_DIRECTORY, CELL_FS_TYPE_REGULAR};
 
 use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
@@ -105,7 +105,7 @@ fn a_path_in_no_root_returns_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/absent.xml\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
 }
@@ -274,7 +274,7 @@ fn a_file_shadowing_a_directory_makes_opendir_enotdir() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");
     assert_immediate(
         run(&mut host, &rt, fs_opendir(0x10000, 0x20000)),
-        cell_errors::CELL_ENOTDIR.code,
+        errno::CELL_ENOTDIR.code,
         0,
     );
 }
@@ -290,7 +290,7 @@ fn a_directory_shadowing_a_file_makes_open_enoent() {
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/entry\0");
     assert_immediate(
         run(&mut host, &rt, fs_open(0x10000, 0x20000, 0, 0)),
-        cell_errors::CELL_ENOENT.code,
+        errno::CELL_ENOENT.code,
         0,
     );
 }

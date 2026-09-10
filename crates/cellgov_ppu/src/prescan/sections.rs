@@ -5,7 +5,7 @@
 //! the caller falls back to the segment walk. A present-but-malformed
 //! section table errors; it is not a fallback trigger.
 
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELF64_E_SHENTSIZE, ELF64_E_SHNUM, ELF64_E_SHOFF, ELF64_E_SHSTRNDX, ELF64_SHENT_SIZE,
     ELF64_SH_FLAGS, ELF64_SH_NAME, ELF64_SH_OFFSET, ELF64_SH_SIZE, ELF64_SH_TYPE, ELF_HEADER_SIZE,
     SHF_ALLOC, SHF_EXECINSTR, SHN_UNDEF, SHT_PROGBITS, SHT_STRTAB,
@@ -15,7 +15,7 @@ use super::error::PrescanError;
 
 // Range guarantee: the caller's runtime bounds checks combine with
 // the `const _: () = ...` field-offset assertions in
-// `cellgov_ps3_abi::elf` to prove every read in this module is in
+// `cellgov_ps3_abi::format::elf` to prove every read in this module is in
 // range. A future edit that breaks either coupling fails compilation
 // at the const_assert before any read can fall out of range.
 use cellgov_mem::be::{read_u16, read_u32, read_u64};

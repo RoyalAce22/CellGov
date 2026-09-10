@@ -12,7 +12,7 @@
 /// Returns 0 with a distinct stderr line for each failure mode
 /// (short input, bad magic, truncated phdr table, no user segments).
 pub(super) fn elf_user_region_end(data: &[u8]) -> usize {
-    use cellgov_ps3_abi::elf::PT_LOAD;
+    use cellgov_ps3_abi::format::elf::PT_LOAD;
     fn u16_be(d: &[u8], o: usize) -> u16 {
         u16::from_be_bytes([d[o], d[o + 1]])
     }

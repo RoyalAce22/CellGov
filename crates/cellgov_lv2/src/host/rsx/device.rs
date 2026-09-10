@@ -3,8 +3,8 @@
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::sys_rsx::device_map;
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::rsx::device_map;
 
 use crate::dispatch::Lv2Dispatch;
 use crate::host::Lv2Host;
@@ -40,7 +40,7 @@ impl Lv2Host {
                      (cellGcmInitPerfMon uses 7/9/10/11/12); returning CELL_EINVAL"
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         if dev_addr_ptr == 0 {
             self.log_invariant_break(
@@ -51,7 +51,7 @@ impl Lv2Host {
                      main region. Returning CELL_EFAULT."
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let device_addr = u64::from(device_map::ADDR);
         let dev_addr_write = Effect::SharedWriteIntent {
@@ -62,7 +62,7 @@ impl Lv2Host {
             source_time: tick,
         };
         Lv2Dispatch::Immediate {
-            code: cell_errors::CELL_OK.into(),
+            code: errno::CELL_OK.into(),
             effects: vec![dev_addr_write],
         }
     }

@@ -10,10 +10,10 @@ use crate::host::test_support::{
 use crate::ppu_thread::PpuThreadAttrs;
 use crate::request::Lv2Request;
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::cell_errors;
+use cellgov_ps3_abi::lv2::errno;
 
 fn etimedout() -> u64 {
-    cell_errors::CELL_ETIMEDOUT.into()
+    errno::CELL_ETIMEDOUT.into()
 }
 
 fn child_attrs() -> PpuThreadAttrs {
@@ -363,7 +363,7 @@ fn event_flag_error_and_busy_exits_zero_a_nonnull_result_ptr() {
         src,
         &rt,
     );
-    assert_zero_store(&bad_mode, cell_errors::CELL_EINVAL.into(), 0x300);
+    assert_zero_store(&bad_mode, errno::CELL_EINVAL.into(), 0x300);
 
     let unknown = host.dispatch(
         Lv2Request::EventFlagTryWait {
@@ -375,7 +375,7 @@ fn event_flag_error_and_busy_exits_zero_a_nonnull_result_ptr() {
         src,
         &rt,
     );
-    assert_zero_store(&unknown, cell_errors::CELL_ESRCH.into(), 0x308);
+    assert_zero_store(&unknown, errno::CELL_ESRCH.into(), 0x308);
 
     let busy = host.dispatch(
         Lv2Request::EventFlagTryWait {
@@ -387,7 +387,7 @@ fn event_flag_error_and_busy_exits_zero_a_nonnull_result_ptr() {
         src,
         &rt,
     );
-    assert_zero_store(&busy, cell_errors::CELL_EBUSY.into(), 0x310);
+    assert_zero_store(&busy, errno::CELL_EBUSY.into(), 0x310);
 }
 
 #[test]
@@ -481,7 +481,7 @@ fn event_flag_cancel_esrch_zeroes_a_nonnull_num_ptr() {
     );
     match cancel {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, u64::from(cell_errors::CELL_ESRCH));
+            assert_eq!(code, u64::from(errno::CELL_ESRCH));
             assert_eq!(effects.len(), 1);
             match &effects[0] {
                 cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. } => {
@@ -504,7 +504,7 @@ fn event_flag_cancel_esrch_zeroes_a_nonnull_num_ptr() {
     );
     match cancel_null {
         Lv2Dispatch::Immediate { code, effects } => {
-            assert_eq!(code, u64::from(cell_errors::CELL_ESRCH));
+            assert_eq!(code, u64::from(errno::CELL_ESRCH));
             assert!(
                 effects.is_empty(),
                 "a null num pointer must not produce a guest write at address 0"
@@ -560,7 +560,7 @@ fn a_duplicate_event_flag_park_zeroes_the_result_and_returns_efault() {
         src,
         &rt,
     );
-    assert_zero_store(&dup, cell_errors::CELL_EFAULT.into(), 0x308);
+    assert_zero_store(&dup, errno::CELL_EFAULT.into(), 0x308);
 }
 
 fn cond_setup(host: &mut Lv2Host, rt: &FakeRuntime, owner: UnitId) -> (u32, u32) {

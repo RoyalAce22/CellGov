@@ -24,7 +24,7 @@ use core::mem::size_of;
 pub const STATE_HASH_FORMAT_VERSION: u8 = 2;
 
 pub use cellgov_lv2::host::rsx::RSX_CONTEXT_ID;
-pub use cellgov_ps3_abi::sys_rsx::{control_register, driver_info_init, region};
+pub use cellgov_ps3_abi::lv2::rsx::{control_register, driver_info_init, region};
 
 /// BE u32 semaphore slot.
 pub type RsxSemaphore = u32;
@@ -68,7 +68,7 @@ pub struct RsxReports {
     pub report: [RsxReport; 2048],
 }
 
-pub use cellgov_ps3_abi::rsx_nv_hardware::{LABEL_COUNT, LABEL_STRIDE};
+pub use cellgov_ps3_abi::hw::rsx::{LABEL_COUNT, LABEL_STRIDE};
 
 /// DMA-control region; 0x58 bytes. libgcm hands a title the
 /// put / get / ref triple at +0x40 as `gcmControlRegister`.
@@ -372,18 +372,18 @@ impl Default for RsxContext {
     }
 }
 
-pub use cellgov_ps3_abi::sys_rsx::{driver_info, reports};
+pub use cellgov_ps3_abi::lv2::rsx::{driver_info, reports};
 
 /// Bytes a [`RsxDmaControl`] occupies in guest memory.
 pub const RSX_DMA_CONTROL_SIZE: usize = size_of::<RsxDmaControl>();
 
 const _: () = assert!(
     size_of::<RsxReports>() == reports::SIZE,
-    "RsxReports layout drift vs cellgov_ps3_abi::sys_rsx::reports::SIZE"
+    "RsxReports layout drift vs cellgov_ps3_abi::lv2::rsx::reports::SIZE"
 );
 const _: () = assert!(
     size_of::<RsxDriverInfo>() == driver_info::SIZE,
-    "RsxDriverInfo layout drift vs cellgov_ps3_abi::sys_rsx::driver_info::SIZE"
+    "RsxDriverInfo layout drift vs cellgov_ps3_abi::lv2::rsx::driver_info::SIZE"
 );
 
 #[cfg(test)]

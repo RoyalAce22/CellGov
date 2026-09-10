@@ -7,13 +7,13 @@
 //!   pseudo-syscall (`0x10000..0x80000`). Fired by the trampoline
 //!   installed in unpatched GOT slots; the NID rides in r4 and the
 //!   number itself currently sits at the namespace start
-//!   ([`crate::syscall::UNRESOLVED_IMPORT`]).
+//!   ([`crate::lv2::syscall::UNRESOLVED_IMPORT`]).
 //!
 //! This module holds the namespace layout and the pure encode /
 //! decode over it. The LEV-aware dispatch-hint classifier lives in
 //! `cellgov_lv2::syscall_classification`.
 
-use crate::syscall;
+use crate::lv2::syscall;
 
 /// Half-open ranges in the syscall-number namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -109,7 +109,7 @@ const _: () = {
     );
 };
 
-// Every LV2 syscall constant in `crate::syscall` must fit the
+// Every LV2 syscall constant in `crate::lv2::syscall` must fit the
 // `Lv2` namespace; a constant at `0x10000+` would otherwise route
 // as an HLE import at runtime. We drive this check from the macro-
 // emitted `syscall::ALL_LV2_NUMBERS` (typed-arm set) and the
@@ -136,5 +136,5 @@ const _: () = {
 };
 
 #[cfg(test)]
-#[path = "tests/syscall_namespace_tests.rs"]
+#[path = "tests/namespace_tests.rs"]
 mod tests;

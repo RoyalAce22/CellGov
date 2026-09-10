@@ -3,7 +3,7 @@
 
 use crate::state::SpuState;
 use cellgov_mem::be::{read_u16, read_u32};
-use cellgov_ps3_abi::elf::{ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD};
+use cellgov_ps3_abi::format::elf::{ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD};
 
 /// Load failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]

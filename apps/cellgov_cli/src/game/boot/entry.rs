@@ -3,7 +3,7 @@
 
 use cellgov_core::Runtime;
 use cellgov_ppu::PpuExecutionUnit;
-use cellgov_ps3_abi::process_address_space::PS3_PRIMARY_STACK_TOP;
+use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_TOP;
 
 use super::firmware::MemoryPlacement;
 use super::params::{primary_entry_sp, BootParams};

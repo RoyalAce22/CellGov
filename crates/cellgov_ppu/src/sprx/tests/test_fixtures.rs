@@ -1,6 +1,6 @@
 //! Shared in-memory PRX fixtures used by both parse and load tests.
 
-use cellgov_ps3_abi::elf::{
+use cellgov_ps3_abi::format::elf::{
     ELF_MAGIC, ET_PRX, NID_MODULE_START, NID_MODULE_STOP, PT_LOAD, PT_PRX_RELOC,
 };
 

@@ -7,7 +7,7 @@
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use cellgov_ps3_abi::dev_flash::{FLASH_MOUNT, SIBLING_FLASH_MOUNTS};
+use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, SIBLING_FLASH_MOUNTS};
 
 /// One regular file extracted from a USTAR archive.
 #[derive(Debug)]

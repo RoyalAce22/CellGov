@@ -68,5 +68,5 @@ pub const ALL_PROCESS_OBJECT_CLASS_IDS: &[ProcessObjectClassId] = &[
 ];
 
 #[cfg(test)]
-#[path = "tests/sys_process_tests.rs"]
+#[path = "tests/process_tests.rs"]
 mod tests;

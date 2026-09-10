@@ -1,6 +1,6 @@
 //! `sys_prx` ABI: `CellPrxError` codes, the start/stop option struct
 //! layout, and the start-command vocabulary. The `CellPrxError` range
-//! is disjoint from [`crate::cell_errors`] -- PRX errors are
+//! is disjoint from [`crate::lv2::errno`] -- PRX errors are
 //! `0x8001_1xxx`, LV2 errnos are `0x8001_0xxx` -- so the two tables
 //! never collide.
 //!

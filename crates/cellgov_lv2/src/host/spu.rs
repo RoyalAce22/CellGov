@@ -6,9 +6,9 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::ByteRange;
 use cellgov_sync::MailboxId;
 
-use cellgov_ps3_abi::cell_errors;
-use cellgov_ps3_abi::elf::ELF32_E_ENTRY;
-use cellgov_ps3_abi::sys_spu;
+use cellgov_ps3_abi::format::elf::ELF32_E_ENTRY;
+use cellgov_ps3_abi::lv2::errno;
+use cellgov_ps3_abi::lv2::spu;
 
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState, SpuLoadImage};
 use crate::host::{Lv2Host, Lv2Runtime};
@@ -21,7 +21,7 @@ use cellgov_time::GuestTicks;
 /// with the kernel image id occupying the `entry_point` word.
 fn kernel_image_struct(handle: crate::image::SpuImageHandle) -> [u8; 16] {
     let mut img_struct = [0u8; 16];
-    img_struct[0..4].copy_from_slice(&sys_spu::image::TYPE_KERNEL.to_be_bytes());
+    img_struct[0..4].copy_from_slice(&spu::image::TYPE_KERNEL.to_be_bytes());
     img_struct[4..8].copy_from_slice(&handle.raw().to_be_bytes());
     img_struct
 }
@@ -46,7 +46,7 @@ impl Lv2Host {
         img_ptr: u32,
         rt: &dyn Lv2Runtime,
     ) -> Result<(u32, Vec<LsSegment>), UserImageRefusal> {
-        use sys_spu::{image, segment, LS_SIZE};
+        use spu::{image, segment, LS_SIZE};
         // Field addresses are formed in u64: a record or table row at
         // the top of the 32-bit space reads as unmapped (CELL_EFAULT)
         // instead of wrapping the guest pointer.
@@ -178,16 +178,16 @@ impl Lv2Host {
         // > usize image cannot satisfy a read; reject as CELL_EINVAL
         // alongside the out-of-bounds branch.
         let Ok(size) = usize::try_from(size) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
         let img_bytes = match rt.read_committed(u64::from(img_ptr), size) {
             Some(b) => b,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
         if !rt.writable(u64::from(handle_out), 16) {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         // Synthetic path keys every (type_id, img_ptr) pair to a distinct
         // entry; ELF parsing is deferred to sys_spu_thread_initialize.
@@ -219,17 +219,17 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let path_bytes = match rt.read_committed(path_ptr as u64, sys_spu::IMAGE_PATH_MAX) {
+        let path_bytes = match rt.read_committed(path_ptr as u64, spu::IMAGE_PATH_MAX) {
             Some(bytes) => bytes,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         };
         // Missing NUL is malformed (EINVAL), distinct from not-found (ENOENT).
         let path_len = match path_bytes.iter().position(|&b| b == 0) {
             Some(n) => n,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
         let path = &path_bytes[..path_len];
@@ -237,7 +237,7 @@ impl Lv2Host {
         let record = match self.state.content.lookup_by_path(path) {
             Some(r) => r,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ENOENT.into());
+                return Lv2Dispatch::immediate(errno::CELL_ENOENT.into());
             }
         };
 
@@ -270,7 +270,7 @@ impl Lv2Host {
         // fully-initialized state `sys_spu_thread_group_start`
         // requires.
         if num_threads == 0 {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         // `MAX_SLOTS_PER_GROUP` bounds CellGov's thread-id encoding.
         // The kernel's own limit on `num` is unestablished, so this
@@ -287,12 +287,12 @@ impl Lv2Host {
                     cap = MAX_SLOTS_PER_GROUP,
                 ),
             );
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         let group_id = match self.state.groups.create(num_threads) {
             Some(id) => id,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EAGAIN.into());
+                return Lv2Dispatch::immediate(errno::CELL_EAGAIN.into());
             }
         };
 
@@ -332,8 +332,8 @@ impl Lv2Host {
                 }
                 0
             }
-            Err(DestroyGroupError::Unknown) => cell_errors::CELL_ESRCH.into(),
-            Err(DestroyGroupError::Busy) => cell_errors::CELL_EBUSY.into(),
+            Err(DestroyGroupError::Unknown) => errno::CELL_ESRCH.into(),
+            Err(DestroyGroupError::Busy) => errno::CELL_EBUSY.into(),
         };
         Lv2Dispatch::Immediate {
             code,
@@ -371,7 +371,7 @@ impl Lv2Host {
         let group = match self.state.groups.get_mut(group_id) {
             Some(g) => g,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         };
 
@@ -381,7 +381,7 @@ impl Lv2Host {
         // re-registering its SPUs against a second RegisterSpu
         // dispatch.
         if group.state != GroupState::Created {
-            return Lv2Dispatch::immediate(cell_errors::CELL_ESTAT.into());
+            return Lv2Dispatch::immediate(errno::CELL_ESTAT.into());
         }
 
         // Two-pass: validate every handle, then build `inits`. The second
@@ -389,7 +389,7 @@ impl Lv2Host {
         let slot_entries: Vec<_> = group.slots.iter().map(|(&k, v)| (k, v.clone())).collect();
         for (_slot_idx, slot) in &slot_entries {
             if self.load_image_for(slot.image_handle).is_none() {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         }
 
@@ -446,7 +446,7 @@ impl Lv2Host {
                     false,
                     "dispatch_thread_initialize got wrong request variant: {other:?}"
                 );
-                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
 
@@ -455,7 +455,7 @@ impl Lv2Host {
         // CELL_EINVAL rather than CELL_EFAULT. Which of the two the
         // kernel answers when both apply is unestablished.
         if thread_num >= MAX_SLOTS_PER_GROUP {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
 
         // A kernel record carries the image id in `entry_point`.
@@ -463,20 +463,20 @@ impl Lv2Host {
             let bytes = rt.read_committed(u64::from(img_ptr) + u64::from(offset), 4)?;
             Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
         };
-        let Some(image_type) = image_word(sys_spu::image::TYPE_OFFSET) else {
-            return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+        let Some(image_type) = image_word(spu::image::TYPE_OFFSET) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         let (kernel_handle, user_image) = match image_type {
-            sys_spu::image::TYPE_KERNEL => {
-                let Some(handle) = image_word(sys_spu::image::ENTRY_OFFSET) else {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+            spu::image::TYPE_KERNEL => {
+                let Some(handle) = image_word(spu::image::ENTRY_OFFSET) else {
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 (handle, None)
             }
-            sys_spu::image::TYPE_USER => match self.parse_user_image(img_ptr, rt) {
+            spu::image::TYPE_USER => match self.parse_user_image(img_ptr, rt) {
                 Ok(parsed) => (0, Some(parsed)),
                 Err(UserImageRefusal::Unreadable) => {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 }
                 Err(UserImageRefusal::Invalid(site)) => {
                     self.log_invariant_break(
@@ -486,10 +486,10 @@ impl Lv2Host {
                              0x{img_ptr:08x}"
                         ),
                     );
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
                 }
             },
-            _ => return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
         };
 
         // Args snapshot at initialize time, not at group_start: the PPU
@@ -507,7 +507,7 @@ impl Lv2Host {
                     a
                 }
                 _ => {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 }
             }
         };
@@ -518,7 +518,7 @@ impl Lv2Host {
         {
             Some(id) => id,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into());
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
             }
         };
 
@@ -532,14 +532,14 @@ impl Lv2Host {
             None => {
                 // ContentStore never allocates handle 0; guest-supplied 0 -> ESRCH.
                 let Some(handle) = crate::image::SpuImageHandle::new(kernel_handle) else {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                    return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
                 };
                 // The id must name an image the kernel holds; a lookup
                 // miss is CELL_ESRCH. User-image handles are not
                 // kernel ids, so a forged kernel record cannot alias
                 // one at group start.
                 if self.state.content.lookup_by_handle(handle).is_none() {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                    return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
                 }
                 (handle, None)
             }
@@ -551,26 +551,26 @@ impl Lv2Host {
         {
             Ok(()) => None,
             Err(crate::thread_group::InitializeThreadError::UnknownGroup) => {
-                Some(cell_errors::CELL_ESRCH)
+                Some(errno::CELL_ESRCH)
             }
             Err(crate::thread_group::InitializeThreadError::SlotAlreadyInitialized) => {
-                Some(cell_errors::CELL_EBUSY)
+                Some(errno::CELL_EBUSY)
             }
             // Once the group leaves its not-initialized state, this
             // answers CELL_EBUSY, the same code an occupied slot
             // takes.
             Err(crate::thread_group::InitializeThreadError::GroupAlreadyStarted { .. }) => {
-                Some(cell_errors::CELL_EBUSY)
+                Some(errno::CELL_EBUSY)
             }
             // A fully populated group has left its not-initialized
             // state too, so it takes the same arm.
             Err(crate::thread_group::InitializeThreadError::GroupFull { .. }) => {
-                Some(cell_errors::CELL_EBUSY)
+                Some(errno::CELL_EBUSY)
             }
             // A slot index past the thread map is a bad argument, not
             // a missing object: CELL_EINVAL.
             Err(crate::thread_group::InitializeThreadError::SlotOutOfRange) => {
-                Some(cell_errors::CELL_EINVAL)
+                Some(errno::CELL_EINVAL)
             }
         };
         if let Some(code) = refusal {
@@ -606,7 +606,7 @@ impl Lv2Host {
         let group = match self.state.groups.get(group_id) {
             Some(g) => g,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         };
 
@@ -614,7 +614,7 @@ impl Lv2Host {
         // termination reason once abnormal causes are tracked, instead
         // of hard-coding GROUP_EXIT / status 0 for both branches below.
         match group.state {
-            GroupState::Created => Lv2Dispatch::immediate(cell_errors::CELL_EINVAL.into()),
+            GroupState::Created => Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
             GroupState::Running => Lv2Dispatch::Block {
                 reason: Lv2BlockReason::ThreadGroupJoin { group_id },
                 pending: PendingResponse::ThreadGroupJoin {
@@ -622,7 +622,7 @@ impl Lv2Host {
                     code: 0,
                     cause_ptr,
                     status_ptr,
-                    cause: sys_spu::group_join_cause::GROUP_EXIT,
+                    cause: spu::group_join_cause::GROUP_EXIT,
                     status: 0,
                 },
                 effects: vec![],
@@ -636,12 +636,12 @@ impl Lv2Host {
                 // CELL_EFAULT. Mirrors resolve_join_wakes in
                 // cellgov_core so the immediate and parked paths agree.
                 if cause_ptr == 0 {
-                    return Lv2Dispatch::immediate(cell_errors::CELL_EFAULT.into());
+                    return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 }
                 let mut effects = vec![Effect::SharedWriteIntent {
                     range: ByteRange::contiguous_u32(cause_ptr, 4),
                     bytes: WritePayload::from_slice(
-                        &sys_spu::group_join_cause::GROUP_EXIT.to_be_bytes(),
+                        &spu::group_join_cause::GROUP_EXIT.to_be_bytes(),
                     ),
                     ordering: PriorityClass::Normal,
                     source: requester,
@@ -649,7 +649,7 @@ impl Lv2Host {
                 }];
                 if status_ptr == 0 {
                     return Lv2Dispatch::Immediate {
-                        code: cell_errors::CELL_EFAULT.into(),
+                        code: errno::CELL_EFAULT.into(),
                         effects,
                     };
                 }
@@ -674,7 +674,7 @@ impl Lv2Host {
         let target_uid = match self.state.groups.running_unit_for_thread(thread_id) {
             Some(uid) => uid,
             None => {
-                return Lv2Dispatch::immediate(cell_errors::CELL_ESRCH.into());
+                return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
             }
         };
         let effect = Effect::MailboxSend {

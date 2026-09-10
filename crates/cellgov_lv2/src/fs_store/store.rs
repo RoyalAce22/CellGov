@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use cellgov_mem::Fnv1aHasher;
-use cellgov_ps3_abi::sys_fs::LV2_FS_OBJECT_ID_BASE;
+use cellgov_ps3_abi::lv2::fs::LV2_FS_OBJECT_ID_BASE;
 use num_enum::TryFromPrimitive;
 
 use super::FsError;
