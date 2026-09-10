@@ -9,7 +9,7 @@
 //! [ErtlGregg2003 p:20 s:6.3] dispatch for super-instruction arms.
 
 use crate::exec::branch::branch_condition;
-use crate::exec::memory_helpers::{buffer_store, load_ze, LoadWidth};
+use crate::exec::memory_helpers::{buffer_store, load_ze, Width};
 use crate::exec::ExecuteVerdict;
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
@@ -88,7 +88,7 @@ pub(crate) fn execute(
             cmp_imm,
         } => {
             let ea = state.ea_d_form(ra_load, offset);
-            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
+            match load_ze(region_views, store_buf, ea, Width::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     let a = val as i32;
@@ -138,7 +138,7 @@ pub(crate) fn execute(
             offset,
         } => {
             let ea = state.ea_d_form(ra_load, offset);
-            match load_ze(region_views, store_buf, ea, LoadWidth::B4) {
+            match load_ze(region_views, store_buf, ea, Width::B4) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_lr(val);
@@ -166,7 +166,7 @@ pub(crate) fn execute(
             offset,
         } => {
             let ea = state.ea_d_form(ra_load, offset);
-            match load_ze(region_views, store_buf, ea, LoadWidth::B8) {
+            match load_ze(region_views, store_buf, ea, Width::B8) {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     state.set_lr(val);

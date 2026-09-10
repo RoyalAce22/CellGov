@@ -43,11 +43,9 @@ fn unmapped(ea: u64) -> cellgov_mem::MemError {
     })
 }
 
-/// The widths a fixed-point load can ask for. Typed so a helper is
-/// never handed a size it has no arm for: a caller mistake is a
-/// compile error, not a fabricated unmapped fault at run time.
+/// The widths of a scalar load or store.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LoadWidth {
+pub(crate) enum Width {
     /// One byte.
     B1,
     /// Halfword.
@@ -58,7 +56,7 @@ pub(crate) enum LoadWidth {
     B8,
 }
 
-impl LoadWidth {
+impl Width {
     pub(crate) const fn bytes(self) -> u8 {
         match self {
             Self::B1 => 1,
@@ -79,7 +77,7 @@ pub(crate) fn load_ze(
     region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     ea: u64,
-    width: LoadWidth,
+    width: Width,
 ) -> Result<u64, cellgov_mem::MemError> {
     let size = width.bytes();
     if let Some(val) = store_buf.forward(ea, size) {
@@ -91,10 +89,10 @@ pub(crate) fn load_ze(
     bytes[..n].copy_from_slice(&slice[..n]);
     store_buf.overlay_range(ea, &mut bytes[..n]);
     Ok(match width {
-        LoadWidth::B1 => bytes[0] as u64,
-        LoadWidth::B2 => u16::from_be_bytes([bytes[0], bytes[1]]) as u64,
-        LoadWidth::B4 => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64,
-        LoadWidth::B8 => u64::from_be_bytes(bytes),
+        Width::B1 => bytes[0] as u64,
+        Width::B2 => u16::from_be_bytes([bytes[0], bytes[1]]) as u64,
+        Width::B4 => u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as u64,
+        Width::B8 => u64::from_be_bytes(bytes),
     })
 }
 
@@ -104,17 +102,17 @@ pub(crate) fn load_se(
     region_views: &[cellgov_mem::RegionView<'_>],
     store_buf: &StoreBuffer,
     ea: u64,
-    width: LoadWidth,
+    width: Width,
 ) -> Result<u64, cellgov_mem::MemError> {
     let size = width.bytes();
     if let Some(val) = store_buf.forward(ea, size) {
         // `forward` right-aligns `size` bytes; sign must come from
         // the size's MSB, not u64 bit 63 (always 0 for sub-doubleword).
         return Ok(match width {
-            LoadWidth::B1 => (val as u8 as i8) as i64 as u64,
-            LoadWidth::B2 => (val as u16 as i16) as i64 as u64,
-            LoadWidth::B4 => (val as u32 as i32) as i64 as u64,
-            LoadWidth::B8 => val as u64,
+            Width::B1 => (val as u8 as i8) as i64 as u64,
+            Width::B2 => (val as u16 as i16) as i64 as u64,
+            Width::B4 => (val as u32 as i32) as i64 as u64,
+            Width::B8 => val as u64,
         });
     }
     let slice = load_slice(region_views, ea, size as usize).ok_or_else(|| unmapped(ea))?;
@@ -123,10 +121,10 @@ pub(crate) fn load_se(
     bytes[..n].copy_from_slice(&slice[..n]);
     store_buf.overlay_range(ea, &mut bytes[..n]);
     Ok(match width {
-        LoadWidth::B1 => (bytes[0] as i8) as i64 as u64,
-        LoadWidth::B2 => i16::from_be_bytes([bytes[0], bytes[1]]) as i64 as u64,
-        LoadWidth::B4 => i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64 as u64,
-        LoadWidth::B8 => u64::from_be_bytes(bytes),
+        Width::B1 => (bytes[0] as i8) as i64 as u64,
+        Width::B2 => i16::from_be_bytes([bytes[0], bytes[1]]) as i64 as u64,
+        Width::B4 => i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as i64 as u64,
+        Width::B8 => u64::from_be_bytes(bytes),
     })
 }
 
