@@ -118,6 +118,43 @@ pub mod get_module_list_option {
     pub const FLAG_FILL_LIST: u64 = 0x2;
 }
 
+/// `sys_prx_register_module_option_t`.
+///
+/// `size@0` selects the form. [`register_module_option::SIZE`] is the
+/// only form that carries `type@8`, `stub_ea@0x20` and
+/// `stub_size@0x24`. The two forms in
+/// [`register_module_option::LEGACY_SIZES`] stop short of all three.
+///
+/// The layout is unestablished: nothing in the corpus or the public
+/// documents fixes the offsets or the three accepted sizes. An sc 484
+/// caller's own code shows which fields it writes before the call, so
+/// a reading of one fixes them together.
+pub mod register_module_option {
+    /// The form that carries the type word and the stub-table pair.
+    pub const SIZE: u64 = 0x30;
+
+    /// Forms that stop short of `type@8`.
+    ///
+    /// A caller that presents one asks for no import binding, so the
+    /// kernel reads none of the fields past `size`.
+    pub const LEGACY_SIZES: [u64; 2] = [0x1C, 0x20];
+
+    /// `type` -- IN: bit 0 asks the kernel to bind the caller's own
+    /// import tables. The remaining bits have no witness.
+    pub const TYPE_OFFSET: u64 = 0x08;
+    /// `stub_ea` -- IN: guest address of the import table.
+    pub const STUB_EA_OFFSET: u64 = 0x20;
+    /// `stub_size` -- IN: bytes of that table.
+    pub const STUB_SIZE_OFFSET: u64 = 0x24;
+
+    /// Bit of `type` that asks for the import binding.
+    pub const TYPE_MANUAL_IMPORTS: u64 = 0x1;
+
+    /// Bytes through the end of `stub_size`, the last field any form
+    /// reads. The tail from here to [`SIZE`] stays untouched.
+    pub const TOUCHED_LEN: u64 = 0x28;
+}
+
 /// Low nibble of `sys_prx_start_stop_module_option_t::cmd`.
 ///
 /// liblv2.sprx's `sys_prx_start_module` writes 1, invokes whatever

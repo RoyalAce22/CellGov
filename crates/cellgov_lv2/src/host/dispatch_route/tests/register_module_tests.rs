@@ -93,6 +93,45 @@ fn call(host: &mut Lv2Host, rt: &FakeRuntime, opt: u64) -> Lv2Dispatch {
 }
 
 #[test]
+fn an_option_pointer_whose_struct_wraps_is_a_named_efault() {
+    // The read of `size` alone would answer EFAULT here. The gate
+    // stands ahead of that read, so the arm forms its later field
+    // addresses from a pointer that has room for the struct. The
+    // sibling sc 481 / 482 / 494 arms bound theirs the same way.
+    use cellgov_ps3_abi::lv2::prx::register_module_option as layout;
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
+    let opt = u64::MAX - layout::TOUCHED_LEN + 1;
+    assert_eq!(
+        call(&mut host, &rt, opt),
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
+    );
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.prx_register_module_p_opt_wraps"),
+        1
+    );
+}
+
+#[test]
+fn an_option_pointer_one_byte_below_the_wrap_clears_the_gate() {
+    // The control for the gate above: one byte lower the struct fits,
+    // so the arm goes on to read `size` and answers on what it finds
+    // there. A gate that refused one address too many fails here.
+    use cellgov_ps3_abi::lv2::prx::register_module_option as layout;
+    let mut host = Lv2Host::new();
+    let rt = FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
+    let opt = u64::MAX - layout::TOUCHED_LEN;
+    assert_eq!(
+        call(&mut host, &rt, opt),
+        Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
+    );
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.prx_register_module_p_opt_wraps"),
+        0
+    );
+}
+
+#[test]
 fn unrecognised_option_size_is_einval() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::with_memory(memory_with(1, 0x28, &[]));

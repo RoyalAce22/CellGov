@@ -459,8 +459,22 @@ impl Lv2Host {
         )
     }
 
-    /// `_sys_prx_register_module` (484): returns
-    /// CELL_PRX_ERROR_ELF_IS_REGISTERED for non-VSH callers.
+    /// `_sys_prx_register_module` (484): binds a CoreOS caller's own
+    /// import tables against the firmware export map.
+    ///
+    /// A caller that clears `type` bit 0 asks for no binding and gets
+    /// CELL_OK. Any other process that asks for one gets
+    /// CELL_PRX_ERROR_ELF_IS_REGISTERED.
+    ///
+    /// The struct layout is
+    /// [`cellgov_ps3_abi::lv2::prx::register_module_option`].
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` for a null `pOpt` or a `size` naming none of
+    ///   the three modelled forms.
+    /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
+    ///   not fit inside the guest address space.
     pub(in crate::host::dispatch_route) fn dispatch_prx_register_module(
         &mut self,
         args: [u64; 8],
@@ -468,27 +482,44 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        use cellgov_ps3_abi::lv2::prx::CELL_PRX_ERROR_ELF_IS_REGISTERED;
+        use cellgov_ps3_abi::lv2::prx::{
+            register_module_option as opt_layout, CELL_PRX_ERROR_ELF_IS_REGISTERED,
+        };
 
         let opt = args[1];
         if opt == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
+        // The gate covers the whole read reach, so every field address
+        // below is sound without a per-field check. The sc 481 / 482 /
+        // 494 arms bound their option structs the same way.
+        if opt.checked_add(opt_layout::TOUCHED_LEN).is_none() {
+            self.log_invariant_break(
+                "dispatch.prx_register_module_p_opt_wraps",
+                format_args!(
+                    "_sys_prx_register_module option struct [pOpt, pOpt+{touched:#x}) wraps \
+                     u64: pOpt={opt:#018x}; returning CELL_EFAULT (struct does not fit in the \
+                     guest address space)",
+                    touched = opt_layout::TOUCHED_LEN
+                ),
+            );
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
+        }
         let Some(size) = read_be_u64(rt, opt) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        // 0x1c / 0x20 are the legacy option forms, which carry no
-        // type word; treating them as type = 0 skips the branch
-        // entirely, so they need no field reads here.
+        // A legacy form carries no type word; treating it as type = 0
+        // skips the branch entirely, so it needs no field reads here.
         let (module_type, stub_ea, stub_size) = match size {
-            0x1c | 0x20 => (0u64, 0u32, 0u32),
-            0x30 => {
-                let Some(t) = read_be_u64(rt, opt + 0x08) else {
+            s if opt_layout::LEGACY_SIZES.contains(&s) => (0u64, 0u32, 0u32),
+            opt_layout::SIZE => {
+                let Some(t) = read_be_u64(rt, opt + opt_layout::TYPE_OFFSET) else {
                     return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
-                let (Some(ea), Some(sz)) =
-                    (read_be_u32(rt, opt + 0x20), read_be_u32(rt, opt + 0x24))
-                else {
+                let (Some(ea), Some(sz)) = (
+                    read_be_u32(rt, opt + opt_layout::STUB_EA_OFFSET),
+                    read_be_u32(rt, opt + opt_layout::STUB_SIZE_OFFSET),
+                ) else {
                     return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 (t, ea, sz)
@@ -497,7 +528,7 @@ impl Lv2Host {
         };
         self.obs.prx_register_module_count += 1;
 
-        if module_type & 0x1 == 0 {
+        if module_type & opt_layout::TYPE_MANUAL_IMPORTS == 0 {
             return Lv2Dispatch::immediate(0);
         }
         if !self.is_coreos() {
