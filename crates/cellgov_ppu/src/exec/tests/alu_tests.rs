@@ -12,6 +12,8 @@ mod cmp_cr;
 mod logical;
 #[path = "alu_muldiv_tests.rs"]
 mod muldiv;
+#[path = "alu_retire_tests.rs"]
+mod retire;
 #[path = "alu_shift_rotate_tests.rs"]
 mod shift_rotate;
 #[path = "alu_spr_trap_tests.rs"]

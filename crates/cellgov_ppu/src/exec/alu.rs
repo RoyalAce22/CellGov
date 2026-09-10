@@ -53,56 +53,33 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let a = state.gpr[ra as usize];
             let b = imm as i64 as u64;
             let (result, carry) = a.overflowing_add(b);
-            state.set_gpr(rt as usize, result);
             state.set_xer_ca(carry);
-            state.set_cr0_from_result(result);
-            ExecuteVerdict::Continue
+            retire(state, rt, result, None, true)
         }
         // [PPC-Book1 p:52 s:3.3.8] add: RT <- (RA) + (RB); OE sets SO/OV, Rc updates CR0.
         PpuInstruction::Add { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
             let result = a.wrapping_add(b);
-            state.set_gpr(rt as usize, result);
-            if oe {
-                let ov = ((a ^ result) & (b ^ result)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((a ^ result) & (b ^ result)) as i64 >> 63 != 0);
+            retire(state, rt, result, ov, rc)
         }
         // [PPC-Book1 p:52 s:3.3.8] subf: RT <- ~(RA) + (RB) + 1, i.e. (RB) - (RA).
         PpuInstruction::Subf { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
             let result = b.wrapping_sub(a);
-            state.set_gpr(rt as usize, result);
-            if oe {
-                let ov = ((b ^ a) & (b ^ result)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((b ^ a) & (b ^ result)) as i64 >> 63 != 0);
+            retire(state, rt, result, ov, rc)
         }
         // [PPC-Book1 p:53 s:3.3.8] subfc: subtract from carrying; sets CA from borrow-out.
         PpuInstruction::Subfc { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize];
             let b = state.gpr[rb as usize];
             let (result, borrow) = b.overflowing_sub(a);
-            state.set_gpr(rt as usize, result);
             state.set_xer_ca(!borrow);
-            if oe {
-                let ov = ((b ^ a) & (b ^ result)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((b ^ a) & (b ^ result)) as i64 >> 63 != 0);
+            retire(state, rt, result, ov, rc)
         }
         // [PPC-Book1 p:54 s:3.3.8] subfe: ~(RA) + (RB) + CA; carry-in from XER[CA].
         PpuInstruction::Subfe { rt, ra, rb, oe, rc } => {
@@ -111,29 +88,16 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ca_in: u64 = state.xer_ca() as u64;
             let (s1, c1) = b.overflowing_add(!a);
             let (s2, c2) = s1.overflowing_add(ca_in);
-            state.set_gpr(rt as usize, s2);
             state.set_xer_ca(c1 || c2);
-            if oe {
-                let ov = ((b ^ a) & (b ^ s2)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(s2);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((b ^ a) & (b ^ s2)) as i64 >> 63 != 0);
+            retire(state, rt, s2, ov, rc)
         }
         // [PPC-Book1 p:55 s:3.3.8] neg: RT <- ~(RA) + 1; OV set if RA is the most-negative value.
         PpuInstruction::Neg { rt, ra, oe, rc } => {
             let a = state.gpr[ra as usize];
             let result = (a as i64).wrapping_neg() as u64;
-            state.set_gpr(rt as usize, result);
-            if oe {
-                state.set_xer_ov(a == 0x8000_0000_0000_0000);
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(a == 0x8000_0000_0000_0000);
+            retire(state, rt, result, ov, rc)
         }
         // [PPC-Book1 p:56 s:3.3.8] mullw: signed 32x32 product, low 32 bits sign-extended into RT.
         PpuInstruction::Mullw { rt, ra, rb, oe, rc } => {
@@ -141,61 +105,39 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let b = state.gpr[rb as usize] as i32 as i64;
             let product = a.wrapping_mul(b);
             let result = product as u64;
-            state.set_gpr(rt as usize, result);
-            if oe {
-                state.set_xer_ov(product < i32::MIN as i64 || product > i32::MAX as i64);
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(product < i32::MIN as i64 || product > i32::MAX as i64);
+            retire(state, rt, result, ov, rc)
         }
         // [PPC-Book1 p:57 s:3.3.8] mulhwu: high 32 bits of unsigned 32x32 product, zero-extended.
         PpuInstruction::Mulhwu { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as u32 as u64;
             let b = state.gpr[rb as usize] as u32 as u64;
             let result = (a * b) >> 32;
-            state.set_gpr(rt as usize, result);
-            if rc {
-                // RT is the unsigned high half (upper 32 bits of RT
-                // are zero); CR0 reads the same value, so a high-bit
-                // result is positive, not negative.
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            // RT is the unsigned high half (upper 32 bits of RT
+            // are zero); CR0 reads the same value, so a high-bit
+            // result is positive, not negative.
+            retire(state, rt, result, None, rc)
         }
         // [PPC-Book1 p:57 s:3.3.8] mulhw: high 32 bits of signed 32x32 product, sign-extended.
         PpuInstruction::Mulhw { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as i32 as i64;
             let b = state.gpr[rb as usize] as i32 as i64;
             let result = ((a * b) >> 32) as i32 as i64 as u64;
-            state.set_gpr(rt as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, rt, result, None, rc)
         }
         // [PPC-Book1 p:57 s:3.3.8] mulhdu: high 64 bits of unsigned 64x64 product.
         PpuInstruction::Mulhdu { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as u128;
             let b = state.gpr[rb as usize] as u128;
             let result = ((a * b) >> 64) as u64;
-            state.set_gpr(rt as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, rt, result, None, rc)
         }
         // [PPC-Book1 p:57 s:3.3.8] mulhd: high 64 bits of signed 64x64 product.
         PpuInstruction::Mulhd { rt, ra, rb, rc } => {
             let a = state.gpr[ra as usize] as i64 as i128;
             let b = state.gpr[rb as usize] as i64 as i128;
             let result = ((a * b) >> 64) as u64;
-            state.set_gpr(rt as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, rt, result, None, rc)
         }
         // [PPC-Book1 p:54 s:3.3.8] adde: (RA) + (RB) + CA; carry-in from XER[CA], CA written.
         PpuInstruction::Adde { rt, ra, rb, oe, rc } => {
@@ -204,48 +146,27 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum1, c1) = a.overflowing_add(b);
             let (sum2, c2) = sum1.overflowing_add(ca_in);
-            state.set_gpr(rt as usize, sum2);
             state.set_xer_ca(c1 || c2);
-            if oe {
-                let ov = ((a ^ sum2) & (b ^ sum2)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(sum2);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((a ^ sum2) & (b ^ sum2)) as i64 >> 63 != 0);
+            retire(state, rt, sum2, ov, rc)
         }
         // [PPC-Book1 p:55 s:3.3.8] addze: (RA) + CA + 0; CA propagated from XER and updated.
         PpuInstruction::Addze { rt, ra, oe, rc } => {
             let a = state.gpr[ra as usize];
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum, c) = a.overflowing_add(ca_in);
-            state.set_gpr(rt as usize, sum);
             state.set_xer_ca(c);
-            if oe {
-                let ov = ((a ^ sum) & (ca_in ^ sum)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(sum);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((a ^ sum) & (ca_in ^ sum)) as i64 >> 63 != 0);
+            retire(state, rt, sum, ov, rc)
         }
         // [PPC-Book1 p:55 s:3.3.8] subfze: ~(RA) + CA + 0; symmetric to addze with RA inverted.
         PpuInstruction::Subfze { rt, ra, oe, rc } => {
             let a = !state.gpr[ra as usize];
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum, c) = a.overflowing_add(ca_in);
-            state.set_gpr(rt as usize, sum);
             state.set_xer_ca(c);
-            if oe {
-                let ov = ((a ^ sum) & (ca_in ^ sum)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(sum);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((a ^ sum) & (ca_in ^ sum)) as i64 >> 63 != 0);
+            retire(state, rt, sum, ov, rc)
         }
         // [PPC-Book1 p:55 s:3.3.8] subfme: ~(RA) + CA + (-1); -1 is u64::MAX in two's complement.
         PpuInstruction::Subfme { rt, ra, oe, rc } => {
@@ -253,20 +174,12 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum1, c1) = a.overflowing_add(u64::MAX);
             let (sum2, c2) = sum1.overflowing_add(ca_in);
-            state.set_gpr(rt as usize, sum2);
             state.set_xer_ca(c1 || c2);
-            if oe {
-                // OV uses the i64 add overflow rule across the
-                // two-step `a + (-1) + ca_in`; the equivalent
-                // single-step is `a + (ca_in - 1)`.
-                let b = u64::MAX;
-                let ov = ((a ^ sum2) & (b ^ sum2)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(sum2);
-            }
-            ExecuteVerdict::Continue
+            // OV uses the i64 add overflow rule across the
+            // two-step `a + (-1) + ca_in`; the equivalent
+            // single-step is `a + (ca_in - 1)`.
+            let ov = oe.then_some(((a ^ sum2) & (u64::MAX ^ sum2)) as i64 >> 63 != 0);
+            retire(state, rt, sum2, ov, rc)
         }
         // [PPC-Book1 p:55 s:3.3.8] addme: (RA) + CA + (-1).
         PpuInstruction::Addme { rt, ra, oe, rc } => {
@@ -274,17 +187,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let ca_in: u64 = state.xer_ca() as u64;
             let (sum1, c1) = a.overflowing_add(u64::MAX);
             let (sum2, c2) = sum1.overflowing_add(ca_in);
-            state.set_gpr(rt as usize, sum2);
             state.set_xer_ca(c1 || c2);
-            if oe {
-                let b = u64::MAX;
-                let ov = ((a ^ sum2) & (b ^ sum2)) as i64 >> 63 != 0;
-                state.set_xer_ov(ov);
-            }
-            if rc {
-                state.set_cr0_from_result(sum2);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(((a ^ sum2) & (u64::MAX ^ sum2)) as i64 >> 63 != 0);
+            retire(state, rt, sum2, ov, rc)
         }
         // [PPC-Book1 p:58 s:3.3.8] divw: signed 32-bit divide; RT undefined on overflow (we yield 0).
         PpuInstruction::Divw { rt, ra, rb, oe, rc } => {
@@ -292,14 +197,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let b = state.gpr[rb as usize] as i32;
             let overflow = b == 0 || (a == i32::MIN && b == -1);
             let result = if overflow { 0 } else { a.wrapping_div(b) };
-            state.set_gpr(rt as usize, result as i64 as u64);
-            if oe {
-                state.set_xer_ov(overflow);
-            }
-            if rc {
-                state.set_cr0_from_result(result as i64 as u64);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(overflow);
+            retire(state, rt, result as i64 as u64, ov, rc)
         }
         // [PPC-Book1 p:59 s:3.3.8] divwu: unsigned 32-bit divide; sets OV on divide-by-zero.
         PpuInstruction::Divwu { rt, ra, rb, oe, rc } => {
@@ -307,16 +206,10 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let b = state.gpr[rb as usize] as u32;
             let overflow = b == 0;
             let result = if overflow { 0 } else { a / b };
-            state.set_gpr(rt as usize, result as u64);
-            if oe {
-                state.set_xer_ov(overflow);
-            }
-            if rc {
-                // RT is unsigned, zero-extended; CR0 reads the same
-                // value (a high-bit result is positive, not negative).
-                state.set_cr0_from_result(result as u64);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(overflow);
+            // RT is unsigned, zero-extended; CR0 reads the same
+            // value (a high-bit result is positive, not negative).
+            retire(state, rt, result as u64, ov, rc)
         }
         // [PPC-Book1 p:58 s:3.3.8] divd: signed 64-bit divide; OV on b=0 or i64::MIN/-1.
         PpuInstruction::Divd { rt, ra, rb, oe, rc } => {
@@ -324,14 +217,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let b = state.gpr[rb as usize] as i64;
             let overflow = b == 0 || (a == i64::MIN && b == -1);
             let result = if overflow { 0 } else { a.wrapping_div(b) };
-            state.set_gpr(rt as usize, result as u64);
-            if oe {
-                state.set_xer_ov(overflow);
-            }
-            if rc {
-                state.set_cr0_from_result(result as u64);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(overflow);
+            retire(state, rt, result as u64, ov, rc)
         }
         // [PPC-Book1 p:59 s:3.3.8] divdu: unsigned 64-bit divide; OV when divisor is zero.
         PpuInstruction::Divdu { rt, ra, rb, oe, rc } => {
@@ -339,118 +226,70 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let b = state.gpr[rb as usize];
             let overflow = b == 0;
             let result = if overflow { 0 } else { a / b };
-            state.set_gpr(rt as usize, result);
-            if oe {
-                state.set_xer_ov(overflow);
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(overflow);
+            retire(state, rt, result, ov, rc)
         }
         // [PPC-Book1 p:56 s:3.3.8] mulld: signed 64x64 product, low 64 bits placed into RT.
         PpuInstruction::Mulld { rt, ra, rb, oe, rc } => {
             let a = state.gpr[ra as usize] as i64;
             let b = state.gpr[rb as usize] as i64;
             let result = a.wrapping_mul(b) as u64;
-            state.set_gpr(rt as usize, result);
-            if oe {
-                state.set_xer_ov(a.checked_mul(b).is_none());
-            }
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            let ov = oe.then_some(a.checked_mul(b).is_none());
+            retire(state, rt, result, ov, rc)
         }
 
         // Logical
         // [PPC-Book1 p:67 s:3.3.11] or: RA <- (RS) | (RB); X-form bit-parallel OR.
         PpuInstruction::Or { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] | state.gpr[rb as usize];
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:68 s:3.3.11] orc: RA <- (RS) | ~(RB); OR with complement.
         PpuInstruction::Orc { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] | !state.gpr[rb as usize];
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:67 s:3.3.11] and: RA <- (RS) & (RB); X-form bit-parallel AND.
         PpuInstruction::And { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] & state.gpr[rb as usize];
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:68 s:3.3.11] nor: RA <- ~((RS) | (RB)); NOR.
         PpuInstruction::Nor { ra, rs, rb, rc } => {
             let result = !(state.gpr[rs as usize] | state.gpr[rb as usize]);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:68 s:3.3.11] andc: RA <- (RS) & ~(RB); AND with complement.
         PpuInstruction::Andc { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] & !state.gpr[rb as usize];
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:67 s:3.3.11] xor: RA <- (RS) XOR (RB); X-form bit-parallel XOR.
         PpuInstruction::Xor { ra, rs, rb, rc } => {
             let result = state.gpr[rs as usize] ^ state.gpr[rb as usize];
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:65 s:3.3.11] eqv: RA <- ~((RS) XOR (RB)); bit-parallel XNOR.
         PpuInstruction::Eqv { ra, rs, rb, rc } => {
             let result = !(state.gpr[rs as usize] ^ state.gpr[rb as usize]);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:65 s:3.3.11] nand: RA <- ~((RS) & (RB)); bit-parallel NAND.
         PpuInstruction::Nand { ra, rs, rb, rc } => {
             let result = !(state.gpr[rs as usize] & state.gpr[rb as usize]);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:65 s:3.3.11] andi.: RA <- (RS) & (zero-ext UI); always updates CR0.
         PpuInstruction::AndiDot { ra, rs, imm } => {
             let result = state.gpr[rs as usize] & imm as u64;
-            state.set_gpr(ra as usize, result);
-            state.set_cr0_from_result(result);
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, true)
         }
         // [PPC-Book1 p:65 s:3.3.11] andis.: RA <- (RS) & (UI << 16); always updates CR0.
         PpuInstruction::AndisDot { ra, rs, imm } => {
             // andis. masks RS with (UI << 16); UI is zero-extended,
             // so high bits of the result above bit 31 stay clear.
             let result = state.gpr[rs as usize] & ((imm as u64) << 16);
-            state.set_gpr(ra as usize, result);
-            state.set_cr0_from_result(result);
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, true)
         }
 
         // Shifts
@@ -459,32 +298,24 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as u32;
             let result = if shift < 32 { val << shift } else { 0 } as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                // slw clears RA[0:31], so the 64-bit value CR0
-                // compares is never negative: a word result with bit
-                // 31 set reads GT. Srw has the same shape. The rlw*
-                // mask is 64 bits wide and reaches the high half (see
-                // the Rlwinm arm).
-                // [PPC-Book1 p:77 s:3.3.12.2] slw places the word result in RA[32:63] and sets RA[0:31] to zero.
-                // [PPC-Book1 p:71 s:3.3.12] Rotate/Shift Rc=1: first three CR0 bits set per 3.3.7 result test.
-                // [PowerISA-3.1 p:I34 s:2.3.1] the result CR0 compares is the entire 64-bit value placed in the target register.
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            // slw clears RA[0:31], so the 64-bit value CR0
+            // compares is never negative: a word result with bit
+            // 31 set reads GT. Srw has the same shape. The rlw*
+            // mask is 64 bits wide and reaches the high half (see
+            // the Rlwinm arm).
+            // [PPC-Book1 p:77 s:3.3.12.2] slw places the word result in RA[32:63] and sets RA[0:31] to zero.
+            // [PPC-Book1 p:71 s:3.3.12] Rotate/Shift Rc=1: first three CR0 bits set per 3.3.7 result test.
+            // [PowerISA-3.1 p:I34 s:2.3.1] the result CR0 compares is the entire 64-bit value placed in the target register.
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:78 s:3.3.12.2] srw: shift right word logical; shift count from RB[58:63].
         PpuInstruction::Srw { ra, rs, rb, rc } => {
             let shift = state.gpr[rb as usize] & 0x3F;
             let val = state.gpr[rs as usize] as u32;
             let result = if shift < 32 { val >> shift } else { 0 } as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                // srw clears RA[0:31], so CR0 never reads LT.
-                // [PPC-Book1 p:78 s:3.3.12.2] srw places the word result in RA[32:63] and sets RA[0:31] to zero.
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            // srw clears RA[0:31], so CR0 never reads LT.
+            // [PPC-Book1 p:78 s:3.3.12.2] srw places the word result in RA[32:63] and sets RA[0:31] to zero.
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:79 s:3.3.12.2] srawi: arithmetic right shift word immediate; CA from shifted-out 1s.
         PpuInstruction::Srawi { ra, rs, sh, rc } => {
@@ -492,12 +323,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let result = val >> sh;
             let ca = val < 0 && sh > 0 && (val as u32) << (32 - sh) != 0;
             let result_u = result as i64 as u64;
-            state.set_gpr(ra as usize, result_u);
             state.set_xer_ca(ca);
-            if rc {
-                state.set_cr0_from_result(result_u);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result_u, None, rc)
         }
         // [PPC-Book1 p:79 s:3.3.12.2] sraw: arithmetic right shift word; sign replicated, CA from lost 1s.
         PpuInstruction::Sraw { ra, rs, rb, rc } => {
@@ -511,12 +338,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
                 (val >> 31, val < 0)
             };
             let result_u = result as i64 as u64;
-            state.set_gpr(ra as usize, result_u);
             state.set_xer_ca(ca);
-            if rc {
-                state.set_cr0_from_result(result_u);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result_u, None, rc)
         }
         // [PPC-Book1 p:80 s:3.3.12.2] srad: arithmetic right shift doubleword; CA from lost 1-bits.
         PpuInstruction::Srad { ra, rs, rb, rc } => {
@@ -529,12 +352,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             } else {
                 (val >> 63, val < 0)
             };
-            state.set_gpr(ra as usize, result as u64);
             state.set_xer_ca(ca);
-            if rc {
-                state.set_cr0_from_result(result as u64);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result as u64, None, rc)
         }
         // [PPC-Book1 p:79 s:3.3.12.2] sradi: arithmetic right shift doubleword immediate.
         PpuInstruction::Sradi { ra, rs, sh, rc } => {
@@ -542,12 +361,8 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let val = state.gpr[rs as usize] as i64;
             let result = val >> shift;
             let ca = val < 0 && shift > 0 && (val as u64) << (64 - shift) != 0;
-            state.set_gpr(ra as usize, result as u64);
             state.set_xer_ca(ca);
-            if rc {
-                state.set_cr0_from_result(result as u64);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result as u64, None, rc)
         }
         // [PPC-Book1 p:77 s:3.3.12.2] sld: shift left doubleword; RB[57] selects 64+ -> zero.
         PpuInstruction::Sld { ra, rs, rb, rc } => {
@@ -557,11 +372,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             } else {
                 0
             };
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:78 s:3.3.12.2] srd: shift right doubleword logical; RB[57] selects 64+ -> zero.
         PpuInstruction::Srd { ra, rs, rb, rc } => {
@@ -571,30 +382,18 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             } else {
                 0
             };
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:70 s:3.3.11] cntlzw: count leading zeros of low 32 bits of RS, range 0..=32.
         PpuInstruction::Cntlzw { ra, rs, rc } => {
             let val = state.gpr[rs as usize] as u32;
             let result = val.leading_zeros() as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:70 s:3.3.11] cntlzd: count leading zeros of 64-bit RS, range 0..=64.
         PpuInstruction::Cntlzd { ra, rs, rc } => {
             let result = state.gpr[rs as usize].leading_zeros() as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:70 s:3.3.13] popcntb is defined by Book I, but
         // [CBE-Handbook p:738 s:A.2.4.1] lists it as one of the Book-I
@@ -634,29 +433,17 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         // [PPC-Book1 p:69 s:3.3.11] extsh: sign-extend halfword RS[48:63] into RA.
         PpuInstruction::Extsh { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i16 as i64 as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:69 s:3.3.11] extsb: sign-extend byte RS[56:63] into RA.
         PpuInstruction::Extsb { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i8 as i64 as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:69 s:3.3.11] extsw: sign-extend word RS[32:63] into RA.
         PpuInstruction::Extsw { ra, rs, rc } => {
             let result = state.gpr[rs as usize] as i32 as i64 as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:66 s:3.3.11] ori: RA <- (RS) | zero-ext UI; ori 0,0,0 is the preferred no-op.
         PpuInstruction::Ori { ra, rs, imm } => {
@@ -905,18 +692,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let rotated = val.rotate_left(sh as u32);
             let mask = rlwinm_mask(mb, me);
             let result = (rotated & mask) as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                // `rlwinm_mask` is 32 bits wide, so `result` is always
-                // a word and CR0 never reads LT. That matches the
-                // architecture for MB <= ME. With MB > ME the mask
-                // wraps into RA[0:31], where ROTL32 leaves a second
-                // copy of the rotated word; `rlwinm_mask` models no
-                // part of that wrapped half.
-                // [PPC-Book1 p:71 s:3.3.12] the rotate/shift mask is 64 bits and wraps from position 63 to position 0 when mstart > mstop; ROTL32 places a copy of the rotated word in bits 0:31.
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            // `rlwinm_mask` is 32 bits wide, so `result` is always
+            // a word and CR0 never reads LT. That matches the
+            // architecture for MB <= ME. With MB > ME the mask
+            // wraps into RA[0:31], where ROTL32 leaves a second
+            // copy of the rotated word; `rlwinm_mask` models no
+            // part of that wrapped half.
+            // [PPC-Book1 p:71 s:3.3.12] the rotate/shift mask is 64 bits and wraps from position 63 to position 0 when mstart > mstop; ROTL32 places a copy of the rotated word in bits 0:31.
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:76 s:3.3.12] rlwimi: rotate left word, insert under
         // mask MB..ME into RA. Spec's RA <- r&m | (RA)&~m operates on 64-bit
@@ -935,11 +718,7 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let mask_lo32 = rlwinm_mask(mb, me);
             let mask64 = u64::from(mask_lo32);
             let merged = (u64::from(rotated) & mask64) | (state.gpr[ra as usize] & !mask64);
-            state.set_gpr(ra as usize, merged);
-            if rc {
-                state.set_cr0_from_result(merged);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, merged, None, rc)
         }
         // [PPC-Book1 p:75 s:3.3.12] rlwnm: rotate left word by RB[59:63], AND with mask MB..ME.
         PpuInstruction::Rlwnm {
@@ -955,43 +734,27 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let rotated = val.rotate_left(n);
             let mask = rlwinm_mask(mb, me);
             let result = (rotated & mask) as u64;
-            state.set_gpr(ra as usize, result);
-            if rc {
-                // Same 32-bit mask and same MB > ME gap as Rlwinm.
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            // Same 32-bit mask and same MB > ME gap as Rlwinm.
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:72 s:3.3.12] rldicl: rotate left doubleword immediate, mask MB..63 (clear left).
         PpuInstruction::Rldicl { ra, rs, sh, mb, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let result = rotated & mask64(mb, 63);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:72 s:3.3.12] rldicr: rotate left doubleword immediate, mask 0..ME (clear right).
         PpuInstruction::Rldicr { ra, rs, sh, me, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let result = rotated & mask64(0, me);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:73 s:3.3.12] rldic: rotate left doubleword imm, mask MB..63-SH (clear).
         PpuInstruction::Rldic { ra, rs, sh, mb, rc } => {
             let rotated = state.gpr[rs as usize].rotate_left(sh as u32);
             let me = 63u8.saturating_sub(sh);
             let result = rotated & mask64(mb, me);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:76 s:3.3.12] rldimi: rotate left doubleword imm, insert under mask MB..63-SH.
         PpuInstruction::Rldimi { ra, rs, sh, mb, rc } => {
@@ -1000,37 +763,49 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             let mask = mask64(mb, me);
             let prior = state.gpr[ra as usize];
             let result = (rotated & mask) | (prior & !mask);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:75 s:3.3.12] rldcl: ROTL64(RS, RB[58:63]) & MASK(mb, 63).
         PpuInstruction::Rldcl { ra, rs, rb, mb, rc } => {
             let sh = (state.gpr[rb as usize] & 0x3F) as u32;
             let rotated = state.gpr[rs as usize].rotate_left(sh);
             let result = rotated & mask64(mb, 63);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:75 s:3.3.12] rldcr: ROTL64(RS, RB[58:63]) & MASK(0, me).
         PpuInstruction::Rldcr { ra, rs, rb, me, rc } => {
             let sh = (state.gpr[rb as usize] & 0x3F) as u32;
             let rotated = state.gpr[rs as usize].rotate_left(sh);
             let result = rotated & mask64(0, me);
-            state.set_gpr(ra as usize, result);
-            if rc {
-                state.set_cr0_from_result(result);
-            }
-            ExecuteVerdict::Continue
+            retire(state, ra, result, None, rc)
         }
 
         _ => unreachable!("alu::execute called with non-ALU variant"),
     }
+}
+
+/// Write `result` to GPR `reg`, then run the shared OE and Rc tail.
+///
+/// Pass `ov` as `Some` only for OE=1; OE=0 leaves XER[OV] untouched.
+/// OV lands before CR0 because CR0 copies its SO bit from XER.
+// [PPC-Book1 p:18 s:2.3.1] fixed-point Rc=1 sets CR0[0:2] from a signed compare of the result with zero and copies XER[SO] into CR0[3].
+// [PPC-Book1 p:32 s:3.2.2] OE=1 writes XER[OV] and sets SO when OV is set; OE=0 leaves both alone.
+#[inline]
+fn retire(
+    state: &mut PpuState,
+    reg: u8,
+    result: u64,
+    ov: Option<bool>,
+    rc: bool,
+) -> ExecuteVerdict {
+    state.set_gpr(reg as usize, result);
+    if let Some(ov) = ov {
+        state.set_xer_ov(ov);
+    }
+    if rc {
+        state.set_cr0_from_result(result);
+    }
+    ExecuteVerdict::Continue
 }
 
 /// AND each TO bit against its corresponding `tw`/`td` comparison

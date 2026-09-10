@@ -259,13 +259,13 @@ impl PpuState {
     }
 
     /// XER carry bit (PPC bit 34 from MSB = Rust bit 29 from LSB).
-    // [PPC-Book1 p:42 s:3.2.2] XER bit 34 is Carry (CA).
+    // [PPC-Book1 p:32 s:3.2.2] XER bit 34 is Carry (CA).
     pub fn xer_ca(&self) -> bool {
         (self.xer >> 29) & 1 != 0
     }
 
     /// XER sticky-overflow bit (PPC bit 32 = Rust bit 31).
-    // [PPC-Book1 p:42 s:3.2.2] XER bit 32 is Summary Overflow (SO), sticky.
+    // [PPC-Book1 p:32 s:3.2.2] XER bit 32 is Summary Overflow (SO), sticky.
     pub fn xer_so(&self) -> bool {
         (self.xer >> 31) & 1 != 0
     }
@@ -280,7 +280,7 @@ impl PpuState {
     }
 
     /// Write OV (Rust bit 30) and OR into sticky SO (Rust bit 31).
-    // [PPC-Book1 p:42 s:3.2.2] XER bit 33 is Overflow (OV); SO is sticky and OR'd from OV.
+    // [PPC-Book1 p:32 s:3.2.2] XER bit 33 is Overflow (OV); SO is sticky and OR'd from OV.
     pub fn set_xer_ov(&mut self, overflow: bool) {
         if overflow {
             self.set_xer(self.xer | (1u64 << 31) | (1u64 << 30));
@@ -290,13 +290,13 @@ impl PpuState {
     }
 
     /// XER transfer byte count (PPC bits 57..63), used by `lswx` / `stswx`.
-    // [PPC-Book1 p:42 s:3.2.2] XER bits 57..63 hold the byte count for load-/store-string indexed.
+    // [PPC-Book1 p:32 s:3.2.2] XER bits 57..63 hold the byte count for load-/store-string indexed.
     pub fn xer_tbc(&self) -> u8 {
         (self.xer & 0x7F) as u8
     }
 
     /// Set CR0 LT/GT/EQ from `result as i64` plus XER's SO; 64-bit mode.
-    // [PPC-Book1 p:28 s:2.3.1] CR0 = c || XER[SO] for fixed-point Rc=1 instructions.
+    // [PPC-Book1 p:18 s:2.3.1] CR0 = c || XER[SO] for fixed-point Rc=1 instructions.
     pub fn set_cr0_from_result(&mut self, result: u64) {
         let signed = result as i64;
         let mut nib = if signed < 0 {

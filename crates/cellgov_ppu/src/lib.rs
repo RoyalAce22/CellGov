@@ -222,27 +222,50 @@ impl PpuExecutionUnit {
     ///
     /// Retirements discarded by the rollback never reach the trace
     /// stream: their `PpuStateHash` / `PpuStateFull` entries are
-    /// truncated and `retirement_counter` is restored. Callers capture
-    /// diagnostics before calling this so `fault_regs` reflects the
-    /// fault site, not the entry snapshot.
-    fn discard_batch(
-        &mut self,
-        snapshot: &Option<state::PpuState>,
-        entry_hashes: usize,
-        entry_fulls: usize,
-        entry_retired: u64,
-        effects: &mut Vec<Effect>,
-    ) {
-        if let Some(snap) = snapshot.as_ref() {
+    /// truncated and `retirement_counter` is restored.
+    fn discard_batch(&mut self, entry: &BatchEntry, effects: &mut Vec<Effect>) {
+        if let Some(snap) = entry.snapshot.as_ref() {
             self.state = snap.clone();
         }
         self.store_buf.clear();
         effects.clear();
-        self.per_step_hashes.truncate(entry_hashes);
-        self.per_step_full_states.truncate(entry_fulls);
-        self.retirement_counter = entry_retired;
+        self.per_step_hashes.truncate(entry.hashes);
+        self.per_step_full_states.truncate(entry.fulls);
+        self.retirement_counter = entry.retired;
         self.status = UnitStatus::Faulted;
     }
+
+    /// Roll the batch back and yield a guest fault carrying `code`.
+    ///
+    /// `diag` is a parameter because the rollback erases the fault
+    /// site's registers; the caller captures it first.
+    fn fault_yield(
+        &mut self,
+        entry: &BatchEntry,
+        effects: &mut Vec<Effect>,
+        diag: LocalDiagnostics,
+        code: u32,
+    ) -> ExecutionStepResult {
+        self.discard_batch(entry, effects);
+        ExecutionStepResult {
+            yield_reason: YieldReason::Fault,
+            consumed_cost: InstructionCost::ZERO,
+            local_diagnostics: diag,
+            fault: Some(FaultKind::Guest(code)),
+            syscall_args: None,
+        }
+    }
+}
+
+/// What a batch rewinds to when a step inside it faults.
+///
+/// `snapshot` is `None` for a single-step batch: no step retires ahead
+/// of a fault there, so the rollback needs no state clone.
+struct BatchEntry {
+    snapshot: Option<state::PpuState>,
+    hashes: usize,
+    fulls: usize,
+    retired: u64,
 }
 
 impl ExecutionUnit for PpuExecutionUnit {
@@ -292,14 +315,12 @@ impl ExecutionUnit for PpuExecutionUnit {
         // Taken after the runtime's committed inputs (syscall return,
         // register writes) are applied: a mid-batch rollback must not
         // undo state the commit pipeline already owns.
-        let snapshot = if max_budget > 1 {
-            Some(self.state.clone())
-        } else {
-            None
+        let entry = BatchEntry {
+            snapshot: (max_budget > 1).then(|| self.state.clone()),
+            hashes: self.per_step_hashes.len(),
+            fulls: self.per_step_full_states.len(),
+            retired: self.retirement_counter,
         };
-        let entry_hashes = self.per_step_hashes.len();
-        let entry_fulls = self.per_step_full_states.len();
-        let entry_retired = self.retirement_counter;
 
         let mem = ctx.memory().as_bytes();
         // Stack-allocated region table avoids per-call heap alloc on the
@@ -340,20 +361,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 } else {
                     self.break_pc = None;
                     let diag = self.fault_diag(step_pc);
-                    self.discard_batch(
-                        &snapshot,
-                        entry_hashes,
-                        entry_fulls,
-                        entry_retired,
-                        effects,
-                    );
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::ZERO,
-                        local_diagnostics: diag,
-                        fault: Some(FaultKind::Guest(FAULT_DEBUG_BREAK)),
-                        syscall_args: None,
-                    };
+                    return self.fault_yield(&entry, effects, diag, FAULT_DEBUG_BREAK);
                 }
             }
 
@@ -369,20 +377,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 let pc = step_pc as usize;
                 if pc + 4 > mem.len() {
                     let diag = self.fault_diag(step_pc);
-                    self.discard_batch(
-                        &snapshot,
-                        entry_hashes,
-                        entry_fulls,
-                        entry_retired,
-                        effects,
-                    );
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::ZERO,
-                        local_diagnostics: diag,
-                        fault: Some(FaultKind::Guest(FAULT_PC_OUT_OF_RANGE)),
-                        syscall_args: None,
-                    };
+                    return self.fault_yield(&entry, effects, diag, FAULT_PC_OUT_OF_RANGE);
                 }
                 let raw = u32::from_be_bytes([mem[pc], mem[pc + 1], mem[pc + 2], mem[pc + 3]]);
                 match decode::decode(raw) {
@@ -394,20 +389,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                     }
                     Err(_) => {
                         let diag = self.fault_diag(step_pc);
-                        self.discard_batch(
-                            &snapshot,
-                            entry_hashes,
-                            entry_fulls,
-                            entry_retired,
-                            effects,
-                        );
-                        return ExecutionStepResult {
-                            yield_reason: YieldReason::Fault,
-                            consumed_cost: InstructionCost::ZERO,
-                            local_diagnostics: diag,
-                            fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
-                            syscall_args: None,
-                        };
+                        return self.fault_yield(&entry, effects, diag, FAULT_DECODE_ERROR);
                     }
                 }
             };
@@ -500,13 +482,6 @@ impl ExecutionUnit for PpuExecutionUnit {
                         PpuFault::AlignmentInterrupt(a) => self.fault_diag_ea(step_pc, a),
                         _ => self.fault_diag(step_pc),
                     };
-                    self.discard_batch(
-                        &snapshot,
-                        entry_hashes,
-                        entry_fulls,
-                        entry_retired,
-                        effects,
-                    );
                     // Mask guards against upper-bit collision with the category prefix.
                     let code = match f {
                         PpuFault::PcOutOfRange(_) => FAULT_PC_OUT_OF_RANGE,
@@ -520,13 +495,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         PpuFault::ProgramTrap(to) => FAULT_PROGRAM_TRAP | (to as u32 & 0xFFFF),
                         PpuFault::AlignmentInterrupt(_) => FAULT_ALIGNMENT_INTERRUPT,
                     };
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::ZERO,
-                        local_diagnostics: diag,
-                        fault: Some(FaultKind::Guest(code)),
-                        syscall_args: None,
-                    };
+                    return self.fault_yield(&entry, effects, diag, code);
                 }
                 ExecuteVerdict::MemFault(e) => {
                     let (ea, unmapped) = match &e {
@@ -541,14 +510,8 @@ impl ExecutionUnit for PpuExecutionUnit {
                         }
                     };
                     let diag = self.fault_diag_ea(step_pc, ea);
-                    self.discard_batch(
-                        &snapshot,
-                        entry_hashes,
-                        entry_fulls,
-                        entry_retired,
-                        effects,
-                    );
-                    // Incremented AFTER the rollback: the counters are
+                    let result = self.fault_yield(&entry, effects, diag, FAULT_INVALID_ADDRESS);
+                    // Incremented after the rollback: the counters are
                     // hash-excluded instruments, and restoring the entry
                     // snapshot must not erase the record of this fault.
                     self.state.mem_fault_arm_entries =
@@ -557,13 +520,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                         self.state.mem_fault_unmapped_routed =
                             self.state.mem_fault_unmapped_routed.wrapping_add(1);
                     }
-                    return ExecutionStepResult {
-                        yield_reason: YieldReason::Fault,
-                        consumed_cost: InstructionCost::ZERO,
-                        local_diagnostics: diag,
-                        fault: Some(FaultKind::Guest(FAULT_INVALID_ADDRESS)),
-                        syscall_args: None,
-                    };
+                    return result;
                 }
                 ExecuteVerdict::BufferFull => {
                     // PC stays at the failing store; retries next step.
@@ -690,3 +647,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/break_pc_tests.rs"]
 mod break_pc_tests;
+
+#[cfg(test)]
+#[path = "tests/batch_fault_tests.rs"]
+mod batch_fault_tests;
