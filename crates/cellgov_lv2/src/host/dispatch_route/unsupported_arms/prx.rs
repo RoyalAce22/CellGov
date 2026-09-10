@@ -35,6 +35,11 @@ impl Lv2Host {
     ///   1 nor 2.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
     ///   not fit inside the 32-bit guest address space.
+    /// - `CELL_EINVAL` when `id` or `pOpt` carries high bits, per
+    ///   [`Lv2Host::narrow_u32_args`].
+    /// - The low word of `pOpt->res` when a phase-2 report carries a
+    ///   value other than `SYS_PRX_RESIDENT`. A zero low word answers
+    ///   CELL_OK.
     pub(in crate::host::dispatch_route) fn dispatch_prx_start_module(
         &mut self,
         args: [u64; 8],
@@ -45,9 +50,14 @@ impl Lv2Host {
         use cellgov_ps3_abi::lv2::prx::{
             start_cmd, start_stop_option as opt, CELL_PRX_ERROR_ERROR, SYS_PRX_RESIDENT,
         };
+        use cellgov_ps3_abi::lv2::syscall;
 
-        let id = args[0] as u32;
-        let p_opt = args[2] as u32;
+        let Some([id, p_opt]) = self.narrow_u32_args(
+            syscall::SYS_PRX_START_MODULE,
+            [("id", args[0]), ("pOpt", args[2])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         if id == 0 || p_opt == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
@@ -190,6 +200,8 @@ impl Lv2Host {
     ///   1 / 2 / 4 / 8.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
     ///   not fit inside the 32-bit guest address space.
+    /// - `CELL_EINVAL` when `id` or `pOpt` carries high bits, per
+    ///   [`Lv2Host::narrow_u32_args`].
     pub(in crate::host::dispatch_route) fn dispatch_prx_stop_module(
         &mut self,
         args: [u64; 8],
@@ -203,9 +215,14 @@ impl Lv2Host {
             CELL_PRX_ERROR_ALREADY_STOPPING, CELL_PRX_ERROR_CAN_NOT_STOP, CELL_PRX_ERROR_ERROR,
             CELL_PRX_ERROR_NOT_STARTED,
         };
+        use cellgov_ps3_abi::lv2::syscall;
 
-        let id = args[0] as u32;
-        let p_opt = args[2] as u32;
+        let Some([id, p_opt]) = self.narrow_u32_args(
+            syscall::SYS_PRX_STOP_MODULE,
+            [("id", args[0]), ("pOpt", args[2])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         if self.state.prx_registry.lookup_by_id(id).is_none() {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         }
@@ -415,6 +432,8 @@ impl Lv2Host {
     /// - `CELL_PRX_ERROR_UNKNOWN_MODULE` when `id` names no loaded module.
     /// - `CELL_PRX_ERROR_NOT_REMOVABLE` for a started or stopping
     ///   resident module.
+    /// - `CELL_EINVAL` when `id` carries high bits, per
+    ///   [`Lv2Host::narrow_u32_args`].
     pub(in crate::host::dispatch_route) fn dispatch_prx_unload_module(
         &mut self,
         args: [u64; 8],
@@ -423,8 +442,12 @@ impl Lv2Host {
         use cellgov_ps3_abi::lv2::prx::{
             CELL_PRX_ERROR_NOT_REMOVABLE, CELL_PRX_ERROR_UNKNOWN_MODULE,
         };
+        use cellgov_ps3_abi::lv2::syscall;
 
-        let id = args[0] as u32;
+        let Some([id]) = self.narrow_u32_args(syscall::SYS_PRX_UNLOAD_MODULE, [("id", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         match self.state.prx_registry.lookup_by_id(id) {
             None => Lv2Dispatch::immediate(CELL_PRX_ERROR_UNKNOWN_MODULE.into()),
             Some(entry) => match entry.state() {
@@ -474,7 +497,9 @@ impl Lv2Host {
     /// - `CELL_EINVAL` for a null `pOpt` or a `size` naming none of
     ///   the three modelled forms.
     /// - `CELL_EFAULT` when `pOpt` is unreadable or the struct would
-    ///   not fit inside the guest address space.
+    ///   not fit inside the 32-bit guest address space.
+    /// - `CELL_EINVAL` when `pOpt` carries high bits, per
+    ///   [`Lv2Host::narrow_u32_args`].
     pub(in crate::host::dispatch_route) fn dispatch_prx_register_module(
         &mut self,
         args: [u64; 8],
@@ -485,8 +510,13 @@ impl Lv2Host {
         use cellgov_ps3_abi::lv2::prx::{
             register_module_option as opt_layout, CELL_PRX_ERROR_ELF_IS_REGISTERED,
         };
+        use cellgov_ps3_abi::lv2::syscall;
 
-        let opt = args[1];
+        let Some([opt]) =
+            self.narrow_u32_args(syscall::SYS_PRX_REGISTER_MODULE, [("pOpt", args[1])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         if opt == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
@@ -498,14 +528,14 @@ impl Lv2Host {
                 "dispatch.prx_register_module_p_opt_wraps",
                 format_args!(
                     "_sys_prx_register_module option struct [pOpt, pOpt+{touched:#x}) wraps \
-                     u64: pOpt={opt:#018x}; returning CELL_EFAULT (struct does not fit in the \
-                     guest address space)",
+                     u32: pOpt={opt:#010x}; returning CELL_EFAULT (struct does not fit in the \
+                     32-bit guest address space)",
                     touched = opt_layout::TOUCHED_LEN
                 ),
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(size) = read_be_u64(rt, opt) else {
+        let Some(size) = read_be_u64(rt, u64::from(opt)) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         // A legacy form carries no type word; treating it as type = 0
@@ -513,18 +543,31 @@ impl Lv2Host {
         let (module_type, stub_ea, stub_size) = match size {
             s if opt_layout::LEGACY_SIZES.contains(&s) => (0u64, 0u32, 0u32),
             opt_layout::SIZE => {
-                let Some(t) = read_be_u64(rt, opt + opt_layout::TYPE_OFFSET) else {
+                let Some(t) = read_be_u64(rt, u64::from(opt + opt_layout::TYPE_OFFSET)) else {
                     return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 let (Some(ea), Some(sz)) = (
-                    read_be_u32(rt, opt + opt_layout::STUB_EA_OFFSET),
-                    read_be_u32(rt, opt + opt_layout::STUB_SIZE_OFFSET),
+                    read_be_u32(rt, u64::from(opt + opt_layout::STUB_EA_OFFSET)),
+                    read_be_u32(rt, u64::from(opt + opt_layout::STUB_SIZE_OFFSET)),
                 ) else {
                     return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 };
                 (t, ea, sz)
             }
-            _ => return Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+            _ => {
+                // The ABI module records this layout as unestablished.
+                // A fourth form is the witness that would fix it, so
+                // the break record keeps the size the caller declared.
+                self.log_invariant_break(
+                    "dispatch.prx_register_module_unknown_struct_size",
+                    format_args!(
+                        "_sys_prx_register_module pOpt={opt:#010x} declares size={size:#x}, \
+                         none of the modelled forms; that layout's offsets are unestablished, \
+                         so no field is read and CELL_EINVAL is returned"
+                    ),
+                );
+                return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+            }
         };
         self.obs.prx_register_module_count += 1;
 
@@ -699,13 +742,21 @@ impl Lv2Host {
     ///
     /// - `CELL_EFAULT` when `library` is null or unmapped; the address
     ///   is checked before the descriptor is touched.
+    /// - `CELL_EINVAL` when `library` carries high bits, per
+    ///   [`Lv2Host::narrow_u32_args`].
     pub(in crate::host::dispatch_route) fn dispatch_prx_register_library(
-        &self,
+        &mut self,
         args: [u64; 8],
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        let library = args[0];
-        if library == 0 || rt.read_committed(library, 1).is_none() {
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([library]) =
+            self.narrow_u32_args(syscall::SYS_PRX_REGISTER_LIBRARY, [("library", args[0])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        if library == 0 || rt.read_committed(u64::from(library), 1).is_none() {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         Lv2Dispatch::immediate(0)
@@ -715,9 +766,10 @@ impl Lv2Host {
     /// writes `pInfo->count`, filtering liblv2.sprx.
     ///
     /// The struct layout is
-    /// [`cellgov_ps3_abi::lv2::prx::get_module_list_option`]. When the
-    /// fill-list flag is clear, the call answers CELL_OK. A null
-    /// `pInfo` answers CELL_EFAULT.
+    /// [`cellgov_ps3_abi::lv2::prx::get_module_list_option`]. A caller
+    /// that clears the fill-list flag gets CELL_OK. The arm reads no
+    /// field of `pInfo` on that path, so a null pointer gets CELL_OK
+    /// too.
     ///
     /// `size` selects the layout. A value other than the modelled one
     /// names a struct whose `max` / `count` / `idlist` sit elsewhere,
@@ -729,6 +781,16 @@ impl Lv2Host {
     /// Slot writes and the trailing count write are co-emitted in one
     /// `Lv2Dispatch::Immediate` batch so `apply_lv2_effects` can
     /// commit them all-or-none.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `pInfo` carries high bits, per
+    ///   [`Lv2Host::narrow_u32_args`]. The check runs before the
+    ///   fill-list test, so it also answers a caller that asks for no
+    ///   fill.
+    /// - `CELL_EFAULT` for a null `pInfo`, for a struct that would not
+    ///   fit inside the 32-bit guest address space, and for an
+    ///   unreadable `size` / `max` / `idlist` field.
     pub(in crate::host::dispatch_route) fn dispatch_prx_get_module_list(
         &mut self,
         args: [u64; 8],
@@ -737,10 +799,15 @@ impl Lv2Host {
         tick: GuestTicks,
     ) -> Lv2Dispatch {
         use cellgov_ps3_abi::lv2::prx::get_module_list_option as opt;
+        use cellgov_ps3_abi::lv2::syscall;
         let modelled_size = opt::SIZE;
 
         let flags = args[0];
-        let p_info = args[1] as u32;
+        let Some([p_info]) =
+            self.narrow_u32_args(syscall::SYS_PRX_GET_MODULE_LIST, [("pInfo", args[1])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         if flags & opt::FLAG_FILL_LIST == 0 {
             return Lv2Dispatch::immediate(0);
         }
@@ -811,6 +878,10 @@ impl Lv2Host {
             .lookup_by_path("liblv2.sprx")
             .map(|e| e.kernel_id());
         let mut count: u32 = 0;
+        // `idlist` is a guest pointer read out of the option struct, so
+        // an array near the top of the address space cannot hold every
+        // slot.
+        let mut wrapped_slot: Option<u32> = None;
         if idlist_ptr != 0 {
             for kid in self.state.prx_registry.ids() {
                 if Some(kid) == liblv2_id {
@@ -819,17 +890,14 @@ impl Lv2Host {
                 if count >= max {
                     break;
                 }
-                debug_assert!(
-                    count
-                        .checked_mul(opt::ID_SIZE)
-                        .and_then(|off| idlist_ptr.checked_add(off))
-                        .and_then(|s| s.checked_add(opt::ID_SIZE))
-                        .is_some(),
-                    "sys_prx_get_module_list id slot write at idlist_ptr+count*{id_size} \
-                     wraps u32: idlist_ptr={idlist_ptr:#010x} count={count}",
-                    id_size = opt::ID_SIZE,
-                );
-                let slot = idlist_ptr.wrapping_add(count.wrapping_mul(opt::ID_SIZE));
+                let slot = count
+                    .checked_mul(opt::ID_SIZE)
+                    .and_then(|off| idlist_ptr.checked_add(off))
+                    .filter(|s| s.checked_add(opt::ID_SIZE).is_some());
+                let Some(slot) = slot else {
+                    wrapped_slot = Some(count);
+                    break;
+                };
                 effects.push(Effect::shared_write(
                     ByteRange::contiguous_u32(slot, opt::ID_SIZE),
                     WritePayload::from_slice(&kid.to_be_bytes()),
@@ -838,6 +906,17 @@ impl Lv2Host {
                 ));
                 count += 1;
             }
+        }
+        if let Some(index) = wrapped_slot {
+            self.log_invariant_break(
+                "dispatch.prx_module_list_idlist_slot_wraps",
+                format_args!(
+                    "sys_prx_get_module_list id slot {index} at idlist_ptr+{index}*{id_size} \
+                     leaves the 32-bit guest address space: idlist_ptr={idlist_ptr:#010x}; the \
+                     fill stops there and count reports the {index} slot(s) written",
+                    id_size = opt::ID_SIZE
+                ),
+            );
         }
         effects.push(Effect::shared_write(
             ByteRange::contiguous_u32(count_addr, opt::COUNT_SIZE),

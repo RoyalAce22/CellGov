@@ -487,11 +487,11 @@ impl Lv2Host {
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_LOAD_MODULE,
                 args,
-            } => self.resolve_prx_load(args[0], rt),
+            } => self.resolve_prx_load(syscall::SYS_PRX_LOAD_MODULE, args[0], rt),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER,
                 args,
-            } => self.resolve_prx_load(args[0], rt),
+            } => self.resolve_prx_load(syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER, args[0], rt),
             Lv2Request::Unsupported {
                 number: syscall::SYS_PRX_START_MODULE,
                 args,

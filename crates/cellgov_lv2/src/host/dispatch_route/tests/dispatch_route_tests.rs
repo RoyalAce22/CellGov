@@ -26,5 +26,9 @@ mod mmapper_ext;
 mod process_spu;
 #[path = "route_prx_tests.rs"]
 mod prx;
+#[path = "prx_arg_width_tests.rs"]
+mod prx_arg_width;
+#[path = "prx_module_list_fill_tests.rs"]
+mod prx_module_list_fill;
 #[path = "route_stub_tests.rs"]
 mod stub;

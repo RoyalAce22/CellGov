@@ -101,7 +101,7 @@ fn an_option_pointer_whose_struct_wraps_is_a_named_efault() {
     use cellgov_ps3_abi::lv2::prx::register_module_option as layout;
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
-    let opt = u64::MAX - layout::TOUCHED_LEN + 1;
+    let opt = u64::from(u32::MAX - layout::TOUCHED_LEN + 1);
     assert_eq!(
         call(&mut host, &rt, opt),
         Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
@@ -120,7 +120,7 @@ fn an_option_pointer_one_byte_below_the_wrap_clears_the_gate() {
     use cellgov_ps3_abi::lv2::prx::register_module_option as layout;
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::with_memory(cellgov_mem::GuestMemory::new(0x10000));
-    let opt = u64::MAX - layout::TOUCHED_LEN;
+    let opt = u64::from(u32::MAX - layout::TOUCHED_LEN);
     assert_eq!(
         call(&mut host, &rt, opt),
         Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
@@ -138,6 +138,12 @@ fn unrecognised_option_size_is_einval() {
     assert_eq!(
         call(&mut host, &rt, OPT.into()),
         Lv2Dispatch::immediate(cellgov_ps3_abi::lv2::errno::CELL_EINVAL.into())
+    );
+    // The declared size is the witness that would fix this layout, so
+    // the refusal names it.
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.prx_register_module_unknown_struct_size"),
+        1
     );
 }
 

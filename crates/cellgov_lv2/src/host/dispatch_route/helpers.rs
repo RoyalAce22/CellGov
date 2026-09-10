@@ -11,6 +11,48 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
+    /// Bind `N` u32-typed guest fields out of the 64-bit argument
+    /// registers that carry them, or `None` when a register carries
+    /// high bits.
+    ///
+    /// [`crate::request::classify`] gates every u32 slot it binds, so a
+    /// typed request never carries a narrowed field. An arm that reads
+    /// `Lv2Request::Unsupported`'s raw arguments has no such gate ahead
+    /// of it. Every `_sys_prx_*` arm binds its fields here.
+    ///
+    /// Whether the kernel masks a field to 32 bits or refuses it is
+    /// unestablished: every corpus caller passes a value that already
+    /// fits, so none separates the two answers. A reading of the
+    /// kernel's syscall prologue fixes it.
+    ///
+    /// # Cross-module contract
+    ///
+    /// A caller answers `None` with `CELL_EINVAL`, the answer the
+    /// classifier gives a malformed request. This method records each
+    /// occurrence under `dispatch.arg_high_bits`.
+    pub(in crate::host::dispatch_route) fn narrow_u32_args<const N: usize>(
+        &mut self,
+        number: u64,
+        fields: [(&'static str, u64); N],
+    ) -> Option<[u32; N]> {
+        let mut narrowed = [0u32; N];
+        for (slot, (name, value)) in narrowed.iter_mut().zip(fields) {
+            let Ok(v) = u32::try_from(value) else {
+                self.log_invariant_break(
+                    "dispatch.arg_high_bits",
+                    format_args!(
+                        "syscall {number} u32 field {name}={value:#018x} carries high bits; \
+                         returning CELL_EINVAL instead of answering about {low:#010x}",
+                        low = value as u32
+                    ),
+                );
+                return None;
+            };
+            *slot = v;
+        }
+        Some(narrowed)
+    }
+
     /// Append the TTY buffer into the observability `tty_log` and
     /// write `nwritten` back.
     ///
@@ -64,10 +106,20 @@ impl Lv2Host {
     ///   terminator appears within the 256-byte cap.
     /// - `CELL_ENOENT` for non-UTF-8 path bytes (CellGov-side
     ///   narrowing: such a path cannot name anything in the corpus).
-    pub(super) fn resolve_prx_load(&mut self, path_ptr: u64, rt: &dyn Lv2Runtime) -> Lv2Dispatch {
+    /// - `CELL_EINVAL` when `path_arg` carries high bits, per
+    ///   [`Self::narrow_u32_args`].
+    pub(super) fn resolve_prx_load(
+        &mut self,
+        number: u64,
+        path_arg: u64,
+        rt: &dyn Lv2Runtime,
+    ) -> Lv2Dispatch {
         const PATH_CAP: usize = 256;
         const FIRMWARE_DIR: &str = "/dev_flash/sys/external/";
-        let Some(bytes) = rt.read_committed_until(path_ptr, PATH_CAP, 0) else {
+        let Some([path_ptr]) = self.narrow_u32_args(number, [("path", path_arg)]) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
+        let Some(bytes) = rt.read_committed_until(u64::from(path_ptr), PATH_CAP, 0) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         debug_assert!(

@@ -69,6 +69,16 @@ pub mod start_stop_option {
     /// with `0x8001_1911` (`CELL_PRX_ERROR_NO_EXIT_ENTRY`) and never
     /// reaches the report phase.
     pub const NO_ENTRY: u64 = u64::MAX;
+
+    // The sc 481 / 482 arms gate `pOpt + MIN_SIZE` against a 32-bit
+    // wrap. Once `size` names the extended form, they gate
+    // `pOpt + ENTRY2_OFFSET + 8` as well. They form every field
+    // address without a further check, so each gate has to reach the
+    // end of the last field it covers.
+    const _: () = assert!(RES_OFFSET as u64 + 8 == MIN_SIZE);
+    const _: () = assert!(CMD_OFFSET < RES_OFFSET && ENTRY_OFFSET < RES_OFFSET);
+    const _: () = assert!(SIZE_OFFSET == 0);
+    const _: () = assert!(ENTRY2_OFFSET as u64 == MIN_SIZE);
 }
 
 /// `sys_prx_get_module_list_option_t`.
@@ -116,6 +126,14 @@ pub mod get_module_list_option {
     /// have no witness. A caller that clears this bit short-circuits
     /// to CELL_OK.
     pub const FLAG_FILL_LIST: u64 = 0x2;
+
+    // The sc 494 arm gates `pInfo + TOUCHED_LEN` against a 32-bit
+    // wrap once, then forms every field address without a further
+    // check. The gate has to reach the end of the last field it reads.
+    const _: () = assert!(MAX_OFFSET + COUNT_SIZE <= TOUCHED_LEN);
+    const _: () = assert!(COUNT_OFFSET + COUNT_SIZE <= TOUCHED_LEN);
+    const _: () = assert!(IDLIST_OFFSET + ID_SIZE <= TOUCHED_LEN);
+    const _: () = assert!(TOUCHED_LEN as u64 <= SIZE);
 }
 
 /// `sys_prx_register_module_option_t`.
@@ -141,18 +159,26 @@ pub mod register_module_option {
 
     /// `type` -- IN: bit 0 asks the kernel to bind the caller's own
     /// import tables. The remaining bits have no witness.
-    pub const TYPE_OFFSET: u64 = 0x08;
+    pub const TYPE_OFFSET: u32 = 0x08;
     /// `stub_ea` -- IN: guest address of the import table.
-    pub const STUB_EA_OFFSET: u64 = 0x20;
+    pub const STUB_EA_OFFSET: u32 = 0x20;
     /// `stub_size` -- IN: bytes of that table.
-    pub const STUB_SIZE_OFFSET: u64 = 0x24;
+    pub const STUB_SIZE_OFFSET: u32 = 0x24;
 
     /// Bit of `type` that asks for the import binding.
     pub const TYPE_MANUAL_IMPORTS: u64 = 0x1;
 
     /// Bytes through the end of `stub_size`, the last field any form
     /// reads. The tail from here to [`SIZE`] stays untouched.
-    pub const TOUCHED_LEN: u64 = 0x28;
+    pub const TOUCHED_LEN: u32 = 0x28;
+
+    // The sc 484 arm gates `pOpt + TOUCHED_LEN` against a 32-bit wrap
+    // once, then forms every field address without a further check.
+    // The gate has to reach the end of the last field it reads.
+    const _: () = assert!(TYPE_OFFSET + core::mem::size_of::<u64>() as u32 <= TOUCHED_LEN);
+    const _: () = assert!(STUB_EA_OFFSET + core::mem::size_of::<u32>() as u32 <= TOUCHED_LEN);
+    const _: () = assert!(STUB_SIZE_OFFSET + core::mem::size_of::<u32>() as u32 == TOUCHED_LEN);
+    const _: () = assert!(TOUCHED_LEN as u64 <= SIZE);
 }
 
 /// Low nibble of `sys_prx_start_stop_module_option_t::cmd`.
