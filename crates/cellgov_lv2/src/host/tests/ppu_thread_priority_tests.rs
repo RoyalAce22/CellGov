@@ -159,17 +159,38 @@ fn a_range_error_precedes_the_id_lookup_and_an_unknown_id_is_esrch() {
 }
 
 #[test]
-fn only_the_low_word_of_the_prio_argument_is_read() {
+fn a_prio_register_that_is_no_sign_extension_is_refused() {
+    // `prio` is an `int`, so the guest ABI sign-extends a negative
+    // value and the arm reads the whole register. A register that
+    // reproduces no `int` names no priority. A read of its low word
+    // would accept 0x1_0000_0007 as priority 7.
+    //
+    // Both registers below answer CELL_EINVAL, so only the break count
+    // says which gate refused each one. The stored priority is a value
+    // no refusal writes, so the read-back separates a refusal from a
+    // store of the default.
+    const GATE: &str = "dispatch.arg_not_sign_extended";
     let rt = rt();
     let mut host = Lv2Host::new();
     seed_primary_ppu(&mut host, src());
     let id = PpuThreadId::PRIMARY.raw();
-    // A sign-extended 32-bit value in a 64-bit register is what the
-    // guest ABI hands over for a negative s32.
+    assert_eq!(set_priority(&mut host, &rt, id, 1001), 0);
+
     assert_eq!(
         set_priority(&mut host, &rt, id, -2),
         u64::from(errno::CELL_EINVAL)
     );
-    assert_eq!(set_priority(&mut host, &rt, id, 0x1_0000_0000 + 7), 0);
-    assert_eq!(get_priority(&mut host, &rt, id), 7);
+    assert_eq!(
+        host.invariant_break_site_count(GATE),
+        0,
+        "a sign-extended -2 reaches the range window"
+    );
+
+    assert_eq!(
+        set_priority(&mut host, &rt, id, 0x1_0000_0000 + 7),
+        u64::from(errno::CELL_EINVAL)
+    );
+    assert_eq!(host.invariant_break_site_count(GATE), 1);
+
+    assert_eq!(get_priority(&mut host, &rt, id), 1001);
 }

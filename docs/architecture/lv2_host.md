@@ -43,9 +43,13 @@ classifier refuses a register that carries high bits, so a typed
 variant never holds a narrowed field. `Unsupported` hands the raw
 registers past that gate; every `Unsupported` arm binds its own u32
 fields under the same rule and answers CELL_EINVAL with a
-`dispatch.arg_high_bits` break, before its own argument tests run.
-Whether the kernel masks such a field or refuses it is unestablished
--- every corpus caller passes a value that already fits in 32 bits.
+`dispatch.arg_high_bits` break, before its own argument tests run. An
+`int`-typed field takes the signed form of the same rule: the register
+must reproduce its own low word under sign extension, and one that
+does not answers CELL_EINVAL with a `dispatch.arg_not_sign_extended`
+break. Whether the kernel masks such a field or refuses it is
+unestablished -- every corpus caller passes a value that already fits
+in 32 bits.
 
 Classified into typed `Lv2Request` variants:
 

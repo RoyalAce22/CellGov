@@ -76,16 +76,23 @@ impl Lv2Host {
     ///
     /// Listed in the order they fire.
     ///
-    /// - `CELL_EINVAL` when `prio` is outside the window. `prio` is an
-    ///   `int`, and the arm reads only the low word of its register.
-    ///   The window test runs on that word, so the arm drops a high
-    ///   word. Whether the kernel drops or refuses it is unestablished.
+    /// - `CELL_EINVAL` when `prio` is outside the window.
     /// - `CELL_ESRCH` when `thread_id` is absent from the thread table.
+    ///
+    /// `CELL_EINVAL` also answers a `prio` register that is no sign
+    /// extension of its low word, per [`Lv2Host::narrow_i32_args`].
+    /// That gate precedes the list above.
     pub(in crate::host::dispatch_route) fn dispatch_ppu_thread_set_priority(
         &mut self,
         args: [u64; 8],
     ) -> Lv2Dispatch {
-        let prio = args[1] as i32;
+        use cellgov_ps3_abi::lv2::syscall;
+
+        let Some([prio]) =
+            self.narrow_i32_args(syscall::PPU_THREAD_SET_PRIORITY, [("prio", args[1])])
+        else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let floor = if self.debug_or_root() {
             PPU_THREAD_PRIORITY_MIN_ROOT
         } else {

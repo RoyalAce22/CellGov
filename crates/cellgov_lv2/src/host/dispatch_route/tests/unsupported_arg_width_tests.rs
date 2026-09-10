@@ -1,4 +1,9 @@
-//! One rule binds the u32 guest fields of every `Unsupported` arm.
+//! One rule per width binds the guest fields of every `Unsupported`
+//! arm.
+//!
+//! - A u32 field refuses a register that carries a high word.
+//! - An `int` field refuses a register that is no sign extension of
+//!   its own low word.
 
 use super::*;
 use cellgov_ps3_abi::lv2::syscall;
@@ -21,10 +26,8 @@ const ABOVE_CEILING: u64 = AT_CEILING + 1;
 ///   `flags` of 332 and 362 and `sys_mmapper_map_shared_memory`'s
 ///   `addr`. So is the `sys_ppu_thread_*` `thread_id`, which names a
 ///   64-bit [`crate::ppu_thread::PpuThreadId`].
-/// - The arm binds that argument as a signed 32-bit field with a
-///   truncating cast. `sys_ppu_thread_set_priority`'s `prio` and
-///   `sys_mmapper_allocate_shared_memory_ext`'s `entry_count` drop a
-///   high word instead of a refusal.
+/// - The arm binds that argument as an `int`, so it appears in
+///   [`UNSUPPORTED_I32_SLOTS`] instead.
 ///
 /// Syscall 47 binds no u32 field, so it has no row.
 const UNSUPPORTED_U32_SLOTS: &[(u64, &[usize])] = &[
@@ -49,21 +52,40 @@ const UNSUPPORTED_U32_SLOTS: &[(u64, &[usize])] = &[
     (syscall::EVENT_PORT_DISCONNECT, &[0]),
 ];
 
+/// Each `Unsupported` syscall and the argument slots it binds as an
+/// `int`. Each arm's own range test reads its field as signed.
+/// Syscall 47 admits a negative `prio` under debug-or-root capability.
+const UNSUPPORTED_I32_SLOTS: &[(u64, &[usize])] = &[
+    (syscall::PPU_THREAD_SET_PRIORITY, &[1]),
+    (syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT, &[4]),
+];
+
 /// The slot count the table names, so a lost row fails the sweeps
 /// below. A sweep that covers fewer slots is otherwise silent.
 const GATED_SLOTS: usize = 26;
 
-/// Calls `f` for every slot in the table, then checks the count
-/// against [`GATED_SLOTS`].
-fn for_each_slot(mut f: impl FnMut(u64, usize)) {
+/// [`GATED_SLOTS`] for the `int` table.
+const GATED_I32_SLOTS: usize = 2;
+
+/// Calls `f` for every slot in `table`, then checks the count against
+/// `expected`.
+fn for_each_slot_of(table: &[(u64, &[usize])], expected: usize, mut f: impl FnMut(u64, usize)) {
     let mut seen = 0;
-    for (number, slots) in UNSUPPORTED_U32_SLOTS {
+    for (number, slots) in table {
         for &slot in *slots {
             f(*number, slot);
             seen += 1;
         }
     }
-    assert_eq!(seen, GATED_SLOTS, "table names a different slot count");
+    assert_eq!(seen, expected, "table names a different slot count");
+}
+
+fn for_each_slot(f: impl FnMut(u64, usize)) {
+    for_each_slot_of(UNSUPPORTED_U32_SLOTS, GATED_SLOTS, f);
+}
+
+fn for_each_i32_slot(f: impl FnMut(u64, usize)) {
+    for_each_slot_of(UNSUPPORTED_I32_SLOTS, GATED_I32_SLOTS, f);
 }
 
 /// Every other slot stays zero. The gate precedes each arm's own
@@ -141,6 +163,118 @@ fn every_unsupported_u32_slot_turns_over_exactly_at_the_u32_ceiling() {
             "sc {number} arg {slot} one past u32::MAX"
         );
     });
+}
+
+#[test]
+fn every_unsupported_i32_slot_refuses_a_register_that_is_no_sign_extension() {
+    // 0x1_0000_0001 reads as 1 under a truncating cast. 0x8000_0000
+    // wraps to i32::MIN. Neither register carries the value its low
+    // word names.
+    for probe in [0x1_0000_0001u64, 0x8000_0000] {
+        for_each_i32_slot(|number, slot| {
+            let (host, out) = dispatch_with(number, args_with(slot, probe));
+            assert_eq!(
+                out,
+                Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+                "sc {number} arg {slot} = {probe:#x}"
+            );
+            assert_eq!(
+                host.invariant_break_site_count("dispatch.arg_not_sign_extended"),
+                1,
+                "sc {number} arg {slot} = {probe:#x}"
+            );
+        });
+    }
+}
+
+#[test]
+fn every_unsupported_i32_slot_admits_a_sign_extended_register() {
+    // Each arm answers these on its own terms, and 7 is inside both
+    // range windows. Only the break count separates a gate that
+    // admits the register from one that refuses it.
+    for probe in [7u64, u64::MAX] {
+        for_each_i32_slot(|number, slot| {
+            let (host, _) = dispatch_with(number, args_with(slot, probe));
+            assert_eq!(
+                host.invariant_break_site_count("dispatch.arg_not_sign_extended"),
+                0,
+                "sc {number} arg {slot} = {probe:#x}"
+            );
+        });
+    }
+}
+
+#[test]
+fn every_unsupported_i32_slot_turns_over_exactly_at_the_i32_bounds() {
+    // Neither bound is pinned above: the admitted probes sit far
+    // inside the window and no refused probe pins the floor. These
+    // four values straddle each bound by one.
+    let admitted = [i32::MAX as u64, i32::MIN as i64 as u64];
+    let refused = [i32::MAX as u64 + 1, (i32::MIN as i64 as u64) - 1];
+    for (ok, bad) in admitted.into_iter().zip(refused) {
+        for_each_i32_slot(|number, slot| {
+            let (host, _) = dispatch_with(number, args_with(slot, ok));
+            assert_eq!(
+                host.invariant_break_site_count("dispatch.arg_not_sign_extended"),
+                0,
+                "sc {number} arg {slot} = {ok:#x}"
+            );
+
+            let (host, out) = dispatch_with(number, args_with(slot, bad));
+            assert_eq!(
+                out,
+                Lv2Dispatch::immediate(errno::CELL_EINVAL.into()),
+                "sc {number} arg {slot} = {bad:#x}"
+            );
+            assert_eq!(
+                host.invariant_break_site_count("dispatch.arg_not_sign_extended"),
+                1,
+                "sc {number} arg {slot} = {bad:#x}"
+            );
+        });
+    }
+}
+
+#[test]
+fn an_entry_count_that_is_no_sign_extension_refuses_a_call_that_would_otherwise_succeed() {
+    // The sweeps above zero every companion argument, so each arm
+    // refuses their probes for a second reason. The sweep proves only
+    // that the errno and the break site are the gate's. This call is
+    // well formed, so a truncating read of 0x1_0000_0001 binds one
+    // entry and mints a handle. `sys_ppu_thread_set_priority` has the
+    // same witness beside its own arm.
+    use cellgov_ps3_abi::lv2::memory::page_size;
+    const KEY: u64 = 0x8000_4d49_4f32_3211;
+    const ENTRIES: u64 = 0x4000;
+    const MEM_ID_PTR: u64 = 0x9000;
+    const SIZE_64K: u64 = 0x2_0000;
+
+    let well_formed = [
+        KEY,
+        SIZE_64K,
+        page_size::FLAG_64K,
+        ENTRIES,
+        1,
+        MEM_ID_PTR,
+        0,
+        0,
+    ];
+    let (host, out) = dispatch_with(syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT, well_formed);
+    assert!(
+        matches!(out, Lv2Dispatch::Immediate { code: 0, .. }),
+        "the call the gate must refuse has to succeed without it: {out:?}"
+    );
+    assert!(host.state.mmapper_ipc.contains_key(&KEY));
+
+    let mut aliased = well_formed;
+    aliased[4] = 0x1_0000_0001;
+    let (host, out) = dispatch_with(syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT, aliased);
+    assert_eq!(out, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
+    assert_eq!(
+        host.invariant_break_site_count("dispatch.arg_not_sign_extended"),
+        1
+    );
+    assert!(host.state.mmapper_ipc.is_empty());
 }
 
 #[test]

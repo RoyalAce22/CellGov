@@ -599,21 +599,21 @@ impl Lv2Host {
     /// - `CELL_EALIGN` when `size` is not a multiple of the granule.
     /// - `CELL_EINVAL` when `flags` carries bits outside the
     ///   granularity field.
-    /// - `CELL_EINVAL` when `entry_count` is outside `1..=16`.
-    ///   `entry_count` is an `int`, and the arm reads only the low word
-    ///   of its register. The range test runs on that word, so the arm
-    ///   drops a high word. The `entries` and `mem_id` gates below
-    ///   refuse a high word. Which answer the kernel gives either
-    ///   field is unestablished.
+    /// - `CELL_EINVAL` when `entry_count` is outside
+    ///   `1..=ext_entry::MAX_COUNT`.
     /// - `CELL_EFAULT` when an entry's `type` word is unreadable.
     /// - `CELL_EPERM` when an entry type is unknown, or privileged
     ///   without 64 KiB pages and debug-or-root capability.
     /// - `CELL_EFAULT` when `mem_id_ptr` is null.
     /// - `CELL_EEXIST` when a keyed `ipc_key` is already registered.
     ///
-    /// `CELL_EINVAL` also answers a `flags`, `entries` or `mem_id`
-    /// register that carries high bits, per
-    /// [`Lv2Host::narrow_u32_args`]. That gate precedes the list above.
+    /// Two gates precede the list above:
+    ///
+    /// - `CELL_EINVAL` when a `flags`, `entries` or `mem_id` register
+    ///   carries high bits, per [`Lv2Host::narrow_u32_args`].
+    /// - `CELL_EINVAL` when the `entry_count` register is no sign
+    ///   extension of its low word, per [`Lv2Host::narrow_i32_args`].
+    ///
     /// This arm's `flags` is a 32-bit word, unlike the 64-bit one 332
     /// and 362 take.
     pub(in crate::host::dispatch_route) fn dispatch_mmapper_allocate_shared_memory_ext(
@@ -635,10 +635,15 @@ impl Lv2Host {
         ) else {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         };
+        let Some([entry_count]) = self.narrow_i32_args(
+            syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT,
+            [("entry_count", args[4])],
+        ) else {
+            return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
+        };
         let flags = u64::from(flags);
         let ipc_key = args[0];
         let size = args[1];
-        let entry_count = args[4] as i32;
         if size == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EALIGN.into());
         }
