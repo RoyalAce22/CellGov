@@ -72,6 +72,57 @@ fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
     }
 }
 
+/// The local-store address form of a quadword load or store.
+#[derive(Clone, Copy)]
+enum Lsa {
+    /// `RA + (I10 << 4)`.
+    D(u8, i16),
+    /// `RA + RB`.
+    X(u8, u8),
+    /// `I16 << 2`.
+    A(i16),
+    /// `PC + (I16 << 2)`.
+    R(i16),
+}
+
+impl Lsa {
+    #[inline]
+    fn resolve(self, state: &SpuState) -> u32 {
+        match self {
+            Lsa::D(ra, imm) => state.reg_word(ra).wrapping_add((imm as i32 as u32) << 4),
+            Lsa::X(ra, rb) => state.reg_word(ra).wrapping_add(state.reg_word(rb)),
+            Lsa::A(imm) => (imm as i32 as u32) << 2,
+            Lsa::R(imm) => state.pc.wrapping_add((imm as i32 as u32) << 2),
+        }
+    }
+}
+
+/// Copy the aligned quadword at `lsa` into `rt`. A fault leaves `rt`
+/// unchanged.
+#[inline]
+fn load_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcome {
+    match ls_addr(lsa.resolve(state), state.ls.len()) {
+        Ok(a) => {
+            state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
+            SpuStepOutcome::Continue
+        }
+        Err(f) => SpuStepOutcome::Fault(f),
+    }
+}
+
+/// Copy `rt` to the aligned quadword at `lsa`. A fault leaves local
+/// store unchanged.
+#[inline]
+fn store_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcome {
+    match ls_addr(lsa.resolve(state), state.ls.len()) {
+        Ok(a) => {
+            state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
+            SpuStepOutcome::Continue
+        }
+        Err(f) => SpuStepOutcome::Fault(f),
+    }
+}
+
 // [SPU-ISA p:139 s:6. Shift and Rotate Instructions] The rotate-and-mask immediates carry the two's complement of the right-shift count: count = (0 - sign_extend(I7)) mod 64.
 fn rotate_mask_count(imm: u8) -> u32 {
     let signed = ((imm as u32) << 25) as i32 >> 25;
@@ -82,93 +133,21 @@ fn rotate_mask_count(imm: u8) -> u32 {
 pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
     match *insn {
         // [SPU-ISA p:32 s:3. Memory-Load/Store Instructions] Load Quadword (d-form): LSA from RA + I10<<4, force low 4 bits zero.
-        SpuInstruction::Lqd { rt, ra, imm } => {
-            let raw = state.reg_word(ra).wrapping_add((imm as i32 as u32) << 4);
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
+        SpuInstruction::Lqd { rt, ra, imm } => load_quad(state, rt, Lsa::D(ra, imm)),
         // [SPU-ISA p:33 s:3. Memory-Load/Store Instructions] Load Quadword (x-form): LSA from RA + RB, low 4 bits forced zero.
-        SpuInstruction::Lqx { rt, ra, rb } => {
-            let raw = state.reg_word(ra).wrapping_add(state.reg_word(rb));
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
+        SpuInstruction::Lqx { rt, ra, rb } => load_quad(state, rt, Lsa::X(ra, rb)),
         // [SPU-ISA p:34 s:3. Memory-Load/Store Instructions] Load Quadword (a-form): LSA is I16<<2, ignoring registers.
-        SpuInstruction::Lqa { rt, imm } => {
-            let raw = (imm as i32 as u32) << 2;
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
-        // [SPU-ISA p:36 s:3. Memory-Load/Store Instructions] Store Quadword (d-form): symmetric to lqd, writes register to LS.
-        SpuInstruction::Stqd { rt, ra, imm } => {
-            let raw = state.reg_word(ra).wrapping_add((imm as i32 as u32) << 4);
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
-        // [SPU-ISA p:37 s:3. Memory-Load/Store Instructions] Store Quadword (x-form): RA + RB indexed local-store address.
-        SpuInstruction::Stqx { rt, ra, rb } => {
-            let raw = state.reg_word(ra).wrapping_add(state.reg_word(rb));
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
-        // [SPU-ISA p:38 s:3. Memory-Load/Store Instructions] Store Quadword (a-form): absolute LSA from I16<<2.
-        SpuInstruction::Stqa { rt, imm } => {
-            let raw = (imm as i32 as u32) << 2;
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
+        SpuInstruction::Lqa { rt, imm } => load_quad(state, rt, Lsa::A(imm)),
         // [SPU-ISA p:35 s:3. Memory-Load/Store Instructions] Load Quadword Instruction Relative: LSA is PC + sign-extended I16<<2, low 4 bits forced zero.
-        SpuInstruction::Lqr { rt, imm } => {
-            let raw = state.pc.wrapping_add((imm as i32 as u32) << 2);
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.regs[rt as usize].copy_from_slice(&state.ls[a..a + 16]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
+        SpuInstruction::Lqr { rt, imm } => load_quad(state, rt, Lsa::R(imm)),
+        // [SPU-ISA p:36 s:3. Memory-Load/Store Instructions] Store Quadword (d-form): symmetric to lqd, writes register to LS.
+        SpuInstruction::Stqd { rt, ra, imm } => store_quad(state, rt, Lsa::D(ra, imm)),
+        // [SPU-ISA p:37 s:3. Memory-Load/Store Instructions] Store Quadword (x-form): RA + RB indexed local-store address.
+        SpuInstruction::Stqx { rt, ra, rb } => store_quad(state, rt, Lsa::X(ra, rb)),
+        // [SPU-ISA p:38 s:3. Memory-Load/Store Instructions] Store Quadword (a-form): absolute LSA from I16<<2.
+        SpuInstruction::Stqa { rt, imm } => store_quad(state, rt, Lsa::A(imm)),
         // [SPU-ISA p:39 s:3. Memory-Load/Store Instructions] Store Quadword Instruction Relative: PC-relative LSA, symmetric to lqr.
-        SpuInstruction::Stqr { rt, imm } => {
-            let raw = state.pc.wrapping_add((imm as i32 as u32) << 2);
-            match ls_addr(raw, state.ls.len()) {
-                Ok(a) => {
-                    state.ls[a..a + 16].copy_from_slice(&state.regs[rt as usize]);
-                    SpuStepOutcome::Continue
-                }
-                Err(f) => SpuStepOutcome::Fault(f),
-            }
-        }
+        SpuInstruction::Stqr { rt, imm } => store_quad(state, rt, Lsa::R(imm)),
 
         // [SPU-ISA p:52 s:4. Constant-Formation Instructions] Immediate Load Word: replicate sign-extended I16 into all four word slots.
         SpuInstruction::Il { rt, imm } => {
@@ -726,3 +705,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/exec_compiler_forms_tests.rs"]
 mod compiler_forms_tests;
+
+#[cfg(test)]
+#[path = "tests/exec_quad_tests.rs"]
+mod quad_tests;
