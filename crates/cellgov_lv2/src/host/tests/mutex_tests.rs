@@ -224,9 +224,10 @@ fn mutex_create_decodes_attr_ptr() {
         0x00, 0x00, 0x00, 0x02, // protocol = SYS_SYNC_PRIORITY
         0x00, 0x00, 0x00, 0x10, // recursive = SYS_SYNC_RECURSIVE
         0x00, 0x00, 0x02, 0x00, // pshared = SYS_SYNC_NOT_PROCESS_SHARED
+        0x00, 0x00, 0x20, 0x00, // adaptive = SYS_SYNC_NOT_ADAPTIVE
     ];
     mem.apply_commit(
-        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 12).unwrap(),
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 16).unwrap(),
         &attr_bytes,
     )
     .unwrap();
@@ -264,9 +265,10 @@ fn a_not_recursive_attr_creates_a_non_recursive_mutex() {
         0x00, 0x00, 0x00, 0x01, // protocol = SYS_SYNC_FIFO
         0x00, 0x00, 0x00, 0x20, // recursive = SYS_SYNC_NOT_RECURSIVE
         0x00, 0x00, 0x02, 0x00, // pshared = SYS_SYNC_NOT_PROCESS_SHARED
+        0x00, 0x00, 0x20, 0x00, // adaptive = SYS_SYNC_NOT_ADAPTIVE
     ];
     mem.apply_commit(
-        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 12).unwrap(),
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 16).unwrap(),
         &attr_bytes,
     )
     .unwrap();
@@ -315,9 +317,8 @@ fn a_not_recursive_attr_creates_a_non_recursive_mutex() {
     }
 }
 
-/// Build a `FakeRuntime` with a 28-byte `sys_mutex_attribute_t`
-/// prefix (protocol, recursive, pshared, adaptive, ipc_key, flags)
-/// committed at 0x200.
+/// Build a `FakeRuntime` with a whole `sys_mutex_attribute_t`
+/// committed at 0x200, with a zeroed name.
 fn mutex_attr_runtime(
     protocol: u32,
     recursive: u32,
@@ -325,15 +326,27 @@ fn mutex_attr_runtime(
     ipc_key: u64,
     flags: u32,
 ) -> FakeRuntime {
+    use cellgov_ps3_abi::lv2::sync::mutex_attribute as layout;
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
-    let mut attr = [0u8; 28];
-    attr[0..4].copy_from_slice(&protocol.to_be_bytes());
-    attr[4..8].copy_from_slice(&recursive.to_be_bytes());
-    attr[8..12].copy_from_slice(&pshared.to_be_bytes());
-    attr[16..24].copy_from_slice(&ipc_key.to_be_bytes());
-    attr[24..28].copy_from_slice(&flags.to_be_bytes());
+    let mut attr = [0u8; layout::SIZE as usize];
+    let mut put = |off: usize, word: u32| {
+        attr[off..off + 4].copy_from_slice(&word.to_be_bytes());
+    };
+    put(layout::PROTOCOL_OFFSET, protocol);
+    put(layout::RECURSIVE_OFFSET, recursive);
+    put(layout::PSHARED_OFFSET, pshared);
+    // A zero adaptive word is out of range, so a create that reaches
+    // this word reports an invariant break the test is not about.
+    put(
+        layout::ADAPTIVE_OFFSET,
+        cellgov_ps3_abi::lv2::sync::SYS_SYNC_NOT_ADAPTIVE,
+    );
+    put(layout::FLAGS_OFFSET, flags);
+    let key = layout::IPC_KEY_OFFSET;
+    attr[key..key + 8].copy_from_slice(&ipc_key.to_be_bytes());
     mem.apply_commit(
-        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), 28).unwrap(),
+        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x200), layout::SIZE as u64)
+            .unwrap(),
         &attr,
     )
     .unwrap();

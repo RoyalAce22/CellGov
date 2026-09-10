@@ -17,9 +17,19 @@ pub const SYS_SYNC_FIFO: u32 = 0x1;
 /// priority-first order.
 pub const SYS_SYNC_PRIORITY: u32 = 0x2;
 
+/// `protocol = SYS_SYNC_PRIORITY_INHERIT`: wake parked waiters in
+/// priority order, and lend the owner the highest waiter's priority.
+/// These three are the whole `protocol` vocabulary.
+pub const SYS_SYNC_PRIORITY_INHERIT: u32 = 0x3;
+
 /// `pshared = SYS_SYNC_PROCESS_SHARED`: the primitive is visible
 /// across processes; the attribute's `ipc_key` is meaningful.
 pub const SYS_SYNC_PROCESS_SHARED: u32 = 0x100;
+
+/// `pshared = SYS_SYNC_NOT_PROCESS_SHARED`: the primitive is visible
+/// to one process, and its `ipc_key` is not read. These two are the
+/// whole `pshared` vocabulary.
+pub const SYS_SYNC_NOT_PROCESS_SHARED: u32 = 0x200;
 
 /// `recursive = SYS_SYNC_RECURSIVE`: the owner may re-lock the mutex,
 /// bumping a recursion count.
@@ -29,6 +39,25 @@ pub const SYS_SYNC_RECURSIVE: u32 = 0x10;
 /// These two are the whole `recursive` vocabulary, so any other value
 /// is EINVAL at create.
 pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
+
+/// `adaptive = SYS_SYNC_ADAPTIVE`: the create asks that a contending
+/// thread spin before it parks.
+// Neither adaptive enumerant is witnessed: no public document states
+// the pair, and no capture isolates the field. The micro-test corpus
+// passes SYS_SYNC_NOT_ADAPTIVE, and nothing in the corpus passes the
+// other member. The kernel answer for a third value is unestablished,
+// so `sys_mutex_create` names it instead of refusing it.
+//
+// Both members state an intent the kernel drops: the non-public
+// description of the field calls it unimplemented and without effect,
+// so neither member changes how a contending thread waits, and the
+// word reaches no CellGov mutex attribute.
+pub const SYS_SYNC_ADAPTIVE: u32 = 0x1000;
+
+/// `adaptive = SYS_SYNC_NOT_ADAPTIVE`: the create asks that a
+/// contending thread park at once. These two are the whole `adaptive`
+/// vocabulary.
+pub const SYS_SYNC_NOT_ADAPTIVE: u32 = 0x2000;
 
 /// `type = SYS_SYNC_WAITER_SINGLE`: at most one thread may park on
 /// the primitive at once. Dispatch rejects a second parker.
@@ -97,6 +126,51 @@ pub mod semaphore_attribute {
     // bounds-checks `SIZE` reads every field below without a second
     // check.
     const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+}
+
+/// `sys_mutex_attribute_t`, the block `sys_mutex_create` (100) reads.
+///
+/// `protocol@0` (u32), `recursive@4` (u32), `pshared@8` (u32),
+/// `adaptive@12` (u32), `ipc_key@16` (u64), `flags@24` (s32),
+/// `pad@28` (u32), `name@32` (8 bytes), for a declared
+/// [`SIZE`](mutex_attribute::SIZE) of 40 bytes.
+// The provenance matches `semaphore_attribute`.
+pub mod mutex_attribute {
+    /// `sizeof(sys_mutex_attribute_t)`.
+    pub const SIZE: u32 = 0x28;
+
+    /// `protocol` -- wake order for parked waiters.
+    pub const PROTOCOL_OFFSET: usize = 0x00;
+    /// `recursive` -- [`SYS_SYNC_RECURSIVE`] or
+    /// [`SYS_SYNC_NOT_RECURSIVE`].
+    ///
+    /// [`SYS_SYNC_RECURSIVE`]: super::SYS_SYNC_RECURSIVE
+    /// [`SYS_SYNC_NOT_RECURSIVE`]: super::SYS_SYNC_NOT_RECURSIVE
+    pub const RECURSIVE_OFFSET: usize = 0x04;
+    /// `pshared` -- [`SYS_SYNC_PROCESS_SHARED`] or
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`].
+    ///
+    /// [`SYS_SYNC_PROCESS_SHARED`]: super::SYS_SYNC_PROCESS_SHARED
+    /// [`SYS_SYNC_NOT_PROCESS_SHARED`]: super::SYS_SYNC_NOT_PROCESS_SHARED
+    pub const PSHARED_OFFSET: usize = 0x08;
+    /// `adaptive` -- [`SYS_SYNC_ADAPTIVE`] or
+    /// [`SYS_SYNC_NOT_ADAPTIVE`].
+    ///
+    /// [`SYS_SYNC_ADAPTIVE`]: super::SYS_SYNC_ADAPTIVE
+    /// [`SYS_SYNC_NOT_ADAPTIVE`]: super::SYS_SYNC_NOT_ADAPTIVE
+    pub const ADAPTIVE_OFFSET: usize = 0x0C;
+    /// `ipc_key` -- the process-shared namespace key.
+    pub const IPC_KEY_OFFSET: usize = 0x10;
+    /// `flags` -- the process-shared attach policy.
+    pub const FLAGS_OFFSET: usize = 0x18;
+
+    // Same container coupling as `semaphore_attribute`.
+    const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(RECURSIVE_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(PSHARED_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(ADAPTIVE_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(IPC_KEY_OFFSET + core::mem::size_of::<u64>() <= SIZE as usize);
+    const _: () = assert!(FLAGS_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
 }
 
 /// `sys_event_flag_attribute_t`, the block `sys_event_flag_create`
