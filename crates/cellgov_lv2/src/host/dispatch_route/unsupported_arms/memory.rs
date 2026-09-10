@@ -11,10 +11,9 @@ use cellgov_ps3_abi::lv2::memory::{
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
+use crate::host::guest_struct::read_be_u64;
 use crate::host::mmapper::{MmapperHandle, PendingRegionInstall};
 use crate::host::{Lv2Host, Lv2Runtime};
-
-use super::be::read_be_u64;
 
 impl Lv2Host {
     /// `sys_memory_container_create`: mints a container id and writes

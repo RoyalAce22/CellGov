@@ -7,9 +7,8 @@ use cellgov_ps3_abi::lv2::errno;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
+use crate::host::guest_struct::{read_be_u32, read_be_u64, GuestStruct};
 use crate::host::{Lv2Host, Lv2Runtime};
-
-use super::be::{read_be_u32, read_be_u64};
 
 impl Lv2Host {
     /// `_sys_prx_start_module` (481): the two-phase start handshake.
@@ -68,7 +67,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
-        let Some(size) = self.read_be_u64(rt, p_opt + opt::SIZE_OFFSET) else {
+        let Some(size) = read_be_u64(rt, u64::from(p_opt + opt::SIZE_OFFSET)) else {
             self.log_invariant_break(
                 "dispatch.prx_start_module_size_unreadable",
                 format_args!(
@@ -89,7 +88,7 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(cmd) = self.read_be_u64(rt, p_opt + opt::CMD_OFFSET) else {
+        let Some(cmd) = read_be_u64(rt, u64::from(p_opt + opt::CMD_OFFSET)) else {
             self.log_invariant_break(
                 "dispatch.prx_start_module_cmd_unreadable",
                 format_args!(
@@ -120,7 +119,7 @@ impl Lv2Host {
                 Lv2Dispatch::Immediate { code: 0, effects }
             }
             start_cmd::REPORT_RESULT => {
-                let Some(res) = self.read_be_u64(rt, p_opt + opt::RES_OFFSET) else {
+                let Some(res) = read_be_u64(rt, u64::from(p_opt + opt::RES_OFFSET)) else {
                     self.log_invariant_break(
                         "dispatch.prx_start_module_res_unreadable",
                         format_args!(
@@ -226,7 +225,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
 
-        let Some(size) = self.read_be_u64(rt, p_opt + opt::SIZE_OFFSET) else {
+        let Some(size) = read_be_u64(rt, u64::from(p_opt + opt::SIZE_OFFSET)) else {
             self.log_invariant_break(
                 "dispatch.prx_stop_module_size_unreadable",
                 format_args!(
@@ -247,7 +246,7 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(cmd) = self.read_be_u64(rt, p_opt + opt::CMD_OFFSET) else {
+        let Some(cmd) = read_be_u64(rt, u64::from(p_opt + opt::CMD_OFFSET)) else {
             self.log_invariant_break(
                 "dispatch.prx_stop_module_cmd_unreadable",
                 format_args!(
@@ -296,7 +295,7 @@ impl Lv2Host {
                 }
             }
             start_cmd::REPORT_RESULT => {
-                let Some(res) = self.read_be_u64(rt, p_opt + opt::RES_OFFSET) else {
+                let Some(res) = read_be_u64(rt, u64::from(p_opt + opt::RES_OFFSET)) else {
                     self.log_invariant_break(
                         "dispatch.prx_stop_module_res_unreadable",
                         format_args!(
@@ -450,12 +449,6 @@ impl Lv2Host {
         }
     }
 
-    /// Read a big-endian `u64` from committed guest memory.
-    fn read_be_u64(&self, rt: &dyn Lv2Runtime, addr: u32) -> Option<u64> {
-        let bytes = rt.read_committed(u64::from(addr), 8)?;
-        Some(u64::from_be_bytes(bytes[..8].try_into().ok()?))
-    }
-
     /// Stage a big-endian `u64` write to guest memory.
     fn write_be_u64(&self, requester: UnitId, addr: u32, value: u64, tick: GuestTicks) -> Effect {
         Effect::SharedWriteIntent {
@@ -579,28 +572,11 @@ impl Lv2Host {
                 );
                 break;
             }
-            let func_count = u16::from_be_bytes([
-                hdr[PRX_IMPORT_NUM_FUNC_OFFSET],
-                hdr[PRX_IMPORT_NUM_FUNC_OFFSET + 1],
-            ]);
-            let nids_ptr = u32::from_be_bytes([
-                hdr[PRX_IMPORT_NIDS_PTR_OFFSET],
-                hdr[PRX_IMPORT_NIDS_PTR_OFFSET + 1],
-                hdr[PRX_IMPORT_NIDS_PTR_OFFSET + 2],
-                hdr[PRX_IMPORT_NIDS_PTR_OFFSET + 3],
-            ]);
-            let stub_ptr = u32::from_be_bytes([
-                hdr[PRX_IMPORT_STUB_PTR_OFFSET],
-                hdr[PRX_IMPORT_STUB_PTR_OFFSET + 1],
-                hdr[PRX_IMPORT_STUB_PTR_OFFSET + 2],
-                hdr[PRX_IMPORT_STUB_PTR_OFFSET + 3],
-            ]);
-            let name_ptr = u32::from_be_bytes([
-                hdr[PRX_IMPORT_NAME_PTR_OFFSET],
-                hdr[PRX_IMPORT_NAME_PTR_OFFSET + 1],
-                hdr[PRX_IMPORT_NAME_PTR_OFFSET + 2],
-                hdr[PRX_IMPORT_NAME_PTR_OFFSET + 3],
-            ]);
+            let entry = GuestStruct::new(hdr);
+            let func_count = entry.u16_at(PRX_IMPORT_NUM_FUNC_OFFSET);
+            let nids_ptr = entry.u32_at(PRX_IMPORT_NIDS_PTR_OFFSET);
+            let stub_ptr = entry.u32_at(PRX_IMPORT_STUB_PTR_OFFSET);
+            let name_ptr = entry.u32_at(PRX_IMPORT_NAME_PTR_OFFSET);
             // The cap and the lossy decode mirror the loader-side
             // decoders that mint the `firmware_exports` keys
             // (`cellgov_ppu::prx::read_cstring`,
@@ -755,7 +731,7 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(declared_size) = self.read_be_u64(rt, p_info) else {
+        let Some(declared_size) = read_be_u64(rt, u64::from(p_info)) else {
             self.log_invariant_break(
                 "dispatch.prx_module_list_unreadable_pinfo",
                 format_args!(
@@ -781,7 +757,7 @@ impl Lv2Host {
         let max_addr = p_info.wrapping_add(0x0C);
         let count_addr = p_info.wrapping_add(0x10);
         let idlist_ptr_addr = p_info.wrapping_add(0x14);
-        let Some(max_bytes) = rt.read_committed(u64::from(max_addr), 4) else {
+        let Some(max) = read_be_u32(rt, u64::from(max_addr)) else {
             self.log_invariant_break(
                 "dispatch.prx_module_list_unreadable_pinfo",
                 format_args!(
@@ -791,8 +767,7 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let max = u32::from_be_bytes([max_bytes[0], max_bytes[1], max_bytes[2], max_bytes[3]]);
-        let Some(idlist_bytes) = rt.read_committed(u64::from(idlist_ptr_addr), 4) else {
+        let Some(idlist_ptr) = read_be_u32(rt, u64::from(idlist_ptr_addr)) else {
             self.log_invariant_break(
                 "dispatch.prx_module_list_unreadable_pinfo",
                 format_args!(
@@ -802,12 +777,6 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let idlist_ptr = u32::from_be_bytes([
-            idlist_bytes[0],
-            idlist_bytes[1],
-            idlist_bytes[2],
-            idlist_bytes[3],
-        ]);
         let liblv2_id = self
             .state
             .prx_registry

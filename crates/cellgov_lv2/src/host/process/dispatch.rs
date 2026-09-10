@@ -6,6 +6,7 @@ use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::Lv2Dispatch;
+use crate::host::guest_struct::read_be_u64;
 use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
@@ -61,11 +62,8 @@ impl Lv2Host {
         source: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        let argv0 = rt
-            .read_committed(u64::from(arg_ptr) + 0x28, 8)
-            .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
-            .and_then(|args_array| rt.read_committed(args_array, 8))
-            .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]));
+        let argv0 = read_be_u64(rt, u64::from(arg_ptr) + 0x28)
+            .and_then(|args_array| read_be_u64(rt, args_array));
         match argv0 {
             None => {
                 // The param block is read unconditionally, so an
@@ -160,10 +158,7 @@ impl Lv2Host {
         if !rt.writable(u64::from(pid_out_ptr), 4) {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        let Some(table_off) = rt
-            .read_committed(u64::from(block_ptr), 8)
-            .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
-        else {
+        let Some(table_off) = read_be_u64(rt, u64::from(block_ptr)) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
         if table_off >= u64::from(block_size) {
@@ -179,10 +174,7 @@ impl Lv2Host {
         let mut path: Option<Vec<u8>> = None;
         let mut argv_terminated = false;
         for idx in 0..walk_limit {
-            let Some(entry) = rt
-                .read_committed(table_base + idx * 8, 8)
-                .map(|b| u64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]))
-            else {
+            let Some(entry) = read_be_u64(rt, table_base + idx * 8) else {
                 return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             };
             if entry == 0 {

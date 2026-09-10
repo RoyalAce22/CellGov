@@ -7,6 +7,7 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
@@ -33,13 +34,14 @@ impl Lv2Host {
         if id_ptr == 0 || attr_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        // sys_semaphore_attribute_t: protocol u32 at +0, type s32 at +20
-        // (shared with event_flag/mutex/cond). Memset-zero fails validation.
-        let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
+        // sys_semaphore_attribute_t: protocol@0 u32, pshared@4 u32,
+        // ipc_key@8 u64, flags@16 s32, pad@20 u32, name@24 char[8].
+        // This arm validates protocol alone. A memset-zero block
+        // fails that check.
+        let Some(attr) = GuestStruct::read(rt, attr_ptr as u64, 24) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let protocol =
-            u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
+        let protocol = attr.u32_at(0);
         use cellgov_ps3_abi::lv2::sync::{SYS_SYNC_FIFO, SYS_SYNC_PRIORITY};
         if protocol != SYS_SYNC_FIFO && protocol != SYS_SYNC_PRIORITY {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());

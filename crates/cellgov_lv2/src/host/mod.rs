@@ -17,6 +17,7 @@ mod event_flag;
 mod event_queue;
 mod expire;
 mod fs;
+pub(crate) mod guest_struct;
 mod lv2_host;
 mod lwmutex;
 mod memory;

@@ -11,6 +11,7 @@ use cellgov_ps3_abi::lv2::errno;
 use cellgov_ps3_abi::lv2::spu;
 
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse, SpuInitState, SpuLoadImage};
+use crate::host::guest_struct::{read_be_u32, GuestStruct};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::image::LsSegment;
 use crate::request::Lv2Request;
@@ -50,12 +51,7 @@ impl Lv2Host {
         // Field addresses are formed in u64: a record or table row at
         // the top of the 32-bit space reads as unmapped (CELL_EFAULT)
         // instead of wrapping the guest pointer.
-        let word = |addr: u64| -> Result<u32, UserImageRefusal> {
-            let bytes = rt
-                .read_committed(addr, 4)
-                .ok_or(UserImageRefusal::Unreadable)?;
-            Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        };
+        let word = |addr: u64| read_be_u32(rt, addr).ok_or(UserImageRefusal::Unreadable);
         let record = u64::from(img_ptr);
         let entry = word(record + u64::from(image::ENTRY_OFFSET))?;
         let segs_ptr = word(record + u64::from(image::SEGS_OFFSET))?;
@@ -459,10 +455,7 @@ impl Lv2Host {
         }
 
         // A kernel record carries the image id in `entry_point`.
-        let image_word = |offset: u32| -> Option<u32> {
-            let bytes = rt.read_committed(u64::from(img_ptr) + u64::from(offset), 4)?;
-            Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        };
+        let image_word = |offset: u32| read_be_u32(rt, u64::from(img_ptr) + u64::from(offset));
         let Some(image_type) = image_word(spu::image::TYPE_OFFSET) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
@@ -498,15 +491,9 @@ impl Lv2Host {
         let args = if arg_ptr == 0 {
             [0u64; 4]
         } else {
-            match rt.read_committed(arg_ptr as u64, 32) {
-                Some(bytes) if bytes.len() >= 32 => {
-                    let mut a = [0u64; 4];
-                    for (i, chunk) in bytes.as_chunks::<8>().0.iter().enumerate().take(4) {
-                        a[i] = u64::from_be_bytes(*chunk);
-                    }
-                    a
-                }
-                _ => {
+            match GuestStruct::read(rt, arg_ptr as u64, 32) {
+                Some(block) => std::array::from_fn(|i| block.u64_at(i * 8)),
+                None => {
                     return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                 }
             }
@@ -700,3 +687,7 @@ mod user_image_tests;
 #[cfg(test)]
 #[path = "tests/encoding_cap_tests.rs"]
 mod encoding_cap_tests;
+
+#[cfg(test)]
+#[path = "tests/spu_thread_argument_tests.rs"]
+mod thread_argument_tests;

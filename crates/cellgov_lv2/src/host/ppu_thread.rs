@@ -6,6 +6,7 @@ use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::{AddJoinWaiter, PpuThreadId};
 use cellgov_time::GuestTicks;
@@ -90,27 +91,11 @@ impl Lv2Host {
         // r4 is a `ppu_thread_param_t *`: `{ u32 entry_opd_ptr; u32
         // tls; }`. The OPD it points to is `{ u32 code; u32 toc; }`
         // (8 bytes, not PowerOpen 24).
-        let param_bytes: [u8; 8] = match rt
-            .read_committed(param_ptr as u64, 8)
-            .and_then(|bytes| bytes.first_chunk::<8>().copied())
-        {
-            Some(arr) => arr,
-            None => {
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
-            }
+        let Some(param) = GuestStruct::read(rt, param_ptr as u64, 8) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let entry_opd_ptr = u32::from_be_bytes([
-            param_bytes[0],
-            param_bytes[1],
-            param_bytes[2],
-            param_bytes[3],
-        ]);
-        let param_tls = u32::from_be_bytes([
-            param_bytes[4],
-            param_bytes[5],
-            param_bytes[6],
-            param_bytes[7],
-        ]);
+        let entry_opd_ptr = param.u32_at(0);
+        let param_tls = param.u32_at(4);
 
         // A null entry descriptor is EFAULT. The check runs before
         // the priority range test; that order is a CellGov choice,
@@ -129,19 +114,11 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
 
-        let opd_bytes: [u8; 8] = match rt
-            .read_committed(entry_opd_ptr as u64, 8)
-            .and_then(|bytes| bytes.first_chunk::<8>().copied())
-        {
-            Some(arr) => arr,
-            None => {
-                return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
-            }
+        let Some(opd) = GuestStruct::read(rt, entry_opd_ptr as u64, 8) else {
+            return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let entry_code =
-            u32::from_be_bytes([opd_bytes[0], opd_bytes[1], opd_bytes[2], opd_bytes[3]]) as u64;
-        let entry_toc =
-            u32::from_be_bytes([opd_bytes[4], opd_bytes[5], opd_bytes[6], opd_bytes[7]]) as u64;
+        let entry_code = u64::from(opd.u32_at(0));
+        let entry_toc = u64::from(opd.u32_at(4));
 
         // 0x4000 floor covers the ABI back-chain + register save area.
         let size = stacksize.max(0x4000);

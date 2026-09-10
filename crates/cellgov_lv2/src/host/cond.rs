@@ -16,6 +16,7 @@ use cellgov_ps3_abi::lv2::ipc::{
 use cellgov_ps3_abi::lv2::sync::SYS_SYNC_PROCESS_SHARED;
 
 use crate::dispatch::{CondMutexKind, Lv2Dispatch, PendingResponse};
+use crate::host::guest_struct::{read_be_u32, read_be_u64};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::PpuThreadId;
 use cellgov_time::GuestTicks;
@@ -90,10 +91,7 @@ impl Lv2Host {
         let Some(&base) = self.derived.system_seed_bases.get(&CELLSYSUTIL_SHM_IPC_KEY) else {
             return false;
         };
-        let read_u32 = |addr: u32| -> Option<u32> {
-            let bytes = rt.read_committed(u64::from(addr), 4)?;
-            Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
-        };
+        let read_u32 = |addr: u32| read_be_u32(rt, u64::from(addr));
         let slot_base = base.wrapping_add(slot as u32 * CELLSYSUTIL_SLOT_STRIDE);
         let cursor = read_u32(slot_base.wrapping_add(CELLSYSUTIL_SLOT_CURSOR_OFFSET));
         let limit = read_u32(slot_base.wrapping_add(CELLSYSUTIL_SLOT_LIMIT_OFFSET));
@@ -403,27 +401,10 @@ impl Lv2Host {
 /// iff `pshared` at +0 equals SYS_SYNC_PROCESS_SHARED, else 0.
 /// `None` when the attr struct is unreadable.
 fn cond_attr_ipc_key(attr_ptr: u32, rt: &dyn Lv2Runtime) -> Option<u64> {
-    let pshared_bytes = rt.read_committed(u64::from(attr_ptr), 4)?;
-    let pshared = u32::from_be_bytes([
-        pshared_bytes[0],
-        pshared_bytes[1],
-        pshared_bytes[2],
-        pshared_bytes[3],
-    ]);
-    if pshared != SYS_SYNC_PROCESS_SHARED {
+    if read_be_u32(rt, u64::from(attr_ptr))? != SYS_SYNC_PROCESS_SHARED {
         return Some(0);
     }
-    let key_bytes = rt.read_committed(u64::from(attr_ptr) + 8, 8)?;
-    Some(u64::from_be_bytes([
-        key_bytes[0],
-        key_bytes[1],
-        key_bytes[2],
-        key_bytes[3],
-        key_bytes[4],
-        key_bytes[5],
-        key_bytes[6],
-        key_bytes[7],
-    ]))
+    read_be_u64(rt, u64::from(attr_ptr) + 8)
 }
 
 fn wake_with(

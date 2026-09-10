@@ -1,8 +1,6 @@
 //! Per-syscall dispatch helpers for the `Lv2Request::Unsupported
-//! { number: N }` arms: one submodule per syscall family, plus the
-//! readers they share in [`be`].
+//! { number: N }` arms: one submodule per syscall family.
 
-mod be;
 mod memory;
 mod misc;
 mod prx;

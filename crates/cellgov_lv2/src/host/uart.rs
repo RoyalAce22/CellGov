@@ -30,6 +30,7 @@ use cellgov_ps3_abi::lv2::uart as av;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::{Lv2BlockReason, Lv2Dispatch, PendingResponse};
+use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::PpuThreadId;
 
@@ -215,11 +216,11 @@ impl ReplyBatch {
 }
 
 fn rd16(p: &[u8], off: usize) -> u16 {
-    u16::from_be_bytes([p[off], p[off + 1]])
+    GuestStruct::new(p).u16_at(off)
 }
 
 fn rd32(p: &[u8], off: usize) -> u32 {
-    u32::from_be_bytes([p[off], p[off + 1], p[off + 2], p[off + 3]])
+    GuestStruct::new(p).u32_at(off)
 }
 
 /// A packet's bytes, zero-padded to the length its header declares

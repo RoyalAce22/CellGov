@@ -8,6 +8,7 @@ use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::sync_primitives::MutexAttrs;
 use cellgov_time::GuestTicks;
@@ -34,10 +35,10 @@ impl Lv2Host {
         // null-attr default create.
         let attrs = if attr_ptr == 0 {
             MutexAttrs::default()
-        } else if let Some(bytes) = rt.read_committed(attr_ptr as u64, 12) {
-            let protocol = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-            let recursive_raw = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-            let pshared = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
+        } else if let Some(attr) = GuestStruct::read(rt, attr_ptr as u64, 12) {
+            let protocol = attr.u32_at(0);
+            let recursive_raw = attr.u32_at(4);
+            let pshared = attr.u32_at(8);
             // Each attribute word is an enumeration, so every unknown
             // enumerant is EINVAL. Validation ladder: protocol then
             // recursive in the syscall body, pshared / ipc_key /
@@ -70,13 +71,11 @@ impl Lv2Host {
                     // (1 / 2 / 3). EINVAL for the zero key is a
                     // CellGov choice -- the key range is established,
                     // the code for breaking it is not.
-                    let Some(tail) = rt.read_committed(attr_ptr as u64 + 16, 12) else {
+                    let Some(tail) = GuestStruct::read(rt, attr_ptr as u64 + 16, 12) else {
                         return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
                     };
-                    let ipc_key = u64::from_be_bytes([
-                        tail[0], tail[1], tail[2], tail[3], tail[4], tail[5], tail[6], tail[7],
-                    ]);
-                    let flags = u32::from_be_bytes([tail[8], tail[9], tail[10], tail[11]]);
+                    let ipc_key = tail.u64_at(0);
+                    let flags = tail.u32_at(8);
                     if ipc_key == 0 || !(1..=3).contains(&flags) {
                         return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
                     }

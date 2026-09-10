@@ -10,6 +10,7 @@ use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
 use crate::dispatch::{Lv2Dispatch, PendingResponse};
+use crate::host::guest_struct::GuestStruct;
 use crate::host::{Lv2Host, Lv2Runtime};
 use cellgov_time::GuestTicks;
 
@@ -54,17 +55,11 @@ impl Lv2Host {
         }
         // sys_event_flag_attribute_t: protocol@0 u32, pshared@4 u32,
         // ipc_key@8 u64, flags@16 s32, type@20 s32.
-        let Some(attr_bytes) = rt.read_committed(attr_ptr as u64, 24) else {
+        let Some(attr) = GuestStruct::read(rt, attr_ptr as u64, 24) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let protocol =
-            u32::from_be_bytes([attr_bytes[0], attr_bytes[1], attr_bytes[2], attr_bytes[3]]);
-        let kind = u32::from_be_bytes([
-            attr_bytes[20],
-            attr_bytes[21],
-            attr_bytes[22],
-            attr_bytes[23],
-        ]);
+        let protocol = attr.u32_at(0);
+        let kind = attr.u32_at(20);
         use cellgov_ps3_abi::lv2::sync::{
             SYS_SYNC_FIFO, SYS_SYNC_PRIORITY, SYS_SYNC_WAITER_MULTIPLE, SYS_SYNC_WAITER_SINGLE,
         };
