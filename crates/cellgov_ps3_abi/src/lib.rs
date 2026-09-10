@@ -1,5 +1,13 @@
-//! PS3 ABI constants: NIDs, error codes, struct offsets, and flag bits
-//! shared across workspace crates without inducing backward DAG edges.
+//! PS3 / Cell / PowerPC external-ABI facts and the pure functions over
+//! them. It holds no guest state, does no I/O, and depends on no
+//! workspace crate, so any workspace crate may depend on it.
+//!
+//! - NIDs, each checked against its SHA-1 at compile time
+//! - error codes
+//! - syscall numbers and the namespace layout over them
+//! - struct offsets and flag bits
+//! - binary-format and hardware constants
+//! - the PPC64 encoders for CellGov's own stubs
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
@@ -57,57 +65,21 @@ macro_rules! nid_const {
     };
 }
 
-/// Declare a PS3 PRX library NID module from a single declarative
-/// source. Each named NID becomes a SHA-1-verified `pub const` (via
-/// [`nid_const!`]) and a `(nid, name)` row of the per-module
-/// `DECLARED_NIDS` slice that the `nid` table tests reconcile against
-/// `NID_TABLE`; the `classified { ... }` block additionally
-/// contributes to a per-module `CLASSIFIED_NIDS: &[u32]` slice that
-/// `nid::tests::every_classified_nid_has_explicit_arm` walks to
-/// enforce the "every classified NID has an explicit arm in
-/// `stub_classification_explicit`" contract.
+/// Declares one PS3 library's NIDs as SHA-1-verified `pub const`s.
 ///
-/// The optional `unclassified { ... }` block emits the same per-NID
-/// `pub const` declarations but does not include them in
-/// `CLASSIFIED_NIDS`; use it for NIDs defined at a typed callsite
-/// that have not yet been reviewed for a stub-class verdict. Such
-/// NIDs keep surfacing through the unclaimed-NID log path until a
-/// per-NID review moves them into `classified`.
+/// The macro also emits the module's `DECLARED_NIDS` slice, one row
+/// per NID. `nid::CURATED` lists that slice, and the `nid` table tests
+/// reconcile it against `NID_TABLE`.
 macro_rules! nid_module {
-    (
-        classified {
-            $( $cname:ident = $cvalue:expr, $cfn:literal; )*
-        }
+    ( $( $name:ident = $value:expr, $fn:literal; )* ) => {
         $(
-            unclassified {
-                $( $uname:ident = $uvalue:expr, $ufn:literal; )*
-            }
-        )?
-    ) => {
-        $(
-            $crate::nid_const!($cname = $cvalue, $cfn);
+            $crate::nid_const!($name = $value, $fn);
         )*
-        $(
-            $(
-                $crate::nid_const!($uname = $uvalue, $ufn);
-            )*
-        )?
-
-        /// NIDs grouped under this module that must classify
-        /// explicitly in `cellgov_ps3_abi::nid::stub_classification_explicit`
-        /// (i.e. not fall to the default `NoopSafe` catch-all). The
-        /// test `nid::tests::every_classified_nid_has_explicit_arm`
-        /// walks every module's slice to enforce the contract.
-        ///
-        /// Consulted by `cellgov dev prx-imports` when
-        /// classifying unresolved-or-zero-bound PRX imports.
-        pub const CLASSIFIED_NIDS: &[u32] = &[ $( $cname ),* ];
 
         /// Every NID this module declares, paired with the guest
         /// function name behind its literal.
         pub const DECLARED_NIDS: &[(u32, &str)] = &[
-            $( ($cname, $cfn), )*
-            $( $( ($uname, $ufn), )* )?
+            $( ($name, $fn), )*
         ];
     };
 }

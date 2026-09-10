@@ -236,7 +236,7 @@ pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
             let name = cellgov_ps3_abi::nid::lookup(f.nid)
                 .map(|(_m, n)| n)
                 .unwrap_or("<unknown>");
-            let class_cell = cellgov_ps3_abi::nid::stub_classification(f.nid).as_str();
+            let class_cell = crate::stub_class::stub_classification(f.nid).as_str();
             println!(
                 "| 0x{:08x} | 0x{:08x}  | {:<width$} | {:<15} |",
                 f.nid,

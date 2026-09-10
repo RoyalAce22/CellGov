@@ -9,9 +9,9 @@
 //!   number itself currently sits at the namespace start
 //!   ([`crate::syscall::UNRESOLVED_IMPORT`]).
 //!
-//! The LEV-aware dispatch-hint classifier lives in
-//! `cellgov_lv2::syscall_classification`; this module exposes pure
-//! ABI facts only.
+//! This module holds the namespace layout and the pure encode /
+//! decode over it. The LEV-aware dispatch-hint classifier lives in
+//! `cellgov_lv2::syscall_classification`.
 
 use crate::syscall;
 

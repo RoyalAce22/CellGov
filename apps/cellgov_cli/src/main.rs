@@ -16,6 +16,7 @@ mod funcs;
 mod game;
 mod paths;
 mod progress;
+mod stub_class;
 
 use std::path::Path;
 

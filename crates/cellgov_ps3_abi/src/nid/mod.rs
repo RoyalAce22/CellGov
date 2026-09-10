@@ -11,18 +11,17 @@
 //! carry fixed NIDs the derivation does not produce. NIDs are
 //! game-independent.
 //!
-//! The curated `nid_module!` blocks live in `modules`. The full table
-//! is `table.rs`; `table_gen_tests` renders it from the `table.tsv`
-//! data file beside it and fails on drift.
+//! The curated `nid_module!` blocks live in `modules`, listed by name
+//! in [`CURATED`]. The full table is `table.rs`; `table_gen_tests`
+//! renders it from the `table.tsv` data file beside it and fails on
+//! drift.
 
 mod modules;
-mod stub_class;
 mod table;
 
 pub use modules::{
-    cell_gcm_sys, cell_save_data, cell_spurs, cell_sysutil, sys_fs, sys_prx_for_user,
+    cell_gcm_sys, cell_save_data, cell_spurs, cell_sysutil, sys_fs, sys_prx_for_user, CURATED,
 };
-pub use stub_class::{stub_classification, stub_classification_explicit, StubClass};
 use table::NID_TABLE;
 
 /// Returns `Some((module, function))` if the NID is known. `module` may
@@ -47,3 +46,7 @@ mod table_tests;
 #[cfg(test)]
 #[path = "tests/table_gen_tests.rs"]
 mod table_gen_tests;
+
+#[cfg(test)]
+#[path = "tests/curated_tests.rs"]
+mod curated_tests;

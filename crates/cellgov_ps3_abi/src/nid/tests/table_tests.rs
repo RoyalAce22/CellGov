@@ -4,16 +4,6 @@ use super::*;
 use crate::elf::{NID_MODULE_START, NID_MODULE_STOP};
 use crate::sha1::nid_sha1;
 
-/// Every `nid_module!` block in `modules.rs`, one row each.
-const DECLARED: &[(&str, &[(u32, &str)])] = &[
-    ("sys_prx_for_user", sys_prx_for_user::DECLARED_NIDS),
-    ("sys_fs", sys_fs::DECLARED_NIDS),
-    ("cell_sysutil", cell_sysutil::DECLARED_NIDS),
-    ("cell_save_data", cell_save_data::DECLARED_NIDS),
-    ("cell_gcm_sys", cell_gcm_sys::DECLARED_NIDS),
-    ("cell_spurs", cell_spurs::DECLARED_NIDS),
-];
-
 /// The module entry points: the only rows whose key is a fixed value
 /// rather than `nid_sha1(name)`.
 const ENTRY_POINT_NIDS: &[(u32, &str)] = &[
@@ -32,16 +22,16 @@ fn is_placeholder_name(nid: u32, module: &str, name: &str) -> bool {
 }
 
 #[test]
-fn every_nid_module_block_is_listed_in_declared() {
+fn every_nid_module_block_is_listed_in_curated() {
     let blocks = include_str!("../modules.rs")
         .matches("crate::nid_module! {")
         .count();
     assert_eq!(
         blocks,
-        DECLARED.len(),
-        "modules.rs declares {blocks} nid_module! blocks but DECLARED lists {}; \
-         a block missing from DECLARED is never reconciled against NID_TABLE",
-        DECLARED.len(),
+        CURATED.len(),
+        "modules.rs declares {blocks} nid_module! blocks but CURATED lists {}; \
+         a block missing from CURATED is never reconciled against NID_TABLE",
+        CURATED.len(),
     );
 }
 
@@ -120,7 +110,7 @@ fn entry_point_nids_are_not_named_export_hashes() {
 fn every_declared_const_matches_its_table_row() {
     let mut disagreements = Vec::new();
     let mut checked = 0usize;
-    for (module, declared) in DECLARED {
+    for (module, declared) in CURATED {
         for &(nid, name) in *declared {
             checked += 1;
             match lookup(nid) {
@@ -134,7 +124,7 @@ fn every_declared_const_matches_its_table_row() {
             }
         }
     }
-    assert!(checked > 0, "no nid_module! block is listed in DECLARED");
+    assert!(checked > 0, "no nid_module! block is listed in CURATED");
     assert!(
         disagreements.is_empty(),
         "{} of {checked} declared NIDs disagree with NID_TABLE:\n{}",
