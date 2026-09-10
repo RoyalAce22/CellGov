@@ -4,7 +4,7 @@ use super::*;
 use crate::elf::{NID_MODULE_START, NID_MODULE_STOP};
 use crate::sha1::nid_sha1;
 
-/// Every `nid_module!` block in `nid.rs`, one row each.
+/// Every `nid_module!` block in `modules.rs`, one row each.
 const DECLARED: &[(&str, &[(u32, &str)])] = &[
     ("sys_prx_for_user", sys_prx_for_user::DECLARED_NIDS),
     ("sys_fs", sys_fs::DECLARED_NIDS),
@@ -33,13 +33,13 @@ fn is_placeholder_name(nid: u32, module: &str, name: &str) -> bool {
 
 #[test]
 fn every_nid_module_block_is_listed_in_declared() {
-    let blocks = include_str!("../nid.rs")
+    let blocks = include_str!("../modules.rs")
         .matches("crate::nid_module! {")
         .count();
     assert_eq!(
         blocks,
         DECLARED.len(),
-        "nid.rs declares {blocks} nid_module! blocks but DECLARED lists {}; \
+        "modules.rs declares {blocks} nid_module! blocks but DECLARED lists {}; \
          a block missing from DECLARED is never reconciled against NID_TABLE",
         DECLARED.len(),
     );
