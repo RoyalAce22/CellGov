@@ -42,10 +42,9 @@ impl Lv2Host {
     /// `_sys_process_exit2`: exit carrying a `sys_exit2_param` block.
     ///
     /// The argv walk follows the block liblv2's
-    /// `sys_game_process_exitspawn` builds before it issues sc 26.
-    /// That block is a 0x30 header whose +0x28 word points at the
-    /// marshalled pointer array: argv strings, NULL, envp strings,
-    /// NULL. Empty argv is a plain `sys_process_exit`. Non-empty argv
+    /// `sys_game_process_exitspawn` builds before it issues sc 26; its
+    /// layout is [`cellgov_ps3_abi::lv2::process::exit2_param`]. Empty
+    /// argv is a plain `sys_process_exit`. Non-empty argv
     /// requests exitspawn -- reboot into `argv[0]` with argv/envp/data
     /// carried over. The re-spawn itself is not modeled yet (the
     /// kernel-side spawn-request queue vsh's sc-23 service consumes is
@@ -62,8 +61,9 @@ impl Lv2Host {
         source: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        let argv0 = read_be_u64(rt, u64::from(arg_ptr) + 0x28)
-            .and_then(|args_array| read_be_u64(rt, args_array));
+        let argv_slot = u64::from(arg_ptr)
+            + u64::from(cellgov_ps3_abi::lv2::process::exit2_param::ARGV_ARRAY_OFFSET);
+        let argv0 = read_be_u64(rt, argv_slot).and_then(|args_array| read_be_u64(rt, args_array));
         match argv0 {
             None => {
                 // The param block is read unconditionally, so an
@@ -87,12 +87,10 @@ impl Lv2Host {
                     .read_committed_until(path_ptr, SPAWN_STRING_MAX_LEN, 0)
                     .map(|b| String::from_utf8_lossy(b).into_owned())
                     .unwrap_or_else(|| String::from("<unreadable>"));
-                // arg_size > 0x1030 additionally carries a 0x1000-byte
-                // data blob at the block's tail. liblv2's exitspawn
-                // marshaller reserves 0x1000 bytes beyond the 0x30
-                // header and copies the caller's data there whenever
-                // data_size is non-zero. Recorded here so the trace
-                // shows what the unmodeled re-spawn dropped.
+                // An `arg_size` past `exit2_param::DATA_BLOB_THRESHOLD`
+                // additionally carries the caller's data blob at the
+                // block's tail. Recorded here so the trace shows what
+                // the unmodeled re-spawn dropped.
                 self.log_invariant_break(
                     "process.exitspawn_not_modeled",
                     format_args!(

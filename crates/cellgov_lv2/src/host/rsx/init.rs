@@ -24,16 +24,40 @@ pub fn write_rsx_driver_info_init(
     let mut put = |offset: usize, value: u32| {
         buf[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
     };
-    put(0x00, driver_info_init::VERSION_DRIVER);
-    put(0x04, driver_info_init::VERSION_GPU);
-    put(0x08, memory_size);
-    put(0x0C, driver_info_init::HARDWARE_CHANNEL);
-    put(0x10, driver_info_init::NVCORE_FREQUENCY);
-    put(0x14, driver_info_init::MEMORY_FREQUENCY);
-    put(0x2C, driver_info_init::REPORTS_NOTIFY_OFFSET);
-    put(0x30, driver_info_init::REPORTS_OFFSET_FIELD);
-    put(0x34, driver_info_init::REPORTS_REPORT_OFFSET);
-    put(0x50, system_mode);
+    put(
+        driver_info::VERSION_DRIVER_OFFSET,
+        driver_info_init::VERSION_DRIVER,
+    );
+    put(
+        driver_info::VERSION_GPU_OFFSET,
+        driver_info_init::VERSION_GPU,
+    );
+    put(driver_info::MEMORY_SIZE_OFFSET, memory_size);
+    put(
+        driver_info::HARDWARE_CHANNEL_OFFSET,
+        driver_info_init::HARDWARE_CHANNEL,
+    );
+    put(
+        driver_info::NVCORE_FREQUENCY_OFFSET,
+        driver_info_init::NVCORE_FREQUENCY,
+    );
+    put(
+        driver_info::MEMORY_FREQUENCY_OFFSET,
+        driver_info_init::MEMORY_FREQUENCY,
+    );
+    put(
+        driver_info::REPORTS_NOTIFY_OFFSET_FIELD,
+        driver_info_init::REPORTS_NOTIFY_OFFSET,
+    );
+    put(
+        driver_info::REPORTS_OFFSET_FIELD,
+        driver_info_init::REPORTS_OFFSET_FIELD,
+    );
+    put(
+        driver_info::REPORTS_REPORT_OFFSET_FIELD,
+        driver_info_init::REPORTS_REPORT_OFFSET,
+    );
+    put(driver_info::SYSTEM_MODE_OFFSET, system_mode);
     put(driver_info::HANDLER_QUEUE_OFFSET, handler_queue);
 }
 
@@ -55,17 +79,20 @@ pub fn write_rsx_reports_init(buf: &mut [u8]) {
     );
     buf.fill(0);
 
+    let notify_base = driver_info_init::REPORTS_NOTIFY_OFFSET as usize;
+    let report_base = driver_info_init::REPORTS_REPORT_OFFSET as usize;
     let ts_be = u64::MAX.to_be_bytes();
-    for i in 0..64 {
-        let offset = 0x1000 + i * 16;
-        buf[offset..offset + 8].copy_from_slice(&ts_be);
+    for i in 0..reports::NOTIFY_COUNT {
+        let at = notify_base + i * reports::ENTRY_SIZE;
+        buf[at..at + reports::TIMESTAMP_SIZE].copy_from_slice(&ts_be);
     }
 
     let pad_be = u32::MAX.to_be_bytes();
-    for i in 0..2048 {
-        let offset = 0x1400 + i * 16;
-        buf[offset..offset + 8].copy_from_slice(&ts_be);
-        buf[offset + 12..offset + 16].copy_from_slice(&pad_be);
+    for i in 0..reports::REPORT_COUNT {
+        let at = report_base + i * reports::ENTRY_SIZE;
+        buf[at..at + reports::TIMESTAMP_SIZE].copy_from_slice(&ts_be);
+        let pad = at + reports::REPORT_PAD_OFFSET;
+        buf[pad..pad + reports::REPORT_PAD_SIZE].copy_from_slice(&pad_be);
     }
 }
 

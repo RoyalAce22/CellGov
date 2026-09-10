@@ -50,6 +50,36 @@ pub const SYS_LWCOND_OBJECT: ProcessObjectClassId = 0x97;
 /// `sys_event_flag` objects.
 pub const SYS_EVENT_FLAG_OBJECT: ProcessObjectClassId = 0x98;
 
+/// `sys_exit2_param`, the block `_sys_process_exit2` (26) carries.
+///
+/// liblv2.sprx's `sys_game_process_exitspawn` marshals the block
+/// before it issues the syscall. The header size, the argv-array slot
+/// and the data reservation come from that caller's layout:
+///
+/// - `tag@0`
+/// - `this_size@8` -- the header size
+/// - `next_size@0x10` -- the marshalled region past the header
+/// - `prio@0x18`
+/// - `flags@0x20`
+/// - `args@0x28`
+///
+/// What the kernel does with the priority and the flags across the
+/// handoff is unestablished.
+pub mod exit2_param {
+    /// Bytes of header ahead of the marshalled strings.
+    pub const HEADER_SIZE: u32 = 0x30;
+    /// `args` -- guest pointer to the marshalled pointer array: argv
+    /// strings, NULL, envp strings, NULL.
+    pub const ARGV_ARRAY_OFFSET: u32 = 0x28;
+    /// Size of the caller's opaque data blob, which the marshaller
+    /// puts in the last bytes of the block.
+    pub const DATA_BLOB_SIZE: u32 = 0x1000;
+    /// An `arg_size` above this carries a [`DATA_BLOB_SIZE`] blob at
+    /// the tail of the block. A block of exactly this size carries
+    /// none.
+    pub const DATA_BLOB_THRESHOLD: u32 = HEADER_SIZE + DATA_BLOB_SIZE;
+}
+
 /// Every documented class id, in numeric order. The class-id
 /// coverage test in `cellgov_lv2::host::process::counts` drives
 /// off this slice.

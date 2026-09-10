@@ -72,9 +72,50 @@ pub mod start_stop_option {
 }
 
 /// `sys_prx_get_module_list_option_t`.
+///
+/// liblv2.sprx's `sys_prx_get_module_list` builds the struct on its own
+/// stack, so the offsets and the declared size are read off that
+/// caller:
+///
+/// - `size@0`, a `u64`
+/// - `pad@8`, which no caller writes
+/// - `max@0xC`
+/// - `count@0x10`
+/// - `idlist@0x14`
+/// - `unk@0x18`
+/// - tail padding to [`get_module_list_option::SIZE`]
+///
+/// The `pad` and `unk` words carry no name in that caller and the
+/// kernel touches neither, so what they hold is unestablished. A
+/// caller that declares a size other than that one names a layout with
+/// different offsets, which no firmware witness covers.
 pub mod get_module_list_option {
     /// The layout liblv2.sprx declares on every call it issues.
     pub const SIZE: u64 = 0x20;
+
+    /// `max` -- IN: slots the caller's `idlist` array holds.
+    pub const MAX_OFFSET: u32 = 0x0C;
+    /// `count` -- OUT: modules the kernel filled in.
+    pub const COUNT_OFFSET: u32 = 0x10;
+    /// `idlist` -- IN: guest pointer to the `u32` id array.
+    pub const IDLIST_OFFSET: u32 = 0x14;
+
+    /// Bytes of the struct the kernel reads or writes. The kernel
+    /// never touches the tail from here to [`SIZE`], so a caller that
+    /// maps only this much still gets a complete call.
+    pub const TOUCHED_LEN: u32 = 0x18;
+
+    /// Width of one `idlist` entry: a big-endian module id.
+    pub const ID_SIZE: u32 = 4;
+    /// Width of the `count` field.
+    pub const COUNT_SIZE: u32 = 4;
+
+    /// `flags` bit that asks for the module list.
+    ///
+    /// liblv2.sprx passes `flags = 2` on every call, so the other bits
+    /// have no witness. A caller that clears this bit short-circuits
+    /// to CELL_OK.
+    pub const FLAG_FILL_LIST: u64 = 0x2;
 }
 
 /// Low nibble of `sys_prx_start_stop_module_option_t::cmd`.

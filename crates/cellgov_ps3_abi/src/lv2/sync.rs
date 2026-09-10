@@ -37,6 +37,43 @@ pub const SYS_SYNC_WAITER_SINGLE: u32 = 0x10000;
 /// `type = SYS_SYNC_WAITER_MULTIPLE`: any number of threads may park.
 pub const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
 
+/// `sys_event_flag_wait` mode word.
+///
+/// Two independent nibbles:
+///
+/// - the low nibble picks the match rule, and names exactly one of
+///   [`AND`] / [`OR`];
+/// - the high nibble picks the post-match clear, and is empty or names
+///   exactly one of [`CLEAR`] / [`CLEAR_ALL`].
+///
+/// Any other value in either nibble is EINVAL at wait.
+///
+/// [`AND`]: event_flag_wait_mode::AND
+/// [`OR`]: event_flag_wait_mode::OR
+/// [`CLEAR`]: event_flag_wait_mode::CLEAR
+/// [`CLEAR_ALL`]: event_flag_wait_mode::CLEAR_ALL
+///
+/// Either clear gives the waiter the flag value from before the clear.
+// The split between the two clear bits comes from a non-public
+// description of the wait mode, so it carries no citation. No corpus
+// caller issues CLEAR_ALL, so nothing in dev_flash witnesses it
+// either.
+pub mod event_flag_wait_mode {
+    /// Match when every requested bit is set.
+    pub const AND: u32 = 0x01;
+    /// Match when any requested bit is set.
+    pub const OR: u32 = 0x02;
+    /// Nibble holding the match rule.
+    pub const MATCH_MASK: u32 = 0x0F;
+
+    /// On a match, clear the bits the caller waited on.
+    pub const CLEAR: u32 = 0x10;
+    /// On a match, clear every bit of the flag value.
+    pub const CLEAR_ALL: u32 = 0x20;
+    /// Nibble holding the clear rule.
+    pub const CLEAR_MASK: u32 = 0xF0;
+}
+
 /// `port_type = SYS_EVENT_PORT_LOCAL`: connectable only by queue id,
 /// through `sys_event_port_connect_local` (136).
 pub const SYS_EVENT_PORT_LOCAL: u64 = 1;

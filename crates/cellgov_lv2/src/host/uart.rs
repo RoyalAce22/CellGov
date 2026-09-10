@@ -223,6 +223,15 @@ fn rd32(p: &[u8], off: usize) -> u32 {
     GuestStruct::new(p).u32_at(off)
 }
 
+/// # Panics
+///
+/// Panics if `src` does not fit at `off`. Every caller writes a named
+/// field of a fixed-size record, so a panic means the offset table and
+/// the record length disagree.
+fn put_bytes(dst: &mut [u8], off: usize, src: &[u8]) {
+    dst[off..off + src.len()].copy_from_slice(src);
+}
+
 /// A packet's bytes, zero-padded to the length its header declares
 /// so field reads past a short send read zeros rather than fault.
 fn padded(tx: &[u8], off: usize, len: usize) -> Vec<u8> {
@@ -536,35 +545,35 @@ fn video_sce_index(vid: u32) -> Option<usize> {
 
 /// Validate one `ps3av_pkt_video_mode`.
 ///
-/// The system controller decides the accepted set, and its firmware is
-/// not in dev_flash. The bounds table above, the `0x1CE07`
-/// `out_format` mask, and the `unk2` and `pitch` limits have no
-/// witness, so a rejection here is a guess.
+/// The bounds are [`cellgov_ps3_abi::lv2::uart::video_mode`]. None of
+/// them has a witness, so a rejection here is a guess.
 fn video_mode_status(v: &[u8]) -> u32 {
-    let head = rd32(v, 8);
-    let unk2 = rd16(v, 14);
-    let vid = rd32(v, 16);
-    let width = rd32(v, 20);
-    let height = rd32(v, 24);
-    let pitch = rd32(v, 28);
-    let out_format = rd32(v, 32);
-    let format = rd32(v, 36);
-    let order = rd16(v, 42);
+    use cellgov_ps3_abi::lv2::uart::video_mode as vm;
+    let head = rd32(v, vm::HEAD_OFFSET);
+    let unk2 = rd16(v, vm::UNK2_OFFSET);
+    let vid = rd32(v, vm::VID_OFFSET);
+    let width = rd32(v, vm::WIDTH_OFFSET);
+    let height = rd32(v, vm::HEIGHT_OFFSET);
+    let pitch = rd32(v, vm::PITCH_OFFSET);
+    let out_format = rd32(v, vm::OUT_FORMAT_OFFSET);
+    let format = rd32(v, vm::FORMAT_OFFSET);
+    let order = rd16(v, vm::ORDER_OFFSET);
     let Some(idx) = video_sce_index(vid) else {
         return av::PS3AV_STATUS_INVALID_VIDEO_PARAM;
     };
     let (width_div, max_width, max_height) = VIDEO_SCE_PARAMS[idx];
     let bad = head > av::PS3AV_HEAD_B_ANALOG
-        || order > 1
-        || format > 16
-        || out_format > 16
-        || (1u64 << out_format) & 0x1CE07 == 0
-        || unk2 > 3
-        || pitch & 7 != 0
+        || order > vm::ORDER_MAX
+        || format > vm::FORMAT_MAX
+        || out_format > vm::FORMAT_MAX
+        || (1u64 << out_format) & vm::OUT_FORMAT_ACCEPTED == 0
+        || unk2 > vm::UNK2_MAX
+        || pitch & vm::ALIGN_MASK != 0
         || pitch > u32::from(u16::MAX)
-        || (width != 1280 && (width & 7 != 0 || width > u32::from(u16::MAX)))
-        || (max_width != 720 && width > max_width / width_div)
-        || !((height == 1470 && matches!(max_height, 721 | 481 | 577))
+        || (width != vm::WIDTH_UNALIGNED_EXEMPT
+            && (width & vm::ALIGN_MASK != 0 || width > u32::from(u16::MAX)))
+        || (max_width != vm::WIDTH_UNCHECKED_MAX && width > max_width / width_div)
+        || !((height == vm::HEIGHT_TALL && vm::HEIGHT_TALL_MAX_HEIGHTS.contains(&max_height))
             || (height <= max_height && height <= u32::from(u16::MAX)));
     if bad {
         av::PS3AV_STATUS_INVALID_VIDEO_PARAM
@@ -573,12 +582,33 @@ fn video_mode_status(v: &[u8]) -> u32 {
     }
 }
 
-/// `monitor_name`, NUL-padded into the descriptor's 16-byte field.
+/// `monitor_name`, NUL-padded into the descriptor's name field.
 const MONITOR_NAME: &[u8] = b"CellGov HDMI";
+const _: () = assert!(MONITOR_NAME.len() <= av::monitor_info::MONITOR_NAME_LEN);
 
-/// The name field runs from offset 12 to the `res_60` bits at 28.
-const MONITOR_NAME_FIELD_LEN: usize = 16;
-const _: () = assert!(MONITOR_NAME.len() <= MONITOR_NAME_FIELD_LEN);
+/// `monitor_id` for the synthesised HDMI sink.
+///
+/// On a console this is the attached display's EDID identification
+/// block. CellGov has no display, so the bytes are its own pick.
+/// Nothing here holds them against the EDID vendor registry.
+const MONITOR_ID: [u8; av::monitor_info::MONITOR_ID_LEN] =
+    [0x4A, 0x13, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x15];
+
+/// `speaker_info` for the synthesised HDMI sink.
+///
+/// How the byte encodes a speaker layout is unestablished, so the
+/// value is CellGov's pick like the rest of the descriptor.
+const HDMI_SPEAKER_INFO: u8 = 0x4F;
+
+/// `speaker_info` for the AV-multi port: one bit, against the one
+/// stereo audio block that port reports.
+const AVMULTI_SPEAKER_INFO: u8 = 1;
+
+/// `gamma` the HDMI descriptor reports.
+///
+/// The field's scale is unestablished, so the value is CellGov's pick
+/// like the rest of the descriptor.
+const HDMI_GAMMA: u32 = 100;
 
 /// The fixed HDMI 0 monitor: a 27-inch 16:9 1080p panel.
 ///
@@ -588,21 +618,22 @@ const _: () = assert!(MONITOR_NAME.len() <= MONITOR_NAME_FIELD_LEN);
 /// colour. An EDID pass-through behaviour mode reports only the
 /// monitor type.
 fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LEN] {
+    use av::monitor_info as mi;
     let mut m = [0u8; av::PS3AV_MONITOR_INFO_LEN];
     if behavior != av::PS3AV_HDMI_BEHAVIOR_NORMAL
         && behavior & av::PS3AV_HDMI_BEHAVIOR_EDID_PASS != 0
     {
-        m[11] = if behavior & av::PS3AV_HDMI_BEHAVIOR_DVI != 0 {
+        m[mi::MONITOR_TYPE_OFFSET] = if behavior & av::PS3AV_HDMI_BEHAVIOR_DVI != 0 {
             av::PS3AV_MONITOR_TYPE_DVI
         } else {
             av::PS3AV_MONITOR_TYPE_HDMI
         };
         return m;
     }
-    m[0] = avport;
-    m[1..11].copy_from_slice(&[0x4A, 0x13, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x15]);
-    m[11] = av::PS3AV_MONITOR_TYPE_HDMI;
-    m[12..12 + MONITOR_NAME.len()].copy_from_slice(MONITOR_NAME);
+    m[mi::AVPORT_OFFSET] = avport;
+    put_bytes(&mut m, mi::MONITOR_ID_OFFSET, &MONITOR_ID);
+    m[mi::MONITOR_TYPE_OFFSET] = av::PS3AV_MONITOR_TYPE_HDMI;
+    put_bytes(&mut m, mi::MONITOR_NAME_OFFSET, MONITOR_NAME);
     // The CEA modes an HDTV carries, per refresh table. 480p and 576p
     // share a bit position, read against whichever table holds it.
     let hd = av::PS3AV_RESBIT_1280X720P | av::PS3AV_RESBIT_1920X1080I | av::PS3AV_RESBIT_1920X1080P;
@@ -619,16 +650,16 @@ fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LE
     .into_iter()
     .enumerate()
     {
-        let at = 28 + i * 8;
-        m[at..at + 4].copy_from_slice(&bits.to_be_bytes());
-        m[at + 4..at + 8].copy_from_slice(&nat.to_be_bytes());
+        let at = mi::RES_TABLE_OFFSET + i * mi::RES_TABLE_SIZE;
+        put_bytes(&mut m, at, &bits.to_be_bytes());
+        put_bytes(&mut m, at + mi::RES_WORD_SIZE, &nat.to_be_bytes());
     }
-    m[60] = av::PS3AV_CS_SUPPORTED
+    m[mi::CS_RGB_OFFSET] = av::PS3AV_CS_SUPPORTED
         | av::PS3AV_RGB_SELECTABLE_QUANTIZATION_RANGE
         | av::PS3AV_12BIT_COLOR;
-    m[61] = av::PS3AV_CS_SUPPORTED | av::PS3AV_12BIT_COLOR;
-    m[62] = av::PS3AV_CS_SUPPORTED;
-    m[63] = av::PS3AV_COLORIMETRY_XVYCC_601
+    m[mi::CS_YUV444_OFFSET] = av::PS3AV_CS_SUPPORTED | av::PS3AV_12BIT_COLOR;
+    m[mi::CS_YUV422_OFFSET] = av::PS3AV_CS_SUPPORTED;
+    m[mi::COLORIMETRY_OFFSET] = av::PS3AV_COLORIMETRY_XVYCC_601
         | av::PS3AV_COLORIMETRY_XVYCC_709
         | av::PS3AV_COLORIMETRY_MD0
         | av::PS3AV_COLORIMETRY_MD1
@@ -640,12 +671,15 @@ fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LE
         .into_iter()
         .enumerate()
     {
-        m[64 + i * 2..66 + i * 2].copy_from_slice(&v.to_be_bytes());
+        put_bytes(
+            &mut m,
+            mi::COLOR_COORD_OFFSET + i * mi::COLOR_COORD_SIZE,
+            &v.to_be_bytes(),
+        );
     }
-    m[80..84].copy_from_slice(&100u32.to_be_bytes());
-    m[84] = 1; // supported_ai
-    m[85] = 0x4F; // speaker_info
-    m[86..88].copy_from_slice(&7u16.to_be_bytes()); // num_of_audio_block
+    put_bytes(&mut m, mi::GAMMA_OFFSET, &HDMI_GAMMA.to_be_bytes());
+    m[mi::SUPPORTED_AI_OFFSET] = 1;
+    m[mi::SPEAKER_INFO_OFFSET] = HDMI_SPEAKER_INFO;
     let audio: [(u8, u8, u8, u8); 7] = [
         (av::PS3AV_MON_INFO_AUDIO_TYPE_LPCM, 8, 0x7F, 0x07),
         (av::PS3AV_MON_INFO_AUDIO_TYPE_AC3, 8, 0x7F, 0xFF),
@@ -655,35 +689,49 @@ fn hdmi_monitor_info(avport: u8, behavior: u8) -> [u8; av::PS3AV_MONITOR_INFO_LE
         (av::PS3AV_MON_INFO_AUDIO_TYPE_DTS_HD, 8, 0x7F, 0xFF),
         (av::PS3AV_MON_INFO_AUDIO_TYPE_DOLBY_THD, 8, 0x7F, 0xFF),
     ];
+    put_bytes(
+        &mut m,
+        mi::NUM_AUDIO_BLOCK_OFFSET,
+        &(audio.len() as u16).to_be_bytes(),
+    );
     for (i, (ty, ch, fs, sbit)) in audio.into_iter().enumerate() {
-        let at = 88 + i * 4;
-        m[at..at + 4].copy_from_slice(&[ty, ch, fs, sbit]);
+        let at = mi::AUDIO_BLOCK_OFFSET + i * mi::AUDIO_BLOCK_SIZE;
+        put_bytes(&mut m, at, &[ty, ch, fs, sbit]);
     }
     // 60 cm by 34 cm: a 27-inch panel at 16:9.
-    m[152..154].copy_from_slice(&60u16.to_be_bytes()); // hor_screen_size
-    m[154..156].copy_from_slice(&34u16.to_be_bytes()); // ver_screen_size
-    m[156] = 0b1111; // supported_content_types
+    put_bytes(&mut m, mi::HOR_SCREEN_SIZE_OFFSET, &60u16.to_be_bytes());
+    put_bytes(&mut m, mi::VER_SCREEN_SIZE_OFFSET, &34u16.to_be_bytes());
+    m[mi::CONTENT_TYPES_OFFSET] = 0b1111;
 
-    // The five 3D resolution blocks at 160..200 stay zero: a plain
-    // HDTV carries no stereoscopic timing.
+    // The 3D blocks at `RES_3D_OFFSET` stay zero: a plain HDTV carries
+    // no 3D timing.
     m
 }
 
 /// The AV-multi port: every resolution, all three colour spaces, one
 /// stereo LPCM block.
 fn avmulti_monitor_info() -> [u8; av::PS3AV_MONITOR_INFO_LEN] {
+    use av::monitor_info as mi;
     let mut m = [0u8; av::PS3AV_MONITOR_INFO_LEN];
-    m[0] = av::PS3AV_AVPORT_AVMULTI_0 as u8;
-    m[11] = av::PS3AV_MONITOR_TYPE_AVMULTI;
-    for at in [28, 36, 52] {
-        m[at..at + 4].copy_from_slice(&u32::MAX.to_be_bytes());
+    m[mi::AVPORT_OFFSET] = av::PS3AV_AVPORT_AVMULTI_0 as u8;
+    m[mi::MONITOR_TYPE_OFFSET] = av::PS3AV_MONITOR_TYPE_AVMULTI;
+    // res_60, res_50 and res_vesa carry every bit; res_other stays
+    // zero. The loop fills only the bit words, so no table names a
+    // native timing.
+    for table in [0, 1, 3] {
+        let at = mi::RES_TABLE_OFFSET + table * mi::RES_TABLE_SIZE;
+        put_bytes(&mut m, at, &u32::MAX.to_be_bytes());
     }
-    m[60] = av::PS3AV_CS_SUPPORTED;
-    m[61] = av::PS3AV_CS_SUPPORTED;
-    m[62] = av::PS3AV_CS_SUPPORTED;
-    m[85] = 1; // speaker_info
-    m[86..88].copy_from_slice(&1u16.to_be_bytes());
-    m[88..92].copy_from_slice(&[av::PS3AV_MON_INFO_AUDIO_TYPE_LPCM, 2, 127, 7]);
+    m[mi::CS_RGB_OFFSET] = av::PS3AV_CS_SUPPORTED;
+    m[mi::CS_YUV444_OFFSET] = av::PS3AV_CS_SUPPORTED;
+    m[mi::CS_YUV422_OFFSET] = av::PS3AV_CS_SUPPORTED;
+    m[mi::SPEAKER_INFO_OFFSET] = AVMULTI_SPEAKER_INFO;
+    put_bytes(&mut m, mi::NUM_AUDIO_BLOCK_OFFSET, &1u16.to_be_bytes());
+    put_bytes(
+        &mut m,
+        mi::AUDIO_BLOCK_OFFSET,
+        &[av::PS3AV_MON_INFO_AUDIO_TYPE_LPCM, 2, 127, 7],
+    );
     m
 }
 
@@ -1541,6 +1589,10 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/uart_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/uart_monitor_layout_tests.rs"]
+mod monitor_layout_tests;
 
 #[cfg(test)]
 #[path = "tests/uart_reader_queue_tests.rs"]

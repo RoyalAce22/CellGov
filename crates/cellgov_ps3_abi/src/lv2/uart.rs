@@ -291,6 +291,148 @@ pub const PS3AV_MONITOR_INFO_LEN: usize = 208;
 /// Bytes of monitor info the HDMI reply and the plugged event carry.
 pub const PS3AV_MONITOR_INFO_HDMI_LEN: usize = 204;
 
+/// `ps3av_pkt_video_mode` field offsets and the values the AV manager
+/// accepts in each.
+///
+/// The system controller decides the accepted set, and its firmware is
+/// not in dev_flash. Every bound here is unestablished, so a rejection
+/// built on one is a guess. A VIDEO_MODE packet the AV manager answers
+/// with `PS3AV_STATUS_INVALID_VIDEO_PARAM` would witness the boundary
+/// it names.
+pub mod video_mode {
+    /// `head` -- which output head the mode drives.
+    pub const HEAD_OFFSET: usize = 8;
+    /// `unk2`.
+    pub const UNK2_OFFSET: usize = 14;
+    /// `video_vid` -- the mode id, keying the SCE bounds table.
+    pub const VID_OFFSET: usize = 16;
+    /// `width`, in pixels.
+    pub const WIDTH_OFFSET: usize = 20;
+    /// `height`, in lines.
+    pub const HEIGHT_OFFSET: usize = 24;
+    /// `pitch`, in bytes.
+    pub const PITCH_OFFSET: usize = 28;
+    /// `video_out_format`.
+    pub const OUT_FORMAT_OFFSET: usize = 32;
+    /// `video_format`.
+    pub const FORMAT_OFFSET: usize = 36;
+    /// `video_order`.
+    pub const ORDER_OFFSET: usize = 42;
+
+    /// Highest accepted `video_format` and `video_out_format`.
+    pub const FORMAT_MAX: u32 = 16;
+    /// Set bit `n` for each `video_out_format` value `n` the AV
+    /// manager accepts. The AV manager rejects a value inside
+    /// [`FORMAT_MAX`] whose bit this mask clears.
+    pub const OUT_FORMAT_ACCEPTED: u64 = 0x1CE07;
+    /// Highest accepted `unk2`.
+    pub const UNK2_MAX: u16 = 3;
+    /// Highest accepted `video_order`.
+    pub const ORDER_MAX: u16 = 1;
+    /// The AV manager rejects a `pitch` or a `width` that is not
+    /// aligned to this mask.
+    pub const ALIGN_MASK: u32 = 7;
+    /// The one `width` exempt from [`ALIGN_MASK`].
+    pub const WIDTH_UNALIGNED_EXEMPT: u32 = 1280;
+    /// `max_width` marking a bounds row that skips the width check.
+    pub const WIDTH_UNCHECKED_MAX: u32 = 720;
+    /// `height` accepted against a table row whose `max_height` is one
+    /// of [`HEIGHT_TALL_MAX_HEIGHTS`], whatever that row bounds.
+    pub const HEIGHT_TALL: u32 = 1470;
+    /// The rows [`HEIGHT_TALL`] is accepted against.
+    pub const HEIGHT_TALL_MAX_HEIGHTS: [u32; 3] = [721, 481, 577];
+}
+
+/// `ps3av_monitor_info` field offsets, the descriptor body of a
+/// `GET_MONITOR_INFO` reply and of a plugged event.
+///
+/// Provenance is the module's: nothing in the corpus states the PS3AV
+/// protocol, so every offset here is unestablished. The layout an
+/// AV-manager reply carries during boot would witness them.
+pub mod monitor_info {
+    /// `avport` -- which port the descriptor answers for.
+    pub const AVPORT_OFFSET: usize = 0;
+    /// `monitor_id` -- the sink's EDID identification block.
+    pub const MONITOR_ID_OFFSET: usize = 1;
+    /// Bytes of `monitor_id`.
+    pub const MONITOR_ID_LEN: usize = 10;
+    /// `monitor_type` -- HDMI, DVI or AV-multi.
+    pub const MONITOR_TYPE_OFFSET: usize = 11;
+    /// `monitor_name`, NUL-padded.
+    pub const MONITOR_NAME_OFFSET: usize = 12;
+    /// Bytes of `monitor_name`.
+    pub const MONITOR_NAME_LEN: usize = 16;
+
+    /// First of the four resolution tables: `res_60`, `res_50`,
+    /// `res_other`, `res_vesa`.
+    pub const RES_TABLE_OFFSET: usize = 28;
+    /// Tables at [`RES_TABLE_OFFSET`].
+    pub const RES_TABLE_COUNT: usize = 4;
+    /// Bytes per table: a `res_bits` word then a `native` word.
+    pub const RES_TABLE_SIZE: usize = 8;
+    /// Width of each of those two words.
+    pub const RES_WORD_SIZE: usize = 4;
+
+    /// `cs_rgb` -- colour-space support, RGB.
+    pub const CS_RGB_OFFSET: usize = 60;
+    /// `cs_yuv444`.
+    pub const CS_YUV444_OFFSET: usize = 61;
+    /// `cs_yuv422`.
+    pub const CS_YUV422_OFFSET: usize = 62;
+    /// `colorimetry` flags.
+    pub const COLORIMETRY_OFFSET: usize = 63;
+
+    /// First of the eight chromaticity words: red x/y, green x/y,
+    /// blue x/y, white x/y, each a 10-bit CIE fraction in a `u16`.
+    pub const COLOR_COORD_OFFSET: usize = 64;
+    /// Words at [`COLOR_COORD_OFFSET`].
+    pub const COLOR_COORD_COUNT: usize = 8;
+    /// Width of one chromaticity word.
+    pub const COLOR_COORD_SIZE: usize = 2;
+
+    /// `gamma`, as a fixed-point word whose scale is unestablished.
+    pub const GAMMA_OFFSET: usize = 80;
+    /// `supported_ai`.
+    pub const SUPPORTED_AI_OFFSET: usize = 84;
+    /// `speaker_info`.
+    pub const SPEAKER_INFO_OFFSET: usize = 85;
+    /// `num_of_audio_block`.
+    pub const NUM_AUDIO_BLOCK_OFFSET: usize = 86;
+
+    /// First of the [`PS3AV_MON_INFO_AUDIO_BLK_MAX`] audio blocks,
+    /// which end where `hor_screen_size` starts.
+    ///
+    /// [`PS3AV_MON_INFO_AUDIO_BLK_MAX`]: super::PS3AV_MON_INFO_AUDIO_BLK_MAX
+    pub const AUDIO_BLOCK_OFFSET: usize = 88;
+    /// Bytes per audio block: `type`, `max_ch`, `fs`, `sbit`.
+    pub const AUDIO_BLOCK_SIZE: usize = 4;
+
+    /// `hor_screen_size`, in centimetres.
+    pub const HOR_SCREEN_SIZE_OFFSET: usize = 152;
+    /// `ver_screen_size`, in centimetres.
+    pub const VER_SCREEN_SIZE_OFFSET: usize = 154;
+    /// `supported_content_types`.
+    pub const CONTENT_TYPES_OFFSET: usize = 156;
+    /// First of the five stereoscopic-timing blocks, eight bytes each.
+    /// The blocks end at offset 200. What the bytes after them hold is
+    /// unestablished.
+    pub const RES_3D_OFFSET: usize = 160;
+
+    // A wrong stride or count fails the build rather than shifting
+    // the fields after it.
+    const _: () = assert!(MONITOR_ID_OFFSET + MONITOR_ID_LEN == MONITOR_TYPE_OFFSET);
+    const _: () = assert!(MONITOR_NAME_OFFSET + MONITOR_NAME_LEN == RES_TABLE_OFFSET);
+    const _: () = assert!(RES_WORD_SIZE * 2 == RES_TABLE_SIZE);
+    const _: () = assert!(RES_TABLE_OFFSET + RES_TABLE_COUNT * RES_TABLE_SIZE == CS_RGB_OFFSET);
+    const _: () =
+        assert!(COLOR_COORD_OFFSET + COLOR_COORD_COUNT * COLOR_COORD_SIZE == GAMMA_OFFSET);
+    const _: () = assert!(
+        AUDIO_BLOCK_OFFSET + super::PS3AV_MON_INFO_AUDIO_BLK_MAX * AUDIO_BLOCK_SIZE
+            == HOR_SCREEN_SIZE_OFFSET
+    );
+    const _: () = assert!(RES_3D_OFFSET < super::PS3AV_MONITOR_INFO_LEN);
+}
+
 /// KSV of the HDMI transmitter, as GET_AKSV reports it.
 pub const PS3AV_AKSV_VALUE: [u8; 5] = [0x00, 0x00, 0x0F, 0xFF, 0xFF];
 /// KSV of the single HDCP sink, as BKSV lists and HDCP events report it.

@@ -683,18 +683,15 @@ impl Lv2Host {
     /// `_sys_prx_get_module_list` (494): fills `pInfo->idlist` and
     /// writes `pInfo->count`, filtering liblv2.sprx.
     ///
-    /// Struct layout, as liblv2.sprx's `sys_prx_get_module_list`
-    /// builds it on its own stack: `size@0` (u64, declared `0x20`),
-    /// `pad@8` (never written), `max@0xC`, `count@0x10`,
-    /// `idlist@0x14`, `unk@0x18`, tail padding to `0x20`. Only
-    /// `[p_info, p_info+0x18)` is touched. liblv2.sprx always passes
-    /// `flags = 2`; `flags & 0x2 == 0` short-circuits to CELL_OK.
-    /// CELL_EFAULT on null `pInfo`.
+    /// The struct layout is
+    /// [`cellgov_ps3_abi::lv2::prx::get_module_list_option`]. When the
+    /// fill-list flag is clear, the call answers CELL_OK. A null
+    /// `pInfo` answers CELL_EFAULT.
     ///
-    /// `size` selects the layout. A value other than `0x20` names a
-    /// struct whose `max` / `count` / `idlist` sit elsewhere, and that
-    /// layout is not modelled: the call fills nothing, answers
-    /// CELL_OK, and logs a break.
+    /// `size` selects the layout. A value other than the modelled one
+    /// names a struct whose `max` / `count` / `idlist` sit elsewhere,
+    /// and that layout is not modelled: the call fills nothing,
+    /// answers CELL_OK, and logs a break.
     ///
     /// # Cross-module contract
     ///
@@ -708,23 +705,25 @@ impl Lv2Host {
         rt: &dyn Lv2Runtime,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        let modelled_size = cellgov_ps3_abi::lv2::prx::get_module_list_option::SIZE;
+        use cellgov_ps3_abi::lv2::prx::get_module_list_option as opt;
+        let modelled_size = opt::SIZE;
 
         let flags = args[0];
         let p_info = args[1] as u32;
-        if flags & 0x2 == 0 {
+        if flags & opt::FLAG_FILL_LIST == 0 {
             return Lv2Dispatch::immediate(0);
         }
         if p_info == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        if p_info.checked_add(0x18).is_none() {
+        if p_info.checked_add(opt::TOUCHED_LEN).is_none() {
             self.log_invariant_break(
                 "dispatch.prx_module_list_p_info_wraps",
                 format_args!(
-                    "sys_prx_get_module_list pInfo struct [p_info, p_info+0x18) wraps u32: \
-                     pInfo={p_info:#010x}; returning CELL_EFAULT (struct does not fit in \
-                     32-bit guest address space)"
+                    "sys_prx_get_module_list pInfo struct [p_info, p_info+{touched:#x}) wraps \
+                     u32: pInfo={p_info:#010x}; returning CELL_EFAULT (struct does not fit in \
+                     32-bit guest address space)",
+                    touched = opt::TOUCHED_LEN
                 ),
             );
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
@@ -752,9 +751,9 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(0);
         }
         let mut effects = Vec::new();
-        let max_addr = p_info.wrapping_add(0x0C);
-        let count_addr = p_info.wrapping_add(0x10);
-        let idlist_ptr_addr = p_info.wrapping_add(0x14);
+        let max_addr = p_info.wrapping_add(opt::MAX_OFFSET);
+        let count_addr = p_info.wrapping_add(opt::COUNT_OFFSET);
+        let idlist_ptr_addr = p_info.wrapping_add(opt::IDLIST_OFFSET);
         let Some(max) = read_be_u32(rt, u64::from(max_addr)) else {
             self.log_invariant_break(
                 "dispatch.prx_module_list_unreadable_pinfo",
@@ -791,16 +790,17 @@ impl Lv2Host {
                 }
                 debug_assert!(
                     count
-                        .checked_mul(4)
+                        .checked_mul(opt::ID_SIZE)
                         .and_then(|off| idlist_ptr.checked_add(off))
-                        .and_then(|s| s.checked_add(4))
+                        .and_then(|s| s.checked_add(opt::ID_SIZE))
                         .is_some(),
-                    "sys_prx_get_module_list 4-byte slot write at idlist_ptr+count*4 \
+                    "sys_prx_get_module_list id slot write at idlist_ptr+count*{id_size} \
                      wraps u32: idlist_ptr={idlist_ptr:#010x} count={count}",
+                    id_size = opt::ID_SIZE,
                 );
-                let slot = idlist_ptr.wrapping_add(count.wrapping_mul(4));
+                let slot = idlist_ptr.wrapping_add(count.wrapping_mul(opt::ID_SIZE));
                 effects.push(Effect::shared_write(
-                    ByteRange::contiguous_u32(slot, 4),
+                    ByteRange::contiguous_u32(slot, opt::ID_SIZE),
                     WritePayload::from_slice(&kid.to_be_bytes()),
                     requester,
                     tick,
@@ -809,7 +809,7 @@ impl Lv2Host {
             }
         }
         effects.push(Effect::shared_write(
-            ByteRange::contiguous_u32(count_addr, 4),
+            ByteRange::contiguous_u32(count_addr, opt::COUNT_SIZE),
             WritePayload::from_slice(&count.to_be_bytes()),
             requester,
             tick,

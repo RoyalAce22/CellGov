@@ -62,15 +62,77 @@ pub mod control_register {
 
 /// `RsxReports` substructure (1024 semaphore slots + 64 notify entries
 /// + 2048 report entries).
+///
+/// The semaphore block runs from offset 0 to
+/// [`driver_info_init::REPORTS_NOTIFY_OFFSET`]. The notify array and
+/// the report array follow at the two offsets `driver_info` publishes
+/// to the guest. Those two offsets and [`reports::SIZE`] fix each
+/// array's byte span, and [`reports::ENTRY_SIZE`] fixes its count.
+/// What the kernel leaves in the semaphore block is unestablished.
 pub mod reports {
     /// `sizeof(RsxReports)`.
     pub const SIZE: usize = 0x9400;
+    /// `sizeof(RsxNotify)`, and `sizeof(RsxReport)`: both are a
+    /// 64-bit timestamp followed by 8 bytes of payload.
+    pub const ENTRY_SIZE: usize = 16;
+    /// Notify entries in the array at
+    /// [`super::driver_info_init::REPORTS_NOTIFY_OFFSET`].
+    pub const NOTIFY_COUNT: usize = 64;
+    /// Report entries in the array at
+    /// [`super::driver_info_init::REPORTS_REPORT_OFFSET`].
+    pub const REPORT_COUNT: usize = 2048;
+    /// Bytes of an entry the leading timestamp occupies.
+    pub const TIMESTAMP_SIZE: usize = 8;
+    /// Offset of a report entry's trailing pad word.
+    pub const REPORT_PAD_OFFSET: usize = 12;
+    /// Width of that pad word.
+    pub const REPORT_PAD_SIZE: usize = 4;
+
+    // A wrong count or stride fails the build rather than shifting
+    // the arrays inside the region.
+    const _: () = assert!(
+        super::driver_info_init::REPORTS_NOTIFY_OFFSET as usize + NOTIFY_COUNT * ENTRY_SIZE
+            == super::driver_info_init::REPORTS_REPORT_OFFSET as usize
+    );
+    const _: () = assert!(
+        super::driver_info_init::REPORTS_REPORT_OFFSET as usize + REPORT_COUNT * ENTRY_SIZE == SIZE
+    );
+    const _: () = assert!(REPORT_PAD_OFFSET + REPORT_PAD_SIZE == ENTRY_SIZE);
+    const _: () = assert!(TIMESTAMP_SIZE <= REPORT_PAD_OFFSET);
 }
 
 /// `RsxDriverInfo` substructure.
+///
+/// `sys_rsx_context_allocate` (670) writes every field below as a
+/// 32-bit big-endian word. The offsets are unestablished: no trace in
+/// the corpus records a guest read of this region. The field order
+/// alone pins each word to its offset. A libgcm read of the
+/// driver-info region would witness them. The words the kernel leaves
+/// zero carry no constant here.
 pub mod driver_info {
     /// `sizeof(RsxDriverInfo)`.
     pub const SIZE: usize = 0x12F8;
+    /// `version_driver`.
+    pub const VERSION_DRIVER_OFFSET: usize = 0x00;
+    /// `version_gpu`.
+    pub const VERSION_GPU_OFFSET: usize = 0x04;
+    /// `memory_size` -- local RSX memory exposed to the caller.
+    pub const MEMORY_SIZE_OFFSET: usize = 0x08;
+    /// `hardware_channel`.
+    pub const HARDWARE_CHANNEL_OFFSET: usize = 0x0C;
+    /// `nvcore_frequency`.
+    pub const NVCORE_FREQUENCY_OFFSET: usize = 0x10;
+    /// `memory_frequency`.
+    pub const MEMORY_FREQUENCY_OFFSET: usize = 0x14;
+    /// `reports_notify_offset` -- notify array, relative to the
+    /// reports region base.
+    pub const REPORTS_NOTIFY_OFFSET_FIELD: usize = 0x2C;
+    /// `reports_offset` -- semaphore block, same base.
+    pub const REPORTS_OFFSET_FIELD: usize = 0x30;
+    /// `reports_report_offset` -- report array, same base.
+    pub const REPORTS_REPORT_OFFSET_FIELD: usize = 0x34;
+    /// `system_mode`.
+    pub const SYSTEM_MODE_OFFSET: usize = 0x50;
     /// Offset of the `handler_queue` field within `RsxDriverInfo`.
     pub const HANDLER_QUEUE_OFFSET: usize = 0x12D0;
 }
