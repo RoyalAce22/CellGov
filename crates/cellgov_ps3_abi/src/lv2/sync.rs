@@ -74,6 +74,56 @@ pub mod event_flag_wait_mode {
     pub const CLEAR_MASK: u32 = 0xF0;
 }
 
+/// `sys_semaphore_attribute_t`, the block `sys_semaphore_create` (90)
+/// reads.
+///
+/// `protocol@0` (u32), `pshared@4` (u32), `ipc_key@8` (u64),
+/// `flags@16` (s32), `pad@20` (u32), `name@24` (8 bytes), for a
+/// declared [`SIZE`](semaphore_attribute::SIZE) of 32 bytes.
+// The field order and the eight-byte name come from a non-public
+// description of the struct, so they carry no citation. The kernel
+// answer for a block whose name bytes are unmapped is unestablished.
+// No corpus trace presents an attribute block that straddles the end
+// of a mapped region. CellGov gates the create on the whole declared
+// size, which a copy-in of the struct reaches.
+pub mod semaphore_attribute {
+    /// `sizeof(sys_semaphore_attribute_t)`.
+    pub const SIZE: u32 = 0x20;
+
+    /// `protocol` -- wake order for parked waiters.
+    pub const PROTOCOL_OFFSET: usize = 0x00;
+
+    // Container coupling, as in `format::elf`: a reader that
+    // bounds-checks `SIZE` reads every field below without a second
+    // check.
+    const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+}
+
+/// `sys_event_flag_attribute_t`, the block `sys_event_flag_create`
+/// (82) reads.
+///
+/// `protocol@0` (u32), `pshared@4` (u32), `ipc_key@8` (u64),
+/// `flags@16` (s32), `type@20` (s32), `name@24` (8 bytes), for a
+/// declared [`SIZE`](event_flag_attribute::SIZE) of 32 bytes.
+// The provenance matches `semaphore_attribute`.
+pub mod event_flag_attribute {
+    /// `sizeof(sys_event_flag_attribute_t)`.
+    pub const SIZE: u32 = 0x20;
+
+    /// `protocol` -- wake order for parked waiters.
+    pub const PROTOCOL_OFFSET: usize = 0x00;
+    /// `type` -- [`SYS_SYNC_WAITER_SINGLE`] or
+    /// [`SYS_SYNC_WAITER_MULTIPLE`].
+    ///
+    /// [`SYS_SYNC_WAITER_SINGLE`]: super::SYS_SYNC_WAITER_SINGLE
+    /// [`SYS_SYNC_WAITER_MULTIPLE`]: super::SYS_SYNC_WAITER_MULTIPLE
+    pub const TYPE_OFFSET: usize = 0x14;
+
+    // Same container coupling as `semaphore_attribute`.
+    const _: () = assert!(PROTOCOL_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+    const _: () = assert!(TYPE_OFFSET + core::mem::size_of::<u32>() <= SIZE as usize);
+}
+
 /// `port_type = SYS_EVENT_PORT_LOCAL`: connectable only by queue id,
 /// through `sys_event_port_connect_local` (136).
 pub const SYS_EVENT_PORT_LOCAL: u64 = 1;

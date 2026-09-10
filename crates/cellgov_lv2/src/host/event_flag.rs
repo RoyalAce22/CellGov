@@ -78,13 +78,12 @@ impl Lv2Host {
         if id_ptr == 0 || attr_ptr == 0 {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
-        // sys_event_flag_attribute_t: protocol@0 u32, pshared@4 u32,
-        // ipc_key@8 u64, flags@16 s32, type@20 s32.
-        let Some(attr) = GuestStruct::read(rt, attr_ptr as u64, 24) else {
+        use cellgov_ps3_abi::lv2::sync::event_flag_attribute as attr_layout;
+        let Some(attr) = GuestStruct::read(rt, attr_ptr as u64, attr_layout::SIZE as usize) else {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         };
-        let protocol = attr.u32_at(0);
-        let kind = attr.u32_at(20);
+        let protocol = attr.u32_at(attr_layout::PROTOCOL_OFFSET);
+        let kind = attr.u32_at(attr_layout::TYPE_OFFSET);
         use cellgov_ps3_abi::lv2::sync::{
             SYS_SYNC_FIFO, SYS_SYNC_PRIORITY, SYS_SYNC_WAITER_MULTIPLE, SYS_SYNC_WAITER_SINGLE,
         };

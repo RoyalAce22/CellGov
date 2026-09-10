@@ -48,6 +48,10 @@ mod tests;
 #[path = "tests/hardware_trace_tests.rs"]
 mod hardware_trace_tests;
 
+#[cfg(test)]
+#[path = "tests/sync_attribute_tests.rs"]
+mod sync_attribute_tests;
+
 pub use diagnostics::InvariantBreakReason;
 pub use lv2_host::{FirmwareIdentity, Lv2Host};
 pub use mmapper::SystemStateSeed;

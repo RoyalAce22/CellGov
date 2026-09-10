@@ -145,21 +145,48 @@ pub(super) fn seed_primary_ppu(host: &mut Lv2Host, unit_id: UnitId) {
 }
 
 /// Address where [`fake_runtime_with_valid_sync_attr`] seeds a
-/// fully-initialized 24-byte `sys_*_attribute_t` header so creation
-/// dispatches accept the pointer.
+/// fully-initialized `sys_*_attribute_t` so create dispatches accept
+/// the pointer.
 pub(super) const VALID_SYNC_ATTR_PTR: u32 = 0x800;
 
-/// Build a `FakeRuntime` whose guest memory has a valid 24-byte
-/// `sys_*_attribute_t` header (protocol = SYS_SYNC_FIFO at +0, type =
-/// SYS_SYNC_WAITER_SINGLE at +20) at [`VALID_SYNC_ATTR_PTR`].
+/// Bytes of a `sys_semaphore_attribute_t` / `sys_event_flag_attribute_t`.
+pub(super) const SYNC_ATTR_SIZE: usize =
+    cellgov_ps3_abi::lv2::sync::semaphore_attribute::SIZE as usize;
+
+/// One `sys_*_attribute_t` that both create dispatches accept:
+/// protocol = SYS_SYNC_FIFO, type = SYS_SYNC_WAITER_SINGLE, and a
+/// zeroed name.
+///
+/// The semaphore holds padding where the event flag holds `type`, so
+/// one block with both fields set satisfies both create dispatches.
+pub(super) fn valid_sync_attr_bytes() -> [u8; SYNC_ATTR_SIZE] {
+    use cellgov_ps3_abi::lv2::sync::{
+        event_flag_attribute, semaphore_attribute, SYS_SYNC_FIFO, SYS_SYNC_WAITER_SINGLE,
+    };
+    // The one protocol write serves both create dispatches only while
+    // the two structs agree on the offset of the field.
+    const _: () =
+        assert!(semaphore_attribute::PROTOCOL_OFFSET == event_flag_attribute::PROTOCOL_OFFSET);
+    const _: () = assert!(semaphore_attribute::SIZE == event_flag_attribute::SIZE);
+    let mut attr = [0u8; SYNC_ATTR_SIZE];
+    let protocol = semaphore_attribute::PROTOCOL_OFFSET;
+    attr[protocol..protocol + 4].copy_from_slice(&SYS_SYNC_FIFO.to_be_bytes());
+    let kind = event_flag_attribute::TYPE_OFFSET;
+    attr[kind..kind + 4].copy_from_slice(&SYS_SYNC_WAITER_SINGLE.to_be_bytes());
+    attr
+}
+
+/// Build a `FakeRuntime` whose guest memory carries
+/// [`valid_sync_attr_bytes`] at [`VALID_SYNC_ATTR_PTR`].
 pub(super) fn fake_runtime_with_valid_sync_attr(size: usize) -> FakeRuntime {
     let mut mem = GuestMemory::new(size);
-    let mut attr = [0u8; 24];
-    attr[0..4].copy_from_slice(&0x1u32.to_be_bytes()); // protocol = SYS_SYNC_FIFO
-    attr[20..24].copy_from_slice(&0x10000u32.to_be_bytes()); // type = SYS_SYNC_WAITER_SINGLE
     mem.apply_commit(
-        ByteRange::new(GuestAddr::new(VALID_SYNC_ATTR_PTR as u64), 24).unwrap(),
-        &attr,
+        ByteRange::new(
+            GuestAddr::new(VALID_SYNC_ATTR_PTR as u64),
+            SYNC_ATTR_SIZE as u64,
+        )
+        .unwrap(),
+        &valid_sync_attr_bytes(),
     )
     .unwrap();
     FakeRuntime::with_memory(mem)
