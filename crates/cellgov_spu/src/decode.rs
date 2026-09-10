@@ -77,8 +77,55 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
         0x001 => return Ok(SpuInstruction::Lnop),
         0x002 => return Ok(SpuInstruction::Sync),
         0x3D8 => return Ok(SpuInstruction::Heq),
+        // [SPU-ISA p:192 s:8 Hbr] RR opcode 0x1AC; the P bit selects hbrp on the same opcode.
         0x1AC => return Ok(SpuInstruction::Hbr),
-        0x1B0 | 0x1B1 => return Ok(SpuInstruction::Hbrp),
+        // [SPU-ISA p:90 s:5 Gb] RR opcode 0x1B0; RB field unused.
+        0x1B0 => return Ok(SpuInstruction::Gb { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:89 s:5 Gbh] RR opcode 0x1B1; RB field unused.
+        0x1B1 => return Ok(SpuInstruction::Gbh { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:243 s:10 Dsync] RR opcode 0x003.
+        0x003 => return Ok(SpuInstruction::Dsync),
+        // [SPU-ISA p:249 s:11 Rchcnt] RR opcode 0x00F; CA in the RA field.
+        0x00F => {
+            return Ok(SpuInstruction::Rchcnt {
+                rt: rt7,
+                channel: ra7,
+            })
+        }
+        // [SPU-ISA p:186 s:7 Biz] RR opcodes 0x128..0x12B; the D/E interrupt bits at [12:13] are not modeled.
+        0x128 => return Ok(SpuInstruction::Biz { rt: rt7, ra: ra7 }),
+        0x129 => return Ok(SpuInstruction::Binz { rt: rt7, ra: ra7 }),
+        0x12A => return Ok(SpuInstruction::Bihz { rt: rt7, ra: ra7 }),
+        0x12B => return Ok(SpuInstruction::Bihnz { rt: rt7, ra: ra7 }),
+        // [SPU-ISA p:41 s:3 Cbx] RR opcodes 0x1D4..0x1D7: cbx, chx, cwx, cdx.
+        0x1D4 => {
+            return Ok(SpuInstruction::Cbx {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        0x1D5 => {
+            return Ok(SpuInstruction::Chx {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        0x1D6 => {
+            return Ok(SpuInstruction::Cwx {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
+        0x1D7 => {
+            return Ok(SpuInstruction::Cdx {
+                rt: rt7,
+                ra: ra7,
+                rb: rb7,
+            })
+        }
         0x0C0 => {
             return Ok(SpuInstruction::A {
                 rt: rt7,
@@ -185,6 +232,30 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 imm: i7,
             })
         }
+        // [SPU-ISA p:141 s:6 Rotqmbyi] RI7 opcode 0x1FD.
+        0x1FD => {
+            return Ok(SpuInstruction::Rotqmbyi {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:42 s:3 Chd] RI7 opcode 0x1F5.
+        0x1F5 => {
+            return Ok(SpuInstruction::Chd {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
+        // [SPU-ISA p:46 s:3 Cdd] RI7 opcode 0x1F7.
+        0x1F7 => {
+            return Ok(SpuInstruction::Cdd {
+                rt: rt7,
+                ra: ra7,
+                imm: i7,
+            })
+        }
         // [SPU-ISA p:121 s:6 Shli] RI7 opcode 0x07B.
         0x07B => {
             return Ok(SpuInstruction::Shli {
@@ -279,6 +350,14 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 imm: sign_extend_10(i10),
             })
         }
+        // [SPU-ISA p:157 s:7 Ceqbi] RI10 opcode 0x7E; only the rightmost 8 bits of I10 are compared.
+        0x7E => {
+            return Ok(SpuInstruction::Ceqbi {
+                rt: rt7,
+                ra: ra7,
+                imm: (i10 & 0xFF) as u8,
+            })
+        }
         _ => {}
     }
 
@@ -369,6 +448,13 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
                 offset: i16_offset,
             })
         }
+        // [SPU-ISA p:185 s:7 Brhz] RI16 opcode 0x044.
+        0x044 => {
+            return Ok(SpuInstruction::Brhz {
+                rt: rt7,
+                offset: i16_offset,
+            })
+        }
         _ => {}
     }
 
@@ -376,6 +462,11 @@ pub fn decode(raw: u32) -> Result<SpuInstruction, SpuDecodeError> {
     if op7 == 0x21 {
         let imm = (raw >> 7) & 0x3FFFF;
         return Ok(SpuInstruction::Ila { rt: rt7, imm });
+    }
+
+    // [SPU-ISA p:193 s:8 Hbra] prefix 0001000 in bits [0:6], ROH in [7:8], I16 in [9:24].
+    if op7 == 0x08 {
+        return Ok(SpuInstruction::Hbra);
     }
 
     // hbrr: prefix 0001001 in bits [0:6], ROH in [7:8].
@@ -402,3 +493,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/decode_compiler_forms_tests.rs"]
 mod compiler_forms_tests;
+
+#[cfg(test)]
+#[path = "tests/decode_job_forms_tests.rs"]
+mod job_forms_tests;

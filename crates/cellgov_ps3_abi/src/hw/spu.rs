@@ -56,6 +56,12 @@ pub const SPU_WR_OUT_MBOX: u8 = 28;
 // [CBEA p:134 s:9.5 SPU Mailbox Channels] SPU_WrOutIntrMbox, channel 30.
 pub const SPU_WR_OUT_INTR_MBOX: u8 = 30;
 
+// SPU state management channels
+
+/// SPU read machine status: isolation status and interrupt enable.
+// [CBEA p:141 s:9.8 SPU Read Machine Status Channel] SPU_RdMachStat, channel x'D' = 13, nonblocking.
+pub const SPU_RD_MACH_STAT: u8 = 13;
+
 // MFC DMA command opcodes (written to MFC_CMD)
 
 /// DMA put: local store -> main memory.

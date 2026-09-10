@@ -27,6 +27,9 @@ const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
 const FAULT_UNSUPPORTED_MFC_CMD: u32 = 0x0004_0000;
 const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
+/// A refused `rchcnt` keeps its own fault class. The trace then
+/// distinguishes it from a refused `rdch` / `wrch` on the same channel.
+const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
 
 /// SPU execution unit snapshot for replay.
 #[derive(Debug, Clone)]
@@ -210,6 +213,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                             FAULT_UNSUPPORTED_CHANNEL | channel as u32
                         }
                         SpuFault::UnsupportedMfcCommand(c) => FAULT_UNSUPPORTED_MFC_CMD | c,
+                        SpuFault::UnsupportedChannelCount(channel) => {
+                            FAULT_UNSUPPORTED_CHANNEL_COUNT | channel as u32
+                        }
                     };
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,

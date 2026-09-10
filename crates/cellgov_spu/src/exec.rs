@@ -61,6 +61,9 @@ pub enum SpuFault {
     /// Unsupported MFC command opcode.
     #[error("SPU unsupported MFC command opcode 0x{0:08x}")]
     UnsupportedMfcCommand(u32),
+    /// A channel whose capacity the model does not know.
+    #[error("SPU unsupported channel rchcnt 0x{0:02x}")]
+    UnsupportedChannelCount(u8),
 }
 
 fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
@@ -127,6 +130,37 @@ fn store_quad(state: &mut SpuState, rt: u8, lsa: Lsa) -> SpuStepOutcome {
 fn rotate_mask_count(imm: u8) -> u32 {
     let signed = ((imm as u32) << 25) as i32 >> 25;
     (0i32.wrapping_sub(signed) as u32) & 0x3F
+}
+
+/// The shufb mask the generate-controls forms build.
+///
+/// Identity bytes fill `0x10..=0x1F`. The `width`-byte slot at `addr`
+/// holds selectors for the rightmost `width` bytes of the preferred
+/// slot, except a doubleword, which uses the leftmost 8.
+// [SPU-ISA p:265 s:B. Details of the Generate Controls Instructions] The insertion mask shape per width.
+fn insertion_controls(addr: u32, width: usize) -> [u8; 16] {
+    let pos = (addr as usize) & (0xF & !(width - 1));
+    let first = if width == 8 { 0 } else { 4 - width as u8 };
+    let mut mask = [0u8; 16];
+    for (i, byte) in mask.iter_mut().enumerate() {
+        *byte = if i >= pos && i < pos + width {
+            first + (i - pos) as u8
+        } else {
+            0x10 + i as u8
+        };
+    }
+    mask
+}
+
+/// The indirect conditional branches: PC <- RA's preferred slot masked
+/// to the LS range when `taken`, else fall through.
+fn branch_indirect_if(state: &mut SpuState, ra: u8, taken: bool) -> SpuStepOutcome {
+    if taken {
+        state.pc = state.reg_word(ra) & 0x3FFFC;
+        SpuStepOutcome::Branch
+    } else {
+        SpuStepOutcome::Continue
+    }
 }
 
 /// Execute a single decoded SPU instruction.
@@ -285,6 +319,26 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             }
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:90 s:5. Integer and Logical Instructions] Gather Bits from Words: the low bit of each word, word 0 leftmost, forms a nibble in the preferred slot; every other bit of RT is zero.
+        SpuInstruction::Gb { rt, ra } => {
+            let mut bits = 0u32;
+            for slot in 0..4 {
+                bits = (bits << 1) | (state.reg_word_slot(ra, slot) & 1);
+            }
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, bits);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:89 s:5. Integer and Logical Instructions] Gather Bits from Halfwords: the low bit of each halfword, halfword 0 leftmost, forms a byte in the preferred slot; every other bit of RT is zero.
+        SpuInstruction::Gbh { rt, ra } => {
+            let mut bits = 0u32;
+            for slot in 0..8 {
+                bits = (bits << 1) | (state.regs[ra as usize][slot * 2 + 1] & 1) as u32;
+            }
+            state.regs[rt as usize] = [0u8; 16];
+            state.set_reg_word_slot(rt, 0, bits);
+            SpuStepOutcome::Continue
+        }
 
         // [SPU-ISA p:116 s:5. Integer and Logical Instructions] Shuffle Bytes: RC byte selectors choose from RA||RB or generate 0x00/0xFF/0x80 constants.
         SpuInstruction::Shufb { rt, ra, rb, rc } => {
@@ -345,6 +399,17 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             state.regs[rt as usize] = dst;
             SpuStepOutcome::Continue
         }
+        // [SPU-ISA p:141 s:6. Shift and Rotate Instructions] Rotate and Mask Quadword by Bytes Immediate: shift right by (0 - I7) mod 32 bytes with zero fill; a count of 16 or more clears the register.
+        SpuInstruction::Rotqmbyi { rt, ra, imm } => {
+            let shift = (0u8.wrapping_sub(imm) & 0x1F) as usize;
+            let src = state.regs[ra as usize];
+            let mut dst = [0u8; 16];
+            for (i, byte) in dst.iter_mut().enumerate() {
+                *byte = if i >= shift { src[i - shift] } else { 0 };
+            }
+            state.regs[rt as usize] = dst;
+            SpuStepOutcome::Continue
+        }
         // [SPU-ISA p:120 s:6. Shift and Rotate Instructions] Shift Left Word: per-slot count is the low 6 bits of the RB slot; a count above 31 yields zero.
         SpuInstruction::Shl { rt, ra, rb } => {
             for slot in 0..4 {
@@ -385,28 +450,50 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
 
         // [SPU-ISA p:40 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (d-form): build shufb mask whose target byte position holds 0x03.
         SpuInstruction::Cbd { rt, ra, imm } => {
-            let addr = state.reg_word(ra).wrapping_add(imm as u32);
-            let pos = (addr & 0xF) as usize;
-            let mut mask = [0u8; 16];
-            for (i, byte) in mask.iter_mut().enumerate() {
-                *byte = if i == pos { 0x03 } else { 0x10 + i as u8 };
-            }
-            state.regs[rt as usize] = mask;
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 1);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:41 s:3. Memory-Load/Store Instructions] Generate Controls for Byte Insertion (x-form): the byte position is RA + RB.
+        SpuInstruction::Cbx { rt, ra, rb } => {
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 1);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:42 s:3. Memory-Load/Store Instructions] Generate Controls for Halfword Insertion (d-form): the aligned halfword slot holds 0x02 0x03.
+        SpuInstruction::Chd { rt, ra, imm } => {
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 2);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:43 s:3. Memory-Load/Store Instructions] Generate Controls for Halfword Insertion (x-form): the halfword position is RA + RB.
+        SpuInstruction::Chx { rt, ra, rb } => {
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 2);
             SpuStepOutcome::Continue
         }
         // [SPU-ISA p:44 s:3. Memory-Load/Store Instructions] Generate Controls for Word Insertion (d-form): build shufb mask placing 0x00..0x03 at the aligned word slot.
         SpuInstruction::Cwd { rt, ra, imm } => {
-            let addr = state.reg_word(ra).wrapping_add(imm as u32);
-            let pos = (addr & 0xC) as usize;
-            let mut mask = [0u8; 16];
-            for (i, byte) in mask.iter_mut().enumerate() {
-                *byte = if i >= pos && i < pos + 4 {
-                    (i - pos) as u8
-                } else {
-                    0x10 + i as u8
-                };
-            }
-            state.regs[rt as usize] = mask;
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 4);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:45 s:3. Memory-Load/Store Instructions] Generate Controls for Word Insertion (x-form): the word position is RA + RB.
+        SpuInstruction::Cwx { rt, ra, rb } => {
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 4);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:46 s:3. Memory-Load/Store Instructions] Generate Controls for Doubleword Insertion (d-form): the aligned doubleword slot holds 0x00..0x07.
+        SpuInstruction::Cdd { rt, ra, imm } => {
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(imm as u32), 8);
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:47 s:3. Memory-Load/Store Instructions] Generate Controls for Doubleword Insertion (x-form): the doubleword position is RA + RB.
+        SpuInstruction::Cdx { rt, ra, rb } => {
+            state.regs[rt as usize] =
+                insertion_controls(state.reg_word(ra).wrapping_add(state.reg_word(rb)), 8);
             SpuStepOutcome::Continue
         }
 
@@ -425,6 +512,14 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
             for slot in 0..4 {
                 let a = state.reg_word_slot(ra, slot);
                 state.set_reg_word_slot(rt, slot, if a == v { 0xFFFFFFFF } else { 0 });
+            }
+            SpuStepOutcome::Continue
+        }
+        // [SPU-ISA p:157 s:7. Compare, Branch, and Halt Instructions] Compare Equal Byte Immediate: each byte of RA against the rightmost 8 bits of I10, all ones on a match.
+        SpuInstruction::Ceqbi { rt, ra, imm } => {
+            for i in 0..16 {
+                let a = state.regs[ra as usize][i];
+                state.regs[rt as usize][i] = if a == imm { 0xFF } else { 0x00 };
             }
             SpuStepOutcome::Continue
         }
@@ -501,11 +596,34 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
                 SpuStepOutcome::Continue
             }
         }
+        // [SPU-ISA p:185 s:7. Compare, Branch, and Halt Instructions] Branch If Zero Halfword: branch when the low halfword of RT's preferred slot is zero.
+        SpuInstruction::Brhz { rt, offset } => {
+            if state.reg_word(rt) & 0xFFFF == 0 {
+                state.pc = (state.pc as i32).wrapping_add(offset << 2) as u32 & 0x3FFFC;
+                SpuStepOutcome::Branch
+            } else {
+                SpuStepOutcome::Continue
+            }
+        }
+        // [SPU-ISA p:186 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Zero: PC <- RA preferred slot masked to LS range when RT's preferred word is zero.
+        SpuInstruction::Biz { rt, ra } => branch_indirect_if(state, ra, state.reg_word(rt) == 0),
+        // [SPU-ISA p:187 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Not Zero: taken when RT's preferred word is non-zero.
+        SpuInstruction::Binz { rt, ra } => branch_indirect_if(state, ra, state.reg_word(rt) != 0),
+        // [SPU-ISA p:188 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Zero Halfword: taken when the low halfword of RT's preferred slot is zero.
+        SpuInstruction::Bihz { rt, ra } => {
+            branch_indirect_if(state, ra, state.reg_word(rt) & 0xFFFF == 0)
+        }
+        // [SPU-ISA p:189 s:7. Compare, Branch, and Halt Instructions] Branch Indirect If Not Zero Halfword: taken when the low halfword of RT's preferred slot is non-zero.
+        SpuInstruction::Bihnz { rt, ra } => {
+            branch_indirect_if(state, ra, state.reg_word(rt) & 0xFFFF != 0)
+        }
 
         // [SPU-ISA p:250 s:11. Channel Instructions] Write Channel: send RT to the addressed channel.
         SpuInstruction::Wrch { channel, rt } => execute_wrch(channel, rt, state, unit_id),
         // [SPU-ISA p:248 s:11. Channel Instructions] Read Channel: capture channel value into RT, may stall on count.
         SpuInstruction::Rdch { rt, channel } => execute_rdch(rt, channel, state, unit_id),
+        // [SPU-ISA p:249 s:11. Channel Instructions] Read Channel Count: the channel's capacity into RT's preferred slot, other slots zero.
+        SpuInstruction::Rchcnt { rt, channel } => execute_rchcnt(rt, channel, state),
 
         // [SPU-ISA p:241 s:10. Control Instructions] No Operation (Execute) is architecturally a no-op.
         // [SPU-ISA p:240 s:10. Control Instructions] No Operation (Load) consumes only an even-pipe slot.
@@ -513,13 +631,15 @@ pub fn execute(insn: &SpuInstruction, state: &mut SpuState, unit_id: UnitId) -> 
         // [SPU-ISA p:194 s:8. Hint-for-Branch Instructions] Hint for Branch Relative is a hint with no architectural effect.
         // [SPU-ISA p:193 s:8. Hint-for-Branch Instructions] Hint for Branch (a-form) is a hint with no architectural effect.
         // [SPU-ISA p:242 s:10. Control Instructions] Synchronize is a barrier; modeled as a no-op given in-order semantics.
+        // [SPU-ISA p:243 s:10. Control Instructions] Synchronize Data orders local-store accesses; a no-op given in-order semantics.
         // [SPU-ISA p:150 s:7. Compare, Branch, and Halt Instructions] Halt If Equal traps when condition holds; here treated as continue.
         SpuInstruction::Nop
         | SpuInstruction::Lnop
         | SpuInstruction::Hbr
+        | SpuInstruction::Hbra
         | SpuInstruction::Hbrr
-        | SpuInstruction::Hbrp
         | SpuInstruction::Sync
+        | SpuInstruction::Dsync
         | SpuInstruction::Heq => SpuStepOutcome::Continue,
 
         // [SPU-ISA p:238 s:10. Control Instructions] Stop and Signal halts the SPU and raises the stop signal to the PPE.
@@ -607,11 +727,27 @@ fn execute_rdch(rt: u8, channel: u8, state: &mut SpuState, unit_id: UnitId) -> S
             state.set_reg_word_splat(rt, state.channels.atomic_status);
             SpuStepOutcome::Continue
         }
+        // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] Two status bits: IS (bit 30) isolation and IE (bit 31) interrupt enable; the model runs nonisolated with interrupts never enabled, so both read as zero.
+        spu::SPU_RD_MACH_STAT => {
+            state.set_reg_word_splat(rt, 0);
+            SpuStepOutcome::Continue
+        }
         _ => SpuStepOutcome::Fault(SpuFault::UnsupportedChannel {
             channel,
             is_write: false,
         }),
     }
+}
+
+fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuStepOutcome {
+    let count = match channel {
+        // [CBEA p:141 s:9.8 SPU Read Machine Status Channel] The channel has no count; rchcnt on it always returns 1.
+        spu::SPU_RD_MACH_STAT => 1,
+        _ => return SpuStepOutcome::Fault(SpuFault::UnsupportedChannelCount(channel)),
+    };
+    state.regs[rt as usize] = [0u8; 16];
+    state.set_reg_word_slot(rt, 0, count);
+    SpuStepOutcome::Continue
 }
 
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
@@ -709,3 +845,7 @@ mod compiler_forms_tests;
 #[cfg(test)]
 #[path = "tests/exec_quad_tests.rs"]
 mod quad_tests;
+
+#[cfg(test)]
+#[path = "tests/exec_job_forms_tests.rs"]
+mod job_forms_tests;

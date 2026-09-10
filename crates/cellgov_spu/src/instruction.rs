@@ -181,6 +181,21 @@ pub enum SpuInstruction {
         /// Source register.
         ra: u8,
     },
+    // [SPU-ISA p:90 s:5 Gather Bits from Words p.90, Gather Bits from Halfwords p.89]
+    /// Gather bits from words: the low bit of each word, word 0 leftmost, into the low nibble of the preferred slot.
+    Gb {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
+    /// Gather bits from halfwords: the low bit of each halfword, halfword 0 leftmost, into the low byte of the preferred slot.
+    Gbh {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+    },
     /// OR immediate: all 4 word slots, `rt[i] = ra[i] | sign_extend(imm)`.
     Ori {
         /// Destination register.
@@ -249,6 +264,16 @@ pub enum SpuInstruction {
         /// 7-bit immediate; only the low 4 bits count.
         imm: u8,
     },
+    // [SPU-ISA p:141 s:6 Rotate and Mask Quadword by Bytes Immediate]
+    /// Rotate and mask quadword by bytes immediate: a right shift by `(-imm) & 0x1F` bytes, zero fill.
+    Rotqmbyi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// 7-bit immediate that holds the two's complement of the shift count.
+        imm: u8,
+    },
 
     // [SPU-ISA p:120 s:6 Shift/Rotate Word: Shl p.120, Shli p.121, Rotmi p.139, Rotmai p.148]
     /// Shift left word: per slot, `rt[i] = ra[i] << (rb[i] & 0x3F)`, zero when the count exceeds 31.
@@ -288,7 +313,7 @@ pub enum SpuInstruction {
         imm: u8,
     },
 
-    // [SPU-ISA p:40 s:3 Generate Controls for Byte/Word Insertion d-form: Cbd p.40, Cwd p.44]
+    // [SPU-ISA p:40 s:3 Generate Controls for Insertion: Cbd p.40, Cbx p.41, Chd p.42, Chx p.43, Cwd p.44, Cwx p.45, Cdd p.46, Cdx p.47]
     /// Generate controls for byte insertion d-form (shufb mask).
     Cbd {
         /// Destination register.
@@ -298,6 +323,33 @@ pub enum SpuInstruction {
         /// 7-bit immediate.
         imm: u8,
     },
+    /// Generate controls for byte insertion x-form.
+    Cbx {
+        /// Destination register.
+        rt: u8,
+        /// Base register.
+        ra: u8,
+        /// Index register.
+        rb: u8,
+    },
+    /// Generate controls for halfword insertion d-form.
+    Chd {
+        /// Destination register.
+        rt: u8,
+        /// Base register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Generate controls for halfword insertion x-form.
+    Chx {
+        /// Destination register.
+        rt: u8,
+        /// Base register.
+        ra: u8,
+        /// Index register.
+        rb: u8,
+    },
     /// Generate controls for word insertion d-form.
     Cwd {
         /// Destination register.
@@ -306,6 +358,33 @@ pub enum SpuInstruction {
         ra: u8,
         /// 7-bit immediate.
         imm: u8,
+    },
+    /// Generate controls for word insertion x-form.
+    Cwx {
+        /// Destination register.
+        rt: u8,
+        /// Base register.
+        ra: u8,
+        /// Index register.
+        rb: u8,
+    },
+    /// Generate controls for doubleword insertion d-form.
+    Cdd {
+        /// Destination register.
+        rt: u8,
+        /// Base register.
+        ra: u8,
+        /// 7-bit immediate.
+        imm: u8,
+    },
+    /// Generate controls for doubleword insertion x-form.
+    Cdx {
+        /// Destination register.
+        rt: u8,
+        /// Base register.
+        ra: u8,
+        /// Index register.
+        rb: u8,
     },
 
     // [SPU-ISA p:160 s:7 Compare Equal Word (Ceq) p.160, Compare Equal Word Immediate (Ceqi) p.161]
@@ -326,6 +405,16 @@ pub enum SpuInstruction {
         ra: u8,
         /// 10-bit signed immediate.
         imm: i16,
+    },
+    // [SPU-ISA p:157 s:7 Compare Equal Byte Immediate]
+    /// Compare equal byte immediate: `rt[i] = (ra[i] == imm) ? 0xFF : 0` over 16 bytes.
+    Ceqbi {
+        /// Destination register.
+        rt: u8,
+        /// Source register.
+        ra: u8,
+        /// The rightmost 8 bits of the I10 field.
+        imm: u8,
     },
     // [SPU-ISA p:167 s:7 Compare Greater Than Word Immediate (Cgti) p.167, Compare Logical Greater Than Word (Clgt) p.172]
     /// Compare greater than word immediate, signed: `rt[i] = (ra[i] > sign_extend(imm)) ? 0xFFFFFFFF : 0`.
@@ -394,6 +483,42 @@ pub enum SpuInstruction {
         /// Signed word offset.
         offset: i32,
     },
+    // [SPU-ISA p:185 s:7 Branch If Zero Halfword p.185, Branch Indirect If Zero p.186, If Not Zero p.187, If Zero Halfword p.188, If Not Zero Halfword p.189]
+    /// Branch relative if the low halfword of rt's preferred slot is zero.
+    Brhz {
+        /// Register to test.
+        rt: u8,
+        /// Signed word offset.
+        offset: i32,
+    },
+    /// Branch indirect if the preferred word of rt is zero: PC = ra.
+    Biz {
+        /// Register to test.
+        rt: u8,
+        /// Register containing target address.
+        ra: u8,
+    },
+    /// Branch indirect if the preferred word of rt is not zero: PC = ra.
+    Binz {
+        /// Register to test.
+        rt: u8,
+        /// Register containing target address.
+        ra: u8,
+    },
+    /// Branch indirect if the low halfword of rt's preferred slot is zero: PC = ra.
+    Bihz {
+        /// Register to test.
+        rt: u8,
+        /// Register containing target address.
+        ra: u8,
+    },
+    /// Branch indirect if the low halfword of rt's preferred slot is not zero: PC = ra.
+    Bihnz {
+        /// Register to test.
+        rt: u8,
+        /// Register containing target address.
+        ra: u8,
+    },
 
     // [SPU-ISA p:248 s:11 Channel Instructions: Rdch p.248, Wrch p.250]
     /// Read channel: `rt = channel[channel]`.
@@ -410,8 +535,16 @@ pub enum SpuInstruction {
         /// Source register.
         rt: u8,
     },
+    // [SPU-ISA p:249 s:11 Read Channel Count]
+    /// Read channel count: the preferred slot of rt = the channel's capacity, other slots zero.
+    Rchcnt {
+        /// Destination register.
+        rt: u8,
+        /// Channel number.
+        channel: u8,
+    },
 
-    // [SPU-ISA p:240 s:10 Control: Nop p.241, Lnop p.240, Sync p.242, Stop p.238, Heq p.150]
+    // [SPU-ISA p:240 s:10 Control: Nop p.241, Lnop p.240, Sync p.242, Dsync p.243, Stop p.238, Heq p.150]
     // [SPU-ISA p:192 s:8 Hint-for-Branch: Hbr p.192, Hbra p.193, Hbrr p.194]
     /// No operation (even pipeline).
     Nop,
@@ -419,12 +552,14 @@ pub enum SpuInstruction {
     Lnop,
     /// Branch hint; ignored by the interpreter.
     Hbr,
+    /// Branch-absolute hint; ignored by the interpreter.
+    Hbra,
     /// Branch-relative hint; ignored by the interpreter.
     Hbrr,
-    /// Branch-predict hint; ignored by the interpreter.
-    Hbrp,
     /// Ordering barrier; no-op in the interpreter.
     Sync,
+    /// Data barrier; no-op in the interpreter.
+    Dsync,
     /// Halt if equal; no-op outside debug.
     Heq,
     /// Stop and signal.
