@@ -105,11 +105,17 @@ where
         if first_invariant_break.is_none() {
             first_invariant_break = rt.lv2_host().observability().first_invariant_break_line();
         }
+        let truncated = stop.is_truncated();
         // `PrescribedScheduler` falls back to round-robin where a
         // prescribed unit is not runnable. A replay that drifted off
         // its prefix would record a `branch_step` it never reached.
+        //
+        // A truncated replay is short of its prefix for its own reason
+        // and not for drift: a faulted step reaches no guest state and
+        // gets no point, so a prefix ending in one records fewer points
+        // than it named.
         debug_assert!(
-            log.points().len() >= candidate.prefix.len()
+            (truncated || log.points().len() >= candidate.prefix.len())
                 && log
                     .points()
                     .iter()
@@ -117,7 +123,6 @@ where
                     .all(|(point, forced)| point.chosen == *forced),
             "the replay did not reproduce its prescribed prefix",
         );
-        let truncated = stop.is_truncated();
         if truncated {
             iter.schedules_truncated += 1;
             iter.bounds_hit = true;

@@ -152,18 +152,24 @@ where
             Halt::SleepBlocked => sleep_blocked += 1,
             Halt::Stopped(stop) => {
                 let truncated = stop.is_truncated();
+                // A truncated execution bounds the search whichever run
+                // it was. The two tallies below count alternates alone,
+                // because that is what they answer for and what
+                // `mark_baseline_truncated` rewrites one of them to.
                 if truncated {
-                    truncated_runs += 1;
                     bounds_hit = true;
-                    if stop.class() == StopClass::Refusal {
-                        refused_runs += 1;
-                    }
                 }
                 observe(&rt, branch_step.is_none());
                 match branch_step {
                     Some(step) => {
                         let unit = alternate_choice
                             .expect("a resumed execution names the unit it re-decided with");
+                        if truncated {
+                            truncated_runs += 1;
+                            if stop.class() == StopClass::Refusal {
+                                refused_runs += 1;
+                            }
+                        }
                         schedules.push(ScheduleRecord {
                             branch_step: step,
                             alternate_choice: unit,
