@@ -10,6 +10,7 @@
     not(test),
     forbid(
         clippy::disallowed_methods,
+        clippy::disallowed_macros,
         clippy::print_stdout,
         clippy::print_stderr,
         clippy::dbg_macro

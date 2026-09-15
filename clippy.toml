@@ -12,6 +12,8 @@
 #
 # Iteration order: a hash-ordered collection iterates in an order no
 # run can reproduce, so every map and set is a BTreeMap / BTreeSet.
+# `RandomState` is a type here, not a method: `default()` is a trait
+# impl no method entry can name.
 disallowed-types = [
     { path = "anyhow::Error", reason = "errors are local thiserror types, not an opaque report", allow-invalid = true },
     { path = "eyre::Report", reason = "errors are local thiserror types, not an opaque report", allow-invalid = true },
@@ -19,6 +21,7 @@ disallowed-types = [
     { path = "std::collections::HashSet", reason = "iteration order must be deterministic: use BTreeSet" },
     { path = "hashbrown::HashMap", reason = "iteration order must be deterministic: use BTreeMap", allow-invalid = true },
     { path = "hashbrown::HashSet", reason = "iteration order must be deterministic: use BTreeSet", allow-invalid = true },
+    { path = "std::hash::RandomState", reason = "no run reads host entropy: this is the hasher behind the hash collections" },
 ]
 
 # Host access, forbidden in the runtime crates only: each runtime
@@ -30,6 +33,13 @@ disallowed-types = [
 # source traits it installs. A `static` of an atomic or lock type is
 # built by a const constructor no entry here can name, so the
 # host_line_guard test refuses those in the runtime sources instead.
+#
+# Threads, sockets and entropy count as host access: a thread's
+# interleaving, a socket's bytes and an entropy read are each an answer
+# the runtime did not compute.
+#
+# clippy warns on a path that resolves to nothing, and the gate denies
+# warnings, so no entry here is a refusal that refuses nothing.
 disallowed-methods = [
     { path = "std::time::Instant::now", reason = "the runtime reads no host clock: guest time is GuestTicks" },
     { path = "std::time::SystemTime::now", reason = "the runtime reads no host clock: guest time is GuestTicks" },
@@ -100,4 +110,29 @@ disallowed-methods = [
     { path = "std::thread::LocalKey::get", reason = "the runtime keeps no process-global state" },
     { path = "std::thread::LocalKey::take", reason = "the runtime keeps no process-global state" },
     { path = "std::thread::LocalKey::replace", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::spawn", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::scope", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::Builder::spawn", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::Builder::spawn_scoped", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::current", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::park", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::park_timeout", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::thread::yield_now", reason = "the runtime runs on its caller's thread: every schedule it models is its own" },
+    { path = "std::net::TcpStream::connect", reason = "the runtime opens no socket: the host supplies bytes or a source trait" },
+    { path = "std::net::TcpStream::connect_timeout", reason = "the runtime opens no socket: the host supplies bytes or a source trait" },
+    { path = "std::net::TcpListener::bind", reason = "the runtime opens no socket: the host supplies bytes or a source trait" },
+    { path = "std::net::UdpSocket::bind", reason = "the runtime opens no socket: the host supplies bytes or a source trait" },
+    { path = "std::net::ToSocketAddrs::to_socket_addrs", reason = "the runtime opens no socket: the host supplies bytes or a source trait" },
+    { path = "std::hash::RandomState::new", reason = "the runtime reads no host entropy: a run repeats exactly" },
+]
+
+# Compile-time host reads, on the same split as the method list: these
+# read the build machine, so the answer is baked in where no observer
+# can supply it. `include!` is absent because a listed entry was
+# measured to deny nothing; host_line_guard scans the sources for it.
+disallowed-macros = [
+    { path = "std::env", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::option_env", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::include_str", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::include_bytes", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
 ]

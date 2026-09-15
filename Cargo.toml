@@ -97,11 +97,14 @@ unwrap_used = "deny"
 # stands in place of, and the hash-ordered collections.
 disallowed_types = "deny"
 
-# Host-access policy. The list lives in the workspace clippy.toml and
-# binds the runtime crates only: each forbids this lint at its crate
+# Host-access policy. The lists live in the workspace clippy.toml and
+# bind the runtime crates only: each forbids these lints at its crate
 # root outside its test build. Every other crate is a host crate and
 # keeps its host access, so the workspace level is allow.
+# `disallowed_macros` carries the compile-time half -- `env!`,
+# `include_str!` and their kin, which read the build machine.
 disallowed_methods = "allow"
+disallowed_macros = "allow"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"

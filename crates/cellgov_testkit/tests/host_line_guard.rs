@@ -2,15 +2,17 @@
 //!
 //! The lists the compiler enforces live in the workspace
 //! `clippy.toml`. They bind a crate only while its root forbids
-//! `clippy::disallowed_methods`, since the workspace lint table allows
-//! that lint everywhere else. No lint fires in these cases, so this
-//! guard fails on each:
+//! `clippy::disallowed_methods` and `clippy::disallowed_macros`, since
+//! the workspace lint table allows both everywhere else. No lint fires
+//! in these cases, so this guard fails on each:
 //!
 //! - A runtime crate root drops the attribute.
 //! - A new member sits on neither side.
 //! - A runtime source keeps a `static` that is `mut`, or of an atomic,
 //!   lock or cell type. A const constructor builds such a static, so
 //!   no entry in the method list can catch it.
+//! - A runtime source calls `include!`. The macro list does not reach
+//!   it: an entry for it denies nothing.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -49,7 +51,7 @@ const HOST: &[&str] = &[
 ];
 
 /// The arguments of the crate-root `cfg_attr`, whitespace removed.
-const FORBID_ARGS: &str = "not(test),forbid(clippy::disallowed_methods,clippy::print_stdout,clippy::print_stderr,clippy::dbg_macro)";
+const FORBID_ARGS: &str = "not(test),forbid(clippy::disallowed_methods,clippy::disallowed_macros,clippy::print_stdout,clippy::print_stderr,clippy::dbg_macro)";
 
 /// Host reads the workspace `clippy.toml` must keep denying, at least
 /// one per family.
@@ -74,10 +76,34 @@ const REQUIRED_METHODS: &[&str] = &[
     "std::sync::OnceLock::new",
     "std::sync::LazyLock::new",
     "std::thread::LocalKey::with",
+    "std::thread::spawn",
+    "std::thread::scope",
+    "std::thread::Builder::spawn",
+    "std::thread::current",
+    "std::net::TcpStream::connect",
+    "std::net::TcpListener::bind",
+    "std::net::UdpSocket::bind",
+    "std::hash::RandomState::new",
 ];
 
-/// Collections the workspace `clippy.toml` must keep denying.
-const REQUIRED_TYPES: &[&str] = &["std::collections::HashMap", "std::collections::HashSet"];
+/// Compile-time host reads the workspace `clippy.toml` must keep
+/// denying. These read the build machine, so no observer can supply the
+/// answer and no refusal can name it.
+const REQUIRED_MACROS: &[&str] = &[
+    "std::env",
+    "std::option_env",
+    "std::include_str",
+    "std::include_bytes",
+];
+
+/// Collections the workspace `clippy.toml` must keep denying, and the
+/// entropy hasher behind them, which `default()` reaches through a
+/// trait impl no method entry can name.
+const REQUIRED_TYPES: &[&str] = &[
+    "std::collections::HashMap",
+    "std::collections::HashSet",
+    "std::hash::RandomState",
+];
 
 /// Type names that make a `static` a store the program changes at run
 /// time, besides every `Atomic*`.
@@ -172,10 +198,14 @@ fn forbids_host_access(root: &syn::File) -> bool {
     root.attrs.iter().any(is_host_line_forbid)
 }
 
-/// Crate roots a member carries besides `src/lib.rs`: a binary target,
-/// or a `[lib]` table that moves the library root.
+/// Crate roots a member carries besides `src/lib.rs`: a binary target, a
+/// build script, or a `[lib]` table that moves the library root.
+///
+/// Cargo compiles a build script as its own crate and runs it on the
+/// build machine, so the attribute on `src/lib.rs` does not reach it and
+/// the workspace lint table leaves both host-line lints allowed there.
 fn other_crate_roots(member_dir: &Path) -> Vec<String> {
-    let mut found: Vec<String> = ["src/main.rs", "src/bin"]
+    let mut found: Vec<String> = ["src/main.rs", "src/bin", "build.rs"]
         .into_iter()
         .filter(|rel| member_dir.join(rel).exists())
         .map(str::to_string)
@@ -190,6 +220,10 @@ fn other_crate_roots(member_dir: &Path) -> Vec<String> {
             }
         } else if table == "[lib]" && line.starts_with("path") {
             found.push(format!("[lib] {line}"));
+        } else if table == "[package]" && line.starts_with("build") && line.contains('"') {
+            // A quoted value moves the build script; `build = false`
+            // turns it off and names no root.
+            found.push(format!("[package] {line}"));
         }
     }
     found
@@ -246,6 +280,32 @@ fn mutable_statics(stream: TokenStream, found: &mut Vec<String>) {
     }
 }
 
+/// Every `include!` call in `stream`, as the call text.
+///
+/// `include!` reads the build machine's file system, which is what the
+/// `clippy.toml` macro list refuses. The lint does not fire on this
+/// one, so this scan is what refuses it.
+fn include_calls(stream: TokenStream, found: &mut Vec<String>) {
+    let tokens: Vec<TokenTree> = stream.into_iter().collect();
+    for (i, token) in tokens.iter().enumerate() {
+        if let TokenTree::Group(group) = token {
+            include_calls(group.stream(), found);
+            continue;
+        }
+        let TokenTree::Ident(ident) = token else {
+            continue;
+        };
+        if ident != "include" || !tokens.get(i + 1).is_some_and(|t| is_punct(t, '!')) {
+            continue;
+        }
+        let arg = match tokens.get(i + 2) {
+            Some(TokenTree::Group(g)) => g.stream().to_string(),
+            _ => continue,
+        };
+        found.push(format!("include!({arg})"));
+    }
+}
+
 /// The `.rs` files under `dir`, outside each `tests` directory.
 ///
 /// The runtime crates keep each unit-test file under a `tests` directory.
@@ -278,7 +338,7 @@ fn the_parsers_read_members_and_listed_paths_and_nothing_else() {
 #[test]
 fn the_attribute_check_reads_the_crate_level_attribute_and_nothing_else() {
     let check = |src: &str| forbids_host_access(&syn::parse_file(src).expect("control parses"));
-    let attr = "#![cfg_attr(\n    not(test),\n    forbid(\n        clippy::disallowed_methods,\n        clippy::print_stdout,\n        clippy::print_stderr,\n        clippy::dbg_macro\n    )\n)]\n";
+    let attr = "#![cfg_attr(\n    not(test),\n    forbid(\n        clippy::disallowed_methods,\n        clippy::disallowed_macros,\n        clippy::print_stdout,\n        clippy::print_stderr,\n        clippy::dbg_macro\n    )\n)]\n";
     assert!(check(&format!(
         "//! Docs.\n\n#![deny(unused_must_use)]\n{attr}\npub mod a;\n"
     )));
@@ -287,11 +347,20 @@ fn the_attribute_check_reads_the_crate_level_attribute_and_nothing_else() {
     assert!(!check(&format!("pub mod a {{\n{attr}\n}}\n")));
     assert!(!check(
         "const S: &str = \"#![cfg_attr(not(test), forbid(clippy::disallowed_methods, \
-         clippy::print_stdout, clippy::print_stderr, clippy::dbg_macro))]\";\n"
+         clippy::disallowed_macros, clippy::print_stdout, clippy::print_stderr, \
+         clippy::dbg_macro))]\";\n"
     ));
     assert!(!check(
         "#![cfg_attr(not(test), forbid(clippy::disallowed_methods))]\n"
     ));
+    assert!(
+        !check(
+            "#![cfg_attr(not(test), forbid(clippy::disallowed_methods, clippy::print_stdout, \
+             clippy::print_stderr, clippy::dbg_macro))]\n"
+        ),
+        "a root that forbids the method lint but not the macro lint leaves the \
+         compile-time host reads unrefused"
+    );
 }
 
 #[test]
@@ -336,6 +405,47 @@ fn the_static_scan_flags_atomic_lock_cell_and_mut_statics_and_nothing_else() {
 }
 
 #[test]
+fn the_include_scan_flags_a_call_and_not_a_name_that_merely_reads_include() {
+    let scan = |src: &str| {
+        let mut found = Vec::new();
+        include_calls(src.parse().expect("control tokenizes"), &mut found);
+        found
+    };
+    assert_eq!(scan("include!(\"table.rs\");"), ["include!(\"table.rs\")"]);
+    assert_eq!(
+        scan("fn f() { include!(concat!(\"a\", \"b\")); }").len(),
+        1,
+        "the scan reads the call, whatever builds its argument"
+    );
+    assert_eq!(
+        scan("include!{\"table.rs\"}").len() + scan("include![\"table.rs\"];").len(),
+        2,
+        "a call is a call in each of the three delimiters"
+    );
+    assert_eq!(
+        scan("std::include!(\"table.rs\");").len(),
+        1,
+        "a qualified call is a call"
+    );
+    assert!(
+        scan("fn f(include: u32) { if include != (0) {} }").is_empty(),
+        "the ! of a != is a punct like any other; the group that follows names the call"
+    );
+    assert!(
+        scan("use a::include; fn include_rows() {} struct S { include: bool }").is_empty(),
+        "an item named include is not a call"
+    );
+    assert!(
+        scan("let _ = include_str!(\"x\");").is_empty(),
+        "include_str! is the macro list's, not this scan's"
+    );
+    assert!(
+        scan("// include!(\"x.rs\");\nconst S: &str = \"include!(\\\"y.rs\\\")\";").is_empty(),
+        "a comment and a string literal are not calls"
+    );
+}
+
+#[test]
 fn every_member_sits_on_one_side_of_the_host_line() {
     let manifest = read(&workspace_root().join("Cargo.toml"));
     let members = members(&manifest);
@@ -372,8 +482,9 @@ fn every_runtime_crate_root_forbids_host_access() {
         assert!(
             forbids_host_access(&parsed),
             "{} lacks the crate-level attribute that makes the workspace clippy.toml's \
-             disallowed-methods list binding there:\n#![cfg_attr(not(test), forbid(\
-             clippy::disallowed_methods, clippy::print_stdout, clippy::print_stderr, \
+             disallowed-methods and disallowed-macros lists binding there:\n\
+             #![cfg_attr(not(test), forbid(clippy::disallowed_methods, \
+             clippy::disallowed_macros, clippy::print_stdout, clippy::print_stderr, \
              clippy::dbg_macro))]",
             lib.display()
         );
@@ -393,18 +504,27 @@ fn every_runtime_crate_has_no_crate_root_but_its_library() {
     }
 }
 
-#[test]
-fn no_runtime_source_keeps_a_mutable_static() {
+/// Every non-test source of every runtime crate.
+///
+/// The floor applies per member. One floor over the whole set holds at
+/// one file per crate, which is what a walk that stops early gives.
+fn runtime_sources() -> Vec<PathBuf> {
     let root = workspace_root();
     let mut files = Vec::new();
     for member in RUNTIME {
+        let before = files.len();
         non_test_sources(&root.join(member).join("src"), &mut files);
+        assert!(
+            files.len() > before,
+            "gate went vacuous: {member} contributed no source file"
+        );
     }
-    assert!(
-        files.len() >= RUNTIME.len(),
-        "gate went vacuous: {} runtime source file(s) found",
-        files.len()
-    );
+    files
+}
+
+#[test]
+fn no_runtime_source_keeps_a_mutable_static() {
+    let files = runtime_sources();
     let mut report = String::new();
     for file in &files {
         let stream: TokenStream = read(file)
@@ -420,6 +540,27 @@ fn no_runtime_source_keeps_a_mutable_static() {
         report.is_empty(),
         "runtime sources keep process-global state in a static; hold it in a value the \
          runtime owns instead:\n{report}"
+    );
+}
+
+#[test]
+fn no_runtime_source_reads_the_build_machine_with_include() {
+    let files = runtime_sources();
+    let mut report = String::new();
+    for file in &files {
+        let stream: TokenStream = read(file)
+            .parse()
+            .unwrap_or_else(|e| panic!("cannot tokenize {}: {e}", file.display()));
+        let mut found = Vec::new();
+        include_calls(stream, &mut found);
+        for call in found {
+            report.push_str(&format!("  {}: {call}\n", file.display()));
+        }
+    }
+    assert!(
+        report.is_empty(),
+        "runtime sources read the build machine's file system; take the bytes from a \
+         file source the host installs instead:\n{report}"
     );
 }
 
@@ -447,13 +588,20 @@ fn no_member_directory_shadows_the_workspace_clippy_toml() {
 }
 
 #[test]
-fn the_workspace_lists_keep_the_host_reads_and_hash_collections() {
+fn the_workspace_lists_keep_every_path_the_guard_requires() {
     let clippy_toml = read(&workspace_root().join("clippy.toml"));
     let methods = listed_paths(&clippy_toml, "disallowed-methods");
     for required in REQUIRED_METHODS {
         assert!(
             methods.iter().any(|m| m == required),
             "clippy.toml's disallowed-methods no longer names {required}"
+        );
+    }
+    let macros = listed_paths(&clippy_toml, "disallowed-macros");
+    for required in REQUIRED_MACROS {
+        assert!(
+            macros.iter().any(|m| m == required),
+            "clippy.toml's disallowed-macros no longer names {required}"
         );
     }
     let types = listed_paths(&clippy_toml, "disallowed-types");
