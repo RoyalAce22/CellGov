@@ -193,7 +193,7 @@ impl Runtime {
         }
         self.last_dma_completions.clear();
         self.last_dma_completions
-            .extend(due.iter().map(|(completion, _)| *completion));
+            .extend(due.iter().map(|(c, payload)| (*c, payload.is_some())));
         let timer_due = self.fire_timer_wakes();
 
         if result.yield_reason == YieldReason::Finished {

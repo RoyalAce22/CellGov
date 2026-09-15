@@ -383,3 +383,14 @@ fn a_run_whose_units_never_conflict_scans_every_earlier_event_of_every_other_uni
          shared event of every other unit: 2048 events cost 768 times as many tests",
     );
 }
+
+/// Gated on `debug_assertions`: the guard compiles out under release,
+/// where the call answers instead of a panic.
+#[test]
+#[cfg(debug_assertions)]
+#[should_panic(expected = "units_independent pairs two units")]
+fn a_unit_paired_with_itself_is_refused() {
+    let mut execution = Execution::new();
+    execution.push(UnitId::new(0), StepFootprint::default());
+    let _ = execution.units_independent(UnitId::new(0), UnitId::new(0));
+}

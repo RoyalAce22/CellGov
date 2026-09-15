@@ -42,6 +42,12 @@ const WRITER_STEPS: u64 = 3;
 const COUNTER_STEPS: u64 = 40;
 const TRANSFERRED: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
 
+/// The latency this witness rests on. Budget 2 and ten ticks are what
+/// put the completion between unit 1's last two write positions, so a
+/// change to either moves the landing and every case below reads a
+/// different workload. `workload` names it for all three.
+const LATENCY: u64 = 10;
+
 fn destination() -> ByteRange {
     ByteRange::new(GuestAddr::new(128), 4).expect("destination range")
 }
@@ -54,6 +60,12 @@ fn destination() -> ByteRange {
 /// 1's last two possible write positions. So one step of unit 2, run
 /// earlier, decides whether the transfer or the write lands last.
 fn workload() -> Runtime {
+    assert_eq!(
+        cellgov_core::DEFAULT_DMA_LATENCY_TICKS.raw(),
+        LATENCY,
+        "the workspace latency is what places the completion between the writer's \
+         last two positions",
+    );
     let src = ByteRange::new(GuestAddr::new(0), 4).expect("source range");
     let dst = destination();
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(2), STEP_CAP);

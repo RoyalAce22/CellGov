@@ -57,8 +57,21 @@ pub struct StepFootprint {
     pub mailbox_sends: Vec<MailboxId>,
     /// Mailboxes read from.
     pub mailbox_receives: Vec<MailboxId>,
-    /// DMA source and destination ranges (both appended).
-    pub dma_ranges: Vec<ByteRange>,
+    /// Ranges a transfer writes at completion: its destination.
+    ///
+    /// `Runtime::apply_dma_transfer` lands the destination in committed
+    /// memory whatever the request's direction names, so which end this
+    /// is follows that function and not `DmaDirection`.
+    pub dma_writes: Vec<ByteRange>,
+    /// Ranges a transfer reads at completion: the source of a
+    /// transfer no inline payload carries.
+    ///
+    /// A payloaded transfer copied its bytes at enqueue and reads
+    /// nothing later, and an SPU put's source addresses local store
+    /// rather than committed memory. Neither belongs here, so no
+    /// comparison pairs a local-store address against a
+    /// main-memory range.
+    pub dma_reads: Vec<ByteRange>,
     /// Signals updated.
     pub signal_updates: Vec<SignalId>,
     /// Mailbox wait targets.
@@ -81,8 +94,9 @@ pub struct StepFootprint {
     /// and flips the next conditional-store verdict, so the pair
     /// conflicts.
     pub reservation_lines: Vec<u64>,
-    /// Source and destination of every transfer in flight during this
-    /// step.
+    /// What every transfer in flight during this step touches at its
+    /// landing: each one's destination, and the source of one no inline
+    /// payload carries.
     ///
     /// A transfer lands at the first commit whose clock passed the tick
     /// stamped at its enqueue. So a step taken during a flight moves
@@ -92,7 +106,8 @@ pub struct StepFootprint {
     /// enqueue and everything after it by the same cost, which leaves
     /// the landing where it was relative to them. Reordering a step
     /// across the enqueue is still covered: a step during the flight
-    /// conflicts with the enqueue's own `dma_ranges`.
+    /// conflicts with the enqueue's own [`StepFootprint::dma_writes`]
+    /// and [`StepFootprint::dma_reads`].
     ///
     /// [`StepFootprint::conflicts`] tests this set against the other
     /// step's accesses, never against its own copy. Two steps that
@@ -130,7 +145,8 @@ impl StepFootprint {
         for category in [
             &mut self.shared_writes,
             &mut self.shared_reads,
-            &mut self.dma_ranges,
+            &mut self.dma_writes,
+            &mut self.dma_reads,
             &mut self.inflight_dma_ranges,
         ] {
             let aliases: Vec<ByteRange> = category
@@ -145,18 +161,25 @@ impl StepFootprint {
     ///
     /// Call it after the step's commit: that commit is what fires a due
     /// transfer, and one it fired was in flight for that step.
+    ///
+    /// A transfer the all-blocked time warp fires reaches neither the
+    /// queue nor the fired list, and needs to reach neither: the warp
+    /// lands it before the step it then selects, and every step it was
+    /// in flight for already read it out of the queue.
     pub fn note_inflight(&mut self, rt: &cellgov_core::Runtime) {
-        let queued = rt
-            .dma_queue()
-            .pending()
-            .map(|c| (c.source(), c.destination()));
+        let queued = rt.dma_queue().pending();
         let fired = rt
             .last_dma_completions()
             .iter()
-            .map(|c| (c.source(), c.destination()));
-        for (source, destination) in queued.chain(fired) {
-            self.inflight_dma_ranges.push(source);
-            self.inflight_dma_ranges.push(destination);
+            .map(|(completion, payloaded)| (completion, *payloaded));
+        for (completion, payloaded) in queued.chain(fired) {
+            self.inflight_dma_ranges.push(completion.destination());
+            // A payloaded transfer reads no source at completion, and
+            // an SPU put's source names local store. See
+            // [`StepFootprint::dma_reads`].
+            if !payloaded {
+                self.inflight_dma_ranges.push(completion.source());
+            }
         }
     }
 
@@ -188,9 +211,11 @@ impl StepFootprint {
                     // naming it runs it again.
                     fp.wait_units.push(*source);
                 }
-                Effect::DmaEnqueue { request, .. } => {
-                    fp.dma_ranges.push(request.source());
-                    fp.dma_ranges.push(request.destination());
+                Effect::DmaEnqueue { request, payload } => {
+                    fp.dma_writes.push(request.destination());
+                    if payload.is_none() {
+                        fp.dma_reads.push(request.source());
+                    }
                 }
                 Effect::WaitOnEvent { target, source } => {
                     fp.wait_units.push(*source);
@@ -249,25 +274,23 @@ impl StepFootprint {
             return true;
         }
 
-        if ranges_overlap(&self.shared_writes, &other.dma_ranges)
-            || ranges_overlap(&other.shared_writes, &self.dma_ranges)
+        // Bernstein again, over what a transfer does at completion
+        // against what the other step does now. Two reads are the one
+        // pairing left out, here as above.
+        if ranges_overlap(&self.shared_writes, &other.dma_writes)
+            || ranges_overlap(&other.shared_writes, &self.dma_writes)
+            || ranges_overlap(&self.shared_writes, &other.dma_reads)
+            || ranges_overlap(&other.shared_writes, &self.dma_reads)
+            || ranges_overlap(&self.shared_reads, &other.dma_writes)
+            || ranges_overlap(&other.shared_reads, &self.dma_writes)
         {
             return true;
         }
 
-        // A source range rides in `dma_ranges` beside its destination.
-        // The destination carries the dependency: `apply_dma_transfer`
-        // writes it at completion. The source is real only for a
-        // payload-less transfer, which reads it at completion. An SPU
-        // put copies local store into the payload at enqueue, so
-        // pairing on its source is a false dependency.
-        if ranges_overlap(&self.shared_reads, &other.dma_ranges)
-            || ranges_overlap(&other.shared_reads, &self.dma_ranges)
+        if ranges_overlap(&self.dma_writes, &other.dma_writes)
+            || ranges_overlap(&self.dma_writes, &other.dma_reads)
+            || ranges_overlap(&other.dma_writes, &self.dma_reads)
         {
-            return true;
-        }
-
-        if ranges_overlap(&self.dma_ranges, &other.dma_ranges) {
             return true;
         }
 
@@ -334,10 +357,11 @@ impl StepFootprint {
         // reservation whose 128-byte line its destination touches. That
         // clear flips the next conditional store's verdict, even where
         // the transferred bytes miss the store's own range. The sweep
-        // in `Runtime::host_write` exempts the issuer alone. The source
-        // half of `dma_ranges` rides along and over-approximates.
-        if write_covers_any_line(&self.dma_ranges, &other.reservation_lines)
-            || write_covers_any_line(&other.dma_ranges, &self.reservation_lines)
+        // in `Runtime::host_write` exempts the issuer alone, and reaches
+        // the write's own range alone. So only the destination sweeps: a
+        // completion's source read clears nothing.
+        if write_covers_any_line(&self.dma_writes, &other.reservation_lines)
+            || write_covers_any_line(&other.dma_writes, &self.reservation_lines)
         {
             return true;
         }
@@ -361,7 +385,8 @@ impl StepFootprint {
             && self.shared_reads.is_empty()
             && self.mailbox_sends.is_empty()
             && self.mailbox_receives.is_empty()
-            && self.dma_ranges.is_empty()
+            && self.dma_writes.is_empty()
+            && self.dma_reads.is_empty()
             && self.signal_updates.is_empty()
             && self.wait_mailboxes.is_empty()
             && self.wait_signals.is_empty()
@@ -377,13 +402,17 @@ impl StepFootprint {
 /// `accessor`'s step touched the bytes that transfer moves.
 ///
 /// The last clause reads the landing as the write it is, the way the
-/// `dma_ranges` clause above does: the destination sweeps every other
-/// unit's reservation whose line it covers, so where it lands decides
-/// whether the holder keeps the entry.
+/// [`StepFootprint::dma_writes`] clause above does: the destination
+/// sweeps every other unit's reservation whose line it covers, so where
+/// it lands decides whether the holder keeps the entry. The in-flight
+/// set over-approximates there, because it holds a payload-less
+/// transfer's source beside its destination and a source read sweeps
+/// nothing.
 fn touches_inflight(during: &StepFootprint, accessor: &StepFootprint) -> bool {
     ranges_overlap(&during.inflight_dma_ranges, &accessor.shared_writes)
         || ranges_overlap(&during.inflight_dma_ranges, &accessor.shared_reads)
-        || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_ranges)
+        || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_writes)
+        || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_reads)
         || write_covers_any_line(&during.inflight_dma_ranges, &accessor.reservation_lines)
 }
 

@@ -237,7 +237,18 @@ impl Execution {
     ///
     /// Returns `false` for a unit that ran no step: the schedule
     /// recorded nothing to answer from.
+    ///
+    /// # Panics
+    ///
+    /// Debug-panics when `a == b`. Every pairing goes through
+    /// [`StepFootprint::conflicts`], which answers for two units alone.
+    /// Program order already holds one unit's steps apart.
     pub fn units_independent(&self, a: UnitId, b: UnitId) -> bool {
+        debug_assert_ne!(
+            a, b,
+            "units_independent pairs two units; program order holds one unit's own \
+             steps apart",
+        );
         let (Some(left), Some(right)) = (self.by_unit.get(&a), self.by_unit.get(&b)) else {
             return false;
         };

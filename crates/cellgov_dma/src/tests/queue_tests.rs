@@ -172,3 +172,20 @@ fn pop_due_at_max_ticks_drains_everything() {
     assert_eq!(due.len(), 2, "both completions should be drained at MAX");
     assert!(q.is_empty());
 }
+
+#[test]
+fn pending_reports_which_entries_carry_their_bytes() {
+    let mut queue = DmaQueue::new();
+    queue.enqueue(completion_at(5, 1), None);
+    queue.enqueue(completion_at(9, 2), Some(vec![0u8; 0x10]));
+
+    let seen: Vec<(u64, bool)> = queue
+        .pending()
+        .map(|(c, payloaded)| (c.issuer().raw(), payloaded))
+        .collect();
+    assert_eq!(
+        seen,
+        vec![(1, false), (2, true)],
+        "drain order, and the flag follows the entry rather than the position",
+    );
+}

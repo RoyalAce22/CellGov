@@ -43,6 +43,7 @@ mod timer;
 mod trace_bridge;
 mod types;
 
+pub use construction::DEFAULT_DMA_LATENCY_TICKS;
 pub use snapshot::RuntimeSnapshot;
 pub use spaces::{AddressSpaceId, SpaceError};
 pub use state::Runtime;

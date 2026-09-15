@@ -55,10 +55,10 @@ fn writer(id: UnitId, addr: u64) -> FakeIsaUnit {
 /// One transfer in flight, and two writers that share nothing.
 ///
 /// The window opens after the submitter's enqueue step, which is why
-/// the builder takes that step itself. That step's own `dma_ranges`
-/// are the flight's ranges, so it conflicts with every step of the
-/// flight. Its position stamps the landing tick, so that dependency
-/// is real. The cases below measure the other steps.
+/// the builder takes that step itself. That step records the
+/// transfer's source and destination, so it conflicts with every step
+/// of the flight. Its position stamps the landing tick, so that
+/// dependency is real. The cases below measure the other steps.
 fn two_writers_beside_a_transfer() -> Runtime {
     let src = ByteRange::new(GuestAddr::new(DMA_SRC), 4).unwrap();
     let dst = ByteRange::new(GuestAddr::new(DMA_DST), 4).unwrap();

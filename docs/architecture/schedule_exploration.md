@@ -79,9 +79,11 @@ touches no shared resource still moves it. A PPU `mftb` reads that
 clock straight into a guest register, and a timer deadline fires from
 it. The relation records neither, so two steps it calls independent
 can commit different memory when they swap. One clock reader it does
-record is a transfer's landing tick: a step carries the ranges of
-every transfer in flight during it, and those conflict with another
-step's access to the same bytes. The second is the RSX FIFO advance
+record is a transfer's landing tick: a step carries what each transfer
+in flight during it will touch at completion, and those ranges conflict
+with another step's access to the same bytes. A transfer writes its
+destination there, and reads its source unless an inline payload
+already carries the bytes. The second is the RSX FIFO advance
 pass, whose effects commit guest memory and sweep reservations from a
 batch no unit's step emitted. The third is the LV2 handler surface: a
 footprint reads one unit's own step effects, and an LV2 handler's

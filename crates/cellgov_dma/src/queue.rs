@@ -66,9 +66,16 @@ impl DmaQueue {
         self.entries.values().next().map(|(c, _)| c)
     }
 
-    /// Every pending completion, in the order the queue drains them.
-    pub fn pending(&self) -> impl Iterator<Item = &DmaCompletion> + '_ {
-        self.entries.values().map(|(c, _)| c)
+    /// Every pending completion, in the order the queue drains them,
+    /// each with whether an inline payload already carries its bytes.
+    ///
+    /// A payloaded transfer never reads its source at completion, so a
+    /// caller that reasons about what the landing touches needs the
+    /// flag as well as the ranges.
+    pub fn pending(&self) -> impl Iterator<Item = (&DmaCompletion, bool)> + '_ {
+        self.entries
+            .values()
+            .map(|(completion, payload)| (completion, payload.is_some()))
     }
 
     /// Remove and return the earliest pending completion.

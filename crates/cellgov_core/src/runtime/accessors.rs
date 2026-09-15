@@ -233,16 +233,20 @@ impl Runtime {
         &self.last_runnable
     }
 
-    /// DMA completions the last [`Runtime::commit_step`] fired.
+    /// DMA completions the last [`Runtime::commit_step`] fired, each
+    /// with whether an inline payload carried its bytes.
     ///
     /// Empty before the first commit and after a restore. The commit
     /// that fires a completion applies the write outside every unit's
     /// batch, so this list is where a caller reads which bytes moved.
     /// The all-blocked time warp inside [`Runtime::step`] fires
-    /// completions outside every commit, and those appear here for no
-    /// step.
+    /// completions outside every commit, and none of them reaches this
+    /// list.
+    ///
+    /// The flag is what [`DmaQueue::pending`] carries, and for the same
+    /// reason: a payloaded transfer reads no source at completion.
     #[inline]
-    pub fn last_dma_completions(&self) -> &[cellgov_dma::DmaCompletion] {
+    pub fn last_dma_completions(&self) -> &[(cellgov_dma::DmaCompletion, bool)] {
         &self.last_dma_completions
     }
 

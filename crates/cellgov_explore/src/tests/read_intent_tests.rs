@@ -3,7 +3,8 @@
 //! A read set adds two of Bernstein's clauses: read against write,
 //! and write against read. It leaves two pairs independent: read
 //! against read, and read against a reservation line. The cases below
-//! cover those four pairs, the alias expansion over a shared mapping,
+//! cover those four pairs, each of a step's own read and write against
+//! each end of a transfer, the alias expansion over a shared mapping,
 //! and a write-read race whose two orders leave different bytes.
 
 use crate::dependency::StepFootprint;
@@ -17,6 +18,7 @@ use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
+use cellgov_testkit::world::DmaSubmitter;
 use cellgov_time::{Budget, GuestTicks};
 
 /// Address unit 0 writes and unit 1 reads.
@@ -93,16 +95,75 @@ fn two_reads_of_the_same_bytes_are_independent() {
     assert!(!reads(0, 8).conflicts(&reads(0, 8)));
 }
 
+/// A transfer's two ends pair differently, because at completion it
+/// writes one and reads the other.
 #[test]
-fn a_read_conflicts_with_an_overlapping_dma_range() {
+fn a_read_pairs_with_the_destination_a_transfer_writes() {
+    // The landing writes the destination, so the order decides which
+    // value a read of those bytes sees.
     assert!(reads(0, 8).conflicts(&dma(0x100, 4, 8)));
-    assert!(reads(0x100, 8).conflicts(&dma(0x100, 4, 8)));
+    assert!(dma(0x100, 4, 8).conflicts(&reads(0, 8)));
 }
 
 #[test]
-fn a_dma_range_conflicts_with_an_overlapping_read() {
-    assert!(dma(0x100, 4, 8).conflicts(&reads(0, 8)));
-    assert!(dma(0x100, 4, 8).conflicts(&reads(0x100, 8)));
+fn a_read_prunes_against_the_source_a_transfer_reads() {
+    // Both steps read the same bytes, and one of the reads is the
+    // completion's. Neither changes what the other sees.
+    assert!(!reads(0x100, 8).conflicts(&dma(0x100, 4, 8)));
+    assert!(!dma(0x100, 4, 8).conflicts(&reads(0x100, 8)));
+}
+
+#[test]
+fn a_write_pairs_with_either_end_of_a_transfer() {
+    assert!(writes(0, 8).conflicts(&dma(0x100, 4, 8)));
+    assert!(writes(0x100, 8).conflicts(&dma(0x100, 4, 8)));
+}
+
+/// An SPU put is the payloaded case, and its source names local store.
+/// See [`StepFootprint::dma_reads`].
+#[test]
+fn a_payloaded_transfer_records_no_source() {
+    let request = DmaRequest::new(
+        DmaDirection::Put,
+        range(0x100, 8),
+        range(4, 8),
+        UnitId::new(1),
+    )
+    .unwrap();
+    let carried = StepFootprint::from_effects(&[Effect::DmaEnqueue {
+        request,
+        payload: Some(vec![0u8; 8]),
+    }]);
+    assert!(carried.dma_reads.is_empty());
+    assert_eq!(carried.dma_writes, vec![range(4, 8)]);
+    assert!(!carried.conflicts(&writes(0x100, 8)));
+    assert!(!carried.conflicts(&reads(0x100, 8)));
+}
+
+/// The queue is where `note_inflight` takes the payload flag.
+#[test]
+fn an_unpayloaded_flight_records_both_of_its_ends() {
+    let source = range(0, 4);
+    let destination = range(128, 4);
+    let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(2), 16);
+    rt.register_unit_with(|id| {
+        DmaSubmitter::new(id, source, destination, vec![0xde, 0xad, 0xbe, 0xef])
+    });
+    let step = rt.step().expect("the submitter is the only runnable unit");
+    rt.commit_step(&step.result, &step.effects)
+        .expect("the enqueue commits");
+
+    let mut footprint = StepFootprint::from_effects(&step.effects);
+    footprint.note_inflight(&rt);
+    let starts: Vec<u64> = footprint
+        .inflight_dma_ranges
+        .iter()
+        .map(|r| r.start().raw())
+        .collect();
+    assert!(
+        starts.contains(&0) && starts.contains(&128),
+        "in-flight set {starts:#x?} lacks one end of a payload-less transfer",
+    );
 }
 
 #[test]

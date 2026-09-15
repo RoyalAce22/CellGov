@@ -46,7 +46,7 @@ pub struct Runtime {
     pub(super) last_runnable: Vec<UnitId>,
     /// DMA completions the last [`Runtime::commit_step`] fired, read
     /// through [`Runtime::last_dma_completions`].
-    pub(super) last_dma_completions: Vec<cellgov_dma::DmaCompletion>,
+    pub(super) last_dma_completions: Vec<(cellgov_dma::DmaCompletion, bool)>,
     pub(super) lv2_host: Lv2Host,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) spu_factory: Option<SpuFactory>,
