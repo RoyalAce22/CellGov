@@ -38,6 +38,7 @@ fn result(stop: StopReason, alternates: Vec<ScheduleRecord>) -> ExplorationResul
         outcome: OutcomeClass::ScheduleStable,
         total_branching_points: 3,
         classes_explored: None,
+        reversals_dropped: 0,
         bounds_hit: false,
         schedules_pruned: 0,
         schedules_refused: refused,

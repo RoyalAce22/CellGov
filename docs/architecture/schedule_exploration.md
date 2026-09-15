@@ -47,13 +47,18 @@ execution per class and hit no bound. A bounded run reports no count
 and can only be inconclusive.
 
 The count is narrower than it reads. A reversal that names a unit no
-state at that depth can run is dropped and counted, and one drop
-withdraws the count for the whole run, so a search can answer for every
-outcome and still report none.
+state at that depth can run is dropped, and one drop withdraws the
+count for the whole run, so a search can answer for every outcome and
+still report none. A result carries the drops beside the count for that
+reason: an absent count with no drop means a bound stopped the search
+or it claims no count of its own, and an absent count with a number
+means that many branches were given up. The number counts branches over
+every execution rather than classes, since one branch can carry more
+than one owed sequence.
 [`exhaustive_cover`](../../crates/cellgov_explore/tests/exhaustive_cover.rs)
 walks the choice tree of a small workload, finds both committed
 memories it can reach, and holds the search against them: it reaches
-both, and reports no count.
+both, reports no count, and names the drops that withdrew it.
 
 `StepFootprint`, extracted from the ten shared-resource `Effect`
 variants, drives conservative dependency analysis: step pairs with

@@ -224,6 +224,7 @@ where
     let classes = iter.schedules.len().saturating_add(1);
     let mut result = classify_iteration(iter, baseline, baseline_branching, first_invariant_break);
     result.classes_explored = complete.then_some(classes);
+    result.reversals_dropped = dropped_branches;
     result
 }
 
@@ -380,6 +381,9 @@ fn inherit(frames: &[Frame]) -> (BTreeMap<UnitId, StepFootprint>, WakeupTree) {
 /// Returns the reversals no depth can deliver, which withdraw
 /// [`ExplorationResult::classes_explored`] the way [`choose`]'s drops
 /// do.
+///
+/// A warped depth keeps its flag across executions, so every execution
+/// that reads the same race there counts another drop.
 fn detect_races(log: &DecisionLog, frames: &mut [Frame]) -> usize {
     let mut dropped = 0usize;
     let execution = Execution::from_log(log);
@@ -480,8 +484,9 @@ fn backtrack(frames: &mut Vec<Frame>) -> Option<usize> {
 /// not runnable here names a reversal this state cannot reach:
 /// `Execution::races` reports a racing pair without asking whether the
 /// later unit can go first here. `choose` drops that branch and counts
-/// it in `dropped`. Each drop gives up an equivalence class, which is
-/// why a count above zero withdraws
+/// it in `dropped`. The branch carries every sequence grafted below it,
+/// so a drop gives up at least one equivalence class, which is why a
+/// count above zero withdraws
 /// [`ExplorationResult::classes_explored`].
 ///
 /// With no branch left the depth takes any runnable unit it did not

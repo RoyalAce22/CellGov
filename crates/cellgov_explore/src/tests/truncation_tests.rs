@@ -237,6 +237,7 @@ fn withdrawn_record(replay_stop: StopReason) -> ExplorationResult {
         outcome: OutcomeClass::Inconclusive,
         total_branching_points: 1,
         classes_explored: None,
+        reversals_dropped: 0,
         bounds_hit: true,
         schedules_pruned: 0,
         schedules_truncated: 1,
@@ -348,6 +349,12 @@ fn a_capped_search_over_a_contending_workload_claims_nothing() {
     assert!(
         result.schedules.is_empty(),
         "a prefix baseline's races cover a prefix, so the search owes no reversal",
+    );
+    // With nothing owed nothing is dropped, so the empty count above is
+    // the cap and not a reversal this run gave up.
+    assert_eq!(
+        result.reversals_dropped, 0,
+        "a prefix execution names no race, so no branch is there to drop",
     );
     assert_eq!(result.schedules_truncated, 0);
 }

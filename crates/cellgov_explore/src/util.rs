@@ -207,9 +207,11 @@ pub fn classify_iteration(
         schedules: iter.schedules,
         outcome,
         total_branching_points,
-        // A search that runs one execution per class sets the field on
-        // the result this returns.
+        // The optimal search overwrites these two on the result this
+        // returns. No other search counts a class or a drop, so the zero
+        // below is that search's silence and not a measurement.
         classes_explored: None,
+        reversals_dropped: 0,
         bounds_hit: iter.bounds_hit,
         schedules_pruned: iter.schedules_pruned,
         schedules_truncated: iter.schedules_truncated,

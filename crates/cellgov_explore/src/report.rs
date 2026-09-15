@@ -20,9 +20,14 @@ pub fn format_human(result: &ExplorationResult) -> String {
     out.push_str(&format!("schedules_explored: {}\n", result.schedules.len()));
     out.push_str(&format!(
         "classes_explored: {}\n",
-        match result.classes_explored {
-            Some(n) => n.to_string(),
-            None => "not covered".to_string(),
+        match (result.classes_explored, result.reversals_dropped) {
+            (Some(n), 0) => n.to_string(),
+            // A count beside a drop breaks the rule the field states,
+            // and the JSON below prints the drop whatever the count
+            // says, so this names the pair rather than hiding one half.
+            (Some(n), dropped) => format!("{n} (contradicted by {dropped} reversal(s) dropped)"),
+            (None, 0) => "not covered".to_string(),
+            (None, dropped) => format!("not covered ({dropped} reversal(s) dropped)"),
         }
     ));
     out.push_str(&format!("schedules_pruned: {}\n", result.schedules_pruned));
@@ -97,6 +102,7 @@ pub fn format_json(result: &ExplorationResult) -> String {
         "branching_points": result.total_branching_points,
         "schedules_explored": result.schedules.len(),
         "classes_explored": result.classes_explored,
+        "reversals_dropped": result.reversals_dropped,
         "schedules_pruned": result.schedules_pruned,
         "schedules_truncated": result.schedules_truncated,
         "schedules_refused": result.schedules_refused,

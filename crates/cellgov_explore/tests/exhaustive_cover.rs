@@ -132,8 +132,9 @@ fn every_reachable_memory() -> BTreeSet<u64> {
     seen
 }
 
-/// Every committed memory the search answers for.
-fn memories_the_search_reaches() -> (BTreeSet<u64>, Option<usize>, bool) {
+/// Every committed memory the search answers for, beside the cover it
+/// claims, the reversals it dropped, and whether a bound stopped it.
+fn memories_the_search_reaches() -> (BTreeSet<u64>, Option<usize>, usize, bool) {
     let result = explore_window(
         workload,
         &ExplorationConfig {
@@ -150,7 +151,12 @@ fn memories_the_search_reaches() -> (BTreeSet<u64>, Option<usize>, bool) {
             reached.insert(record.memory_hash);
         }
     }
-    (reached, result.classes_explored, result.bounds_hit)
+    (
+        reached,
+        result.classes_explored,
+        result.reversals_dropped,
+        result.bounds_hit,
+    )
 }
 
 #[test]
@@ -165,7 +171,7 @@ fn two_committed_memories_are_reachable() {
 #[test]
 fn the_search_answers_for_every_reachable_memory() {
     let reachable = every_reachable_memory();
-    let (reached, classes, bounds_hit) = memories_the_search_reaches();
+    let (reached, classes, dropped, bounds_hit) = memories_the_search_reaches();
 
     assert!(
         !bounds_hit,
@@ -180,10 +186,20 @@ fn the_search_answers_for_every_reachable_memory() {
         2,
         "and the workload really does reach two, so this is not vacuous",
     );
-    // A reversal the search owed named a unit no state at that depth
-    // could run, and the search counts that drop.
     assert_eq!(
         classes, None,
-        "a dropped reversal withdraws the class count, which is the residue",
+        "a dropped reversal withdraws the class count for the whole run",
+    );
+    // The count is the point: the run gives up hundreds of branches,
+    // not the one an empty class count suggests, and it still answers
+    // for every outcome. Nothing but this number separates the two.
+    //
+    // The figure is ours and no paper's, pinned here as a regression
+    // witness. It counts dropped branches over every execution, so the
+    // search's own race handling moves it, and a move is a finding to
+    // explain rather than a number to re-bless.
+    assert_eq!(
+        dropped, 290,
+        "the branches this workload's depths could not deliver",
     );
 }

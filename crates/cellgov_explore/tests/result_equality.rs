@@ -101,6 +101,7 @@ fn every_field_of_a_finished_result_is_named() {
         outcome,
         total_branching_points,
         classes_explored,
+        reversals_dropped,
         bounds_hit,
         schedules_pruned,
         schedules_truncated,
@@ -117,6 +118,10 @@ fn every_field_of_a_finished_result_is_named() {
         classes_explored,
         Some(schedules.len() + 1),
         "the search covered one execution per class",
+    );
+    assert_eq!(
+        reversals_dropped, 0,
+        "a run that claims a count owed no reversal it could not deliver",
     );
     assert_eq!(
         classes_explored,

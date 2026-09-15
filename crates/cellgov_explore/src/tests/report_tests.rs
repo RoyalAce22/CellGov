@@ -40,6 +40,7 @@ fn sample_result() -> ExplorationResult {
         outcome: OutcomeClass::ScheduleSensitive,
         total_branching_points: 2,
         classes_explored: None,
+        reversals_dropped: 0,
         bounds_hit: false,
         schedules_pruned: 1,
         schedules_truncated: 0,
@@ -113,7 +114,7 @@ fn both_reports_say_whether_the_search_covered_every_class() {
         ..sample_result()
     };
     assert!(
-        format_human(&covered).contains("classes_explored: 6"),
+        format_human(&covered).contains("classes_explored: 6\n"),
         "{}",
         format_human(&covered)
     );
@@ -121,13 +122,55 @@ fn both_reports_say_whether_the_search_covered_every_class() {
     assert_eq!(v["classes_explored"], 6);
 
     let uncovered = sample_result();
+    // Both readings run to the end of the line. A drop count renders as
+    // a suffix, so a prefix match would pass either rendering.
     assert!(
-        format_human(&uncovered).contains("classes_explored: not covered"),
+        format_human(&uncovered).contains("classes_explored: not covered\n"),
         "{}",
         format_human(&uncovered)
     );
     let v: serde_json::Value = serde_json::from_str(&format_json(&uncovered)).expect("valid JSON");
     assert_eq!(v["classes_explored"], serde_json::Value::Null);
+    assert_eq!(v["reversals_dropped"], 0);
+}
+
+/// A count withdrawn by a drop reads differently from one never
+/// claimed, so a reader can tell how much the run gave up.
+#[test]
+fn a_withdrawn_count_names_the_reversals_that_withdrew_it() {
+    let withdrawn = ExplorationResult {
+        classes_explored: None,
+        reversals_dropped: 3,
+        ..sample_result()
+    };
+    let human = format_human(&withdrawn);
+    assert!(
+        human.contains("classes_explored: not covered (3 reversal(s) dropped)"),
+        "{human}",
+    );
+    let v: serde_json::Value = serde_json::from_str(&format_json(&withdrawn)).expect("valid JSON");
+    assert_eq!(v["classes_explored"], serde_json::Value::Null);
+    assert_eq!(v["reversals_dropped"], 3);
+}
+
+/// A count beside a drop is a state the type allows and the searches do
+/// not produce. Both reports name it, so neither can read as covered.
+#[test]
+fn a_count_beside_a_drop_reads_as_a_contradiction_in_both_reports() {
+    let contradictory = ExplorationResult {
+        classes_explored: Some(6),
+        reversals_dropped: 2,
+        ..sample_result()
+    };
+    let human = format_human(&contradictory);
+    assert!(
+        human.contains("classes_explored: 6 (contradicted by 2 reversal(s) dropped)"),
+        "{human}",
+    );
+    let v: serde_json::Value =
+        serde_json::from_str(&format_json(&contradictory)).expect("valid JSON");
+    assert_eq!(v["classes_explored"], 6);
+    assert_eq!(v["reversals_dropped"], 2);
 }
 
 #[test]
