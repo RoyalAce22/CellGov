@@ -150,6 +150,18 @@ PPU `lwarx` / `stwcx.` / `ldarx` / `stdcx.` and SPU
 `MFC_GETLLAR` / `MFC_PUTLLC` share one reservation model. The
 granule is 128 bytes (a Cell BE cache line) on both sides.
 
+**The SPU commands name a line by any byte inside it.** Alignment
+is not checked for the atomic commands, so a misaligned effective
+address refuses nothing: `MFC_GETLLAR` delivers the containing line
+to local store and reserves that line, and `MFC_PUTLLC` stores over
+the containing line. The bytes and the reservation always cover the
+same memory. A refused `MFC_GETLLAR` names the line it could not
+fetch, drops the reservation register rather than taking a line it
+never read, and leaves the atomic status alone, so the status keeps
+reporting the last command that completed. A completed one reports
+the getllar bit of `MFC_RdAtomicStat`; `MFC_PUTLLC` reports its own
+success bit.
+
 **Two pieces of state.** Every execution unit carries a local
 register -- `Option<ReservedLine>` on `PpuState` / `SpuState` --
 set by an atomic load and cleared by a conditional-store

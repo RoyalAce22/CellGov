@@ -31,6 +31,7 @@ use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
 use cellgov_mem::{ByteRange, GuestAddr};
+use cellgov_ps3_abi::hw::spu::MFC_ATOMIC_STAT_G;
 use cellgov_time::{Budget, InstructionCost};
 
 // Fault code constants encoded into `FaultKind::Guest`.
@@ -392,8 +393,15 @@ impl ExecutionUnit for SpuExecutionUnit {
                         };
                     }
                     effects.extend(shared_read(ea, size, self.id));
-                    // MFC_GETLLAR also installs the unit's reservation entry.
+                    // MFC_GETLLAR also installs the unit's reservation
+                    // entry and its atomic status. Both land here, after
+                    // the line arrives, so a refused read reports no
+                    // status and holds no reservation.
                     if let Some(line_addr) = acquire_line {
+                        // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
+                        self.state.channels.atomic_status = MFC_ATOMIC_STAT_G;
+                        self.state.reservation =
+                            Some(cellgov_sync::ReservedLine::containing(line_addr));
                         effects.push(Effect::ReservationAcquire {
                             line_addr,
                             source: self.id,
@@ -456,6 +464,10 @@ mod tag_id_tests;
 #[cfg(test)]
 #[path = "tests/getllar_tests.rs"]
 mod getllar_tests;
+
+#[cfg(test)]
+#[path = "tests/atomic_line_tests.rs"]
+mod atomic_line_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]

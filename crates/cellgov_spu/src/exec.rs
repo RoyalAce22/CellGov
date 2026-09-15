@@ -9,7 +9,8 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
-use cellgov_ps3_abi::hw::spu::{MfcCmd, MfcTagId, MFC_MAX_TAG_ID};
+use cellgov_ps3_abi::hw::spu::{MfcCmd, MfcTagId, MFC_ATOMIC_STAT_S, MFC_MAX_TAG_ID};
+use cellgov_sync::RESERVATION_LINE_BYTES;
 use cellgov_time::GuestTicks;
 
 /// Outcome of executing a single SPU instruction.
@@ -28,11 +29,14 @@ pub enum SpuStepOutcome {
     },
     /// Memory read the caller must service from the committed snapshot.
     ///
-    /// The caller copies `size` bytes from `ea` into LS at `lsa`; when
-    /// `acquire_line` is set (MFC_GETLLAR) it also emits an
-    /// `Effect::ReservationAcquire` for that line.
+    /// The caller copies `size` bytes from `ea` into LS at `lsa`. When
+    /// `acquire_line` is set (MFC_GETLLAR), the caller then:
+    /// - installs the reservation,
+    /// - sets the atomic status to `MFC_ATOMIC_STAT_G`,
+    /// - emits an `Effect::ReservationAcquire` for that line.
     MemoryRead {
-        /// Guest effective address to read from.
+        /// Guest effective address to read from. For a line read this
+        /// is the line's own address, whatever the guest wrote.
         ea: u64,
         /// Local store destination address.
         lsa: u32,
@@ -849,15 +853,19 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 reason: YieldReason::DmaSubmitted,
             }
         }
-        // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] getllar: load 128B cache line and acquire reservation on it.
+        // [CBEA p:66 s:7.8.1 Get Lock Line and Reserve Command] getllar: the transfer is one cache line, placed in local storage, with a reservation over it.
+        // The effective address names the line by any byte inside it.
+        // [CBEA p:57 s:7.2 Command Exceptions] alignment is not checked for the atomic commands, so a misaligned address refuses nothing.
+        // The bytes and the reservation therefore both cover the
+        // containing line. The caller writes the reservation register
+        // and the status channel after the line arrives; see
+        // `SpuStepOutcome::MemoryRead`.
         spu::MFC_GETLLAR => {
-            state.channels.atomic_status = 0;
             let line = cellgov_sync::ReservedLine::containing(ea);
-            state.reservation = Some(line);
             SpuStepOutcome::MemoryRead {
-                ea,
+                ea: line.addr(),
                 lsa,
-                size: 128,
+                size: RESERVATION_LINE_BYTES as u32,
                 acquire_line: Some(line.addr()),
             }
         }
@@ -874,13 +882,16 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 // The line is 128 bytes wherever MFC_LSA points, and
                 // nothing bounds that channel either.
                 let Some(ls_bytes) = lsa_usize
-                    .checked_add(128)
+                    .checked_add(RESERVATION_LINE_BYTES as usize)
                     .and_then(|end| state.ls.get(lsa_usize..end))
                     .map(|slice| slice.to_vec())
                 else {
                     return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
                 };
-                let range = ByteRange::new(GuestAddr::new(ea), 128).expect("valid EA range");
+                // The store covers the line the reservation named, as
+                // the getllar arm's read did.
+                let range = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
+                    .expect("valid EA range");
                 state.channels.atomic_status = 0;
                 SpuStepOutcome::Yield {
                     effects: vec![Effect::ConditionalStore {
@@ -893,7 +904,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     reason: YieldReason::DmaSubmitted,
                 }
             } else {
-                state.channels.atomic_status = 1;
+                state.channels.atomic_status = MFC_ATOMIC_STAT_S;
                 SpuStepOutcome::Continue
             }
         }

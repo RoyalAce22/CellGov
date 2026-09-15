@@ -134,6 +134,8 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
 
     s.channels.mfc_lsa = 0x200;
     s.channels.mfc_eah = 0;
+    // An address inside the line 0x1000: the command names the whole
+    // line by this byte, so the marked bytes land 0x40 past LSA.
     s.channels.mfc_eal = 0x1040;
     s.channels.mfc_size = 128;
     s.channels.mfc_tag_id = 0;
@@ -146,15 +148,25 @@ fn mfc_getllar_sets_local_reservation_and_emits_acquire() {
 
     let mut mem = GuestMemory::new(0x2000);
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x1040), 8).unwrap();
-    mem.apply_commit(range, &[0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE])
-        .unwrap();
+    let marked = [0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED, 0xFA, 0xCE];
+    mem.apply_commit(range, &marked).unwrap();
     let ctx = ExecutionContext::new(&mem);
 
     let mut effects = Vec::new();
     let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
     assert_eq!(unit.state().reservation.map(|l| l.addr()), Some(0x1000));
-    assert_eq!(unit.state().channels.atomic_status, 0);
+    assert_eq!(
+        unit.state().channels.atomic_status,
+        0x4,
+        "a completed getllar reports the G bit, not the putllc S bit",
+    );
+    assert_eq!(
+        &unit.state().ls[0x200..0x240],
+        &[0u8; 0x40],
+        "the line's first 0x40 bytes were never written",
+    );
+    assert_eq!(&unit.state().ls[0x240..0x248], &marked);
     let acquires: Vec<_> = effects
         .iter()
         .filter_map(|e| match e {

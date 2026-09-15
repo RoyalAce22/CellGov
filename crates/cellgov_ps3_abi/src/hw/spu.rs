@@ -77,6 +77,13 @@ pub const MFC_RD_TAG_STAT: u8 = 24;
 /// Read atomic operation status (after getllar/putllc).
 // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] MFC_RdAtomicStat, channel 27.
 pub const MFC_RD_ATOMIC_STAT: u8 = 27;
+/// `MFC_RdAtomicStat` G bit: a `getllar` completed.
+// [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] bit 29 of the 32-bit status word is G, set when the get lock-line and reserve command completed.
+pub const MFC_ATOMIC_STAT_G: u32 = 1 << (31 - 29);
+/// `MFC_RdAtomicStat` S bit: a `putllc` lost its reservation. The bit
+/// is clear when the conditional store succeeded.
+// [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] bit 31 of the status word is S, 1 when the put conditional was unsuccessful and 0 when it succeeded.
+pub const MFC_ATOMIC_STAT_S: u32 = 1;
 
 // SPU mailbox channels
 

@@ -9,7 +9,10 @@ use cellgov_ps3_abi::hw::spu::{MFC_GET, MFC_GETLLAR};
 use cellgov_time::Budget;
 
 const UNIT: u64 = 7;
+/// An address inside a line. A `get` reads from it as written; a
+/// `getllar` reads the line containing it.
 const SOURCE_EA: u64 = 0x1040;
+const SOURCE_LINE_EA: u64 = 0x1000;
 const TRANSFER_BYTES: u32 = 128;
 const MEM_BYTES: usize = 0x2000;
 const LAST_LINE_EA: u64 = MEM_BYTES as u64 - TRANSFER_BYTES as u64;
@@ -56,7 +59,7 @@ fn getllar_records_the_bytes_it_copied_into_local_store() {
 
     assert_eq!(
         read_ranges(&effects),
-        [(SOURCE_EA, u64::from(TRANSFER_BYTES), UnitId::new(UNIT))]
+        [(SOURCE_LINE_EA, u64::from(TRANSFER_BYTES), UnitId::new(UNIT))]
     );
 }
 
