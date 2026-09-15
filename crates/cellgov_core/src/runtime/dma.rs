@@ -87,7 +87,7 @@ impl Runtime {
             self.registry
                 .set_status_override(c.issuer(), UnitStatus::Runnable);
             if let Some(tag_id) = c.request().tag_id() {
-                *self.pending_tag_completions.entry(c.issuer()).or_insert(0) |= 1u32 << tag_id;
+                *self.pending_tag_completions.entry(c.issuer()).or_insert(0) |= tag_id.status_bit();
             }
         }
         due

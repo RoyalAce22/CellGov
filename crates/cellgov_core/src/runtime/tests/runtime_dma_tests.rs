@@ -112,6 +112,49 @@ fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
     );
 }
 
+/// A tagged completion publishes the bit of that tag's weight, not the
+/// low bit.
+///
+/// Every other case in the suite uses tag 0, where `1 << 0` is 1 and the
+/// shift cannot be told from a constant. Tag group `n` carries weight
+/// `2^n`, so tag 5 must publish `0x20`.
+// [CBEA p:126 s:9.3.4 MFC Read Tag-Group Query Mask Channel] the mask's bit positions run g1F..g0, so tag group n is the bit of weight 2^n.
+#[test]
+fn a_tagged_completion_publishes_that_tag_groups_bit() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+    use cellgov_ps3_abi::hw::spu::MfcTagId;
+    let mut rt = build(256, 5, 100);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    let issuer = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    rt.registry_mut()
+        .set_status_override(issuer, cellgov_exec::UnitStatus::Blocked);
+
+    let tag = MfcTagId::new(5).expect("5 is inside the architected range");
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        issuer,
+    )
+    .unwrap()
+    .with_tag_id(tag);
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    assert_eq!(
+        rt.pending_tag_completions.get(&issuer).copied(),
+        Some(0x20),
+        "tag group 5 is the bit of weight 32",
+    );
+}
+
 #[test]
 fn a_dma_completion_for_a_finished_issuer_does_not_resurrect_it() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};

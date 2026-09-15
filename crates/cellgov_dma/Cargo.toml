@@ -15,3 +15,7 @@ workspace = true
 cellgov_time = { path = "../cellgov_time" }
 cellgov_mem = { path = "../cellgov_mem" }
 cellgov_event = { path = "../cellgov_event" }
+# MfcTagId: the architected tag range belongs with the other hardware
+# constants, so a request cannot carry a tag the completion cannot
+# publish.
+cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }

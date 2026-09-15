@@ -9,6 +9,7 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
+use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_MAX_TAG_ID};
 use cellgov_time::GuestTicks;
 
 /// Outcome of executing a single SPU instruction.
@@ -43,8 +44,6 @@ pub enum SpuStepOutcome {
     /// Instruction caused an architecture fault.
     Fault(SpuFault),
 }
-
-use cellgov_ps3_abi::hw::spu::MFC_MAX_TAG_ID;
 
 /// SPU-specific fault categories.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -785,7 +784,13 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             let dst = ByteRange::new(GuestAddr::new(ea), size as u64).expect("valid EA range");
             let request = DmaRequest::new(DmaDirection::Put, src, dst, unit_id)
                 .expect("matching sizes")
-                .with_tag_id(state.channels.mfc_tag_id as u8);
+                // The gate at the top of this function refused anything
+                // above the architected range, so the staged value is
+                // inside it.
+                .with_tag_id(
+                    MfcTagId::new(state.channels.mfc_tag_id as u8)
+                        .expect("invariant: the tag gate bounds the staged tag id"),
+                );
             // [CBEA p:65 s:7. MFC Commands sub:7.8 MFC Atomic Update Commands] Self-store overlapping the reserved line clears the reservation.
             if let Some(line) = state.reservation {
                 if line.overlaps_range(ea, size as u64) {

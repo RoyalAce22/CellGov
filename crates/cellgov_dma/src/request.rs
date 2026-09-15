@@ -6,6 +6,7 @@
 
 use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
+use cellgov_ps3_abi::hw::spu::MfcTagId;
 
 /// Direction of a modeled DMA transfer.
 ///
@@ -30,7 +31,7 @@ pub struct DmaRequest {
     source: ByteRange,
     destination: ByteRange,
     issuer: UnitId,
-    tag_id: Option<u8>,
+    tag_id: Option<MfcTagId>,
 }
 
 impl DmaRequest {
@@ -60,16 +61,16 @@ impl DmaRequest {
     }
 
     /// Attach the MFC tag-id the SPU issued under. Completion publishes
-    /// `1 << tag_id` to the issuer's tag-status channel.
+    /// [`MfcTagId::status_bit`] to the issuer's tag-status channel.
     #[inline]
-    pub const fn with_tag_id(mut self, tag_id: u8) -> Self {
+    pub const fn with_tag_id(mut self, tag_id: MfcTagId) -> Self {
         self.tag_id = Some(tag_id);
         self
     }
 
     /// MFC tag-id the SPU issued under; `None` for PPU/host-initiated DMA.
     #[inline]
-    pub const fn tag_id(self) -> Option<u8> {
+    pub const fn tag_id(self) -> Option<MfcTagId> {
         self.tag_id
     }
 
@@ -108,3 +109,7 @@ impl DmaRequest {
 #[cfg(test)]
 #[path = "tests/request_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/tag_bound_tests.rs"]
+mod tag_bound_tests;

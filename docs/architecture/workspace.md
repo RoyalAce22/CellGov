@@ -46,6 +46,7 @@ graph BT
 
   ps3_abi --> time
   ps3_abi --> sync
+  ps3_abi --> dma
   ps3_abi --> lv2
   ps3_abi --> ppu
   ps3_abi --> spu

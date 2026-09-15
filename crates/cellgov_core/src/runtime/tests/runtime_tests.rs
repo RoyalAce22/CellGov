@@ -728,7 +728,9 @@ impl ExecutionUnit for TagPollUnit {
                 let dst = ByteRange::new(GuestAddr::new(self.dst_addr), 4).unwrap();
                 let request = DmaRequest::new(DmaDirection::Put, src, dst, self.id)
                     .unwrap()
-                    .with_tag_id(0);
+                    .with_tag_id(
+                        cellgov_ps3_abi::hw::spu::MfcTagId::new(0).expect("0 is in range"),
+                    );
                 effects.push(Effect::DmaEnqueue {
                     request,
                     payload: Some(vec![0xAB; 4]),

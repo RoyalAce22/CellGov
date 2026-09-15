@@ -1,8 +1,8 @@
 //! SPU local store and register-file sizes, channel numbers and MFC
 //! command opcodes.
 //!
-//! Channel-access semantics live in `cellgov_spu`; this module is
-//! data only.
+//! Channel-access semantics live in `cellgov_spu`; this module holds
+//! the ABI facts and the pure functions over them.
 // [CBEA p:112 s:9.1 MFC SPU Command Parameter Channels] SPU channel architecture overview.
 
 // MFC command channels
@@ -25,9 +25,40 @@ pub const MFC_TAG_ID: u8 = 20;
 /// Highest tag id an MFC command may name; the field is bits 27:31.
 // [CBEA p:115 s:9.1.3 MFC Command Tag Identification Channel] the identification tag is any value between x'0' and x'1F'.
 pub const MFC_MAX_TAG_ID: u32 = 31;
+
 /// MFC command opcode register; writing submits the DMA command.
 // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] channel x'15' = 21; write triggers issue.
 pub const MFC_CMD: u8 = 21;
+
+/// A tag id inside the architected range.
+///
+/// The completion path publishes `1 << tag_id` into a 32-bit tag-status
+/// word, so a value this type refuses has no bit to set. Holding the
+/// bound here means [`MfcTagId::status_bit`] cannot overflow, whoever
+/// built the command.
+// [CBEA p:128 s:9.3.6 MFC Read Tag-Group Status Channel] the status word reports one bit per tag group, and a group left out of the query mask reads zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MfcTagId(u8);
+
+impl MfcTagId {
+    /// Construct from a raw tag id.
+    ///
+    /// # Errors
+    /// `None` above [`MFC_MAX_TAG_ID`].
+    #[inline]
+    pub const fn new(raw: u8) -> Option<Self> {
+        if raw as u32 > MFC_MAX_TAG_ID {
+            return None;
+        }
+        Some(Self(raw))
+    }
+
+    /// The tag-status bit this id publishes.
+    #[inline]
+    pub const fn status_bit(self) -> u32 {
+        1u32 << self.0
+    }
+}
 
 // MFC tag status channels
 
