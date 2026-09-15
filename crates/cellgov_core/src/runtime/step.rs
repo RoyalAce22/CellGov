@@ -64,6 +64,10 @@ impl Runtime {
         if self.steps_taken >= self.max_steps {
             return Err(StepError::MaxStepsExceeded);
         }
+        // The time warp below fires the DMA and timer wakes itself and
+        // lands their guest writes, so the clear runs ahead of it.
+        self.last_host_writes.clear();
+        self.last_lv2_effects.clear();
 
         let unit_id = match self.scheduler.select_next(&self.registry) {
             Some(id) => id,

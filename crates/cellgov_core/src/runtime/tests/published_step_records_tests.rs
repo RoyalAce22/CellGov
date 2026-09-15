@@ -1,8 +1,13 @@
 //! The two per-step records a consumer reads off the runtime: the
 //! tagged host writes and the LV2 effects that landed.
 
+use std::cell::Cell;
+
+use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
-use cellgov_exec::{ExecutionStepResult, LocalDiagnostics, YieldReason};
+use cellgov_exec::{
+    ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
+};
 use cellgov_mem::{GuestAddr, GuestMemory, PageSize, Region, RegionAccess};
 use cellgov_sync::MailboxId;
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
@@ -63,7 +68,7 @@ fn trivial_result() -> ExecutionStepResult {
 }
 
 #[test]
-fn a_placement_before_the_first_commit_stands_in_the_published_host_writes() {
+fn a_placement_before_the_first_step_stands_in_the_published_host_writes() {
     let mut rt = build();
 
     rt.place_bytes(AddressSpaceId::BOOT, range(MAIN, 4), &[0xAB; 4])
@@ -72,25 +77,35 @@ fn a_placement_before_the_first_commit_stands_in_the_published_host_writes() {
     assert_eq!(
         rt.last_host_writes().to_vec(),
         vec![(HostWriter::Placement, range(MAIN, 4))],
-        "the list is emptied at commit entry, so a placement made before \
-         the first commit is still in it",
+        "the list is emptied at step entry, so a placement made before \
+         the first step is still in it",
     );
 }
 
 #[test]
-fn the_trivial_fast_path_clears_the_records_a_placement_left_behind() {
+fn a_commit_keeps_the_records_and_the_next_step_clears_them() {
     let mut rt = build();
     rt.set_mode(RuntimeMode::FaultDriven);
+    rt.register_unit_with(|id| DmaWaiter {
+        id,
+        steps: Cell::new(0),
+    });
     rt.place_bytes(AddressSpaceId::BOOT, range(MAIN, 4), &[0xAB; 4])
         .expect("a writable region accepts the placement");
 
     rt.commit_step(&trivial_result(), &[])
         .expect("a trivial step commits");
+    assert_eq!(
+        rt.last_host_writes().to_vec(),
+        vec![(HostWriter::Placement, range(MAIN, 4))],
+        "a commit clears nothing, including on the fast path: the time warp \
+         runs ahead of it and what the warp wrote has to survive it",
+    );
 
+    rt.step().expect("the waiter is runnable");
     assert!(
         rt.last_host_writes().is_empty(),
-        "the fast path returns before the body runs, so the clear has to \
-         precede it or the next reader sees the previous step's writes",
+        "the step is what opens the record",
     );
 }
 
@@ -202,6 +217,216 @@ fn an_lv2_mailbox_send_to_an_unregistered_mailbox_names_its_break() {
         vec![effect],
         "the wake half of the send still ran, so the effect is published \
          even though the message reached no reader",
+    );
+}
+
+const DMA_SRC: u64 = 0x100;
+const DMA_DST: u64 = 0x200;
+
+/// Enqueues one transfer on its first step and parks on it.
+///
+/// The test registers nothing else, so the transfer can only land in
+/// the time warp the next [`Runtime::step`] takes.
+#[derive(Clone)]
+struct DmaWaiter {
+    id: UnitId,
+    steps: Cell<u64>,
+}
+
+impl ExecutionUnit for DmaWaiter {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 2 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        let yield_reason = if n == 1 {
+            let request = DmaRequest::new(
+                DmaDirection::Put,
+                range(DMA_SRC, 8),
+                range(DMA_DST, 8),
+                self.id,
+            )
+            .expect("a put between two mapped, disjoint ranges");
+            effects.push(Effect::DmaEnqueue {
+                request,
+                payload: None,
+            });
+            YieldReason::DmaWait
+        } else {
+            YieldReason::Finished
+        };
+        ExecutionStepResult {
+            yield_reason,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn a_transfer_the_time_warp_fires_reaches_the_published_host_writes() {
+    let mut rt = build();
+    let waiter = rt.register_unit_with(|id| DmaWaiter {
+        id,
+        steps: Cell::new(0),
+    });
+
+    let step = rt.step().expect("the waiter is runnable");
+    rt.commit_step(&step.result, &step.effects)
+        .expect("the enqueue commits");
+    assert!(
+        !rt.dma_queue().is_empty(),
+        "the premise: the transfer is still in flight, so only a warp lands it",
+    );
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Blocked),
+        "and nothing is runnable, so the next step has to warp",
+    );
+
+    let step = rt.step().expect("the warp wakes the issuer");
+    rt.commit_step(&step.result, &step.effects)
+        .expect("the woken step commits");
+
+    assert!(
+        rt.last_host_writes()
+            .contains(&(HostWriter::DmaCompletion, range(DMA_DST, 8))),
+        "the warp landed the transfer before it picked a step, and the commit \
+         that followed must not clear what it wrote: {:?}",
+        rt.last_host_writes(),
+    );
+}
+
+const FLAG_ID: u32 = 1;
+const RESULT_PTR: u32 = 0x300;
+
+/// Waits on an event flag whose bits never arrive, with a finite
+/// timeout, then finishes.
+///
+/// The test registers nothing else, so only the time warp reaches the
+/// deadline. The expiry writes the observed bits back through the
+/// result pointer from inside the warp.
+#[derive(Clone)]
+struct FlagWaiter {
+    id: UnitId,
+    steps: Cell<u64>,
+}
+
+impl ExecutionUnit for FlagWaiter {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 2 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        let (yield_reason, syscall_args) = if n == 1 {
+            let mut args = [0u64; 9];
+            args[0] = cellgov_ps3_abi::lv2::syscall::EVENT_FLAG_WAIT;
+            args[1] = u64::from(FLAG_ID);
+            args[2] = 0b10;
+            args[3] = 0x01;
+            args[4] = u64::from(RESULT_PTR);
+            args[5] = 1_000;
+            (YieldReason::Syscall, Some(args))
+        } else {
+            (YieldReason::Finished, None)
+        };
+        ExecutionStepResult {
+            yield_reason,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::with_pc(0x1000),
+            fault: None,
+            syscall_args,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+#[test]
+fn an_expiry_the_time_warp_fires_reaches_the_published_records() {
+    let mut rt = build();
+    let waiter = rt.register_unit_with(|id| FlagWaiter {
+        id,
+        steps: Cell::new(0),
+    });
+    rt.lv2_host_mut().seed_primary_ppu_thread(
+        waiter,
+        cellgov_lv2::PpuThreadAttrs {
+            entry: 0,
+            arg: 0,
+            stack_base: 0,
+            stack_size: 0,
+            priority: 0,
+            tls_base: 0,
+        },
+    );
+    rt.lv2_host_mut()
+        .event_flags_mut()
+        .create_with_id(FLAG_ID, 0)
+        .expect("a fresh event-flag id");
+
+    let step = rt.step().expect("the waiter is runnable");
+    rt.commit_step(&step.result, &step.effects)
+        .expect("the wait commits");
+    assert_eq!(
+        rt.registry().effective_status(waiter),
+        Some(UnitStatus::Blocked),
+        "the premise: the wait parked, so only the warp reaches its deadline",
+    );
+
+    let step = rt.step().expect("the warp expires the wait");
+    rt.commit_step(&step.result, &step.effects)
+        .expect("the woken step commits");
+
+    assert!(
+        rt.last_host_writes()
+            .contains(&(HostWriter::Lv2Effect, range(u64::from(RESULT_PTR), 8))),
+        "the expiry wrote the observed bits through the waiter's result \
+         pointer inside the warp, and the commit after it must not clear \
+         what the warp wrote: {:?}",
+        rt.last_host_writes(),
     );
 }
 

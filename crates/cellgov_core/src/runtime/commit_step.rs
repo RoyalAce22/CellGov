@@ -24,10 +24,6 @@ impl Runtime {
         effects: &[Effect],
     ) -> Result<CommitOutcome, CommitError> {
         self.step_woke_others = false;
-        // The clear runs ahead of the fast-path return below, so a
-        // trivial step drops the previous step's records too.
-        self.last_host_writes.clear();
-        self.last_lv2_effects.clear();
         // Trivial-step fast path under FaultDriven. Epoch still advances
         // to preserve the atomic-batch boundary; trace is off in this mode.
         // The RSX half of the predicate must be the exact negation of the

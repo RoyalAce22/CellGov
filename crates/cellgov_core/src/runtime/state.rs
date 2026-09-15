@@ -48,11 +48,11 @@ pub struct Runtime {
     /// through [`Runtime::last_dma_completions`].
     pub(super) last_dma_completions: Vec<(cellgov_dma::DmaCompletion, bool)>,
     /// Guest ranges host-side code wrote since the last
-    /// [`Runtime::commit_step`] began, read through
+    /// [`Runtime::step`] began, read through
     /// [`Runtime::last_host_writes`].
     pub(super) last_host_writes: Vec<(cellgov_trace::HostWriter, cellgov_mem::ByteRange)>,
     /// Effects an LV2 handler applied since the last
-    /// [`Runtime::commit_step`] began, read through
+    /// [`Runtime::step`] began, read through
     /// [`Runtime::last_lv2_effects`].
     pub(super) last_lv2_effects: Vec<Effect>,
     pub(super) lv2_host: Lv2Host,

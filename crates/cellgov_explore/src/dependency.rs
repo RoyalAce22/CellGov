@@ -29,15 +29,6 @@
 //!   [`StepFootprint::note_host_writes`].
 //! - An LV2 syscall's park and the wake that ends it, neither of which
 //!   carries an effect or a yield reason.
-//! - Whatever the all-blocked time warp does before it picks a step.
-//!   The warp fires the timer wakes and the sync wakes itself, so a
-//!   timed wait's expiry lands its repair writes and its wake
-//!   continuations there. The `commit_step` that follows clears the
-//!   records that hold them, before any footprint reads them. The DMA
-//!   half of the warp is the one part covered.
-//!   [`StepFootprint::inflight_dma_ranges`] holds a transfer's ranges
-//!   for every step of its flight, rather than for the commit that
-//!   fires it.
 //!
 //! An LV2 handler's own effects are not among them. The runtime applies
 //! them at dispatch rather than through the commit pipeline, so the
@@ -297,7 +288,9 @@ impl StepFootprint {
     /// Call it after the step's commit, before
     /// [`StepFootprint::expand_aliases`]. The commit runs the LV2
     /// dispatch, resolves the wakes and fires the completions, and each
-    /// of those writes guest memory outside the unit's batch.
+    /// of those writes guest memory outside the unit's batch. The
+    /// record reaches back to the step's start, so it also holds what
+    /// the all-blocked time warp wrote before the step it picked.
     ///
     /// Each one becomes this step's own
     /// [`StepFootprint::shared_writes`]: the bytes land at this step,

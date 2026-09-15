@@ -120,12 +120,18 @@ that step's send and the wake it performs, since the dispatch releases
 the target by status alone rather than by what parked it. No clause
 was added for either.
 
-Two things still reach committed state without reaching a footprint.
+One thing still reaches committed state without reaching a footprint.
 The RSX FIFO advance pass commits guest memory and sweeps reservations
 from a batch no unit's step emitted; only its MMIO mirrors are
-recorded. The all-blocked time warp is the other: it fires the timer
-and sync wakes before it picks a step, and the commit that follows
-clears the published records before any footprint reads them.
+recorded.
+
+The all-blocked time warp does reach one. It fires the timer and DMA
+wakes before it picks a step, so the record a footprint reads opens at
+the step's start rather than at its commit, and what the warp wrote
+belongs to the step it then picked. A timed wait's expiry writing
+through its waiter's result pointer is the case that needs it: the DMA
+half was already covered, because a transfer's ranges are held for
+every step of its flight.
 
 A park the commit pipeline takes from the step result rather than an
 effect does reach a footprint. The independence relation reads the

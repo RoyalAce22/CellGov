@@ -251,8 +251,8 @@ impl Runtime {
     }
 
     /// Guest ranges host-side code wrote since the last
-    /// [`Runtime::commit_step`] began, each tagged with the mechanism
-    /// that wrote it, in the order they landed.
+    /// [`Runtime::step`] began, each tagged with the mechanism that
+    /// wrote it, in the order they landed.
     ///
     /// These writes land outside every unit's batch, so a step's
     /// effect list alone does not show them: an LV2 handler's out
@@ -261,16 +261,20 @@ impl Runtime {
     ///
     /// # Cross-module contract
     ///
-    /// - [`Runtime::commit_step`] empties the list when it starts, so
-    ///   the caller reads one step's writes only while it calls the
-    ///   runtime no further.
+    /// - [`Runtime::step`] empties the list when it starts, and
+    ///   [`Runtime::commit_step`] leaves it alone. A driver reads one
+    ///   step's writes after it commits that step.
+    /// - `SchedulerNotReinstalled` and `MaxStepsExceeded` are the two
+    ///   refusals `step` answers ahead of that clear, so each leaves
+    ///   the previous step's record in place. Every later refusal
+    ///   clears first and leaves whatever the time warp wrote.
+    /// - The all-blocked time warp inside [`Runtime::step`] fires the
+    ///   DMA and timer wakes, so what they write belongs to the step
+    ///   the warp then picked.
     /// - A restore empties the list.
     /// - A refused write records nothing.
-    /// - A [`HostWriter::Placement`] the driver makes between two
-    ///   commits stands in the list until the next commit clears it.
-    /// - A write the all-blocked time warp inside [`Runtime::step`]
-    ///   makes reaches no reader: the commit that follows it clears
-    ///   the list.
+    /// - A [`HostWriter::Placement`] the driver makes between two steps
+    ///   stands in the list until the next step clears it.
     /// - Every [`RuntimeMode`] builds the list; the mode gates the
     ///   `HostWrite` trace record alone.
     /// - An entry carries no address space, so a write at one numeric
@@ -283,7 +287,7 @@ impl Runtime {
     }
 
     /// Effects an LV2 handler applied since the last
-    /// [`Runtime::commit_step`] began, in the order they landed.
+    /// [`Runtime::step`] began, in the order they landed.
     ///
     /// A handler applies its effects at dispatch, so no unit's effect
     /// list holds them. The list holds the applied effects alone; a
