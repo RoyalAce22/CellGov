@@ -92,3 +92,7 @@ impl Runtime {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/dma_space_tests.rs"]
+mod dma_space_tests;

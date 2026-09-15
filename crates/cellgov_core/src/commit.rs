@@ -216,6 +216,14 @@ pub enum BlockReason {
 pub struct CommitContext<'a> {
     /// Guest memory the staged writes drain into.
     pub memory: &'a mut GuestMemory,
+    /// Space 0's memory, `Some` only where [`Self::memory`] is a child
+    /// space and `None` where the two are the same memory.
+    ///
+    /// Every DMA transfer reads and writes space 0, whatever space its
+    /// issuer runs in. A caller that validates a DMA range resolves it
+    /// against this field. Against [`Self::memory`] the check reads
+    /// bytes the transfer never touches.
+    pub dma_memory: Option<&'a GuestMemory>,
     /// Unit registry queried for source/target validation and status overrides.
     pub units: &'a mut UnitRegistry,
     /// Mailbox registry for send and receive-attempt effects.
@@ -387,8 +395,9 @@ impl CommitPipeline {
                             // Unlogged: the transfer's own read at
                             // completion is the one the runtime reports,
                             // and this batch may still be refused below.
+                            let dma_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
                             let resolves: Result<(), MemError> =
-                                ctx.memory.with_reads_unlogged(|mem: &GuestMemory| {
+                                dma_mem.with_reads_unlogged(|mem: &GuestMemory| {
                                     mem.read_checked(src).map(|_| ())
                                 });
                             if let Err(err) = resolves {
@@ -403,7 +412,11 @@ impl CommitPipeline {
                             }
                         }
                         let dst = request.destination();
-                        if let Err(err) = ctx.memory.validate_write(dst, dst.length() as usize) {
+                        // The completion writes the destination in
+                        // space 0 too, whatever space the issuer runs
+                        // in.
+                        let dst_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
+                        if let Err(err) = dst_mem.validate_write(dst, dst.length() as usize) {
                             // Marking the issuer Faulted prevents the SPU
                             // from polling MFC_RD_TAG_STAT for a tag bit
                             // that never arrives and time-warping to an

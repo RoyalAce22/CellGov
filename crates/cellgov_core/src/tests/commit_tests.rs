@@ -63,6 +63,7 @@ impl CommitTestBed {
         let mut label_writes = 0u64;
         let mut ctx = CommitContext {
             memory: &mut self.mem,
+            dma_memory: None,
             units: &mut self.units,
             mailboxes: &mut self.mailboxes,
             signals: &mut self.signals,

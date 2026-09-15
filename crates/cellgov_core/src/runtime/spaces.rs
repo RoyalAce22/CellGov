@@ -210,14 +210,22 @@ pub(super) fn resolve_space_memory_for_write<'a>(
 /// Mutable commit targets for `space`: its memory and its reservation
 /// table, borrowed together so a caller holds both while other
 /// `Runtime` fields stay free.
+///
+/// The third element is space 0's memory, `Some` only where `space` is
+/// a child. The commit pipeline validates a DMA transfer's ends against
+/// it, for the reason on [`crate::commit::CommitContext::dma_memory`].
 pub(super) fn resolve_commit_targets<'a>(
     memory: &'a mut GuestMemory,
     reservations: &'a mut ReservationTable,
     spaces: &'a mut SpaceTable,
     space: AddressSpaceId,
-) -> (&'a mut GuestMemory, &'a mut ReservationTable) {
+) -> (
+    &'a mut GuestMemory,
+    &'a mut ReservationTable,
+    Option<&'a GuestMemory>,
+) {
     match space {
-        AddressSpaceId::BOOT => (memory, reservations),
+        AddressSpaceId::BOOT => (memory, reservations, None),
         s => (
             spaces.extra.get_mut(&s).unwrap_or_else(|| {
                 panic!(
@@ -229,6 +237,7 @@ pub(super) fn resolve_commit_targets<'a>(
                 .extra_reservations
                 .get_mut(&s)
                 .expect("reservation table is created with its space"),
+            Some(memory),
         ),
     }
 }

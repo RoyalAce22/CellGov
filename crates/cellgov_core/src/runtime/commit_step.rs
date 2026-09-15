@@ -60,7 +60,9 @@ impl Runtime {
 
         // Commit into the emitting unit's address space; the batch's
         // writes were validated against the same space the unit
-        // executed in.
+        // executed in. A DMA transfer's ends are the exception: the
+        // pipeline resolves them in space 0, through
+        // `CommitContext::dma_memory`.
         let source_space = match self.last_scheduled_unit {
             Some(unit) => self.spaces.space_of(unit),
             None => crate::runtime::spaces::AddressSpaceId::BOOT,
@@ -101,14 +103,16 @@ impl Runtime {
         // `rsx_label_writes_committed` is threaded through CommitContext
         // so `process()` increments it adjacent to the guard it witnesses.
         let rsx_label_base = self.resolved_rsx_label_base();
-        let (space_memory, space_reservations) = crate::runtime::spaces::resolve_commit_targets(
-            &mut self.memory,
-            &mut self.reservations,
-            &mut self.spaces,
-            source_space,
-        );
+        let (space_memory, space_reservations, dma_memory) =
+            crate::runtime::spaces::resolve_commit_targets(
+                &mut self.memory,
+                &mut self.reservations,
+                &mut self.spaces,
+                source_space,
+            );
         let mut ctx = CommitContext {
             memory: space_memory,
+            dma_memory,
             units: &mut self.registry,
             mailboxes: &mut self.mailbox_registry,
             signals: &mut self.signal_registry,
@@ -188,7 +192,15 @@ impl Runtime {
         // where the request carries a tag, and is no part of the wake.
         // Reverse order would leave the SPU Blocked even when its wake
         // just fired.
-        if result.yield_reason == YieldReason::DmaWait {
+        //
+        // Only a batch that applied leaves a completion to wake the
+        // park. One batch can hold both a DmaEnqueue and the tag-status
+        // read that waits on it. A refusal discards the transfer the
+        // unit parks on, so nothing publishes the tag bit it waits for.
+        // A refused enqueue marks its issuer Faulted, which covers that
+        // shape. This guard covers the other one: the enqueue resolved,
+        // and a later effect's refusal discarded it.
+        if result.yield_reason == YieldReason::DmaWait && batch_applied {
             self.registry
                 .set_status_override(source, UnitStatus::Blocked);
             if let Ok(ref mut o) = outcome {
@@ -438,7 +450,8 @@ impl Runtime {
     /// projection lives in [`Self::mirror_rsx_cursor_to_mmio`].
     ///
     /// Runs after the batch applies and before the FIFO advance pass, so
-    /// the drain sees the new put / ref in the same batch.
+    /// the drain sees the new
+    /// put / ref in the same batch.
     fn mirror_rsx_control_register_writes(&mut self, effects: &[Effect]) {
         use crate::rsx::control_register;
         enum Slot {
@@ -490,3 +503,11 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/space_batch_tests.rs"]
 mod space_batch_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_refusal_status_tests.rs"]
+mod dma_refusal_status_tests;
+
+#[cfg(test)]
+#[path = "tests/rsx_mirror_guard_tests.rs"]
+mod rsx_mirror_guard_tests;
