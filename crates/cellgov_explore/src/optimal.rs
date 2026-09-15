@@ -360,6 +360,14 @@ fn run_one(
             // branch the tree holds for another unit is then a reversal
             // nothing took. The next execution to reach this depth
             // decides from the set this one recorded.
+            //
+            // No workload under `tests/` retires a branch here, so every
+            // drop those searches count comes from `choose`. A later
+            // visit delivers the prescription, so `chosen` matches. A
+            // first visit's tree holds what the depth above owed below
+            // it, which `inherit` hands down where a race grafted a
+            // sequence reaching past this prefix; a drop then needs the
+            // head of what is left to name a unit the warp does not wake.
             if !decided || frame.chosen != step.unit {
                 dropped_branches += frame.wut.retain_branch(step.unit);
             }

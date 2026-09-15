@@ -1,17 +1,17 @@
-//! A depth the runtime resolved by warping still owes its branches.
+//! A depth with one runnable unit drops the reversals naming another.
 //!
-//! Where no unit is runnable, the search has nothing to decide from:
-//! the runtime warps guest time, fires what is due, and runs whatever
-//! that wakes. The depth records the woken set and decides from it
-//! afterwards. It delivers a branch that names a unit the warp wakes,
-//! and drops one that names any other unit.
+//! `choose` walks the branches a depth holds and takes the least one
+//! whose unit can run there. Where the depth has a single runnable unit,
+//! it retires and counts every branch naming another unit, and one
+//! counted drop withdraws the run's class total.
 //!
-//! The warp here wakes one unit, so every reversal a race asks of this
-//! depth names some other unit, and the depth drops every one.
-//! `the_warp_wakes_exactly_one_unit` pins that count, which is what
-//! decides which of the two outcomes this workload shows.
-//! `warp_two_wakes.rs` holds the other outcome: two waits due at one
-//! tick, so the warp there wakes two units.
+//! The workload below reaches such a depth by parking two of its three
+//! units, so the third runs alone. No assertion here turns on what the
+//! warp after it wakes: the drops come from `choose`, at the last
+//! barrier-park depth before that warp, which
+//! `a_depth_holds_one_runnable_unit_with_the_rest_parked` pins.
+//! `warp_two_wakes.rs` covers the warp depth itself, where the search
+//! delivers its alternate instead of dropping it.
 
 #![allow(
     clippy::unwrap_used,
@@ -20,6 +20,7 @@
 
 use cellgov_core::Runtime;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+use cellgov_exec::UnitStatus;
 use cellgov_explore::{explore_optimal, ExplorationConfig};
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
@@ -35,10 +36,12 @@ const DMA_DST: u64 = 128;
 /// word and releases two writers that write it too.
 ///
 /// Nothing is runnable while the transfer is outstanding, so the
-/// runtime warps to it. The step that warp schedules is the parked
-/// unit's write, which races with both writers it then releases. So
-/// the warp depth is where those races ask for their reversals, and it
-/// is the one depth that cannot give them.
+/// runtime warps to it, and the step that warp schedules is the parked
+/// unit's write. Each wake that write makes releases a writer, so it
+/// races with the wait that parked that writer. The last of those waits
+/// took its depth's only runnable unit, with the other two parked on
+/// their own barriers, and the reversal its race asks for names one of
+/// them.
 fn warp_then_contend() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(1), 400);
     rt.register_unit_with(|id| {
@@ -80,41 +83,52 @@ fn warp_then_contend() -> Runtime {
     rt
 }
 
-/// The depth delivers a branch only for a unit the warp wakes. This
-/// count therefore decides whether the depth takes or drops the
-/// reversals the case below asks of it.
+/// The premise: the workload reaches a depth whose one runnable unit
+/// runs with the other two parked.
+///
+/// `choose` retires every branch naming a unit it cannot run there, and
+/// a parked unit is what such a branch names here. A depth left alone
+/// because the other units finished would say nothing, so the parked
+/// count carries the premise beside the runnable one. Both are read
+/// before the step, so a warp -- where nothing is runnable -- is not one
+/// of these.
 #[test]
-fn the_warp_wakes_exactly_one_unit() {
+fn a_depth_holds_one_runnable_unit_with_the_rest_parked() {
     let mut rt = warp_then_contend();
-    let mut warps = 0usize;
+    let mut singleton_depths = 0usize;
     for _ in 0..64 {
-        let idle = rt.registry().runnable_ids().next().is_none();
+        let registry = rt.registry();
+        let mut runnable = 0usize;
+        let mut parked = 0usize;
+        for id in registry.ids() {
+            match registry.effective_status(id) {
+                Some(UnitStatus::Runnable) => runnable += 1,
+                Some(UnitStatus::Blocked) => parked += 1,
+                Some(UnitStatus::Faulted | UnitStatus::Finished) | None => {}
+            }
+        }
+        let alone = runnable == 1 && parked == 2;
         let Ok(step) = rt.step() else { break };
-        if idle {
-            warps += 1;
-            assert_eq!(
-                rt.last_runnable().len(),
-                1,
-                "the warp woke {:?}",
-                rt.last_runnable(),
-            );
+        if alone {
+            singleton_depths += 1;
         }
         rt.commit_step(&step.result, &step.effects)
             .expect("no step of this workload refuses its commit");
     }
     assert!(
-        warps > 0,
-        "the workload has to reach a warp to say anything"
+        singleton_depths > 0,
+        "no depth ran its only runnable unit with the other two parked, so no \
+         branch here names a unit that cannot run",
     );
 }
 
 /// The search finishes, and says it did not cover everything.
 ///
-/// Every reversal a race asks of the warp depth names a unit the warp
-/// does not wake. The depth drops and counts each one, and that count
-/// withdraws the class total.
+/// Every reversal a race asks of the singleton depth names a unit that
+/// cannot run there. `choose` retires and counts each one, and that
+/// count withdraws the class total.
 #[test]
-fn a_warp_depth_refuses_a_reversal_it_cannot_deliver() {
+fn a_depth_with_one_runnable_unit_drops_what_it_cannot_deliver() {
     let cap = 1_000;
     let result = explore_optimal(
         warp_then_contend,
@@ -155,6 +169,6 @@ fn a_warp_depth_refuses_a_reversal_it_cannot_deliver() {
     // reads the same as a bound's.
     assert!(
         result.reversals_dropped > 0,
-        "the warp depth dropped a branch, and the count is what says so",
+        "the depth dropped a branch, and the count is what says so",
     );
 }
