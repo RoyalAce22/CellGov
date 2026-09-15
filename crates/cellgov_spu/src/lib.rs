@@ -33,9 +33,25 @@ use cellgov_exec::{
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::{Budget, InstructionCost};
 
-/// Fault code constants encoded into `FaultKind::Guest`.
+// Fault code constants encoded into `FaultKind::Guest`.
+
+/// A fetch or an access outside local store.
+///
+/// The detail is the program counter on the fetch path and the raw
+/// address operand on the load/store path. Local store spans 18 bits, so
+/// neither fits the detail half and the masked value gives the address
+/// modulo 64 KB. The fetch path carries the whole program counter beside
+/// the code in [`LocalDiagnostics`], which is where a reader takes it
+/// from.
+// [CBE-Handbook p:64 s:3.1.1 Local Store] Local store holds 256 KB, so an address inside it needs 18 bits.
 const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
+/// An MFC command the model has no arm for.
+///
+/// The detail is the command word the guest wrote. The opcode sits in
+/// its low byte, so the masked detail still names the refused command;
+/// the two class ids above the mask say nothing about which it was.
+// [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] The word written to this channel carries the transfer and replacement class ids in its high half and the MFC command opcode in its low byte.
 const FAULT_UNSUPPORTED_MFC_CMD: u32 = 0x0004_0000;
 const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
 /// A refused `rchcnt` keeps its own fault class. The trace then
@@ -57,6 +73,87 @@ const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 /// line the atomic path never read from a parked transfer that never
 /// landed.
 const FAULT_MFC_READ_UNRESOLVED: u32 = 0x0009_0000;
+
+/// The half of a fault code that carries the detail.
+///
+/// A class occupies the half above it. `cellgov_boot`'s fault report
+/// splits a guest code at the same halfword boundary, so a detail that
+/// reached a class bit would print as a different fault.
+const FAULT_DETAIL_MASK: u32 = 0xFFFF;
+
+/// Every class this crate raises, so the layout checks and the layout
+/// tests cover one set.
+const EVERY_FAULT_CLASS: [u32; 8] = [
+    FAULT_LS_OUT_OF_RANGE,
+    FAULT_UNSUPPORTED_CHANNEL,
+    FAULT_UNSUPPORTED_MFC_CMD,
+    FAULT_DECODE_ERROR,
+    FAULT_UNSUPPORTED_CHANNEL_COUNT,
+    FAULT_MFC_GET_UNRESOLVED,
+    FAULT_MFC_TAG_ID_OUT_OF_RANGE,
+    FAULT_MFC_READ_UNRESOLVED,
+];
+
+// `guest_fault`'s debug assertion compiles out under `--release`, which
+// is the profile a trace a reader decodes comes from, so the classes
+// that exist are held against the layout here instead. Distinctness
+// belongs with them: masking a detail away is no use if two classes
+// share a code.
+const _: () = {
+    // The premise for masking at all: local store spans 18 bits, so an
+    // address inside it does not fit the detail half.
+    assert!(
+        state::SPU_LS_SIZE as u32 > FAULT_DETAIL_MASK,
+        "a local store inside the detail field would leave nothing to mask",
+    );
+    let mut i = 0;
+    while i < EVERY_FAULT_CLASS.len() {
+        assert!(
+            EVERY_FAULT_CLASS[i] & FAULT_DETAIL_MASK == 0,
+            "a fault class reaches into the detail field",
+        );
+        let mut j = i + 1;
+        while j < EVERY_FAULT_CLASS.len() {
+            assert!(
+                EVERY_FAULT_CLASS[i] != EVERY_FAULT_CLASS[j],
+                "two fault classes share a code",
+            );
+            j += 1;
+        }
+        i += 1;
+    }
+};
+
+/// The class and detail each [`SpuFault`] reports.
+fn guest_fault_for(fault: SpuFault) -> FaultKind {
+    match fault {
+        SpuFault::LsOutOfRange(a) => guest_fault(FAULT_LS_OUT_OF_RANGE, a),
+        SpuFault::UnsupportedChannel { channel, .. } => {
+            guest_fault(FAULT_UNSUPPORTED_CHANNEL, channel as u32)
+        }
+        SpuFault::UnsupportedMfcCommand(c) => guest_fault(FAULT_UNSUPPORTED_MFC_CMD, c),
+        SpuFault::UnsupportedChannelCount(channel) => {
+            guest_fault(FAULT_UNSUPPORTED_CHANNEL_COUNT, channel as u32)
+        }
+        SpuFault::TagIdOutOfRange(tag) => guest_fault(FAULT_MFC_TAG_ID_OUT_OF_RANGE, tag),
+    }
+}
+
+/// One guest fault: `class` in the high half of the code, `detail`
+/// masked into the low half.
+///
+/// Each detail these paths carry is a value the guest picked or
+/// influenced -- a program counter, a channel number, an MFC command
+/// word, a tag id -- so an unmasked one sets a class bit and the code
+/// decodes as some other fault. The assertion covers a class added
+/// after [`EVERY_FAULT_CLASS`].
+fn guest_fault(class: u32, detail: u32) -> FaultKind {
+    debug_assert!(
+        class & FAULT_DETAIL_MASK == 0,
+        "fault class 0x{class:08x} reaches into the detail field",
+    );
+    FaultKind::Guest(class | (detail & FAULT_DETAIL_MASK))
+}
 
 /// Records the bytes a transfer copied from main memory into local store.
 ///
@@ -177,9 +274,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                     yield_reason: YieldReason::Fault,
                     consumed_cost: InstructionCost::new(0),
                     local_diagnostics: LocalDiagnostics::with_pc(self.state.pc as u64),
-                    fault: Some(FaultKind::Guest(
-                        FAULT_MFC_GET_UNRESOLVED | u32::from(tag_id),
-                    )),
+                    fault: Some(guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id))),
                     syscall_args: None,
                 };
             }
@@ -208,7 +303,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: Some(FaultKind::Guest(FAULT_LS_OUT_OF_RANGE | self.state.pc)),
+                        fault: Some(guest_fault(FAULT_LS_OUT_OF_RANGE, self.state.pc)),
                         syscall_args: None,
                     };
                 }
@@ -222,7 +317,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: Some(FaultKind::Guest(FAULT_DECODE_ERROR)),
+                        fault: Some(guest_fault(FAULT_DECODE_ERROR, 0)),
                         syscall_args: None,
                     };
                 }
@@ -287,9 +382,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                             yield_reason: YieldReason::Fault,
                             consumed_cost: InstructionCost::new(budget.raw() - remaining),
                             local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                            fault: Some(FaultKind::Guest(
-                                FAULT_MFC_READ_UNRESOLVED | (ea as u32 & 0xFFFF),
-                            )),
+                            fault: Some(guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32)),
                             syscall_args: None,
                         };
                     }
@@ -305,27 +398,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
                 SpuStepOutcome::Fault(f) => {
                     self.status = UnitStatus::Faulted;
-                    let code = match f {
-                        SpuFault::LsOutOfRange(a) => FAULT_LS_OUT_OF_RANGE | a,
-                        SpuFault::UnsupportedChannel { channel, .. } => {
-                            FAULT_UNSUPPORTED_CHANNEL | channel as u32
-                        }
-                        SpuFault::UnsupportedMfcCommand(c) => FAULT_UNSUPPORTED_MFC_CMD | c,
-                        SpuFault::UnsupportedChannelCount(channel) => {
-                            FAULT_UNSUPPORTED_CHANNEL_COUNT | channel as u32
-                        }
-                        // The detail is masked: the staged tag is
-                        // whatever the guest wrote to the channel, so it
-                        // would otherwise smear into the class bits.
-                        SpuFault::TagIdOutOfRange(tag) => {
-                            FAULT_MFC_TAG_ID_OUT_OF_RANGE | (tag & 0xFFFF)
-                        }
-                    };
+                    let fault = guest_fault_for(f);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
                         local_diagnostics: LocalDiagnostics::with_pc(step_pc),
-                        fault: Some(FaultKind::Guest(code)),
+                        fault: Some(fault),
                         syscall_args: None,
                     };
                 }
@@ -361,6 +439,10 @@ mod read_intent_tests;
 #[cfg(test)]
 #[path = "tests/parked_get_tests.rs"]
 mod parked_get_tests;
+
+#[cfg(test)]
+#[path = "tests/fault_code_tests.rs"]
+mod fault_code_tests;
 
 #[cfg(test)]
 #[path = "tests/tag_id_tests.rs"]

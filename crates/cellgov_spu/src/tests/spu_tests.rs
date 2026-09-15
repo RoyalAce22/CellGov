@@ -98,7 +98,11 @@ fn lqa_out_of_range_local_store_faults() {
     assert_eq!(result.yield_reason, YieldReason::Fault);
     assert_eq!(unit.status(), UnitStatus::Faulted);
     if let Some(FaultKind::Guest(code)) = result.fault {
-        assert_eq!(code & FAULT_LS_OUT_OF_RANGE, FAULT_LS_OUT_OF_RANGE);
+        // The whole class field, not one bit of it. Before the detail
+        // was masked this path produced 0x0003_FFF8, whose class field
+        // reads as FAULT_UNSUPPORTED_CHANNEL, and a one-bit test passed
+        // against it anyway.
+        assert_eq!(code & !crate::FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE);
     } else {
         panic!(
             "expected Guest(FAULT_LS_OUT_OF_RANGE) fault, got {:?}",
