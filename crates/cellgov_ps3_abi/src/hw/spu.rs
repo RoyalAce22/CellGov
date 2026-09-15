@@ -22,6 +22,9 @@ pub const MFC_SIZE: u8 = 19;
 /// MFC tag ID register.
 // [CBEA p:115 s:9.1.3 MFC Command Tag Identification Channel] channel x'14' = 20.
 pub const MFC_TAG_ID: u8 = 20;
+/// Highest tag id an MFC command may name; the field is bits 27:31.
+// [CBEA p:115 s:9.1.3 MFC Command Tag Identification Channel] the identification tag is any value between x'0' and x'1F'.
+pub const MFC_MAX_TAG_ID: u32 = 31;
 /// MFC command opcode register; writing submits the DMA command.
 // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] channel x'15' = 21; write triggers issue.
 pub const MFC_CMD: u8 = 21;

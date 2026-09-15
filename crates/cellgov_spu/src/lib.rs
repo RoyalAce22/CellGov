@@ -45,6 +45,9 @@ const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
 /// whose local-store destination escapes the store. Its low bits carry
 /// the transfer's tag id.
 const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
+/// An MFC command whose staged tag id is outside 0..31. The low bits
+/// carry the value the guest wrote, masked to 16 bits.
+const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 
 /// Records the bytes a transfer copied from main memory into local store.
 ///
@@ -285,6 +288,12 @@ impl ExecutionUnit for SpuExecutionUnit {
                         SpuFault::UnsupportedChannelCount(channel) => {
                             FAULT_UNSUPPORTED_CHANNEL_COUNT | channel as u32
                         }
+                        // The detail is masked: the staged tag is
+                        // whatever the guest wrote to the channel, so it
+                        // would otherwise smear into the class bits.
+                        SpuFault::TagIdOutOfRange(tag) => {
+                            FAULT_MFC_TAG_ID_OUT_OF_RANGE | (tag & 0xFFFF)
+                        }
                     };
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
@@ -326,6 +335,10 @@ mod read_intent_tests;
 #[cfg(test)]
 #[path = "tests/parked_get_tests.rs"]
 mod parked_get_tests;
+
+#[cfg(test)]
+#[path = "tests/tag_id_tests.rs"]
+mod tag_id_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]

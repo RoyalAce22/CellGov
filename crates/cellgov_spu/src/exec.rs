@@ -44,6 +44,8 @@ pub enum SpuStepOutcome {
     Fault(SpuFault),
 }
 
+use cellgov_ps3_abi::hw::spu::MFC_MAX_TAG_ID;
+
 /// SPU-specific fault categories.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SpuFault {
@@ -64,6 +66,13 @@ pub enum SpuFault {
     /// A channel whose capacity the model does not know.
     #[error("SPU unsupported channel rchcnt 0x{0:02x}")]
     UnsupportedChannelCount(u8),
+    /// An MFC command whose staged tag id is outside the architected
+    /// range.
+    ///
+    /// The completion path publishes `1 << tag_id` into a 32-bit
+    /// tag-status word, so a value past the range has no bit to set.
+    #[error("SPU MFC command tag id {0} is outside 0..31")]
+    TagIdOutOfRange(u32),
 }
 
 fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
@@ -674,6 +683,7 @@ fn execute_wrch(channel: u8, rt: u8, state: &mut SpuState, unit_id: UnitId) -> S
             SpuStepOutcome::Continue
         }
         // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] MFC_TagID assigns a 0..31 tag value to the command being formed.
+        // [CBEA p:115 s:9. Synergistic Processor Unit Channels sub:9.1 MFC SPU Command Parameter Channels] The parameter's validity is checked asynchronous to the instruction stream, so the write itself stands whatever the guest wrote; `execute_mfc_cmd` gates the command that would carry it.
         spu::MFC_TAG_ID => {
             state.channels.mfc_tag_id = val;
             SpuStepOutcome::Continue
@@ -751,6 +761,14 @@ fn execute_rchcnt(rt: u8, channel: u8, state: &mut SpuState) -> SpuStepOutcome {
 }
 
 fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOutcome {
+    // [CBE-Handbook p:456 s:17. SPE Channel and Related MMIO Interface sub:17.9 MFC Command Parameter Channels] A set bit above the tag field suspends MFC command queue processing, so no command naming that tag is processed.
+    // The model has no suspended queue to hold the command in, and
+    // carrying it would reach `1 << tag_id` on the completion path,
+    // where a value past 31 has no bit to set. The command is refused
+    // by name instead.
+    if state.channels.mfc_tag_id > MFC_MAX_TAG_ID {
+        return SpuStepOutcome::Fault(SpuFault::TagIdOutOfRange(state.channels.mfc_tag_id));
+    }
     let ea = ((state.channels.mfc_eah as u64) << 32) | state.channels.mfc_eal as u64;
     let lsa = state.channels.mfc_lsa;
     let size = state.channels.mfc_size;
