@@ -492,6 +492,12 @@ impl ExecutionUnit for SpuExecutionUnit {
             reservation_line: self.state.reservation.map(|l| l.addr()),
         }
     }
+
+    fn local_memory_hash(&self) -> Option<u64> {
+        let mut hasher = cellgov_mem::Fnv1aHasher::new();
+        hasher.write(&self.state.ls);
+        Some(hasher.finish())
+    }
 }
 
 #[cfg(test)]
@@ -521,6 +527,10 @@ mod atomic_line_tests;
 #[cfg(test)]
 #[path = "tests/fault_diag_tests.rs"]
 mod fault_diag_tests;
+
+#[cfg(test)]
+#[path = "tests/local_memory_hash_tests.rs"]
+mod local_memory_hash_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]

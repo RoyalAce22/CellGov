@@ -37,7 +37,7 @@ pub struct CapturedRegion {
 /// Memory snapshot from one explored schedule.
 #[derive(Debug, Clone)]
 pub struct ScheduleSnapshot {
-    /// Final committed-memory hash.
+    /// Final observable hash ([`crate::classify::OBSERVABLE`]).
     pub memory_hash: u64,
     /// Captured regions, in spec order.
     pub regions: Vec<CapturedRegion>,
@@ -78,7 +78,7 @@ where
             baseline_regions = captured;
         } else {
             alternates.push(ScheduleSnapshot {
-                memory_hash: rt.committed_memory_hash(),
+                memory_hash: rt.observable_hash(),
                 regions: captured,
             });
         }

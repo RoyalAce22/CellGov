@@ -137,6 +137,18 @@ pub trait ExecutionUnit {
     /// from guest code (synthetic / scenario units).
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
 
+    /// Hash of the unit's private memory the guest reads back, or `None`
+    /// for a unit with none.
+    ///
+    /// An SPU's local store is such memory: a program computes in it,
+    /// and two schedules can leave the committed memory equal and the
+    /// local store different. The schedule explorer folds this hash
+    /// beside the committed-memory hash into the observable its verdict
+    /// compares. Registers stay outside this hash.
+    fn local_memory_hash(&self) -> Option<u64> {
+        None
+    }
+
     /// Return `(shadow_hits, shadow_misses)` for units with a
     /// predecoded instruction shadow; others report `(0, 0)`. A
     /// high miss ratio indicates fetches outside the shadowed

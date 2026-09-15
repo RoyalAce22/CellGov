@@ -67,7 +67,7 @@ where
     let mut rt = make_runtime();
     let (log, baseline_stop) = observe_decisions_bounded(&mut rt, config.max_steps_per_run);
     let baseline = BaselineRun {
-        hash: rt.committed_memory_hash(),
+        hash: rt.observable_hash(),
         steps: log.len(),
         stop: baseline_stop,
     };
@@ -119,7 +119,7 @@ where
             candidate.prefix.iter().copied().map(Some).collect(),
         ));
         let (log, stop) = observe_decisions_bounded(&mut rt, config.max_steps_per_run);
-        let hash = rt.committed_memory_hash();
+        let hash = rt.observable_hash();
         if first_invariant_break.is_none() {
             first_invariant_break = rt.lv2_host().observability().first_invariant_break_line();
         }

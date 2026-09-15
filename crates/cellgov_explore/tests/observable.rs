@@ -1,10 +1,10 @@
 //! Declared regions never narrow the verdict.
 //!
 //! The verdict compares one observable, the committed memory of every
-//! address space at the end of the run. `explore_with_regions` adds a
-//! second comparison against an oracle. Whatever regions a caller
-//! declares, and whether it declares any, the verdict is the one
-//! `explore_window` gives for the same workload.
+//! address space and every SPU's local store at the end of the run.
+//! `explore_with_regions` adds a second comparison against an oracle.
+//! Whatever regions a caller declares, and whether it declares any, the
+//! verdict is the one `explore_window` gives for the same workload.
 
 #![allow(
     clippy::unwrap_used,

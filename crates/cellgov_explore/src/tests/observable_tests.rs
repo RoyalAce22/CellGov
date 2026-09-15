@@ -57,6 +57,7 @@ fn the_json_report_carries_the_observable_label() {
 #[test]
 fn the_observable_names_every_address_space_and_the_end_of_the_run() {
     assert!(OBSERVABLE.contains("every address space"), "{OBSERVABLE}");
+    assert!(OBSERVABLE.contains("local store"), "{OBSERVABLE}");
     assert!(OBSERVABLE.contains("end of the run"), "{OBSERVABLE}");
     assert!(!OBSERVABLE.contains("region"), "{OBSERVABLE}");
 }

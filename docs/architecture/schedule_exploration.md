@@ -35,7 +35,7 @@ flowchart TD
   owe --> back["retire the branch just explored, add its unit to that prefix's sleep set"]
   back --> next{"any prefix still owes a branch?"}
   next -->|yes| run
-  next -->|no| hash["compare the multi-space committed-memory hashes (plus named regions under explore_with_regions)"]
+  next -->|no| hash["compare the observable hashes: multi-space committed memory folded with each SPU's local store (plus named regions under explore_with_regions)"]
   hash --> cls{"across the classes explored"}
   cls -->|all identical| stable["ScheduleStable"]
   cls -->|two differ| sens["ScheduleSensitive"]
@@ -43,18 +43,19 @@ flowchart TD
 ```
 
 Every verdict compares one observable: the committed memory of every
-address space at the end of a maximal execution, which is what
-`committed_memory_hash` covers. `ScheduleStable` is stable with respect
-to that, and the report names it on every verdict. Every byte is
-observed at the end of the run, so two writes to overlapping bytes are
-dependent whatever reads fall between them, and the observer relaxation
-that treats an unread write as unobserved lands on no write. It can
-land only on a resource whose final state the hash does not cover: a
-mailbox, a signal register, a reservation, an SPU's local store. A
-divergence confined to one of those reports as stable. Named regions
-are a second
-comparison against an oracle; they never narrow the verdict, and a run
-that declares none reports the same verdict as one that declares many.
+address space and every SPU's local store at the end of a maximal
+execution, which is what `observable_hash` covers (the committed-memory
+hash folded with each unit's private memory). `ScheduleStable` is
+stable with respect to that, and the report names it on every verdict.
+Every byte is observed at the end of the run, so two writes to
+overlapping bytes are dependent whatever reads fall between them, and
+the observer relaxation that treats an unread write as unobserved lands
+on no write. It can land only on a resource whose final state the hash
+does not cover: a mailbox, a signal register, a reservation, a unit's
+registers. A divergence confined to one of those reports as stable.
+Named regions are a second comparison against an oracle; they never
+narrow the verdict, and a run that declares none reports the same
+verdict as one that declares many.
 
 `ScheduleStable` carries a class count when the search covered one
 execution per class and hit no bound. A bounded run reports no count
@@ -179,8 +180,10 @@ race, so it removes a reversal the search would have owed: the
 relation is the one place in the module where erring toward more order
 costs cover rather than budget.
 
-Schedules compare through the multi-space committed-memory hash, so
-divergence confined to a spawned child's address space is witnessed.
+Schedules compare through the observable hash, the multi-space
+committed-memory hash folded with each SPU's local store, so divergence
+confined to a spawned child's address space or to one SPU's local store
+is witnessed.
 `explore_with_regions` also captures named memory regions per
 schedule for comparison against external baselines; a region spec
 that fails to resolve is captured unresolved and fails oracle

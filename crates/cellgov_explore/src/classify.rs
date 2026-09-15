@@ -4,23 +4,27 @@ use crate::util::StopReason;
 use cellgov_event::UnitId;
 
 /// What every verdict compares: the committed memory of every address
-/// space at the end of a maximal execution, as
-/// `Runtime::committed_memory_hash` covers it.
+/// space and every SPU's local store at the end of a maximal execution.
+/// `Runtime::observable_hash` folds exactly that.
 ///
-/// Outside it lie the sync state `Runtime::sync_state_hash` folds
-/// (mailboxes, signal registers, reservations, mapping metadata) and
-/// every unit's own state, an SPU's local store included. A divergence
-/// confined to one of those reports as stable.
+/// Two things lie outside it, so a divergence confined to either
+/// reports as stable:
+///
+/// - the sync state `Runtime::sync_state_hash` folds: mailboxes, signal
+///   registers, reservations, mapping metadata;
+/// - the rest of every unit's own state: registers, program counter,
+///   channels.
 ///
 /// The end of the run observes every byte, so two writes to
 /// overlapping bytes are dependent whatever reads fall between them.
 /// Named regions ([`crate::explore_with_regions`]) are a second
 /// comparison, against an oracle, and never narrow this: a run that
 /// declares none reports the same verdict as one that declares many.
-pub const OBSERVABLE: &str = "committed memory of every address space at the end of the run";
+pub const OBSERVABLE: &str =
+    "committed memory of every address space and every SPU's local store at the end of the run";
 
 /// The wire form of [`OBSERVABLE`] in the JSON report.
-pub const OBSERVABLE_LABEL: &str = "committed-memory";
+pub const OBSERVABLE_LABEL: &str = "committed-memory-and-local-store";
 
 /// Verdict of a bounded exploration run, with respect to
 /// [`OBSERVABLE`].
@@ -31,8 +35,7 @@ pub const OBSERVABLE_LABEL: &str = "committed-memory";
 /// `From<&OutcomeClass> for &'static str` impl.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr)]
 pub enum OutcomeClass {
-    /// Every schedule explored produced identical committed memory in
-    /// every address space.
+    /// Every schedule explored produced an identical observable.
     ///
     /// [`ExplorationResult::classes_explored`] says how far the verdict
     /// reaches. A count means the search covered one execution per
@@ -41,7 +44,7 @@ pub enum OutcomeClass {
     /// search sampled.
     #[strum(serialize = "schedule-stable")]
     ScheduleStable,
-    /// At least two explored schedules produced distinct committed memory.
+    /// At least two explored schedules produced a distinct observable.
     #[strum(serialize = "schedule-sensitive")]
     ScheduleSensitive,
     /// Bounds were hit before a divergence was observed or ruled out.
@@ -56,7 +59,7 @@ pub enum OutcomeClass {
 /// workload that hash covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BaselineRun {
-    /// Committed-memory hash after the baseline ran.
+    /// Observable hash ([`OBSERVABLE`]) after the baseline ran.
     pub hash: u64,
     /// Steps the baseline committed; see
     /// [`ExplorationResult::baseline_steps`].
@@ -65,14 +68,14 @@ pub struct BaselineRun {
     pub stop: StopReason,
 }
 
-/// One explored alternate schedule and its committed-memory hash.
+/// One explored alternate schedule and its observable hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleRecord {
     /// Step index of the branching point this alternate diverges at.
     pub branch_step: usize,
     /// Unit forced at the branch point.
     pub alternate_choice: UnitId,
-    /// Final committed-memory hash after the alternate ran.
+    /// Final observable hash ([`OBSERVABLE`]) after the alternate ran.
     pub memory_hash: u64,
     /// Why this alternate's own replay stopped.
     ///
@@ -91,7 +94,8 @@ pub struct ScheduleRecord {
 /// Aggregate result of a bounded exploration run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExplorationResult {
-    /// Committed-memory hash from the default-schedule baseline run.
+    /// Observable hash ([`OBSERVABLE`]) from the default-schedule
+    /// baseline run.
     pub baseline_hash: u64,
     /// Steps the baseline committed, which with [`Self::baseline_stop`]
     /// says how much of the workload [`Self::baseline_hash`] covers.

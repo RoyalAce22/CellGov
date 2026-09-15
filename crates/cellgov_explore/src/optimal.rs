@@ -536,7 +536,7 @@ fn run_one(
     // A step that refused leaves the frame it pushed behind.
     frames.truncate(depth);
     let run = Run {
-        hash: rt.committed_memory_hash(),
+        hash: rt.observable_hash(),
         invariant_break: rt.lv2_host().observability().first_invariant_break_line(),
         log,
         alternate_choice,

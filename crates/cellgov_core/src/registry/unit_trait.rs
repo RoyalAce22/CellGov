@@ -60,6 +60,10 @@ pub trait RegisteredUnit: 'static {
     /// Shadow hit/miss counters. See [`ExecutionUnit::shadow_stats`].
     fn shadow_stats(&self) -> (u64, u64);
 
+    /// Hash of the unit's private memory, or `None`. See
+    /// [`ExecutionUnit::local_memory_hash`].
+    fn local_memory_hash(&self) -> Option<u64>;
+
     /// Current register snapshot for diagnostic dumps. See
     /// [`ExecutionUnit::register_dump`].
     fn register_dump(&self) -> Option<FaultRegisterDump>;
@@ -123,6 +127,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn shadow_stats(&self) -> (u64, u64) {
         ExecutionUnit::shadow_stats(self)
+    }
+
+    #[inline]
+    fn local_memory_hash(&self) -> Option<u64> {
+        ExecutionUnit::local_memory_hash(self)
     }
 
     #[inline]
