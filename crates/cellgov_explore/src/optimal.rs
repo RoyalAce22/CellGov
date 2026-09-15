@@ -38,15 +38,46 @@ struct Run {
     /// that frame away, and the record still names the alternate the
     /// run took.
     alternate_choice: Option<UnitId>,
-    /// Wakeup-tree branches dropped because their unit was not runnable
-    /// where the branch sits:
+    dropped: Drops,
+}
+
+/// Wakeup-tree branches the search gave up, by the site that gave each
+/// one up.
+///
+/// One aggregate cannot say which site a run's drops came from, and the
+/// two sites reach a branch for different reasons. The public
+/// [`ExplorationResult::reversals_dropped`] carries [`Drops::total`],
+/// which is the two drop counts and not the visit count beside them.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Drops {
+    /// [`choose`] met a branch whose head cannot run at the depth
+    /// holding it.
+    by_choose: usize,
+    /// A warp depth met an inherited branch, and the warp woke a
+    /// different unit ([`Frame::warp_woke`]).
+    at_warp: usize,
+    /// Visits at which a warp depth read its own tree, which are the
+    /// only visits `at_warp` can move on.
     ///
-    /// - [`choose`]'s own drops.
-    /// - A branch a warp depth held before the search knew what that
-    ///   warp wakes ([`Frame::warp_woke`]).
-    ///
-    /// One per head per frame ([`Frame::dropped`]).
-    dropped_branches: usize,
+    /// A run that reaches no warp depth leaves `at_warp` at zero
+    /// whatever that site would answer, so a reader of `at_warp` needs
+    /// this beside it.
+    at_warp_visits: usize,
+}
+
+impl Drops {
+    /// Branches given up at either site, one per head per frame
+    /// ([`Frame::dropped`]). A visit is not a branch, so
+    /// [`Drops::at_warp_visits`] is no part of this.
+    fn total(self) -> usize {
+        self.by_choose + self.at_warp
+    }
+
+    fn add(&mut self, other: Self) {
+        self.by_choose += other.by_choose;
+        self.at_warp += other.at_warp;
+        self.at_warp_visits += other.at_warp_visits;
+    }
 }
 
 /// The search's state at one depth of the execution it runs.
@@ -133,10 +164,27 @@ where
 /// reads them here; the search reuses one runtime, so there is no later
 /// chance.
 pub fn explore_optimal_observed<F, O>(
+    make_runtime: F,
+    config: &ExplorationConfig,
+    observe: O,
+) -> ExplorationResult
+where
+    F: FnMut() -> Runtime,
+    O: FnMut(&Runtime, bool),
+{
+    search(make_runtime, config, observe).0
+}
+
+/// [`explore_optimal_observed`] beside the site each dropped branch
+/// came from.
+///
+/// The result carries one aggregate, so a test that means to reach one
+/// of the two sites cannot tell from it which site answered.
+fn search<F, O>(
     mut make_runtime: F,
     config: &ExplorationConfig,
     mut observe: O,
-) -> ExplorationResult
+) -> (ExplorationResult, Drops)
 where
     F: FnMut() -> Runtime,
     O: FnMut(&Runtime, bool),
@@ -155,7 +203,7 @@ where
     let mut truncated_runs = 0usize;
     let mut refused_runs = 0usize;
     let mut sleep_blocked = 0usize;
-    let mut dropped_branches = 0usize;
+    let mut dropped = Drops::default();
     // The depth the next execution re-decides at; the backtrack below
     // names it and `run_one` picks the unit there.
     let mut resume: Option<usize> = None;
@@ -164,7 +212,7 @@ where
         let (run, halt) = run_one(&mut rt, &start, &mut frames, resume, config);
         let branch_step = resume;
         let alternate_choice = run.alternate_choice;
-        dropped_branches += run.dropped_branches;
+        dropped.add(run.dropped);
         if first_invariant_break.is_none() {
             first_invariant_break = run.invariant_break;
         }
@@ -247,12 +295,12 @@ where
     // Every execution the search ran stands for one class. A bound or a
     // dropped branch stops the search before it covers every class; a
     // sleep-set block leaves the count whole.
-    let complete = !iter.bounds_hit && !baseline.stop.is_truncated() && dropped_branches == 0;
+    let complete = !iter.bounds_hit && !baseline.stop.is_truncated() && dropped.total() == 0;
     let classes = iter.schedules.len().saturating_add(1);
     let mut result = classify_iteration(iter, baseline, baseline_branching, first_invariant_break);
     result.classes_explored = complete.then_some(classes);
-    result.reversals_dropped = dropped_branches;
-    result
+    result.reversals_dropped = dropped.total();
+    (result, dropped)
 }
 
 /// Run one execution and extend `frames` past the prefix they already
@@ -269,7 +317,7 @@ fn run_one(
     rt.restore_into(start);
     let mut log = DecisionLog::new();
     let mut depth = 0usize;
-    let mut dropped_branches = 0usize;
+    let mut dropped = Drops::default();
     let halt = loop {
         // Read before the cap: a window nothing can model is no
         // caller's bound. The snapshot every execution restores can
@@ -317,7 +365,7 @@ fn run_one(
                     warp_woke: Vec::new(),
                 });
             }
-            match choose(&mut frames[depth], deciding, &mut dropped_branches) {
+            match choose(&mut frames[depth], deciding, &mut dropped.by_choose) {
                 Some(unit) => frames[depth].chosen = unit,
                 None => break Halt::SleepBlocked,
             }
@@ -377,30 +425,44 @@ fn run_one(
             );
             // Where the depth already knew the set, `choose` picked out
             // of it above and the runtime delivered that pick. Where it
-            // did not, this execution took whatever the warp gave. A
-            // branch the tree holds for another unit is then a reversal
-            // nothing took. The next execution to reach this depth
-            // decides from the set this one recorded.
+            // did not, this execution took whatever the warp gave. The
+            // next execution to reach this depth decides from the set
+            // this one recorded.
             //
-            // No workload under `tests/` retires a branch here, so every
-            // drop those searches count comes from `choose`. A later
-            // visit delivers the prescription, so `chosen` matches. A
-            // first visit's tree holds what the depth above owed below
-            // it, which `inherit` hands down where a race grafted a
-            // sequence reaching past this prefix; a drop then needs the
-            // head of what is left to name a unit the warp does not wake.
-            // A decided visit that retires a branch retires one the
-            // frame may still owe, and the memo then costs the second
-            // drop of that head nothing.
+            // A decided visit that retired a branch would retire one the
+            // frame may still owe, and the memo would then cost the
+            // second drop of that head nothing.
             debug_assert!(
                 !decided || frame.chosen == step.unit,
                 "the depth prescribed {:?} and the warp delivered {:?}",
                 frame.chosen,
                 step.unit,
             );
+            // A first visit arms the depth from what `inherit` handed
+            // down, and that is empty at almost every warp depth. A
+            // non-empty one needs the depth above to hold a branch
+            // through its own chosen unit with a continuation. Only a
+            // grafted sequence puts one there, and program order keeps
+            // the unit that ran at a depth out of every sequence a race
+            // grafts on it. The graft's head is the sequence's own first
+            // event, which leads it, so a branch of that head would have
+            // taken the walk instead (`WakeupTree::insert`). The head
+            // names a second unit, runnable where the branch sits, and
+            // no step parks a unit that was already runnable. A run that
+            // takes the branch therefore leaves that second unit
+            // runnable here, and a depth holding a runnable unit is no
+            // warp depth.
+            //
+            // The gap is a step that stops a unit it does not name:
+            // `Runtime::handle_process_exit_child` finishes every unit
+            // of the exiting pid, so a workload that exits a child
+            // process can reach this depth holding a branch. The loop
+            // below answers for that, and `at_warp_visits` says how
+            // often the loop read a tree at all.
             if !decided || frame.chosen != step.unit {
+                dropped.at_warp_visits += 1;
                 for branch in frame.wut.retain_branch(step.unit) {
-                    dropped_branches += frame.drop_cost(branch);
+                    dropped.at_warp += frame.drop_cost(branch);
                 }
             }
             frame.chosen = step.unit;
@@ -448,7 +510,7 @@ fn run_one(
         invariant_break: rt.lv2_host().observability().first_invariant_break_line(),
         log,
         alternate_choice,
-        dropped_branches,
+        dropped,
     };
     (run, halt)
 }
@@ -612,3 +674,7 @@ mod already_explored_tests;
 #[cfg(test)]
 #[path = "tests/dropped_once_tests.rs"]
 mod dropped_once_tests;
+
+#[cfg(test)]
+#[path = "tests/warp_retire_tests.rs"]
+mod warp_retire_tests;

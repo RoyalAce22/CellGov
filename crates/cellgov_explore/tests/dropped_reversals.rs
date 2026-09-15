@@ -9,7 +9,9 @@
 //! units, so the third runs alone. No assertion here turns on what the
 //! warp after it wakes: the drops come from `choose`, at the last
 //! barrier-park depth before that warp, which
-//! `a_depth_holds_one_runnable_unit_with_the_rest_parked` pins.
+//! `a_depth_holds_one_runnable_unit_with_the_rest_parked` pins. The
+//! crate's `warp_retire_tests` reads the two sites apart over this same
+//! workload, and pins which one answers.
 //! `warp_two_wakes.rs` covers the warp depth itself, where the search
 //! delivers its alternate instead of dropping it.
 
