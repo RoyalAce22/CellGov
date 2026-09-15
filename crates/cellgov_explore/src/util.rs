@@ -55,6 +55,13 @@ pub enum StopClass {
     /// The model refused the step or its commit.
     #[strum(serialize = "refusal")]
     Refusal,
+    /// A unit yielded because a step could not complete.
+    ///
+    /// Separate from [`StopClass::Refusal`]: a refusal is the model
+    /// declining to do the thing, and a fault is the guest's own step
+    /// failing. Only the first names a defect in the model.
+    #[strum(serialize = "fault")]
+    Fault,
 }
 
 impl StopClass {
@@ -86,8 +93,8 @@ impl StopReason {
             }
             // Guest time reaching u64::MAX is no cap anyone can raise.
             Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
-            | Self::CommitError(_)
-            | Self::Faulted(_) => StopClass::Refusal,
+            | Self::CommitError(_) => StopClass::Refusal,
+            Self::Faulted(_) => StopClass::Fault,
         }
     }
 }

@@ -159,8 +159,8 @@ fn a_schedule_decided_fault_withdraws_the_verdict() {
     assert!(reversal.truncated);
     assert_eq!(result.schedules_truncated, 1);
     assert_eq!(
-        result.schedules_refused, 1,
-        "a fault is a refusal, so the one truncated alternate is the one refused",
+        result.schedules_refused, 0,
+        "the guest's own step failed; the model refused nothing",
     );
 
     assert_eq!(

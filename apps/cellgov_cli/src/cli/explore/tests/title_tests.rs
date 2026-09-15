@@ -2,6 +2,7 @@
 
 use super::*;
 use cellgov_core::{CommitError, StepError};
+use cellgov_effects::FaultKind;
 use cellgov_explore::ScheduleRecord;
 use cellgov_mem::MemError;
 
@@ -167,6 +168,92 @@ fn a_refused_schedule_outranks_the_verdict_it_leaves_behind() {
         exit_code(&w, &sensitive_but_refused),
         EXIT_MODEL_REFUSAL,
         "a schedule the model would not run leaves the verdict resting on the rest",
+    );
+}
+
+/// A guest fault exits non-zero, and not under the refusal's name.
+///
+/// The two say different things: a refusal is the model declining a
+/// step, a fault is the guest's own step failing. `explore window`
+/// already called this stop a fault, and a reader comparing the two
+/// entry points on one boot would have seen two names for it.
+#[test]
+fn a_guest_fault_exits_under_its_own_name() {
+    let w = window(CheckpointTrigger::ProcessExit);
+    let fault = StopReason::Faulted(FaultKind::Guest(7));
+
+    let faulted_alternate = result(StopReason::Stalled, vec![alternate(fault)]);
+    assert_eq!(
+        w.model_refusals(&faulted_alternate),
+        0,
+        "the model refused nothing",
+    );
+    assert_eq!(w.guest_faults(&faulted_alternate), 1);
+    assert_eq!(exit_code(&w, &faulted_alternate), EXIT_GUEST_FAULT);
+    assert_ne!(EXIT_GUEST_FAULT, EXIT_MODEL_REFUSAL);
+    assert_ne!(EXIT_GUEST_FAULT, 0, "a faulted exploration is a finding");
+
+    let faulted_baseline = result(fault, vec![]);
+    assert_eq!(exit_code(&w, &faulted_baseline), EXIT_GUEST_FAULT);
+
+    let mut sensitive_but_faulted = faulted_alternate;
+    sensitive_but_faulted.outcome = OutcomeClass::ScheduleSensitive;
+    assert_eq!(
+        exit_code(&w, &sensitive_but_faulted),
+        EXIT_GUEST_FAULT,
+        "a schedule that faulted leaves the verdict resting on the rest",
+    );
+}
+
+/// A refusal and a fault in one run: the refusal is the finding.
+#[test]
+fn a_model_refusal_outranks_a_guest_fault() {
+    let w = window(CheckpointTrigger::ProcessExit);
+    let both = result(
+        StopReason::Stalled,
+        vec![
+            alternate(StopReason::Faulted(FaultKind::Guest(7))),
+            alternate(StopReason::CommitError(OTHER_REFUSAL)),
+        ],
+    );
+    assert_eq!(w.guest_faults(&both), 1);
+    assert_eq!(w.model_refusals(&both), 1);
+    assert_eq!(
+        exit_code(&w, &both),
+        EXIT_MODEL_REFUSAL,
+        "a defect in the model outranks the guest's own step failing",
+    );
+}
+
+/// The count the guest-fault status comes from reaches both reports.
+///
+/// The exploration's own tallies count refusals and truncations, so the
+/// window's lines are where a reader checks the status against a number.
+#[test]
+fn the_reports_name_the_fault_count_the_status_came_from() {
+    let w = window(CheckpointTrigger::ProcessExit);
+    let faulted = result(
+        StopReason::Stalled,
+        vec![alternate(StopReason::Faulted(FaultKind::Guest(7)))],
+    );
+
+    let text = human(&w, &faulted);
+    assert!(text.contains("guest_faults: 1"), "{text}");
+    assert!(
+        text.contains("(fault)"),
+        "the schedule line names the class, and `explore window` prints the same word: {text}",
+    );
+
+    let v: serde_json::Value =
+        serde_json::from_str(&json(&w, &faulted)).expect("the document parses");
+    assert_eq!(v["guest_faults"], 1);
+    assert_eq!(v["model_refusals"], 0);
+    assert_eq!(v["exploration"]["schedules"][0]["stop_class"], "fault");
+
+    let clean = result(StopReason::Stalled, vec![alternate(StopReason::Stalled)]);
+    assert!(
+        human(&w, &clean).contains("guest_faults: 0"),
+        "the line is a measurement, so it prints where nothing faulted",
     );
 }
 

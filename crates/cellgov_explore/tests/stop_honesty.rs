@@ -91,7 +91,20 @@ fn a_fault_stops_the_run_and_is_not_a_stall() {
         "the kind the unit raised reaches the stop, so no refused commit stands in for it",
     );
     assert!(stop.is_truncated(), "a faulted run answers for nothing");
-    assert_eq!(stop.class(), StopClass::Refusal);
+    assert_eq!(
+        stop.class(),
+        StopClass::Fault,
+        "the guest's own step failed, which is not the model refusing one",
+    );
+}
+
+#[test]
+fn a_fault_reads_as_a_fault_wherever_a_report_prints_it() {
+    // The CLI's drive to a window's start prints "fault" from a stop
+    // enum of its own, so one boot carries two names for one stop unless
+    // the class label is the same word.
+    assert_eq!(StopClass::Fault.label(), "fault");
+    assert_ne!(StopClass::Fault.label(), StopClass::Refusal.label());
 }
 
 #[test]

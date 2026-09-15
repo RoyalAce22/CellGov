@@ -38,6 +38,14 @@ const EXIT_MODEL_REFUSAL: i32 = exit_codes::command_specific(20);
 /// Exit code: the boot ended before the window's start condition held.
 const EXIT_WINDOW_NEVER_OPENED: i32 = exit_codes::command_specific(21);
 
+/// Exit code: a schedule the exploration ran ended in a guest fault.
+///
+/// Separate from [`EXIT_MODEL_REFUSAL`] because the two name different
+/// findings: a refusal is the model declining a step, and a fault is
+/// the guest's own step failing. `explore window` calls the same stop a
+/// fault, and this is how `explore title` says it.
+const EXIT_GUEST_FAULT: i32 = exit_codes::command_specific(22);
+
 /// Exit code: the window is schedule-sensitive, the same verdict the
 /// scenario and microtest entry points give.
 const EXIT_SCHEDULE_SENSITIVE: i32 = exit_codes::FAILED;
@@ -240,12 +248,26 @@ impl Window {
     /// How many refusals in `result` the cell's checkpoint does not
     /// explain, the baseline included.
     fn model_refusals(&self, result: &ExplorationResult) -> usize {
-        let baseline = usize::from(self.is_model_refusal(result.baseline_stop));
-        let alternates = result
-            .schedules
-            .iter()
-            .filter(|s| self.is_model_refusal(s.stop))
-            .count();
+        self.count_stops(result, |stop| self.is_model_refusal(stop))
+    }
+
+    /// How many schedules in `result` ended in a guest fault, the
+    /// baseline included.
+    ///
+    /// No checkpoint explains a fault: a `first-rsx-write` cell reaches
+    /// its checkpoint as a refused commit, and every other trigger as a
+    /// stop no unit faulted on.
+    fn guest_faults(&self, result: &ExplorationResult) -> usize {
+        self.count_stops(result, |stop| stop.class() == StopClass::Fault)
+    }
+
+    fn count_stops(
+        &self,
+        result: &ExplorationResult,
+        mut names: impl FnMut(StopReason) -> bool,
+    ) -> usize {
+        let baseline = usize::from(names(result.baseline_stop));
+        let alternates = result.schedules.iter().filter(|s| names(s.stop)).count();
         baseline.saturating_add(alternates)
     }
 }
@@ -254,11 +276,16 @@ impl Window {
 ///
 /// A refusal outranks the verdict: a schedule the model would not run
 /// leaves the classification to the schedules that ran, so the refusal
-/// is the finding. A bound is the caller's own cap, and the cell's
-/// checkpoint is where the boot stops; both exit clean.
+/// is the finding. A guest fault outranks it for the same reason and
+/// exits under its own name, because it says something about the guest
+/// rather than about the model. A bound is the caller's own cap, and
+/// the cell's checkpoint is where the boot stops; both exit clean.
 fn exit_code(window: &Window, result: &ExplorationResult) -> i32 {
     if window.model_refusals(result) > 0 {
         return EXIT_MODEL_REFUSAL;
+    }
+    if window.guest_faults(result) > 0 {
+        return EXIT_GUEST_FAULT;
     }
     match result.outcome {
         OutcomeClass::ScheduleSensitive => EXIT_SCHEDULE_SENSITIVE,
@@ -306,6 +333,9 @@ fn window_lines(window: &Window, result: &ExplorationResult) -> String {
         "model_refusals: {}\n",
         window.model_refusals(result)
     ));
+    // The number the guest-fault status comes from: the exploration's
+    // own tallies below count refusals and truncations, not faults.
+    out.push_str(&format!("guest_faults: {}\n", window.guest_faults(result)));
     out
 }
 
@@ -336,6 +366,7 @@ fn json(window: &Window, result: &ExplorationResult) -> String {
                 .map(|addr| format!("0x{addr:08x}")),
         },
         "model_refusals": window.model_refusals(result),
+        "guest_faults": window.guest_faults(result),
         "exploration": exploration,
     });
     serde_json::to_string_pretty(&doc)

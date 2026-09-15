@@ -156,8 +156,11 @@ const EXPLORE_TITLE_EXIT_CODES: &str = "Exit codes particular to this command:
   20  the model refused a schedule it was asked to explore: a refused
       commit, or a refused step. The cell's own first-rsx-write
       checkpoint is not one of them.
-  21  the window never opened: the boot reached a terminal state, a cap
-      or a refusal before the start condition
+  21  the window never opened: the boot reached a terminal state, a
+      cap, a refusal or a fault before the start condition
+  22  a schedule the exploration ran ended in a guest fault. Distinct
+      from 20: the guest's own step failed rather than the model
+      declining one. A refusal outranks it.
 
 A schedule-sensitive window -- two schedules that both ran themselves
 out committed different memory -- takes the shared status 1. A cap the

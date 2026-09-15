@@ -39,7 +39,7 @@ flowchart TD
   hash --> cls{"across the classes explored"}
   cls -->|all identical| stable["ScheduleStable"]
   cls -->|two differ| sens["ScheduleSensitive"]
-  cls -->|"a bound, a refusal, or a baseline that committed nothing"| inc["Inconclusive"]
+  cls -->|"a bound, a refusal, a fault, or a baseline that committed nothing"| inc["Inconclusive"]
 ```
 
 `ScheduleStable` carries a class count when the search covered one

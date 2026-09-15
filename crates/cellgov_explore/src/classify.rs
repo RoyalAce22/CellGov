@@ -144,7 +144,8 @@ pub struct ExplorationResult {
     /// Only a refusal names a defect in the model:
     ///
     /// - a bound stops a replay the caller capped;
-    /// - a blocked replay stops on the workload's own state.
+    /// - a blocked replay stops on the workload's own state;
+    /// - a fault is the guest's own step failing.
     pub schedules_refused: usize,
     /// The exploration's first host invariant break as one line for the
     /// caller to report: the baseline's, or the first replay that broke
