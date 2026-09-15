@@ -166,12 +166,14 @@ fn the_two_searches_agree_on_the_fake_isa_workloads() {
     agree_on("reader and writer", 2, reader_and_writer);
 }
 
-/// Every fixture reaches one final memory hash. Five hold one unit, or
-/// units whose footprints never conflict, so neither search replays
-/// anything. The two that race reach the same memory by every order.
+/// Every fixture here reaches one final memory hash. Five hold one
+/// unit, or units whose footprints never conflict, so neither search
+/// replays anything. The two that race reach the same memory by every
+/// order, because `WritingUnit` writes its own step number.
 ///
-/// The fake-ISA workloads above carry the case where the answer is
-/// more than one hash.
+/// So this case checks only that neither search invents an outcome. The
+/// fixture that can witness a dropped class is below, in
+/// `the_two_searches_agree_where_the_order_decides_the_outcome`.
 #[test]
 fn the_two_searches_agree_on_the_testkit_fixtures() {
     agree_on("round robin", 1, || {
@@ -331,4 +333,75 @@ fn the_same_workload_within_the_cap_reaches_the_same_hashes() {
         optimal_cost < scaffold_cost,
         "the scaffold reverses each race on its own, so it costs more ({scaffold_cost})",
     );
+}
+
+/// The fixture half of the comparison, over a fixture that can fail it.
+///
+/// `store_order_scenario` reaches two final memory hashes, so a search
+/// that drops an equivalence class reaches fewer than the other. Every
+/// other `cellgov_testkit` fixture reaches one, which hides that loss.
+#[test]
+fn the_two_searches_agree_where_the_order_decides_the_outcome() {
+    let (optimal, scaffold) = agree_on("store order, two steps each", 2, || {
+        fixtures::store_order_scenario(2).build_runtime()
+    });
+    assert_eq!(
+        optimal, 6,
+        "six orders of the four stores, one execution each",
+    );
+    assert!(
+        optimal < scaffold,
+        "the scaffold reaches the same two outcomes for more ({scaffold})",
+    );
+}
+
+/// A replay that needs more steps than the baseline, under a cap the
+/// baseline fit inside.
+///
+/// Elsewhere a tally built by hand drives `schedules_truncated`. Here
+/// the workload drives it. The baseline releases the poller in two
+/// steps, and the order that polls before the write needs the whole
+/// cap. Both searches test the cap before the step that would report
+/// the stall, so that replay stops on the bound at four steps.
+#[test]
+fn a_replay_that_outruns_the_baseline_truncates_in_both_searches() {
+    let config = ExplorationConfig {
+        max_schedules: 256,
+        max_steps_per_run: 4,
+    };
+    let make = || fixtures::schedule_dependent_length_scenario(8).build_runtime();
+    let enumerated = explore_window(make, &config);
+    let backtracked = explore_backtrack(make, &config);
+
+    // The premise of the count below: the workload itself fits the cap.
+    for (name, result) in [("optimal", &enumerated), ("scaffold", &backtracked)] {
+        assert_eq!(
+            result.baseline_stop,
+            cellgov_explore::util::StopReason::Stalled,
+            "{name}: the baseline releases the poller and runs itself out",
+        );
+        assert!(
+            result.baseline_steps < config.max_steps_per_run,
+            "{name}: the baseline fits inside the cap ({} steps)",
+            result.baseline_steps,
+        );
+        assert_eq!(
+            result.schedules_truncated, 1,
+            "{name}: the order that polls before the write needs the whole cap",
+        );
+        // A refused commit and a fault truncate too, so the count alone
+        // would read the same for a replay the model refused.
+        let stops: Vec<_> = result
+            .schedules
+            .iter()
+            .filter(|record| record.truncated)
+            .map(|record| record.stop)
+            .collect();
+        assert_eq!(
+            stops,
+            vec![cellgov_explore::util::StopReason::StepBound],
+            "{name}: the cap stopped the replay, not a refusal",
+        );
+        assert!(result.bounds_hit, "{name}");
+    }
 }

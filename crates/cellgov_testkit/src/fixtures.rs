@@ -18,8 +18,8 @@
 //! ```
 
 use crate::world::{
-    CountingUnit, DmaSubmitter, MailboxProducer, MailboxResponder, MailboxSender, SignalEmitter,
-    WritingUnit,
+    CountingUnit, DmaSubmitter, MailboxProducer, MailboxResponder, MailboxSender, PollingUnit,
+    SignalEmitter, WritingUnit,
 };
 use cellgov_core::Runtime;
 use cellgov_exec::{FakeIsaUnit, FakeOp};
@@ -209,6 +209,66 @@ pub fn write_conflict_scenario(steps_per_unit: u64) -> ScenarioFixture {
         .register(move |rt: &mut Runtime| {
             rt.register_unit_with(|id| WritingUnit::new(id, steps_per_unit, range));
             rt.register_unit_with(|id| WritingUnit::new(id, steps_per_unit, range));
+        })
+        .build()
+}
+
+/// Two [`WritingUnit`]s over one word, each with a fixed value of its
+/// own.
+///
+/// The order decides which value lands last, so a complete schedule
+/// reaches one of two final memories. A search that drops an
+/// equivalence class reaches fewer. [`write_conflict_scenario`] cannot
+/// witness that, because its units write their own step numbers and
+/// end on the same byte whatever the order.
+///
+/// The outcome count holds at two for every `steps_per_unit`. The
+/// classes number `C(2n, n)` -- 2, 6, 20 and 70 for one through four
+/// steps a unit -- which is what an optimal search costs here.
+pub fn store_order_scenario(steps_per_unit: u64) -> ScenarioFixture {
+    assert!(
+        steps_per_unit > 0,
+        "store_order_scenario needs at least 1 step per unit"
+    );
+    let cap = (2usize)
+        .checked_mul(steps_per_unit as usize)
+        .and_then(|n| n.checked_add(1))
+        .expect("store_order_scenario step cap overflow");
+    let range = ByteRange::new(GuestAddr::new(0), 4).unwrap();
+    ScenarioFixture::builder()
+        .memory_size(16)
+        .budget(Budget::new(1))
+        .max_steps(cap)
+        .register(move |rt: &mut Runtime| {
+            rt.register_unit_with(|id| WritingUnit::of_value(id, steps_per_unit, range, 0xA1));
+            rt.register_unit_with(|id| WritingUnit::of_value(id, steps_per_unit, range, 0xB2));
+        })
+        .build()
+}
+
+/// A [`PollingUnit`] whose step count the schedule decides, beside the
+/// [`WritingUnit`] that releases it.
+///
+/// The poller finishes once it reads a non-zero byte. So a schedule
+/// that runs the writer first costs one poll step, and one that polls
+/// first costs `poll_limit` of them. That gap drives a replay onto a
+/// cap its own baseline fit inside.
+pub fn schedule_dependent_length_scenario(poll_limit: u64) -> ScenarioFixture {
+    assert!(
+        poll_limit > 1,
+        "the poller needs room to outrun a schedule that releases it early"
+    );
+    let gate = ByteRange::new(GuestAddr::new(8), 1).unwrap();
+    let cap = (poll_limit as usize)
+        .checked_add(4)
+        .expect("schedule_dependent_length_scenario step cap overflow");
+    ScenarioFixture::builder()
+        .memory_size(16)
+        .budget(Budget::new(1))
+        .max_steps(cap)
+        .register(move |rt: &mut Runtime| {
+            rt.register_unit_with(|id| WritingUnit::of_value(id, 1, gate, 0xFF));
+            rt.register_unit_with(|id| PollingUnit::new(id, poll_limit, gate));
         })
         .build()
 }

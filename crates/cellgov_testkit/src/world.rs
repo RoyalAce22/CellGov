@@ -82,14 +82,108 @@ impl ExecutionUnit for CountingUnit {
     }
 }
 
-/// Emits one `SharedWriteIntent` per step against `range`, payload is
-/// the step number byte-replicated; finishes after `max` steps.
+/// Reads one byte per step and finishes once it reads a non-zero.
+///
+/// Another unit writes that byte, so the schedule decides how many
+/// steps the poller retires.
+///
+/// Every step emits a `SharedReadIntent` for the byte, so the
+/// independence relation sees the pair.
+#[derive(Clone)]
+pub struct PollingUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+    max: u64,
+    done: Cell<bool>,
+    range: ByteRange,
+}
+
+impl PollingUnit {
+    /// Construct a unit that polls the byte at `range` for at most
+    /// `max` steps.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `range` is not one byte.
+    pub fn new(id: UnitId, max: u64, range: ByteRange) -> Self {
+        assert_eq!(range.length(), 1, "a poller reads one byte");
+        Self {
+            id,
+            steps: Cell::new(0),
+            max,
+            done: Cell::new(false),
+            range,
+        }
+    }
+}
+
+impl ExecutionUnit for PollingUnit {
+    type Snapshot = (u64, bool);
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+    fn status(&self) -> UnitStatus {
+        if self.done.get() || self.steps.get() >= self.max {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        // The commit pipeline stages nothing for `SharedReadIntent`, so
+        // an unreadable range gives no refusal of its own. The expect
+        // names the failure instead of leaving the poller to spin to
+        // `max`.
+        let bytes = ctx
+            .memory()
+            .read_checked(self.range)
+            .expect("the polled range must be readable");
+        let seen = *bytes.first().expect("a poller reads one byte");
+        if seen != 0 {
+            self.done.set(true);
+        }
+        effects.push(Effect::SharedReadIntent {
+            range: self.range,
+            source: self.id,
+        });
+        let yield_reason = if self.done.get() || n >= self.max {
+            YieldReason::Finished
+        } else {
+            YieldReason::BudgetExhausted
+        };
+        ExecutionStepResult {
+            yield_reason,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+    fn snapshot(&self) -> (u64, bool) {
+        (self.steps.get(), self.done.get())
+    }
+}
+
+/// Emits one `SharedWriteIntent` per step against `range`; finishes
+/// after `max` steps.
+///
+/// The payload is the step number byte-replicated, or the byte
+/// [`WritingUnit::of_value`] fixes.
 #[derive(Clone)]
 pub struct WritingUnit {
     id: UnitId,
     steps: Cell<u64>,
     max: u64,
     range: ByteRange,
+    /// Byte every write carries, or `None` to write the step number.
+    value: Option<u8>,
 }
 
 impl WritingUnit {
@@ -101,6 +195,16 @@ impl WritingUnit {
             steps: Cell::new(0),
             max,
             range,
+            value: None,
+        }
+    }
+
+    /// Like [`WritingUnit::new`], with `value` as the payload of every
+    /// write.
+    pub fn of_value(id: UnitId, max: u64, range: ByteRange, value: u8) -> Self {
+        Self {
+            value: Some(value),
+            ..Self::new(id, max, range)
         }
     }
 
@@ -135,7 +239,8 @@ impl ExecutionUnit for WritingUnit {
         } else {
             YieldReason::BudgetExhausted
         };
-        let bytes = vec![n as u8; self.range.length() as usize];
+        let byte = self.value.unwrap_or(n as u8);
+        let bytes = vec![byte; self.range.length() as usize];
         effects.push(Effect::shared_write(
             self.range,
             WritePayload::new(bytes),

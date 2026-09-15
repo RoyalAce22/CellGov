@@ -127,3 +127,82 @@ fn writing_unit_at_zero_writes_to_addr_zero() {
         _ => unreachable!(),
     }
 }
+
+#[test]
+fn writing_unit_of_value_writes_that_value_every_step() {
+    let mem = GuestMemory::new(16);
+    let ctx = ExecutionContext::new(&mem);
+    let range = ByteRange::new(GuestAddr::new(4), 4).unwrap();
+    let mut u = WritingUnit::of_value(UnitId::new(0), 3, range, 0xA1);
+    let mut effects = Vec::new();
+    for _ in 0..2 {
+        effects.clear();
+        u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        match &effects[0] {
+            Effect::SharedWriteIntent { bytes, .. } => {
+                assert_eq!(
+                    bytes.bytes(),
+                    &[0xA1, 0xA1, 0xA1, 0xA1],
+                    "the value does not follow the step number",
+                );
+            }
+            other => panic!("expected SharedWriteIntent, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn polling_unit_finishes_on_the_step_that_reads_a_non_zero_gate() {
+    let mut mem = GuestMemory::new(16);
+    let gate = ByteRange::new(GuestAddr::new(8), 1).unwrap();
+    let mut u = PollingUnit::new(UnitId::new(0), 8, gate);
+    let mut effects = Vec::new();
+
+    {
+        let ctx = ExecutionContext::new(&mem);
+        let r = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+        assert_eq!(r.yield_reason, YieldReason::BudgetExhausted);
+        assert_eq!(
+            u.status(),
+            UnitStatus::Runnable,
+            "a zero gate holds it open"
+        );
+        assert_eq!(effects.len(), 1);
+        assert!(
+            matches!(&effects[0], Effect::SharedReadIntent { range, .. } if *range == gate),
+            "the poll is a read the relation can see",
+        );
+    }
+
+    mem.apply_commit(gate, &[0xFF]).expect("gate is writable");
+    let ctx = ExecutionContext::new(&mem);
+    effects.clear();
+    let r = u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+    assert_eq!(r.yield_reason, YieldReason::Finished);
+    assert_eq!(u.status(), UnitStatus::Finished);
+}
+
+#[test]
+fn polling_unit_gives_up_after_max_steps() {
+    let mem = GuestMemory::new(16);
+    let ctx = ExecutionContext::new(&mem);
+    let gate = ByteRange::new(GuestAddr::new(8), 1).unwrap();
+    let mut u = PollingUnit::new(UnitId::new(0), 2, gate);
+    let mut effects = Vec::new();
+    for _ in 0..2 {
+        effects.clear();
+        u.run_until_yield(Budget::new(1), &ctx, &mut effects);
+    }
+    assert_eq!(
+        u.status(),
+        UnitStatus::Finished,
+        "the gate never opens, so the limit is what stops it",
+    );
+}
+
+#[test]
+#[should_panic(expected = "a poller reads one byte")]
+fn polling_unit_refuses_a_range_wider_than_one_byte() {
+    let gate = ByteRange::new(GuestAddr::new(8), 4).unwrap();
+    let _ = PollingUnit::new(UnitId::new(0), 2, gate);
+}

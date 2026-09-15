@@ -485,3 +485,53 @@ fn fake_isa_scenario_trace_effect_sequence() {
         ]
     );
 }
+
+#[test]
+fn store_order_runs_to_completion_and_replays() {
+    let result = run(store_order_scenario(2));
+    assert_eq!(result.outcome, ScenarioOutcome::Stalled);
+    assert_eq!(result.steps_taken, 4);
+    assert_deterministic_replay(|| store_order_scenario(2), 3);
+}
+
+/// Round-robin ends on unit 1's byte. The point of the fixture is that
+/// the byte names the unit rather than the step, so another order ends
+/// on the other one.
+#[test]
+fn store_order_ends_on_the_last_writer_s_own_value() {
+    use cellgov_mem::GuestMemory;
+    use cellgov_trace::StateHash;
+
+    let result = run(store_order_scenario(3));
+    let mut expected = GuestMemory::new(16);
+    expected
+        .apply_commit(ByteRange::new(GuestAddr::new(0), 4).unwrap(), &[0xB2; 4])
+        .unwrap();
+    assert_eq!(
+        result.final_memory_hash,
+        StateHash::new(expected.content_hash())
+    );
+}
+
+#[test]
+#[should_panic(expected = "needs at least 1 step")]
+fn store_order_zero_steps_panics() {
+    let _ = store_order_scenario(0);
+}
+
+#[test]
+fn schedule_dependent_length_runs_to_completion_and_replays() {
+    let result = run(schedule_dependent_length_scenario(8));
+    assert_eq!(result.outcome, ScenarioOutcome::Stalled);
+    assert_eq!(
+        result.steps_taken, 2,
+        "round-robin writes the gate first, so the poller finishes on its first read",
+    );
+    assert_deterministic_replay(|| schedule_dependent_length_scenario(8), 3);
+}
+
+#[test]
+#[should_panic(expected = "room to outrun")]
+fn schedule_dependent_length_refuses_a_limit_with_no_room() {
+    let _ = schedule_dependent_length_scenario(1);
+}
