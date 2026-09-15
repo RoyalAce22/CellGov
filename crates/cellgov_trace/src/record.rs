@@ -97,9 +97,11 @@ pub enum TracedWakeReason {
 
 /// Mirror of `cellgov_effects::Effect` for the trace stream.
 ///
-/// Discriminants must match the source variant order: the trace crate cannot
-/// depend on `cellgov_effects` (DAG: effects -> trace), so the bridge maps by
-/// raw value.
+/// A recorded trace holds these as raw bytes, so a discriminant that
+/// moves changes what an existing stream decodes to. A variant
+/// `cellgov_effects::Effect` gains belongs at the end of this list.
+/// `cellgov_core::runtime::trace_bridge` pairs the two enums by name,
+/// so the order answers to the wire format alone.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
 )]
@@ -134,6 +136,8 @@ pub enum TracedEffectKind {
     RsxFlipRequest = 12,
     /// Shared-memory read intent.
     SharedReadIntent = 13,
+    /// Guest-clock read.
+    ClockRead = 14,
 }
 
 /// Reason a host-side invariant break was recorded into the trace

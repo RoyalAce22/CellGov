@@ -264,6 +264,9 @@ impl PpuExecutionUnit {
                 source: self.id,
             });
         }
+        if self.state.clock_read {
+            effects.push(Effect::ClockRead { source: self.id });
+        }
     }
 
     /// Extend the run in flight, or start another.
@@ -440,6 +443,9 @@ impl PpuExecutionUnit {
         if tb_from_tick > self.state.tb {
             self.state.tb = tb_from_tick;
         }
+        // The resync reaches no guest register, so it is no clock read:
+        // `mftb` and `mftbu` set the flag, and each step starts clear.
+        self.state.clock_read = false;
 
         if let Some(code) = ctx.syscall_return() {
             self.state.set_gpr(3, code);
@@ -824,3 +830,7 @@ mod batch_fault_tests;
 #[cfg(test)]
 #[path = "tests/tap_tests.rs"]
 mod tap_tests;
+
+#[cfg(test)]
+#[path = "tests/clock_read_tests.rs"]
+mod clock_read_tests;

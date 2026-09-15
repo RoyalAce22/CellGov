@@ -10,8 +10,10 @@
 //! records that transfer's ranges, and they conflict with another
 //! step's access to the bytes it lands on.
 //!
-//! The clock's other two readers, a `mftb` and a timer deadline, reach
-//! no footprint at all; `cellgov_explore::dependency` says so.
+//! The clock's other two readers have their own witnesses.
+//! `tests/clock_read.rs` covers a `mftb`, which reads the clock into a
+//! guest register. `tests/timer_deadline.rs` covers a timer deadline,
+//! which reaches no footprint.
 
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;

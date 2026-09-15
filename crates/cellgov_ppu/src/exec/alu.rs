@@ -537,12 +537,14 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             // so a guest using a `delta = t2 - t1` idiom never
             // observes zero.
             state.tb = state.tb.saturating_add(1);
+            state.clock_read = true;
             state.set_gpr(rt as usize, state.tb);
             ExecuteVerdict::Continue
         }
         // [PPC-Book2 p:30 s:4.1] mftbu: read TBU (high 32 bits of Time Base) into RT[32:63] (TBR=269).
         PpuInstruction::Mftbu { rt } => {
             state.tb = state.tb.saturating_add(1);
+            state.clock_read = true;
             state.set_gpr(rt as usize, (state.tb >> 32) & 0xFFFF_FFFF);
             ExecuteVerdict::Continue
         }

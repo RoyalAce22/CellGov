@@ -144,7 +144,9 @@ The full vocabulary of guest-visible operations:
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
   `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`,
-  `SharedReadIntent`.
+  `SharedReadIntent`, `ClockRead`. The last two declare what a step
+  read so dependency analysis can pair it; the commit pipeline stages
+  nothing for either.
 - **Trace record variants** in `cellgov_trace::TraceRecord`:
   - one header, `RunIdentity`, written first and never repeated:
     the format version plus a fingerprint of each half of the

@@ -76,6 +76,7 @@ fn effect_emitted_roundtrip_each_kind() {
 
 #[test]
 fn effect_emitted_discriminants_locked() {
+    use strum::VariantArray;
     // Pinned to match cellgov_effects::Effect variant order; drift on either
     // side breaks replay against existing traces.
     assert_eq!(TracedEffectKind::SharedWriteIntent as u8, 0);
@@ -92,6 +93,10 @@ fn effect_emitted_discriminants_locked() {
     assert_eq!(TracedEffectKind::RsxLabelWrite as u8, 11);
     assert_eq!(TracedEffectKind::RsxFlipRequest as u8, 12);
     assert_eq!(TracedEffectKind::SharedReadIntent as u8, 13);
+    assert_eq!(TracedEffectKind::ClockRead as u8, 14);
+    // Without this, a variant appended below ClockRead keeps every
+    // assertion above green and ships with an unpinned discriminant.
+    assert_eq!(TracedEffectKind::VARIANTS.len(), 15);
 }
 
 #[test]

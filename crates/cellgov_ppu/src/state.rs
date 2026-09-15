@@ -68,6 +68,12 @@ pub struct PpuState {
     /// Instrument flag (hash-excluded): set by `mtvrsave`. Guards the
     /// read-before-write tripwire in `Mfvrsave`.
     pub vrsave_written: bool,
+    /// Per-step flag (hash-excluded): set by `mftb` and `mftbu`, read
+    /// and cleared once per step.
+    ///
+    /// The step that set it emits one `ClockRead` effect, which the
+    /// schedule explorer pairs against every other step.
+    pub clock_read: bool,
     /// Instrument counter (hash-excluded): `mfvrsave` execution
     /// witness; non-zero proves the tripwire's silence is non-vacuous.
     pub mfvrsave_executed: u64,
@@ -115,6 +121,7 @@ impl PpuState {
             xer: 0,
             vrsave: 0,
             vrsave_written: false,
+            clock_read: false,
             mfvrsave_executed: 0,
             ldarx_executed: 0,
             stdcx_executed: 0,
@@ -391,6 +398,7 @@ impl Clone for PpuState {
             xer: self.xer,
             vrsave: self.vrsave,
             vrsave_written: self.vrsave_written,
+            clock_read: self.clock_read,
             mfvrsave_executed: self.mfvrsave_executed,
             ldarx_executed: self.ldarx_executed,
             stdcx_executed: self.stdcx_executed,

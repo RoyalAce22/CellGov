@@ -150,7 +150,8 @@ pub struct CommitOutcome {
     /// clobbers of prior entries on the same unit.
     pub reservations_cleared: usize,
     /// Effects the validation pass staged nothing for: `FaultRaised`,
-    /// `TraceMarker`, `RsxFlipRequest` and `SharedReadIntent`.
+    /// `TraceMarker`, `RsxFlipRequest`, `SharedReadIntent` and
+    /// `ClockRead`.
     ///
     /// The apply pass still acts on `RsxFlipRequest`.
     pub effects_deferred: usize,

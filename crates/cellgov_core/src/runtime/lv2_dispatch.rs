@@ -196,6 +196,7 @@ impl Runtime {
                 Effect::SharedReadIntent { .. } => {
                     "runtime.apply_lv2_effects_unsupported_shared_read_intent"
                 }
+                Effect::ClockRead { .. } => "runtime.apply_lv2_effects_unsupported_clock_read",
             };
             self.lv2_host.log_invariant_break(
                 site,

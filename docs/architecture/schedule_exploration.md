@@ -75,23 +75,37 @@ barriers cannot interact, why the cross-unit half of the reservation
 rule is the half a footprint pair is asked for, and why the granule
 arithmetic cannot saturate.
 
-Three things reach committed state without reaching a footprint. Guest
-time is the first: one global clock advances per step, and a step that
-touches no shared resource still moves it. A PPU `mftb` reads that
-clock straight into a guest register, and a timer deadline fires from
-it. The relation records neither, so two steps it calls independent
-can commit different memory when they swap. One clock reader it does
-record is a transfer's landing tick. A step carries what each transfer
-in flight during it will touch at completion -- its destination, and
-its source unless an inline payload already holds the bytes -- and
-those ranges conflict with another step's access to them. A step that
-touches the bytes of a transfer in flight during itself conflicts with
-every step instead, because every step carries ticks and so decides
-which side of the landing that step falls on. The second is the RSX FIFO advance
-pass, whose effects commit guest memory and sweep reservations from a
-batch no unit's step emitted. The third is the LV2 handler surface: a
-footprint reads one unit's own step effects, and an LV2 handler's
-commit through `Runtime::host_write` belongs to no unit's step.
+Guest time is one global clock that advances by each step's cost, so a
+step touching no shared resource still moves it. Three things read it,
+and the relation answers for each differently.
+
+A transfer's landing is the first. A step carries what each transfer in
+flight during it will touch at completion -- its destination, and its
+source unless an inline payload already holds the bytes -- and those
+ranges conflict with another step's access to them. A step that touches
+the bytes of a transfer in flight during itself conflicts with every
+step instead, because every step carries ticks and so decides which
+side of the landing that step falls on.
+
+A guest read of the time base is the second. A PPU `mftb` or `mftbu`
+puts the clock into a guest register, which the guest can store
+anywhere, so the step emits `ClockRead` and conflicts with every step.
+The clause pairs on the read rather than on where the value went: what
+would narrow it is tracking the value from the register that received
+it to a store, and nothing does.
+
+A timer deadline is the third, and it needs no clause. A wake commits
+nothing of its own. It changes which unit is runnable, and every effect
+the woken unit then commits is an ordinary event the relation already
+holds against the other writers.
+
+Two things still reach committed state without reaching a footprint.
+The RSX FIFO advance pass commits guest memory and sweeps reservations
+from a batch no unit's step emitted. The LV2 handler surface is the
+other: a footprint reads one unit's own step effects, and an LV2
+handler's commit through `Runtime::host_write` belongs to no unit's
+step. A syscall that reports the clock is hidden twice over there --
+neither the read nor the writes carrying it reach a footprint.
 
 A park the commit pipeline takes from the step result rather than an
 effect does reach a footprint. The independence relation reads the

@@ -24,6 +24,7 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::RsxLabelWrite { .. } => TracedEffectKind::RsxLabelWrite,
         Effect::RsxFlipRequest { .. } => TracedEffectKind::RsxFlipRequest,
         Effect::SharedReadIntent { .. } => TracedEffectKind::SharedReadIntent,
+        Effect::ClockRead { .. } => TracedEffectKind::ClockRead,
     }
 }
 

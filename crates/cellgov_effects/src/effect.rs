@@ -181,6 +181,23 @@ pub enum Effect {
         /// Reading unit.
         source: UnitId,
     },
+    /// Declares that this step read the guest clock.
+    ///
+    /// The commit pipeline applies nothing for it, as for
+    /// [`Effect::SharedReadIntent`]. The packet carries the read into
+    /// dependency analysis, where it pairs against every step: one
+    /// clock advances by each step's cost, so the ticks any other unit
+    /// spends decide the value this step read.
+    ///
+    /// Emission rules:
+    ///
+    /// - A read the guest can observe emits the packet.
+    /// - The time-base resync a unit does each step emits nothing: it
+    ///   reaches no guest register.
+    ClockRead {
+        /// Reading unit.
+        source: UnitId,
+    },
 }
 
 impl Effect {

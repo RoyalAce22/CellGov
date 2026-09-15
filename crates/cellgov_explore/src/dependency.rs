@@ -11,12 +11,13 @@
 //! that interact only through one of these prune when they should
 //! not:
 //!
-//! - Guest time, in two of its three readers. One clock advances by
-//!   each step's cost. A `mftb` reads it into a guest register, and a
-//!   timer wake is stamped with a deadline from it; neither reaches a
-//!   footprint. `tests/shared_clock.rs` holds the witness. The third
-//!   reader, the tick a transfer lands at, reaches a footprint through
-//!   [`StepFootprint::inflight_dma_ranges`].
+//! - Guest time, in one of its three readers. One clock advances by
+//!   each step's cost, and a timer wake is stamped with a deadline from
+//!   it; that stamp reaches no footprint. `tests/timer_deadline.rs`
+//!   holds the witness, and records that the cover stays whole anyway.
+//!   The other two readers do reach a footprint: a `mftb` through
+//!   [`StepFootprint::reads_clock`], and the tick a transfer lands at
+//!   through [`StepFootprint::inflight_dma_ranges`].
 //! - The RSX FIFO advance pass, whose effects commit guest memory and
 //!   sweep reservations from no unit's step.
 //! - Every LV2 handler effect, guest write and wake alike: a handler
@@ -114,6 +115,12 @@ pub struct StepFootprint {
     /// the landing clause. Two steps that only share a flight still
     /// prune, where neither touches the bytes it moves.
     pub inflight_dma_ranges: Vec<ByteRange>,
+    /// Whether the step read the guest clock.
+    ///
+    /// One clock advances by each step's cost, so the ticks every other
+    /// unit spends decide the value this step read. A reader therefore
+    /// conflicts with every step, whatever either of them touched.
+    pub reads_clock: bool,
 }
 
 impl StepFootprint {
@@ -200,6 +207,9 @@ impl StepFootprint {
                 }
                 Effect::SharedReadIntent { range, .. } => {
                     fp.shared_reads.push(*range);
+                }
+                Effect::ClockRead { .. } => {
+                    fp.reads_clock = true;
                 }
                 Effect::MailboxSend { mailbox, .. } => {
                     fp.mailbox_sends.push(*mailbox);
@@ -383,6 +393,12 @@ impl StepFootprint {
             return true;
         }
 
+        // The same ticks decide the value a clock reader saw, and it
+        // can store that value anywhere.
+        if self.reads_clock || other.reads_clock {
+            return true;
+        }
+
         false
     }
 
@@ -406,6 +422,7 @@ impl StepFootprint {
             && self.wake_targets.is_empty()
             && self.reservation_lines.is_empty()
             && self.inflight_dma_ranges.is_empty()
+            && !self.reads_clock
     }
 
     /// True when this step touches the bytes of a transfer that was in

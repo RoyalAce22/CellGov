@@ -221,6 +221,32 @@ fn non_write_effects_are_deferred() {
     assert_eq!(bed.mem.read(range(0, 2)).unwrap(), &[9, 9]);
 }
 
+/// `ClockRead` and `SharedReadIntent` exist for the dependency
+/// relation, so a deferred count is the whole of what the pipeline may
+/// do with them.
+#[test]
+fn a_batch_of_declarations_alone_commits_nothing() {
+    let mut bed = CommitTestBed::new(8);
+    let before = bed.mem.read(range(0, 8)).unwrap().to_vec();
+    let (r, e) = step_with(
+        YieldReason::BudgetExhausted,
+        vec![
+            Effect::ClockRead {
+                source: UnitId::new(0),
+            },
+            Effect::SharedReadIntent {
+                range: range(0, 4),
+                source: UnitId::new(0),
+            },
+        ],
+    );
+    let outcome = bed.process(&r, &e).unwrap();
+    assert_eq!(outcome.writes_committed, 0);
+    assert_eq!(outcome.effects_deferred, 2);
+    assert!(!outcome.fault_discarded);
+    assert_eq!(bed.mem.read(range(0, 8)).unwrap(), &before[..]);
+}
+
 #[test]
 fn fault_step_discards_everything() {
     let mut bed = CommitTestBed::new(8);
