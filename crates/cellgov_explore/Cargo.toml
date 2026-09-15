@@ -20,6 +20,10 @@ cellgov_exec = { path = "../cellgov_exec" }
 cellgov_mem = { path = "../cellgov_mem" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
+# `HostWriter` tags each host write the runtime publishes. The
+# dependency relation matches it exhaustively, so a new mechanism
+# has to be classified rather than silently missed.
+cellgov_trace = { path = "../cellgov_trace" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 strum = { version = "0.26", default-features = false, features = ["derive"] }
@@ -28,4 +32,7 @@ strum = { version = "0.26", default-features = false, features = ["derive"] }
 # The spawn fixture issues `sys_process_spawn` by number, which is the
 # ABI crate's to name.
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
+# The mailbox-wake fixture puts an SPU thread group in the state
+# `sys_spu_thread_write_in_mbox` needs before it will send.
+cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_testkit = { path = "../cellgov_testkit" }

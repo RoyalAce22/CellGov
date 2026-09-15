@@ -130,6 +130,8 @@ fn snapshot_field_categories(rt: &Runtime) {
         dma_latency: _,                   // set once at construction
         last_runnable: _,                 // cleared on restore, rewritten by the next step
         last_dma_completions: _,          // cleared on restore, rewritten by the next commit
+        last_host_writes: _,              // cleared on restore, rewritten by the next commit
+        last_lv2_effects: _,              // cleared on restore, rewritten by the next commit
         spu_factory: _,                   // set once at construction
         ppu_factory: _,                   // set once at construction
         process_spawn_loader: _,          // host-installed closure, like the factories
@@ -253,6 +255,8 @@ impl Runtime {
         // leaves, and the next step rewrites it only on Ok.
         self.last_runnable.clear();
         self.last_dma_completions.clear();
+        self.last_host_writes.clear();
+        self.last_lv2_effects.clear();
         self.trace.clear();
         self.zoom_trace.clear();
         self.scheduler_dirty_after_restore = true;

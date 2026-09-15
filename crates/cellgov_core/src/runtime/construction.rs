@@ -69,6 +69,8 @@ impl Runtime {
             dma_latency: Box::new(FixedLatency::new(DEFAULT_DMA_LATENCY_TICKS.raw())),
             last_runnable: Vec::new(),
             last_dma_completions: Vec::new(),
+            last_host_writes: Vec::new(),
+            last_lv2_effects: Vec::new(),
             lv2_host: Lv2Host::new(),
             syscall_responses: SyscallResponseTable::new(),
             spu_factory: None,

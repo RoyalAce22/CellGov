@@ -147,6 +147,7 @@ impl Runtime {
                     );
                     self.lv2_direct_committed_writes =
                         self.lv2_direct_committed_writes.wrapping_add(1);
+                    self.last_lv2_effects.push(effect.clone());
                     continue;
                 }
                 Effect::MailboxSend {
@@ -156,16 +157,32 @@ impl Runtime {
                         // [CBE-Handbook p:541 s:19.6.6.2] outbound
                         // write-blocking path is not wired here yet.
                         mbox.force_send(message.raw());
+                    } else {
+                        // `handle_register_spu` mints the mailbox
+                        // beside the unit, so a miss here names a
+                        // host-side disagreement between the thread
+                        // table and the mailbox registry.
+                        self.lv2_host.log_invariant_break(
+                            "runtime.apply_lv2_effects_mailbox_send_unregistered",
+                            format_args!(
+                                "LV2 dispatch sent to mailbox {} with no registry entry; \
+                                 the message is discarded and the target's next receive \
+                                 reads the state before it",
+                                mailbox.raw(),
+                            ),
+                        );
                     }
                     let target = UnitId::new(mailbox.raw());
                     if self.registry.effective_status(target) == Some(UnitStatus::Blocked) {
                         self.registry
                             .set_status_override(target, UnitStatus::Runnable);
                     }
+                    self.last_lv2_effects.push(effect.clone());
                     continue;
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
                     self.rsx_flip.request_flip(*buffer_index);
+                    self.last_lv2_effects.push(effect.clone());
                     continue;
                 }
                 // Execution units and the FIFO advance pass emit these

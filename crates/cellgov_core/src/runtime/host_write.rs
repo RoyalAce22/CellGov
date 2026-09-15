@@ -57,6 +57,9 @@ impl Runtime {
         mem.apply_commit(range, bytes)?;
         let (addr, len) = (range.start().raw(), range.length());
         let cleared = reservations.clear_covering(addr, len, exempt);
+        // The push precedes the mode gate below: a FaultDriven run
+        // writes no trace record and still publishes this entry.
+        self.last_host_writes.push((writer, range));
         if let Some(tap) = self.tap.as_deref_mut() {
             tap.write(addr, bytes);
         }
@@ -145,3 +148,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/place_bytes_tests.rs"]
 mod place_bytes_tests;
+
+#[cfg(test)]
+#[path = "tests/published_step_records_tests.rs"]
+mod published_step_records_tests;

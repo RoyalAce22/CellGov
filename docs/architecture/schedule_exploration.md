@@ -81,7 +81,7 @@ rule is the half a footprint pair is asked for, and why the granule
 arithmetic cannot saturate.
 
 Guest time is one global clock that advances by each step's cost, so a
-step touching no shared resource still moves it. Three things read it,
+step touching no shared resource still moves it. Four things read it,
 and the relation answers for each differently.
 
 A transfer's landing is the first. A step carries what each transfer in
@@ -99,18 +99,33 @@ The clause pairs on the read rather than on where the value went: what
 would narrow it is tracking the value from the register that received
 it to a store, and nothing does.
 
-A timer deadline is the third, and it needs no clause. A wake commits
+An LV2 handler's write is the third. A handler holds the tick its
+dispatch ran at, and nothing in the effect it emits says whether the
+payload was built from it, so such a write conflicts with every step on
+the same argument the time-base read does.
+
+A timer deadline is the fourth, and it needs no clause. A wake commits
 nothing of its own. It changes which unit is runnable, and every effect
 the woken unit then commits is an ordinary event the relation already
 holds against the other writers.
 
+An LV2 handler's effects do reach a footprint. A handler commits at
+dispatch rather than through the pipeline, so the calling unit's step
+names none of them and a syscall would otherwise read as a step that
+touched nothing. The runtime publishes what the host did during a step
+-- the tagged guest writes, and the effects the dispatch applied -- and
+each one is folded into the category it would have had from a unit. A
+handler's write becomes that step's write; its mailbox send becomes
+that step's send and the wake it performs, since the dispatch releases
+the target by status alone rather than by what parked it. No clause
+was added for either.
+
 Two things still reach committed state without reaching a footprint.
 The RSX FIFO advance pass commits guest memory and sweeps reservations
-from a batch no unit's step emitted. The LV2 handler surface is the
-other: a footprint reads one unit's own step effects, and an LV2
-handler's commit through `Runtime::host_write` belongs to no unit's
-step. A syscall that reports the clock is hidden twice over there --
-neither the read nor the writes carrying it reach a footprint.
+from a batch no unit's step emitted; only its MMIO mirrors are
+recorded. The all-blocked time warp is the other: it fires the timer
+and sync wakes before it picks a step, and the commit that follows
+clears the published records before any footprint reads them.
 
 A park the commit pipeline takes from the step result rather than an
 effect does reach a footprint. The independence relation reads the

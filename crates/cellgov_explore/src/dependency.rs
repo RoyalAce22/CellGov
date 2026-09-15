@@ -11,31 +11,55 @@
 //! that interact only through one of these prune when they should
 //! not:
 //!
-//! - Guest time, in one of its three readers. One clock advances by
+//! - Guest time, in one of its four readers. One clock advances by
 //!   each step's cost, and a timer wake is stamped with a deadline from
 //!   it; that stamp reaches no footprint. `tests/timer_deadline.rs`
 //!   holds the witness, and records that the cover stays whole anyway.
-//!   The other two readers do reach a footprint: a `mftb` through
-//!   [`StepFootprint::reads_clock`], and the tick a transfer lands at
-//!   through [`StepFootprint::inflight_dma_ranges`].
-//! - The RSX FIFO advance pass, whose effects commit guest memory and
-//!   sweep reservations from no unit's step.
-//! - Every LV2 handler effect, guest write and wake alike: a handler
-//!   commits through `Runtime::host_write`, not through the unit's
-//!   step effects.
+//!   The other three readers do reach a footprint. A `mftb` and an LV2
+//!   handler's tick-derived write reach [`StepFootprint::reads_clock`].
+//!   The tick a transfer lands at reaches
+//!   [`StepFootprint::inflight_dma_ranges`].
+//! - The RSX FIFO advance pass's cursor and call stack, and the label,
+//!   notify and report words it writes. Those land as `RsxLabelWrite`
+//!   effects the pass queues for the next commit, and
+//!   `Runtime::commit_step` prepends them. No driver's effect slice
+//!   carries one, and [`StepFootprint::from_effects`] records nothing
+//!   for the variant either. The pass's MMIO mirrors are the half that
+//!   does reach a footprint, through
+//!   [`StepFootprint::note_host_writes`].
 //! - An LV2 syscall's park and the wake that ends it, neither of which
 //!   carries an effect or a yield reason.
+//! - Whatever the all-blocked time warp does before it picks a step.
+//!   The warp fires the timer wakes and the sync wakes itself, so a
+//!   timed wait's expiry lands its repair writes and its wake
+//!   continuations there. The `commit_step` that follows clears the
+//!   records that hold them, before any footprint reads them. The DMA
+//!   half of the warp is the one part covered.
+//!   [`StepFootprint::inflight_dma_ranges`] holds a transfer's ranges
+//!   for every step of its flight, rather than for the commit that
+//!   fires it.
 //!
-//! The last two reach a workload here through one syscall, the spawn
-//! in `tests/child_init_window.rs`, and both are closed by refusing
-//! rather than by recording. `cellgov_boot` holds every other unit
+//! An LV2 handler's own effects are not among them. The runtime applies
+//! them at dispatch rather than through the commit pipeline, so the
+//! calling unit's step names none of them.
+//! [`StepFootprint::note_lv2_effects`] puts them back:
+//!
+//! - A write becomes that step's write.
+//! - A mailbox send becomes that step's send, and the wake it performs
+//!   on the unit whose id keys the mailbox.
+//!
+//! `tests/lv2_out_param.rs` and `tests/lv2_mailbox_wake.rs` hold the
+//! two halves.
+//!
+//! The park reaches a workload here through one syscall, the spawn in
+//! `tests/child_init_window.rs`. A refusal closes it, rather than a
+//! record. `cellgov_boot` holds every other unit
 //! `Blocked` across a spawned child's `module_start` through
 //! `Runtime::set_unit_status_override`, which no footprint sees either.
 //! So every driver stops with
 //! [`crate::util::StopReason::ChildInitUnserved`] before it takes a
 //! step under a staged pass, and the step that stages one reaches no
-//! decision point: neither the parks nor the handler's own writes enter
-//! the relation. A window that spans one reaches no verdict, which is
+//! decision point. A window that spans one reaches no verdict, which is
 //! the honest answer while the relation cannot see the parks.
 //!
 //! A faulted step records no footprint and needs none: its batch is
@@ -196,6 +220,129 @@ impl StepFootprint {
             // [`StepFootprint::dma_reads`].
             if !payloaded {
                 self.inflight_dma_ranges.push(completion.source());
+            }
+        }
+    }
+
+    /// Record what an LV2 handler did during this step.
+    ///
+    /// Call it after the step's commit, which is what runs the
+    /// dispatch. The runtime applies a handler's effects there rather
+    /// than through the commit pipeline, so the step's own effect list
+    /// names none of them. A syscall reaches the relation as a step
+    /// that touched nothing.
+    ///
+    /// It reads them through [`StepFootprint::from_effects`], so each
+    /// one lands in the category it would have from a unit and answers
+    /// to the clause that category already has.
+    ///
+    /// A handler's mailbox send answers to one more. The commit
+    /// pipeline's own send only fills the mailbox.
+    /// `Runtime::apply_lv2_effects` runs a handler's send itself and
+    /// releases the target's park with it, and it reads the target's
+    /// status alone rather than what parked it. The mailbox clause
+    /// pairs that send with a receive attempt and with nothing else, so
+    /// this method records the release as the wake it is.
+    pub fn note_lv2_effects(&mut self, rt: &cellgov_core::Runtime) {
+        let lv2 = Self::from_effects(rt.last_lv2_effects());
+        self.merge(lv2);
+        for effect in rt.last_lv2_effects() {
+            if let Effect::MailboxSend { mailbox, .. } = effect {
+                // The target the release names: the unit whose raw id
+                // is the mailbox's, whatever its block reason was.
+                self.wake_targets
+                    .push(cellgov_event::UnitId::new(mailbox.raw()));
+            }
+        }
+    }
+
+    /// The exhaustive destructure makes a new field a compile error here.
+    fn merge(&mut self, other: Self) {
+        let Self {
+            shared_writes,
+            shared_reads,
+            mailbox_sends,
+            mailbox_receives,
+            dma_writes,
+            dma_reads,
+            signal_updates,
+            wait_mailboxes,
+            wait_signals,
+            wait_barriers,
+            wake_targets,
+            wait_units,
+            reservation_lines,
+            inflight_dma_ranges,
+            reads_clock,
+        } = other;
+        self.shared_writes.extend(shared_writes);
+        self.shared_reads.extend(shared_reads);
+        self.mailbox_sends.extend(mailbox_sends);
+        self.mailbox_receives.extend(mailbox_receives);
+        self.dma_writes.extend(dma_writes);
+        self.dma_reads.extend(dma_reads);
+        self.signal_updates.extend(signal_updates);
+        self.wait_mailboxes.extend(wait_mailboxes);
+        self.wait_signals.extend(wait_signals);
+        self.wait_barriers.extend(wait_barriers);
+        self.wake_targets.extend(wake_targets);
+        self.wait_units.extend(wait_units);
+        self.reservation_lines.extend(reservation_lines);
+        self.inflight_dma_ranges.extend(inflight_dma_ranges);
+        self.reads_clock |= reads_clock;
+    }
+
+    /// Record the host writes that landed during this step.
+    ///
+    /// Call it after the step's commit, before
+    /// [`StepFootprint::expand_aliases`]. The commit runs the LV2
+    /// dispatch, resolves the wakes and fires the completions, and each
+    /// of those writes guest memory outside the unit's batch.
+    ///
+    /// Each one becomes this step's own
+    /// [`StepFootprint::shared_writes`]: the bytes land at this step,
+    /// and this step's position decides them. The match is exhaustive,
+    /// so a new `HostWriter` variant does not compile until this
+    /// classifies it.
+    pub fn note_host_writes(&mut self, rt: &cellgov_core::Runtime) {
+        for (writer, range) in rt.last_host_writes() {
+            match writer {
+                // The dispatch holds the tick it ran at, and nothing in
+                // the effect separates a payload built from that tick
+                // from one that ignored it. The
+                // `sys_time_get_current_time` out parameters are such a
+                // payload. So an LV2 write reads the clock, on the same
+                // argument [`StepFootprint::reads_clock`] makes for
+                // `mftb`: the handler can put that value anywhere in
+                // the bytes it lands.
+                cellgov_trace::HostWriter::Lv2Effect
+                | cellgov_trace::HostWriter::SyscallOutParam
+                | cellgov_trace::HostWriter::WakeContinuation => {
+                    self.shared_writes.push(*range);
+                    self.reads_clock = true;
+                }
+                // The seed copy a newly attached view receives. Its
+                // bytes are the segment's, so no tick reaches them.
+                cellgov_trace::HostWriter::SharedViewSeed
+                // The RSX mirrors, whose bytes are the cursor's and the
+                // flip model's, and no tick's. The advance pass belongs
+                // to no unit's step, but its writes land inside one
+                // commit. That step's position decides when a poller
+                // sees them.
+                | cellgov_trace::HostWriter::RsxMirror => {
+                    self.shared_writes.push(*range);
+                }
+                // A landing is already the in-flight set's, which holds
+                // it for every step of the flight rather than for the
+                // one commit that fired it.
+                cellgov_trace::HostWriter::DmaCompletion => {}
+                // `expand_aliases` widens each access to its sibling
+                // views, so a fanout's target range is already paired
+                // against whatever reads or writes it.
+                cellgov_trace::HostWriter::SharedViewFanout => {}
+                // The program driving the runtime, on its own account.
+                // It makes no placement inside a step.
+                cellgov_trace::HostWriter::Placement => {}
             }
         }
     }

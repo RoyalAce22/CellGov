@@ -250,6 +250,51 @@ impl Runtime {
         &self.last_dma_completions
     }
 
+    /// Guest ranges host-side code wrote since the last
+    /// [`Runtime::commit_step`] began, each tagged with the mechanism
+    /// that wrote it, in the order they landed.
+    ///
+    /// These writes land outside every unit's batch, so a step's
+    /// effect list alone does not show them: an LV2 handler's out
+    /// parameter, a wake continuation, a DMA payload, the RSX mirrors
+    /// and the shared-view replications are all here.
+    ///
+    /// # Cross-module contract
+    ///
+    /// - [`Runtime::commit_step`] empties the list when it starts, so
+    ///   the caller reads one step's writes only while it calls the
+    ///   runtime no further.
+    /// - A restore empties the list.
+    /// - A refused write records nothing.
+    /// - A [`HostWriter::Placement`] the driver makes between two
+    ///   commits stands in the list until the next commit clears it.
+    /// - A write the all-blocked time warp inside [`Runtime::step`]
+    ///   makes reaches no reader: the commit that follows it clears
+    ///   the list.
+    /// - Every [`RuntimeMode`] builds the list; the mode gates the
+    ///   `HostWrite` trace record alone.
+    /// - An entry carries no address space, so a write at one numeric
+    ///   address in two spaces gives two entries that read alike.
+    ///
+    /// [`HostWriter::Placement`]: cellgov_trace::HostWriter::Placement
+    #[inline]
+    pub fn last_host_writes(&self) -> &[(cellgov_trace::HostWriter, cellgov_mem::ByteRange)] {
+        &self.last_host_writes
+    }
+
+    /// Effects an LV2 handler applied since the last
+    /// [`Runtime::commit_step`] began, in the order they landed.
+    ///
+    /// A handler applies its effects at dispatch, so no unit's effect
+    /// list holds them. The list holds the applied effects alone; a
+    /// dropped effect is absent. The guest writes among them also
+    /// reach [`Runtime::last_host_writes`], which states the contract
+    /// both lists follow.
+    #[inline]
+    pub fn last_lv2_effects(&self) -> &[cellgov_effects::Effect] {
+        &self.last_lv2_effects
+    }
+
     // -- scheduler --
 
     /// Replace the runtime scheduler.
