@@ -231,6 +231,7 @@ dependencies = [
  "cellgov_time",
  "cellgov_trace",
  "criterion",
+ "strum",
  "thiserror",
 ]
 

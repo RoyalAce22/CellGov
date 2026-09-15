@@ -26,7 +26,11 @@ pub struct RuntimeStep {
 }
 
 /// Why a [`crate::Runtime::step`] call could not produce a step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+///
+/// `VariantArray` publishes the whole set, so a sweep over every way a
+/// step can refuse reads `StepError::VARIANTS` and a new variant
+/// reaches it without anyone widening a list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, strum::VariantArray)]
 pub enum StepError {
     /// Terminal stall: registry empty or every unit Faulted / Finished.
     #[error("no runnable unit")]

@@ -23,6 +23,10 @@ cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_trace = { path = "../cellgov_trace" }
 thiserror = "2"
+# The runtime publishes its refusal enums as machine-readable variant
+# lists, so a sweep over "every way a step can refuse" cannot silently
+# stop being exhaustive when a variant is added.
+strum = { version = "0.26", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 criterion.workspace = true

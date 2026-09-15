@@ -7,18 +7,13 @@ use strum::VariantArray;
 /// One refused commit, which stands for every shape the pipeline gives.
 const REFUSED_COMMIT: CommitError = CommitError::OutOfRange { effect_index: 0 };
 
-/// Every [`StepError`] the runtime can give.
-const EVERY_STEP_ERROR: [StepError; 5] = [
-    StepError::NoRunnableUnit,
-    StepError::AllBlocked,
-    StepError::MaxStepsExceeded,
-    StepError::TimeOverflow,
-    StepError::SchedulerNotReinstalled,
-];
-
 #[test]
 fn only_a_stall_reads_as_a_finished_run() {
-    for reason in EVERY_STEP_ERROR.map(StopReason::StepError) {
+    for reason in StepError::VARIANTS
+        .iter()
+        .copied()
+        .map(StopReason::StepError)
+    {
         assert_ne!(reason.class(), StopClass::Finished, "{reason}");
         assert!(reason.is_truncated(), "{reason}");
     }

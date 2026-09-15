@@ -20,6 +20,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
+use strum::VariantArray;
 
 const BASELINE_HASH: u64 = 0x1111_1111_1111_1111;
 
@@ -27,19 +28,26 @@ const BASELINE_HASH: u64 = 0x1111_1111_1111_1111;
 /// reads as a divergence wherever nothing withdraws it.
 const OTHER_HASH: u64 = 0x2222_2222_2222_2222;
 
-/// One refused commit, which stands for every shape the pipeline gives.
+/// One refused commit, which stands for every shape the pipeline
+/// gives. `a_refusal_of_any_shape_truncates` is what earns that.
 const REFUSED_COMMIT: CommitError = CommitError::OutOfRange { effect_index: 0 };
 
 /// Every stop reason that leaves a prefix of the schedule.
-const EVERY_TRUNCATING_REASON: [StopReason; 7] = [
-    StopReason::StepBound,
-    StopReason::StepError(StepError::NoRunnableUnit),
-    StopReason::StepError(StepError::AllBlocked),
-    StopReason::StepError(StepError::MaxStepsExceeded),
-    StopReason::StepError(StepError::TimeOverflow),
-    StopReason::StepError(StepError::SchedulerNotReinstalled),
-    StopReason::CommitError(REFUSED_COMMIT),
-];
+///
+/// The step-refusal half comes from `StepError::VARIANTS` rather than
+/// a list here, so a variant added to the runtime reaches this sweep
+/// without anyone widening anything.
+fn every_truncating_reason() -> Vec<StopReason> {
+    std::iter::once(StopReason::StepBound)
+        .chain(
+            StepError::VARIANTS
+                .iter()
+                .copied()
+                .map(StopReason::StepError),
+        )
+        .chain(std::iter::once(StopReason::CommitError(REFUSED_COMMIT)))
+        .collect()
+}
 
 /// `count` units that all write the same word, so every pair of them
 /// conflicts and a search has alternates to record.
@@ -102,7 +110,7 @@ const COMPLETE_BASELINE: BaselineRun = BaselineRun {
 
 #[test]
 fn no_stop_short_of_a_stall_can_contribute_a_divergence() {
-    for reason in EVERY_TRUNCATING_REASON {
+    for reason in every_truncating_reason() {
         // Each replay reports a hash the baseline did not, which is
         // what a divergence looks like when the run finished.
         let iter = tally(2, OTHER_HASH, reason);
@@ -329,4 +337,84 @@ fn a_capped_search_over_a_contending_workload_claims_nothing() {
         "a prefix baseline's races cover a prefix, so the search owes no reversal",
     );
     assert_eq!(result.schedules_truncated, 0);
+}
+
+/// The sweep runs one case per way the runtime can refuse a step, plus
+/// the replay bound and a refused commit, and a stall is the one stop
+/// it does not cover.
+///
+/// The width and the repeat check are what keep the sweep from going
+/// vacuous: a hand-written list put back in place of the
+/// `StepError::VARIANTS` chain goes red here the moment it is a variant
+/// short or names one twice. The truncation claims go red on a
+/// [`StopReason::is_truncated`] that admits any stop but a stall.
+#[test]
+fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
+    let reasons = every_truncating_reason();
+    assert_eq!(
+        reasons.len(),
+        StepError::VARIANTS.len() + 2,
+        "the sweep must run one case per step refusal, plus the replay bound and a \
+         refused commit",
+    );
+    for (index, reason) in reasons.iter().enumerate() {
+        assert!(
+            !reasons[..index].contains(reason),
+            "{reason}: the sweep runs this case twice, so it is one case short elsewhere",
+        );
+        assert!(reason.is_truncated(), "{reason}");
+    }
+    assert!(!StopReason::Stalled.is_truncated());
+}
+
+/// A refused commit truncates whatever shape it took, which is what
+/// lets one stand in for every other in the sweep above.
+#[test]
+fn a_refusal_of_any_shape_truncates() {
+    let shapes = [
+        CommitError::PayloadLengthMismatch { effect_index: 0 },
+        CommitError::OutOfRange { effect_index: 0 },
+        CommitError::UnknownMailbox {
+            effect_index: 0,
+            mailbox: cellgov_sync::MailboxId::new(0),
+        },
+        CommitError::UnknownSignal {
+            effect_index: 0,
+            signal: cellgov_sync::SignalId::new(0),
+        },
+        CommitError::UnknownWakeTarget {
+            effect_index: 0,
+            target: UnitId::new(0),
+        },
+        CommitError::UnknownSourceUnit {
+            effect_index: 0,
+            source_unit: UnitId::new(0),
+        },
+        CommitError::DmaDestinationOutOfRange { effect_index: 0 },
+        CommitError::DmaDestinationReserved {
+            effect_index: 0,
+            addr: 0,
+            region: "reserved",
+        },
+        CommitError::Memory(cellgov_mem::MemError::LengthMismatch),
+    ];
+    // The count stands in for exhaustiveness only over a list that
+    // names each shape once: a repeat would hold the length up while a
+    // shape the pipeline can give went unlisted.
+    for (index, shape) in shapes.iter().enumerate() {
+        assert!(
+            !shapes[..index].contains(shape),
+            "{shape}: listed twice, so a shape the pipeline can give is missing",
+        );
+    }
+    assert_eq!(
+        shapes.len(),
+        <CommitError as strum::EnumCount>::COUNT,
+        "a commit refusal the pipeline can give is missing from this list",
+    );
+    for shape in shapes {
+        let reason = StopReason::CommitError(shape);
+        assert!(reason.is_truncated(), "{shape}");
+        assert_eq!(reason.class(), crate::util::StopClass::Refusal, "{shape}");
+    }
 }

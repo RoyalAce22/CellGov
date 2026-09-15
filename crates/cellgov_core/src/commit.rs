@@ -27,7 +27,13 @@ use cellgov_sync::{
 use cellgov_time::GuestTicks;
 
 /// Why a commit batch could not be applied.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+///
+/// No variant is a unit variant: each carries the effect index it
+/// refused, and `Memory` carries the memory layer's own error instead.
+/// So `VariantArray` cannot publish the set, and `EnumCount` publishes
+/// how many there are -- what a sweep standing one refusal in for every
+/// shape needs to know it still covers them all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, strum::EnumCount)]
 pub enum CommitError {
     /// A `SharedWriteIntent` payload length did not match its range length.
     #[error("effect[{effect_index}]: write payload length disagrees with range")]
