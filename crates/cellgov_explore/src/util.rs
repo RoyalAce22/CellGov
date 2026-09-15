@@ -3,6 +3,7 @@
 use crate::classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 use crate::config::ExplorationConfig;
 use crate::decision::DecisionLog;
+use crate::execution::Execution;
 use cellgov_core::{CommitError, Runtime, StepError};
 use cellgov_event::UnitId;
 
@@ -160,6 +161,10 @@ impl AlternateIteration {
 
 /// Iterate each non-pruned alternate at every branching point.
 ///
+/// The pass prunes an alternate when no event of the unit the schedule
+/// chose conflicts with an event of the alternate unit anywhere in the
+/// run.
+///
 /// `process` is called with `(branch_step, alternate_unit)` and returns
 /// that alternate's final memory hash together with why its replay
 /// stopped. Iteration stops early when the `max_schedules` bound is
@@ -178,6 +183,7 @@ where
     F: FnMut(usize, UnitId) -> (u64, StopReason),
 {
     let branching: Vec<_> = log.branching_points().collect();
+    let execution = Execution::from_log(log);
     let mut schedules = Vec::new();
     let mut bounds_hit = false;
     let mut found_divergence = false;
@@ -196,13 +202,9 @@ where
                 break 'outer;
             }
 
-            if let Some(alt_agg) = log.aggregate_footprint(alt) {
-                if let Some(def_agg) = log.aggregate_footprint(default_choice) {
-                    if !def_agg.conflicts(&alt_agg) {
-                        schedules_pruned += 1;
-                        continue;
-                    }
-                }
+            if execution.units_independent(default_choice, alt) {
+                schedules_pruned += 1;
+                continue;
             }
 
             let (hash, stop) = process(bp.step, alt);

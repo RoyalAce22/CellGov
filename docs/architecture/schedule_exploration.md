@@ -11,7 +11,7 @@ or `Inconclusive`.
 flowchart TD
   base["baseline run"] --> bp["record every branching point"]
   bp --> alt["candidate alternate schedule"]
-  alt --> fp{"StepFootprint overlap with the swapped step?"}
+  alt --> fp{"any step of the two units conflict?"}
   fp -->|"no: provably independent"| prune["pruned, not replayed"]
   fp -->|yes| replay["replay through PrescribedScheduler within max_schedules / max_steps_per_run"]
   replay --> hash["multi-space committed-memory hash (plus named regions under explore_with_regions)"]
@@ -34,6 +34,14 @@ conflicts rather than prunes. Two loads of the same bytes still
 prune, and instruction fetch emits nothing, so a fetch still prunes
 against another unit's write to the text region. The dependency
 module states what each clause pairs.
+
+`Execution` carries those footprints as events: one per retired step,
+identified by the step's position and the unit that ran it. It builds
+happens-before over that sequence -- two events of one unit ordered by
+the order the unit ran them, two conflicting events by the order the
+schedule ran them, transitively closed through one clock vector per
+event -- and `Execution::races` reads the relation for the pairs
+nothing but their own conflict orders.
 
 Schedules compare through the multi-space committed-memory hash, so
 divergence confined to a spawned child's address space is witnessed.

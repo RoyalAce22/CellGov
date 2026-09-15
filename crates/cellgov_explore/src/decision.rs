@@ -65,22 +65,6 @@ impl DecisionLog {
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
-
-    /// Merged footprint across every step `uid` ran in this log.
-    ///
-    /// Returns `None` if `uid` never ran. O(n) in log length.
-    pub fn aggregate_footprint(&self, uid: UnitId) -> Option<StepFootprint> {
-        let mut agg: Option<StepFootprint> = None;
-        for p in &self.points {
-            if p.chosen == uid {
-                match &mut agg {
-                    Some(fp) => fp.merge(&p.footprint),
-                    None => agg = Some(p.footprint.clone()),
-                }
-            }
-        }
-        agg
-    }
 }
 
 #[cfg(test)]

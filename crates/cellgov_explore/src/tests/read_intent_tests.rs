@@ -7,6 +7,7 @@
 //! and a write-read race whose two orders leave different bytes.
 
 use crate::dependency::StepFootprint;
+use crate::execution::Execution;
 use crate::observer::observe_decisions;
 use crate::{explore, ExplorationConfig, OutcomeClass};
 use cellgov_core::{AddressSpaceId, Runtime};
@@ -42,6 +43,20 @@ fn writes(start: u64, len: u64) -> StepFootprint {
         UnitId::new(1),
         GuestTicks::ZERO,
     )])
+}
+
+/// The footprint of the one step in which `unit` touched shared state.
+fn shared_footprint(execution: &Execution, unit: UnitId) -> StepFootprint {
+    let shared: Vec<_> = execution
+        .events_of(unit)
+        .filter(|event| !event.footprint.is_local_only())
+        .collect();
+    assert_eq!(
+        shared.len(),
+        1,
+        "unit {unit:?} touches shared state in exactly one step"
+    );
+    shared[0].footprint.clone()
 }
 
 fn dma(src: u64, dst: u64, len: u64) -> StepFootprint {
@@ -108,14 +123,6 @@ fn a_footprint_holding_only_a_read_is_not_local_only() {
     assert!(!reads(0, 4).is_local_only());
 }
 
-#[test]
-fn merge_carries_the_read_set() {
-    let mut a = reads(0, 4);
-    a.merge(&reads(0x80, 4));
-    assert_eq!(a.shared_reads.len(), 2);
-    assert!(a.conflicts(&writes(0x80, 4)));
-}
-
 /// Two views of one shared mapping, `size` bytes each, at
 /// `0x2000` and `0x5000` in the boot space.
 fn runtime_with_two_views_of_one_mapping(size: u64) -> Runtime {
@@ -161,12 +168,9 @@ fn a_read_through_one_view_of_a_shared_mapping_conflicts_with_a_write_through_it
     });
 
     let (log, _) = observe_decisions(&mut rt);
-    let reader = log
-        .aggregate_footprint(UnitId::new(0))
-        .expect("the reading unit ran");
-    let writer = log
-        .aggregate_footprint(UnitId::new(1))
-        .expect("the writing unit ran");
+    let execution = Execution::from_log(&log);
+    let reader = shared_footprint(&execution, UnitId::new(0));
+    let writer = shared_footprint(&execution, UnitId::new(1));
     assert!(
         reader.conflicts(&writer),
         "reader {:?} against writer {:?}",
@@ -191,9 +195,7 @@ fn the_read_set_of_a_shared_view_carries_its_sibling_view_range() {
     });
 
     let (log, _) = observe_decisions(&mut rt);
-    let reader = log
-        .aggregate_footprint(UnitId::new(0))
-        .expect("the reading unit ran");
+    let reader = shared_footprint(&Execution::from_log(&log), UnitId::new(0));
     let starts: Vec<u64> = reader
         .shared_reads
         .iter()
@@ -233,8 +235,9 @@ fn a_read_of_one_view_alone_does_not_conflict_with_a_write_outside_the_mapping()
     });
 
     let (log, _) = observe_decisions(&mut rt);
-    let reader = log.aggregate_footprint(UnitId::new(0)).unwrap();
-    let writer = log.aggregate_footprint(UnitId::new(1)).unwrap();
+    let execution = Execution::from_log(&log);
+    let reader = shared_footprint(&execution, UnitId::new(0));
+    let writer = shared_footprint(&execution, UnitId::new(1));
     assert!(
         !reader.conflicts(&writer),
         "the alias expansion must not reach a range outside the mapping"
@@ -282,18 +285,22 @@ fn write_read_race_runtime() -> Runtime {
 fn the_write_read_race_pair_conflicts_on_the_read_set_alone() {
     let mut rt = write_read_race_runtime();
     let (log, _) = observe_decisions(&mut rt);
-    let writer = log.aggregate_footprint(UnitId::new(0)).unwrap();
-    let reader = log.aggregate_footprint(UnitId::new(1)).unwrap();
+    let execution = Execution::from_log(&log);
+    let writer = shared_footprint(&execution, UnitId::new(0));
+    let reader: Vec<StepFootprint> = execution
+        .events_of(UnitId::new(1))
+        .filter(|event| !event.footprint.is_local_only())
+        .map(|event| event.footprint.clone())
+        .collect();
 
-    let mut writes_only = reader.clone();
-    writes_only.shared_reads.clear();
+    assert_eq!(reader.len(), 2, "the reading unit loads, then stores");
     assert!(
-        !writer.conflicts(&writes_only),
-        "the two units' writes are disjoint, so the write set alone proves independence"
+        writer.conflicts(&reader[0]),
+        "the read of the raced bytes is what makes the pair conflict"
     );
     assert!(
-        writer.conflicts(&reader),
-        "the read of the raced bytes is what makes the pair conflict"
+        !writer.conflicts(&reader[1]),
+        "the two units' writes are disjoint, so the write set alone proves independence"
     );
 }
 

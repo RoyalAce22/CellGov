@@ -233,23 +233,6 @@ impl StepFootprint {
             && self.reservation_lines.is_empty()
     }
 
-    /// Append every access from `other` into `self`.
-    pub fn merge(&mut self, other: &StepFootprint) {
-        self.shared_writes.extend_from_slice(&other.shared_writes);
-        self.shared_reads.extend_from_slice(&other.shared_reads);
-        self.mailbox_sends.extend_from_slice(&other.mailbox_sends);
-        self.mailbox_receives
-            .extend_from_slice(&other.mailbox_receives);
-        self.dma_ranges.extend_from_slice(&other.dma_ranges);
-        self.signal_updates.extend_from_slice(&other.signal_updates);
-        self.wait_mailboxes.extend_from_slice(&other.wait_mailboxes);
-        self.wait_signals.extend_from_slice(&other.wait_signals);
-        self.wait_barriers.extend_from_slice(&other.wait_barriers);
-        self.wake_targets.extend_from_slice(&other.wake_targets);
-        self.reservation_lines
-            .extend_from_slice(&other.reservation_lines);
-    }
-
     fn has_any_wait(&self) -> bool {
         !self.wait_mailboxes.is_empty()
             || !self.wait_signals.is_empty()

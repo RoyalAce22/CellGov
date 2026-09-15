@@ -23,6 +23,9 @@ enum PageGrammar {
     /// count running across all four books, or a Roman-numeral preface
     /// page.
     BookPage,
+    /// `<article>:<page>`, the stamp an ACM article-numbered journal
+    /// puts on each page.
+    ArticlePage,
 }
 
 /// The documents a citation may name and how each one numbers its pages.
@@ -39,6 +42,22 @@ const DOCUMENTS: &[(&str, PageGrammar)] = &[
     ("Bala2000", PageGrammar::Integer),
     ("Brunthaler2010", PageGrammar::Integer),
     ("ErtlGregg2003", PageGrammar::Integer),
+    ("Abdulla2017", PageGrammar::ArticlePage),
+    ("FlanaganGodefroid2005", PageGrammar::Integer),
+    ("Aronis2018", PageGrammar::Integer),
+    ("Kokologiannakis2022", PageGrammar::ArticlePage),
+    ("Abdulla2024", PageGrammar::Integer),
+    ("Nguyen2018", PageGrammar::Integer),
+    ("Chalupa2018", PageGrammar::ArticlePage),
+    ("Albert2019", PageGrammar::Integer),
+    ("Abdulla2019", PageGrammar::ArticlePage),
+    ("Mazurkiewicz1977", PageGrammar::Integer),
+    ("Godefroid1996", PageGrammar::Integer),
+    ("ValmariHansen2016", PageGrammar::Integer),
+    ("Lamport1978", PageGrammar::Integer),
+    ("FlanaganFreund2009", PageGrammar::Integer),
+    ("Rodriguez2015", PageGrammar::Integer),
+    ("Kokologiannakis2024", PageGrammar::Integer),
 ];
 
 /// Floor on the population the guard validates. The tree carries
@@ -82,6 +101,9 @@ fn page_matches(grammar: PageGrammar, page: &str) -> bool {
                 .find_map(|book| page.strip_prefix(book))
                 .is_some_and(is_integer)
         }
+        PageGrammar::ArticlePage => page
+            .split_once(':')
+            .is_some_and(|(article, number)| is_integer(article) && is_integer(number)),
     }
 }
 
@@ -306,6 +328,36 @@ fn every_page_grammar_accepts_its_own_forms_and_rejects_the_others() {
             "book-page {page:?}"
         );
     }
+    for (page, ok) in [
+        ("42:11", true),
+        ("42", false),
+        ("42:", false),
+        (":11", false),
+        ("42:11:2", false),
+    ] {
+        assert_eq!(
+            page_matches(PageGrammar::ArticlePage, page),
+            ok,
+            "article-page {page:?}"
+        );
+    }
+}
+
+#[test]
+fn an_article_numbered_document_needs_both_halves_of_its_stamp() {
+    let (valid, faults) = scan_line("/// the race rule [Abdulla2017 p:42:11 s:3.3]");
+    assert_eq!((valid, faults.len()), (1, 0));
+
+    // A bare page number names no article, so it resolves to nothing
+    // in a volume that restarts the count per article.
+    let (_, faults) = scan_line("/// [Abdulla2017 p:11] a page with no article");
+    assert_eq!(
+        faults,
+        vec![Fault::BadPage {
+            key: "Abdulla2017".to_string(),
+            page: "11".to_string()
+        }]
+    );
 }
 
 #[test]

@@ -5,9 +5,10 @@
 //! same memory hash; whole-struct `PartialEq` catches them.
 //!
 //! The factory reference reuses the production `observe_decisions`,
-//! `PrescribedScheduler`, and `cellgov_explore::util::*` helpers, so
-//! this test isolates the snapshot/restore axis -- it does not
-//! re-validate those helpers.
+//! `PrescribedScheduler`, `Execution` and `cellgov_explore::util::*`
+//! helpers, so this test isolates the snapshot/restore axis -- it does
+//! not re-validate those helpers. Pruning in particular is the same
+//! `Execution::units_independent` call on both sides.
 //!
 //! Coverage gap: scenarios all use a fixed `Budget` and `max_steps`;
 //! construction-param variation is pinned by the `captured_*` debug
@@ -23,8 +24,8 @@ use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
 use cellgov_explore::{
     explore, observe_decisions,
     util::{build_overrides, run_to_stall},
-    ExplorationConfig, ExplorationResult, OutcomeClass, PrescribedScheduler, ScheduleRecord,
-    StopClass,
+    Execution, ExplorationConfig, ExplorationResult, OutcomeClass, PrescribedScheduler,
+    ScheduleRecord, StopClass,
 };
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
@@ -49,6 +50,7 @@ where
         return None;
     }
 
+    let execution = Execution::from_log(&log);
     let mut schedules = Vec::new();
     let mut bounds_hit = false;
     let mut found_divergence = false;
@@ -66,13 +68,9 @@ where
                 bounds_hit = true;
                 break 'outer;
             }
-            if let Some(alt_agg) = log.aggregate_footprint(alt) {
-                if let Some(def_agg) = log.aggregate_footprint(default_choice) {
-                    if !def_agg.conflicts(&alt_agg) {
-                        schedules_pruned += 1;
-                        continue;
-                    }
-                }
+            if execution.units_independent(default_choice, alt) {
+                schedules_pruned += 1;
+                continue;
             }
 
             let overrides = build_overrides(bp.step, alt);
