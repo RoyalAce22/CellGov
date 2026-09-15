@@ -74,6 +74,7 @@ fn unit_write_error(rt: &mut Runtime, target: ByteRange) -> CommitError {
         rsx_label_base: 0,
         rsx_flip: &mut rt.rsx_flip,
         rsx_label_writes_committed: &mut rsx_label_writes,
+        tap: None,
     };
     let mut pipeline = crate::commit::CommitPipeline::new();
     pipeline

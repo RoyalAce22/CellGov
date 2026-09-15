@@ -213,6 +213,22 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
+    /// Log an invariant break if queue `id` holds payloads and parked waiters at once.
+    ///
+    /// A receive runs this check before it drains the queue, because the
+    /// drain can hide the break.
+    fn note_event_queue_mutual_exclusion(&mut self, id: u32) {
+        if let Some((payloads, waiters)) = self.state.event_queues.mutual_exclusion_break(id) {
+            self.log_invariant_break(
+                "sync_primitives.event_queue.mutual_exclusion",
+                format_args!(
+                    "event queue {id:#x} has {payloads} buffered payload(s) and {waiters} \
+                     parked waiter(s); the waiters may be stranded on a drained queue"
+                ),
+            );
+        }
+    }
+
     pub(super) fn dispatch_event_queue_receive(
         &mut self,
         id: u32,
@@ -229,6 +245,7 @@ impl Lv2Host {
             );
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
+        self.note_event_queue_mutual_exclusion(id);
         match self.state.event_queues.try_receive(id) {
             None => Lv2Dispatch::immediate(errno::CELL_ESRCH.into()),
             Some(crate::sync_primitives::EventQueueReceive::Delivered(payload)) => {
@@ -284,6 +301,7 @@ impl Lv2Host {
                 return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
             }
         }
+        self.note_event_queue_mutual_exclusion(id);
         let Some(batch) = self.state.event_queues.try_receive_batch(id, size as usize) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
         };
@@ -389,3 +407,7 @@ impl Lv2Host {
 #[cfg(test)]
 #[path = "tests/event_queue_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/event_queue_exclusion_tests.rs"]
+mod exclusion_tests;

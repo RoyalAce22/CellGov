@@ -1,13 +1,12 @@
 //! Mount-table resolution with single-read disk caching.
 
 use std::collections::BTreeMap;
-use std::fs::Metadata;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use cellgov_ps3_abi::lv2::errno;
 
-use crate::fs_store::{DirEntry, FsError};
+use crate::fs_store::{DirEntry, FsError, HostEntryKind, MountFiles};
 use crate::host::Lv2Host;
 
 /// Outcome of a host-side mount-table lookup for a regular-file path.
@@ -47,8 +46,9 @@ impl Lv2Host {
             Err(MountResolveErr::Failed(code)) => return MountResolution::Failed(code),
         };
 
-        let host_path = match first_existing(&candidates) {
-            Ok(Some((host_path, md))) if md.is_file() => host_path.to_path_buf(),
+        let files = self.fs_mounts().files();
+        let host_path = match first_existing(files, &candidates) {
+            Ok(Some((host_path, HostEntryKind::File))) => host_path.to_path_buf(),
             // A shadowing root that holds a directory under this name
             // hides whatever a later root holds there.
             Ok(Some(_)) | Ok(None) => return MountResolution::Failed(errno::CELL_ENOENT),
@@ -58,9 +58,15 @@ impl Lv2Host {
             }
         };
 
-        let bytes = match std::fs::read(&host_path) {
+        let bytes = match files.read(&host_path) {
             Ok(b) => b,
-            Err(_) => return MountResolution::Failed(errno::CELL_EIO),
+            // The probe found the file under this root, so a refused
+            // read counts as an unreadable root, the same as a refused
+            // probe.
+            Err(kind) => {
+                let code = self.mount_candidate_unreadable(path, &host_path, kind);
+                return MountResolution::Failed(code);
+            }
         };
 
         match self.fs_store_mut().register_blob(path.to_string(), bytes) {
@@ -103,20 +109,21 @@ impl Lv2Host {
             Err(MountResolveErr::Failed(code)) => return DirMountResolution::Failed(code),
         };
 
-        // One probe pass over the roots. The same metadata decides
-        // the type of the hit and which roots contribute entries, so
-        // the listing cannot straddle two disk states.
-        let mut present: Vec<(&Path, Metadata)> = Vec::new();
+        // One probe pass over the roots. The same answer decides the
+        // type of the hit and which roots contribute entries, so the
+        // listing cannot straddle two disk states.
+        let files = self.fs_mounts().files();
+        let mut present: Vec<(&Path, HostEntryKind)> = Vec::new();
         for candidate in &candidates {
-            match probe(candidate) {
-                Ok(md) => {
+            match probe(files, candidate) {
+                Ok(kind) => {
                     // The earliest root that holds this name decides
                     // the type; a file there hides every later
                     // root's directory.
-                    if present.is_empty() && !md.is_dir() {
+                    if present.is_empty() && kind != HostEntryKind::Directory {
                         return DirMountResolution::Failed(errno::CELL_ENOTDIR);
                     }
-                    present.push((candidate.as_path(), md));
+                    present.push((candidate.as_path(), kind));
                 }
                 Err(CandidateMiss::Absent) => {}
                 Err(CandidateMiss::Unreadable(kind)) => {
@@ -132,11 +139,11 @@ impl Lv2Host {
         // The `String` key gives the UTF-8 byte order the contract
         // names, and `or_insert` keeps the earliest root's entry.
         let mut merged: BTreeMap<String, DirEntry> = BTreeMap::new();
-        for (candidate, md) in &present {
-            if !md.is_dir() {
+        for (candidate, kind) in &present {
+            if *kind != HostEntryKind::Directory {
                 continue;
             }
-            if let Err(kind) = collect_dir_entries(candidate, &mut merged) {
+            if let Err(kind) = collect_dir_entries(files, candidate, &mut merged) {
                 let code = self.mount_candidate_unreadable(path, candidate, kind);
                 return DirMountResolution::Failed(code);
             }
@@ -175,21 +182,17 @@ impl Lv2Host {
 /// Returns the host error kind if the host will not enumerate the
 /// directory. The caller maps that kind to a guest errno.
 fn collect_dir_entries(
+    files: &dyn MountFiles,
     host_path: &Path,
     merged: &mut BTreeMap<String, DirEntry>,
 ) -> Result<(), ErrorKind> {
-    let read_dir = std::fs::read_dir(host_path).map_err(|e| e.kind())?;
-    for entry in read_dir {
-        let entry = entry.map_err(|e| e.kind())?;
-        let file_type = entry.file_type().map_err(|e| e.kind())?;
-        let is_directory = if file_type.is_dir() {
-            true
-        } else if file_type.is_file() {
-            false
-        } else {
-            continue;
+    for entry in files.list(host_path)? {
+        let is_directory = match entry.kind {
+            HostEntryKind::Directory => true,
+            HostEntryKind::File => false,
+            HostEntryKind::Other => continue,
         };
-        let name = match entry.file_name().into_string() {
+        let name = match entry.name.into_string() {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -219,30 +222,28 @@ enum CandidateMiss {
 /// - `InvalidFilename`, from a host that cannot express the name.
 ///
 /// Every other kind leaves the root's contents unknown.
-fn probe(candidate: &Path) -> Result<Metadata, CandidateMiss> {
-    match std::fs::metadata(candidate) {
-        Ok(md) => Ok(md),
-        Err(err)
-            if matches!(
-                err.kind(),
-                ErrorKind::NotFound | ErrorKind::NotADirectory | ErrorKind::InvalidFilename
-            ) =>
-        {
+fn probe(files: &dyn MountFiles, candidate: &Path) -> Result<HostEntryKind, CandidateMiss> {
+    match files.kind(candidate) {
+        Ok(kind) => Ok(kind),
+        Err(ErrorKind::NotFound | ErrorKind::NotADirectory | ErrorKind::InvalidFilename) => {
             Err(CandidateMiss::Absent)
         }
-        Err(err) => Err(CandidateMiss::Unreadable(err.kind())),
+        Err(kind) => Err(CandidateMiss::Unreadable(kind)),
     }
 }
 
-/// First candidate that exists on the host, with its metadata.
+/// First candidate that exists on the host, with what it names.
 ///
 /// # Errors
 ///
 /// Returns the first unreadable candidate and its host error kind.
-fn first_existing(candidates: &[PathBuf]) -> Result<Option<(&Path, Metadata)>, (&Path, ErrorKind)> {
+fn first_existing<'c>(
+    files: &dyn MountFiles,
+    candidates: &'c [PathBuf],
+) -> Result<Option<(&'c Path, HostEntryKind)>, (&'c Path, ErrorKind)> {
     for candidate in candidates {
-        match probe(candidate) {
-            Ok(md) => return Ok(Some((candidate.as_path(), md))),
+        match probe(files, candidate) {
+            Ok(kind) => return Ok(Some((candidate.as_path(), kind))),
             Err(CandidateMiss::Absent) => {}
             Err(CandidateMiss::Unreadable(kind)) => return Err((candidate.as_path(), kind)),
         }
@@ -280,3 +281,7 @@ fn resolve_candidates(host: &mut Lv2Host, path: &str) -> Result<Vec<PathBuf>, Mo
 #[cfg(test)]
 #[path = "tests/overlay_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/mount_files_tests.rs"]
+mod files_tests;

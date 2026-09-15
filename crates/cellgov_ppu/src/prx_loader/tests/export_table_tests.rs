@@ -109,23 +109,6 @@ fn one_module_publishing_two_libraries_keeps_both_nids_separate() {
 }
 
 #[test]
-fn get_any_by_nid_reports_every_exporter_not_the_first() {
-    let a = PrxModuleId(1);
-    let b = PrxModuleId(2);
-    let mut loaded = BTreeMap::new();
-    loaded.insert(a, loaded_stub_libs(a, &[("cellAudio", &[(0xA, 0x1000)])]));
-    loaded.insert(b, loaded_stub_libs(b, &[("_cellAudio", &[(0xA, 0x2000)])]));
-    let t = FirmwareExportTable::build(&loaded, &[a, b]).expect("build");
-
-    // Sorted by namespace: "_cellAudio" precedes "cellAudio".
-    assert_eq!(
-        t.get_any_by_nid(0xA),
-        vec![("_cellAudio", 0x2000), ("cellAudio", 0x1000)]
-    );
-    assert!(t.get_any_by_nid(0xB).is_empty());
-}
-
-#[test]
 fn a_namespace_miss_is_not_a_nid_hit() {
     let a = PrxModuleId(1);
     let loaded = loaded_set(&[(a, &[(0xA, 0x1000)])]);

@@ -57,6 +57,9 @@ impl Runtime {
         mem.apply_commit(range, bytes)?;
         let (addr, len) = (range.start().raw(), range.length());
         let cleared = reservations.clear_covering(addr, len, exempt);
+        if let Some(tap) = self.tap.as_deref_mut() {
+            tap.write(addr, bytes);
+        }
         if self.mode != RuntimeMode::FaultDriven {
             // Both casts narrow to the record's u32 fields:
             // `apply_commit` proved the range lies inside one region,

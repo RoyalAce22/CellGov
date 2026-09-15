@@ -20,6 +20,7 @@ mod mounts;
 mod prescan_format;
 mod sink;
 mod stack_walk;
+mod taps;
 
 pub mod diag;
 pub mod manifest;
@@ -36,3 +37,4 @@ pub use guest_args::GuestArgsError;
 pub use keys::KeyVaultSource;
 pub use mounts::{ComposedMount, MountRegisterError};
 pub use sink::{BootSink, NullSink};
+pub use taps::{DebugTaps, NoTaps};

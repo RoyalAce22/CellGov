@@ -9,6 +9,15 @@
 //! decoding lives in `cellgov_ppu` / `cellgov_spu`, not here.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 pub mod context;
 pub mod fake_isa;

@@ -9,13 +9,13 @@ use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
     assert_immediate, extract_fd, extract_read, extract_readdir, fs_open, fs_opendir, fs_read,
-    fs_readdir, parse_dirent, run, PathRuntime, TempMountDir,
+    fs_readdir, host_mounts, parse_dirent, run, PathRuntime, TempMountDir,
 };
 
 /// `/app_home` served from `update`, then `base`.
 fn overlay_host(update: &TempMountDir, base: &TempMountDir) -> Lv2Host {
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(
             FsMount::with_roots("/app_home", vec![update.path.clone(), base.path.clone()])
                 .expect("valid mount"),
@@ -147,7 +147,7 @@ fn a_root_that_does_not_exist_at_all_is_skipped() {
     let base = TempMountDir::new("overlay_absent_root_base");
     base.write("Data/original.xml", b"base");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(
             FsMount::with_roots(
                 "/app_home",
@@ -172,7 +172,7 @@ fn the_third_root_answers_when_the_first_two_miss() {
     second.write("Data/b.xml", b"second");
     third.write("Data/c.xml", b"third");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(
             FsMount::with_roots(
                 "/app_home",
@@ -302,7 +302,7 @@ fn a_one_root_mount_reads_and_lists_exactly_its_root() {
     only.write("Data/b.xml", b"b");
     only.mkdir("Data/sub");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", only.path.clone()).expect("valid mount"))
         .expect("registration");
 

@@ -38,6 +38,7 @@ mod state;
 mod state_hash;
 mod step;
 mod sync_wakes;
+mod tap;
 mod timer;
 mod trace_bridge;
 mod types;
@@ -45,6 +46,7 @@ mod types;
 pub use snapshot::RuntimeSnapshot;
 pub use spaces::{AddressSpaceId, SpaceError};
 pub use state::Runtime;
+pub use tap::RuntimeTap;
 pub use types::{
     default_budget_for_mode, PendingChildInit, PpuFactory, ProcessSpawnLoadError,
     ProcessSpawnLoader, RuntimeMode, RuntimeStep, SpawnedProcessImage, SpuFactory, StepError,

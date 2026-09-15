@@ -9,7 +9,7 @@ use cellgov_core::Runtime;
 use cellgov_time::Budget;
 
 use crate::manifest::TitleManifest;
-use crate::{BootSink, ChildInitPlans, ComposedMount, KeyVaultSource};
+use crate::{BootSink, ChildInitPlans, ComposedMount, DebugTaps, KeyVaultSource};
 
 /// A runtime one `step()` from the title's first instruction.
 pub struct PreparedBoot {
@@ -128,7 +128,7 @@ pub struct ExecutionOptions<'a> {
     pub patch_bytes: &'a [(u64, u8)],
 }
 
-/// What the boot reports about itself, and the debug taps it installs.
+/// What the boot reports about itself, and the debug toggles it applies.
 #[derive(Debug, Clone, Copy)]
 pub struct DiagnosticOptions<'a> {
     /// Report what the boot loaded, stage by stage. The boot reports
@@ -151,17 +151,23 @@ pub struct DiagnosticOptions<'a> {
     pub dump_mem_fault_ranges: &'a [(u64, u64)],
 }
 
-/// The sink and the vault source, shared for the whole boot.
+/// The sink, the vault source and the debug observers, shared for the whole boot.
 ///
-/// Both outlive the options struct: the spawn loader the boot installs
-/// reports a child's load through the same sink and opens the same
-/// vault.
+/// All three outlive the options struct. For each child, the spawn
+/// loader the boot installs uses the same three:
+///
+/// - it reports the child's load through the sink,
+/// - it opens the vault,
+/// - it hands the child's units the observers.
 pub struct BootServices {
     /// Where the boot reports what it loaded and what it skipped.
     pub sink: Rc<dyn BootSink>,
     /// Where an SCE-wrapped firmware module or child image gets its
     /// key vault.
     pub keys: Rc<dyn KeyVaultSource>,
+    /// The debug observers the boot installs; [`crate::NoTaps`]
+    /// installs none.
+    pub taps: Rc<dyn DebugTaps>,
 }
 
 impl BootServices {
@@ -176,20 +182,24 @@ pub struct PrepareOptions<'a> {
     pub title: TitleOptions<'a>,
     /// How far it runs and what it may change.
     pub execution: ExecutionOptions<'a>,
-    /// What it reports and which debug taps it installs.
+    /// What it reports and which debug toggles it applies.
     pub diagnostics: DiagnosticOptions<'a>,
-    /// Where it reports and where it gets keys.
+    /// Where it reports, where it gets keys, and which debug observers
+    /// it installs.
     pub services: BootServices,
 }
 
-/// Debug toggles captured by both the primary-thread `register_with`
-/// and the `set_ppu_factory` closures so children spawned via
-/// `sys_ppu_thread_create` inherit them.
-#[derive(Debug, Clone, Copy)]
+/// The debug toggles and the PPU observer for the unit of each PPU thread.
+///
+/// The primary unit's `register_unit_with` closure and the
+/// `set_ppu_factory` closure both capture them, so each thread that
+/// `sys_ppu_thread_create` makes inherits them.
+#[derive(Clone)]
 pub(super) struct BootDebugOptions {
     pub dump_at_pc: Option<u64>,
     pub dump_skip: u32,
     pub profile_pairs: bool,
+    pub ppu_tap: Option<Rc<dyn cellgov_ppu::PpuTap>>,
 }
 
 impl BootDebugOptions {
@@ -199,6 +209,9 @@ impl BootDebugOptions {
         }
         if self.profile_pairs {
             unit.set_profile_mode(true);
+        }
+        if let Some(tap) = &self.ppu_tap {
+            unit.set_tap(Rc::clone(tap));
         }
     }
 }

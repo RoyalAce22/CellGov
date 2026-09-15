@@ -2,7 +2,7 @@
 
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
-use cellgov_ppu::differential::rpcs3_capture::read_trace;
+use cellgov_ppu::differential::rpcs3_capture::read_trace_bytes;
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,7 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(2);
     }
     let path = PathBuf::from(&args[1]);
-    let records = read_trace(&path)?;
+    let records = read_trace_bytes(&std::fs::read(&path)?)?;
     println!("parsed {} records from {}", records.len(), path.display());
     if let Some(first) = records.first() {
         println!(

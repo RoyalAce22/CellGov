@@ -6,6 +6,7 @@ mod bench;
 mod finish_line;
 mod run;
 mod sink;
+mod taps;
 
 pub use bench::{
     bench_boot_one_run, bench_boot_runs, AnchorPlan, AnchorVerdict, BenchGate, BenchOptions,
@@ -15,3 +16,4 @@ pub use bench::{
 pub(crate) use finish_line::{anchor_finish_line, within_runtime_cap};
 pub use run::{run_game, RunArtifacts, RunExecution, RunReporting, RunSummary};
 pub(crate) use sink::console_sink;
+pub(crate) use taps::{from_env as debug_taps_from_env, set_watch_vars};

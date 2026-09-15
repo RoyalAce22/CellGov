@@ -1,13 +1,103 @@
 # Workspace-wide clippy configuration. Crate directories carry no
 # clippy.toml of their own, so this file applies to every crate.
 
+# Type policy, denied in every crate.
+#
 # Error handling: a fallible signature carries a local typed error.
 # Neither framework is a dependency; the entries keep one from
 # becoming one without a lint firing at the first use. The trait
 # object `dyn std::error::Error` is not listed: naming the trait here
 # fires on every `thiserror` derive, so the boxed-return shape is the
 # error_style_guard test's instead.
+#
+# Iteration order: a hash-ordered collection iterates in an order no
+# run can reproduce, so every map and set is a BTreeMap / BTreeSet.
 disallowed-types = [
     { path = "anyhow::Error", reason = "errors are local thiserror types, not an opaque report", allow-invalid = true },
     { path = "eyre::Report", reason = "errors are local thiserror types, not an opaque report", allow-invalid = true },
+    { path = "std::collections::HashMap", reason = "iteration order must be deterministic: use BTreeMap" },
+    { path = "std::collections::HashSet", reason = "iteration order must be deterministic: use BTreeSet" },
+    { path = "hashbrown::HashMap", reason = "iteration order must be deterministic: use BTreeMap", allow-invalid = true },
+    { path = "hashbrown::HashSet", reason = "iteration order must be deterministic: use BTreeSet", allow-invalid = true },
+]
+
+# Host access, forbidden in the runtime crates only: each runtime
+# crate's root forbids `clippy::disallowed_methods` outside its test
+# build, and the workspace lint table allows it everywhere else. The
+# runtime reads no clock, no environment, no file and no console,
+# starts and ends no process, and keeps no process-global state; the
+# program driving it supplies all of that through the observer and
+# source traits it installs. A `static` of an atomic or lock type is
+# built by a const constructor no entry here can name, so the
+# host_line_guard test refuses those in the runtime sources instead.
+disallowed-methods = [
+    { path = "std::time::Instant::now", reason = "the runtime reads no host clock: guest time is GuestTicks" },
+    { path = "std::time::SystemTime::now", reason = "the runtime reads no host clock: guest time is GuestTicks" },
+    { path = "std::time::SystemTime::elapsed", reason = "the runtime reads no host clock: guest time is GuestTicks" },
+    { path = "std::time::Instant::elapsed", reason = "the runtime reads no host clock: guest time is GuestTicks" },
+    { path = "std::thread::sleep", reason = "the runtime reads no host clock: guest time is GuestTicks" },
+    { path = "std::env::var", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::var_os", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::vars", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::vars_os", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::current_dir", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::set_current_dir", reason = "the runtime changes no environment: the host owns the process" },
+    { path = "std::env::set_var", reason = "the runtime changes no environment: the host owns the process" },
+    { path = "std::env::remove_var", reason = "the runtime changes no environment: the host owns the process" },
+    { path = "std::env::args", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::args_os", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::current_exe", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::temp_dir", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::env::home_dir", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::process::id", reason = "the runtime reads no environment: the host passes configuration in" },
+    { path = "std::fs::read", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::read_to_string", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::read_dir", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::metadata", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::symlink_metadata", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::canonicalize", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::exists", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::read_link", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::exists", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::try_exists", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::is_file", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::is_dir", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::is_symlink", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::metadata", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::symlink_metadata", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::read_dir", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::read_link", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::path::Path::canonicalize", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::write", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::copy", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::hard_link", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::set_permissions", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::create_dir", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::create_dir_all", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::DirBuilder::create", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::remove_file", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::remove_dir", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::remove_dir_all", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::rename", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::File::open", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::fs::File::create", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::File::create_new", reason = "the runtime writes no file: it reports to an observer the host installs" },
+    { path = "std::fs::OpenOptions::open", reason = "the runtime opens no file: the host supplies bytes or a source trait" },
+    { path = "std::io::stdin", reason = "the runtime reads no console: the host supplies bytes or a source trait" },
+    { path = "std::io::stdout", reason = "the runtime writes to no console: it reports to a sink the host supplies" },
+    { path = "std::io::stderr", reason = "the runtime writes to no console: it reports to a sink the host supplies" },
+    { path = "std::process::Command::new", reason = "the runtime starts no host process: the host runs other programs" },
+    { path = "std::process::exit", reason = "the runtime ends no process: a refusal is a named error the host acts on" },
+    { path = "std::process::abort", reason = "the runtime ends no process: a refusal is a named error the host acts on" },
+    { path = "std::sync::OnceLock::new", reason = "the runtime keeps no process-global state" },
+    { path = "std::sync::LazyLock::new", reason = "the runtime keeps no process-global state" },
+    { path = "std::sync::Once::new", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::with", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::try_with", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::with_borrow", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::with_borrow_mut", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::set", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::get", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::take", reason = "the runtime keeps no process-global state" },
+    { path = "std::thread::LocalKey::replace", reason = "the runtime keeps no process-global state" },
 ]

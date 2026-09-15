@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
-use super::FsError;
+use super::{FsError, MountFiles, NoMountFiles};
 
 /// One read-only mount: a guest-path prefix served from an ordered
 /// list of host roots.
@@ -61,19 +62,38 @@ impl FsMount {
     }
 }
 
-/// Ordered set of [`FsMount`]s.
+/// Ordered set of [`FsMount`]s, with the [`MountFiles`] that reads their roots.
 ///
 /// Mounts are consulted in registration order; the first whose
 /// prefix matches resolves the path.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct FsMountTable {
     mounts: Vec<FsMount>,
+    files: Rc<dyn MountFiles>,
+}
+
+impl Default for FsMountTable {
+    fn default() -> Self {
+        Self {
+            mounts: Vec::new(),
+            files: Rc::new(NoMountFiles),
+        }
+    }
 }
 
 impl FsMountTable {
-    /// Empty mount table.
+    /// Empty mount table on the [`NoMountFiles`] null backend.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Read the roots through `files` on every later lookup.
+    pub fn set_files(&mut self, files: Rc<dyn MountFiles>) {
+        self.files = files;
+    }
+
+    pub(crate) fn files(&self) -> &dyn MountFiles {
+        self.files.as_ref()
     }
 
     /// # Errors

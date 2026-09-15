@@ -99,6 +99,23 @@ impl StagingMemory {
     /// Returns any [`MemError`] that [`GuestMemory::apply_commit`] would
     /// produce on the first offending write.
     pub fn drain_into(&mut self, target: &mut GuestMemory) -> Result<usize, MemError> {
+        self.drain_into_observed(target, |_, _| {})
+    }
+
+    /// Drain like [`Self::drain_into`] and hand each applied write to `observe`.
+    ///
+    /// On a refused batch, the drain calls `observe` for no write. The
+    /// caller has the reservation clear-sweep obligation that
+    /// [`Self::drain_into`] names.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same [`MemError`] as [`Self::drain_into`].
+    pub fn drain_into_observed(
+        &mut self,
+        target: &mut GuestMemory,
+        mut observe: impl FnMut(ByteRange, &[u8]),
+    ) -> Result<usize, MemError> {
         self.validate_pending(target)?;
         let count = self.pending.len();
         for w in self.pending.drain(..) {
@@ -106,6 +123,7 @@ impl StagingMemory {
                 "validate_pending called validate_write; apply_commit calls the same predicate, \
                  so this Err path is structurally unreachable",
             );
+            observe(w.range, &w.bytes);
         }
         Ok(count)
     }

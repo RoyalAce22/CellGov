@@ -166,6 +166,8 @@ fn prepare_boot(
         execution.title.manifest.name(),
         execution.title.manifest.display_name()
     );
+    let taps = crate::game::debug_taps_from_env()
+        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     reporting
         .progress
         .phase(crate::progress::BootPhase::Loading.code());
@@ -176,6 +178,7 @@ fn prepare_boot(
         services: BootServices {
             sink: Rc::clone(sink),
             keys: Rc::new(crate::cli::keys::ProcessKeyVault),
+            taps,
         },
     })
     .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()))
@@ -238,8 +241,10 @@ fn drive_step_loop(
         reporting.progress,
         crate::game::within_runtime_cap(reporting.finish_line, rt),
     );
-    let (outcome, boot_outcome) =
-        step_loop(rt, &mut ctx).unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+    let (outcome, boot_outcome) = step_loop(rt, &mut ctx).unwrap_or_else(|e| {
+        report_first_invariant_break(rt, sink.as_ref());
+        crate::cli::exit::die(&e.to_string())
+    });
     let t_loop = loop_start.elapsed();
     // Stop the bar here: it clears within a tick of this call, so the
     // caller's result report prints on a clear terminal. See
@@ -267,11 +272,26 @@ fn report_outcome(rt: &mut Runtime, loop_out: &LoopOutput, sink: &dyn BootSink) 
     println!("outcome: {}", loop_out.outcome);
     println!("steps: {}", loop_out.steps);
     report::print_out(&report::anomaly_lines(&counters));
+    report_first_invariant_break(rt, sink);
     report_hle_summary(&loop_out.hle_calls, sink);
     report_insn_coverage(&loop_out.insn_coverage, sink);
     report_top_pcs(rt, &loop_out.pc_hits, sink);
     report_shadow_stats(rt, sink);
     counters
+}
+
+/// Report the first LV2 host invariant break of the run as a warning.
+///
+/// The host records each break and prints nothing. Without this call,
+/// the run reports the count of breaks and no detail.
+fn report_first_invariant_break(rt: &Runtime, sink: &dyn BootSink) {
+    let obs = rt.lv2_host().observability();
+    if let Some(first) = &obs.first_invariant_break {
+        sink.warn(&format!(
+            "lv2 host invariant break at {first} (the first of {})",
+            obs.invariant_break_count
+        ));
+    }
 }
 
 /// Report the per-unit instruction and adjacent-pair tallies the

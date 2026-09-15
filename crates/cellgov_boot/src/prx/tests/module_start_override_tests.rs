@@ -27,6 +27,7 @@ fn env(run_hle_stubbed: bool) -> ModuleStartEnv {
         dump_mem_fault_ranges: Vec::new(),
         run_hle_stubbed,
         sink: Rc::new(crate::NullSink),
+        ppu_tap: None,
     }
 }
 

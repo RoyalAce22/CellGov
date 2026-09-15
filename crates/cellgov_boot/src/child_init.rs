@@ -58,6 +58,8 @@ pub(crate) struct ChildInitPlan {
     pub stack_pointer: u64,
     /// The boot's `disable_module_start_hle_stubs` override, which the child's pass also applies.
     pub run_hle_stubbed: bool,
+    /// The observer the child's `module_start` units report to.
+    pub ppu_tap: Option<Rc<dyn cellgov_ppu::PpuTap>>,
 }
 
 /// Plans staged by the spawn loader, keyed by the token the loader
@@ -139,6 +141,7 @@ pub(crate) fn run_pending_child_inits(
             dump_mem_fault_ranges: Vec::new(),
             run_hle_stubbed: plan.run_hle_stubbed,
             sink: Rc::clone(sink),
+            ppu_tap: plan.ppu_tap.clone(),
         };
         let mut completed: usize = 0;
         let mut faulted: Vec<String> = Vec::new();

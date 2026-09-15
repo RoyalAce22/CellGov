@@ -64,15 +64,13 @@ impl Lv2Host {
     /// Log-once without `debug_assert!`, for paths reachable by
     /// guest input during normal operation (e.g. `Unsupported`
     /// syscalls during real boots).
+    ///
+    /// This method formats `details` for the first break only, into
+    /// [`super::Lv2Observability::first_invariant_break`]. Each later
+    /// break updates the counts and formats nothing.
     pub fn log_invariant_break(&mut self, site: &'static str, details: std::fmt::Arguments<'_>) {
-        if self.obs.invariant_break_count == 0 {
-            #[allow(
-                clippy::print_stderr,
-                reason = "one-shot diagnostic for guest-reachable invariant breaks; gated on the first occurrence so a hostile guest cannot spam stderr"
-            )]
-            {
-                eprintln!("lv2 host invariant break at {site}: {details}");
-            }
+        if self.obs.first_invariant_break.is_none() {
+            self.obs.first_invariant_break = Some(format!("{site}: {details}"));
         }
         self.obs
             .pending_invariant_breaks
@@ -114,3 +112,7 @@ impl Lv2Host {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/first_invariant_break_tests.rs"]
+mod tests;

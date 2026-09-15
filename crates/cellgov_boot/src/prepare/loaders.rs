@@ -98,6 +98,7 @@ pub(super) fn install_spawn_loader(
     let loader_plans = child_init.clone();
     let sink: Rc<dyn crate::BootSink> = Rc::clone(&services.sink);
     let keys: Rc<dyn crate::KeyVaultSource> = Rc::clone(&services.keys);
+    let taps: Rc<dyn crate::DebugTaps> = Rc::clone(&services.taps);
     rt.set_process_spawn_loader(move |elf_bytes, mem| {
         // A child image may arrive SCE-wrapped (vsh spawns SELFs, not
         // raw ELFs). The spawn loader is APP-keyed: klicensee
@@ -157,7 +158,7 @@ pub(super) fn install_spawn_loader(
                 detail: format!("required_size=0x{required:x} leaves no 32-bit code floor"),
             }
         })?;
-        let mut prx_modules = match spawn_firmware_dir.as_deref() {
+        let (mut prx_modules, child_exports) = match spawn_firmware_dir.as_deref() {
             Some(dir) => {
                 let mut cache = spawn_candidates.borrow_mut();
                 let candidates =
@@ -171,7 +172,7 @@ pub(super) fn install_spawn_loader(
                             cache.insert(scanned)
                         }
                     };
-                let (modules, _identity, _host_link) = load_firmware_set_from(
+                let (modules, _identity, host_link) = load_firmware_set_from(
                     candidates,
                     &imports,
                     mem,
@@ -182,9 +183,9 @@ pub(super) fn install_spawn_loader(
                 .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageLoad {
                     detail: format!("child firmware set: {e}"),
                 })?;
-                modules
+                (modules, Some(host_link.exports))
             }
-            None => Vec::new(),
+            None => (Vec::new(), None),
         };
         if prx_modules.is_empty() {
             let (info, _requesters) = install_unresolved_trampolines_only(
@@ -230,6 +231,13 @@ pub(super) fn install_spawn_loader(
                 detail: format!("child kernel-context OPD: {e}"),
             }
         })?;
+        // This report follows the last refusal above. On a refusal the
+        // runtime removes the child's address space (`cellgov_core`
+        // `process_spawn.rs` `handle_process_spawn`). An earlier report
+        // can name OPDs in a space that the runtime then removes.
+        if let Some(exports) = &child_exports {
+            taps.firmware_bound(exports, mem);
+        }
 
         let stack_top = (child_mem_size as u64) - 0x1000;
         let init_token = loader_plans.stage(ChildInitPlan {
@@ -240,6 +248,7 @@ pub(super) fn install_spawn_loader(
             // transient module_start stacks from here.
             stack_pointer: stack_top - PS3_PRIMARY_STACK_SIZE as u64,
             run_hle_stubbed: overrides.disable_module_start_hle_stubs,
+            ppu_tap: taps.ppu(),
         });
         Ok(cellgov_core::SpawnedProcessImage {
             entry_code: state.pc,

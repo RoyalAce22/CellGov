@@ -5,6 +5,15 @@
 //! access mode) lives on [`Region`].
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 pub mod addr;
 pub mod be;
@@ -12,8 +21,6 @@ pub mod guest;
 pub mod hash;
 pub mod range;
 pub mod staging;
-pub mod store_watch;
-pub mod value_sample;
 
 pub use addr::GuestAddr;
 pub use guest::{

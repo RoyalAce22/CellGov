@@ -16,9 +16,11 @@
 //! never recycles within a boot.
 
 mod error;
+mod host_files;
 mod mount;
 mod store;
 
 pub use error::FsError;
+pub use host_files::{HostDirEntry, HostEntryKind, MountFiles, NoMountFiles};
 pub use mount::{FsMount, FsMountTable};
 pub use store::{DirEntry, FileStat, FsStore, SeekWhence};

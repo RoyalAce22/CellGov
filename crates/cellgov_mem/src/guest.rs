@@ -256,6 +256,9 @@ pub struct GuestMemory {
     /// keyed `(addr, len)`. Bounded by the distinct addresses one step
     /// touches, provided the runtime drains it every step.
     provisional_reads: RefCell<BTreeMap<(u64, u32), u32>>,
+    /// Set while [`Self::with_reads_unlogged`] runs; a provisional read
+    /// then logs nothing.
+    reads_unlogged: Cell<bool>,
 }
 
 /// Diagnostic context for an out-of-region access.
@@ -366,6 +369,7 @@ impl GuestMemory {
             cached_hash: Cell::new(None),
             provisional_read_count: Cell::new(0),
             provisional_reads: RefCell::new(BTreeMap::new()),
+            reads_unlogged: Cell::new(false),
         })
     }
 
@@ -419,9 +423,14 @@ impl GuestMemory {
     /// Record one provisional read in the running count and the
     /// since-last-drain log.
     ///
+    /// Inside [`Self::with_reads_unlogged`], it records nothing.
+    ///
     /// A read of 4 GiB or more logs its length as `u32::MAX`, the
     /// trace record's field width, so the overflow stays visible.
     pub fn note_provisional_read(&self, addr: u64, len: u64) {
+        if self.reads_unlogged.get() {
+            return;
+        }
         let len = u32::try_from(len).unwrap_or(u32::MAX);
         self.provisional_read_count
             .set(self.provisional_read_count.get().saturating_add(1));
@@ -441,6 +450,25 @@ impl GuestMemory {
             .into_iter()
             .map(|((addr, len), hits)| ProvisionalRead { addr, len, hits })
             .collect()
+    }
+
+    /// Run `f` over this memory with provisional-read logging off.
+    ///
+    /// Inside `f`, a read of a [`RegionAccess::ReservedZeroReadable`]
+    /// region still returns zeros. It adds nothing to
+    /// [`Self::provisional_read_count`] or to the log that
+    /// [`Self::drain_provisional_reads`] takes. A host observer reads
+    /// through this, so the reads that the runtime reports stay the
+    /// guest's own.
+    pub fn with_reads_unlogged<R>(&self, f: impl FnOnce(&Self) -> R) -> R {
+        struct Restore<'a>(&'a Cell<bool>, bool);
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.0.set(self.1);
+            }
+        }
+        let _restore = Restore(&self.reads_unlogged, self.reads_unlogged.replace(true));
+        f(self)
     }
 
     /// Every region as a [`RegionView`], in base-address order.
@@ -519,8 +547,9 @@ impl GuestMemory {
     }
 
     /// Returns `None` if no region contains the range or the target region
-    /// is `ReservedStrict`. A read from a `ReservedZeroReadable` region
-    /// bumps [`GuestMemory::provisional_read_count`]. Use
+    /// is `ReservedStrict`. Outside [`GuestMemory::with_reads_unlogged`],
+    /// a read from a `ReservedZeroReadable` region bumps
+    /// [`GuestMemory::provisional_read_count`]. Use
     /// [`GuestMemory::read_checked`] for typed errors.
     pub fn read(&self, range: ByteRange) -> Option<&[u8]> {
         self.resolve_read(range).ok()
@@ -560,7 +589,6 @@ impl GuestMemory {
             region.dirty_pages.mark_range(first_page, last_page);
         }
         self.cached_hash.set(None);
-        crate::store_watch::emit(0, start, bytes);
         Ok(())
     }
 

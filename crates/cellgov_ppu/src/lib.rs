@@ -4,13 +4,21 @@
 //! architectural state back to the step's entry snapshot.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 pub mod decode;
 pub mod differential;
 pub mod exec;
 mod fp;
 pub mod funcmap;
-pub mod hle_watch;
 pub mod instruction;
 pub mod loader;
 pub mod prescan;
@@ -20,6 +28,9 @@ pub mod shadow;
 pub mod sprx;
 pub mod state;
 pub mod store_buffer;
+pub mod tap;
+
+pub use tap::PpuTap;
 
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::store_buffer::StoreBuffer;
@@ -105,6 +116,9 @@ pub struct PpuExecutionUnit {
     profile_insns: std::collections::BTreeMap<&'static str, u64>,
     profile_pairs: std::collections::BTreeMap<(&'static str, &'static str), u64>,
     profile_prev: Option<&'static str>,
+    /// `Clone` shares the tap, so a cloned unit reports to the same
+    /// observer. A runtime snapshot holds such a clone.
+    tap: Option<std::rc::Rc<dyn PpuTap>>,
 }
 
 impl PpuExecutionUnit {
@@ -128,7 +142,13 @@ impl PpuExecutionUnit {
             profile_insns: std::collections::BTreeMap::new(),
             profile_pairs: std::collections::BTreeMap::new(),
             profile_prev: None,
+            tap: None,
         }
+    }
+
+    /// Report every dispatched instruction to `tap`.
+    pub fn set_tap(&mut self, tap: std::rc::Rc<dyn PpuTap>) {
+        self.tap = Some(tap);
     }
 
     /// Set the inclusive `[lo, hi]` retirement-index window for full-state capture.
@@ -268,22 +288,25 @@ struct BatchEntry {
     retired: u64,
 }
 
-impl ExecutionUnit for PpuExecutionUnit {
-    type Snapshot = PpuSnapshot;
+/// The tap a unit with none installed runs its batch loop with.
+struct NoTap;
 
-    fn unit_id(&self) -> UnitId {
-        self.id
-    }
+impl PpuTap for NoTap {
+    #[inline(always)]
+    fn dispatch(&self, _insn: &instruction::PpuInstruction, _state: &state::PpuState) {}
+}
 
-    fn status(&self) -> UnitStatus {
-        self.status
-    }
-
-    fn run_until_yield(
+impl PpuExecutionUnit {
+    /// Run one batch and report each dispatch to `tap`.
+    ///
+    /// The compiler builds one copy per tap type, so the [`NoTap`] copy
+    /// has no call in its per-instruction loop.
+    fn run_batch<T: PpuTap + ?Sized>(
         &mut self,
         budget: Budget,
         ctx: &ExecutionContext<'_>,
         effects: &mut Vec<Effect>,
+        tap: &T,
     ) -> ExecutionStepResult {
         let max_budget = budget.raw();
         let mut remaining = max_budget;
@@ -427,6 +450,7 @@ impl ExecutionUnit for PpuExecutionUnit {
                 continue;
             }
 
+            tap.dispatch(&insn, &self.state);
             match exec::execute(
                 &insn,
                 &mut self.state,
@@ -581,6 +605,34 @@ impl ExecutionUnit for PpuExecutionUnit {
             }
         }
     }
+}
+
+impl ExecutionUnit for PpuExecutionUnit {
+    type Snapshot = PpuSnapshot;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        self.status
+    }
+
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        match self.tap.take() {
+            None => self.run_batch(budget, ctx, effects, &NoTap),
+            Some(tap) => {
+                let result = self.run_batch(budget, ctx, effects, tap.as_ref());
+                self.tap = Some(tap);
+                result
+            }
+        }
+    }
 
     fn snapshot(&self) -> PpuSnapshot {
         PpuSnapshot {
@@ -651,3 +703,7 @@ mod break_pc_tests;
 #[cfg(test)]
 #[path = "tests/batch_fault_tests.rs"]
 mod batch_fault_tests;
+
+#[cfg(test)]
+#[path = "tests/tap_tests.rs"]
+mod tap_tests;

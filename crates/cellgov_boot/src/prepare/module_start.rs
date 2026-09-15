@@ -71,6 +71,7 @@ pub(super) fn run_module_starts(
         dump_mem_fault_ranges: diagnostics.dump_mem_fault_ranges.to_vec(),
         run_hle_stubbed: overrides.disable_module_start_hle_stubs,
         sink: std::rc::Rc::clone(&services.sink),
+        ppu_tap: services.taps.ppu(),
     };
     let (started, faulted) = match (prx_modules.is_empty(), skipped) {
         (false, false) => {

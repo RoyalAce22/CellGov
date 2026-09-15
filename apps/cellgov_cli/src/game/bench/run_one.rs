@@ -33,6 +33,13 @@ fn bench_boot(
 ) -> BenchBootResult {
     progress.phase(crate::progress::BootPhase::Loading.code());
     let sink = crate::game::console_sink();
+    let ignored = crate::game::set_watch_vars();
+    if !ignored.is_empty() {
+        sink.warn(&format!(
+            "boot bench installs no debug watch; ignoring {}",
+            ignored.join(", ")
+        ));
+    }
     let prepared = prepare(PrepareOptions {
         title: TitleOptions {
             manifest: opts.title,
@@ -65,6 +72,7 @@ fn bench_boot(
         services: BootServices {
             sink: std::rc::Rc::clone(&sink),
             keys: std::rc::Rc::new(crate::cli::keys::ProcessKeyVault),
+            taps: std::rc::Rc::new(cellgov_boot::NoTaps),
         },
     })
     .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
@@ -91,12 +99,16 @@ fn bench_boot(
         progress,
         &sink,
     )
-    .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+    .unwrap_or_else(|e| {
+        warn_first_invariant_break(&rt, sink.as_ref());
+        crate::cli::exit::die(&e.to_string())
+    });
     let wall = t0.elapsed();
     // Stop the bar before the witness block prints; see
     // `ProgressSink::finished`.
     progress.finished();
 
+    warn_first_invariant_break(&rt, sink.as_ref());
     print_witness_block(&rt, authid_source);
 
     // After the witness block: the write is host I/O, and a reader
@@ -113,6 +125,21 @@ fn bench_boot(
         wall,
         budget: step_budget,
         outcome,
+    }
+}
+
+/// Report the first LV2 host invariant break of the boot as a warning.
+///
+/// The witness block counts the breaks per site, and this line names
+/// the first break. The host records each break and prints nothing.
+/// The line carries no `BENCH_` prefix, so the witness reader skips it.
+fn warn_first_invariant_break(rt: &cellgov_core::Runtime, sink: &dyn cellgov_boot::BootSink) {
+    let obs = rt.lv2_host().observability();
+    if let Some(first) = &obs.first_invariant_break {
+        sink.warn(&format!(
+            "lv2 host invariant break at {first} (the first of {})",
+            obs.invariant_break_count
+        ));
     }
 }
 

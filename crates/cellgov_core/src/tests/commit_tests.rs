@@ -60,6 +60,7 @@ impl CommitTestBed {
             rsx_label_base: self.label_base,
             rsx_flip: &mut flip,
             rsx_label_writes_committed: &mut label_writes,
+            tap: None,
         };
         self.pipeline.process(result, effects, &mut ctx)
     }

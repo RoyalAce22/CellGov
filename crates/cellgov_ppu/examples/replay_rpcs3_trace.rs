@@ -5,7 +5,7 @@
 
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
-use cellgov_ppu::differential::rpcs3_capture::read_trace;
+use cellgov_ppu::differential::rpcs3_capture::read_trace_bytes;
 use cellgov_ppu::differential::{is_context_dependent, run_case, CaseOutcome};
 use std::path::PathBuf;
 
@@ -35,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let capture_id: &'static str = Box::leak(capture_id_owned.into_boxed_str());
 
-    let records = read_trace(&path)?;
+    let records = read_trace_bytes(&std::fs::read(&path)?)?;
     println!(
         "replaying {} records from {} (capture_id={}{})",
         records.len(),

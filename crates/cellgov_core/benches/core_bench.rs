@@ -67,6 +67,7 @@ fn bench_commit_0_effects(c: &mut Criterion) {
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
                 rsx_label_writes_committed: &mut label_writes,
+                tap: None,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -103,6 +104,7 @@ fn bench_commit_1_effect(c: &mut Criterion) {
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
                 rsx_label_writes_committed: &mut label_writes,
+                tap: None,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -141,6 +143,7 @@ fn bench_commit_10_effects(c: &mut Criterion) {
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
                 rsx_label_writes_committed: &mut label_writes,
+                tap: None,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)
@@ -185,6 +188,7 @@ fn bench_commit_fault_discard(c: &mut Criterion) {
                 rsx_label_base: 0,
                 rsx_flip: &mut flip,
                 rsx_label_writes_committed: &mut label_writes,
+                tap: None,
             };
             pipeline
                 .process(black_box(&result), black_box(&effects), &mut ctx)

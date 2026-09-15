@@ -7,14 +7,14 @@ use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
-    assert_immediate, extract_fd, extract_readdir, fs_opendir, fs_readdir, parse_dirent, run,
-    PathRuntime, TempMountDir,
+    assert_immediate, extract_fd, extract_readdir, fs_opendir, fs_readdir, host_mounts,
+    parse_dirent, run, PathRuntime, TempMountDir,
 };
 
 fn open_mount(label: &str) -> (Lv2Host, TempMountDir) {
     let dir = TempMountDir::new(label);
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     (host, dir)
@@ -67,7 +67,7 @@ fn empty_directory_eofs_immediately() {
     let dir = TempMountDir::new("readdir_empty");
     let _ = std::fs::create_dir_all(dir.path.join("sub"));
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home/sub");
@@ -91,7 +91,7 @@ fn readdir_walks_entries_lexicographically() {
     dir.write("middle.xml", b"m");
     dir.write("B.xml", b"B");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
@@ -127,7 +127,7 @@ fn readdir_classifies_subdirs_as_directory_type() {
     dir.write("file.txt", b"hi");
     let _ = std::fs::create_dir_all(dir.path.join("subdir"));
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");
@@ -158,7 +158,7 @@ fn readdir_eof_then_close_clean() {
     let dir = TempMountDir::new("readdir_close");
     dir.write("only.xml", b"x");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let fd = opendir_path(&mut host, b"/app_home");

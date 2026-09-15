@@ -211,6 +211,9 @@ pub struct CommitContext<'a> {
     /// `process()` increments it beside that `debug_assert!`, so in a
     /// debug build the count equals the number of times the assert ran.
     pub rsx_label_writes_committed: &'a mut u64,
+    /// The debug observer that [`CommitPipeline::process`] reports each
+    /// drained write to.
+    pub tap: Option<&'a mut (dyn crate::runtime::RuntimeTap + 'static)>,
 }
 
 /// The commit pipeline.
@@ -473,14 +476,23 @@ impl CommitPipeline {
             return Err(e);
         }
 
-        // `drain_into` is the only fallible op in the apply pass; a
+        // The drain is the only fallible op in the apply pass; a
         // new fallible op below would need rollback machinery to
-        // preserve the atomic-batch contract.
+        // preserve the atomic-batch contract. It validates the whole
+        // batch before it applies any write, so the observer sees no
+        // write from a refused batch.
         //
-        // `drain_into` leaves the staging buffer populated on
-        // validation failure; clear it so `StagingMemory`'s Drop guard
-        // is honored on both pre_validate and drain failure paths.
-        if let Err(e) = staging.drain_into(ctx.memory) {
+        // The drain leaves the staging buffer populated on
+        // validation failure; clear it so that `StagingMemory`'s Drop
+        // guard holds on both the pre_validate and the drain failure
+        // paths.
+        let tap = &mut ctx.tap;
+        let drained = staging.drain_into_observed(ctx.memory, |range, bytes| {
+            if let Some(tap) = tap.as_deref_mut() {
+                tap.write(range.start().raw(), bytes);
+            }
+        });
+        if let Err(e) = drained {
             staging.clear();
             return Err(CommitError::Memory(e));
         }

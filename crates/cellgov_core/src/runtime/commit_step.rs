@@ -109,6 +109,7 @@ impl Runtime {
             rsx_label_base,
             rsx_flip: &mut self.rsx_flip,
             rsx_label_writes_committed: &mut self.rsx_label_writes_committed,
+            tap: self.tap.as_deref_mut(),
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
 

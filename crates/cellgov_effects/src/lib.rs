@@ -5,6 +5,15 @@
 //! produce `Effect` values; the runtime consumes them.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 pub mod effect;
 pub mod payload;

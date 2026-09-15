@@ -182,11 +182,14 @@ impl Runtime {
         self.last_scheduled_unit = Some(unit_id);
         self.drain_provisional_reads_to_trace(unit_id);
 
-        if let Some((addr, width)) = cellgov_mem::value_sample::pending(self.steps_taken as u64) {
-            let bytes =
-                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), u64::from(width))
-                    .and_then(|range| self.memory.read(range));
-            cellgov_mem::value_sample::emit(self.steps_taken as u64, bytes);
+        if let Some(tap) = self.tap.as_deref_mut() {
+            // The drain above emptied the provisional-read log. A
+            // reserved-region read by the observer would otherwise trace
+            // at the next commit as a read by this step's unit. It would
+            // also raise the run's provisional-read count.
+            let step = self.steps_taken as u64;
+            self.memory
+                .with_reads_unlogged(|memory| tap.step(step, memory));
         }
 
         if self.mode == RuntimeMode::FullTrace {

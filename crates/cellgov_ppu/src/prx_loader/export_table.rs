@@ -104,21 +104,6 @@ impl FirmwareExportTable {
         self.entries.get(namespace)?.get(&nid).map(|&(opd, _)| opd)
     }
 
-    /// Every library exporting `nid`, for callers holding a NID with
-    /// no namespace to pair it with.
-    ///
-    /// Returns all matches rather than the first: the retail firmware
-    /// corpus exports some NIDs from more than one library, so picking
-    /// one silently resolves to the wrong function.
-    ///
-    /// O(namespaces) -- this walks every library, unlike [`Self::get`].
-    pub fn get_any_by_nid(&self, nid: u32) -> Vec<(&str, u64)> {
-        self.entries
-            .iter()
-            .filter_map(|(ns, by_nid)| by_nid.get(&nid).map(|&(opd, _)| (ns.as_str(), opd)))
-            .collect()
-    }
-
     /// Number of distinct `(namespace, NID)` pairs recorded.
     pub fn len(&self) -> usize {
         self.entries.values().map(BTreeMap::len).sum()

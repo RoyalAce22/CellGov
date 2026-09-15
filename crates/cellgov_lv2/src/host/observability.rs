@@ -82,6 +82,9 @@ pub struct Lv2Observability {
     /// Per-site break counts keyed by the static site string passed
     /// to `log_invariant_break`.
     pub invariant_break_sites: BTreeMap<&'static str, u64>,
+    /// The first break as `site: details`, which a boot reports through
+    /// its sink.
+    pub first_invariant_break: Option<String>,
     /// Drained after each `Lv2Host::dispatch` by the runtime, which
     /// emits one `HostInvariantBreak` trace record per entry.
     /// Commit-time and wake-time paths in `cellgov_core` push after

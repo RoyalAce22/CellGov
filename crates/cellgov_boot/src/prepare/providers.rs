@@ -232,6 +232,9 @@ pub(super) fn register_mounts(
     diagnostics: &DiagnosticOptions<'_>,
     sink: &dyn crate::BootSink,
 ) -> Result<(), ProviderError> {
+    rt.lv2_host_mut()
+        .fs_mounts_mut()
+        .set_files(std::rc::Rc::new(crate::mounts::HostMountFiles));
     register_composed_mounts(rt, title, diagnostics, sink)?;
     if title.manifest.mounts.is_empty() {
         return Ok(());

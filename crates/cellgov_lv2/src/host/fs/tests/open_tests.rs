@@ -10,7 +10,7 @@ use cellgov_time::GuestTicks;
 use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
-    assert_immediate, extract_fd, fs_open, run, PathRuntime, TempMountDir,
+    assert_immediate, extract_fd, fs_open, host_mounts, run, PathRuntime, TempMountDir,
 };
 
 #[test]
@@ -197,7 +197,7 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
     let dir = TempMountDir::new("open_resolves");
     dir.write("Data/level.xml", b"<level/>");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/level.xml\0");
@@ -232,7 +232,7 @@ fn fs_open_resolves_via_mount_and_caches_blob() {
 fn fs_open_mounted_missing_returns_enoent() {
     let dir = TempMountDir::new("open_missing");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/missing.bin\0");
@@ -247,7 +247,7 @@ fn fs_open_mounted_missing_returns_enoent() {
 fn fs_open_mount_path_traversal_returns_eacces() {
     let dir = TempMountDir::new("open_traversal");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/../etc/passwd\0");
@@ -263,7 +263,7 @@ fn fs_open_mounted_directory_returns_enoent_in_slice3() {
     let dir = TempMountDir::new("open_dir");
     std::fs::create_dir_all(dir.path.join("savedir")).expect("subdir");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/savedir\0");
@@ -279,7 +279,7 @@ fn fs_open_o_creat_under_mount_returns_erofs() {
     let dir = TempMountDir::new("open_creat");
     dir.write("scratch.bin", b"existing");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/scratch.bin\0");

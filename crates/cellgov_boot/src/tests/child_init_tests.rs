@@ -8,6 +8,7 @@ fn plan(kctx: u64) -> ChildInitPlan {
         kctx_opd: kctx,
         stack_pointer: 0x1000,
         run_hle_stubbed: false,
+        ppu_tap: None,
     }
 }
 

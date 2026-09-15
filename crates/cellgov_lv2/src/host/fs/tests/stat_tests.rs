@@ -7,8 +7,8 @@ use crate::host::Lv2Host;
 use cellgov_ps3_abi::lv2::fs::{CELL_FS_BLOCK_SIZE, CELL_FS_MAX_PATH_LENGTH};
 
 use crate::host::fs::common::{
-    assert_immediate, extract_stat, fs_close, fs_fstat, fs_stat, open_registered, parse_stat, run,
-    PathRuntime, TempMountDir,
+    assert_immediate, extract_stat, fs_close, fs_fstat, fs_stat, host_mounts, open_registered,
+    parse_stat, run, PathRuntime, TempMountDir,
 };
 use crate::host::fs::stat_layout::CELL_FS_S_IFREG_R_ONLY_MODE;
 
@@ -170,7 +170,7 @@ fn fs_stat_resolves_via_mount_and_reports_size() {
     let dir = TempMountDir::new("stat_resolves");
     dir.write("Data/level.xml", b"abcdefghij");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/level.xml\0");
@@ -187,7 +187,7 @@ fn fs_stat_resolves_via_mount_and_reports_size() {
 fn fs_stat_mounted_missing_returns_enoent() {
     let dir = TempMountDir::new("stat_missing");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(crate::fs_store::FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/nope.bin\0");

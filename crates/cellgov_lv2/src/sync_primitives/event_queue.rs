@@ -179,28 +179,20 @@ impl EventQueueTable {
         self.entries.is_empty()
     }
 
+    /// `(payloads, waiters)` when queue `id` holds payloads and waiters at once.
+    ///
+    /// That state breaks the storage invariant in the module doc, and
+    /// strands a parked waiter on a drained queue. [`Self::try_receive`]
+    /// and [`Self::try_receive_batch`] debug-assert the invariant.
+    pub fn mutual_exclusion_break(&self, id: u32) -> Option<(usize, usize)> {
+        let entry = self.entries.get(&id)?;
+        (!entry.waiters.is_empty() && !entry.payloads.is_empty())
+            .then_some((entry.payloads.len(), entry.waiters.len()))
+    }
+
     /// Try to pop a payload; `None` if `id` is unknown.
     pub fn try_receive(&mut self, id: u32) -> Option<EventQueueReceive> {
         let entry = self.entries.get_mut(&id)?;
-        // Mutual-exclusion invariant: the queue holds buffered
-        // payloads OR parked waiters, never both. A break strands
-        // a parked waiter on a drained queue.
-        if !(entry.waiters.is_empty() || entry.payloads.is_empty()) {
-            #[allow(
-                clippy::print_stderr,
-                reason = "one-shot release-build diagnostic for a host invariant break that is not guest-reachable under normal operation"
-            )]
-            {
-                eprintln!(
-                    "lv2 host invariant break at sync_primitives.event_queue.mutual_exclusion: \
-                     event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s); \
-                     waiters may be stranded on a drained queue.",
-                    id,
-                    entry.payloads.len(),
-                    entry.waiters.len(),
-                );
-            }
-        }
         debug_assert!(
             entry.waiters.is_empty() || entry.payloads.is_empty(),
             "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
@@ -218,23 +210,6 @@ impl EventQueueTable {
     /// `id` is unknown.
     pub fn try_receive_batch(&mut self, id: u32, max: usize) -> Option<Vec<EventPayload>> {
         let entry = self.entries.get_mut(&id)?;
-        // Same mutual-exclusion invariant as `try_receive`.
-        if !(entry.waiters.is_empty() || entry.payloads.is_empty()) {
-            #[allow(
-                clippy::print_stderr,
-                reason = "one-shot release-build diagnostic for a host invariant break that is not guest-reachable under normal operation"
-            )]
-            {
-                eprintln!(
-                    "lv2 host invariant break at sync_primitives.event_queue.mutual_exclusion: \
-                     event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s); \
-                     waiters may be stranded on a drained queue.",
-                    id,
-                    entry.payloads.len(),
-                    entry.waiters.len(),
-                );
-            }
-        }
         debug_assert!(
             entry.waiters.is_empty() || entry.payloads.is_empty(),
             "event queue {:#x} has {} buffered payload(s) AND {} parked waiter(s)",
@@ -369,3 +344,7 @@ impl EventQueueTable {
 #[cfg(test)]
 #[path = "tests/event_queue_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/event_queue_exclusion_tests.rs"]
+mod exclusion_tests;

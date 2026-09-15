@@ -6,14 +6,14 @@ use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
-    assert_immediate, extract_fd, fs_close, fs_closedir, fs_open, fs_opendir, run, PathRuntime,
-    TempMountDir,
+    assert_immediate, extract_fd, fs_close, fs_closedir, fs_open, fs_opendir, host_mounts, run,
+    PathRuntime, TempMountDir,
 };
 
 fn open_mount(label: &str) -> (Lv2Host, TempMountDir) {
     let dir = TempMountDir::new(label);
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     (host, dir)

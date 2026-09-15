@@ -79,6 +79,9 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         verified.as_ref(),
         host_link,
     );
+    if let Some(tap) = services.taps.runtime() {
+        rt.set_tap(tap);
+    }
     host::register_prx_modules(&mut rt, &prx_modules)?;
 
     // 7. Execution-unit factories, inherited by guest-created threads.
@@ -86,8 +89,9 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         dump_at_pc: diagnostics.dump_at_pc,
         dump_skip: diagnostics.dump_skip,
         profile_pairs: diagnostics.profile_pairs,
+        ppu_tap: services.taps.ppu(),
     };
-    loaders::install_unit_factories(&mut rt, debug_opts);
+    loaders::install_unit_factories(&mut rt, debug_opts.clone());
 
     // 8. Spawned-child image loader.
     let child_init = loaders::install_spawn_loader(&mut rt, &title, &services);

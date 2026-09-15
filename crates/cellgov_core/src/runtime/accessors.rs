@@ -182,6 +182,11 @@ impl Runtime {
         self.process_spawn_loader = Some(Box::new(loader));
     }
 
+    /// Install the debug observer the runtime reports writes and steps to.
+    pub fn set_tap(&mut self, tap: Box<dyn super::RuntimeTap>) {
+        self.tap = Some(tap);
+    }
+
     /// True when a spawned child is parked behind a loader-staged init
     /// pass the host has not run yet.
     #[inline]

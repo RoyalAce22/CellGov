@@ -6,7 +6,7 @@ use crate::fs_store::FsMount;
 use crate::host::Lv2Host;
 
 use crate::host::fs::common::{
-    assert_immediate, extract_fd, fs_opendir, run, PathRuntime, TempMountDir,
+    assert_immediate, extract_fd, fs_opendir, host_mounts, run, PathRuntime, TempMountDir,
 };
 
 #[test]
@@ -57,7 +57,7 @@ fn unmounted_path_returns_enoent_no_effects() {
 fn missing_host_directory_returns_enoent() {
     let dir = TempMountDir::new("opendir_missing");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/missing_subdir\0");
@@ -73,7 +73,7 @@ fn host_path_is_a_file_returns_enotdir() {
     let dir = TempMountDir::new("opendir_file");
     dir.write("level.xml", b"<level/>");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/level.xml\0");
@@ -89,7 +89,7 @@ fn dotdot_traversal_returns_eaccess() {
     let dir = TempMountDir::new("opendir_traversal");
     dir.write("Data/level.xml", b"<level/>");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data/../../etc\0");
@@ -106,7 +106,7 @@ fn opendir_at_mount_root_allocates_fd() {
     dir.write("a.xml", b"a");
     dir.write("b.xml", b"b");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home\0");
@@ -122,7 +122,7 @@ fn opendir_at_subdir_allocates_fd() {
     dir.write("Data/first.xml", b"first");
     dir.write("Data/second.xml", b"second");
     let mut host = Lv2Host::new();
-    host.fs_mounts_mut()
+    host_mounts(&mut host)
         .add(FsMount::new("/app_home", dir.path.clone()).expect("valid mount"))
         .expect("registration");
     let rt = PathRuntime::empty(0x40000).write(0x10000, b"/app_home/Data\0");

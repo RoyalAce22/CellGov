@@ -1,6 +1,15 @@
 //! LV2 host model: image registry, thread group table, sync primitives, and syscall dispatch.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 
 pub mod dispatch;
 pub mod fs_store;
@@ -17,7 +26,10 @@ pub use dispatch::{
     event_registers, CondMutexKind, ExpiredWait, Lv2BlockReason, Lv2Dispatch, PendingResponse,
     PpuThreadInitState, SpuInitState, SpuLoadImage,
 };
-pub use fs_store::{FileStat, FsError, FsMount, FsMountTable, FsStore, SeekWhence};
+pub use fs_store::{
+    FileStat, FsError, FsMount, FsMountTable, FsStore, HostDirEntry, HostEntryKind, MountFiles,
+    NoMountFiles, SeekWhence,
+};
 pub use host::FIRST_KERNEL_ID;
 pub use host::{
     InvariantBreakReason, Lv2Host, Lv2Observability, Lv2Runtime, ProcessEntry, ProcessTable,

@@ -2,11 +2,15 @@
 //! sandbox, request builders, dispatch-shape assertions, and
 //! per-test temp-dir helpers for mount tests.
 
+use std::io::ErrorKind;
+use std::path::Path;
+
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_time::GuestTicks;
 
 use crate::dispatch::Lv2Dispatch;
+use crate::fs_store::{FsMountTable, HostDirEntry, HostEntryKind, MountFiles};
 use crate::host::{Lv2Host, Lv2Runtime};
 use crate::request::Lv2Request;
 
@@ -363,6 +367,51 @@ pub(super) fn extract_pos(d: Lv2Dispatch, expected_addr: u64) -> u64 {
         }
         other => panic!("expected SharedWriteIntent, got {other:?}"),
     }
+}
+
+/// The host file system, as the boot supplies it to a mount table.
+#[derive(Debug)]
+pub(super) struct StdMountFiles;
+
+fn host_kind(file_type: std::fs::FileType) -> HostEntryKind {
+    if file_type.is_dir() {
+        HostEntryKind::Directory
+    } else if file_type.is_file() {
+        HostEntryKind::File
+    } else {
+        HostEntryKind::Other
+    }
+}
+
+impl MountFiles for StdMountFiles {
+    fn kind(&self, path: &Path) -> Result<HostEntryKind, ErrorKind> {
+        let md = std::fs::metadata(path).map_err(|e| e.kind())?;
+        Ok(host_kind(md.file_type()))
+    }
+
+    fn read(&self, path: &Path) -> Result<Vec<u8>, ErrorKind> {
+        std::fs::read(path).map_err(|e| e.kind())
+    }
+
+    fn list(&self, path: &Path) -> Result<Vec<HostDirEntry>, ErrorKind> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(path).map_err(|e| e.kind())? {
+            let entry = entry.map_err(|e| e.kind())?;
+            let kind = host_kind(entry.file_type().map_err(|e| e.kind())?);
+            out.push(HostDirEntry {
+                name: entry.file_name(),
+                kind,
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// Install `StdMountFiles` on `host`'s mount table, and return the table.
+pub(super) fn host_mounts(host: &mut Lv2Host) -> &mut FsMountTable {
+    let mounts = host.fs_mounts_mut();
+    mounts.set_files(std::rc::Rc::new(StdMountFiles));
+    mounts
 }
 
 /// Per-test scratch dir under the host temp directory.

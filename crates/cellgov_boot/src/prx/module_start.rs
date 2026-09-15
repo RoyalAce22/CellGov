@@ -193,6 +193,8 @@ pub struct ModuleStartEnv {
     pub run_hle_stubbed: bool,
     /// Where the pass reports each module it runs.
     pub sink: Rc<dyn BootSink>,
+    /// The observer the transient unit reports its dispatches to.
+    pub ppu_tap: Option<Rc<dyn cellgov_ppu::PpuTap>>,
 }
 
 /// Guest address of the thread-id word liblv2 reads back through
@@ -301,6 +303,9 @@ pub fn run_module_start(
         *unit.state_mut() = ms_state;
         if let Some((pc, skip)) = env.break_pc {
             unit.set_break_pc(pc, skip);
+        }
+        if let Some(tap) = &env.ppu_tap {
+            unit.set_tap(Rc::clone(tap));
         }
         unit
     });

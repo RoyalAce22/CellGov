@@ -79,9 +79,10 @@ todo = "deny"
 self_named_module_files = "deny"
 
 # Library print discipline. Binary crates opt out at the crate root
-# (stdout/stderr are their user-facing channels); library crates
+# (stdout/stderr are their user-facing channels); host library crates
 # annotate intentional one-shot diagnostics with
-# `#[allow(..., reason = "...")]` per-site.
+# `#[allow(..., reason = "...")]` per-site. The runtime crates forbid
+# both at the crate root, so no site there can opt out.
 print_stdout = "deny"
 print_stderr = "deny"
 
@@ -93,8 +94,14 @@ unwrap_used = "deny"
 
 # Type policy. The disallowed list lives in the workspace clippy.toml;
 # it names the error-framework types every error type in this tree
-# stands in place of.
+# stands in place of, and the hash-ordered collections.
 disallowed_types = "deny"
+
+# Host-access policy. The list lives in the workspace clippy.toml and
+# binds the runtime crates only: each forbids this lint at its crate
+# root outside its test build. Every other crate is a host crate and
+# keeps its host access, so the workspace level is allow.
+disallowed_methods = "allow"
 
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"

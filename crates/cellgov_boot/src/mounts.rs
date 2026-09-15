@@ -3,7 +3,8 @@
 //! Reads each `[[fs.mounts]]` entry, resolves the host directory
 //! (with optional per-mount env-var override), and adds an
 //! [`FsMount`] to [`Lv2Host::fs_mounts_mut`]. A missing or
-//! non-directory host root is a startup error.
+//! non-directory host root is a startup error. `HostMountFiles` is the
+//! host file system the mount table reads through.
 //!
 //! # Validation order
 //!
@@ -11,11 +12,50 @@
 //! before any I/O or env lookup, so a multi-error manifest surfaces
 //! shape problems before I/O problems.
 
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use cellgov_lv2::{FsMount, Lv2Host};
+use cellgov_lv2::{FsMount, HostDirEntry, HostEntryKind, Lv2Host, MountFiles};
 
 use super::manifest::MountEntry;
+
+/// The host file system, as a boot supplies it to the LV2 mount table.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct HostMountFiles;
+
+fn host_kind(file_type: std::fs::FileType) -> HostEntryKind {
+    if file_type.is_dir() {
+        HostEntryKind::Directory
+    } else if file_type.is_file() {
+        HostEntryKind::File
+    } else {
+        HostEntryKind::Other
+    }
+}
+
+impl MountFiles for HostMountFiles {
+    fn kind(&self, path: &Path) -> Result<HostEntryKind, ErrorKind> {
+        let md = std::fs::metadata(path).map_err(|e| e.kind())?;
+        Ok(host_kind(md.file_type()))
+    }
+
+    fn read(&self, path: &Path) -> Result<Vec<u8>, ErrorKind> {
+        std::fs::read(path).map_err(|e| e.kind())
+    }
+
+    fn list(&self, path: &Path) -> Result<Vec<HostDirEntry>, ErrorKind> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(path).map_err(|e| e.kind())? {
+            let entry = entry.map_err(|e| e.kind())?;
+            let kind = host_kind(entry.file_type().map_err(|e| e.kind())?);
+            out.push(HostDirEntry {
+                name: entry.file_name(),
+                kind,
+            });
+        }
+        Ok(out)
+    }
+}
 
 /// One composed mount: a guest prefix and the host roots that answer
 /// it, in probe order.
@@ -460,3 +500,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/mounts_roots_tests.rs"]
 mod roots_tests;
+
+#[cfg(test)]
+#[path = "tests/mount_files_tests.rs"]
+mod files_tests;

@@ -22,7 +22,7 @@ pub const RECORD_MAGIC: u32 = 0xC0E6_0004;
 /// Format version this reader understands.
 pub const FORMAT_VERSION: u32 = 3;
 
-/// Parse error class for [`read_trace`] and [`read_trace_bytes`].
+/// Parse error class for [`read_trace_bytes`].
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum Rpcs3CaptureError {
     /// Input ran out before the requested field could be read.
@@ -276,21 +276,6 @@ pub fn read_trace_bytes(bytes: &[u8]) -> Result<Vec<CapturedRecord>, Rpcs3Captur
     }
 
     Ok(records)
-}
-
-/// Read a CellGov PPU trace dump from a host path.
-///
-/// # Errors
-///
-/// Wraps [`std::io::Error`] as [`Rpcs3CaptureError::UnexpectedEof`]
-/// for missing files; format errors surface as their specific
-/// variants per [`read_trace_bytes`].
-pub fn read_trace(path: &std::path::Path) -> Result<Vec<CapturedRecord>, Rpcs3CaptureError> {
-    let bytes = std::fs::read(path).map_err(|_| Rpcs3CaptureError::UnexpectedEof {
-        offset: 0,
-        field: "file",
-    })?;
-    read_trace_bytes(&bytes)
 }
 
 #[cfg(test)]

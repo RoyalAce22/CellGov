@@ -1,5 +1,14 @@
 #![deny(unused_must_use)]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
+#![cfg_attr(
+    not(test),
+    forbid(
+        clippy::disallowed_methods,
+        clippy::print_stdout,
+        clippy::print_stderr,
+        clippy::dbg_macro
+    )
+)]
 //! Top-level runtime orchestration: the `Runtime` struct, scheduler loop,
 //! unit registry, commit coordination, and stable-ordering rules. No
 //! architecture-specific logic; only traits and immutable data packets
@@ -17,7 +26,7 @@ pub use commit::{BlockReason, CommitContext, CommitError, CommitOutcome, CommitP
 pub use registry::{RegisteredUnit, UnitRegistry};
 pub use runtime::{
     default_budget_for_mode, AddressSpaceId, PendingChildInit, ProcessSpawnLoadError,
-    ProcessSpawnLoader, Runtime, RuntimeMode, RuntimeSnapshot, RuntimeStep, SpaceError,
+    ProcessSpawnLoader, Runtime, RuntimeMode, RuntimeSnapshot, RuntimeStep, RuntimeTap, SpaceError,
     SpawnedProcessImage, SpuFactory, StepError,
 };
 pub use scheduler::{RoundRobinScheduler, Scheduler};

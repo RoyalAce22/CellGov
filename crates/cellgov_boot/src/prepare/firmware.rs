@@ -73,6 +73,7 @@ pub(super) fn load_firmware_set(
         services.keys.as_ref(),
     )?;
     let t_prx_load = t_start.elapsed();
+    services.taps.firmware_bound(&host_link.exports, mem);
     if prx_modules.is_empty() {
         let (info, requesters) =
             install_unresolved_trampolines_only(&modules, mem, code_floor as u64, sink)?;

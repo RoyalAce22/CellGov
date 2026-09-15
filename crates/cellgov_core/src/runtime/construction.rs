@@ -98,6 +98,7 @@ impl Runtime {
             rsx_call_stack: crate::rsx::RsxCallStack::new(),
             rsx_consume_fifo: false,
             lv2_direct_committed_writes: 0,
+            tap: None,
         }
     }
 }
