@@ -227,3 +227,108 @@ fn the_cost_of_three_writers_is_recorded() {
         "the optimal search costs one execution per class; the scaffold costs more",
     );
 }
+
+/// A workload longer than the cap below, and small enough that the
+/// uncapped run enumerates it whole.
+///
+/// Two units of six steps each. Two steps of each store over one shared
+/// word and the rest are local, so the classes are the orders of the
+/// four stores: `C(4,2) = 6` of them, reaching two final bytes. Twelve
+/// steps outruns a cap of four without putting the uncapped run near
+/// `max_schedules`.
+fn longer_than_the_cap() -> Runtime {
+    let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(1), 400);
+    for value in 0..2u32 {
+        rt.register_unit_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(0xA0 + value),
+                    FakeOp::SharedStore { addr: 0, len: 4 },
+                    FakeOp::LoadImm(0xB0 + value),
+                    FakeOp::SharedStore { addr: 0, len: 4 },
+                    FakeOp::LoadImm(0xC0 + value),
+                    FakeOp::End,
+                ],
+            )
+        });
+    }
+    rt
+}
+
+/// Both searches take the same bound from the same origin.
+///
+/// They bound their baselines differently once and it went unnoticed,
+/// because every fixture was shorter than the default cap. A workload
+/// that outruns the cap is what separates a shared bound from two that
+/// merely never bite: one search answering here while the other
+/// withdrew would read as a lost equivalence class in `agree_on`.
+#[test]
+fn both_searches_truncate_a_baseline_at_the_same_step() {
+    let config = ExplorationConfig {
+        max_schedules: 256,
+        max_steps_per_run: 4,
+    };
+    let enumerated = explore_window(longer_than_the_cap, &config);
+    let backtracked = explore_backtrack(longer_than_the_cap, &config);
+
+    assert_eq!(
+        enumerated.baseline_stop,
+        cellgov_explore::util::StopReason::StepBound,
+        "the cap is below the workload, so the optimal search meets it",
+    );
+    assert_eq!(
+        backtracked.baseline_stop, enumerated.baseline_stop,
+        "the two searches stop their baselines for the same reason",
+    );
+    assert_eq!(
+        backtracked.baseline_steps, enumerated.baseline_steps,
+        "and at the same step, so the bound has one origin",
+    );
+    assert_eq!(
+        enumerated.baseline_steps, config.max_steps_per_run,
+        "counted from step 0, not from a branching point",
+    );
+}
+
+/// The differential property holds over a workload the cap truncates.
+///
+/// Both searches withdraw everything, so the agreed set is empty. That
+/// is the shape `agree_on` cannot distinguish from a shared reduction,
+/// which is why the case above pins the bound directly.
+#[test]
+fn a_capped_workload_leaves_both_searches_answering_for_nothing() {
+    let config = ExplorationConfig {
+        max_schedules: 256,
+        max_steps_per_run: 4,
+    };
+    let enumerated = explore_window(longer_than_the_cap, &config);
+    let backtracked = explore_backtrack(longer_than_the_cap, &config);
+    assert_eq!(outcomes(&enumerated), outcomes(&backtracked));
+    assert!(outcomes(&enumerated).is_empty());
+    assert!(enumerated.bounds_hit && backtracked.bounds_hit);
+}
+
+/// The same workload under a cap it fits inside: both searches answer,
+/// and agree.
+///
+/// The positive control over the two cases above, which would both pass
+/// for searches that truncated everything always.
+///
+/// The cost assertion guards the other way. Six is the workload's class
+/// count, so a search that reaches six enumerated the whole of it. Two
+/// searches that both stopped at `max_schedules` would agree on their
+/// hashes and fail here.
+#[test]
+fn the_same_workload_within_the_cap_reaches_the_same_hashes() {
+    let (optimal_cost, scaffold_cost) =
+        agree_on("two stores each, within the cap", 2, longer_than_the_cap);
+    assert_eq!(
+        optimal_cost, 6,
+        "one execution per order of the four shared stores",
+    );
+    assert!(
+        optimal_cost < scaffold_cost,
+        "the scaffold reverses each race on its own, so it costs more ({scaffold_cost})",
+    );
+}
