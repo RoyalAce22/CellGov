@@ -1,5 +1,7 @@
 //! LV2 direct-commit effect application and reservation-conflict rollback.
 
+use cellgov_trace::HostWriter;
+
 use super::*;
 
 #[test]
@@ -512,7 +514,8 @@ fn an_lv2_write_into_a_shared_view_is_a_named_invariant_break_in_release() {
 fn a_wake_payload_into_a_shared_view_is_trapped_in_debug() {
     let mut rt = build_with_shared_view();
     rt.commit_bytes_at(
-        crate::runtime::spaces::AddressSpaceId::BOOT,
+        HostWriter::WakeContinuation,
+        UnitId::new(0),
         0x20000,
         &[0xAA; 4],
     );
@@ -582,7 +585,8 @@ fn a_wake_payload_into_a_shared_view_is_a_named_invariant_break_in_release() {
     let mut rt = build_with_shared_view();
     let breaks_before = rt.lv2_host().observability().invariant_break_count;
     rt.commit_bytes_at(
-        crate::runtime::spaces::AddressSpaceId::BOOT,
+        HostWriter::WakeContinuation,
+        UnitId::new(0),
         0x20000,
         &[0xAA; 4],
     );

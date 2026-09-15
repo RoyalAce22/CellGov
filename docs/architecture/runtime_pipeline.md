@@ -169,7 +169,11 @@ The full vocabulary of guest-visible operations:
   - one locator for reads of the reserved-zero RSX / SPU ranges,
     `ReservedRegionRead` (unit, step, address, length, hits),
     drained after every step and commit so the replay comparison
-    can find a zero the guest saw from a provisional region.
+    can find a zero the guest saw from a provisional region;
+  - `HostWrite` (mechanism, space, address, length, reservations
+    cleared), one per write the runtime itself lands in guest
+    memory. Those writes carry no `UnitId`, so the mechanism
+    stands in that slot.
 
 `RuntimeMode` gates trace emission: `FaultDriven` boot pays no
 trace overhead, `DeterminismCheck` pays state-hash overhead at

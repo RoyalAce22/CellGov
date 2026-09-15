@@ -4,6 +4,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::{Lv2Dispatch, PpuThreadAttrs, PpuThreadInitState};
 use cellgov_ps3_abi::lv2::errno::{CELL_E2BIG, CELL_ENOMEM};
+use cellgov_trace::HostWriter;
 
 use super::spaces::AddressSpaceId;
 use super::Runtime;
@@ -131,7 +132,8 @@ impl Runtime {
         // The tid writeback lands in the CREATOR's space, like every
         // other syscall out-parameter.
         self.commit_bytes_at(
-            caller_space,
+            HostWriter::SyscallOutParam,
+            source,
             u64::from(id_ptr),
             &thread_id.raw().to_be_bytes(),
         );

@@ -5,8 +5,10 @@
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus, YieldReason};
+use cellgov_trace::HostWriter;
 
 use crate::commit::{BlockReason, CommitContext, CommitError, CommitOutcome};
+use crate::runtime::spaces::AddressSpaceId;
 use crate::runtime::state::Runtime;
 
 impl Runtime {
@@ -258,7 +260,13 @@ impl Runtime {
                          ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
                     );
                 let value = flip_status_now as u32;
-                if let Err(err) = self.memory.apply_commit(range, &value.to_be_bytes()) {
+                if let Err(err) = self.host_write(
+                    HostWriter::RsxMirror,
+                    AddressSpaceId::BOOT,
+                    range,
+                    &value.to_be_bytes(),
+                    None,
+                ) {
                     self.lv2_host.log_invariant_break(
                         "dispatch.rsx_flip_status_mirror_failed",
                         format_args!(
@@ -391,7 +399,13 @@ impl Runtime {
                     "control_register::{REF,GET}_ADDR are 4-byte aligned constants; \
                      ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
                 );
-            if let Err(err) = self.memory.apply_commit(range, &value.to_be_bytes()) {
+            if let Err(err) = self.host_write(
+                HostWriter::RsxMirror,
+                AddressSpaceId::BOOT,
+                range,
+                &value.to_be_bytes(),
+                None,
+            ) {
                 self.lv2_host.log_invariant_break(
                     "dispatch.rsx_cursor_mmio_writeback_failed",
                     format_args!(

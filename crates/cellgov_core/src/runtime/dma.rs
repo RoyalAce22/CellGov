@@ -6,7 +6,9 @@
 use cellgov_dma::DmaCompletion;
 use cellgov_exec::UnitStatus;
 use cellgov_time::GuestTicks;
+use cellgov_trace::HostWriter;
 
+use super::spaces::AddressSpaceId;
 use super::Runtime;
 
 impl Runtime {
@@ -17,6 +19,18 @@ impl Runtime {
     /// regions are add-only with immutable access, and snapshots
     /// co-capture queue and memory -- so the destination remains
     /// writable at completion.
+    ///
+    /// The write sweeps overlapping reservations. DMA commits
+    /// independently of `SharedWriteIntent`. Without the sweep, a
+    /// cross-unit MFC_PUT leaves a stale reservation, and a later
+    /// `stwcx` / `putllc` reads it as still held.
+    /// [PPC-Book2 p:10 s:1.7.3.1] the issuer's own reservation is
+    /// preserved; only other processors' reservations are invalidated.
+    /// [CBE-Handbook p:479 s:18.6.4] names the Cell half of that split:
+    /// the atomic unit loses a lock-line reservation when another
+    /// processor element or device modifies the line, and the issuer's
+    /// own MFC transfer is a local SPE action rather than that outside
+    /// entity.
     fn apply_dma_transfer(&mut self, c: &DmaCompletion, payload: &Option<Vec<u8>>) {
         let bytes = if let Some(data) = payload {
             data.clone()
@@ -26,28 +40,23 @@ impl Runtime {
                 .expect("DMA source range mapped and readable at enqueue")
                 .to_vec()
         };
-        self.memory
-            .apply_commit(c.destination(), &bytes)
-            .expect("DMA destination validated as ReadWrite at enqueue");
+        // DMA stays in space 0 end to end (see the `spaces` module docs).
+        self.host_write(
+            HostWriter::DmaCompletion,
+            AddressSpaceId::BOOT,
+            c.destination(),
+            &bytes,
+            Some(c.issuer()),
+        )
+        .expect("DMA destination validated as ReadWrite at enqueue");
     }
 
     /// Pop and apply DMA completions whose modeled time has arrived;
     /// returns the fired list for trace recording.
-    ///
-    /// Each completion sweeps overlapping cross-unit reservations:
-    /// DMA commits independently of `SharedWriteIntent`, so without
-    /// this sweep a cross-unit MFC_PUT would leave a stale reservation
-    /// a later `stwcx` / `putllc` could spuriously read as still held.
     pub(super) fn fire_dma_completions(&mut self) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         let due = self.dma_queue.pop_due(self.time);
         for (c, payload) in &due {
             self.apply_dma_transfer(c, payload);
-            let dst = c.destination();
-            // [PPC-Book2 p:10 s:1.7.3.1] DMA completion: the issuer's own
-            // reservation is preserved; only other processors' reservations
-            // are invalidated.
-            self.reservations
-                .clear_covering(dst.start().raw(), dst.length(), Some(c.issuer()));
             // A Finished issuer is process-exit residue: the transfer
             // still commits (the payload was in flight and the terminal
             // memory snapshot must include it), but the Runnable

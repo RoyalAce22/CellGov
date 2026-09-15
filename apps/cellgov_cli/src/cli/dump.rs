@@ -188,6 +188,18 @@ fn dump_trace(result: &ScenarioResult) {
                     time.raw()
                 );
             }
+            TraceRecord::HostWrite {
+                writer,
+                space,
+                addr,
+                len,
+                reservations_cleared,
+            } => {
+                println!(
+                    "{i:4}  HostWrite          writer={writer:?} space={space} \
+                     addr=0x{addr:x} len={len} cleared={reservations_cleared}"
+                );
+            }
         }
     }
     println!("--- {count} records total ---");

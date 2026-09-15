@@ -173,7 +173,7 @@ intra-step verdicts trust the local register alone.
 flowchart TD
   ld["lwarx / ldarx / MFC_GETLLAR"] -->|Effect ReservationAcquire| tbl["ReservationTable entry (committed)"]
   ld --> loc["local register = Some(line)"]
-  wr["any committed write from another unit: SharedWriteIntent, ConditionalStore, DMA completion"] -->|clear_covering| tbl
+  wr["any committed write from another unit or the host: SharedWriteIntent, ConditionalStore, host write"] -->|clear_covering| tbl
   start["step start: local is Some but reservation_held is false"] --> clr["local register cleared"]
   st["stwcx. / stdcx. / MFC_PUTLLC"] --> v{"local Some AND line matches the store?"}
   v -->|no| nope["conditional store fails"]
@@ -200,19 +200,20 @@ source_time }` commits the success path of `stwcx.` / `stdcx.`
 **Clear-sweep contract.** Every write path that commits bytes to
 main memory fires the clear sweep. The lost-reservation
 regression suite in `cellgov_core::tests::runtime_tests` pins
-the invariant per path; a future write-emitting path must add
-its own `clear_covering` call. The sweep fires from three paths:
+the invariant per path. The sweep fires from three paths:
 
 1. `SharedWriteIntent` commit, in the commit pipeline's apply
    pass after the staging drain.
 2. `ConditionalStore` commit, same as (1) via the shared
    byte-deposit path, plus the emitter's own entry is dropped.
-3. DMA completion: `fire_dma_completions` calls
-   `clear_covering` on the destination range after applying the
-   transfer. DMA commits separately from SharedWriteIntent, so
-   the sweep call is explicit here; without it a cross-unit
-   MFC_PUT would commit bytes over another unit's reserved line
-   without clearing the reservation.
+3. A host write, through `Runtime::host_write`: LV2 dispatch
+   effects, wake and out-parameter payloads, DMA completion, the
+   RSX control-register and flip-status mirrors, and shared-view
+   seeding and fanout. Validation, the sweep and the trace record
+   sit together there, so a new host-side write inherits the
+   sweep instead of carrying its own call. A write the host makes
+   on one unit's behalf exempts that unit, as (1) exempts its
+   emitter; a mechanism with no unit behind it exempts nobody.
 
 **Scope and bounds.** The reservation table and local registers
 are the full contention model. Memory-barrier instructions

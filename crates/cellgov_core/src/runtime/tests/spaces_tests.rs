@@ -1064,13 +1064,15 @@ fn seeding_an_attaching_view_clears_that_spaces_reservations() {
         .unwrap();
 
     // A holder in the attaching space over bytes the seed rewrites,
-    // plus one outside the segment that must survive.
+    // plus one outside the segment that must survive. The survivor
+    // sits clear of granule 0, which the child's own allocate call
+    // sweeps when it writes the mem-id back at 0x20.
     rt.space_reservations_mut(S1)
         .unwrap()
         .insert_or_replace(UnitId::new(9), ReservedLine::containing(CHILD_VIEW + 0x100));
     rt.space_reservations_mut(S1)
         .unwrap()
-        .insert_or_replace(UnitId::new(8), ReservedLine::containing(0x40));
+        .insert_or_replace(UnitId::new(8), ReservedLine::containing(0x800));
 
     rt.dispatch_lv2_request(
         classify(

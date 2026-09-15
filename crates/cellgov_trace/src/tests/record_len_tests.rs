@@ -85,6 +85,13 @@ fn one_of_each() -> Vec<TraceRecord> {
             code: 29,
             time: GuestTicks::new(30),
         },
+        TraceRecord::HostWrite {
+            writer: HostWriter::SharedViewFanout,
+            space: 33,
+            addr: 34,
+            len: 35,
+            reservations_cleared: 36,
+        },
     ]
 }
 
@@ -111,10 +118,10 @@ fn every_known_tag_has_a_sample_and_the_next_tag_is_free() {
     assert_eq!(sampled, declared, "a variant is missing from one_of_each");
     assert_eq!(
         declared.iter().copied().collect::<Vec<_>>(),
-        (0..=TAG_RUN_IDENTITY).collect::<Vec<_>>(),
+        (0..=TAG_HOST_WRITE).collect::<Vec<_>>(),
         "tags are dense and append-only"
     );
-    assert_eq!(TraceRecord::encoded_len(TAG_RUN_IDENTITY + 1), None);
+    assert_eq!(TraceRecord::encoded_len(TAG_HOST_WRITE + 1), None);
 }
 
 #[test]

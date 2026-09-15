@@ -89,10 +89,11 @@ window into the boot map. `Runtime::spaces` (`SpaceTable`) holds:
 
 Equal numeric addresses in different spaces never alias: every
 consumer touching guest memory for a unit resolves through the
-unit's space tag, and the LV2 direct-commit channel
-(`apply_lv2_effects`, `commit_bytes_at`) takes an explicit space:
-the syscall caller's for dispatch effects, the parked waiter's for
-wake payloads.
+unit's space tag, and the LV2 direct-commit channel resolves one
+too: `apply_lv2_effects` takes the space, the syscall caller's for
+dispatch effects and the expiring waiter's for expiry effects,
+while `commit_bytes_at` takes the unit whose pointer it writes
+through and resolves that unit's space itself.
 
 Cross-process shared memory is an explicit registration: a shared
 mapping names a segment size and a set of `(space, base)` views,

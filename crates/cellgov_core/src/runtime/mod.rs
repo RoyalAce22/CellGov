@@ -13,6 +13,7 @@ mod commit_step;
 mod commit_trace;
 mod construction;
 mod dma;
+mod host_write;
 mod lv2_dispatch;
 mod mem_helpers;
 mod ppu_create;

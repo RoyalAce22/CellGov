@@ -28,6 +28,7 @@ use std::collections::BTreeMap;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize};
 use cellgov_sync::ReservationTable;
+use cellgov_trace::HostWriter;
 
 use super::state::Runtime;
 
@@ -188,8 +189,10 @@ pub(super) fn resolve_space_memory<'a>(
     }
 }
 
-/// Mutable view of `space`'s memory alone, for LV2-side direct
-/// writes (e.g. the spawn pid writeback into the caller's space).
+/// Mutable view of `space`'s memory alone, for the regions a dispatch
+/// installs -- a child thread's stack, an shm window. A write into
+/// bytes a region already backs goes through [`Runtime::host_write`],
+/// which resolves the space's reservation table with its memory.
 pub(super) fn resolve_space_memory_for_write<'a>(
     memory: &'a mut GuestMemory,
     spaces: &'a mut SpaceTable,
@@ -205,8 +208,8 @@ pub(super) fn resolve_space_memory_for_write<'a>(
 }
 
 /// Mutable commit targets for `space`: its memory and its reservation
-/// table, borrowed together so the commit context can hold both while
-/// other `Runtime` fields stay free.
+/// table, borrowed together so a caller holds both while other
+/// `Runtime` fields stay free.
 pub(super) fn resolve_commit_targets<'a>(
     memory: &'a mut GuestMemory,
     reservations: &'a mut ReservationTable,
@@ -598,23 +601,12 @@ impl Runtime {
                 .to_vec()
         };
         let dst_range = ByteRange::new(GuestAddr::new(dst.1), size).expect("validated view range");
-        let (mem, dst_reservations) = match dst.0 {
-            AddressSpaceId::BOOT => (&mut self.memory, &mut self.reservations),
-            s => (
-                self.spaces.extra.get_mut(&s).expect("validated view space"),
-                self.spaces
-                    .extra_reservations
-                    .get_mut(&s)
-                    .expect("reservation table is created with its space"),
-            ),
-        };
-        mem.apply_commit(dst_range, &bytes)
-            .expect("validated backing region accepts the segment write");
         // Seeding rewrites the destination view's bytes, so it
         // invalidates every reservation covering them -- the same rule
         // `fanout_shared_writes` applies to a replicated store, and
         // the module's cross-space reservation contract.
-        dst_reservations.clear_covering(dst.1, size, None);
+        self.host_write(HostWriter::SharedViewSeed, dst.0, dst_range, &bytes, None)
+            .expect("validated backing region accepts the segment write");
     }
 
     /// Replicate committed writes that landed in a shared view into
@@ -715,25 +707,18 @@ impl Runtime {
                 let len = bytes.len() as u64;
                 let dst_range = ByteRange::new(GuestAddr::new(dst_addr), len)
                     .expect("replication range mirrors a validated committed range");
-                let (mem, dst_reservations) = match dst_space {
-                    AddressSpaceId::BOOT => (&mut self.memory, &mut self.reservations),
-                    s => (
-                        self.spaces
-                            .extra
-                            .get_mut(&s)
-                            .expect("views validated at registration"),
-                        self.spaces
-                            .extra_reservations
-                            .get_mut(&s)
-                            .expect("reservation table is created with its space"),
-                    ),
-                };
-                mem.apply_commit(dst_range, &bytes)
-                    .expect("sibling view region installed at registration");
                 // No holder is exempt: a store to the shared bytes
                 // invalidates every reservation covering an aliasing
                 // range, the writer's own included.
-                cleared += dst_reservations.clear_covering(dst_addr, len, None);
+                cleared += self
+                    .host_write(
+                        HostWriter::SharedViewFanout,
+                        dst_space,
+                        dst_range,
+                        &bytes,
+                        None,
+                    )
+                    .expect("sibling view region installed at registration");
             }
         }
         cleared

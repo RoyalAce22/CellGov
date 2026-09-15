@@ -4,6 +4,7 @@
 use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::PendingResponse;
+use cellgov_trace::HostWriter;
 
 use super::Runtime;
 
@@ -84,7 +85,8 @@ impl Runtime {
                     // whose wait helpers pass 0 and complete cleanly.
                     if result_ptr != 0 {
                         self.commit_bytes_at(
-                            waiter_space,
+                            HostWriter::WakeContinuation,
+                            waiter,
                             result_ptr as u64,
                             &observed.to_be_bytes(),
                         );
@@ -101,7 +103,8 @@ impl Runtime {
                     // CELL_ECANCELED.
                     if result_ptr != 0 {
                         self.commit_bytes_at(
-                            waiter_space,
+                            HostWriter::WakeContinuation,
+                            waiter,
                             result_ptr as u64,
                             &observed.to_be_bytes(),
                         );
@@ -120,8 +123,18 @@ impl Runtime {
                         //   offset 0  : owner (u32 BE)
                         //   offset 4  : waiter count (u32 BE)
                         //   offset 12 : recursive_count (u32 BE)
-                        self.commit_bytes_at(waiter_space, base, &caller.to_be_bytes());
-                        self.commit_bytes_at(waiter_space, base + 12, &1u32.to_be_bytes());
+                        self.commit_bytes_at(
+                            HostWriter::WakeContinuation,
+                            waiter,
+                            base,
+                            &caller.to_be_bytes(),
+                        );
+                        self.commit_bytes_at(
+                            HostWriter::WakeContinuation,
+                            waiter,
+                            base + 12,
+                            &1u32.to_be_bytes(),
+                        );
                         let waiter_addr = base + 4;
                         // The user-space struct lives in the waking
                         // unit's space; read it back from there.
@@ -154,7 +167,12 @@ impl Runtime {
                              (host waiter list diverged from guest struct)",
                         );
                         let next = current.saturating_sub(1);
-                        self.commit_bytes_at(waiter_space, waiter_addr, &next.to_be_bytes());
+                        self.commit_bytes_at(
+                            HostWriter::WakeContinuation,
+                            waiter,
+                            waiter_addr,
+                            &next.to_be_bytes(),
+                        );
                     }
                     if let Some(tid) = self.lv2_host.ppu_thread_id_for_unit(waiter) {
                         self.lv2_host.lwmutex_holds_inc(tid);
@@ -281,15 +299,24 @@ impl Runtime {
             // asymmetry is a witnessed choice.
             // Address 0 may be mapped, so NULL is never written
             // through.
-            let waiter_space = self.spaces.space_of(waiter_id);
             let code = if cause_ptr == 0 {
                 cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()
             } else {
-                self.commit_bytes_at(waiter_space, cause_ptr as u64, &cause.to_be_bytes());
+                self.commit_bytes_at(
+                    HostWriter::WakeContinuation,
+                    waiter_id,
+                    cause_ptr as u64,
+                    &cause.to_be_bytes(),
+                );
                 if status_ptr == 0 {
                     cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into()
                 } else {
-                    self.commit_bytes_at(waiter_space, status_ptr as u64, &status.to_be_bytes());
+                    self.commit_bytes_at(
+                        HostWriter::WakeContinuation,
+                        waiter_id,
+                        status_ptr as u64,
+                        &status.to_be_bytes(),
+                    );
                     code
                 }
             };

@@ -148,6 +148,41 @@ pub enum TracedInvariantBreakReason {
     Unspecified = 0,
 }
 
+/// Which host mechanism produced a [`TraceRecord::HostWrite`].
+///
+/// A host write is a write to guest memory by the runtime itself,
+/// outside any execution unit's committed effects. The stream has no
+/// `UnitId` for such a write, so this enum names the mechanism in
+/// that slot.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, IntoPrimitive, TryFromPrimitive, strum::VariantArray,
+)]
+#[repr(u8)]
+#[num_enum(error_type(name = DecodeError, constructor = DecodeError::unknown_host_writer))]
+pub enum HostWriter {
+    /// An LV2 handler's `SharedWriteIntent`, which lands at dispatch
+    /// time instead of through the commit pipeline.
+    Lv2Effect = 0,
+    /// A continuation payload written through a pointer a parked
+    /// caller supplied, at the point its wait resolves.
+    /// [`HostWriter::SyscallOutParam`] covers the write-back inside
+    /// the dispatch itself.
+    WakeContinuation = 1,
+    /// A DMA transfer's payload, which lands when its modeled latency
+    /// window arrives.
+    DmaCompletion = 2,
+    /// An RSX control-register or flip-status mirror slot.
+    RsxMirror = 3,
+    /// Replication of a committed write into a sibling view of the
+    /// same shared mapping.
+    SharedViewFanout = 4,
+    /// The segment copy the runtime seeds a newly attached view with.
+    SharedViewSeed = 5,
+    /// A syscall out-parameter the runtime writes back at dispatch
+    /// time, for a caller that never parked.
+    SyscallOutParam = 6,
+}
+
 /// Which dispatch arm a [`TraceRecord::SyscallEntered`] record was
 /// classified into. Pure function of `(lev, num, args)`; derived by
 /// the runtime before `Lv2Host::dispatch` runs.
@@ -212,6 +247,9 @@ pub enum DecodeError {
     /// Syscall-disposition byte is not a known variant.
     #[error("unknown syscall disposition 0x{0:02x}")]
     UnknownSyscallDisposition(u8),
+    /// Host-writer byte is not a known variant.
+    #[error("unknown host writer 0x{0:02x}")]
+    UnknownHostWriter(u8),
 }
 
 impl DecodeError {
@@ -241,6 +279,10 @@ impl DecodeError {
 
     fn unknown_syscall_disposition(v: u8) -> Self {
         Self::UnknownSyscallDisposition(v)
+    }
+
+    fn unknown_host_writer(v: u8) -> Self {
+        Self::UnknownHostWriter(v)
     }
 }
 
@@ -434,6 +476,21 @@ pub enum TraceRecord {
         /// Guest-time clock when the value was delivered.
         time: GuestTicks,
     },
+    /// A write the runtime itself landed in guest memory, one record
+    /// per accepted write. A refused write emits nothing: it changed
+    /// no guest-visible byte.
+    HostWrite {
+        /// Host mechanism that produced the write.
+        writer: HostWriter,
+        /// Address space the write landed in; 0 is the boot space.
+        space: u32,
+        /// Guest address of the first byte written.
+        addr: u64,
+        /// Bytes written.
+        len: u32,
+        /// Reservations the write's clear sweep dropped.
+        reservations_cleared: u32,
+    },
 }
 
 const TAG_UNIT_SCHEDULED: u8 = 0x00;
@@ -450,6 +507,7 @@ const TAG_SYSCALL_ENTERED: u8 = 0x0a;
 const TAG_RESERVED_REGION_READ: u8 = 0x0b;
 const TAG_SYSCALL_RETURNED: u8 = 0x0c;
 const TAG_RUN_IDENTITY: u8 = 0x0d;
+const TAG_HOST_WRITE: u8 = 0x0e;
 
 impl TraceRecord {
     /// Tag byte that leads this record on the wire.
@@ -469,6 +527,7 @@ impl TraceRecord {
             TraceRecord::SyscallEntered { .. } => TAG_SYSCALL_ENTERED,
             TraceRecord::ReservedRegionRead { .. } => TAG_RESERVED_REGION_READ,
             TraceRecord::SyscallReturned { .. } => TAG_SYSCALL_RETURNED,
+            TraceRecord::HostWrite { .. } => TAG_HOST_WRITE,
         }
     }
 
@@ -490,6 +549,7 @@ impl TraceRecord {
             TAG_RESERVED_REGION_READ => 1 + 8 * 3 + 4 + 4,
             TAG_SYSCALL_RETURNED => 1 + 8 * 3,
             TAG_RUN_IDENTITY => 1 + 4 + 8 + 8,
+            TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
             _ => return None,
         })
     }
@@ -511,6 +571,7 @@ impl TraceRecord {
             TraceRecord::SyscallEntered { .. } => TraceLevel::Scheduling,
             TraceRecord::ReservedRegionRead { .. } => TraceLevel::Hashes,
             TraceRecord::SyscallReturned { .. } => TraceLevel::Scheduling,
+            TraceRecord::HostWrite { .. } => TraceLevel::Commits,
         }
     }
 
@@ -652,6 +713,19 @@ impl TraceRecord {
                 write_u64(buf, unit.raw());
                 write_u64(buf, *code);
                 write_u64(buf, time.raw());
+            }
+            TraceRecord::HostWrite {
+                writer,
+                space,
+                addr,
+                len,
+                reservations_cleared,
+            } => {
+                buf.push(u8::from(*writer));
+                write_u32(buf, *space);
+                write_u64(buf, *addr);
+                write_u32(buf, *len);
+                write_u32(buf, *reservations_cleared);
             }
         }
         debug_assert_eq!(
@@ -839,6 +913,21 @@ impl TraceRecord {
                 let time = GuestTicks::new(read_u64(bytes, &mut pos)?);
                 TraceRecord::SyscallReturned { unit, code, time }
             }
+            TAG_HOST_WRITE => {
+                let writer_byte = read_u8(bytes, &mut pos)?;
+                let writer = HostWriter::try_from(writer_byte)?;
+                let space = read_u32(bytes, &mut pos)?;
+                let addr = read_u64(bytes, &mut pos)?;
+                let len = read_u32(bytes, &mut pos)?;
+                let reservations_cleared = read_u32(bytes, &mut pos)?;
+                TraceRecord::HostWrite {
+                    writer,
+                    space,
+                    addr,
+                    len,
+                    reservations_cleared,
+                }
+            }
             other => return Err(DecodeError::UnknownTag(other)),
         };
         Ok((record, pos))
@@ -890,3 +979,7 @@ mod len_tests;
 #[cfg(test)]
 #[path = "tests/record_identity_tests.rs"]
 mod identity_tests;
+
+#[cfg(test)]
+#[path = "tests/record_host_write_tests.rs"]
+mod host_write_tests;

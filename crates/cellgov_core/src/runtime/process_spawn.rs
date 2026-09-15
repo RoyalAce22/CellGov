@@ -12,6 +12,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::UnitStatus;
 use cellgov_lv2::{Lv2Dispatch, PpuThreadAttrs, PpuThreadInitState};
 use cellgov_ps3_abi::lv2::errno::{CELL_EFAULT, CELL_ENOMEM, CELL_ENOSYS};
+use cellgov_trace::HostWriter;
 
 use super::spaces::AddressSpaceId;
 use super::Runtime;
@@ -195,7 +196,12 @@ impl Runtime {
         // Lv2Host::dispatch_process_spawn already rejected an
         // unwritable pid_out_ptr with CELL_EFAULT, so a failure inside
         // commit_bytes_at is host-state corruption.
-        self.commit_bytes_at(caller_space, u64::from(pid_out_ptr), &pid.to_be_bytes());
+        self.commit_bytes_at(
+            HostWriter::SyscallOutParam,
+            source,
+            u64::from(pid_out_ptr),
+            &pid.to_be_bytes(),
+        );
         self.step_woke_others = true;
         self.deliver_syscall_return(source, 0);
     }

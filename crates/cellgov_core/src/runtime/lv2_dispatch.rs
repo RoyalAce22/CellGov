@@ -10,7 +10,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus};
 use cellgov_lv2::{Lv2Dispatch, PendingResponse, SpuInitState};
 use cellgov_mem::MemError;
-use cellgov_trace::{TraceRecord, TracedSyscallDisposition};
+use cellgov_trace::{HostWriter, TraceRecord, TracedSyscallDisposition};
 
 use super::spaces::AddressSpaceId;
 use super::types::RuntimeMode;
@@ -20,8 +20,9 @@ use super::{
 };
 
 impl Runtime {
-    /// Apply an `Lv2Dispatch` effects batch by direct commit into
-    /// `space`, bypassing the commit pipeline's [`StagingMemory`].
+    /// Apply an `Lv2Dispatch` effects batch into `space` through
+    /// [`Runtime::host_write`], which bypasses the commit pipeline's
+    /// [`StagingMemory`].
     ///
     /// The `SharedWriteIntent` subset commits all-or-none: a
     /// validation failure logs `dispatch.lv2_effect_apply_failed` and
@@ -77,10 +78,29 @@ impl Runtime {
         }
         for effect in effects {
             match effect {
-                Effect::SharedWriteIntent { range, bytes, .. } => {
+                Effect::SharedWriteIntent {
+                    range,
+                    bytes,
+                    source,
+                    ..
+                } => {
                     if memory_failure.is_some() {
                         continue;
                     }
+                    // The reservation sweep exempts `source`, so an
+                    // intent whose source lives in another space would
+                    // spare a unit that holds nothing here. The real
+                    // holder then keeps a stale reservation.
+                    debug_assert_eq!(
+                        self.spaces.space_of(*source),
+                        space,
+                        "LV2 SharedWriteIntent at {:#x} from unit {} targets space {}, \
+                         which is not that unit's; waiter-side payloads belong on \
+                         PendingResponse",
+                        range.start().raw(),
+                        source.raw(),
+                        space.raw(),
+                    );
                     // LV2 direct commits bypass the commit pipeline's
                     // shared-view fanout; a write landing inside a
                     // shared view would leave sibling views incoherent.
@@ -113,12 +133,14 @@ impl Runtime {
                             space.raw(),
                         );
                     }
-                    let mem = super::spaces::resolve_space_memory_for_write(
-                        &mut self.memory,
-                        &mut self.spaces,
+                    self.host_write(
+                        HostWriter::Lv2Effect,
                         space,
-                    );
-                    mem.apply_commit(*range, bytes.bytes()).expect(
+                        *range,
+                        bytes.bytes(),
+                        Some(*source),
+                    )
+                    .expect(
                         "validate_lv2_memory_subset called GuestMemory::validate_write -- \
                          the same predicate apply_commit uses internally -- so this Err \
                          path is structurally unreachable",
@@ -733,9 +755,9 @@ impl Runtime {
                 // The out-pointer was decoded from the JOINER's
                 // syscall, so it addresses the joiner's space.
                 if status_out_ptr != 0 {
-                    let waiter_space = self.spaces.space_of(waiter);
                     self.commit_bytes_at(
-                        waiter_space,
+                        HostWriter::WakeContinuation,
+                        waiter,
                         status_out_ptr as u64,
                         &exit_value.to_be_bytes(),
                     );
