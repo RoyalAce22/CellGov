@@ -60,6 +60,19 @@ impl Runtime {
         // reservation granule, so the split the write already applies
         // in space 0 is the split the aliases carry.
         self.fanout_committed_range(AddressSpaceId::BOOT, c.destination(), Some(c.issuer()));
+        // A transfer can land over code a unit is executing: a title
+        // loading an overlay by MFC transfer is that shape. Predecoded
+        // code at the destination, and at every alias the fanout
+        // replicated into, is as stale as after a committed store, so
+        // the same invalidation runs over every unit.
+        let aliases = self.shared_alias_ranges_in(AddressSpaceId::BOOT, c.destination());
+        let (dst, len) = (c.destination().start().raw(), c.destination().length());
+        for (_, unit) in self.registry.iter_mut() {
+            unit.invalidate_code(dst, len);
+            for alias in &aliases {
+                unit.invalidate_code(alias.start().raw(), alias.length());
+            }
+        }
     }
 
     /// Pop and apply DMA completions whose modeled time has arrived;
@@ -111,3 +124,7 @@ mod dma_space_tests;
 #[cfg(test)]
 #[path = "tests/dma_shared_view_tests.rs"]
 mod dma_shared_view_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_invalidation_tests.rs"]
+mod dma_invalidation_tests;

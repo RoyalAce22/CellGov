@@ -171,6 +171,7 @@ dependencies = [
  "cellgov_boot",
  "cellgov_compare",
  "cellgov_core",
+ "cellgov_dma",
  "cellgov_effects",
  "cellgov_event",
  "cellgov_exec",

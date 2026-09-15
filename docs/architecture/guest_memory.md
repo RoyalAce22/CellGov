@@ -103,9 +103,12 @@ space), clears reservations on covered lines in the sibling
 spaces, and invalidates predecoded code at the translated alias
 ranges. The storing unit keeps its own reservation over those
 lines, as it keeps it over the view it stored through: every view
-names one reservation granule. A DMA landing inside a view fans out the same way and
-clears the same lines; it invalidates no predecoded code, at the
-alias ranges or at its own destination. Atomic `ConditionalStore`
+names one reservation granule. A DMA landing inside a view fans out
+the same way, clears the same lines, and invalidates predecoded code
+at its destination and at every alias, on every unit, as a committed
+store does; a transfer can deliver the code a unit runs next. The
+fanout and the invalidation cover two writers, the committed store
+and the DMA landing. Atomic `ConditionalStore`
 through a shared view is unmodeled and refuses loudly. A DMA
 transfer resolves both its ends in space 0, so the fanout is the
 only part of one that reaches another space. The RSX subsystem
@@ -126,6 +129,7 @@ flowchart LR
   va -->|same bytes| vc
   vb -.->|clear covered reservations| r1["space 1 reservation table"]
   va -.->|invalidate alias ranges| shadow["PredecodedShadow"]
+  dma["DMA landing in view A"] --> va
 ```
 
 An ipc-keyed `sys_mmapper` map registers its window as a view of
