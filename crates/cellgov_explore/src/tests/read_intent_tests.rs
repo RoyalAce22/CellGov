@@ -166,6 +166,45 @@ fn an_unpayloaded_flight_records_both_of_its_ends() {
     );
 }
 
+/// The in-flight ranges reach the sibling views of the mapping they
+/// land in.
+///
+/// The order of `note_inflight` and `expand_aliases` inside
+/// [`StepFootprint::note_commit`] decides it: with the widening first
+/// the flight stays unwidened, and a unit reading the sibling view is
+/// then proved independent of the landing.
+#[test]
+fn an_inflight_landing_reaches_the_sibling_view() {
+    let mut rt = runtime_with_two_views_of_one_mapping(0x40);
+    let source = range(0, 4);
+    // Into the first view, whose sibling sits at 0x5000.
+    let destination = range(0x2010, 4);
+    let unit = rt.register_unit_with(|id| {
+        DmaSubmitter::new(id, source, destination, vec![0xde, 0xad, 0xbe, 0xef])
+    });
+    let step = rt.step().expect("the submitter is the only runnable unit");
+    rt.commit_step(&step.result, &step.effects)
+        .expect("the enqueue commits");
+
+    let mut footprint = StepFootprint::from_effects(&step.effects);
+    footprint.note_commit(&rt, unit);
+
+    let starts: Vec<u64> = footprint
+        .inflight_dma_ranges
+        .iter()
+        .map(|r| r.start().raw())
+        .collect();
+    assert!(
+        starts.contains(&0x2010),
+        "the landing itself is missing: {starts:#x?}",
+    );
+    assert!(
+        starts.contains(&0x5010),
+        "the sibling view of the landing is missing, so a unit reading \
+         it would prune against the flight: {starts:#x?}",
+    );
+}
+
 #[test]
 fn a_read_does_not_conflict_with_a_reservation_on_the_bytes_it_reads() {
     let held = StepFootprint::from_effects(&[Effect::ReservationAcquire {

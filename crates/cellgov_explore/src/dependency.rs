@@ -164,6 +164,30 @@ impl StepFootprint {
         fp
     }
 
+    /// Add the four producers the step's commit feeds.
+    ///
+    /// A step's footprint is built in two halves because the commit
+    /// falls between them: [`StepFootprint::from_step`] reads the
+    /// effects the unit emitted, and this reads what committing them
+    /// did. Call it immediately after `commit_step`, with the unit that
+    /// ran. It closes none of the gaps the module doc names.
+    ///
+    /// [`StepFootprint::expand_aliases`] widens the ranges the two
+    /// recorders ahead of it pushed, so an earlier position leaves the
+    /// in-flight set unwidened -- a footprint short an access, which is
+    /// how a search prunes an execution it owed.
+    /// [`StepFootprint::note_host_writes`] widens its own ranges
+    /// through the space each landed in, so it runs last and nothing
+    /// reads them a second time from the stepping unit's space. The
+    /// other order for that pair costs a duplicate range, never an
+    /// access.
+    pub fn note_commit(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
+        self.note_inflight(rt);
+        self.note_lv2_effects(rt);
+        self.expand_aliases(rt, unit);
+        self.note_host_writes(rt);
+    }
+
     /// Widen every range category to the sibling views it aliases.
     ///
     /// An access through one view of a shared mapping reaches every
@@ -171,8 +195,9 @@ impl StepFootprint {
     /// transfer lands in space 0, and a unit that reads a view which
     /// aliases the landing sees it.
     ///
-    /// Call it after [`StepFootprint::note_inflight`], so the
-    /// in-flight set is there to widen.
+    /// Call it after [`StepFootprint::note_inflight`] and
+    /// [`StepFootprint::note_lv2_effects`], so every range they record
+    /// is there to widen.
     pub fn expand_aliases(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
         for category in [
             &mut self.shared_writes,
@@ -291,10 +316,10 @@ impl StepFootprint {
 
     /// Record the host writes that landed during this step.
     ///
-    /// Call it after the step's commit, and after
-    /// [`StepFootprint::expand_aliases`]. The commit runs the LV2
-    /// dispatch, resolves the wakes and fires the completions, and each
-    /// of those writes guest memory outside the unit's batch. The
+    /// One of the four [`StepFootprint::note_commit`] runs; called
+    /// directly, it runs after the step's commit. That commit runs the
+    /// LV2 dispatch, resolves the wakes and fires the completions, and
+    /// each of those writes guest memory outside the unit's batch. The
     /// record reaches back to the step's start, so it also holds what
     /// the all-blocked time warp wrote before the step it picked.
     ///

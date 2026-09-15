@@ -63,16 +63,10 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 let runnable: Vec<_> = rt.last_runnable().to_vec();
                 let mut footprint =
                     StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-                // An access through one view of a shared mapping
-                // reaches every sibling view's bytes, whether the
-                // access writes them or reads them.
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
                     break StopReason::CommitError(e);
                 }
-                footprint.note_inflight(rt);
-                footprint.note_lv2_effects(rt);
-                footprint.expand_aliases(rt, step.unit);
-                footprint.note_host_writes(rt);
+                footprint.note_commit(rt, step.unit);
                 // The pass this parks behind reaches no footprint, so
                 // the relation cannot answer for the steps after it.
                 if rt.has_pending_child_init() {

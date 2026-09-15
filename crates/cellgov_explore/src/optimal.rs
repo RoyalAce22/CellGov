@@ -380,10 +380,7 @@ fn run_one(
         if let Err(e) = rt.commit_step(&step.result, &step.effects) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
-        footprint.note_inflight(rt);
-        footprint.note_lv2_effects(rt);
-        footprint.expand_aliases(rt, step.unit);
-        footprint.note_host_writes(rt);
+        footprint.note_commit(rt, step.unit);
         // The pass this parks behind reaches no footprint, so the
         // relation cannot answer for the steps after it.
         if rt.has_pending_child_init() {
