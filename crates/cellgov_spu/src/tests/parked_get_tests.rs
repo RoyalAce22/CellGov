@@ -6,7 +6,7 @@
 //! and the tag bit stays clear: it is the guest's only signal that the
 //! transfer finished.
 
-use crate::{SpuExecutionUnit, FAULT_MFC_GET_UNRESOLVED};
+use crate::{SpuExecutionUnit, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_GET_UNRESOLVED};
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
@@ -207,8 +207,26 @@ fn a_get_ending_at_the_last_byte_of_local_store_lands() {
     );
 }
 
-/// One byte further and the destination escapes the store, which is the
-/// other half of the refusal the fault code names.
+/// Both ends refuse, and the copy tests the source first, so the
+/// refusal is the source's.
+#[test]
+fn an_unresolved_source_outranks_an_escaping_destination() {
+    let mem = memory_with_aux_region();
+    let mut unit = unit_getting(UNMAPPED_EA);
+    let lsa = unit.state().ls.len() - TRANSFER_BYTES as usize + 1;
+    unit.state_mut().channels.mfc_lsa = lsa as u32;
+    let result = issue_then_perform(&mut unit, &mem);
+
+    assert_eq!(
+        result.fault,
+        Some(FaultKind::Guest(FAULT_MFC_GET_UNRESOLVED | u32::from(TAG))),
+    );
+    assert_eq!(result.local_diagnostics.faulting_ea, Some(UNMAPPED_EA));
+}
+
+/// One byte further and the destination escapes the store. The source
+/// resolved, so the refusal is local store's, as a put's is, and it
+/// names the local-store address rather than the tag.
 #[test]
 fn a_get_whose_local_store_destination_escapes_faults() {
     let mem = memory_with_marked_source();
@@ -220,8 +238,15 @@ fn a_get_whose_local_store_destination_escapes_faults() {
 
     assert_eq!(
         result.fault,
-        Some(FaultKind::Guest(FAULT_MFC_GET_UNRESOLVED | u32::from(TAG))),
+        Some(FaultKind::Guest(
+            FAULT_LS_OUT_OF_RANGE | (lsa as u32 & FAULT_DETAIL_MASK)
+        )),
         "a destination the store cannot hold is refused, not truncated",
+    );
+    assert_eq!(
+        result.local_diagnostics.faulting_ea,
+        Some(lsa as u64),
+        "and the address that escaped rides whole",
     );
     assert_eq!(
         unit.state().channels.tag_status & (1u32 << TAG),

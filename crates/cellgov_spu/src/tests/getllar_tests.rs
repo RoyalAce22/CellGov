@@ -6,7 +6,9 @@
 //! `putllc` would otherwise succeed against a comparison the guest made
 //! on stale local store.
 
-use crate::{SpuExecutionUnit, FAULT_MFC_READ_UNRESOLVED};
+use crate::{
+    SpuExecutionUnit, FAULT_DETAIL_MASK, FAULT_LS_OUT_OF_RANGE, FAULT_MFC_READ_UNRESOLVED,
+};
 use cellgov_effects::{Effect, FaultKind};
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionContext, ExecutionUnit, UnitStatus, YieldReason};
@@ -208,9 +210,9 @@ fn a_getllar_ending_at_the_last_byte_of_local_store_lands() {
     );
 }
 
-/// One byte further and the destination escapes the store, which is the
-/// other arm the fault code names. The line itself resolves, so only the
-/// local-store side refuses.
+/// One byte further and the destination escapes the store. The line
+/// itself resolves, so the refusal is local store's and names the
+/// local-store address, not the line.
 #[test]
 fn a_getllar_whose_local_store_destination_escapes_refuses() {
     let mem = memory_with_marked_aux();
@@ -224,9 +226,14 @@ fn a_getllar_whose_local_store_destination_escapes_refuses() {
     assert_eq!(
         result.fault,
         Some(FaultKind::Guest(
-            FAULT_MFC_READ_UNRESOLVED | (AUX_EA as u32 & 0xFFFF)
+            FAULT_LS_OUT_OF_RANGE | (lsa as u32 & FAULT_DETAIL_MASK)
         )),
         "a destination the store cannot hold is refused, not truncated",
+    );
+    assert_eq!(
+        result.local_diagnostics.faulting_ea,
+        Some(lsa as u64),
+        "and the address that escaped rides whole",
     );
     assert!(
         acquired_lines(&effects).is_empty(),

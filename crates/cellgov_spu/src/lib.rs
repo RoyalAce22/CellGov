@@ -42,8 +42,8 @@ use cellgov_time::{Budget, InstructionCost};
 ///
 /// - the program counter, on the fetch path;
 /// - the raw address operand, on the load/store path;
-/// - the staged `MFC_LSA`, where an MFC put or putllc names a range
-///   local store cannot hold.
+/// - the staged `MFC_LSA`, where an MFC put, get, getllar or putllc
+///   names a range local store cannot hold.
 ///
 /// Local store spans 18 bits, so none of them fits the detail half and
 /// the masked value gives the address modulo 64 KB. [`LocalDiagnostics`]
@@ -63,19 +63,19 @@ const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
 /// A refused `rchcnt` keeps its own fault class. The trace then
 /// distinguishes it from a refused `rdch` / `wrch` on the same channel.
 const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
-/// A parked MFC GET whose effective address resolves to no region, or
-/// whose local-store destination escapes the store. Its low bits carry
-/// the transfer's tag id; [`LocalDiagnostics::faulting_ea`] carries the
-/// effective address whole.
+/// A parked MFC GET whose effective address resolves to no region. Its
+/// low bits carry the transfer's tag id; [`LocalDiagnostics::faulting_ea`]
+/// carries the effective address whole. A destination that escapes
+/// local store is [`FAULT_LS_OUT_OF_RANGE`], as it is for a put.
 const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
 /// An MFC command whose staged tag id is outside 0..31. The low bits
 /// carry the value the guest wrote, masked to 16 bits.
 const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 /// A synchronous MFC read -- `getllar` -- whose effective address
-/// resolves to no region, or whose local-store destination escapes the
-/// store. Either arm carries the low 16 bits of the effective address,
-/// masked so the detail cannot reach the class field.
-/// [`LocalDiagnostics::faulting_ea`] carries the whole address.
+/// resolves to no region. The detail carries the low 16 bits of the
+/// effective address, masked so it cannot reach the class field;
+/// [`LocalDiagnostics::faulting_ea`] carries the whole address. A
+/// destination that escapes local store is [`FAULT_LS_OUT_OF_RANGE`].
 ///
 /// Distinct from [`FAULT_MFC_GET_UNRESOLVED`] so a trace separates a
 /// line the atomic path never read from a parked transfer that never
@@ -161,6 +161,40 @@ fn guest_fault(class: u32, detail: u32) -> FaultKind {
         "fault class 0x{class:08x} reaches into the detail field",
     );
     FaultKind::Guest(class | (detail & FAULT_DETAIL_MASK))
+}
+
+/// Which end of a main-memory-to-local-store copy refused it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CopyRefusal {
+    /// No region backs the source range.
+    Unresolved,
+    /// The destination range escapes local store.
+    LocalStoreEscapes,
+}
+
+/// Copy `size` bytes of committed memory at `ea` into local store at
+/// `lsa`, or name the end that refused.
+///
+/// The source is tested first, so an escaping destination refuses only
+/// where the source resolves. Either refusal leaves local store
+/// untouched.
+fn copy_into_local_store(
+    ls: &mut [u8],
+    memory: &cellgov_mem::GuestMemory,
+    ea: u64,
+    lsa: u32,
+    size: u32,
+) -> Result<(), CopyRefusal> {
+    let bytes = ByteRange::new(GuestAddr::new(ea), u64::from(size))
+        .and_then(|src| memory.read(src))
+        .ok_or(CopyRefusal::Unresolved)?;
+    let dst_start = lsa as usize;
+    let slot = dst_start
+        .checked_add(size as usize)
+        .and_then(|end| ls.get_mut(dst_start..end))
+        .ok_or(CopyRefusal::LocalStoreEscapes)?;
+    slot.copy_from_slice(bytes);
+    Ok(())
 }
 
 /// Records the bytes a transfer copied from main memory into local store.
@@ -260,29 +294,33 @@ impl ExecutionUnit for SpuExecutionUnit {
             // A transfer of no bytes reads no main storage and writes no
             // local store, so neither address has to resolve for it.
             // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
-            let moved = size == 0
-                || ByteRange::new(GuestAddr::new(ea), u64::from(size))
-                    .and_then(|src| ctx.memory().read(src))
-                    .and_then(|bytes| {
-                        let dst_start = lsa as usize;
-                        let dst_end = dst_start.checked_add(size as usize)?;
-                        let slot = self.state.ls.get_mut(dst_start..dst_end)?;
-                        slot.copy_from_slice(bytes);
-                        Some(())
-                    })
-                    .is_some();
-            if !moved {
+            let moved = if size == 0 {
+                Ok(())
+            } else {
+                copy_into_local_store(&mut self.state.ls, ctx.memory(), ea, lsa, size)
+            };
+            if let Err(refusal) = moved {
                 // The tag bit is the guest's only signal that the
                 // transfer finished. Publishing it here would report a
                 // completion over local store the transfer never wrote,
-                // so the refusal is named instead.
+                // so the refusal is named instead, by the end that
+                // refused: the address that end names rides whole beside
+                // the code.
+                let (fault, address) = match refusal {
+                    CopyRefusal::Unresolved => {
+                        (guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id)), ea)
+                    }
+                    CopyRefusal::LocalStoreEscapes => {
+                        (guest_fault(FAULT_LS_OUT_OF_RANGE, lsa), u64::from(lsa))
+                    }
+                };
                 effects.clear();
                 self.status = UnitStatus::Faulted;
                 return ExecutionStepResult {
                     yield_reason: YieldReason::Fault,
                     consumed_cost: InstructionCost::new(0),
-                    local_diagnostics: LocalDiagnostics::with_pc_ea(self.state.pc as u64, ea),
-                    fault: Some(guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id))),
+                    local_diagnostics: LocalDiagnostics::with_pc_ea(self.state.pc as u64, address),
+                    fault: Some(fault),
                     syscall_args: None,
                 };
             }
@@ -367,30 +405,33 @@ impl ExecutionUnit for SpuExecutionUnit {
                     // line reaches whichever region backs it. The guest
                     // writes `ea` through MFC_EAH and MFC_EAL, so it can
                     // also name an address no region backs.
-                    let read = ByteRange::new(GuestAddr::new(ea), u64::from(size))
-                        .and_then(|src| ctx.memory().read(src))
-                        .and_then(|bytes| {
-                            let dst_start = lsa as usize;
-                            let dst_end = dst_start.checked_add(size as usize)?;
-                            let slot = self.state.ls.get_mut(dst_start..dst_end)?;
-                            slot.copy_from_slice(bytes);
-                            Some(())
-                        });
-                    if read.is_none() {
+                    let read =
+                        copy_into_local_store(&mut self.state.ls, ctx.memory(), ea, lsa, size);
+                    if let Err(refusal) = read {
                         // The reservation is the guest's evidence that
                         // it holds the line. Acquiring one over bytes
                         // that never arrived would let a later putllc
                         // succeed against a comparison made on stale
                         // local store, so the refusal is named and no
-                        // reservation is taken.
+                        // reservation is taken. The end that refused
+                        // names the fault, and its address rides whole
+                        // beside the code.
+                        let (fault, address) = match refusal {
+                            CopyRefusal::Unresolved => {
+                                (guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32), ea)
+                            }
+                            CopyRefusal::LocalStoreEscapes => {
+                                (guest_fault(FAULT_LS_OUT_OF_RANGE, lsa), u64::from(lsa))
+                            }
+                        };
                         self.state.reservation = None;
                         effects.clear();
                         self.status = UnitStatus::Faulted;
                         return ExecutionStepResult {
                             yield_reason: YieldReason::Fault,
                             consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                            local_diagnostics: LocalDiagnostics::with_pc_ea(step_pc, ea),
-                            fault: Some(guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32)),
+                            local_diagnostics: LocalDiagnostics::with_pc_ea(step_pc, address),
+                            fault: Some(fault),
                             syscall_args: None,
                         };
                     }
