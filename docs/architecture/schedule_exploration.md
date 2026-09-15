@@ -67,7 +67,7 @@ barriers cannot interact, why the cross-unit half of the reservation
 rule is the half a footprint pair is asked for, and why the granule
 arithmetic cannot saturate.
 
-Two things reach committed state without reaching a footprint. Guest
+Three things reach committed state without reaching a footprint. Guest
 time is the first: one global clock advances per step, a DMA completion lands at the
 first commit whose clock reached its completion tick, and a PPU `mftb`
 reads that clock straight into a guest register, so a step that
@@ -77,7 +77,14 @@ independent can therefore commit different memory when they swap;
 [`shared_clock`](../../crates/cellgov_explore/tests/shared_clock.rs)
 holds the witness. The second is the RSX FIFO advance pass, whose
 effects commit guest memory and sweep reservations from a batch no
-unit's step emitted.
+unit's step emitted. The third is the LV2 handler surface: a footprint
+reads one unit's own step effects, and an LV2 handler's commit through
+`Runtime::host_write` belongs to no unit's step.
+
+A park the commit pipeline takes from the step result rather than an
+effect does reach a footprint. The independence relation reads the
+yield reason for it, so a wake of the parked unit conflicts with the
+step that parked it rather than pruning against it.
 
 `Execution` carries those footprints as events: one per retired step,
 identified by the step's position and the unit that ran it. It builds

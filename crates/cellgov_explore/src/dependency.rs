@@ -34,15 +34,42 @@
 //! emits effects that commit guest memory and sweep reservations, and
 //! `commit_step` prepends them to the next space-0 batch. Those
 //! effects belong to no unit's step, so no footprint names them.
+//!
+//! Two ways a unit's status changes reach no footprint, so a wake of
+//! that unit prunes against the step that parked it:
+//!
+//! - An LV2 `MailboxSend` handler returns a unit to runnable whatever
+//!   parked it. A footprint reads the unit's own step effects. An LV2
+//!   handler's effects commit through `Runtime::host_write` inside
+//!   `commit_step` instead, and that same boundary hides
+//!   LV2-committed guest writes. No workload built from the fake ISA
+//!   reaches this path, because no LV2 handler runs.
+//! - `Runtime::set_unit_status_override` is public, so the program
+//!   driving the runtime can change a unit's status outside every
+//!   path this module reasons about. `cellgov_boot` does, mid-run:
+//!   `run_pending_child_inits` holds every other runnable unit
+//!   `Blocked` across a spawned child's `module_start` and restores
+//!   each one afterward. An exploration over a window of a boot that
+//!   spawns a child covers those steps, so this one is reachable.
+//!
+//! A park the commit pipeline reads off the step result is visible:
+//! [`StepFootprint::from_step`] reads it too, and
+//! `YieldReason::parks_without_an_effect` is where a new yield reason
+//! picks its side. One park stays invisible, and so does its wake:
+//! LV2 dispatch parks a syscall's source with no effect and no yield
+//! reason of its own, then returns it to runnable the same nameless
+//! way.
 
 use cellgov_effects::Effect;
+use cellgov_exec::YieldReason;
 use cellgov_mem::ByteRange;
 use cellgov_sync::{BarrierId, MailboxId, SignalId, RESERVATION_LINE_BYTES};
 
 /// Shared resources one execution step accessed.
 ///
-/// Build via [`StepFootprint::from_effects`] from the step's emitted
-/// effect list.
+/// Build via [`StepFootprint::from_step`], which reads the whole step.
+/// [`StepFootprint::from_effects`] reads the effect list alone and
+/// records no park the step result carries.
 #[derive(Debug, Clone, Default)]
 pub struct StepFootprint {
     /// Byte ranges written via `SharedWriteIntent` or `ConditionalStore`.
@@ -82,12 +109,34 @@ pub struct StepFootprint {
 }
 
 impl StepFootprint {
+    /// Extract a footprint from one whole step.
+    ///
+    /// The commit pipeline parks a unit that yields
+    /// [`YieldReason::DmaWait`] from the step result alone, and no
+    /// effect names that park. [`StepFootprint::from_effects`]
+    /// therefore misses it, and a wake of the parked unit prunes
+    /// against the step that parked it.
+    pub fn from_step(
+        unit: cellgov_event::UnitId,
+        yielded: YieldReason,
+        effects: &[Effect],
+    ) -> Self {
+        let mut fp = Self::from_effects(effects);
+        if yielded.parks_without_an_effect() {
+            fp.wait_units.push(unit);
+        }
+        fp
+    }
+
     /// Extract a footprint from the effects emitted in one step.
     ///
     /// `FaultRaised` discards the whole step's effects upstream and
     /// `TraceMarker` carries no guest state. The two RSX variants do
     /// commit guest state, but no execution unit emits them: they
     /// reach a batch from the FIFO advance pass.
+    ///
+    /// [`StepFootprint::from_step`] adds the park a step result
+    /// carries.
     pub fn from_effects(effects: &[Effect]) -> Self {
         let mut fp = Self::default();
         for effect in effects {

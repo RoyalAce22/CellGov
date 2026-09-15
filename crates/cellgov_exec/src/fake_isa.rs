@@ -97,6 +97,18 @@ pub enum FakeOp {
         /// Transfer size in bytes.
         len: u64,
     },
+    /// Yield `DmaWait`, which parks the unit.
+    ///
+    /// The park reaches the commit pipeline through the step result and
+    /// no effect names it, which is what separates this from
+    /// [`FakeOp::Wait`] and [`FakeOp::Barrier`].
+    ///
+    /// The yield is unconditional. An SPU yields only while the
+    /// masked tags are not yet complete. A program therefore puts a
+    /// transfer before the wait. With no transfer outstanding, the
+    /// all-blocked time warp finds nothing to fire and the next step
+    /// refuses as `StepError::AllBlocked`.
+    DmaWait,
     /// Emit `WaitOnEvent` on a signal with the given mask.
     Wait {
         /// Signal id.
@@ -293,6 +305,7 @@ impl ExecutionUnit for FakeIsaUnit {
                 });
                 YieldReason::DmaSubmitted
             }
+            FakeOp::DmaWait => YieldReason::DmaWait,
             FakeOp::Wait { signal, mask: _ } => {
                 effects.push(Effect::WaitOnEvent {
                     target: WaitTarget::Signal(cellgov_sync::SignalId::new(signal)),

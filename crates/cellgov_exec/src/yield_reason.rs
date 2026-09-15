@@ -65,6 +65,39 @@ impl YieldReason {
         }
     }
 
+    /// Whether the commit pipeline parks the unit on this yield
+    /// without any effect naming the park.
+    ///
+    /// The pipeline counts one park per `BlockReason`:
+    ///
+    /// - a `WaitOnEvent` effect
+    /// - a `MailboxReceiveAttempt` effect whose mailbox comes back
+    ///   empty
+    /// - this yield reason, which no effect names
+    ///
+    /// A reader that builds a per-step record from the effect list
+    /// alone sees the first two and asks here for the third.
+    ///
+    /// `Syscall` answers `false` although LV2 dispatch parks its
+    /// source too, at the blocking and timer-sleep arms that the
+    /// pipeline counts under no `BlockReason`. LV2 returns that
+    /// waiter to runnable through a status override, and refuses a
+    /// `WakeUnit` effect by name. Both halves of that pair are
+    /// nameless to an effect-list reader.
+    pub fn parks_without_an_effect(&self) -> bool {
+        match self {
+            YieldReason::DmaWait => true,
+            YieldReason::WaitingSync
+            | YieldReason::MailboxAccess
+            | YieldReason::BudgetExhausted
+            | YieldReason::DmaSubmitted
+            | YieldReason::Syscall
+            | YieldReason::InterruptBoundary
+            | YieldReason::Fault
+            | YieldReason::Finished => false,
+        }
+    }
+
     /// Whether the commit pipeline's trivial-step fast path is
     /// eligible for this yield. The fast path skips per-step LV2
     /// drain / syscall-response arbitration; a yield reason that

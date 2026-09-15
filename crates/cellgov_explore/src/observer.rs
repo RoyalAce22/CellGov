@@ -41,7 +41,8 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 // A warp inside the step can widen the set the
                 // scheduler chose from, so the point reads it here.
                 let runnable: Vec<_> = rt.last_runnable().to_vec();
-                let mut footprint = StepFootprint::from_effects(&step.effects);
+                let mut footprint =
+                    StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
                 // An access through one view of a shared mapping
                 // reaches every sibling view's bytes, whether the
                 // access writes them or reads them.

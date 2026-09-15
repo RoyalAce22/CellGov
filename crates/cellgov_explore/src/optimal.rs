@@ -308,7 +308,8 @@ fn run_one(
         }
         let runnable = rt.last_runnable().to_vec();
         let chosen = frames[depth].chosen;
-        let mut footprint = StepFootprint::from_effects(&step.effects);
+        let mut footprint =
+            StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
         let write_aliases: Vec<_> = footprint
             .shared_writes
             .iter()
