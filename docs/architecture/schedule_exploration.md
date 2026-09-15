@@ -52,9 +52,11 @@ count for the whole run, so a search can answer for every outcome and
 still report none. A result carries the drops beside the count for that
 reason: an absent count with no drop means a bound stopped the search
 or it claims no count of its own, and an absent count with a number
-means that many branches were given up. The number counts branches over
-every execution rather than classes, since one branch can carry more
-than one owed sequence.
+means that many reversals were given up. The number counts each drop
+over every execution rather than classes, since one drop can carry more
+than one owed sequence. Both searches report it. The backtrack-set
+search claims no class count in any case, so its number names cover
+given up beside a count it never held.
 [`exhaustive_cover`](../../crates/cellgov_explore/tests/exhaustive_cover.rs)
 walks the choice tree of a small workload, finds both committed
 memories it can reach, and holds the search against them: it reaches

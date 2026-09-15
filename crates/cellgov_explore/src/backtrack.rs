@@ -53,7 +53,13 @@ struct Candidate {
 ///   against it.
 ///
 /// [`ExplorationResult::schedules_pruned`] counts candidates dropped
-/// because an earlier one already named the same prefix.
+/// because an earlier one already named the same prefix, and
+/// [`ExplorationResult::reversals_dropped`] the races whose point left
+/// no unit to force.
+///
+/// This search runs more than one execution per class, so it claims no
+/// [`ExplorationResult::classes_explored`] whatever it drops. Its drop
+/// count therefore names cover given up rather than a count withdrawn.
 pub fn explore_backtrack<F>(mut make_runtime: F, config: &ExplorationConfig) -> ExplorationResult
 where
     F: FnMut() -> cellgov_core::Runtime,
@@ -75,11 +81,18 @@ where
     let mut seen: BTreeSet<Prefix> = BTreeSet::new();
     let mut worklist: Vec<Candidate> = Vec::new();
     let mut schedules_pruned = 0usize;
+    let mut dropped_reversals = 0usize;
 
     // A truncated execution's race set covers a prefix of the
     // workload, so it names no backtrack point worth replaying.
     if !baseline_stop.is_truncated() {
-        push_candidates(&log, &mut seen, &mut worklist, &mut schedules_pruned);
+        push_candidates(
+            &log,
+            &mut seen,
+            &mut worklist,
+            &mut schedules_pruned,
+            &mut dropped_reversals,
+        );
     }
 
     let mut iter = AlternateIteration {
@@ -133,7 +146,13 @@ where
             if hash != baseline.hash {
                 iter.found_divergence = true;
             }
-            push_candidates(&log, &mut seen, &mut worklist, &mut iter.schedules_pruned);
+            push_candidates(
+                &log,
+                &mut seen,
+                &mut worklist,
+                &mut iter.schedules_pruned,
+                &mut dropped_reversals,
+            );
         }
         iter.schedules.push(ScheduleRecord {
             branch_step: candidate.branch_step,
@@ -151,12 +170,14 @@ where
         iter.mark_baseline_truncated();
     }
 
-    classify_iteration(
+    let mut result = classify_iteration(
         iter,
         baseline,
         total_branching_points,
         first_invariant_break,
-    )
+    );
+    result.reversals_dropped = dropped_reversals;
+    result
 }
 
 /// Add a backtrack point for every race in `log`'s execution.
@@ -168,11 +189,17 @@ where
 /// unit that can reach the later event's state, and the search cannot
 /// tell which one does. The paper's own implementation takes the same
 /// branch [FlanaganGodefroid2005 p:6 s:4.1].
+///
+/// Where that fallback leaves no unit to force, the race reaches no
+/// candidate and `dropped` counts it. `suppressed` counts the other
+/// way a candidate does not run: an earlier one already named its
+/// prefix, which costs no class.
 fn push_candidates(
     log: &DecisionLog,
     seen: &mut BTreeSet<Prefix>,
     worklist: &mut Vec<Candidate>,
     suppressed: &mut usize,
+    dropped: &mut usize,
 ) {
     let execution = Execution::from_log(log);
     let relation = execution.happens_before();
@@ -192,6 +219,13 @@ fn push_candidates(
                 .filter(|unit| *unit != point.chosen)
                 .collect()
         };
+        // A point that ran the only runnable unit leaves the fallback
+        // nothing to force: every other unit was parked there. The
+        // reversal is owed and undeliverable, so it is counted here
+        // rather than given up in silence.
+        if forced.is_empty() {
+            *dropped += 1;
+        }
         for unit in forced {
             let mut prefix: Prefix = points[..at].iter().map(|p| p.chosen).collect();
             prefix.push(unit);

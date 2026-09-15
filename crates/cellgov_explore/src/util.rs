@@ -280,9 +280,10 @@ pub fn classify_iteration(
         schedules: iter.schedules,
         outcome,
         total_branching_points,
-        // The optimal search overwrites these two on the result this
-        // returns. No other search counts a class or a drop, so the zero
-        // below is that search's silence and not a measurement.
+        // `explore_optimal` overwrites both of these on the result this
+        // returns, and `explore_backtrack` the drop count. The bounded
+        // enumerator overwrites neither, so for it the zeros below are
+        // silence rather than a measurement.
         classes_explored: None,
         reversals_dropped: 0,
         bounds_hit: iter.bounds_hit,

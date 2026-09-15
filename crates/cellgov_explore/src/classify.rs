@@ -108,14 +108,13 @@ pub struct ExplorationResult {
     ///
     /// A run that dropped one reversal and one that gave up half its
     /// classes both report no count, and only this separates them. It
-    /// counts branches over every execution the search ran, and one
-    /// branch can carry more than one owed sequence, so it is not a
-    /// count of the classes given up.
+    /// counts each drop over every execution the search ran, and one
+    /// drop can carry more than one owed sequence, so it is not a count
+    /// of the classes given up.
     ///
     /// Zero beside an empty count means no drop withdrew the count: a
     /// bound or a short stop did, or the search claims no count of its
-    /// own. [`crate::explore_backtrack`] counts no drop, so its zero is
-    /// no claim.
+    /// own.
     pub reversals_dropped: usize,
     /// True if the `max_schedules` bound was hit, or if the baseline or
     /// any replay stopped before the workload finished.
