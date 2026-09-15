@@ -114,7 +114,7 @@ fn the_verdict_reads_schedule_stable() {
     assert_eq!(
         result.outcome,
         cellgov_explore::classify::OutcomeClass::ScheduleStable,
-        "the pruned alternate is the one that diverges",
+        "the alternate the search never owes is the one that diverges",
     );
     assert!(!result.bounds_hit, "no bound withdraws the claim");
     assert_eq!(
@@ -122,10 +122,11 @@ fn the_verdict_reads_schedule_stable() {
         StopReason::Stalled,
         "the baseline hash covers the whole workload",
     );
-    // The same verdict follows from a baseline that holds no branching
-    // point, so the prune needs a witness of its own.
+    // The search reports that it covered every equivalence class and
+    // the verdict is still wrong: the relation it explores over cannot
+    // see the clock.
     assert!(
-        result.schedules_pruned > 0,
-        "the verdict rests on a prune, so at least one alternate must be pruned",
+        result.classes_explored.is_some(),
+        "the search claims it covered every class",
     );
 }

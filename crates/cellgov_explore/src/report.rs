@@ -18,6 +18,13 @@ pub fn format_human(result: &ExplorationResult) -> String {
         result.total_branching_points
     ));
     out.push_str(&format!("schedules_explored: {}\n", result.schedules.len()));
+    out.push_str(&format!(
+        "classes_explored: {}\n",
+        match result.classes_explored {
+            Some(n) => n.to_string(),
+            None => "not covered".to_string(),
+        }
+    ));
     out.push_str(&format!("schedules_pruned: {}\n", result.schedules_pruned));
     out.push_str(&format!(
         "schedules_truncated: {}\n",
@@ -89,6 +96,7 @@ pub fn format_json(result: &ExplorationResult) -> String {
         "baseline_stop_class": result.baseline_stop.class().label(),
         "branching_points": result.total_branching_points,
         "schedules_explored": result.schedules.len(),
+        "classes_explored": result.classes_explored,
         "schedules_pruned": result.schedules_pruned,
         "schedules_truncated": result.schedules_truncated,
         "schedules_refused": result.schedules_refused,

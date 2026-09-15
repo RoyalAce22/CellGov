@@ -1,11 +1,15 @@
-//! Runs the baseline schedule and records every scheduling decision
-//! with the full runnable set at each step.
+//! Runs one schedule and records every scheduling decision with the
+//! full runnable set at each step.
+//!
+//! A refused commit stops the observation and reports
+//! [`StopReason::CommitError`]: the step's effects never reached guest
+//! state, so neither its [`DecisionPoint`] nor any later step describes
+//! the schedule the caller asked for.
 
 use crate::decision::{DecisionLog, DecisionPoint};
 use crate::dependency::StepFootprint;
 use crate::util::StopReason;
-use cellgov_core::{Runtime, RuntimeSnapshot};
-use std::collections::BTreeMap;
+use cellgov_core::Runtime;
 
 /// Drive `rt` to stall and return the recorded [`DecisionLog`] with why
 /// the run stopped.
@@ -15,40 +19,17 @@ use std::collections::BTreeMap;
 /// [`StopReason::Stalled`] means the log and `rt`'s memory hash both
 /// describe a prefix of the schedule.
 pub fn observe_decisions(rt: &mut Runtime) -> (DecisionLog, StopReason) {
-    let (log, _, stop) = observe_decisions_with_snapshots(rt, false);
-    (log, stop)
+    observe(rt, None)
 }
 
 /// [`observe_decisions`] that stops after `max_steps` committed steps
 /// and reports [`StopReason::StepBound`].
 pub fn observe_decisions_bounded(rt: &mut Runtime, max_steps: usize) -> (DecisionLog, StopReason) {
-    let (log, _, stop) = observe(rt, false, Some(max_steps));
-    (log, stop)
+    observe(rt, Some(max_steps))
 }
 
-/// Like [`observe_decisions`], but with `capture=true` also records
-/// a [`RuntimeSnapshot`] keyed by step index at every branching
-/// point (>=2 runnable units). Skipping non-branching steps bounds
-/// peak memory to `branching_points * sizeof(snapshot)`.
-///
-/// A refused commit stops the observation and is reported as
-/// [`StopReason::CommitError`]: the step's effects never reached guest
-/// state, so neither its [`DecisionPoint`] nor any later step describes
-/// the schedule the caller asked for.
-pub fn observe_decisions_with_snapshots(
-    rt: &mut Runtime,
-    capture: bool,
-) -> (DecisionLog, BTreeMap<usize, RuntimeSnapshot>, StopReason) {
-    observe(rt, capture, None)
-}
-
-fn observe(
-    rt: &mut Runtime,
-    capture: bool,
-    max_steps: Option<usize>,
-) -> (DecisionLog, BTreeMap<usize, RuntimeSnapshot>, StopReason) {
+fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReason) {
     let mut log = DecisionLog::new();
-    let mut snapshots: BTreeMap<usize, RuntimeSnapshot> = BTreeMap::new();
     let mut committed = 0usize;
     let stop = loop {
         let runnable: Vec<_> = rt.registry().runnable_ids().collect();
@@ -59,11 +40,6 @@ fn observe(
             break StopReason::StepBound;
         }
         let step_idx = rt.steps_taken();
-        if capture && runnable.len() >= 2 {
-            // Snapshot must precede the step so alternates replay the
-            // branching-point step itself with a different choice.
-            snapshots.insert(step_idx, rt.snapshot());
-        }
         match rt.step() {
             Ok(step) => {
                 let mut footprint = StepFootprint::from_effects(&step.effects);
@@ -96,7 +72,7 @@ fn observe(
             Err(e) => break StopReason::StepError(e),
         }
     };
-    (log, snapshots, stop)
+    (log, stop)
 }
 
 #[cfg(test)]

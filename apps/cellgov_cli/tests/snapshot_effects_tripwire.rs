@@ -1,11 +1,12 @@
 //! Liveness gate for the `effects_buf`-empty debug assert in
-//! `Runtime::snapshot()`, which holds only at a batch boundary. The
-//! per-step loop never snapshots; only the schedule-exploration
-//! observer (`cellgov_explore::observe_decisions_with_snapshots`)
-//! does, once per branching point, so the assert is evaluated
-//! exactly `ExplorationResult::total_branching_points` times. Each
-//! foundation scenario must report that count > 0 or the assert's
-//! silence is vacuous; the declared lower bounds are diagnostic only.
+//! `Runtime::snapshot()`, which holds only at a batch boundary.
+//!
+//! The per-step loop never snapshots. Schedule exploration does: it
+//! snapshots the runtime the caller gives it once, and restores that
+//! snapshot for each execution it runs. So every case below evaluates
+//! the assert once, and a case that returns a result at all is the
+//! witness. The branching-point counts are a trajectory diagnostic; a
+//! scenario that stopped branching would still evaluate the assert.
 
 #![allow(
     clippy::print_stderr,
@@ -17,12 +18,12 @@ use cellgov_testkit::fixtures;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SnapshotStatus {
-    /// The scenario produces at least one branching point during
-    /// baseline run; `Runtime::snapshot` is called there, and the
-    /// effects_buf-empty debug_assert is evaluated. Witness count
-    /// (`total_branching_points`) must be > 0.
-    /// `expected_at_least` is the empirical lower bound, surfaced
-    /// in the diagnostic but not asserted == exactly.
+    /// The exploration ran, so it called `Runtime::snapshot` and
+    /// evaluated the `effects_buf`-empty debug assert.
+    ///
+    /// `expected_at_least` is the branching-point count measured for
+    /// this case. The test reports it as a diagnostic and asserts
+    /// nothing about it.
     Reached { expected_at_least: usize },
 }
 

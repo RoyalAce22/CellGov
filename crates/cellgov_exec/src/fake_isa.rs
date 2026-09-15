@@ -40,6 +40,25 @@ pub enum FakeOp {
         /// Byte count.
         len: u64,
     },
+    /// Emit `SharedWriteIntent` of `len` zero-valued bytes at
+    /// `base + acc * stride`.
+    ///
+    /// The address comes from the accumulator, so which range the store
+    /// touches depends on what an earlier [`FakeOp::SharedLoad`] read.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the index arithmetic overflows `u64`. The commit
+    /// pipeline refuses an address past the end of guest memory as
+    /// `CommitError::OutOfRange`.
+    SharedStoreIndexed {
+        /// Address the accumulator indexes from.
+        base: u64,
+        /// Bytes between one index and the next.
+        stride: u64,
+        /// Byte count.
+        len: u64,
+    },
     /// Emit `Effect::ReservationAcquire` for the 128-byte line
     /// containing `line_addr`.
     ReservationAcquire {
@@ -175,6 +194,23 @@ impl ExecutionUnit for FakeIsaUnit {
                 effects.push(Effect::shared_write(
                     range,
                     WritePayload::new(vec![byte; len as usize]),
+                    self.id,
+                    GuestTicks::ZERO,
+                ));
+                YieldReason::BudgetExhausted
+            }
+            FakeOp::SharedStoreIndexed { base, stride, len } => {
+                // The index comes from committed memory, so the
+                // arithmetic is checked.
+                let addr = u64::from(self.acc)
+                    .checked_mul(stride)
+                    .and_then(|offset| base.checked_add(offset))
+                    .expect("SharedStoreIndexed address must not overflow");
+                let range = ByteRange::new(GuestAddr::new(addr), len)
+                    .expect("SharedStoreIndexed range must be valid");
+                effects.push(Effect::shared_write(
+                    range,
+                    WritePayload::new(vec![0; len as usize]),
                     self.id,
                     GuestTicks::ZERO,
                 ));

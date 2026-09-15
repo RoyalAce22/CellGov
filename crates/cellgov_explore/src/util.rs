@@ -1,11 +1,7 @@
 //! Shared helpers used by the exploration entry points.
 
 use crate::classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
-use crate::config::ExplorationConfig;
-use crate::decision::DecisionLog;
-use crate::execution::Execution;
 use cellgov_core::{CommitError, Runtime, StepError};
-use cellgov_event::UnitId;
 
 /// Why [`run_to_stall`] returned.
 ///
@@ -111,15 +107,10 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
     }
 }
 
-/// Build an override list that defers steps `0..branch_step` to the
-/// fallback and forces `choice` at `branch_step`.
-pub fn build_overrides(branch_step: usize, choice: UnitId) -> Vec<Option<UnitId>> {
-    let mut v = vec![None; branch_step];
-    v.push(Some(choice));
-    v
-}
-
-/// Tally of a pass over branching-point alternates.
+/// Tally one search kept over the executions it ran.
+///
+/// Every search collapses its own tally through
+/// [`classify_iteration`], which holds the truncation rules.
 pub struct AlternateIteration {
     /// Per-schedule outcomes.
     pub schedules: Vec<ScheduleRecord>,
@@ -133,7 +124,8 @@ pub struct AlternateIteration {
     /// alternate schedule, and a prefix differs from a completed
     /// baseline whether or not the workload is schedule-sensitive.
     pub found_divergence: bool,
-    /// Alternates skipped by dependency pruning.
+    /// Starts the search dropped before they reached a record; see
+    /// [`ExplorationResult::schedules_pruned`].
     pub schedules_pruned: usize,
     /// Alternates whose replay stopped before the workload finished.
     pub schedules_truncated: usize,
@@ -156,85 +148,6 @@ impl AlternateIteration {
         for record in &mut self.schedules {
             record.truncated = true;
         }
-    }
-}
-
-/// Iterate each non-pruned alternate at every branching point.
-///
-/// The pass prunes an alternate when no event of the unit the schedule
-/// chose conflicts with an event of the alternate unit anywhere in the
-/// run.
-///
-/// `process` is called with `(branch_step, alternate_unit)` and returns
-/// that alternate's final memory hash together with why its replay
-/// stopped. Iteration stops early when the `max_schedules` bound is
-/// reached.
-///
-/// Only a replay that reports [`StopReason::Stalled`] can contribute
-/// `found_divergence`; any other reason marks the pass inconclusive
-/// instead.
-pub fn for_each_alternate<F>(
-    log: &DecisionLog,
-    config: &ExplorationConfig,
-    baseline_hash: u64,
-    mut process: F,
-) -> AlternateIteration
-where
-    F: FnMut(usize, UnitId) -> (u64, StopReason),
-{
-    let branching: Vec<_> = log.branching_points().collect();
-    let execution = Execution::from_log(log);
-    let mut schedules = Vec::new();
-    let mut bounds_hit = false;
-    let mut found_divergence = false;
-    let mut schedules_pruned: usize = 0;
-    let mut schedules_truncated: usize = 0;
-    let mut schedules_refused: usize = 0;
-
-    'outer: for bp in &branching {
-        let default_choice = bp.chosen;
-        for &alt in &bp.runnable {
-            if alt == default_choice {
-                continue;
-            }
-            if schedules.len() >= config.max_schedules {
-                bounds_hit = true;
-                break 'outer;
-            }
-
-            if execution.units_independent(default_choice, alt) {
-                schedules_pruned += 1;
-                continue;
-            }
-
-            let (hash, stop) = process(bp.step, alt);
-            let truncated = stop.is_truncated();
-            if truncated {
-                schedules_truncated += 1;
-                bounds_hit = true;
-                if stop.class() == StopClass::Refusal {
-                    schedules_refused += 1;
-                }
-            } else if hash != baseline_hash {
-                found_divergence = true;
-            }
-            schedules.push(ScheduleRecord {
-                branch_step: bp.step,
-                alternate_choice: alt,
-                memory_hash: hash,
-                stop,
-                truncated,
-            });
-        }
-    }
-
-    AlternateIteration {
-        schedules,
-        bounds_hit,
-        found_divergence,
-        schedules_pruned,
-        schedules_truncated,
-        schedules_refused,
     }
 }
 
@@ -263,6 +176,9 @@ pub fn classify_iteration(
         schedules: iter.schedules,
         outcome,
         total_branching_points,
+        // A search that runs one execution per class sets the field on
+        // the result this returns.
+        classes_explored: None,
         bounds_hit: iter.bounds_hit,
         schedules_pruned: iter.schedules_pruned,
         schedules_truncated: iter.schedules_truncated,

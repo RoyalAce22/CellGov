@@ -171,7 +171,7 @@ fn regression_single_unit_no_branching() {
 }
 
 #[test]
-fn regression_disjoint_writers_pruned() {
+fn regression_disjoint_writers_cost_one_execution() {
     let result = explore(
         || {
             let mem = GuestMemory::new(64);
@@ -201,13 +201,14 @@ fn regression_disjoint_writers_pruned() {
         &default_config(),
     );
     let r = result.expect("branching points exist");
-    assert!(
-        r.schedules_pruned > 0,
-        "disjoint writers must be pruned by dependency analysis"
+    assert_eq!(
+        r.classes_explored,
+        Some(1),
+        "disjoint writers race over nothing, so every schedule is one class"
     );
     assert!(
         r.schedules.is_empty(),
-        "all alternates should be pruned for disjoint writers"
+        "one class costs one execution, and the baseline is it"
     );
 }
 

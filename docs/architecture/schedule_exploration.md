@@ -3,34 +3,49 @@
 `cellgov_explore` enumerates legal alternate schedules without
 modifying the runtime, and classifies each outcome as
 `ScheduleStable`, `ScheduleSensitive`, or `Inconclusive`. Two searches
-reach that verdict, both replaying through a `PrescribedScheduler`
-within configurable `max_schedules` and `max_steps_per_run` bounds.
+reach that verdict, both forcing their choices through a
+`PrescribedScheduler` within configurable `max_schedules` and
+`max_steps_per_run` bounds. `max_schedules` bounds equivalence
+classes.
 
-The bounded enumerator records every branching point from a baseline
-run and tries each alternate at each one, pruning a pair of units
-whose steps never conflict. The backtrack-set search instead builds
-happens-before over the events one execution retired, takes the races,
-and replays one schedule per race with the later event's unit forced
-at the earlier event's step. Neither is optimal: a class can cost more
-than one execution in both. They exist together because they share no
-reduction, so they agree on the set of final memory hashes a workload
-can reach even where they disagree on what reaching it costs -- and a
-reduction that drops a class shows up as a disagreement rather than as
-a smaller count.
+The optimal search runs one execution per equivalence class. It runs
+an execution to a maximal sequence, reads its races, and for each one
+records the sequence that reaches the reversed order in a wakeup tree
+at the prefix before the earlier event. The next execution takes the
+least branch that tree holds. A sleep set carries the units already
+explored from a prefix so none is explored twice, and the wakeup tree
+is what keeps that sleep set from blocking: it holds enough of an owed
+sequence to reach the state the race asked for. This is the search
+behind `explore`, `explore_window` and `explore_with_regions`.
+
+The backtrack-set search is the older algorithm, kept beside it. It
+walks the same races without the wakeup trees and sleep sets, so a
+class can cost it more than one execution. It exists because the two
+share no reduction: they agree on the set of final memory hashes a
+workload reaches even where they disagree on what reaching it costs,
+and a reduction that drops a class shows up as a disagreement rather
+than as a smaller count. A smaller count is what a dropped class looks
+like to every measurement that does not have a second search to check
+against.
 
 ```mermaid
 flowchart TD
-  base["baseline run"] --> bp["record every branching point"]
-  bp --> alt["candidate alternate schedule"]
-  alt --> fp{"any step of the two units conflict?"}
-  fp -->|"no: provably independent"| prune["pruned, not replayed"]
-  fp -->|yes| replay["replay through PrescribedScheduler within max_schedules / max_steps_per_run"]
-  replay --> hash["multi-space committed-memory hash (plus named regions under explore_with_regions)"]
-  hash --> cls{"across explored schedules"}
+  run["run an execution to a maximal sequence"] --> races["build happens-before, take the races"]
+  races --> owe["per race: record the reversing sequence in the wakeup tree at the earlier event's prefix"]
+  owe --> back["retire the branch just explored, add its unit to that prefix's sleep set"]
+  back --> next{"any prefix still owes a branch?"}
+  next -->|yes| run
+  next -->|no| hash["compare the multi-space committed-memory hashes (plus named regions under explore_with_regions)"]
+  hash --> cls{"across the classes explored"}
   cls -->|all identical| stable["ScheduleStable"]
   cls -->|two differ| sens["ScheduleSensitive"]
   cls -->|"a bound, a refusal, or a baseline that committed nothing"| inc["Inconclusive"]
 ```
+
+`ScheduleStable` means no schedule diverges, not merely that no
+sampled one did, whenever the result carries a class count. The count
+is present only when the search covered one execution per class and
+hit no bound; a bounded run reports none and can only be inconclusive.
 
 `StepFootprint`, extracted from the ten shared-resource `Effect`
 variants, drives conservative dependency analysis: step pairs with

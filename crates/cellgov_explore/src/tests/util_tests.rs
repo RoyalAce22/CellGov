@@ -2,9 +2,6 @@
 
 use super::*;
 use cellgov_core::{CommitError, StepError};
-use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
-use cellgov_mem::GuestMemory;
-use cellgov_time::Budget;
 use strum::VariantArray;
 
 /// One refused commit, which stands for every shape the pipeline gives.
@@ -80,64 +77,55 @@ fn a_run_with_nothing_to_schedule_is_blocked() {
     );
 }
 
-/// Two units that write the same word, so dependency pruning keeps
-/// every alternate and the tallies below have something to count.
-fn contending_runtime() -> Runtime {
-    let mem = GuestMemory::new(64);
-    let mut rt = Runtime::new(mem, Budget::new(100), 100);
-    for imm in [0xAAu32, 0xBB] {
-        rt.register_unit_with(|id| {
-            FakeIsaUnit::new(
-                id,
-                vec![
-                    FakeOp::LoadImm(imm),
-                    FakeOp::SharedStore { addr: 0, len: 4 },
-                    FakeOp::End,
-                ],
-            )
-        });
+/// The tally a search keeps for `count` alternates that each stopped
+/// for `reason`.
+fn tally(count: usize, reason: StopReason) -> AlternateIteration {
+    let truncated = reason.is_truncated();
+    let schedules: Vec<crate::classify::ScheduleRecord> = (0..count)
+        .map(|index| crate::classify::ScheduleRecord {
+            branch_step: index,
+            alternate_choice: cellgov_event::UnitId::new(index as u64),
+            memory_hash: 0,
+            stop: reason,
+            truncated,
+        })
+        .collect();
+    AlternateIteration {
+        found_divergence: false,
+        bounds_hit: truncated,
+        schedules_truncated: if truncated { schedules.len() } else { 0 },
+        schedules_refused: if reason.class() == StopClass::Refusal {
+            schedules.len()
+        } else {
+            0
+        },
+        schedules_pruned: 0,
+        schedules,
     }
-    rt
-}
-
-fn contending_log() -> DecisionLog {
-    let mut rt = contending_runtime();
-    let (log, _) = crate::observer::observe_decisions(&mut rt);
-    log
 }
 
 #[test]
 fn a_refused_replay_is_counted_apart_from_one_a_cap_cut_short() {
-    let log = contending_log();
-    let config = ExplorationConfig::default();
-
-    let mut alternates = 0usize;
-    let refused = for_each_alternate(&log, &config, 0, |_, _| {
-        alternates += 1;
-        (0, StopReason::CommitError(REFUSED_COMMIT))
-    });
-    assert!(alternates > 0, "the workload must offer an alternate");
+    let alternates = 3usize;
+    let refused = tally(alternates, StopReason::CommitError(REFUSED_COMMIT));
     assert_eq!(refused.schedules_refused, alternates);
     assert_eq!(refused.schedules_truncated, alternates);
 
-    let bounded = for_each_alternate(&log, &config, 0, |_, _| (0, StopReason::StepBound));
+    let bounded = tally(alternates, StopReason::StepBound);
     assert_eq!(bounded.schedules_truncated, alternates);
     assert_eq!(
         bounded.schedules_refused, 0,
         "a cap the caller set is not a refusal the model gave"
     );
 
-    let stalled = for_each_alternate(&log, &config, 0, |_, _| (0, StopReason::Stalled));
+    let stalled = tally(alternates, StopReason::Stalled);
     assert_eq!(stalled.schedules_truncated, 0);
     assert_eq!(stalled.schedules_refused, 0);
 }
 
 #[test]
 fn a_withdrawn_baseline_taints_every_record_without_inventing_a_refusal() {
-    let log = contending_log();
-    let mut iter = for_each_alternate(&log, &ExplorationConfig::default(), 0, |_, _| {
-        (0, StopReason::Stalled)
-    });
+    let mut iter = tally(2, StopReason::Stalled);
     assert!(!iter.schedules.is_empty());
 
     iter.mark_baseline_truncated();

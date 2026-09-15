@@ -11,7 +11,13 @@ use cellgov_event::UnitId;
 /// `From<&OutcomeClass> for &'static str` impl.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr)]
 pub enum OutcomeClass {
-    /// All explored schedules produced identical committed memory.
+    /// Every schedule explored produced identical committed memory.
+    ///
+    /// [`ExplorationResult::classes_explored`] says how far the verdict
+    /// reaches. A count means the search covered one execution per
+    /// equivalence class and hit no bound, so the verdict covers every
+    /// schedule. An empty count holds the verdict to the schedules the
+    /// search sampled.
     #[strum(serialize = "schedule-stable")]
     ScheduleStable,
     /// At least two explored schedules produced distinct committed memory.
@@ -82,13 +88,28 @@ pub struct ExplorationResult {
     pub outcome: OutcomeClass,
     /// Total branching points observed in the baseline run.
     pub total_branching_points: usize,
+    /// Equivalence classes the search covered.
+    ///
+    /// Empty for a search that runs more than one execution per class,
+    /// and for one that hit a bound before it covered every class. See
+    /// [`OutcomeClass::ScheduleStable`] for what a count changes about
+    /// a verdict.
+    pub classes_explored: Option<usize>,
     /// True if the `max_schedules` bound was hit, or if the baseline or
     /// any replay stopped before the workload finished.
     ///
     /// [`Self::outcome`] can be [`OutcomeClass::Inconclusive`] with this
     /// false, when the baseline committed no step at all.
     pub bounds_hit: bool,
-    /// Alternates skipped by dependency pruning.
+    /// Starts the search dropped before they reached a record.
+    ///
+    /// What the count names depends on the search:
+    ///
+    /// - an alternate whose two units the execution proved independent;
+    /// - an execution the search dropped because every runnable unit
+    ///   was already explored from its prefix.
+    ///
+    /// Neither costs a class, so the count measures work saved.
     pub schedules_pruned: usize,
     /// Alternates whose recorded hash covers only a prefix of their
     /// schedule, counting every record when the baseline itself
@@ -107,10 +128,9 @@ pub struct ExplorationResult {
     /// caller to report: the baseline's, or the first replay that broke
     /// one when the baseline broke none.
     ///
-    /// Each replay restores the LV2 host from a baseline snapshot, so
-    /// the line is read per run rather than once at the end; the
-    /// exploration consumes its runtime, and no caller can read it
-    /// afterwards.
+    /// Each run restores the LV2 host from the search's start
+    /// snapshot, so the search reads the line after every run. The next
+    /// restore overwrites it.
     pub first_invariant_break: Option<String>,
 }
 

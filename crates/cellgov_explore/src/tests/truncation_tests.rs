@@ -1,16 +1,20 @@
 //! A prefix hash never reads as a divergence.
 //!
-//! Four pieces carry that rule, and each case below fails when one of
-//! them alone stops working: [`StopReason::is_truncated`], the
-//! [`ScheduleRecord::truncated`] flag `for_each_alternate` sets,
-//! [`AlternateIteration::mark_baseline_truncated`], and the `DIVERGED`
-//! suppression both report formatters apply.
+//! Three pieces carry that rule, and each case below fails when one of
+//! them alone stops working:
+//!
+//! - [`StopReason::is_truncated`];
+//! - [`AlternateIteration::mark_baseline_truncated`];
+//! - the `DIVERGED` suppression both report formatters apply.
+//!
+//! The [`ScheduleRecord::truncated`] flag each search sets from
+//! `is_truncated` rides along; the cases build it by hand.
 
 use crate::classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 use crate::config::ExplorationConfig;
-use crate::decision::DecisionLog;
+use crate::optimal::explore_optimal;
 use crate::report::{format_human, format_json};
-use crate::util::{classify_iteration, for_each_alternate, AlternateIteration, StopReason};
+use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason};
 use cellgov_core::{CommitError, Runtime, StepError};
 use cellgov_event::UnitId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
@@ -37,11 +41,11 @@ const EVERY_TRUNCATING_REASON: [StopReason; 7] = [
     StopReason::CommitError(REFUSED_COMMIT),
 ];
 
-/// `count` units that all write the same word, so dependency pruning
-/// keeps every alternate and each case has records to read.
-fn contending_log(count: u32) -> DecisionLog {
+/// `count` units that all write the same word, so every pair of them
+/// conflicts and a search has alternates to record.
+fn contending_runtime(count: u32) -> Runtime {
     let mem = GuestMemory::new(64);
-    let mut rt = Runtime::new(mem, Budget::new(100), 100);
+    let mut rt = Runtime::new(mem, Budget::new(1), 100);
     for imm in 0..count {
         rt.register_unit_with(|id| {
             FakeIsaUnit::new(
@@ -54,8 +58,38 @@ fn contending_log(count: u32) -> DecisionLog {
             )
         });
     }
-    let (log, _) = crate::observer::observe_decisions(&mut rt);
-    log
+    rt
+}
+
+/// The tally a search keeps for `count` alternates that each committed
+/// `hash` and stopped for `reason`.
+///
+/// Every search builds this shape and hands it to
+/// [`classify_iteration`], so the rules below are the ones the live
+/// searches run.
+fn tally(count: usize, hash: u64, reason: StopReason) -> AlternateIteration {
+    let truncated = reason.is_truncated();
+    let schedules: Vec<ScheduleRecord> = (0..count)
+        .map(|index| ScheduleRecord {
+            branch_step: index,
+            alternate_choice: UnitId::new(index as u64),
+            memory_hash: hash,
+            stop: reason,
+            truncated,
+        })
+        .collect();
+    AlternateIteration {
+        found_divergence: !truncated && hash != BASELINE_HASH,
+        bounds_hit: truncated,
+        schedules_truncated: if truncated { schedules.len() } else { 0 },
+        schedules_refused: if reason.class() == StopClass::Refusal {
+            schedules.len()
+        } else {
+            0
+        },
+        schedules_pruned: 0,
+        schedules,
+    }
 }
 
 /// A baseline that ran the workload out, which every alternate below is
@@ -68,13 +102,10 @@ const COMPLETE_BASELINE: BaselineRun = BaselineRun {
 
 #[test]
 fn no_stop_short_of_a_stall_can_contribute_a_divergence() {
-    let log = contending_log(2);
-    let config = ExplorationConfig::default();
-
     for reason in EVERY_TRUNCATING_REASON {
         // Each replay reports a hash the baseline did not, which is
         // what a divergence looks like when the run finished.
-        let iter = for_each_alternate(&log, &config, BASELINE_HASH, |_, _| (OTHER_HASH, reason));
+        let iter = tally(2, OTHER_HASH, reason);
         assert!(
             !iter.schedules.is_empty(),
             "{reason}: the workload must offer an alternate to record"
@@ -92,9 +123,7 @@ fn no_stop_short_of_a_stall_can_contribute_a_divergence() {
         );
     }
 
-    let stalled = for_each_alternate(&log, &config, BASELINE_HASH, |_, _| {
-        (OTHER_HASH, StopReason::Stalled)
-    });
+    let stalled = tally(2, OTHER_HASH, StopReason::Stalled);
     assert!(
         stalled.found_divergence,
         "a run that finished on a hash of its own is the divergence the cases above withhold"
@@ -105,16 +134,10 @@ fn no_stop_short_of_a_stall_can_contribute_a_divergence() {
 
 #[test]
 fn a_truncated_alternate_against_a_finished_baseline_is_inconclusive() {
-    let log = contending_log(2);
-    let iter = for_each_alternate(
-        &log,
-        &ExplorationConfig::default(),
-        BASELINE_HASH,
-        |_, _| (OTHER_HASH, StopReason::StepBound),
-    );
+    let iter = tally(1, OTHER_HASH, StopReason::StepBound);
     assert!(!iter.schedules.is_empty());
 
-    let result = classify_iteration(iter, COMPLETE_BASELINE, log.branching_count(), None);
+    let result = classify_iteration(iter, COMPLETE_BASELINE, 1, None);
     assert!(result.schedules.iter().all(|s| s.truncated));
     assert_eq!(result.outcome, OutcomeClass::Inconclusive);
     assert!(result.bounds_hit);
@@ -125,13 +148,7 @@ fn a_baseline_that_stopped_short_withdraws_a_record_it_had_already_cleared() {
     // Each record is written while the baseline still reads as
     // finished, and the baseline's own stop is applied after the last
     // one. A record cleared earlier is withdrawn with the rest.
-    let log = contending_log(3);
-    let mut iter = for_each_alternate(
-        &log,
-        &ExplorationConfig::default(),
-        BASELINE_HASH,
-        |_, _| (OTHER_HASH, StopReason::Stalled),
-    );
+    let mut iter = tally(2, OTHER_HASH, StopReason::Stalled);
     assert!(
         iter.schedules.len() > 1,
         "the case needs more than one record for the earlier one to be at stake"
@@ -152,7 +169,7 @@ fn a_baseline_that_stopped_short_withdraws_a_record_it_had_already_cleared() {
         ..COMPLETE_BASELINE
     };
     assert_eq!(
-        classify_iteration(iter, truncated_baseline, log.branching_count(), None).outcome,
+        classify_iteration(iter, truncated_baseline, 2, None).outcome,
         OutcomeClass::Inconclusive,
     );
 }
@@ -162,15 +179,10 @@ fn a_bound_hit_with_every_explored_schedule_in_agreement_is_still_inconclusive()
     // The claim that an exploration ruled divergence out holds only
     // over a complete enumeration. Three contending units offer more
     // alternates than this cap admits.
-    let log = contending_log(3);
-    let config = ExplorationConfig {
-        max_schedules: 1,
-        ..ExplorationConfig::default()
-    };
-    let iter = for_each_alternate(&log, &config, BASELINE_HASH, |_, _| {
-        (BASELINE_HASH, StopReason::Stalled)
-    });
-    assert_eq!(iter.schedules.len(), 1, "the cap must cut the enumeration");
+    let mut iter = tally(1, BASELINE_HASH, StopReason::Stalled);
+    // The cap stopped the search, not any replay.
+    iter.bounds_hit = true;
+    assert_eq!(iter.schedules.len(), 1, "the cap must cut the search");
     assert!(!iter.found_divergence);
     assert_eq!(iter.schedules_truncated, 0);
     assert!(
@@ -179,7 +191,7 @@ fn a_bound_hit_with_every_explored_schedule_in_agreement_is_still_inconclusive()
     );
     assert!(iter.bounds_hit);
 
-    let result = classify_iteration(iter, COMPLETE_BASELINE, log.branching_count(), None);
+    let result = classify_iteration(iter, COMPLETE_BASELINE, 3, None);
     assert_eq!(
         result.outcome,
         OutcomeClass::Inconclusive,
@@ -203,6 +215,7 @@ fn withdrawn_record(replay_stop: StopReason) -> ExplorationResult {
         }],
         outcome: OutcomeClass::Inconclusive,
         total_branching_points: 1,
+        classes_explored: None,
         bounds_hit: true,
         schedules_pruned: 0,
         schedules_truncated: 1,
@@ -291,4 +304,29 @@ fn a_tally_that_reports_no_bound_and_no_divergence_is_the_one_stable_reading() {
         classify_iteration(clean, COMPLETE_BASELINE, 1, None).outcome,
         OutcomeClass::ScheduleStable,
     );
+}
+
+/// The rules above, over the live search rather than a tally built by
+/// hand: a cap stops the baseline, and the run claims nothing.
+#[test]
+fn a_capped_search_over_a_contending_workload_claims_nothing() {
+    let config = ExplorationConfig {
+        max_schedules: 256,
+        max_steps_per_run: 2,
+    };
+    let result = explore_optimal(|| contending_runtime(2), &config);
+    assert!(result.baseline_stop.is_truncated());
+    assert!(result.bounds_hit);
+    assert_eq!(
+        result.classes_explored, None,
+        "a prefix baseline covers no class",
+    );
+    assert_eq!(result.outcome, OutcomeClass::Inconclusive);
+    // The search reads no race off a prefix execution, so it owes no
+    // reversal and records nothing.
+    assert!(
+        result.schedules.is_empty(),
+        "a prefix baseline's races cover a prefix, so the search owes no reversal",
+    );
+    assert_eq!(result.schedules_truncated, 0);
 }

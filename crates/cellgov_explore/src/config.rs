@@ -12,7 +12,14 @@ pub const DEFAULT_MAX_STEPS_PER_RUN: usize = 10_000;
 /// divergence has been observed.
 #[derive(Debug, Clone)]
 pub struct ExplorationConfig {
-    /// Maximum number of distinct alternate schedules to explore.
+    /// Maximum number of alternate schedules to record beyond the
+    /// baseline.
+    ///
+    /// One class costs one execution under
+    /// [`crate::optimal::explore_optimal`], so the bound there admits
+    /// `max_schedules + 1` classes: the baseline's plus one per record.
+    /// A search that explores more than one execution per class spends
+    /// the same bound on fewer classes.
     pub max_schedules: usize,
     /// Maximum runtime steps per individual replay.
     pub max_steps_per_run: usize,

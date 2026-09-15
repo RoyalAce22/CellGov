@@ -49,13 +49,13 @@ fn a_result_carries_the_exploration_s_first_invariant_break_for_its_driver_to_re
     assert_eq!(
         broken.first_invariant_break.as_deref(),
         Some("lv2 host invariant break at test.site: details here (the first of 1)"),
-        "the exploration consumes its runtimes, so a break one recorded reaches a \
+        "the exploration reuses one runtime, so a break one recorded reaches a \
          driver only through this field"
     );
 }
 
-/// Two units that write the same range, so the sweep prunes no
-/// alternate and replays every branching point.
+/// Two units that write the same range, so their stores conflict and
+/// the search runs both orders.
 fn contending_runtime() -> Runtime {
     let mem = GuestMemory::new(64);
     let mut rt = Runtime::new(mem, Budget::new(100), 100);
@@ -531,7 +531,11 @@ fn three_unit_disjoint_is_stable() {
     assert_eq!(r.outcome, OutcomeClass::ScheduleStable);
     assert!(r.total_branching_points >= 2);
     assert!(r.schedules.is_empty());
-    assert!(r.schedules_pruned >= 3);
+    assert_eq!(
+        r.classes_explored,
+        Some(1),
+        "units that never conflict put every schedule in one class",
+    );
 }
 
 #[test]
@@ -760,19 +764,24 @@ fn a_baseline_stopped_by_the_runtime_step_cap_forces_inconclusive() {
         .expect("two contending units must produce a branching point");
     assert!(r.bounds_hit);
     assert_eq!(r.outcome, OutcomeClass::Inconclusive);
-    assert!(!r.schedules.is_empty());
+    assert!(r.baseline_stop.is_truncated());
     assert_eq!(
-        r.schedules_truncated,
-        r.schedules.len(),
-        "a prefix baseline taints every record it was compared against",
+        r.classes_explored, None,
+        "a prefix baseline covers no class, so the search counts none",
     );
-    assert!(r.schedules.iter().all(|s| s.truncated));
+    // A truncated execution's races cover a prefix of the workload, so
+    // the baseline owes no reversal and the search records nothing.
+    assert!(
+        r.schedules.is_empty(),
+        "a prefix baseline's races cover a prefix, so the search owes no reversal",
+    );
+    assert_eq!(r.schedules_truncated, 0);
 }
 
 #[test]
-fn a_truncated_baseline_with_every_alternate_pruned_is_not_stable() {
-    // Disjoint writers prune to nothing, and pruning alone never sets
-    // `bounds_hit`, so the verdict rests entirely on the baseline rule.
+fn a_truncated_baseline_with_nothing_left_to_compare_is_not_stable() {
+    // Disjoint writers race over nothing, so the search owes no second
+    // execution and the verdict rests entirely on the baseline rule.
     let r = explore(
         || {
             let mem = GuestMemory::new(64);
@@ -795,7 +804,7 @@ fn a_truncated_baseline_with_every_alternate_pruned_is_not_stable() {
     )
     .expect("two units must produce a branching point");
     assert!(r.schedules.is_empty());
-    assert!(r.schedules_pruned > 0);
+    assert!(r.baseline_stop.is_truncated());
     assert_eq!(
         r.outcome,
         OutcomeClass::Inconclusive,
@@ -858,7 +867,7 @@ fn a_truncated_baseline_withdraws_a_divergence_that_was_already_found() {
         steps: 4,
         stop: crate::util::StopReason::StepBound,
     };
-    let r = classify_iteration(iter, baseline, 1, None);
+    let r = crate::util::classify_iteration(iter, baseline, 1, None);
     assert!(r.bounds_hit);
     assert_eq!(r.schedules_truncated, 1);
     assert_eq!(
@@ -907,7 +916,7 @@ fn result_fields_are_populated() {
 }
 
 #[test]
-fn disjoint_pruning_skips_all_alternates() {
+fn disjoint_writers_cost_one_execution() {
     let result = explore(
         || {
             let mem = GuestMemory::new(64);
@@ -939,9 +948,10 @@ fn disjoint_pruning_skips_all_alternates() {
 
     let r = result.expect("should have branching points");
     assert_eq!(r.outcome, OutcomeClass::ScheduleStable);
-    assert!(r.schedules.is_empty(), "all alternates should be pruned");
+    assert!(r.total_branching_points > 0, "the run held a choice");
     assert!(
-        r.schedules_pruned > 0,
-        "pruning should have skipped at least one alternate"
+        r.schedules.is_empty(),
+        "the two writers race over nothing, so no second execution is owed",
     );
+    assert_eq!(r.classes_explored, Some(1));
 }

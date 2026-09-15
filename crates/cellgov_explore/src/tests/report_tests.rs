@@ -39,6 +39,7 @@ fn sample_result() -> ExplorationResult {
         }],
         outcome: OutcomeClass::ScheduleSensitive,
         total_branching_points: 2,
+        classes_explored: None,
         bounds_hit: false,
         schedules_pruned: 1,
         schedules_truncated: 0,
@@ -100,6 +101,33 @@ fn json_report_parses_correctly() {
     assert_eq!(v["schedules"][0]["diverged"], true);
     assert_eq!(v["schedules"][0]["truncated"], false);
     assert_eq!(v["schedules"][0]["truncated_by"], serde_json::Value::Null);
+}
+
+#[test]
+fn both_reports_say_whether_the_search_covered_every_class() {
+    // Absence is a reading of its own: a verdict backed by no class
+    // count answers for the schedules the search sampled, and an empty
+    // row is how a reader sees that.
+    let covered = ExplorationResult {
+        classes_explored: Some(6),
+        ..sample_result()
+    };
+    assert!(
+        format_human(&covered).contains("classes_explored: 6"),
+        "{}",
+        format_human(&covered)
+    );
+    let v: serde_json::Value = serde_json::from_str(&format_json(&covered)).expect("valid JSON");
+    assert_eq!(v["classes_explored"], 6);
+
+    let uncovered = sample_result();
+    assert!(
+        format_human(&uncovered).contains("classes_explored: not covered"),
+        "{}",
+        format_human(&uncovered)
+    );
+    let v: serde_json::Value = serde_json::from_str(&format_json(&uncovered)).expect("valid JSON");
+    assert_eq!(v["classes_explored"], serde_json::Value::Null);
 }
 
 #[test]
@@ -174,6 +202,7 @@ fn stable_result_no_diverged_tag() {
         schedules: vec![],
         outcome: OutcomeClass::ScheduleStable,
         total_branching_points: 1,
+        classes_explored: None,
         schedules_pruned: 1,
         ..sample_result()
     };

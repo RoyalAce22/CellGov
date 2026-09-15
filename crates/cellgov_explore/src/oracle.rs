@@ -1,11 +1,9 @@
 //! Exploration wrapper that also captures named memory regions from
 //! each run for comparison against external baselines.
 
-use crate::classify::{BaselineRun, ExplorationResult};
+use crate::classify::ExplorationResult;
 use crate::config::ExplorationConfig;
-use crate::observer::observe_decisions_with_snapshots;
-use crate::prescribed::PrescribedScheduler;
-use crate::util::{classify_iteration, for_each_alternate, run_to_stall};
+use crate::optimal::explore_optimal_observed;
 use cellgov_core::{AddressSpaceId, Runtime};
 use cellgov_mem::{ByteRange, GuestAddr};
 
@@ -54,7 +52,7 @@ pub struct OracleExplorationResult {
     pub exploration: ExplorationResult,
     /// Snapshot from the baseline run.
     pub baseline: ScheduleSnapshot,
-    /// Snapshot from each non-pruned alternate, in exploration order.
+    /// Snapshot from each explored alternate, in exploration order.
     pub alternates: Vec<ScheduleSnapshot>,
 }
 
@@ -65,77 +63,45 @@ pub struct OracleExplorationResult {
 /// that stopped short withdraws every divergence claim, exactly as in
 /// [`crate::explore()`].
 pub fn explore_with_regions<F>(
-    mut make_runtime: F,
+    make_runtime: F,
     config: &ExplorationConfig,
     regions: &[MemoryRegionSpec],
 ) -> Option<OracleExplorationResult>
 where
     F: FnMut() -> Runtime,
 {
-    let mut rt_baseline = make_runtime();
-    let (log, snapshots, baseline_stop) = observe_decisions_with_snapshots(&mut rt_baseline, true);
-    let baseline = BaselineRun {
-        hash: rt_baseline.committed_memory_hash(),
-        steps: log.len(),
-        stop: baseline_stop,
-    };
-    let baseline_hash = baseline.hash;
-    let baseline_regions = extract_regions(&rt_baseline, regions);
-
-    let total_branching_points = log.branching_count();
-    if total_branching_points == 0 {
+    let mut baseline_regions = Vec::new();
+    let mut alternates = Vec::new();
+    let exploration = explore_optimal_observed(make_runtime, config, |rt, is_baseline| {
+        let captured = extract_regions(rt, regions);
+        if is_baseline {
+            baseline_regions = captured;
+        } else {
+            alternates.push(ScheduleSnapshot {
+                memory_hash: rt.committed_memory_hash(),
+                regions: captured,
+            });
+        }
+    });
+    if exploration.total_branching_points == 0 {
         return None;
     }
-
-    // Read before the first replay: `Runtime::restore_into` overwrites
-    // the whole LV2 host from the snapshot, so the baseline's record is
-    // gone the moment an alternate restores over it.
-    let mut first_invariant_break = rt_baseline
-        .lv2_host()
-        .observability()
-        .first_invariant_break_line();
-
-    let mut alternates = Vec::new();
-    let mut iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
-        let snap = snapshots
-            .get(&step)
-            .expect("observer must snapshot every branching point");
-        rt_baseline.restore_into(snap);
-        rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
-        let stop = run_to_stall(&mut rt_baseline, config.max_steps_per_run);
-        // The next replay restores over this one's record, so a break
-        // only this replay found is readable only here.
-        if first_invariant_break.is_none() {
-            first_invariant_break = rt_baseline
-                .lv2_host()
-                .observability()
-                .first_invariant_break_line();
-        }
-        let hash = rt_baseline.committed_memory_hash();
-        let captured = extract_regions(&rt_baseline, regions);
-        alternates.push(ScheduleSnapshot {
-            memory_hash: hash,
-            regions: captured,
-        });
-        (hash, stop)
-    });
-
-    if baseline.stop.is_truncated() {
-        iter.mark_baseline_truncated();
-    }
-
-    let exploration = classify_iteration(
-        iter,
-        baseline,
-        total_branching_points,
-        first_invariant_break,
+    // Nothing in the type system pairs these two: the callback and the
+    // schedule record fire from separate tests. One without the other
+    // shifts every later region against the record beside it.
+    debug_assert_eq!(
+        alternates.len(),
+        exploration.schedules.len(),
+        "the observation callback and the schedule record must fire together",
     );
+
+    let baseline = ScheduleSnapshot {
+        memory_hash: exploration.baseline_hash,
+        regions: baseline_regions,
+    };
     Some(OracleExplorationResult {
         exploration,
-        baseline: ScheduleSnapshot {
-            memory_hash: baseline_hash,
-            regions: baseline_regions,
-        },
+        baseline,
         alternates,
     })
 }

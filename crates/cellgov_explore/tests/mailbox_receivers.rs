@@ -16,6 +16,7 @@ use cellgov_explore::observer::observe_decisions;
 use cellgov_explore::util::StopReason;
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
+use std::collections::BTreeSet;
 
 const MAILBOX: u64 = 0;
 const FIRST: UnitId = UnitId::new(1);
@@ -89,39 +90,42 @@ fn the_two_receivers_conflict() {
     );
 }
 
-/// A relation that called the two receivers independent would prune
-/// these alternates, so the run would answer for a schedule space it
-/// never entered.
+/// The search separates the two orders of the receive attempts.
+///
+/// The class count is what this costs. A relation that called the pair
+/// independent reports no race between them, and the search covers 9
+/// classes instead of 12. The reachable memories are the same either
+/// way, because the sends race with the receives and reach them anyway.
+/// So an outcome check sees nothing here, and the class count is where
+/// the lost cover shows.
 #[test]
-fn no_point_between_the_two_receivers_prunes() {
+fn the_search_runs_both_orders_of_the_two_receivers() {
     let mut rt = workload();
     let (log, stop) = observe_decisions(&mut rt);
     assert_eq!(stop, StopReason::Stalled);
-    let between: Vec<usize> = log
-        .branching_points()
-        .filter(|point| {
+    assert!(
+        log.branching_points().any(|point| {
             let (chosen, others) = (point.chosen, &point.runnable);
             (chosen == FIRST && others.contains(&SECOND))
                 || (chosen == SECOND && others.contains(&FIRST))
-        })
-        .map(|point| point.step)
-        .collect();
-    assert!(
-        !between.is_empty(),
+        }),
         "the run holds at least one point where both receivers were runnable",
     );
 
     let result = explore_window(workload, &ExplorationConfig::default());
-    for step in between {
-        assert!(
-            result
-                .schedules
-                .iter()
-                .any(|record| record.branch_step == step
-                    && (record.alternate_choice == FIRST || record.alternate_choice == SECOND)),
-            "the other receiver at step {step} was pruned rather than replayed",
-        );
-    }
+    assert_eq!(
+        result.classes_explored,
+        Some(12),
+        "the receive-receive race separates three classes the sends do not",
+    );
+    let hashes: BTreeSet<u64> = std::iter::once(result.baseline_hash)
+        .chain(result.schedules.iter().map(|record| record.memory_hash))
+        .collect();
+    assert_eq!(
+        hashes.len(),
+        5,
+        "the committed memories those classes reach between them",
+    );
 }
 
 #[test]

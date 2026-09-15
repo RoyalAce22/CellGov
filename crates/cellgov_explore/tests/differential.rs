@@ -1,11 +1,11 @@
 //! The two searches over one workload, in one process.
 //!
-//! The bounded enumerator tries each alternate at each branching point
-//! independently and prunes a pair of units that never conflict. The
-//! backtrack-set search walks races instead. Both reach the same set
-//! of final memory hashes, which is the property a reduction can
-//! silently lose. They are free to disagree on how many executions it
-//! cost.
+//! The optimal search carries the sequence each race asks for and runs
+//! one execution per equivalence class. The backtrack-set search
+//! reverses each race on its own and can reach one class more than
+//! once. Both reach the same set of final memory hashes, which is the
+//! property a reduction can silently lose. They are free to disagree on
+//! how many executions it cost.
 
 #![allow(
     clippy::unwrap_used,
@@ -69,10 +69,15 @@ fn agree_on(name: &str, expected: usize, make_runtime: fn() -> Runtime) -> (usiz
         enumerated.outcome, backtracked.outcome,
         "{name}: the two searches classify the workload differently",
     );
-    (
+    let (optimal, scaffold) = (
         enumerated.schedules.len() + 1,
         backtracked.schedules.len() + 1,
-    )
+    );
+    assert!(
+        optimal <= scaffold,
+        "{name}: the optimal search runs no more executions than the scaffold",
+    );
+    (optimal, scaffold)
 }
 
 fn fake_isa_program(units: Vec<Vec<FakeOp>>) -> Runtime {
@@ -208,17 +213,17 @@ fn the_two_searches_agree_on_the_testkit_fixtures() {
 
 /// Three writers over one address commit three conflicting stores. The
 /// other six steps touch no shared state, so the equivalence classes
-/// are the orders of those three stores. That gives `3! = 6` traces
+/// are the orders of those three stores. That gives `3! = 6` classes
 /// and three outcomes, one per unit that can commit the last write.
 ///
-/// Neither search reaches six. The assertion pins what each costs
-/// today, so an improvement appears as a moved number.
+/// The optimal search costs exactly those six; the scaffold reaches the
+/// same three outcomes for ten.
 #[test]
 fn the_cost_of_three_writers_is_recorded() {
     let (enumerated, backtracked) = agree_on("three writers", 3, three_writers_one_address);
     assert_eq!(
         (enumerated, backtracked),
-        (16, 10),
-        "executions each search costs, baseline included, against 6 traces",
+        (6, 10),
+        "the optimal search costs one execution per class; the scaffold costs more",
     );
 }

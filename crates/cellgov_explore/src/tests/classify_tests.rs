@@ -34,6 +34,7 @@ fn exploration_result_construction() {
         schedules: vec![],
         outcome: OutcomeClass::ScheduleStable,
         total_branching_points: 0,
+        classes_explored: None,
         bounds_hit: false,
         schedules_pruned: 0,
         schedules_truncated: 0,
