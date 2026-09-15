@@ -14,8 +14,8 @@ use cellgov_mem::Fnv1aHasher;
 use cellgov_trace::{TraceReader, TraceRecord};
 
 /// Prefix of the one-line, machine-readable form a boot prints on
-/// stderr so a parent process can recover the identity triple its
-/// child ran.
+/// stderr, from which a parent process recovers the identity triple
+/// and the boot overrides of its child's run.
 pub const RUN_IDENTITY_SENTINEL: &str = "RUN_IDENTITY";
 
 /// Which firmware answered the run.
@@ -144,7 +144,82 @@ impl TryFrom<GameIdentityWire> for GameIdentity {
 #[error("game identity names both app_ver and sfo_version; a tree's version comes from one key")]
 pub struct TwoVersionKeys;
 
-/// The identity triple every machine artifact a boot writes embeds.
+/// Boot behaviour a run changes from what its cell's anchor records.
+///
+/// A run under any of these composes the same cell as a run under
+/// none, but it retires a different instruction stream, so no anchor
+/// gates it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BootOverrides {
+    /// The boot process runs no firmware module's `module_start`. A
+    /// spawned child still runs its own.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub skip_module_start: bool,
+    /// The host serves the system-class bdj.self program authority id,
+    /// whatever the title's SELF names.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub force_system_authid: bool,
+    /// The firmware module set loads at this base.
+    ///
+    /// Without the override, the set loads at the first 64K page past
+    /// the code floor. A spawned child places its own set at the same
+    /// base, under its own code floor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prx_base: Option<u64>,
+    /// The `module_start`s the boot stubs to `CELL_OK` run their LLE
+    /// path instead.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub disable_module_start_hle_stubs: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+impl BootOverrides {
+    /// True when the run overrides nothing.
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// One token per override the run applies, named as the wire form
+    /// names the field.
+    pub fn names(&self) -> Vec<String> {
+        let Self {
+            skip_module_start,
+            force_system_authid,
+            prx_base,
+            disable_module_start_hle_stubs,
+        } = *self;
+        let mut out = Vec::new();
+        if skip_module_start {
+            out.push("skip_module_start".to_string());
+        }
+        if force_system_authid {
+            out.push("force_system_authid".to_string());
+        }
+        if let Some(base) = prx_base {
+            out.push(format!("prx_base=0x{base:x}"));
+        }
+        if disable_module_start_hle_stubs {
+            out.push("disable_module_start_hle_stubs".to_string());
+        }
+        out
+    }
+
+    /// The set as a report prints it.
+    fn label(&self) -> String {
+        if self.is_empty() {
+            "no boot overrides".to_string()
+        } else {
+            format!("boot overrides {}", self.names().join(" "))
+        }
+    }
+}
+
+/// The identity triple every machine artifact a boot writes embeds,
+/// and the boot overrides the run applied.
 ///
 /// A half is absent when the run has no store entry to name it:
 ///
@@ -161,13 +236,17 @@ pub struct RunIdentity {
     /// `None` for a title with no store entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub game: Option<GameIdentity>,
+    /// The boot reads its overrides from here, so the identity names
+    /// every override the run applied.
+    #[serde(default, skip_serializing_if = "BootOverrides::is_empty")]
+    pub overrides: BootOverrides,
 }
 
 impl RunIdentity {
-    /// True when neither half is named, which is how an artifact
+    /// True when the identity names nothing, which is how an artifact
     /// written before versioning reads.
     pub fn is_empty(&self) -> bool {
-        self.firmware.is_none() && self.game.is_none()
+        self.firmware.is_none() && self.game.is_none() && self.overrides.is_empty()
     }
 
     /// Fingerprint of the firmware half; 0 when it is absent.
@@ -188,16 +267,26 @@ impl RunIdentity {
         })
     }
 
+    /// Fingerprint of the override set; 0 when the run overrides nothing.
+    pub fn overrides_fingerprint(&self) -> u64 {
+        if self.overrides.is_empty() {
+            return 0;
+        }
+        let names = self.overrides.names();
+        fingerprint(&names.iter().map(String::as_str).collect::<Vec<_>>())
+    }
+
     /// The trace header record for this identity.
     pub fn trace_header(&self) -> TraceRecord {
         TraceRecord::RunIdentity {
             format_version: cellgov_trace::TRACE_FORMAT_VERSION,
             firmware: self.firmware_fingerprint(),
             game: self.game_fingerprint(),
+            overrides: self.overrides_fingerprint(),
         }
     }
 
-    /// One line per half, in the order a report prints them.
+    /// One line per half in report order, then one for a non-empty override set.
     pub fn render_lines(&self) -> Vec<String> {
         let mut out = Vec::new();
         match &self.game {
@@ -215,6 +304,9 @@ impl RunIdentity {
                 f.version, f.image_version, f.pup_sha256
             )),
             None => out.push("firmware (unidentified)".to_string()),
+        }
+        if !self.overrides.is_empty() {
+            out.push(format!("override {}", self.overrides.names().join(" ")));
         }
         out
     }
@@ -306,12 +398,14 @@ pub struct TraceIdentity {
     pub firmware: u64,
     /// Fingerprint of the run's game half; 0 when it was absent.
     pub game: u64,
+    /// Fingerprint of the run's boot overrides; 0 when it applied none.
+    pub overrides: u64,
 }
 
 impl TraceIdentity {
     /// The stream-level spelling of [`RunIdentity::is_empty`].
     fn names_nothing(self) -> bool {
-        self.firmware == 0 && self.game == 0
+        self.firmware == 0 && self.game == 0 && self.overrides == 0
     }
 }
 
@@ -328,10 +422,12 @@ pub fn trace_identity(bytes: &[u8]) -> Option<TraceIdentity> {
             format_version,
             firmware,
             game,
+            overrides,
         }) => Some(TraceIdentity {
             format_version,
             firmware,
             game,
+            overrides,
         }),
         Ok(_) | Err(_) => None,
     }
@@ -340,14 +436,18 @@ pub fn trace_identity(bytes: &[u8]) -> Option<TraceIdentity> {
 /// The lines a trace comparison prints when its two streams lead with
 /// different identity headers, empty when they agree.
 ///
-/// A state file carries the identity triple as a fingerprint, so these
-/// lines name only the half that differs. The JSON artifacts of the
-/// same runs name the versions.
+/// A state file carries each part of the identity as a fingerprint, so
+/// these lines name only the parts that differ. The JSON artifacts of
+/// the same runs name the versions and the overrides.
 ///
-/// A stream makes no claim when it has no header, or when its header
-/// names neither half. Such a stream never warns about identity, which
-/// matches [`cross_identity_warning`] on the same pair of runs. Two
-/// headers that differ in format version still warn.
+/// A stream makes no claim when:
+///
+/// - it has no header;
+/// - its header names no firmware, no game and no override.
+///
+/// Such a stream never warns about identity, which matches
+/// [`cross_identity_warning`] on the same pair of runs. Two headers
+/// that differ in format version still warn.
 pub fn cross_trace_identity_warning(
     a: Option<TraceIdentity>,
     a_label: &str,
@@ -380,23 +480,24 @@ pub fn cross_trace_identity_warning(
     if a_id.game != b_id.game {
         differs.push("game version");
     }
+    if a_id.overrides != b_id.overrides {
+        differs.push("boot overrides");
+    }
     if differs.is_empty() {
         return out;
     }
     out.push(format!(
         "WARN: cross-triple comparison: {a_label} and {b_label} disagree on {}. \
          A divergence between two differently-composed runs is a difference between \
-         versions until it is shown otherwise; it is not a regression.",
+         compositions until it is shown otherwise; it is not a regression.",
         differs.join(" and "),
     ));
-    out.push(format!(
-        "  {a_label}: firmware=0x{:016x} game=0x{:016x}",
-        a_id.firmware, a_id.game
-    ));
-    out.push(format!(
-        "  {b_label}: firmware=0x{:016x} game=0x{:016x}",
-        b_id.firmware, b_id.game
-    ));
+    for (label, id) in [(a_label, a_id), (b_label, b_id)] {
+        out.push(format!(
+            "  {label}: firmware=0x{:016x} game=0x{:016x} overrides=0x{:016x}",
+            id.firmware, id.game, id.overrides
+        ));
+    }
     out
 }
 
@@ -423,8 +524,8 @@ pub fn identity_report(
     out
 }
 
-/// The lines a comparison prints when its two sides were not composed
-/// from the same identity triple, empty when they were.
+/// The lines a comparison prints when its two sides differ in identity
+/// triple or boot overrides, empty when they agree.
 ///
 /// An unidentified side never produces one: a pre-versioning artifact
 /// makes no claim to contradict.
@@ -452,10 +553,17 @@ pub fn cross_identity_warning(
             describe_game(b),
         ));
     }
+    if a.overrides != b.overrides {
+        out.push(format!(
+            "WARN: cross-override comparison: {a_label} ran {}, {b_label} ran {}",
+            a.overrides.label(),
+            b.overrides.label(),
+        ));
+    }
     if !out.is_empty() {
         out.push(
             "WARN: a divergence between two differently-composed runs is a difference \
-             between versions until it is shown otherwise; it is not a regression."
+             between compositions until it is shown otherwise; it is not a regression."
                 .to_string(),
         );
     }
@@ -483,3 +591,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/app_version_tests.rs"]
 mod app_version_tests;
+
+#[cfg(test)]
+#[path = "tests/boot_overrides_tests.rs"]
+mod boot_overrides_tests;

@@ -306,13 +306,14 @@ fn gate_cell(
         game_ver: cell.cell.game_ver.clone(),
         firmware_dir: None,
     };
-    let composition = match try_resolve_composition(&selection, vfs_root, title) {
-        Ok(c) => c,
-        Err(e) => match not_installed_reason(&e) {
-            Some(why) => return CellVerdict::NotInstalled(why),
-            None => die(&format!("{COMMAND}: {}: {e}", cell.label())),
-        },
-    };
+    let composition =
+        match try_resolve_composition(&selection, vfs_root, title, args.overrides.overrides()) {
+            Ok(c) => c,
+            Err(e) => match not_installed_reason(&e) {
+                Some(why) => return CellVerdict::NotInstalled(why),
+                None => die(&format!("{COMMAND}: {}: {e}", cell.label())),
+            },
+        };
     let inputs = match try_resolve_cell_inputs(title.clone(), composition, vfs_root, COMMAND) {
         Ok(i) => i,
         Err(e) => return CellVerdict::NotInstalled(e.to_string()),

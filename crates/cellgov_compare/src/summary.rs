@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::classify::DivergenceClass;
-use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
+use crate::identity::{BootOverrides, FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::observation::ObservedOutcome;
 use crate::observation_compare::{ObservationCompareResult, RegionPairOutcome};
 
@@ -66,7 +66,7 @@ pub struct CrossRunnerSummary {
     /// Byte-divergence run with the lowest guest start address;
     /// `None` when no byte divergences were found.
     pub lowest_offset_class: Option<(DivergenceClass, RegionIdent, u64)>,
-    /// Which firmware and title version CellGov composed.
+    /// The firmware, title version and boot overrides of the CellGov run.
     #[serde(flatten)]
     pub identity: RunIdentity,
     /// Firmware version the other runner ran, read from that runner's
@@ -90,6 +90,8 @@ struct CrossRunnerSummaryShadow {
     firmware: Option<FirmwareIdentity>,
     #[serde(default)]
     game: Option<GameIdentity>,
+    #[serde(default)]
+    overrides: BootOverrides,
     #[serde(default)]
     rpcs3_firmware: Option<String>,
 }
@@ -223,6 +225,7 @@ impl TryFrom<CrossRunnerSummaryShadow> for CrossRunnerSummary {
             identity: RunIdentity {
                 firmware: s.firmware,
                 game: s.game,
+                overrides: s.overrides,
             },
             rpcs3_firmware: s.rpcs3_firmware,
         };

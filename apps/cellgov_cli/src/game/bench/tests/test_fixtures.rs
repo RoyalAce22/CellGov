@@ -168,6 +168,12 @@ pub(super) fn bench_options<'a>(
         identity: &cellgov_compare::RunIdentity {
             firmware: None,
             game: None,
+            overrides: cellgov_compare::BootOverrides {
+                skip_module_start: false,
+                force_system_authid: false,
+                prx_base: None,
+                disable_module_start_hle_stubs: false,
+            },
         },
         selection: SelectionArgs::default(),
         strict_reserved: false,

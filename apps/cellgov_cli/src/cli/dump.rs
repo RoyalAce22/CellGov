@@ -33,10 +33,12 @@ fn dump_trace(result: &ScenarioResult) {
                 format_version,
                 firmware,
                 game,
+                overrides,
             } => {
                 println!(
                     "{i:4}  RunIdentity        format_version={format_version} \
-                     firmware=0x{firmware:016x} game=0x{game:016x}"
+                     firmware=0x{firmware:016x} game=0x{game:016x} \
+                     overrides=0x{overrides:016x}"
                 );
             }
             TraceRecord::UnitScheduled {

@@ -56,7 +56,8 @@ pub struct BenchOptions<'a> {
     /// selected update's first; see
     /// [`cellgov_boot::prepare::TitleOptions::eboot_dirs`].
     pub eboot_dirs: &'a [std::path::PathBuf],
-    /// The identity triple every artifact this run writes embeds.
+    /// The identity triple every artifact this run writes embeds, and
+    /// the boot overrides the run applies.
     pub identity: &'a cellgov_compare::RunIdentity,
     /// What the child re-resolves its own composition from.
     pub selection: SelectionArgs<'a>,
@@ -90,6 +91,7 @@ impl BenchOptions<'_> {
             || self.budget_override.is_some()
             || self.strict_reserved
             || !self.guest_args.is_empty()
+            || !self.identity.overrides.is_empty()
     }
 
     /// Append the `boot bench-once` CLI form of this struct onto `cmd`.
@@ -130,6 +132,12 @@ impl BenchOptions<'_> {
         for arg in self.guest_args {
             cmd.arg("--guest-arg").arg(arg);
         }
+        for (flag, value) in crate::cli::parse::override_flags(&self.identity.overrides) {
+            cmd.arg(flag);
+            if let Some(v) = value {
+                cmd.arg(v);
+            }
+        }
     }
 }
 
@@ -140,3 +148,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/retarget_tests.rs"]
 mod retarget_tests;
+
+#[cfg(test)]
+#[path = "tests/override_gate_tests.rs"]
+mod override_gate_tests;

@@ -707,6 +707,10 @@ Usage: cellgov boot run [OPTIONS] <--title <NAME>|--content-id <ID>|--title-mani
 | `--save-boot-summary` | `PATH` | Write the run's boot summary JSON here. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. |
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
+| `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
+| `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
+| `--prx-base` | `HEX` | Load the firmware module set at this 64K-aligned base inside the main region, instead of the first 64K page past the title image. A spawned child's firmware set loads at the same base. |
+| `--disable-module-start-hle-stubs` | -- | Run the LLE path of each module_start the boot stubs to CELL_OK. |
 
 ```
 Exit codes particular to this command:
@@ -748,6 +752,10 @@ Usage: cellgov boot bench [OPTIONS] <--title <NAME>|--content-id <ID>|--title-ma
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. It records a state hash per step, which makes the run a divergence diagnostic instead of a throughput measurement. |
 | `--run-index` | `N` | Index this measurement reports on its `BENCH_RESULT` line. A run set stamps each of its children. |
+| `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
+| `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
+| `--prx-base` | `HEX` | Load the firmware module set at this 64K-aligned base inside the main region, instead of the first 64K page past the title image. A spawned child's firmware set loads at the same base. |
+| `--disable-module-start-hle-stubs` | -- | Run the LLE path of each module_start the boot stubs to CELL_OK. |
 | `--all` | -- | Gate every declared cell of every registry title, one after another; `--fw` / `--game-ver` narrow the cells. |
 | `--no-anchor-check` | -- | Drop the anchor gate for a measurement-only run. |
 | `--runs` | `N` | Subprocess measurements to take. With `1` the determinism gate compares nothing, and the set reports that. Default `3`. |
@@ -795,6 +803,10 @@ Usage: cellgov boot bench-once [OPTIONS] <--title <NAME>|--content-id <ID>|--tit
 | `--guest-arg` | `VALUE` | One guest argv entry; repeat for more. Values may spell a flag. |
 | `--save-state-trace` | `PATH` | Write the run's state trace here. It records a state hash per step, which makes the run a divergence diagnostic instead of a throughput measurement. |
 | `--run-index` | `N` | Index this measurement reports on its `BENCH_RESULT` line. A run set stamps each of its children. |
+| `--skip-module-start` | -- | Run no firmware module's module_start in the boot process. |
+| `--force-system-authid` | -- | Serve the system-class bdj.self program authority id instead of the one the title's SELF names. |
+| `--prx-base` | `HEX` | Load the firmware module set at this 64K-aligned base inside the main region, instead of the first 64K page past the title image. A spawned child's firmware set loads at the same base. |
+| `--disable-module-start-hle-stubs` | -- | Run the LLE path of each module_start the boot stubs to CELL_OK. |
 
 ### `cellgov diff`
 

@@ -1,16 +1,22 @@
 use std::path::Path;
 
 use super::{
-    default_prx_base, locate_and_parse_manifest, manifest_rel_path, page_align_up_u64,
-    prx_base_from_value, FirmwareLoadError,
+    checked_prx_base, default_prx_base, load_firmware_set_bound, locate_and_parse_manifest,
+    manifest_rel_path, page_align_up_u64, resolve_prx_base, FirmwareLoadError,
 };
 
-/// The refusal reason a rejected `CELLGOV_PRX_BASE` value carries.
-fn refusal_reason(value: &str, code_floor: u32) -> String {
-    match prx_base_from_value(value, code_floor) {
-        Ok(base) => panic!("{value:?} was accepted as 0x{base:x}"),
-        Err(FirmwareLoadError::PrxBase { reason, .. }) => reason,
-        Err(other) => panic!("{value:?}: unexpected refusal {other}"),
+/// The refusal reason a rejected `prx_base` override carries.
+fn refusal_reason(base: u64, code_floor: u32) -> String {
+    match checked_prx_base(base, code_floor) {
+        Ok(placed) => panic!("0x{base:x} was accepted as 0x{placed:x}"),
+        Err(FirmwareLoadError::PrxBase {
+            base: named,
+            reason,
+        }) => {
+            assert_eq!(named, base, "the refusal names the wrong base");
+            reason
+        }
+        Err(other) => panic!("0x{base:x}: unexpected refusal {other}"),
     }
 }
 
@@ -67,46 +73,54 @@ fn the_default_prx_base_is_the_first_64k_page_at_or_past_the_code_floor() {
 }
 
 #[test]
-fn a_prx_base_override_accepts_either_hex_prefix_and_surrounding_space() {
-    // Lower prefix with padding, upper prefix, and no prefix at all.
-    for value in [" 0x30000000 ", "0X30000000", "30000000"] {
-        assert_eq!(
-            prx_base_from_value(value, 0x10_0000).unwrap(),
-            0x3000_0000,
-            "{value:?} did not parse"
-        );
-    }
+fn no_prx_base_override_places_the_set_at_the_default_base() {
+    assert_eq!(resolve_prx_base(None, 0x1_0001).unwrap(), 0x2_0000);
 }
 
 #[test]
-fn a_prx_base_override_that_is_not_hex_is_refused() {
-    // Empty, prefix-only, non-hex, Rust's digit separator (which
-    // from_str_radix does not accept), and past u64.
-    for value in ["", "0x", "zzz", "0x1_0000", "FFFFFFFFFFFFFFFFF"] {
-        assert!(
-            refusal_reason(value, 0).contains("not a hex u64"),
-            "{value:?} should be refused as non-hex"
-        );
+fn a_prx_base_override_replaces_the_default_base() {
+    assert_eq!(
+        resolve_prx_base(Some(0x3000_0000), 0x10_0000).unwrap(),
+        0x3000_0000
+    );
+}
+
+#[test]
+fn a_prx_base_override_is_checked_before_it_replaces_the_default_base() {
+    match resolve_prx_base(Some(0x3000_1000), 0x10_0000) {
+        Err(FirmwareLoadError::PrxBase { base, reason }) => {
+            assert_eq!(base, 0x3000_1000);
+            assert!(reason.contains("64K-aligned"), "{reason}");
+        }
+        other => panic!("a misaligned override resolved: {other:?}"),
+    }
+    // A spawned child's floor sits past its own image, so the one
+    // override is checked against each process's floor in turn.
+    match resolve_prx_base(Some(0x3000_0000), 0x3001_0000) {
+        Err(FirmwareLoadError::PrxBase { reason, .. }) => {
+            assert!(reason.contains("below code_floor 0x30010000"), "{reason}");
+        }
+        other => panic!("an override below the floor it is given resolved: {other:?}"),
     }
 }
 
 #[test]
 fn a_prx_base_override_must_be_64k_aligned() {
-    for value in ["0x30001000", "0x30000001", "0x3000ffff"] {
+    for base in [0x3000_1000u64, 0x3000_0001, 0x3000_ffff] {
         assert!(
-            refusal_reason(value, 0).contains("64K-aligned"),
-            "{value:?} should be refused as misaligned"
+            refusal_reason(base, 0).contains("64K-aligned"),
+            "0x{base:x} should be refused as misaligned"
         );
     }
-    assert_eq!(prx_base_from_value("0x30000000", 0).unwrap(), 0x3000_0000);
+    assert_eq!(checked_prx_base(0x3000_0000, 0).unwrap(), 0x3000_0000);
 }
 
 #[test]
 fn a_prx_base_override_below_the_code_floor_is_refused() {
-    assert!(refusal_reason("0x20000000", 0x3000_0000).contains("below code_floor"));
+    assert!(refusal_reason(0x2000_0000, 0x3000_0000).contains("below code_floor"));
     // The floor itself is placeable: the base may equal it.
     assert_eq!(
-        prx_base_from_value("0x30000000", 0x3000_0000).unwrap(),
+        checked_prx_base(0x3000_0000, 0x3000_0000).unwrap(),
         0x3000_0000
     );
 }
@@ -115,17 +129,82 @@ fn a_prx_base_override_below_the_code_floor_is_refused() {
 fn a_prx_base_override_outside_the_main_region_is_refused() {
     // The main region ends where the RSX iomap window begins, so the
     // first page at that boundary is already out of bounds.
-    for value in ["0x40000000", "0xffff0000", "0xffffffffffff0000"] {
+    for base in [0x4000_0000u64, 0xffff_0000, 0xffff_ffff_ffff_0000] {
         assert!(
-            refusal_reason(value, 0).contains("main region"),
-            "{value:?} should be refused as outside the main region"
+            refusal_reason(base, 0).contains("main region"),
+            "0x{base:x} should be refused as outside the main region"
         );
     }
     assert_eq!(
-        prx_base_from_value("0x3fff0000", 0).unwrap(),
+        checked_prx_base(0x3fff_0000, 0).unwrap(),
         0x3FFF_0000,
         "the last 64K page of the main region is placeable"
     );
+}
+
+#[test]
+fn a_prx_base_refusal_names_the_flag_that_set_it() {
+    let err = checked_prx_base(0x3000_1000, 0).unwrap_err().to_string();
+    assert!(err.starts_with("--prx-base 0x0000000030001000: "), "{err}");
+}
+
+/// A sink that records each warn line and drops the other channels.
+#[derive(Default)]
+struct WarnLog(std::cell::RefCell<Vec<String>>);
+
+impl crate::BootSink for WarnLog {
+    fn note(&self, _line: &str) {}
+    fn warn(&self, line: &str) {
+        self.0.borrow_mut().push(line.to_string());
+    }
+    fn guest_text(&self, _text: &str) {}
+}
+
+/// A key source for a load that opens no module.
+struct NoVault;
+
+impl crate::KeyVaultSource for NoVault {
+    fn vault_for(
+        &self,
+        _bytes: &[u8],
+    ) -> Result<&cellgov_install::keys::KeyVault, &cellgov_install::keys::KeyVaultError> {
+        unreachable!("a boot with no firmware directory decrypts no module")
+    }
+}
+
+/// The warn lines a boot with no firmware directory reports.
+fn warns_with_no_firmware_dir(prx_base: Option<u64>) -> Vec<String> {
+    let mut mem = cellgov_mem::GuestMemory::new(0x1_0000);
+    let log = WarnLog::default();
+    let (loaded, identity, _) = load_firmware_set_bound(
+        None,
+        &[],
+        &mut mem,
+        0x1_0000,
+        prx_base,
+        false,
+        &log,
+        &NoVault,
+    )
+    .expect("no firmware directory loads an empty set");
+    assert!(loaded.is_empty() && identity.is_none());
+    log.0.into_inner()
+}
+
+#[test]
+fn a_prx_base_override_with_no_firmware_to_place_is_reported() {
+    let warns = warns_with_no_firmware_dir(Some(0x3000_0000));
+    assert!(
+        warns
+            .iter()
+            .any(|w| w.contains("prx_base=0x30000000") && w.contains("no effect")),
+        "{warns:?}"
+    );
+}
+
+#[test]
+fn a_boot_with_no_firmware_and_no_prx_base_override_warns_nothing() {
+    assert_eq!(warns_with_no_firmware_dir(None), Vec::<String>::new());
 }
 
 #[test]

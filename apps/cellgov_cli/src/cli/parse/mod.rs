@@ -12,7 +12,9 @@ mod store;
 mod tree;
 mod value;
 
-pub(crate) use boot::{BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector};
+pub(crate) use boot::{
+    override_flags, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
+};
 pub(crate) use dev::{
     CliGenArgs, CompletionShell, CompletionsArgs, DevCommand, DisasmArgs, FixtureGenArgs,
     FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,
@@ -35,3 +37,7 @@ pub(crate) use tree::{BootCommand, Cli, Command, Globals};
 #[cfg(test)]
 #[path = "tests/parse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/boot_override_parse_tests.rs"]
+mod boot_override_parse_tests;

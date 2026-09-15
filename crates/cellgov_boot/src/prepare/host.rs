@@ -6,7 +6,6 @@ use cellgov_core::Runtime;
 use super::image::LoadedImage;
 use super::params::BootParams;
 use super::types::{AuthorityIdSource, ExecutionOptions, TitleOptions};
-use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::prx::{HostLinkMaps, PrxLoadInfo, VerifiedFirmware};
 use crate::BootError;
@@ -23,10 +22,6 @@ pub enum HostBindError {
         /// The module's own name from its PRX header.
         name: String,
     },
-    /// A `CELLGOV_*` toggle this stage reads holds an unrecognized
-    /// value.
-    #[error("{0}")]
-    EnvBool(#[from] EnvBoolError),
 }
 
 /// Seeded ring size per slot: the dispatcher's six non-zero field
@@ -130,7 +125,7 @@ pub(super) fn build_runtime(
     alloc_base: u32,
     verified_firmware: Option<&VerifiedFirmware>,
     host_link: HostLinkMaps,
-) -> Result<(Runtime, AuthorityIdSource), HostBindError> {
+) -> (Runtime, AuthorityIdSource) {
     // The header leads the stream, so the writer takes it before the
     // runtime that appends to it exists.
     let mut trace = cellgov_trace::TraceWriter::new();
@@ -166,11 +161,11 @@ pub(super) fn build_runtime(
     // Adversarial knob for the authority-id tripwire test: forcing
     // the bdj.self system authid makes the cellSysmodule
     // LoadModule-failure signature reappear.
-    let (authid_label, authid_source) = if crate::env::parse_bool("CELLGOV_FORCE_SYSTEM_AUTHID")? {
+    let (authid_label, authid_source) = if title.identity.overrides.force_system_authid {
         rt.lv2_host_mut()
             .set_program_authority_id(cellgov_ps3_abi::format::sce::BDJ_SELF_PROGRAM_AUTHORITY_ID);
         (
-            "forced system authid (CELLGOV_FORCE_SYSTEM_AUTHID)",
+            "forced system authid (boot override force_system_authid)",
             AuthorityIdSource::Forced,
         )
     } else if title.authority_id.is_some() {
@@ -221,7 +216,7 @@ pub(super) fn build_runtime(
             "absent -- PSL1GHT homebrew sentinel"
         },
     ));
-    Ok((rt, authid_source))
+    (rt, authid_source)
 }
 
 /// Publish each loaded firmware module in the host's PRX registry,

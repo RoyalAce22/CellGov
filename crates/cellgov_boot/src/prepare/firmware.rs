@@ -64,6 +64,7 @@ pub(super) fn load_firmware_set(
         &modules,
         mem,
         code_floor,
+        title.identity.overrides.prx_base,
         matches!(
             title.manifest.source,
             crate::manifest::GameSource::FirmwareExec { .. }

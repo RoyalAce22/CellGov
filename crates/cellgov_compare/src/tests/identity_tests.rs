@@ -12,6 +12,7 @@ fn fw_only(version: &str) -> RunIdentity {
             pup_sha256: "ab".repeat(32),
         }),
         game: None,
+        overrides: Default::default(),
     }
 }
 
@@ -62,6 +63,7 @@ fn field_boundaries_are_hashed() {
                 version: version.into(),
                 app_version: None,
             }),
+            overrides: Default::default(),
         }
         .game_fingerprint()
     };
@@ -78,6 +80,7 @@ fn a_field_that_embeds_the_separator_still_fingerprints_apart() {
                 version: version.into(),
                 app_version: None,
             }),
+            overrides: Default::default(),
         }
         .game_fingerprint()
     };
@@ -85,7 +88,7 @@ fn a_field_that_embeds_the_separator_still_fingerprints_apart() {
 }
 
 #[test]
-fn the_trace_header_carries_both_fingerprints_and_the_format_version() {
+fn the_trace_header_carries_each_fingerprint_and_the_format_version() {
     let id = identity("4.91", "NPAA00001", "base");
     assert_eq!(
         id.trace_header(),
@@ -93,6 +96,7 @@ fn the_trace_header_carries_both_fingerprints_and_the_format_version() {
             format_version: cellgov_trace::TRACE_FORMAT_VERSION,
             firmware: id.firmware_fingerprint(),
             game: id.game_fingerprint(),
+            overrides: 0,
         }
     );
 }
@@ -249,6 +253,7 @@ fn a_side_with_only_one_half_warns_about_the_half_it_lacks() {
     let b = RunIdentity {
         firmware: a.firmware.clone(),
         game: None,
+        overrides: Default::default(),
     };
     let lines = cross_identity_warning(&a, "a.json", &b, "b.json");
     assert!(
@@ -306,6 +311,7 @@ fn a_format_difference_warns_even_when_neither_side_names_a_triple() {
         format_version: version,
         firmware: 0,
         game: 0,
+        overrides: 0,
     };
     let lines = cross_trace_identity_warning(
         Some(anonymous(cellgov_trace::TRACE_FORMAT_VERSION)),
@@ -352,6 +358,7 @@ fn a_header_that_names_neither_half_never_warns() {
             format_version: cellgov_trace::TRACE_FORMAT_VERSION,
             firmware: 0,
             game: 0,
+            overrides: 0,
         }),
         "an unidentified run still leads its stream with a header"
     );

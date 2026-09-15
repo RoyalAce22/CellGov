@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_compare::{AppVersion, FirmwareIdentity, GameIdentity, RunIdentity};
+use cellgov_compare::{AppVersion, BootOverrides, FirmwareIdentity, GameIdentity, RunIdentity};
 use cellgov_install::manifest::MANIFEST_FILE;
 use cellgov_install::param_sfo::{self, SfoVersionKey};
 
@@ -154,6 +154,9 @@ pub(crate) fn run_identity(
             GameChoice::Stored(stored) => Some(game_identity(stored)?),
             GameChoice::Firmware { .. } | GameChoice::Unstored => None,
         },
+        // The store composes no override. `try_resolve_composition` in
+        // `boot_cmd` replaces this empty set with the boot's own flags.
+        overrides: BootOverrides::default(),
     })
 }
 

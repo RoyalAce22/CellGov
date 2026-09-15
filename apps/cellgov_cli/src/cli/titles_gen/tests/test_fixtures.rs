@@ -142,6 +142,7 @@ pub(crate) fn boot_on(outcome: BootOutcome, steps: u64, fw: &str) -> BootSummary
     b.identity = RunIdentity {
         firmware: Some(firmware(fw)),
         game: None,
+        overrides: Default::default(),
     };
     b
 }
@@ -233,6 +234,7 @@ pub(crate) fn stamped(
             version: BASE.to_string(),
             app_version: Some(AppVersion::AppVer("01.00".to_string())),
         }),
+        overrides: Default::default(),
     };
     summary.rpcs3_firmware = rpcs3_fw.map(str::to_string);
     summary

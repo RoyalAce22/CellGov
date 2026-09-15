@@ -30,6 +30,7 @@ fn identity(fw_version: &str) -> RunIdentity {
             version: "base".into(),
             app_version: Some(AppVersion::AppVer("01.00".into())),
         }),
+        overrides: Default::default(),
     }
 }
 

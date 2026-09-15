@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use super::value;
 use crate::cli::args::CliArgError;
 use cellgov_boot::manifest::CheckpointTrigger;
+use cellgov_compare::BootOverrides;
 
 /// Ceiling on `boot bench --runs`. Each run is a whole boot, and the
 /// throughput estimator gains nothing past a handful of samples.
@@ -68,6 +69,70 @@ pub(crate) struct BootSelection {
     /// unmanaged, so it carries no firmware version.
     #[arg(long, value_name = "DIR", conflicts_with = "fw")]
     pub firmware_dir: Option<PathBuf>,
+}
+
+/// The help heading [`BootOverrideArgs`] lists its flags under.
+///
+/// Clap also applies it to each arg a command declares after the
+/// flattened struct. Each such arg names its own heading.
+pub(super) const BOOT_OVERRIDE_HEADING: &str =
+    "Boot overrides (the anchor gates no run that sets one)";
+
+/// The flags that set a run's [`BootOverrides`].
+#[derive(Debug, Clone, Default, clap::Args)]
+#[command(next_help_heading = BOOT_OVERRIDE_HEADING)]
+pub(crate) struct BootOverrideArgs {
+    /// Run no firmware module's module_start in the boot process.
+    #[arg(long)]
+    pub skip_module_start: bool,
+    /// Serve the system-class bdj.self program authority id instead of
+    /// the one the title's SELF names.
+    #[arg(long)]
+    pub force_system_authid: bool,
+    /// Load the firmware module set at this 64K-aligned base inside the
+    /// main region, instead of the first 64K page past the title image.
+    /// A spawned child's firmware set loads at the same base.
+    #[arg(long, value_name = "HEX", value_parser = value::hex_u64)]
+    pub prx_base: Option<u64>,
+    /// Run the LLE path of each module_start the boot stubs to CELL_OK.
+    #[arg(long)]
+    pub disable_module_start_hle_stubs: bool,
+}
+
+impl BootOverrideArgs {
+    /// The set the run identity carries and the boot applies.
+    pub(crate) fn overrides(&self) -> BootOverrides {
+        BootOverrides {
+            skip_module_start: self.skip_module_start,
+            force_system_authid: self.force_system_authid,
+            prx_base: self.prx_base,
+            disable_module_start_hle_stubs: self.disable_module_start_hle_stubs,
+        }
+    }
+}
+
+/// The flags and values from which [`BootOverrideArgs`] parses `overrides`.
+pub(crate) fn override_flags(overrides: &BootOverrides) -> Vec<(&'static str, Option<String>)> {
+    let BootOverrides {
+        skip_module_start,
+        force_system_authid,
+        prx_base,
+        disable_module_start_hle_stubs,
+    } = *overrides;
+    let mut out = Vec::new();
+    if skip_module_start {
+        out.push(("--skip-module-start", None));
+    }
+    if force_system_authid {
+        out.push(("--force-system-authid", None));
+    }
+    if let Some(base) = prx_base {
+        out.push(("--prx-base", Some(format!("0x{base:x}"))));
+    }
+    if disable_module_start_hle_stubs {
+        out.push(("--disable-module-start-hle-stubs", None));
+    }
+    out
 }
 
 /// The outcomes `boot run` has beyond the shared 0-5 contract.
@@ -156,6 +221,8 @@ pub(crate) struct BootRunArgs {
     /// One guest argv entry; repeat for more. Values may spell a flag.
     #[arg(long, value_name = "VALUE", allow_hyphen_values = true, action = clap::ArgAction::Append)]
     pub guest_arg: Vec<String>,
+    #[command(flatten)]
+    pub overrides: BootOverrideArgs,
 }
 
 /// `cellgov boot bench` and `cellgov boot bench-once`.
@@ -192,6 +259,8 @@ pub(crate) struct BenchArgs {
     /// run set stamps each of its children.
     #[arg(long, value_name = "N")]
     pub run_index: Option<usize>,
+    #[command(flatten)]
+    pub overrides: BootOverrideArgs,
 }
 
 /// `cellgov boot bench` -- the run set, which alone gates on the
@@ -201,20 +270,21 @@ pub(crate) struct BenchArgs {
 pub(crate) struct BenchGateArgs {
     #[command(flatten)]
     pub bench: BenchArgs,
+    // Each arg below names its own heading; see `BOOT_OVERRIDE_HEADING`.
     /// Gate every declared cell of every registry title, one after
     /// another; `--fw` / `--game-ver` narrow the cells.
-    #[arg(long, group = TITLE_SELECTOR_GROUP)]
+    #[arg(long, group = TITLE_SELECTOR_GROUP, help_heading = None::<&'static str>)]
     pub all: bool,
     /// Drop the anchor gate for a measurement-only run.
-    #[arg(long)]
+    #[arg(long, help_heading = None::<&'static str>)]
     pub no_anchor_check: bool,
     /// Subprocess measurements to take. With `1` the determinism gate
     /// compares nothing, and the set reports that.
-    #[arg(long, value_name = "N", default_value_t = crate::game::BENCH_DEFAULT_RUNS, value_parser = bench_runs)]
+    #[arg(long, value_name = "N", default_value_t = crate::game::BENCH_DEFAULT_RUNS, value_parser = bench_runs, help_heading = None::<&'static str>)]
     pub runs: usize,
     /// Fail when the runs reach no throughput verdict. Use it only on
     /// a host that runs nothing else; elsewhere the spread measures
     /// the host.
-    #[arg(long)]
+    #[arg(long, help_heading = None::<&'static str>)]
     pub strict_perf: bool,
 }

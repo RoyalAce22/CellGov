@@ -253,6 +253,12 @@ pub enum DecodeError {
     /// Host-writer byte is not a known variant.
     #[error("unknown host writer 0x{0:02x}")]
     UnknownHostWriter(u8),
+    /// The header names a trace format other than [`TRACE_FORMAT_VERSION`].
+    ///
+    /// Each format fixes its own header width, so the decoder cannot
+    /// find where the record after that header starts.
+    #[error("trace format {0}, this build reads format {v}", v = TRACE_FORMAT_VERSION)]
+    UnsupportedFormatVersion(u32),
 }
 
 impl DecodeError {
@@ -294,14 +300,14 @@ impl DecodeError {
 ///
 /// A stream whose first record is not `RunIdentity` is version 1 and
 /// carries no run identity.
-pub const TRACE_FORMAT_VERSION: u32 = 2;
+pub const TRACE_FORMAT_VERSION: u32 = 3;
 
 /// A single structured trace record.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TraceRecord {
-    /// Header record: the format version and a fingerprint of the
-    /// identity triple the run was composed from.
+    /// Header record: the format version, then fingerprints of the run's
+    /// identity triple and boot overrides.
     ///
     /// The header leads the stream and never repeats.
     RunIdentity {
@@ -313,6 +319,9 @@ pub enum TraceRecord {
         /// Fingerprint of the game half; 0 when the run named no store
         /// entry.
         game: u64,
+        /// Fingerprint of the boot overrides the run applied; 0 when it
+        /// applied none.
+        overrides: u64,
     },
     /// Scheduler selected a unit and granted it a budget.
     UnitScheduled {
@@ -551,7 +560,7 @@ impl TraceRecord {
             TAG_SYSCALL_ENTERED => 1 + 8 + 8 + 8 * 8 + 1,
             TAG_RESERVED_REGION_READ => 1 + 8 * 3 + 4 + 4,
             TAG_SYSCALL_RETURNED => 1 + 8 * 3,
-            TAG_RUN_IDENTITY => 1 + 4 + 8 + 8,
+            TAG_RUN_IDENTITY => 1 + 4 + 8 * 3,
             TAG_HOST_WRITE => 1 + 1 + 4 + 8 + 4 + 4,
             _ => return None,
         })
@@ -587,10 +596,12 @@ impl TraceRecord {
                 format_version,
                 firmware,
                 game,
+                overrides,
             } => {
                 write_u32(buf, *format_version);
                 write_u64(buf, *firmware);
                 write_u64(buf, *game);
+                write_u64(buf, *overrides);
             }
             TraceRecord::UnitScheduled {
                 unit,
@@ -744,15 +755,28 @@ impl TraceRecord {
     /// # Errors
     ///
     /// [`DecodeError::UnknownTag`] for a tag no variant owns,
-    /// [`DecodeError::Truncated`] when `bytes` is shorter than that
-    /// tag's [`encoded_len`](Self::encoded_len), and the per-field
-    /// variants when a byte inside the record is out of range.
+    /// [`DecodeError::UnsupportedFormatVersion`] for a header written
+    /// under another format, [`DecodeError::Truncated`] when `bytes` is
+    /// shorter than that tag's [`encoded_len`](Self::encoded_len), and
+    /// the per-field variants when a byte inside the record is out of
+    /// range.
     pub fn decode(bytes: &[u8]) -> Result<(Self, usize), DecodeError> {
         let mut pos = 0usize;
         let tag = read_u8(bytes, &mut pos)?;
         let Some(len) = Self::encoded_len(tag) else {
             return Err(DecodeError::UnknownTag(tag));
         };
+        if tag == TAG_RUN_IDENTITY {
+            // `len` is this format's header width, and a header of
+            // another format has another width. Decode reads the version
+            // first, so it reports an older, shorter header by its
+            // format, and it reads no record at the wrong offset.
+            let mut version_pos = pos;
+            let found = read_u32(bytes, &mut version_pos)?;
+            if found != TRACE_FORMAT_VERSION {
+                return Err(DecodeError::UnsupportedFormatVersion(found));
+            }
+        }
         if bytes.len() < len {
             return Err(DecodeError::Truncated);
         }
@@ -761,10 +785,12 @@ impl TraceRecord {
                 let format_version = read_u32(bytes, &mut pos)?;
                 let firmware = read_u64(bytes, &mut pos)?;
                 let game = read_u64(bytes, &mut pos)?;
+                let overrides = read_u64(bytes, &mut pos)?;
                 TraceRecord::RunIdentity {
                     format_version,
                     firmware,
                     game,
+                    overrides,
                 }
             }
             TAG_UNIT_SCHEDULED => {
@@ -986,3 +1012,7 @@ mod identity_tests;
 #[cfg(test)]
 #[path = "tests/record_host_write_tests.rs"]
 mod host_write_tests;
+
+#[cfg(test)]
+#[path = "tests/record_format_version_tests.rs"]
+mod format_version_tests;

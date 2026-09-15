@@ -29,7 +29,7 @@ pub fn bench_boot_runs(
         "invariant: a run set takes at least one measurement"
     );
     // Optional trailing tokens, each carrying its own leading space
-    // so the banner has no gap when both are absent.
+    // so the banner has no gap when none is present.
     let mut overrides = String::new();
     if let Some(cp) = opts.checkpoint_override {
         overrides.push_str(&format!(" checkpoint={}", cp.as_cli_str()));
@@ -40,6 +40,9 @@ pub fn bench_boot_runs(
     if !opts.guest_args.is_empty() {
         // Debug quoting: guest argv entries may contain spaces.
         overrides.push_str(&format!(" guest_args={:?}", opts.guest_args));
+    }
+    for name in opts.identity.overrides.names() {
+        overrides.push_str(&format!(" {name}"));
     }
     println!(
         "boot bench: title={} elf={} max_steps={} runs={}{overrides}",

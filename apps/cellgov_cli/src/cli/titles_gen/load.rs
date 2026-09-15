@@ -10,6 +10,7 @@
 //!
 //! - states a firmware or game version its cell directory does not
 //!   name,
+//! - states a run under a boot override,
 //! - sits in a cell the manifest does not declare,
 //! - sits at a path that names no cell.
 
@@ -85,6 +86,18 @@ pub(crate) enum SummaryLoadError {
         cell: String,
         /// Game version the file states.
         recorded: String,
+    },
+    /// The file states a run under boot overrides, and no cell records
+    /// one.
+    #[error(
+        "{}: states a run under boot override(s) {overrides}. A row states the result for \
+         the configuration its cell records, which applies none",
+        path.display()
+    )]
+    CellOverridden {
+        path: PathBuf,
+        /// The override set the file states, as its wire form names it.
+        overrides: String,
     },
     /// A result sits at a path no cell key names.
     #[error(
@@ -188,9 +201,13 @@ pub(crate) fn load_title<'a>(
 ///
 /// # Errors
 ///
-/// [`SummaryLoadError`] when a file exists but cannot be read, cannot
-/// be parsed, or states a firmware or game version other than the one
-/// its cell names.
+/// - [`SummaryLoadError::Io`] when a file exists and a read of it fails.
+/// - [`SummaryLoadError::Parse`] when the file does not parse.
+/// - [`SummaryLoadError::CellFirmwareMismatch`] or
+///   [`SummaryLoadError::CellGameVersionMismatch`] when the file states
+///   a version its cell does not name.
+/// - [`SummaryLoadError::CellOverridden`] when the file states a run
+///   under a boot override.
 fn load_cell(
     title: &TitleManifest,
     fixtures: &Path,
@@ -367,14 +384,20 @@ fn dir_name(dir: &Path) -> Option<&str> {
     dir.file_name().and_then(|n| n.to_str())
 }
 
-/// Hold a committed file against both halves of the cell whose
-/// directory it sits in.
+/// Hold a committed file against the cell whose directory it sits in.
 ///
 /// `dev record-anchors` refuses to file a mismatched result; nothing
 /// else stops one arriving by hand.
 fn check_cell(path: &Path, cell: &CellKey, recorded: &RunIdentity) -> Result<(), SummaryLoadError> {
     check_cell_firmware(path, cell, recorded.firmware.as_ref())?;
-    check_cell_game_version(path, cell, recorded.game.as_ref())
+    check_cell_game_version(path, cell, recorded.game.as_ref())?;
+    if !recorded.overrides.is_empty() {
+        return Err(SummaryLoadError::CellOverridden {
+            path: path.to_path_buf(),
+            overrides: recorded.overrides.names().join(" "),
+        });
+    }
+    Ok(())
 }
 
 /// Both firmware spellings are the store key of a `vfs/firmware/<key>/`
@@ -470,3 +493,7 @@ mod reference_lookup_tests;
 #[cfg(test)]
 #[path = "tests/unkeyed_result_tests.rs"]
 mod unkeyed_result_tests;
+
+#[cfg(test)]
+#[path = "tests/cell_override_tests.rs"]
+mod cell_override_tests;

@@ -107,6 +107,7 @@ pub fn identity(fw: &str, title_id: &str, version: &str) -> RunIdentity {
             version: version.into(),
             app_version: Some(AppVersion::AppVer("02.00".into())),
         }),
+        overrides: Default::default(),
     }
 }
 

@@ -27,6 +27,14 @@ counter. Every such line is either tracked as a witness or listed as
 diagnostic-only with the reason.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
+**Boot override.** A `boot run` / `boot bench` flag that changes what
+the boot does to the guest while composing the same cell:
+`--skip-module-start`, `--force-system-authid`, `--prx-base`,
+`--disable-module-start-hle-stubs`. The run identity names every
+override a run applied, so no anchor gates such a run and
+`dev record-anchors` refuses to file one.
+[title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
+
 **Budget.** The instruction allowance a unit gets per step (default
 256). A distinct type from guest ticks and epochs; the three never
 convert implicitly.

@@ -6,7 +6,7 @@ use cellgov_mem::GuestAddr;
 use cellgov_time::Budget;
 use serde::{Deserialize, Serialize};
 
-use crate::identity::{FirmwareIdentity, GameIdentity, RunIdentity};
+use crate::identity::{BootOverrides, FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::runner_cellgov::BootOutcome;
 use crate::witnesses::WitnessSet;
 
@@ -41,8 +41,8 @@ pub struct BootSummary {
     /// name the boot path emits. Empty until the title is recorded.
     #[serde(default, skip_serializing_if = "WitnessSet::is_empty")]
     pub witnesses: WitnessSet,
-    /// Which firmware and title version the measurement was taken
-    /// against. Empty in a summary recorded before the store carried
+    /// The firmware, title version and boot overrides the measurement
+    /// ran under. Empty in a summary recorded before the store carried
     /// versions.
     #[serde(flatten)]
     pub identity: RunIdentity,
@@ -171,6 +171,8 @@ struct BootSummaryShadow {
     firmware: Option<FirmwareIdentity>,
     #[serde(default)]
     game: Option<GameIdentity>,
+    #[serde(default)]
+    overrides: BootOverrides,
 }
 
 impl TryFrom<BootSummaryShadow> for BootSummary {
@@ -188,6 +190,7 @@ impl TryFrom<BootSummaryShadow> for BootSummary {
         summary.identity = RunIdentity {
             firmware: s.firmware,
             game: s.game,
+            overrides: s.overrides,
         };
         Ok(summary)
     }

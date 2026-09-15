@@ -56,6 +56,8 @@ pub(crate) struct ChildInitPlan {
     /// r1 for each module_start, inside the child's region below its
     /// primary stack.
     pub stack_pointer: u64,
+    /// The boot's `disable_module_start_hle_stubs` override, which the child's pass also applies.
+    pub run_hle_stubbed: bool,
 }
 
 /// Plans staged by the spawn loader, keyed by the token the loader
@@ -135,6 +137,7 @@ pub(crate) fn run_pending_child_inits(
             stack_pointer: plan.stack_pointer,
             break_pc: None,
             dump_mem_fault_ranges: Vec::new(),
+            run_hle_stubbed: plan.run_hle_stubbed,
             sink: Rc::clone(sink),
         };
         let mut completed: usize = 0;

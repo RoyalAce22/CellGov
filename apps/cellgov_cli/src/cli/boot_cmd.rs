@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use cellgov_compare::BootOutcome;
+use cellgov_compare::{BootOutcome, BootOverrides};
 use cellgov_terminal::caps::RenderFlags;
 use cellgov_terminal::progress::ProgressBar;
 use cellgov_time::Budget;
@@ -75,13 +75,17 @@ pub(super) fn resolve_composition(
     selection: &BootSelection,
     vfs_root: &Path,
     title: &cellgov_boot::manifest::TitleManifest,
+    overrides: BootOverrides,
 ) -> BootComposition {
-    try_resolve_composition(selection, vfs_root, title)
+    try_resolve_composition(selection, vfs_root, title, overrides)
         .unwrap_or_else(|e| die(&format!("boot: {e}")))
 }
 
 /// [`resolve_composition`] with the refusal returned, so a sweep can
 /// name the cell it stops and continue to the next.
+///
+/// The composed identity takes `overrides` before the identity line
+/// prints, so the line names every override the boot applies.
 ///
 /// # Errors
 ///
@@ -91,6 +95,7 @@ pub(super) fn try_resolve_composition(
     selection: &BootSelection,
     vfs_root: &Path,
     title: &cellgov_boot::manifest::TitleManifest,
+    overrides: BootOverrides,
 ) -> Result<BootComposition, ComposeError> {
     if let Some(explicit) = &selection.firmware_dir {
         if !explicit.is_dir() {
@@ -101,7 +106,7 @@ pub(super) fn try_resolve_composition(
         }
     }
     let install_root = super::keys::install_root_of(vfs_root);
-    let composition = compose_boot(&ComposeInputs {
+    let mut composition = compose_boot(&ComposeInputs {
         title,
         vfs_root,
         install_root: &install_root,
@@ -113,6 +118,7 @@ pub(super) fn try_resolve_composition(
         no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV),
         disable_env: DISABLE_DEFAULT_ENV,
     })?;
+    composition.identity.overrides = overrides;
     for line in banner::render(title, &composition) {
         eprintln!("{line}");
     }
@@ -216,12 +222,13 @@ pub(super) struct BootInputs {
 fn resolve_boot_inputs(
     selector: &TitleSelector,
     selection: &BootSelection,
+    overrides: BootOverrides,
     vfs_root: &Path,
     explicit_elf: Option<&str>,
     subcmd: &str,
 ) -> BootInputs {
     let title = resolve_title_manifest(selector, subcmd);
-    let composition = resolve_composition(selection, vfs_root, &title);
+    let composition = resolve_composition(selection, vfs_root, &title, overrides);
     let (elf_path, image) = match explicit_elf {
         Some(p) => {
             let image = crate::cli::exit::load_ppu_image_with_title_or_die(p, &title, vfs_root);
@@ -319,6 +326,7 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
+        args.overrides.overrides(),
         &vfs_root,
         args.elf_path.as_deref(),
         "boot run",
@@ -432,6 +440,7 @@ fn run_retargets_anchor(args: &BootRunArgs, checkpoint_elsewhere: bool) -> bool 
         || args.budget.is_some()
         || args.strict_reserved
         || !args.guest_arg.is_empty()
+        || !args.overrides.overrides().is_empty()
         || args.patch_byte.as_ref().is_some_and(|p| !p.is_empty())
         || args.dump_at_pc.is_some()
         || checkpoint_elsewhere
@@ -535,6 +544,7 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render:
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
+        args.overrides.overrides(),
         &vfs_root,
         None,
         "boot bench-once",
@@ -623,6 +633,7 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
+        args.overrides.overrides(),
         &vfs_root,
         None,
         "boot bench",
@@ -771,3 +782,7 @@ mod boot_run_finish_line_tests;
 #[cfg(test)]
 #[path = "tests/shipped_firmware_cell_tests.rs"]
 mod shipped_firmware_cell_tests;
+
+#[cfg(test)]
+#[path = "tests/boot_run_override_finish_line_tests.rs"]
+mod boot_run_override_finish_line_tests;

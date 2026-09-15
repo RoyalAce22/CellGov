@@ -39,10 +39,12 @@ produce byte-identical observations.
 
 Which firmware answered a run, and which of a title's installed
 versions it composed, travel with the observation rather than beside
-it. Every comparator prints both sides' identity triples before its
-verdict and says out loud when the two differ, because a divergence
-between two differently-composed runs is a difference between versions
-until it is shown otherwise. The identity triple is context, not a
+it, and so do the boot overrides the run applied (`--skip-module-start`
+and its siblings on `boot run` / `boot bench`). Every comparator prints
+both sides' identities before its verdict and says out loud when the
+two differ, because a divergence between two differently-composed runs
+is a difference between compositions until it is shown otherwise. The
+identity triple is context, not a
 verdict: a mismatch never drives an exit code on its own. The game half
 carries the title's version under the `PARAM.SFO` key its tree named it
 by, so a warning names the key beside the value. State traces carry the

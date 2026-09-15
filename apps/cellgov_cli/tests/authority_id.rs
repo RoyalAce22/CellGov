@@ -72,7 +72,7 @@ fn boot(title: &TitleUnderTest, force_system_authid: bool) -> Option<AuthorityWi
         cmd.arg("--game-ver").arg(v);
     }
     if force_system_authid {
-        cmd.env("CELLGOV_FORCE_SYSTEM_AUTHID", "1");
+        cmd.arg("--force-system-authid");
     }
     let output = cmd.output().expect("spawn cellgov boot bench-once");
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -133,7 +133,7 @@ fn every_installed_title_is_served_its_own_authority_id() {
         let forced = boot(title, true).expect("installed above; forced boot must also start");
         assert_eq!(
             forced.program_authority_id, BDJ_SELF_PROGRAM_AUTHORITY_ID,
-            "{}: CELLGOV_FORCE_SYSTEM_AUTHID must serve the bdj.self constant",
+            "{}: --force-system-authid must serve the bdj.self constant",
             title.short_name,
         );
         if forced.lwmutex_unknown_locks > normal.lwmutex_unknown_locks {

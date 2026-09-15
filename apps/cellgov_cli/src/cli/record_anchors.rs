@@ -69,7 +69,10 @@ fn identity_game_version(game_ver: &str) -> String {
 }
 
 /// Every way the run's own identity contradicts the cell that would
-/// receive its result; empty when the two name one identity triple.
+/// receive its result.
+///
+/// An applied boot override contradicts every cell, because no anchor
+/// records one.
 ///
 /// The child re-resolves its composition, and not every flag reaches
 /// that resolution. A boot asked for no firmware never consults `--fw`;
@@ -78,6 +81,14 @@ fn identity_game_version(game_ver: &str) -> String {
 /// the run composed, so it decides which cell may receive the result.
 fn cell_disagreements(identity: &RunIdentity, cell: &CellKey) -> Vec<String> {
     let mut out = Vec::new();
+    // `measure` passes no override flag, so this names a child that
+    // applied one anyway.
+    if !identity.overrides.is_empty() {
+        out.push(format!(
+            "applied boot override(s) {}, which no anchor is recorded under",
+            identity.overrides.names().join(" ")
+        ));
+    }
     match &identity.firmware {
         Some(f) if f.version == cell.fw => {}
         Some(f) => out.push(format!(
@@ -206,9 +217,10 @@ fn measure(job: &Job) -> Option<Measurement> {
     let disagreements = cell_disagreements(&identity, &job.cell);
     if !disagreements.is_empty() {
         die(&format!(
-            "{}: the run {}; refusing to file a measurement under a cell it did not \
-             compose. The anchor tree is keyed by the composed identity triple, so the \
-             gate would hold one configuration against another configuration's run",
+            "{}: the run {}; refusing to file the measurement under that cell. The \
+             anchor tree is keyed by the composed identity triple and records no boot \
+             override, so the gate would hold one configuration against another \
+             configuration's run",
             job.label(),
             disagreements.join(", and ")
         ));
@@ -481,3 +493,7 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
 #[cfg(test)]
 #[path = "tests/record_anchors_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/record_anchors_override_tests.rs"]
+mod override_tests;

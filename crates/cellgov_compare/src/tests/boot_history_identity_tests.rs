@@ -99,6 +99,7 @@ fn naming_a_half_that_was_not_named_before_is_a_move() {
     let fw_only = RunIdentity {
         firmware: full.firmware.clone(),
         game: None,
+        overrides: Default::default(),
     };
     let first = entry(None, fw_only).expect("first");
     let second = entry(Some(&first), full)

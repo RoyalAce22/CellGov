@@ -78,11 +78,12 @@ never silently dropped. The selected set loads in topological-sort order,
 OPD; a `module_start` that faults in guest code is skipped with a
 named witness instead of aborting the boot.
 
-`boot run` exposes two env vars for firmware-loading experiments:
-`CELLGOV_PRX_BASE` overrides the firmware PRX load address, and
-`CELLGOV_SKIP_MODULE_START=1` bypasses `module_start` for a
-firmware PRX whose initializer corrupts state under CellGov's LV2
-coverage.
+`boot run` and `boot bench` take two flags for firmware-loading
+experiments: `--prx-base HEX` overrides the firmware PRX load address,
+and `--skip-module-start` bypasses `module_start` for a firmware PRX
+whose initializer corrupts state under CellGov's LV2 coverage. Both
+are boot overrides: the run identity names them, and no anchor gates a
+run that sets one.
 
 **SPU (`cellgov_spu`)**: 128x128-bit register file, 256 KB local
 store, channel file. Implements RR / RI7 / RI10 / RI16 / RI18 / RRR

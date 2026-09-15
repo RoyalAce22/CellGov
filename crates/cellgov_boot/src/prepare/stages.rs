@@ -78,7 +78,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         placement.alloc_base,
         verified.as_ref(),
         host_link,
-    )?;
+    );
     host::register_prx_modules(&mut rt, &prx_modules)?;
 
     // 7. Execution-unit factories, inherited by guest-created threads.
@@ -120,6 +120,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
     let counts = module_start::run_module_starts(
         &mut rt,
         &prx_modules,
+        title.identity.overrides,
         &diagnostics,
         &services,
         primary_unit_id,

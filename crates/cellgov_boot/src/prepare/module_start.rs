@@ -1,5 +1,6 @@
 //! Running every loaded PRX's `module_start`.
 
+use cellgov_compare::BootOverrides;
 use cellgov_core::Runtime;
 use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_BASE;
 
@@ -29,8 +30,8 @@ pub(super) struct ModuleStartCounts {
     /// Modules whose `module_start` faulted; witnessed by
     /// `BENCH_MODULE_START_FAULTS`, and left un-started.
     pub faulted: usize,
-    /// `CELLGOV_SKIP_MODULE_START` suppressed the loop, so `total` is
-    /// not accounted for.
+    /// The `skip_module_start` boot override suppressed the loop, so
+    /// `total` is not accounted for.
     pub skipped: bool,
 }
 
@@ -48,6 +49,7 @@ pub(super) struct ModuleStartCounts {
 pub(super) fn run_module_starts(
     rt: &mut Runtime,
     prx_modules: &[PrxLoadInfo],
+    overrides: BootOverrides,
     diagnostics: &DiagnosticOptions<'_>,
     services: &BootServices,
     primary_unit_id: cellgov_event::UnitId,
@@ -58,8 +60,7 @@ pub(super) fn run_module_starts(
         .iter()
         .filter(|p| p.module_start.is_some())
         .count();
-    let skipped =
-        crate::env::parse_bool("CELLGOV_SKIP_MODULE_START").map_err(ModuleStartError::from)?;
+    let skipped = overrides.skip_module_start;
     let boot_env = ModuleStartEnv {
         space: cellgov_core::AddressSpaceId::BOOT,
         thread_owner: primary_unit_id,
@@ -68,6 +69,7 @@ pub(super) fn run_module_starts(
         stack_pointer: MODULE_START_STACK_POINTER,
         break_pc: diagnostics.dump_at_pc.map(|pc| (pc, diagnostics.dump_skip)),
         dump_mem_fault_ranges: diagnostics.dump_mem_fault_ranges.to_vec(),
+        run_hle_stubbed: overrides.disable_module_start_hle_stubs,
         sink: std::rc::Rc::clone(&services.sink),
     };
     let (started, faulted) = match (prx_modules.is_empty(), skipped) {
@@ -100,12 +102,13 @@ pub(super) fn run_module_starts(
             (completed, faulted.len())
         }
         (false, true) => {
-            sink.warn("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
+            sink.warn("module_start: skipped (boot override skip_module_start)");
             (0, 0)
         }
         (true, true) => {
             sink.warn(
-                "module_start: CELLGOV_SKIP_MODULE_START set, but no PRX was loaded -- flag has no effect"
+                "module_start: boot override skip_module_start set, but no PRX was loaded -- \
+                 it has no effect",
             );
             (0, 0)
         }

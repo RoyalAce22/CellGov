@@ -93,6 +93,7 @@ fn one_string_under_the_two_keys_fingerprints_apart() {
         RunIdentity {
             firmware: None,
             game: Some(game(app_version)),
+            overrides: Default::default(),
         }
         .game_fingerprint()
     };
@@ -122,6 +123,7 @@ fn a_difference_in_the_version_key_alone_is_named_in_the_warning() {
     let by = |app_version| RunIdentity {
         firmware: None,
         game: Some(game(app_version)),
+        overrides: Default::default(),
     };
     let a = by(Some(AppVersion::AppVer("01.00".into())));
     let b = by(Some(AppVersion::SfoVersion("01.00".into())));
@@ -141,6 +143,7 @@ fn a_tree_naming_no_version_is_named_as_such_in_the_warning() {
     let by = |app_version| RunIdentity {
         firmware: None,
         game: Some(game(app_version)),
+        overrides: Default::default(),
     };
     let a = by(Some(AppVersion::AppVer("01.00".into())));
     let b = by(None);
@@ -158,6 +161,7 @@ fn the_report_line_carries_the_label() {
     let id = RunIdentity {
         firmware: None,
         game: Some(game(Some(AppVersion::SfoVersion("01.02".into())))),
+        overrides: Default::default(),
     };
     let lines = id.render_lines();
     assert!(lines[0].contains("(sfo_version 01.02)"), "{lines:?}");

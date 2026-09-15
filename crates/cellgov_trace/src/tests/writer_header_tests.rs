@@ -28,6 +28,7 @@ fn header() -> TraceRecord {
         format_version: crate::record::TRACE_FORMAT_VERSION,
         firmware: 7,
         game: 9,
+        overrides: 11,
     }
 }
 
@@ -62,7 +63,7 @@ fn a_second_header_is_refused() {
     assert!(w.record_header(&header()));
     assert!(!w.record_header(&header()));
     assert_eq!(w.record_count(), 1);
-    assert_eq!(w.byte_len(), 21);
+    assert_eq!(Some(w.byte_len()), TraceRecord::encoded_len(header().tag()));
 }
 
 #[test]

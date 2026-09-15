@@ -39,7 +39,8 @@ pub enum AuthorityIdSource {
     SelfHeader,
     /// Raw-ELF input; the host's retail-application fallback stands.
     Fallback,
-    /// `CELLGOV_FORCE_SYSTEM_AUTHID` overrode whatever the input said.
+    /// The `force_system_authid` boot override replaced whatever the
+    /// input said.
     Forced,
 }
 
@@ -98,8 +99,10 @@ pub struct TitleOptions<'a> {
     /// selected update's first: the roots of a mount that declares no
     /// host, and the bases of a `[content]` entry.
     pub eboot_dirs: &'a [PathBuf],
-    /// Which firmware and title version the store composed for this
-    /// run; written as the trace stream's header record.
+    /// The run's firmware, title version and boot overrides, as the trace header records them.
+    ///
+    /// The boot reads its overrides from here and nowhere else, so the
+    /// header names every override the run applied.
     pub identity: &'a cellgov_compare::RunIdentity,
 }
 

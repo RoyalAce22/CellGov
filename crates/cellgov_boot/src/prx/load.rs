@@ -173,12 +173,12 @@ pub enum FirmwareLoadError {
         /// The parser's own account of the refusal.
         source: cellgov_ppu::sprx::PrxParseError,
     },
-    /// `CELLGOV_PRX_BASE` was set but names no placement the main
-    /// region can hold.
-    #[error("CELLGOV_PRX_BASE={value}: {reason}")]
+    /// The `prx_base` boot override names no placement the main region
+    /// can hold.
+    #[error("--prx-base 0x{base:016x}: {reason}")]
     PrxBase {
-        /// The value the variable held, as the diagnostic shows it.
-        value: String,
+        /// The base the override named.
+        base: u64,
         /// Which rule it broke.
         reason: String,
     },
@@ -424,23 +424,16 @@ fn page_align_up_u64(addr: u64) -> Result<u64, FirmwareLoadError> {
     Ok(rounded & !0xFFFu64)
 }
 
-/// Resolve the PRX placement base from `CELLGOV_PRX_BASE`, or from
-/// [`default_prx_base`] when that variable is unset.
+/// The PRX placement base: the `prx_base` boot override when the run
+/// names one, [`default_prx_base`] otherwise.
 ///
 /// # Errors
 ///
-/// `CELLGOV_PRX_BASE` holds a value that is not Unicode, or one that
-/// [`prx_base_from_value`] refuses.
-fn resolve_prx_base(code_floor: u32) -> Result<u64, FirmwareLoadError> {
-    match std::env::var("CELLGOV_PRX_BASE") {
-        Ok(s) => prx_base_from_value(&s, code_floor),
-        Err(std::env::VarError::NotPresent) => Ok(default_prx_base(code_floor)),
-        // An override the host cannot spell as Unicode names no hex
-        // address, and the operator still asked for a placement.
-        Err(std::env::VarError::NotUnicode(raw)) => Err(FirmwareLoadError::PrxBase {
-            value: format!("{raw:?}"),
-            reason: "not Unicode, so it names no hex address".to_string(),
-        }),
+/// [`checked_prx_base`] refuses the override.
+fn resolve_prx_base(prx_base: Option<u64>, code_floor: u32) -> Result<u64, FirmwareLoadError> {
+    match prx_base {
+        Some(base) => checked_prx_base(base, code_floor),
+        None => Ok(default_prx_base(code_floor)),
     }
 }
 
@@ -452,43 +445,25 @@ fn default_prx_base(code_floor: u32) -> u64 {
     (u64::from(code_floor) + 0xFFFF) & !0xFFFF
 }
 
-/// Parse one `CELLGOV_PRX_BASE` value into a placement base.
+/// Check a `prx_base` override against the placements the main region can take.
 ///
 /// # Errors
 ///
-/// - `value` is not a hex `u64`.
-/// - `value` is not 64K-aligned.
-/// - `value` is below `code_floor`.
-/// - `value` is outside the main region.
-fn prx_base_from_value(value: &str, code_floor: u32) -> Result<u64, FirmwareLoadError> {
-    let trimmed = value.trim();
-    let stripped = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-        .unwrap_or(trimmed);
-    let base = u64::from_str_radix(stripped, 16).map_err(|e| FirmwareLoadError::PrxBase {
-        value: format!("{value:?}"),
-        reason: format!("not a hex u64 ({e})"),
-    })?;
+/// - `base` is not 64K-aligned.
+/// - `base` is below `code_floor`.
+/// - `base` is outside the main region.
+fn checked_prx_base(base: u64, code_floor: u32) -> Result<u64, FirmwareLoadError> {
+    let refuse = |reason: String| FirmwareLoadError::PrxBase { base, reason };
     if base & 0xFFFF != 0 {
-        return Err(FirmwareLoadError::PrxBase {
-            value: format!("0x{base:x}"),
-            reason: "must be 64K-aligned (low 16 bits zero)".to_string(),
-        });
+        return Err(refuse("must be 64K-aligned (low 16 bits zero)".to_string()));
     }
     if base < code_floor as u64 {
-        return Err(FirmwareLoadError::PrxBase {
-            value: format!("0x{base:x}"),
-            reason: format!("below code_floor 0x{code_floor:x}"),
-        });
+        return Err(refuse(format!("below code_floor 0x{code_floor:x}")));
     }
     // Main region spans `[0, 0x4000_0000)`; PRX placement above that
     // hits reserved or unmapped regions.
     if base >= 0x4000_0000 {
-        return Err(FirmwareLoadError::PrxBase {
-            value: format!("0x{base:x}"),
-            reason: "must be in main region (< 0x4000_0000)".to_string(),
-        });
+        return Err(refuse("must be in main region (< 0x4000_0000)".to_string()));
     }
     Ok(base)
 }
@@ -653,26 +628,42 @@ fn utf8_path(path: &Path) -> Result<String, FirmwareLoadError> {
 /// Returns an empty vector (and no identity) only when no firmware
 /// directory was supplied.
 ///
+/// `prx_base` places the set there instead of at the first 64K page
+/// past `code_floor`.
+///
 /// # Errors
 ///
 /// Any refusal of the scan, the selection, the placement or the GOT
 /// batch; see [`FirmwareLoadError`].
+#[allow(
+    clippy::too_many_arguments,
+    reason = "each argument is an independent input of the one load; a bag would be built for this caller alone"
+)]
 pub fn load_firmware_set_bound(
     firmware_dir: Option<&str>,
     modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     code_floor: u32,
+    prx_base: Option<u64>,
     include_internal: bool,
     sink: &dyn BootSink,
     keys: &dyn KeyVaultSource,
 ) -> Result<(Vec<PrxLoadInfo>, Option<VerifiedFirmware>, HostLinkMaps), FirmwareLoadError> {
     let Some(dir) = firmware_dir else {
         sink.note("prx: firmware-set mode requires --firmware-dir");
+        // The trampolines-only fallback places from the code floor, so
+        // the run identity names an override this boot never applied.
+        if let Some(base) = prx_base {
+            sink.warn(&format!(
+                "prx: boot override prx_base=0x{base:x} set, but no firmware set is loaded -- \
+                 it has no effect"
+            ));
+        }
         return Ok((Vec::new(), None, HostLinkMaps::default()));
     };
     let candidates = FirmwareCandidates::scan(dir, include_internal, keys)?;
     let (loaded, identity, host_link) =
-        load_firmware_set_from(&candidates, modules, mem, code_floor, sink)?;
+        load_firmware_set_from(&candidates, modules, mem, code_floor, prx_base, sink)?;
     Ok((loaded, Some(identity), host_link))
 }
 
@@ -690,6 +681,7 @@ pub fn load_firmware_set_from(
     modules: &[cellgov_ppu::prx::ImportedModule],
     mem: &mut GuestMemory,
     code_floor: u32,
+    prx_base: Option<u64>,
     sink: &dyn BootSink,
 ) -> Result<(Vec<PrxLoadInfo>, VerifiedFirmware, HostLinkMaps), FirmwareLoadError> {
     let fw_root = &candidates.root;
@@ -770,7 +762,7 @@ pub fn load_firmware_set_from(
         bytes_by_path.insert(path_str.clone(), elf);
     }
 
-    let prx_base = resolve_prx_base(code_floor)?;
+    let prx_base = resolve_prx_base(prx_base, code_floor)?;
 
     let image = cellgov_ppu::prx_loader::load_firmware_set(bytes_by_path, mem, prx_base).map_err(
         |source| FirmwareLoadError::LoadSet {

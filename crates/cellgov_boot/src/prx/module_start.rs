@@ -12,7 +12,6 @@ use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::PpuExecutionUnit;
 
 use crate::diag::{append_pc_ring_with_decode, append_syscall_ring, fetch_raw_at, format_fault};
-use crate::env::EnvBoolError;
 use crate::step_loop::tty::{classify_tty_capture, TtyCaptureDecision};
 use crate::step_loop::{PcRing, SyscallRing};
 use crate::BootSink;
@@ -158,9 +157,6 @@ pub enum ModuleStartError {
         /// The unit whose thread it was to alias to.
         owner: UnitId,
     },
-    /// A `CELLGOV_*` toggle this pass reads holds an unrecognized value.
-    #[error("{0}")]
-    EnvBool(#[from] EnvBoolError),
 }
 
 fn stall_detail(rt: &Runtime, pc_ring: &PcRing, sc_ring: &SyscallRing) -> String {
@@ -193,6 +189,8 @@ pub struct ModuleStartEnv {
     /// `--dump-mem-fault`: guest ranges hex-dumped alongside the
     /// register dump when the transient unit faults or breaks.
     pub dump_mem_fault_ranges: Vec<(u64, u64)>,
+    /// Run the LLE path of each HLE-stubbed `module_start` in place of its `CELL_OK` stub.
+    pub run_hle_stubbed: bool,
     /// Where the pass reports each module it runs.
     pub sink: Rc<dyn BootSink>,
 }
@@ -264,9 +262,9 @@ pub fn run_module_start(
     };
 
     if HLE_STUBBED_MODULE_STARTS.contains(&prx_info.name.as_str()) {
-        if crate::env::parse_bool("CELLGOV_DISABLE_MODULE_START_HLE_STUBS")? {
+        if env.run_hle_stubbed {
             sink.note(&format!(
-                "module_start: {} HLE-stub DISABLED via env; running the honest \
+                "module_start: {} HLE-stub DISABLED by boot override; running the honest \
                  LLE path (expected to stall at the producer-fed wait)",
                 prx_info.name,
             ));
@@ -731,3 +729,7 @@ fn handle_module_start_tty(args: &[u64; 9], mem: &cellgov_mem::GuestMemory, sink
 #[cfg(test)]
 #[path = "tests/module_start_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/module_start_override_tests.rs"]
+mod override_tests;

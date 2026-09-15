@@ -6,7 +6,7 @@ use std::path::Path;
 use cellgov_compare::witness_parse::{parse_witness_lines, ParsedWitnesses};
 use cellgov_compare::witnesses::{check_all, unrecorded};
 use cellgov_compare::{
-    BootSummary, FirmwareIdentity, GameIdentity, RunIdentity, RUN_IDENTITY_SENTINEL,
+    BootOverrides, BootSummary, FirmwareIdentity, GameIdentity, RunIdentity, RUN_IDENTITY_SENTINEL,
 };
 use cellgov_time::Budget;
 
@@ -81,16 +81,24 @@ pub(super) fn incomparable_reasons(opts: &BenchOptions<'_>) -> Vec<String> {
             opts.guest_args.len()
         ));
     }
+    for (flag, value) in crate::cli::parse::override_flags(&opts.identity.overrides) {
+        let spelled = value.map_or_else(|| flag.to_string(), |v| format!("{flag} {v}"));
+        reasons.push(format!(
+            "{spelled} overrides boot behaviour; the anchor is recorded with no boot override"
+        ));
+    }
     reasons
 }
 
-/// How the identity triple a summary embeds disagrees with the one
-/// the run composed.
+/// How the identity a summary embeds disagrees with the one the run
+/// composed.
 ///
-/// The anchor's directory names the cell it is filed under; the
-/// embedded identity triple is what the recording run itself
-/// composed. A file whose two accounts disagree came from a run of
-/// another cell, so the numbers below compare two different cells.
+/// The anchor's directory names the cell it is filed under. The
+/// embedded identity is what the recording run itself composed. A
+/// disagreement means the file measured one of these:
+///
+/// - another cell, when the firmware or game half differs;
+/// - another trajectory of the same cell, when the override set differs.
 fn mislabelled_anchor(recorded: &RunIdentity, run: &RunIdentity) -> Vec<String> {
     let mut failures = Vec::new();
     if recorded.firmware != run.firmware {
@@ -107,7 +115,23 @@ fn mislabelled_anchor(recorded: &RunIdentity, run: &RunIdentity) -> Vec<String> 
             render_game(run.game.as_ref()),
         ));
     }
+    if recorded.overrides != run.overrides {
+        failures.push(format!(
+            "the anchor was measured under different boot overrides: recorded {}, ran {}",
+            render_overrides(&recorded.overrides),
+            render_overrides(&run.overrides),
+        ));
+    }
     failures
+}
+
+/// How a report names an override set.
+fn render_overrides(overrides: &BootOverrides) -> String {
+    if overrides.is_empty() {
+        "(none)".to_string()
+    } else {
+        overrides.names().join(" ")
+    }
 }
 
 /// How a report names the firmware half.
@@ -299,3 +323,7 @@ fn check_anchor_under(
 #[cfg(test)]
 #[path = "tests/anchor_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/anchor_override_tests.rs"]
+mod override_tests;

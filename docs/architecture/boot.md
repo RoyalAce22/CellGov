@@ -40,9 +40,8 @@ ring-state-aware wake for the system-namespace condition
 variables, and returns `CELL_OK` from the `module_start` without
 executing the producer-fed wait. A `module_start` with no such
 declaration runs in full. The
-`CELLGOV_DISABLE_MODULE_START_HLE_STUBS` env knob forces the
-honest low-level path, which stalls `AllBlocked` at the
-producer-fed wait.
+`--disable-module-start-hle-stubs` boot override forces the honest
+low-level path, which stalls `AllBlocked` at the producer-fed wait.
 
 ## Where the boot lives
 

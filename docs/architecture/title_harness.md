@@ -210,11 +210,16 @@ fires from inside the checkout.
 The gate holds a run against the anchor of the cell the run composed,
 and against nothing else. A cell with no committed anchor reports
 `NOT RECORDED` and gates nothing, the same way a retargeted run reports
-`NOT COMPARED`. A run that composed no cell at all -- an unmanaged
+`NOT COMPARED`. A run under a boot override (`--skip-module-start`,
+`--force-system-authid`, `--prx-base`, `--disable-module-start-hle-stubs`)
+is a retargeted run: it composes the same cell as a clean run, but its
+run identity names the override set, so the gate reports it
+incomparable and `dev record-anchors` refuses to file it. A run that
+composed no cell at all -- an unmanaged
 `--firmware-dir` tree, or a title the store does not hold -- has no key
 to file evidence under, so it is reported incomparable rather than held
-against a neighbouring cell. The gate also compares the identity triple
-the anchor embeds against the one the run composed, so a file
+against a neighbouring cell. The gate also compares the identity the
+anchor embeds against the one the run composed, so a file
 hand-edited, copied in from another cell, or measured before one half
 of the identity triple was installed says so instead of standing in for
 this cell's measurement.

@@ -91,6 +91,7 @@ pub(super) fn install_spawn_loader(
 ) -> ChildInitPlans {
     let child_init = ChildInitPlans::default();
     let spawn_firmware_dir: Option<String> = title.firmware_dir.map(str::to_string);
+    let overrides = title.identity.overrides;
     // Scanned and decrypted on the first spawn; a boot that never
     // spawns pays nothing.
     let spawn_candidates: RefCell<Option<FirmwareCandidates>> = RefCell::new(None);
@@ -170,11 +171,17 @@ pub(super) fn install_spawn_loader(
                             cache.insert(scanned)
                         }
                     };
-                let (modules, _identity, _host_link) =
-                    load_firmware_set_from(candidates, &imports, mem, code_floor, sink.as_ref())
-                        .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageLoad {
-                            detail: format!("child firmware set: {e}"),
-                        })?;
+                let (modules, _identity, _host_link) = load_firmware_set_from(
+                    candidates,
+                    &imports,
+                    mem,
+                    code_floor,
+                    overrides.prx_base,
+                    sink.as_ref(),
+                )
+                .map_err(|e| cellgov_core::ProcessSpawnLoadError::ImageLoad {
+                    detail: format!("child firmware set: {e}"),
+                })?;
                 modules
             }
             None => Vec::new(),
@@ -232,6 +239,7 @@ pub(super) fn install_spawn_loader(
             // the child's own stack grows down from `stack_top`, the
             // transient module_start stacks from here.
             stack_pointer: stack_top - PS3_PRIMARY_STACK_SIZE as u64,
+            run_hle_stubbed: overrides.disable_module_start_hle_stubs,
         });
         Ok(cellgov_core::SpawnedProcessImage {
             entry_code: state.pc,

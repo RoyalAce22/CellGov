@@ -8,9 +8,9 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use cellgov_compare::{
-    classify, classify::ClassifierContext, summarize, ByteParity, Convergence, CrossRunnerSummary,
-    DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome, RegionPairOutcome,
-    UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
+    classify, classify::ClassifierContext, summarize, BootOverrides, ByteParity, Convergence,
+    CrossRunnerSummary, DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome,
+    RegionPairOutcome, UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
 };
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
@@ -134,6 +134,23 @@ pub(crate) fn apply_subs(template: &str, subs: &[(&str, &str)]) -> String {
     out
 }
 
+/// The refusal for a CellGov capture taken under a boot override.
+///
+/// The fixture takes its identity from the store's composition, which
+/// names no override. Without this refusal, the fixture files an
+/// overridden run as a clean one.
+fn overridden_capture_refusal(path: &str, overrides: &BootOverrides) -> Option<String> {
+    if overrides.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "fixture-gen: {path} was captured under boot override(s) {}; a committed \
+         cross-runner result names the configuration its cell records, which applies none. \
+         Re-capture with `boot run --save-observation` and no override flag",
+        overrides.names().join(" ")
+    ))
+}
+
 pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     let cellgov_path = args.cellgov.clone();
     let rpcs3_path = args.rpcs3.clone();
@@ -144,7 +161,12 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     let vfs_root = resolve_ps3_vfs_root(vfs_flag);
     // The fixture must name the EBOOT a boot run picks, so the
     // selection goes through the boot family's resolver.
-    let composition = super::boot_cmd::resolve_composition(&args.selection, &vfs_root, &manifest);
+    let composition = super::boot_cmd::resolve_composition(
+        &args.selection,
+        &vfs_root,
+        &manifest,
+        BootOverrides::default(),
+    );
     let cell = super::boot_cmd::composed_cell(&composition).unwrap_or_else(|| {
         die(&format!(
             "fixture-gen: {} composed no cell: a cross-runner result is filed under \
@@ -186,6 +208,9 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
 
     let cellgov: Observation = serde_json::from_slice(&load_file_or_die(&cellgov_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {cellgov_path}: {e}")));
+    if let Some(refusal) = overridden_capture_refusal(&cellgov_path, &cellgov.identity.overrides) {
+        die(&refusal);
+    }
     let rpcs3: Observation = serde_json::from_slice(&load_file_or_die(&rpcs3_path))
         .unwrap_or_else(|e| die(&format!("fixture-gen: parse {rpcs3_path}: {e}")));
 
@@ -836,3 +861,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/fixture_gen_cell_tests.rs"]
 mod cell_tests;
+
+#[cfg(test)]
+#[path = "tests/fixture_gen_override_tests.rs"]
+mod override_tests;

@@ -12,6 +12,7 @@ fn one_of_each() -> Vec<TraceRecord> {
             format_version: TRACE_FORMAT_VERSION,
             firmware: 31,
             game: 32,
+            overrides: 33,
         },
         TraceRecord::UnitScheduled {
             unit: UnitId::new(1),

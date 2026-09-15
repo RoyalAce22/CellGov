@@ -89,8 +89,8 @@ pub(super) fn dump_boot_memory(rt: &Runtime, addrs: &[u64], sink: &dyn crate::Bo
 /// faulted.
 ///
 /// A faulted start is a witnessed skip (`BENCH_MODULE_START_FAULTS`),
-/// so it counts toward completeness; `CELLGOV_SKIP_MODULE_START` runs
-/// nothing, so the invariant binds only when the loop ran.
+/// so it counts toward completeness. The invariant binds only when the
+/// loop ran; the `skip_module_start` boot override runs no module.
 pub(super) fn assert_module_start_completeness(counts: &ModuleStartCounts) {
     if counts.skipped {
         return;
