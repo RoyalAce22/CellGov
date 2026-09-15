@@ -1,12 +1,17 @@
 //! A depth the runtime resolved by warping still owes its branches.
 //!
-//! Where no unit is runnable, the search does not pick: the runtime
-//! warps guest time, fires what is due, and runs whatever that wakes.
-//! The depth still carries a wakeup tree, and a race the execution
-//! reports can ask that depth for a reversal it cannot deliver. The
-//! case here is what the depth does with that branch: it drops the
-//! branch and counts the drop, rather than re-arming one no replay of
-//! the prefix can take.
+//! Where no unit is runnable, the search has nothing to decide from:
+//! the runtime warps guest time, fires what is due, and runs whatever
+//! that wakes. The depth records the woken set and decides from it
+//! afterwards. It delivers a branch that names a unit the warp wakes,
+//! and drops one that names any other unit.
+//!
+//! The warp here wakes one unit, so every reversal a race asks of this
+//! depth names some other unit, and the depth drops every one.
+//! `the_warp_wakes_exactly_one_unit` pins that count, which is what
+//! decides which of the two outcomes this workload shows.
+//! `warp_two_wakes.rs` holds the other outcome: two waits due at one
+//! tick, so the warp there wakes two units.
 
 #![allow(
     clippy::unwrap_used,
@@ -75,12 +80,39 @@ fn warp_then_contend() -> Runtime {
     rt
 }
 
+/// The depth delivers a branch only for a unit the warp wakes. This
+/// count therefore decides whether the depth takes or drops the
+/// reversals the case below asks of it.
+#[test]
+fn the_warp_wakes_exactly_one_unit() {
+    let mut rt = warp_then_contend();
+    let mut warps = 0usize;
+    for _ in 0..64 {
+        let idle = rt.registry().runnable_ids().next().is_none();
+        let Ok(step) = rt.step() else { break };
+        if idle {
+            warps += 1;
+            assert_eq!(
+                rt.last_runnable().len(),
+                1,
+                "the warp woke {:?}",
+                rt.last_runnable(),
+            );
+        }
+        rt.commit_step(&step.result, &step.effects)
+            .expect("no step of this workload refuses its commit");
+    }
+    assert!(
+        warps > 0,
+        "the workload has to reach a warp to say anything"
+    );
+}
+
 /// The search finishes, and says it did not cover everything.
 ///
-/// A race can name a warp depth as the place to reverse it, and the
-/// search can reverse nothing there. The runtime picks, and it picks
-/// the same unit on every replay of the prefix. So the depth drops the
-/// branch and counts it, and that count withdraws the class total.
+/// Every reversal a race asks of the warp depth names a unit the warp
+/// does not wake. The depth drops and counts each one, and that count
+/// withdraws the class total.
 #[test]
 fn a_warp_depth_refuses_a_reversal_it_cannot_deliver() {
     let cap = 1_000;

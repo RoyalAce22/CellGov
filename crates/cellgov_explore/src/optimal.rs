@@ -42,8 +42,8 @@ struct Run {
     /// where the branch sits:
     ///
     /// - [`choose`]'s own drops.
-    /// - Every branch left on a depth the runtime resolved by warping
-    ///   guest time ([`Frame::warped`]).
+    /// - A branch a warp depth held before the search knew what that
+    ///   warp wakes ([`Frame::warp_woke`]).
     dropped_branches: usize,
 }
 
@@ -66,14 +66,16 @@ struct Frame {
     /// Footprint each unit produced when the search ran it from this
     /// prefix, which is what the independence test at line 17 reads.
     footprints: BTreeMap<UnitId, StepFootprint>,
-    /// True where no unit was runnable and the runtime resolved the
-    /// depth by warping guest time.
+    /// Units the all-blocked time warp woke here, empty at every depth
+    /// no warp resolved.
     ///
-    /// The runtime picks this depth's unit, and picks the same one on
-    /// every replay of the prefix. So the search can deliver no
-    /// reversal here: a race that asks for one gets a drop and a
-    /// count.
-    warped: bool,
+    /// No unit is runnable at such a depth, so the search has nothing
+    /// to decide from and lets the runtime warp guest time and pick. A
+    /// replay of the same prefix reaches the same warp, so that warp
+    /// wakes the same set. A later execution decides from the recorded
+    /// set, and the selection call the runtime makes after the warp
+    /// delivers that choice.
+    warp_woke: Vec<UnitId>,
 }
 
 /// Why one execution of the search stopped.
@@ -190,7 +192,7 @@ where
                 // A truncated execution's race set covers a prefix of
                 // the workload, so it owes nothing.
                 if !truncated {
-                    dropped_branches += detect_races(&run.log, &mut frames);
+                    detect_races(&run.log, &mut frames);
                 }
             }
         }
@@ -267,27 +269,47 @@ fn run_one(
             break Halt::Stopped(StopReason::StepBound);
         }
         let runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
-        // An empty set is no choice: the runtime warps guest time to
-        // fire what is due and schedules whatever that wakes.
-        if !runnable.is_empty() && depth >= fixed {
+        // An empty set is no choice the search can make yet: the
+        // runtime warps guest time, fires what is due, and schedules
+        // whatever that wakes. A depth that already recorded the set a
+        // warp woke decides from that instead.
+        let warp_woke: Vec<UnitId> = if runnable.is_empty() {
+            frames
+                .get(depth)
+                .map(|frame| frame.warp_woke.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let deciding: &[UnitId] = if runnable.is_empty() {
+            &warp_woke
+        } else {
+            &runnable
+        };
+        if !deciding.is_empty() && depth >= fixed {
             if depth == frames.len() {
                 let (sleep, wut) = inherit(frames);
                 frames.push(Frame {
-                    chosen: runnable[0],
+                    chosen: deciding[0],
                     sleep,
                     wut,
                     footprints: BTreeMap::new(),
-                    warped: false,
+                    warp_woke: Vec::new(),
                 });
             }
-            match choose(&mut frames[depth], &runnable, &mut dropped_branches) {
+            match choose(&mut frames[depth], deciding, &mut dropped_branches) {
                 Some(unit) => frames[depth].chosen = unit,
                 None => break Halt::SleepBlocked,
             }
         }
-        if runnable.is_empty() {
+        if deciding.is_empty() {
             rt.set_scheduler(cellgov_core::RoundRobinScheduler::new());
         } else {
+            // At a warp depth the runtime asks once before the warp,
+            // and again after each pass of it. Nothing is runnable at
+            // the first call, and an unanswered call advances no
+            // cursor, so the pass that wakes someone delivers the
+            // prescription.
             rt.set_scheduler(PrescribedScheduler::single_choice(frames[depth].chosen));
         }
         let step = match rt.step() {
@@ -308,8 +330,6 @@ fn run_one(
             "the cap was reached, the predicate saw no step left, and one ran",
         );
         if runnable.is_empty() {
-            // The warp resolved the choice; the frame records what it
-            // picked so the backtrack below has a branch to retire.
             if depth == frames.len() {
                 let (sleep, wut) = inherit(frames);
                 frames.push(Frame {
@@ -317,21 +337,33 @@ fn run_one(
                     sleep,
                     wut,
                     footprints: BTreeMap::new(),
-                    warped: true,
+                    warp_woke: Vec::new(),
                 });
-            } else {
-                debug_assert_eq!(
-                    frames[depth].chosen, step.unit,
-                    "a replayed prefix reaches the same warp, so it wakes the same unit",
-                );
-                frames[depth].chosen = step.unit;
-                frames[depth].warped = true;
             }
-            // `choose` never ran here, so the tree still holds whatever
-            // branch a race left it. A backtrack retires a branch by
-            // its unit, so a branch for a unit this depth cannot run is
-            // the drop `choose` counts.
-            dropped_branches += frames[depth].wut.retain_branch(step.unit);
+            let frame = &mut frames[depth];
+            // `last_runnable` is the set the scheduler chose from, so
+            // it is the set the warp woke.
+            let before = std::mem::replace(&mut frame.warp_woke, rt.last_runnable().to_vec());
+            let decided = !before.is_empty();
+            // The search replays the prefix below step for step, and
+            // the warp runs before the selection, so both visits read
+            // the same set. A visit that read a different one decided
+            // from a set that no longer describes this depth.
+            debug_assert!(
+                !decided || before == frame.warp_woke,
+                "a replayed prefix reached the same warp and it woke {:?}, not {before:?}",
+                frame.warp_woke,
+            );
+            // Where the depth already knew the set, `choose` picked out
+            // of it above and the runtime delivered that pick. Where it
+            // did not, this execution took whatever the warp gave. A
+            // branch the tree holds for another unit is then a reversal
+            // nothing took. The next execution to reach this depth
+            // decides from the set this one recorded.
+            if !decided || frame.chosen != step.unit {
+                dropped_branches += frame.wut.retain_branch(step.unit);
+            }
+            frame.chosen = step.unit;
         }
         let runnable = rt.last_runnable().to_vec();
         let chosen = frames[depth].chosen;
@@ -411,14 +443,10 @@ fn inherit(frames: &[Frame]) -> (BTreeMap<UnitId, StepFootprint>, WakeupTree) {
 /// Read the races of a maximal execution and record what each one owes
 /// [Abdulla2017 p:42:24 s:Algorithm 2 lines 2-7].
 ///
-/// Returns the reversals no depth can deliver, which withdraw
-/// [`ExplorationResult::classes_explored`] the way [`choose`]'s drops
-/// do.
-///
-/// A warped depth keeps its flag across executions, so every execution
-/// that reads the same race there counts another drop.
-fn detect_races(log: &DecisionLog, frames: &mut [Frame]) -> usize {
-    let mut dropped = 0usize;
+/// A depth a warp resolved takes a branch like any other. [`choose`]
+/// asks whether the warp can deliver it, against [`Frame::warp_woke`],
+/// and drops the branch it cannot.
+fn detect_races(log: &DecisionLog, frames: &mut [Frame]) {
     let execution = Execution::from_log(log);
     let relation = execution.happens_before();
     let events = execution.events();
@@ -448,15 +476,8 @@ fn detect_races(log: &DecisionLog, frames: &mut [Frame]) -> usize {
         if already_explored(&frame.sleep, &sequence, &precedes) {
             continue;
         }
-        if frame.warped {
-            // A branch left on this depth is a reversal the search can
-            // never take: see `Frame::warped`.
-            dropped += 1;
-            continue;
-        }
         frame.wut.insert(&sequence, &precedes);
     }
-    dropped
 }
 
 /// True when the search already ran an execution equivalent to
