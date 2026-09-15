@@ -1,16 +1,20 @@
 //! The events one run retired and the order they force on each other.
 //!
 //! An event is one step of one unit. It carries that step's
-//! [`StepFootprint`]. Happens-before is the transitive closure of two
+//! [`StepFootprint`]. Happens-before is the transitive closure of three
 //! orders over those events [Lamport1978 p:559 s:The Partial Ordering]:
 //!
 //! - program order: the order one unit ran its own events.
 //! - conflict order: the order the schedule ran two events whose
 //!   footprints conflict.
+//! - a wake that ended a park, before the step it released. No
+//!   footprint pair reaches that order, because the wake names a unit
+//!   and the released step emits no wait.
 //!
 //! [`Execution::races`] names the pairs that only their own conflict
 //! order holds apart. An exploration has reason to run each of those
-//! pairs in the opposite order.
+//! pairs in the opposite order. An edge added here therefore removes a
+//! race, and with it a reversal the search owed.
 
 use crate::decision::DecisionLog;
 use crate::dependency::StepFootprint;
@@ -174,6 +178,14 @@ struct UnitEvents {
 pub struct Execution {
     events: Vec<Event>,
     by_unit: BTreeMap<UnitId, UnitEvents>,
+    /// Per event, the parked units its wakes returned to runnable.
+    ///
+    /// The commit pipeline's `WakeUnit` arm sets its target runnable
+    /// whether or not a park holds it, so
+    /// [`StepFootprint::wake_targets`] alone does not witness a
+    /// release. The runnable set the schedule recorded does: a target
+    /// already in that set runs without the wake.
+    releases: Vec<Vec<UnitId>>,
 }
 
 impl Execution {
@@ -183,7 +195,46 @@ impl Execution {
     }
 
     /// Append the event one unit's step retired.
+    ///
+    /// The event names no runnable set, so a wake it carries releases
+    /// nothing and [`Execution::happens_before`] orders it before
+    /// nothing. The relation is then short of an edge, which costs
+    /// exploration and no cover. [`Execution::push_with_runnable`]
+    /// takes the runnable set that witnesses a release.
     pub fn push(&mut self, unit: UnitId, footprint: StepFootprint) {
+        self.push_event(unit, footprint, Vec::new());
+    }
+
+    /// Append the event one unit's step retired, with the units the
+    /// schedule found runnable when it chose that step.
+    ///
+    /// A wake target absent from `runnable` was parked, so the wake
+    /// released it. A target already in `runnable` runs whether the
+    /// wake lands or not, and an edge from that wake to its next step
+    /// would name an order the schedule does not force. An empty
+    /// `runnable` names no set at all, since the schedule chose from a
+    /// set that held at least the unit that ran. Such an event
+    /// releases nothing.
+    pub fn push_with_runnable(
+        &mut self,
+        unit: UnitId,
+        footprint: StepFootprint,
+        runnable: &[UnitId],
+    ) {
+        let released = if runnable.is_empty() {
+            Vec::new()
+        } else {
+            footprint
+                .wake_targets
+                .iter()
+                .copied()
+                .filter(|target| !runnable.contains(target))
+                .collect()
+        };
+        self.push_event(unit, footprint, released);
+    }
+
+    fn push_event(&mut self, unit: UnitId, footprint: StepFootprint, released: Vec<UnitId>) {
         let index = self.events.len();
         let positions = self.by_unit.entry(unit).or_default();
         positions.all.push(index);
@@ -194,13 +245,14 @@ impl Execution {
             id: EventId { index, unit },
             footprint,
         });
+        self.releases.push(released);
     }
 
     /// The execution a baseline run recorded.
     pub fn from_log(log: &DecisionLog) -> Self {
         let mut execution = Self::new();
         for point in log.points() {
-            execution.push(point.chosen, point.footprint.clone());
+            execution.push_with_runnable(point.chosen, point.footprint.clone(), &point.runnable);
         }
         execution
     }
@@ -275,6 +327,12 @@ impl Execution {
         let mut clocks: Vec<ClockVector> = Vec::with_capacity(self.events.len());
         let mut cost = ClockCost::default();
         let mut latest_of_unit: BTreeMap<UnitId, usize> = BTreeMap::new();
+        // The wake that ended a unit's park, until the step it released
+        // consumes it. Only a wake that found its target parked lands
+        // here. So a unit holds one entry at a time: a second wake
+        // before that target runs again finds it runnable, and releases
+        // nothing.
+        let mut pending_wake: BTreeMap<UnitId, usize> = BTreeMap::new();
 
         for (index, event) in self.events.iter().enumerate() {
             let mut clock = match latest_of_unit.get(&event.id.unit) {
@@ -299,9 +357,27 @@ impl Execution {
                     }
                 }
             }
+            // A wake that ended a park releases the woken unit's next
+            // step, and neither names the other: the wake carries a
+            // target and the released step emits no wait. So no
+            // footprint pair orders the two, and this join is the only
+            // thing that does. Without the join, a reversing sequence
+            // can name a unit that is still parked where the branch
+            // sits; the search drops that branch and withdraws its
+            // class count.
+            if let Some(waker) = pending_wake.remove(&event.id.unit) {
+                clock.join(&clocks[waker]);
+                cost.joins += 1;
+            }
             clock.raise(event.id.unit, index);
             cost.widest_clock = cost.widest_clock.max(clock.len());
             latest_of_unit.insert(event.id.unit, index);
+            // A wake that found its target runnable released nothing,
+            // so `releases` omits it: an edge the schedule does not
+            // force removes the race that owed a reversal.
+            for woken in &self.releases[index] {
+                pending_wake.entry(*woken).or_insert(index);
+            }
             clocks.push(clock);
         }
 

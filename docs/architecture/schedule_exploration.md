@@ -96,11 +96,20 @@ step that parked it rather than pruning against it.
 
 `Execution` carries those footprints as events: one per retired step,
 identified by the step's position and the unit that ran it. It builds
-happens-before over that sequence -- two events of one unit ordered by
-the order the unit ran them, two conflicting events by the order the
-schedule ran them, transitively closed through one clock vector per
-event -- and `Execution::races` reads the relation for the pairs
-nothing but their own conflict orders.
+happens-before over that sequence from three orders, transitively
+closed through one clock vector per event:
+
+- program order: the order one unit ran its own events;
+- conflict order: the order the schedule ran two events whose
+  footprints conflict;
+- a wake before the step it released, which no footprint pair reaches
+  because the wake names a unit and the released step emits no wait.
+
+`Execution::races` then reads the relation for the pairs nothing but
+their own conflict order holds apart. An edge added here removes a
+race, so it removes a reversal the search would have owed: the
+relation is the one place in the module where erring toward more order
+costs cover rather than budget.
 
 Schedules compare through the multi-space committed-memory hash, so
 divergence confined to a spawned child's address space is witnessed.

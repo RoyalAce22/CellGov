@@ -116,3 +116,32 @@ fn initials_name_every_unit_nothing_holds_back() {
         "unit 3's only event follows event 0, so it cannot lead",
     );
 }
+
+/// The descent consumed an equivalent prefix, so the tree already holds
+/// a sequence equivalent to this one [Abdulla2017 p:42:23 s:6.2].
+#[test]
+fn a_sequence_reaching_a_leaf_leaves_the_tree_unchanged() {
+    let mut tree = WakeupTree::new();
+    tree.insert(&seq(&[(1, 0)]), &free);
+    let before = tree.clone();
+
+    tree.insert(&seq(&[(1, 0), (2, 1)]), &free);
+    assert_eq!(
+        tree, before,
+        "the walk consumed unit 1 and landed on its leaf, so the tail grafts nowhere",
+    );
+    assert!(
+        tree.subtree(unit(1)).is_empty(),
+        "grafting the tail here would give the leaf a child",
+    );
+}
+
+/// An empty tree holds no sequence, so the root is the one node a graft
+/// still reaches.
+#[test]
+fn an_empty_tree_still_takes_the_sequence_it_is_given() {
+    let mut tree = WakeupTree::new();
+    tree.insert(&seq(&[(4, 0), (5, 1)]), &free);
+    assert_eq!(tree.min_branch(), Some(unit(4)));
+    assert_eq!(tree.subtree(unit(4)).min_branch(), Some(unit(5)));
+}

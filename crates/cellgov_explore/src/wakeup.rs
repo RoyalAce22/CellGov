@@ -98,19 +98,31 @@ impl WakeupTree {
     ///
     /// The walk takes the least branch whose unit can lead `sequence`
     /// -- no element still to place happens-before it -- and consumes
-    /// that element. A sequence the walk places entirely is one the
-    /// tree already holds, and the tree does not change. Otherwise what
-    /// is left becomes a new branch, ordered after the branches already
-    /// there.
+    /// that element. The tree does not change when the walk places the
+    /// whole sequence, or when it reaches a leaf below the root: either
+    /// way the tree already holds an equivalent sequence. Otherwise what
+    /// is left becomes a new branch, ordered after every node already
+    /// below the node it attaches to [Abdulla2017 p:42:23 s:6.2].
     ///
     /// `precedes` answers whether the event at one index happens-before
     /// the event at another, over the execution `sequence` came from.
+    ///
+    /// A branch serves a sequence here only when its unit leads what is
+    /// left [Abdulla2017 p:42:13 s:Lemma 4.6 case a]. Case (b) also lets
+    /// a unit absent from the sequence serve, when that unit's own next
+    /// step commutes with every event in the sequence
+    /// [Abdulla2017 p:42:14 s:Lemma 4.6 case b]. A node holds a `UnitId`
+    /// and nothing else, so this tree cannot run that test. A sequence
+    /// equivalent to one the tree holds can therefore graft a second
+    /// branch, and the search runs an execution it did not owe. That
+    /// costs exploration and no cover.
     pub fn insert<F>(&mut self, sequence: &[SeqEvent], precedes: &F)
     where
         F: Fn(usize, usize) -> bool,
     {
         let mut remaining: Vec<SeqEvent> = sequence.to_vec();
         let mut node = self;
+        let mut depth = 0usize;
         loop {
             if remaining.is_empty() {
                 return;
@@ -120,6 +132,17 @@ impl WakeupTree {
                 .iter()
                 .position(|(branch, _)| leads(&remaining, *branch, precedes))
             else {
+                // A leaf below the root is a sequence the tree already
+                // holds, and the walk reached it by consuming an
+                // equivalent prefix, so the tree does not change
+                // [Abdulla2017 p:42:23 s:6.2]. Insert property (2) of
+                // that section keeps a leaf a leaf.
+                //
+                // The root is not that kind of leaf: an empty tree
+                // holds no sequence and owes this one whole.
+                if depth > 0 && node.children.is_empty() {
+                    return;
+                }
                 node.graft(&remaining);
                 return;
             };
@@ -130,6 +153,7 @@ impl WakeupTree {
                 .expect("the branch leads the sequence, so the unit is in it");
             remaining.remove(at);
             node = &mut node.children[taken].1;
+            depth += 1;
         }
     }
 
