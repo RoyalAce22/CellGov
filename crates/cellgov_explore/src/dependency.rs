@@ -15,9 +15,22 @@
 //! explorer covers it. Two loads still prune against each other, since
 //! neither changes what the other observes.
 //!
-//! One access reaches committed memory and emits nothing: instruction
-//! fetch. A unit that races another unit's write to the text region
-//! prunes against it.
+//! Two reads of shared state reach no footprint. Instruction fetch
+//! reads the text region and records no read, so a unit that races
+//! another unit's write to that region prunes against it.
+//!
+//! Guest time is the other. One global clock advances per step. A DMA
+//! completion lands at the first commit whose clock reached its
+//! completion tick, and a PPU `mftb` reads that clock into a guest
+//! register. A step that touches no shared resource still moves the
+//! clock relative to every later step. Two steps this module calls
+//! independent can therefore commit different memory when they swap.
+//! `tests/shared_clock.rs` holds the witness.
+//!
+//! One write reaches no footprint either. The RSX FIFO advance pass
+//! emits effects that commit guest memory and sweep reservations, and
+//! `commit_step` prepends them to the next space-0 batch. Those
+//! effects belong to no unit's step, so no footprint names them.
 
 use cellgov_effects::Effect;
 use cellgov_mem::ByteRange;
@@ -60,9 +73,10 @@ pub struct StepFootprint {
 impl StepFootprint {
     /// Extract a footprint from the effects emitted in one step.
     ///
-    /// `FaultRaised` discards the whole step's effects upstream, and
-    /// `TraceMarker` / RSX completion effects have no dependency
-    /// impact, so all four are dropped.
+    /// `FaultRaised` discards the whole step's effects upstream and
+    /// `TraceMarker` carries no guest state. The two RSX variants do
+    /// commit guest state, but no execution unit emits them: they
+    /// reach a batch from the FIFO advance pass.
     pub fn from_effects(effects: &[Effect]) -> Self {
         let mut fp = Self::default();
         for effect in effects {
@@ -113,6 +127,12 @@ impl StepFootprint {
     /// True when swapping these two steps could change the observable
     /// outcome.
     ///
+    /// The two steps must belong to different units. The reservation
+    /// and DMA rules below read only the cross-unit half of the
+    /// hardware rule. A same-unit pair therefore gets an answer the
+    /// hardware does not give. Program order already holds a unit's
+    /// own steps apart.
+    ///
     /// Returns `true` unless independence can be proved. O(n*m) in the
     /// product of each category's populated vectors; in practice a step
     /// touches only one or two categories so the cost is small.
@@ -140,9 +160,15 @@ impl StepFootprint {
         }
 
         // A DMA's source range rides in `dma_ranges` alongside its
-        // destination. Pairing reads against the whole vector
-        // therefore adds read-against-read pairs for two units that
-        // read one buffer.
+        // destination, so every pairing reads both halves. The
+        // destination half carries the real dependency:
+        // `apply_dma_transfer` writes it at completion. The source
+        // half is real only for a transfer that carries no payload,
+        // which reads its source at completion rather than at
+        // enqueue. The SPU put path copies local store into the
+        // payload at enqueue. Its source range addresses local store
+        // rather than committed memory, so every pair that half adds
+        // there is a false dependency.
         if ranges_overlap(&self.shared_reads, &other.dma_ranges)
             || ranges_overlap(&other.shared_reads, &self.dma_ranges)
         {
@@ -160,6 +186,16 @@ impl StepFootprint {
         }
 
         if ids_overlap(&self.mailbox_sends, &other.mailbox_sends) {
+            return true;
+        }
+
+        // Two receive attempts on one mailbox are order-dependent even
+        // when no step sends. The commit pipeline's
+        // `MailboxReceiveAttempt` arm pops the FIFO for whichever unit
+        // commits first (`Mailbox::try_receive`), and blocks the other
+        // when the pop returns empty. The swap therefore decides which
+        // unit takes the message and which one parks.
+        if ids_overlap(&self.mailbox_receives, &other.mailbox_receives) {
             return true;
         }
 
@@ -183,6 +219,16 @@ impl StepFootprint {
             return true;
         }
 
+        // Two units that wait on different barriers are independent
+        // because no barrier releases anything. `WaitTarget` reaches
+        // exactly one reader in the workspace, `from_effects` above.
+        // The commit pipeline's `WaitOnEvent` arm names only `source`
+        // and blocks it, and no registry holds barrier state. So a
+        // wait's only guest-visible consequence is its own unit's
+        // status, and one unit's wait can free no other unit's.
+        //
+        // The same-barrier clause below is therefore a false
+        // dependency; it costs exploration budget alone.
         if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
             return true;
         }
@@ -199,12 +245,15 @@ impl StepFootprint {
         }
 
         // A completed cross-unit DMA clears every other unit's
-        // reservation whose 128-byte line its destination touches,
-        // even when the transferred bytes miss the conditional
-        // store's exact range (cellgov_core runtime/dma.rs,
-        // `fire_dma_completions` -> `clear_covering`), flipping the
-        // store's verdict. Source ranges ride along in `dma_ranges`;
-        // pairing them too only over-approximates.
+        // reservation whose 128-byte line its destination touches. The
+        // clear flips the store's verdict, even when the transferred
+        // bytes miss the conditional store's own range.
+        // `fire_dma_completions` hands the destination to
+        // `Runtime::host_write`, which sweeps the reservation table
+        // and exempts the issuer alone. The sweep asks each entry
+        // whether its whole line overlaps the written bytes. The
+        // source half of `dma_ranges` rides along and only
+        // over-approximates.
         if write_covers_any_line(&self.dma_ranges, &other.reservation_lines)
             || write_covers_any_line(&other.dma_ranges, &self.reservation_lines)
         {
@@ -262,6 +311,19 @@ fn ids_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
     false
 }
 
+/// Whether any of `writes` touches a byte of any 128-byte line in
+/// `lines`.
+///
+/// Neither `saturating_add` can saturate, so neither can fold a
+/// wrapped range onto the top of the address space and hide the low
+/// bytes it would touch:
+///
+/// - `ByteRange::new` refuses a range whose exclusive end overflows,
+///   and `ByteRange::contiguous_u32` cannot build one, so
+///   `w_start + (w_len - 1)` stays below `u64::MAX`.
+/// - `from_effects` masks every line address to a multiple of the
+///   granule, so `line_addr + 127` reaches `u64::MAX` at the top line
+///   and no further. The loop debug-asserts that mask.
 fn write_covers_any_line(writes: &[ByteRange], lines: &[u64]) -> bool {
     for w in writes {
         let w_start = w.start().raw();
@@ -271,6 +333,14 @@ fn write_covers_any_line(writes: &[ByteRange], lines: &[u64]) -> bool {
         }
         let w_end = w_start.saturating_add(w_len - 1);
         for &line_addr in lines {
+            // `from_effects` masks every line it pushes, and
+            // `reservation_lines` is public, so a caller can push an
+            // unmasked address.
+            debug_assert_eq!(
+                line_addr & (RESERVATION_LINE_BYTES - 1),
+                0,
+                "reservation line {line_addr:#x} is not granule-aligned",
+            );
             let line_end = line_addr.saturating_add(RESERVATION_LINE_BYTES - 1);
             if w_start <= line_end && line_addr <= w_end {
                 return true;

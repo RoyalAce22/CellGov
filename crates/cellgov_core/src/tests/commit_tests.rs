@@ -531,6 +531,44 @@ fn wait_effect(source: UnitId) -> Effect {
     }
 }
 
+fn barrier_wait(source: UnitId, barrier: u64) -> Effect {
+    use cellgov_effects::WaitTarget;
+    use cellgov_sync::BarrierId;
+    Effect::WaitOnEvent {
+        target: WaitTarget::Barrier(BarrierId::new(barrier)),
+        source,
+    }
+}
+
+/// A wait blocks its own source and frees nobody, whatever it names.
+///
+/// Schedule exploration depends on this: it prunes two units that wait
+/// on different barriers as independent, which holds only while no
+/// barrier releases a waiter.
+#[test]
+fn a_wait_names_a_target_the_pipeline_never_reads() {
+    // Each commit carries one wait, so the two steps make the shape
+    // the prune reasons about. A barrier that released its waiters
+    // would appear as the second commit that frees the first unit.
+    let statuses = |barriers: [u64; 2]| {
+        let mut bed = CommitTestBed::new(8);
+        let first = bed.units.register_with(DummyUnit::runnable);
+        let second = bed.units.register_with(DummyUnit::runnable);
+        for (unit, barrier) in [(first, barriers[0]), (second, barriers[1])] {
+            let (r, e) = step_with(YieldReason::WaitingSync, vec![barrier_wait(unit, barrier)]);
+            let outcome = bed.process(&r, &e).unwrap();
+            assert_eq!(outcome.waits_committed, 1);
+        }
+        (
+            bed.units.effective_status(first),
+            bed.units.effective_status(second),
+        )
+    };
+    let blocked = (Some(UnitStatus::Blocked), Some(UnitStatus::Blocked));
+    assert_eq!(statuses([1, 2]), blocked);
+    assert_eq!(statuses([1, 1]), blocked);
+}
+
 #[test]
 fn wait_on_event_blocks_the_source_unit() {
     let mut bed = CommitTestBed::new(8);

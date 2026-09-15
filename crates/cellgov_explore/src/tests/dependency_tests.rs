@@ -1,4 +1,4 @@
-//! Step-footprint conflict detection: overlapping versus disjoint writes and mailbox send/receive pairs.
+//! Step-footprint conflict detection.
 
 use super::*;
 use cellgov_dma::{DmaDirection, DmaRequest};
@@ -6,6 +6,9 @@ use cellgov_effects::payload::{MailboxMessage, WritePayload};
 use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::GuestAddr;
 use cellgov_time::GuestTicks;
+
+/// Highest 128-byte-aligned line the address space holds.
+const TOP_LINE: u64 = !(RESERVATION_LINE_BYTES - 1);
 
 fn range(start: u64, len: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(start), len).unwrap()
@@ -86,6 +89,34 @@ fn two_sends_same_mailbox_conflict() {
         source: UnitId::new(1),
     }]);
     assert!(a.conflicts(&b));
+}
+
+#[test]
+fn two_receives_same_mailbox_conflict() {
+    let a = StepFootprint::from_effects(&[Effect::MailboxReceiveAttempt {
+        mailbox: MailboxId::new(1),
+        source: UnitId::new(0),
+    }]);
+    let b = StepFootprint::from_effects(&[Effect::MailboxReceiveAttempt {
+        mailbox: MailboxId::new(1),
+        source: UnitId::new(1),
+    }]);
+    assert!(a.conflicts(&b));
+    assert!(b.conflicts(&a));
+}
+
+#[test]
+fn two_receives_different_mailboxes_are_independent() {
+    let a = StepFootprint::from_effects(&[Effect::MailboxReceiveAttempt {
+        mailbox: MailboxId::new(1),
+        source: UnitId::new(0),
+    }]);
+    let b = StepFootprint::from_effects(&[Effect::MailboxReceiveAttempt {
+        mailbox: MailboxId::new(2),
+        source: UnitId::new(1),
+    }]);
+    assert!(!a.conflicts(&b));
+    assert!(!b.conflicts(&a));
 }
 
 #[test]
@@ -256,6 +287,69 @@ fn both_wait_same_barrier_conflicts() {
         source: UnitId::new(1),
     }]);
     assert!(a.conflicts(&b));
+}
+
+#[test]
+fn different_barriers_are_independent() {
+    let a = StepFootprint::from_effects(&[Effect::WaitOnEvent {
+        target: cellgov_effects::WaitTarget::Barrier(BarrierId::new(1)),
+        source: UnitId::new(0),
+    }]);
+    let b = StepFootprint::from_effects(&[Effect::WaitOnEvent {
+        target: cellgov_effects::WaitTarget::Barrier(BarrierId::new(2)),
+        source: UnitId::new(1),
+    }]);
+    assert!(!a.conflicts(&b));
+    assert!(!b.conflicts(&a));
+}
+
+#[test]
+fn the_top_line_ends_at_the_last_byte_without_saturating() {
+    let reserver = StepFootprint::from_effects(&[Effect::ReservationAcquire {
+        line_addr: u64::MAX,
+        source: UnitId::new(0),
+    }]);
+    assert_eq!(reserver.reservation_lines, vec![TOP_LINE]);
+    // The line comparison adds the granule to the masked address, so
+    // assert on the value the mask produced.
+    assert_eq!(
+        reserver.reservation_lines[0].checked_add(RESERVATION_LINE_BYTES - 1),
+        Some(u64::MAX),
+    );
+}
+
+/// The highest write a `ByteRange` can represent ends one byte short
+/// of saturation, and it still covers the top line.
+#[test]
+fn a_write_over_the_top_line_covers_it() {
+    let reserver = StepFootprint::from_effects(&[Effect::ReservationAcquire {
+        line_addr: TOP_LINE,
+        source: UnitId::new(0),
+    }]);
+    let last_byte = StepFootprint::from_effects(&[Effect::shared_write(
+        range(u64::MAX - 1, 1),
+        WritePayload::new(vec![0; 1]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    )]);
+    assert!(reserver.conflicts(&last_byte));
+
+    // One byte below the line still misses it.
+    let below = StepFootprint::from_effects(&[Effect::shared_write(
+        range(TOP_LINE - 1, 1),
+        WritePayload::new(vec![0; 1]),
+        UnitId::new(1),
+        GuestTicks::new(0),
+    )]);
+    assert!(!reserver.conflicts(&below));
+}
+
+/// Pins the first bullet of `write_covers_any_line`: no wrapped range
+/// reaches the line comparison.
+#[test]
+fn a_write_that_would_wrap_is_unrepresentable() {
+    assert!(ByteRange::new(GuestAddr::new(u64::MAX), 1).is_none());
+    assert!(ByteRange::new(GuestAddr::new(u64::MAX - 1), 1).is_some());
 }
 
 #[test]

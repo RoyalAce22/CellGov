@@ -33,7 +33,24 @@ write-read race whose read steers a later store to a disjoint address
 conflicts rather than prunes. Two loads of the same bytes still
 prune, and instruction fetch emits nothing, so a fetch still prunes
 against another unit's write to the text region. The dependency
-module states what each clause pairs.
+module states what each clause pairs, and carries the argument that
+makes each domain rule sound -- why two units waiting on different
+barriers cannot interact, why the cross-unit half of the reservation
+rule is the half a footprint pair is asked for, and why the granule
+arithmetic cannot saturate.
+
+Three things reach committed state without reaching a footprint.
+Instruction fetch is the first, as above. Guest time is the second:
+one global clock advances per step, a DMA completion lands at the
+first commit whose clock reached its completion tick, and a PPU `mftb`
+reads that clock straight into a guest register, so a step that
+touches no shared resource at all still moves an in-flight transfer
+relative to every later step. Two steps the relation calls
+independent can therefore commit different memory when they swap;
+[`shared_clock`](../../crates/cellgov_explore/tests/shared_clock.rs)
+holds the witness. The third is the RSX FIFO advance pass, whose
+effects commit guest memory and sweep reservations from a batch no
+unit's step emitted.
 
 `Execution` carries those footprints as events: one per retired step,
 identified by the step's position and the unit that ran it. It builds
