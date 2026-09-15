@@ -42,6 +42,20 @@ flowchart TD
   cls -->|"a bound, a refusal, a fault, or a baseline that committed nothing"| inc["Inconclusive"]
 ```
 
+Every verdict compares one observable: the committed memory of every
+address space at the end of a maximal execution, which is what
+`committed_memory_hash` covers. `ScheduleStable` is stable with respect
+to that, and the report names it on every verdict. Every byte is
+observed at the end of the run, so two writes to overlapping bytes are
+dependent whatever reads fall between them, and the observer relaxation
+that treats an unread write as unobserved lands on no write. It can
+land only on a resource whose final state the hash does not cover: a
+mailbox, a signal register, a reservation, an SPU's local store. A
+divergence confined to one of those reports as stable. Named regions
+are a second
+comparison against an oracle; they never narrow the verdict, and a run
+that declares none reports the same verdict as one that declares many.
+
 `ScheduleStable` carries a class count when the search covered one
 execution per class and hit no bound. A bounded run reports no count
 and can only be inconclusive.

@@ -3,7 +3,27 @@
 use crate::util::StopReason;
 use cellgov_event::UnitId;
 
-/// Verdict of a bounded exploration run.
+/// What every verdict compares: the committed memory of every address
+/// space at the end of a maximal execution, as
+/// `Runtime::committed_memory_hash` covers it.
+///
+/// Outside it lie the sync state `Runtime::sync_state_hash` folds
+/// (mailboxes, signal registers, reservations, mapping metadata) and
+/// every unit's own state, an SPU's local store included. A divergence
+/// confined to one of those reports as stable.
+///
+/// The end of the run observes every byte, so two writes to
+/// overlapping bytes are dependent whatever reads fall between them.
+/// Named regions ([`crate::explore_with_regions`]) are a second
+/// comparison, against an oracle, and never narrow this: a run that
+/// declares none reports the same verdict as one that declares many.
+pub const OBSERVABLE: &str = "committed memory of every address space at the end of the run";
+
+/// The wire form of [`OBSERVABLE`] in the JSON report.
+pub const OBSERVABLE_LABEL: &str = "committed-memory";
+
+/// Verdict of a bounded exploration run, with respect to
+/// [`OBSERVABLE`].
 ///
 /// `IntoStaticStr` derive is the single source of truth for the
 /// human / JSON wire-form: `schedule-stable`, `schedule-sensitive`,
@@ -11,7 +31,8 @@ use cellgov_event::UnitId;
 /// `From<&OutcomeClass> for &'static str` impl.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr)]
 pub enum OutcomeClass {
-    /// Every schedule explored produced identical committed memory.
+    /// Every schedule explored produced identical committed memory in
+    /// every address space.
     ///
     /// [`ExplorationResult::classes_explored`] says how far the verdict
     /// reaches. A count means the search covered one execution per

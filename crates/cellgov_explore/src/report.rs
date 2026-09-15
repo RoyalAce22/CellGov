@@ -1,11 +1,14 @@
 //! ASCII and JSON formatters for [`ExplorationResult`].
 
-use crate::classify::{ExplorationResult, OutcomeClass, ScheduleRecord};
+use crate::classify::{
+    ExplorationResult, OutcomeClass, ScheduleRecord, OBSERVABLE, OBSERVABLE_LABEL,
+};
 
 /// Format an exploration result as a human-readable ASCII report.
 pub fn format_human(result: &ExplorationResult) -> String {
     let mut out = String::new();
     out.push_str(&format!("outcome: {}\n", outcome_label(result.outcome)));
+    out.push_str(&format!("observable: {OBSERVABLE}\n"));
     out.push_str(&format!("baseline_hash: 0x{:016x}\n", result.baseline_hash));
     out.push_str(&format!("baseline_steps: {}\n", result.baseline_steps));
     out.push_str(&format!(
@@ -95,6 +98,7 @@ pub fn format_json(result: &ExplorationResult) -> String {
 
     let json = serde_json::json!({
         "outcome": outcome_label(result.outcome),
+        "observable": OBSERVABLE_LABEL,
         "baseline_hash": format!("0x{:016x}", result.baseline_hash),
         "baseline_steps": result.baseline_steps,
         "baseline_stop": result.baseline_stop.to_string(),
@@ -129,3 +133,7 @@ fn truncated_by(record: &ScheduleRecord) -> Option<&'static str> {
 #[cfg(test)]
 #[path = "tests/report_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/observable_tests.rs"]
+mod observable_tests;
