@@ -26,3 +26,7 @@ pub use observer::observe_decisions;
 pub use oracle::{explore_with_regions, MemoryRegionSpec, OracleExplorationResult};
 pub use prescribed::PrescribedScheduler;
 pub use util::{StopClass, StopReason};
+
+#[cfg(test)]
+#[path = "tests/truncation_tests.rs"]
+mod truncation_tests;
