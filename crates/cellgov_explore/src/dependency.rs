@@ -52,6 +52,27 @@
 //!   each one afterward. An exploration over a window of a boot that
 //!   spawns a child covers those steps, so this one is reachable.
 //!
+//! A faulted step records no footprint, and needs none. Its batch is
+//! discarded, so a footprint for it would name accesses the commit
+//! pipeline threw away; every driver stops at the fault instead, so
+//! the step is not an event and no pair involving it is tested here.
+//!
+//! That holds even where the fault turns on bytes another unit writes.
+//! The step emits its read either way, so an order that does not fault
+//! records that read, the write conflicts with it, and the relation
+//! owes their reversal. Running the reversal is what reaches the
+//! fault, and the run is then truncated and answers for nothing.
+//!
+//! Which order a search reaches first is no part of that. A search
+//! whose every order faults reads an execution the read is not in, so
+//! the relation concludes nothing about the pair -- and owes nothing,
+//! because a faulted run truncates and the search withdraws every
+//! claim measured against it
+//! ([`crate::util::StopReason::is_truncated`]). So the pair is held
+//! apart either by the order that committed or by the truncation, and
+//! neither the discard rule nor the relation gives way.
+//! `tests/fault_decided_by_a_write.rs` holds both witnesses.
+//!
 //! A park the commit pipeline reads off the step result is visible:
 //! [`StepFootprint::from_step`] reads it too, and
 //! `YieldReason::parks_without_an_effect` is where a new yield reason

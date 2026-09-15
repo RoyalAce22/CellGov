@@ -138,6 +138,20 @@ pub enum FakeOp {
     /// The unit reports `Faulted` from here on, so it leaves the
     /// runnable set.
     Fault,
+    /// Read one byte of committed memory and fault when it is zero.
+    ///
+    /// Whether this step faults depends on a byte another unit can
+    /// write, so the schedule decides it. The opcode emits the read
+    /// either way, and the fault then discards the access that decided
+    /// it.
+    ///
+    /// The commit contract covers a faulted batch that already emitted
+    /// effects, and a real unit reaches that shape by faulting after a
+    /// load in the same batch.
+    FaultIfZero {
+        /// Byte address the fault turns on.
+        addr: u64,
+    },
     /// Terminal: yield `Finished`.
     End,
 }
@@ -356,6 +370,30 @@ impl ExecutionUnit for FakeIsaUnit {
                     fault: Some(cellgov_effects::FaultKind::Guest(FAKE_FAULT_CODE)),
                     syscall_args: None,
                 };
+            }
+            FakeOp::FaultIfZero { addr } => {
+                let range =
+                    ByteRange::new(GuestAddr::new(addr), 1).expect("FaultIfZero reads one byte");
+                let bytes = ctx
+                    .memory()
+                    .read_checked(range)
+                    .expect("FaultIfZero address must be readable");
+                let gate = *bytes.first().expect("a one-byte range covers one byte");
+                effects.push(Effect::SharedReadIntent {
+                    range,
+                    source: self.id,
+                });
+                if gate == 0 {
+                    self.faulted = true;
+                    return ExecutionStepResult {
+                        yield_reason: YieldReason::Fault,
+                        consumed_cost: InstructionCost::new(budget.raw()),
+                        local_diagnostics: LocalDiagnostics::empty(),
+                        fault: Some(cellgov_effects::FaultKind::Guest(FAKE_FAULT_CODE)),
+                        syscall_args: None,
+                    };
+                }
+                YieldReason::BudgetExhausted
             }
             FakeOp::End => {
                 self.finished = true;

@@ -157,6 +157,14 @@ struct UnitEvents {
     all: Vec<usize>,
     /// Those of `all` whose footprint touched shared state. A
     /// local-only footprint conflicts with nothing.
+    ///
+    /// This narrows the conflict scan for a unit that runs mostly
+    /// local steps, which the fake-ISA workloads do. It buys a PPU
+    /// unit nothing: a block records the text it fetched, so every
+    /// block touches shared state and this holds every position `all`
+    /// does. The scan over a title window is therefore quadratic in
+    /// the window's steps, and shortening it needs an index over the
+    /// bytes a footprint names rather than over which steps have one.
     shared: Vec<usize>,
 }
 
