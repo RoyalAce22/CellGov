@@ -35,6 +35,58 @@ fn a_single_sequence_tree_branches_once() {
     assert!(tree.subtree(unit(3)).is_empty());
 }
 
+/// `inherit` hands the next depth `subtree(chosen)`, so the tree below
+/// the kept branch is exactly what that depth is owed. Dropping it
+/// loses those sequences with nothing counting them, which is a silent
+/// loss of equivalence classes rather than a visible one.
+#[test]
+fn keeping_a_branch_keeps_the_tree_below_it() {
+    let mut tree = WakeupTree::new();
+    tree.insert(&seq(&[(7, 0), (4, 1), (5, 2)]), &free);
+    tree.insert(&seq(&[(2, 3)]), &free);
+    assert_eq!(
+        tree.branches().collect::<Vec<_>>(),
+        vec![unit(7), unit(2)],
+        "the premise is two branches, one of them carrying a chain",
+    );
+    assert_eq!(
+        tree.subtree(unit(7)).min_branch(),
+        Some(unit(4)),
+        "and the chain really is below the branch this keeps",
+    );
+
+    let dropped = tree.retain_branch(unit(7));
+
+    assert_eq!(dropped, 1, "the other branch went, and was counted");
+    assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(7)]);
+    let below = tree.subtree(unit(7));
+    assert_eq!(
+        below.min_branch(),
+        Some(unit(4)),
+        "the next depth still inherits what this one owed it",
+    );
+    assert_eq!(
+        below.subtree(unit(4)).min_branch(),
+        Some(unit(5)),
+        "and the depth below that one too, so the whole chain survives",
+    );
+}
+
+/// The depth still has to run the unit the warp chose, so the tree
+/// ends holding that branch rather than nothing.
+#[test]
+fn keeping_an_absent_branch_arms_that_unit_alone() {
+    let mut tree = WakeupTree::new();
+    tree.insert(&seq(&[(7, 0)]), &free);
+    let dropped = tree.retain_branch(unit(3));
+    assert_eq!(dropped, 1, "the branch it did hold went");
+    assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(3)]);
+    assert!(
+        tree.subtree(unit(3)).is_empty(),
+        "nothing was below it to keep",
+    );
+}
+
 #[test]
 fn the_least_branch_is_the_one_inserted_first() {
     let mut tree = WakeupTree::new();
