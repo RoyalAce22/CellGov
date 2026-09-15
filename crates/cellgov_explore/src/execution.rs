@@ -160,7 +160,11 @@ impl HappensBefore {
 /// A conflict scan visits every one: [`StepFootprint::conflicts`] holds
 /// a step that rides a landing against every step, so no property of a
 /// footprint narrows the set a scan walks. The scan over a title window
-/// is therefore quadratic in the window's steps.
+/// is therefore quadratic in the window's steps. The crate accepts that
+/// cost at the sizes `benches/explore_bench.rs` times and the
+/// `rider_scan_tests` pins count: a step that rides a landing shortens
+/// every later scan, because the conflict it gives every event is one
+/// the clock then carries.
 #[derive(Debug, Clone, Default)]
 struct UnitEvents {
     all: Vec<usize>,
@@ -466,3 +470,7 @@ impl Execution {
 #[cfg(test)]
 #[path = "tests/execution_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/rider_scan_tests.rs"]
+mod rider_scan_tests;

@@ -36,3 +36,8 @@ cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 # `sys_spu_thread_write_in_mbox` needs before it will send.
 cellgov_lv2 = { path = "../cellgov_lv2" }
 cellgov_testkit = { path = "../cellgov_testkit" }
+criterion.workspace = true
+
+[[bench]]
+name = "explore_bench"
+harness = false

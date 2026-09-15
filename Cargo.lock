@@ -294,6 +294,7 @@ dependencies = [
  "cellgov_testkit",
  "cellgov_time",
  "cellgov_trace",
+ "criterion",
  "serde",
  "serde_json",
  "strum",
