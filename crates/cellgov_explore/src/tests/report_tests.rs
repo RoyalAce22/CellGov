@@ -34,6 +34,7 @@ fn sample_result() -> ExplorationResult {
         bounds_hit: false,
         schedules_pruned: 1,
         schedules_truncated: 0,
+        first_invariant_break: None,
     }
 }
 
@@ -72,6 +73,7 @@ fn stable_result_no_diverged_tag() {
         bounds_hit: false,
         schedules_pruned: 1,
         schedules_truncated: 0,
+        first_invariant_break: None,
     };
     let text = format_human(&r);
     assert!(text.contains("schedule-stable"));
@@ -94,6 +96,7 @@ fn a_truncated_record_is_never_labelled_diverged() {
         bounds_hit: true,
         schedules_pruned: 0,
         schedules_truncated: 1,
+        first_invariant_break: None,
     };
     let text = format_human(&r);
     assert!(text.contains("schedules_truncated: 1"));

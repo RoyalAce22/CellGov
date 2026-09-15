@@ -120,6 +120,9 @@ where
         bounds_hit,
         schedules_pruned,
         schedules_truncated,
+        // Every workload here drives the fake ISA only, so no run
+        // reaches an LV2 host path that can record a break.
+        first_invariant_break: None,
     })
 }
 
@@ -162,6 +165,10 @@ where
             assert_eq!(
                 s.schedules_truncated, f.schedules_truncated,
                 "{scenario}: schedules_truncated differs"
+            );
+            assert_eq!(
+                s.first_invariant_break, f.first_invariant_break,
+                "{scenario}: first_invariant_break differs"
             );
             assert_eq!(
                 s.schedules.len(),

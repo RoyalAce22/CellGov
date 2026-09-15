@@ -134,12 +134,8 @@ fn bench_boot(
 /// the first break. The host records each break and prints nothing.
 /// The line carries no `BENCH_` prefix, so the witness reader skips it.
 fn warn_first_invariant_break(rt: &cellgov_core::Runtime, sink: &dyn cellgov_boot::BootSink) {
-    let obs = rt.lv2_host().observability();
-    if let Some(first) = &obs.first_invariant_break {
-        sink.warn(&format!(
-            "lv2 host invariant break at {first} (the first of {})",
-            obs.invariant_break_count
-        ));
+    if let Some(line) = rt.lv2_host().observability().first_invariant_break_line() {
+        sink.warn(&line);
     }
 }
 

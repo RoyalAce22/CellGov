@@ -30,7 +30,11 @@ pub(crate) fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
         "isa" => ("fake-isa-integration", fixtures::fake_isa_scenario()),
         _ => return None,
     };
-    Some((label, run(fixture)))
+    let result = run(fixture);
+    // Both `scenario run` and `scenario dump` reach the runtime through
+    // here, so reporting once covers each of them.
+    super::compare::report_first_invariant_break(result.first_invariant_break.as_deref());
+    Some((label, result))
 }
 
 /// Return a closure that builds a fresh ScenarioFixture for the named

@@ -182,6 +182,7 @@ pub fn classify_iteration(
     iter: AlternateIteration,
     baseline_hash: u64,
     total_branching_points: usize,
+    first_invariant_break: Option<String>,
 ) -> ExplorationResult {
     let outcome = if iter.found_divergence {
         OutcomeClass::ScheduleSensitive
@@ -198,5 +199,6 @@ pub fn classify_iteration(
         bounds_hit: iter.bounds_hit,
         schedules_pruned: iter.schedules_pruned,
         schedules_truncated: iter.schedules_truncated,
+        first_invariant_break,
     }
 }

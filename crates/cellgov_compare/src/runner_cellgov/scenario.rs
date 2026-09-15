@@ -184,8 +184,38 @@ pub enum DeterminismError {
     HashMismatch,
 }
 
+/// A determinism-checked scenario run: what the comparison reads, and
+/// what the host recorded about itself while producing it.
+#[derive(Debug, Clone)]
+pub struct CheckedRun {
+    /// The observation both runs agreed on, as the first run produced
+    /// it.
+    pub observation: Observation,
+    /// The first host invariant break of the run [`Self::observation`]
+    /// came from, ready for the driver to report. Diagnostic only: it
+    /// stays out of [`Observation`], whose fields a cross-runner
+    /// comparison reads.
+    pub first_invariant_break: Option<String>,
+}
+
 /// Run a scenario factory twice and verify both observations match;
 /// returns the observation, or the first field that diverged.
+///
+/// Use [`observe_checked`] where the caller reports the run's first host
+/// invariant break.
+///
+/// # Errors
+///
+/// See [`observe_checked`].
+pub fn observe_with_determinism_check(
+    factory: impl Fn() -> ScenarioFixture,
+    regions: &[RegionDescriptor],
+) -> Result<Observation, DeterminismError> {
+    observe_checked(factory, regions).map(|run| run.observation)
+}
+
+/// Run a scenario factory twice, verify both observations match, and
+/// keep the first run's host invariant break for the caller to report.
 ///
 /// # Errors
 ///
@@ -194,10 +224,10 @@ pub enum DeterminismError {
 /// - [`DeterminismError::ObserveDisagreement`] when one run observes
 ///   and the other refuses, or both refuse for different reasons.
 /// - Otherwise, the first field that differs between the runs.
-pub fn observe_with_determinism_check(
+pub fn observe_checked(
     factory: impl Fn() -> ScenarioFixture,
     regions: &[RegionDescriptor],
-) -> Result<Observation, DeterminismError> {
+) -> Result<CheckedRun, DeterminismError> {
     let r1 = runner::run(factory());
     let r2 = runner::run(factory());
     let (o1, o2) = match (observe(&r1, regions), observe(&r2, regions)) {
@@ -229,7 +259,10 @@ pub fn observe_with_determinism_check(
         return Err(DeterminismError::HashMismatch);
     }
 
-    Ok(o1)
+    Ok(CheckedRun {
+        observation: o1,
+        first_invariant_break: r1.first_invariant_break,
+    })
 }
 
 #[cfg(test)]

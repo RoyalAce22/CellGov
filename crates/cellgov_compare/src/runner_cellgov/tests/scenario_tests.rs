@@ -5,6 +5,40 @@ use cellgov_testkit::fixtures;
 use cellgov_testkit::runner::run;
 
 #[test]
+fn a_checked_run_carries_the_first_invariant_break_beside_the_observation() {
+    use cellgov_core::Runtime;
+
+    let clean = observe_checked(|| fixtures::round_robin_fairness_scenario(2, 3), &[])
+        .expect("both runs observe");
+    assert_eq!(
+        clean.first_invariant_break, None,
+        "a run that broke no invariant gives its driver no line to report"
+    );
+
+    let broken = observe_checked(
+        || {
+            cellgov_testkit::fixtures::ScenarioFixture::builder()
+                .register(|rt: &mut Runtime| {
+                    rt.lv2_host_mut()
+                        .log_invariant_break("test.site", format_args!("details here"));
+                })
+                .build()
+        },
+        &[],
+    )
+    .expect("both runs observe");
+    assert_eq!(
+        broken.first_invariant_break.as_deref(),
+        Some("lv2 host invariant break at test.site: details here (the first of 1)"),
+        "the diagnostic reaches the driver beside the observation, never inside it"
+    );
+    assert_eq!(
+        broken.observation.metadata.runner, "cellgov",
+        "the observation the comparison reads is unchanged by the diagnostic"
+    );
+}
+
+#[test]
 fn observe_maps_stalled_to_completed() {
     let result = run(fixtures::round_robin_fairness_scenario(2, 3));
     let obs = observe(&result, &[]).expect("trace decodes");

@@ -7,6 +7,28 @@ use cellgov_time::Budget;
 use cellgov_trace::{TraceReader, TraceRecord};
 
 #[test]
+fn a_result_carries_the_run_s_first_invariant_break_for_its_driver_to_report() {
+    let clean = run(ScenarioFixture::empty());
+    assert_eq!(
+        clean.first_invariant_break, None,
+        "a run that broke no invariant gives its driver no line to report"
+    );
+
+    let broken = run(ScenarioFixture::builder()
+        .register(|rt: &mut Runtime| {
+            rt.lv2_host_mut()
+                .log_invariant_break("test.site", format_args!("details here"));
+        })
+        .build());
+    assert_eq!(
+        broken.first_invariant_break.as_deref(),
+        Some("lv2 host invariant break at test.site: details here (the first of 1)"),
+        "the runtime ends inside the runner, so a break it recorded reaches a driver \
+         only through this field"
+    );
+}
+
+#[test]
 fn empty_fixture_stalls_immediately_with_no_steps() {
     let result = run(ScenarioFixture::empty());
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);

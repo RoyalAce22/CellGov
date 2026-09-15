@@ -58,6 +58,15 @@ pub struct ExplorationResult {
     /// schedule, counting every record when the baseline itself
     /// stopped short.
     pub schedules_truncated: usize,
+    /// The exploration's first host invariant break as one line for the
+    /// caller to report: the baseline's, or the first replay that broke
+    /// one when the baseline broke none.
+    ///
+    /// Each replay restores the LV2 host from a baseline snapshot, so
+    /// the line is read per run rather than once at the end; the
+    /// exploration consumes its runtime, and no caller can read it
+    /// afterwards.
+    pub first_invariant_break: Option<String>,
 }
 
 #[cfg(test)]

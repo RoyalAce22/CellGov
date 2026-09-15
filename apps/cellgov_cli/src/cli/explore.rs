@@ -4,7 +4,7 @@
 use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::compare::load_observations_from_dir;
+use super::compare::{load_observations_from_dir, report_first_invariant_break};
 use super::exit::{die, load_file_or_die};
 use super::parse::{ExploreArgs, ExploreCommand, OutputFormat};
 use super::scenarios::{build_lv2_fixture, microtest_region_defs, scenario_factory, MICROTESTS};
@@ -49,6 +49,7 @@ fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: Output
     let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
     match result {
         Some(r) => {
+            report_first_invariant_break(r.first_invariant_break.as_deref());
             match format {
                 OutputFormat::Human => {
                     println!("scenario: {name}");
@@ -80,6 +81,7 @@ fn run_explore_micro(name: &str, format: OutputFormat) {
     let result = cellgov_explore::explore(|| build_lv2_fixture(name).build_runtime(), &config);
     match result {
         Some(r) => {
+            report_first_invariant_break(r.first_invariant_break.as_deref());
             match format {
                 OutputFormat::Human => {
                     println!("microtest: {name}");
@@ -148,6 +150,8 @@ fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFo
         println!("oracle_verdict: NOT COMPARED -- no branching points to explore");
         return;
     };
+
+    report_first_invariant_break(r.exploration.first_invariant_break.as_deref());
 
     // An unresolved capture (see `CapturedRegion::resolved`) holds
     // empty bytes regardless of what the run produced, so comparing it

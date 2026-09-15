@@ -82,8 +82,12 @@ pub struct Lv2Observability {
     /// Per-site break counts keyed by the static site string passed
     /// to `log_invariant_break`.
     pub invariant_break_sites: BTreeMap<&'static str, u64>,
-    /// The first break as `site: details`, which a boot reports through
-    /// its sink.
+    /// The first break as `site: details`.
+    ///
+    /// Every program that drives the runtime reports this, through
+    /// [`Self::first_invariant_break_line`], so one break reads the same
+    /// whichever driver found it. The host records it and prints
+    /// nothing.
     pub first_invariant_break: Option<String>,
     /// Drained after each `Lv2Host::dispatch` by the runtime, which
     /// emits one `HostInvariantBreak` trace record per entry.
@@ -172,6 +176,21 @@ pub struct Lv2Observability {
 }
 
 impl Lv2Observability {
+    /// The one line every driver reports for the run's first host
+    /// invariant break, or `None` when the run broke none.
+    ///
+    /// Both halves name the window since the last
+    /// [`super::Lv2Host::clear_observability`], which resets the message
+    /// and the count together: the site and details are the first break
+    /// in that window, and the count is every break in it.
+    pub fn first_invariant_break_line(&self) -> Option<String> {
+        let first = self.first_invariant_break.as_ref()?;
+        Some(format!(
+            "lv2 host invariant break at {first} (the first of {})",
+            self.invariant_break_count
+        ))
+    }
+
     /// Witness: cond\[0\] producer-wait parks, summed over slots.
     pub fn cond0_producer_waits(&self) -> u64 {
         self.cond0_producer_waits_by_slot.values().sum()

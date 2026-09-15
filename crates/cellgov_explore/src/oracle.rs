@@ -82,6 +82,14 @@ where
         return None;
     }
 
+    // Read before the first replay: `Runtime::restore_into` overwrites
+    // the whole LV2 host from the snapshot, so the baseline's record is
+    // gone the moment an alternate restores over it.
+    let mut first_invariant_break = rt_baseline
+        .lv2_host()
+        .observability()
+        .first_invariant_break_line();
+
     let mut alternates = Vec::new();
     let mut iter = for_each_alternate(&log, config, baseline_hash, |step, alt| {
         let snap = snapshots
@@ -90,6 +98,14 @@ where
         rt_baseline.restore_into(snap);
         rt_baseline.set_scheduler(PrescribedScheduler::single_choice(alt));
         let stop = run_to_stall(&mut rt_baseline, config.max_steps_per_run);
+        // The next replay restores over this one's record, so a break
+        // only this replay found is readable only here.
+        if first_invariant_break.is_none() {
+            first_invariant_break = rt_baseline
+                .lv2_host()
+                .observability()
+                .first_invariant_break_line();
+        }
         let hash = rt_baseline.committed_memory_hash();
         let captured = extract_regions(&rt_baseline, regions);
         alternates.push(ScheduleSnapshot {
@@ -103,7 +119,12 @@ where
         iter.mark_baseline_truncated();
     }
 
-    let exploration = classify_iteration(iter, baseline_hash, total_branching_points);
+    let exploration = classify_iteration(
+        iter,
+        baseline_hash,
+        total_branching_points,
+        first_invariant_break,
+    );
     Some(OracleExplorationResult {
         exploration,
         baseline: ScheduleSnapshot {

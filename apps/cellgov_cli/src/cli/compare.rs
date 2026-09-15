@@ -4,8 +4,7 @@
 
 use cellgov_compare::{
     compare, compare_multi, format_human, format_json, format_multi_human, format_multi_json,
-    observe_with_determinism_check, Classification, CompareMode, DeterminismError, Observation,
-    RegionDescriptor,
+    observe_checked, Classification, CompareMode, DeterminismError, Observation, RegionDescriptor,
 };
 use cellgov_testkit::fixtures::ScenarioFixture;
 
@@ -78,13 +77,26 @@ fn require_determinism(
     name: &str,
     regions: &[RegionDescriptor],
 ) -> Observation {
-    observe_with_determinism_check(factory, regions).unwrap_or_else(|e| {
+    let run = observe_checked(factory, regions).unwrap_or_else(|e| {
         let msg = match &e {
             DeterminismError::Observe(e) => format!("observing {name}: {e}"),
             e => format!("determinism break for {name}: {e}"),
         };
         die_with_status(&msg, determinism_exit_status(&e))
-    })
+    });
+    report_first_invariant_break(run.first_invariant_break.as_deref());
+    run.observation
+}
+
+/// Report a run's first LV2 host invariant break, the line every
+/// driver reports. `explore` reports through this same helper.
+///
+/// The line goes to stderr so it survives a `--format json` run, whose
+/// stdout a reader parses.
+pub(super) fn report_first_invariant_break(line: Option<&str>) {
+    if let Some(line) = line {
+        eprintln!("warning: {line}");
+    }
 }
 
 /// The status a failed twice-run check exits with.

@@ -34,6 +34,7 @@ fn exploration_result_construction() {
         bounds_hit: false,
         schedules_pruned: 0,
         schedules_truncated: 0,
+        first_invariant_break: None,
     };
     assert_eq!(res.outcome, OutcomeClass::ScheduleStable);
     assert!(!res.bounds_hit);

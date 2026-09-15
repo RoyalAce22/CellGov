@@ -46,6 +46,10 @@ pub struct ScenarioResult {
     /// share no backing with the runtime's memory, so holding a result
     /// never blocks a pooled memory's reset.
     pub final_spaces: BTreeMap<AddressSpaceId, GuestMemory>,
+    /// The run's first host invariant break as one line, from
+    /// `Lv2Observability::first_invariant_break_line`. The runtime ends
+    /// here, so a driver that never sees it cannot report the break.
+    pub first_invariant_break: Option<String>,
 }
 
 /// Copy a space's regions into fresh backing, keeping each region's
@@ -175,6 +179,7 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
             .address_spaces()
             .map(|(id, mem)| (id, deep_copy(mem)))
             .collect(),
+        first_invariant_break: rt.lv2_host().observability().first_invariant_break_line(),
     };
     let mem = rt.into_memory();
     (result, mem)

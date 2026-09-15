@@ -60,9 +60,9 @@ pub use observation_compare::{
 };
 pub use report::{format_human, format_json, format_multi_human, format_multi_json};
 pub use runner_cellgov::{
-    observe, observe_from_boot, observe_with_determinism_check, BootOutcome, BootOutcomeParseError,
-    DeterminismError, ObserveDisagreement, ObserveError, RegionDescriptor, RegionExtractError,
-    SpaceSnapshots,
+    observe, observe_checked, observe_from_boot, observe_with_determinism_check, BootOutcome,
+    BootOutcomeParseError, CheckedRun, DeterminismError, ObserveDisagreement, ObserveError,
+    RegionDescriptor, RegionExtractError, SpaceSnapshots,
 };
 pub use summary::{
     summarize, ByteParity, ByteParityDivergeReason, Convergence, ConvergenceFailure,

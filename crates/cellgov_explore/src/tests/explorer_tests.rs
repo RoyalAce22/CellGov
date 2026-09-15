@@ -8,6 +8,126 @@ use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
 use cellgov_mem::{GuestMemory, PageSize, Region};
 use cellgov_time::Budget;
 
+/// Two units that write disjoint ranges, so the workload branches.
+fn branching_runtime() -> Runtime {
+    let mem = GuestMemory::new(64);
+    let mut rt = Runtime::new(mem, Budget::new(100), 100);
+    for (imm, addr) in [(0xAA, 0), (0xBB, 8)] {
+        rt.register_unit_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(imm),
+                    FakeOp::SharedStore { addr, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+    }
+    rt
+}
+
+#[test]
+fn a_result_carries_the_exploration_s_first_invariant_break_for_its_driver_to_report() {
+    let clean =
+        explore(branching_runtime, &ExplorationConfig::default()).expect("the workload branches");
+    assert_eq!(
+        clean.first_invariant_break, None,
+        "an exploration that broke no invariant gives its driver no line to report"
+    );
+
+    let broken = explore(
+        || {
+            let mut rt = branching_runtime();
+            rt.lv2_host_mut()
+                .log_invariant_break("test.site", format_args!("details here"));
+            rt
+        },
+        &ExplorationConfig::default(),
+    )
+    .expect("the workload branches");
+    assert_eq!(
+        broken.first_invariant_break.as_deref(),
+        Some("lv2 host invariant break at test.site: details here (the first of 1)"),
+        "the exploration consumes its runtimes, so a break one recorded reaches a \
+         driver only through this field"
+    );
+}
+
+/// Two units that write the same range, so the sweep prunes no
+/// alternate and replays every branching point.
+fn contending_runtime() -> Runtime {
+    let mem = GuestMemory::new(64);
+    let mut rt = Runtime::new(mem, Budget::new(100), 100);
+    for imm in [0xAA, 0xBB] {
+        rt.register_unit_with(|id| {
+            FakeIsaUnit::new(
+                id,
+                vec![
+                    FakeOp::LoadImm(imm),
+                    FakeOp::SharedStore { addr: 0, len: 4 },
+                    FakeOp::End,
+                ],
+            )
+        });
+    }
+    rt
+}
+
+#[test]
+fn a_replay_restore_rewinds_the_host_break_record() {
+    let mut rt = contending_runtime();
+    let snap = rt.snapshot();
+    rt.lv2_host_mut()
+        .log_invariant_break("test.site", format_args!("after the snapshot"));
+    assert!(
+        rt.lv2_host()
+            .observability()
+            .first_invariant_break_line()
+            .is_some(),
+        "setup: the break must be recorded before the restore"
+    );
+
+    rt.restore_into(&snap);
+
+    assert_eq!(
+        rt.lv2_host().observability().first_invariant_break_line(),
+        None,
+        "a replay restores the whole LV2 host, so an exploration that read the \
+         line only after its replays would lose a break the baseline found"
+    );
+}
+
+/// The factory records the break before the run, so every snapshot
+/// holds it and a replay restores it back. That makes this test blind
+/// to the read point: it stays green whether the line is read before
+/// the first replay or only after the last.
+/// [`a_replay_restore_rewinds_the_host_break_record`] pins that half.
+/// No test here can record a break after the last snapshot, since the
+/// fake ISA reaches no LV2 path and `explore` owns the runtime.
+#[test]
+fn the_break_line_reaches_the_result_through_a_run_that_replays() {
+    let result = explore(
+        || {
+            let mut rt = contending_runtime();
+            rt.lv2_host_mut()
+                .log_invariant_break("test.site", format_args!("details here"));
+            rt
+        },
+        &ExplorationConfig::default(),
+    )
+    .expect("the workload branches");
+    assert!(
+        !result.schedules.is_empty(),
+        "setup: contending units leave at least one alternate unpruned, so a \
+         replay restores over the baseline's record"
+    );
+    assert_eq!(
+        result.first_invariant_break.as_deref(),
+        Some("lv2 host invariant break at test.site: details here (the first of 1)"),
+    );
+}
+
 #[test]
 fn explore_disjoint_writes_is_stable() {
     let result = explore(
@@ -684,7 +804,7 @@ fn a_truncated_baseline_withdraws_a_divergence_that_was_already_found() {
     assert_eq!(iter.schedules_truncated, 1);
     assert!(iter.schedules[0].truncated);
 
-    let r = classify_iteration(iter, 0xDEAD_BEEF, 1);
+    let r = classify_iteration(iter, 0xDEAD_BEEF, 1, None);
     assert!(r.bounds_hit);
     assert_eq!(r.schedules_truncated, 1);
     assert_eq!(

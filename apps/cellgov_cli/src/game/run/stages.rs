@@ -285,12 +285,8 @@ fn report_outcome(rt: &mut Runtime, loop_out: &LoopOutput, sink: &dyn BootSink) 
 /// The host records each break and prints nothing. Without this call,
 /// the run reports the count of breaks and no detail.
 fn report_first_invariant_break(rt: &Runtime, sink: &dyn BootSink) {
-    let obs = rt.lv2_host().observability();
-    if let Some(first) = &obs.first_invariant_break {
-        sink.warn(&format!(
-            "lv2 host invariant break at {first} (the first of {})",
-            obs.invariant_break_count
-        ));
+    if let Some(line) = rt.lv2_host().observability().first_invariant_break_line() {
+        sink.warn(&line);
     }
 }
 
