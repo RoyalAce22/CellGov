@@ -48,8 +48,7 @@ nine-step deterministic loop:
    enqueue, reservations, wakes, block transitions, RSX flip
    requests) in emission order.
 6. Dispatch the unit's syscall through `Lv2Host` if the yield reason
-   was `Syscall`; absorb a callback-worker mid-body fault if the
-   source is a registered worker.
+   was `Syscall`.
 7. Advance the commit epoch, then fire due DMA completions (ready
    tick reached) and due timer wakes (guest-tick deadline reached;
    a parked sleep wakes with CELL_OK, a timed sync wait expires

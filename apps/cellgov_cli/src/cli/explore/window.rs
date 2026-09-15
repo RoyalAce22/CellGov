@@ -184,10 +184,9 @@ pub(super) fn open_window(
             }
             Err(e) => return Err(ended(steps, WindowStop::Run(StopReason::StepError(e)))),
         };
-        let outcome = match rt.commit_step(&step.result, &step.effects) {
-            Ok(outcome) => outcome,
-            Err(e) => return Err(ended(steps, WindowStop::Run(StopReason::CommitError(e)))),
-        };
+        if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+            return Err(ended(steps, WindowStop::Run(StopReason::CommitError(e))));
+        }
         // `boot run` drains this between steps; nothing here does, so a
         // child parked behind it never runs and the rest of the boot is
         // not the one the anchor recorded.
@@ -195,18 +194,15 @@ pub(super) fn open_window(
             return Err(ended(steps, WindowStop::ChildInitUnserved));
         }
         // The precedence the boot's own step loop classifies a step by:
-        // a discarded batch ends the boot unless the runtime absorbed a
-        // callback worker's fault and woke its parent.
+        // a discarded batch ends the boot.
         if let Some(kind) = step.result.fault {
-            if !outcome.callback_worker_fault_absorbed {
-                return Err(ended(
-                    steps,
-                    WindowStop::Fault {
-                        pc: step.result.local_diagnostics.pc,
-                        kind,
-                    },
-                ));
-            }
+            return Err(ended(
+                steps,
+                WindowStop::Fault {
+                    pc: step.result.local_diagnostics.pc,
+                    kind,
+                },
+            ));
         }
         if let (WindowStart::Pc(target), Some(pc)) = (start, step.result.local_diagnostics.pc) {
             if pc == target {

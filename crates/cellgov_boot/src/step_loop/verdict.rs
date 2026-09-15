@@ -43,7 +43,8 @@ pub fn rsx_checkpoint_addr(
 /// 4. `PcReached(addr)` -- step retired the caller-supplied PC.
 /// 5. `Continue`.
 ///
-/// `callback_worker_fault_absorbed` suppresses `StepFault` so the run can resume.
+/// Nothing suppresses `StepFault`: a discarded batch ends the boot,
+/// whichever unit emitted it.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StepVerdict {
     Continue,
@@ -63,11 +64,7 @@ pub(crate) fn classify_step_outcome(
     if commit_result.is_err() && checkpoint_addr.is_none() {
         return StepVerdict::CommitFault;
     }
-    let callback_fault_absorbed = matches!(
-        commit_result,
-        Ok(o) if o.callback_worker_fault_absorbed
-    );
-    if step.fault.is_some() && !callback_fault_absorbed {
+    if step.fault.is_some() {
         return StepVerdict::StepFault;
     }
     if let Some(addr) = checkpoint_addr {
