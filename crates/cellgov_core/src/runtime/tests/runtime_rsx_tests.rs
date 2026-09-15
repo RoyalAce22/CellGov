@@ -471,6 +471,114 @@ fn rsx_mirror_writes_fires_fifo_advance_in_same_batch() {
     );
 }
 
+/// Faults on its first step, emitting nothing.
+#[derive(Clone)]
+struct FaultingUnit {
+    id: UnitId,
+    steps: Cell<u64>,
+}
+
+impl ExecutionUnit for FaultingUnit {
+    type Snapshot = u64;
+
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 1 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+
+    fn run_until_yield(
+        &mut self,
+        _budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        _effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        self.steps.set(1);
+        ExecutionStepResult {
+            yield_reason: YieldReason::Fault,
+            consumed_cost: InstructionCost::ZERO,
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: Some(cellgov_effects::FaultKind::Guest(0x700)),
+            syscall_args: None,
+        }
+    }
+
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+/// A fault discards its own batch and not the FIFO pass's work.
+///
+/// The advance pass queues its effects for the next space-0 batch, and
+/// which batch that is falls to the scheduler. Hard rule 4 discards the
+/// faulting unit's own effects; the queued RSX work is not that unit's,
+/// so a fault in an unrelated block must not take it down.
+#[test]
+fn a_faulted_batch_leaves_the_queued_rsx_work_for_the_next_one() {
+    use cellgov_mem::{ByteRange, GuestAddr};
+    const FIFO_BASE: u32 = 0x200;
+    const LABEL_BASE: u32 = 0x4000;
+    const SEM_OFFSET: u32 = 0x10;
+    const RELEASE_VALUE: u32 = 0xCAFE_BABE;
+
+    let label = ByteRange::new(GuestAddr::new((LABEL_BASE + SEM_OFFSET) as u64), 4).unwrap();
+    let mut rt = build_with_rsx_and_label_region(LABEL_BASE);
+    rt.set_rsx_mirror_writes(true);
+    // Unit 0 drives the FIFO, so the advance pass queues a label write.
+    rt.registry_mut()
+        .register_with(|id| RsxOffsetReleaseDriverUnit {
+            id,
+            steps: Cell::new(0),
+            fifo_base: FIFO_BASE,
+            put_target: FIFO_BASE + 16,
+            sem_offset: SEM_OFFSET,
+            release_value: RELEASE_VALUE,
+        });
+    // Unit 1 faults, and round-robin hands it the next step.
+    rt.registry_mut().register_with(|id| FaultingUnit {
+        id,
+        steps: Cell::new(0),
+    });
+
+    let s1 = rt.step().unwrap();
+    assert_eq!(s1.unit, UnitId::new(0));
+    rt.commit_step(&s1.result, &s1.effects).unwrap();
+    assert_eq!(
+        rt.memory().read(label).unwrap(),
+        &[0, 0, 0, 0],
+        "the advance pass queued the write for a later batch",
+    );
+
+    let s2 = rt.step().unwrap();
+    assert_eq!(s2.unit, UnitId::new(1), "the faulting unit runs next");
+    let outcome = rt.commit_step(&s2.result, &s2.effects).unwrap();
+    assert!(outcome.fault_discarded);
+    assert_eq!(
+        outcome.effects_discarded_on_fault, 0,
+        "the faulting unit emitted nothing, so nothing of its own was discarded",
+    );
+    assert_eq!(
+        rt.memory().read(label).unwrap(),
+        &[0, 0, 0, 0],
+        "and the queued write did not land in the batch that faulted",
+    );
+
+    let s3 = rt.step().unwrap();
+    rt.commit_step(&s3.result, &s3.effects).unwrap();
+    assert_eq!(
+        rt.memory().read(label).unwrap(),
+        &RELEASE_VALUE.to_be_bytes(),
+        "the next batch that did not fault carries it",
+    );
+}
+
 /// Emits one `RsxLabelWrite` on its first step, then finishes.
 #[derive(Clone)]
 struct RsxLabelWriteEmitterUnit {

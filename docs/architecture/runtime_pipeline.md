@@ -55,8 +55,11 @@ nine-step deterministic loop:
    a parked sleep wakes with CELL_OK, a timed sync wait expires
    with CELL_ETIMEDOUT through `Lv2Host::expire_wait`); resolve
    join wakes if the unit finished; run the RSX FIFO advance pass,
-   whose emitted effects queue for the next batch under the
-   atomic-batch contract. DMA completions publish per-tag
+   whose emitted effects queue for the next batch that can commit
+   them, under the atomic-batch contract. That is the next space-0
+   batch which does not fault: those effects belong to no unit's
+   step, so neither a child-space batch nor a faulting one carries
+   them. DMA completions publish per-tag
    completion bits to the issuing SPU's tag-status channel at fire
    time, not at enqueue. An SPU yielding `DmaWait` is parked
    `Blocked` before completions fire, so a same-commit

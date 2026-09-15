@@ -71,9 +71,16 @@ impl Runtime {
         // deferred effects target space-0 addresses and may only join
         // a space-0 batch; a child-space batch leaves them queued for
         // the next space-0 commit. Allocates only when prepending.
+        //
+        // A faulting batch is no carrier either. Hard rule 4 discards
+        // the faulting unit's own effects, and the advance pass's are
+        // not that unit's: which batch carries them is a scheduling
+        // accident, so riding on one that faults would lose guest work
+        // the pipeline had already accepted. They stay queued.
         let combined_storage: Vec<Effect>;
         let effects: &[Effect] = if self.pending_rsx_effects.is_empty()
             || source_space != crate::runtime::spaces::AddressSpaceId::BOOT
+            || result.yield_reason == YieldReason::Fault
         {
             effects
         } else {
