@@ -18,12 +18,13 @@ use cellgov_time::Budget;
 pub enum UnitStatus {
     /// Eligible to be scheduled.
     Runnable = 0,
-    /// Parked, waiting on an external event. The guest-semantic
-    /// reason is owned by whichever subsystem parked the unit
-    /// (mailbox / signal / barrier / DMA waiter lists in
-    /// `cellgov_mailbox` / `cellgov_signal` / `cellgov_dma`, PPU
-    /// thread `join` waiters in `cellgov_lv2::ppu_thread`). The
-    /// scheduler sees only the opaque state and skips the unit.
+    /// Parked, waiting on an external event. The scheduler sees only
+    /// the opaque state and skips the unit. The subsystem that parks
+    /// the unit keeps the reason:
+    ///
+    /// - the commit pipeline in `cellgov_core`, for mailbox, event and
+    ///   DMA waits;
+    /// - `cellgov_lv2`, for LV2 waits such as a PPU thread `join`.
     Blocked = 1,
     /// Has raised a fault; kept out of the runnable set. Return to
     /// `Runnable` is architecture-specific.

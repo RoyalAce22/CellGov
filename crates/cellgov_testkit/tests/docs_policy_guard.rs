@@ -9,7 +9,10 @@
 //!   track. The trees below are the ones a clone cannot populate:
 //!   nothing describes how, so a pointer into one dangles for every
 //!   public reader.
+//! - A backticked `cellgov_<name>` in a doc comment names a workspace
+//!   crate, so no doc still names a crate after its rename or removal.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -29,6 +32,11 @@ const MIN_IDENTITIES: usize = 4;
 const MIN_MECHANISM_DOCS: usize = 10;
 const MIN_COMMENT_LINES: usize = 20_000;
 const MIN_TEXT_FILES: usize = 400;
+const MIN_CRATE_MENTIONS: usize = 100;
+
+/// Identifiers that carry the crate prefix and name something else: the
+/// multi-baseline comparison's field and the JSON key that mirrors it.
+const NON_CRATE_NAMES: &[&str] = &["cellgov_result"];
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -175,6 +183,113 @@ fn comment_body(line: &str) -> Option<&str> {
     t.strip_prefix("//!")
         .or_else(|| t.strip_prefix("///"))
         .or_else(|| t.strip_prefix("//"))
+}
+
+/// The body of a `///` or `//!` line, if the line is one.
+fn doc_comment_body(line: &str) -> Option<&str> {
+    let t = line.trim_start();
+    t.strip_prefix("//!").or_else(|| t.strip_prefix("///"))
+}
+
+/// Each `cellgov_` identifier that starts a word in `code`, cut at its
+/// first byte outside `[a-z0-9_]`.
+///
+/// It skips three shapes that name no crate:
+///
+/// - a bare `cellgov_` prefix, as in the glob `cellgov_*`;
+/// - a file name, which the cut leaves followed by `.`;
+/// - the names in [`NON_CRATE_NAMES`].
+fn code_names(code: &str) -> impl Iterator<Item = &str> + '_ {
+    const PREFIX: &str = "cellgov_";
+    let ident = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_';
+    code.match_indices(PREFIX).filter_map(move |(at, _)| {
+        let before = code[..at].chars().next_back();
+        if before.is_some_and(|c| c.is_ascii_alphanumeric() || c == '_') {
+            return None;
+        }
+        let len = code[at..].find(|c| !ident(c)).unwrap_or(code.len() - at);
+        let name = &code[at..at + len];
+        let file_name = code[at + len..].starts_with('.');
+        (len > PREFIX.len() && !file_name && !NON_CRATE_NAMES.contains(&name)).then_some(name)
+    })
+}
+
+/// Each name [`code_names`] finds in the code of `source`'s doc
+/// comments, with its 1-based line number.
+///
+/// The code is what rustdoc's Markdown reads as code:
+///
+/// - every line of a fenced block;
+/// - each backtick span, which can continue onto the next doc line.
+///
+/// A backtick still open at the end of a paragraph is plain text, so
+/// the function skips the names after it. These lines end a paragraph:
+///
+/// - a blank doc line;
+/// - a fence;
+/// - a line that is not a doc comment.
+fn doc_crate_mentions(source: &str) -> Vec<(usize, &str)> {
+    let mut found = Vec::new();
+    let mut open_span = Vec::new();
+    let mut in_span = false;
+    let mut in_fence = false;
+    for (n, line) in source.lines().enumerate() {
+        let Some(body) = doc_comment_body(line) else {
+            in_fence = false;
+            in_span = false;
+            open_span.clear();
+            continue;
+        };
+        if body.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            in_span = false;
+            open_span.clear();
+            continue;
+        }
+        if in_fence {
+            found.extend(code_names(body).map(|name| (n + 1, name)));
+            continue;
+        }
+        if body.trim().is_empty() {
+            in_span = false;
+            open_span.clear();
+            continue;
+        }
+        for (i, piece) in body.split('`').enumerate() {
+            if i > 0 {
+                in_span = !in_span;
+                if !in_span {
+                    found.append(&mut open_span);
+                }
+            }
+            if in_span {
+                open_span.extend(code_names(piece).map(|name| (n + 1, name)));
+            }
+        }
+    }
+    found
+}
+
+/// The package name of every workspace member, read from each member's
+/// own manifest.
+fn workspace_crates(root: &Path) -> BTreeSet<String> {
+    let manifest = read(&root.join("Cargo.toml"));
+    // Line-anchored, so `default-members = [` cannot match in its place.
+    let list = manifest
+        .split_once("\nmembers = [")
+        .and_then(|(_, rest)| rest.split_once(']'))
+        .map(|(list, _)| list)
+        .expect("the root manifest lists workspace members");
+    list.split(',')
+        .filter_map(|entry| entry.trim().strip_prefix('"')?.strip_suffix('"'))
+        .map(|member| {
+            let path = root.join(member).join("Cargo.toml");
+            read(&path)
+                .lines()
+                .find_map(|line| toml_string(line, "name"))
+                .unwrap_or_else(|| panic!("{} declares no package name", path.display()))
+        })
+        .collect()
 }
 
 /// Whether a comment carries a tracker reference: `#` and two or more
@@ -324,6 +439,72 @@ fn the_issue_reference_matcher_separates_tracker_numbers_from_the_look_alikes() 
     }
 }
 
+fn crate_names(source: &str) -> Vec<&str> {
+    doc_crate_mentions(source)
+        .into_iter()
+        .map(|(_, name)| name)
+        .collect()
+}
+
+#[test]
+fn the_crate_matcher_reads_backticked_word_starts_only() {
+    assert_eq!(
+        crate_names("/// in `cellgov_lv2::ppu_thread` and `cellgov_cli/decrypt`"),
+        ["cellgov_lv2", "cellgov_cli"]
+    );
+    assert_eq!(
+        crate_names("//! the path `crates/cellgov_ps3_abi/src` and `cellgov_sync`'s list"),
+        ["cellgov_ps3_abi", "cellgov_sync"]
+    );
+    assert_eq!(
+        crate_names("/// two in one span: `cellgov_mem::GuestMemory as cellgov_dma::X`"),
+        ["cellgov_mem", "cellgov_dma"]
+    );
+    for miss in [
+        "/// cellgov_mailbox outside a code span",
+        "/// the glob `cellgov_*`",
+        "/// `my_cellgov_thing` is another word",
+        "/// `CELLGOV_KEYS` is an environment variable",
+        "/// unbalanced ` then cellgov_x",
+        "/// the patch header `cellgov_ppu_trace.h` and `files/cellgov_hle_trace.{h,cpp}`",
+        "/// the `cellgov_result` field",
+        "// `cellgov_x` in a comment that is not a doc comment",
+    ] {
+        assert!(
+            crate_names(miss).is_empty(),
+            "{miss:?} names no crate, got {:?}",
+            crate_names(miss)
+        );
+    }
+}
+
+#[test]
+fn the_crate_matcher_reads_a_span_across_doc_lines_and_a_fenced_block() {
+    assert_eq!(
+        doc_crate_mentions("/// writes `a` that `cellgov_cli\n/// fixture-gen` and `cellgov_mem`"),
+        [(1, "cellgov_cli"), (2, "cellgov_mem")]
+    );
+    assert_eq!(
+        crate_names("/// `a span\n/// ends` so cellgov_x is prose, then `cellgov_dma`"),
+        ["cellgov_dma"]
+    );
+    assert_eq!(
+        doc_crate_mentions("//! ```text\n//! cargo test -p cellgov_lv2\n//! ```\n//! cellgov_x"),
+        [(2, "cellgov_lv2")]
+    );
+    for miss in [
+        "/// `cellgov_x\n///\n/// a blank doc line ends the paragraph`",
+        "/// `cellgov_x\nfn f() {}\n/// a code line ends the paragraph`",
+        "/// `cellgov_x and the file ends",
+    ] {
+        assert!(
+            crate_names(miss).is_empty(),
+            "{miss:?} names no crate, got {:?}",
+            crate_names(miss)
+        );
+    }
+}
+
 #[test]
 fn the_tree_matcher_needs_a_path_boundary() {
     assert_eq!(
@@ -432,6 +613,46 @@ fn shipped_comments_carry_no_issue_reference() {
     assert!(
         violations.is_empty(),
         "{} comment(s) carry an issue reference:\n{}",
+        violations.len(),
+        violations.concat()
+    );
+}
+
+#[test]
+fn doc_comments_name_only_workspace_crates() {
+    let root = workspace_root();
+    let crates = workspace_crates(&root);
+    assert!(
+        crates.len() >= 10,
+        "only {} workspace crate(s) parsed",
+        crates.len()
+    );
+    for name in NON_CRATE_NAMES {
+        assert!(
+            !crates.contains(*name),
+            "{name} is exempt as a non-crate name but is now a workspace crate"
+        );
+    }
+    let mut mentions = 0usize;
+    let mut violations = Vec::new();
+    for file in &shipped_rust(&root) {
+        let text = read(file);
+        for (line, name) in doc_crate_mentions(&text) {
+            mentions += 1;
+            if !crates.contains(name) {
+                let shown = file.strip_prefix(&root).unwrap_or(file);
+                violations.push(format!("  {}:{line}  {name}\n", shown.display()));
+            }
+        }
+    }
+    assert!(
+        mentions >= MIN_CRATE_MENTIONS,
+        "gate went vacuous: only {mentions} backticked crate name(s) found in doc comments"
+    );
+    violations.sort();
+    assert!(
+        violations.is_empty(),
+        "{} doc comment(s) name a crate the workspace does not have:\n{}",
         violations.len(),
         violations.concat()
     );

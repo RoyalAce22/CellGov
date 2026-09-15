@@ -206,13 +206,10 @@ pub struct CommitContext<'a> {
     pub rsx_label_base: u32,
     /// Write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
-    /// Liveness witness, incremented adjacent to the semaphore-region
-    /// `debug_assert!` per `RsxLabelWrite` seen during `process()`.
-    /// Co-locating the counter with the guard makes it impossible for
-    /// the witness to be vacuous: a future filter in `process()` that
-    /// dropped an effect before the assert would also stop the
-    /// increment, so a nonzero count provably means the guard fired
-    /// the same number of times.
+    /// Count of `RsxLabelWrite` effects that reach the label-area check.
+    ///
+    /// `process()` increments it beside that `debug_assert!`, so in a
+    /// debug build the count equals the number of times the assert ran.
     pub rsx_label_writes_committed: &'a mut u64,
 }
 
@@ -411,28 +408,10 @@ impl CommitPipeline {
                         }
                     }
                     Effect::RsxLabelWrite { offset, value } => {
-                        // The label base addresses the whole `RsxReports`
-                        // area, not just its leading semaphore block:
-                        // semaphores occupy 0..0x1000, notify entries
-                        // start at 0x1000 and report entries at 0x1400,
-                        // out to `reports::SIZE`. Notify and report slots
-                        // are what `NV4097_GET_REPORT` legitimately
-                        // targets, so the boundary worth asserting is the
-                        // end of the area GCM handed out; past it the
-                        // write corrupts whatever follows.
-                        // libgcm_sys.sprx reads a separate block offset
-                        // for the semaphore, notify and report arrays
-                        // out of the driver-info block the kernel
-                        // published. It adds each one to a single
-                        // common reports base, so the bound that means
-                        // anything is the end of the whole area.
-                        //
-                        // The window only means something once a label
-                        // base exists. A base of zero says GCM never
-                        // handed one out, so the guest has no window to be
-                        // relative to and `offset` is the absolute address
-                        // it wants written -- routinely past the area size
-                        // and not a bug.
+                        // Semaphore, notify and report slots all resolve
+                        // against one base, so a correct guest stays inside
+                        // the whole area. With a zero base, `offset` is
+                        // absolute.
                         debug_assert!(
                             ctx.rsx_label_base == 0
                                 || (*offset as usize) < cellgov_ps3_abi::lv2::rsx::reports::SIZE,

@@ -253,12 +253,8 @@ impl Runtime {
         if self.rsx_mirror_writes {
             let flip_status_now = self.rsx_flip.status();
             if flip_status_now != flip_status_at_entry {
-                let addr = crate::rsx::RSX_FLIP_STATUS_MIRROR_ADDR as u64;
-                let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 4)
-                    .expect(
-                        "RSX_FLIP_STATUS_MIRROR_ADDR is a 4-byte aligned constant; \
-                         ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
-                    );
+                let addr = crate::rsx::RSX_FLIP_STATUS_MIRROR_ADDR;
+                let range = cellgov_mem::ByteRange::contiguous_u32(addr, 4);
                 let value = flip_status_now as u32;
                 if let Err(err) = self.host_write(
                     HostWriter::RsxMirror,
@@ -326,11 +322,7 @@ impl Runtime {
     /// [`Self::mirror_rsx_control_register_writes`].
     fn catch_up_cursor_get_from_mmio(&mut self) {
         use crate::rsx::control_register::GET_ADDR;
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(GET_ADDR as u64), 4)
-            .expect(
-                "control_register::GET_ADDR is a 4-byte aligned constant; \
-                 ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
-            );
+        let range = cellgov_mem::ByteRange::contiguous_u32(GET_ADDR, 4);
         let Some(bytes) = self.memory.read(range) else {
             return;
         };
@@ -346,11 +338,7 @@ impl Runtime {
     fn assert_ref_addr_mirrors_cursor(&mut self) {
         use crate::rsx::control_register::REF_ADDR;
         let expected = self.rsx_cursor.current_reference();
-        let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(REF_ADDR as u64), 4)
-            .expect(
-                "control_register::REF_ADDR is a 4-byte aligned constant; \
-                 ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
-            );
+        let range = cellgov_mem::ByteRange::contiguous_u32(REF_ADDR, 4);
         let Some(bytes) = self.memory.read(range) else {
             self.lv2_host.log_invariant_break(
                 "dispatch.rsx_ref_addr_post_writeback_unmapped",
@@ -394,11 +382,7 @@ impl Runtime {
             (control_register::GET_ADDR, self.rsx_cursor.get()),
         ];
         for (addr, value) in writes {
-            let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr as u64), 4)
-                .expect(
-                    "control_register::{REF,GET}_ADDR are 4-byte aligned constants; \
-                     ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
-                );
+            let range = cellgov_mem::ByteRange::contiguous_u32(addr, 4);
             if let Err(err) = self.host_write(
                 HostWriter::RsxMirror,
                 AddressSpaceId::BOOT,
@@ -459,12 +443,7 @@ impl Runtime {
                 let slot_start = *slot_addr as u64;
                 let slot_end = slot_start + 4;
                 if write_start <= slot_start && write_end >= slot_end {
-                    let slot_range =
-                        cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(slot_start), 4)
-                            .expect(
-                                "control_register::{PUT,REF}_ADDR are 4-byte aligned constants; \
-                         ByteRange::new on a fixed 4-byte slot cannot misalign or overflow",
-                            );
+                    let slot_range = cellgov_mem::ByteRange::contiguous_u32(*slot_addr, 4);
                     if let Some(bytes) = self.memory.read(slot_range) {
                         let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
                         match slot {

@@ -57,18 +57,16 @@ impl Runtime {
         let due = self.dma_queue.pop_due(self.time);
         for (c, payload) in &due {
             self.apply_dma_transfer(c, payload);
-            // A Finished issuer is process-exit residue: the transfer
-            // still commits (the payload was in flight and the terminal
-            // memory snapshot must include it), but the Runnable
-            // override would replace Finished and resume a stopped
-            // thread. Process exit does not return to its caller: it
-            // terminates the process, so no thread of it is left to
-            // resume. Mirrors the guard in fire_timer_wakes.
-            // A Faulted issuer is a pre-validate DmaEnqueue rejection
-            // (see the commit pipeline's DmaEnqueue arm) with an older
-            // accepted transfer still in flight; the mark exists to
-            // keep the unit off the scheduler, so it must not be
-            // replaced either.
+            // The transfer still commits, so the terminal memory
+            // snapshot holds the payload. The `Runnable` override below
+            // would replace either of these issuer states:
+            // - `Finished`: process-exit residue (see the `runtime`
+            //   module docs), or an SPU that stopped before its
+            //   transfer completed. An MFC put does not block the
+            //   issuer.
+            // - `Faulted`: the commit pipeline's `pre_validate` refused
+            //   a later DmaEnqueue from the issuer, and that mark keeps
+            //   the unit off the scheduler.
             if matches!(
                 self.registry.effective_status(c.issuer()),
                 Some(UnitStatus::Finished | UnitStatus::Faulted)

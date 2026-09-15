@@ -235,14 +235,12 @@ pub(super) struct MeasuredRun<'a> {
 /// Load the anchor for one cell of `content_id` and compare `run`
 /// against it.
 ///
-/// An unreadable or unparseable anchor is a disagreement, not a skip:
-/// only a genuinely absent file means "nothing recorded yet".
+/// When the check reaches no usable anchor, the cause sets the verdict:
 ///
-/// [`workspace_root`] is compiled in, so a binary invoked outside the
-/// tree it was built from reaches no anchor at all. That says nothing
-/// about what is recorded, so it reports as
-/// [`AnchorVerdict::NotComparable`] rather than letting every cell
-/// look unrecorded.
+/// - an absent anchor file is [`AnchorVerdict::NotRecorded`];
+/// - an unreadable or unparseable anchor is [`AnchorVerdict::Drift`];
+/// - a missing compiled-in [`workspace_root`] is
+///   [`AnchorVerdict::NotComparable`].
 pub(super) fn check_anchor(
     content_id: &str,
     cell: &CellKey,

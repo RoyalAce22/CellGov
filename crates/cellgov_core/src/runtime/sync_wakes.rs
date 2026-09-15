@@ -19,18 +19,10 @@ impl Runtime {
     pub(super) fn resolve_sync_wakes(&mut self, woken_unit_ids: &[UnitId]) {
         for waiter in woken_unit_ids {
             let waiter = *waiter;
-            // A Finished unit on the wake list is exited-process
-            // residue: the exit sweep finishes every unit of the pid
-            // but leaves the LV2 host's waiter lists unpurged, so a
-            // later release can still pick the unit. On PS3 a process
-            // exit deallocates everything the process owns, its PPU
-            // and SPU threads included, so no thread of it survives to
-            // take a wake. The Runnable transition below would
-            // resurrect a unit the guest already terminated -- the
-            // same reasoning as the Finished guard in
-            // fire_timer_wakes. The release side consumed a waiter
-            // slot on a dead unit, which can skew guest-visible
-            // primitive state, so the drop is logged.
+            // A Finished waiter is process-exit residue (see the
+            // `runtime` module docs). The release side spent a waiter
+            // slot on it. That can skew guest-visible primitive state,
+            // so the resolver logs the drop.
             if self.registry.effective_status(waiter) == Some(UnitStatus::Finished) {
                 self.timer_wakes.cancel(waiter);
                 // The pending response (already drained by the exit

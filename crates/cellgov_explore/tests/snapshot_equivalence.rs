@@ -94,10 +94,8 @@ where
         }
     }
 
-    // A prefix baseline withdraws every divergence claim, mirroring
-    // `AlternateIteration::mark_baseline_truncated`.
-    // A prefix baseline withdraws every divergence claim, mirroring
-    // `AlternateIteration::mark_baseline_truncated`.
+    // A prefix baseline withdraws every divergence claim, as
+    // `AlternateIteration::mark_baseline_truncated` does.
     if baseline_stop.is_truncated() {
         found_divergence = false;
         bounds_hit = true;

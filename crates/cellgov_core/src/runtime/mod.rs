@@ -7,6 +7,20 @@
 //!
 //! The main trace stream is fixed-size-per-record; full PPU register
 //! snapshots route to `zoom_trace` to keep the main stream homogeneous.
+//!
+//! Process-exit residue: a process exit sets each unit of the process
+//! to `Finished`, and a boot-process exit sets every registered unit.
+//! The exit deallocates every thread of the process, so none of these
+//! units runs again. The exit sweep cancels each unit's timer deadline
+//! and drops its parked response. Other records can still name such a
+//! unit:
+//!
+//! - an LV2 waiter list;
+//! - an in-flight DMA transfer.
+//!
+//! The DMA-completion, timer-wake and sync-wake paths each skip a
+//! `Finished` unit. Their `Runnable` override would replace `Finished`
+//! and resume the thread.
 
 mod accessors;
 mod commit_step;

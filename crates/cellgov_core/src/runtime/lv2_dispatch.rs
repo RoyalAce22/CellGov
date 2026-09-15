@@ -77,7 +77,7 @@ impl Runtime {
             );
         }
         for effect in effects {
-            match effect {
+            let site = match effect {
                 Effect::SharedWriteIntent {
                     range,
                     bytes,
@@ -147,6 +147,7 @@ impl Runtime {
                     );
                     self.lv2_direct_committed_writes =
                         self.lv2_direct_committed_writes.wrapping_add(1);
+                    continue;
                 }
                 Effect::MailboxSend {
                     mailbox, message, ..
@@ -161,105 +162,45 @@ impl Runtime {
                         self.registry
                             .set_status_override(target, UnitStatus::Runnable);
                     }
+                    continue;
                 }
                 Effect::RsxFlipRequest { buffer_index } => {
                     self.rsx_flip.request_flip(*buffer_index);
+                    continue;
                 }
+                // Execution units and the FIFO advance pass emit these
+                // variants, and no LV2 handler does. A boot prints the
+                // detail line of its first break alone, so each variant
+                // logs under its own site and the per-site count
+                // identifies it.
                 Effect::MailboxReceiveAttempt { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_mailbox_receive_attempt",
-                        format_args!(
-                            "LV2 dispatch emitted MailboxReceiveAttempt; this variant is \
-                             PPU/SPU-side receiver semantics and has no LV2 producer. \
-                             Effect dropped."
-                        ),
-                    );
+                    "runtime.apply_lv2_effects_unsupported_mailbox_receive_attempt"
                 }
-                Effect::DmaEnqueue { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_dma_enqueue",
-                        format_args!(
-                            "LV2 dispatch emitted DmaEnqueue; this variant originates \
-                             from SPU MFC issue. Effect dropped."
-                        ),
-                    );
-                }
-                Effect::WaitOnEvent { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_wait_on_event",
-                        format_args!(
-                            "LV2 dispatch emitted WaitOnEvent; LV2 block semantics use \
-                             Lv2Dispatch::Block / PendingResponse, not this variant. \
-                             Effect dropped."
-                        ),
-                    );
-                }
-                Effect::WakeUnit { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_wake_unit",
-                        format_args!(
-                            "LV2 dispatch emitted WakeUnit; LV2 wake semantics use the \
-                             `woken_unit_ids` field on Lv2Dispatch::WakeAndReturn, not \
-                             this variant. Effect dropped."
-                        ),
-                    );
-                }
+                Effect::DmaEnqueue { .. } => "runtime.apply_lv2_effects_unsupported_dma_enqueue",
+                Effect::WaitOnEvent { .. } => "runtime.apply_lv2_effects_unsupported_wait_on_event",
+                Effect::WakeUnit { .. } => "runtime.apply_lv2_effects_unsupported_wake_unit",
                 Effect::SignalUpdate { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_signal_update",
-                        format_args!(
-                            "LV2 dispatch emitted SignalUpdate; this variant originates \
-                             from PPU/SPU signal-write paths. Effect dropped."
-                        ),
-                    );
+                    "runtime.apply_lv2_effects_unsupported_signal_update"
                 }
-                Effect::FaultRaised { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_fault_raised",
-                        format_args!(
-                            "LV2 dispatch emitted FaultRaised; faults originate from \
-                             execution units, not LV2 syscall handlers. Effect dropped."
-                        ),
-                    );
-                }
-                Effect::TraceMarker { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_trace_marker",
-                        format_args!(
-                            "LV2 dispatch emitted TraceMarker; this is an execution-unit \
-                             breadcrumb variant. Effect dropped."
-                        ),
-                    );
-                }
+                Effect::FaultRaised { .. } => "runtime.apply_lv2_effects_unsupported_fault_raised",
+                Effect::TraceMarker { .. } => "runtime.apply_lv2_effects_unsupported_trace_marker",
                 Effect::ReservationAcquire { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_reservation_acquire",
-                        format_args!(
-                            "LV2 dispatch emitted ReservationAcquire; LL/SC paths run in \
-                             execution units, not LV2 syscalls. Effect dropped."
-                        ),
-                    );
+                    "runtime.apply_lv2_effects_unsupported_reservation_acquire"
                 }
                 Effect::ConditionalStore { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_conditional_store",
-                        format_args!(
-                            "LV2 dispatch emitted ConditionalStore; stwcx./stdcx. paths \
-                             run in execution units, not LV2 syscalls. Effect dropped."
-                        ),
-                    );
+                    "runtime.apply_lv2_effects_unsupported_conditional_store"
                 }
                 Effect::RsxLabelWrite { .. } => {
-                    self.lv2_host.log_invariant_break(
-                        "runtime.apply_lv2_effects_unsupported_rsx_label_write",
-                        format_args!(
-                            "LV2 dispatch emitted RsxLabelWrite; this variant flows from \
-                             the FIFO advance pass via pending_rsx_effects into the next \
-                             batch's commit_pipeline, not through LV2 dispatch. Effect dropped."
-                        ),
-                    );
+                    "runtime.apply_lv2_effects_unsupported_rsx_label_write"
                 }
-            }
+            };
+            self.lv2_host.log_invariant_break(
+                site,
+                format_args!(
+                    "LV2 dispatch emitted {effect:?}, which no LV2 handler produces; \
+                     effect dropped"
+                ),
+            );
         }
     }
 

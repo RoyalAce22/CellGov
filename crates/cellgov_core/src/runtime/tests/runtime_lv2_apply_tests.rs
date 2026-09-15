@@ -77,27 +77,116 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
 }
 
 #[test]
-fn apply_lv2_effects_loud_rejects_unsupported_effect_variant() {
-    // The exhaustive match in apply_lv2_effects catches new Effect
-    // variants at compile time; this corroborates the runtime side:
-    // TraceMarker, which no LV2 handler emits, reaches a loud-reject
-    // arm and its log_invariant_break fires.
+fn apply_lv2_effects_loud_rejects_every_unsupported_effect_variant() {
+    use cellgov_dma::{DmaDirection, DmaRequest};
+    use cellgov_effects::{FaultKind, WaitTarget, WritePayload};
+    use cellgov_event::PriorityClass;
+    use cellgov_mem::ByteRange;
+    use cellgov_sync::{MailboxId, SignalId};
+
+    let source = UnitId::new(0);
+    let slot = ByteRange::contiguous_u32(0x100, 4);
+    let cases = [
+        (
+            Effect::MailboxReceiveAttempt {
+                mailbox: MailboxId::new(0),
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_mailbox_receive_attempt",
+        ),
+        (
+            Effect::DmaEnqueue {
+                request: DmaRequest::new(
+                    DmaDirection::Put,
+                    ByteRange::contiguous_u32(0x200, 4),
+                    slot,
+                    source,
+                )
+                .unwrap(),
+                payload: Some(vec![0xAA; 4]),
+            },
+            "runtime.apply_lv2_effects_unsupported_dma_enqueue",
+        ),
+        (
+            Effect::WaitOnEvent {
+                target: WaitTarget::Mailbox(MailboxId::new(0)),
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_wait_on_event",
+        ),
+        (
+            Effect::WakeUnit {
+                target: source,
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_wake_unit",
+        ),
+        (
+            Effect::SignalUpdate {
+                signal: SignalId::new(0),
+                value: 1,
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_signal_update",
+        ),
+        (
+            Effect::FaultRaised {
+                kind: FaultKind::Validation,
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_fault_raised",
+        ),
+        (
+            Effect::TraceMarker {
+                marker: 0xDEAD_BEEF,
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_trace_marker",
+        ),
+        (
+            Effect::ReservationAcquire {
+                line_addr: 0x100,
+                source,
+            },
+            "runtime.apply_lv2_effects_unsupported_reservation_acquire",
+        ),
+        (
+            Effect::ConditionalStore {
+                range: slot,
+                bytes: WritePayload::new(vec![0xAA; 4]),
+                ordering: PriorityClass::Normal,
+                source,
+                source_time: GuestTicks::ZERO,
+            },
+            "runtime.apply_lv2_effects_unsupported_conditional_store",
+        ),
+        (
+            Effect::RsxLabelWrite {
+                offset: 0x100,
+                value: 0xAAAA_AAAA,
+            },
+            "runtime.apply_lv2_effects_unsupported_rsx_label_write",
+        ),
+    ];
+    let effects: Vec<Effect> = cases.iter().map(|(effect, _)| effect.clone()).collect();
     let mut rt = build(4096, 1, 100);
     let pre_breaks = rt.lv2_host().observability().invariant_break_count;
 
-    let marker = Effect::TraceMarker {
-        marker: 0xDEAD_BEEF,
-        source: UnitId::new(0),
-    };
-    rt.apply_lv2_effects(&[marker], crate::runtime::spaces::AddressSpaceId::BOOT);
+    rt.apply_lv2_effects(&effects, crate::runtime::spaces::AddressSpaceId::BOOT);
 
     assert_eq!(
         rt.lv2_host().observability().invariant_break_count,
-        pre_breaks + 1,
-        "unsupported-variant arm must increment invariant_break_count; a count of \
-         {pre_breaks} (unchanged) means the variant slipped through silently -- \
-         exactly the `_ => {{}}` regression the exhaustive match closed.",
+        pre_breaks + cases.len(),
     );
+    for (effect, site) in &cases {
+        assert_eq!(
+            rt.lv2_host().invariant_break_site_count(site),
+            1,
+            "{effect:?} must log once under its own site",
+        );
+    }
+    assert_eq!(rt.memory().read(slot).unwrap(), &[0; 4]);
+    assert_eq!(rt.dma_queue().len(), 0);
 }
 
 #[test]

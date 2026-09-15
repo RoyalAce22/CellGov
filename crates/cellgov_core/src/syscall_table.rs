@@ -88,7 +88,6 @@ impl SyscallResponseTable {
     ///
     /// Panics if no response is present; a missing entry indicates a
     /// double-wake or a missing upstream insert.
-    #[allow(dead_code)]
     pub fn take_expected(&mut self, unit: UnitId) -> PendingResponse {
         self.pending.remove(&unit).unwrap_or_else(|| {
             panic!(

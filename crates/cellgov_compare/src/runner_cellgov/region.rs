@@ -31,23 +31,15 @@ pub struct RegionDescriptor {
 /// in the manifest that declared it.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RegionExtractError {
-    /// The descriptor repeats the name of an earlier descriptor. The
-    /// comparison pairs regions by name and takes the first match, so
-    /// it would never compare the second copy.
-    #[error(
-        "region {name} is declared twice; observations are matched region by name \
-         and the first match wins, so the second copy would never be compared"
-    )]
+    /// The descriptor repeats the name of an earlier descriptor.
+    #[error("region {name} is declared twice, and regions pair by name, so the second is never compared")]
     Duplicate {
         /// Region name as declared.
         name: String,
     },
-    /// The descriptor declares zero bytes, and an observation of nothing
-    /// matches any baseline.
+    /// The descriptor declares zero bytes.
     #[error(
-        "region {name} at 0x{addr:016x} declares zero bytes; an observation of \
-         nothing compares as a match against anything, so the region cannot be \
-         observed"
+        "region {name} at 0x{addr:016x} declares zero bytes, so it observes nothing the run wrote"
     )]
     Empty {
         /// Region name as declared.

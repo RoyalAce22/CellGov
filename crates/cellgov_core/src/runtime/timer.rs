@@ -9,8 +9,9 @@ use super::Runtime;
 
 impl Runtime {
     /// Pop and resolve timer wakes whose deadline has arrived; returns
-    /// the fired list for trace recording. Due entries whose unit is
-    /// already Finished (process-exit residue) are dropped unfired.
+    /// the fired list for trace recording. A due entry whose unit is
+    /// already `Finished` does not fire and stays out of the list, so
+    /// no `UnitWoken` record names the unit.
     pub(super) fn fire_timer_wakes(&mut self) -> Vec<TimerWake> {
         if self.timer_wakes.is_empty() {
             // Breaks buffered by earlier work in this commit still
@@ -21,18 +22,9 @@ impl Runtime {
         let due = self.timer_wakes.pop_due(self.time);
         let mut fired = Vec::with_capacity(due.len());
         for wake in due {
-            // A due entry for a Finished unit is process-exit residue:
-            // the exit sweep finishes every unit and drops its parked
-            // response without touching the timer queue, and this
-            // firing pass runs in the same commit. Firing anyway would
-            // resurrect the unit (the Runnable override replaces
-            // Finished) and trip the missing-response invariant break.
-            // handle_process_exit_child finishes every one of the
-            // pid's units at the same exit. Process exit does not
-            // return to its caller, so a due sleep or timed wait never
-            // resumes its thread. Dropped wakes are excluded from the
-            // returned list so no UnitWoken record is traced for a unit
-            // that stays Finished.
+            // The exit sweep cancels the deadline of each unit it
+            // finishes (see the `runtime` module docs). This skip is the
+            // backstop for an entry that outlives the sweep.
             if self.registry.effective_status(wake.unit) == Some(cellgov_exec::UnitStatus::Finished)
             {
                 continue;
