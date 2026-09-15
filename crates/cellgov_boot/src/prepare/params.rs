@@ -9,7 +9,7 @@ use cellgov_ps3_abi::hw::address_space::{
 use cellgov_ps3_abi::lv2::process::SYS_PROCESS_PARAM_PRIO_LIMIT;
 use cellgov_time::Budget;
 
-use super::types::PrepareOptions;
+use super::types::ExecutionOptions;
 use crate::error::narrow_u32;
 use crate::BootError;
 
@@ -68,53 +68,52 @@ pub(super) struct BootParams {
 /// The step cap is below one budget, or the declared primary stack
 /// exceeds the reservation.
 pub(super) fn resolve_boot_params(
-    opts: &PrepareOptions<'_>,
+    execution: &ExecutionOptions<'_>,
+    sink: &dyn crate::BootSink,
     elf_data: &[u8],
 ) -> Result<BootParams, BootError> {
     let tls_info = cellgov_ppu::loader::find_tls_segment(elf_data);
     let proc_param = cellgov_ppu::loader::find_sys_process_param(elf_data);
     let malloc_pagesize = proc_param.map(|p| p.malloc_pagesize).unwrap_or(0x100000);
 
-    let mode = if opts.capture_state_trace {
+    let mode = if execution.capture_state_trace {
         RuntimeMode::DeterminismCheck
     } else {
         RuntimeMode::FaultDriven
     };
     let step_budget = {
-        let b = opts
+        let b = execution
             .budget_override
             .unwrap_or_else(|| default_budget_for_mode(mode));
         if b.is_exhausted() {
             // A zero budget stalls the runtime without retiring work
             // (`cellgov_core::Runtime::new` "Zero values"), so the boot
             // would never advance.
-            opts.sink
-                .warn("boot: budget 0 retires no work; raised to 1");
+            sink.warn("boot: budget 0 retires no work; raised to 1");
             Budget::new(1)
         } else {
             b
         }
     };
     let step_budget_usize = (step_budget.raw() as usize).max(1);
-    if opts.runtime_max_steps < step_budget_usize {
+    if execution.runtime_max_steps < step_budget_usize {
         return Err(ParamsError::MaxStepsBelowBudget {
-            max_steps: opts.runtime_max_steps,
+            max_steps: execution.runtime_max_steps,
             budget: step_budget.raw(),
         }
         .into());
     }
     let (adjusted_max_steps, effective_max_steps) =
-        step_call_cap(opts.runtime_max_steps, step_budget_usize);
-    if effective_max_steps != opts.runtime_max_steps {
-        opts.sink.warn(&format!(
+        step_call_cap(execution.runtime_max_steps, step_budget_usize);
+    if effective_max_steps != execution.runtime_max_steps {
+        sink.warn(&format!(
             "boot: max_steps={} is not a multiple of budget={step_budget}; \
              the effective cap is {effective_max_steps} retired instructions",
-            opts.runtime_max_steps,
+            execution.runtime_max_steps,
         ));
     }
 
-    let primary_prio: u32 =
-        resolve_primary_prio(proc_param.map(|p| p.primary_prio), opts.sink.as_ref());
+    let primary_prio: u32 = resolve_primary_prio(proc_param.map(|p| p.primary_prio), sink);
     // An absent param segment leaves the kernel's own starting value
     // of 1 MiB, which is also the ceiling on a `sys_proc_param` stack
     // declaration. `decode_primary_stacksize` clamps a present
@@ -266,3 +265,7 @@ fn step_call_cap(max_instructions: usize, budget: usize) -> (usize, usize) {
 #[cfg(test)]
 #[path = "tests/params_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/params_execution_tests.rs"]
+mod execution_tests;

@@ -5,7 +5,7 @@ use cellgov_core::Runtime;
 
 use super::image::LoadedImage;
 use super::params::BootParams;
-use super::types::{AuthorityIdSource, PrepareOptions};
+use super::types::{AuthorityIdSource, ExecutionOptions, TitleOptions};
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::prx::{HostLinkMaps, PrxLoadInfo, VerifiedFirmware};
@@ -77,14 +77,15 @@ pub(super) fn cellsysutil_system_seed() -> cellgov_lv2::SystemStateSeed {
 
 /// What the boot loaded, reported before the runtime exists.
 pub(super) fn report_boot_banner(
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    execution: &ExecutionOptions<'_>,
+    sink: &dyn crate::BootSink,
     image: &LoadedImage,
     params: &BootParams,
     prx_modules: &[PrxLoadInfo],
 ) {
-    let sink = opts.sink.as_ref();
-    sink.note(&format!("title: {}", opts.title.display_name()));
-    sink.note(&format!("elf: {}", opts.elf_path));
+    sink.note(&format!("title: {}", title.manifest.display_name()));
+    sink.note(&format!("elf: {}", title.elf_path));
     sink.note(&format!("memory: {} MB", image.mem_size / (1024 * 1024)));
     sink.note(&format!(
         "entry: 0x{:x} (OPD) -> pc=0x{:x} toc=0x{:x}",
@@ -107,8 +108,8 @@ pub(super) fn report_boot_banner(
             info.name, info.base, info.toc, info.relocs_applied,
         ));
     }
-    sink.note(&format!("max_steps: {}", opts.runtime_max_steps));
-    let budget_source = if opts.budget_override.is_some() {
+    sink.note(&format!("max_steps: {}", execution.runtime_max_steps));
+    let budget_source = if execution.budget_override.is_some() {
         "override"
     } else {
         "mode-default"
@@ -123,17 +124,17 @@ pub(super) fn report_boot_banner(
 /// host the title later runs against.
 pub(super) fn build_runtime(
     mem: cellgov_mem::GuestMemory,
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    sink: &dyn crate::BootSink,
     params: &BootParams,
     alloc_base: u32,
     verified_firmware: Option<&VerifiedFirmware>,
     host_link: HostLinkMaps,
 ) -> Result<(Runtime, AuthorityIdSource), HostBindError> {
-    let sink = opts.sink.as_ref();
     // The header leads the stream, so the writer takes it before the
     // runtime that appends to it exists.
     let mut trace = cellgov_trace::TraceWriter::new();
-    trace.record_header(&opts.identity.trace_header());
+    trace.record_header(&title.identity.trace_header());
     let mut rt =
         Runtime::with_trace_writer(mem, params.step_budget, params.adjusted_max_steps, trace);
     rt.set_mode(params.mode);
@@ -159,7 +160,7 @@ pub(super) fn build_runtime(
     // Boot identity served by sys_ss_access_control_engine pkg 2.
     // Firmware modules classify callers by this value; libsysmodule's
     // module_start runs full init only for non-system authids.
-    if let Some(authid) = opts.authority_id {
+    if let Some(authid) = title.authority_id {
         rt.lv2_host_mut().set_program_authority_id(authid);
     }
     // Adversarial knob for the authority-id tripwire test: forcing
@@ -172,7 +173,7 @@ pub(super) fn build_runtime(
             "forced system authid (CELLGOV_FORCE_SYSTEM_AUTHID)",
             AuthorityIdSource::Forced,
         )
-    } else if opts.authority_id.is_some() {
+    } else if title.authority_id.is_some() {
         (
             "from SELF identification header",
             AuthorityIdSource::SelfHeader,
@@ -189,7 +190,7 @@ pub(super) fn build_runtime(
         authid_label,
     ));
     // Process privilege, from the SELF's plaintext capability header.
-    if let Some(flags) = opts.control_flags1 {
+    if let Some(flags) = title.control_flags1 {
         rt.lv2_host_mut().set_control_flags1(flags);
     }
     // Resolution source for the sc 484 CoreOS manual import link, and

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use cellgov_core::Runtime;
 use cellgov_lv2::FsError;
 
-use super::types::PrepareOptions;
+use super::types::{DiagnosticOptions, TitleOptions};
 use crate::content::{ContentBaseSource, ContentRegisterError};
 use crate::mounts::MountRegisterError;
 
@@ -187,9 +187,11 @@ where
 /// Unicode, or a blob does not register.
 pub(super) fn register_content(
     rt: &mut Runtime,
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    sink: &dyn crate::BootSink,
 ) -> Result<(), ProviderError> {
-    let Some(content) = opts.title.content.as_ref() else {
+    let Some(content) = title.manifest.content.as_ref() else {
         return Ok(());
     };
     let workspace_root =
@@ -204,12 +206,12 @@ pub(super) fn register_content(
         content,
         &workspace_root,
         override_base.as_deref(),
-        &usrdir_bases(opts.elf_path, opts.eboot_dirs),
+        &usrdir_bases(title.elf_path, title.eboot_dirs),
         rt.lv2_host_mut(),
     )?;
-    if opts.print_banner {
+    if diagnostics.print_banner {
         let label = content_source_label(&source, override_base.as_deref());
-        opts.sink.note(&format!(
+        sink.note(&format!(
             "content: registered {} blob(s) from {label}",
             content.files.len(),
         ));
@@ -226,10 +228,12 @@ pub(super) fn register_content(
 /// that does not read, or an override env var that is not Unicode.
 pub(super) fn register_mounts(
     rt: &mut Runtime,
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    sink: &dyn crate::BootSink,
 ) -> Result<(), ProviderError> {
-    register_composed_mounts(rt, opts)?;
-    if opts.title.mounts.is_empty() {
+    register_composed_mounts(rt, title, diagnostics, sink)?;
+    if title.manifest.mounts.is_empty() {
         return Ok(());
     }
     let workspace_root =
@@ -238,20 +242,21 @@ pub(super) fn register_mounts(
             source,
         })?;
     let env = read_override_env(
-        opts.title
+        title
+            .manifest
             .mounts
             .iter()
             .filter_map(|m| m.override_env.clone()),
     )?;
     let n = crate::mounts::register_mounts(
-        &opts.title.mounts,
+        &title.manifest.mounts,
         &workspace_root,
-        &usrdir_bases(opts.elf_path, opts.eboot_dirs),
+        &usrdir_bases(title.elf_path, title.eboot_dirs),
         |name| env.get(name).cloned(),
         rt.lv2_host_mut(),
     )?;
-    if opts.print_banner {
-        opts.sink.note(&format!("mounts: registered {n} mount(s)"));
+    if diagnostics.print_banner {
+        sink.note(&format!("mounts: registered {n} mount(s)"));
     }
     Ok(())
 }
@@ -285,9 +290,11 @@ pub enum ComposedMountError {
 /// encloses a composed one cannot answer first.
 fn register_composed_mounts(
     rt: &mut Runtime,
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    sink: &dyn crate::BootSink,
 ) -> Result<(), ProviderError> {
-    for mount in opts.composed_mounts {
+    for mount in title.composed_mounts {
         let registered =
             cellgov_lv2::FsMount::with_roots(mount.prefix.clone(), mount.roots.clone())
                 .ok_or_else(|| ComposedMountError::Rejected {
@@ -304,10 +311,10 @@ fn register_composed_mounts(
                 });
         registered?;
     }
-    if opts.print_banner && !opts.composed_mounts.is_empty() {
-        opts.sink.note(&format!(
+    if diagnostics.print_banner && !title.composed_mounts.is_empty() {
+        sink.note(&format!(
             "mounts: composed {} store mount(s)",
-            opts.composed_mounts.len()
+            title.composed_mounts.len()
         ));
     }
     Ok(())

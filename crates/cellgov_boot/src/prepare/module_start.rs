@@ -4,7 +4,7 @@ use cellgov_core::Runtime;
 use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_BASE;
 
 use super::params::primary_entry_sp;
-use super::types::PrepareOptions;
+use super::types::{BootServices, DiagnosticOptions};
 use crate::prx::{
     run_module_start, ModuleStartEnv, ModuleStartError, ModuleStartOutcome, PrxLoadInfo,
 };
@@ -48,10 +48,12 @@ pub(super) struct ModuleStartCounts {
 pub(super) fn run_module_starts(
     rt: &mut Runtime,
     prx_modules: &[PrxLoadInfo],
-    opts: &PrepareOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    services: &BootServices,
     primary_unit_id: cellgov_event::UnitId,
     kctx_opd: u64,
 ) -> Result<ModuleStartCounts, BootError> {
+    let sink = services.sink();
     let total = prx_modules
         .iter()
         .filter(|p| p.module_start.is_some())
@@ -64,9 +66,9 @@ pub(super) fn run_module_starts(
         pid: None,
         kctx_opd,
         stack_pointer: MODULE_START_STACK_POINTER,
-        break_pc: opts.dump_at_pc.map(|pc| (pc, opts.dump_skip)),
-        dump_mem_fault_ranges: opts.dump_mem_fault_ranges.to_vec(),
-        sink: std::rc::Rc::clone(&opts.sink),
+        break_pc: diagnostics.dump_at_pc.map(|pc| (pc, diagnostics.dump_skip)),
+        dump_mem_fault_ranges: diagnostics.dump_mem_fault_ranges.to_vec(),
+        sink: std::rc::Rc::clone(&services.sink),
     };
     let (started, faulted) = match (prx_modules.is_empty(), skipped) {
         (false, false) => {
@@ -89,7 +91,7 @@ pub(super) fn run_module_starts(
                 }
             }
             if !faulted.is_empty() {
-                opts.sink.warn(&format!(
+                sink.warn(&format!(
                     "BENCH_MODULE_START_FAULTS: count={} modules={}",
                     faulted.len(),
                     faulted.join(",")
@@ -98,12 +100,11 @@ pub(super) fn run_module_starts(
             (completed, faulted.len())
         }
         (false, true) => {
-            opts.sink
-                .warn("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
+            sink.warn("module_start: skipped (CELLGOV_SKIP_MODULE_START set)");
             (0, 0)
         }
         (true, true) => {
-            opts.sink.warn(
+            sink.warn(
                 "module_start: CELLGOV_SKIP_MODULE_START set, but no PRX was loaded -- flag has no effect"
             );
             (0, 0)

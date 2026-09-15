@@ -334,36 +334,50 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
     );
     let bar = ProgressBar::start(render.caps(), &RUN_TASK, inputs.title.name());
     let sink = bar.sink();
-    let result = game::run_game(game::RunGameOptions {
-        title: &inputs.title,
-        elf_path: &inputs.elf_path,
-        elf_data: inputs.elf_data,
-        authority_id: inputs.authority_id,
-        control_flags1: inputs.control_flags1,
-        max_steps: args.max_steps,
-        trace: args.trace,
-        profile: args.profile,
-        firmware_dir: firmware_dir.as_deref(),
-        composed_mounts: &inputs.composition.mounts,
-        eboot_dirs: &inputs.composition.eboot_dirs,
-        identity: &inputs.composition.identity,
-        dump_at_pc: args.dump_at_pc,
-        dump_skip: args.dump_skip,
-        patch_bytes: args.patch_byte.as_deref().unwrap_or(&[]),
-        dump_mem_boot_addrs: args.dump_mem_boot.as_deref().unwrap_or(&[]),
-        dump_mem_fault_ranges: args.dump_mem_fault.as_deref().unwrap_or(&[]),
-        save_observation: args.save_observation.as_deref(),
-        observation_regions: observation_regions.as_deref(),
-        save_boot_summary: args.save_boot_summary.as_deref(),
-        save_state_trace: args.save_state_trace.as_deref(),
-        strict_reserved: args.strict_reserved,
-        profile_pairs: args.profile_pairs,
-        budget_override: args.budget.map(Budget::new),
-        prescan: args.prescan,
-        guest_args: &args.guest_arg,
-        progress: &*sink,
-        finish_line,
-    });
+    let result = game::run_game(
+        game::RunExecution {
+            title: cellgov_boot::prepare::TitleOptions {
+                manifest: &inputs.title,
+                elf_path: &inputs.elf_path,
+                elf_data: inputs.elf_data,
+                authority_id: inputs.authority_id,
+                control_flags1: inputs.control_flags1,
+                firmware_dir: firmware_dir.as_deref(),
+                composed_mounts: &inputs.composition.mounts,
+                eboot_dirs: &inputs.composition.eboot_dirs,
+                identity: &inputs.composition.identity,
+            },
+            limits: cellgov_boot::prepare::ExecutionOptions {
+                runtime_max_steps: args.max_steps,
+                budget_override: args.budget.map(Budget::new),
+                strict_reserved: args.strict_reserved,
+                capture_state_trace: args.save_state_trace.is_some(),
+                guest_args: &args.guest_arg,
+                patch_bytes: args.patch_byte.as_deref().unwrap_or(&[]),
+            },
+        },
+        game::RunArtifacts {
+            observation: args.save_observation.as_deref(),
+            observation_regions: observation_regions.as_deref(),
+            boot_summary: args.save_boot_summary.as_deref(),
+            state_trace: args.save_state_trace.as_deref(),
+        },
+        game::RunReporting {
+            boot: cellgov_boot::prepare::DiagnosticOptions {
+                print_banner: true,
+                prescan: args.prescan,
+                profile_pairs: args.profile_pairs,
+                dump_at_pc: args.dump_at_pc,
+                dump_skip: args.dump_skip,
+                dump_mem_boot_addrs: args.dump_mem_boot.as_deref().unwrap_or(&[]),
+                dump_mem_fault_ranges: args.dump_mem_fault.as_deref().unwrap_or(&[]),
+            },
+            trace: args.trace,
+            profile: args.profile,
+            progress: &*sink,
+            finish_line,
+        },
+    );
     // Down before any exit: `process::exit` runs no destructor, so a
     // bar left standing keeps its render thread and a hidden cursor.
     // The failure arm takes `abort`, which flags the terminal-native

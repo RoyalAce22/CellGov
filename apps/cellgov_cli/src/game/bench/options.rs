@@ -54,7 +54,7 @@ pub struct BenchOptions<'a> {
     pub composed_mounts: &'a [cellgov_boot::ComposedMount],
     /// The directories the candidate walk probes for the EBOOT, a
     /// selected update's first; see
-    /// [`cellgov_boot::prepare::PrepareOptions::eboot_dirs`].
+    /// [`cellgov_boot::prepare::TitleOptions::eboot_dirs`].
     pub eboot_dirs: &'a [std::path::PathBuf],
     /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,

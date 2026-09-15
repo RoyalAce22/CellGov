@@ -8,7 +8,9 @@ use cellgov_ps3_abi::hw::address_space::{
     PS3_SPU_RESERVED_SIZE,
 };
 
-use super::types::{check_strict_reserved_vs_rsx_mirror, PrepareOptions};
+use super::types::{
+    check_strict_reserved_vs_rsx_mirror, DiagnosticOptions, ExecutionOptions, TitleOptions,
+};
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::BootError;
@@ -96,7 +98,10 @@ pub(super) struct LoadedImage {
 /// The image does not parse or load, its size does not fit the fixed
 /// layout, or `--strict-reserved` conflicts with the manifest.
 pub(super) fn load_image(
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    execution: &ExecutionOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    sink: &dyn crate::BootSink,
     elf_data: &[u8],
     t_start: Instant,
 ) -> Result<LoadedImage, BootError> {
@@ -112,22 +117,22 @@ pub(super) fn load_image(
         .ok_or(ImageError::SizeOverflow { required_size })?;
     let mem_size = game_size.max(min_for_kernel);
     if crate::env::parse_bool("CELLGOV_BOOT_TRACE_MEM").map_err(ImageError::from)? {
-        opts.sink.warn(&format!(
+        sink.warn(&format!(
             "boot: required_size=0x{required_size:x} game_size=0x{game_size:x} \
              floor=0x{min_for_kernel:x} mem_size=0x{mem_size:x} ({:.2} GiB)",
             mem_size as f64 / (1024.0 * 1024.0 * 1024.0),
         ));
     }
     let mut state = cellgov_ppu::state::PpuState::new();
-    check_strict_reserved_vs_rsx_mirror(opts.strict_reserved, opts.title.rsx_mirror())?;
-    let reserved_access = if opts.strict_reserved {
+    check_strict_reserved_vs_rsx_mirror(execution.strict_reserved, title.manifest.rsx_mirror())?;
+    let reserved_access = if execution.strict_reserved {
         cellgov_mem::RegionAccess::ReservedStrict
     } else {
         cellgov_mem::RegionAccess::ReservedZeroReadable
     };
-    let rsx_access = if opts.strict_reserved {
+    let rsx_access = if execution.strict_reserved {
         reserved_access
-    } else if opts.title.rsx_mirror() {
+    } else if title.manifest.rsx_mirror() {
         cellgov_mem::RegionAccess::ReadWrite
     } else {
         reserved_access
@@ -185,8 +190,8 @@ pub(super) fn load_image(
         .map_err(|source| ImageError::LoadElf { source })?;
     let t_elf_load = t_start.elapsed();
 
-    if opts.prescan {
-        emit_prescan_report(elf_data, opts.elf_path, opts.sink.as_ref());
+    if diagnostics.prescan {
+        emit_prescan_report(elf_data, title.elf_path, sink);
     }
 
     let code_floor = {

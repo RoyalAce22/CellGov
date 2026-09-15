@@ -5,7 +5,7 @@
 use cellgov_core::{AddressSpaceId, Runtime};
 
 use super::module_start::ModuleStartCounts;
-use super::types::PrepareOptions;
+use super::types::{DiagnosticOptions, ExecutionOptions};
 
 /// Why a `--patch-byte` write did not land.
 #[derive(Debug, thiserror::Error)]
@@ -40,9 +40,11 @@ pub enum PatchError {
 /// refused; see [`PatchError`].
 pub(super) fn apply_patch_bytes(
     rt: &mut Runtime,
-    opts: &PrepareOptions<'_>,
+    execution: &ExecutionOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    sink: &dyn crate::BootSink,
 ) -> Result<(), PatchError> {
-    for &(addr, val) in opts.patch_bytes {
+    for &(addr, val) in execution.patch_bytes {
         let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)
             .ok_or(PatchError::BadRange { addr })?;
         rt.place_bytes(AddressSpaceId::BOOT, range, &[val])
@@ -51,9 +53,8 @@ pub(super) fn apply_patch_bytes(
                 value: val,
                 detail: format!("{e:?}"),
             })?;
-        if opts.print_banner {
-            opts.sink
-                .note(&format!("patch: byte 0x{addr:x} = 0x{val:02x}"));
+        if diagnostics.print_banner {
+            sink.note(&format!("patch: byte 0x{addr:x} = 0x{val:02x}"));
         }
     }
     Ok(())

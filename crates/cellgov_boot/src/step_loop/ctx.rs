@@ -14,8 +14,6 @@ use crate::{BootSink, ChildInitPlans};
 pub struct StepLoopCtx<'a> {
     /// Steps retired; the loop requires a zero here at entry.
     pub steps: &'a mut usize,
-    /// Every `(space, PC)` a unit attempted.
-    pub distinct_pcs: &'a mut std::collections::BTreeSet<(cellgov_core::AddressSpaceId, u64)>,
     /// HLE import index -> call count.
     pub hle_calls: &'a mut std::collections::BTreeMap<u32, usize>,
     /// Instruction name -> retire count.

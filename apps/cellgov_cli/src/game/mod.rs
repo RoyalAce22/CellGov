@@ -13,5 +13,5 @@ pub use bench::{
     BENCH_SPREAD_CEILING_PCT,
 };
 pub(crate) use finish_line::{anchor_finish_line, within_runtime_cap};
-pub use run::{run_game, RunGameOptions, RunSummary};
+pub use run::{run_game, RunArtifacts, RunExecution, RunReporting, RunSummary};
 pub(crate) use sink::console_sink;

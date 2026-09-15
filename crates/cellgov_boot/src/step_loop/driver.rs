@@ -68,12 +68,10 @@ fn drive(
             Ok(step) => {
                 *ctx.steps += 1;
 
-                // PC ring and distinct-PC set track attempted execution;
-                // they advance before commit (kept on a discarded batch).
+                // The PC ring tracks attempted execution; it advances
+                // before commit (kept on a discarded batch).
                 if let Some(pc) = step.result.local_diagnostics.pc {
-                    let space = rt.unit_space(step.unit);
-                    ctx.distinct_pcs.insert((space, pc));
-                    ctx.pc_ring.push((space, pc));
+                    ctx.pc_ring.push((rt.unit_space(step.unit), pc));
                 }
 
                 if (*ctx.steps).is_multiple_of(STEP_REPORT_BATCH) {

@@ -7,7 +7,9 @@ use super::options::BenchOptions;
 use super::result_line::format_bench_result;
 use super::types::BenchBootResult;
 use super::witnesses::print_witness_block;
-use cellgov_boot::prepare::{prepare, PrepareOptions};
+use cellgov_boot::prepare::{
+    prepare, BootServices, DiagnosticOptions, ExecutionOptions, PrepareOptions, TitleOptions,
+};
 use cellgov_boot::step_loop::bench_step_loop;
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
@@ -32,30 +34,38 @@ fn bench_boot(
     progress.phase(crate::progress::BootPhase::Loading.code());
     let sink = crate::game::console_sink();
     let prepared = prepare(PrepareOptions {
-        title: opts.title,
-        elf_path: opts.elf_path,
-        elf_data,
-        authority_id,
-        control_flags1,
-        firmware_dir: opts.firmware_dir,
-        composed_mounts: opts.composed_mounts,
-        eboot_dirs: opts.eboot_dirs,
-        identity: opts.identity,
-        strict_reserved: opts.strict_reserved,
-        dump_at_pc: None,
-        dump_skip: 0,
-        dump_mem_fault_ranges: &[],
-        print_banner: false,
-        runtime_max_steps: opts.max_steps,
-        patch_bytes: &[],
-        dump_mem_boot_addrs: &[],
-        profile_pairs: false,
-        budget_override: opts.budget_override,
-        capture_state_trace: trace_path.is_some(),
-        prescan: opts.prescan,
-        guest_args: opts.guest_args,
-        sink: std::rc::Rc::clone(&sink),
-        keys: std::rc::Rc::new(crate::cli::keys::ProcessKeyVault),
+        title: TitleOptions {
+            manifest: opts.title,
+            elf_path: opts.elf_path,
+            elf_data,
+            authority_id,
+            control_flags1,
+            firmware_dir: opts.firmware_dir,
+            composed_mounts: opts.composed_mounts,
+            eboot_dirs: opts.eboot_dirs,
+            identity: opts.identity,
+        },
+        execution: ExecutionOptions {
+            runtime_max_steps: opts.max_steps,
+            budget_override: opts.budget_override,
+            strict_reserved: opts.strict_reserved,
+            capture_state_trace: trace_path.is_some(),
+            guest_args: opts.guest_args,
+            patch_bytes: &[],
+        },
+        diagnostics: DiagnosticOptions {
+            print_banner: false,
+            prescan: opts.prescan,
+            profile_pairs: false,
+            dump_at_pc: None,
+            dump_skip: 0,
+            dump_mem_boot_addrs: &[],
+            dump_mem_fault_ranges: &[],
+        },
+        services: BootServices {
+            sink: std::rc::Rc::clone(&sink),
+            keys: std::rc::Rc::new(crate::cli::keys::ProcessKeyVault),
+        },
     })
     .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     let mut rt = prepared.rt;

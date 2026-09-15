@@ -7,7 +7,7 @@ use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_TOP;
 
 use super::firmware::MemoryPlacement;
 use super::params::{primary_entry_sp, BootParams};
-use super::types::{BootDebugOptions, PrepareOptions};
+use super::types::{BootDebugOptions, DiagnosticOptions, ExecutionOptions};
 use crate::env::EnvBoolError;
 use crate::error::narrow_u32;
 use crate::guest_args::GuestArgsError;
@@ -57,17 +57,19 @@ pub enum EntryError {
 pub(super) fn seed_primary_entry_state(
     rt: &mut Runtime,
     state: &mut cellgov_ppu::state::PpuState,
-    opts: &PrepareOptions<'_>,
+    execution: &ExecutionOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    sink: &dyn crate::BootSink,
     params: &BootParams,
     entry: u64,
 ) -> Result<(), EntryError> {
-    let args_block = if opts.guest_args.is_empty() {
+    let args_block = if execution.guest_args.is_empty() {
         None
     } else {
         let block = crate::guest_args::build_args_block(
             PS3_PRIMARY_STACK_TOP,
             params.primary_stack_size as u64,
-            opts.guest_args,
+            execution.guest_args,
         )?;
         let range = cellgov_mem::ByteRange::new(
             cellgov_mem::GuestAddr::new(block.base),
@@ -82,8 +84,8 @@ pub(super) fn seed_primary_entry_state(
                 base: block.base,
                 detail: format!("{e:?}"),
             })?;
-        if opts.print_banner {
-            opts.sink.note(&format!(
+        if diagnostics.print_banner {
+            sink.note(&format!(
                 "guest args: argc={} argv=0x{:08x} r1=0x{:08x}",
                 block.argc, block.argv_addr, block.initial_r1
             ));

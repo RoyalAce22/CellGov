@@ -8,7 +8,7 @@ use cellgov_core::Runtime;
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::hw::address_space::{PS3_PRIMARY_STACK_SIZE, PS3_RSX_IOMAP_BASE};
 
-use super::types::{BootDebugOptions, PrepareOptions};
+use super::types::{BootDebugOptions, BootServices, TitleOptions};
 use crate::child_init::{ChildInitPlan, ChildInitPlans};
 use crate::prx::{
     install_kernel_context_opd, install_unresolved_trampolines_only, load_firmware_set_from,
@@ -84,15 +84,19 @@ pub(super) fn install_unit_factories(rt: &mut Runtime, debug_opts: BootDebugOpti
 /// The runtime rolls the spawn back, fails the syscall and logs the
 /// cause (`cellgov_core` `process_spawn.rs`
 /// `runtime.process_spawn_image_load_failed`); it never ends the run.
-pub(super) fn install_spawn_loader(rt: &mut Runtime, opts: &PrepareOptions<'_>) -> ChildInitPlans {
+pub(super) fn install_spawn_loader(
+    rt: &mut Runtime,
+    title: &TitleOptions<'_>,
+    services: &BootServices,
+) -> ChildInitPlans {
     let child_init = ChildInitPlans::default();
-    let spawn_firmware_dir: Option<String> = opts.firmware_dir.map(str::to_string);
+    let spawn_firmware_dir: Option<String> = title.firmware_dir.map(str::to_string);
     // Scanned and decrypted on the first spawn; a boot that never
     // spawns pays nothing.
     let spawn_candidates: RefCell<Option<FirmwareCandidates>> = RefCell::new(None);
     let loader_plans = child_init.clone();
-    let sink: Rc<dyn crate::BootSink> = Rc::clone(&opts.sink);
-    let keys: Rc<dyn crate::KeyVaultSource> = Rc::clone(&opts.keys);
+    let sink: Rc<dyn crate::BootSink> = Rc::clone(&services.sink);
+    let keys: Rc<dyn crate::KeyVaultSource> = Rc::clone(&services.keys);
     rt.set_process_spawn_loader(move |elf_bytes, mem| {
         // A child image may arrive SCE-wrapped (vsh spawns SELFs, not
         // raw ELFs). The spawn loader is APP-keyed: klicensee

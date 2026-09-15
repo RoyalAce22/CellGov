@@ -3,7 +3,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::types::PrepareOptions;
+use super::types::{BootServices, DiagnosticOptions, TitleOptions};
 use crate::error::narrow_u32;
 use crate::prx::{
     install_unresolved_trampolines_only, load_firmware_set_bound, FirmwareLoadError, HostLinkMaps,
@@ -34,20 +34,22 @@ pub(super) struct FirmwareSet {
 /// The title's import tables do not parse, or the firmware set does
 /// not load; see [`FirmwareLoadError`].
 pub(super) fn load_firmware_set(
-    opts: &PrepareOptions<'_>,
+    title: &TitleOptions<'_>,
+    diagnostics: &DiagnosticOptions<'_>,
+    services: &BootServices,
     elf_data: &[u8],
     mem: &mut cellgov_mem::GuestMemory,
     code_floor: u32,
     t_start: Instant,
 ) -> Result<FirmwareSet, BootError> {
+    let sink = services.sink();
     let modules = cellgov_ppu::prx::parse_imports(elf_data)
         .map_err(|source| FirmwareLoadError::ImportParse { source })?;
-    if opts.print_banner {
-        opts.sink
-            .note(&format!("imports: {} modules", modules.len()));
+    if diagnostics.print_banner {
+        sink.note(&format!("imports: {} modules", modules.len()));
         for m in &modules {
             let first_stub = m.functions.first().map(|f| f.stub_addr).unwrap_or(0);
-            opts.sink.note(&format!(
+            sink.note(&format!(
                 "  {}: {} functions, first stub at 0x{:x}",
                 m.name,
                 m.functions.len(),
@@ -58,25 +60,21 @@ pub(super) fn load_firmware_set(
     let t_hle_bind = t_start.elapsed();
 
     let (mut prx_modules, verified, mut host_link) = load_firmware_set_bound(
-        opts.firmware_dir,
+        title.firmware_dir,
         &modules,
         mem,
         code_floor,
         matches!(
-            opts.title.source,
+            title.manifest.source,
             crate::manifest::GameSource::FirmwareExec { .. }
         ),
-        opts.sink.as_ref(),
-        opts.keys.as_ref(),
+        sink,
+        services.keys.as_ref(),
     )?;
     let t_prx_load = t_start.elapsed();
     if prx_modules.is_empty() {
-        let (info, requesters) = install_unresolved_trampolines_only(
-            &modules,
-            mem,
-            code_floor as u64,
-            opts.sink.as_ref(),
-        )?;
+        let (info, requesters) =
+            install_unresolved_trampolines_only(&modules, mem, code_floor as u64, sink)?;
         if let Some(info) = info {
             prx_modules.push(info);
         }

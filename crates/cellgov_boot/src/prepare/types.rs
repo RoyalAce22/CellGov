@@ -73,16 +73,16 @@ impl StartupTimings {
     }
 }
 
-/// Everything [`super::prepare`] needs to boot a title.
-pub struct PrepareOptions<'a> {
-    /// The title the boot runs.
-    pub title: &'a TitleManifest,
+/// The title the boot runs, and the tree it resolves against.
+pub struct TitleOptions<'a> {
+    /// The manifest that names the title's source, content and mounts.
+    pub manifest: &'a TitleManifest,
     /// Path the executable was read from; names EBOOT siblings and the
     /// default content base.
     pub elf_path: &'a str,
-    /// Already-decrypted ELF bytes. `prepare` moves them out before
-    /// the first stage runs, so this field reads as an empty `Vec`
-    /// from inside a stage.
+    /// Already-decrypted ELF bytes. [`super::prepare`] moves them out
+    /// before the first stage runs, so this field reads as an empty
+    /// `Vec` from inside a stage.
     pub elf_data: Vec<u8>,
     /// Program authority id from the SELF identification header;
     /// `None` (raw-ELF input) keeps the host's retail fallback.
@@ -101,46 +101,82 @@ pub struct PrepareOptions<'a> {
     /// Which firmware and title version the store composed for this
     /// run; written as the trace stream's header record.
     pub identity: &'a cellgov_compare::RunIdentity,
+}
+
+/// How far the boot may run, and what it may change under the guest.
+#[derive(Debug, Clone, Copy)]
+pub struct ExecutionOptions<'a> {
+    /// Retired-instruction cap for the whole run.
+    pub runtime_max_steps: usize,
+    /// Retired instructions one `step()` grants, overriding the mode
+    /// default.
+    pub budget_override: Option<Budget>,
     /// Make the reserved regions refuse a read instead of answering
     /// zero.
     pub strict_reserved: bool,
+    /// When true, switch runtime mode to `DeterminismCheck` so
+    /// per-step `PpuStateHash` records land in the trace buffer, one
+    /// per retired instruction.
+    pub capture_state_trace: bool,
+    /// Guest argv for the primary thread, `argv[0]` included. Empty
+    /// keeps the no-args entry state (r3..r6 = 0).
+    pub guest_args: &'a [String],
+    /// The boot applies these once every `module_start` completes.
+    pub patch_bytes: &'a [(u64, u8)],
+}
+
+/// What the boot reports about itself, and the debug taps it installs.
+#[derive(Debug, Clone, Copy)]
+pub struct DiagnosticOptions<'a> {
+    /// Report what the boot loaded, stage by stage. The boot reports
+    /// the refusals and the authority-id witness either way.
+    pub print_banner: bool,
+    /// When true, walk the title ELF's executable PT_LOAD segments
+    /// through the PPU decoder before execution and report the gaps.
+    pub prescan: bool,
+    /// Count adjacent instruction pairs per unit.
+    pub profile_pairs: bool,
     /// `--dump-at-pc`: the PC a unit faults with a register dump at.
+    /// The fault ends the run.
     pub dump_at_pc: Option<u64>,
     /// How many hits of `dump_at_pc` to pass over first.
     pub dump_skip: u32,
-    /// Narrate what the boot loaded.
-    pub print_banner: bool,
-    /// Count adjacent instruction pairs per unit.
-    pub profile_pairs: bool,
-    /// Retired-instruction cap for the whole run.
-    pub runtime_max_steps: usize,
-    /// Applied after every `module_start` has completed.
-    pub patch_bytes: &'a [(u64, u8)],
     /// `--dump-mem` addresses, hex-dumped once the boot is up.
     pub dump_mem_boot_addrs: &'a [u64],
     /// `--dump-mem-fault` ranges, hex-dumped when a module_start unit
     /// faults or hits `--dump-at-pc`.
     pub dump_mem_fault_ranges: &'a [(u64, u64)],
-    /// Retired instructions one `step()` grants, overriding the mode
-    /// default.
-    pub budget_override: Option<Budget>,
-    /// When true, switch runtime mode to `DeterminismCheck` so
-    /// per-step `PpuStateHash` records land in the trace buffer.
-    pub capture_state_trace: bool,
-    /// When true, walk the title ELF's executable PT_LOAD segments
-    /// through the PPU decoder before execution and report the gaps.
-    pub prescan: bool,
-    /// Guest argv for the primary thread, `argv[0]` included. Empty
-    /// keeps the no-args entry state (r3..r6 = 0).
-    pub guest_args: &'a [String],
-    /// Where the boot narrates what it loaded and what it skipped.
-    ///
-    /// The spawn loader the boot installs outlives this options struct
-    /// and narrates a child's load through the same sink.
+}
+
+/// The sink and the vault source, shared for the whole boot.
+///
+/// Both outlive the options struct: the spawn loader the boot installs
+/// reports a child's load through the same sink and opens the same
+/// vault.
+pub struct BootServices {
+    /// Where the boot reports what it loaded and what it skipped.
     pub sink: Rc<dyn BootSink>,
     /// Where an SCE-wrapped firmware module or child image gets its
     /// key vault.
     pub keys: Rc<dyn KeyVaultSource>,
+}
+
+impl BootServices {
+    pub(super) fn sink(&self) -> &dyn BootSink {
+        self.sink.as_ref()
+    }
+}
+
+/// Everything [`super::prepare`] needs to boot a title.
+pub struct PrepareOptions<'a> {
+    /// What the boot loads.
+    pub title: TitleOptions<'a>,
+    /// How far it runs and what it may change.
+    pub execution: ExecutionOptions<'a>,
+    /// What it reports and which debug taps it installs.
+    pub diagnostics: DiagnosticOptions<'a>,
+    /// Where it reports and where it gets keys.
+    pub services: BootServices,
 }
 
 /// Debug toggles captured by both the primary-thread `register_with`
