@@ -1,13 +1,23 @@
-//! Witness: guest time is a shared resource no footprint records.
+//! Witness: guest time decides where an in-flight transfer lands.
 //!
 //! A step advances one global clock, and a DMA completion lands at the
 //! first commit whose clock passes the completion tick. So a step that
 //! touches no shared resource still decides where an in-flight
 //! transfer lands relative to every later step.
 //!
-//! The workload below is schedule-sensitive for that reason, and
-//! `StepFootprint` calls the pair that decides it independent. The
-//! footprint carries no clock, so the relation cannot see it.
+//! The workload below is schedule-sensitive for that reason. The
+//! relation sees it: a step taken while a transfer is in flight
+//! records that transfer's ranges, and they conflict with another
+//! step's access to the bytes it lands on.
+//!
+//! The verdict is still wrong, and this file is where that is held.
+//! The search explores the classes the relation now offers it and
+//! reaches one destination outcome, while a schedule written out by
+//! hand reaches another. So what is left over this workload is in what
+//! the search covers, not in what the relation can see of it.
+//!
+//! The clock's other two readers, a `mftb` and a timer deadline, reach
+//! no footprint at all; `cellgov_explore::dependency` says so.
 
 use cellgov_core::Runtime;
 use cellgov_event::UnitId;
@@ -92,8 +102,12 @@ fn a_counting_step_run_first_changes_committed_memory() {
     );
 }
 
+/// A counting step records no access of its own. What holds it against
+/// the writer is the transfer in flight while it runs: the writer
+/// stores over the bytes that transfer lands on, so the two steps'
+/// order decides which of them lands last.
 #[test]
-fn the_relation_calls_the_pair_that_decides_it_independent() {
+fn the_relation_holds_the_pair_that_decides_it_apart() {
     let mut rt = workload();
     let (log, stop) = observe_decisions(&mut rt);
     assert_eq!(
@@ -103,18 +117,28 @@ fn the_relation_calls_the_pair_that_decides_it_independent() {
     );
     let execution = Execution::from_log(&log);
     assert!(
-        execution.units_independent(WRITER, COUNTER),
-        "a counting step records no shared access, so nothing holds it against the writer",
+        !execution.units_independent(WRITER, COUNTER),
+        "the counter runs while the transfer is in flight and the writer stores over \
+         where it lands, so the order matters",
     );
 }
 
+/// The verdict is still wrong, and the search is now what makes it so.
+///
+/// The relation offers the search races between the counter and the
+/// writer, and the search explores them. It reports that it covered
+/// every class and hits no bound. Every schedule it reaches lands the
+/// transfer last, while
+/// `a_counting_step_run_first_changes_committed_memory` prescribes a
+/// schedule that does not. A class the search claims it covered
+/// therefore holds two committed memories. That cannot be true of a
+/// class, so the coverage claim is what is wrong.
 #[test]
-fn the_verdict_reads_schedule_stable() {
+fn the_verdict_still_reads_schedule_stable() {
     let result = explore_window(workload, &ExplorationConfig::default());
     assert_eq!(
         result.outcome,
         cellgov_explore::classify::OutcomeClass::ScheduleStable,
-        "the alternate the search never owes is the one that diverges",
     );
     assert!(!result.bounds_hit, "no bound withdraws the claim");
     assert_eq!(
@@ -122,11 +146,20 @@ fn the_verdict_reads_schedule_stable() {
         StopReason::Stalled,
         "the baseline hash covers the whole workload",
     );
-    // The search reports that it covered every equivalence class and
-    // the verdict is still wrong: the relation it explores over cannot
-    // see the clock.
     assert!(
         result.classes_explored.is_some(),
         "the search claims it covered every class",
+    );
+
+    // The claim and the counterexample in one place: no schedule the
+    // search reached commits what the hand-written one commits.
+    let (diverging, _) = run_with(vec![None, Some(COUNTER)]);
+    assert_ne!(result.baseline_hash, diverging);
+    assert!(
+        result
+            .schedules
+            .iter()
+            .all(|record| record.memory_hash != diverging),
+        "the search reached no schedule that commits the diverging memory",
     );
 }

@@ -66,6 +66,11 @@ impl DmaQueue {
         self.entries.values().next().map(|(c, _)| c)
     }
 
+    /// Every pending completion, in the order the queue drains them.
+    pub fn pending(&self) -> impl Iterator<Item = &DmaCompletion> + '_ {
+        self.entries.values().map(|(c, _)| c)
+    }
+
     /// Remove and return the earliest pending completion.
     pub fn pop_next(&mut self) -> Option<(DmaCompletion, Option<Vec<u8>>)> {
         let key = *self.entries.keys().next()?;

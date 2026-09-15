@@ -1,85 +1,41 @@
 //! Conservative dependency analysis for schedule exploration.
 //!
-//! [`StepFootprint`] summarizes one step's shared-resource accesses.
-//! Two footprints conflict if swapping their execution order could
-//! produce a different observable outcome; non-conflicting steps are
-//! independent and the swap need not be explored. The analysis
-//! over-approximates: it never reports two dependent steps as
-//! independent, and a false dependency only costs exploration budget.
+//! [`StepFootprint`] holds the shared resources one step touched, and
+//! [`StepFootprint::conflicts`] answers whether swapping two steps
+//! could change what either observes. The answer over-approximates: it
+//! never calls two dependent steps independent, and a false dependency
+//! costs exploration budget alone.
 //!
-//! A guest load of committed memory emits `Effect::SharedReadIntent`
-//! for the bytes it read. The read set gives all three of Bernstein's
-//! intersections over data accesses -- write-write, read-against-write
-//! and write-against-read. A write-read race whose read steers a later
-//! store to a disjoint address therefore conflicts here, and the
-//! explorer covers it. Two loads still prune against each other, since
-//! neither changes what the other observes.
+//! Each clause of `conflicts` carries the argument that makes it
+//! sound. Some shared state reaches no footprint at all. Two steps
+//! that interact only through one of these prune when they should
+//! not:
 //!
-//! Instruction fetch reads the text region too. A PPU block records
-//! what it fetched at its boundary, coalesced into one read per run of
-//! addresses and into one covering span past a cap on the runs, so a
-//! unit that races another unit's write to that region conflicts with
-//! it.
+//! - Guest time, in two of its three readers. One clock advances by
+//!   each step's cost. A `mftb` reads it into a guest register, and a
+//!   timer wake is stamped with a deadline from it; neither reaches a
+//!   footprint. `tests/shared_clock.rs` holds the witness. The third
+//!   reader, the tick a transfer lands at, reaches a footprint through
+//!   [`StepFootprint::inflight_dma_ranges`].
+//! - The RSX FIFO advance pass, whose effects commit guest memory and
+//!   sweep reservations from no unit's step.
+//! - Every LV2 handler effect, guest write and wake alike: a handler
+//!   commits through `Runtime::host_write`, not through the unit's
+//!   step effects. No fake-ISA workload runs a handler.
+//! - An LV2 syscall's park and the wake that ends it, neither of which
+//!   carries an effect or a yield reason.
+//! - `Runtime::set_unit_status_override`, which `cellgov_boot` uses
+//!   mid-run to hold every other unit `Blocked` across a spawned
+//!   child's `module_start`.
 //!
-//! One read of shared state still reaches no footprint: guest time.
-//! One global clock advances per step. A DMA completion lands at the
-//! first commit whose clock reached its completion tick, and a PPU
-//! `mftb` reads that clock into a guest register. A step that touches
-//! no shared resource still moves the clock relative to every later
-//! step. Two steps this module calls independent can therefore commit
-//! different memory when they swap. `tests/shared_clock.rs` holds the
-//! witness.
+//! A faulted step records no footprint and needs none: its batch is
+//! discarded and every driver stops there, so it is not an event.
 //!
-//! One write reaches no footprint either. The RSX FIFO advance pass
-//! emits effects that commit guest memory and sweep reservations, and
-//! `commit_step` prepends them to the next space-0 batch. Those
-//! effects belong to no unit's step, so no footprint names them.
-//!
-//! Two ways a unit's status changes reach no footprint, so a wake of
-//! that unit prunes against the step that parked it:
-//!
-//! - An LV2 `MailboxSend` handler returns a unit to runnable whatever
-//!   parked it. A footprint reads the unit's own step effects. An LV2
-//!   handler's effects commit through `Runtime::host_write` inside
-//!   `commit_step` instead, and that same boundary hides
-//!   LV2-committed guest writes. No workload built from the fake ISA
-//!   reaches this path, because no LV2 handler runs.
-//! - `Runtime::set_unit_status_override` is public, so the program
-//!   driving the runtime can change a unit's status outside every
-//!   path this module reasons about. `cellgov_boot` does, mid-run:
-//!   `run_pending_child_inits` holds every other runnable unit
-//!   `Blocked` across a spawned child's `module_start` and restores
-//!   each one afterward. An exploration over a window of a boot that
-//!   spawns a child covers those steps, so this one is reachable.
-//!
-//! A faulted step records no footprint, and needs none. Its batch is
-//! discarded, so a footprint for it would name accesses the commit
-//! pipeline threw away; every driver stops at the fault instead, so
-//! the step is not an event and no pair involving it is tested here.
-//!
-//! That holds even where the fault turns on bytes another unit writes.
-//! The step emits its read either way, so an order that does not fault
-//! records that read, the write conflicts with it, and the relation
-//! owes their reversal. Running the reversal is what reaches the
-//! fault, and the run is then truncated and answers for nothing.
-//!
-//! Which order a search reaches first is no part of that. A search
-//! whose every order faults reads an execution the read is not in, so
-//! the relation concludes nothing about the pair -- and owes nothing,
-//! because a faulted run truncates and the search withdraws every
-//! claim measured against it
-//! ([`crate::util::StopReason::is_truncated`]). So the pair is held
-//! apart either by the order that committed or by the truncation, and
-//! neither the discard rule nor the relation gives way.
-//! `tests/fault_decided_by_a_write.rs` holds both witnesses.
-//!
-//! A park the commit pipeline reads off the step result is visible:
-//! [`StepFootprint::from_step`] reads it too, and
-//! `YieldReason::parks_without_an_effect` is where a new yield reason
-//! picks its side. One park stays invisible, and so does its wake:
-//! LV2 dispatch parks a syscall's source with no effect and no yield
-//! reason of its own, then returns it to runnable the same nameless
-//! way.
+//! Another unit's write can decide whether a step faults. An order
+//! where the step does not fault records its read, and the relation
+//! holds that pair apart. Where every order faults, the run truncates
+//! and answers for nothing. `tests/fault_decided_by_a_write.rs` holds
+//! both.
 
 use cellgov_effects::Effect;
 use cellgov_exec::YieldReason;
@@ -115,11 +71,9 @@ pub struct StepFootprint {
     pub wake_targets: Vec<cellgov_event::UnitId>,
     /// Units this step's effects can park.
     ///
-    /// A wait names a mailbox, signal or barrier, and the commit
-    /// pipeline reads none of them. It reads the source, so the unit
-    /// is the key that matches a wake. A receive attempt parks its
-    /// source the same way when the mailbox comes back empty, so its
-    /// source belongs here too.
+    /// The commit pipeline reads a wait's source, not its target, so
+    /// the unit is the key a wake matches. A receive attempt belongs
+    /// here too: it parks its source when the mailbox comes back empty.
     pub wait_units: Vec<cellgov_event::UnitId>,
     /// 128-byte-aligned line addresses touched by a `ReservationAcquire`.
     ///
@@ -127,16 +81,30 @@ pub struct StepFootprint {
     /// and flips the next conditional-store verdict, so the pair
     /// conflicts.
     pub reservation_lines: Vec<u64>,
+    /// Source and destination of every transfer in flight during this
+    /// step.
+    ///
+    /// A transfer lands at the first commit whose clock passed the tick
+    /// stamped at its enqueue. So a step taken during a flight moves
+    /// the landing relative to every other step.
+    ///
+    /// A step taken before the enqueue needs no record. It moves the
+    /// enqueue and everything after it by the same cost, which leaves
+    /// the landing where it was relative to them. Reordering a step
+    /// across the enqueue is still covered: a step during the flight
+    /// conflicts with the enqueue's own `dma_ranges`.
+    ///
+    /// [`StepFootprint::conflicts`] tests this set against the other
+    /// step's accesses, never against its own copy. Two steps that
+    /// merely share a flight therefore still prune.
+    pub inflight_dma_ranges: Vec<ByteRange>,
 }
 
 impl StepFootprint {
     /// Extract a footprint from one whole step.
     ///
-    /// The commit pipeline parks a unit that yields
-    /// [`YieldReason::DmaWait`] from the step result alone, and no
-    /// effect names that park. [`StepFootprint::from_effects`]
-    /// therefore misses it, and a wake of the parked unit prunes
-    /// against the step that parked it.
+    /// Adds the park a [`YieldReason::DmaWait`] result carries, which
+    /// no effect names and [`StepFootprint::from_effects`] misses.
     pub fn from_step(
         unit: cellgov_event::UnitId,
         yielded: YieldReason,
@@ -149,15 +117,56 @@ impl StepFootprint {
         fp
     }
 
+    /// Widen every range category to the sibling views it aliases.
+    ///
+    /// An access through one view of a shared mapping reaches every
+    /// sibling view's bytes. A DMA range needs the same widening: a
+    /// transfer lands in space 0, and a unit that reads a view which
+    /// aliases the landing sees it.
+    ///
+    /// Call it after [`StepFootprint::note_inflight`], so the
+    /// in-flight set is there to widen.
+    pub fn expand_aliases(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
+        for category in [
+            &mut self.shared_writes,
+            &mut self.shared_reads,
+            &mut self.dma_ranges,
+            &mut self.inflight_dma_ranges,
+        ] {
+            let aliases: Vec<ByteRange> = category
+                .iter()
+                .flat_map(|range| rt.shared_alias_ranges(unit, *range))
+                .collect();
+            category.extend(aliases);
+        }
+    }
+
+    /// Record the transfers in flight during this step.
+    ///
+    /// Call it after the step's commit: that commit is what fires a due
+    /// transfer, and one it fired was in flight for that step.
+    pub fn note_inflight(&mut self, rt: &cellgov_core::Runtime) {
+        let queued = rt
+            .dma_queue()
+            .pending()
+            .map(|c| (c.source(), c.destination()));
+        let fired = rt
+            .last_dma_completions()
+            .iter()
+            .map(|c| (c.source(), c.destination()));
+        for (source, destination) in queued.chain(fired) {
+            self.inflight_dma_ranges.push(source);
+            self.inflight_dma_ranges.push(destination);
+        }
+    }
+
     /// Extract a footprint from the effects emitted in one step.
     ///
-    /// `FaultRaised` discards the whole step's effects upstream and
-    /// `TraceMarker` carries no guest state. The two RSX variants do
-    /// commit guest state, but no execution unit emits them: they
-    /// reach a batch from the FIFO advance pass.
+    /// `FaultRaised` and `TraceMarker` carry no guest state. The two
+    /// RSX variants do, but they reach a batch from the FIFO advance
+    /// pass rather than from a unit.
     ///
-    /// [`StepFootprint::from_step`] adds the park a step result
-    /// carries.
+    /// [`StepFootprint::from_step`] adds the park.
     pub fn from_effects(effects: &[Effect]) -> Self {
         let mut fp = Self::default();
         for effect in effects {
@@ -173,12 +182,10 @@ impl StepFootprint {
                 }
                 Effect::MailboxReceiveAttempt { mailbox, source } => {
                     fp.mailbox_receives.push(*mailbox);
-                    // The commit pipeline blocks the source when
-                    // `Mailbox::try_receive` comes back empty, and a
-                    // later send wakes nobody. Only a wake naming the
-                    // unit runs it again, so every attempt records the
-                    // park it may take: the footprint is built before
-                    // the pop decides.
+                    // The footprint is built before the pop decides, so
+                    // every attempt records the park it may take: an
+                    // empty mailbox blocks the source, and only a wake
+                    // naming it runs it again.
                     fp.wait_units.push(*source);
                 }
                 Effect::DmaEnqueue { request, .. } => {
@@ -219,14 +226,13 @@ impl StepFootprint {
     /// outcome.
     ///
     /// The two steps must belong to different units. The reservation
-    /// and DMA rules below read only the cross-unit half of the
-    /// hardware rule. A same-unit pair therefore gets an answer the
-    /// hardware does not give. Program order already holds a unit's
-    /// own steps apart.
+    /// and DMA clauses read only the cross-unit half of the hardware
+    /// rule, so a same-unit pair gets an answer the hardware does not
+    /// give. Program order already holds a unit's own steps apart.
     ///
-    /// Returns `true` unless independence can be proved. O(n*m) in the
-    /// product of each category's populated vectors; in practice a step
-    /// touches only one or two categories so the cost is small.
+    /// Returns `true` unless it can prove the pair independent.
+    /// O(n*m) over each category's populated vectors, and a step
+    /// usually populates one or two.
     pub fn conflicts(&self, other: &StepFootprint) -> bool {
         for a in &self.shared_writes {
             for b in &other.shared_writes {
@@ -236,8 +242,7 @@ impl StepFootprint {
             }
         }
 
-        // Bernstein's other two intersections. No read-against-read
-        // clause: neither read changes what the other sees.
+        // Bernstein's other two intersections.
         if ranges_overlap(&self.shared_reads, &other.shared_writes)
             || ranges_overlap(&other.shared_reads, &self.shared_writes)
         {
@@ -250,16 +255,12 @@ impl StepFootprint {
             return true;
         }
 
-        // A DMA's source range rides in `dma_ranges` alongside its
-        // destination, so every pairing reads both halves. The
-        // destination half carries the real dependency:
-        // `apply_dma_transfer` writes it at completion. The source
-        // half is real only for a transfer that carries no payload,
-        // which reads its source at completion rather than at
-        // enqueue. The SPU put path copies local store into the
-        // payload at enqueue. Its source range addresses local store
-        // rather than committed memory, so every pair that half adds
-        // there is a false dependency.
+        // A source range rides in `dma_ranges` beside its destination.
+        // The destination carries the dependency: `apply_dma_transfer`
+        // writes it at completion. The source is real only for a
+        // payload-less transfer, which reads it at completion. An SPU
+        // put copies local store into the payload at enqueue, so
+        // pairing on its source is a false dependency.
         if ranges_overlap(&self.shared_reads, &other.dma_ranges)
             || ranges_overlap(&other.shared_reads, &self.dma_ranges)
         {
@@ -280,12 +281,10 @@ impl StepFootprint {
             return true;
         }
 
-        // Two receive attempts on one mailbox are order-dependent even
-        // when no step sends. The commit pipeline's
-        // `MailboxReceiveAttempt` arm pops the FIFO for whichever unit
-        // commits first (`Mailbox::try_receive`), and blocks the other
-        // when the pop returns empty. The swap therefore decides which
-        // unit takes the message and which one parks.
+        // Two receive attempts on one mailbox are order-dependent with
+        // no step sending: the pipeline pops the FIFO for whichever
+        // commits first and blocks the other, so the swap decides which
+        // unit takes the message.
         if ids_overlap(&self.mailbox_receives, &other.mailbox_receives) {
             return true;
         }
@@ -299,33 +298,23 @@ impl StepFootprint {
             return true;
         }
 
-        // A wake enables only the unit it names. The commit pipeline's
-        // `WaitOnEvent` arm blocks its source and reads no target, and
-        // the one path from there back to runnable is a `WakeUnit`
-        // naming that unit, so a wake reaches no other unit's wait.
-        // A receive attempt that finds the mailbox empty parks its
-        // source the same way and `wait_units` carries that source
-        // too, so the wake that runs it again pairs with it here.
+        // A wake enables only the unit it names: `WaitOnEvent` blocks
+        // its source and reads no target, and the one path back to
+        // runnable is a `WakeUnit` naming that unit. An empty receive
+        // parks its source the same way, and `wait_units` carries it.
         //
-        // The two exceptions belong to no step and reach no footprint:
-        // a DMA completion wakes its issuer, and a timer wake fires
-        // from the runtime's own clock.
+        // Two wakes belong to no step and reach no footprint: a DMA
+        // completion waking its issuer, and a timer wake.
         if ids_overlap(&self.wake_targets, &other.wait_units)
             || ids_overlap(&other.wake_targets, &self.wait_units)
         {
             return true;
         }
 
-        // Two units that wait on different barriers are independent
-        // because no barrier releases anything. `WaitTarget` reaches
-        // exactly one reader in the workspace, `from_effects` above.
-        // The commit pipeline's `WaitOnEvent` arm names only `source`
-        // and blocks it, and no registry holds barrier state. So a
-        // wait's only guest-visible consequence is its own unit's
-        // status, and one unit's wait can free no other unit's.
-        //
-        // The same-barrier clause below is therefore a false
-        // dependency; it costs exploration budget alone.
+        // No barrier releases anything. `WaitOnEvent` names only
+        // `source` and blocks it, and no registry holds barrier state,
+        // so a wait's only consequence is its own unit's status. The
+        // same-barrier clause below is therefore a false dependency.
         if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
             return true;
         }
@@ -342,15 +331,11 @@ impl StepFootprint {
         }
 
         // A completed cross-unit DMA clears every other unit's
-        // reservation whose 128-byte line its destination touches. The
-        // clear flips the store's verdict, even when the transferred
-        // bytes miss the conditional store's own range.
-        // `fire_dma_completions` hands the destination to
-        // `Runtime::host_write`, which sweeps the reservation table
-        // and exempts the issuer alone. The sweep asks each entry
-        // whether its whole line overlaps the written bytes. The
-        // source half of `dma_ranges` rides along and only
-        // over-approximates.
+        // reservation whose 128-byte line its destination touches. That
+        // clear flips the next conditional store's verdict, even where
+        // the transferred bytes miss the store's own range. The sweep
+        // in `Runtime::host_write` exempts the issuer alone. The source
+        // half of `dma_ranges` rides along and over-approximates.
         if write_covers_any_line(&self.dma_ranges, &other.reservation_lines)
             || write_covers_any_line(&other.dma_ranges, &self.reservation_lines)
         {
@@ -358,6 +343,12 @@ impl StepFootprint {
         }
 
         if lines_overlap(&self.reservation_lines, &other.reservation_lines) {
+            return true;
+        }
+
+        // One step's cost decides where an in-flight transfer lands,
+        // and the other step reads or writes the bytes it lands on.
+        if touches_inflight(self, other) || touches_inflight(other, self) {
             return true;
         }
 
@@ -378,7 +369,22 @@ impl StepFootprint {
             && self.wait_units.is_empty()
             && self.wake_targets.is_empty()
             && self.reservation_lines.is_empty()
+            && self.inflight_dma_ranges.is_empty()
     }
+}
+
+/// True when a transfer was in flight during `during`'s step, and
+/// `accessor`'s step touched the bytes that transfer moves.
+///
+/// The last clause reads the landing as the write it is, the way the
+/// `dma_ranges` clause above does: the destination sweeps every other
+/// unit's reservation whose line it covers, so where it lands decides
+/// whether the holder keeps the entry.
+fn touches_inflight(during: &StepFootprint, accessor: &StepFootprint) -> bool {
+    ranges_overlap(&during.inflight_dma_ranges, &accessor.shared_writes)
+        || ranges_overlap(&during.inflight_dma_ranges, &accessor.shared_reads)
+        || ranges_overlap(&during.inflight_dma_ranges, &accessor.dma_ranges)
+        || write_covers_any_line(&during.inflight_dma_ranges, &accessor.reservation_lines)
 }
 
 fn ranges_overlap(a: &[ByteRange], b: &[ByteRange]) -> bool {

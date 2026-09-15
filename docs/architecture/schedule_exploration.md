@@ -42,10 +42,16 @@ flowchart TD
   cls -->|"a bound, a refusal, or a baseline that committed nothing"| inc["Inconclusive"]
 ```
 
-`ScheduleStable` means no schedule diverges, not merely that no
-sampled one did, whenever the result carries a class count. The count
-is present only when the search covered one execution per class and
-hit no bound; a bounded run reports none and can only be inconclusive.
+`ScheduleStable` carries a class count when the search covered one
+execution per class and hit no bound. A bounded run reports no count
+and can only be inconclusive.
+
+The count is a claim about coverage, and it is not yet one a reader
+can rely on:
+[`shared_clock`](../../crates/cellgov_explore/tests/shared_clock.rs)
+holds a workload where the search reports every class covered, reaches
+one committed memory, and a schedule written out by hand reaches
+another.
 
 `StepFootprint`, extracted from the ten shared-resource `Effect`
 variants, drives conservative dependency analysis: step pairs with
@@ -68,18 +74,18 @@ rule is the half a footprint pair is asked for, and why the granule
 arithmetic cannot saturate.
 
 Three things reach committed state without reaching a footprint. Guest
-time is the first: one global clock advances per step, a DMA completion lands at the
-first commit whose clock reached its completion tick, and a PPU `mftb`
-reads that clock straight into a guest register, so a step that
-touches no shared resource at all still moves an in-flight transfer
-relative to every later step. Two steps the relation calls
-independent can therefore commit different memory when they swap;
-[`shared_clock`](../../crates/cellgov_explore/tests/shared_clock.rs)
-holds the witness. The second is the RSX FIFO advance pass, whose
-effects commit guest memory and sweep reservations from a batch no
-unit's step emitted. The third is the LV2 handler surface: a footprint
-reads one unit's own step effects, and an LV2 handler's commit through
-`Runtime::host_write` belongs to no unit's step.
+time is the first: one global clock advances per step, and a step that
+touches no shared resource still moves it. A PPU `mftb` reads that
+clock straight into a guest register, and a timer deadline fires from
+it. The relation records neither, so two steps it calls independent
+can commit different memory when they swap. One clock reader it does
+record is a transfer's landing tick: a step carries the ranges of
+every transfer in flight during it, and those conflict with another
+step's access to the same bytes. The second is the RSX FIFO advance
+pass, whose effects commit guest memory and sweep reservations from a
+batch no unit's step emitted. The third is the LV2 handler surface: a
+footprint reads one unit's own step effects, and an LV2 handler's
+commit through `Runtime::host_write` belongs to no unit's step.
 
 A park the commit pipeline takes from the step result rather than an
 effect does reach a footprint. The independence relation reads the

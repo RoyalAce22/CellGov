@@ -44,6 +44,9 @@ pub struct Runtime {
     /// read through [`Runtime::last_runnable`]. The buffer is reused,
     /// so a step costs no allocation for it.
     pub(super) last_runnable: Vec<UnitId>,
+    /// DMA completions the last [`Runtime::commit_step`] fired, read
+    /// through [`Runtime::last_dma_completions`].
+    pub(super) last_dma_completions: Vec<cellgov_dma::DmaCompletion>,
     pub(super) lv2_host: Lv2Host,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) spu_factory: Option<SpuFactory>,

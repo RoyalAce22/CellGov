@@ -41,6 +41,9 @@ impl Runtime {
             && !self.rsx_flip.pending()
         {
             self.epoch.advance();
+            // This path fires no completion, so the list this commit
+            // publishes is empty.
+            self.last_dma_completions.clear();
             if let Some(unit) = self.last_scheduled_unit {
                 debug_assert!(
                     !self.step_woke_others,
@@ -188,6 +191,9 @@ impl Runtime {
         if let Ok(ref mut o) = outcome {
             o.dma_completions_fired = due.len();
         }
+        self.last_dma_completions.clear();
+        self.last_dma_completions
+            .extend(due.iter().map(|(completion, _)| *completion));
         let timer_due = self.fire_timer_wakes();
 
         if result.yield_reason == YieldReason::Finished {

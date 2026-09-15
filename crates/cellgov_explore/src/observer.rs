@@ -46,21 +46,11 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 // An access through one view of a shared mapping
                 // reaches every sibling view's bytes, whether the
                 // access writes them or reads them.
-                let write_aliases: Vec<_> = footprint
-                    .shared_writes
-                    .iter()
-                    .flat_map(|r| rt.shared_alias_ranges(step.unit, *r))
-                    .collect();
-                footprint.shared_writes.extend(write_aliases);
-                let read_aliases: Vec<_> = footprint
-                    .shared_reads
-                    .iter()
-                    .flat_map(|r| rt.shared_alias_ranges(step.unit, *r))
-                    .collect();
-                footprint.shared_reads.extend(read_aliases);
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
                     break StopReason::CommitError(e);
                 }
+                footprint.note_inflight(rt);
+                footprint.expand_aliases(rt, step.unit);
                 // A discarded batch reached no guest state, so the step
                 // gets no point, as a refused commit gets none.
                 if let Some(kind) = step.result.fault {

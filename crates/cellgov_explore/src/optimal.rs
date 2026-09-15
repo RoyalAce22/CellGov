@@ -310,21 +310,11 @@ fn run_one(
         let chosen = frames[depth].chosen;
         let mut footprint =
             StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-        let write_aliases: Vec<_> = footprint
-            .shared_writes
-            .iter()
-            .flat_map(|range| rt.shared_alias_ranges(step.unit, *range))
-            .collect();
-        footprint.shared_writes.extend(write_aliases);
-        let read_aliases: Vec<_> = footprint
-            .shared_reads
-            .iter()
-            .flat_map(|range| rt.shared_alias_ranges(step.unit, *range))
-            .collect();
-        footprint.shared_reads.extend(read_aliases);
         if let Err(e) = rt.commit_step(&step.result, &step.effects) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
+        footprint.note_inflight(rt);
+        footprint.expand_aliases(rt, step.unit);
         // The commit is what discards a faulted batch and counts it, so
         // the break reads the fault after it. The step gets no decision
         // point, as a refused commit gets none.

@@ -233,6 +233,19 @@ impl Runtime {
         &self.last_runnable
     }
 
+    /// DMA completions the last [`Runtime::commit_step`] fired.
+    ///
+    /// Empty before the first commit and after a restore. The commit
+    /// that fires a completion applies the write outside every unit's
+    /// batch, so this list is where a caller reads which bytes moved.
+    /// The all-blocked time warp inside [`Runtime::step`] fires
+    /// completions outside every commit, and those appear here for no
+    /// step.
+    #[inline]
+    pub fn last_dma_completions(&self) -> &[cellgov_dma::DmaCompletion] {
+        &self.last_dma_completions
+    }
+
     // -- scheduler --
 
     /// Replace the runtime scheduler.
