@@ -60,9 +60,9 @@ pub struct StepFootprint {
     pub mailbox_receives: Vec<MailboxId>,
     /// Ranges a transfer writes at completion: its destination.
     ///
-    /// `Runtime::apply_dma_transfer` lands the destination in committed
-    /// memory whatever the request's direction names, so which end this
-    /// is follows that function and not `DmaDirection`.
+    /// The commit pipeline refuses any direction but a put, and a put's
+    /// destination is the end that lands in committed memory. So this
+    /// end is the destination for everything that reaches a queue.
     pub dma_writes: Vec<ByteRange>,
     /// Ranges a transfer reads at completion: the source of a
     /// transfer no inline payload carries.

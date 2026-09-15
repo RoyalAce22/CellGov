@@ -16,7 +16,7 @@
 //!   base before staging.
 
 use crate::registry::UnitRegistry;
-use cellgov_dma::{DmaCompletion, DmaLatencyModel, DmaQueue};
+use cellgov_dma::{DmaCompletion, DmaDirection, DmaLatencyModel, DmaQueue};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_exec::{ExecutionStepResult, UnitStatus, YieldReason};
@@ -81,12 +81,45 @@ pub enum CommitError {
         source_unit: UnitId,
     },
     /// A `DmaEnqueue` destination range escapes any registered region.
-    ///
-    /// Source ranges are not pre-validated; they may legitimately reference
-    /// SPU local stores or staging buffers that the completion handler
-    /// resolves by path.
     #[error("effect[{effect_index}]: DMA destination escapes regions")]
     DmaDestinationOutOfRange {
+        /// Index of the offending effect within the batch.
+        effect_index: usize,
+    },
+    /// A `DmaEnqueue` carrying no inline payload names a source range
+    /// that escapes any registered region.
+    ///
+    /// The completion reads the source out of committed space 0, so a
+    /// range that does not resolve there has no bytes to move. An
+    /// enqueue that carries its bytes inline is not held to this: the
+    /// completion never reads a range for it.
+    #[error("effect[{effect_index}]: DMA source escapes regions")]
+    DmaSourceOutOfRange {
+        /// Index of the offending effect within the batch.
+        effect_index: usize,
+    },
+    /// A `DmaEnqueue` inline payload is not as long as the destination
+    /// it lands in.
+    ///
+    /// The completion writes the payload over the whole destination
+    /// range, so the two lengths are one fact. A disagreement reaches
+    /// the memory layer as a length mismatch the completion has no
+    /// refusal for.
+    #[error("effect[{effect_index}]: DMA payload length disagrees with the destination")]
+    DmaPayloadLengthMismatch {
+        /// Index of the offending effect within the batch.
+        effect_index: usize,
+    },
+    /// A `DmaEnqueue` names a direction the completion does not model.
+    ///
+    /// The completion writes the request's destination into committed
+    /// space 0 whatever the direction says, which is the `Put` reading.
+    /// A `Get` names the local-store end as its destination, so
+    /// applying it there would land the transfer in main memory at a
+    /// local-store address. The queue refuses it rather than modelling
+    /// it wrongly.
+    #[error("effect[{effect_index}]: DMA direction is not modelled")]
+    DmaDirectionUnsupported {
         /// Index of the offending effect within the batch.
         effect_index: usize,
     },
@@ -340,7 +373,45 @@ impl CommitPipeline {
                         }
                         signal_updates += 1;
                     }
-                    Effect::DmaEnqueue { request, .. } => {
+                    Effect::DmaEnqueue { request, payload } => {
+                        if request.direction() != DmaDirection::Put {
+                            ctx.units
+                                .set_status_override(request.issuer(), UnitStatus::Faulted);
+                            return Err(CommitError::DmaDirectionUnsupported { effect_index: idx });
+                        }
+                        // An inline payload is the bytes, so the source
+                        // is never read and needs no range that
+                        // resolves. What the payload does need is the
+                        // destination's length: the completion writes it
+                        // over that whole range.
+                        if let Some(bytes) = payload {
+                            if bytes.len() as u64 != request.destination().length() {
+                                ctx.units
+                                    .set_status_override(request.issuer(), UnitStatus::Faulted);
+                                return Err(CommitError::DmaPayloadLengthMismatch {
+                                    effect_index: idx,
+                                });
+                            }
+                        } else {
+                            let src = request.source();
+                            // Unlogged: the transfer's own read at
+                            // completion is the one the runtime reports,
+                            // and this batch may still be refused below.
+                            let resolves: Result<(), MemError> =
+                                ctx.memory.with_reads_unlogged(|mem: &GuestMemory| {
+                                    mem.read_checked(src).map(|_| ())
+                                });
+                            if let Err(err) = resolves {
+                                ctx.units
+                                    .set_status_override(request.issuer(), UnitStatus::Faulted);
+                                return Err(match err {
+                                    MemError::Unmapped(_) => {
+                                        CommitError::DmaSourceOutOfRange { effect_index: idx }
+                                    }
+                                    other => CommitError::Memory(other),
+                                });
+                            }
+                        }
                         let dst = request.destination();
                         if let Err(err) = ctx.memory.validate_write(dst, dst.length() as usize) {
                             // Marking the issuer Faulted prevents the SPU
@@ -635,3 +706,7 @@ impl CommitPipeline {
 #[cfg(test)]
 #[path = "tests/commit_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/dma_argument_tests.rs"]
+mod dma_argument_tests;

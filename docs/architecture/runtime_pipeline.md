@@ -109,12 +109,16 @@ Pre-fault instructions are discarded, never re-executed; the
 diagnostic still names the faulting PC and captures fault-site
 registers before the rollback.
 
-A `DmaEnqueue` whose destination fails `validate_write` at step 4
-(reserved or out-of-range) also marks the issuing unit `Faulted`
-before returning the `CommitError`, so the SPU cannot roll forward
-into a tag-poll that never wakes: the unit terminates on the
-rejecting step and the host-visible `CommitError` carries the
-addr/region.
+A `DmaEnqueue` the pipeline refuses at step 4 also marks the issuing
+unit `Faulted` before returning the `CommitError`, so the SPU cannot
+roll forward into a tag-poll that never wakes: the unit terminates on
+the rejecting step and the host-visible `CommitError` says which
+argument it refused. Four arguments reach that mark -- a destination
+that is reserved or out of range, a source range that resolves to no
+region, an inline payload that is not the destination's length, and any
+direction but a put. The completion reads the source and writes the
+destination in committed space 0, so each of those is an end the
+transfer could not have honoured.
 
 **Trivial-step fast path (FaultDriven only).** `Runtime::commit_step`
 skips steps 4-8 and only advances the epoch (plus the scheduler

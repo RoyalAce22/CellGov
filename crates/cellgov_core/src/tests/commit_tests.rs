@@ -11,10 +11,10 @@ use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 // cellgov_testkit depends on cellgov_core; local test doubles avoid the cycle.
 
-struct CommitTestBed {
+pub(super) struct CommitTestBed {
     pipeline: CommitPipeline,
     mem: GuestMemory,
-    units: UnitRegistry,
+    pub(super) units: UnitRegistry,
     mailboxes: MailboxRegistry,
     signals: SignalRegistry,
     dma_queue: DmaQueue,
@@ -26,7 +26,7 @@ struct CommitTestBed {
 }
 
 impl CommitTestBed {
-    fn new(mem_size: usize) -> Self {
+    pub(super) fn new(mem_size: usize) -> Self {
         Self {
             pipeline: CommitPipeline::new(),
             mem: GuestMemory::new(mem_size),
@@ -41,7 +41,20 @@ impl CommitTestBed {
         }
     }
 
-    fn process(
+    /// Bed over a caller-built region map, for a case that needs an
+    /// access mode `GuestMemory::new` does not give.
+    pub(super) fn with_memory(mem: GuestMemory) -> Self {
+        Self {
+            mem,
+            ..Self::new(0)
+        }
+    }
+
+    pub(super) fn memory(&self) -> &GuestMemory {
+        &self.mem
+    }
+
+    pub(super) fn process(
         &mut self,
         result: &ExecutionStepResult,
         effects: &[Effect],
@@ -68,13 +81,13 @@ impl CommitTestBed {
 
 #[derive(Clone)]
 
-struct DummyUnit {
+pub(super) struct DummyUnit {
     id: UnitId,
     status: UnitStatus,
 }
 
 impl DummyUnit {
-    fn runnable(id: UnitId) -> Self {
+    pub(super) fn runnable(id: UnitId) -> Self {
         Self {
             id,
             status: UnitStatus::Runnable,
@@ -118,7 +131,7 @@ impl cellgov_exec::ExecutionUnit for DummyUnit {
     fn snapshot(&self) {}
 }
 
-fn range(start: u64, length: u64) -> ByteRange {
+pub(super) fn range(start: u64, length: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(start), length).unwrap()
 }
 
@@ -151,7 +164,7 @@ fn marker() -> Effect {
     }
 }
 
-fn step_with(
+pub(super) fn step_with(
     yield_reason: YieldReason,
     effects: Vec<Effect>,
 ) -> (ExecutionStepResult, Vec<Effect>) {
