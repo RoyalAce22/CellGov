@@ -59,8 +59,8 @@ fn keeping_a_branch_keeps_the_tree_below_it() {
 
     assert_eq!(
         dropped,
-        vec![unit(2)],
-        "the other branch went, and is named"
+        vec![(unit(2), WakeupTree::new())],
+        "the other branch went, and is named with what was below it"
     );
     assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(7)]);
     let below = tree.subtree(unit(7));
@@ -83,7 +83,11 @@ fn keeping_an_absent_branch_arms_that_unit_alone() {
     let mut tree = WakeupTree::new();
     tree.insert(&seq(&[(7, 0)]), &free);
     let dropped = tree.retain_branch(unit(3));
-    assert_eq!(dropped, vec![unit(7)], "the branch it did hold went");
+    assert_eq!(
+        dropped,
+        vec![(unit(7), WakeupTree::new())],
+        "the branch it did hold went"
+    );
     assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(3)]);
     assert!(
         tree.subtree(unit(3)).is_empty(),
@@ -112,6 +116,67 @@ fn removing_a_branch_leaves_the_others_in_order() {
     tree.insert(&seq(&[(5, 2)]), &free);
     tree.remove_branch(unit(2));
     assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(7), unit(5)]);
+}
+
+/// `Frame::drop_cost` counts what a removed branch carried, so the
+/// removal returns the whole tree below the head.
+#[test]
+fn removing_a_branch_hands_back_the_tree_below_it() {
+    let mut tree = WakeupTree::new();
+    tree.insert(&seq(&[(1, 0), (2, 1), (3, 2)]), &free);
+    tree.insert(&seq(&[(4, 3)]), &free);
+
+    let below = tree
+        .remove_branch(unit(1))
+        .expect("the branch through unit 1 was there");
+    assert_eq!(
+        below.sequences(),
+        vec![vec![unit(2), unit(3)]],
+        "the chain under the head came back whole",
+    );
+    assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(4)]);
+    assert_eq!(
+        tree.remove_branch(unit(9)),
+        None,
+        "no branch through unit 9 was there to remove",
+    );
+}
+
+#[test]
+fn keeping_a_branch_hands_back_the_chain_under_each_dropped_one() {
+    let mut tree = WakeupTree::new();
+    tree.insert(&seq(&[(7, 0), (4, 1)]), &free);
+    tree.insert(&seq(&[(2, 2), (3, 3), (5, 4)]), &free);
+
+    let dropped = tree.retain_branch(unit(7));
+
+    assert_eq!(dropped.len(), 1, "one branch went");
+    assert_eq!(dropped[0].0, unit(2));
+    assert_eq!(
+        dropped[0].1.sequences(),
+        vec![vec![unit(3), unit(5)]],
+        "and the chain under it came with it",
+    );
+}
+
+#[test]
+fn sequences_are_the_root_to_leaf_paths_in_branch_order() {
+    let mut tree = WakeupTree::new();
+    assert_eq!(tree.sequences(), Vec::<Vec<UnitId>>::new());
+
+    tree.insert(&seq(&[(7, 0), (4, 1), (5, 2)]), &free);
+    tree.insert(&seq(&[(2, 3)]), &free);
+    // Walks the 7 branch, then grafts 6 beside 4: a fan under one head.
+    tree.insert(&seq(&[(7, 0), (6, 4)]), &free);
+
+    assert_eq!(
+        tree.sequences(),
+        vec![
+            vec![unit(7), unit(4), unit(5)],
+            vec![unit(7), unit(6)],
+            vec![unit(2)],
+        ],
+    );
 }
 
 #[test]

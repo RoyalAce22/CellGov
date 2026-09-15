@@ -66,9 +66,8 @@ struct Drops {
 }
 
 impl Drops {
-    /// Branches given up at either site, one per head per frame
-    /// ([`Frame::dropped`]). A visit is not a branch, so
-    /// [`Drops::at_warp_visits`] is no part of this.
+    /// Sequences dropped at either site, one per sequence per frame
+    /// ([`Frame::dropped`]).
     fn total(self) -> usize {
         self.by_choose + self.at_warp
     }
@@ -99,15 +98,18 @@ struct Frame {
     /// Footprint each unit produced when the search ran it from this
     /// prefix, which is what the independence test at line 17 reads.
     footprints: BTreeMap<UnitId, StepFootprint>,
-    /// Branch heads this frame already dropped, so a re-grafted branch
+    /// Sequences this frame already dropped, so a re-grafted sequence
     /// costs the reversal once.
     ///
     /// A race can graft a sequence under a head this frame dropped
     /// earlier, and the state at this depth is what every replay of the
-    /// prefix above reaches, so the branch is unreachable again.
+    /// prefix above reaches, so the branch is unreachable again. Two
+    /// races can graft different tails under one head, and each is cover
+    /// the frame lost. An extension or a prefix of a lost sequence costs
+    /// nothing; [`Frame::drop_cost`] says why.
     /// [`crate::classify::ExplorationResult::reversals_dropped`] says
     /// what the count this feeds does and does not measure.
-    dropped: BTreeSet<UnitId>,
+    dropped: BTreeSet<Vec<UnitId>>,
     /// Units the all-blocked time warp woke here, empty at every depth
     /// no warp resolved.
     ///
@@ -121,10 +123,38 @@ struct Frame {
 }
 
 impl Frame {
-    /// What a drop of the branch through `unit` costs the reversal
-    /// count: 1 the first time this frame drops it, 0 after.
-    fn drop_cost(&mut self, unit: UnitId) -> usize {
-        usize::from(self.dropped.insert(unit))
+    /// What a drop of the branch through `head`, with `below` under it,
+    /// costs the reversal count. Each sequence the branch carried costs
+    /// one, unless a sequence this frame already lost covers it.
+    ///
+    /// A lost sequence covers:
+    ///
+    /// - itself;
+    /// - every extension of it;
+    /// - every prefix of it.
+    ///
+    /// That is how [`WakeupTree::insert`] treats a leaf: with the lost
+    /// one deliverable, the tree holds the other without a second
+    /// branch. A head with nothing below it carries the one-unit
+    /// sequence.
+    fn drop_cost(&mut self, head: UnitId, below: &WakeupTree) -> usize {
+        let mut sequences = below.sequences();
+        if sequences.is_empty() {
+            sequences.push(Vec::new());
+        }
+        let mut cost = 0usize;
+        for mut tail in sequences {
+            tail.insert(0, head);
+            let covered = self
+                .dropped
+                .iter()
+                .any(|lost| lost.starts_with(&tail) || tail.starts_with(lost));
+            if !covered {
+                self.dropped.insert(tail);
+                cost += 1;
+            }
+        }
+        cost
     }
 }
 
@@ -430,8 +460,8 @@ fn run_one(
             // this one recorded.
             //
             // A decided visit that retired a branch would retire one the
-            // frame may still owe, and the memo would then cost the
-            // second drop of that head nothing.
+            // frame may still owe. The memo would then cost nothing for
+            // the second drop of each sequence it carried.
             debug_assert!(
                 !decided || frame.chosen == step.unit,
                 "the depth prescribed {:?} and the warp delivered {:?}",
@@ -461,8 +491,8 @@ fn run_one(
             // often the loop read a tree at all.
             if !decided || frame.chosen != step.unit {
                 dropped.at_warp_visits += 1;
-                for branch in frame.wut.retain_branch(step.unit) {
-                    dropped.at_warp += frame.drop_cost(branch);
+                for (head, below) in frame.wut.retain_branch(step.unit) {
+                    dropped.at_warp += frame.drop_cost(head, &below);
                 }
             }
             frame.chosen = step.unit;
@@ -637,10 +667,10 @@ fn backtrack(frames: &mut Vec<Frame>) -> Option<usize> {
 /// not runnable here names a reversal this state cannot reach:
 /// `Execution::races` reports a racing pair without asking whether the
 /// later unit can go first here. `choose` drops that branch and counts
-/// it in `dropped`, once for each head this frame drops
-/// ([`Frame::dropped`]). The branch carries every sequence grafted
-/// below it, so a drop gives up at least one equivalence class, which
-/// is why a count above zero withdraws
+/// it in `dropped`, once for each sequence the branch carried that no
+/// earlier drop at this frame covers ([`Frame::drop_cost`]). Each
+/// sequence is an owed execution, so a drop gives up at least one
+/// equivalence class, which is why a count above zero withdraws
 /// [`ExplorationResult::classes_explored`].
 ///
 /// With no branch left the depth takes any runnable unit it did not
@@ -652,8 +682,11 @@ fn choose(frame: &mut Frame, runnable: &[UnitId], dropped: &mut usize) -> Option
         if runnable.contains(&unit) {
             return Some(unit);
         }
-        frame.wut.remove_branch(unit);
-        *dropped += frame.drop_cost(unit);
+        let below = frame
+            .wut
+            .remove_branch(unit)
+            .expect("min_branch named this branch, so the tree holds it");
+        *dropped += frame.drop_cost(unit, &below);
     }
     let unit = runnable
         .iter()

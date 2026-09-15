@@ -63,7 +63,7 @@ fn a_frame_gives_up_a_re_grafted_branch_once() {
     );
 }
 
-/// The memo keys on the head, so one frame can drop two reversals.
+/// Two heads are two sequences, so one frame can drop two reversals.
 #[test]
 fn a_frame_that_gives_up_two_heads_counts_two() {
     let here = unit(1);
@@ -82,13 +82,11 @@ fn a_frame_that_gives_up_two_heads_counts_two() {
     assert_eq!(dropped, 2, "neither head could run here");
 }
 
-/// The memo keys on the head, which is all a wakeup branch names. The
-/// count therefore reads the heads a frame dropped, and not the
-/// sequences lost with them.
-/// [`crate::classify::ExplorationResult::reversals_dropped`] already
-/// disclaims that: one drop can carry more than one owed sequence.
+/// A longer sequence under a head the frame already lost is an
+/// extension of the lost sequence; `Frame::drop_cost` says why that
+/// costs nothing.
 #[test]
-fn a_second_sequence_under_a_given_up_head_costs_nothing() {
+fn an_extension_of_a_lost_sequence_costs_nothing() {
     let here = unit(1);
     let absent = unit(9);
     let runnable = [here];
@@ -125,7 +123,48 @@ fn a_second_sequence_under_a_given_up_head_costs_nothing() {
 
     assert_eq!(
         dropped, 1,
-        "the head was given up once, and the longer sequence under it \
-         went uncounted",
+        "the two-unit sequence extends the one the frame already lost",
     );
+}
+
+#[test]
+fn two_sequences_under_one_head_dropped_together_count_two() {
+    let here = unit(1);
+    let absent = unit(9);
+    let mut frame = frame_owing(absent, here);
+    // Two tails under one head: the second insert walks the head and
+    // grafts its tail beside the first, since neither tail leads the
+    // other. A tail under a leaf would graft nowhere: the tree treats a
+    // leaf as a sequence it already holds.
+    frame.wut = WakeupTree::new();
+    for tail in [5u64, 6] {
+        frame.wut.insert(
+            &[
+                SeqEvent {
+                    unit: absent,
+                    index: 0,
+                },
+                SeqEvent {
+                    unit: unit(tail),
+                    index: 1,
+                },
+            ],
+            &free,
+        );
+    }
+    assert_eq!(
+        frame.wut.branches().collect::<Vec<_>>(),
+        vec![absent],
+        "the premise: one head",
+    );
+    assert_eq!(
+        frame.wut.sequences().len(),
+        2,
+        "the premise: two sequences under it",
+    );
+
+    let mut dropped = 0usize;
+    choose(&mut frame, &[here], &mut dropped).expect("a runnable unit is left to take");
+
+    assert_eq!(dropped, 2, "both sequences under the head were given up");
 }

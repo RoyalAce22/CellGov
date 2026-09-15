@@ -195,9 +195,9 @@ fn the_search_answers_for_every_reachable_memory() {
     // for every outcome. Nothing but this number separates the two.
     //
     // The figure is ours and no paper's, pinned here as a regression
-    // witness. It counts once per head per frame, so the search's own
-    // race handling moves it, and a move is a finding to explain rather
-    // than a number to re-bless.
+    // witness. It counts once per lost sequence per frame, so the
+    // search's own race handling moves it, and a move is a finding to
+    // explain rather than a number to re-bless.
     assert_eq!(
         dropped, 290,
         "the branches this workload's depths could not deliver",

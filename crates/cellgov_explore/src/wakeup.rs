@@ -71,32 +71,60 @@ impl WakeupTree {
             .unwrap_or_default()
     }
 
-    /// Drop the branch through `unit`
+    /// Drop the branch through `unit` and return the tree below it
     /// [Abdulla2017 p:42:24 s:Algorithm 2 line 20].
-    pub fn remove_branch(&mut self, unit: UnitId) {
-        self.children.retain(|(branch, _)| *branch != unit);
+    ///
+    /// `None` when no branch through `unit` was there.
+    pub fn remove_branch(&mut self, unit: UnitId) -> Option<Self> {
+        let at = self
+            .children
+            .iter()
+            .position(|(branch, _)| *branch == unit)?;
+        Some(self.children.remove(at).1)
     }
 
-    /// Keep only the branch through `unit`, and name the heads the tree
-    /// dropped.
+    /// Keep only the branch through `unit`, and return each branch the
+    /// tree dropped: its head and the tree below it.
     ///
     /// The tree below `unit` survives, so the depth beneath still
     /// inherits what this one owes it. Where no branch through `unit`
     /// was there to keep, the tree ends as [`WakeupTree::single`]
     /// leaves it.
-    pub fn retain_branch(&mut self, unit: UnitId) -> Vec<UnitId> {
+    pub fn retain_branch(&mut self, unit: UnitId) -> Vec<(UnitId, Self)> {
         let mut dropped = Vec::new();
-        self.children.retain(|(branch, _)| {
-            let keep = *branch == unit;
-            if !keep {
-                dropped.push(*branch);
+        let mut kept = Vec::new();
+        for child in self.children.drain(..) {
+            if child.0 == unit {
+                kept.push(child);
+            } else {
+                dropped.push(child);
             }
-            keep
-        });
+        }
+        self.children = kept;
         if self.children.is_empty() {
             self.children.push((unit, Self::new()));
         }
         dropped
+    }
+
+    /// Every sequence the tree holds: one path from the root to each
+    /// leaf, in branch order. An empty tree holds none.
+    pub fn sequences(&self) -> Vec<Vec<UnitId>> {
+        let mut out = Vec::new();
+        self.collect_sequences(&mut Vec::new(), &mut out);
+        out
+    }
+
+    fn collect_sequences(&self, prefix: &mut Vec<UnitId>, out: &mut Vec<Vec<UnitId>>) {
+        for (unit, below) in &self.children {
+            prefix.push(*unit);
+            if below.is_empty() {
+                out.push(prefix.clone());
+            } else {
+                below.collect_sequences(prefix, out);
+            }
+            prefix.pop();
+        }
     }
 
     /// Add `sequence` to the tree [Abdulla2017 p:42:23 s:6.2].

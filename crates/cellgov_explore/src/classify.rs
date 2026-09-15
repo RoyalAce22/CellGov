@@ -128,16 +128,19 @@ pub struct ExplorationResult {
     /// [`Self::classes_explored`].
     ///
     /// A run that dropped one reversal and one that gave up half its
-    /// classes both report no count, and only this separates them. One
-    /// drop can carry more than one owed sequence, so it is not a count
-    /// of the classes given up.
+    /// classes both report no count, and only this separates them. A
+    /// dropped sequence is one owed execution the search never ran. The
+    /// count omits what that execution's own races would owe, so no
+    /// number of classes follows from it.
     ///
     /// Neither number grows with revisits, and the two count different
     /// objects, so a ratio between them over one workload reads
     /// nothing. [`crate::backtrack::explore_backtrack`] counts a prefix
     /// and a race, so two races at one prefix are two.
-    /// [`crate::optimal::explore_optimal`] counts a frame and a branch
-    /// head, so every race that shares a head at one depth is one.
+    /// [`crate::optimal::explore_optimal`] counts a frame and a lost
+    /// sequence. Two races that graft different tails under one head at
+    /// one depth are two. A race that re-grafts a sequence the depth
+    /// already lost, or an extension or prefix of one, is none.
     ///
     /// Zero beside an empty count means no drop withdrew the count: a
     /// bound or a short stop did, or the search claims no count of its

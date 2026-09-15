@@ -67,13 +67,16 @@ still report none. A result carries the drops beside the count for that
 reason: an absent count with no drop means a bound stopped the search
 or it claims no count of its own, and an absent count with a number
 means that many reversals were given up. Neither search counts classes,
-since one drop can carry more than one owed sequence. Both report the
-number, and neither grows it with revisits, but they count different
-objects. The backtrack-set search counts a prefix and a race, so two
-races at one prefix are two. The optimal search counts a depth's own
-frame and the branch head it could not take, and a wakeup branch names
-a unit and nothing else, so every race sharing a head at one depth is
-one. The two numbers are read against zero, not against each other. The
+since a dropped sequence is one owed execution and what its own races
+would have owed goes uncounted. Both report the number, and neither
+grows it with revisits, but they count different objects. The
+backtrack-set search counts a prefix and a race, so two races at one
+prefix are two. The optimal search counts a depth's own frame and each
+sequence of the branch it could not take, so two races that graft
+different tails under one head at one depth are two, and a race that
+re-grafts a sequence the depth already lost, or an extension or a
+prefix of one, is none. The two
+numbers are read against zero, not against each other. The
 backtrack-set search claims no class count in any case, so its number
 names cover given up beside a count it never held.
 [`exhaustive_cover`](../../crates/cellgov_explore/tests/exhaustive_cover.rs)
