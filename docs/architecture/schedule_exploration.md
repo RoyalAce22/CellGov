@@ -1,11 +1,22 @@
 # Schedule exploration
 
 `cellgov_explore` enumerates legal alternate schedules without
-modifying the runtime. It records every branching point from a
-baseline run, replays each alternate through a `PrescribedScheduler`
-within configurable `max_schedules` and `max_steps_per_run` bounds,
-and classifies each outcome as `ScheduleStable`, `ScheduleSensitive`,
-or `Inconclusive`.
+modifying the runtime, and classifies each outcome as
+`ScheduleStable`, `ScheduleSensitive`, or `Inconclusive`. Two searches
+reach that verdict, both replaying through a `PrescribedScheduler`
+within configurable `max_schedules` and `max_steps_per_run` bounds.
+
+The bounded enumerator records every branching point from a baseline
+run and tries each alternate at each one, pruning a pair of units
+whose steps never conflict. The backtrack-set search instead builds
+happens-before over the events one execution retired, takes the races,
+and replays one schedule per race with the later event's unit forced
+at the earlier event's step. Neither is optimal: a class can cost more
+than one execution in both. They exist together because they share no
+reduction, so they agree on the set of final memory hashes a workload
+can reach even where they disagree on what reaching it costs -- and a
+reduction that drops a class shows up as a disagreement rather than as
+a smaller count.
 
 ```mermaid
 flowchart TD

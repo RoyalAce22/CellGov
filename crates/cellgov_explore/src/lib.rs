@@ -4,6 +4,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+pub mod backtrack;
 pub mod classify;
 pub mod config;
 pub mod decision;
@@ -17,6 +18,7 @@ pub mod prescribed;
 pub mod report;
 pub mod util;
 
+pub use backtrack::explore_backtrack;
 pub use classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 pub use config::ExplorationConfig;
 pub use decision::{DecisionLog, DecisionPoint};
@@ -24,7 +26,7 @@ pub use dependency::StepFootprint;
 pub use execution::{ClockCost, ClockVector, Event, EventId, Execution, HappensBefore, Race};
 pub use explore::{explore_pair, PairResult};
 pub use explorer::{explore, explore_window};
-pub use observer::observe_decisions;
+pub use observer::{observe_decisions, observe_decisions_bounded};
 pub use oracle::{explore_with_regions, MemoryRegionSpec, OracleExplorationResult};
 pub use prescribed::PrescribedScheduler;
 pub use util::{StopClass, StopReason};

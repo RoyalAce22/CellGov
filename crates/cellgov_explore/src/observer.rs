@@ -19,6 +19,13 @@ pub fn observe_decisions(rt: &mut Runtime) -> (DecisionLog, StopReason) {
     (log, stop)
 }
 
+/// [`observe_decisions`] that stops after `max_steps` committed steps
+/// and reports [`StopReason::StepBound`].
+pub fn observe_decisions_bounded(rt: &mut Runtime, max_steps: usize) -> (DecisionLog, StopReason) {
+    let (log, _, stop) = observe(rt, false, Some(max_steps));
+    (log, stop)
+}
+
 /// Like [`observe_decisions`], but with `capture=true` also records
 /// a [`RuntimeSnapshot`] keyed by step index at every branching
 /// point (>=2 runnable units). Skipping non-branching steps bounds
@@ -32,12 +39,24 @@ pub fn observe_decisions_with_snapshots(
     rt: &mut Runtime,
     capture: bool,
 ) -> (DecisionLog, BTreeMap<usize, RuntimeSnapshot>, StopReason) {
+    observe(rt, capture, None)
+}
+
+fn observe(
+    rt: &mut Runtime,
+    capture: bool,
+    max_steps: Option<usize>,
+) -> (DecisionLog, BTreeMap<usize, RuntimeSnapshot>, StopReason) {
     let mut log = DecisionLog::new();
     let mut snapshots: BTreeMap<usize, RuntimeSnapshot> = BTreeMap::new();
+    let mut committed = 0usize;
     let stop = loop {
         let runnable: Vec<_> = rt.registry().runnable_ids().collect();
         if runnable.is_empty() {
             break StopReason::Stalled;
+        }
+        if max_steps.is_some_and(|cap| committed >= cap) {
+            break StopReason::StepBound;
         }
         let step_idx = rt.steps_taken();
         if capture && runnable.len() >= 2 {
@@ -72,6 +91,7 @@ pub fn observe_decisions_with_snapshots(
                     chosen: step.unit,
                     footprint,
                 });
+                committed += 1;
             }
             Err(e) => break StopReason::StepError(e),
         }
