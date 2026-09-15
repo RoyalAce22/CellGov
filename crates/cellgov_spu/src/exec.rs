@@ -9,7 +9,7 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
-use cellgov_ps3_abi::hw::spu::{MfcTagId, MFC_MAX_TAG_ID};
+use cellgov_ps3_abi::hw::spu::{MfcCmd, MfcTagId, MFC_MAX_TAG_ID};
 use cellgov_time::GuestTicks;
 
 /// Outcome of executing a single SPU instruction.
@@ -59,8 +59,11 @@ pub enum SpuFault {
         /// Whether it was a read or write.
         is_write: bool,
     },
-    /// Unsupported MFC command opcode.
-    #[error("SPU unsupported MFC command opcode 0x{0:08x}")]
+    /// An MFC command word this model will not enqueue.
+    ///
+    /// The variant carries the whole 32-bit word. A reader can then tell
+    /// a refusal the reserved bit raised from one the opcode raised.
+    #[error("SPU unsupported MFC command word 0x{0:08x}")]
     UnsupportedMfcCommand(u32),
     /// A channel whose capacity the model does not know.
     #[error("SPU unsupported channel rchcnt 0x{0:02x}")]
@@ -74,6 +77,15 @@ pub enum SpuFault {
     TagIdOutOfRange(u32),
 }
 
+/// The aligned local-store offset a quadword load or store resolves to.
+///
+/// The mask is the architecture's own, for a local store of
+/// [`crate::state::SPU_LS_SIZE`]. It confines every address to local
+/// store, so a guest cannot reach past the end however it computes the
+/// address. The bound below therefore covers a `ls` shorter than the
+/// architected size, which only a test builds. The fetch path faults on
+/// a guest address; this path cannot.
+// [SPU-ISA p:31 s:3. Memory-Load/Store Instructions] Every load/store address is first ANDed with the limit register, whose 256 KB value is 0x0003FFFF, and its low four bits are then dropped because only aligned quadwords move.
 fn ls_addr(raw: u32, ls_len: usize) -> Result<usize, SpuFault> {
     let a = (raw & 0x3FFF0) as usize;
     if a + 16 > ls_len {
@@ -768,16 +780,40 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
     if state.channels.mfc_tag_id > MFC_MAX_TAG_ID {
         return SpuStepOutcome::Fault(SpuFault::TagIdOutOfRange(state.channels.mfc_tag_id));
     }
+    let word = MfcCmd::new(cmd);
+    // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] an invalid command suspends queue processing and raises an invalid-command interrupt, and the leading bit of the command halfword marks the opcode reserved.
+    // The reserved bit outranks the low byte, so this check runs ahead
+    // of the opcode match. A word that sets the bit names some other
+    // command than its low byte spells.
+    if word.names_a_reserved_opcode() {
+        return SpuStepOutcome::Fault(SpuFault::UnsupportedMfcCommand(cmd));
+    }
+    // The two class ids ride in the same word and steer bus bandwidth
+    // and cache replacement. They change how fast a command runs, never
+    // what it does. This model has neither to steer, so it reads past
+    // them.
+    // [CBEA p:114 s:9.1.2 MFC Class ID Channel] a class id is never checked, an unrecognised one falls back to the default, and none of them raises an exception.
     let ea = ((state.channels.mfc_eah as u64) << 32) | state.channels.mfc_eal as u64;
     let lsa = state.channels.mfc_lsa;
     let size = state.channels.mfc_size;
 
-    match cmd {
+    match word.opcode() {
         // [CBEA p:61 s:7. MFC Commands sub:7.6 Put Commands (Local Storage to Main Storage)] put: copy LS bytes to main storage.
         spu::MFC_PUT => {
             let lsa_usize = lsa as usize;
             let size_usize = size as usize;
-            let ls_bytes = state.ls[lsa_usize..lsa_usize + size_usize].to_vec();
+            // MFC_LSA and MFC_Size arrive on separate channels and
+            // neither write bounds the pair, so the source range is the
+            // guest's to choose. The get side refuses the same shape
+            // through `get_mut`. A direct index of local store here
+            // panics the host on a range it cannot hold.
+            let Some(ls_bytes) = lsa_usize
+                .checked_add(size_usize)
+                .and_then(|end| state.ls.get(lsa_usize..end))
+                .map(|slice| slice.to_vec())
+            else {
+                return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
+            };
 
             let src =
                 ByteRange::new(GuestAddr::new(lsa as u64), size as u64).expect("valid LS range");
@@ -835,7 +871,15 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
             state.reservation = None;
             if success {
                 let lsa_usize = lsa as usize;
-                let ls_bytes = state.ls[lsa_usize..lsa_usize + 128].to_vec();
+                // The line is 128 bytes wherever MFC_LSA points, and
+                // nothing bounds that channel either.
+                let Some(ls_bytes) = lsa_usize
+                    .checked_add(128)
+                    .and_then(|end| state.ls.get(lsa_usize..end))
+                    .map(|slice| slice.to_vec())
+                else {
+                    return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
+                };
                 let range = ByteRange::new(GuestAddr::new(ea), 128).expect("valid EA range");
                 state.channels.atomic_status = 0;
                 SpuStepOutcome::Yield {
@@ -860,6 +904,10 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
 #[cfg(test)]
 #[path = "tests/exec_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/mfc_class_id_tests.rs"]
+mod mfc_class_id_tests;
 
 #[cfg(test)]
 #[path = "tests/exec_compiler_forms_tests.rs"]

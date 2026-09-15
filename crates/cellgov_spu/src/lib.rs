@@ -37,12 +37,17 @@ use cellgov_time::{Budget, InstructionCost};
 
 /// A fetch or an access outside local store.
 ///
-/// The detail is the program counter on the fetch path and the raw
-/// address operand on the load/store path. Local store spans 18 bits, so
-/// neither fits the detail half and the masked value gives the address
-/// modulo 64 KB. The fetch path carries the whole program counter beside
-/// the code in [`LocalDiagnostics`], which is where a reader takes it
-/// from.
+/// The detail is one of:
+///
+/// - the program counter, on the fetch path;
+/// - the raw address operand, on the load/store path;
+/// - the staged `MFC_LSA`, where an MFC put or putllc names a range
+///   local store cannot hold.
+///
+/// Local store spans 18 bits, so none of them fits the detail half and
+/// the masked value gives the address modulo 64 KB. The fetch path
+/// carries the whole program counter beside the code in
+/// [`LocalDiagnostics`], which is where a reader takes it from.
 // [CBE-Handbook p:64 s:3.1.1 Local Store] Local store holds 256 KB, so an address inside it needs 18 bits.
 const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;

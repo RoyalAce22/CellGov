@@ -111,6 +111,64 @@ pub const MFC_GETLLAR: u32 = 0xD0;
 // [CBEA p:65 s:7.8 MFC Atomic Update Commands] putllc opcode 0xB4.
 pub const MFC_PUTLLC: u32 = 0xB4;
 
+/// One word written to [`MFC_CMD`]: an opcode and two class ids.
+///
+/// | bits | field |
+/// | --- | --- |
+/// | 0:7 | TclassID |
+/// | 8:15 | RclassID |
+/// | 16:23 | reserved, bit 16 marking the opcode reserved |
+/// | 24:31 | opcode |
+///
+/// Bit numbering is the document's, most significant first, so the
+/// opcode is the word's low byte and bit 16 is `1 << 15`.
+// [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] the write sets the class ids and the opcode and enqueues the command formed by the earlier parameter writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct MfcCmd(u32);
+
+impl MfcCmd {
+    /// Wrap a word the guest wrote to the channel.
+    #[inline]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The word as the guest wrote it.
+    #[inline]
+    pub const fn raw(self) -> u32 {
+        self.0
+    }
+
+    /// The operation this command names, against [`MFC_PUT`] and its
+    /// siblings.
+    #[inline]
+    pub const fn opcode(self) -> u32 {
+        self.0 & 0xFF
+    }
+
+    /// Transfer class id, which steers bus bandwidth.
+    // [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] TclassID steers how large a share of the bus a transfer is given.
+    #[inline]
+    pub const fn tclass_id(self) -> u8 {
+        (self.0 >> 24) as u8
+    }
+
+    /// Replacement class id, which steers L2-cache and TLB replacement.
+    // [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] RclassID steers which L2-cache and address-translation entries are chosen for replacement.
+    #[inline]
+    pub const fn rclass_id(self) -> u8 {
+        (self.0 >> 16) as u8
+    }
+
+    /// True where the word marks its own opcode reserved, whatever the
+    /// opcode byte holds.
+    // [CBEA p:113 s:9.1.1 MFC Command Opcode Channel] the command parameter is the word's low halfword, whose own leading bit marks the opcode reserved.
+    #[inline]
+    pub const fn names_a_reserved_opcode(self) -> bool {
+        self.0 & (1 << 15) != 0
+    }
+}
+
 /// SPU local store size in bytes (256 KiB).
 // [CBE-Handbook p:64 s:3.1.1] Local Store is a 256 KB single-ported memory.
 pub const SPU_LS_SIZE: usize = 256 * 1024;

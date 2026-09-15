@@ -79,12 +79,10 @@ fn decode_failure_faults() {
     assert!(result.fault.is_some());
 }
 
+/// The mask confines every address to a full-size local store, so a
+/// short `ls` is the only shape that reaches the bound in `ls_addr`.
 #[test]
-fn lqa_out_of_range_local_store_faults() {
-    // Under normal conditions (256KB LS + 18-bit masked address) the
-    // ls_addr bounds check cannot fire. Truncate LS so the masked
-    // address lands past the end and the helper must reject.
-    //
+fn lqa_past_a_short_local_store_faults() {
     // lqa rt=3, imm=0x7FFE: offset 0x7FFE << 2 = 0x1FFF8, masked to
     // 0x1FFF0; with LS at 0x1_0000, 0x1FFF0 + 16 > 0x1_0000.
     let raw = (0x061u32 << 23) | 3 | ((0x7FFEu32 & 0xFFFF) << 7);

@@ -177,7 +177,9 @@ flowchart TD
   start["step start: local is Some but reservation_held is false"] --> clr["local register cleared"]
   st["stwcx. / stdcx. / MFC_PUTLLC"] --> v{"local Some AND line matches the store?"}
   v -->|no| nope["conditional store fails"]
-  v -->|yes| ok["Effect ConditionalStore: bytes commit, own entry dropped, clear sweep on the other entries"]
+  v -->|yes| src{"MFC_PUTLLC only: does the 128-byte source reach local store?"}
+  src -->|no| ref["SPU fault, no effect emitted"]
+  src -->|yes| ok["Effect ConditionalStore: bytes commit, own entry dropped, clear sweep on the other entries"]
 ```
 
 **Effect vocabulary.** Two `Effect` variants drive the table:

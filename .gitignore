@@ -52,6 +52,11 @@ keys.toml
 # AI tooling
 .claude/
 CLAUDE.local.md
+.agents/
+.codex/
+.codex-plugin/
+AGENTS.md
+AGENTS.override.md
 
 # Python venv, ChromaDB, and local-only ingest scripts
 .venv/
