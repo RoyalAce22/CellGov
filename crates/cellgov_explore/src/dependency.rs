@@ -62,6 +62,14 @@ pub struct StepFootprint {
     pub wait_barriers: Vec<BarrierId>,
     /// Units explicitly woken.
     pub wake_targets: Vec<cellgov_event::UnitId>,
+    /// Units this step's effects can park.
+    ///
+    /// A wait names a mailbox, signal or barrier, and the commit
+    /// pipeline reads none of them. It reads the source, so the unit
+    /// is the key that matches a wake. A receive attempt parks its
+    /// source the same way when the mailbox comes back empty, so its
+    /// source belongs here too.
+    pub wait_units: Vec<cellgov_event::UnitId>,
     /// 128-byte-aligned line addresses touched by a `ReservationAcquire`.
     ///
     /// A cross-unit write overlapping the line clears the reservation
@@ -90,18 +98,28 @@ impl StepFootprint {
                 Effect::MailboxSend { mailbox, .. } => {
                     fp.mailbox_sends.push(*mailbox);
                 }
-                Effect::MailboxReceiveAttempt { mailbox, .. } => {
+                Effect::MailboxReceiveAttempt { mailbox, source } => {
                     fp.mailbox_receives.push(*mailbox);
+                    // The commit pipeline blocks the source when
+                    // `Mailbox::try_receive` comes back empty, and a
+                    // later send wakes nobody. Only a wake naming the
+                    // unit runs it again, so every attempt records the
+                    // park it may take: the footprint is built before
+                    // the pop decides.
+                    fp.wait_units.push(*source);
                 }
                 Effect::DmaEnqueue { request, .. } => {
                     fp.dma_ranges.push(request.source());
                     fp.dma_ranges.push(request.destination());
                 }
-                Effect::WaitOnEvent { target, .. } => match target {
-                    cellgov_effects::WaitTarget::Mailbox(id) => fp.wait_mailboxes.push(*id),
-                    cellgov_effects::WaitTarget::Signal(id) => fp.wait_signals.push(*id),
-                    cellgov_effects::WaitTarget::Barrier(id) => fp.wait_barriers.push(*id),
-                },
+                Effect::WaitOnEvent { target, source } => {
+                    fp.wait_units.push(*source);
+                    match target {
+                        cellgov_effects::WaitTarget::Mailbox(id) => fp.wait_mailboxes.push(*id),
+                        cellgov_effects::WaitTarget::Signal(id) => fp.wait_signals.push(*id),
+                        cellgov_effects::WaitTarget::Barrier(id) => fp.wait_barriers.push(*id),
+                    }
+                }
                 Effect::WakeUnit { target, .. } => {
                     fp.wake_targets.push(*target);
                 }
@@ -208,14 +226,20 @@ impl StepFootprint {
             return true;
         }
 
-        // Any wake conflicts with any wait on the other side: wake
-        // targets are often resolved indirectly through barriers or
-        // mailboxes and tracking the exact pairing is not worth the
-        // precision loss.
-        if !self.wake_targets.is_empty() && other.has_any_wait() {
-            return true;
-        }
-        if !other.wake_targets.is_empty() && self.has_any_wait() {
+        // A wake enables only the unit it names. The commit pipeline's
+        // `WaitOnEvent` arm blocks its source and reads no target, and
+        // the one path from there back to runnable is a `WakeUnit`
+        // naming that unit, so a wake reaches no other unit's wait.
+        // A receive attempt that finds the mailbox empty parks its
+        // source the same way and `wait_units` carries that source
+        // too, so the wake that runs it again pairs with it here.
+        //
+        // The two exceptions belong to no step and reach no footprint:
+        // a DMA completion wakes its issuer, and a timer wake fires
+        // from the runtime's own clock.
+        if ids_overlap(&self.wake_targets, &other.wait_units)
+            || ids_overlap(&other.wake_targets, &self.wait_units)
+        {
             return true;
         }
 
@@ -278,14 +302,9 @@ impl StepFootprint {
             && self.wait_mailboxes.is_empty()
             && self.wait_signals.is_empty()
             && self.wait_barriers.is_empty()
+            && self.wait_units.is_empty()
             && self.wake_targets.is_empty()
             && self.reservation_lines.is_empty()
-    }
-
-    fn has_any_wait(&self) -> bool {
-        !self.wait_mailboxes.is_empty()
-            || !self.wait_signals.is_empty()
-            || !self.wait_barriers.is_empty()
     }
 }
 

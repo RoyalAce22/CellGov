@@ -105,6 +105,18 @@ pub enum FakeOp {
         /// Barrier id.
         barrier: u64,
     },
+    /// Emit `WakeUnit` naming `unit`.
+    ///
+    /// The one opcode that returns another unit to runnable, which is
+    /// what a program needs to reach a `Barrier` opcode's waiter
+    /// again.
+    ///
+    /// An id no unit holds is not a silent no-op: the commit pipeline
+    /// refuses the whole batch as `CommitError::UnknownWakeTarget`.
+    Wake {
+        /// Unit to return to runnable.
+        unit: u64,
+    },
     /// Terminal: yield `Finished`.
     End,
 }
@@ -281,6 +293,13 @@ impl ExecutionUnit for FakeIsaUnit {
                     source: self.id,
                 });
                 YieldReason::WaitingSync
+            }
+            FakeOp::Wake { unit } => {
+                effects.push(Effect::WakeUnit {
+                    target: UnitId::new(unit),
+                    source: self.id,
+                });
+                YieldReason::BudgetExhausted
             }
             FakeOp::ReservationAcquire { line_addr } => {
                 effects.push(Effect::ReservationAcquire {

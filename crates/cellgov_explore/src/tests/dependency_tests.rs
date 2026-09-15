@@ -247,8 +247,27 @@ fn dma_over_reserved_line_conflicts_without_byte_overlap() {
     assert!(b.conflicts(&a));
 }
 
+/// The wake names the unit that waits, so the order decides whether
+/// that unit ends runnable or blocked.
 #[test]
-fn wake_vs_wait_conflicts() {
+fn a_wake_conflicts_with_the_wait_it_enables() {
+    let waiter = UnitId::new(1);
+    let a = StepFootprint::from_effects(&[Effect::WakeUnit {
+        target: waiter,
+        source: UnitId::new(0),
+    }]);
+    let b = StepFootprint::from_effects(&[Effect::WaitOnEvent {
+        target: cellgov_effects::WaitTarget::Mailbox(MailboxId::new(1)),
+        source: waiter,
+    }]);
+    assert!(a.conflicts(&b));
+    assert!(b.conflicts(&a), "the pair conflicts from either side");
+}
+
+/// The wake names a third unit, so it reaches this waiter through
+/// nothing: each step sets a different unit's status.
+#[test]
+fn a_wake_of_another_unit_is_independent_of_a_wait() {
     let a = StepFootprint::from_effects(&[Effect::WakeUnit {
         target: UnitId::new(2),
         source: UnitId::new(0),
@@ -257,23 +276,30 @@ fn wake_vs_wait_conflicts() {
         target: cellgov_effects::WaitTarget::Mailbox(MailboxId::new(1)),
         source: UnitId::new(1),
     }]);
-    assert!(a.conflicts(&b));
+    assert!(!a.conflicts(&b));
+    assert!(!b.conflicts(&a));
 }
 
+/// The wait target does not decide the pairing: a wake of the waiter
+/// conflicts whatever the wait names.
 #[test]
-fn wait_vs_wake_conflicts_symmetric() {
-    let a = StepFootprint::from_effects(&[Effect::WaitOnEvent {
-        target: cellgov_effects::WaitTarget::Mailbox(MailboxId::new(1)),
+fn the_wait_target_does_not_decide_the_pairing() {
+    let waiter = UnitId::new(1);
+    let wake = StepFootprint::from_effects(&[Effect::WakeUnit {
+        target: waiter,
         source: UnitId::new(0),
     }]);
-    let b = StepFootprint::from_effects(&[Effect::WakeUnit {
-        target: UnitId::new(3),
-        source: UnitId::new(1),
-    }]);
-    assert!(
-        a.conflicts(&b),
-        "wait vs wake should conflict symmetrically"
-    );
+    for target in [
+        cellgov_effects::WaitTarget::Mailbox(MailboxId::new(4)),
+        cellgov_effects::WaitTarget::Signal(SignalId::new(4)),
+        cellgov_effects::WaitTarget::Barrier(BarrierId::new(4)),
+    ] {
+        let wait = StepFootprint::from_effects(&[Effect::WaitOnEvent {
+            target,
+            source: waiter,
+        }]);
+        assert!(wake.conflicts(&wait), "{target:?}");
+    }
 }
 
 #[test]
