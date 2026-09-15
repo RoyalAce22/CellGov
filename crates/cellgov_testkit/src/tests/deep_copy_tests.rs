@@ -11,9 +11,7 @@ fn two_space_fixture() -> ScenarioFixture {
         .budget(Budget::new(1))
         .max_steps(10)
         .register(|rt: &mut Runtime| {
-            rt.create_address_space(CHILD).unwrap();
-            let mem = rt.space_memory_mut(CHILD).unwrap();
-            *mem = GuestMemory::from_regions(vec![
+            let child = GuestMemory::from_regions(vec![
                 Region::new(0, 16, "child_main", PageSize::Page4K),
                 Region::with_access(
                     0x1000,
@@ -31,8 +29,9 @@ fn two_space_fixture() -> ScenarioFixture {
                 ),
             ])
             .unwrap();
+            rt.create_address_space_with(CHILD, child).unwrap();
             let seed = ByteRange::new(GuestAddr::new(0), 4).unwrap();
-            mem.apply_commit(seed, &[1, 2, 3, 4]).unwrap();
+            rt.place_bytes(CHILD, seed, &[1, 2, 3, 4]).unwrap();
             rt.register_unit_with(|id| WritingUnit::at_zero(id, 2));
         })
         .build()

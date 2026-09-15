@@ -228,11 +228,14 @@ fn rt_with_child_space(child_unit: cellgov_event::UnitId) -> Runtime {
     write_bytes(&mut rt, CHILD_PC, &BOOT_WORD.to_be_bytes());
 
     let space = cellgov_core::AddressSpaceId::new(1);
-    rt.create_address_space(space).unwrap();
-    rt.space_memory_mut(space)
-        .unwrap()
-        .install_region(CHILD_PC, 0x1000, "child-main", PageSize::Page4K)
-        .unwrap();
+    let child = GuestMemory::from_regions(vec![Region::new(
+        CHILD_PC,
+        0x1000,
+        "child-main",
+        PageSize::Page4K,
+    )])
+    .unwrap();
+    rt.create_address_space_with(space, child).unwrap();
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(CHILD_PC), 4).unwrap();
     rt.place_bytes(space, range, &CHILD_WORD.to_be_bytes())
         .unwrap();

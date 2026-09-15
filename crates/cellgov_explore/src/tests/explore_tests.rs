@@ -3,7 +3,7 @@
 use super::*;
 use cellgov_core::AddressSpaceId;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
-use cellgov_mem::{GuestMemory, PageSize};
+use cellgov_mem::{GuestMemory, PageSize, Region};
 use cellgov_time::Budget;
 
 #[test]
@@ -14,10 +14,9 @@ fn cross_space_pair_is_schedule_stable() {
     let result = explore_pair(|| {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.create_address_space(AddressSpaceId::new(1)).unwrap();
-        rt.space_memory_mut(AddressSpaceId::new(1))
-            .unwrap()
-            .install_region(0, 64, "child", PageSize::Page64K)
+        let child = GuestMemory::from_regions(vec![Region::new(0, 64, "child", PageSize::Page64K)])
+            .unwrap();
+        rt.create_address_space_with(AddressSpaceId::new(1), child)
             .unwrap();
         rt.register_unit_with(|id| {
             FakeIsaUnit::new(
@@ -60,10 +59,9 @@ fn child_space_only_divergence_is_not_schedule_stable() {
     let result = explore_pair(|| {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.create_address_space(AddressSpaceId::new(1)).unwrap();
-        rt.space_memory_mut(AddressSpaceId::new(1))
-            .unwrap()
-            .install_region(0, 64, "child", PageSize::Page64K)
+        let child = GuestMemory::from_regions(vec![Region::new(0, 64, "child", PageSize::Page64K)])
+            .unwrap();
+        rt.create_address_space_with(AddressSpaceId::new(1), child)
             .unwrap();
         rt.register_unit_with(|id| {
             FakeIsaUnit::new(

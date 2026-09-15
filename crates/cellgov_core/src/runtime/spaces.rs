@@ -234,19 +234,35 @@ pub(super) fn resolve_commit_targets<'a>(
 }
 
 impl Runtime {
-    /// Create an empty child address space. The caller installs
-    /// regions via [`Runtime::space_memory_mut`].
+    /// Create an empty child address space.
+    ///
+    /// [`Runtime::create_address_space_with`] takes the memory instead.
     ///
     /// # Errors
     /// [`SpaceError::SpaceExists`] for space 0 or a duplicate id.
     pub fn create_address_space(&mut self, space: AddressSpaceId) -> Result<(), SpaceError> {
+        self.create_address_space_with(
+            space,
+            GuestMemory::from_regions(Vec::new()).expect("empty region set cannot overlap"),
+        )
+    }
+
+    /// Create a child address space over `memory`.
+    ///
+    /// From here bytes reach the space through the commit pipeline or
+    /// [`Runtime::place_bytes`].
+    ///
+    /// # Errors
+    /// [`SpaceError::SpaceExists`] for space 0 or a duplicate id.
+    pub fn create_address_space_with(
+        &mut self,
+        space: AddressSpaceId,
+        memory: GuestMemory,
+    ) -> Result<(), SpaceError> {
         if space == AddressSpaceId::BOOT || self.spaces.extra.contains_key(&space) {
             return Err(SpaceError::SpaceExists(space.raw()));
         }
-        self.spaces.extra.insert(
-            space,
-            GuestMemory::from_regions(Vec::new()).expect("empty region set cannot overlap"),
-        );
+        self.spaces.extra.insert(space, memory);
         self.spaces
             .extra_reservations
             .insert(space, ReservationTable::new());
@@ -274,15 +290,13 @@ impl Runtime {
             .ok_or(SpaceError::UnknownSpace(space.raw()))
     }
 
-    /// Mutable view of `space`'s memory, for region installs and image
-    /// loads during space construction.
-    ///
-    /// A write into a live space goes through the commit pipeline, or
-    /// through [`Runtime::place_bytes`].
+    /// Mutable view of `space`'s memory, for a test that shapes a
+    /// space in place.
     ///
     /// # Errors
     /// [`SpaceError::UnknownSpace`] when no such space exists.
-    pub fn space_memory_mut(
+    #[cfg(test)]
+    pub(crate) fn space_memory_mut(
         &mut self,
         space: AddressSpaceId,
     ) -> Result<&mut GuestMemory, SpaceError> {
@@ -312,14 +326,13 @@ impl Runtime {
             .ok_or(SpaceError::UnknownSpace(space.raw()))
     }
 
-    /// Mutable view of `space`'s reservation table, for test seeding.
-    ///
-    /// Mid-run, the commit pipeline and the host write's clear sweep
-    /// are the writers that keep the reservation contract.
+    /// Mutable view of `space`'s reservation table, for a test that
+    /// seeds a reservation.
     ///
     /// # Errors
     /// [`SpaceError::UnknownSpace`] when no such space exists.
-    pub fn space_reservations_mut(
+    #[cfg(test)]
+    pub(crate) fn space_reservations_mut(
         &mut self,
         space: AddressSpaceId,
     ) -> Result<&mut ReservationTable, SpaceError> {
