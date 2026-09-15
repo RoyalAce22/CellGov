@@ -86,9 +86,12 @@ fn a_transfer_reaching_past_the_address_space_records_no_read() {
     let ctx = ExecutionContext::new(&mem);
 
     let mut effects = Vec::new();
-    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
     assert!(read_ranges(&effects).is_empty(), "{effects:?}");
+    // The refusal, not an empty vector, is why no read is recorded. An
+    // empty batch alone would also satisfy the assertion above.
+    assert_eq!(result.yield_reason, YieldReason::Fault);
 }
 
 #[test]
@@ -101,9 +104,10 @@ fn a_transfer_whose_local_store_destination_escapes_records_no_read() {
     let ctx = ExecutionContext::new(&mem);
 
     let mut effects = Vec::new();
-    let _ = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
+    let result = unit.run_until_yield(Budget::new(100), &ctx, &mut effects);
 
     assert!(read_ranges(&effects).is_empty(), "{effects:?}");
+    assert_eq!(result.yield_reason, YieldReason::Fault);
 }
 
 #[test]

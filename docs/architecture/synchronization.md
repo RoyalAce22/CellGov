@@ -184,7 +184,9 @@ flowchart TD
 
 - `ReservationAcquire { line_addr, source }` inserts or replaces
   the unit's entry. Emitted by `lwarx` / `ldarx` (PPU) and
-  `MFC_GETLLAR` (SPU).
+  `MFC_GETLLAR` (SPU). A `MFC_GETLLAR` whose line does not reach
+  local store emits none and clears the local register too, so the
+  two halves agree that the unit holds nothing.
 - `ConditionalStore { range, bytes, source, ordering,
 source_time }` commits the success path of `stwcx.` / `stdcx.`
   / `MFC_PUTLLC`. The commit pipeline applies the bytes through

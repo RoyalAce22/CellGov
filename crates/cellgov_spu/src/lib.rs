@@ -48,6 +48,15 @@ const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
 /// An MFC command whose staged tag id is outside 0..31. The low bits
 /// carry the value the guest wrote, masked to 16 bits.
 const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
+/// A synchronous MFC read -- `getllar` -- whose effective address
+/// resolves to no region, or whose local-store destination escapes the
+/// store. Either arm carries the low 16 bits of the effective address,
+/// masked so the detail cannot reach the class field.
+///
+/// Distinct from [`FAULT_MFC_GET_UNRESOLVED`] so a trace separates a
+/// line the atomic path never read from a parked transfer that never
+/// landed.
+const FAULT_MFC_READ_UNRESOLVED: u32 = 0x0009_0000;
 
 /// Records the bytes a transfer copied from main memory into local store.
 ///
@@ -251,23 +260,40 @@ impl ExecutionUnit for SpuExecutionUnit {
                     size,
                     acquire_line,
                 } => {
-                    let src_start = ea as usize;
-                    // MFC_EAH and MFC_EAL are write channels the SPU
-                    // program sets, so `ea` can sit at the top of the
-                    // space, where the sum carries out of it. The
-                    // saturating add leaves the bound check below to
-                    // refuse the transfer.
-                    let src_end = src_start.saturating_add(size as usize);
-                    let mem = ctx.memory().as_bytes();
-                    if src_end <= mem.len() {
-                        let dst_start = lsa as usize;
-                        let dst_end = dst_start + size as usize;
-                        if dst_end <= self.state.ls.len() {
-                            self.state.ls[dst_start..dst_end]
-                                .copy_from_slice(&mem[src_start..src_end]);
-                            effects.extend(shared_read(ea, size, self.id));
-                        }
+                    // Resolved through the memory's own read, so the
+                    // line reaches whichever region backs it. The guest
+                    // writes `ea` through MFC_EAH and MFC_EAL, so it can
+                    // also name an address no region backs.
+                    let read = ByteRange::new(GuestAddr::new(ea), u64::from(size))
+                        .and_then(|src| ctx.memory().read(src))
+                        .and_then(|bytes| {
+                            let dst_start = lsa as usize;
+                            let dst_end = dst_start.checked_add(size as usize)?;
+                            let slot = self.state.ls.get_mut(dst_start..dst_end)?;
+                            slot.copy_from_slice(bytes);
+                            Some(())
+                        });
+                    if read.is_none() {
+                        // The reservation is the guest's evidence that
+                        // it holds the line. Acquiring one over bytes
+                        // that never arrived would let a later putllc
+                        // succeed against a comparison made on stale
+                        // local store, so the refusal is named and no
+                        // reservation is taken.
+                        self.state.reservation = None;
+                        effects.clear();
+                        self.status = UnitStatus::Faulted;
+                        return ExecutionStepResult {
+                            yield_reason: YieldReason::Fault,
+                            consumed_cost: InstructionCost::new(budget.raw() - remaining),
+                            local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                            fault: Some(FaultKind::Guest(
+                                FAULT_MFC_READ_UNRESOLVED | (ea as u32 & 0xFFFF),
+                            )),
+                            syscall_args: None,
+                        };
                     }
+                    effects.extend(shared_read(ea, size, self.id));
                     // MFC_GETLLAR also installs the unit's reservation entry.
                     if let Some(line_addr) = acquire_line {
                         effects.push(Effect::ReservationAcquire {
@@ -339,6 +365,10 @@ mod parked_get_tests;
 #[cfg(test)]
 #[path = "tests/tag_id_tests.rs"]
 mod tag_id_tests;
+
+#[cfg(test)]
+#[path = "tests/getllar_tests.rs"]
+mod getllar_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
