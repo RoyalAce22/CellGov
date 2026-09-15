@@ -57,7 +57,11 @@ fn keeping_a_branch_keeps_the_tree_below_it() {
 
     let dropped = tree.retain_branch(unit(7));
 
-    assert_eq!(dropped, 1, "the other branch went, and was counted");
+    assert_eq!(
+        dropped,
+        vec![unit(2)],
+        "the other branch went, and is named"
+    );
     assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(7)]);
     let below = tree.subtree(unit(7));
     assert_eq!(
@@ -79,7 +83,7 @@ fn keeping_an_absent_branch_arms_that_unit_alone() {
     let mut tree = WakeupTree::new();
     tree.insert(&seq(&[(7, 0)]), &free);
     let dropped = tree.retain_branch(unit(3));
-    assert_eq!(dropped, 1, "the branch it did hold went");
+    assert_eq!(dropped, vec![unit(7)], "the branch it did hold went");
     assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(3)]);
     assert!(
         tree.subtree(unit(3)).is_empty(),

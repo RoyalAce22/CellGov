@@ -24,7 +24,7 @@ use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason}
 use crate::wakeup::{initials, SeqEvent, WakeupTree};
 use cellgov_core::{Runtime, RuntimeSnapshot};
 use cellgov_event::UnitId;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// What one execution of the search produced.
 struct Run {
@@ -44,6 +44,8 @@ struct Run {
     /// - [`choose`]'s own drops.
     /// - A branch a warp depth held before the search knew what that
     ///   warp wakes ([`Frame::warp_woke`]).
+    ///
+    /// One per head per frame ([`Frame::dropped`]).
     dropped_branches: usize,
 }
 
@@ -66,6 +68,15 @@ struct Frame {
     /// Footprint each unit produced when the search ran it from this
     /// prefix, which is what the independence test at line 17 reads.
     footprints: BTreeMap<UnitId, StepFootprint>,
+    /// Branch heads this frame already dropped, so a re-grafted branch
+    /// costs the reversal once.
+    ///
+    /// A race can graft a sequence under a head this frame dropped
+    /// earlier, and the state at this depth is what every replay of the
+    /// prefix above reaches, so the branch is unreachable again.
+    /// [`crate::classify::ExplorationResult::reversals_dropped`] says
+    /// what the count this feeds does and does not measure.
+    dropped: BTreeSet<UnitId>,
     /// Units the all-blocked time warp woke here, empty at every depth
     /// no warp resolved.
     ///
@@ -76,6 +87,14 @@ struct Frame {
     /// set, and the selection call the runtime makes after the warp
     /// delivers that choice.
     warp_woke: Vec<UnitId>,
+}
+
+impl Frame {
+    /// What a drop of the branch through `unit` costs the reversal
+    /// count: 1 the first time this frame drops it, 0 after.
+    fn drop_cost(&mut self, unit: UnitId) -> usize {
+        usize::from(self.dropped.insert(unit))
+    }
 }
 
 /// Why one execution of the search stopped.
@@ -294,6 +313,7 @@ fn run_one(
                     sleep,
                     wut,
                     footprints: BTreeMap::new(),
+                    dropped: BTreeSet::new(),
                     warp_woke: Vec::new(),
                 });
             }
@@ -337,6 +357,7 @@ fn run_one(
                     sleep,
                     wut,
                     footprints: BTreeMap::new(),
+                    dropped: BTreeSet::new(),
                     warp_woke: Vec::new(),
                 });
             }
@@ -368,8 +389,19 @@ fn run_one(
             // it, which `inherit` hands down where a race grafted a
             // sequence reaching past this prefix; a drop then needs the
             // head of what is left to name a unit the warp does not wake.
+            // A decided visit that retires a branch retires one the
+            // frame may still owe, and the memo then costs the second
+            // drop of that head nothing.
+            debug_assert!(
+                !decided || frame.chosen == step.unit,
+                "the depth prescribed {:?} and the warp delivered {:?}",
+                frame.chosen,
+                step.unit,
+            );
             if !decided || frame.chosen != step.unit {
-                dropped_branches += frame.wut.retain_branch(step.unit);
+                for branch in frame.wut.retain_branch(step.unit) {
+                    dropped_branches += frame.drop_cost(branch);
+                }
             }
             frame.chosen = step.unit;
         }
@@ -543,9 +575,10 @@ fn backtrack(frames: &mut Vec<Frame>) -> Option<usize> {
 /// not runnable here names a reversal this state cannot reach:
 /// `Execution::races` reports a racing pair without asking whether the
 /// later unit can go first here. `choose` drops that branch and counts
-/// it in `dropped`. The branch carries every sequence grafted below it,
-/// so a drop gives up at least one equivalence class, which is why a
-/// count above zero withdraws
+/// it in `dropped`, once for each head this frame drops
+/// ([`Frame::dropped`]). The branch carries every sequence grafted
+/// below it, so a drop gives up at least one equivalence class, which
+/// is why a count above zero withdraws
 /// [`ExplorationResult::classes_explored`].
 ///
 /// With no branch left the depth takes any runnable unit it did not
@@ -558,7 +591,7 @@ fn choose(frame: &mut Frame, runnable: &[UnitId], dropped: &mut usize) -> Option
             return Some(unit);
         }
         frame.wut.remove_branch(unit);
-        *dropped += 1;
+        *dropped += frame.drop_cost(unit);
     }
     let unit = runnable
         .iter()
@@ -575,3 +608,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/already_explored_tests.rs"]
 mod already_explored_tests;
+
+#[cfg(test)]
+#[path = "tests/dropped_once_tests.rs"]
+mod dropped_once_tests;

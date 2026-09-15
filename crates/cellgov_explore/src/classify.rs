@@ -111,12 +111,12 @@ pub struct ExplorationResult {
     /// drop can carry more than one owed sequence, so it is not a count
     /// of the classes given up.
     ///
-    /// The two searches count different things, so a ratio between
-    /// their numbers over one workload reads nothing.
-    /// [`crate::backtrack::explore_backtrack`] counts a race once per
-    /// prefix that owed it, however many of its executions re-read that
-    /// race. [`crate::optimal::explore_optimal`] counts each wakeup
-    /// branch it could not take, over every execution that met one.
+    /// Neither number grows with revisits, and the two count different
+    /// objects, so a ratio between them over one workload reads
+    /// nothing. [`crate::backtrack::explore_backtrack`] counts a prefix
+    /// and a race, so two races at one prefix are two.
+    /// [`crate::optimal::explore_optimal`] counts a frame and a branch
+    /// head, so every race that shares a head at one depth is one.
     ///
     /// Zero beside an empty count means no drop withdrew the count: a
     /// bound or a short stop did, or the search claims no count of its
