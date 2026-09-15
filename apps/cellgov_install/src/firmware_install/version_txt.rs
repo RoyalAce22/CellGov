@@ -10,6 +10,9 @@ use cellgov_ps3_abi::format::dev_flash::{parse_version_txt, VERSION_TXT_COMPONEN
 
 use super::error::FirmwareInstallError;
 
+/// Characters of the file's first line a refusal quotes.
+const LEADING_SHOWN: usize = 64;
+
 fn version_txt_path(dev_flash_dir: &Path) -> PathBuf {
     let mut p = dev_flash_dir.to_path_buf();
     for c in VERSION_TXT_COMPONENTS {
@@ -33,9 +36,22 @@ pub(super) fn read_version(dev_flash_dir: &Path) -> Result<String, FirmwareInsta
             source,
         }
     })?;
-    parse_version_txt(&text).ok_or(FirmwareInstallError::VersionUnparseable { path })
+    parse_version_txt(&text).ok_or_else(|| FirmwareInstallError::VersionUnparseable {
+        path,
+        leading: text
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .take(LEADING_SHOWN)
+            .collect(),
+    })
 }
 
 #[cfg(test)]
 #[path = "tests/version_txt_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/version_txt_short_minor_tests.rs"]
+mod short_minor_tests;

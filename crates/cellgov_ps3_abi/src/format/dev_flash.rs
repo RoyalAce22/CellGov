@@ -50,16 +50,20 @@ pub const VERSION_TXT_MINOR_DIGITS: usize = 4;
 
 /// Minor digits kept in the version a user sees, the leading part of
 /// [`VERSION_TXT_MINOR_DIGITS`].
-const VERSION_TXT_MINOR_DIGITS_SHOWN: usize = 2;
+///
+/// The retail 1.02 image writes its field at this width, with no
+/// sub-revision digits: `release:01.02:`.
+pub const VERSION_TXT_MINOR_DIGITS_SHOWN: usize = 2;
 
 /// The version a user sees, from a `vsh/etc/version.txt` text:
 /// `release:04.9100:` reads as `4.91`.
 ///
 /// The file opens with a `release:<version>:` record whose version is
-/// fixed-width and zero-padded: [`VERSION_TXT_MAJOR_DIGITS`] major
-/// digits, a dot, then [`VERSION_TXT_MINOR_DIGITS`] minor digits.
-/// `None` unless the leading [`VERSION_TXT_RELEASE_FIELD`] record
-/// carries exactly that shape.
+/// zero-padded: [`VERSION_TXT_MAJOR_DIGITS`] major digits, a dot, then
+/// either [`VERSION_TXT_MINOR_DIGITS`] minor digits or only the
+/// [`VERSION_TXT_MINOR_DIGITS_SHOWN`] a user sees. `None` unless the
+/// leading [`VERSION_TXT_RELEASE_FIELD`] record carries one of those
+/// two shapes.
 pub fn parse_version_txt(text: &str) -> Option<String> {
     let (record, rest) = text.split_once(':')?;
     if record != VERSION_TXT_RELEASE_FIELD {
@@ -70,7 +74,8 @@ pub fn parse_version_txt(text: &str) -> Option<String> {
     let (major, minor) = field.split_once('.')?;
     let fixed_width = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
     if !fixed_width(major, VERSION_TXT_MAJOR_DIGITS)
-        || !fixed_width(minor, VERSION_TXT_MINOR_DIGITS)
+        || !(fixed_width(minor, VERSION_TXT_MINOR_DIGITS)
+            || fixed_width(minor, VERSION_TXT_MINOR_DIGITS_SHOWN))
     {
         return None;
     }

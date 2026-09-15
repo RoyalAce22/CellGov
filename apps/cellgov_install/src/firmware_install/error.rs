@@ -97,12 +97,18 @@ pub enum FirmwareInstallError {
         #[source]
         source: std::io::Error,
     },
-    /// `version.txt` is there but carries no `<field>:<version>:`
-    /// record, so no version can be read out of it.
-    #[error("{} carries no colon-delimited version field", path.display())]
+    /// `version.txt` is there, but its first record is not a `release`
+    /// record the version rule accepts, so it names no version.
+    #[error(
+        "{} opens with {leading:?}, which is not a release:<MM>.<mmmm>: or \
+         release:<MM>.<mm>: record",
+        path.display()
+    )]
     VersionUnparseable {
         /// The file that was read.
         path: PathBuf,
+        /// The file's first line, cut to a bounded length.
+        leading: String,
     },
     /// That firmware version is installed, from this same PUP.
     #[error(
