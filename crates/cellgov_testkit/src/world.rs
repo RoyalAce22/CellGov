@@ -22,6 +22,8 @@ pub struct CountingUnit {
     id: UnitId,
     steps: Cell<u64>,
     max: u64,
+    /// Ticks each step spends, or `None` to spend the whole budget.
+    cost: Option<u64>,
 }
 
 impl CountingUnit {
@@ -31,6 +33,20 @@ impl CountingUnit {
             id,
             steps: Cell::new(0),
             max,
+            cost: None,
+        }
+    }
+
+    /// Like [`CountingUnit::new`], spending `cost` ticks per step
+    /// instead of the whole budget.
+    ///
+    /// Two units that differ here spend different guest time for the
+    /// same number of steps, which is what moves a pending deadline
+    /// against a schedule that reorders them.
+    pub fn of_cost(id: UnitId, max: u64, cost: u64) -> Self {
+        Self {
+            cost: Some(cost),
+            ..Self::new(id, max)
         }
     }
 
@@ -69,9 +85,19 @@ impl ExecutionUnit for CountingUnit {
             marker: n as u32,
             source: self.id,
         });
+        // The runtime adds any cost to the clock without holding it
+        // against the budget, so a fixture asking for more than a step
+        // was given advances guest time in a way no unit can.
+        debug_assert!(
+            self.cost.is_none_or(|c| c <= budget.raw()),
+            "counting unit {:?} spends {:?} ticks against a budget of {}",
+            self.id,
+            self.cost,
+            budget.raw(),
+        );
         ExecutionStepResult {
             yield_reason,
-            consumed_cost: InstructionCost::new(budget.raw()),
+            consumed_cost: InstructionCost::new(self.cost.unwrap_or(budget.raw())),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
             syscall_args: None,
@@ -249,6 +275,87 @@ impl ExecutionUnit for WritingUnit {
         ));
         ExecutionStepResult {
             yield_reason,
+            consumed_cost: InstructionCost::new(budget.raw()),
+            local_diagnostics: LocalDiagnostics::empty(),
+            fault: None,
+            syscall_args: None,
+        }
+    }
+    fn snapshot(&self) -> u64 {
+        self.steps.get()
+    }
+}
+
+/// Parks on `sys_timer_usleep`, then writes `value` over `range` once
+/// the deadline fires and finishes.
+///
+/// The guest clock is global, so every other unit's tick spend moves
+/// this unit's wake against their steps. That is what makes a workload
+/// holding one of these schedule-sensitive.
+#[derive(Clone)]
+pub struct SleepingWriter {
+    id: UnitId,
+    usec: u64,
+    range: ByteRange,
+    value: u8,
+    steps: Cell<u64>,
+}
+
+impl SleepingWriter {
+    /// Construct a unit that sleeps `usec` microseconds, then writes
+    /// `value` over `range`.
+    pub fn new(id: UnitId, usec: u64, range: ByteRange, value: u8) -> Self {
+        Self {
+            id,
+            usec,
+            range,
+            value,
+            steps: Cell::new(0),
+        }
+    }
+}
+
+impl ExecutionUnit for SleepingWriter {
+    type Snapshot = u64;
+    fn unit_id(&self) -> UnitId {
+        self.id
+    }
+    fn status(&self) -> UnitStatus {
+        if self.steps.get() >= 2 {
+            UnitStatus::Finished
+        } else {
+            UnitStatus::Runnable
+        }
+    }
+    fn run_until_yield(
+        &mut self,
+        budget: Budget,
+        _ctx: &ExecutionContext<'_>,
+        effects: &mut Vec<Effect>,
+    ) -> ExecutionStepResult {
+        let n = self.steps.get() + 1;
+        self.steps.set(n);
+        if n == 1 {
+            let mut args = [0u64; 9];
+            args[0] = cellgov_ps3_abi::lv2::syscall::TIMER_USLEEP;
+            args[1] = self.usec;
+            return ExecutionStepResult {
+                yield_reason: YieldReason::Syscall,
+                consumed_cost: InstructionCost::new(budget.raw()),
+                local_diagnostics: LocalDiagnostics::with_pc(0x1000),
+                fault: None,
+                syscall_args: Some(args),
+            };
+        }
+        let bytes = vec![self.value; self.range.length() as usize];
+        effects.push(Effect::shared_write(
+            self.range,
+            WritePayload::new(bytes),
+            self.id,
+            GuestTicks::ZERO,
+        ));
+        ExecutionStepResult {
+            yield_reason: YieldReason::Finished,
             consumed_cost: InstructionCost::new(budget.raw()),
             local_diagnostics: LocalDiagnostics::empty(),
             fault: None,
