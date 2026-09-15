@@ -156,21 +156,14 @@ impl HappensBefore {
 }
 
 /// Positions one unit's events sit at.
+///
+/// A conflict scan visits every one: [`StepFootprint::conflicts`] holds
+/// a step that rides a landing against every step, so no property of a
+/// footprint narrows the set a scan walks. The scan over a title window
+/// is therefore quadratic in the window's steps.
 #[derive(Debug, Clone, Default)]
 struct UnitEvents {
     all: Vec<usize>,
-    /// Those of `all` whose footprint touched shared state. A
-    /// local-only footprint conflicts with nothing.
-    ///
-    /// This narrows the conflict scan for a unit that runs mostly
-    /// local steps, which the fake-ISA workloads do. Two things leave
-    /// it holding every position `all` does: a PPU block records the
-    /// text it fetched, and any step taken while a transfer is in
-    /// flight records that transfer's ranges. The scan over a title
-    /// window is therefore quadratic in the window's steps, and
-    /// shortening it needs an index over the bytes a footprint names
-    /// rather than over which steps have one.
-    shared: Vec<usize>,
 }
 
 /// The events one run retired, in the order the schedule ran them.
@@ -238,9 +231,6 @@ impl Execution {
         let index = self.events.len();
         let positions = self.by_unit.entry(unit).or_default();
         positions.all.push(index);
-        if !footprint.is_local_only() {
-            positions.shared.push(index);
-        }
         self.events.push(Event {
             id: EventId { index, unit },
             footprint,
@@ -304,8 +294,8 @@ impl Execution {
         let (Some(left), Some(right)) = (self.by_unit.get(&a), self.by_unit.get(&b)) else {
             return false;
         };
-        for &i in &left.shared {
-            for &j in &right.shared {
+        for &i in &left.all {
+            for &j in &right.all {
                 if self.events[i]
                     .footprint
                     .conflicts(&self.events[j].footprint)
@@ -344,8 +334,8 @@ impl Execution {
                     continue;
                 }
                 let ordered = clock.get(unit);
-                let below = positions.shared.partition_point(|&at| at < index);
-                for &candidate in positions.shared[..below].iter().rev() {
+                let below = positions.all.partition_point(|&at| at < index);
+                for &candidate in positions.all[..below].iter().rev() {
                     if ordered.is_some_and(|latest| candidate <= latest) {
                         break;
                     }
@@ -412,17 +402,14 @@ impl Execution {
         }
         let mut races = BTreeSet::new();
         for (index, event) in self.events.iter().enumerate() {
-            if event.footprint.is_local_only() {
-                continue;
-            }
             for (&unit, positions) in &self.by_unit {
                 if unit == event.id.unit {
                     continue;
                 }
                 // Only the latest conflicting event of a unit can
                 // race: an earlier one reaches this event through it.
-                let below = positions.shared.partition_point(|&at| at < index);
-                let Some(&first) = positions.shared[..below]
+                let below = positions.all.partition_point(|&at| at < index);
+                let Some(&first) = positions.all[..below]
                     .iter()
                     .rev()
                     .find(|&&at| self.events[at].footprint.conflicts(&event.footprint))

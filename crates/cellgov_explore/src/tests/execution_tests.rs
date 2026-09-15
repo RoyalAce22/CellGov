@@ -170,6 +170,45 @@ fn a_local_only_step_orders_nothing_and_hides_no_race_across_itself() {
     assert_eq!(execution.races(&hb), BTreeSet::from([race((0, 0), (2, 1))]));
 }
 
+/// A footprint whose step writes the bytes of a transfer in flight.
+fn rides_a_landing(addr: u64) -> StepFootprint {
+    let mut fp = writes(addr);
+    fp.inflight_dma_ranges.push(range(addr, 4));
+    fp
+}
+
+#[test]
+fn a_step_riding_a_landing_races_with_one_that_touched_nothing() {
+    // Every step carries ticks, so a step that touched nothing still
+    // decides which side of the landing the riding step falls on.
+    for (first, second, name) in [
+        (rides_a_landing(0), local(), "rider first"),
+        (local(), rides_a_landing(0), "rider second"),
+    ] {
+        let mut execution = Execution::new();
+        execution.push(unit(0), first);
+        execution.push(unit(1), second);
+        let hb = execution.happens_before();
+        assert_eq!(
+            execution.races(&hb),
+            BTreeSet::from([race((0, 0), (1, 1))]),
+            "{name}: the pair is a race the search is owed",
+        );
+    }
+}
+
+#[test]
+fn two_steps_that_touched_nothing_are_still_independent() {
+    // The conflict scan visits every event, so the footprint test is
+    // the whole of what prunes this pair.
+    let mut execution = Execution::new();
+    execution.push(unit(0), local());
+    execution.push(unit(1), local());
+    let hb = execution.happens_before();
+    assert_eq!(execution.races(&hb), BTreeSet::new());
+    assert!(execution.units_independent(unit(0), unit(1)));
+}
+
 #[test]
 fn a_conflict_orders_its_two_events_and_nothing_orders_a_disjoint_pair() {
     let execution = two_writers_of_one_word();

@@ -46,12 +46,14 @@ flowchart TD
 execution per class and hit no bound. A bounded run reports no count
 and can only be inconclusive.
 
-The count is a claim about coverage, and it is not yet one a reader
-can rely on:
-[`shared_clock`](../../crates/cellgov_explore/tests/shared_clock.rs)
-holds a workload where the search reports every class covered, reaches
-one committed memory, and a schedule written out by hand reaches
-another.
+The count is narrower than it reads. A reversal that names a unit no
+state at that depth can run is dropped and counted, and one drop
+withdraws the count for the whole run, so a search can answer for every
+outcome and still report none.
+[`exhaustive_cover`](../../crates/cellgov_explore/tests/exhaustive_cover.rs)
+walks the choice tree of a small workload, finds both committed
+memories it can reach, and holds the search against them: it reaches
+both, and reports no count.
 
 `StepFootprint`, extracted from the ten shared-resource `Effect`
 variants, drives conservative dependency analysis: step pairs with
@@ -79,11 +81,13 @@ touches no shared resource still moves it. A PPU `mftb` reads that
 clock straight into a guest register, and a timer deadline fires from
 it. The relation records neither, so two steps it calls independent
 can commit different memory when they swap. One clock reader it does
-record is a transfer's landing tick: a step carries what each transfer
-in flight during it will touch at completion, and those ranges conflict
-with another step's access to the same bytes. A transfer writes its
-destination there, and reads its source unless an inline payload
-already carries the bytes. The second is the RSX FIFO advance
+record is a transfer's landing tick. A step carries what each transfer
+in flight during it will touch at completion -- its destination, and
+its source unless an inline payload already holds the bytes -- and
+those ranges conflict with another step's access to them. A step that
+touches the bytes of a transfer in flight during itself conflicts with
+every step instead, because every step carries ticks and so decides
+which side of the landing that step falls on. The second is the RSX FIFO advance
 pass, whose effects commit guest memory and sweep reservations from a
 batch no unit's step emitted. The third is the LV2 handler surface: a
 footprint reads one unit's own step effects, and an LV2 handler's

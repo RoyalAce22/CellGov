@@ -110,8 +110,9 @@ pub struct StepFootprint {
     /// and [`StepFootprint::dma_reads`].
     ///
     /// [`StepFootprint::conflicts`] tests this set against the other
-    /// step's accesses, never against its own copy. Two steps that
-    /// merely share a flight therefore still prune.
+    /// step's accesses, and against this step's own accesses through
+    /// the landing clause. Two steps that only share a flight still
+    /// prune, where neither touches the bytes it moves.
     pub inflight_dma_ranges: Vec<ByteRange>,
 }
 
@@ -376,10 +377,20 @@ impl StepFootprint {
             return true;
         }
 
+        // Every step carries ticks, so every step decides which side of
+        // a landing the step that rides it falls on.
+        if self.rides_a_landing() || other.rides_a_landing() {
+            return true;
+        }
+
         false
     }
 
     /// True when the step accessed no shared resources.
+    ///
+    /// A step this returns `true` for can still conflict: one that
+    /// rides a landing conflicts with every step. No production caller
+    /// reads it; the tests use it to state a footprint's shape.
     pub fn is_local_only(&self) -> bool {
         self.shared_writes.is_empty()
             && self.shared_reads.is_empty()
@@ -395,6 +406,23 @@ impl StepFootprint {
             && self.wake_targets.is_empty()
             && self.reservation_lines.is_empty()
             && self.inflight_dma_ranges.is_empty()
+    }
+
+    /// True when this step touches the bytes of a transfer that was in
+    /// flight while it ran.
+    ///
+    /// The ticks before this step decide where that landing falls.
+    /// Every step carries ticks, so any other step's position against
+    /// this one decides what this step sees. The pair conflicts whether
+    /// or not the other step is in the flight itself.
+    fn rides_a_landing(&self) -> bool {
+        // `note_inflight` reads the queue after the commit that filed
+        // the request, so an enqueue's destination always sits in its
+        // own in-flight set. The step's own DMA ranges stay out of the
+        // pairing for that reason.
+        ranges_overlap(&self.inflight_dma_ranges, &self.shared_writes)
+            || ranges_overlap(&self.inflight_dma_ranges, &self.shared_reads)
+            || write_covers_any_line(&self.inflight_dma_ranges, &self.reservation_lines)
     }
 }
 

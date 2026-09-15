@@ -10,12 +10,6 @@
 //! records that transfer's ranges, and they conflict with another
 //! step's access to the bytes it lands on.
 //!
-//! The verdict is still wrong, and this file is where that is held.
-//! The search explores the classes the relation now offers it and
-//! reaches one destination outcome, while a schedule written out by
-//! hand reaches another. So what is left over this workload is in what
-//! the search covers, not in what the relation can see of it.
-//!
 //! The clock's other two readers, a `mftb` and a timer deadline, reach
 //! no footprint at all; `cellgov_explore::dependency` says so.
 
@@ -135,43 +129,29 @@ fn the_relation_holds_the_pair_that_decides_it_apart() {
     );
 }
 
-/// The verdict is still wrong, and the search is now what makes it so.
-///
-/// The relation offers the search races between the counter and the
-/// writer, and the search explores them. It reports that it covered
-/// every class and hits no bound. Every schedule it reaches lands the
-/// transfer last, while
-/// `a_counting_step_run_first_changes_committed_memory` prescribes a
-/// schedule that does not. A class the search claims it covered
-/// therefore holds two committed memories. That cannot be true of a
-/// class, so the coverage claim is what is wrong.
 #[test]
-fn the_verdict_still_reads_schedule_stable() {
+fn the_verdict_reads_schedule_sensitive() {
     let result = explore_window(workload, &ExplorationConfig::default());
     assert_eq!(
         result.outcome,
-        cellgov_explore::classify::OutcomeClass::ScheduleStable,
+        cellgov_explore::classify::OutcomeClass::ScheduleSensitive,
     );
-    assert!(!result.bounds_hit, "no bound withdraws the claim");
     assert_eq!(
         result.baseline_stop,
         StopReason::Stalled,
-        "the baseline hash covers the whole workload",
-    );
-    assert!(
-        result.classes_explored.is_some(),
-        "the search claims it covered every class",
+        "the baseline runs the workload out",
     );
 
-    // The claim and the counterexample in one place: no schedule the
-    // search reached commits what the hand-written one commits.
+    // The verdict rests on the schedule
+    // `a_counting_step_run_first_changes_committed_memory` writes by
+    // hand, so the search has to reach that memory itself.
     let (diverging, _) = run_with(vec![None, Some(COUNTER)]);
     assert_ne!(result.baseline_hash, diverging);
     assert!(
         result
             .schedules
             .iter()
-            .all(|record| record.memory_hash != diverging),
-        "the search reached no schedule that commits the diverging memory",
+            .any(|record| !record.truncated && record.memory_hash == diverging),
+        "the search reached the schedule that lands the transfer first",
     );
 }
