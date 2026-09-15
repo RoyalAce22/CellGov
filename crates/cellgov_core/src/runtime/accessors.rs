@@ -252,7 +252,7 @@ impl Runtime {
 
     /// Guest ranges host-side code wrote since the last
     /// [`Runtime::step`] began, each tagged with the mechanism that
-    /// wrote it, in the order they landed.
+    /// wrote it and the space it landed in, in the order they landed.
     ///
     /// These writes land outside every unit's batch, so a step's
     /// effect list alone does not show them: an LV2 handler's out
@@ -277,12 +277,22 @@ impl Runtime {
     ///   stands in the list until the next step clears it.
     /// - Every [`RuntimeMode`] builds the list; the mode gates the
     ///   `HostWrite` trace record alone.
-    /// - An entry carries no address space, so a write at one numeric
-    ///   address in two spaces gives two entries that read alike.
+    /// - An entry's space is the space the write landed in, which is
+    ///   not always the space of the unit whose step it belongs to. A
+    ///   wake continuation lands in the waiter's space, and a timer
+    ///   expiry's repair write in the expiring waiter's space. Resolve
+    ///   a range against its own space, through
+    ///   [`Runtime::shared_alias_ranges_in`].
     ///
     /// [`HostWriter::Placement`]: cellgov_trace::HostWriter::Placement
     #[inline]
-    pub fn last_host_writes(&self) -> &[(cellgov_trace::HostWriter, cellgov_mem::ByteRange)] {
+    pub fn last_host_writes(
+        &self,
+    ) -> &[(
+        cellgov_trace::HostWriter,
+        crate::runtime::spaces::AddressSpaceId,
+        cellgov_mem::ByteRange,
+    )] {
         &self.last_host_writes
     }
 

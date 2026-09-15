@@ -70,9 +70,9 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                     break StopReason::CommitError(e);
                 }
                 footprint.note_inflight(rt);
-                footprint.note_host_writes(rt);
                 footprint.note_lv2_effects(rt);
                 footprint.expand_aliases(rt, step.unit);
+                footprint.note_host_writes(rt);
                 // The pass this parks behind reaches no footprint, so
                 // the relation cannot answer for the steps after it.
                 if rt.has_pending_child_init() {

@@ -234,6 +234,12 @@ impl StepFootprint {
     /// status alone rather than what parked it. The mailbox clause
     /// pairs that send with a receive attempt and with nothing else, so
     /// this method records the release as the wake it is.
+    ///
+    /// An effect carries no address space, so
+    /// [`StepFootprint::expand_aliases`] widens a handler's write
+    /// through the stepping unit's space, which a timer expiry's repair
+    /// write does not land in. [`StepFootprint::note_host_writes`]
+    /// reads the same writes back with the space each landed in.
     pub fn note_lv2_effects(&mut self, rt: &cellgov_core::Runtime) {
         let lv2 = Self::from_effects(rt.last_lv2_effects());
         self.merge(lv2);
@@ -285,7 +291,7 @@ impl StepFootprint {
 
     /// Record the host writes that landed during this step.
     ///
-    /// Call it after the step's commit, before
+    /// Call it after the step's commit, and after
     /// [`StepFootprint::expand_aliases`]. The commit runs the LV2
     /// dispatch, resolves the wakes and fires the completions, and each
     /// of those writes guest memory outside the unit's batch. The
@@ -297,8 +303,18 @@ impl StepFootprint {
     /// and this step's position decides them. The match is exhaustive,
     /// so a new `HostWriter` variant does not compile until this
     /// classifies it.
+    ///
+    /// It widens each range itself, through the space the write landed
+    /// in. That is the space `expand_aliases` cannot supply: some of
+    /// these writes land outside the space of the unit whose step they
+    /// belong to.
     pub fn note_host_writes(&mut self, rt: &cellgov_core::Runtime) {
-        for (writer, range) in rt.last_host_writes() {
+        for (writer, space, range) in rt.last_host_writes() {
+            let record = |fp: &mut Self, range: &cellgov_mem::ByteRange| {
+                fp.shared_writes.push(*range);
+                fp.shared_writes
+                    .extend(rt.shared_alias_ranges_in(*space, *range));
+            };
             match writer {
                 // The dispatch holds the tick it ran at, and nothing in
                 // the effect separates a payload built from that tick
@@ -311,7 +327,7 @@ impl StepFootprint {
                 cellgov_trace::HostWriter::Lv2Effect
                 | cellgov_trace::HostWriter::SyscallOutParam
                 | cellgov_trace::HostWriter::WakeContinuation => {
-                    self.shared_writes.push(*range);
+                    record(self, range);
                     self.reads_clock = true;
                 }
                 // The seed copy a newly attached view receives. Its
@@ -323,7 +339,7 @@ impl StepFootprint {
                 // commit. That step's position decides when a poller
                 // sees them.
                 | cellgov_trace::HostWriter::RsxMirror => {
-                    self.shared_writes.push(*range);
+                    record(self, range);
                 }
                 // A landing is already the in-flight set's, which holds
                 // it for every step of the flight rather than for the

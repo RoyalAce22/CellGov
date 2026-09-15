@@ -59,7 +59,7 @@ impl Runtime {
         let cleared = reservations.clear_covering(addr, len, exempt);
         // The push precedes the mode gate below: a FaultDriven run
         // writes no trace record and still publishes this entry.
-        self.last_host_writes.push((writer, range));
+        self.last_host_writes.push((writer, space, range));
         if let Some(tap) = self.tap.as_deref_mut() {
             tap.write(addr, bytes);
         }

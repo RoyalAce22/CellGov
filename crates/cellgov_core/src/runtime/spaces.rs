@@ -749,7 +749,24 @@ impl Runtime {
     /// this to keep cross-space writes to the same shared bytes from
     /// proving false independence.
     pub fn shared_alias_ranges(&self, unit: UnitId, range: ByteRange) -> Vec<ByteRange> {
-        let space = self.spaces.space_of(unit);
+        self.shared_alias_ranges_in(self.spaces.space_of(unit), range)
+    }
+
+    /// Sibling-view aliases of `range` as seen from `space`: for every
+    /// shared mapping whose view in `space` wholly contains `range`,
+    /// the equivalent range through each other view. A range that
+    /// straddles a view's end gives nothing. The commit pipeline's
+    /// fanout replicates under the same containment, so the aliases
+    /// are the bytes a commit would reach.
+    ///
+    /// [`Runtime::shared_alias_ranges`] asks the same question of the
+    /// space a unit runs in. A host write names its own space instead,
+    /// which [`Runtime::last_host_writes`] carries beside each range.
+    pub fn shared_alias_ranges_in(
+        &self,
+        space: AddressSpaceId,
+        range: ByteRange,
+    ) -> Vec<ByteRange> {
         let (start, len) = (range.start().raw(), range.length());
         let mut out = Vec::new();
         for mapping in self.spaces.shared.values() {

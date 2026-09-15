@@ -50,7 +50,11 @@ pub struct Runtime {
     /// Guest ranges host-side code wrote since the last
     /// [`Runtime::step`] began, read through
     /// [`Runtime::last_host_writes`].
-    pub(super) last_host_writes: Vec<(cellgov_trace::HostWriter, cellgov_mem::ByteRange)>,
+    pub(super) last_host_writes: Vec<(
+        cellgov_trace::HostWriter,
+        crate::runtime::spaces::AddressSpaceId,
+        cellgov_mem::ByteRange,
+    )>,
     /// Effects an LV2 handler applied since the last
     /// [`Runtime::step`] began, read through
     /// [`Runtime::last_lv2_effects`].
