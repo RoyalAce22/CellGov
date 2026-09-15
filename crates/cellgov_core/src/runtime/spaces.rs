@@ -20,9 +20,11 @@
 //! against the emitting unit's table only. The one cross-space path
 //! is a shared mapping: replicating a write into a sibling view and
 //! seeding a view at promotion both clear reservations covering the
-//! translated range in that view's space. A DMA transfer resolves both
-//! ends in space 0, and a landing inside a shared view replicates
-//! through that same path.
+//! translated range in that view's space. Each replication carries the
+//! exemption its own writer carries -- a store spares its emitter, a
+//! seed spares nobody. A DMA transfer resolves both ends in space 0,
+//! and a landing inside a shared view replicates through that same
+//! path.
 
 use std::collections::BTreeMap;
 
@@ -629,10 +631,13 @@ impl Runtime {
                 .to_vec()
         };
         let dst_range = ByteRange::new(GuestAddr::new(dst.1), size).expect("validated view range");
-        // Seeding rewrites the destination view's bytes, so it
-        // invalidates every reservation covering them -- the same rule
-        // `fanout_shared_writes` applies to a replicated store, and
-        // the module's cross-space reservation contract.
+        // A seed is the host copying the segment, not any unit's
+        // store, so it exempts nobody and every reservation covering
+        // the rewritten bytes is lost. The store fanout exempts its
+        // emitter instead, for the reason on
+        // `Runtime::fanout_committed_range`.
+        // [PPC-Book2 p:10 s:1.7.3.1] a modification by some other
+        // mechanism loses the reservation.
         self.host_write(HostWriter::SharedViewSeed, dst.0, dst_range, &bytes, None)
             .expect("validated backing region accepts the segment write");
     }
@@ -642,8 +647,10 @@ impl Runtime {
     /// same batch boundary; iterates mappings in key order and views
     /// in registration order. Each replicated write also clears
     /// reservations covering the translated range in the sibling
-    /// view's space (a store through one view is a store to the
-    /// shared bytes every view names); returns the count cleared.
+    /// view's space, sparing the storing unit's own: a store through
+    /// one view is a store to the shared bytes every view names, and
+    /// a unit's own store does not clear its own reservation. Returns
+    /// the count cleared.
     pub(super) fn fanout_shared_writes(
         &mut self,
         source_space: AddressSpaceId,
@@ -654,8 +661,10 @@ impl Runtime {
         }
         let mut cleared = 0usize;
         for effect in effects {
-            let range = match effect {
-                cellgov_effects::Effect::SharedWriteIntent { range, .. } => *range,
+            let (range, source) = match effect {
+                cellgov_effects::Effect::SharedWriteIntent { range, source, .. } => {
+                    (*range, *source)
+                }
                 // Conditional stores commit to the source space only;
                 // an atomic op through a shared view would leave
                 // sibling views incoherent. No producer targets
@@ -689,10 +698,14 @@ impl Runtime {
                 }
                 _ => continue,
             };
-            // No holder is exempt: a store to the shared bytes
-            // invalidates every reservation covering an aliasing range,
-            // the writer's own included.
-            cleared += self.fanout_committed_range(source_space, range, None);
+            // The storing unit keeps its own reservation over the
+            // aliases, as it keeps it over the view it stored through:
+            // every view of a segment names one granule, and a
+            // processor's own store does not clear its own reservation.
+            // [PPC-Book2 p:10 s:1.7.3.1] the granule holds the real
+            // address an effective address maps to, and only another
+            // processor's store clears it.
+            cleared += self.fanout_committed_range(source_space, range, Some(source));
         }
         cleared
     }
@@ -709,8 +722,14 @@ impl Runtime {
     /// address an effective address maps to, so every view of one
     /// segment names one granule, and only another processor's store
     /// clears it.
-    /// [`Runtime::fanout_shared_writes`] passes `None`: a replicated
-    /// store sweeps every holder, the storing unit included.
+    /// [`Runtime::fanout_shared_writes`] passes the effect's own
+    /// source, so a replicated store spares the storer and sweeps
+    /// every other holder -- the split the commit pipeline already
+    /// applied in the source space.
+    ///
+    /// A unit belongs to exactly one space, so the exempt id can name
+    /// a holder in one table only; in every other view's table it
+    /// matches nothing.
     ///
     /// Reads the bytes back out of committed memory rather than taking
     /// them from the caller, so a partial-overlap write replicates what
@@ -875,3 +894,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/spaces_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/shared_view_store_tests.rs"]
+mod shared_view_store_tests;

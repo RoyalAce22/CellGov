@@ -101,7 +101,9 @@ installed all-or-nothing. A committed write through one view fans
 out to every sibling view (including a second view in the same
 space), clears reservations on covered lines in the sibling
 spaces, and invalidates predecoded code at the translated alias
-ranges. A DMA landing inside a view fans out the same way and
+ranges. The storing unit keeps its own reservation over those
+lines, as it keeps it over the view it stored through: every view
+names one reservation granule. A DMA landing inside a view fans out the same way and
 clears the same lines; it invalidates no predecoded code, at the
 alias ranges or at its own destination. Atomic `ConditionalStore`
 through a shared view is unmodeled and refuses loudly. A DMA

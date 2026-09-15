@@ -36,7 +36,9 @@ impl Runtime {
     ///
     /// A sibling-view replication carries whatever its own writer
     /// carries, because every view of a segment names one granule: a
-    /// store replicates with `None`, a DMA landing with its issuer.
+    /// store replicates with its emitter, a DMA landing with its
+    /// issuer. A seed carries `None`, because no unit stored -- the
+    /// host copied the segment in.
     ///
     /// # Errors
     ///
