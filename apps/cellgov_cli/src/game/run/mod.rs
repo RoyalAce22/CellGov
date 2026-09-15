@@ -6,5 +6,5 @@ mod report;
 mod stages;
 
 pub use options::{RunArtifacts, RunExecution, RunReporting};
-pub(in crate::game) use stages::configure_rsx_from_manifest;
+pub(crate) use stages::configure_rsx_from_manifest;
 pub use stages::{run_game, RunSummary};

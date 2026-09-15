@@ -219,7 +219,7 @@ pub(super) struct BootInputs {
     pub(super) control_flags1: Option<u32>,
 }
 
-fn resolve_boot_inputs(
+pub(super) fn resolve_boot_inputs(
     selector: &TitleSelector,
     selection: &BootSelection,
     overrides: BootOverrides,

@@ -169,6 +169,14 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         ],
     },
     Examples {
+        path: "explore title",
+        lines: &[
+            "cellgov explore title --title flow --fw 1.50",
+            "cellgov explore title --title sshd --fw 4.93 --start-step 20000",
+            "cellgov explore title --title wipeout --fw 4.93 --max-schedules 32 --format json",
+        ],
+    },
+    Examples {
         path: "scenario list",
         lines: &["cellgov scenario list"],
     },

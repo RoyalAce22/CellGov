@@ -18,7 +18,7 @@ flowchart TD
   hash --> cls{"across explored schedules"}
   cls -->|all identical| stable["ScheduleStable"]
   cls -->|two differ| sens["ScheduleSensitive"]
-  cls -->|a bound hit first| inc["Inconclusive"]
+  cls -->|"a bound, a refusal, or a baseline that committed nothing"| inc["Inconclusive"]
 ```
 
 `StepFootprint`, extracted from the nine shared-resource `Effect`

@@ -1,5 +1,6 @@
 //! Outcome classification types for an exploration run.
 
+use crate::util::StopReason;
 use cellgov_event::UnitId;
 
 /// Verdict of a bounded exploration run.
@@ -21,6 +22,22 @@ pub enum OutcomeClass {
     Inconclusive,
 }
 
+/// What the default-schedule run of an exploration produced.
+///
+/// The exploration measures every alternate against
+/// [`BaselineRun::hash`]. `steps` and `stop` say which part of the
+/// workload that hash covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BaselineRun {
+    /// Committed-memory hash after the baseline ran.
+    pub hash: u64,
+    /// Steps the baseline committed; see
+    /// [`ExplorationResult::baseline_steps`].
+    pub steps: usize,
+    /// Why the baseline stopped.
+    pub stop: StopReason,
+}
+
 /// One explored alternate schedule and its committed-memory hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduleRecord {
@@ -30,6 +47,11 @@ pub struct ScheduleRecord {
     pub alternate_choice: UnitId,
     /// Final committed-memory hash after the alternate ran.
     pub memory_hash: u64,
+    /// Why this alternate's own replay stopped.
+    ///
+    /// Distinct from [`Self::truncated`], which a prefix baseline sets
+    /// on every record whatever each replay itself did.
+    pub stop: StopReason,
     /// True when this alternate's replay, or the baseline it is
     /// measured against, stopped before the workload finished.
     ///
@@ -44,13 +66,27 @@ pub struct ScheduleRecord {
 pub struct ExplorationResult {
     /// Committed-memory hash from the default-schedule baseline run.
     pub baseline_hash: u64,
+    /// Steps the baseline committed, which with [`Self::baseline_stop`]
+    /// says how much of the workload [`Self::baseline_hash`] covers.
+    ///
+    /// The count omits a step whose commit the runtime refused: its
+    /// effects never reached guest state. A caller that adds the count
+    /// to a starting step index therefore lands one short of
+    /// [`cellgov_core::Runtime::steps_taken`].
+    pub baseline_steps: usize,
+    /// Why the baseline stopped.
+    pub baseline_stop: StopReason,
     /// Records from each non-pruned alternate schedule explored.
     pub schedules: Vec<ScheduleRecord>,
     /// Verdict derived from comparing all hashes.
     pub outcome: OutcomeClass,
     /// Total branching points observed in the baseline run.
     pub total_branching_points: usize,
-    /// True if exploration stopped because a bound was hit.
+    /// True if the `max_schedules` bound was hit, or if the baseline or
+    /// any replay stopped before the workload finished.
+    ///
+    /// [`Self::outcome`] can be [`OutcomeClass::Inconclusive`] with this
+    /// false, when the baseline committed no step at all.
     pub bounds_hit: bool,
     /// Alternates skipped by dependency pruning.
     pub schedules_pruned: usize,
@@ -58,6 +94,15 @@ pub struct ExplorationResult {
     /// schedule, counting every record when the baseline itself
     /// stopped short.
     pub schedules_truncated: usize,
+    /// Alternates whose replay stopped on a
+    /// [`crate::util::StopClass::Refusal`], a subset of
+    /// [`Self::schedules_truncated`].
+    ///
+    /// Only a refusal names a defect in the model:
+    ///
+    /// - a bound stops a replay the caller capped;
+    /// - a blocked replay stops on the workload's own state.
+    pub schedules_refused: usize,
     /// The exploration's first host invariant break as one line for the
     /// caller to report: the baseline's, or the first replay that broke
     /// one when the baseline broke none.

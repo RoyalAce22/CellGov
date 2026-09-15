@@ -1,50 +1,15 @@
-//! `explore` subcommand: bounded schedule exploration for both
-//! testkit scenarios and LV2-driven ELF microtests.
+//! Schedule exploration over a testkit scenario or an LV2-driven ELF
+//! microtest.
 
 use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::compare::{load_observations_from_dir, report_first_invariant_break};
-use super::exit::{die, load_file_or_die};
-use super::parse::{ExploreArgs, ExploreCommand, OutputFormat};
-use super::scenarios::{build_lv2_fixture, microtest_region_defs, scenario_factory, MICROTESTS};
+use crate::cli::compare::{load_observations_from_dir, report_first_invariant_break};
+use crate::cli::exit::{die, load_file_or_die};
+use crate::cli::parse::OutputFormat;
+use crate::cli::scenarios::{build_lv2_fixture, microtest_region_defs, MICROTESTS};
 
-pub(crate) fn run(args: &ExploreArgs, format: OutputFormat, scenarios_list: &[&str]) {
-    match (&args.micro, &args.scenario) {
-        (
-            Some(ExploreCommand::Micro {
-                name,
-                observations_dir,
-            }),
-            _,
-        ) => {
-            if !MICROTESTS.contains(&name.as_str()) {
-                die(&format!(
-                    "unknown microtest: {name}
-available: {}",
-                    MICROTESTS.join(", ")
-                ));
-            }
-            match observations_dir {
-                Some(dir) => run_explore_micro_oracle(name, &dir.display().to_string(), format),
-                None => run_explore_micro(name, format),
-            }
-        }
-        (None, Some(target)) => match scenario_factory(target) {
-            Some(factory) => run_explore(&factory, target, format),
-            None => die(&format!(
-                "unknown scenario: {target}
-available: {}",
-                scenarios_list.join(", ")
-            )),
-        },
-        // clap requires the positional unless the subcommand is
-        // present, so no argv reaches this arm.
-        (None, None) => die("explore: no scenario or micro-test named"),
-    }
-}
-
-fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: OutputFormat) {
+pub(super) fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: OutputFormat) {
     let config = ExplorationConfig::default();
     let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
     match result {
@@ -70,7 +35,7 @@ fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: Output
     }
 }
 
-fn run_explore_micro(name: &str, format: OutputFormat) {
+pub(super) fn run_explore_micro(name: &str, format: OutputFormat) {
     if !MICROTESTS.contains(&name) {
         die(&format!(
             "unknown microtest: {name}\navailable: {}",
@@ -102,7 +67,7 @@ fn run_explore_micro(name: &str, format: OutputFormat) {
     }
 }
 
-fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFormat) {
+pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFormat) {
     if !MICROTESTS.contains(&name) {
         die(&format!(
             "unknown microtest: {name}\navailable: {}",
@@ -260,5 +225,5 @@ fn compare_regions_against_oracle(
 }
 
 #[cfg(test)]
-#[path = "tests/explore_tests.rs"]
+#[path = "tests/scenario_tests.rs"]
 mod tests;

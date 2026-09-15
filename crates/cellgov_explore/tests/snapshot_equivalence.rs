@@ -24,6 +24,7 @@ use cellgov_explore::{
     explore, observe_decisions,
     util::{build_overrides, run_to_stall},
     ExplorationConfig, ExplorationResult, OutcomeClass, PrescribedScheduler, ScheduleRecord,
+    StopClass,
 };
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
@@ -53,6 +54,7 @@ where
     let mut found_divergence = false;
     let mut schedules_pruned = 0usize;
     let mut schedules_truncated = 0usize;
+    let mut schedules_refused = 0usize;
 
     'outer: for bp in log.branching_points() {
         let default_choice = bp.chosen;
@@ -82,6 +84,9 @@ where
             if truncated {
                 schedules_truncated += 1;
                 bounds_hit = true;
+                if stop.class() == StopClass::Refusal {
+                    schedules_refused += 1;
+                }
             } else if hash != baseline_hash {
                 found_divergence = true;
             }
@@ -89,6 +94,7 @@ where
                 branch_step: bp.step,
                 alternate_choice: alt,
                 memory_hash: hash,
+                stop,
                 truncated,
             });
         }
@@ -114,12 +120,15 @@ where
     };
     Some(ExplorationResult {
         baseline_hash,
+        baseline_steps: log.len(),
+        baseline_stop,
         schedules,
         outcome,
         total_branching_points,
         bounds_hit,
         schedules_pruned,
         schedules_truncated,
+        schedules_refused,
         // Every workload here drives the fake ISA only, so no run
         // reaches an LV2 host path that can record a break.
         first_invariant_break: None,
@@ -152,6 +161,14 @@ where
                 s.baseline_hash, f.baseline_hash,
                 "{scenario}: baseline_hash differs"
             );
+            assert_eq!(
+                s.baseline_steps, f.baseline_steps,
+                "{scenario}: baseline_steps differs"
+            );
+            assert_eq!(
+                s.baseline_stop, f.baseline_stop,
+                "{scenario}: baseline_stop differs"
+            );
             assert_eq!(s.outcome, f.outcome, "{scenario}: outcome differs");
             assert_eq!(
                 s.total_branching_points, f.total_branching_points,
@@ -165,6 +182,10 @@ where
             assert_eq!(
                 s.schedules_truncated, f.schedules_truncated,
                 "{scenario}: schedules_truncated differs"
+            );
+            assert_eq!(
+                s.schedules_refused, f.schedules_refused,
+                "{scenario}: schedules_refused differs"
             );
             assert_eq!(
                 s.first_invariant_break, f.first_invariant_break,

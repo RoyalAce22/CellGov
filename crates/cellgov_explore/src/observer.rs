@@ -56,8 +56,8 @@ pub fn observe_decisions_with_snapshots(
                     .flat_map(|r| rt.shared_alias_ranges(step.unit, *r))
                     .collect();
                 footprint.shared_writes.extend(aliases);
-                if rt.commit_step(&step.result, &step.effects).is_err() {
-                    break StopReason::CommitError;
+                if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+                    break StopReason::CommitError(e);
                 }
                 log.push(DecisionPoint {
                     step: step_idx,
@@ -66,7 +66,7 @@ pub fn observe_decisions_with_snapshots(
                     footprint,
                 });
             }
-            Err(_) => break StopReason::StepError,
+            Err(e) => break StopReason::StepError(e),
         }
     };
     (log, snapshots, stop)

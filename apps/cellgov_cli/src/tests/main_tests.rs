@@ -59,6 +59,7 @@ const DISPATCHED: &[&str] = &[
     "diff zoom",
     "explore",
     "explore micro",
+    "explore title",
     "scenario list",
     "scenario run",
     "scenario dump",
@@ -107,6 +108,32 @@ fn a_scenario_name_no_longer_shadows_a_top_level_command() {
         assert!(
             !top.contains(name),
             "scenario {name:?} collides with a top-level command",
+        );
+    }
+}
+
+/// `explore` carries both a `SCENARIO` positional and verbs, and clap
+/// reads a bare word as a verb before it reaches the positional. A verb
+/// spelled like a scenario would make that scenario unreachable.
+#[test]
+fn a_scenario_name_no_longer_shadows_an_explore_verb() {
+    let command = Cli::command();
+    let explore = command
+        .find_subcommand("explore")
+        .expect("the tree declares explore");
+    let verbs: Vec<&str> = explore
+        .get_subcommands()
+        .map(clap::Command::get_name)
+        .collect();
+    assert!(
+        verbs.len() > 1,
+        "explore declares {} verb(s), so the walk found nothing to check",
+        verbs.len()
+    );
+    for name in SCENARIOS {
+        assert!(
+            !verbs.contains(name),
+            "scenario {name:?} collides with an explore verb, which clap resolves first",
         );
     }
 }

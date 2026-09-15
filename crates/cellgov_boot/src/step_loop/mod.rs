@@ -29,3 +29,4 @@ pub use ctx::StepLoopCtx;
 pub use driver::step_loop;
 pub use ring::{PcRing, Ring, SyscallRing};
 pub use timing::{compute_untracked, pct, StepTiming};
+pub use verdict::rsx_checkpoint_addr;

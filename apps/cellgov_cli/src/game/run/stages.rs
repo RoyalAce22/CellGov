@@ -27,7 +27,7 @@ pub struct RunSummary {
     pub had_critical_anomaly: bool,
 }
 
-pub(in crate::game) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
+pub(crate) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifest) {
     if title.rsx_mirror() {
         rt.set_rsx_mirror_writes(true);
     }

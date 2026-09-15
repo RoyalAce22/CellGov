@@ -8,17 +8,31 @@ pub(crate) fn rsx_write_checkpoint_addr(
     trigger: manifest::CheckpointTrigger,
     commit_result: &Result<CommitOutcome, CommitError>,
 ) -> Option<u64> {
+    commit_result
+        .as_ref()
+        .err()
+        .and_then(|e| rsx_checkpoint_addr(trigger, *e))
+}
+
+/// The reserved-RSX address in `error`, when `trigger` stops there.
+///
+/// A caller that drives the runtime outside these loops -- schedule
+/// exploration, say -- sees the checkpoint as an ordinary commit
+/// refusal. This call tells the title's declared stop apart from any
+/// other refusal.
+pub fn rsx_checkpoint_addr(
+    trigger: manifest::CheckpointTrigger,
+    error: CommitError,
+) -> Option<u64> {
     if trigger != manifest::CheckpointTrigger::FirstRsxWrite {
         return None;
     }
-    if let Err(cellgov_core::CommitError::Memory(cellgov_mem::MemError::ReservedWrite {
-        addr,
-        region: "rsx",
-    })) = commit_result
-    {
-        Some(*addr)
-    } else {
-        None
+    match error {
+        CommitError::Memory(cellgov_mem::MemError::ReservedWrite {
+            addr,
+            region: "rsx",
+        }) => Some(addr),
+        _ => None,
     }
 }
 

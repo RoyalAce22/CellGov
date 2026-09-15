@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::util::StopReason;
-use cellgov_core::Runtime;
+use cellgov_core::{CommitError, Runtime};
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
 use cellgov_mem::{GuestMemory, PageSize, Region, RegionAccess};
 use cellgov_time::Budget;
@@ -64,7 +64,15 @@ fn a_runtime_step_cap_stops_the_observer_with_a_named_reason() {
         });
     }
     let (log, stop) = observe_decisions(&mut rt);
-    assert_eq!(stop, StopReason::StepError);
+    assert_eq!(
+        stop,
+        StopReason::StepError(cellgov_core::StepError::MaxStepsExceeded)
+    );
+    assert_eq!(
+        stop.class(),
+        crate::util::StopClass::Bound,
+        "the cap is the caller's own, so it must not read as a model refusal",
+    );
     assert!(stop.is_truncated());
     assert_eq!(log.len(), 4, "only the committed steps are logged");
 }
@@ -100,7 +108,20 @@ fn a_refused_commit_stops_the_observer_and_names_itself() {
     });
 
     let (log, stop) = observe_decisions(&mut rt);
-    assert_eq!(stop, StopReason::CommitError);
+    let StopReason::CommitError(refusal) = stop else {
+        panic!("a refused commit carries the refusal the pipeline gave: {stop}")
+    };
+    assert!(
+        matches!(
+            refusal,
+            CommitError::DmaDestinationReserved {
+                region: "reserved",
+                ..
+            }
+        ),
+        "the reserved destination is the refusal this scenario forces: {refusal}"
+    );
+    assert_eq!(stop.class(), crate::util::StopClass::Refusal);
     assert!(stop.is_truncated());
     assert!(
         log.points().is_empty(),

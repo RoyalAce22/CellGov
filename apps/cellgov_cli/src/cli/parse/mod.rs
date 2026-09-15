@@ -21,7 +21,8 @@ pub(crate) use dev::{
     TitlesGenArgs, MAX_DISASM_COUNT,
 };
 pub(crate) use diff::{
-    CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, OutputFormat, ScenarioCommand,
+    CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, ExploreTitleArgs, OutputFormat,
+    ScenarioCommand,
 };
 #[cfg(test)]
 pub(crate) use entry::try_parse;
@@ -41,3 +42,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/boot_override_parse_tests.rs"]
 mod boot_override_parse_tests;
+
+#[cfg(test)]
+#[path = "tests/explore_globals_tests.rs"]
+mod explore_globals_tests;

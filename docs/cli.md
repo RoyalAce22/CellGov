@@ -956,6 +956,48 @@ Usage: cellgov explore micro [OPTIONS] <NAME>
 | --- | --- | --- |
 | `--observations-dir` | `DIR` | Compare each schedule against the observations here. |
 
+#### `cellgov explore title`
+
+Explore a window of a composed title boot.
+
+```console
+$ cellgov explore title --title flow --fw 1.50
+$ cellgov explore title --title sshd --fw 4.93 --start-step 20000
+$ cellgov explore title --title wipeout --fw 4.93 --max-schedules 32 --format json
+```
+
+```
+Usage: cellgov explore title [OPTIONS] <--title <NAME>|--content-id <ID>|--title-manifest <PATH>>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--title` | `NAME` | Short name from the title registry. |
+| `--content-id` | `ID` | Content id (serial) from the title registry. |
+| `--title-manifest` | `PATH` | A title manifest outside the registry. |
+| `--fw` | `VERSION` | Installed firmware version. Without it, a disc title boots the firmware its record says it shipped with. Any other title, or a disc whose record names none, boots the only installed firmware. With none or several installed, the store refuses. |
+| `--game-ver` | `base\|VERSION` | Installed content version; may be omitted when exactly one is a candidate. |
+| `--firmware-dir` | `DIR` | A `sys/external` tree outside the store. Marks the run unmanaged, so it carries no firmware version. |
+| `--max-steps` | `N` | Retired-instruction cap for the whole boot, the window included; defaults to the cap the cell's anchor was recorded at. |
+| `--max-schedules` | `N` | Explore at most this many alternate schedules. Default `256`. |
+| `--max-steps-per-run` | `N` | Take at most this many runtime steps per replayed schedule. Default `10000`. |
+| `--start-step` | `N` | Open the window after this many runtime steps. Without it and without --start-pc, the window opens at the first step two units are runnable at. |
+| `--start-pc` | `HEX` | Open the window once a step yields at this guest PC. A PC reached inside a batch never matches. |
+
+```
+Exit codes particular to this command:
+  20  the model refused a schedule it was asked to explore: a refused
+      commit, or a refused step. The cell's own first-rsx-write
+      checkpoint is not one of them.
+  21  the window never opened: the boot reached a terminal state, a cap
+      or a refusal before the start condition
+
+A schedule-sensitive window -- two schedules that both ran themselves
+out committed different memory -- takes the shared status 1. A cap the
+caller set, and a window whose units all blocked, report inconclusive
+and exit 0.
+```
+
 ### `cellgov scenario`
 
 Run a synthetic SPU/PPU scenario.

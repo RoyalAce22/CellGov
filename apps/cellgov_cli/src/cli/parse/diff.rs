@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use super::boot::{BootSelection, TitleSelector};
 use super::value;
 
 /// Human tables or one JSON document.
@@ -126,10 +127,10 @@ pub(crate) struct ExploreArgs {
     #[arg(value_name = "SCENARIO", required = true)]
     pub scenario: Option<String>,
     #[command(subcommand)]
-    pub micro: Option<ExploreCommand>,
+    pub command: Option<ExploreCommand>,
 }
 
-/// `cellgov explore micro`
+/// `cellgov explore ...`
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum ExploreCommand {
     /// Explore an LV2-driven micro-test.
@@ -141,6 +142,54 @@ pub(crate) enum ExploreCommand {
         #[arg(long, value_name = "DIR")]
         observations_dir: Option<PathBuf>,
     },
+    /// Explore a window of a composed title boot.
+    #[command(after_help = EXPLORE_TITLE_EXIT_CODES)]
+    Title(Box<ExploreTitleArgs>),
+}
+
+/// The group the two window-start flags join, so naming both is a usage
+/// error rather than a silent precedence.
+const WINDOW_START_GROUP: &str = "window_start";
+
+/// The outcomes `explore title` has beyond the shared 0-5 contract.
+const EXPLORE_TITLE_EXIT_CODES: &str = "Exit codes particular to this command:
+  20  the model refused a schedule it was asked to explore: a refused
+      commit, or a refused step. The cell's own first-rsx-write
+      checkpoint is not one of them.
+  21  the window never opened: the boot reached a terminal state, a cap
+      or a refusal before the start condition
+
+A schedule-sensitive window -- two schedules that both ran themselves
+out committed different memory -- takes the shared status 1. A cap the
+caller set, and a window whose units all blocked, report inconclusive
+and exit 0.";
+
+/// `cellgov explore title`
+#[derive(Debug, clap::Args)]
+pub(crate) struct ExploreTitleArgs {
+    #[command(flatten)]
+    pub selector: TitleSelector,
+    #[command(flatten)]
+    pub selection: BootSelection,
+    /// Retired-instruction cap for the whole boot, the window
+    /// included; defaults to the cap the cell's anchor was recorded at.
+    #[arg(long, value_name = "N")]
+    pub max_steps: Option<usize>,
+    /// Explore at most this many alternate schedules.
+    #[arg(long, value_name = "N", default_value_t = cellgov_explore::config::DEFAULT_MAX_SCHEDULES)]
+    pub max_schedules: usize,
+    /// Take at most this many runtime steps per replayed schedule.
+    #[arg(long, value_name = "N", default_value_t = cellgov_explore::config::DEFAULT_MAX_STEPS_PER_RUN)]
+    pub max_steps_per_run: usize,
+    /// Open the window after this many runtime steps.
+    /// Without it and without --start-pc, the window opens at the
+    /// first step two units are runnable at.
+    #[arg(long, value_name = "N", group = WINDOW_START_GROUP)]
+    pub start_step: Option<usize>,
+    /// Open the window once a step yields at this guest PC. A PC
+    /// reached inside a batch never matches.
+    #[arg(long, value_name = "HEX", value_parser = value::hex_u64, group = WINDOW_START_GROUP)]
+    pub start_pc: Option<u64>,
 }
 
 /// `cellgov scenario ...`

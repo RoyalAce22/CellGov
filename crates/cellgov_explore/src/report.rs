@@ -1,12 +1,18 @@
 //! ASCII and JSON formatters for [`ExplorationResult`].
 
-use crate::classify::{ExplorationResult, OutcomeClass};
+use crate::classify::{ExplorationResult, OutcomeClass, ScheduleRecord};
 
 /// Format an exploration result as a human-readable ASCII report.
 pub fn format_human(result: &ExplorationResult) -> String {
     let mut out = String::new();
     out.push_str(&format!("outcome: {}\n", outcome_label(result.outcome)));
     out.push_str(&format!("baseline_hash: 0x{:016x}\n", result.baseline_hash));
+    out.push_str(&format!("baseline_steps: {}\n", result.baseline_steps));
+    out.push_str(&format!(
+        "baseline_stop: {} ({})\n",
+        result.baseline_stop,
+        result.baseline_stop.class().label(),
+    ));
     out.push_str(&format!(
         "branching_points: {}\n",
         result.total_branching_points
@@ -17,6 +23,10 @@ pub fn format_human(result: &ExplorationResult) -> String {
         "schedules_truncated: {}\n",
         result.schedules_truncated
     ));
+    out.push_str(&format!(
+        "schedules_refused: {}\n",
+        result.schedules_refused
+    ));
     out.push_str(&format!("bounds_hit: {}\n", result.bounds_hit));
 
     if !result.schedules.is_empty() {
@@ -25,20 +35,27 @@ pub fn format_human(result: &ExplorationResult) -> String {
             // A prefix hash is never labelled DIVERGED: it differs from
             // a finished baseline whether or not the workload is
             // schedule-sensitive.
-            let diverged = if s.truncated {
-                " TRUNCATED"
-            } else if s.memory_hash != result.baseline_hash {
-                " DIVERGED"
+            let tag = match truncated_by(s) {
+                Some(by) => format!(" TRUNCATED({by})"),
+                None if s.memory_hash != result.baseline_hash => " DIVERGED".to_string(),
+                None => String::new(),
+            };
+            // Every finished replay reports a stall, so a row omits it.
+            // The class label goes with the reason because the
+            // runtime's own step cap prints as a step refusal.
+            let stop = if s.stop.is_truncated() {
+                format!(" stop={} ({})", s.stop, s.stop.class().label())
             } else {
-                ""
+                String::new()
             };
             out.push_str(&format!(
-                "  {}: step={} alt_unit={} hash=0x{:016x}{}\n",
+                "  {}: step={} alt_unit={} hash=0x{:016x}{}{}\n",
                 i,
                 s.branch_step,
                 s.alternate_choice.raw(),
                 s.memory_hash,
-                diverged,
+                tag,
+                stop,
             ));
         }
     }
@@ -57,6 +74,9 @@ pub fn format_json(result: &ExplorationResult) -> String {
                 "memory_hash": format!("0x{:016x}", s.memory_hash),
                 "diverged": !s.truncated && s.memory_hash != result.baseline_hash,
                 "truncated": s.truncated,
+                "truncated_by": truncated_by(s),
+                "stop": s.stop.to_string(),
+                "stop_class": s.stop.class().label(),
             })
         })
         .collect();
@@ -64,10 +84,14 @@ pub fn format_json(result: &ExplorationResult) -> String {
     let json = serde_json::json!({
         "outcome": outcome_label(result.outcome),
         "baseline_hash": format!("0x{:016x}", result.baseline_hash),
+        "baseline_steps": result.baseline_steps,
+        "baseline_stop": result.baseline_stop.to_string(),
+        "baseline_stop_class": result.baseline_stop.class().label(),
         "branching_points": result.total_branching_points,
         "schedules_explored": result.schedules.len(),
         "schedules_pruned": result.schedules_pruned,
         "schedules_truncated": result.schedules_truncated,
+        "schedules_refused": result.schedules_refused,
         "bounds_hit": result.bounds_hit,
         "schedules": schedules,
     });
@@ -76,6 +100,16 @@ pub fn format_json(result: &ExplorationResult) -> String {
 
 fn outcome_label(o: OutcomeClass) -> &'static str {
     <&'static str>::from(&o)
+}
+
+/// What withdrew a record's hash -- its own replay, or the baseline the
+/// exploration measured it against -- and `None` when nothing did.
+fn truncated_by(record: &ScheduleRecord) -> Option<&'static str> {
+    match (record.truncated, record.stop.is_truncated()) {
+        (true, true) => Some("replay"),
+        (true, false) => Some("baseline"),
+        (false, _) => None,
+    }
 }
 
 #[cfg(test)]

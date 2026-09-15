@@ -116,7 +116,7 @@ fn dispatch(command: &Command, globals: &Globals) {
         }
         Command::Diff(DiffCommand::Diverge { a, b }) => cli::compare::run_diverge(a, b),
         Command::Diff(DiffCommand::Zoom { a, b, step }) => cli::compare::run_zoom(a, b, *step),
-        Command::Explore(args) => cli::explore::run(args, globals.format, SCENARIOS),
+        Command::Explore(args) => cli::explore::run(args, globals.format, SCENARIOS, vfs_flag),
         Command::Scenario(ScenarioCommand::List) => {
             for name in SCENARIOS {
                 println!("{name}");

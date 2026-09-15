@@ -1,7 +1,7 @@
 //! Exploration wrapper that also captures named memory regions from
 //! each run for comparison against external baselines.
 
-use crate::classify::ExplorationResult;
+use crate::classify::{BaselineRun, ExplorationResult};
 use crate::config::ExplorationConfig;
 use crate::observer::observe_decisions_with_snapshots;
 use crate::prescribed::PrescribedScheduler;
@@ -74,7 +74,12 @@ where
 {
     let mut rt_baseline = make_runtime();
     let (log, snapshots, baseline_stop) = observe_decisions_with_snapshots(&mut rt_baseline, true);
-    let baseline_hash = rt_baseline.committed_memory_hash();
+    let baseline = BaselineRun {
+        hash: rt_baseline.committed_memory_hash(),
+        steps: log.len(),
+        stop: baseline_stop,
+    };
+    let baseline_hash = baseline.hash;
     let baseline_regions = extract_regions(&rt_baseline, regions);
 
     let total_branching_points = log.branching_count();
@@ -115,13 +120,13 @@ where
         (hash, stop)
     });
 
-    if baseline_stop.is_truncated() {
+    if baseline.stop.is_truncated() {
         iter.mark_baseline_truncated();
     }
 
     let exploration = classify_iteration(
         iter,
-        baseline_hash,
+        baseline,
         total_branching_points,
         first_invariant_break,
     );

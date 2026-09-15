@@ -17,6 +17,7 @@ fn schedule_record_holds_data() {
         branch_step: 3,
         alternate_choice: UnitId::new(1),
         memory_hash: 0xDEAD,
+        stop: StopReason::Stalled,
         truncated: false,
     };
     assert_eq!(rec.branch_step, 3);
@@ -28,12 +29,15 @@ fn schedule_record_holds_data() {
 fn exploration_result_construction() {
     let res = ExplorationResult {
         baseline_hash: 0xBEEF,
+        baseline_steps: 7,
+        baseline_stop: StopReason::Stalled,
         schedules: vec![],
         outcome: OutcomeClass::ScheduleStable,
         total_branching_points: 0,
         bounds_hit: false,
         schedules_pruned: 0,
         schedules_truncated: 0,
+        schedules_refused: 0,
         first_invariant_break: None,
     };
     assert_eq!(res.outcome, OutcomeClass::ScheduleStable);

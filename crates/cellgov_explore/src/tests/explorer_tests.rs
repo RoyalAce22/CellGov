@@ -425,18 +425,65 @@ fn explore_shared_view_cross_space_is_sensitive() {
     assert_eq!(r.outcome, OutcomeClass::ScheduleSensitive);
 }
 
+fn single_unit_runtime() -> Runtime {
+    let mem = GuestMemory::new(64);
+    let mut rt = Runtime::new(mem, Budget::new(100), 100);
+    rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+    rt
+}
+
 #[test]
 fn single_unit_returns_none() {
-    let result = explore(
+    let result = explore(single_unit_runtime, &ExplorationConfig::default());
+    assert!(result.is_none());
+}
+
+#[test]
+fn a_window_with_no_branching_point_still_reports_what_the_baseline_did() {
+    let r = explore_window(single_unit_runtime, &ExplorationConfig::default());
+    assert_eq!(r.total_branching_points, 0);
+    assert_eq!(r.baseline_steps, 1);
+    assert_eq!(r.baseline_stop, crate::util::StopReason::Stalled);
+    assert_eq!(
+        r.outcome,
+        OutcomeClass::ScheduleStable,
+        "a window the workload ran itself out of, with no choice anywhere in it, \
+         has one schedule and so is stable",
+    );
+}
+
+#[test]
+fn a_window_with_no_branching_point_that_stopped_short_is_inconclusive() {
+    let r = explore_window(
         || {
             let mem = GuestMemory::new(64);
-            let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+            // One 3-op unit needs 3 steps; the cap refuses the 3rd.
+            let mut rt = Runtime::new(mem, Budget::new(100), 2);
+            rt.register_unit_with(|id| {
+                FakeIsaUnit::new(
+                    id,
+                    vec![
+                        FakeOp::LoadImm(0xAA),
+                        FakeOp::SharedStore { addr: 0, len: 4 },
+                        FakeOp::End,
+                    ],
+                )
+            });
             rt
         },
         &ExplorationConfig::default(),
     );
-    assert!(result.is_none());
+    assert_eq!(r.total_branching_points, 0);
+    assert_eq!(
+        r.baseline_steps, 2,
+        "the window covers what the baseline retired, not what the workload held",
+    );
+    assert_eq!(
+        r.baseline_stop.class(),
+        crate::util::StopClass::Bound,
+        "the cap the caller set is what ended the window",
+    );
+    assert_eq!(r.outcome, OutcomeClass::Inconclusive);
 }
 
 #[test]
@@ -793,18 +840,25 @@ fn a_truncated_baseline_withdraws_a_divergence_that_was_already_found() {
             branch_step: 0,
             alternate_choice: UnitId::new(1),
             memory_hash: 0x1234,
+            stop: crate::util::StopReason::Stalled,
             truncated: false,
         }],
         bounds_hit: false,
         found_divergence: true,
         schedules_pruned: 0,
         schedules_truncated: 0,
+        schedules_refused: 0,
     };
     iter.mark_baseline_truncated();
     assert_eq!(iter.schedules_truncated, 1);
     assert!(iter.schedules[0].truncated);
 
-    let r = classify_iteration(iter, 0xDEAD_BEEF, 1, None);
+    let baseline = crate::classify::BaselineRun {
+        hash: 0xDEAD_BEEF,
+        steps: 4,
+        stop: crate::util::StopReason::StepBound,
+    };
+    let r = classify_iteration(iter, baseline, 1, None);
     assert!(r.bounds_hit);
     assert_eq!(r.schedules_truncated, 1);
     assert_eq!(

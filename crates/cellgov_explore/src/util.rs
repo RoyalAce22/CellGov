@@ -1,9 +1,9 @@
 //! Shared helpers used by the exploration entry points.
 
-use crate::classify::{ExplorationResult, OutcomeClass, ScheduleRecord};
+use crate::classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 use crate::config::ExplorationConfig;
 use crate::decision::DecisionLog;
-use cellgov_core::Runtime;
+use cellgov_core::{CommitError, Runtime, StepError};
 use cellgov_event::UnitId;
 
 /// Why [`run_to_stall`] returned.
@@ -18,16 +18,68 @@ pub enum StopReason {
     /// `max_steps` was reached with work still runnable.
     StepBound,
     /// `Runtime::step` refused.
-    StepError,
-    /// A commit was refused, so the step's effects never reached guest
-    /// state.
-    CommitError,
+    StepError(StepError),
+    /// `Runtime::commit_step` refused, so the step's effects never
+    /// reached guest state.
+    CommitError(CommitError),
+}
+
+/// What a [`StopReason`] says about the run that reported it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr)]
+pub enum StopClass {
+    /// The workload ran itself out.
+    #[strum(serialize = "finished")]
+    Finished,
+    /// A cap the caller set stopped a run with work still to do.
+    #[strum(serialize = "bound")]
+    Bound,
+    /// No unit can run and nothing can wake one: a parked unit with no
+    /// wake source, or a registry whose units all faulted or finished.
+    #[strum(serialize = "blocked")]
+    Blocked,
+    /// The model refused the step or its commit.
+    #[strum(serialize = "refusal")]
+    Refusal,
+}
+
+impl StopClass {
+    /// The one-word label the human and JSON reports both print.
+    pub fn label(self) -> &'static str {
+        <&'static str>::from(&self)
+    }
 }
 
 impl StopReason {
     /// True when the run stopped before the workload finished.
     pub fn is_truncated(self) -> bool {
         !matches!(self, StopReason::Stalled)
+    }
+
+    /// Which class this stop belongs to.
+    pub fn class(self) -> StopClass {
+        match self {
+            Self::Stalled => StopClass::Finished,
+            // The two caps a caller holds: the exploration's own
+            // per-replay cap, and the runtime's step cap.
+            Self::StepBound | Self::StepError(StepError::MaxStepsExceeded) => StopClass::Bound,
+            Self::StepError(StepError::NoRunnableUnit | StepError::AllBlocked) => {
+                StopClass::Blocked
+            }
+            // Guest time reaching u64::MAX is no cap anyone can raise.
+            Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
+            | Self::CommitError(_) => StopClass::Refusal,
+        }
+    }
+}
+
+impl std::fmt::Display for StopReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stalled => f.write_str("stalled"),
+            Self::StepBound => f.write_str("replay step bound reached"),
+            Self::StepError(e) => write!(f, "step refused: {e}"),
+            Self::CommitError(e) => write!(f, "commit refused: {e}"),
+        }
     }
 }
 
@@ -48,12 +100,12 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
         }
         match rt.step() {
             Ok(step) => {
-                if rt.commit_step(&step.result, &step.effects).is_err() {
-                    return StopReason::CommitError;
+                if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+                    return StopReason::CommitError(e);
                 }
                 steps += 1;
             }
-            Err(_) => return StopReason::StepError,
+            Err(e) => return StopReason::StepError(e),
         }
     }
 }
@@ -84,6 +136,8 @@ pub struct AlternateIteration {
     pub schedules_pruned: usize,
     /// Alternates whose replay stopped before the workload finished.
     pub schedules_truncated: usize,
+    /// Alternates whose replay stopped on a [`StopClass::Refusal`].
+    pub schedules_refused: usize,
 }
 
 impl AlternateIteration {
@@ -129,6 +183,7 @@ where
     let mut found_divergence = false;
     let mut schedules_pruned: usize = 0;
     let mut schedules_truncated: usize = 0;
+    let mut schedules_refused: usize = 0;
 
     'outer: for bp in &branching {
         let default_choice = bp.chosen;
@@ -155,6 +210,9 @@ where
             if truncated {
                 schedules_truncated += 1;
                 bounds_hit = true;
+                if stop.class() == StopClass::Refusal {
+                    schedules_refused += 1;
+                }
             } else if hash != baseline_hash {
                 found_divergence = true;
             }
@@ -162,6 +220,7 @@ where
                 branch_step: bp.step,
                 alternate_choice: alt,
                 memory_hash: hash,
+                stop,
                 truncated,
             });
         }
@@ -173,32 +232,43 @@ where
         found_divergence,
         schedules_pruned,
         schedules_truncated,
+        schedules_refused,
     }
 }
 
 /// Collapse an [`AlternateIteration`] tally into an
 /// [`ExplorationResult`].
+///
+/// A baseline that committed no step measured nothing, so it cannot
+/// support [`OutcomeClass::ScheduleStable`] however empty the tally is.
 pub fn classify_iteration(
     iter: AlternateIteration,
-    baseline_hash: u64,
+    baseline: BaselineRun,
     total_branching_points: usize,
     first_invariant_break: Option<String>,
 ) -> ExplorationResult {
     let outcome = if iter.found_divergence {
         OutcomeClass::ScheduleSensitive
-    } else if iter.bounds_hit {
+    } else if iter.bounds_hit || baseline.steps == 0 {
         OutcomeClass::Inconclusive
     } else {
         OutcomeClass::ScheduleStable
     };
     ExplorationResult {
-        baseline_hash,
+        baseline_hash: baseline.hash,
+        baseline_steps: baseline.steps,
+        baseline_stop: baseline.stop,
         schedules: iter.schedules,
         outcome,
         total_branching_points,
         bounds_hit: iter.bounds_hit,
         schedules_pruned: iter.schedules_pruned,
         schedules_truncated: iter.schedules_truncated,
+        schedules_refused: iter.schedules_refused,
         first_invariant_break,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/util_tests.rs"]
+mod tests;
