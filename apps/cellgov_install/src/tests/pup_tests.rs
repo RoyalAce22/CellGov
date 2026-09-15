@@ -25,6 +25,7 @@ fn parse_rejects_bad_magic() {
 fn parse_accepts_valid_empty_pup() {
     let mut data = [0u8; 0x30];
     data[0..8].copy_from_slice(b"SCEUF\0\0\0");
+    data[0x20..0x28].copy_from_slice(&0x30u64.to_be_bytes()); // header_length
     let pup = parse(&data).unwrap();
     assert_eq!(pup.entries.len(), 0);
 }
@@ -41,6 +42,8 @@ fn build_one_entry_pup(keys: &KeyVault, entry_id: u64, payload: &[u8]) -> (Vec<u
     let mut buf = vec![0u8; total];
     buf[0..8].copy_from_slice(b"SCEUF\0\0\0");
     buf[0x18..0x20].copy_from_slice(&1u64.to_be_bytes()); // file_count
+    buf[0x20..0x28].copy_from_slice(&(payload_offset as u64).to_be_bytes()); // header_length
+    buf[0x28..0x30].copy_from_slice(&(payload.len() as u64).to_be_bytes()); // data_length
 
     buf[entry_table_start..entry_table_start + 8].copy_from_slice(&entry_id.to_be_bytes());
     buf[entry_table_start + 8..entry_table_start + 0x10]

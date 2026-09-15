@@ -6,7 +6,15 @@
 //! Unlike every other PS3 container in this crate, all multi-byte SFO
 //! fields are **little-endian**.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
 use std::collections::BTreeMap;
+
+use crate::field::{read_le_u16, read_le_u32, usize_from_u32};
 
 /// Header magic in on-disk byte order (`\0PSF`).
 const SFO_MAGIC: [u8; 4] = [0x00, b'P', b'S', b'F'];
@@ -151,10 +159,10 @@ pub enum SfoError {
         len: usize,
     },
     /// The index table would extend past the file end.
-    #[error("index table needs 0x{required:x} bytes, file is 0x{len:x}")]
+    #[error("{entries} index records of 0x10 bytes past the 0x14-byte header need more than the 0x{len:x}-byte file")]
     IndexTruncated {
-        /// Byte length the header plus index table would occupy.
-        required: usize,
+        /// `entries_num` the header declares.
+        entries: u32,
         /// Actual input length.
         len: usize,
     },
@@ -205,22 +213,6 @@ pub enum SfoError {
     },
 }
 
-fn read_le_u16(data: &[u8], off: usize) -> u16 {
-    u16::from_le_bytes(
-        data[off..off + 2]
-            .try_into()
-            .expect("invariant: caller bounds-checked this 2-byte read"),
-    )
-}
-
-fn read_le_u32(data: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes(
-        data[off..off + 4]
-            .try_into()
-            .expect("invariant: caller bounds-checked this 4-byte read"),
-    )
-}
-
 /// Parse a PARAM.SFO image. Rejects structural corruption (bad magic /
 /// version, out-of-range offsets, truncated tables, duplicate keys);
 /// silently skips entries whose format tag is none of the three known
@@ -244,13 +236,14 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
     let entries_num = read_le_u32(data, 0x10);
 
     // Header-level bounds.
-    if (off_key_table as usize) < HEADER_LEN || off_key_table > off_data_table {
+    if usize_from_u32(off_key_table) < HEADER_LEN || off_key_table > off_data_table {
         return Err(SfoError::KeyTableOutOfRange {
             off: off_key_table,
             data_table: off_data_table,
         });
     }
-    if off_data_table as usize > data.len() {
+    let data_table_start = usize_from_u32(off_data_table);
+    if data_table_start > data.len() {
         return Err(SfoError::DataTableOutOfRange {
             off: off_data_table,
             len: data.len(),
@@ -259,40 +252,36 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
 
     // The index table occupies [HEADER_LEN, HEADER_LEN + entries_num*16)
     // and must be fully present to read each record.
-    let index_bytes = (entries_num as usize)
+    let Some(index_table) = usize_from_u32(entries_num)
         .checked_mul(INDEX_LEN)
-        .and_then(|n| HEADER_LEN.checked_add(n))
-        .ok_or(SfoError::IndexTruncated {
-            required: usize::MAX,
-            len: data.len(),
-        })?;
-    if index_bytes > data.len() {
+        .and_then(|len| data[HEADER_LEN..].get(..len))
+    else {
         return Err(SfoError::IndexTruncated {
-            required: index_bytes,
+            entries: entries_num,
             len: data.len(),
         });
-    }
+    };
 
-    let key_region = &data[off_key_table as usize..off_data_table as usize];
-    let data_table_start = off_data_table as usize;
+    let key_region = &data[usize_from_u32(off_key_table)..data_table_start];
 
     let mut entries: BTreeMap<String, SfoValue> = BTreeMap::new();
-    for i in 0..entries_num as usize {
-        let rec = HEADER_LEN + i * INDEX_LEN;
-        let key_off = read_le_u16(data, rec);
-        let param_fmt = read_le_u16(data, rec + 0x02);
-        let param_len = read_le_u32(data, rec + 0x04);
-        let param_max = read_le_u32(data, rec + 0x08);
-        let data_off = read_le_u32(data, rec + 0x0C);
+    for (i, rec) in index_table.chunks_exact(INDEX_LEN).enumerate() {
+        let key_off = read_le_u16(rec, 0);
+        let param_fmt = read_le_u16(rec, 0x02);
+        let param_len = read_le_u32(rec, 0x04);
+        let param_max = read_le_u32(rec, 0x08);
+        let data_off = read_le_u32(rec, 0x0C);
 
-        if key_off as usize >= key_region.len() {
+        let Some(key_bytes) = key_region
+            .get(usize::from(key_off)..)
+            .filter(|rest| !rest.is_empty())
+        else {
             return Err(SfoError::KeyOffsetOutOfRange {
                 index: i,
                 key_off,
                 key_region_len: key_region.len(),
             });
-        }
-        let key_bytes = &key_region[key_off as usize..];
+        };
         let nul = key_bytes
             .iter()
             .position(|&b| b == 0)
@@ -310,7 +299,7 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
         // Unknown format tags are skipped rather than errored.
         let value = match param_fmt {
             FMT_INTEGER if param_max == 4 && param_len == 4 => {
-                let start = data_table_start.saturating_add(data_off as usize);
+                let start = data_table_start.saturating_add(usize_from_u32(data_off));
                 let end = start.saturating_add(4);
                 if end > data.len() {
                     return Err(SfoError::DataOutOfRange {
@@ -323,8 +312,8 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
                 SfoValue::Integer(read_le_u32(data, start))
             }
             FMT_STRING | FMT_ARRAY => {
-                let start = data_table_start.saturating_add(data_off as usize);
-                let end = start.saturating_add(param_len as usize);
+                let start = data_table_start.saturating_add(usize_from_u32(data_off));
+                let end = start.saturating_add(usize_from_u32(param_len));
                 if end > data.len() {
                     return Err(SfoError::DataOutOfRange {
                         key,
@@ -353,9 +342,31 @@ pub fn parse(data: &[u8]) -> Result<ParamSfo, SfoError> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
 #[path = "tests/param_sfo_tests.rs"]
 mod tests;
 
 #[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
 #[path = "tests/named_version_tests.rs"]
 mod named_version_tests;
+
+#[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
+#[path = "tests/param_sfo_bounds_tests.rs"]
+mod bounds_tests;

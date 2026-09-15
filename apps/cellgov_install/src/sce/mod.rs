@@ -34,3 +34,7 @@ pub(crate) use raw::find_supplemental_body;
 #[cfg(test)]
 #[path = "tests/sce_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/inflate_bound_tests.rs"]
+mod inflate_bound_tests;

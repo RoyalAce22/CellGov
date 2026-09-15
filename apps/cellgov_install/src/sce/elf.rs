@@ -1,29 +1,39 @@
 //! Decrypted-sections -> plaintext run-image assembly, plus the
 //! section-header mask.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
 #[cfg(feature = "decrypt")]
-use cellgov_ps3_abi::format::elf::ELF_MAGIC_U32;
+use std::ops::Range;
+
+#[cfg(feature = "decrypt")]
+use cellgov_ps3_abi::format::elf::{
+    ELF64_SHENT_SIZE, ELF_HEADER_SIZE, ELF_MAGIC_U32, ELF_PHENTSIZE,
+};
 #[cfg(feature = "decrypt")]
 use cellgov_ps3_abi::format::sce::SCE_SECTION_KIND_PHDR;
 
 #[cfg(feature = "decrypt")]
 use super::error::SceError;
 #[cfg(feature = "decrypt")]
-use super::raw::{
-    checked_add_oob, checked_mul_oob, read_be_u16, read_be_u32, read_be_u64,
-    EncryptedSectionDescriptor,
-};
+use super::raw::{checked_add_oob, checked_mul_oob, EncryptedSectionDescriptor};
+#[cfg(feature = "decrypt")]
+use crate::field::{read_be_u16, read_be_u32, read_be_u64, usize_from_header, usize_from_u32};
 
 /// Plaintext geometry of a SELF's inner ELF, read from the SELF
 /// extended header and the ELF header it points at.
 #[cfg(feature = "decrypt")]
 struct InnerElf {
-    ehdr_offset: usize,
-    phdr_offset: usize,
-    phdr_table_bytes: usize,
-    e_shoff: usize,
+    /// The ELF header's bytes in the SELF.
+    ehdr: Range<usize>,
+    /// The program-header table's bytes in the SELF.
+    phdrs: Range<usize>,
+    e_shoff: u64,
     e_shnum: usize,
-    e_shentsize: usize,
     /// `(p_offset, p_filesz)` per program-header row, in table order.
     segments: Vec<(usize, usize)>,
 }
@@ -37,29 +47,30 @@ fn parse_inner_elf(data: &[u8]) -> Result<InnerElf, SceError> {
             need: 0x68,
         });
     }
-    let ehdr_offset = read_be_u64(data, 0x30) as usize;
-    let phdr_offset = read_be_u64(data, 0x38) as usize;
-
-    let ehdr_end = checked_add_oob(ehdr_offset, 0x40, "SELF ELF header")?;
-    if ehdr_end > data.len() {
+    let ehdr_out_of_range = SceError::HeaderOffsetOutOfRange {
+        what: "SELF ELF header",
+    };
+    let ehdr_offset = usize_from_header(read_be_u64(data, 0x30)).ok_or(ehdr_out_of_range)?;
+    let ehdr_end = checked_add_oob(ehdr_offset, ELF_HEADER_SIZE, "SELF ELF header")?;
+    let Some(ehdr) = data.get(ehdr_offset..ehdr_end) else {
         return Err(SceError::HeaderOffsetOutOfRange {
             what: "SELF ELF header",
         });
-    }
-    let inner_magic = read_be_u32(data, ehdr_offset);
+    };
+    let inner_magic = read_be_u32(ehdr, 0);
     if inner_magic != ELF_MAGIC_U32 {
         return Err(SceError::InnerElfBadMagic { got: inner_magic });
     }
     // Field offsets below assume ELFCLASS64 (the only value PS3 SELFs use).
-    let ei_class = data[ehdr_offset + 4];
+    let ei_class = ehdr[4];
     if ei_class != 2 {
         return Err(SceError::BadElfClass { got: ei_class });
     }
-    let e_shoff = read_be_u64(data, ehdr_offset + 0x28) as usize;
-    let e_phnum = read_be_u16(data, ehdr_offset + 0x38) as usize;
-    let e_shnum = read_be_u16(data, ehdr_offset + 0x3C) as usize;
-    let e_phentsize_raw = read_be_u16(data, ehdr_offset + 0x36);
-    let e_shentsize_raw = read_be_u16(data, ehdr_offset + 0x3A);
+    let e_shoff = read_be_u64(ehdr, 0x28);
+    let e_phnum = usize::from(read_be_u16(ehdr, 0x38));
+    let e_shnum = usize::from(read_be_u16(ehdr, 0x3C));
+    let e_phentsize_raw = read_be_u16(ehdr, 0x36);
+    let e_shentsize_raw = read_be_u16(ehdr, 0x3A);
     // Per ELF, entsize is "size of one entry" and only meaningful
     // when there are entries. Firmware SPRXes ship with e_shnum = 0
     // and e_shentsize = 0; only validate when the count is non-zero,
@@ -79,33 +90,36 @@ fn parse_inner_elf(data: &[u8]) -> Result<InnerElf, SceError> {
             expected: 0x40,
         });
     }
-    let e_phentsize = e_phentsize_raw as usize;
-    let e_shentsize = e_shentsize_raw as usize;
-    let phdr_table_bytes = checked_mul_oob(e_phnum, e_phentsize, "SELF program headers")?;
+    // After the entsize checks above, every row has the architectural
+    // size. A table with no rows is empty, whatever entsize it declares.
+    let phdrs_out_of_range = SceError::HeaderOffsetOutOfRange {
+        what: "SELF program headers",
+    };
+    let phdr_offset = usize_from_header(read_be_u64(data, 0x38)).ok_or(phdrs_out_of_range)?;
+    let phdr_table_bytes = checked_mul_oob(e_phnum, ELF_PHENTSIZE, "SELF program headers")?;
     let phdr_end = checked_add_oob(phdr_offset, phdr_table_bytes, "SELF program headers")?;
-    if phdr_end > data.len() {
+    let Some(phdr_table) = data.get(phdr_offset..phdr_end) else {
         return Err(SceError::HeaderOffsetOutOfRange {
             what: "SELF program headers",
         });
-    }
+    };
 
-    let mut segments = Vec::with_capacity(e_phnum);
-    for i in 0..e_phnum {
-        let row_off = checked_mul_oob(i, e_phentsize, "SELF program header row")?;
-        let ph_off = checked_add_oob(phdr_offset, row_off, "SELF program header row")?;
-        segments.push((
-            read_be_u64(data, ph_off + 0x08) as usize,
-            read_be_u64(data, ph_off + 0x20) as usize,
-        ));
-    }
+    let segments = phdr_table
+        .chunks_exact(ELF_PHENTSIZE)
+        .map(|row| {
+            usize_from_header(read_be_u64(row, 0x08))
+                .zip(usize_from_header(read_be_u64(row, 0x20)))
+                .ok_or(SceError::HeaderOffsetOutOfRange {
+                    what: "SELF program header row",
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     Ok(InnerElf {
-        ehdr_offset,
-        phdr_offset,
-        phdr_table_bytes,
+        ehdr: ehdr_offset..ehdr_end,
+        phdrs: phdr_offset..phdr_end,
         e_shoff,
         e_shnum,
-        e_shentsize,
         segments,
     })
 }
@@ -136,46 +150,46 @@ pub(crate) fn assemble_elf_from_sections(
     sections: &[(EncryptedSectionDescriptor, Vec<u8>)],
 ) -> Result<Vec<u8>, SceError> {
     let InnerElf {
-        ehdr_offset,
-        phdr_offset,
-        phdr_table_bytes,
+        ehdr,
+        phdrs,
         e_shoff,
         e_shnum,
-        e_shentsize,
         segments,
     } = parse_inner_elf(data)?;
-    let shdr_offset_in_self = read_be_u64(data, 0x40) as usize;
+    let shdr_offset_in_self = read_be_u64(data, 0x40);
     let e_phnum = segments.len();
 
-    let mut elf_size: usize = checked_add_oob(0x40, phdr_table_bytes, "reconstructed ELF size")?;
+    let mut elf_size: usize =
+        checked_add_oob(ELF_HEADER_SIZE, phdrs.len(), "reconstructed ELF size")?;
     for &(p_offset, p_filesz) in &segments {
         let end = checked_add_oob(p_offset, p_filesz, "SELF program segment extent")?;
         if end > elf_size {
             elf_size = end;
         }
     }
-    let shdr_table_bytes = checked_mul_oob(e_shnum, e_shentsize, "SELF section headers")?;
+    let shdr_table_bytes = checked_mul_oob(e_shnum, ELF64_SHENT_SIZE, "SELF section headers")?;
     // A null `e_shoff` with a non-zero `e_shnum` leaves the
     // section-header table nowhere to land. The table is no part of
     // the run image (see [`mask_non_semantic_elf_bytes`]), so the
-    // shape is dropped.
-    let place_shdr_table = shdr_offset_in_self != 0 && e_shnum > 0 && e_shoff != 0;
-    if place_shdr_table {
-        let shdr_end = checked_add_oob(e_shoff, shdr_table_bytes, "SELF section headers")?;
-        if shdr_end > elf_size {
-            elf_size = shdr_end;
+    // shape is dropped. `shdr_table` is `(destination, source)`.
+    let shdr_table = if shdr_offset_in_self != 0 && e_shnum > 0 && e_shoff != 0 {
+        let shdrs_out_of_range = || SceError::HeaderOffsetOutOfRange {
+            what: "SELF section headers",
+        };
+        let dst_start = usize_from_header(e_shoff).ok_or_else(shdrs_out_of_range)?;
+        let src_start = usize_from_header(shdr_offset_in_self).ok_or_else(shdrs_out_of_range)?;
+        let dst_end = checked_add_oob(dst_start, shdr_table_bytes, "SELF section headers")?;
+        let src_end = checked_add_oob(src_start, shdr_table_bytes, "SELF section headers")?;
+        if src_end > data.len() {
+            return Err(shdrs_out_of_range());
         }
-        let shdr_end_in_self = checked_add_oob(
-            shdr_offset_in_self,
-            shdr_table_bytes,
-            "SELF section headers",
-        )?;
-        if shdr_end_in_self > data.len() {
-            return Err(SceError::HeaderOffsetOutOfRange {
-                what: "SELF section headers",
-            });
+        if dst_end > elf_size {
+            elf_size = dst_end;
         }
-    }
+        Some((dst_start..dst_end, src_start..src_end))
+    } else {
+        None
+    };
 
     // `elf_size` is the maximum of file-derived `p_offset + p_filesz`
     // extents, so a corrupt program header can name an image far larger
@@ -186,13 +200,11 @@ pub(crate) fn assemble_elf_from_sections(
     elf.try_reserve_exact(elf_size)
         .map_err(|_| SceError::ReconstructedElfTooLarge { elf_size })?;
     elf.resize(elf_size, 0);
-    elf[..0x40].copy_from_slice(&data[ehdr_offset..ehdr_offset + 0x40]);
-    let phdr_dst = 0x40usize;
-    elf[phdr_dst..phdr_dst + phdr_table_bytes]
-        .copy_from_slice(&data[phdr_offset..phdr_offset + phdr_table_bytes]);
+    elf[..ELF_HEADER_SIZE].copy_from_slice(&data[ehdr]);
+    elf[ELF_HEADER_SIZE..][..phdrs.len()].copy_from_slice(&data[phdrs]);
     // Rewrite e_phoff to the packed phdr position; the inner ELF's
     // original value may differ from 0x40.
-    elf[0x20..0x28].copy_from_slice(&(phdr_dst as u64).to_be_bytes());
+    elf[0x20..0x28].copy_from_slice(&0x40u64.to_be_bytes());
 
     for (sec, sec_data) in sections {
         if sec.section_kind != SCE_SECTION_KIND_PHDR {
@@ -202,7 +214,7 @@ pub(crate) fn assemble_elf_from_sections(
         // against a non-zero `p_filesz` is exactly the shape the size
         // check below exists to name; skipping it would leave the
         // segment as silent zeroes in the run image.
-        let prog_idx = sec.program_segment_index as usize;
+        let prog_idx = usize_from_u32(sec.program_segment_index);
         let &(p_offset, p_filesz) = segments
             .get(prog_idx)
             .ok_or(SceError::SectionProgramIndexOutOfRange { prog_idx, e_phnum })?;
@@ -237,9 +249,8 @@ pub(crate) fn assemble_elf_from_sections(
     // whose `e_shoff` falls inside a segment's
     // `[p_offset, p_offset + p_filesz)` overwrites that part of the
     // payload.
-    if place_shdr_table {
-        elf[e_shoff..e_shoff + shdr_table_bytes]
-            .copy_from_slice(&data[shdr_offset_in_self..shdr_offset_in_self + shdr_table_bytes]);
+    if let Some((dst, src)) = shdr_table {
+        elf[dst].copy_from_slice(&data[src]);
     }
 
     let magic = u32::from_be_bytes([elf[0], elf[1], elf[2], elf[3]]);

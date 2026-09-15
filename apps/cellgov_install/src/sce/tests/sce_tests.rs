@@ -307,30 +307,6 @@ fn a_zlib_section_naming_a_program_index_past_the_phdr_table_cannot_escape_the_i
     );
 }
 
-#[cfg(feature = "decrypt")]
-#[test]
-fn a_segment_declaring_the_widest_possible_filesz_does_not_overflow_the_inflate_bound() {
-    // The bound is the declared size plus one, so a `p_filesz` of
-    // `usize::MAX` is the value that wraps it.
-    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
-    let hdr = parse_sce_header(&data).unwrap();
-    let sections = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], Some(&[usize::MAX]))
-        .expect("a segment wider than the stream bounds nothing away");
-    assert_eq!(sections[0].1.len(), 0x400);
-}
-
-#[cfg(feature = "decrypt")]
-#[test]
-fn a_zlib_section_in_a_container_with_no_inner_elf_inflates_unbounded() {
-    // The firmware-update PKG path wraps no ELF, so no program header
-    // declares a size for its sections to be held to.
-    let data = build_container_with_one_zlib_section(&zlib_compress(&[0xAAu8; 0x400]));
-    let hdr = parse_sce_header(&data).unwrap();
-    let sections = decrypt_sections_from_envelope(&data, &hdr, &[0u8; 0x40], None)
-        .expect("no segment table, no bound");
-    assert_eq!(sections[0].1.len(), 0x400);
-}
-
 /// Minimal SCE buffer with a program identification header at
 /// `pid_off` whose first u64 is `authid`.
 fn build_self_with_authid(pid_off: u64, authid: u64, len: usize) -> Vec<u8> {
@@ -686,6 +662,27 @@ fn the_section_header_table_lands_on_top_of_an_overlapping_segment_payload() {
 }
 
 #[cfg(feature = "decrypt")]
+#[test]
+fn a_section_header_table_running_past_the_self_is_named() {
+    let mut data = build_synthetic_self();
+    // One 0x40-byte entry read from SELF offset 0x3F0 ends at 0x430, past
+    // the 0x400-byte SELF; its e_shoff destination is in range.
+    data[0x40..0x48].copy_from_slice(&0x3F0u64.to_be_bytes());
+    data[0x128..0x130].copy_from_slice(&0x80u64.to_be_bytes());
+    data[0x13C..0x13E].copy_from_slice(&1u16.to_be_bytes());
+    let err = assemble_elf_from_sections(&data, &[]).unwrap_err();
+    assert!(
+        matches!(
+            err,
+            SceError::HeaderOffsetOutOfRange {
+                what: "SELF section headers"
+            }
+        ),
+        "got {err:?}"
+    );
+}
+
+#[cfg(feature = "decrypt")]
 /// PHDR-kind descriptor naming program-header row `prog_idx`. The
 /// payload fields go unread: `assemble_elf_from_sections` takes the
 /// already-decrypted bytes from its `sections` argument.
@@ -894,6 +891,28 @@ fn parse_control_flags1_rejects_a_body_too_short_for_the_flags_word() {
             SceError::HeaderOffsetOutOfRange { .. }
         ),
         "a 2-byte capability body cannot hold the flags word"
+    );
+}
+
+#[test]
+fn a_supplemental_chain_ending_in_a_fragment_shorter_than_a_record_header_is_named() {
+    // The chain holds one 0x30-byte type-3 record, then 8 bytes: too
+    // few for the next record's 0x10-byte header.
+    let mut data = build_self_with_supplemental(3, &[0u8; 0x20]);
+    data[0x60..0x68].copy_from_slice(&0x38u64.to_be_bytes());
+    assert!(
+        matches!(
+            find_supplemental_body(&data, 1).unwrap_err(),
+            SceError::HeaderOffsetOutOfRange {
+                what: "SELF supplemental header record"
+            }
+        ),
+        "a chain tail shorter than a record header is malformed, not the end of the chain"
+    );
+    assert_eq!(
+        find_supplemental_body(&data, 3).unwrap().map(<[u8]>::len),
+        Some(0x20),
+        "a record found before the malformed tail is still returned"
     );
 }
 

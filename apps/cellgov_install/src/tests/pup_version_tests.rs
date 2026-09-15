@@ -66,7 +66,9 @@ fn a_version_payload_that_is_not_a_version_is_quoted_in_the_refusal() {
 #[test]
 fn a_version_extent_past_the_file_is_not_an_absent_entry() {
     let mut data = pup_with(&[(ENTRY_ID_VERSION_TXT, b"4.93\n")]);
-    data.truncate(data.len() - 2);
+    // A length of 7 runs two bytes past the 5-byte payload, which ends
+    // the file.
+    data[ENTRY0_LENGTH_FIELD].copy_from_slice(&7u64.to_be_bytes());
     let pup = parse(&data).unwrap();
     assert!(matches!(
         version_key(&data, &pup),

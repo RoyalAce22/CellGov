@@ -4,10 +4,21 @@
 //! every other record type is a named refusal rather than a silent
 //! skip. Records are padded to 512-byte boundaries.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, SIBLING_FLASH_MOUNTS};
+
+use crate::field::usize_from_header;
+
+/// Bytes of one header block, and the unit every payload pads to.
+const BLOCK: usize = 512;
 
 /// One regular file extracted from a USTAR archive.
 #[derive(Debug)]
@@ -190,11 +201,10 @@ fn octal_to_u64(s: &[u8]) -> Option<u64> {
 /// past it, padding or not, is not read.
 pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
     let mut entries = Vec::new();
-    let mut offset = 0usize;
+    let mut rest = data;
 
-    while offset + 512 <= data.len() {
-        let header = &data[offset..offset + 512];
-
+    while let Some((header, after_header)) = rest.split_first_chunk::<BLOCK>() {
+        let offset = offset_in(data, rest);
         if header.iter().all(|&b| b == 0) {
             break;
         }
@@ -205,7 +215,7 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
         // ustar header block the magic names, and says nothing about a
         // block without one. Refusing every such block, rather than
         // resyncing to the next one, is CellGov's own choice.
-        if &header[MAGIC_FIELD_OFFSET..MAGIC_FIELD_OFFSET + USTAR_MAGIC.len()] != USTAR_MAGIC {
+        if !header[MAGIC_FIELD_OFFSET..].starts_with(USTAR_MAGIC) {
             return Err(TarParseError::NotUstarHeader { offset });
         }
 
@@ -235,35 +245,28 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
             }
         })?;
         let filetype = header[0x9C];
-        let header_offset = offset;
-
-        offset += 512;
 
         // Bound the payload of EVERY record, not just the ones whose
         // bytes are kept. A record whose payload is skipped still
-        // advances `offset` by its declared size. An over-long size on
+        // advances the scan by its declared size. An over-long size on
         // such a record would walk past the archive and end the scan
         // with `Ok`, dropping every entry behind it. No published rule
         // covers a size field longer than the archive that holds it,
-        // so CellGov refuses it whatever the type flag says. Comparing
-        // at the archive field's own width also keeps a size wider
-        // than `usize` from truncating into a short read.
-        if declared_size > (data.len() - offset) as u64 {
+        // so CellGov refuses it whatever the type flag says.
+        let Some(payload) = usize_from_header(declared_size).and_then(|n| after_header.get(..n))
+        else {
             return Err(TarParseError::PayloadPastArchive {
                 name: full_name,
-                offset,
+                offset: offset_in(data, after_header),
                 size: declared_size,
                 archive_size: data.len(),
             });
-        }
-        // Exact: the bound above holds `declared_size` at or below the
-        // remaining archive length.
-        let size = declared_size as usize;
+        };
 
         match filetype {
             TYPE_REGULAR | 0 => entries.push(TarEntry {
                 name: full_name,
-                data: data[offset..offset + size].to_vec(),
+                data: payload.to_vec(),
             }),
             // A directory record carries no payload, and every parent a
             // written file needs is created during extraction, so the
@@ -271,17 +274,31 @@ pub fn parse(data: &[u8]) -> Result<Vec<TarEntry>, TarParseError> {
             TYPE_DIRECTORY => {}
             filetype => {
                 return Err(TarParseError::UnsupportedFileType {
-                    offset: header_offset,
+                    offset,
                     name: full_name,
                     filetype,
                 });
             }
         }
 
-        offset += (size + 511) & !511;
+        // A last record whose padding the archive omits ends the scan,
+        // as a short trailing block does.
+        rest = payload
+            .len()
+            .checked_next_multiple_of(BLOCK)
+            .and_then(|padded| after_header.get(padded..))
+            .unwrap_or_default();
     }
 
     Ok(entries)
+}
+
+/// Byte offset of `rest` inside `archive`, of which it is a suffix.
+fn offset_in(archive: &[u8], rest: &[u8]) -> usize {
+    archive
+        .len()
+        .checked_sub(rest.len())
+        .expect("invariant: the scan only narrows the archive to a suffix of itself")
 }
 
 fn is_safe_relative(clean: &str) -> bool {
@@ -356,6 +373,10 @@ pub fn route_entry_path(name: &str) -> Option<String> {
 /// returned report. Per-entry I/O failures are collected rather than
 /// short-circuiting; the caller decides whether the report's `errors`
 /// vec aborts the install.
+#[allow(
+    clippy::arithmetic_side_effects,
+    reason = "the tallies count entries, so none passes entries.len()"
+)]
 pub fn extract_to_disk(entries: &[TarEntry], vfs_root: &Path) -> ExtractReport {
     let mut report = ExtractReport::default();
     for entry in entries {
@@ -397,5 +418,21 @@ pub fn extract_to_disk(entries: &[TarEntry], vfs_root: &Path) -> ExtractReport {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
 #[path = "tests/tar_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
+#[path = "tests/tar_bounds_tests.rs"]
+mod bounds_tests;

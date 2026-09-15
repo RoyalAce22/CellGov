@@ -144,6 +144,23 @@ pub enum SceError {
         /// `p_filesz` declared by the destination program header.
         p_filesz: usize,
     },
+    /// The sections without a program-header size produce more
+    /// plaintext than the container header declares.
+    #[error("SCE: section {index} takes the sections' output past the 0x{plaintext_size:x} plaintext bytes the container header declares")]
+    SectionsPastPlaintextSize {
+        /// Zero-based index of the section whose output crossed the size.
+        index: usize,
+        /// Plaintext size the container header declares.
+        plaintext_size: u64,
+    },
+    /// The host cannot allocate a buffer at the bound on a section's output.
+    #[error("SCE: section {index} may inflate to 0x{size:x} bytes, which cannot be allocated")]
+    SectionOutputTooLarge {
+        /// Zero-based index of the section.
+        index: usize,
+        /// Bound on the section's output, in bytes.
+        size: usize,
+    },
     /// Unknown compression_kind in section header.
     #[error("SCE: section {index} has unknown compression_kind {got} (expected 1=none or 2=zlib)")]
     UnknownCompressionKind {

@@ -3,6 +3,12 @@
 //! Entry ids are a fixed table Sony assigns to the payloads a firmware
 //! update carries; a reader locates a payload by id, never by position.
 
+/// Bytes of the fixed header at file offset 0, and the offset of the entry table.
+pub const PUP_HEADER_SIZE: usize = 0x30;
+
+/// Bytes of one entry-table record, and of one hash-table record.
+pub const PUP_RECORD_SIZE: usize = 0x20;
+
 /// `update_files.tar`: the TAR of SCE-wrapped dev_flash packages that
 /// carries the firmware image itself.
 ///

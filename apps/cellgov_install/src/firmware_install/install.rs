@@ -83,10 +83,8 @@ fn update_files_payload<'a>(
         .iter()
         .find(|e| e.entry_id == ENTRY_ID_UPDATE_FILES)
         .ok_or(FirmwareInstallError::NoUpdateFiles)?;
-    usize::try_from(entry.data_offset)
-        .ok()
-        .zip(usize::try_from(entry.data_length).ok())
-        .and_then(|(start, len)| pup_data.get(start..)?.get(..len))
+    entry
+        .payload(pup_data)
         .ok_or(FirmwareInstallError::UpdateFilesOutOfBounds {
             offset: entry.data_offset,
             length: entry.data_length,

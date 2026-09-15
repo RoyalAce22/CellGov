@@ -14,9 +14,18 @@
 //! content extraction consumes the package key and sits behind the
 //! `decrypt` feature.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockEncrypt, KeyInit};
 
+#[cfg(feature = "decrypt")]
+use crate::field::usize_from_u32;
+use crate::field::{read_be_u16, read_be_u32, read_be_u64, usize_from_header};
 #[cfg(feature = "decrypt")]
 use crate::keys::KeyVault;
 
@@ -30,6 +39,7 @@ const PKG_PLATFORM_PS3: u16 = 0x0001;
 /// through the 16-byte `klicensee` at 0x70.
 const PKG_HEADER_MIN: usize = 0x80;
 /// One item record (`PKGEntry`) is 32 bytes.
+#[cfg(feature = "decrypt")]
 const ENTRY_LEN: usize = 0x20;
 /// Item-name field cap, matching `PKG_MAX_FILENAME_SIZE`.
 const MAX_NAME_LEN: u32 = 256;
@@ -151,9 +161,6 @@ pub enum PkgError {
     /// Platform tag was not PS3.
     #[error("non-PS3 PKG platform 0x{0:04x}")]
     NonPs3Platform(u16),
-    /// `file_count` is implausibly large for the entry table.
-    #[error("PKG file_count 0x{0:x} is too large")]
-    FileCountTooLarge(u32),
     /// `pkg_size` exceeds the input length: truncated or multi-part.
     #[error("PKG size mismatch: pkg_size 0x{pkg_size:x} exceeds file length 0x{len:x} (multi-part PKGs are not supported)")]
     SizeMismatch {
@@ -175,10 +182,13 @@ pub enum PkgError {
         pkg_size: u64,
     },
     /// The encrypted entry table does not fit in the data region.
-    #[error("PKG entry table needs 0x{needed:x} bytes, data region is 0x{region:x}")]
+    #[error(
+        "PKG entry table of {file_count} 0x20-byte records does not fit the \
+         0x{region:x}-byte data region"
+    )]
     EntryTableOutOfBounds {
-        /// Bytes the entry table would occupy.
-        needed: usize,
+        /// `file_count` from the header.
+        file_count: u32,
         /// Bytes available in the decrypted data region.
         region: usize,
     },
@@ -232,30 +242,6 @@ pub enum PkgError {
     Keys(#[from] crate::keys::KeyVaultError),
 }
 
-fn read_be_u16(data: &[u8], off: usize) -> u16 {
-    u16::from_be_bytes(
-        data[off..off + 2]
-            .try_into()
-            .expect("invariant: caller bounds-checked this 2-byte read"),
-    )
-}
-
-fn read_be_u32(data: &[u8], off: usize) -> u32 {
-    u32::from_be_bytes(
-        data[off..off + 4]
-            .try_into()
-            .expect("invariant: caller bounds-checked this 4-byte read"),
-    )
-}
-
-fn read_be_u64(data: &[u8], off: usize) -> u64 {
-    u64::from_be_bytes(
-        data[off..off + 8]
-            .try_into()
-            .expect("invariant: caller bounds-checked this 8-byte read"),
-    )
-}
-
 /// Parse and validate a retail PKG header. Rejects debug packages,
 /// non-PS3 platforms, multi-part packages, and out-of-bounds data
 /// regions before any decryption is attempted.
@@ -280,16 +266,11 @@ pub fn parse_header(data: &[u8]) -> Result<PkgHeader, PkgError> {
     }
 
     let file_count = read_be_u32(data, 0x14);
-    // Guard the entry-table size computation against overflow.
-    if (file_count as u64).checked_mul(ENTRY_LEN as u64).is_none() {
-        return Err(PkgError::FileCountTooLarge(file_count));
-    }
-
     let pkg_size = read_be_u64(data, 0x18);
     let data_offset = read_be_u64(data, 0x20);
     let data_size = read_be_u64(data, 0x28);
 
-    if pkg_size > data.len() as u64 {
+    if usize_from_header(pkg_size).is_none_or(|size| size > data.len()) {
         return Err(PkgError::SizeMismatch {
             pkg_size,
             len: data.len(),
@@ -379,27 +360,38 @@ pub fn extract(data: &[u8], keys: &KeyVault) -> Result<PkgArchive, PkgError> {
     let header = parse_header(data)?;
     let pkg_key = keys.pkg_aes()?;
 
-    let region_start = header.data_offset as usize;
-    let mut region = data[region_start..].to_vec();
+    // `parse_header` already proved that this region is inside the package.
+    let Some(encrypted_region) = usize_from_header(header.data_offset)
+        .zip(usize_from_header(header.data_size))
+        .and_then(|(start, len)| data.get(start..)?.get(..len))
+    else {
+        return Err(PkgError::DataRegionOutOfBounds {
+            data_offset: header.data_offset,
+            data_size: header.data_size,
+            pkg_size: header.pkg_size,
+        });
+    };
+    let mut region = encrypted_region.to_vec();
     ctr_decrypt(pkg_key, &header.klicensee, &mut region);
     let region_len = region.len();
 
-    let entry_table_len = (header.file_count as usize) * ENTRY_LEN;
-    if entry_table_len > region_len {
+    let Some(entry_table) = usize_from_u32(header.file_count)
+        .checked_mul(ENTRY_LEN)
+        .and_then(|len| region.get(..len))
+    else {
         return Err(PkgError::EntryTableOutOfBounds {
-            needed: entry_table_len,
+            file_count: header.file_count,
             region: region_len,
         });
-    }
+    };
 
-    let mut files = Vec::with_capacity(header.file_count as usize);
-    for i in 0..header.file_count as usize {
-        let rec = i * ENTRY_LEN;
-        let name_offset = read_be_u32(&region, rec) as u64;
-        let name_size = read_be_u32(&region, rec + 0x04);
-        let file_offset = read_be_u64(&region, rec + 0x08);
-        let file_size = read_be_u64(&region, rec + 0x10);
-        let entry_type = read_be_u32(&region, rec + 0x18);
+    let mut files = Vec::new();
+    for (i, rec) in entry_table.chunks_exact(ENTRY_LEN).enumerate() {
+        let name_offset = read_be_u32(rec, 0);
+        let name_size = read_be_u32(rec, 0x04);
+        let file_offset = read_be_u64(rec, 0x08);
+        let file_size = read_be_u64(rec, 0x10);
+        let entry_type = read_be_u32(rec, 0x18);
 
         if name_size > MAX_NAME_LEN {
             return Err(PkgError::NameTooLong {
@@ -407,16 +399,17 @@ pub fn extract(data: &[u8], keys: &KeyVault) -> Result<PkgArchive, PkgError> {
                 size: name_size,
             });
         }
-        let name_end = name_offset
-            .checked_add(name_size as u64)
-            .filter(|&end| end <= region_len as u64)
-            .ok_or(PkgError::NameOutOfBounds {
+        let Some(name_bytes) = region
+            .get(usize_from_u32(name_offset)..)
+            .and_then(|rest| rest.get(..usize_from_u32(name_size)))
+        else {
+            return Err(PkgError::NameOutOfBounds {
                 index: i,
-                offset: name_offset,
+                offset: u64::from(name_offset),
                 size: name_size,
                 region: region_len,
-            })?;
-        let name_bytes = &region[name_offset as usize..name_end as usize];
+            });
+        };
         let name = String::from_utf8_lossy(name_bytes)
             .trim_end_matches('\0')
             .to_string();
@@ -437,20 +430,23 @@ pub fn extract(data: &[u8], keys: &KeyVault) -> Result<PkgArchive, PkgError> {
                 // DLC / encrypted save containers: out of scope.
             }
             _ => {
-                let file_end = file_offset
-                    .checked_add(file_size)
-                    .filter(|&end| end <= region_len as u64)
-                    .ok_or_else(|| PkgError::FileDataOutOfBounds {
+                let range = usize_from_header(file_offset)
+                    .zip(usize_from_header(file_size))
+                    .and_then(|(start, len)| Some(start..start.checked_add(len)?))
+                    .filter(|range| range.end <= region_len);
+                let Some(region_range) = range else {
+                    return Err(PkgError::FileDataOutOfBounds {
                         index: i,
-                        name: name.clone(),
+                        name,
                         offset: file_offset,
                         size: file_size,
                         region: region_len,
-                    })?;
+                    });
+                };
                 files.push(PkgFile {
                     name,
                     kind: PkgEntryKind::File,
-                    region_range: file_offset as usize..file_end as usize,
+                    region_range,
                 });
             }
         }
@@ -464,5 +460,21 @@ pub fn extract(data: &[u8], keys: &KeyVault) -> Result<PkgArchive, PkgError> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
 #[path = "tests/pkg_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
+#[path = "tests/pkg_bounds_tests.rs"]
+mod bounds_tests;

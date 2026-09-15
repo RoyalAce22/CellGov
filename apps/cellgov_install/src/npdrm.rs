@@ -14,6 +14,12 @@
 //! `tests/npdrm_oracle_vectors.rs` behind the `npdrm-oracle-vectors`
 //! feature.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
 #[cfg(feature = "decrypt")]
 use aes::cipher::{BlockDecrypt, KeyInit};
 use cellgov_ps3_abi::format::sce::SCE_SUPPLEMENTAL_KIND_NPDRM;
@@ -139,8 +145,8 @@ pub fn rap_to_klic(keys: &KeyVault, rap: &[u8; 16]) -> Result<[u8; 16], SceError
             *digit ^= e;
         }
         let before = digits;
-        for (i, digit) in digits.iter_mut().enumerate().skip(1) {
-            *digit = before[i] ^ before[i - 1];
+        for (digit, pair) in digits.iter_mut().skip(1).zip(before.windows(2)) {
+            *digit = pair[1] ^ pair[0];
         }
         digits = u128::from_le_bytes(digits).wrapping_sub(e2).to_le_bytes();
     }
@@ -272,9 +278,21 @@ fn resolve_npdrm_klicensee(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
 #[path = "tests/npdrm_tests.rs"]
 mod tests;
 
 #[cfg(all(test, feature = "decrypt"))]
+#[allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixtures lay out synthetic headers"
+)]
 #[path = "tests/npdrm_klic_tests.rs"]
 mod klic_known_answer_tests;

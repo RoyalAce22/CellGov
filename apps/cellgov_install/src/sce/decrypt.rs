@@ -1,20 +1,27 @@
 //! Envelope + section decrypt pipeline: AES-256-CBC key envelope,
 //! AES-128-CTR metadata directory, per-section decrypt + decompress.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
 use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
 use cellgov_ps3_abi::format::sce::{
-    SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_ENC_KIND_AES128_CTR, SCE_ENC_KIND_PLAIN,
-    SCE_SECTION_KIND_PHDR,
+    SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_DATA_KEY_SIZE, SCE_ENC_KIND_AES128_CTR,
+    SCE_ENC_KIND_PLAIN, SCE_SECTION_DESCRIPTOR_SIZE, SCE_SECTION_KIND_PHDR,
 };
 
+use crate::field::{read_be_u32, read_be_u64, usize_from_header, usize_from_u32};
 use crate::keys::{KeyVault, SelfClass, SelfKey};
 
 use super::elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 use super::error::SceError;
 use super::raw::{
-    checked_add_oob, checked_mul_oob, parse_sce_header, read_be_u32, read_be_u64,
-    EncryptedSectionDescriptor, SceContainerHeader,
+    checked_add_oob, checked_mul_oob, parse_sce_header, EncryptedSectionDescriptor,
+    SceContainerHeader,
 };
 
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
@@ -36,7 +43,7 @@ pub fn decrypt_package(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError
     let mut tried = 0usize;
     let mut last = None;
     for key in keys.scepkg_keys()? {
-        tried += 1;
+        tried = tried.saturating_add(1);
         match decrypt_sce(data, &key.erk, &key.riv) {
             Ok(payload) => return Ok(payload),
             Err(e @ (SceError::KeyEnvelopePadding | SceError::AesCbcDecryptFailed)) => {
@@ -106,7 +113,7 @@ pub(crate) fn open_envelope_with<'k>(
     let mut tried = 0usize;
     let mut last = None;
     for key in candidates {
-        tried += 1;
+        tried = tried.saturating_add(1);
         match decrypt_envelope(data, hdr, &key.erk, &key.riv, npdrm_layer_key) {
             Ok(envelope) => return Ok(envelope),
             Err(e @ (SceError::KeyEnvelopePadding | SceError::AesCbcDecryptFailed)) => {
@@ -178,9 +185,9 @@ fn decrypt_sce(data: &[u8], erk: &[u8; 0x20], riv: &[u8; 0x10]) -> Result<Vec<u8
 /// APP-keyed path; the NPDRM path produces its envelope through
 /// [`crate::npdrm`].
 ///
-/// The container is not assumed to wrap an ELF -- a firmware-update
-/// PKG does not -- so no per-segment inflate bound is available and a
-/// zlib section is inflated to whatever length its stream produces.
+/// A firmware-update PKG wraps no ELF, so no program header sizes its
+/// sections. The header's [`SceContainerHeader::plaintext_size`] bounds
+/// their total output.
 pub fn decrypt_sce_sections(
     data: &[u8],
     erk: &[u8; 0x20],
@@ -218,19 +225,22 @@ pub(crate) fn decrypt_envelope(
     riv: &[u8; 0x10],
     npdrm_layer_key: Option<&[u8; 0x10]>,
 ) -> Result<[u8; 0x40], SceError> {
-    let key_envelope_offset =
-        checked_add_oob(hdr.metadata_offset as usize, 0x20, "SCE metadata info")?;
+    let key_envelope_offset = checked_add_oob(
+        usize_from_u32(hdr.metadata_offset),
+        0x20,
+        "SCE metadata info",
+    )?;
     let key_envelope_end = checked_add_oob(key_envelope_offset, 0x40, "SCE metadata info")?;
-    if key_envelope_end > data.len() {
+    let Some(envelope_bytes) = data.get(key_envelope_offset..key_envelope_end) else {
         return Err(SceError::TooSmall {
             what: "SCE metadata info",
             got: data.len(),
             need: key_envelope_end,
         });
-    }
+    };
 
     let mut envelope = [0u8; 0x40];
-    envelope.copy_from_slice(&data[key_envelope_offset..key_envelope_end]);
+    envelope.copy_from_slice(envelope_bytes);
 
     let is_debug = (hdr.revision_flags & 0x8000) != 0;
     if !is_debug {
@@ -275,18 +285,27 @@ pub(crate) fn decrypt_envelope(
 ///   `[0x20..0x30] = aes_iv`
 ///   `[0x30..0x40] = zero padding`
 ///
-/// `segment_file_sizes` is the inner ELF's `p_filesz` table, supplied
-/// by callers decrypting a SELF; it bounds how far a PHDR-kind
-/// section's zlib stream may inflate. `None` leaves zlib sections
-/// unbounded, which is all a container with no inner ELF can offer.
+/// A size that the container declares bounds the output of each
+/// section, and [`inflate_bounded`] reserves a zlib section's buffer at
+/// that bound. The bound is:
+///
+/// - for a PHDR-kind section, when the caller passes a SELF's
+///   `p_filesz` table as `segment_file_sizes`: the `p_filesz` of its
+///   destination segment;
+/// - for every other section: the part of the header's
+///   [`SceContainerHeader::plaintext_size`] that the earlier sections
+///   left.
 pub(crate) fn decrypt_sections_from_envelope(
     data: &[u8],
     hdr: &SceContainerHeader,
     envelope: &[u8; 0x40],
     segment_file_sizes: Option<&[usize]>,
 ) -> Result<Vec<(EncryptedSectionDescriptor, Vec<u8>)>, SceError> {
-    let key_envelope_offset =
-        checked_add_oob(hdr.metadata_offset as usize, 0x20, "SCE metadata info")?;
+    let key_envelope_offset = checked_add_oob(
+        usize_from_u32(hdr.metadata_offset),
+        0x20,
+        "SCE metadata info",
+    )?;
 
     let aes_key: [u8; 16] = envelope[0..16]
         .try_into()
@@ -296,7 +315,11 @@ pub(crate) fn decrypt_sections_from_envelope(
         .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
 
     let directory_offset = checked_add_oob(key_envelope_offset, 0x40, "SCE metadata directory")?;
-    let directory_end = hdr.header_size as usize;
+    let Some(directory_end) = usize_from_header(hdr.header_size) else {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "SCE metadata headers",
+        });
+    };
     if directory_end > data.len() {
         return Err(SceError::TooSmall {
             what: "SCE metadata headers",
@@ -325,13 +348,17 @@ pub(crate) fn decrypt_sections_from_envelope(
     if directory_buf.len() < 0x20 {
         return Err(SceError::MetadataTooSmall);
     }
-    let section_count = read_be_u32(&directory_buf, 0x0C) as usize;
-    let key_count = read_be_u32(&directory_buf, 0x10) as usize;
+    let section_count = usize_from_u32(read_be_u32(&directory_buf, 0x0C));
+    let key_count = usize_from_u32(read_be_u32(&directory_buf, 0x10));
 
     let sections_start = 0x20usize;
-    let sections_bytes = checked_mul_oob(section_count, 0x30, "SCE metadata sections")?;
+    let sections_bytes = checked_mul_oob(
+        section_count,
+        SCE_SECTION_DESCRIPTOR_SIZE,
+        "SCE metadata sections",
+    )?;
     let keys_start = checked_add_oob(sections_start, sections_bytes, "SCE metadata sections")?;
-    let keys_bytes = checked_mul_oob(key_count, 0x10, "SCE metadata keys")?;
+    let keys_bytes = checked_mul_oob(key_count, SCE_DATA_KEY_SIZE, "SCE metadata keys")?;
     let keys_end = checked_add_oob(keys_start, keys_bytes, "SCE metadata keys")?;
 
     if keys_end > directory_buf.len() {
@@ -341,60 +368,48 @@ pub(crate) fn decrypt_sections_from_envelope(
         });
     }
 
+    let descriptors = &directory_buf[sections_start..keys_start];
     let data_keys = &directory_buf[keys_start..keys_end];
 
+    // A declared size past the host `usize` bounds nothing the host
+    // could allocate, so the budget saturates at the host limit.
+    let mut budget = usize_from_header(hdr.plaintext_size).unwrap_or(usize::MAX);
     let mut sections: Vec<(EncryptedSectionDescriptor, Vec<u8>)> = Vec::new();
 
-    for i in 0..section_count {
-        let row_off = checked_mul_oob(i, 0x30, "SCE section descriptor row")?;
-        let off = checked_add_oob(sections_start, row_off, "SCE section descriptor row")?;
+    for (i, row) in descriptors
+        .chunks_exact(SCE_SECTION_DESCRIPTOR_SIZE)
+        .enumerate()
+    {
         let sec = EncryptedSectionDescriptor {
-            payload_offset: read_be_u64(&directory_buf, off),
-            payload_size: read_be_u64(&directory_buf, off + 8),
-            section_kind: read_be_u32(&directory_buf, off + 0x10),
-            program_segment_index: read_be_u32(&directory_buf, off + 0x14),
-            sha1_hashed: read_be_u32(&directory_buf, off + 0x18),
-            sha1_slot: read_be_u32(&directory_buf, off + 0x1C),
-            encryption_kind: read_be_u32(&directory_buf, off + 0x20),
-            key_slot: read_be_u32(&directory_buf, off + 0x24),
-            iv_slot: read_be_u32(&directory_buf, off + 0x28),
-            compression_kind: read_be_u32(&directory_buf, off + 0x2C),
+            payload_offset: read_be_u64(row, 0),
+            payload_size: read_be_u64(row, 0x08),
+            section_kind: read_be_u32(row, 0x10),
+            program_segment_index: read_be_u32(row, 0x14),
+            sha1_hashed: read_be_u32(row, 0x18),
+            sha1_slot: read_be_u32(row, 0x1C),
+            encryption_kind: read_be_u32(row, 0x20),
+            key_slot: read_be_u32(row, 0x24),
+            iv_slot: read_be_u32(row, 0x28),
+            compression_kind: read_be_u32(row, 0x2C),
         };
 
-        let sec_start = sec.payload_offset as usize;
-        let sec_end = sec_start
-            .checked_add(sec.payload_size as usize)
-            .ok_or(SceError::SectionPastFile { index: i })?;
-        if sec_end > data.len() {
+        let Some(payload) = usize_from_header(sec.payload_offset)
+            .zip(usize_from_header(sec.payload_size))
+            .and_then(|(start, len)| data.get(start..)?.get(..len))
+        else {
             return Err(SceError::SectionPastFile { index: i });
-        }
-
-        let mut sec_data = data[sec_start..sec_end].to_vec();
+        };
+        let mut sec_data = payload.to_vec();
 
         match sec.encryption_kind {
             SCE_ENC_KIND_PLAIN => {}
             SCE_ENC_KIND_AES128_CTR => {
-                let k_off = (sec.key_slot as usize)
-                    .checked_mul(0x10)
-                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
-                let iv_off = (sec.iv_slot as usize)
-                    .checked_mul(0x10)
-                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
-                let k_end = k_off
-                    .checked_add(0x10)
-                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
-                let iv_end = iv_off
-                    .checked_add(0x10)
-                    .ok_or(SceError::SectionKeyIvIndexOutOfRange { index: i })?;
-                if k_end > data_keys.len() || iv_end > data_keys.len() {
+                let (Some(sec_key), Some(sec_iv)) = (
+                    data_key(data_keys, sec.key_slot),
+                    data_key(data_keys, sec.iv_slot),
+                ) else {
                     return Err(SceError::SectionKeyIvIndexOutOfRange { index: i });
-                }
-                let sec_key: [u8; 16] = data_keys[k_off..k_off + 0x10]
-                    .try_into()
-                    .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
-                let sec_iv: [u8; 16] = data_keys[iv_off..iv_off + 0x10]
-                    .try_into()
-                    .expect("invariant: fixed-length 16-byte slice always converts to [u8; 16]");
+                };
 
                 let mut sec_cipher = Aes128Ctr::new(
                     aes::cipher::generic_array::GenericArray::from_slice(&sec_key),
@@ -411,52 +426,44 @@ pub(crate) fn decrypt_sections_from_envelope(
             }
         }
 
+        let segment = match segment_file_sizes {
+            Some(sizes) if sec.section_kind == SCE_SECTION_KIND_PHDR => {
+                let prog_idx = usize_from_u32(sec.program_segment_index);
+                let p_filesz =
+                    *sizes
+                        .get(prog_idx)
+                        .ok_or(SceError::SectionProgramIndexOutOfRange {
+                            prog_idx,
+                            e_phnum: sizes.len(),
+                        })?;
+                Some((prog_idx, p_filesz))
+            }
+            _ => None,
+        };
+        let past_bound = || match segment {
+            Some((prog_idx, p_filesz)) => SceError::SectionInflatesPastSegment {
+                index: i,
+                prog_idx,
+                p_filesz,
+            },
+            None => SceError::SectionsPastPlaintextSize {
+                index: i,
+                plaintext_size: hdr.plaintext_size,
+            },
+        };
+        let bound = segment.map_or(budget, |(_, p_filesz)| p_filesz);
+
         match sec.compression_kind {
             SCE_COMP_KIND_NONE => {}
             SCE_COMP_KIND_ZLIB => {
-                use flate2::read::ZlibDecoder;
-                use std::io::Read;
-                // A stream that inflates to more bytes than its
-                // destination segment's `p_filesz` declares is not a
-                // stream this container describes. Reading one byte
-                // past that size separates the two without letting a
-                // crafted stream drive the allocation.
-                let cap = match segment_file_sizes {
-                    Some(sizes) if sec.section_kind == SCE_SECTION_KIND_PHDR => {
-                        let prog_idx = sec.program_segment_index as usize;
-                        Some(*sizes.get(prog_idx).ok_or(
-                            SceError::SectionProgramIndexOutOfRange {
-                                prog_idx,
-                                e_phnum: sizes.len(),
-                            },
-                        )?)
-                    }
-                    _ => None,
-                };
-                let mut decoder = ZlibDecoder::new(sec_data.as_slice());
-                let mut decompressed = Vec::new();
-                match cap {
-                    Some(cap) => {
-                        let inflated = decoder
-                            .by_ref()
-                            .take((cap as u64).saturating_add(1))
-                            .read_to_end(&mut decompressed)
-                            .map_err(|source| SceError::ZlibDecompress { index: i, source })?;
-                        if inflated > cap {
-                            return Err(SceError::SectionInflatesPastSegment {
-                                index: i,
-                                prog_idx: sec.program_segment_index as usize,
-                                p_filesz: cap,
-                            });
-                        }
-                    }
-                    None => {
-                        decoder
-                            .read_to_end(&mut decompressed)
-                            .map_err(|source| SceError::ZlibDecompress { index: i, source })?;
-                    }
-                }
-                sec_data = decompressed;
+                sec_data = inflate_bounded(&sec_data, bound).map_err(|refusal| match refusal {
+                    InflateRefusal::PastBound => past_bound(),
+                    InflateRefusal::Unallocatable => SceError::SectionOutputTooLarge {
+                        index: i,
+                        size: bound,
+                    },
+                    InflateRefusal::Stream(source) => SceError::ZlibDecompress { index: i, source },
+                })?;
             }
             other => {
                 return Err(SceError::UnknownCompressionKind {
@@ -465,9 +472,81 @@ pub(crate) fn decrypt_sections_from_envelope(
                 });
             }
         }
+        // `assemble_elf_from_sections` checks each PHDR section against
+        // its segment's `p_filesz`, and names a short section as well
+        // as a long one.
+        if segment.is_none() {
+            budget = budget.checked_sub(sec_data.len()).ok_or_else(past_bound)?;
+        }
 
         sections.push((sec, sec_data));
     }
 
     Ok(sections)
+}
+
+/// The 16 bytes of data-key table slot `slot`, or `None` when the slot
+/// is past the table.
+fn data_key(table: &[u8], slot: u32) -> Option<[u8; SCE_DATA_KEY_SIZE]> {
+    let start = usize_from_u32(slot).checked_mul(SCE_DATA_KEY_SIZE)?;
+    table
+        .get(start..)?
+        .get(..SCE_DATA_KEY_SIZE)?
+        .try_into()
+        .ok()
+}
+
+/// Why [`inflate_bounded`] produced no output.
+enum InflateRefusal {
+    /// The stream inflates past the bound.
+    PastBound,
+    /// The host cannot allocate a buffer of the bound's size.
+    Unallocatable,
+    /// The stream is not valid zlib, or ends before its end marker.
+    Stream(std::io::Error),
+}
+
+/// Inflate the zlib `stream`, whose output the container bounds at
+/// `bound` bytes.
+///
+/// The function reserves `bound + 1` bytes before it inflates. The
+/// extra byte separates a stream that ends at the bound from one that
+/// runs past it. The stream cannot grow the buffer. Before it returns,
+/// the function shrinks the buffer to the output, so a small output
+/// does not keep a large reservation.
+fn inflate_bounded(stream: &[u8], bound: usize) -> Result<Vec<u8>, InflateRefusal> {
+    use flate2::{Decompress, FlushDecompress, Status};
+    use std::io::{Error, ErrorKind};
+
+    let room = bound.checked_add(1).ok_or(InflateRefusal::Unallocatable)?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(room)
+        .map_err(|_| InflateRefusal::Unallocatable)?;
+    let mut inflater = Decompress::new(true);
+    loop {
+        let progress = (inflater.total_in(), inflater.total_out());
+        let input = usize::try_from(inflater.total_in())
+            .ok()
+            .and_then(|consumed| stream.get(consumed..))
+            .unwrap_or_default();
+        let status = inflater
+            .decompress_vec(input, &mut out, FlushDecompress::Finish)
+            .map_err(|e| InflateRefusal::Stream(Error::new(ErrorKind::InvalidData, e)))?;
+        if out.len() > bound {
+            return Err(InflateRefusal::PastBound);
+        }
+        if status == Status::StreamEnd {
+            break;
+        }
+        // No progress means the input ended before the end marker. The
+        // stream is truncated, whatever its inflated length.
+        if (inflater.total_in(), inflater.total_out()) == progress {
+            return Err(InflateRefusal::Stream(Error::new(
+                ErrorKind::UnexpectedEof,
+                "zlib stream ends before its end marker",
+            )));
+        }
+    }
+    out.shrink_to_fit();
+    Ok(out)
 }

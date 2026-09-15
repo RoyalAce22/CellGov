@@ -12,6 +12,13 @@ pub const SCE_MAGIC: [u8; 4] = *b"SCE\0";
 /// [`SCE_MAGIC`] as the big-endian word a header parser reads at offset 0.
 pub const SCE_MAGIC_U32: u32 = u32::from_be_bytes(SCE_MAGIC);
 
+/// Bytes of one section descriptor in the decrypted metadata directory.
+pub const SCE_SECTION_DESCRIPTOR_SIZE: usize = 0x30;
+
+/// Bytes of one slot in the metadata directory's data-key table; a
+/// section's key and IV each occupy one.
+pub const SCE_DATA_KEY_SIZE: usize = 0x10;
+
 /// `section_kind` value for SCE sections that describe the original
 /// program-header table; consumed by the SELF decrypter to rebuild
 /// the plaintext ELF's PHDR.

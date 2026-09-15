@@ -1,9 +1,16 @@
-//! Byte-level readers, SCE header layouts, and the container /
-//! supplemental-chain parses over them.
+//! SCE header layouts, and the container / supplemental-chain parses
+//! over them.
+
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
 
 use cellgov_ps3_abi::format::sce::SCE_MAGIC_U32;
 
 use super::error::SceError;
+use crate::field::{read_be_u16, read_be_u32, read_be_u64, usize_from_header, usize_from_u32};
 
 /// Outer SCE container header at file offset 0 (big-endian, 0x20 bytes).
 #[derive(Debug)]
@@ -21,8 +28,10 @@ pub struct SceContainerHeader {
     pub metadata_offset: u32,
     /// Offset 0x10: total size in bytes of all SCE headers (where encrypted payload begins).
     pub header_size: u64,
-    /// Offset 0x18: size of the encrypted payload that follows the headers.
-    pub encrypted_payload_size: u64,
+    /// Offset 0x18: size of the plaintext the container wraps, once
+    /// decrypted and inflated -- a SELF's ELF image, a package's
+    /// payload.
+    pub plaintext_size: u64,
 }
 
 /// 0x40-byte AES-256-CBC-encrypted envelope holding the per-file data key + IV
@@ -89,30 +98,6 @@ pub struct EncryptedSectionDescriptor {
     pub compression_kind: u32,
 }
 
-pub(super) fn read_be_u64(data: &[u8], offset: usize) -> u64 {
-    u64::from_be_bytes(
-        data[offset..offset + 8]
-            .try_into()
-            .expect("invariant: fixed-length 8-byte slice always converts to [u8; 8]"),
-    )
-}
-
-pub(super) fn read_be_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes(
-        data[offset..offset + 4]
-            .try_into()
-            .expect("invariant: fixed-length 4-byte slice always converts to [u8; 4]"),
-    )
-}
-
-pub(super) fn read_be_u16(data: &[u8], offset: usize) -> u16 {
-    u16::from_be_bytes(
-        data[offset..offset + 2]
-            .try_into()
-            .expect("invariant: fixed-length 2-byte slice always converts to [u8; 2]"),
-    )
-}
-
 /// Checked addition routed to [`SceError::HeaderOffsetOutOfRange`].
 /// Used on file-derived offsets / sizes where overflow would
 /// wrap the bounds check and let downstream indexing panic.
@@ -123,7 +108,7 @@ pub(super) fn checked_add_oob(a: usize, b: usize, what: &'static str) -> Result<
 
 /// Checked multiplication routed to [`SceError::HeaderOffsetOutOfRange`].
 /// Used on counts-times-element-size products derived from file
-/// bytes (e.g. `e_phnum * e_phentsize`, `section_count * 0x30`).
+/// bytes.
 #[cfg(feature = "decrypt")]
 pub(super) fn checked_mul_oob(a: usize, b: usize, what: &'static str) -> Result<usize, SceError> {
     a.checked_mul(b)
@@ -150,7 +135,7 @@ pub fn parse_sce_header(data: &[u8]) -> Result<SceContainerHeader, SceError> {
         category: read_be_u16(data, 10),
         metadata_offset: read_be_u32(data, 12),
         header_size: read_be_u64(data, 16),
-        encrypted_payload_size: read_be_u64(data, 24),
+        plaintext_size: read_be_u64(data, 24),
     })
 }
 
@@ -178,8 +163,7 @@ pub fn parse_program_authority_id(data: &[u8]) -> Result<u64, SceError> {
             need: 0x30,
         });
     }
-    let pid_off = read_be_u64(data, 0x28);
-    let Ok(pid_off) = usize::try_from(pid_off) else {
+    let Some(pid_off) = usize_from_header(read_be_u64(data, 0x28)) else {
         return Err(SceError::HeaderOffsetOutOfRange {
             what: "program identification header",
         });
@@ -245,43 +229,39 @@ pub(crate) fn find_supplemental_body(data: &[u8], kind: u32) -> Result<Option<&[
             need: 0x68,
         });
     }
-    let supplemental_offset = read_be_u64(data, 0x58) as usize;
-    let supplemental_size = read_be_u64(data, 0x60) as usize;
+    let chain_out_of_range = SceError::HeaderOffsetOutOfRange {
+        what: "SELF supplemental headers",
+    };
+    let supplemental_size = read_be_u64(data, 0x60);
     if supplemental_size == 0 {
         return Ok(None);
     }
-    let supplemental_end = supplemental_offset.checked_add(supplemental_size).ok_or(
-        SceError::HeaderOffsetOutOfRange {
-            what: "SELF supplemental headers",
-        },
-    )?;
-    if supplemental_end > data.len() {
-        return Err(SceError::HeaderOffsetOutOfRange {
-            what: "SELF supplemental headers",
-        });
-    }
+    let Some(mut chain) = usize_from_header(read_be_u64(data, 0x58))
+        .zip(usize_from_header(supplemental_size))
+        .and_then(|(offset, size)| data.get(offset..)?.get(..size))
+    else {
+        return Err(chain_out_of_range);
+    };
 
-    let mut cursor = supplemental_offset;
-    while cursor < supplemental_end {
-        let record_header_end = checked_add_oob(cursor, 0x10, "SELF supplemental header record")?;
-        if record_header_end > supplemental_end {
-            return Err(SceError::HeaderOffsetOutOfRange {
-                what: "SELF supplemental header record",
-            });
-        }
-        let record_kind = read_be_u32(data, cursor);
-        let record_size = read_be_u32(data, cursor + 4) as usize;
-        let record_end =
-            checked_add_oob(cursor, record_size, "SELF supplemental header record body")?;
-        if record_size < 0x10 || record_end > supplemental_end {
+    while let Some((record_header, after_header)) = chain.split_first_chunk::<0x10>() {
+        let record_kind = read_be_u32(record_header, 0);
+        let body = usize_from_u32(read_be_u32(record_header, 4))
+            .checked_sub(0x10)
+            .and_then(|body_len| after_header.get(..body_len));
+        let Some(body) = body else {
             return Err(SceError::HeaderOffsetOutOfRange {
                 what: "SELF supplemental header record body",
             });
-        }
+        };
         if record_kind == kind {
-            return Ok(Some(&data[record_header_end..record_end]));
+            return Ok(Some(body));
         }
-        cursor = record_end;
+        chain = &after_header[body.len()..];
+    }
+    if !chain.is_empty() {
+        return Err(SceError::HeaderOffsetOutOfRange {
+            what: "SELF supplemental header record",
+        });
     }
     Ok(None)
 }
