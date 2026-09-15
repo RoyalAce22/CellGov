@@ -235,34 +235,26 @@ fn a_reader_whose_store_nothing_else_reaches_still_conflicts() {
     );
 }
 
-/// Two of the nine outcomes stay out of reach, with no bound hit and
-/// no reversal dropped. A class holds one committed memory, so a count
-/// of seven over nine reachable outcomes is a claim the run does not
-/// support. The defect is in what the search covers rather than in what
-/// the relation records.
+/// The count a class holds one committed memory, so nine outcomes need
+/// nine classes and the run has to claim exactly that.
 #[test]
-fn the_search_reaches_seven_of_the_nine_outcomes() {
+fn the_search_reaches_every_outcome_and_claims_one_class_per_outcome() {
     let reachable = every_reachable_memory();
     let (reached, classes, bounds_hit) = memories_the_search_reaches();
     assert!(!bounds_hit, "no bound stopped the search");
-    assert!(
-        classes.is_some(),
-        "the search kept its cover claim, so the two it misses are unaccounted for",
-    );
 
     let missed: BTreeSet<u64> = reachable
         .iter()
         .filter(|(hash, _)| !reached.contains(hash))
         .map(|(_, ticks)| *ticks)
         .collect();
-    // 128 is both expensive steps and no cheap one before the reader,
-    // 136 is both expensive and one cheap. The search reaches 144, so
-    // it places the reader after both expensive steps only when every
-    // cheap one has run too.
-    assert_eq!(
-        missed,
-        BTreeSet::from([128, 136]),
-        "the outcomes the search does not reach, by the tick count that makes each",
+    assert!(
+        missed.is_empty(),
+        "outcomes the search does not reach, by the tick count that makes each: {missed:?}",
     );
-    assert_eq!(reached.len(), 7);
+    assert_eq!(
+        classes,
+        Some(9),
+        "one execution per class, and no class left over",
+    );
 }

@@ -18,7 +18,7 @@ use crate::classify::{BaselineRun, ExplorationResult, ScheduleRecord};
 use crate::config::ExplorationConfig;
 use crate::decision::{DecisionLog, DecisionPoint};
 use crate::dependency::StepFootprint;
-use crate::execution::{Event, Execution};
+use crate::execution::Execution;
 use crate::prescribed::PrescribedScheduler;
 use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason};
 use crate::wakeup::{initials, SeqEvent, WakeupTree};
@@ -408,7 +408,7 @@ fn detect_races(log: &DecisionLog, frames: &mut [Frame]) -> usize {
         let Some(frame) = frames.get_mut(at) else {
             continue;
         };
-        if already_explored(&frame.sleep, &sequence, events, &precedes) {
+        if already_explored(&frame.sleep, &sequence, &precedes) {
             continue;
         }
         if frame.warped {
@@ -426,16 +426,23 @@ fn detect_races(log: &DecisionLog, frames: &mut [Frame]) -> usize {
 /// `sequence` from this prefix, so the race that asked for it owes
 /// nothing [Abdulla2017 p:42:24 s:Algorithm 2 line 6].
 ///
-/// That is the case when `sleep` holds a weak initial of the sequence
-/// [Abdulla2017 p:42:12 s:Lemma 4.2]: a unit that can lead the sequence,
-/// or one whose own next step from this prefix commutes past every event
-/// in it. The second reading needs the sleeping unit's step and the
-/// sequence's, which is why `sleep` carries a footprint per entry and
-/// `events` is the execution the sequence indexes into.
+/// This reads one half of the weak-initials set
+/// [Abdulla2017 p:42:12 s:Lemma 4.2]: a sleeping unit that can lead the
+/// sequence. The half for a sleeping unit whose own next step commutes
+/// past the sequence is not read.
+///
+/// A branch does two things: it covers the sequence, and it opens the
+/// subtree under it. The commuting half answers for the first alone, so
+/// reading it retires branches whose descendants nothing else reaches;
+/// `tests/clock_read.rs` holds a workload where that loses classes. The
+/// leading half alone inserts a branch the search may not owe, which
+/// costs exploration and no cover.
+///
+/// `sleep` carries a footprint per entry for the independence test at
+/// line 17; this reads its units alone.
 fn already_explored<F>(
     sleep: &BTreeMap<UnitId, StepFootprint>,
     sequence: &[SeqEvent],
-    events: &[Event],
     precedes: &F,
 ) -> bool
 where
@@ -445,12 +452,7 @@ where
         return false;
     }
     let leaders = initials(sequence, precedes);
-    sleep.iter().any(|(unit, asleep)| {
-        leaders.contains(unit)
-            || sequence
-                .iter()
-                .all(|event| !events[event.index].footprint.conflicts(asleep))
-    })
+    sleep.keys().any(|unit| leaders.contains(unit))
 }
 
 /// Drop the branch each frame just explored, deepest first, and name

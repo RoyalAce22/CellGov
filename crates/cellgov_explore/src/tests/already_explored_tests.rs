@@ -40,7 +40,7 @@ fn an_empty_sleep_set_explored_nothing() {
     let run = execution(&[(1, store(0))]);
     let sequence = seq_of(&run, &[0]);
     let sleep = BTreeMap::new();
-    assert!(!already_explored(&sleep, &sequence, run.events(), &free));
+    assert!(!already_explored(&sleep, &sequence, &free));
 }
 
 #[test]
@@ -48,19 +48,17 @@ fn a_sleeping_unit_that_leads_the_sequence_is_already_explored() {
     let run = execution(&[(1, store(0))]);
     let sequence = seq_of(&run, &[0]);
     let sleep = BTreeMap::from([(UnitId::new(1), store(0))]);
-    assert!(already_explored(&sleep, &sequence, run.events(), &free));
+    assert!(already_explored(&sleep, &sequence, &free));
 }
 
+/// A commuting step answers for the sequence and not for the subtree
+/// under it, so it does not retire the branch.
 #[test]
-fn a_sleeping_unit_whose_step_commutes_past_the_sequence_is_already_explored() {
+fn a_sleeping_unit_whose_step_commutes_past_the_sequence_explored_nothing() {
     let run = execution(&[(1, store(0))]);
     let sequence = seq_of(&run, &[0]);
     let sleep = BTreeMap::from([(UnitId::new(2), StepFootprint::default())]);
-    assert!(
-        already_explored(&sleep, &sequence, run.events(), &free),
-        "unit 2 leads nothing here, but its step commutes past the \
-         whole sequence, so the branch through it already covers this",
-    );
+    assert!(!already_explored(&sleep, &sequence, &free));
 }
 
 #[test]
@@ -68,7 +66,7 @@ fn a_sleeping_unit_whose_step_conflicts_with_the_sequence_explored_nothing() {
     let run = execution(&[(1, store(0))]);
     let sequence = seq_of(&run, &[0]);
     let sleep = BTreeMap::from([(UnitId::new(2), store(0))]);
-    assert!(!already_explored(&sleep, &sequence, run.events(), &free));
+    assert!(!already_explored(&sleep, &sequence, &free));
 }
 
 #[test]
@@ -77,5 +75,5 @@ fn a_sleeping_unit_the_sequence_holds_back_leads_nothing() {
     let sequence = seq_of(&run, &[0, 1]);
     let held = |first: usize, second: usize| first == 0 && second == 1;
     let sleep = BTreeMap::from([(UnitId::new(2), store(0))]);
-    assert!(!already_explored(&sleep, &sequence, run.events(), &held));
+    assert!(!already_explored(&sleep, &sequence, &held));
 }
