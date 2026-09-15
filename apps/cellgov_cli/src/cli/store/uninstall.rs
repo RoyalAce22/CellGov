@@ -10,7 +10,7 @@ use cellgov_install::{firmware_uninstall, game_uninstall};
 
 use crate::cli::exit::die;
 use crate::cli::parse::{die_usage, FirmwareUninstallArgs, UninstallArgs};
-use crate::game::manifest::{ManifestError, TitleRegistry};
+use cellgov_boot::manifest::{ManifestError, TitleRegistry};
 
 use super::confirm::{confirm, Answers};
 use super::registry_dir;

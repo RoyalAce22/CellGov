@@ -1,21 +1,11 @@
-//! Boot a PS3 title ELF and drive the PPU step loop for the
-//! `boot run` and `boot bench` subcommands.
+//! Drive the boot library for the `boot run` and `boot bench`
+//! subcommands: these modules take the parsed options and render the
+//! report the library produces.
 
 mod bench;
-mod boot;
-mod child_init;
-mod content;
-mod diag;
 mod finish_line;
-mod guest_args;
-pub mod manifest;
-mod mounts;
-mod observation;
-mod prescan_format;
-mod prx;
 mod run;
-mod stack_walk;
-mod step_loop;
+mod sink;
 
 pub use bench::{
     bench_boot_one_run, bench_boot_runs, AnchorPlan, AnchorVerdict, BenchGate, BenchOptions,
@@ -24,3 +14,4 @@ pub use bench::{
 };
 pub(crate) use finish_line::{anchor_finish_line, within_runtime_cap};
 pub use run::{run_game, RunGameOptions, RunSummary};
+pub(crate) use sink::console_sink;

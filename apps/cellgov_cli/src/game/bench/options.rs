@@ -3,7 +3,7 @@
 
 use cellgov_time::Budget;
 
-use crate::game::manifest::{self, CellKey, TitleManifest};
+use cellgov_boot::manifest::{self, CellKey, TitleManifest};
 
 /// Subprocess measurements one `boot bench` invocation takes.
 ///
@@ -51,10 +51,10 @@ pub struct BenchOptions<'a> {
     pub plan: AnchorPlan<'a>,
     /// The `sys/external` directory the firmware loader reads.
     pub firmware_dir: Option<&'a str>,
-    pub composed_mounts: &'a [crate::composition::ComposedMount],
+    pub composed_mounts: &'a [cellgov_boot::ComposedMount],
     /// The directories the candidate walk probes for the EBOOT, a
     /// selected update's first; see
-    /// [`crate::game::boot::PrepareOptions::eboot_dirs`].
+    /// [`cellgov_boot::prepare::PrepareOptions::eboot_dirs`].
     pub eboot_dirs: &'a [std::path::PathBuf],
     /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,

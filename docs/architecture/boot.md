@@ -44,6 +44,18 @@ declaration runs in full. The
 honest low-level path, which stalls `AllBlocked` at the
 producer-fed wait.
 
+## Where the boot lives
+
+`cellgov_boot` owns every stage below, and `cellgov_cli` owns the
+argument parsing, the progress bar, the report text and the exit
+status. The library writes to no console: it narrates through a
+`BootSink` the CLI implements over stdout and stderr, and a refusal
+reaches the CLI as a `BootError` rather than ending the process
+itself. The one exception is the spawn loader, which runs inside
+`Runtime::step` and so returns its refusals as
+`ProcessSpawnLoadError`; the runtime rolls the spawn back and fails
+the syscall ([lv2_host.md](lv2_host.md), "Process model and spawn").
+
 ## Boot pipeline
 
 The `boot run` CLI subcommand loads a PS3 ELF, raw or SCE-wrapped

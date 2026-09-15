@@ -49,8 +49,9 @@ pub(crate) fn patch_byte_pair(entry: &str) -> Result<(u64, u8), CliArgError> {
 /// `pc=0xADDR`.
 pub(crate) fn checkpoint(
     value: &str,
-) -> Result<crate::game::manifest::CheckpointTrigger, crate::game::manifest::CheckpointParseError> {
-    crate::game::manifest::CheckpointTrigger::parse_cli_value(value)
+) -> Result<cellgov_boot::manifest::CheckpointTrigger, cellgov_boot::manifest::CheckpointParseError>
+{
+    cellgov_boot::manifest::CheckpointTrigger::parse_cli_value(value)
 }
 
 /// Refuse an empty entry, which a leading, trailing or doubled comma

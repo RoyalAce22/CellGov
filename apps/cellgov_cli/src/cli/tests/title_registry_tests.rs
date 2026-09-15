@@ -5,7 +5,7 @@ use std::path::Path;
 use cellgov_install::store::{StoreLayout, DEFAULT_VFS_ROOT};
 
 use super::DEFAULT_TITLE_REGISTRY_DIR;
-use crate::game::manifest::TitleRegistry;
+use cellgov_boot::manifest::TitleRegistry;
 
 #[test]
 fn the_default_registry_directory_holds_the_committed_manifests() {

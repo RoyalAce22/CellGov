@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::*;
-use crate::game::manifest::{CellExpectation, MatrixCell};
+use cellgov_boot::manifest::{CellExpectation, MatrixCell};
 
 fn key(fw: &str, game_ver: Option<&str>) -> CellKey {
     CellKey {
@@ -21,7 +21,7 @@ fn cell(bench_max_steps: Option<u64>, checkpoint: Option<CheckpointTrigger>) -> 
 }
 
 fn manifest() -> TitleManifest {
-    use crate::game::manifest::{Distribution, GameSource};
+    use cellgov_boot::manifest::{Distribution, GameSource};
     TitleManifest {
         content_id: "CG_TEST".to_string(),
         short_name: "test".to_string(),

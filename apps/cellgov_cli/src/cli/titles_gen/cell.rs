@@ -7,7 +7,7 @@
 
 use cellgov_compare::{BootSummary, ByteParity, Convergence, CrossRunnerSummary};
 
-use crate::game::manifest::{CellExpectation, MatrixCell};
+use cellgov_boot::manifest::{CellExpectation, MatrixCell};
 
 /// One cell's committed artifacts.
 #[derive(Debug, Default)]

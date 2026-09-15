@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_compare::BootSummary;
 
-use crate::game::manifest::CellKey;
 use crate::paths::{boot_anchor_path, workspace_root};
+use cellgov_boot::manifest::CellKey;
 
 /// Why a committed anchor gave no step count.
 #[derive(Debug, thiserror::Error)]

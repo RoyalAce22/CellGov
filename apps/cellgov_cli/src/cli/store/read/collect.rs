@@ -9,7 +9,7 @@ use cellgov_install::store::{Artifact, StoreLayout, TitleId, VersionKey};
 
 use crate::composition::identity::tree_app_version;
 use crate::composition::inventory::{FirmwareEntry, StoreInventory, TitleEntry};
-use crate::game::manifest::{CellKey, GameSource, TitleManifest, TitleRegistry, BASE_GAME_VER};
+use cellgov_boot::manifest::{CellKey, GameSource, TitleManifest, TitleRegistry, BASE_GAME_VER};
 
 use super::model::{
     store_rel, AnchorDoc, BaseDoc, FirmwareDoc, TitleDoc, UpdateDoc, STORE_FORMAT_VERSION,

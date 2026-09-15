@@ -10,8 +10,8 @@
 use std::path::Path;
 
 use crate::cli::exit::die;
-use crate::game::manifest::{CellKey, CheckpointTrigger, TitleManifest, TitleRegistry};
 use crate::paths::{cell_checkpoint, cell_max_steps};
+use cellgov_boot::manifest::{CellKey, CheckpointTrigger, TitleManifest, TitleRegistry};
 
 /// One declared cell, with the step cap and checkpoint its measurement
 /// uses.

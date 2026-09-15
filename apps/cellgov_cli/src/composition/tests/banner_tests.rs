@@ -1,7 +1,7 @@
 use super::*;
 use crate::composition::compose::{compose_boot, ComposeInputs};
 use crate::composition::test_support::SyntheticStore;
-use crate::game::manifest::{CheckpointTrigger, Distribution, GameSource};
+use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource};
 
 const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 

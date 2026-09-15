@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use cellgov_boot::ComposedMount;
 use cellgov_compare::RunIdentity;
 use cellgov_install::store::TitleTree;
 use cellgov_ps3_abi::format::dev_flash::GUEST_FLASH_MOUNT;
@@ -20,7 +21,7 @@ use super::select::{
     select_firmware, select_game_version, FirmwareChoice, FirmwareSelectError, GameVersion,
     GameVersionSelectError,
 };
-use crate::game::manifest::{GameSource, ResolveEbootError, TitleManifest};
+use cellgov_boot::manifest::{GameSource, ResolveEbootError, TitleManifest};
 
 /// Guest prefix a title's disc tree mounts under, joined with the
 /// title id.
@@ -135,16 +136,6 @@ pub(crate) enum ComposeError {
         /// The root that disagreed.
         second: String,
     },
-}
-
-/// One composed mount: a guest prefix and the host roots that answer
-/// it, in probe order.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ComposedMount {
-    /// Guest path prefix.
-    pub prefix: String,
-    /// Host roots, first hit wins.
-    pub roots: Vec<PathBuf>,
 }
 
 /// The store entries one composition rests on.

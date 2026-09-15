@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use cellgov_compare::CheckpointKind;
 
-use crate::game::manifest::{CellKey, CheckpointTrigger, MatrixCell, TitleManifest};
+use cellgov_boot::manifest::{CellKey, CheckpointTrigger, MatrixCell, TitleManifest};
 
 /// Instruction cap a cell is measured under when neither it nor its
 /// title declares one.

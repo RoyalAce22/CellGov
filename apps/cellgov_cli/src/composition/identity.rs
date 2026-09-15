@@ -18,7 +18,7 @@ use cellgov_install::param_sfo::{self, SfoVersionKey};
 use super::compose::{GameChoice, StoredGame};
 use super::inventory::FirmwareEntry;
 use super::select::{FirmwareChoice, GameVersion};
-use crate::game::manifest::BASE_GAME_VER;
+use cellgov_boot::manifest::BASE_GAME_VER;
 
 /// Why a composed boot could not name the identity triple it runs.
 #[derive(Debug, thiserror::Error)]

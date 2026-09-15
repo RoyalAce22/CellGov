@@ -166,7 +166,7 @@ impl UninstallArgs {
         match (&self.ver, self.updates, self.all) {
             // `base` names the base entry here as it does for
             // `title verify --ver` and `boot --game-ver`.
-            (Some(v), false, false) if v == crate::game::manifest::BASE_GAME_VER => {
+            (Some(v), false, false) if v == cellgov_boot::manifest::BASE_GAME_VER => {
                 UninstallScope::Base
             }
             (Some(v), false, false) => UninstallScope::Update(v.clone()),

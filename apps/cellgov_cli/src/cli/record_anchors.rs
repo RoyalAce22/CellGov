@@ -26,7 +26,7 @@ use crate::cli::declared_cells::{
 };
 use crate::cli::exit::die;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
-use crate::game::manifest::{CellKey, BASE_GAME_VER};
+use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
 use crate::paths::{boot_anchor_path, checkpoint_kind, history_path, workspace_root};
 use crate::progress::RECORD_ANCHORS_TASK;

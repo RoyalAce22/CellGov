@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use super::cell::CellResult;
 use super::index::assert_table_safe;
 use super::load::TitleDocs;
-use crate::game::manifest::{CellKey, BASE_GAME_VER};
+use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
 const DETAIL_TEMPLATE: &str = include_str!("../templates/title_detail.md.template");
 

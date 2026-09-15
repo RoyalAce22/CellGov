@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use super::value;
 use crate::cli::args::CliArgError;
-use crate::game::manifest::CheckpointTrigger;
+use cellgov_boot::manifest::CheckpointTrigger;
 
 /// Ceiling on `boot bench --runs`. Each run is a whole boot, and the
 /// throughput estimator gains nothing past a handful of samples.

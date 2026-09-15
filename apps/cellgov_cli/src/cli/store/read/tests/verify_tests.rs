@@ -18,7 +18,7 @@ fn view() -> StoreView {
             "no-such-store-root",
         ))
         .expect("an absent root reads as an empty store"),
-        registry: crate::game::manifest::TitleRegistry::default(),
+        registry: cellgov_boot::manifest::TitleRegistry::default(),
         fixtures: PathBuf::from("no-such-fixtures"),
     }
 }

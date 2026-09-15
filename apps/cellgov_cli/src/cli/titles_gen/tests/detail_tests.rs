@@ -5,7 +5,7 @@ use cellgov_compare::BootOutcome;
 use super::super::load::load_title;
 use super::super::test_fixtures::*;
 use super::*;
-use crate::game::manifest::TitleManifest;
+use cellgov_boot::manifest::TitleManifest;
 
 /// The first entry's firmware is the title's floor, so that cell
 /// becomes the reference. Cells with no game version make the title

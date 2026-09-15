@@ -11,8 +11,8 @@ use cellgov_compare::{
 use cellgov_time::Budget;
 
 use super::options::BenchOptions;
-use crate::game::manifest::{self, CellKey};
 use crate::paths::{boot_anchor_path, workspace_root};
+use cellgov_boot::manifest::{self, CellKey};
 
 /// How a run compared against its cell's committed anchor.
 #[derive(Debug, Clone, PartialEq, Eq)]

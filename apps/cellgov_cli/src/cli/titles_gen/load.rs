@@ -22,8 +22,8 @@ use cellgov_compare::{
 };
 
 use super::cell::{CellArtifacts, CellResult};
-use crate::game::manifest::{CellKey, GameSource, TitleManifest, BASE_GAME_VER};
 use crate::paths::CROSS_RUNNER_SUMMARY_FILE;
+use cellgov_boot::manifest::{CellKey, GameSource, TitleManifest, BASE_GAME_VER};
 
 /// The anchor file every cell's boot measurement is written to.
 const BOOT_SUMMARY_FILE: &str = "boot_summary.json";

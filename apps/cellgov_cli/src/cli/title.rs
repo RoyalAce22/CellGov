@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use super::exit::die;
 use super::parse::TitleSelector;
-use crate::game;
 
 /// Registry directory every title-driven subcommand resolves
 /// `--title` / `--content-id` against, relative to the working
@@ -24,7 +23,7 @@ pub(crate) fn exdata_dir(vfs_root: &Path) -> PathBuf {
 /// The single modelled user profile on the internal HDD.
 const HDD0_USER: &str = "00000001";
 
-/// Resolve the active [`game::manifest::TitleManifest`] for a
+/// Resolve the active [`cellgov_boot::manifest::TitleManifest`] for a
 /// subcommand, in priority order: `--title-manifest <path>`,
 /// `--content-id <SERIAL>`, `--title <shortname>`.
 ///
@@ -35,13 +34,14 @@ const HDD0_USER: &str = "00000001";
 pub(crate) fn resolve_title_manifest(
     selector: &TitleSelector,
     subcmd: &str,
-) -> game::manifest::TitleManifest {
+) -> cellgov_boot::manifest::TitleManifest {
     if let Some(p) = &selector.title_manifest {
-        return game::manifest::TitleManifest::load_from_path(p)
+        return cellgov_boot::manifest::TitleManifest::load_from_path(p)
             .unwrap_or_else(|e| die(&format!("{subcmd}: {e}")));
     }
-    let registry = game::manifest::TitleRegistry::scan_dir(Path::new(DEFAULT_TITLE_REGISTRY_DIR))
-        .unwrap_or_else(|e| die(&format!("{subcmd}: title registry: {e}")));
+    let registry =
+        cellgov_boot::manifest::TitleRegistry::scan_dir(Path::new(DEFAULT_TITLE_REGISTRY_DIR))
+            .unwrap_or_else(|e| die(&format!("{subcmd}: title registry: {e}")));
     if let Some(cid) = &selector.content_id {
         return registry.by_content_id(cid).cloned().unwrap_or_else(|| {
             die(&format!(

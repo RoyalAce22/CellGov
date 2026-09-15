@@ -1,7 +1,7 @@
 use super::*;
 
-use crate::game::manifest::{CellKey, CheckpointTrigger};
 use crate::game::{AnchorVerdict, BenchGate, BenchRunsOutcome, ThroughputVerdict};
+use cellgov_boot::manifest::{CellKey, CheckpointTrigger};
 
 fn cell(short_name: &str, fw: &str, game_ver: Option<&str>) -> DeclaredCell {
     DeclaredCell {

@@ -14,7 +14,7 @@ use cellgov_compare::{format_with_commas, BootSummary};
 use super::cell::CellArtifacts;
 use super::detail::detail_page_link;
 use super::load::TitleDocs;
-use crate::game::manifest::TitleManifest;
+use cellgov_boot::manifest::TitleManifest;
 
 const TITLES_TEMPLATE: &str = include_str!("../templates/titles.md.template");
 

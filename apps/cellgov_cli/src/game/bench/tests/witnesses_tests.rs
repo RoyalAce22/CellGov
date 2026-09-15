@@ -1,4 +1,8 @@
+//! Every `BENCH_` line a boot emits is either a tracked witness or a
+//! stated diagnostic, and the line table holds no row nothing emits.
+
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 /// Every `"BENCH_<NAME>:` string literal in `source`: the prefixes of
 /// the stderr lines the boot path emits. A literal inside an
@@ -21,105 +25,78 @@ fn emitted_bench_prefixes(source: &str) -> BTreeSet<String> {
     out
 }
 
-/// The boot stage modules the `BENCH_` scan reads.
+/// Every shipped `.rs` file at or below `dir`, in a deterministic
+/// order.
 ///
-/// `include_str!` takes a literal path, so the list is hand-written;
-/// [`the_bench_line_scan_reads_every_boot_stage_module`] holds it
-/// against the directory.
-const BOOT_SOURCES: [(&str, &str); 11] = [
-    ("entry.rs", include_str!("../../boot/entry.rs")),
-    ("finish.rs", include_str!("../../boot/finish.rs")),
-    ("firmware.rs", include_str!("../../boot/firmware.rs")),
-    ("host.rs", include_str!("../../boot/host.rs")),
-    ("image.rs", include_str!("../../boot/image.rs")),
-    ("loaders.rs", include_str!("../../boot/loaders.rs")),
-    (
-        "module_start.rs",
-        include_str!("../../boot/module_start.rs"),
-    ),
-    ("params.rs", include_str!("../../boot/params.rs")),
-    ("prepare.rs", include_str!("../../boot/prepare.rs")),
-    ("providers.rs", include_str!("../../boot/providers.rs")),
-    ("types.rs", include_str!("../../boot/types.rs")),
-];
-
-/// The `bench` submodules the `BENCH_` scan reads, hand-written for
-/// the reason [`BOOT_SOURCES`] gives.
-///
-/// [`the_bench_line_scan_reads_every_bench_module`] holds it against
-/// the directory.
-const BENCH_SOURCES: [(&str, &str); 10] = [
-    ("anchor.rs", include_str!("../anchor.rs")),
-    ("divergence.rs", include_str!("../divergence.rs")),
-    ("options.rs", include_str!("../options.rs")),
-    ("result_line.rs", include_str!("../result_line.rs")),
-    ("run_one.rs", include_str!("../run_one.rs")),
-    ("runs.rs", include_str!("../runs.rs")),
-    ("spawn.rs", include_str!("../spawn.rs")),
-    ("throughput.rs", include_str!("../throughput.rs")),
-    ("types.rs", include_str!("../types.rs")),
-    ("witnesses.rs", include_str!("../witnesses.rs")),
-];
-
-/// Every `.rs` file directly under `dir`, which is itself relative to
-/// the crate root.
-///
-/// The set omits `mod.rs`, which declares modules and re-exports only.
-fn modules_on_disk(dir: &str) -> BTreeSet<String> {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(dir);
-    let mut out = BTreeSet::new();
-    for entry in std::fs::read_dir(&dir).expect("module directory") {
-        let path = entry.expect("module directory entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .expect("module file name")
-            .to_string();
-        if name != "mod.rs" {
-            out.insert(name);
+/// The walk skips a `tests` directory: a fixture's `BENCH_` literal is
+/// a line the test parses, so it names no emitter. Without the skip, a
+/// line-table row outlives its last real emitter.
+fn rust_sources_under(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(next) = stack.pop() {
+        let entries = std::fs::read_dir(&next)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", next.display()));
+        for entry in entries {
+            let path = entry.expect("directory entry").path();
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if path.is_dir() {
+                if name != "tests" {
+                    stack.push(path);
+                }
+            } else if name.ends_with(".rs") && !name.ends_with("_tests.rs") {
+                out.push(path);
+            }
         }
     }
+    out.sort();
     out
 }
 
-#[test]
-fn the_bench_line_scan_reads_every_boot_stage_module() {
-    let scanned: BTreeSet<String> = BOOT_SOURCES.iter().map(|(n, _)| (*n).to_string()).collect();
-    assert_eq!(
-        modules_on_disk("src/game/boot"),
-        scanned,
-        "boot stage modules the BENCH_ line scan does not read"
-    );
-}
-
-#[test]
-fn the_bench_line_scan_reads_every_bench_module() {
-    let scanned: BTreeSet<String> = BENCH_SOURCES
-        .iter()
-        .map(|(n, _)| (*n).to_string())
-        .collect();
-    assert_eq!(
-        modules_on_disk("src/game/bench"),
-        scanned,
-        "bench modules the BENCH_ line scan does not read"
-    );
+/// The two trees that emit `BENCH_` lines -- the boot library, and the
+/// bench driver that closes a measurement -- each with the name a
+/// failure reports it by.
+fn bench_line_emitters() -> [(&'static str, Vec<PathBuf>); 2] {
+    let root = crate::paths::workspace_root();
+    [
+        (
+            "the boot library",
+            rust_sources_under(&root.join("crates").join("cellgov_boot").join("src")),
+        ),
+        (
+            "the bench driver",
+            rust_sources_under(
+                &Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src")
+                    .join("game")
+                    .join("bench"),
+            ),
+        ),
+    ]
 }
 
 #[test]
 fn every_emitted_bench_line_is_tracked_or_reasoned_diagnostic() {
     let mut emitted = BTreeSet::new();
-    for source in [
-        include_str!("../../child_init.rs"),
-        include_str!("../../prx/module_start.rs"),
-    ]
-    .into_iter()
-    .chain(BENCH_SOURCES.iter().map(|(_, source)| *source))
-    .chain(BOOT_SOURCES.iter().map(|(_, source)| *source))
-    {
-        emitted.extend(emitted_bench_prefixes(source));
+    for (tree, paths) in bench_line_emitters() {
+        let mut from_tree = BTreeSet::new();
+        for path in paths {
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+            from_tree.extend(emitted_bench_prefixes(&source));
+        }
+        // A tree the walk misses contributes nothing. The whole-scan
+        // count below cannot tell that from one tree that carries every
+        // line.
+        assert!(
+            !from_tree.is_empty(),
+            "{tree} contributed no BENCH_ line; the walk is reading the wrong tree"
+        );
+        emitted.extend(from_tree);
     }
     assert!(
         emitted.len() > 20,

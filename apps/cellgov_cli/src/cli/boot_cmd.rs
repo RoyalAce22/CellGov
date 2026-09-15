@@ -13,8 +13,8 @@ use crate::composition::{
     GameVersion,
 };
 use crate::game;
-use crate::game::manifest::{CellKey, BASE_GAME_VER};
 use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
+use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
 use super::env::parse_env_bool;
 use super::exit::{die, LoadedPpuImage, TitleNotInstalled};
@@ -74,7 +74,7 @@ const EXIT_RUN_GAME_SAVE_ARTIFACT: i32 = exit_codes::command_specific(14);
 pub(super) fn resolve_composition(
     selection: &BootSelection,
     vfs_root: &Path,
-    title: &game::manifest::TitleManifest,
+    title: &cellgov_boot::manifest::TitleManifest,
 ) -> BootComposition {
     try_resolve_composition(selection, vfs_root, title)
         .unwrap_or_else(|e| die(&format!("boot: {e}")))
@@ -90,7 +90,7 @@ pub(super) fn resolve_composition(
 pub(super) fn try_resolve_composition(
     selection: &BootSelection,
     vfs_root: &Path,
-    title: &game::manifest::TitleManifest,
+    title: &cellgov_boot::manifest::TitleManifest,
 ) -> Result<BootComposition, ComposeError> {
     if let Some(explicit) = &selection.firmware_dir {
         if !explicit.is_dir() {
@@ -198,7 +198,7 @@ pub(super) fn selection_args(selection: &BootSelection, vfs_flag: Option<&Path>)
 }
 
 pub(super) struct BootInputs {
-    pub(super) title: game::manifest::TitleManifest,
+    pub(super) title: cellgov_boot::manifest::TitleManifest,
     /// What the store composed for this run: the firmware, the game
     /// version, and the guest tree the two produce.
     pub(super) composition: BootComposition,
@@ -251,7 +251,7 @@ fn resolve_boot_inputs(
 /// The dump is not on this machine. A candidate that exists and fails
 /// to load dies in the walk.
 pub(super) fn try_resolve_cell_inputs(
-    title: game::manifest::TitleManifest,
+    title: cellgov_boot::manifest::TitleManifest,
     composition: BootComposition,
     vfs_root: &Path,
     subcmd: &str,
@@ -282,7 +282,7 @@ fn forwardable_eboot_path(path: &Path, subcmd: &str) -> String {
 /// Past the line this prints, a run that fails is a boot failure and
 /// never a missing dump; the suites key their skip/fail split on it.
 fn boot_inputs(
-    title: game::manifest::TitleManifest,
+    title: cellgov_boot::manifest::TitleManifest,
     composition: BootComposition,
     elf_path: String,
     image: LoadedPpuImage,
@@ -394,11 +394,14 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
 /// recorded at one is therefore not where this run ends, even when the
 /// title declares the same checkpoint.
 fn run_ends_at_cell_checkpoint(
-    cell_checkpoint: game::manifest::CheckpointTrigger,
-    title_checkpoint: game::manifest::CheckpointTrigger,
+    cell_checkpoint: cellgov_boot::manifest::CheckpointTrigger,
+    title_checkpoint: cellgov_boot::manifest::CheckpointTrigger,
 ) -> bool {
     cell_checkpoint == title_checkpoint
-        && !matches!(cell_checkpoint, game::manifest::CheckpointTrigger::Pc(_))
+        && !matches!(
+            cell_checkpoint,
+            cellgov_boot::manifest::CheckpointTrigger::Pc(_)
+        )
 }
 
 /// Whether a `boot run` flag moves the run off the trajectory its
@@ -473,12 +476,12 @@ pub(super) fn composed_cell(composition: &BootComposition) -> Option<CellKey> {
 pub(super) struct ResolvedPlan {
     pub(super) cell: Option<CellKey>,
     max_steps: u64,
-    checkpoint: game::manifest::CheckpointTrigger,
+    checkpoint: cellgov_boot::manifest::CheckpointTrigger,
 }
 
 impl ResolvedPlan {
     pub(super) fn resolve(
-        title: &game::manifest::TitleManifest,
+        title: &cellgov_boot::manifest::TitleManifest,
         composition: &BootComposition,
     ) -> Self {
         let cell = composed_cell(composition);
@@ -502,7 +505,7 @@ impl ResolvedPlan {
 
     /// The cap as a step count, so an un-overridden bench run stays
     /// comparable to the anchor `dev record-anchors` measured.
-    pub(super) fn max_steps_usize(&self, title: &game::manifest::TitleManifest) -> usize {
+    pub(super) fn max_steps_usize(&self, title: &cellgov_boot::manifest::TitleManifest) -> usize {
         usize::try_from(self.max_steps).unwrap_or_else(|_| {
             die(&format!(
                 "{}: bench_max_steps {} does not fit this host's usize",

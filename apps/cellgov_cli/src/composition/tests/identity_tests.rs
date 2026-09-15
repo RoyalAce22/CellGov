@@ -6,7 +6,7 @@ use cellgov_compare::AppVersion;
 
 use crate::composition::compose::{compose_boot, BootComposition, ComposeInputs};
 use crate::composition::test_support::{firmware_pup_sha256, image_version, SyntheticStore};
-use crate::game::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
+use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
 
 const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 

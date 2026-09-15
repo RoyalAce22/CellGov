@@ -15,7 +15,7 @@ use cellgov_install::store::{
 use crate::cli::exit::die;
 use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
-use crate::game::manifest::BASE_GAME_VER;
+use cellgov_boot::manifest::BASE_GAME_VER;
 
 use super::collect::StoreView;
 use super::model::{DivergenceDoc, VerifiedEntryDoc, VerifyDoc};

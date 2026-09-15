@@ -11,7 +11,7 @@ use super::anchor::MeasuredRun;
 use super::options::{AnchorPlan, BenchOptions, SelectionArgs};
 use super::throughput::ThroughputPolicy;
 use super::types::BenchBootResult;
-use crate::game::manifest::{self, CellKey};
+use cellgov_boot::manifest::{self, CellKey};
 
 /// A run of `wall` that agrees with every other run this helper
 /// builds, so a case that varies only the wall isolates the throughput
@@ -119,9 +119,11 @@ pub(super) fn observed_stderr(breaks: u64, ldarx: u64) -> ParsedWitnesses {
     .expect("synthetic witness lines parse")
 }
 
-pub(super) fn bench_manifest(bench_max_steps: Option<u64>) -> crate::game::manifest::TitleManifest {
-    use crate::game::manifest::{Distribution, GameSource};
-    crate::game::manifest::TitleManifest {
+pub(super) fn bench_manifest(
+    bench_max_steps: Option<u64>,
+) -> cellgov_boot::manifest::TitleManifest {
+    use cellgov_boot::manifest::{Distribution, GameSource};
+    cellgov_boot::manifest::TitleManifest {
         content_id: "CG_TEST".to_string(),
         short_name: "test".to_string(),
         display_name: "test".to_string(),
@@ -146,7 +148,7 @@ pub(super) fn bench_manifest(bench_max_steps: Option<u64>) -> crate::game::manif
 /// A run of `title` in `cell`, at exactly what the registry declares
 /// for it.
 pub(super) fn bench_options<'a>(
-    title: &'a crate::game::manifest::TitleManifest,
+    title: &'a cellgov_boot::manifest::TitleManifest,
     cell: Option<&'a CellKey>,
     guest_args: &'a [String],
 ) -> BenchOptions<'a> {

@@ -7,8 +7,8 @@ use super::options::BenchOptions;
 use super::result_line::format_bench_result;
 use super::types::BenchBootResult;
 use super::witnesses::print_witness_block;
-use crate::game::boot;
-use crate::game::step_loop::bench_step_loop;
+use cellgov_boot::prepare::{prepare, PrepareOptions};
+use cellgov_boot::step_loop::bench_step_loop;
 
 /// Run one boot with the minimum step-loop bookkeeping needed to
 /// detect termination.
@@ -30,7 +30,8 @@ fn bench_boot(
     progress: &dyn crate::progress::ProgressSink,
 ) -> BenchBootResult {
     progress.phase(crate::progress::BootPhase::Loading.code());
-    let prepared = boot::prepare(boot::PrepareOptions {
+    let sink = crate::game::console_sink();
+    let prepared = prepare(PrepareOptions {
         title: opts.title,
         elf_path: opts.elf_path,
         elf_data,
@@ -53,7 +54,10 @@ fn bench_boot(
         capture_state_trace: trace_path.is_some(),
         prescan: opts.prescan,
         guest_args: opts.guest_args,
-    });
+        sink: std::rc::Rc::clone(&sink),
+        keys: std::rc::Rc::new(crate::cli::keys::ProcessKeyVault),
+    })
+    .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     let mut rt = prepared.rt;
     let authid_source = prepared.authid_source;
     let child_init = prepared.child_init;
@@ -75,7 +79,9 @@ fn bench_boot(
         &mut steps,
         &child_init,
         progress,
-    );
+        &sink,
+    )
+    .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     let wall = t0.elapsed();
     // Stop the bar before the witness block prints; see
     // `ProgressSink::finished`.

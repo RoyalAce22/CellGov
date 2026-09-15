@@ -9,7 +9,7 @@ use super::throughput::{
     print_throughput, throughput_verdict, ThroughputPolicy, ThroughputVerdict,
 };
 use super::types::{BenchBootResult, BenchGate, BenchRunsOutcome};
-use crate::game::manifest::CellKey;
+use cellgov_boot::manifest::CellKey;
 
 /// Run [`bench_boot_one_run`](super::bench_boot_one_run) `policy.runs` times in separate
 /// subprocesses, gate on what the runs must reproduce, and report

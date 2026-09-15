@@ -2,7 +2,7 @@
 //! reproduction's links resolve from there.
 
 use super::*;
-use crate::game::manifest::CellKey;
+use cellgov_boot::manifest::CellKey;
 
 fn cell(fw: &str, game_ver: Option<&str>) -> CellKey {
     CellKey {

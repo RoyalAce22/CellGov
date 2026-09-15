@@ -66,7 +66,7 @@ fn a_cell_recorded_at_another_checkpoint_retargets_the_finish_line() {
 
 #[test]
 fn a_cell_at_the_checkpoint_boot_run_stops_at_is_where_it_ends() {
-    use crate::game::manifest::CheckpointTrigger;
+    use cellgov_boot::manifest::CheckpointTrigger;
     for cp in [
         CheckpointTrigger::ProcessExit,
         CheckpointTrigger::FirstRsxWrite,
@@ -81,7 +81,7 @@ fn a_cell_at_the_checkpoint_boot_run_stops_at_is_where_it_ends() {
 
 #[test]
 fn a_pc_checkpoint_is_not_where_boot_run_ends() {
-    use crate::game::manifest::CheckpointTrigger;
+    use cellgov_boot::manifest::CheckpointTrigger;
     let pc = CheckpointTrigger::Pc(0x1_0000);
     assert!(!run_ends_at_cell_checkpoint(pc, pc));
 }

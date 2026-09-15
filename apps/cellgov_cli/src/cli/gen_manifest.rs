@@ -33,7 +33,7 @@ use crate::cli::exit::die;
 use crate::cli::keys::install_root_of;
 use crate::cli::parse::GenManifestArgs;
 use crate::cli::title::{resolve_ps3_vfs_root, DEFAULT_TITLE_REGISTRY_DIR};
-use crate::game::manifest::TitleManifest;
+use cellgov_boot::manifest::TitleManifest;
 
 /// The `distribution` tag a disc install records; its PARAM.SFO sits
 /// under `PS3_GAME/`.

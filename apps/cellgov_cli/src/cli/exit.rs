@@ -8,7 +8,7 @@ use cellgov_install::sce::SceError;
 use cellgov_install::self_image::{is_sce_wrapped, to_plaintext_elf, KeyPolicy};
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
-use crate::game::manifest::{ResolveEbootError, TitleManifest};
+use cellgov_boot::manifest::{ResolveEbootError, TitleManifest};
 
 /// Print `msg` to stderr and exit with the failed-operation status.
 pub(crate) fn die(msg: &str) -> ! {

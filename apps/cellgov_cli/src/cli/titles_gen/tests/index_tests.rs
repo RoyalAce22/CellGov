@@ -12,7 +12,7 @@ use super::super::run::{render_docs, GeneratedDoc};
 use super::super::test_fixtures::*;
 use super::*;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
-use crate::game::manifest::TitleRegistry;
+use cellgov_boot::manifest::TitleRegistry;
 
 fn headline_row(t: &TitleManifest, fixtures: &Path) -> String {
     render_row(&load_title(t, fixtures).unwrap())

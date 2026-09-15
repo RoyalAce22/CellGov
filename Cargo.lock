@@ -139,9 +139,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellgov_boot"
+version = "0.0.0"
+dependencies = [
+ "cellgov_compare",
+ "cellgov_core",
+ "cellgov_effects",
+ "cellgov_event",
+ "cellgov_exec",
+ "cellgov_install",
+ "cellgov_lv2",
+ "cellgov_mem",
+ "cellgov_ppu",
+ "cellgov_ps3_abi",
+ "cellgov_spu",
+ "cellgov_terminal",
+ "cellgov_testkit",
+ "cellgov_time",
+ "cellgov_trace",
+ "serde",
+ "serde_json",
+ "strum",
+ "thiserror",
+ "toml",
+]
+
+[[package]]
 name = "cellgov_cli"
 version = "0.0.0"
 dependencies = [
+ "cellgov_boot",
  "cellgov_compare",
  "cellgov_core",
  "cellgov_effects",

@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::game::manifest::{CellExpectation, Distribution, GameSource, MatrixCell};
+use cellgov_boot::manifest::{CellExpectation, Distribution, GameSource, MatrixCell};
 
 fn cell(fw: &str, game_ver: Option<&str>, bench_max_steps: Option<u64>) -> MatrixCell {
     MatrixCell {

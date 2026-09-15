@@ -9,14 +9,6 @@ use cellgov_terminal::progress::{Task, Unit};
 
 pub(crate) use cellgov_terminal::progress::ProgressSink;
 
-/// Steps a loop retires between two reports to its sink.
-///
-/// The render thread ticks at 10 Hz and a boot retires millions of
-/// steps a second, so a batch this size is finer than a frame shows.
-/// The loop then pays one predictable branch per step instead of an
-/// atomic add.
-pub(crate) const STEP_REPORT_BATCH: usize = 8192;
-
 /// A coarse stage of a boot, indexing [`BENCH_TASK`]'s and
 /// [`RUN_TASK`]'s label tables.
 ///

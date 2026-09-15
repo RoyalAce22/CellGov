@@ -35,7 +35,7 @@ fn the_base_version_key_names_the_base_entry() {
     use cellgov_install::game_uninstall::UninstallScope;
 
     assert_eq!(
-        args(Some(crate::game::manifest::BASE_GAME_VER), false, false).scope(),
+        args(Some(cellgov_boot::manifest::BASE_GAME_VER), false, false).scope(),
         UninstallScope::Base
     );
 }

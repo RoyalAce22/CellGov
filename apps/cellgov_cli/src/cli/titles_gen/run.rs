@@ -10,7 +10,7 @@ use super::{detail, firmware, index};
 use crate::cli::exit::die;
 use crate::cli::parse::TitlesGenArgs;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
-use crate::game::manifest::{TitleManifest, TitleRegistry};
+use cellgov_boot::manifest::{TitleManifest, TitleRegistry};
 
 /// Directory the generated documents are written under.
 const DEFAULT_OUTPUT_DIR: &str = "docs";

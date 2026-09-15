@@ -98,13 +98,13 @@ fn title_of(record: &InstallRecord) -> &TitleRecord {
     record.title.as_ref().expect("a title record has a [title]")
 }
 
-fn load_stub(record: &InstallRecord) -> crate::game::manifest::TitleManifest {
+fn load_stub(record: &InstallRecord) -> cellgov_boot::manifest::TitleManifest {
     let title = title_of(record);
     let stub = fields(record).render_stub(std::path::Path::new(&format!(
         "installs/titles/{}/base.install.toml",
         title.title_id
     )));
-    crate::game::manifest::TitleManifest::load_from_text(&stub, std::path::Path::new("stub.toml"))
+    cellgov_boot::manifest::TitleManifest::load_from_text(&stub, std::path::Path::new("stub.toml"))
         .expect("generated stub is a valid title manifest")
 }
 
@@ -265,8 +265,8 @@ fn the_firmware_stub_spells_no_firmware_version() {
 
 #[test]
 fn the_firmware_stub_names_where_a_firmware_tree_puts_the_system_software() {
-    use crate::game::manifest::{Distribution, GameSource};
-    let manifest = crate::game::manifest::TitleManifest::load_from_text(
+    use cellgov_boot::manifest::{Distribution, GameSource};
+    let manifest = cellgov_boot::manifest::TitleManifest::load_from_text(
         &render_firmware_stub(),
         Path::new("VSH.toml"),
     )
@@ -330,7 +330,7 @@ fn an_installs_flag_names_the_record_directory_not_a_vfs_root() {
 
 #[test]
 fn stub_source_follows_the_record_distribution() {
-    use crate::game::manifest::GameSource;
+    use cellgov_boot::manifest::GameSource;
     for (record, is_disc) in [(disc_record(), true), (hdd_record(), false)] {
         let manifest = load_stub(&record);
         let resolved_disc = match manifest.source {

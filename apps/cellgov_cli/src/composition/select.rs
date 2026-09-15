@@ -16,7 +16,7 @@
 use std::path::PathBuf;
 
 use super::inventory::{dir_exists, FirmwareEntry, StoreInventory, TitleEntry};
-use crate::game::manifest::BASE_GAME_VER;
+use cellgov_boot::manifest::BASE_GAME_VER;
 
 /// What a boot answers `/dev_flash` from.
 #[derive(Debug, Clone, PartialEq, Eq)]

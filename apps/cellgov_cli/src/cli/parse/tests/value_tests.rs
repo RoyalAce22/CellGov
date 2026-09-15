@@ -68,7 +68,7 @@ fn a_patch_byte_pair_wants_one_equals_and_two_hex_fields() {
 
 #[test]
 fn a_checkpoint_takes_the_two_keywords_and_a_pc_literal() {
-    use crate::game::manifest::CheckpointTrigger;
+    use cellgov_boot::manifest::CheckpointTrigger;
     assert_eq!(
         checkpoint("process-exit").unwrap(),
         CheckpointTrigger::ProcessExit

@@ -11,7 +11,7 @@ use cellgov_compare::{
 };
 use cellgov_time::Budget;
 
-use crate::game::manifest::{
+use cellgov_boot::manifest::{
     CellExpectation, CellKey, CheckpointTrigger, Distribution, GameSource, MatrixCell,
     TitleManifest,
 };

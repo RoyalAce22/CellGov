@@ -6,7 +6,7 @@ use clap::Parser as _;
 use super::super::test_fixtures::{bench_manifest, bench_options, test_cell};
 use super::*;
 use crate::cli::parse::{BootCommand, Cli, Command};
-use crate::game::manifest;
+use cellgov_boot::manifest;
 
 #[test]
 fn the_child_receives_the_selection_flags_not_the_resolved_firmware_dir() {

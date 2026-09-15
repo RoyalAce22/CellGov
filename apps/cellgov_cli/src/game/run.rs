@@ -6,13 +6,13 @@ use cellgov_compare::BootOutcome;
 use cellgov_core::Runtime;
 use cellgov_time::Budget;
 
-use crate::game::boot;
-use crate::game::diag::{
-    print_hle_summary, print_insn_coverage, print_shadow_stats, print_top_pcs,
+use cellgov_boot::diag::{
+    report_hle_summary, report_insn_coverage, report_shadow_stats, report_top_pcs,
 };
-use crate::game::manifest::TitleManifest;
-use crate::game::observation::{self, save_boot_observation};
-use crate::game::step_loop::{
+use cellgov_boot::manifest::TitleManifest;
+use cellgov_boot::observation::{self, save_boot_observation};
+use cellgov_boot::prepare::{prepare, PrepareOptions, PreparedBoot};
+use cellgov_boot::step_loop::{
     compute_untracked, pct, step_loop, PcRing, StepLoopCtx, StepTiming, SyscallRing,
 };
 
@@ -30,9 +30,10 @@ pub struct RunGameOptions<'a> {
     pub trace: bool,
     pub profile: bool,
     pub firmware_dir: Option<&'a str>,
-    pub composed_mounts: &'a [crate::composition::ComposedMount],
+    pub composed_mounts: &'a [cellgov_boot::ComposedMount],
     /// The directories the candidate walk probes for the EBOOT, a
-    /// selected update's first; see [`boot::PrepareOptions::eboot_dirs`].
+    /// selected update's first; see
+    /// [`cellgov_boot::prepare::PrepareOptions::eboot_dirs`].
     pub eboot_dirs: &'a [std::path::PathBuf],
     /// The identity triple every artifact this run writes embeds.
     pub identity: &'a cellgov_compare::RunIdentity,
@@ -148,7 +149,8 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         title.display_name()
     );
     progress.phase(crate::progress::BootPhase::Loading.code());
-    let prepared = boot::prepare(boot::PrepareOptions {
+    let sink = crate::game::console_sink();
+    let prepared = prepare(PrepareOptions {
         title,
         elf_path,
         elf_data,
@@ -171,9 +173,12 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         capture_state_trace: save_state_trace.is_some(),
         prescan,
         guest_args,
-    });
+        sink: std::rc::Rc::clone(&sink),
+        keys: std::rc::Rc::new(crate::cli::keys::ProcessKeyVault),
+    })
+    .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     let t_after_prepare = Instant::now();
-    let boot::PreparedBoot {
+    let PreparedBoot {
         mut rt,
         elf_data,
         timings: st,
@@ -228,11 +233,13 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
         obs_null_sink: crate::cli::env::parse_env_bool("CELLGOV_OBS_NULL_SINK"),
         child_init: &child_init,
         progress,
+        sink: std::rc::Rc::clone(&sink),
     };
     let t_loop_start = Instant::now();
     loop_ctx.loop_start = t_loop_start;
     crate::progress::enter_step_loop(progress, super::within_runtime_cap(finish_line, &rt));
-    let (outcome, boot_outcome) = step_loop(&mut rt, &mut loop_ctx);
+    let (outcome, boot_outcome) =
+        step_loop(&mut rt, &mut loop_ctx).unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     let t_loop = t_loop_start.elapsed();
     // The diagnostics below are the run's result, not its progress. A
     // live bar stops drawing within a tick of this call rather than
@@ -265,10 +272,10 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             "tty_bogus_fd_calls: {bogus_fd_count} (sys_tty_write calls with fd values not fitting in u32)"
         );
     }
-    print_hle_summary(&hle_calls);
-    print_insn_coverage(&insn_coverage);
-    print_top_pcs(&rt, &pc_hits);
-    print_shadow_stats(&mut rt);
+    report_hle_summary(&hle_calls, sink.as_ref());
+    report_insn_coverage(&insn_coverage, sink.as_ref());
+    report_top_pcs(&rt, &pc_hits, sink.as_ref());
+    report_shadow_stats(&mut rt, sink.as_ref());
 
     if let Some(t) = &timing {
         println!();
@@ -373,20 +380,22 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
             manifest_regions: observation_regions,
             tty_log: &rt.lv2_host().observability().tty_log,
             identity,
+            sink: sink.as_ref(),
         })
         .map_err(RunError::SaveObservation)?;
     }
     if let Some(path) = save_boot_summary {
         let host_invariant_breaks = rt.lv2_host().observability().invariant_break_count as u64;
-        observation::save_boot_summary_json(
+        observation::save_boot_summary_json(observation::BootSummaryInputs {
             path,
             title,
-            boot_outcome,
+            outcome: boot_outcome,
             steps,
             step_budget,
             host_invariant_breaks,
-            identity.clone(),
-        )
+            identity: identity.clone(),
+            sink: sink.as_ref(),
+        })
         .map_err(RunError::SaveBootSummary)?;
     }
     if let Some(path) = save_state_trace {

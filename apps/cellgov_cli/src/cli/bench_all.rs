@@ -26,8 +26,8 @@ use super::parse::{die_usage, BenchGateArgs, BootSelection};
 use super::title::{resolve_ps3_vfs_root, DEFAULT_TITLE_REGISTRY_DIR};
 use crate::composition::{ComposeError, FirmwareSelectError, GameVersionSelectError};
 use crate::game;
-use crate::game::manifest::TitleManifest;
 use crate::progress::BENCH_PAIR_TASK;
+use cellgov_boot::manifest::TitleManifest;
 
 /// How a refusal and the report name this invocation.
 const COMMAND: &str = "boot bench --all";

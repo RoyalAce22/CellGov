@@ -7,13 +7,13 @@ use super::*;
 use crate::composition::compose::StoredGame;
 use crate::composition::inventory::{BaseEntry, FirmwareEntry};
 use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
-use crate::game::manifest::{CellExpectation, MatrixCell};
+use cellgov_boot::manifest::{CellExpectation, MatrixCell};
 
 fn manifest(
     bench_max_steps: Option<u64>,
     matrix: Vec<MatrixCell>,
-) -> game::manifest::TitleManifest {
-    use game::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
+) -> cellgov_boot::manifest::TitleManifest {
+    use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
     TitleManifest {
         content_id: "CG_TEST".to_string(),
         short_name: "test".to_string(),
@@ -40,7 +40,7 @@ fn declared(
     fw: &str,
     game_ver: Option<&str>,
     bench_max_steps: Option<u64>,
-    checkpoint: Option<game::manifest::CheckpointTrigger>,
+    checkpoint: Option<cellgov_boot::manifest::CheckpointTrigger>,
 ) -> MatrixCell {
     MatrixCell {
         key: CellKey {
@@ -170,7 +170,7 @@ fn a_run_with_no_version_to_key_on_composes_no_cell() {
 
 #[test]
 fn a_declared_cells_overrides_are_what_the_run_and_the_anchor_are_taken_at() {
-    use game::manifest::CheckpointTrigger;
+    use cellgov_boot::manifest::CheckpointTrigger;
     let title = manifest(
         Some(250_000_000),
         vec![declared(
@@ -191,7 +191,7 @@ fn a_declared_cells_overrides_are_what_the_run_and_the_anchor_are_taken_at() {
 
 #[test]
 fn an_undeclared_cell_takes_the_title_defaults() {
-    use game::manifest::CheckpointTrigger;
+    use cellgov_boot::manifest::CheckpointTrigger;
     let title = manifest(
         Some(250_000_000),
         vec![declared("3.55", Some("base"), Some(4_000), None)],

@@ -4,7 +4,7 @@ use super::*;
 use crate::composition::banner::render;
 use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
 use crate::composition::test_support::SyntheticStore;
-use crate::game::manifest::{CheckpointTrigger, Distribution};
+use cellgov_boot::manifest::{CheckpointTrigger, Distribution};
 
 const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 

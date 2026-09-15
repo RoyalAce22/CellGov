@@ -8,7 +8,7 @@ use cellgov_compare::{AppVersion, RunIdentity};
 use super::{GameIdentityError, IdentityError};
 use crate::composition::compose::{compose_boot, ComposeError, ComposeInputs};
 use crate::composition::test_support::SyntheticStore;
-use crate::game::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
+use cellgov_boot::manifest::{CheckpointTrigger, Distribution, GameSource, TitleManifest};
 
 const DISABLE_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
 

@@ -17,7 +17,7 @@ use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 use super::exit::{die, load_file_or_die};
 use super::parse::FixtureGenArgs;
 use super::title::resolve_ps3_vfs_root;
-use crate::game::manifest::{CellKey, TitleManifest};
+use cellgov_boot::manifest::{CellKey, TitleManifest};
 
 /// `ELF_HEADER_SIZE >= 58` is required for the `e_phnum` (56..58)
 /// reads in [`elf_header_plus_phdr_table_end`] to be in bounds.

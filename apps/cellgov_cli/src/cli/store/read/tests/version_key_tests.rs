@@ -8,7 +8,7 @@ use cellgov_testkit::param_sfo::build_param_sfo;
 use cellgov_testkit::scratch::{scratch_labeled, ScratchDir};
 
 use crate::composition::inventory::{BaseEntry, UpdateEntry};
-use crate::game::manifest::TitleRegistry;
+use cellgov_boot::manifest::TitleRegistry;
 
 /// Placeholder identity: these cases write every tree by hand and name
 /// no installed corpus.

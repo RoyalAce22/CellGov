@@ -18,6 +18,7 @@ name = "cellgov"
 path = "src/main.rs"
 
 [dependencies]
+cellgov_boot = { path = "../../crates/cellgov_boot" }
 cellgov_compare = { path = "../../crates/cellgov_compare" }
 cellgov_core = { path = "../../crates/cellgov_core" }
 cellgov_effects = { path = "../../crates/cellgov_effects" }

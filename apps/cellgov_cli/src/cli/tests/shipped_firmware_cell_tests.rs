@@ -6,7 +6,7 @@ use super::*;
 use crate::composition::compose::StoredGame;
 use crate::composition::inventory::{BaseEntry, FirmwareEntry};
 use crate::composition::select::{FirmwareSelectedBy, ManagedFirmware};
-use crate::game::manifest::{
+use cellgov_boot::manifest::{
     CellExpectation, CheckpointTrigger, Distribution, GameSource, MatrixCell, TitleManifest,
 };
 

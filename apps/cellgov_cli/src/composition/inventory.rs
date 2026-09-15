@@ -16,7 +16,7 @@ use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 use cellgov_ps3_abi::format::param_sfo::PARAM_SFO_FILE;
 use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 
-use crate::game::manifest::BASE_GAME_VER;
+use cellgov_boot::manifest::BASE_GAME_VER;
 
 /// Suffix every install-record filename carries.
 const INSTALL_RECORD_SUFFIX: &str = ".install.toml";

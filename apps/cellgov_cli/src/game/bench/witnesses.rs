@@ -17,7 +17,7 @@
 
 use cellgov_core::Runtime;
 
-use crate::game::boot::AuthorityIdSource;
+use cellgov_boot::prepare::AuthorityIdSource;
 
 pub(super) fn print_witness_block(rt: &Runtime, authid_source: AuthorityIdSource) {
     // VRSAVE liveness witness: sum mfvrsave_executed across every

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::cli::exit::die;
 use crate::composition::inventory::StoreInventory;
-use crate::game::manifest::TitleRegistry;
+use cellgov_boot::manifest::TitleRegistry;
 
 use super::collect::StoreView;
 

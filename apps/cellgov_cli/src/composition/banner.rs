@@ -5,7 +5,7 @@
 
 use super::compose::{BootComposition, GameChoice, UnderstatedFirmware};
 use super::select::{FirmwareChoice, GameVersion};
-use crate::game::manifest::TitleManifest;
+use cellgov_boot::manifest::TitleManifest;
 
 /// A digest as `head..tail`, enough to tell two installs apart at a
 /// glance without carrying 64 characters across three lines.

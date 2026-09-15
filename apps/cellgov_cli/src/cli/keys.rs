@@ -55,8 +55,9 @@ pub(crate) fn install_root_of(ps3_vfs_root: &Path) -> PathBuf {
 ///
 /// Called from [`super::title::resolve_ps3_vfs_root`], which every
 /// subcommand that opens a guest image goes through before it opens
-/// one. The loaders inside a boot (`game::boot`, `game::prx::load`)
-/// have no root in hand and read what was fixed here.
+/// one. The loaders inside a boot (`cellgov_boot::prepare`,
+/// `cellgov_boot::prx::load`) have no root in hand and read what was
+/// fixed here.
 ///
 /// # Panics
 ///
@@ -101,6 +102,15 @@ pub(crate) fn try_key_vault_for(bytes: &[u8]) -> Result<&'static KeyVault, &'sta
         key_vault()
     } else {
         Ok(&NO_KEYS)
+    }
+}
+
+/// This process's vault, as the boot library asks for it.
+pub(crate) struct ProcessKeyVault;
+
+impl cellgov_boot::KeyVaultSource for ProcessKeyVault {
+    fn vault_for(&self, bytes: &[u8]) -> Result<&KeyVault, &KeyVaultError> {
+        try_key_vault_for(bytes)
     }
 }
 

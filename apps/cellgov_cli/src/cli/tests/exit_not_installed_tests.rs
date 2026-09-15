@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::{is_plain_miss, TitleNotInstalled};
-use crate::game::manifest::ResolveEbootError;
+use cellgov_boot::manifest::ResolveEbootError;
 
 fn not_found(
     candidates: &[&str],

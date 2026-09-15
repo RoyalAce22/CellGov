@@ -42,6 +42,7 @@ graph BT
   terminal[cellgov_terminal]
   explore[cellgov_explore]
   compare[cellgov_compare]
+  boot[cellgov_boot]
 
   ps3_abi --> time
   ps3_abi --> sync
@@ -50,6 +51,7 @@ graph BT
   ps3_abi --> spu
   ps3_abi --> core
   ps3_abi --> testkit
+  ps3_abi --> boot
   ps3_abi --> cli
   ps3_abi --> firmware
   ps3_abi --> mkelf
@@ -88,6 +90,16 @@ graph BT
   time --> compare
   mem --> compare
 
+  core --> boot
+  lv2 --> boot
+  ppu --> boot
+  spu --> boot
+  trace --> boot
+  compare --> boot
+  firmware --> boot
+  terminal --> boot
+
+  boot --> cli
   ppu --> cli
   spu --> cli
   compare --> cli
@@ -118,6 +130,14 @@ Five structural rules:
   as `cellgov_testkit`: in the tree, outside the runtime DAG. It reads
   the host clock, the process environment and the console size, so no
   guest-visible path reaches it.
+- `cellgov_boot` owns the PS3 process boot and the two step drivers,
+  above `cellgov_core` and `cellgov_install` and below `cellgov_cli`.
+  It writes to no console and ends no process: a refusal is a
+  `BootError` and every line of narration goes to a caller-supplied
+  `BootSink`, so the CLI decides where each channel lands and what
+  status a refusal exits with. Its dependency on `cellgov_install`
+  points at a library that happens to live under `apps/` -- the edge
+  runs the same direction as `cellgov_cli`'s.
 - `cellgov_install` is a library: the PUP / SCE / SELF / TAR
   primitives, the operator key-vault loader (`keys`), and the firmware
   and game installers, which report progress through
@@ -172,6 +192,7 @@ Everything else is workspace-internal. The workspace compiles under
 | `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace, the PARAM.SFO emitter synthetic title trees are built with, and the scratch directories those tests write into -- one guard that removes its tree on drop, including while a panic unwinds, so a failing test leaks nothing. The scratch half sits behind a default-off feature, since this crate is a runtime dependency of the binaries and the directories come from `tempfile`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_terminal`             | Terminal presentation for the host tools: startup capability detection (`Off` / `Plain` / `Ansi`, color policy, width) and the shared progress bar -- a `ProgressSink` event seam instrumented code emits against, and a render thread that owns stderr. Callers describe their work as a `Task` (verb, phase labels, `Bytes`/`Files`/`Steps`/`Items` denominator), so no command's vocabulary is baked in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `cellgov_boot`                  | The PS3 process boot: guest address space, firmware PRX loading and import resolution, TLS and kernel-context setup, the `module_start` pass, and the diagnostic and throughput step drivers with their fault classifiers. Also owns the title-manifest registry every store and doc command reads. Console-free and exit-free by construction: `prepare` returns `Result<PreparedBoot, BootError>` and narration goes to a `BootSink` the caller supplies. |
 | `cellgov_explore`              | Bounded schedule exploration with conflict-aware pruning.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `cellgov_cli`                  | The workspace's one binary, `cellgov`: `firmware`, `title`, `keys`, `self`, `boot`, `diff`, `explore`, `scenario`, and the `dev` tools.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `cellgov_mkelf`                | Standalone generator of PPU ELF fixtures for the microtest corpus. Depends on `cellgov_ps3_abi` only.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
