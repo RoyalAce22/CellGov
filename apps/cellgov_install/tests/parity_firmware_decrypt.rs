@@ -1,8 +1,10 @@
 //! Bit-identical parity for the SELF decryption pipeline.
 //!
-//! For each module in [`MODULES`], decrypt `<name>.sprx` from the
+//! For each module in [`FIRMWARE_MODULES`], decrypt `<name>.sprx` from the
 //! CellGov firmware install and compare against the committed RPCS3
-//! reference digest in `tests/fixtures/rpcs3_digests/digests.txt`.
+//! reference digest in `tests/fixtures/rpcs3_digests/digests.txt`. The
+//! table's `sprx/` rows name the firmware version and the input each
+//! reference plaintext came from.
 //!
 //! Compiled only under `firmware-corpus`, which declares that install
 //! present: every module is asserted, never skipped.
@@ -28,26 +30,9 @@ mod digests;
 #[path = "common/keys.rs"]
 mod keys;
 
-/// Module stems present as both `<stem>.sprx` and `<stem>.prx`.
-const MODULES: &[&str] = &[
-    "libaudio",
-    "libfs",
-    "libgcm_sys",
-    "libio",
-    "liblv2",
-    "libnet",
-    "libnetctl",
-    "libspurs_jq",
-    "libsync2",
-    "libsysmodule",
-    "libsysutil",
-    "libsysutil_np",
-];
+use digests::FIRMWARE_MODULES;
 
-/// The firmware version the committed digests were captured from.
-const REFERENCE_FIRMWARE_VERSION: &str = "4.93";
-
-/// The `sys/external` directory of [`REFERENCE_FIRMWARE_VERSION`].
+/// The `sys/external` directory of the installed firmware `version`.
 ///
 /// The store keys firmware on version, so the install record names the
 /// tree.
@@ -63,7 +48,7 @@ const REFERENCE_FIRMWARE_VERSION: &str = "4.93";
 ///
 /// `firmware-corpus` declares the install exists, so each is a failure
 /// rather than a skip.
-fn firmware_external_dir() -> PathBuf {
+fn firmware_external_dir(version: &str) -> PathBuf {
     let root = digests::workspace_root().join(DEFAULT_VFS_ROOT);
     let layout = StoreLayout::new(&root);
     let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
@@ -110,11 +95,11 @@ fn firmware_external_dir() -> PathBuf {
             );
         }
     }
-    let Some(dir) = found.get(REFERENCE_FIRMWARE_VERSION) else {
+    let Some(dir) = found.get(version) else {
         let installed: Vec<&str> = found.keys().map(String::as_str).collect();
         panic!(
             "firmware-corpus: the committed digests were captured from firmware \
-             {REFERENCE_FIRMWARE_VERSION}, which is not installed under {} (installed: {})",
+             {version}, which is not installed under {} (installed: {})",
             root.display(),
             installed.join(", ")
         );
@@ -127,82 +112,116 @@ fn firmware_external_dir() -> PathBuf {
     dir.clone()
 }
 
-fn decrypt_and_compare(
+/// How module `stem` of `firmware` fails to match its committed rows,
+/// or `None` when its input and plaintext both match.
+fn divergence(
     stem: &str,
+    firmware: &str,
     encrypted_dir: &Path,
     keys: &KeyVault,
     references: &BTreeMap<String, digests::Reference>,
-) {
-    let sprx_path = encrypted_dir.join(format!("{stem}.sprx"));
-    let key = format!("decrypted_masked/{stem}");
-    let Some(expected) = references.get(&key) else {
-        panic!(
-            "{stem}: no committed reference digest under key {key:?}; \
-             see tests/fixtures/rpcs3_digests/README.md"
-        );
+) -> Option<String> {
+    let row = |key: String| {
+        references.get(&key).unwrap_or_else(|| {
+            panic!(
+                "{stem}: no committed reference digest under key {key:?}; \
+                 see tests/fixtures/rpcs3_digests/README.md"
+            )
+        })
     };
-    assert!(
-        sprx_path.is_file(),
-        "firmware-corpus: {stem} missing at {}. A PUP install writes \
-         every module in MODULES; a gap means the install is partial \
-         or the module set has been renamed.",
-        sprx_path.display(),
-    );
+    let input = row(format!("sprx/{firmware}/{stem}"));
+    let expected = row(format!("decrypted_masked/{stem}"));
+    let sprx_path = encrypted_dir.join(format!("{stem}.sprx"));
+    if !sprx_path.is_file() {
+        return Some(format!(
+            "{stem}: missing at {}. A PUP install writes every module in \
+             FIRMWARE_MODULES; a gap means the install is partial or the \
+             module set has been renamed.",
+            sprx_path.display(),
+        ));
+    }
     let encrypted_bytes = std::fs::read(&sprx_path).unwrap();
-    let mut decrypted = cellgov_install::sce::decrypt_self_to_elf(&encrypted_bytes, keys)
-        .unwrap_or_else(|e| panic!("{stem}: decrypt failed: {e}"));
-    assert!(
-        decrypted.len() >= 0x40,
-        "{stem}: decrypt produced {} bytes, < ELF64 header",
-        decrypted.len()
-    );
+    // A reference decrypted from another file says nothing about the
+    // decrypt, so the input check runs first.
+    let input_sha = digests::sha256_bytes(&encrypted_bytes);
+    if encrypted_bytes.len() as u64 != input.bytes || input_sha != input.sha256 {
+        return Some(format!(
+            "{stem}: the installed {} ({input_sha}, {} bytes) is not the input the \
+             reference plaintext was decrypted from ({}, {} bytes), so the decrypt \
+             was not compared; see tests/fixtures/rpcs3_digests/README.md",
+            sprx_path.display(),
+            encrypted_bytes.len(),
+            input.sha256,
+            input.bytes,
+        ));
+    }
+    let mut decrypted = match cellgov_install::sce::decrypt_self_to_elf(&encrypted_bytes, keys) {
+        Ok(elf) => elf,
+        Err(e) => return Some(format!("{stem}: decrypt failed: {e}")),
+    };
+    if decrypted.len() < 0x40 {
+        return Some(format!(
+            "{stem}: decrypt produced {} bytes, < ELF64 header",
+            decrypted.len()
+        ));
+    }
     // Shape-check the SPRX inner ELF: this corpus ships with
     // e_shoff = 0 and `decrypt_self_to_elf` copies it verbatim.
-    assert_eq!(
-        &decrypted[0x28..0x30],
-        &[0u8; 8],
-        "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shoff"
-    );
-    assert_eq!(
-        &decrypted[0x3C..0x3E],
-        &[0u8; 2],
-        "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shnum"
-    );
-    assert_eq!(
-        &decrypted[0x3E..0x40],
-        &[0u8; 2],
-        "{stem}: SPRX inner ELF unexpectedly carries non-zero e_shstrndx"
-    );
+    for (field, range) in [
+        ("e_shoff", 0x28..0x30),
+        ("e_shnum", 0x3C..0x3E),
+        ("e_shstrndx", 0x3E..0x40),
+    ] {
+        if decrypted[range].iter().any(|&b| b != 0) {
+            return Some(format!(
+                "{stem}: SPRX inner ELF unexpectedly carries non-zero {field}"
+            ));
+        }
+    }
     cellgov_install::sce::mask_non_semantic_elf_bytes(&mut decrypted);
     // Length before digest: a size divergence is the common shape and
     // two hashes do not say by how much the output moved.
-    assert_eq!(
-        decrypted.len() as u64,
-        expected.bytes,
-        "{stem}: decrypt produced {} bytes, the RPCS3 reference is {} bytes",
-        decrypted.len(),
-        expected.bytes,
-    );
+    if decrypted.len() as u64 != expected.bytes {
+        return Some(format!(
+            "{stem}: decrypt produced {} bytes, the committed reference is {} bytes",
+            decrypted.len(),
+            expected.bytes,
+        ));
+    }
     let got = digests::sha256_bytes(&decrypted);
-    assert_eq!(
-        got, expected.sha256,
-        "{stem}: CellGov's decrypt diverges from the RPCS3 reference at \
-         equal length ({} bytes). Investigate the divergence rather than \
-         re-blessing; see tests/fixtures/rpcs3_digests/README.md",
-        expected.bytes,
-    );
+    (got != expected.sha256).then(|| {
+        format!(
+            "{stem}: CellGov's decrypt of the reference input diverges from the \
+             committed plaintext at equal length ({} bytes): {got}, reference {}. \
+             Investigate the divergence rather than re-blessing; see \
+             tests/fixtures/rpcs3_digests/README.md",
+            expected.bytes, expected.sha256,
+        )
+    })
 }
 
 #[test]
 fn firmware_prx_decrypt_matches_the_committed_rpcs3_reference() {
-    let encrypted_dir = firmware_external_dir();
-    let keys = keys::vault();
     let references = digests::table();
-    for stem in MODULES {
-        decrypt_and_compare(stem, &encrypted_dir, &keys, &references);
-    }
+    let firmware = digests::reference_firmware(&references);
+    let encrypted_dir = firmware_external_dir(&firmware);
+    let keys = keys::vault();
+    // The test compares every module before its verdict, so one
+    // divergence does not hide the next.
+    let failures: Vec<String> = FIRMWARE_MODULES
+        .iter()
+        .filter_map(|stem| divergence(stem, &firmware, &encrypted_dir, &keys, &references))
+        .collect();
     eprintln!(
-        "cellgov_install parity: compared {} module digests",
-        MODULES.len()
+        "cellgov_install parity: compared {} modules of firmware {firmware}, {} diverged",
+        FIRMWARE_MODULES.len(),
+        failures.len(),
+    );
+    assert!(
+        failures.is_empty(),
+        "{} of {} firmware modules diverge:\n{}",
+        failures.len(),
+        FIRMWARE_MODULES.len(),
+        failures.join("\n"),
     );
 }
