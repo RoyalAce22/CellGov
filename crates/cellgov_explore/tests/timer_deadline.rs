@@ -1,25 +1,15 @@
 //! Whether a pending timer deadline is a dependency the relation sees.
 //!
 //! The guest clock is global. A unit parked on `sys_timer_usleep` wakes
-//! at the first commit whose clock passed its deadline, so the number of
-//! ticks other units spend before a store decides whether that store
-//! lands before or after the sleeper's own.
-//!
-//! `shared_clock.rs` asks this of a DMA landing, and the answer there
-//! was a false independence. Here it is not, and the difference is what
-//! these cases record.
-//!
-//! A landing writes guest memory on no unit's account. No event carries
-//! that write, so tick arithmetic alone decided its order against every
-//! store, and the relation had nothing to hold apart. A timer wake
-//! publishes nothing. It changes which unit is runnable, and every
-//! effect the woken unit then commits is an ordinary event the relation
-//! already holds against the other writers.
-//!
-//! So the relation calls a sleeper and the units whose ticks decide its
-//! wake independent, and the cover is complete anyway. The cases below
-//! measure that over two workloads, one where every step spends the same
-//! and one where two units that touch nothing spend different amounts.
+//! at the first commit whose clock passed its deadline, so the ticks
+//! other units spend before a store decide whether that store lands
+//! before or after the sleeper's own. The relation still calls the
+//! sleeper and those units independent, and the cover is complete
+//! anyway. A timer wake publishes nothing. It changes which unit is
+//! runnable, and every effect the woken unit then commits is an event
+//! the relation already holds against the other writers. A DMA landing
+//! differs (`shared_clock.rs`): it writes guest memory on no unit's
+//! account, so no event carries it and the landing clause has to.
 
 #![allow(
     clippy::unwrap_used,
@@ -64,12 +54,9 @@ fn workload() -> Runtime {
 /// `workload`'s shape where the two units that do not write differ in
 /// what they spend.
 ///
-/// In `workload` every step costs the same, so the deadline moves only
-/// with the step count. Here a cheap counter and an expensive one spend
-/// 20 ticks and the whole budget for the same one step, and neither
-/// touches a shared resource, so the relation calls them independent of
-/// everything. A schedule that runs one before the other moves the
-/// sleeper's wake without touching any range a footprint names.
+/// A cheap counter and an expensive one touch no shared resource, so a
+/// schedule that runs one before the other moves the sleeper's wake
+/// without touching any range a footprint names.
 fn skewed_workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
     rt.register_unit_with(|id| SleepingWriter::new(id, 1, destination(), 0xbb));
@@ -102,7 +89,7 @@ fn run_prefix_of(build: fn() -> Runtime, prefix: &[UnitId]) -> u64 {
 ///
 /// # Panics
 ///
-/// Panics when replaying `prefix` refuses a step or its commit.
+/// Panics when a replay of `prefix` refuses a step or its commit.
 fn runnable_after_of(build: fn() -> Runtime, prefix: &[UnitId]) -> Vec<UnitId> {
     let mut rt = build();
     rt.set_scheduler(PrescribedScheduler::new(
@@ -172,19 +159,8 @@ fn the_skewed_workload_is_schedule_sensitive() {
     );
 }
 
-/// The relation does not see the tick dependency, and does not need to.
-///
-/// The cheap counter's spend decides where the sleeper's wake falls, and
-/// the relation still calls the two independent: neither names a
-/// resource the other touches. The cover is complete anyway, because a
-/// wake publishes nothing by itself. What it changes is which unit is
-/// runnable, and every effect the woken unit then commits is an event
-/// the relation already holds against the other writer.
-///
-/// This is where a deadline differs from a transfer landing. A landing
-/// writes guest memory on no unit's account, so no event carries it and
-/// tick arithmetic alone decided its order. That is the gap the landing
-/// clause closed.
+/// The relation does not see the tick dependency and does not need to;
+/// the module doc says why.
 #[test]
 fn the_relation_calls_the_counter_and_the_sleeper_independent() {
     let mut rt = skewed_workload();
@@ -242,10 +218,9 @@ fn both_workloads_report_schedule_sensitive() {
 
 #[test]
 fn a_deadline_no_step_can_move_across_a_write_still_prunes() {
-    // The sleeper writes a range nothing else touches, so where its
-    // wake falls changes no committed memory. Guest time still moves
-    // under it, which is what makes this the case that would go red on
-    // a blunt rule holding every step against a pending deadline.
+    // The sleeper writes a range nothing else touches, so its wake
+    // position changes no committed memory; a blunt rule holding every
+    // step against a pending deadline would still refuse to prune here.
     let build = || {
         let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
         let elsewhere = ByteRange::new(GuestAddr::new(0), 4).unwrap();

@@ -1,9 +1,6 @@
-//! Which of the two sites the search's dropped branches come from.
-//!
-//! `run_one` gives up a wakeup branch in two places, and
-//! [`ExplorationResult::reversals_dropped`] is one aggregate over both,
-//! so nothing outside the crate can say which site answered for a run.
-//! [`Drops`] separates them and these read it.
+//! Which of the two sites the search's dropped branches come from;
+//! [`Drops`] splits the aggregate [`ExplorationResult::reversals_dropped`]
+//! carries.
 
 use super::*;
 use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
@@ -63,9 +60,6 @@ fn drops_over(programs: &[Vec<FakeOp>]) -> Drops {
 
 /// `dropped_reversals.rs`'s workload, which that file says drops at
 /// `choose` and not at the warp depth its transfer produces.
-///
-/// That claim was prose over one aggregate. This is the same workload
-/// with the two sites read apart.
 fn warp_then_contend() -> Vec<Vec<FakeOp>> {
     let mut programs = vec![vec![
         FakeOp::DmaPut {
@@ -102,13 +96,6 @@ fn the_contending_workload_drops_only_at_choose() {
     assert_eq!(drops.at_warp, 0, "and the warp depth gave up nothing");
 }
 
-/// Every workload built from warps and contention answers the same way.
-///
-/// The warp-depth site reads a tree on each of these and retires
-/// nothing, which is the argument the site carries: a warp depth
-/// inherits an empty tree, so the site arms the depth and gives up
-/// nothing. The visit count carries the premise, since a run that
-/// reaches no warp depth leaves `at_warp` at zero on its own.
 #[test]
 fn no_warp_workload_gives_up_a_branch_at_its_warp_depth() {
     let cases: Vec<(&str, Vec<Vec<FakeOp>>)> = vec![

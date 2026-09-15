@@ -1,6 +1,6 @@
 //! Bounded enumeration of legal alternate schedules over an unmodified
-//! runtime, classifying outcomes as schedule-stable, schedule-sensitive,
-//! or inconclusive.
+//! runtime. It classifies each outcome as schedule-stable,
+//! schedule-sensitive, or inconclusive.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 

@@ -51,8 +51,6 @@ fn a_sleeping_unit_that_leads_the_sequence_is_already_explored() {
     assert!(already_explored(&sleep, &sequence, &free));
 }
 
-/// A commuting step answers for the sequence and not for the subtree
-/// under it, so it does not retire the branch.
 #[test]
 fn a_sleeping_unit_whose_step_commutes_past_the_sequence_explored_nothing() {
     let run = execution(&[(1, store(0))]);

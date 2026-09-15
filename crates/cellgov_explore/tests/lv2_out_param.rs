@@ -118,8 +118,6 @@ fn workload() -> Runtime {
     });
     let peer = rt.register_unit_with(|id| WritingUnit::of_value(id, 1, nsec_range(), PEER_BYTE));
     let loner = rt.register_unit_with(|id| WritingUnit::of_value(id, 1, elsewhere_range(), 0x11));
-    // Every case below names units by id, so a registration inserted
-    // above would retarget them.
     assert_eq!(caller, CALLER, "registration order moved the caller");
     assert_eq!(peer, PEER, "registration order moved the peer");
     assert_eq!(loner, LONER, "registration order moved the loner");

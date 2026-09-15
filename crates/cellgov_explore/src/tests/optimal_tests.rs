@@ -88,8 +88,6 @@ fn disjoint_writers_cost_one_execution() {
     assert_eq!(result.classes_explored, Some(1));
 }
 
-/// A bound leaves classes uncovered, so the search reports no count and
-/// cannot answer for the workload.
 #[test]
 fn a_step_bound_reports_no_class_count() {
     let config = ExplorationConfig {
@@ -103,9 +101,7 @@ fn a_step_bound_reports_no_class_count() {
     assert!(result.bounds_hit);
 }
 
-/// A class bound withdraws the count, but a divergence the search
-/// already reached still stands: a schedule that diverges is a fact
-/// about the workload, whatever the search did not get to.
+/// A divergence the search reached stands whatever the bound withheld.
 #[test]
 fn a_class_bound_reports_no_class_count() {
     let config = ExplorationConfig {
@@ -145,8 +141,6 @@ fn conflicting_writers_of_one_value_are_schedule_stable() {
     assert_eq!(result.outcome, OutcomeClass::ScheduleStable);
 }
 
-/// A class bound over a workload with no divergence to find leaves the
-/// verdict inconclusive rather than stable.
 #[test]
 fn a_class_bound_without_a_divergence_is_inconclusive() {
     let config = ExplorationConfig {

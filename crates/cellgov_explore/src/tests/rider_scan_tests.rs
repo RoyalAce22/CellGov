@@ -1,10 +1,7 @@
 //! What a step that rides a landing costs the relation and the race
-//! scan.
-//!
-//! Such a step conflicts with every step, so it is the shape a title
-//! window is most likely to hold and the one the quadratic scan is
-//! measured on. `benches/explore_bench.rs` times the same two shapes;
-//! these pins are the part `cargo test` runs.
+//! scan. Such a step conflicts with every step, so it is the shape a
+//! title window most often holds; `benches/explore_bench.rs` times the
+//! same two shapes.
 
 use super::*;
 use cellgov_mem::{ByteRange, GuestAddr};
@@ -36,8 +33,6 @@ fn round_robin_writers(rider: bool) -> Execution {
     execution
 }
 
-/// The premise: without the rider no pair conflicts, so every scan runs
-/// to the start.
 #[test]
 fn without_a_rider_the_scan_never_stops_short() {
     let execution = round_robin_writers(false);
@@ -51,9 +46,6 @@ fn without_a_rider_the_scan_never_stops_short() {
     assert!(execution.races(&hb).is_empty());
 }
 
-/// The rider conflicts with every step, so every later event's scan
-/// stops at it and the relation orders every earlier event before it:
-/// the relation gets cheaper, and the races are the rider's alone.
 #[test]
 fn a_rider_cuts_the_scan_short_and_races_with_its_neighbours() {
     let execution = round_robin_writers(true);
@@ -76,9 +68,7 @@ fn a_rider_cuts_the_scan_short_and_races_with_its_neighbours() {
     );
 }
 
-/// The figures are this crate's own, pinned as regression witnesses.
-/// A move is a change to the scan to explain, not a number to
-/// re-bless.
+/// Regression witnesses: the scan's own counts over `round_robin_writers`.
 const RIDERLESS_CONFLICT_TESTS: usize = 24_576;
 const RIDER_CONFLICT_TESTS: usize = 12_198;
 const RIDER_JOINS: usize = 6;

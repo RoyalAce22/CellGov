@@ -9,16 +9,16 @@ use cellgov_event::UnitId;
 pub struct DecisionPoint {
     /// Step index within the run.
     pub step: usize,
-    /// All units that were runnable when the decision was made.
+    /// Units runnable at this step.
     pub runnable: Vec<UnitId>,
-    /// Unit the scheduler actually chose.
+    /// Unit the scheduler chose.
     pub chosen: UnitId,
     /// Shared resources the chosen unit touched during this step.
     pub footprint: StepFootprint,
 }
 
 impl DecisionPoint {
-    /// True when more than one unit was runnable (a real choice).
+    /// True when more than one unit was runnable.
     pub fn is_branching(&self) -> bool {
         self.runnable.len() > 1
     }
@@ -61,7 +61,7 @@ impl DecisionLog {
         self.points.len()
     }
 
-    /// True when no decision points have been recorded.
+    /// True when the log holds no decision point.
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }

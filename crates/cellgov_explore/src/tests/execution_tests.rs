@@ -1,8 +1,5 @@
-//! Happens-before and the race query over hand-computed executions.
-//!
-//! Each fixture below names the whole race set the execution holds. A
-//! rule that reports one pair too many fails as loudly as one that
-//! reports one too few.
+//! Happens-before and the race query over hand-computed executions,
+//! each fixture asserting the whole race set.
 
 use super::*;
 use crate::observer::observe_decisions;
@@ -36,7 +33,6 @@ fn writes(start: u64) -> StepFootprint {
     )])
 }
 
-/// A footprint that touches nothing shared.
 fn local() -> StepFootprint {
     StepFootprint::default()
 }

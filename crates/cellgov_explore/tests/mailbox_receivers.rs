@@ -91,13 +91,11 @@ fn the_two_receivers_conflict() {
     );
 }
 
-/// The search separates the two orders of the receive attempts.
+/// A relation that called the pair independent reports no race, so the
+/// search never owes their reversal and both counts below shrink.
 ///
-/// The class count and the committed memories are what this costs. A
-/// relation that called the pair independent reports no race between
-/// them, so the search never owes their reversal, and both numbers
-/// below shrink with it. One order deadlocks, and its memory is the
-/// fifth: a receiver parked for good stored nothing.
+/// One order deadlocks, and its memory is the fifth: a receiver parked
+/// for good stored nothing.
 #[test]
 fn the_search_runs_both_orders_of_the_two_receivers() {
     let mut rt = workload();
@@ -113,8 +111,6 @@ fn the_search_runs_both_orders_of_the_two_receivers() {
     );
 
     let result = explore_window(workload, &ExplorationConfig::default());
-    // Some orders leave a receiver parked on an empty queue with no
-    // send left to wake it.
     assert_eq!(
         result.schedules_truncated, 0,
         "a deadlocked order is the end of its execution, not a cut prefix",

@@ -2,8 +2,6 @@
 
 use super::*;
 
-// Local stub: cellgov_testkit depends transitively on this crate's
-// scheduler trait, so we cannot pull its fixtures in here.
 use cellgov_core::UnitRegistry;
 use cellgov_effects::Effect;
 use cellgov_exec::{
@@ -65,8 +63,8 @@ fn override_forces_specific_unit() {
     assert_eq!(s.select_next(&r), Some(UnitId::new(0)));
 }
 
-// The stub units cannot express a syscall yield, so stickiness is
-// exercised by driving notify_yielded on the scheduler pair directly.
+// The stub units cannot express a syscall yield, so the test drives
+// `notify_yielded` on both schedulers directly.
 #[test]
 fn notify_yielded_reaches_fallback_stickiness() {
     let mut r = UnitRegistry::new();

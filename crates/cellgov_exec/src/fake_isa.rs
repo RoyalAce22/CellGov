@@ -1,8 +1,6 @@
-//! Tiny fake ISA for pressure-testing the runtime contract.
-//!
-//! Each opcode maps to at least one distinct `Effect` so a single unit
-//! type can exercise every path through the effect/commit pipeline.
-//! Not a real instruction set and not tied to any PS3 architecture.
+//! Tiny fake ISA for pressure-testing the runtime contract. Each opcode
+//! maps to at least one distinct `Effect`, so one unit type exercises
+//! every path through the effect/commit pipeline.
 
 use crate::context::ExecutionContext;
 use crate::step_result::ExecutionStepResult;
@@ -20,10 +18,9 @@ pub const FAKE_FAULT_CODE: u32 = 0xfa11;
 
 /// A single fake-ISA opcode.
 ///
-/// Atomic opcodes (`ReservationAcquire`, `ConditionalStore`) are
-/// pass-throughs to their effect counterparts; the unit carries no
-/// local reservation register, so the test harness is responsible
-/// for driving the committed reservation table directly.
+/// The atomic opcodes (`ReservationAcquire`, `ConditionalStore`) pass
+/// through to their effects; the unit carries no local reservation
+/// register, so the harness drives the committed reservation table.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FakeOp {
     /// Load `value` into the accumulator. No effect emitted.
@@ -70,8 +67,8 @@ pub enum FakeOp {
         line_addr: u64,
     },
     /// Emit `Effect::ConditionalStore` writing the accumulator's low
-    /// byte (replicated) across the range. Assumes the reservation
-    /// is held; the harness orders this against the table.
+    /// byte (replicated) across the range. The harness orders this
+    /// against the table; see [`FakeOp`].
     ConditionalStore {
         /// Start address.
         addr: u64,
@@ -99,15 +96,10 @@ pub enum FakeOp {
     },
     /// Yield `DmaWait`, which parks the unit.
     ///
-    /// The park reaches the commit pipeline through the step result and
-    /// no effect names it, which is what separates this from
-    /// [`FakeOp::Wait`] and [`FakeOp::Barrier`].
-    ///
-    /// The yield is unconditional. An SPU yields only while the
-    /// masked tags are not yet complete. A program therefore puts a
-    /// transfer before the wait. With no transfer outstanding, the
-    /// all-blocked time warp finds nothing to fire and the next step
-    /// refuses as `StepError::AllBlocked`.
+    /// The park rides the yield reason, with no effect naming it. The
+    /// yield is unconditional, so a program puts a transfer before it;
+    /// with none in flight the next step refuses as
+    /// `StepError::AllBlocked`.
     DmaWait,
     /// Emit `WaitOnEvent` on a signal with the given mask.
     Wait {
@@ -123,20 +115,14 @@ pub enum FakeOp {
     },
     /// Emit `WakeUnit` naming `unit`.
     ///
-    /// The one opcode that returns another unit to runnable, which is
-    /// what a program needs to reach a `Barrier` opcode's waiter
-    /// again.
-    ///
-    /// An id no unit holds is not a silent no-op: the commit pipeline
-    /// refuses the whole batch as `CommitError::UnknownWakeTarget`.
+    /// The one opcode that returns another unit to runnable. An id no
+    /// unit holds refuses the whole batch as
+    /// `CommitError::UnknownWakeTarget`.
     Wake {
         /// Unit to return to runnable.
         unit: u64,
     },
     /// Terminal: yield `Fault`, which discards the batch.
-    ///
-    /// The unit reports `Faulted` from here on, so it leaves the
-    /// runnable set.
     Fault,
     /// Read one byte of committed memory and fault when it is zero.
     ///
@@ -144,10 +130,6 @@ pub enum FakeOp {
     /// write, so the schedule decides it. The opcode emits the read
     /// either way, and the fault then discards the access that decided
     /// it.
-    ///
-    /// The commit contract covers a faulted batch that already emitted
-    /// effects, and a real unit reaches that shape by faulting after a
-    /// load in the same batch.
     FaultIfZero {
         /// Byte address the fault turns on.
         addr: u64,

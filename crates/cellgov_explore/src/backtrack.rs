@@ -2,16 +2,13 @@
 //! [FlanaganGodefroid2005 p:4 s:3].
 //!
 //! The search runs one execution, walks its races, and adds a
-//! backtrack point at the earlier event of each race. Every backtrack
-//! point becomes one schedule to replay, and each replay yields races
-//! of its own. Two backtrack points can reach the same equivalence
-//! class, so one class can cost more than one execution.
-//!
-//! Figure 3 reads the next transition of every process at every state,
-//! including a process disabled there [FlanaganGodefroid2005 p:5 s:3].
-//! This search learns a step's footprint only once the step runs. A
-//! unit that stayed blocked through every execution the search reached
-//! names no backtrack point.
+//! backtrack point at the earlier event of each race; every backtrack
+//! point becomes one schedule to replay, and two points can reach one
+//! equivalence class. Figure 3 reads the next transition of every
+//! process at every state, including a disabled one
+//! [FlanaganGodefroid2005 p:5 s:3]; this search learns a step's
+//! footprint only once the step runs, so a unit blocked through every
+//! execution names no backtrack point.
 
 use crate::classify::{BaselineRun, ExplorationResult, ScheduleRecord};
 use crate::config::ExplorationConfig;
@@ -26,9 +23,9 @@ use std::collections::BTreeSet;
 /// One schedule to replay: the units to force, step by step, from step
 /// zero.
 ///
-/// A prefix names a choice for every step up to and including its
-/// backtrack point. The round-robin fallback chooses every step past
-/// its end, so one prefix stands for one subtree.
+/// The last entry is the backtrack point's choice; the round-robin
+/// fallback chooses every step past it, so one prefix stands for one
+/// subtree.
 type Prefix = Vec<UnitId>;
 
 /// A backtrack point: the schedule that reaches it, and the step it
@@ -41,25 +38,13 @@ struct Candidate {
 
 /// Run backtrack-set DPOR on a workload.
 ///
-/// The search calls `make_runtime` once per explored execution, so it
-/// must build the same workload every time. Exploration stops at
-/// `config.max_schedules` replays and each execution at
-/// `config.max_steps_per_run` steps.
+/// The search calls `make_runtime` once per execution, so it must build
+/// the same workload every time.
 ///
-/// [`classify_iteration`] gives the outcome:
-///
-/// - only an execution that ran itself out contributes a divergence;
-/// - a baseline that stopped short withdraws every claim measured
-///   against it.
-///
-/// [`ExplorationResult::schedules_pruned`] counts candidates dropped
-/// because an earlier one already named the same prefix, and
-/// [`ExplorationResult::reversals_dropped`] the races whose point left
-/// no unit to force.
-///
-/// This search runs more than one execution per class, so it claims no
-/// [`ExplorationResult::classes_explored`] whatever it drops. Its drop
-/// count therefore names cover given up rather than a count withdrawn.
+/// This search can run more than one execution per class, so it claims
+/// no [`ExplorationResult::classes_explored`]; `push_candidates` says
+/// what [`ExplorationResult::schedules_pruned`] and
+/// [`ExplorationResult::reversals_dropped`] count here.
 pub fn explore_backtrack<F>(mut make_runtime: F, config: &ExplorationConfig) -> ExplorationResult
 where
     F: FnMut() -> cellgov_core::Runtime,
@@ -124,14 +109,10 @@ where
             first_invariant_break = rt.lv2_host().observability().first_invariant_break_line();
         }
         let truncated = stop.is_truncated();
-        // `PrescribedScheduler` falls back to round-robin where a
-        // prescribed unit is not runnable. A replay that drifted off
-        // its prefix would record a `branch_step` it never reached.
-        //
-        // A truncated replay is short of its prefix for its own reason
-        // and not for drift: a faulted step reaches no guest state and
-        // gets no point, so a prefix ending in one records fewer points
-        // than it named.
+        // The fallback can drift a replay off its prefix, and the
+        // record would then name a `branch_step` it never reached. A
+        // truncated replay is short of its prefix because a truncating
+        // stop gets no point, which is no drift.
         debug_assert!(
             (truncated || log.points().len() >= candidate.prefix.len())
                 && log
@@ -191,15 +172,12 @@ where
 /// The point sits at the earlier event of the race and forces the
 /// later event's unit. When that unit was not runnable at the point,
 /// the search forces every other runnable unit instead
-/// [FlanaganGodefroid2005 p:5 s:Figure 3]. The reversal needs some
-/// unit that can reach the later event's state, and the search cannot
-/// tell which one does. The paper's own implementation takes the same
-/// branch [FlanaganGodefroid2005 p:6 s:4.1].
+/// [FlanaganGodefroid2005 p:5 s:Figure 3], as the paper's own
+/// implementation does [FlanaganGodefroid2005 p:6 s:4.1].
 ///
-/// Where that fallback leaves no unit to force, the race reaches no
-/// candidate and `dropped` counts it. `suppressed` counts the other
-/// way a candidate does not run: an earlier one already named its
-/// prefix, which costs no class.
+/// `dropped` counts the races that fallback leaves no unit to force
+/// for; `suppressed` counts candidates an earlier one already named,
+/// which cost no class.
 fn push_candidates(
     log: &DecisionLog,
     seen: &mut BTreeSet<Prefix>,
@@ -226,13 +204,8 @@ fn push_candidates(
                 .filter(|unit| *unit != point.chosen)
                 .collect()
         };
-        // A point that ran the only runnable unit leaves the fallback
-        // nothing to force: every other unit was parked there. The
-        // reversal is owed and undeliverable, so it is counted here
-        // rather than given up in silence.
-        //
-        // Counted once per reversal, not once per walk: every replay
-        // sharing this prefix re-reads the same race.
+        // Every replay sharing this prefix re-reads the same race, so
+        // `dropped_seen` counts it once.
         if forced.is_empty() {
             let prefix: Prefix = points[..at].iter().map(|p| p.chosen).collect();
             if dropped_seen.insert((prefix, race)) {

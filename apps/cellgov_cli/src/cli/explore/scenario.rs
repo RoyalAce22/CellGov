@@ -109,9 +109,6 @@ pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, forma
     let Some(r) = result else {
         println!("microtest: {name}");
         println!("outcome: no branching points");
-        // No schedules were explored, so nothing was held against the
-        // oracle. Say so rather than letting a silent exit 0 read as
-        // a passing oracle check.
         println!("oracle_verdict: NOT COMPARED -- no branching points to explore");
         return;
     };

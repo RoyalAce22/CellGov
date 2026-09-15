@@ -36,9 +36,7 @@ fn a_single_sequence_tree_branches_once() {
 }
 
 /// `inherit` hands the next depth `subtree(chosen)`, so the tree below
-/// the kept branch is exactly what that depth is owed. Dropping it
-/// loses those sequences with nothing counting them, which is a silent
-/// loss of equivalence classes rather than a visible one.
+/// the kept branch is what that depth is owed.
 #[test]
 fn keeping_a_branch_keeps_the_tree_below_it() {
     let mut tree = WakeupTree::new();
@@ -76,8 +74,6 @@ fn keeping_a_branch_keeps_the_tree_below_it() {
     );
 }
 
-/// The depth still has to run the unit the warp chose, so the tree
-/// ends holding that branch rather than nothing.
 #[test]
 fn keeping_an_absent_branch_arms_that_unit_alone() {
     let mut tree = WakeupTree::new();
@@ -118,8 +114,6 @@ fn removing_a_branch_leaves_the_others_in_order() {
     assert_eq!(tree.branches().collect::<Vec<_>>(), vec![unit(7), unit(5)]);
 }
 
-/// `Frame::drop_cost` counts what a removed branch carried, so the
-/// removal returns the whole tree below the head.
 #[test]
 fn removing_a_branch_hands_back_the_tree_below_it() {
     let mut tree = WakeupTree::new();
@@ -188,8 +182,6 @@ fn inserting_a_sequence_the_tree_already_leads_changes_nothing() {
     assert_eq!(tree, before);
 }
 
-/// Nothing orders the two events, so the tree leads `2.1` through its
-/// existing `1` branch and the sequence needs no second branch.
 #[test]
 fn an_equivalent_reordering_descends_the_existing_branch() {
     let mut tree = WakeupTree::new();
@@ -202,8 +194,6 @@ fn an_equivalent_reordering_descends_the_existing_branch() {
     );
 }
 
-/// Event 0 happens-before event 1, so unit 2 cannot lead the sequence
-/// and the existing branch through it does not serve.
 #[test]
 fn a_branch_a_sequence_cannot_lead_with_does_not_serve_it() {
     let ordered = |first: usize, second: usize| first == 0 && second == 1;
@@ -257,8 +247,6 @@ fn a_sequence_reaching_a_leaf_leaves_the_tree_unchanged() {
     );
 }
 
-/// An empty tree holds no sequence, so the root is the one node a graft
-/// still reaches.
 #[test]
 fn an_empty_tree_still_takes_the_sequence_it_is_given() {
     let mut tree = WakeupTree::new();

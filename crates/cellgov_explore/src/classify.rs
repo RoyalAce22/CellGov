@@ -3,23 +3,20 @@
 use crate::util::StopReason;
 use cellgov_event::UnitId;
 
-/// What every verdict compares: the committed memory of every address
-/// space and every SPU's local store at the end of a maximal execution.
-/// `Runtime::observable_hash` folds exactly that.
+/// What every verdict compares; [`cellgov_core::Runtime::observable_hash`]
+/// folds it.
 ///
 /// Two things lie outside it, so a divergence confined to either
 /// reports as stable:
 ///
-/// - the sync state `Runtime::sync_state_hash` folds: mailboxes, signal
-///   registers, reservations, mapping metadata;
-/// - the rest of every unit's own state: registers, program counter,
-///   channels.
+/// - the sync state [`cellgov_core::Runtime::sync_state_hash`] folds:
+///   mailboxes, signal registers, reservations, mapping metadata;
+/// - each unit's registers, program counter and channels.
 ///
 /// The end of the run observes every byte, so two writes to
 /// overlapping bytes are dependent whatever reads fall between them.
 /// Named regions ([`crate::explore_with_regions`]) are a second
-/// comparison, against an oracle, and never narrow this: a run that
-/// declares none reports the same verdict as one that declares many.
+/// comparison, against an oracle, and never narrow this.
 pub const OBSERVABLE: &str =
     "committed memory of every address space and every SPU's local store at the end of the run";
 
@@ -28,11 +25,6 @@ pub const OBSERVABLE_LABEL: &str = "committed-memory-and-local-store";
 
 /// Verdict of a bounded exploration run, with respect to
 /// [`OBSERVABLE`].
-///
-/// `IntoStaticStr` derive is the single source of truth for the
-/// human / JSON wire-form: `schedule-stable`, `schedule-sensitive`,
-/// `inconclusive`. `report::outcome_label` delegates to the derived
-/// `From<&OutcomeClass> for &'static str` impl.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::VariantArray, strum::IntoStaticStr)]
 pub enum OutcomeClass {
     /// Every schedule explored produced an identical observable.
@@ -40,14 +32,15 @@ pub enum OutcomeClass {
     /// [`ExplorationResult::classes_explored`] says how far the verdict
     /// reaches. A count means the search covered one execution per
     /// equivalence class and hit no bound, so the verdict covers every
-    /// schedule. An empty count holds the verdict to the schedules the
-    /// search sampled.
+    /// schedule. An empty count holds it to the schedules the search
+    /// sampled.
     #[strum(serialize = "schedule-stable")]
     ScheduleStable,
     /// At least two explored schedules produced a distinct observable.
     #[strum(serialize = "schedule-sensitive")]
     ScheduleSensitive,
-    /// Bounds were hit before a divergence was observed or ruled out.
+    /// A bound stopped the search before it found or ruled out a
+    /// divergence.
     #[strum(serialize = "inconclusive")]
     Inconclusive,
 }
@@ -113,42 +106,30 @@ pub struct ExplorationResult {
     pub outcome: OutcomeClass,
     /// Total branching points observed in the baseline run.
     pub total_branching_points: usize,
-    /// Equivalence classes the search covered.
+    /// Equivalence classes the search covered; `None` when it claims
+    /// none.
     ///
-    /// Empty for a search that runs more than one execution per class,
-    /// and for one that hit a bound before it covered every class. See
-    /// [`OutcomeClass::ScheduleStable`] for what a count changes about
-    /// a verdict.
+    /// A search claims no count when:
     ///
-    /// [`Self::reversals_dropped`] separates the two ways this is
-    /// empty: a search that claims nothing, and one whose claim a drop
-    /// withdrew.
+    /// - it runs more than one execution per class;
+    /// - a replay stopped short (a bound, a fault or a refusal) before
+    ///   it covered every class;
+    /// - it dropped a reversal ([`Self::reversals_dropped`]).
+    ///
+    /// [`OutcomeClass::ScheduleStable`] says what a count changes about
+    /// the verdict.
     pub classes_explored: Option<usize>,
     /// Reversals the search owed and could not deliver.
     ///
-    /// A race names a pair whose later unit cannot run where the
-    /// reversal would go, so the search drops that branch. A drop gives
-    /// up at least one equivalence class, which is why any drop empties
-    /// [`Self::classes_explored`].
+    /// A dropped reversal is one owed execution the search never ran,
+    /// so it gives up at least one equivalence class and empties
+    /// [`Self::classes_explored`]. The count omits what that execution's
+    /// own races would owe, so no number of classes follows from it.
     ///
-    /// A run that dropped one reversal and one that gave up half its
-    /// classes both report no count, and only this separates them. A
-    /// dropped sequence is one owed execution the search never ran. The
-    /// count omits what that execution's own races would owe, so no
-    /// number of classes follows from it.
-    ///
-    /// Neither number grows with revisits, and the two count different
-    /// objects, so a ratio between them over one workload reads
-    /// nothing. [`crate::backtrack::explore_backtrack`] counts a prefix
-    /// and a race, so two races at one prefix are two.
-    /// [`crate::optimal::explore_optimal`] counts a frame and a lost
-    /// sequence. Two races that graft different tails under one head at
-    /// one depth are two. A race that re-grafts a sequence the depth
-    /// already lost, or an extension or prefix of one, is none.
-    ///
-    /// Zero beside an empty count means no drop withdrew the count: a
-    /// bound or a short stop did, or the search claims no count of its
-    /// own.
+    /// [`crate::optimal::explore_optimal`] counts a lost sequence per
+    /// frame and [`crate::backtrack::explore_backtrack`] a race per
+    /// prefix; the two count different objects, so a ratio between them
+    /// reads nothing.
     pub reversals_dropped: usize,
     /// True if the `max_schedules` bound was hit, or if the baseline or
     /// any replay stopped before the workload finished.
@@ -174,21 +155,15 @@ pub struct ExplorationResult {
     /// [`crate::util::StopClass::Refusal`], a subset of
     /// [`Self::schedules_truncated`].
     ///
-    /// Only a refusal names a defect in the model:
-    ///
-    /// - a bound stops a replay the caller capped;
-    /// - a blocked replay stops on the workload's own state;
-    /// - a fault is the guest's own step failing;
-    /// - an unserved window holds what the relation cannot see, which
-    ///   is the search's own limit rather than the model's.
+    /// Only a refusal names a defect in the model;
+    /// [`crate::util::StopClass`] says what each other stop names.
     pub schedules_refused: usize,
     /// The exploration's first host invariant break as one line for the
     /// caller to report: the baseline's, or the first replay that broke
     /// one when the baseline broke none.
     ///
-    /// Each run restores the LV2 host from the search's start
-    /// snapshot, so the search reads the line after every run. The next
-    /// restore overwrites it.
+    /// A replay's restore overwrites the LV2 host's own line, so this
+    /// field is where it survives the run.
     pub first_invariant_break: Option<String>,
 }
 

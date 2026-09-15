@@ -98,13 +98,9 @@ fn a_replay_restore_rewinds_the_host_break_record() {
     );
 }
 
-/// The factory records the break before the run, so every snapshot
-/// holds it and a replay restores it back. That makes this test blind
-/// to the read point: it stays green whether the line is read before
-/// the first replay or only after the last.
+/// Blind to the read point: the factory records the break before the
+/// snapshot, so every replay restores it.
 /// [`a_replay_restore_rewinds_the_host_break_record`] pins that half.
-/// No test here can record a break after the last snapshot, since the
-/// fake ISA reaches no LV2 path and `explore` owns the runtime.
 #[test]
 fn the_break_line_reaches_the_result_through_a_run_that_replays() {
     let result = explore(
@@ -662,8 +658,6 @@ fn a_replay_cut_short_by_the_step_bound_is_inconclusive_not_a_divergence() {
     );
 }
 
-/// A replay stopped by `Runtime`'s own `max_steps` cap comes back as
-/// `StepError`, not `StepBound`, and must land in the same place.
 #[test]
 fn a_replay_cut_short_by_a_step_error_is_inconclusive_not_a_divergence() {
     let config = ExplorationConfig {
@@ -769,8 +763,6 @@ fn a_baseline_stopped_by_the_runtime_step_cap_forces_inconclusive() {
         r.classes_explored, None,
         "a prefix baseline covers no class, so the search counts none",
     );
-    // A truncated execution's races cover a prefix of the workload, so
-    // the baseline owes no reversal and the search records nothing.
     assert!(
         r.schedules.is_empty(),
         "a prefix baseline's races cover a prefix, so the search owes no reversal",

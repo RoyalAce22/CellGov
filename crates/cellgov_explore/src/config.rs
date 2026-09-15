@@ -8,8 +8,8 @@ pub const DEFAULT_MAX_STEPS_PER_RUN: usize = 10_000;
 
 /// Upper bounds on an exploration run.
 ///
-/// Exceeding either bound forces `OutcomeClass::Inconclusive` when no
-/// divergence has been observed.
+/// A run past either bound reports `OutcomeClass::Inconclusive` unless
+/// it observed a divergence.
 #[derive(Debug, Clone)]
 pub struct ExplorationConfig {
     /// Maximum number of alternate schedules to record beyond the

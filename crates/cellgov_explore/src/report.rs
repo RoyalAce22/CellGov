@@ -25,9 +25,8 @@ pub fn format_human(result: &ExplorationResult) -> String {
         "classes_explored: {}\n",
         match (result.classes_explored, result.reversals_dropped) {
             (Some(n), 0) => n.to_string(),
-            // A count beside a drop breaks the rule the field states,
-            // and the JSON below prints the drop whatever the count
-            // says, so this names the pair rather than hiding one half.
+            // A count beside a drop breaks the rule `classes_explored`
+            // states; the JSON prints both, so this row names both.
             (Some(n), dropped) => format!("{n} (contradicted by {dropped} reversal(s) dropped)"),
             (None, 0) => "not covered".to_string(),
             (None, dropped) => format!("not covered ({dropped} reversal(s) dropped)"),
@@ -47,9 +46,8 @@ pub fn format_human(result: &ExplorationResult) -> String {
     if !result.schedules.is_empty() {
         out.push_str("schedules:\n");
         for (i, s) in result.schedules.iter().enumerate() {
-            // A prefix hash is never labelled DIVERGED: it differs from
-            // a finished baseline whether or not the workload is
-            // schedule-sensitive.
+            // A prefix hash is never labelled DIVERGED; see the doc on
+            // `ScheduleRecord::truncated`.
             let tag = match truncated_by(s) {
                 Some(by) => format!(" TRUNCATED({by})"),
                 None if s.memory_hash != result.baseline_hash => " DIVERGED".to_string(),

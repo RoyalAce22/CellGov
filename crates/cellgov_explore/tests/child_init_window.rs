@@ -2,13 +2,11 @@
 //!
 //! The host's child-init pass holds every other runnable unit `Blocked`
 //! across the child's `module_start` and restores them after, through
-//! no effect. No footprint records either half, so a relation asked
-//! about the steps around it would call independent two steps that the
-//! pass separated. That is a false independence, which is the silent
-//! direction.
-//!
-//! No explorer runs the pass, so the search cannot model the window
-//! either way. It stops and says so.
+//! no effect. No footprint records either half, so a relation would
+//! call two steps the pass separated independent. That is a false
+//! independence, which is the silent direction. No explorer runs the
+//! pass, so the search cannot model the window either way. It stops and
+//! says so.
 
 #![allow(
     clippy::unwrap_used,
@@ -188,8 +186,6 @@ fn spawns_a_child() -> Runtime {
     rt
 }
 
-/// The premise: the workload really does park a child behind a staged
-/// init pass, part-way through rather than at the start.
 #[test]
 fn the_workload_stages_a_child_init_mid_run() {
     let mut rt = spawns_a_child();
@@ -252,8 +248,8 @@ fn staged_child_init() -> Runtime {
     rt
 }
 
-/// A pass already pending costs no step: the parks are in force before
-/// the first step of the window, so no relation covers it either.
+/// The parks are in force before the window's first step, so no
+/// relation covers a pass already pending either.
 #[test]
 fn a_pass_pending_at_entry_refuses_before_a_step_runs() {
     let mut rt = staged_child_init();
@@ -280,7 +276,6 @@ fn a_pass_pending_at_entry_refuses_before_a_step_runs() {
     );
 }
 
-/// The search reaches no verdict over a window it cannot reason about.
 #[test]
 fn the_search_claims_nothing_over_a_window_that_spans_a_spawn() {
     let result = explore_window(spawns_a_child, &ExplorationConfig::default());

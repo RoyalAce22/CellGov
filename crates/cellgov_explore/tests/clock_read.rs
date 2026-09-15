@@ -54,8 +54,6 @@ fn workload() -> Runtime {
     let reader = rt.register_unit_with(|id| ClockWriter::new(id, destination()));
     let cheap = rt.register_unit_with(|id| CountingUnit::of_cost(id, 2, CHEAP_COST));
     let expensive = rt.register_unit_with(|id| CountingUnit::of_cost(id, 2, BUDGET));
-    // Every case below names units by id, so a registration inserted
-    // above would retarget them.
     assert_eq!(reader, READER, "registration order moved the reader");
     assert_eq!(cheap, CHEAP, "registration order moved the cheap counter");
     assert_eq!(
@@ -217,7 +215,6 @@ fn the_verdict_reads_schedule_sensitive() {
 fn a_reader_whose_store_nothing_else_reaches_still_conflicts() {
     let build = || {
         let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
-        // Writes its own range, which nothing else reads or writes.
         let private = ByteRange::new(GuestAddr::new(0), 8).unwrap();
         let reader = rt.register_unit_with(|id| ClockWriter::new(id, private));
         let cheap = rt.register_unit_with(|id| CountingUnit::of_cost(id, 2, CHEAP_COST));
@@ -235,8 +232,8 @@ fn a_reader_whose_store_nothing_else_reaches_still_conflicts() {
     );
 }
 
-/// The count a class holds one committed memory, so nine outcomes need
-/// nine classes and the run has to claim exactly that.
+/// Each class here holds one committed memory, so nine outcomes need
+/// nine classes.
 #[test]
 fn the_search_reaches_every_outcome_and_claims_one_class_per_outcome() {
     let reachable = every_reachable_memory();

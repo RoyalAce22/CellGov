@@ -1,15 +1,11 @@
 //! A schedule that decides whether a unit faults claims nothing.
 //!
 //! One unit's fault turns on a byte another unit writes, so the order
-//! of the two decides whether the fault happens. Hard rule 4 discards
-//! the faulted batch, the read that decided the fault goes with it,
-//! and the driver records no event for the step. The relation is
-//! therefore never asked about that step: there is no event to ask
-//! about.
-//!
-//! A faulted run is truncated, and that withdraws every claim measured
-//! against it. So the search reports no verdict rather than calling
-//! the workload stable over the orders it did reach.
+//! of the two decides whether the fault happens. The commit pipeline
+//! discards the faulted batch, the read that decided the fault goes
+//! with it, and the driver records no event for the step. A faulted run is
+//! truncated, and that withdraws every claim measured against it. So
+//! the search reports no verdict over the orders it did reach.
 //!
 //! Two workloads are here, because which order a search reaches first
 //! is no part of the argument. Where the read commits, the relation
@@ -111,12 +107,6 @@ fn the_workload_faults_under_one_order_and_not_the_other() {
     );
 }
 
-/// The faulted step leaves no event behind.
-///
-/// A discarded batch published nothing, so recording an event for it
-/// would give the relation a footprint naming no committed access.
-/// The driver stops at the fault instead, so no pair involving that
-/// step reaches the independence test.
 #[test]
 fn a_faulted_step_records_no_event() {
     let mut rt = a_write_decides_a_fault();
@@ -144,8 +134,6 @@ fn a_schedule_decided_fault_withdraws_the_verdict() {
          never sees the gate at zero",
     );
 
-    // The write and the read conflict, so the relation owes their
-    // reversal. Running it is what reaches the fault.
     let reversal = result
         .schedules
         .iter()
@@ -174,14 +162,6 @@ fn a_schedule_decided_fault_withdraws_the_verdict() {
     );
 }
 
-/// Truncation, not the relation, is what withdraws the verdict where
-/// every order the search reaches faults.
-///
-/// The read that decides the fault reaches no execution here, so the
-/// relation is asked about no pair and concludes nothing. What keeps
-/// the verdict honest is that the one run faulted: a faulted run is
-/// truncated, and a truncated baseline withdraws every claim measured
-/// against its hash.
 #[test]
 fn a_baseline_that_faults_first_leaves_the_relation_nothing_to_read() {
     let result = explore_optimal(
@@ -209,11 +189,8 @@ fn a_baseline_that_faults_first_leaves_the_relation_nothing_to_read() {
     assert_eq!(result.classes_explored, None);
 }
 
-/// The positive control: past the gate, the same two programs get a
-/// verdict.
-///
-/// Without this, every assertion above would pass for a search that
-/// called everything inconclusive.
+/// The positive control: without it, every case above passes for a
+/// search that calls everything inconclusive.
 #[test]
 fn the_same_workload_past_the_gate_reaches_a_verdict() {
     let result = explore_optimal(

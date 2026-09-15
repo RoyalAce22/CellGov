@@ -1,8 +1,8 @@
 //! The step cap at the exact length of a maximal execution.
 //!
 //! A cap refuses to start a step. An execution that retires exactly
-//! `max_steps_per_run` steps and then has nothing left to run was not
-//! stopped by the cap: it finished. Reporting a bound there withdraws a
+//! `max_steps_per_run` steps and then has nothing left to run finished;
+//! the cap did not stop it. Reporting a bound there withdraws a
 //! complete answer, because `StopReason::is_truncated` holds for
 //! `StepBound` and the run's committed hash leaves the outcome set.
 //!
@@ -46,9 +46,6 @@ fn destination() -> ByteRange {
 
 /// `workload`'s length with a conflict in it, so the search has
 /// alternates to replay against the same cap.
-///
-/// Both units store over the same four bytes, so which one stores last
-/// decides the committed memory.
 fn conflicting_workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 200);
     rt.register_unit_with(|id| WritingUnit::of_value(id, 3, destination(), 0xaa));
@@ -56,10 +53,9 @@ fn conflicting_workload() -> Runtime {
     rt
 }
 
-/// One unit that parks on a sleep and needs the time warp to finish.
-///
-/// Between its two steps no unit is runnable and one is parked with a
-/// queued deadline, which is the state a cap reads as work left.
+/// One unit that parks on a sleep and needs the time warp to finish:
+/// between its two steps no unit is runnable and one is parked with a
+/// queued deadline, the state a cap reads as work left.
 fn warping_workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 200);
     rt.register_unit_with(|id| SleepingWriter::new(id, 1, destination(), 0xbb));
@@ -97,8 +93,6 @@ fn parked_for_good() -> Runtime {
     rt
 }
 
-/// The premise: unbounded, the workload runs itself out in exactly
-/// `MAXIMAL_STEPS`.
 #[test]
 fn the_workload_is_exactly_as_long_as_the_cap_below() {
     let mut rt = workload();
@@ -107,7 +101,6 @@ fn the_workload_is_exactly_as_long_as_the_cap_below() {
     assert_eq!(log.len(), MAXIMAL_STEPS);
 }
 
-/// The premise for the warping cases below.
 #[test]
 fn the_warping_workload_is_exactly_as_long_as_the_cap_below() {
     let mut rt = warping_workload();
@@ -145,11 +138,9 @@ fn the_observer_one_step_short_reports_the_bound() {
     assert!(stop.is_truncated());
 }
 
-/// A parked unit with a queued deadline is work left, not a stall.
-///
-/// The cap lands where no unit is runnable. The wake is still coming, so
-/// the bound is honest -- and a predicate that read the runnable set
-/// alone would let this run past the cap to its end.
+/// The cap lands where no unit is runnable and a wake is still coming; a
+/// predicate that read the runnable set alone would let this run past
+/// the cap.
 #[test]
 fn the_observer_at_a_wakeable_park_reports_the_bound() {
     let mut rt = warping_workload();
@@ -167,11 +158,8 @@ fn the_observer_at_the_warping_length_reports_the_stall_it_reached() {
     assert_eq!(stop, StopReason::Stalled);
 }
 
-/// A park with no wake source at the cap is the deadlock, not the bound.
-///
-/// Both stops leave no unit runnable. The queues separate them: nothing
-/// is queued to wake this unit, so the execution is maximal and its hash
-/// answers for the workload.
+/// Both stops leave no unit runnable; the queues separate them, and an
+/// empty queue makes the execution maximal.
 #[test]
 fn the_observer_at_an_unwakeable_park_reports_the_deadlock() {
     let mut rt = parked_for_good();
@@ -194,13 +182,8 @@ fn run_to_stall_at_the_exact_length_reports_the_stall_it_reached() {
     );
 }
 
-/// The predicate against the `Runtime::step` that follows it.
-///
 /// Nothing else ties the two together: the predicate reads the registry
 /// and the two wake queues, while `step` asks the scheduler and warps.
-/// The walk holds them to the same answer over every state these
-/// workloads reach -- a park each queue ends, a park nothing ends, and
-/// two workloads that only ever finish.
 #[test]
 fn the_predicate_answers_for_the_step_that_follows_it() {
     let cases: [(fn() -> Runtime, usize); 5] = [
@@ -249,8 +232,8 @@ fn the_search_at_the_exact_length_hits_no_bound() {
         !result.bounds_hit,
         "the cap matched the workload, so nothing was cut short",
     );
-    // These units emit trace markers alone, so no pair conflicts and the
-    // baseline is the only execution. The alternates meet the cap in
+    // Counting units touch nothing shared, so the baseline is the only
+    // execution; the alternates meet the cap in
     // `every_alternate_at_the_exact_length_hits_no_bound`.
     assert_eq!(
         result.classes_explored,
@@ -261,7 +244,7 @@ fn the_search_at_the_exact_length_hits_no_bound() {
 }
 
 /// The cap over a replay, where the scheduler left installed is the
-/// previous step's prescribed choice rather than the round robin.
+/// previous step's prescribed choice.
 #[test]
 fn every_alternate_at_the_exact_length_hits_no_bound() {
     let result = explore_window(

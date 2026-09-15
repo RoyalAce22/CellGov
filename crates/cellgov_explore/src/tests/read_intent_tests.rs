@@ -1,11 +1,6 @@
-//! Read intent in the dependency relation.
-//!
-//! A read set adds two of Bernstein's clauses: read against write,
-//! and write against read. It leaves two pairs independent: read
-//! against read, and read against a reservation line. The cases below
-//! cover those four pairs, each of a step's own read and write against
-//! each end of a transfer, the alias expansion over a shared mapping,
-//! and a write-read race whose two orders leave different bytes.
+//! Read intent in the dependency relation: a read set adds Bernstein's
+//! read-against-write clauses and leaves read-against-read and
+//! read-against-reservation independent.
 
 use crate::dependency::StepFootprint;
 use crate::execution::Execution;
@@ -95,8 +90,6 @@ fn two_reads_of_the_same_bytes_are_independent() {
     assert!(!reads(0, 8).conflicts(&reads(0, 8)));
 }
 
-/// A transfer's two ends pair differently, because at completion it
-/// writes one and reads the other.
 #[test]
 fn a_read_pairs_with_the_destination_a_transfer_writes() {
     // The landing writes the destination, so the order decides which
@@ -119,8 +112,7 @@ fn a_write_pairs_with_either_end_of_a_transfer() {
     assert!(writes(0x100, 8).conflicts(&dma(0x100, 4, 8)));
 }
 
-/// An SPU put is the payloaded case, and its source names local store.
-/// See [`StepFootprint::dma_reads`].
+/// The payloaded case: see [`StepFootprint::dma_reads`].
 #[test]
 fn a_payloaded_transfer_records_no_source() {
     let request = DmaRequest::new(
@@ -166,13 +158,8 @@ fn an_unpayloaded_flight_records_both_of_its_ends() {
     );
 }
 
-/// The in-flight ranges reach the sibling views of the mapping they
-/// land in.
-///
-/// The order of `note_inflight` and `expand_aliases` inside
-/// [`StepFootprint::note_commit`] decides it: with the widening first
-/// the flight stays unwidened, and a unit reading the sibling view is
-/// then proved independent of the landing.
+/// Pins the order inside [`StepFootprint::note_commit`]: widened first,
+/// the flight stays unwidened.
 #[test]
 fn an_inflight_landing_reaches_the_sibling_view() {
     let mut rt = runtime_with_two_views_of_one_mapping(0x40);

@@ -247,8 +247,6 @@ fn dma_over_reserved_line_conflicts_without_byte_overlap() {
     assert!(b.conflicts(&a));
 }
 
-/// The wake names the unit that waits, so the order decides whether
-/// that unit ends runnable or blocked.
 #[test]
 fn a_wake_conflicts_with_the_wait_it_enables() {
     let waiter = UnitId::new(1);
@@ -264,8 +262,6 @@ fn a_wake_conflicts_with_the_wait_it_enables() {
     assert!(b.conflicts(&a), "the pair conflicts from either side");
 }
 
-/// The wake names a third unit, so it reaches this waiter through
-/// nothing: each step sets a different unit's status.
 #[test]
 fn a_wake_of_another_unit_is_independent_of_a_wait() {
     let a = StepFootprint::from_effects(&[Effect::WakeUnit {
@@ -280,8 +276,6 @@ fn a_wake_of_another_unit_is_independent_of_a_wait() {
     assert!(!b.conflicts(&a));
 }
 
-/// The wait target does not decide the pairing: a wake of the waiter
-/// conflicts whatever the wait names.
 #[test]
 fn the_wait_target_does_not_decide_the_pairing() {
     let waiter = UnitId::new(1);

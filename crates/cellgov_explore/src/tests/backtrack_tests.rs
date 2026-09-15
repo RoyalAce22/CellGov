@@ -92,8 +92,6 @@ fn every_replay_records_the_step_it_forced() {
     );
 }
 
-/// The per-run cap stops the baseline two steps into a six-step
-/// workload, so a bounded execution never answers for it.
 #[test]
 fn a_step_bound_on_the_baseline_withdraws_the_verdict() {
     let config = ExplorationConfig {
@@ -107,8 +105,7 @@ fn a_step_bound_on_the_baseline_withdraws_the_verdict() {
     assert!(result.bounds_hit);
 }
 
-/// The cap stops the baseline before either store commits, so the
-/// truncated baseline holds no race to backtrack from.
+/// Two steps end before either store, so the baseline holds no race.
 #[test]
 fn a_truncated_baseline_names_no_backtrack_point() {
     let config = ExplorationConfig {
@@ -121,8 +118,6 @@ fn a_truncated_baseline_names_no_backtrack_point() {
     assert_eq!(result.schedules_truncated, 0);
 }
 
-/// Each replay builds and drops its own runtime, so a break only a
-/// replay found reaches a driver through this field alone.
 #[test]
 fn a_break_only_a_replay_found_reaches_the_result() {
     // A logged break changes no guest state, so every run steps the

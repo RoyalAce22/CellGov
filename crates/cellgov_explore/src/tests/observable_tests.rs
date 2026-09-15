@@ -52,8 +52,6 @@ fn the_json_report_carries_the_observable_label() {
     assert_eq!(v["observable"], OBSERVABLE_LABEL);
 }
 
-/// The sentence names all of memory and the end of the run: a reader
-/// who sees it cannot take the verdict for one over declared regions.
 #[test]
 fn the_observable_names_every_address_space_and_the_end_of_the_run() {
     assert!(OBSERVABLE.contains("every address space"), "{OBSERVABLE}");

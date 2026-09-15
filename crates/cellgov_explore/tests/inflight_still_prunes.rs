@@ -7,9 +7,7 @@
 //!
 //! The workload here has a transfer in flight over the whole run and
 //! no other unit that touches either end of it. Nothing extra
-//! conflicts, and the search keeps its reduction. The last case holds
-//! the other half of the rule: a reservation on the line the transfer
-//! lands on is an access, so the rule pairs its holder.
+//! conflicts, and the search keeps its reduction.
 
 #![allow(
     clippy::unwrap_used,
@@ -66,8 +64,6 @@ fn two_writers_beside_a_transfer() -> Runtime {
     rt.register_unit_with(|id| DmaSubmitter::new(id, src, dst, vec![0xde, 0xad, 0xbe, 0xef]));
     let first = rt.register_unit_with(|id| writer(id, FIRST_WORD));
     let second = rt.register_unit_with(|id| writer(id, SECOND_WORD));
-    // The independence check names units by id, so a registration
-    // inserted above would retarget it.
     assert_eq!(
         (first, second),
         (FIRST, SECOND),
@@ -89,9 +85,8 @@ fn a_transfer_in_flight_does_not_make_disjoint_writers_conflict() {
     let (log, stop) = observe_decisions(&mut rt);
     assert_eq!(stop, StopReason::Stalled);
 
-    // The premise: the steps really did run with a transfer in flight.
-    // Without this the case would pass on a workload where the rule
-    // was never asked.
+    // Without this the case passes on a workload where the rule was
+    // never asked.
     assert!(
         log.points()
             .iter()

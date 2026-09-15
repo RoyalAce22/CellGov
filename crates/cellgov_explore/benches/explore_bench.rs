@@ -26,7 +26,7 @@ fn word(slot: u64) -> ByteRange {
     ByteRange::new(GuestAddr::new(slot * 8), 4).unwrap()
 }
 
-/// `events` steps round-robin over [`UNITS`] units, each unit writing
+/// `events` steps round-robin over [`UNITS`] units; each unit writes
 /// its own word, so no pair conflicts.
 fn disjoint_writers(events: usize) -> Execution {
     let mut execution = Execution::new();

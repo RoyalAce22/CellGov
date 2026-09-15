@@ -5,12 +5,15 @@
 //! the released step emits no wait. Happens-before joins the waker's
 //! clock into the released step's clock instead.
 //!
-//! The two directions cost different things. A missing edge lets a
-//! race ask for a reversal whose sequence names the woken unit where it
-//! is still parked. The search drops that branch and withdraws its
-//! class count, so the same executions run and the claim over them
-//! goes. An edge from a wake that released nothing orders a pair the
-//! schedule leaves free, which removes a race and the reversal it owed.
+//! The two directions cost different things:
+//!
+//! - A missing edge lets a race ask for a reversal whose sequence names
+//!   the woken unit where it is still parked. The search drops that
+//!   branch and withdraws its class count, so the same executions run
+//!   and the claim over them goes.
+//! - An edge from a wake that released nothing orders a pair the
+//!   schedule leaves free, which removes a race and the reversal it
+//!   owed.
 
 #![allow(
     clippy::unwrap_used,
@@ -32,12 +35,9 @@ const WAKER: UnitId = UnitId::new(1);
 /// Unit 0 of the second workload below, which parks on nothing.
 const RUNNING: UnitId = UnitId::new(0);
 
-/// One word, three writers, and a park in the middle of them.
-///
-/// Every write is over the same word, so every pair of them conflicts.
-/// The races between unit 1 and unit 2 then ask for reversals whose
-/// sequences run through the write unit 0 makes once the wake releases
-/// it.
+/// One word, three writers, and a park in the middle of them: the races
+/// between unit 1 and unit 2 ask for reversals whose sequences run
+/// through the write unit 0 makes once the wake releases it.
 fn wake_between_writers() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(1), 400);
     rt.register_unit_with(|id| {
@@ -111,10 +111,6 @@ fn the_wake_precedes_the_step_it_enabled() {
 /// slots -- 2 x 4 = 8. Wake before park: the wake releases nothing,
 /// unit 0 parks for good and never writes, and unit 2's write takes any
 /// of three slots -- 3.
-///
-/// Without the waker edge the search runs the same eleven and reports
-/// no count: a race asks for a reversal naming unit 0 where it is still
-/// parked, `choose` drops that branch, and a drop withdraws the claim.
 #[test]
 fn the_search_drops_no_branch_over_a_workload_with_a_park() {
     let config = ExplorationConfig {
@@ -134,10 +130,8 @@ fn the_search_drops_no_branch_over_a_workload_with_a_park() {
     );
 }
 
-/// A wake that names a unit no park holds.
-///
-/// Unit 1 writes nothing, so the wake is the only thing in the run that
-/// could order the two units.
+/// A wake that names a unit no park holds; unit 1 writes nothing, so the
+/// wake is the only thing that could order the two units.
 fn wake_a_running_unit() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(1), 400);
     rt.register_unit_with(|id| {

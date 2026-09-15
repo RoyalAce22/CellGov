@@ -8,12 +8,12 @@
 //! - `YieldReason::Fault` discards the whole batch, including effects
 //!   emitted before the fault.
 //! - Validation rejects the whole batch; a rejected batch commits
-//!   nothing and surfaces as a fault on the originating unit.
+//!   nothing and reaches the originating unit as a fault.
 //! - Every committed `SharedWriteIntent` runs the reservation-table
 //!   clear sweep against overlapping lines. So does `RsxLabelWrite`,
-//!   with no unit exempted: the RSX is a bus master, not a unit.
-//! - `RsxLabelWrite` is bounds-checked against the resolved label
-//!   base before staging.
+//!   with no unit exempt.
+//! - The pipeline bounds-checks `RsxLabelWrite` against the resolved
+//!   label base before it stages the write.
 
 use crate::registry::UnitRegistry;
 use cellgov_dma::{DmaCompletion, DmaDirection, DmaLatencyModel, DmaQueue};
@@ -28,11 +28,8 @@ use cellgov_time::GuestTicks;
 
 /// Why a commit batch could not be applied.
 ///
-/// No variant is a unit variant: each carries the effect index it
-/// refused, and `Memory` carries the memory layer's own error instead.
-/// So `VariantArray` cannot publish the set, and `EnumCount` publishes
-/// how many there are -- what a sweep standing one refusal in for every
-/// shape needs to know it still covers them all.
+/// `EnumCount` publishes the variant count for the sweep that stands
+/// one refusal in for every shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, strum::EnumCount)]
 pub enum CommitError {
     /// A `SharedWriteIntent` payload length did not match its range length.
@@ -116,8 +113,7 @@ pub enum CommitError {
     /// space 0 whatever the direction says, which is the `Put` reading.
     /// A `Get` names the local-store end as its destination, so
     /// applying it there would land the transfer in main memory at a
-    /// local-store address. The queue refuses it rather than modelling
-    /// it wrongly.
+    /// local-store address.
     #[error("effect[{effect_index}]: DMA direction is not modelled")]
     DmaDirectionUnsupported {
         /// Index of the offending effect within the batch.
@@ -166,9 +162,8 @@ pub struct CommitOutcome {
     pub dma_completions_fired: usize,
     /// `ReservationAcquire`s that installed or replaced an entry.
     ///
-    /// A second acquire on the same unit bumps this counter AND
-    /// `reservations_cleared` while leaving the table size unchanged;
-    /// tooling that wants net installs must reconcile both.
+    /// A second acquire on the same unit counts here and in
+    /// `reservations_cleared`, and the table size does not change.
     pub reservation_acquires_committed: usize,
     /// Number of `ConditionalStore` effects committed.
     pub conditional_stores_committed: usize,
@@ -176,11 +171,13 @@ pub struct CommitOutcome {
     /// for the emitter. Non-zero indicates an emitter-side LL/SC pre-check
     /// skip or ordering bug.
     pub conditional_stores_without_prior_reservation: usize,
-    /// Reservation-table entries dropped during this commit.
+    /// Reservation-table entries dropped during this commit, from:
     ///
-    /// Sources: `SharedWriteIntent` clear-sweep, `ConditionalStore`
-    /// emitter-entry drop and cross-unit sweep, and `ReservationAcquire`
-    /// clobbers of prior entries on the same unit.
+    /// - the `SharedWriteIntent` clear sweep;
+    /// - the `ConditionalStore` emitter-entry drop and cross-unit sweep;
+    /// - an `RsxLabelWrite`'s sweep over its four bytes;
+    /// - a `ReservationAcquire` that replaces a prior entry on the same
+    ///   unit.
     pub reservations_cleared: usize,
     /// Effects the validation pass staged nothing for: `FaultRaised`,
     /// `TraceMarker`, `RsxFlipRequest`, `SharedReadIntent` and
@@ -238,12 +235,11 @@ pub struct CommitContext<'a> {
     pub now: GuestTicks,
     /// Reservation table mutated by LL/SC and clear-sweep paths.
     pub reservations: &'a mut ReservationTable,
-    /// Zero means GCM has not been initialised; `RsxLabelWrite` commits as
-    /// a 4-byte big-endian store at `rsx_label_base + offset`.
+    /// Zero means GCM is not initialised; `RsxLabelWrite` commits as a
+    /// 4-byte big-endian store at `rsx_label_base + offset`.
     ///
-    /// The value also decides whether an offset is checked against the
-    /// RSX label area's extent: relative offsets are only meaningful once
-    /// a base exists, so the guard is skipped while this is zero.
+    /// The guard on the label area's extent runs only once a base
+    /// exists.
     pub rsx_label_base: u32,
     /// Write-only from this pipeline.
     pub rsx_flip: &'a mut crate::rsx::flip::RsxFlipState,
@@ -270,9 +266,9 @@ impl CommitPipeline {
 
     /// Process the effects produced by a single unit step.
     ///
-    /// Validation runs over every effect first; staged memory writes
-    /// drain as one atomic operation before any other subsystem is
-    /// mutated. See the module docs for the full contract.
+    /// Validation runs over every effect first; the staged memory writes
+    /// drain as one atomic operation before the pipeline touches any
+    /// other subsystem. See the module docs for the full contract.
     ///
     /// # Errors
     ///
@@ -313,9 +309,9 @@ impl CommitPipeline {
         let mut woken_units = Vec::new();
         let mut deferred = 0usize;
 
-        // The IIFE channels validation failures through `staging.clear()`
-        // before propagating; `StagingMemory`'s Drop debug-asserts the
-        // buffer is empty at release.
+        // The IIFE routes every validation failure through
+        // `staging.clear()`; `StagingMemory`'s Drop debug-asserts an
+        // empty buffer.
         let pre_validate: Result<(), CommitError> = (|| {
             for (idx, effect) in effects.iter().enumerate() {
                 match effect {
@@ -377,11 +373,6 @@ impl CommitPipeline {
                                 .set_status_override(request.issuer(), UnitStatus::Faulted);
                             return Err(CommitError::DmaDirectionUnsupported { effect_index: idx });
                         }
-                        // An inline payload is the bytes, so the source
-                        // is never read and needs no range that
-                        // resolves. What the payload does need is the
-                        // destination's length: the completion writes it
-                        // over that whole range.
                         if let Some(bytes) = payload {
                             if bytes.len() as u64 != request.destination().length() {
                                 ctx.units
@@ -412,15 +403,14 @@ impl CommitPipeline {
                             }
                         }
                         let dst = request.destination();
-                        // The completion writes the destination in
-                        // space 0 too, whatever space the issuer runs
-                        // in.
+                        // Space 0, whatever space the issuer runs in;
+                        // see the doc on `CommitContext::dma_memory`.
                         let dst_mem: &GuestMemory = ctx.dma_memory.unwrap_or(&*ctx.memory);
                         if let Err(err) = dst_mem.validate_write(dst, dst.length() as usize) {
-                            // Marking the issuer Faulted prevents the SPU
-                            // from polling MFC_RD_TAG_STAT for a tag bit
-                            // that never arrives and time-warping to an
-                            // empty queue -> StepError::AllBlocked.
+                            // A Faulted issuer cannot poll
+                            // `MFC_RD_TAG_STAT` for a tag bit that never
+                            // arrives and warp to an empty queue
+                            // (`StepError::AllBlocked`).
                             ctx.units
                                 .set_status_override(request.issuer(), UnitStatus::Faulted);
                             return Err(match err {
@@ -532,12 +522,9 @@ impl CommitPipeline {
                         writes += 1;
                     }
                     Effect::FaultRaised { kind, source } => {
-                        // The variant's contract is that the whole step is
-                        // discarded, but this pipeline drives the discard
-                        // off `YieldReason::Fault`, which already returned
-                        // above. Reaching here means the emitter raised a
-                        // fault without yielding one, and every sibling
-                        // effect in the batch is about to commit.
+                        // The discard runs off `YieldReason::Fault`, which
+                        // returned above, so an emitter that reaches here
+                        // raised a fault without yielding one.
                         debug_assert!(
                             result.yield_reason == YieldReason::Fault,
                             "FaultRaised({kind:?}) from unit {} in a batch that yielded {:?}; \
@@ -560,16 +547,11 @@ impl CommitPipeline {
             return Err(e);
         }
 
-        // The drain is the only fallible op in the apply pass; a
-        // new fallible op below would need rollback machinery to
-        // preserve the atomic-batch contract. It validates the whole
-        // batch before it applies any write, so the observer sees no
-        // write from a refused batch.
-        //
-        // The drain leaves the staging buffer populated on
-        // validation failure; clear it so that `StagingMemory`'s Drop
-        // guard holds on both the pre_validate and the drain failure
-        // paths.
+        // The drain is the one fallible operation in the apply pass, and
+        // it validates the whole batch before it applies a write, so the
+        // observer sees no write from a refused batch. A refused drain
+        // leaves the buffer populated; the clear keeps `StagingMemory`'s
+        // Drop guard true.
         let tap = &mut ctx.tap;
         let drained = staging.drain_into_observed(ctx.memory, |range, bytes| {
             if let Some(tap) = tap.as_deref_mut() {
@@ -653,10 +635,8 @@ impl CommitPipeline {
                     reservation_acquires += 1;
                 }
                 Effect::ConditionalStore { range, source, .. } => {
-                    // Drop the emitter's own entry first so the cross-unit
-                    // sweep below cannot double-count it. A missing prior
-                    // entry here flags an emitter-side bug via
-                    // `conditional_stores_without_prior_reservation`.
+                    // The emitter's own entry goes first, so the
+                    // cross-unit sweep below cannot double-count it.
                     if ctx.reservations.remove_if_present(*source).is_some() {
                         reservations_cleared += 1;
                     } else {

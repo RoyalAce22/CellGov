@@ -1,11 +1,8 @@
 //! Where a title exploration's window opens, and how the driver gets
-//! the runtime there.
-//!
-//! A boot prefix is single-unit until the title creates its second
-//! thread, so a window at the process entry spends the step cap on a
-//! stretch with no choice in it. The driver instead runs the default
-//! schedule up to a start condition and hands what follows to the
-//! explorer. The caller picks the window a verdict covers.
+//! the runtime there. A boot prefix is single-unit until the title
+//! creates its second thread, so the driver runs the default schedule
+//! to a start condition the caller picks and hands what follows to the
+//! explorer.
 
 use cellgov_boot::manifest::CheckpointTrigger;
 use cellgov_boot::step_loop::rsx_checkpoint_addr;
@@ -16,17 +13,14 @@ use cellgov_explore::StopReason;
 /// Where the window opens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum WindowStart {
-    /// The first step two or more units are runnable at, which is the
-    /// first step a schedule choice exists at.
+    /// The first step two or more units are runnable at.
     FirstBranchingPoint,
     /// A `Runtime::step()` count. `--max-steps` is a retired-instruction
     /// cap; the boot divides it by the per-step budget into the step cap
     /// this count runs against.
     Step(usize),
-    /// A guest PC. The driver matches it against the PC a step yields
-    /// at, as the boot's own step loop does. A PC the batch passes
-    /// through mid-flight is not one of those, so the window opens at a
-    /// yield point or the boot runs out first.
+    /// A guest PC, matched against the PC a step yields at; a PC inside
+    /// a batch never matches.
     Pc(u64),
 }
 
@@ -100,9 +94,7 @@ impl std::fmt::Display for WindowStop {
 pub(super) struct WindowNeverOpened {
     /// The condition the drive was running to.
     pub start: WindowStart,
-    /// Where the cell's anchor stops the boot, which is what separates
-    /// the title's own stop from a refusal the checkpoint does not
-    /// explain.
+    /// Where the cell's anchor stops the boot.
     pub checkpoint: CheckpointTrigger,
     /// Steps the boot committed before it stopped.
     pub steps: usize,
@@ -113,9 +105,8 @@ pub(super) struct WindowNeverOpened {
 impl WindowNeverOpened {
     /// What stopped the boot, as the clause the message ends with.
     ///
-    /// A cell that stops at the first RSX write reaches that stop as a
-    /// refused commit, so it reads as the title's own stop rather than
-    /// one more refusal.
+    /// A `first-rsx-write` checkpoint arrives as a refused commit; see
+    /// [`rsx_checkpoint_addr`].
     fn detail(&self) -> String {
         if let WindowStop::Run(StopReason::CommitError(err)) = self.stop {
             if let Some(addr) = rsx_checkpoint_addr(self.checkpoint, err) {
@@ -172,11 +163,8 @@ pub(super) fn open_window(
             WindowStart::Step(n) if steps >= n => return Ok(steps),
             _ => {}
         }
-        // This loop leaves an empty runnable set to `Runtime::step`,
-        // which warps guest time to the next DMA completion or timer
-        // deadline and schedules whatever that wakes. Only it separates
-        // a boot that ran itself out (`NoRunnableUnit`) from one parked
-        // with nothing left to wake it (`AllBlocked`).
+        // An empty runnable set goes to `Runtime::step`, whose warp
+        // alone separates `NoRunnableUnit` from `AllBlocked`.
         let step = match rt.step() {
             Ok(step) => step,
             Err(StepError::NoRunnableUnit) => {
@@ -187,9 +175,8 @@ pub(super) fn open_window(
         if let Err(e) = rt.commit_step(&step.result, &step.effects) {
             return Err(ended(steps, WindowStop::Run(StopReason::CommitError(e))));
         }
-        // `boot run` drains this between steps; nothing here does, so a
-        // child parked behind it never runs and the rest of the boot is
-        // not the one the anchor recorded.
+        // `boot run` drains this between steps; nothing here does. See
+        // the doc on `WindowStop::ChildInitUnserved`.
         if rt.has_pending_child_init() {
             return Err(ended(steps, WindowStop::ChildInitUnserved));
         }
@@ -215,8 +202,7 @@ pub(super) fn open_window(
 /// Why `start` cannot open inside a runtime whose step cap is
 /// `max_steps`, or `None` when it can.
 ///
-/// A start at or past the cap would leave the window with no step in
-/// it, and a window that never ran would read as a stable one.
+/// A window with no step in it would read as a stable one.
 pub(super) fn start_past_cap(start: WindowStart, max_steps: usize) -> Option<String> {
     let WindowStart::Step(n) = start else {
         return None;

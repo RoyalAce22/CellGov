@@ -23,10 +23,7 @@ fn frame_owing(branch: UnitId, chosen: UnitId) -> Frame {
     }
 }
 
-/// `detect_races` grafts at a frame still on the stack, and the state a
-/// depth reaches does not change between visits. A head `choose` could
-/// not take is a head it cannot take again, so a second count measures
-/// returns to a drained frame.
+/// [`Frame::dropped`] says why a head lost once is lost on every visit.
 #[test]
 fn a_frame_gives_up_a_re_grafted_branch_once() {
     let here = unit(1);
@@ -63,7 +60,6 @@ fn a_frame_gives_up_a_re_grafted_branch_once() {
     );
 }
 
-/// Two heads are two sequences, so one frame can drop two reversals.
 #[test]
 fn a_frame_that_gives_up_two_heads_counts_two() {
     let here = unit(1);
@@ -82,9 +78,6 @@ fn a_frame_that_gives_up_two_heads_counts_two() {
     assert_eq!(dropped, 2, "neither head could run here");
 }
 
-/// A longer sequence under a head the frame already lost is an
-/// extension of the lost sequence; `Frame::drop_cost` says why that
-/// costs nothing.
 #[test]
 fn an_extension_of_a_lost_sequence_costs_nothing() {
     let here = unit(1);
@@ -132,10 +125,9 @@ fn two_sequences_under_one_head_dropped_together_count_two() {
     let here = unit(1);
     let absent = unit(9);
     let mut frame = frame_owing(absent, here);
-    // Two tails under one head: the second insert walks the head and
-    // grafts its tail beside the first, since neither tail leads the
-    // other. A tail under a leaf would graft nowhere: the tree treats a
-    // leaf as a sequence it already holds.
+    // The tree starts empty: a tail under the leaf `frame_owing` built
+    // would graft nowhere. Two tails under one head then fan out,
+    // since neither leads the other.
     frame.wut = WakeupTree::new();
     for tail in [5u64, 6] {
         frame.wut.insert(

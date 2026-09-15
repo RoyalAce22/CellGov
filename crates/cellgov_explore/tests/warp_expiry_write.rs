@@ -8,9 +8,7 @@
 //! the same address.
 //!
 //! Two waiters on one flag, with different deadlines and one result
-//! pointer between them, is the smallest workload that shows it. Each
-//! expiry writes the same eight bytes, so the order decides what stands
-//! there.
+//! pointer between them, is the smallest workload that shows it.
 
 #![allow(
     clippy::unwrap_used,
@@ -45,9 +43,8 @@ fn shared_range() -> ByteRange {
     ByteRange::new(GuestAddr::new(u64::from(SHARED_RESULT)), 8).unwrap()
 }
 
-/// Waits on a flag whose bits never arrive, with a finite timeout.
-///
-/// The wait can only end in the warp, and its expiry is what writes.
+/// Waits on a flag whose bits never arrive, with a finite timeout, so
+/// the wait can only end in the warp and its expiry is what writes.
 #[derive(Clone)]
 struct FlagWaiter {
     id: UnitId,

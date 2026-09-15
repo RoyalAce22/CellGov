@@ -5,16 +5,13 @@
 //! runtime lands some host writes outside the space of the unit whose
 //! step they belong to: a wake continuation lands in the waiter's
 //! space, and a timer expiry's repair write in the expiring waiter's
-//! space. Widening one of those through the stepping unit's space
-//! looks for the range in the wrong views and finds none.
-//!
-//! A unit's own access to the sibling view still meets such a write:
-//! `expand_aliases` widens that access from the unit's own space, and
-//! the two meet on the raw range. Two host writes in two spaces have no
-//! second chance, because `note_host_writes` is the one producer
-//! `expand_aliases` no longer reaches. They prune, and that is a false
-//! independence. So [`StepFootprint::note_host_writes`] widens each
-//! entry through the space the record carries.
+//! space. A widening of such a write through the stepping unit's space
+//! looks for the range in the wrong views and finds none. A unit's own
+//! access to the sibling view still meets the write, because
+//! `expand_aliases` widens that access from the unit's own space. Two
+//! host writes in two spaces have no second chance: they prune, and
+//! that is a false independence. So `StepFootprint::note_host_writes`
+//! widens each entry through the space the record carries.
 
 #![allow(
     clippy::unwrap_used,
@@ -52,9 +49,6 @@ fn child_range() -> ByteRange {
     ByteRange::new(GuestAddr::new(CHILD_VIEW), 8).unwrap()
 }
 
-/// A child-space write widened through a boot-space unit finds no
-/// alias, so nothing pairs it with a second host write into the boot
-/// view.
 #[test]
 fn the_alias_of_a_child_space_range_is_found_only_from_that_space() {
     let rt = two_spaces_sharing_a_mapping();
@@ -78,8 +72,6 @@ fn the_alias_of_a_child_space_range_is_found_only_from_that_space() {
     );
 }
 
-/// The space-keyed form did not replace the question `expand_aliases`
-/// asks.
 #[test]
 fn a_units_own_range_still_widens_through_the_units_space() {
     let mut rt = two_spaces_sharing_a_mapping();
@@ -103,10 +95,9 @@ fn a_units_own_range_still_widens_through_the_units_space() {
     );
 }
 
-/// Both sides are built by hand, so this is the mechanical half: one
-/// widened side is enough for the pair to meet. In a run the reader
-/// would be a unit, and `expand_aliases` would widen it from its own
-/// space; two host writes are the pair with no second chance.
+/// Both sides are built by hand, so one widened side is enough for the
+/// pair to meet; in a run `expand_aliases` widens a unit's side from its
+/// own space.
 #[test]
 fn one_span_through_two_views_conflicts() {
     let rt = two_spaces_sharing_a_mapping();
@@ -191,10 +182,8 @@ impl cellgov_exec::ExecutionUnit for TimeCaller {
     }
 }
 
-/// The other tests read `Runtime::shared_alias_ranges_in` directly.
-/// This one holds the consumer to it: the step names no write of its
-/// own, so the out parameter reaches `shared_writes` through
-/// `note_host_writes` or not at all.
+/// The consumer half: the other cases read
+/// `Runtime::shared_alias_ranges_in` directly.
 #[test]
 fn a_published_host_write_reaches_the_footprint_with_its_space() {
     let mut rt = two_spaces_sharing_a_mapping();

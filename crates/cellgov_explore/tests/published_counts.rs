@@ -33,7 +33,6 @@ fn load(addr: u64) -> Vec<FakeOp> {
     vec![FakeOp::SharedLoad { addr, len: 4 }]
 }
 
-/// Build a runtime whose units run `programs`, each terminated.
 fn program(programs: Vec<Vec<FakeOp>>) -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(1), 400);
     for mut ops in programs {
@@ -43,7 +42,6 @@ fn program(programs: Vec<Vec<FakeOp>>) -> Runtime {
     rt
 }
 
-/// Equivalence classes the optimal search covers.
 fn classes(make: fn() -> Runtime) -> usize {
     let result = explore_optimal(
         make,
@@ -57,8 +55,7 @@ fn classes(make: fn() -> Runtime) -> usize {
         .expect("the search covered every class")
 }
 
-/// `Abdulla2017`'s writer-readers program: one writer of `x` and two
-/// units that read an unshared variable and then `x`.
+/// `Abdulla2017`'s writer-readers program.
 fn writer_readers() -> Runtime {
     program(vec![
         store(X, 1),
@@ -75,8 +72,7 @@ fn the_writer_readers_program_has_the_published_four_classes() {
     assert_eq!(classes(writer_readers), 4);
 }
 
-/// `Aronis2018`'s writers program: two units that each write `x` and
-/// then `y`.
+/// `Aronis2018`'s writers program.
 fn writers() -> Runtime {
     program(vec![
         [store(X, 1), store(Y, 1)].concat(),
@@ -92,8 +88,7 @@ fn the_writers_program_has_the_published_four_classes() {
     assert_eq!(classes(writers), 4);
 }
 
-/// `Aronis2018`'s second program: two writers of `x` and a reader that
-/// checks it.
+/// `Aronis2018`'s second program.
 fn two_writers_and_a_reader() -> Runtime {
     program(vec![store(X, 1), store(X, 2), load(X)])
 }
@@ -110,7 +105,7 @@ fn the_two_writers_and_a_reader_program_has_the_published_six_classes() {
     assert_eq!(classes(two_writers_and_a_reader), 6);
 }
 
-/// `Abdulla2024`'s example: four units over `g`, `x`, `y` and `z`.
+/// `Abdulla2024`'s example program.
 fn four_units_over_four_variables() -> Runtime {
     program(vec![
         store(X, 1),

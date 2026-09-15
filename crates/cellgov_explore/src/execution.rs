@@ -12,9 +12,8 @@
 //!   and the released step emits no wait.
 //!
 //! [`Execution::races`] names the pairs that only their own conflict
-//! order holds apart. An exploration has reason to run each of those
-//! pairs in the opposite order. An edge added here therefore removes a
-//! race, and with it a reversal the search owed.
+//! order holds apart, so an edge added here removes a race, and with it
+//! a reversal the search owed.
 
 use crate::decision::DecisionLog;
 use crate::dependency::StepFootprint;
@@ -157,14 +156,10 @@ impl HappensBefore {
 
 /// Positions one unit's events sit at.
 ///
-/// A conflict scan visits every one: [`StepFootprint::conflicts`] holds
-/// a step that rides a landing against every step, so no property of a
-/// footprint narrows the set a scan walks. The scan over a title window
-/// is therefore quadratic in the window's steps. The crate accepts that
-/// cost at the sizes `benches/explore_bench.rs` times and the
-/// `rider_scan_tests` pins count: a step that rides a landing shortens
-/// every later scan, because the conflict it gives every event is one
-/// the clock then carries.
+/// A conflict scan visits every one, because a step that rides a
+/// landing conflicts with every step and no property of a footprint
+/// narrows the walk. The scan over a window is quadratic in its steps;
+/// `rider_scan_tests` pins the count.
 #[derive(Debug, Clone, Default)]
 struct UnitEvents {
     all: Vec<usize>,
@@ -177,11 +172,10 @@ pub struct Execution {
     by_unit: BTreeMap<UnitId, UnitEvents>,
     /// Per event, the parked units its wakes returned to runnable.
     ///
-    /// The commit pipeline's `WakeUnit` arm sets its target runnable
-    /// whether or not a park holds it, so
-    /// [`StepFootprint::wake_targets`] alone does not witness a
-    /// release. The runnable set the schedule recorded does: a target
-    /// already in that set runs without the wake.
+    /// The `WakeUnit` arm sets its target runnable whether or not a park
+    /// holds it, so [`StepFootprint::wake_targets`] alone witnesses no
+    /// release; a target already in the recorded runnable set runs
+    /// without the wake.
     releases: Vec<Vec<UnitId>>,
 }
 
@@ -194,10 +188,9 @@ impl Execution {
     /// Append the event one unit's step retired.
     ///
     /// The event names no runnable set, so a wake it carries releases
-    /// nothing and [`Execution::happens_before`] orders it before
-    /// nothing. The relation is then short of an edge, which costs
+    /// nothing: the relation is short of an edge, which costs
     /// exploration and no cover. [`Execution::push_with_runnable`]
-    /// takes the runnable set that witnesses a release.
+    /// takes the set that witnesses a release.
     pub fn push(&mut self, unit: UnitId, footprint: StepFootprint) {
         self.push_event(unit, footprint, Vec::new());
     }
@@ -206,12 +199,9 @@ impl Execution {
     /// schedule found runnable when it chose that step.
     ///
     /// A wake target absent from `runnable` was parked, so the wake
-    /// released it. A target already in `runnable` runs whether the
-    /// wake lands or not, and an edge from that wake to its next step
-    /// would name an order the schedule does not force. An empty
-    /// `runnable` names no set at all, since the schedule chose from a
-    /// set that held at least the unit that ran. Such an event
-    /// releases nothing.
+    /// released it. An empty `runnable` names no set at all, since the
+    /// schedule chose from a set that held at least the unit that ran;
+    /// such an event releases nothing.
     pub fn push_with_runnable(
         &mut self,
         unit: UnitId,
@@ -286,9 +276,8 @@ impl Execution {
     ///
     /// # Panics
     ///
-    /// Debug-panics when `a == b`. Every pairing goes through
-    /// [`StepFootprint::conflicts`], which answers for two units alone.
-    /// Program order already holds one unit's steps apart.
+    /// Debug-panics when `a == b`: [`StepFootprint::conflicts`] answers
+    /// for two units alone.
     pub fn units_independent(&self, a: UnitId, b: UnitId) -> bool {
         debug_assert_ne!(
             a, b,
@@ -322,8 +311,7 @@ impl Execution {
         let mut cost = ClockCost::default();
         let mut latest_of_unit: BTreeMap<UnitId, usize> = BTreeMap::new();
         // The wake that ended a unit's park, until the step it released
-        // consumes it. Only a wake that found its target parked lands
-        // here. So a unit holds one entry at a time: a second wake
+        // consumes it. A unit holds one entry at a time: a second wake
         // before that target runs again finds it runnable, and releases
         // nothing.
         let mut pending_wake: BTreeMap<UnitId, usize> = BTreeMap::new();
@@ -351,14 +339,11 @@ impl Execution {
                     }
                 }
             }
-            // A wake that ended a park releases the woken unit's next
-            // step, and neither names the other: the wake carries a
-            // target and the released step emits no wait. So no
-            // footprint pair orders the two, and this join is the only
-            // thing that does. Without the join, a reversing sequence
-            // can name a unit that is still parked where the branch
-            // sits; the search drops that branch and withdraws its
-            // class count.
+            // No footprint pair orders a wake before the step it
+            // released (see the module doc), so this join is the one
+            // edge that does. Without it a reversal can name a unit
+            // still parked where the branch sits, and the search drops
+            // that branch.
             if let Some(waker) = pending_wake.remove(&event.id.unit) {
                 clock.join(&clocks[waker]);
                 cost.joins += 1;
@@ -366,9 +351,8 @@ impl Execution {
             clock.raise(event.id.unit, index);
             cost.widest_clock = cost.widest_clock.max(clock.len());
             latest_of_unit.insert(event.id.unit, index);
-            // A wake that found its target runnable released nothing,
-            // so `releases` omits it: an edge the schedule does not
-            // force removes the race that owed a reversal.
+            // `releases` omits a wake that found its target runnable:
+            // see the doc on that field.
             for woken in &self.releases[index] {
                 pending_wake.entry(*woken).or_insert(index);
             }

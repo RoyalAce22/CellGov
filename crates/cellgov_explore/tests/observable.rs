@@ -49,18 +49,16 @@ fn config() -> ExplorationConfig {
     }
 }
 
-/// The whole result, not the outcome alone: an outcome hides a field
-/// that moved (`result_equality.rs`), and a region that changed which
-/// schedules ran or what they hashed would still read as the same
-/// verdict.
+/// The whole result: an outcome alone hides a field that moved
+/// (`result_equality.rs`), so a region that changed which schedules ran
+/// or what they hashed could still read as the same verdict.
 fn exploration_with(regions: &[MemoryRegionSpec]) -> ExplorationResult {
     explore_with_regions(workload, &config(), regions)
         .expect("the workload holds a branching point")
         .exploration
 }
 
-/// The premise: the workload is schedule-sensitive on the whole-memory
-/// observable, so a narrowed one would have something to hide.
+/// The premise: a narrowed observable would have something to hide.
 #[test]
 fn the_workload_is_schedule_sensitive_on_the_whole_memory() {
     let result = explore_window(workload, &config());
@@ -72,9 +70,8 @@ fn no_declared_region_gives_the_whole_memory_verdict() {
     assert_eq!(exploration_with(&[]), explore_window(workload, &config()));
 }
 
-/// A region clear of the bytes the schedules disagree on does not turn
-/// the verdict stable: the region is an oracle comparison, not the
-/// observable.
+/// The region is an oracle comparison; the observable stays the whole
+/// memory.
 #[test]
 fn a_region_clear_of_the_divergence_leaves_the_verdict_sensitive() {
     let source_only = MemoryRegionSpec {
@@ -88,8 +85,6 @@ fn a_region_clear_of_the_divergence_leaves_the_verdict_sensitive() {
     assert_eq!(r, explore_window(workload, &config()));
 }
 
-/// A region that resolves to nothing lands as an unresolved capture and
-/// changes the verdict no more than a resolved one does.
 #[test]
 fn an_unresolved_region_leaves_the_verdict_alone() {
     let nowhere = MemoryRegionSpec {

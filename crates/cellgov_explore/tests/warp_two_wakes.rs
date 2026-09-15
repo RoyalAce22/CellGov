@@ -5,13 +5,11 @@
 //! same tick therefore wake together. Which of the two runs first is a
 //! choice, and the search owes an execution for it.
 //!
-//! One piece of arithmetic makes the deadlines meet. A wait's deadline
-//! is the tick its syscall committed at plus its timeout. A timeout
-//! converts at a thousand ticks to the microsecond. Two units cannot
-//! commit on the same tick, so the later one asks for less. One step
-//! costs a thousand ticks here. The unit that parks second therefore
-//! asks for one microsecond less than the first, and the two deadlines
-//! meet.
+//! The deadlines meet by arithmetic. A wait's deadline is the tick its
+//! syscall committed at plus its timeout, and one step costs the
+//! thousand ticks a microsecond of timeout converts to (`BUDGET`). So
+//! the unit that parks one step later asks for one microsecond less,
+//! and the two deadlines meet.
 
 #![allow(
     clippy::unwrap_used,
@@ -38,10 +36,9 @@ const STEP_CAP: usize = 200;
 const FLAG_ID: u32 = 1;
 /// A null result pointer, which the kernel skips.
 ///
-/// The expiry therefore writes no guest memory. An expiry that wrote
-/// would make the warp step a clock reader, and a clock reader
-/// conflicts with every step. The parked waits below it would then ask
-/// for reversals no state reaches.
+/// The expiry then writes no guest memory. A write there would make the
+/// warp step a clock reader, which conflicts with every step, and the
+/// parked waits below it would ask for reversals no state reaches.
 const RESULT_PTR: u32 = 0;
 /// The word both units write when they wake, so the committed memory
 /// shows the waking order.
@@ -50,10 +47,8 @@ const SHARED: u64 = 0x100;
 const FIRST: UnitId = UnitId::new(0);
 const SECOND: UnitId = UnitId::new(1);
 
-/// Waits on a flag whose bits never arrive, then writes `mark`.
-///
-/// The wait ends in the warp, so the write is this unit's first step
-/// after it.
+/// Waits on a flag whose bits never arrive, then writes `mark`; the wait
+/// ends in the warp, so the write is this unit's first step after it.
 #[derive(Clone)]
 struct Waker {
     id: UnitId,
@@ -124,8 +119,6 @@ impl ExecutionUnit for Waker {
 /// Two waits that land on one tick, so one warp wakes both.
 fn two_waits_one_tick() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(0x1000), Budget::new(BUDGET), STEP_CAP);
-    // The first to park waits a microsecond longer, which is exactly
-    // the step the second spends before it parks.
     let first = rt.register_unit_with(|id| Waker {
         id,
         timeout_usec: 2,
@@ -162,7 +155,6 @@ fn two_waits_one_tick() -> Runtime {
     rt
 }
 
-/// The premise the case below rests on.
 #[test]
 fn one_warp_wakes_both_waiters() {
     let mut rt = two_waits_one_tick();
@@ -185,8 +177,6 @@ fn one_warp_wakes_both_waiters() {
     assert_eq!(warps, 1, "one warp, and it is the branching point");
 }
 
-/// The search runs one execution per waking order, and claims the
-/// cover.
 #[test]
 fn the_search_runs_one_execution_per_waking_order() {
     let result = explore_optimal(

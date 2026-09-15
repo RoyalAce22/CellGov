@@ -1,10 +1,5 @@
 //! Runs one schedule and records every scheduling decision with the
 //! full runnable set at each step.
-//!
-//! A refused commit stops the observation and reports
-//! [`StopReason::CommitError`]: the step's effects never reached guest
-//! state, so neither its [`DecisionPoint`] nor any later step describes
-//! the schedule the caller asked for.
 
 use crate::decision::{DecisionLog, DecisionPoint};
 use crate::dependency::StepFootprint;
@@ -14,12 +9,11 @@ use cellgov_core::Runtime;
 /// Drive `rt` until it stops and return the recorded [`DecisionLog`]
 /// with why the run stopped.
 ///
-/// The runtime is advanced in place; callers who need the final state
-/// should inspect `rt` after the call. A truncating stop -- see
-/// [`StopReason::is_truncated`] -- means the log and `rt`'s memory
-/// hash both describe a prefix of the schedule. The two cover the same
-/// steps except under [`StopReason::ChildInitUnserved`], where the hash
-/// covers one step the log leaves out.
+/// A truncating stop ([`StopReason::is_truncated`]) means the log and
+/// `rt`'s memory hash both describe a prefix of the schedule. The two
+/// cover the same steps except under
+/// [`StopReason::ChildInitUnserved`], where the hash covers one step
+/// the log leaves out.
 pub fn observe_decisions(rt: &mut Runtime) -> (DecisionLog, StopReason) {
     observe(rt, None)
 }
@@ -34,10 +28,9 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
     let mut log = DecisionLog::new();
     let mut committed = 0usize;
     let stop = loop {
-        // Read before the cap: a window nothing can model is no
-        // caller's bound. A driver can hand over a runtime that already
-        // carries a pending pass, and the step below would run under
-        // parks no footprint records.
+        // Read before the cap: a runtime handed over with a pending pass
+        // would run under parks no footprint records. The same loop
+        // shape as `crate::util::run_to_stall`.
         if rt.has_pending_child_init() {
             break StopReason::ChildInitUnserved;
         }
@@ -50,10 +43,9 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
         let step_idx = rt.steps_taken();
         match rt.step() {
             Ok(step) => {
-                // The predicate is a second reading of the question
-                // `Runtime::step` itself answers. A step that runs past
-                // the cap is the two disagreeing, and the cap then
-                // bounds nothing.
+                // The predicate re-reads the question `Runtime::step`
+                // answers; a step past the cap means the two disagree,
+                // and the cap then bounds nothing.
                 debug_assert!(
                     !at_cap,
                     "the cap was reached, the predicate saw no step left, and one ran",

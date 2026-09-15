@@ -1,14 +1,10 @@
-//! A prefix hash never reads as a divergence.
-//!
-//! Three pieces carry that rule, and each case below fails when one of
-//! them alone stops working:
+//! A prefix hash never reads as a divergence. Three pieces carry that
+//! rule, and each case below fails when one of them alone stops
+//! working:
 //!
 //! - [`StopReason::is_truncated`];
 //! - [`AlternateIteration::mark_baseline_truncated`];
 //! - the `DIVERGED` suppression both report formatters apply.
-//!
-//! The [`ScheduleRecord::truncated`] flag each search sets from
-//! `is_truncated` rides along; the cases build it by hand.
 
 use crate::classify::{BaselineRun, ExplorationResult, OutcomeClass, ScheduleRecord};
 use crate::config::ExplorationConfig;
@@ -34,10 +30,6 @@ const OTHER_HASH: u64 = 0x2222_2222_2222_2222;
 const REFUSED_COMMIT: CommitError = CommitError::OutOfRange { effect_index: 0 };
 
 /// Every stop reason that leaves a prefix of the schedule.
-///
-/// The step-refusal half comes from `StepError::VARIANTS` rather than
-/// a list here, so a variant added to the runtime reaches this sweep
-/// without anyone widening anything.
 fn every_truncating_reason() -> Vec<StopReason> {
     std::iter::once(StopReason::StepBound)
         .chain(std::iter::once(StopReason::ChildInitUnserved))
@@ -54,13 +46,11 @@ fn every_truncating_reason() -> Vec<StopReason> {
         .collect()
 }
 
-/// Whether a reason leaves a prefix, decided by an exhaustive match.
+/// Whether a reason leaves a prefix, by an exhaustive match.
 ///
-/// `StopReason::is_truncated` reads `!matches!(Stalled | Deadlocked)`,
-/// so a variant added to the enum inherits "truncates" without anyone
-/// choosing it. This match does not compile until the new variant is
-/// named, which is what makes the choice deliberate. The sweep below
-/// holds the two readings to the same answer.
+/// A variant added to `StopReason` inherits "truncates" from
+/// `is_truncated` and does not compile here until it names its own
+/// answer; the sweep holds the two readings together.
 fn declares_a_prefix(reason: StopReason) -> bool {
     match reason {
         StopReason::Stalled | StopReason::Deadlocked => false,
@@ -72,12 +62,6 @@ fn declares_a_prefix(reason: StopReason) -> bool {
     }
 }
 
-/// Every shape the enum holds is one the sweep covers or one
-/// [`MAXIMAL_STOPS`] names.
-///
-/// `declares_a_prefix` makes a new variant name its truncation; this
-/// count makes it join a list, so the sweep cannot stay one case short
-/// while the match reads whole.
 #[test]
 fn every_stop_reason_shape_is_swept_or_maximal() {
     let swept = every_truncating_reason();
@@ -108,9 +92,6 @@ fn every_reason_the_sweep_names_declares_the_same_truncation() {
 }
 
 /// The two stops that end a maximal execution.
-///
-/// A run that reaches either one answers for its whole self: its hash
-/// stands for the run, and the search reads its races.
 const MAXIMAL_STOPS: [StopReason; 2] = [StopReason::Stalled, StopReason::Deadlocked];
 
 /// `count` units that all write the same word, so every pair of them
@@ -136,9 +117,8 @@ fn contending_runtime(count: u32) -> Runtime {
 /// The tally a search keeps for `count` alternates that each committed
 /// `hash` and stopped for `reason`.
 ///
-/// Every search builds this shape and hands it to
-/// [`classify_iteration`], so the rules below are the ones the live
-/// searches run.
+/// Every search hands this shape to [`classify_iteration`], so the
+/// rules below are the ones the live searches run.
 fn tally(count: usize, hash: u64, reason: StopReason) -> AlternateIteration {
     let truncated = reason.is_truncated();
     let schedules: Vec<ScheduleRecord> = (0..count)
@@ -358,10 +338,9 @@ fn a_finished_record_that_disagrees_is_the_divergence_the_others_withhold() {
 
 #[test]
 fn a_tally_that_reports_no_bound_and_no_divergence_is_the_one_stable_reading() {
-    // The floor under every case above. `classify_iteration` reaches
-    // `ScheduleStable` where nothing was withdrawn and no bound was
-    // hit. An assertion of `Inconclusive` elsewhere is therefore a
-    // claim about the rule, not about the classifier.
+    // Positive control: `classify_iteration` reaches `ScheduleStable`
+    // where nothing was withdrawn and no bound was hit, so an
+    // `Inconclusive` elsewhere is the rule's doing.
     let clean = AlternateIteration {
         schedules: vec![ScheduleRecord {
             branch_step: 0,
@@ -382,8 +361,6 @@ fn a_tally_that_reports_no_bound_and_no_divergence_is_the_one_stable_reading() {
     );
 }
 
-/// The rules above, over the live search rather than a tally built by
-/// hand: a cap stops the baseline, and the run claims nothing.
 #[test]
 fn a_capped_search_over_a_contending_workload_claims_nothing() {
     let config = ExplorationConfig {
@@ -398,14 +375,10 @@ fn a_capped_search_over_a_contending_workload_claims_nothing() {
         "a prefix baseline covers no class",
     );
     assert_eq!(result.outcome, OutcomeClass::Inconclusive);
-    // The search reads no race off a prefix execution, so it owes no
-    // reversal and records nothing.
     assert!(
         result.schedules.is_empty(),
         "a prefix baseline's races cover a prefix, so the search owes no reversal",
     );
-    // With nothing owed nothing is dropped, so the empty count above is
-    // the cap and not a reversal this run gave up.
     assert_eq!(
         result.reversals_dropped, 0,
         "a prefix execution names no race, so no branch is there to drop",
@@ -413,15 +386,6 @@ fn a_capped_search_over_a_contending_workload_claims_nothing() {
     assert_eq!(result.schedules_truncated, 0);
 }
 
-/// The sweep runs one case per way a run stops short, and the two
-/// maximal stops are the ones it does not cover.
-///
-/// The width and the repeat check are what keep the sweep from going
-/// vacuous: a hand-written list put back in place of the
-/// `StepError::VARIANTS` chain goes red here the moment it is a variant
-/// short or names one twice. The truncation claims go red on a
-/// [`StopReason::is_truncated`] that admits a maximal stop, or that
-/// refuses one of the stops the sweep covers.
 #[test]
 fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
     let reasons = every_truncating_reason();
@@ -447,8 +411,6 @@ fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
     }
 }
 
-/// A refused commit truncates whatever shape it took, which is what
-/// lets one stand in for every other in the sweep above.
 #[test]
 fn a_refusal_of_any_shape_truncates() {
     let shapes = [

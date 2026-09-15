@@ -1,8 +1,7 @@
-//! The crate's exploration entry points, over optimal DPOR.
-//!
-//! [`crate::optimal::explore_optimal`] does the search. These two wrap
-//! it in the shape a driver asks for: one that reports nothing when a
-//! workload holds no choice, and one that reports the baseline's facts
+//! The crate's exploration entry points, over optimal DPOR:
+//! [`crate::optimal::explore_optimal`] does the search, and these two
+//! wrap it in the shape a driver asks for -- one reports nothing when a
+//! workload holds no choice, the other reports the baseline's facts
 //! either way.
 
 use crate::classify::ExplorationResult;
@@ -21,13 +20,8 @@ use cellgov_core::Runtime;
 /// hands over a runtime it already advanced -- a window of a title
 /// boot -- can explore from there.
 ///
-/// Exploration stops at `config.max_schedules` alternates beyond the
-/// baseline, and each execution at `config.max_steps_per_run` steps.
-///
-/// An execution that stops for any reason other than a stall sets
-/// [`ExplorationResult::bounds_hit`] and cannot contribute a
-/// divergence. A baseline that itself stopped short withdraws every
-/// divergence claim, because `baseline_hash` is then a prefix hash.
+/// An execution that stopped short contributes no divergence; see
+/// [`crate::classify::ScheduleRecord::truncated`].
 pub fn explore<F>(make_runtime: F, config: &ExplorationConfig) -> Option<ExplorationResult>
 where
     F: FnMut() -> Runtime,

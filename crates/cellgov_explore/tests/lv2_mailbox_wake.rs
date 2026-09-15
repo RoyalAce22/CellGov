@@ -9,7 +9,7 @@
 //! send answers to the mailbox clause every unit-emitted send already
 //! answers to, and to the wake clause as well. The handler's send reads
 //! the target's status alone and releases its park, so a park no
-//! mailbox pairs ends with that send. Neither is a clause of its own.
+//! mailbox pairs ends with that send.
 
 #![allow(
     clippy::unwrap_used,
@@ -177,8 +177,6 @@ fn workload() -> Runtime {
     });
     assert_eq!(receiver, RECEIVER, "registration order moved the receiver");
 
-    // The handler names the mailbox by the target unit's raw id, so the
-    // first registration has to be the one the receiver waits on.
     let mailbox = rt.mailbox_registry_mut().register(4);
     assert_eq!(
         mailbox,
@@ -209,9 +207,8 @@ fn workload() -> Runtime {
 /// The same three units, with the receiver parked on a mailbox no
 /// handler fills.
 ///
-/// `Runtime::apply_lv2_effects` releases the target of a handler's
-/// send, and reads that unit's status alone, so this park ends too. The
-/// two steps share no mailbox for the mailbox clause to pair.
+/// `Runtime::apply_lv2_effects` reads the target's status alone, so this
+/// park ends too, and no mailbox pairs the two steps.
 fn workload_parked_elsewhere() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(BUDGET), STEP_CAP);
     let receiver = rt.register_unit_with(|id| Waiter {
@@ -251,8 +248,6 @@ fn workload_parked_elsewhere() -> Runtime {
     rt
 }
 
-/// The premise of the cases below: the handler's send also releases the
-/// park.
 #[test]
 fn the_handler_sends_a_message_the_senders_own_step_never_names() {
     let mut rt = workload();
@@ -312,8 +307,6 @@ fn the_relation_holds_the_sender_against_the_unit_its_handler_wakes() {
     );
 }
 
-/// The premise of the pair below: the release reads the target's status
-/// rather than the reason it parked.
 #[test]
 fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
     let mut rt = workload_parked_elsewhere();
@@ -355,9 +348,8 @@ fn the_release_ends_a_park_on_a_mailbox_the_handler_never_fills() {
     );
 }
 
-/// No mailbox pairs these two steps. The mailbox clause alone would
-/// call them independent, and prune the order where the receiver never
-/// runs again.
+/// The mailbox clause alone would call these two steps independent, and
+/// prune the order where the receiver never runs again.
 #[test]
 fn the_relation_holds_the_sender_against_a_park_no_mailbox_pairs() {
     let mut rt = workload_parked_elsewhere();

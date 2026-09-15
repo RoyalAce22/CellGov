@@ -5,15 +5,11 @@
 //! it retires and counts every branch naming another unit, and one
 //! counted drop withdraws the run's class total.
 //!
-//! The workload below reaches such a depth by parking two of its three
-//! units, so the third runs alone. No assertion here turns on what the
-//! warp after it wakes: the drops come from `choose`, at the last
-//! barrier-park depth before that warp, which
-//! `a_depth_holds_one_runnable_unit_with_the_rest_parked` pins. The
-//! crate's `warp_retire_tests` reads the two sites apart over this same
-//! workload, and pins which one answers.
-//! `warp_two_wakes.rs` covers the warp depth itself, where the search
-//! delivers its alternate instead of dropping it.
+//! `warp_then_contend` reaches such a depth. No assertion here turns on
+//! the warp after it: `warp_two_wakes.rs` covers the warp depth, where
+//! the search delivers its alternate, and the crate's
+//! `warp_retire_tests` reads the two sites apart over this same
+//! workload.
 
 #![allow(
     clippy::unwrap_used,
@@ -42,8 +38,7 @@ const DMA_DST: u64 = 128;
 /// unit's write. Each wake that write makes releases a writer, so it
 /// races with the wait that parked that writer. The last of those waits
 /// took its depth's only runnable unit, with the other two parked on
-/// their own barriers, and the reversal its race asks for names one of
-/// them.
+/// their own barriers. The reversal its race asks for names one of them.
 fn warp_then_contend() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(1), 400);
     rt.register_unit_with(|id| {
@@ -85,15 +80,10 @@ fn warp_then_contend() -> Runtime {
     rt
 }
 
-/// The premise: the workload reaches a depth whose one runnable unit
-/// runs with the other two parked.
-///
-/// `choose` retires every branch naming a unit it cannot run there, and
-/// a parked unit is what such a branch names here. A depth left alone
-/// because the other units finished would say nothing, so the parked
-/// count carries the premise beside the runnable one. Both are read
-/// before the step, so a warp -- where nothing is runnable -- is not one
-/// of these.
+/// A depth left alone because the other units finished would say
+/// nothing, so the parked count carries the premise beside the runnable
+/// one. Both are read before the step, so a warp, where nothing is
+/// runnable, is not one of these.
 #[test]
 fn a_depth_holds_one_runnable_unit_with_the_rest_parked() {
     let mut rt = warp_then_contend();
@@ -124,11 +114,6 @@ fn a_depth_holds_one_runnable_unit_with_the_rest_parked() {
     );
 }
 
-/// The search finishes, and says it did not cover everything.
-///
-/// Every reversal a race asks of the singleton depth names a unit that
-/// cannot run there. `choose` retires and counts each one, and that
-/// count withdraws the class total.
 #[test]
 fn a_depth_with_one_runnable_unit_drops_what_it_cannot_deliver() {
     let cap = 1_000;
@@ -154,8 +139,6 @@ fn a_depth_with_one_runnable_unit_drops_what_it_cannot_deliver() {
         "no bound stopped this search: it ran out of branches",
     );
 
-    // The bug this guards recorded one execution until the cap, so a
-    // record count well under the cap is the claim.
     assert!(
         result.schedules.len() < 32,
         "the search owed a handful of reversals, not a runaway: {} records",
@@ -166,9 +149,8 @@ fn a_depth_with_one_runnable_unit_drops_what_it_cannot_deliver() {
         result.classes_explored, None,
         "a reversal the search dropped is cover it cannot claim",
     );
-    // This workload exists to build the drop, so it is where the count
-    // has to be non-zero. Without this the empty class total above
-    // reads the same as a bound's.
+    // Without this the empty class total above reads the same as a
+    // bound's.
     assert!(
         result.reversals_dropped > 0,
         "the depth dropped a branch, and the count is what says so",

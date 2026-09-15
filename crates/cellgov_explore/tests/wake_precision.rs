@@ -1,12 +1,12 @@
 //! What the narrowed wake rule buys, measured.
 //!
-//! A wake enables only the unit it names. The rule it replaced paired
-//! any wake with any wait, so one wake made every waiting unit in the
-//! execution a conflict partner and the pruning the rest of the
-//! relation earns was thrown away at that pair.
-//!
-//! The workload here is the shape that rule cost most: several units
-//! that wait, and one waker whose every wake names just one of them.
+//! A wake enables only the unit it names, so a wake and a wait by any
+//! other unit are independent. A rule that pairs any wake with any wait
+//! makes `n * n` conflicting pairs of `n` wakes and `n` waits, where
+//! `n` are real. The false pairs produce races whose reversals no state
+//! can reach; the search drops those branches, and a single drop
+//! withdraws the class count. The workload here is that shape: several
+//! units that wait, and one waker whose every wake names one of them.
 
 #![allow(
     clippy::unwrap_used,
@@ -24,10 +24,6 @@ use cellgov_time::Budget;
 
 /// One waker that wakes each waiter in turn, and `waiters` units that
 /// each wait on their own barrier and then store to their own address.
-///
-/// This is the shape the rule this replaced cost most: `n` wake steps
-/// against `n` wait steps made `n * n` conflicting pairs where only
-/// `n` of them are real.
 fn one_waker_many_waiters(waiters: u64) -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(1), 400);
     // Waiters first, so the search's default descent parks each of
@@ -71,20 +67,11 @@ fn measure(waiters: u64) -> (usize, Option<usize>) {
     (result.schedules.len() + 1, result.classes_explored)
 }
 
-/// Each wake depends on the one wait it enables and on nothing else,
-/// so the search runs one execution per equivalence class.
-///
 /// Each waiter decides one thing on its own: whether its wake lands
 /// before it parks, which wastes the wake and leaves it parked for
 /// good. Those decisions are independent, so the workload holds two to
 /// the power of the waiters. The counts below are that number twice:
 /// executions on the left, the classes they cover on the right.
-///
-/// Covering every class is what the narrowing buys. The rule this
-/// replaced paired every wake with every wait. Its false dependencies
-/// produced races whose reversals no state can reach, and the search
-/// drops those branches: a single drop withdraws the class count on
-/// the right.
 #[test]
 fn the_narrowed_rule_covers_every_class_it_explores() {
     let measured: Vec<(usize, Option<usize>)> = (1..=4).map(measure).collect();
@@ -94,7 +81,7 @@ fn the_narrowed_rule_covers_every_class_it_explores() {
     );
 }
 
-/// The rule this replaced, restated: any wake against any wait.
+/// The rule the narrowing replaced: any wake against any wait.
 fn blanket(wake: &StepFootprint, wait: &StepFootprint) -> bool {
     let waits_on_anything = !wait.wait_mailboxes.is_empty()
         || !wait.wait_signals.is_empty()
@@ -102,8 +89,6 @@ fn blanket(wake: &StepFootprint, wait: &StepFootprint) -> bool {
     !wake.wake_targets.is_empty() && waits_on_anything
 }
 
-/// The pairs the narrowing drops: a wake of one unit against a wait by
-/// any other.
 #[test]
 fn the_narrowing_drops_every_pair_but_the_one_the_wake_names() {
     let woken = UnitId::new(1);

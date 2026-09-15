@@ -1,8 +1,5 @@
-//! Reusable fake [`ExecutionUnit`] implementations composed by scenario
-//! fixtures.
-//!
-//! The fakes probe runtime wiring directly, independent of any real
-//! architectural interpreter.
+//! Fake [`ExecutionUnit`] implementations the scenario fixtures compose
+//! to probe the runtime without an architectural interpreter.
 
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, MailboxMessage, WritePayload};
@@ -111,10 +108,8 @@ impl ExecutionUnit for CountingUnit {
 /// Reads one byte per step and finishes once it reads a non-zero.
 ///
 /// Another unit writes that byte, so the schedule decides how many
-/// steps the poller retires.
-///
-/// Every step emits a `SharedReadIntent` for the byte, so the
-/// independence relation sees the pair.
+/// steps the poller retires. Every step emits a `SharedReadIntent` for
+/// the byte, so the independence relation sees the pair.
 #[derive(Clone)]
 pub struct PollingUnit {
     id: UnitId,
@@ -164,9 +159,7 @@ impl ExecutionUnit for PollingUnit {
         let n = self.steps.get() + 1;
         self.steps.set(n);
         // The commit pipeline stages nothing for `SharedReadIntent`, so
-        // an unreadable range gives no refusal of its own. The expect
-        // names the failure instead of leaving the poller to spin to
-        // `max`.
+        // an unreadable range gives no refusal of its own.
         let bytes = ctx
             .memory()
             .read_checked(self.range)
@@ -356,9 +349,9 @@ impl ExecutionUnit for ClockWriter {
 /// Parks on `sys_timer_usleep`, then writes `value` over `range` once
 /// the deadline fires and finishes.
 ///
-/// The guest clock is global, so every other unit's tick spend moves
-/// this unit's wake against their steps. That is what makes a workload
-/// holding one of these schedule-sensitive.
+/// The guest clock is global, so other units' tick spend moves this
+/// unit's wake against their steps, which makes the workload
+/// schedule-sensitive.
 #[derive(Clone)]
 pub struct SleepingWriter {
     id: UnitId,
@@ -678,8 +671,8 @@ impl ExecutionUnit for DmaSubmitter {
 /// Three-stage PPU-like sender: send command + wake responder + wait;
 /// receive attempt; consume response and emit a `TraceMarker`.
 ///
-/// Explicit `WakeUnit` is required: the commit pipeline does not auto-wake
-/// on message delivery.
+/// The sender emits an explicit `WakeUnit`: the commit pipeline does not
+/// wake a unit on message delivery.
 #[derive(Clone)]
 pub struct MailboxSender {
     id: UnitId,

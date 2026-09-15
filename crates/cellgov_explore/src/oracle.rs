@@ -1,5 +1,5 @@
 //! Exploration wrapper that also captures named memory regions from
-//! each run for comparison against external baselines.
+//! each run for comparison against an oracle.
 
 use crate::classify::ExplorationResult;
 use crate::config::ExplorationConfig;
@@ -28,9 +28,12 @@ pub struct CapturedRegion {
     pub name: String,
     /// Raw bytes from committed memory; empty when `resolved` is false.
     pub data: Vec<u8>,
-    /// False when the spec's range could not be read from this run's
-    /// committed memory: a space the run never created, an unmapped
-    /// address, or an overflowing range.
+    /// False when this run's committed memory holds nothing at the
+    /// spec's range:
+    ///
+    /// - a space the run never created;
+    /// - an unmapped address;
+    /// - an overflowing range.
     pub resolved: bool,
 }
 

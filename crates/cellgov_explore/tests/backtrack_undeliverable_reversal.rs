@@ -3,18 +3,10 @@
 //! The search forces the later event's unit at the earlier event. Where
 //! that unit cannot run there, it falls back to every other runnable
 //! unit. A point that ran the only runnable unit leaves that fallback
-//! empty, because every other unit was parked.
-//!
-//! The workload below reaches such a point. A transfer the runtime
-//! warps to is the one thing that returns a unit to runnable, and the
-//! replays of that baseline hold steps where two of the three units are
-//! already parked on their own barriers. The wait the third unit takes
-//! there races with the wake that later releases it, and that race asks
-//! for its reversal at a point with nothing else to run.
-//!
-//! The race is then owed and undeliverable. `reversals_dropped` is what
-//! says so, and separates this search's zero from a search that gave
-//! nothing up.
+//! empty, because every other unit was parked. `warp_then_contend`
+//! reaches such a point, so one of its races is owed and undeliverable.
+//! `reversals_dropped` says so, and separates this search's zero from
+//! the zero of a search that gave nothing up.
 
 #![allow(
     clippy::unwrap_used,
@@ -42,8 +34,7 @@ const DMA_DST: u64 = 128;
 /// unit's write. The wake that follows that write releases each writer,
 /// so it races with the wait that parked it. A replay that parks the
 /// first unit before either writer leaves a step where one writer is
-/// the only runnable unit, and that wait's race then asks for its
-/// reversal there.
+/// the only runnable unit. That wait's race asks for its reversal there.
 fn warp_then_contend() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(1), 400);
     rt.register_unit_with(|id| {
@@ -95,8 +86,6 @@ fn run(config_cap: usize) -> cellgov_explore::ExplorationResult {
     )
 }
 
-/// The premise: the baseline reaches the end, so the search owes the
-/// races it found.
 #[test]
 fn the_baseline_runs_itself_out() {
     let result = run(1_000);
@@ -119,22 +108,15 @@ fn a_race_that_reaches_no_candidate_is_counted() {
         "a point that ran the only runnable unit owes a reversal it cannot \
          deliver, and the count is what says so",
     );
-    // The zero this replaced sat beside a search that ran schedules over
-    // this workload, so it read as "nothing was given up" where it meant
-    // "nothing was counted".
     assert!(
         !result.schedules.is_empty(),
         "the count is only worth reading beside the schedules it ran",
     );
 }
 
-/// The count names distinct lost reversals, not how often the search
-/// re-read them.
-///
 /// Every replay whose prefix reaches an undeliverable race walks that
-/// race again. A count per walk gave 21 here, across 43 executions; a
-/// count per reversal gives 5. Both figures belong to this workload, so
-/// the shared race walk and the fallback order move them.
+/// race again, so the count is per reversal. The shared race walk and
+/// the fallback order move both pins.
 #[test]
 fn the_count_names_reversals_rather_than_walks() {
     let result = run(1_000);

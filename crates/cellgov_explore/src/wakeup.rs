@@ -1,13 +1,10 @@
 //! Wakeup trees [Abdulla2017 p:42:22 s:6.1].
 //!
-//! An ordered tree of unit sequences. Each branch is an initial
-//! fragment of an execution the search owes, and the order on the
-//! branches is the order the search takes them in.
-//!
-//! A sleep set alone can block: the search reaches a state where every
-//! runnable unit is asleep, and the execution it owed goes unexplored.
-//! A wakeup tree carries enough of the owed sequence to reach the state
-//! the race asked for, so no branch it holds ends that way.
+//! An ordered tree of unit sequences: each branch is an initial
+//! fragment of an execution the search owes, in the order the search
+//! takes them. A sleep set alone can block, with every runnable unit
+//! asleep and the owed execution unexplored; a wakeup tree carries
+//! enough of the owed sequence to reach the state the race asked for.
 
 use cellgov_event::UnitId;
 
@@ -73,8 +70,6 @@ impl WakeupTree {
 
     /// Drop the branch through `unit` and return the tree below it
     /// [Abdulla2017 p:42:24 s:Algorithm 2 line 20].
-    ///
-    /// `None` when no branch through `unit` was there.
     pub fn remove_branch(&mut self, unit: UnitId) -> Option<Self> {
         let at = self
             .children
@@ -86,10 +81,10 @@ impl WakeupTree {
     /// Keep only the branch through `unit`, and return each branch the
     /// tree dropped: its head and the tree below it.
     ///
-    /// The tree below `unit` survives, so the depth beneath still
-    /// inherits what this one owes it. Where no branch through `unit`
-    /// was there to keep, the tree ends as [`WakeupTree::single`]
-    /// leaves it.
+    /// The tree below `unit` survives for the depth beneath to inherit.
+    /// With no branch through `unit` to keep, the tree ends as
+    /// [`WakeupTree::single`] leaves it, since the depth still runs that
+    /// unit.
     pub fn retain_branch(&mut self, unit: UnitId) -> Vec<(UnitId, Self)> {
         let mut dropped = Vec::new();
         let mut kept = Vec::new();
@@ -130,25 +125,22 @@ impl WakeupTree {
     /// Add `sequence` to the tree [Abdulla2017 p:42:23 s:6.2].
     ///
     /// The walk takes the least branch whose unit can lead `sequence`
-    /// -- no element still to place happens-before it -- and consumes
-    /// that element. The tree does not change when the walk places the
-    /// whole sequence, or when it reaches a leaf below the root: either
-    /// way the tree already holds an equivalent sequence. Otherwise what
-    /// is left becomes a new branch, ordered after every node already
-    /// below the node it attaches to [Abdulla2017 p:42:23 s:6.2].
+    /// and consumes that element. The tree does not change when the
+    /// walk places the whole sequence or reaches a leaf below the root:
+    /// either way it already holds an equivalent sequence. Otherwise
+    /// what is left becomes a new branch, ordered after every node
+    /// already below the node it attaches to
+    /// [Abdulla2017 p:42:23 s:6.2].
     ///
     /// `precedes` answers whether the event at one index happens-before
     /// the event at another, over the execution `sequence` came from.
     ///
     /// A branch serves a sequence here only when its unit leads what is
-    /// left [Abdulla2017 p:42:13 s:Lemma 4.6 case a]. Case (b) also lets
-    /// a unit absent from the sequence serve, when that unit's own next
-    /// step commutes with every event in the sequence
-    /// [Abdulla2017 p:42:14 s:Lemma 4.6 case b]. A node holds a `UnitId`
-    /// and nothing else, so this tree cannot run that test. A sequence
-    /// equivalent to one the tree holds can therefore graft a second
-    /// branch, and the search runs an execution it did not owe. That
-    /// costs exploration and no cover.
+    /// left [Abdulla2017 p:42:13 s:Lemma 4.6 case a]. A node holds a
+    /// `UnitId` and no footprint, so the tree cannot run the commuting
+    /// test of [Abdulla2017 p:42:14 s:Lemma 4.6 case b]; an equivalent
+    /// sequence can therefore graft a second branch, which costs
+    /// exploration and no cover.
     pub fn insert<F>(&mut self, sequence: &[SeqEvent], precedes: &F)
     where
         F: Fn(usize, usize) -> bool,
@@ -166,13 +158,8 @@ impl WakeupTree {
                 .position(|(branch, _)| leads(&remaining, *branch, precedes))
             else {
                 // A leaf below the root is a sequence the tree already
-                // holds, and the walk reached it by consuming an
-                // equivalent prefix, so the tree does not change
-                // [Abdulla2017 p:42:23 s:6.2]. Insert property (2) of
-                // that section keeps a leaf a leaf.
-                //
-                // The root is not that kind of leaf: an empty tree
-                // holds no sequence and owes this one whole.
+                // holds [Abdulla2017 p:42:23 s:6.2]; the root of an
+                // empty tree holds none.
                 if depth > 0 && node.children.is_empty() {
                     return;
                 }
@@ -206,11 +193,8 @@ impl WakeupTree {
     }
 }
 
-/// True when `unit` can go first in some reordering of `sequence`.
-///
-/// It can when `sequence` holds an event of `unit` that no other event
-/// of `sequence` happens-before. That is the initials test
-/// [Abdulla2017 p:42:12 s:Lemma 4.2] asked of one unit.
+/// True when `unit` can go first in some reordering of `sequence`: the
+/// initials test [Abdulla2017 p:42:12 s:Lemma 4.2] asked of one unit.
 fn leads<F>(sequence: &[SeqEvent], unit: UnitId, precedes: &F) -> bool
 where
     F: Fn(usize, usize) -> bool,
@@ -229,10 +213,8 @@ where
 /// Units that occur in `sequence` and can go first in some reordering
 /// of it: the initials [Abdulla2017 p:42:12 s:Lemma 4.2].
 ///
-/// The weak initials are these plus the units that occur nowhere in
-/// `sequence` and whose own next step commutes past every event of it.
-/// A sequence on its own names neither the runnable units nor their
-/// next steps, so a caller that holds those adds that half itself.
+/// This is half of the weak-initials set; the other half needs each
+/// absent unit's next step, which a sequence does not carry.
 pub fn initials<F>(sequence: &[SeqEvent], precedes: &F) -> std::collections::BTreeSet<UnitId>
 where
     F: Fn(usize, usize) -> bool,

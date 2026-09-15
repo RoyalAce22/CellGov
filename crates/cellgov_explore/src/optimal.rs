@@ -1,18 +1,13 @@
 //! Optimal DPOR: source sets and wakeup trees
 //! [Abdulla2017 p:42:24 s:Algorithm 2].
 //!
-//! The search runs one execution to a maximal sequence, then reads its
-//! races. A race asks for an execution where the later event runs
-//! first, and the sequence that reaches it goes into the wakeup tree at
-//! the prefix before the earlier event. The next execution takes the
-//! least branch that tree holds.
-//!
-//! A sleep set carries the units already explored from a prefix, so the
-//! search does not run one twice. The wakeup tree keeps the sleep set
-//! from blocking; [`crate::wakeup`] says how.
-//!
-//! Each maximal execution the search runs stands for one equivalence
-//! class of schedules.
+//! The search runs one execution to a maximal sequence, reads its
+//! races, and puts the sequence that reverses each race into the wakeup
+//! tree at the prefix before the earlier event. The next execution
+//! takes the least branch a tree holds. A sleep set carries the units
+//! already explored from a prefix; [`crate::wakeup`] says how the tree
+//! keeps it from blocking. Each maximal execution stands for one
+//! equivalence class.
 
 use crate::classify::{BaselineRun, ExplorationResult, ScheduleRecord};
 use crate::config::ExplorationConfig;
@@ -33,10 +28,9 @@ struct Run {
     invariant_break: Option<String>,
     /// Unit this execution ran at the depth it re-decided at.
     ///
-    /// `run_one` reads this before it cuts the frame stack back to
-    /// the steps that committed. A first step the model refuses cuts
-    /// that frame away, and the record still names the alternate the
-    /// run took.
+    /// `run_one` reads this before it truncates the frame stack: a
+    /// first step the model refuses cuts that frame away, and the
+    /// record still names the alternate the run took.
     alternate_choice: Option<UnitId>,
     dropped: Drops,
 }
@@ -44,10 +38,8 @@ struct Run {
 /// Wakeup-tree branches the search gave up, by the site that gave each
 /// one up.
 ///
-/// One aggregate cannot say which site a run's drops came from, and the
-/// two sites reach a branch for different reasons. The public
-/// [`ExplorationResult::reversals_dropped`] carries [`Drops::total`],
-/// which is the two drop counts and not the visit count beside them.
+/// [`ExplorationResult::reversals_dropped`] carries [`Drops::total`];
+/// the split is for a test that asks which site answered.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Drops {
     /// [`choose`] met a branch whose head cannot run at the depth
@@ -56,12 +48,10 @@ struct Drops {
     /// A warp depth met an inherited branch, and the warp woke a
     /// different unit ([`Frame::warp_woke`]).
     at_warp: usize,
-    /// Visits at which a warp depth read its own tree, which are the
-    /// only visits `at_warp` can move on.
+    /// Visits at which a warp depth read its own tree.
     ///
-    /// A run that reaches no warp depth leaves `at_warp` at zero
-    /// whatever that site would answer, so a reader of `at_warp` needs
-    /// this beside it.
+    /// `at_warp` moves only on these visits, so a zero there says
+    /// nothing until this is above zero.
     at_warp_visits: usize,
 }
 
@@ -89,9 +79,8 @@ struct Frame {
     /// Units already explored from this prefix, each with the step it
     /// took [Abdulla2017 p:42:24 s:Algorithm 2 line 21].
     ///
-    /// The step travels with the entry: a unit that sleeps down a level
-    /// never runs there, and the independence test at line 17 still
-    /// reads its step.
+    /// The step travels with the entry so [`inherit`] can test it at a
+    /// depth where the unit never runs.
     sleep: BTreeMap<UnitId, StepFootprint>,
     /// Sequences the search still owes from this prefix.
     wut: WakeupTree,
@@ -101,31 +90,24 @@ struct Frame {
     /// Sequences this frame already dropped, so a re-grafted sequence
     /// costs the reversal once.
     ///
-    /// A race can graft a sequence under a head this frame dropped
-    /// earlier, and the state at this depth is what every replay of the
-    /// prefix above reaches, so the branch is unreachable again. Two
-    /// races can graft different tails under one head, and each is cover
-    /// the frame lost. An extension or a prefix of a lost sequence costs
-    /// nothing; [`Frame::drop_cost`] says why.
-    /// [`crate::classify::ExplorationResult::reversals_dropped`] says
-    /// what the count this feeds does and does not measure.
+    /// Every replay of the prefix above reaches the same state at this
+    /// depth, so a branch it could not take once it cannot take again.
+    /// [`Frame::drop_cost`] says what a sequence under a lost one costs.
     dropped: BTreeSet<Vec<UnitId>>,
     /// Units the all-blocked time warp woke here, empty at every depth
     /// no warp resolved.
     ///
-    /// No unit is runnable at such a depth, so the search has nothing
-    /// to decide from and lets the runtime warp guest time and pick. A
-    /// replay of the same prefix reaches the same warp, so that warp
-    /// wakes the same set. A later execution decides from the recorded
-    /// set, and the selection call the runtime makes after the warp
-    /// delivers that choice.
+    /// A replay of the prefix reaches the same warp, and that warp wakes
+    /// the same set, so a later execution decides from the recorded set
+    /// and the runtime's selection call after the warp delivers the
+    /// choice.
     warp_woke: Vec<UnitId>,
 }
 
 impl Frame {
     /// What a drop of the branch through `head`, with `below` under it,
-    /// costs the reversal count. Each sequence the branch carried costs
-    /// one, unless a sequence this frame already lost covers it.
+    /// costs the reversal count: one per sequence the branch carried
+    /// that no sequence this frame already lost covers.
     ///
     /// A lost sequence covers:
     ///
@@ -133,10 +115,9 @@ impl Frame {
     /// - every extension of it;
     /// - every prefix of it.
     ///
-    /// That is how [`WakeupTree::insert`] treats a leaf: with the lost
-    /// one deliverable, the tree holds the other without a second
-    /// branch. A head with nothing below it carries the one-unit
-    /// sequence.
+    /// That is the leaf rule of [`WakeupTree::insert`]: were the lost
+    /// one deliverable, the tree would hold the other without a second
+    /// branch.
     fn drop_cost(&mut self, head: UnitId, below: &WakeupTree) -> usize {
         let mut sequences = below.sequences();
         if sequences.is_empty() {
@@ -171,13 +152,6 @@ enum Halt {
 ///
 /// The search calls `make_runtime` once, snapshots the runtime it
 /// returns, and restores that snapshot per execution.
-///
-/// `config.max_schedules` bounds the equivalence classes explored and
-/// `config.max_steps_per_run` bounds each execution.
-///
-/// [`ExplorationResult::schedules`] holds every execution after the
-/// first; the first is the baseline. So the classes explored are
-/// `schedules.len() + 1` whenever the baseline execution was maximal.
 pub fn explore_optimal<F>(make_runtime: F, config: &ExplorationConfig) -> ExplorationResult
 where
     F: FnMut() -> Runtime,
@@ -206,10 +180,7 @@ where
 }
 
 /// [`explore_optimal_observed`] beside the site each dropped branch
-/// came from.
-///
-/// The result carries one aggregate, so a test that means to reach one
-/// of the two sites cannot tell from it which site answered.
+/// came from ([`Drops`]).
 fn search<F, O>(
     mut make_runtime: F,
     config: &ExplorationConfig,
@@ -251,10 +222,8 @@ where
             Halt::SleepBlocked => sleep_blocked += 1,
             Halt::Stopped(stop) => {
                 let truncated = stop.is_truncated();
-                // A truncated execution bounds the search whichever run
-                // it was. The two tallies below count alternates alone,
-                // because that is what they answer for and what
-                // `mark_baseline_truncated` rewrites one of them to.
+                // The two tallies below count alternates alone;
+                // `mark_baseline_truncated` answers for the baseline.
                 if truncated {
                     bounds_hit = true;
                 }
@@ -312,9 +281,8 @@ where
         schedules,
         bounds_hit,
         found_divergence,
-        // A sleep set holds the units whose every extension the search
-        // already explored. A block cuts a redundant execution, so it
-        // costs no class.
+        // A sleep-set block cuts a redundant execution, so it costs no
+        // class.
         schedules_pruned: sleep_blocked,
         schedules_truncated: truncated_runs,
         schedules_refused: refused_runs,
@@ -322,9 +290,8 @@ where
     if baseline.stop.is_truncated() {
         iter.mark_baseline_truncated();
     }
-    // Every execution the search ran stands for one class. A bound or a
-    // dropped branch stops the search before it covers every class; a
-    // sleep-set block leaves the count whole.
+    // A sleep-set block explored no class and lost none, so it leaves
+    // the count whole.
     let complete = !iter.bounds_hit && !baseline.stop.is_truncated() && dropped.total() == 0;
     let classes = iter.schedules.len().saturating_add(1);
     let mut result = classify_iteration(iter, baseline, baseline_branching, first_invariant_break);
@@ -349,27 +316,22 @@ fn run_one(
     let mut depth = 0usize;
     let mut dropped = Drops::default();
     let halt = loop {
-        // Read before the cap: a window nothing can model is no
-        // caller's bound. The snapshot every execution restores can
-        // carry a pending pass, and the step below would then run under
-        // parks no footprint records -- in every execution the search
-        // runs, not one.
+        // Read before the cap: the restored snapshot can carry a
+        // pending pass, and no footprint records the parks a step
+        // under it runs behind.
         if rt.has_pending_child_init() {
             break Halt::Stopped(StopReason::ChildInitUnserved);
         }
-        // The cap refuses to start a step, so it answers only where
-        // there was one to start. An execution that reaches the cap
-        // with nothing left to run is maximal, and the step below
-        // names the stop its work justifies.
+        // An execution that reaches the cap with nothing left to run is
+        // maximal, so the step below names its stop.
         let at_cap = depth >= config.max_steps_per_run;
         if at_cap && rt.can_take_another_step() {
             break Halt::Stopped(StopReason::StepBound);
         }
         let runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
-        // An empty set is no choice the search can make yet: the
-        // runtime warps guest time, fires what is due, and schedules
-        // whatever that wakes. A depth that already recorded the set a
-        // warp woke decides from that instead.
+        // With nothing runnable the runtime warps and picks; a depth
+        // that recorded what its warp woke decides from that instead
+        // (see the doc on `Frame::warp_woke`).
         let warp_woke: Vec<UnitId> = if runnable.is_empty() {
             frames
                 .get(depth)
@@ -403,11 +365,10 @@ fn run_one(
         if deciding.is_empty() {
             rt.set_scheduler(cellgov_core::RoundRobinScheduler::new());
         } else {
-            // At a warp depth the runtime asks once before the warp,
-            // and again after each pass of it. Nothing is runnable at
-            // the first call, and an unanswered call advances no
-            // cursor, so the pass that wakes someone delivers the
-            // prescription.
+            // At a warp depth the first selection call finds nothing
+            // runnable and advances no cursor (see the comment in
+            // `PrescribedScheduler::select_next`), so the pass that
+            // wakes a unit delivers the prescription.
             rt.set_scheduler(PrescribedScheduler::single_choice(frames[depth].chosen));
         }
         let step = match rt.step() {
@@ -420,9 +381,8 @@ fn run_one(
             }
             Err(e) => break Halt::Stopped(StopReason::StepError(e)),
         };
-        // The predicate is a second reading of the question `Runtime::step`
-        // itself answers. A step that runs past the cap is the two
-        // disagreeing, and the cap then bounds nothing.
+        // `can_take_another_step` and `Runtime::step` answer the same
+        // question, so a step past the cap is the two disagreeing.
         debug_assert!(
             !at_cap,
             "the cap was reached, the predicate saw no step left, and one ran",
@@ -444,51 +404,29 @@ fn run_one(
             // it is the set the warp woke.
             let before = std::mem::replace(&mut frame.warp_woke, rt.last_runnable().to_vec());
             let decided = !before.is_empty();
-            // The search replays the prefix below step for step, and
-            // the warp runs before the selection, so both visits read
-            // the same set. A visit that read a different one decided
-            // from a set that no longer describes this depth.
+            // The prefix below replays step for step and the warp runs
+            // before the selection, so every visit reads the same set.
             debug_assert!(
                 !decided || before == frame.warp_woke,
                 "a replayed prefix reached the same warp and it woke {:?}, not {before:?}",
                 frame.warp_woke,
             );
-            // Where the depth already knew the set, `choose` picked out
-            // of it above and the runtime delivered that pick. Where it
-            // did not, this execution took whatever the warp gave. The
-            // next execution to reach this depth decides from the set
-            // this one recorded.
-            //
-            // A decided visit that retired a branch would retire one the
-            // frame may still owe. The memo would then cost nothing for
-            // the second drop of each sequence it carried.
+            // A decided visit prescribed `chosen` from the recorded
+            // set, and a warp that delivered another unit would retire
+            // a branch the frame still owes.
             debug_assert!(
                 !decided || frame.chosen == step.unit,
                 "the depth prescribed {:?} and the warp delivered {:?}",
                 frame.chosen,
                 step.unit,
             );
-            // A first visit arms the depth from what `inherit` handed
-            // down, and that is empty at almost every warp depth. A
-            // non-empty one needs the depth above to hold a branch
-            // through its own chosen unit with a continuation. Only a
-            // grafted sequence puts one there, and program order keeps
-            // the unit that ran at a depth out of every sequence a race
-            // grafts on it. The graft's head is the sequence's own first
-            // event, which leads it, so a branch of that head would have
-            // taken the walk instead (`WakeupTree::insert`). The head
-            // names a second unit, runnable where the branch sits, and
-            // no step parks a unit that was already runnable. A run that
-            // takes the branch therefore leaves that second unit
-            // runnable here, and a depth holding a runnable unit is no
-            // warp depth.
-            //
-            // The gap is a step that stops a unit it does not name:
-            // `Runtime::handle_process_exit_child` finishes every unit
-            // of the exiting pid, so a workload that exits a child
-            // process can reach this depth holding a branch. The loop
-            // below answers for that, and `at_warp_visits` says how
-            // often the loop read a tree at all.
+            // `inherit` hands almost every warp depth an empty tree: a
+            // grafted branch names a second runnable unit, and a depth
+            // holding one is no warp depth. A step that stops a unit it
+            // does not name (`Runtime::handle_process_exit_child`
+            // finishes every unit of the exiting pid) can leave a
+            // branch here, and this loop retires what the warp cannot
+            // deliver.
             if !decided || frame.chosen != step.unit {
                 dropped.at_warp_visits += 1;
                 for (head, below) in frame.wut.retain_branch(step.unit) {
@@ -505,14 +443,14 @@ fn run_one(
             break Halt::Stopped(StopReason::CommitError(e));
         }
         footprint.note_commit(rt, step.unit);
-        // The pass this parks behind reaches no footprint, so the
-        // relation cannot answer for the steps after it.
+        // The same stop as at the top of the loop, read after the
+        // commit that can make the pass pending.
         if rt.has_pending_child_init() {
             break Halt::Stopped(StopReason::ChildInitUnserved);
         }
-        // The commit is what discards a faulted batch and counts it, so
-        // the break reads the fault after it. The step gets no decision
-        // point, as a refused commit gets none.
+        // The commit discards and counts a faulted batch, so the fault
+        // is read after it; a faulted step gets no decision point, like
+        // a refused commit.
         if let Some(kind) = step.result.fault {
             break Halt::Stopped(StopReason::Faulted(kind));
         }
@@ -548,10 +486,8 @@ fn run_one(
 /// The sleep set and wakeup tree one depth inherits from the one above
 /// [Abdulla2017 p:42:24 s:Algorithm 2 lines 17-18].
 ///
-/// A unit stays asleep only where the step it took from the parent
-/// prefix is independent of the step the parent ran. A unit the search
-/// never ran from that prefix has no footprint to test, so it wakes:
-/// that costs exploration, never soundness.
+/// A parent with no footprint for its chosen unit wakes every sleeper,
+/// which costs exploration and no soundness.
 fn inherit(frames: &[Frame]) -> (BTreeMap<UnitId, StepFootprint>, WakeupTree) {
     let Some(parent) = frames.last() else {
         return (BTreeMap::new(), WakeupTree::new());
@@ -572,9 +508,8 @@ fn inherit(frames: &[Frame]) -> (BTreeMap<UnitId, StepFootprint>, WakeupTree) {
 /// Read the races of a maximal execution and record what each one owes
 /// [Abdulla2017 p:42:24 s:Algorithm 2 lines 2-7].
 ///
-/// A depth a warp resolved takes a branch like any other. [`choose`]
-/// asks whether the warp can deliver it, against [`Frame::warp_woke`],
-/// and drops the branch it cannot.
+/// A depth a warp resolved takes a branch like any other; [`choose`]
+/// drops what the warp cannot deliver.
 fn detect_races(log: &DecisionLog, frames: &mut [Frame]) {
     let execution = Execution::from_log(log);
     let relation = execution.happens_before();
@@ -586,8 +521,7 @@ fn detect_races(log: &DecisionLog, frames: &mut [Frame]) {
         let (at, second) = (race.first.index, race.second.index);
         // The sequence that reverses the race: everything between the
         // two that the earlier event does not hold back, then the later
-        // event. Nothing in the window happens after the later event,
-        // so the whole sequence can run before the earlier one.
+        // event.
         let mut sequence: Vec<SeqEvent> = (at + 1..second)
             .filter(|index| !precedes(at, *index))
             .map(|index| SeqEvent {
@@ -615,18 +549,10 @@ fn detect_races(log: &DecisionLog, frames: &mut [Frame]) {
 ///
 /// This reads one half of the weak-initials set
 /// [Abdulla2017 p:42:12 s:Lemma 4.2]: a sleeping unit that can lead the
-/// sequence. The half for a sleeping unit whose own next step commutes
-/// past the sequence is not read.
-///
-/// A branch does two things: it covers the sequence, and it opens the
-/// subtree under it. The commuting half answers for the first alone, so
-/// reading it retires branches whose descendants nothing else reaches;
-/// `tests/clock_read.rs` holds a workload where that loses classes. The
-/// leading half alone inserts a branch the search may not owe, which
-/// costs exploration and no cover.
-///
-/// `sleep` carries a footprint per entry for the independence test at
-/// line 17; this reads its units alone.
+/// sequence. The other half, a sleeping unit whose own next step
+/// commutes past the sequence, covers the sequence and not the subtree
+/// under its branch; `tests/clock_read.rs` holds a workload where
+/// reading it loses classes.
 fn already_explored<F>(
     sleep: &BTreeMap<UnitId, StepFootprint>,
     sequence: &[SeqEvent],
@@ -663,20 +589,11 @@ fn backtrack(frames: &mut Vec<Frame>) -> Option<usize> {
 /// The unit one depth runs next [Abdulla2017 p:42:24 s:Algorithm 2
 /// lines 11-16].
 ///
-/// The wakeup tree's least branch goes first. A branch whose unit is
-/// not runnable here names a reversal this state cannot reach:
-/// `Execution::races` reports a racing pair without asking whether the
-/// later unit can go first here. `choose` drops that branch and counts
-/// it in `dropped`, once for each sequence the branch carried that no
-/// earlier drop at this frame covers ([`Frame::drop_cost`]). Each
-/// sequence is an owed execution, so a drop gives up at least one
-/// equivalence class, which is why a count above zero withdraws
-/// [`ExplorationResult::classes_explored`].
-///
-/// With no branch left the depth takes any runnable unit it did not
-/// explore and records that choice as the tree's one branch, so a race
-/// the execution reports inserts against a tree that already holds what
-/// this depth ran. With none of those `choose` returns `None`.
+/// A branch whose unit is not runnable here names a reversal this state
+/// cannot reach, since `Execution::races` does not ask; `choose` drops
+/// it and [`Frame::drop_cost`] counts what it carried. With no branch
+/// left the depth takes a runnable unit not asleep and makes it the
+/// tree's one branch, so a later insert walks what this depth ran.
 fn choose(frame: &mut Frame, runnable: &[UnitId], dropped: &mut usize) -> Option<UnitId> {
     while let Some(unit) = frame.wut.min_branch() {
         if runnable.contains(&unit) {

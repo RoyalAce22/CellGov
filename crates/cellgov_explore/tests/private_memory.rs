@@ -154,9 +154,8 @@ fn config() -> ExplorationConfig {
     }
 }
 
-/// The premise: with the reader's private memory outside the
-/// observable, the two orders leave the same committed memory and the
-/// window reads stable.
+/// The premise: the two orders leave the same committed memory, so only
+/// the private memory can separate them.
 #[test]
 fn a_reader_that_reports_no_private_memory_reads_stable() {
     let result = explore_window(workload(false), &config());

@@ -169,11 +169,10 @@ fn the_two_searches_agree_on_the_fake_isa_workloads() {
 /// Every fixture here reaches one final memory hash. Five hold one
 /// unit, or units whose footprints never conflict, so neither search
 /// replays anything. The two that race reach the same memory by every
-/// order, because `WritingUnit` writes its own step number.
-///
-/// So this case checks only that neither search invents an outcome. The
-/// fixture that can witness a dropped class is below, in
-/// `the_two_searches_agree_where_the_order_decides_the_outcome`.
+/// order, because `WritingUnit` writes its own step number. So this
+/// case checks only that neither search invents an outcome;
+/// `the_two_searches_agree_where_the_order_decides_the_outcome` holds
+/// the fixture that can witness a dropped class.
 #[test]
 fn the_two_searches_agree_on_the_testkit_fixtures() {
     agree_on("round robin", 1, || {
@@ -192,8 +191,6 @@ fn the_two_searches_agree_on_the_testkit_fixtures() {
         fixtures::fake_isa_scenario().build_runtime()
     });
 
-    // Both searches replay off a race in these two fixtures, so their
-    // agreement covers more than one execution each.
     let (enumerated, backtracked) = agree_on("write conflict", 1, || {
         fixtures::write_conflict_scenario(3).build_runtime()
     });
@@ -217,9 +214,6 @@ fn the_two_searches_agree_on_the_testkit_fixtures() {
 /// other six steps touch no shared state, so the equivalence classes
 /// are the orders of those three stores. That gives `3! = 6` classes
 /// and three outcomes, one per unit that can commit the last write.
-///
-/// The optimal search costs exactly those six; the scaffold reaches the
-/// same three outcomes for ten.
 #[test]
 fn the_cost_of_three_writers_is_recorded() {
     let (enumerated, backtracked) = agree_on("three writers", 3, three_writers_one_address);
@@ -260,11 +254,9 @@ fn longer_than_the_cap() -> Runtime {
 
 /// Both searches take the same bound from the same origin.
 ///
-/// They bound their baselines differently once and it went unnoticed,
-/// because every fixture was shorter than the default cap. A workload
-/// that outruns the cap is what separates a shared bound from two that
-/// merely never bite: one search answering here while the other
-/// withdrew would read as a lost equivalence class in `agree_on`.
+/// A workload that outruns the cap separates a shared bound from two
+/// that never bite. One search answering here while the other withdrew
+/// would read as a lost equivalence class in `agree_on`.
 #[test]
 fn both_searches_truncate_a_baseline_at_the_same_step() {
     let config = ExplorationConfig {
@@ -311,16 +303,12 @@ fn a_capped_workload_leaves_both_searches_answering_for_nothing() {
     assert!(enumerated.bounds_hit && backtracked.bounds_hit);
 }
 
-/// The same workload under a cap it fits inside: both searches answer,
-/// and agree.
+/// The positive control for the two capped cases above, which would
+/// both pass for searches that truncated everything.
 ///
-/// The positive control over the two cases above, which would both pass
-/// for searches that truncated everything always.
-///
-/// The cost assertion guards the other way. Six is the workload's class
-/// count, so a search that reaches six enumerated the whole of it. Two
-/// searches that both stopped at `max_schedules` would agree on their
-/// hashes and fail here.
+/// Six is the workload's class count, so a search that reaches six
+/// enumerated the whole of it. Two searches that both stopped at
+/// `max_schedules` would agree on their hashes and fail here.
 #[test]
 fn the_same_workload_within_the_cap_reaches_the_same_hashes() {
     let (optimal_cost, scaffold_cost) =
@@ -358,11 +346,9 @@ fn the_two_searches_agree_where_the_order_decides_the_outcome() {
 /// A replay that needs more steps than the baseline, under a cap the
 /// baseline fit inside.
 ///
-/// Elsewhere a tally built by hand drives `schedules_truncated`. Here
-/// the workload drives it. The baseline releases the poller in two
-/// steps, and the order that polls before the write needs the whole
-/// cap. Both searches test the cap before the step that would report
-/// the stall, so that replay stops on the bound at four steps.
+/// Both searches test the cap before the step that would report the
+/// stall, so the replay that polls before the write stops on the bound
+/// at four steps.
 #[test]
 fn a_replay_that_outruns_the_baseline_truncates_in_both_searches() {
     let config = ExplorationConfig {
@@ -373,7 +359,6 @@ fn a_replay_that_outruns_the_baseline_truncates_in_both_searches() {
     let enumerated = explore_window(make, &config);
     let backtracked = explore_backtrack(make, &config);
 
-    // The premise of the count below: the workload itself fits the cap.
     for (name, result) in [("optimal", &enumerated), ("scaffold", &backtracked)] {
         assert_eq!(
             result.baseline_stop,

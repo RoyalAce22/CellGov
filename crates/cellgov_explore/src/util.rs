@@ -21,26 +21,23 @@ pub enum StopReason {
     Deadlocked,
     /// A child is parked behind a staged init pass no explorer runs.
     ///
-    /// The pass holds every other runnable unit `Blocked` across the
-    /// child's `module_start` and restores them after, through no
-    /// effect, so no footprint records either half. A relation that
-    /// cannot see those parks would call steps independent that a pass
-    /// separated, which is the silent direction. The search stops
-    /// instead of exploring a window it cannot reason about.
+    /// The pass parks every other runnable unit across the child's
+    /// `module_start` and releases them after, through no effect, so no
+    /// footprint records either half. A relation that cannot see those
+    /// parks would call steps independent that the pass separated, so
+    /// the search stops instead of answering for the window.
     ///
-    /// Every step loop reads this before it starts a step, so a runtime
-    /// handed over with a pass already pending runs none. The step that
-    /// stages one commits and reaches no decision point, so a log this
-    /// stop ends covers one step less than the run's memory hash.
+    /// The step that stages the pass commits and reaches no decision
+    /// point, so a log this stop ends covers one step less than the
+    /// run's memory hash.
     ChildInitUnserved,
     /// The caller's step cap refused a step the execution had left to
     /// take, so what the run reports covers a prefix.
     ///
-    /// An execution that reaches the cap with nothing left to run
-    /// reports the stop its own work justifies instead. Every step loop
-    /// that reads a cap asks
-    /// [`cellgov_core::Runtime::can_take_another_step`] before it
-    /// answers with this.
+    /// Every step loop that reads a cap asks
+    /// [`cellgov_core::Runtime::can_take_another_step`] first, so an
+    /// execution the cap meets with nothing left to run reports its own
+    /// stop.
     StepBound,
     /// `Runtime::step` refused.
     StepError(StepError),
@@ -78,12 +75,9 @@ pub enum StopClass {
     Fault,
     /// The search will not answer for this window.
     ///
-    /// Nothing is wrong with the model or the guest: the window holds
-    /// something the relation cannot see, so no verdict over it would
-    /// mean anything. Separate from [`StopClass::Refusal`] because a
-    /// reader chasing a model defect should not be sent here, and
-    /// separate from [`StopClass::Bound`] because no cap the caller can
-    /// raise would help.
+    /// Neither the model nor the guest is at fault: the window holds
+    /// what the relation cannot see, and no cap the caller can raise
+    /// would help.
     #[strum(serialize = "unserved")]
     Unserved,
 }
@@ -97,9 +91,6 @@ impl StopClass {
 
 impl StopReason {
     /// True when the run stopped before its execution was maximal.
-    ///
-    /// A deadlock is no truncation: no schedule extends the execution
-    /// past it, so its hash answers for the whole run.
     pub fn is_truncated(self) -> bool {
         !matches!(self, StopReason::Stalled | StopReason::Deadlocked)
     }
@@ -119,9 +110,6 @@ impl StopReason {
             Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
             | Self::CommitError(_) => StopClass::Refusal,
             Self::Faulted(_) => StopClass::Fault,
-            // Neither the model nor the guest is at fault: the window
-            // holds what the relation cannot see, so the search answers
-            // for none of it.
             Self::ChildInitUnserved => StopClass::Unserved,
         }
     }
@@ -146,42 +134,29 @@ impl std::fmt::Display for StopReason {
 
 /// Drive `rt` until it stops, committing each step immediately.
 ///
-/// `Runtime::step` decides when a run is over. An empty runnable set
-/// is not that decision. The runtime warps guest time to the earlier
-/// of the next DMA completion and the next timer deadline. It fires
-/// what is due, then schedules whatever that wakes. The step reports
-/// `NoRunnableUnit` where every unit finished, and `AllBlocked` where
-/// a parked unit has no wake source left. Both end the execution, and
-/// neither truncates it.
-///
-/// A refused commit stops the run: its effects never landed, so every
-/// later step would build on a state the schedule did not produce. A
-/// fault stops it for the same reason -- the commit discards its
-/// batch, and the faulted unit leaves the runnable set. A staged child
-/// init the host has not run stops it because the relation cannot see
-/// the parks it holds; see [`StopReason::ChildInitUnserved`].
+/// `Runtime::step` decides when a run is over; an empty runnable set
+/// is not that decision, because the runtime warps guest time to the
+/// next DMA completion or timer deadline first. Each [`StopReason`]
+/// variant says why its stop ends the run.
 pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
     let mut steps = 0;
     loop {
-        // Read before the cap: a window nothing can model is no
-        // caller's bound. A driver can hand over a runtime that already
-        // carries a pending pass, and the step below would run under
-        // parks no footprint records.
+        // Before the cap: a window nothing can model is no caller's
+        // bound, and a handed-over runtime can already carry a pass.
         if rt.has_pending_child_init() {
             return StopReason::ChildInitUnserved;
         }
-        // The cap refuses to start a step, so it answers only where
-        // there was one to start. See `Runtime::can_take_another_step`.
+        // Answers only where a step was left to start; see the doc on
+        // `StopReason::StepBound`.
         let at_cap = steps >= max_steps;
         if at_cap && rt.can_take_another_step() {
             return StopReason::StepBound;
         }
         match rt.step() {
             Ok(step) => {
-                // The predicate is a second reading of the question
-                // `Runtime::step` itself answers. A step that runs past
-                // the cap is the two disagreeing, and the cap then
-                // bounds nothing.
+                // A step past the cap means `can_take_another_step` and
+                // `Runtime::step` disagree, and the cap then bounds
+                // nothing.
                 debug_assert!(
                     !at_cap,
                     "the cap was reached, the predicate saw no step left, and one ran",
@@ -192,10 +167,8 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
                     return StopReason::CommitError(e);
                 }
-                // The pass this parks behind reaches no footprint, so
-                // the relation cannot answer for the steps after it.
                 // Ahead of the fault for the same reason the commit
-                // refusal above is: a refusal outranks a fault.
+                // refusal above is.
                 if rt.has_pending_child_init() {
                     return StopReason::ChildInitUnserved;
                 }
@@ -224,9 +197,8 @@ pub struct AlternateIteration {
     /// True if at least one untruncated alternate produced a different
     /// memory hash.
     ///
-    /// A truncated replay never sets this: its hash is a prefix of the
-    /// alternate schedule, and a prefix differs from a completed
-    /// baseline whether or not the workload is schedule-sensitive.
+    /// A truncated replay never sets this; see
+    /// [`ScheduleRecord::truncated`].
     pub found_divergence: bool,
     /// Starts the search dropped before they reached a record; see
     /// [`ExplorationResult::schedules_pruned`].
@@ -239,12 +211,7 @@ pub struct AlternateIteration {
 
 impl AlternateIteration {
     /// Withdraw every divergence claim because the baseline itself
-    /// stopped short.
-    ///
-    /// Alternates are compared against `baseline_hash`; when that hash
-    /// came from a prefix of the baseline schedule, neither a match nor
-    /// a mismatch says anything about schedule sensitivity, so the pass
-    /// can only report inconclusive.
+    /// stopped short; see [`ScheduleRecord::truncated`].
     pub fn mark_baseline_truncated(&mut self) {
         self.found_divergence = false;
         self.bounds_hit = true;
@@ -280,10 +247,9 @@ pub fn classify_iteration(
         schedules: iter.schedules,
         outcome,
         total_branching_points,
-        // `explore_optimal` overwrites both of these on the result this
-        // returns, and `explore_backtrack` the drop count. The bounded
-        // enumerator overwrites neither, so for it the zeros below are
-        // silence rather than a measurement.
+        // `explore_optimal` overwrites both of these, `explore_backtrack`
+        // the drop count, and the bounded enumerator neither, so for it
+        // these two claim nothing.
         classes_explored: None,
         reversals_dropped: 0,
         bounds_hit: iter.bounds_hit,

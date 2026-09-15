@@ -1,17 +1,12 @@
-//! The search's cover claim against the schedules of a small workload.
+//! The search's cover claim against every schedule of a small workload.
 //!
 //! `shared_clock.rs` holds the search against one hand-written
-//! schedule. This walks the choice tree of a small workload instead, so
-//! the search's reach is measured against every outcome.
-//!
-//! The workload is `shared_clock`'s shape with a shorter counter: a
-//! transfer in flight, a writer over its destination, and a unit that
-//! only spends ticks. The order of the writer's last store against the
-//! landing decides the outcome.
-//!
-//! Two committed memories is the total, not a sample: the destination
-//! is the only range any schedule writes twice, and it ends holding
-//! either the transfer's bytes or the writer's last store.
+//! schedule. This walks the choice tree of `shared_clock`'s shape with a
+//! shorter counter: a transfer in flight, a writer over its destination,
+//! and a unit that only spends ticks. Two committed memories is the
+//! total: the destination is the only range any schedule writes twice,
+//! and it ends holding either the transfer's bytes or the writer's last
+//! store.
 
 #![allow(
     clippy::unwrap_used,
@@ -33,10 +28,8 @@ const STEP_CAP: usize = 200;
 /// Choices the walk forces before it lets a prefix run itself out.
 ///
 /// The workload retires thirteen steps -- two, three and eight -- so
-/// this is a prefix of the choice tree and not the whole of it. Both
-/// committed memories sit inside it, which is what the walk is for; a
-/// third would need the module doc's argument to be wrong, not a
-/// deeper walk.
+/// this is a prefix of the choice tree. Both committed memories sit
+/// inside it.
 const DEPTH: usize = 8;
 
 /// The latency the two outcomes rest on.
@@ -68,12 +61,6 @@ fn workload() -> Runtime {
 
 /// The committed memory a schedule forced through `prefix` reaches.
 ///
-/// A deadlock answers as a stall does: its execution is maximal, so its
-/// hash is the whole run's. Any other stop leaves a prefix hash that no
-/// finished run can be held against. This workload reaches none, and a
-/// truncated run would shrink the reachable set the cases below measure
-/// the search against.
-///
 /// # Panics
 ///
 /// Panics when a forced schedule stops short of a maximal execution.
@@ -90,13 +77,12 @@ fn run_prefix(prefix: &[UnitId]) -> u64 {
     rt.committed_memory_hash()
 }
 
-/// Units runnable after `prefix` has been forced.
+/// Units runnable once `prefix` runs.
 ///
 /// # Panics
 ///
 /// Panics when replaying `prefix` refuses a step or its commit. Every
-/// prefix the walk builds was runnable where it was built, so a refusal
-/// here would answer for a schedule the walk never took.
+/// prefix the walk builds was runnable where the walk built it.
 fn runnable_after(prefix: &[UnitId]) -> Vec<UnitId> {
     let mut rt = workload();
     rt.set_scheduler(PrescribedScheduler::new(
@@ -190,14 +176,10 @@ fn the_search_answers_for_every_reachable_memory() {
         classes, None,
         "a dropped reversal withdraws the class count for the whole run",
     );
-    // The count is the point: the run gives up hundreds of branches,
-    // not the one an empty class count suggests, and it still answers
-    // for every outcome. Nothing but this number separates the two.
-    //
-    // The figure is ours and no paper's, pinned here as a regression
-    // witness. It counts once per lost sequence per frame, so the
-    // search's own race handling moves it, and a move is a finding to
-    // explain rather than a number to re-bless.
+    // The run gives up hundreds of branches and still answers for every
+    // outcome; an empty class count alone reads as one. The figure counts
+    // once per lost sequence per frame, so the search's own race handling
+    // moves it.
     assert_eq!(
         dropped, 290,
         "the branches this workload's depths could not deliver",

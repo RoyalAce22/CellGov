@@ -2,9 +2,8 @@
 //!
 //! Owns the fetch-decode-execute loop; instruction semantics live in
 //! [`exec`], decoding in [`decode`]. Guest-visible writes flow through
-//! `Effect` packets; reads into the 256 KB local store are serviced
-//! from the frozen committed snapshot exposed by
-//! [`cellgov_exec::ExecutionContext::memory`].
+//! `Effect` packets; reads into the 256 KB local store come from the
+//! frozen committed view at [`cellgov_exec::ExecutionContext::memory`].
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 #![cfg_attr(
@@ -46,7 +45,7 @@ use cellgov_time::{Budget, InstructionCost};
 ///   names a range local store cannot hold.
 ///
 /// Local store spans 18 bits, so none of them fits the detail half and
-/// the masked value gives the address modulo 64 KB. [`LocalDiagnostics`]
+/// the masked value is the address modulo 64 KB. [`LocalDiagnostics`]
 /// carries the whole value beside the code: the fetch path's program
 /// counter as `pc`, the other two as `faulting_ea`.
 // [CBE-Handbook p:64 s:3.1.1 Local Store] Local store holds 256 KB, so an address inside it needs 18 bits.
@@ -54,14 +53,13 @@ const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
 /// An MFC command the model has no arm for.
 ///
-/// The detail is the command word the guest wrote. The opcode sits in
-/// its low byte, so the masked detail still names the refused command;
-/// the two class ids above the mask say nothing about which it was.
+/// The detail is the command word the guest wrote; its opcode sits in
+/// the low byte, so the masked detail still names the command.
 // [CBE-Handbook p:457 s:17.9.6 MFC Class ID and MFC Command Opcode Channel] The word written to this channel carries the transfer and replacement class ids in its high half and the MFC command opcode in its low byte.
 const FAULT_UNSUPPORTED_MFC_CMD: u32 = 0x0004_0000;
 const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
-/// A refused `rchcnt` keeps its own fault class. The trace then
-/// distinguishes it from a refused `rdch` / `wrch` on the same channel.
+/// A refused `rchcnt`, distinct from a refused `rdch` / `wrch` on the
+/// same channel.
 const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
 /// A parked MFC GET whose effective address resolves to no region. Its
 /// low bits carry the transfer's tag id; [`LocalDiagnostics::faulting_ea`]
@@ -72,14 +70,9 @@ const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
 /// carry the value the guest wrote, masked to 16 bits.
 const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 /// A synchronous MFC read -- `getllar` -- whose effective address
-/// resolves to no region. The detail carries the low 16 bits of the
-/// effective address, masked so it cannot reach the class field;
-/// [`LocalDiagnostics::faulting_ea`] carries the whole address. A
-/// destination that escapes local store is [`FAULT_LS_OUT_OF_RANGE`].
-///
-/// Distinct from [`FAULT_MFC_GET_UNRESOLVED`] so a trace separates a
-/// line the atomic path never read from a parked transfer that never
-/// landed.
+/// resolves to no region. The detail is the low 16 bits of the
+/// effective address; [`LocalDiagnostics::faulting_ea`] carries it
+/// whole.
 const FAULT_MFC_READ_UNRESOLVED: u32 = 0x0009_0000;
 
 /// The half of a fault code that carries the detail.
@@ -102,14 +95,9 @@ const EVERY_FAULT_CLASS: [u32; 8] = [
     FAULT_MFC_READ_UNRESOLVED,
 ];
 
-// `guest_fault`'s debug assertion compiles out under `--release`, which
-// is the profile a trace a reader decodes comes from, so the classes
-// that exist are held against the layout here instead. Distinctness
-// belongs with them: masking a detail away is no use if two classes
-// share a code.
+// The debug assertion in `guest_fault` compiles out under `--release`,
+// so the layout is also checked here at compile time.
 const _: () = {
-    // The premise for masking at all: local store spans 18 bits, so an
-    // address inside it does not fit the detail half.
     assert!(
         state::SPU_LS_SIZE as u32 > FAULT_DETAIL_MASK,
         "a local store inside the detail field would leave nothing to mask",
@@ -150,11 +138,9 @@ fn guest_fault_for(fault: SpuFault) -> FaultKind {
 /// One guest fault: `class` in the high half of the code, `detail`
 /// masked into the low half.
 ///
-/// Each detail these paths carry is a value the guest picked or
-/// influenced -- a program counter, a channel number, an MFC command
-/// word, a tag id -- so an unmasked one sets a class bit and the code
-/// decodes as some other fault. The assertion covers a class added
-/// after [`EVERY_FAULT_CLASS`].
+/// The mask keeps a guest-chosen detail out of the class half; see
+/// [`FAULT_DETAIL_MASK`]. The assertion covers a class added after
+/// [`EVERY_FAULT_CLASS`].
 fn guest_fault(class: u32, detail: u32) -> FaultKind {
     debug_assert!(
         class & FAULT_DETAIL_MASK == 0,
@@ -200,10 +186,9 @@ fn copy_into_local_store(
 /// Records the bytes a transfer copied from main memory into local store.
 ///
 /// Dependency analysis pairs the range against another unit's write to
-/// the same bytes. The result is `None` for:
-///
-/// - a zero-byte transfer, whose empty range pairs with no write;
-/// - an `ea + size` that carries out of the 64-bit space.
+/// the same bytes, so a zero-byte transfer, which pairs with nothing,
+/// records none. A range past the end of the address space records
+/// none either.
 fn shared_read(ea: u64, size: u32, source: UnitId) -> Option<Effect> {
     // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
     if size == 0 {
@@ -285,14 +270,11 @@ impl ExecutionUnit for SpuExecutionUnit {
         // transfer's read enters it after the clear.
         let mut parked_get_read = None;
         if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
-            // The guest writes `ea` through MFC_EAH and MFC_EAL, so it
-            // can name anything, an address no region backs included.
-            // Resolving through the memory's own read reaches whichever
-            // region backs it; a slice of `as_bytes()` reaches only the
-            // region at the base.
+            // `ea` comes from MFC_EAH and MFC_EAL, so the guest can name
+            // an address no region backs.
             // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
-            // A transfer of no bytes reads no main storage and writes no
-            // local store, so neither address has to resolve for it.
+            // A transfer of no bytes touches neither end, so neither
+            // address has to resolve for it.
             // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
             let moved = if size == 0 {
                 Ok(())
@@ -301,11 +283,8 @@ impl ExecutionUnit for SpuExecutionUnit {
             };
             if let Err(refusal) = moved {
                 // The tag bit is the guest's only signal that the
-                // transfer finished. Publishing it here would report a
-                // completion over local store the transfer never wrote,
-                // so the refusal is named instead, by the end that
-                // refused: the address that end names rides whole beside
-                // the code.
+                // transfer finished, so a refused copy faults instead of
+                // publishing it.
                 let (fault, address) = match refusal {
                     CopyRefusal::Unresolved => {
                         (guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id)), ea)
@@ -382,9 +361,8 @@ impl ExecutionUnit for SpuExecutionUnit {
                     if reason == YieldReason::Finished {
                         self.status = UnitStatus::Finished;
                     } else if reason != YieldReason::MailboxAccess {
-                        // Mailbox path keeps PC on the rdch for retry; the
-                        // re-entry block at the top of run_until_yield
-                        // advances PC once a message lands.
+                        // PC stays on the rdch; the re-entry block at the
+                        // top of `run_until_yield` advances it.
                         self.state.pc += 4;
                     }
                     return ExecutionStepResult {
@@ -401,21 +379,14 @@ impl ExecutionUnit for SpuExecutionUnit {
                     size,
                     acquire_line,
                 } => {
-                    // Resolved through the memory's own read, so the
-                    // line reaches whichever region backs it. The guest
-                    // writes `ea` through MFC_EAH and MFC_EAL, so it can
-                    // also name an address no region backs.
+                    // `ea` can name an address no region backs; see the
+                    // parked-get arm above.
                     let read =
                         copy_into_local_store(&mut self.state.ls, ctx.memory(), ea, lsa, size);
                     if let Err(refusal) = read {
-                        // The reservation is the guest's evidence that
-                        // it holds the line. Acquiring one over bytes
-                        // that never arrived would let a later putllc
-                        // succeed against a comparison made on stale
-                        // local store, so the refusal is named and no
-                        // reservation is taken. The end that refused
-                        // names the fault, and its address rides whole
-                        // beside the code.
+                        // A reservation over bytes that never arrived
+                        // would let a later putllc succeed against stale
+                        // local store, so a refused copy takes none.
                         let (fault, address) = match refusal {
                             CopyRefusal::Unresolved => {
                                 (guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32), ea)
@@ -436,10 +407,6 @@ impl ExecutionUnit for SpuExecutionUnit {
                         };
                     }
                     effects.extend(shared_read(ea, size, self.id));
-                    // MFC_GETLLAR also installs the unit's reservation
-                    // entry and its atomic status. Both land here, after
-                    // the line arrives, so a refused read reports no
-                    // status and holds no reservation.
                     if let Some(line_addr) = acquire_line {
                         // [CBEA p:131 s:9.4 MFC Read Atomic Command Status Channel] the channel holds the status of the last completed immediate atomic command.
                         self.state.channels.atomic_status = MFC_ATOMIC_STAT_G;

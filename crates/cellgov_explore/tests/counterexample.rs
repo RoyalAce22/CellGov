@@ -60,7 +60,6 @@ fn entangled(n: u32) -> Runtime {
         .chain([FakeOp::End])
         .collect();
     rt.register_unit_with(|id| FakeIsaUnit::new(id, counter.clone()));
-    // The master reads the counter and stores to the writer it names.
     rt.register_unit_with(|id| {
         FakeIsaUnit::new(
             id,

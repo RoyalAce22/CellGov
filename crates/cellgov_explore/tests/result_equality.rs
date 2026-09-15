@@ -2,13 +2,9 @@
 //!
 //! An outcome alone hides a field that moved: two runs can classify a
 //! workload the same way while disagreeing on which schedules they
-//! reached, what each one hashed, or how many classes they covered.
-//! Comparing the whole struct catches that.
-//!
-//! Two properties, and the second is what keeps the first honest. A
+//! reached, what each one hashed, or how many classes they covered. A
 //! search is a pure function of its workload, so two runs give one
-//! answer. The cases below name every field of the struct, so a field
-//! added later cannot join it unchecked.
+//! whole struct, and the cases below name every field of it.
 
 #![allow(
     clippy::unwrap_used,
@@ -72,11 +68,8 @@ fn the_backtrack_search_gives_one_answer() {
 }
 
 /// The scaffold can reach one class more than once, so its execution
-/// count is no class count and it claims none.
-///
-/// The same workload gives the optimal search a count, so an empty one
-/// here is the scaffold's own answer rather than a bound either search
-/// hit.
+/// count is no class count and it claims none; the optimal search's
+/// count over the same workload is the control.
 #[test]
 fn the_backtrack_search_claims_no_class_count() {
     let config = ExplorationConfig::default();
@@ -86,8 +79,6 @@ fn the_backtrack_search_claims_no_class_count() {
     assert!(explore_window(mixed, &config).classes_explored.is_some());
 }
 
-/// Every field of [`ExplorationResult`], named once.
-///
 /// The destructure is the guard: a field added to the struct stops this
 /// compiling until someone decides what it should say here.
 #[test]
@@ -141,12 +132,9 @@ fn every_field_of_a_finished_result_is_named() {
     );
 }
 
-/// The search builds one runtime.
-///
-/// A driver that explores a window of a longer run hands over a
-/// runtime it already advanced to the window's start. It has nothing to
-/// build a second one from, so it passes a factory which panics on a
-/// second call.
+/// A driver that explores a window of a longer run hands over a runtime
+/// it already advanced to the window's start; it has nothing to build a
+/// second one from.
 #[test]
 fn the_search_builds_one_runtime() {
     let mut once = Some(mixed());

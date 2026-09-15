@@ -1,30 +1,28 @@
 //! Per-process address spaces and explicit process-shared mappings.
 //!
 //! Space 0 is the boot process's space and lives in `Runtime::memory`;
-//! child spaces are additional [`GuestMemory`] instances. Every unit
-//! belongs to exactly one space (untagged units are space 0), and a
-//! step's execution context, syscall-parameter reads, and commit batch
-//! all resolve through the unit's space.
+//! child spaces are further [`GuestMemory`] instances. Every unit
+//! belongs to exactly one space (an untagged unit is in space 0), and
+//! its execution context, syscall-parameter reads and commit batch all
+//! resolve through that space.
 //!
 //! A shared segment is registered under an IPC key with one or more
-//! `(space, base)` views; a space may map the segment at several bases,
-//! because the map call names one base and nothing in it forbids a
-//! repeat. Registration installs a zero-filled region in each view's
-//! space, and the commit pipeline replicates a committed write landing
-//! in one view into every sibling view, same-space aliases included,
-//! within the same commit batch.
+//! `(space, base)` views; a space may map the segment at several bases.
+//! Registration installs a zero-filled region in each view's space, and
+//! the commit pipeline replicates a committed write that lands in one
+//! view into every sibling view, same-space aliases included, inside
+//! the same commit batch.
 //!
 //! Reservations are space-scoped: space 0's table is
 //! `Runtime::reservations`, each child space owns its own
-//! [`ReservationTable`], and the commit pipeline's clear-sweeps run
-//! against the emitting unit's table only. The one cross-space path
-//! is a shared mapping: replicating a write into a sibling view and
-//! seeding a view at promotion both clear reservations covering the
-//! translated range in that view's space. Each replication carries the
-//! exemption its own writer carries -- a store spares its emitter, a
-//! seed spares nobody. A DMA transfer resolves both ends in space 0,
-//! and a landing inside a shared view replicates through that same
-//! path.
+//! [`ReservationTable`], and the commit pipeline's clear sweep runs
+//! against the emitting unit's table only. The one cross-space path is
+//! a shared mapping: a replicated write and a promotion seed both clear
+//! the reservations that cover the translated range in the sibling
+//! view's space, each with the exemption its own writer carries (see
+//! `Runtime::host_write`). A DMA transfer resolves both ends in
+//! space 0, and a landing inside a shared view replicates through the
+//! same path.
 
 use std::collections::BTreeMap;
 
@@ -72,16 +70,14 @@ pub(super) struct SharedMapping {
 pub(super) struct SpaceTable {
     /// Child spaces only; space 0 is `Runtime::memory`.
     pub(super) extra: BTreeMap<AddressSpaceId, GuestMemory>,
-    /// Shared segments keyed by IPC key (mmapper substrate).
+    /// Shared segments keyed by IPC key.
     pub(super) shared: BTreeMap<u64, SharedMapping>,
     /// Unit -> space; absent means space 0.
     pub(super) unit_spaces: BTreeMap<UnitId, AddressSpaceId>,
-    /// Keyed-shm install history: ipc key -> (segment size, views in
-    /// map order). Pre-registration bookkeeping only -- a keyed map
-    /// promotes into `shared` the moment a second address space
-    /// attaches. Excluded from `metadata_hash` and `is_empty`:
-    /// single-space entries are derivable from the install stream and
-    /// must not perturb single-process boot hashes.
+    /// Keyed-shm install history: IPC key -> (segment size, views in
+    /// map order). A keyed map promotes into `shared` when a second
+    /// space attaches. Outside `metadata_hash` and `is_empty`, so a
+    /// single-process boot's hash does not move.
     pub(super) keyed_installs: BTreeMap<u64, (u64, Vec<(AddressSpaceId, u64)>)>,
     /// Child-space reservation tables, keyed 1:1 with `extra`;
     /// space 0's table is `Runtime::reservations`.
@@ -132,9 +128,8 @@ impl SpaceTable {
         for (key, mapping) in &self.shared {
             hasher.write(&key.to_le_bytes());
             hasher.write(&mapping.size.to_le_bytes());
-            // Length-prefix the views vec like the two maps above, so
-            // a view entry cannot be confused with the next mapping's
-            // key/size bytes in the hash stream.
+            // The length prefix keeps a view entry distinct from the
+            // next mapping's key and size in the hash stream.
             hasher.write(&(mapping.views.len() as u64).to_le_bytes());
             for (space, base) in &mapping.views {
                 hasher.write(&space.raw().to_le_bytes());
@@ -409,11 +404,9 @@ impl Runtime {
                 return Err(SpaceError::UnknownSpace(space.raw()));
             }
         }
-        // All-or-nothing: check every view before installing any, so a
-        // rejected view leaves no orphaned "shared" regions behind
-        // (there is no region-removal API to roll a partial install
-        // back with, and an orphan would shift committed_memory_hash
-        // and block the address range forever).
+        // Every view is checked before any is installed: there is no
+        // region-removal API, and an orphaned region would shift
+        // `committed_memory_hash`.
         for (idx, &(space, base)) in views.iter().enumerate() {
             let end = u128::from(base) + u128::from(size);
             if end > u128::from(u64::MAX) {
@@ -423,9 +416,8 @@ impl Runtime {
                 AddressSpaceId::BOOT => &self.memory,
                 s => self.spaces.extra.get(&s).expect("presence checked above"),
             };
-            // Exactly `install_region`'s rejection predicate (a
-            // zero-size view at an existing base is rejected there
-            // too).
+            // `install_region`'s own rejection predicate, a zero-size
+            // view at an existing base included.
             let rejects = |other_base: u128, other_end: u128| {
                 (other_base <= u128::from(base) && other_end > u128::from(base))
                     || (other_base > u128::from(base) && end > other_base)
@@ -469,18 +461,15 @@ impl Runtime {
         Ok(())
     }
 
-    /// Record a keyed-shm window install (334 / 337 drain) and keep
-    /// views of one segment coherent across address spaces.
+    /// Record a keyed-shm window install (the 334 / 337 drain) and keep
+    /// the views of one segment coherent across address spaces.
     ///
-    /// Single-space maps only book-keep: the mapping registers in
-    /// [`SpaceTable::shared`] the moment a second address space
-    /// attaches, adopting every recorded view (their regions are
-    /// already installed by the drain) and seeding each of them from
-    /// the first view -- an attach must observe content written
-    /// before it, and a repeat map inside the first space got its own
-    /// zero-filled region rather than the segment's bytes. Later
-    /// attaches append to the live mapping the same way.
-    /// Single-process boots therefore never touch the shared table.
+    /// A mapping registers in [`SpaceTable::shared`] when a second
+    /// space attaches. Promotion adopts every recorded view and seeds
+    /// each from the first, because an attach observes the content
+    /// written before it and a repeat map inside the first space holds
+    /// its own zero-filled region. A later attach appends to the live
+    /// mapping the same way.
     pub(super) fn attach_keyed_shm_view(
         &mut self,
         key: u64,
@@ -488,9 +477,8 @@ impl Runtime {
         space: AddressSpaceId,
         base: u64,
     ) {
-        // A live mapping's size is the segment's size; a view of a
-        // different length is not a view of this segment, and
-        // appending it would corrupt every later containment test.
+        // A view of another length is not a view of this segment;
+        // appending it would break every later containment test.
         if let Some(mapping) = self.spaces.shared.get(&key) {
             if mapping.size != size {
                 self.lv2_host.log_invariant_break(
@@ -553,12 +541,8 @@ impl Runtime {
                 return;
             }
         }
-        // Every view is one map of the same segment, and a shared
-        // segment is one backing store seen through each of its
-        // windows. Until promotion each view was an independent
-        // zero-filled region, so bring them ALL up to the first view's
-        // content, not just the one attaching now: a repeat map inside
-        // the first space would otherwise stay silently stale forever.
+        // Every view, the earlier ones included, seeds from the first;
+        // see the doc on `attach_keyed_shm_view`.
         let (first, rest) = views.split_first().expect("promotion needs two views");
         for &view in rest {
             self.copy_shared_segment(*first, view, size);
@@ -631,26 +615,21 @@ impl Runtime {
                 .to_vec()
         };
         let dst_range = ByteRange::new(GuestAddr::new(dst.1), size).expect("validated view range");
-        // A seed is the host copying the segment, not any unit's
-        // store, so it exempts nobody and every reservation covering
-        // the rewritten bytes is lost. The store fanout exempts its
-        // emitter instead, for the reason on
-        // `Runtime::fanout_committed_range`.
+        // A seed is the host's copy, not a unit's store, so it exempts
+        // nobody; see the doc on `Runtime::host_write`.
         // [PPC-Book2 p:10 s:1.7.3.1] a modification by some other
         // mechanism loses the reservation.
         self.host_write(HostWriter::SharedViewSeed, dst.0, dst_range, &bytes, None)
             .expect("validated backing region accepts the segment write");
     }
 
-    /// Replicate committed writes that landed in a shared view into
-    /// every sibling view. Runs after a successful commit, inside the
-    /// same batch boundary; iterates mappings in key order and views
-    /// in registration order. Each replicated write also clears
-    /// reservations covering the translated range in the sibling
-    /// view's space, sparing the storing unit's own: a store through
-    /// one view is a store to the shared bytes every view names, and
-    /// a unit's own store does not clear its own reservation. Returns
-    /// the count cleared.
+    /// Replicate the committed writes that landed in a shared view into
+    /// every sibling view, and return the reservations that cleared.
+    ///
+    /// Runs after a successful commit, inside the same batch boundary;
+    /// mappings in key order, views in registration order. Each write
+    /// spares its emitter's reservation; see
+    /// [`Runtime::fanout_committed_range`].
     pub(super) fn fanout_shared_writes(
         &mut self,
         source_space: AddressSpaceId,
@@ -665,11 +644,10 @@ impl Runtime {
                 cellgov_effects::Effect::SharedWriteIntent { range, source, .. } => {
                     (*range, *source)
                 }
-                // Conditional stores commit to the source space only;
-                // an atomic op through a shared view would leave
-                // sibling views incoherent. No producer targets
-                // shared segments with atomics yet -- surface the
-                // first one here instead of as silent incoherence.
+                // A conditional store commits to the source space only,
+                // so one through a shared view leaves the siblings
+                // incoherent. No producer does that yet; the assertion
+                // names the first.
                 cellgov_effects::Effect::ConditionalStore { range, .. } => {
                     debug_assert!(
                         !self.range_intersects_shared_view(source_space, *range),
@@ -678,9 +656,8 @@ impl Runtime {
                         range.start().raw(),
                         range.length(),
                     );
-                    // Release builds compile the assert out; keep the
-                    // witness loud there too (same guard pattern as
-                    // dispatch.lv2_write_targets_shared_view).
+                    // The assertion compiles out under `--release`; the
+                    // invariant break covers that profile.
                     if self.range_intersects_shared_view(source_space, *range) {
                         self.lv2_host.log_invariant_break(
                             "spaces.conditional_store_targets_shared_view",
@@ -698,10 +675,8 @@ impl Runtime {
                 }
                 _ => continue,
             };
-            // The storing unit keeps its own reservation over the
-            // aliases, as it keeps it over the view it stored through:
-            // every view of a segment names one granule, and a
-            // processor's own store does not clear its own reservation.
+            // The storing unit keeps its reservation over every alias;
+            // see the doc on `Runtime::fanout_committed_range`.
             // [PPC-Book2 p:10 s:1.7.3.1] the granule holds the real
             // address an effective address maps to, and only another
             // processor's store clears it.
@@ -715,25 +690,17 @@ impl Runtime {
     /// reservations that cleared.
     ///
     /// `exempt` is the one unit whose reservation survives the
-    /// replicated write. A DMA landing passes its issuer, so every view
-    /// carries the split the destination write applies in its own
-    /// space.
+    /// replicated write: [`Runtime::fanout_shared_writes`] passes the
+    /// store's emitter, a DMA landing its issuer. A unit belongs to one
+    /// space, so the id matches a holder in one table and nothing in
+    /// every other.
     /// [PPC-Book2 p:10 s:1.7.3.1] a reservation granule holds the real
     /// address an effective address maps to, so every view of one
     /// segment names one granule, and only another processor's store
     /// clears it.
-    /// [`Runtime::fanout_shared_writes`] passes the effect's own
-    /// source, so a replicated store spares the storer and sweeps
-    /// every other holder -- the split the commit pipeline already
-    /// applied in the source space.
     ///
-    /// A unit belongs to exactly one space, so the exempt id can name
-    /// a holder in one table only; in every other view's table it
-    /// matches nothing.
-    ///
-    /// Reads the bytes back out of committed memory rather than taking
-    /// them from the caller, so a partial-overlap write replicates what
-    /// the pipeline actually applied.
+    /// The bytes are read back out of committed memory, so a
+    /// partial-overlap write replicates what the pipeline applied.
     pub(super) fn fanout_committed_range(
         &mut self,
         source_space: AddressSpaceId,
@@ -745,7 +712,6 @@ impl Runtime {
         }
         let mut cleared = 0usize;
         let (start, len) = (range.start().raw(), range.length());
-        // Collect replication targets first: (bytes, dst_space, dst_addr).
         let mut replications: Vec<(Vec<u8>, AddressSpaceId, u64)> = Vec::new();
         for mapping in self.spaces.shared.values() {
             let source_view = mapping
@@ -766,18 +732,15 @@ impl Runtime {
                 };
                 match mem.read(range) {
                     Some(bytes) => bytes.to_vec(),
-                    // An unreadable source range cannot have committed
-                    // (a committed write reads back), so there is
-                    // nothing to replicate. Reachable only when the
-                    // caller passes effects that never landed, e.g. a
-                    // fault-discarded batch.
+                    // An unreadable source range committed nothing, so
+                    // there is nothing to replicate; only an effect that
+                    // never landed reaches here.
                     None => continue,
                 }
             };
             for &(dst_space, dst_base) in &mapping.views {
-                // Skip only the exact view the write landed in: a
-                // second view in the same space is still an alias of
-                // the shared bytes and must receive the write.
+                // Skip only the view the write landed in; a second view
+                // in the same space aliases the same bytes.
                 if dst_space == source_space && dst_base == source_base {
                     continue;
                 }
@@ -801,12 +764,8 @@ impl Runtime {
         cleared
     }
 
-    /// Sibling-view aliases of `range` as seen from `unit`'s space:
-    /// for every shared mapping whose view in that space contains
-    /// `range`, the equivalent range through each other view. Empty
-    /// when `range` touches no shared view. Dependency analysis uses
-    /// this to keep cross-space writes to the same shared bytes from
-    /// proving false independence.
+    /// Sibling-view aliases of `range` as seen from `unit`'s space;
+    /// [`Runtime::shared_alias_ranges_in`] with the unit's space.
     pub fn shared_alias_ranges(&self, unit: UnitId, range: ByteRange) -> Vec<ByteRange> {
         self.shared_alias_ranges_in(self.spaces.space_of(unit), range)
     }
@@ -818,9 +777,10 @@ impl Runtime {
     /// fanout replicates under the same containment, so the aliases
     /// are the bytes a commit would reach.
     ///
-    /// [`Runtime::shared_alias_ranges`] asks the same question of the
-    /// space a unit runs in. A host write names its own space instead,
-    /// which [`Runtime::last_host_writes`] carries beside each range.
+    /// Dependency analysis reads these so two cross-space writes to the
+    /// same shared bytes never prove independent. A host write names
+    /// its own space, which [`Runtime::last_host_writes`] carries
+    /// beside each range.
     pub fn shared_alias_ranges_in(
         &self,
         space: AddressSpaceId,
@@ -870,14 +830,12 @@ impl Runtime {
         })
     }
 
-    /// Committed-memory hash across every space's content. Mapping
-    /// metadata is not folded here; it reaches the sync-channel state
-    /// hash through `metadata_hash`.
-    /// With no child spaces this is exactly space 0's content hash.
-    /// Replay tooling compares schedules through this rather than
-    /// `memory()` alone, so a cross-process divergence in a child space
-    /// is witnessed. The schedule explorer compares through
-    /// [`Runtime::observable_hash`], which folds this.
+    /// Committed-memory hash over every space's content.
+    ///
+    /// Child spaces fold in so a cross-process divergence in one is
+    /// witnessed; with no child space this is space 0's content hash.
+    /// Mapping metadata stays outside it and reaches the sync-channel
+    /// state hash through `metadata_hash`.
     pub fn committed_memory_hash(&self) -> u64 {
         if self.spaces.extra.is_empty() {
             return self.memory.content_hash();

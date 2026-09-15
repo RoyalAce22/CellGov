@@ -134,8 +134,6 @@ fn both_reports_say_whether_the_search_covered_every_class() {
     assert_eq!(v["reversals_dropped"], 0);
 }
 
-/// A count withdrawn by a drop reads differently from one never
-/// claimed, so a reader can tell how much the run gave up.
 #[test]
 fn a_withdrawn_count_names_the_reversals_that_withdrew_it() {
     let withdrawn = ExplorationResult {
@@ -153,8 +151,8 @@ fn a_withdrawn_count_names_the_reversals_that_withdrew_it() {
     assert_eq!(v["reversals_dropped"], 3);
 }
 
-/// A count beside a drop is a state the type allows and the searches do
-/// not produce. Both reports name it, so neither can read as covered.
+/// A count beside a drop is a state the type allows and no search
+/// produces.
 #[test]
 fn a_count_beside_a_drop_reads_as_a_contradiction_in_both_reports() {
     let contradictory = ExplorationResult {

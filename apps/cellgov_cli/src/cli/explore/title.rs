@@ -39,20 +39,10 @@ const EXIT_MODEL_REFUSAL: i32 = exit_codes::command_specific(20);
 const EXIT_WINDOW_NEVER_OPENED: i32 = exit_codes::command_specific(21);
 
 /// Exit code: a schedule the exploration ran ended in a guest fault.
-///
-/// Separate from [`EXIT_MODEL_REFUSAL`] because the two name different
-/// findings: a refusal is the model declining a step, and a fault is
-/// the guest's own step failing. `explore window` calls the same stop a
-/// fault, and this is how `explore title` says it.
 const EXIT_GUEST_FAULT: i32 = exit_codes::command_specific(22);
 
 /// Exit code: the window holds something the search cannot reason
 /// about, so it answers for none of it.
-///
-/// Distinct from [`EXIT_MODEL_REFUSAL`]: nothing is wrong with the
-/// model. It is also what [`EXIT_WINDOW_NEVER_OPENED`] reports for the
-/// same cause met before the window opens, so the two ends of one boot
-/// give one reading.
 const EXIT_WINDOW_UNSERVED: i32 = exit_codes::command_specific(23);
 
 /// Exit code: the window is schedule-sensitive, the same verdict the
@@ -100,12 +90,9 @@ pub(super) fn run(args: &ExploreTitleArgs, format: OutputFormat, vfs_flag: Optio
     let checkpoint = plan.as_plan().checkpoint;
     let mut rt = prepared_runtime(&inputs, firmware_dir.as_deref(), max_steps);
     crate::game::configure_rsx_from_manifest(&mut rt, &inputs.title);
-    // `--start-step` counts runtime steps, which is what the runtime's
-    // own cap bounds; see `WindowStart::Step`.
+    // Both counts are runtime steps; see the doc on `WindowStart::Step`.
     if let Some(refusal) = start_past_cap(start, rt.max_steps()) {
-        // A flag value this boot cannot satisfy is a usage error, so it
-        // takes the shared usage status rather than the one a
-        // schedule-sensitive window exits with.
+        // A flag value this boot cannot satisfy is a usage error.
         die_usage(&refusal);
     }
 
@@ -121,8 +108,8 @@ pub(super) fn run(args: &ExploreTitleArgs, format: OutputFormat, vfs_flag: Optio
         max_schedules: args.max_schedules,
         max_steps_per_run: args.max_steps_per_run,
     };
-    // `explore_window` takes the runtime the boot already built. The
-    // factory hands over that one, and the explorer calls it once.
+    // The explorer calls its factory once, so the factory hands over
+    // the runtime the boot built.
     let mut once = Some(rt);
     let result = cellgov_explore::explore_window(
         || {
@@ -148,11 +135,11 @@ pub(super) fn run(args: &ExploreTitleArgs, format: OutputFormat, vfs_flag: Optio
 
 /// The start condition the flags name.
 fn window_start(args: &ExploreTitleArgs) -> WindowStart {
+    // Clap's group makes the two flags exclusive, so the first arm
+    // never hides a `--start-pc`.
     match (args.start_step, args.start_pc) {
         (Some(n), _) => WindowStart::Step(n),
         (_, Some(pc)) => WindowStart::Pc(pc),
-        // Clap's group makes the two flags exclusive, so this arm means
-        // the caller gave neither.
         (None, None) => WindowStart::FirstBranchingPoint,
     }
 }
@@ -160,11 +147,8 @@ fn window_start(args: &ExploreTitleArgs) -> WindowStart {
 /// Bring the title to a runtime one `step()` from its first
 /// instruction. A refusal ends the process.
 ///
-/// The staged child-init plans go unrun: this command's drive does not
-/// run them, and neither do the explorer's replays. [`open_window`]
-/// refuses by name the moment a child parks behind one, so it catches a
-/// spawn before the window opens. A spawn inside the window escapes
-/// that check.
+/// No staged child-init pass runs here or in the explorer's replays;
+/// [`open_window`] refuses the first one it meets.
 fn prepared_runtime(
     inputs: &crate::cli::boot_cmd::BootInputs,
     firmware_dir: Option<&str>,
@@ -223,11 +207,9 @@ impl Window {
     /// The step the window ends at, given what the baseline did inside
     /// it.
     ///
-    /// `baseline_steps` counts committed steps. A refused commit is a
-    /// step the runtime took and did not commit. The window then
-    /// reaches one step further than the hash covers. A cell whose
-    /// checkpoint is a write into the reserved RSX region takes that
-    /// path.
+    /// `baseline_steps` counts committed steps. A refused commit is one
+    /// more step the runtime took, so the window reaches one past the
+    /// hash.
     fn closed_at(&self, result: &ExplorationResult) -> usize {
         let uncommitted = usize::from(matches!(result.baseline_stop, StopReason::CommitError(_)));
         self.opened_at
@@ -238,9 +220,8 @@ impl Window {
     /// The guest address `stop` is the cell's checkpoint at, or `None`
     /// when it is some other stop.
     ///
-    /// A `first-rsx-write` checkpoint reaches a driver as a refused
-    /// commit, the same shape a defect in the commit pipeline takes.
-    /// Only the cell's declared trigger separates the two.
+    /// A `first-rsx-write` checkpoint reaches this driver as a refused
+    /// commit, so only the cell's trigger separates it from a refusal.
     fn checkpoint_addr(&self, stop: StopReason) -> Option<u64> {
         match stop {
             StopReason::CommitError(e) => rsx_checkpoint_addr(self.checkpoint, e),
@@ -269,9 +250,8 @@ impl Window {
     /// How many schedules in `result` ended in a guest fault, the
     /// baseline included.
     ///
-    /// No checkpoint explains a fault: a `first-rsx-write` cell reaches
-    /// its checkpoint as a refused commit, and every other trigger as a
-    /// stop no unit faulted on.
+    /// No checkpoint trigger ends a boot in a fault, so unlike
+    /// [`Self::model_refusals`] this counts every one.
     fn guest_faults(&self, result: &ExplorationResult) -> usize {
         self.count_stops(result, |stop| stop.class() == StopClass::Fault)
     }
@@ -289,12 +269,9 @@ impl Window {
 
 /// The status the run exits with.
 ///
-/// A refusal outranks the verdict: a schedule the model would not run
-/// leaves the classification to the schedules that ran, so the refusal
-/// is the finding. A guest fault outranks it for the same reason and
-/// exits under its own name, because it says something about the guest
-/// rather than about the model. A bound is the caller's own cap, and
-/// the cell's checkpoint is where the boot stops; both exit clean.
+/// A refusal, a fault or an unserved schedule outranks the verdict, in
+/// that order: a schedule that stopped short leaves the classification
+/// incomplete. A bound and the cell's checkpoint both exit clean.
 fn exit_code(window: &Window, result: &ExplorationResult) -> i32 {
     if window.model_refusals(result) > 0 {
         return EXIT_MODEL_REFUSAL;
@@ -302,8 +279,6 @@ fn exit_code(window: &Window, result: &ExplorationResult) -> i32 {
     if window.guest_faults(result) > 0 {
         return EXIT_GUEST_FAULT;
     }
-    // No verdict rests on a window the search would not answer for, so
-    // this outranks the outcome below and never exits clean.
     if window.unserved(result) > 0 {
         return EXIT_WINDOW_UNSERVED;
     }
@@ -335,12 +310,9 @@ fn window_lines(window: &Window, result: &ExplorationResult) -> String {
             window.checkpoint.as_cli_str(),
         ));
     }
-    // The explorer replays each alternate under `--max-steps-per-run`,
-    // which is its own bound and shorter than the window whenever the
-    // baseline ran past it. This line keeps the range above from reading
-    // as the range every schedule covered. A baseline that stopped short
-    // marks every record truncated on its own account, and the
-    // exploration's `baseline_stop` line already carries that.
+    // An alternate stops at `--max-steps-per-run`, which can fall short
+    // of the window. A truncated baseline already reports that through
+    // its own `baseline_stop` line.
     if !result.baseline_stop.is_truncated() && result.schedules_truncated > 0 {
         out.push_str(&format!(
             "window_covered: {} of {} alternate(s) stopped before the window closed; each \

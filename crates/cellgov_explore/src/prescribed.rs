@@ -1,10 +1,7 @@
-//! Scheduler that replays a recorded per-step choice list, falling
-//! back to round-robin beyond the list or when the prescribed unit
-//! is not currently runnable.
-//!
-//! Observation-only: installing a `PrescribedScheduler` never mutates
-//! the runtime's state; it only biases which runnable unit the
-//! runtime picks next.
+//! Scheduler that replays a recorded per-step choice list and falls
+//! back to round-robin beyond the list or where the prescribed unit is
+//! not runnable. It changes no runtime state; it decides which runnable
+//! unit the runtime picks next.
 
 use cellgov_core::{RoundRobinScheduler, Scheduler, UnitRegistry};
 use cellgov_event::UnitId;
@@ -12,9 +9,6 @@ use cellgov_exec::{UnitStatus, YieldReason};
 
 /// Scheduler that picks from a prescribed list, then falls back to
 /// round-robin.
-///
-/// At step `i`, if `overrides[i] == Some(uid)` and `uid` is runnable,
-/// `uid` is chosen. Otherwise the fallback picks.
 pub struct PrescribedScheduler {
     overrides: Vec<Option<UnitId>>,
     step: usize,
@@ -33,9 +27,7 @@ impl PrescribedScheduler {
     }
 
     /// Force `choice` on the first scheduling decision, then fall
-    /// back to round-robin. Suits the snapshot/restore path where
-    /// the host runtime's step counter is already at the branch
-    /// point and only one override is needed.
+    /// back to round-robin.
     pub fn single_choice(choice: UnitId) -> Self {
         Self::new(vec![Some(choice)])
     }
@@ -46,9 +38,8 @@ impl Scheduler for PrescribedScheduler {
         let override_for_step = self.overrides.get(self.step).copied().flatten();
         if let Some(uid) = override_for_step {
             if registry.effective_status(uid) == Some(UnitStatus::Runnable) {
-                // The fallback's cursor follows the unit that ran, so
-                // the first pick after the prescription rotates from
-                // there exactly as round-robin would have.
+                // The fallback's cursor follows the unit that ran (see
+                // `RoundRobinScheduler::note_selected`).
                 self.fallback.note_selected(uid);
                 self.step += 1;
                 return Some(uid);
@@ -71,10 +62,9 @@ impl Scheduler for PrescribedScheduler {
         woke_others: bool,
         holds_critical_section: bool,
     ) {
-        // The fallback's selection is stateful (non-waking-syscall and
-        // critical-section stickiness); it must observe every yield
-        // even while overrides are active, or the selections after the
-        // prescription diverge from the baseline round-robin schedule.
+        // The fallback reads every yield, under a prescription too, so
+        // its stickiness state (see `RoundRobinScheduler`) matches the
+        // baseline's when the prescription ends.
         self.fallback
             .notify_yielded(unit, yield_reason, woke_others, holds_critical_section);
     }

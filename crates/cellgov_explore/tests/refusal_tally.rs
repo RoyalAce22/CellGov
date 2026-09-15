@@ -3,17 +3,9 @@
 //! Both tallies answer for alternates. A refusal is one way an alternate
 //! truncates, so the refused count is a subset of the truncated one, and
 //! neither can exceed the number of alternates the search recorded.
-//!
-//! A baseline counted into one tally and not the other breaks that
-//! without breaking any exit code, because `report.rs` prints the two
-//! numbers and nothing recomputes them.
-//!
-//! Two of the workloads here stop short by faulting and one by a
-//! refused commit. A guest fault is not a refusal, so a faulting
-//! alternate moves the truncated count alone; only the model declining
-//! a step or its commit raises the refused one. Both are here so the
-//! zero a fault leaves is a measurement rather than a count nothing in
-//! the file could move.
+//! `report.rs` prints the two numbers and nothing recomputes them, so a
+//! baseline counted into one tally and not the other breaks no exit
+//! code.
 
 #![allow(
     clippy::unwrap_used,
@@ -37,10 +29,6 @@ use cellgov_time::Budget;
 const GATE: u64 = 32;
 
 /// A baseline that faults on its first step, with no alternate to run.
-///
-/// One unit, so no schedule branches. The baseline stops short and the
-/// search records no alternate at all, which is the shape that put a
-/// count beside zero truncations.
 fn baseline_faults_alone() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 200);
     rt.register_unit_with(|id| {
@@ -53,9 +41,7 @@ fn baseline_faults_alone() -> Runtime {
 ///
 /// The writer holds the lower id, so the baseline sets the gate before
 /// the faulter reads it and runs itself out. Reversing the pair is the
-/// alternate, and it faults. A stop short reaches the tally only from
-/// an alternate: a baseline that stops short records none, because a
-/// truncated execution's races are never read.
+/// alternate, and it faults.
 fn an_alternate_faults() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(4), 200);
     let gate = ByteRange::new(GuestAddr::new(GATE), 1).unwrap();
@@ -66,8 +52,8 @@ fn an_alternate_faults() -> Runtime {
     rt
 }
 
-/// Bytes of guest memory. The indexed store below strides by it, so
-/// any index past zero addresses memory the commit pipeline refuses.
+/// The indexed store below strides by the memory size, so any index
+/// past zero addresses memory the commit pipeline refuses.
 const MEMORY: usize = 64;
 
 /// A baseline that finishes and an alternate the commit pipeline
@@ -78,7 +64,7 @@ const MEMORY: usize = 64;
 /// memory. The reader holds the lower id, so the baseline reads a zero
 /// gate and stores at `base`. The reversal reads `0xaa` first, indexes
 /// past the end of memory, and the commit refuses the write as out of
-/// range -- which is a refusal and not a fault.
+/// range.
 fn an_alternate_is_refused() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(MEMORY), Budget::new(4), 200);
     rt.register_unit_with(|id| {
@@ -130,9 +116,8 @@ fn hold_the_tally(name: &str, result: &ExplorationResult) {
         result.schedules_truncated, recorded,
         "{name}: the tally and the records disagree",
     );
-    // Derived from the records rather than compared against a constant:
-    // the first assertion above holds for a count stuck at zero, and
-    // this one does not.
+    // Derived from the records: the first assertion above holds for a
+    // count stuck at zero, and this one does not.
     let refused = result
         .schedules
         .iter()
@@ -161,10 +146,6 @@ fn both_searches_hold_the_tally_over_every_workload() {
     }
 }
 
-/// The case the tally used to get wrong, stated on its own.
-///
-/// The baseline stops short and there is no alternate, so both tallies
-/// are zero: they answer for alternates, and there were none.
 #[test]
 fn a_faulting_baseline_with_no_alternate_counts_neither() {
     let config = ExplorationConfig::default();
@@ -189,11 +170,8 @@ fn a_faulting_baseline_with_no_alternate_counts_neither() {
     }
 }
 
-/// An alternate that stops short moves the truncated tally, which is
-/// what keeps the cases above from passing on a tally stuck at zero.
-///
-/// It moves only that one. The guest's own step failed, and the model
-/// refused nothing, so the two counts part company here.
+/// The case that keeps the ones above from passing on a tally stuck at
+/// zero.
 #[test]
 fn a_faulting_alternate_truncates_without_refusing() {
     let result = explore_window(an_alternate_faults, &ExplorationConfig::default());
@@ -216,11 +194,9 @@ fn a_faulting_alternate_truncates_without_refusing() {
     );
 }
 
-/// A refused alternate raises the refused count, which is the path the
-/// tally exists to watch.
-///
-/// The cases above all leave that count at zero, so without this one a
-/// search that never counted a refusal at all would satisfy the file.
+/// The one case that moves the refused count: the others leave it at
+/// zero, so without this one a search that never counted a refusal
+/// would satisfy the file.
 #[test]
 fn a_refused_alternate_raises_the_refused_count() {
     let result = explore_window(an_alternate_is_refused, &ExplorationConfig::default());
@@ -260,7 +236,6 @@ fn a_refused_alternate_raises_the_refused_count() {
     );
 }
 
-/// The two searches report the same tally for the same workload.
 #[test]
 fn the_two_searches_agree_on_the_tally() {
     let config = ExplorationConfig::default();

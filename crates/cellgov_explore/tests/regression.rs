@@ -253,8 +253,6 @@ fn regression_overlapping_writers_not_pruned() {
     );
 }
 
-/// Flat region at base 0 plus an RSX region at 0xC000_0000, with
-/// the put-pointer writeback mirror enabled.
 fn build_rsx_runtime() -> Runtime {
     use cellgov_mem::{PageSize, Region};
     let regions = vec![

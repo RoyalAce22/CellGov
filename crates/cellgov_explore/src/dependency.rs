@@ -1,66 +1,32 @@
 //! Conservative dependency analysis for schedule exploration.
 //!
 //! [`StepFootprint`] holds the shared resources one step touched, and
-//! [`StepFootprint::conflicts`] answers whether swapping two steps
-//! could change what either observes. The answer over-approximates: it
-//! never calls two dependent steps independent, and a false dependency
-//! costs exploration budget alone.
+//! [`StepFootprint::conflicts`] answers whether a swap of two steps
+//! could change what either observes. The answer over-approximates: a
+//! false dependency costs exploration budget alone. A faulted step
+//! records no footprint: the commit discards its batch and every driver
+//! stops there, so it is not an event. An order in which the step does
+//! not fault records its read instead
+//! (`tests/fault_decided_by_a_write.rs`).
 //!
-//! Each clause of `conflicts` carries the argument that makes it
-//! sound. Some shared state reaches no footprint at all. Two steps
-//! that interact only through one of these prune when they should
-//! not:
+//! Four kinds of shared state reach no footprint, so two steps that
+//! interact only through one of them prune when they should not:
 //!
-//! - Guest time, in one of its four readers. One clock advances by
-//!   each step's cost, and a timer wake is stamped with a deadline from
-//!   it; that stamp reaches no footprint. `tests/timer_deadline.rs`
-//!   holds the witness, and records that the cover stays whole anyway.
-//!   The other three readers do reach a footprint. A `mftb` and an LV2
-//!   handler's tick-derived write reach [`StepFootprint::reads_clock`].
-//!   The tick a transfer lands at reaches
+//! - The deadline a timer wake carries (`tests/timer_deadline.rs`,
+//!   which records that the cover stays whole anyway). The clock's
+//!   other readers reach [`StepFootprint::reads_clock`] and
 //!   [`StepFootprint::inflight_dma_ranges`].
-//! - The RSX FIFO advance pass's cursor and call stack, and the label,
-//!   notify and report words it writes. Those land as `RsxLabelWrite`
-//!   effects the pass queues for the next commit, and
-//!   `Runtime::commit_step` prepends them. No driver's effect slice
-//!   carries one, and [`StepFootprint::from_effects`] records nothing
-//!   for the variant either. The pass's MMIO mirrors are the half that
-//!   does reach a footprint, through
+//! - The RSX FIFO advance pass's cursor and call stack, and the
+//!   `RsxLabelWrite` effects it queues. Its MMIO mirrors do reach
 //!   [`StepFootprint::note_host_writes`].
-//! - An LV2 syscall's park and the wake that ends it, neither of which
-//!   carries an effect or a yield reason.
-//!
-//! An LV2 handler's own effects are not among them. The runtime applies
-//! them at dispatch rather than through the commit pipeline, so the
-//! calling unit's step names none of them.
-//! [`StepFootprint::note_lv2_effects`] puts them back:
-//!
-//! - A write becomes that step's write.
-//! - A mailbox send becomes that step's send, and the wake it performs
-//!   on the unit whose id keys the mailbox.
-//!
-//! `tests/lv2_out_param.rs` and `tests/lv2_mailbox_wake.rs` hold the
-//! two halves.
-//!
-//! The park reaches a workload here through one syscall, the spawn in
-//! `tests/child_init_window.rs`. A refusal closes it, rather than a
-//! record. `cellgov_boot` holds every other unit
-//! `Blocked` across a spawned child's `module_start` through
-//! `Runtime::set_unit_status_override`, which no footprint sees either.
-//! So every driver stops with
-//! [`crate::util::StopReason::ChildInitUnserved`] before it takes a
-//! step under a staged pass, and the step that stages one reaches no
-//! decision point. A window that spans one reaches no verdict, which is
-//! the honest answer while the relation cannot see the parks.
-//!
-//! A faulted step records no footprint and needs none: its batch is
-//! discarded and every driver stops there, so it is not an event.
-//!
-//! Another unit's write can decide whether a step faults. An order
-//! where the step does not fault records its read, and the relation
-//! holds that pair apart. Where every order faults, the run truncates
-//! and answers for nothing. `tests/fault_decided_by_a_write.rs` holds
-//! both.
+//! - A DMA completion's wake of its issuer, which the commit applies
+//!   as a status override and no `WakeUnit` effect carries. The park
+//!   it ends does reach [`StepFootprint::wait_units`].
+//! - An LV2 handler's park of its caller and the wake that ends it.
+//!   The one park a workload here reaches is the spawn's staged pass
+//!   (`tests/child_init_window.rs`), which every driver refuses with
+//!   [`crate::util::StopReason::ChildInitUnserved`]; the parks the
+//!   sync and timer handlers take reach no footprint and no refusal.
 
 use cellgov_effects::Effect;
 use cellgov_exec::YieldReason;
@@ -84,18 +50,15 @@ pub struct StepFootprint {
     pub mailbox_receives: Vec<MailboxId>,
     /// Ranges a transfer writes at completion: its destination.
     ///
-    /// The commit pipeline refuses any direction but a put, and a put's
-    /// destination is the end that lands in committed memory. So this
-    /// end is the destination for everything that reaches a queue.
+    /// The commit pipeline admits puts alone, so the destination is the
+    /// end that lands in committed memory for every queued transfer.
     pub dma_writes: Vec<ByteRange>,
     /// Ranges a transfer reads at completion: the source of a
     /// transfer no inline payload carries.
     ///
-    /// A payloaded transfer copied its bytes at enqueue and reads
-    /// nothing later, and an SPU put's source addresses local store
-    /// rather than committed memory. Neither belongs here, so no
-    /// comparison pairs a local-store address against a
-    /// main-memory range.
+    /// A payloaded transfer copied its bytes at enqueue, and an SPU
+    /// put's source is a local-store address. Neither is a main-memory
+    /// range, so neither belongs here.
     pub dma_reads: Vec<ByteRange>,
     /// Signals updated.
     pub signal_updates: Vec<SignalId>,
@@ -109,9 +72,9 @@ pub struct StepFootprint {
     pub wake_targets: Vec<cellgov_event::UnitId>,
     /// Units this step's effects can park.
     ///
-    /// The commit pipeline reads a wait's source, not its target, so
-    /// the unit is the key a wake matches. A receive attempt belongs
-    /// here too: it parks its source when the mailbox comes back empty.
+    /// A wake names the parked unit, so the pipeline keys a wait by its
+    /// source. A receive attempt belongs here too: an empty mailbox
+    /// parks its source.
     pub wait_units: Vec<cellgov_event::UnitId>,
     /// 128-byte-aligned line addresses touched by a `ReservationAcquire`.
     ///
@@ -123,21 +86,10 @@ pub struct StepFootprint {
     /// landing: each one's destination, and the source of one no inline
     /// payload carries.
     ///
-    /// A transfer lands at the first commit whose clock passed the tick
-    /// stamped at its enqueue. So a step taken during a flight moves
-    /// the landing relative to every other step.
-    ///
-    /// A step taken before the enqueue needs no record. It moves the
-    /// enqueue and everything after it by the same cost, which leaves
-    /// the landing where it was relative to them. Reordering a step
-    /// across the enqueue is still covered: a step during the flight
-    /// conflicts with the enqueue's own [`StepFootprint::dma_writes`]
-    /// and [`StepFootprint::dma_reads`].
-    ///
-    /// [`StepFootprint::conflicts`] tests this set against the other
-    /// step's accesses, and against this step's own accesses through
-    /// the landing clause. Two steps that only share a flight still
-    /// prune, where neither touches the bytes it moves.
+    /// A transfer lands at the first commit whose clock passed its
+    /// enqueue tick, so a step taken during a flight moves the landing
+    /// relative to every other step. A step taken before the enqueue
+    /// moves the enqueue and the landing alike, and needs no record.
     pub inflight_dma_ranges: Vec<ByteRange>,
     /// Whether the step read the guest clock.
     ///
@@ -164,23 +116,14 @@ impl StepFootprint {
         fp
     }
 
-    /// Add the four producers the step's commit feeds.
+    /// Add what the step's commit did to the footprint its effects gave.
     ///
-    /// A step's footprint is built in two halves because the commit
-    /// falls between them: [`StepFootprint::from_step`] reads the
-    /// effects the unit emitted, and this reads what committing them
-    /// did. Call it immediately after `commit_step`, with the unit that
-    /// ran. It closes none of the gaps the module doc names.
-    ///
-    /// [`StepFootprint::expand_aliases`] widens the ranges the two
-    /// recorders ahead of it pushed, so an earlier position leaves the
-    /// in-flight set unwidened -- a footprint short an access, which is
-    /// how a search prunes an execution it owed.
-    /// [`StepFootprint::note_host_writes`] widens its own ranges
-    /// through the space each landed in, so it runs last and nothing
-    /// reads them a second time from the stepping unit's space. The
-    /// other order for that pair costs a duplicate range, never an
-    /// access.
+    /// Call it directly after `commit_step`, with the unit that ran.
+    /// The order inside is fixed: [`StepFootprint::expand_aliases`]
+    /// widens the ranges already recorded and no others, and
+    /// [`StepFootprint::note_host_writes`] widens its own ranges through
+    /// the space each landed in, which need not be the stepping unit's
+    /// (see `Runtime::last_host_writes`).
     pub fn note_commit(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
         self.note_inflight(rt);
         self.note_lv2_effects(rt);
@@ -191,13 +134,9 @@ impl StepFootprint {
     /// Widen every range category to the sibling views it aliases.
     ///
     /// An access through one view of a shared mapping reaches every
-    /// sibling view's bytes. A DMA range needs the same widening: a
-    /// transfer lands in space 0, and a unit that reads a view which
-    /// aliases the landing sees it.
-    ///
-    /// Call it after [`StepFootprint::note_inflight`] and
-    /// [`StepFootprint::note_lv2_effects`], so every range they record
-    /// is there to widen.
+    /// sibling view's bytes, and a unit that reads a view which aliases
+    /// a DMA landing sees the landing. A range recorded after this call
+    /// stays unwidened; [`StepFootprint::note_commit`] fixes the order.
     pub fn expand_aliases(&mut self, rt: &cellgov_core::Runtime, unit: cellgov_event::UnitId) {
         for category in [
             &mut self.shared_writes,
@@ -216,13 +155,11 @@ impl StepFootprint {
 
     /// Record the transfers in flight during this step.
     ///
-    /// Call it after the step's commit: that commit is what fires a due
-    /// transfer, and one it fired was in flight for that step.
-    ///
-    /// A transfer the all-blocked time warp fires reaches neither the
-    /// queue nor the fired list, and needs to reach neither: the warp
-    /// lands it before the step it then selects, and every step it was
-    /// in flight for already read it out of the queue.
+    /// Call it after the step's commit: that commit fires a due
+    /// transfer, and one it fired was in flight for the step. A
+    /// transfer the warp fires reaches neither list
+    /// (`Runtime::last_dma_completions`) and needs to reach neither:
+    /// every step it was in flight for already read it out of the queue.
     pub fn note_inflight(&mut self, rt: &cellgov_core::Runtime) {
         let queued = rt.dma_queue().pending();
         let fired = rt
@@ -231,9 +168,7 @@ impl StepFootprint {
             .map(|(completion, payloaded)| (completion, *payloaded));
         for (completion, payloaded) in queued.chain(fired) {
             self.inflight_dma_ranges.push(completion.destination());
-            // A payloaded transfer reads no source at completion, and
-            // an SPU put's source names local store. See
-            // [`StepFootprint::dma_reads`].
+            // See the doc on `dma_reads`.
             if !payloaded {
                 self.inflight_dma_ranges.push(completion.source());
             }
@@ -242,29 +177,15 @@ impl StepFootprint {
 
     /// Record what an LV2 handler did during this step.
     ///
-    /// Call it after the step's commit, which is what runs the
-    /// dispatch. The runtime applies a handler's effects there rather
-    /// than through the commit pipeline, so the step's own effect list
-    /// names none of them. A syscall reaches the relation as a step
-    /// that touched nothing.
+    /// Call it after the step's commit, which runs the dispatch. The
+    /// step's own effect list names none of a handler's effects
+    /// (`Runtime::last_lv2_effects`), so without this a syscall reaches
+    /// the relation as a step that touched nothing.
     ///
-    /// It reads them through [`StepFootprint::from_effects`], so each
-    /// one lands in the category it would have from a unit and answers
-    /// to the clause that category already has.
-    ///
-    /// A handler's mailbox send answers to one more. The commit
-    /// pipeline's own send only fills the mailbox.
-    /// `Runtime::apply_lv2_effects` runs a handler's send itself and
-    /// releases the target's park with it, and it reads the target's
-    /// status alone rather than what parked it. The mailbox clause
-    /// pairs that send with a receive attempt and with nothing else, so
-    /// this method records the release as the wake it is.
-    ///
-    /// An effect carries no address space, so
-    /// [`StepFootprint::expand_aliases`] widens a handler's write
-    /// through the stepping unit's space, which a timer expiry's repair
-    /// write does not land in. [`StepFootprint::note_host_writes`]
-    /// reads the same writes back with the space each landed in.
+    /// `Runtime::apply_lv2_effects` releases the target's park with a
+    /// handler's mailbox send, and the mailbox clause pairs a send with
+    /// a receive attempt alone. So the send is also recorded as the
+    /// wake it performs.
     pub fn note_lv2_effects(&mut self, rt: &cellgov_core::Runtime) {
         let lv2 = Self::from_effects(rt.last_lv2_effects());
         self.merge(lv2);
@@ -316,23 +237,11 @@ impl StepFootprint {
 
     /// Record the host writes that landed during this step.
     ///
-    /// One of the four [`StepFootprint::note_commit`] runs; called
-    /// directly, it runs after the step's commit. That commit runs the
-    /// LV2 dispatch, resolves the wakes and fires the completions, and
-    /// each of those writes guest memory outside the unit's batch. The
-    /// record reaches back to the step's start, so it also holds what
-    /// the all-blocked time warp wrote before the step it picked.
-    ///
-    /// Each one becomes this step's own
-    /// [`StepFootprint::shared_writes`]: the bytes land at this step,
-    /// and this step's position decides them. The match is exhaustive,
-    /// so a new `HostWriter` variant does not compile until this
-    /// classifies it.
-    ///
-    /// It widens each range itself, through the space the write landed
-    /// in. That is the space `expand_aliases` cannot supply: some of
-    /// these writes land outside the space of the unit whose step they
-    /// belong to.
+    /// Call it after the step's commit. Each write becomes this step's
+    /// own [`StepFootprint::shared_writes`], widened through the space
+    /// it landed in: the bytes land at this step, and this step's
+    /// position decides them. The record reaches back to the step's
+    /// start, so it also holds what the warp wrote.
     pub fn note_host_writes(&mut self, rt: &cellgov_core::Runtime) {
         for (writer, space, range) in rt.last_host_writes() {
             let record = |fp: &mut Self, range: &cellgov_mem::ByteRange| {
@@ -341,28 +250,24 @@ impl StepFootprint {
                     .extend(rt.shared_alias_ranges_in(*space, *range));
             };
             match writer {
-                // The dispatch holds the tick it ran at, and nothing in
-                // the effect separates a payload built from that tick
-                // from one that ignored it. The
-                // `sys_time_get_current_time` out parameters are such a
-                // payload. So an LV2 write reads the clock, on the same
-                // argument [`StepFootprint::reads_clock`] makes for
-                // `mftb`: the handler can put that value anywhere in
-                // the bytes it lands.
+                // The dispatch holds the tick it ran at, and a handler
+                // can land a tick-derived value anywhere in these bytes
+                // (the `sys_time_get_current_time` out parameters are
+                // one). So an LV2 write reads the clock, on the argument
+                // [`StepFootprint::reads_clock`] makes for `mftb`.
                 cellgov_trace::HostWriter::Lv2Effect
                 | cellgov_trace::HostWriter::SyscallOutParam
                 | cellgov_trace::HostWriter::WakeContinuation => {
                     record(self, range);
                     self.reads_clock = true;
                 }
-                // The seed copy a newly attached view receives. Its
-                // bytes are the segment's, so no tick reaches them.
+                // A new view's seed copy carries the segment's bytes,
+                // and the RSX mirrors carry the cursor's and the flip
+                // model's; no tick reaches either. The advance pass
+                // belongs to no unit's step, but its writes land inside
+                // one commit, whose step's position decides when a
+                // poller sees them.
                 cellgov_trace::HostWriter::SharedViewSeed
-                // The RSX mirrors, whose bytes are the cursor's and the
-                // flip model's, and no tick's. The advance pass belongs
-                // to no unit's step, but its writes land inside one
-                // commit. That step's position decides when a poller
-                // sees them.
                 | cellgov_trace::HostWriter::RsxMirror => {
                     record(self, range);
                 }
@@ -407,9 +312,7 @@ impl StepFootprint {
                 Effect::MailboxReceiveAttempt { mailbox, source } => {
                     fp.mailbox_receives.push(*mailbox);
                     // The footprint is built before the pop decides, so
-                    // every attempt records the park it may take: an
-                    // empty mailbox blocks the source, and only a wake
-                    // naming it runs it again.
+                    // every attempt records the park it may take.
                     fp.wait_units.push(*source);
                 }
                 Effect::DmaEnqueue { request, payload } => {
@@ -524,21 +427,15 @@ impl StepFootprint {
 
         // A wake enables only the unit it names: `WaitOnEvent` blocks
         // its source and reads no target, and the one path back to
-        // runnable is a `WakeUnit` naming that unit. An empty receive
-        // parks its source the same way, and `wait_units` carries it.
-        //
-        // Two wakes belong to no step and reach no footprint: a DMA
-        // completion waking its issuer, and a timer wake.
+        // runnable is a `WakeUnit` naming that unit.
         if ids_overlap(&self.wake_targets, &other.wait_units)
             || ids_overlap(&other.wake_targets, &self.wait_units)
         {
             return true;
         }
 
-        // No barrier releases anything. `WaitOnEvent` names only
-        // `source` and blocks it, and no registry holds barrier state,
-        // so a wait's only consequence is its own unit's status. The
-        // same-barrier clause below is therefore a false dependency.
+        // A false dependency: no registry holds barrier state, so a
+        // barrier wait's one consequence is its own unit's status.
         if ids_overlap(&self.wait_barriers, &other.wait_barriers) {
             return true;
         }
@@ -554,13 +451,10 @@ impl StepFootprint {
             return true;
         }
 
-        // A completed cross-unit DMA clears every other unit's
-        // reservation whose 128-byte line its destination touches. That
-        // clear flips the next conditional store's verdict, even where
-        // the transferred bytes miss the store's own range. The sweep
-        // in `Runtime::host_write` exempts the issuer alone, and reaches
-        // the write's own range alone. So only the destination sweeps: a
-        // completion's source read clears nothing.
+        // A landing clears every other unit's reservation whose line its
+        // destination touches, even where the bytes miss the store's own
+        // range (`Runtime::host_write` sweeps the write's range and
+        // exempts the issuer alone). A source read clears nothing.
         if write_covers_any_line(&self.dma_writes, &other.reservation_lines)
             || write_covers_any_line(&other.dma_writes, &self.reservation_lines)
         {
@@ -595,8 +489,7 @@ impl StepFootprint {
     /// True when the step accessed no shared resources.
     ///
     /// A step this returns `true` for can still conflict: one that
-    /// rides a landing conflicts with every step. No production caller
-    /// reads it; the tests use it to state a footprint's shape.
+    /// rides a landing conflicts with every step.
     pub fn is_local_only(&self) -> bool {
         self.shared_writes.is_empty()
             && self.shared_reads.is_empty()
@@ -618,10 +511,8 @@ impl StepFootprint {
     /// True when this step touches the bytes of a transfer that was in
     /// flight while it ran.
     ///
-    /// The ticks before this step decide where that landing falls.
-    /// Every step carries ticks, so any other step's position against
-    /// this one decides what this step sees. The pair conflicts whether
-    /// or not the other step is in the flight itself.
+    /// Every step carries ticks, so any other step's position decides
+    /// what this one sees, whether or not that step is in the flight.
     fn rides_a_landing(&self) -> bool {
         // `note_inflight` reads the queue after the commit that filed
         // the request, so an enqueue's destination always sits in its
@@ -636,13 +527,10 @@ impl StepFootprint {
 /// True when a transfer was in flight during `during`'s step, and
 /// `accessor`'s step touched the bytes that transfer moves.
 ///
-/// The last clause reads the landing as the write it is, the way the
-/// [`StepFootprint::dma_writes`] clause above does: the destination
-/// sweeps every other unit's reservation whose line it covers, so where
-/// it lands decides whether the holder keeps the entry. The in-flight
-/// set over-approximates there, because it holds a payload-less
-/// transfer's source beside its destination and a source read sweeps
-/// nothing.
+/// The last clause reads a landing as the write it is, the way the
+/// reservation clause of [`StepFootprint::conflicts`] does. It
+/// over-approximates: the in-flight set holds a source beside its
+/// destination, and a source read sweeps nothing.
 fn touches_inflight(during: &StepFootprint, accessor: &StepFootprint) -> bool {
     ranges_overlap(&during.inflight_dma_ranges, &accessor.shared_writes)
         || ranges_overlap(&during.inflight_dma_ranges, &accessor.shared_reads)
@@ -676,9 +564,8 @@ fn ids_overlap<T: PartialEq>(a: &[T], b: &[T]) -> bool {
 /// Whether any of `writes` touches a byte of any 128-byte line in
 /// `lines`.
 ///
-/// Neither `saturating_add` can saturate, so neither can fold a
-/// wrapped range onto the top of the address space and hide the low
-/// bytes it would touch:
+/// Neither `saturating_add` can saturate, so neither folds a wrapped
+/// range onto the top of the address space:
 ///
 /// - `ByteRange::new` refuses a range whose exclusive end overflows,
 ///   and `ByteRange::contiguous_u32` cannot build one, so
