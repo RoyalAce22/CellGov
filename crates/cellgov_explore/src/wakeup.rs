@@ -77,6 +77,23 @@ impl WakeupTree {
         self.children.retain(|(branch, _)| *branch != unit);
     }
 
+    /// Keep only the branch through `unit`, and report how many the
+    /// tree dropped.
+    ///
+    /// The tree below `unit` survives, so the depth beneath still
+    /// inherits what this one owes it. Where no branch through `unit`
+    /// was there to keep, the tree ends as [`WakeupTree::single`]
+    /// leaves it.
+    pub fn retain_branch(&mut self, unit: UnitId) -> usize {
+        let before = self.children.len();
+        self.children.retain(|(branch, _)| *branch == unit);
+        let dropped = before - self.children.len();
+        if self.children.is_empty() {
+            self.children.push((unit, Self::new()));
+        }
+        dropped
+    }
+
     /// Add `sequence` to the tree [Abdulla2017 p:42:23 s:6.2].
     ///
     /// The walk takes the least branch whose unit can lead `sequence`

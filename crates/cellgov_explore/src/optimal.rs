@@ -38,8 +38,12 @@ struct Run {
     /// that frame away, and the record still names the alternate the
     /// run took.
     alternate_choice: Option<UnitId>,
-    /// Wakeup-tree branches [`choose`] dropped because their unit was
-    /// not runnable where the branch sits.
+    /// Wakeup-tree branches dropped because their unit was not runnable
+    /// where the branch sits:
+    ///
+    /// - [`choose`]'s own drops.
+    /// - Every branch left on a depth the runtime resolved by warping
+    ///   guest time ([`Frame::warped`]).
     dropped_branches: usize,
 }
 
@@ -62,6 +66,14 @@ struct Frame {
     /// Footprint each unit produced when the search ran it from this
     /// prefix, which is what the independence test at line 17 reads.
     footprints: BTreeMap<UnitId, StepFootprint>,
+    /// True where no unit was runnable and the runtime resolved the
+    /// depth by warping guest time.
+    ///
+    /// The runtime picks this depth's unit, and picks the same one on
+    /// every replay of the prefix. So the search can deliver no
+    /// reversal here: a race that asks for one gets a drop and a
+    /// count.
+    warped: bool,
 }
 
 /// Why one execution of the search stopped.
@@ -83,7 +95,7 @@ enum Halt {
 ///
 /// [`ExplorationResult::schedules`] holds every execution after the
 /// first; the first is the baseline. So the classes explored are
-/// `schedules.len() + 1` whenever the baseline finished.
+/// `schedules.len() + 1` whenever the baseline execution was maximal.
 pub fn explore_optimal<F>(make_runtime: F, config: &ExplorationConfig) -> ExplorationResult
 where
     F: FnMut() -> Runtime,
@@ -172,7 +184,7 @@ where
                 // A truncated execution's race set covers a prefix of
                 // the workload, so it owes nothing.
                 if !truncated {
-                    detect_races(&run.log, &mut frames);
+                    dropped_branches += detect_races(&run.log, &mut frames);
                 }
             }
         }
@@ -231,14 +243,13 @@ fn run_one(
     let mut depth = 0usize;
     let mut dropped_branches = 0usize;
     let halt = loop {
-        let runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
-        if runnable.is_empty() {
-            break Halt::Stopped(StopReason::Stalled);
-        }
         if depth >= config.max_steps_per_run {
             break Halt::Stopped(StopReason::StepBound);
         }
-        if depth >= fixed {
+        let runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
+        // An empty set is no choice: the runtime warps guest time to
+        // fire what is due and schedules whatever that wakes.
+        if !runnable.is_empty() && depth >= fixed {
             if depth == frames.len() {
                 let (sleep, wut) = inherit(frames);
                 frames.push(Frame {
@@ -246,6 +257,7 @@ fn run_one(
                     sleep,
                     wut,
                     footprints: BTreeMap::new(),
+                    warped: false,
                 });
             }
             match choose(&mut frames[depth], &runnable, &mut dropped_branches) {
@@ -253,12 +265,49 @@ fn run_one(
                 None => break Halt::SleepBlocked,
             }
         }
-        let chosen = frames[depth].chosen;
-        rt.set_scheduler(PrescribedScheduler::single_choice(chosen));
+        if runnable.is_empty() {
+            rt.set_scheduler(cellgov_core::RoundRobinScheduler::new());
+        } else {
+            rt.set_scheduler(PrescribedScheduler::single_choice(frames[depth].chosen));
+        }
         let step = match rt.step() {
             Ok(step) => step,
+            Err(cellgov_core::StepError::NoRunnableUnit) => {
+                break Halt::Stopped(StopReason::Stalled)
+            }
+            Err(cellgov_core::StepError::AllBlocked) => {
+                break Halt::Stopped(StopReason::Deadlocked)
+            }
             Err(e) => break Halt::Stopped(StopReason::StepError(e)),
         };
+        if runnable.is_empty() {
+            // The warp resolved the choice; the frame records what it
+            // picked so the backtrack below has a branch to retire.
+            if depth == frames.len() {
+                let (sleep, wut) = inherit(frames);
+                frames.push(Frame {
+                    chosen: step.unit,
+                    sleep,
+                    wut,
+                    footprints: BTreeMap::new(),
+                    warped: true,
+                });
+            } else {
+                debug_assert_eq!(
+                    frames[depth].chosen, step.unit,
+                    "a replayed prefix reaches the same warp, so it wakes the same unit",
+                );
+                frames[depth].chosen = step.unit;
+                frames[depth].warped = true;
+            }
+            // `choose` never ran here, so the tree still holds whatever
+            // branch a race left it. A backtrack retires a branch by
+            // its unit, so a branch for a unit this depth cannot run is
+            // the drop `choose` counts.
+            dropped_branches += frames[depth].wut.retain_branch(step.unit);
+        }
+        let runnable = rt.last_runnable().to_vec();
+        let chosen = frames[depth].chosen;
         let mut footprint = StepFootprint::from_effects(&step.effects);
         let write_aliases: Vec<_> = footprint
             .shared_writes
@@ -274,6 +323,12 @@ fn run_one(
         footprint.shared_reads.extend(read_aliases);
         if let Err(e) = rt.commit_step(&step.result, &step.effects) {
             break Halt::Stopped(StopReason::CommitError(e));
+        }
+        // The commit is what discards a faulted batch and counts it, so
+        // the break reads the fault after it. The step gets no decision
+        // point, as a refused commit gets none.
+        if let Some(kind) = step.result.fault {
+            break Halt::Stopped(StopReason::Faulted(kind));
         }
         debug_assert_eq!(
             step.unit, chosen,
@@ -330,7 +385,12 @@ fn inherit(frames: &[Frame]) -> (BTreeMap<UnitId, StepFootprint>, WakeupTree) {
 
 /// Read the races of a maximal execution and record what each one owes
 /// [Abdulla2017 p:42:24 s:Algorithm 2 lines 2-7].
-fn detect_races(log: &DecisionLog, frames: &mut [Frame]) {
+///
+/// Returns the reversals no depth can deliver, which withdraw
+/// [`ExplorationResult::classes_explored`] the way [`choose`]'s drops
+/// do.
+fn detect_races(log: &DecisionLog, frames: &mut [Frame]) -> usize {
+    let mut dropped = 0usize;
     let execution = Execution::from_log(log);
     let relation = execution.happens_before();
     let events = execution.events();
@@ -360,8 +420,15 @@ fn detect_races(log: &DecisionLog, frames: &mut [Frame]) {
         if already_explored(&frame.sleep, &sequence, events, &precedes) {
             continue;
         }
+        if frame.warped {
+            // A branch left on this depth is a reversal the search can
+            // never take: see `Frame::warped`.
+            dropped += 1;
+            continue;
+        }
         frame.wut.insert(&sequence, &precedes);
     }
+    dropped
 }
 
 /// True when the search already ran an execution equivalent to

@@ -16,8 +16,9 @@ use crate::optimal::explore_optimal;
 use crate::report::{format_human, format_json};
 use crate::util::{classify_iteration, AlternateIteration, StopClass, StopReason};
 use cellgov_core::{CommitError, Runtime, StepError};
+use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
-use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp};
+use cellgov_exec::fake_isa::{FakeIsaUnit, FakeOp, FAKE_FAULT_CODE};
 use cellgov_mem::GuestMemory;
 use cellgov_time::Budget;
 use strum::VariantArray;
@@ -46,8 +47,17 @@ fn every_truncating_reason() -> Vec<StopReason> {
                 .map(StopReason::StepError),
         )
         .chain(std::iter::once(StopReason::CommitError(REFUSED_COMMIT)))
+        .chain(std::iter::once(StopReason::Faulted(FaultKind::Guest(
+            FAKE_FAULT_CODE,
+        ))))
         .collect()
 }
+
+/// The two stops that end a maximal execution.
+///
+/// A run that reaches either one answers for its whole self: its hash
+/// stands for the run, and the search reads its races.
+const MAXIMAL_STOPS: [StopReason; 2] = [StopReason::Stalled, StopReason::Deadlocked];
 
 /// `count` units that all write the same word, so every pair of them
 /// conflicts and a search has alternates to record.
@@ -131,13 +141,16 @@ fn no_stop_short_of_a_stall_can_contribute_a_divergence() {
         );
     }
 
-    let stalled = tally(2, OTHER_HASH, StopReason::Stalled);
-    assert!(
-        stalled.found_divergence,
-        "a run that finished on a hash of its own is the divergence the cases above withhold"
-    );
-    assert!(stalled.schedules.iter().all(|s| !s.truncated));
-    assert_eq!(stalled.schedules_truncated, 0);
+    for reason in MAXIMAL_STOPS {
+        let maximal = tally(2, OTHER_HASH, reason);
+        assert!(
+            maximal.found_divergence,
+            "{reason}: a run that ended on a hash of its own is the divergence the cases \
+             above withhold"
+        );
+        assert!(maximal.schedules.iter().all(|s| !s.truncated), "{reason}");
+        assert_eq!(maximal.schedules_truncated, 0, "{reason}");
+    }
 }
 
 #[test]
@@ -339,23 +352,23 @@ fn a_capped_search_over_a_contending_workload_claims_nothing() {
     assert_eq!(result.schedules_truncated, 0);
 }
 
-/// The sweep runs one case per way the runtime can refuse a step, plus
-/// the replay bound and a refused commit, and a stall is the one stop
-/// it does not cover.
+/// The sweep runs one case per way a run stops short, and the two
+/// maximal stops are the ones it does not cover.
 ///
 /// The width and the repeat check are what keep the sweep from going
 /// vacuous: a hand-written list put back in place of the
 /// `StepError::VARIANTS` chain goes red here the moment it is a variant
 /// short or names one twice. The truncation claims go red on a
-/// [`StopReason::is_truncated`] that admits any stop but a stall.
+/// [`StopReason::is_truncated`] that admits a maximal stop, or that
+/// refuses one of the stops the sweep covers.
 #[test]
 fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
     let reasons = every_truncating_reason();
     assert_eq!(
         reasons.len(),
-        StepError::VARIANTS.len() + 2,
-        "the sweep must run one case per step refusal, plus the replay bound and a \
-         refused commit",
+        StepError::VARIANTS.len() + 3,
+        "the sweep must run one case per step refusal, plus the replay bound, a \
+         refused commit and a fault",
     );
     for (index, reason) in reasons.iter().enumerate() {
         assert!(
@@ -364,7 +377,13 @@ fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
         );
         assert!(reason.is_truncated(), "{reason}");
     }
-    assert!(!StopReason::Stalled.is_truncated());
+    for reason in MAXIMAL_STOPS {
+        assert!(!reason.is_truncated(), "{reason}");
+        assert!(
+            !reasons.contains(&reason),
+            "{reason}: a maximal stop cannot also be one the sweep truncates",
+        );
+    }
 }
 
 /// A refused commit truncates whatever shape it took, which is what

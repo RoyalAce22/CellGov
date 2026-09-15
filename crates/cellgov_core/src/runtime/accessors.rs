@@ -221,6 +221,18 @@ impl Runtime {
         &self.dma_queue
     }
 
+    /// Units runnable when the scheduler made its last choice.
+    ///
+    /// Empty before the first [`Runtime::step`] and after a restore.
+    /// Read it after the call: a step that warps guest time to fire a
+    /// due DMA completion or timer wake widens the set the scheduler
+    /// chose from. A step that refuses leaves the previous step's set
+    /// in place.
+    #[inline]
+    pub fn last_runnable(&self) -> &[UnitId] {
+        &self.last_runnable
+    }
+
     // -- scheduler --
 
     /// Replace the runtime scheduler.

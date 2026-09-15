@@ -74,6 +74,10 @@ impl Runtime {
             }
         };
 
+        // A warp above can widen the set the scheduler chose from, so
+        // record it here.
+        self.last_runnable.clear();
+        self.last_runnable.extend(self.registry.runnable_ids());
         self.registry.clear_status_override(unit_id);
 
         if self.mode == RuntimeMode::FullTrace {

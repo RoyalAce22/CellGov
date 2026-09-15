@@ -44,17 +44,24 @@ impl PrescribedScheduler {
 impl Scheduler for PrescribedScheduler {
     fn select_next(&mut self, registry: &UnitRegistry) -> Option<UnitId> {
         let override_for_step = self.overrides.get(self.step).copied().flatten();
-        self.step += 1;
         if let Some(uid) = override_for_step {
             if registry.effective_status(uid) == Some(UnitStatus::Runnable) {
                 // The fallback's cursor follows the unit that ran, so
                 // the first pick after the prescription rotates from
                 // there exactly as round-robin would have.
                 self.fallback.note_selected(uid);
+                self.step += 1;
                 return Some(uid);
             }
         }
-        self.fallback.select_next(registry)
+        let picked = self.fallback.select_next(registry);
+        // `Runtime::step` asks again after a time warp. The cursor
+        // indexes the steps the runtime took, so an unanswered call
+        // leaves it where it is.
+        if picked.is_some() {
+            self.step += 1;
+        }
+        picked
     }
 
     fn notify_yielded(

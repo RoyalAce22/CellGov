@@ -128,6 +128,7 @@ fn snapshot_field_categories(rt: &Runtime) {
         mode: _,
         // --- left alone by a restore ---
         dma_latency: _,                   // set once at construction
+        last_runnable: _,                 // cleared on restore, rewritten by the next step
         spu_factory: _,                   // set once at construction
         ppu_factory: _,                   // set once at construction
         process_spawn_loader: _,          // host-installed closure, like the factories
@@ -247,6 +248,9 @@ impl Runtime {
         self.pending_child_inits = snap.pending_child_inits.clone();
         self.rsx_label_base = snap.rsx_label_base;
         self.effects_buf.clear();
+        // The set belongs to a step of the execution the restore
+        // leaves, and the next step rewrites it only on Ok.
+        self.last_runnable.clear();
         self.trace.clear();
         self.zoom_trace.clear();
         self.scheduler_dirty_after_restore = true;

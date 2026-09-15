@@ -40,6 +40,10 @@ pub struct Runtime {
     /// [`Runtime::fire_timer_wakes`] and the all-blocked time-warp.
     pub(super) timer_wakes: crate::timer_queue::TimerWakeQueue,
     pub(super) dma_latency: Box<dyn DmaLatencyModel>,
+    /// Units runnable at the moment the scheduler last made a choice,
+    /// read through [`Runtime::last_runnable`]. The buffer is reused,
+    /// so a step costs no allocation for it.
+    pub(super) last_runnable: Vec<UnitId>,
     pub(super) lv2_host: Lv2Host,
     pub(super) syscall_responses: SyscallResponseTable,
     pub(super) spu_factory: Option<SpuFactory>,

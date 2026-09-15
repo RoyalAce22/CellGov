@@ -31,10 +31,11 @@ const SECOND_ADDR: u64 = 8;
 /// One sender queues two distinct messages, then two receivers take
 /// one each.
 ///
-/// Each receiver idles until the sender queues both messages, so
-/// neither one finds the queue empty and every unit finishes. Which
-/// receiver takes which message is the only thing the schedule
-/// decides, and each one writes what it took to its own address.
+/// Each receiver idles through three steps first, so the default
+/// schedule queues both messages before either receive attempt and
+/// every unit finishes. Which receiver takes which message is the only
+/// thing that schedule decides, and each one writes what it took to
+/// its own address.
 fn workload() -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(64), Budget::new(1), STEP_CAP);
     let queue = rt.mailbox_registry_mut().register(4);
@@ -92,12 +93,11 @@ fn the_two_receivers_conflict() {
 
 /// The search separates the two orders of the receive attempts.
 ///
-/// The class count is what this costs. A relation that called the pair
-/// independent reports no race between them, and the search covers 9
-/// classes instead of 12. The reachable memories are the same either
-/// way, because the sends race with the receives and reach them anyway.
-/// So an outcome check sees nothing here, and the class count is where
-/// the lost cover shows.
+/// The class count and the committed memories are what this costs. A
+/// relation that called the pair independent reports no race between
+/// them, so the search never owes their reversal, and both numbers
+/// below shrink with it. One order deadlocks, and its memory is the
+/// fifth: a receiver parked for good stored nothing.
 #[test]
 fn the_search_runs_both_orders_of_the_two_receivers() {
     let mut rt = workload();
@@ -113,10 +113,23 @@ fn the_search_runs_both_orders_of_the_two_receivers() {
     );
 
     let result = explore_window(workload, &ExplorationConfig::default());
+    // Some orders leave a receiver parked on an empty queue with no
+    // send left to wake it.
+    assert_eq!(
+        result.schedules_truncated, 0,
+        "a deadlocked order is the end of its execution, not a cut prefix",
+    );
+    assert!(
+        result
+            .schedules
+            .iter()
+            .any(|record| record.stop == StopReason::Deadlocked),
+        "an order that parks a receiver for good is one of the orders",
+    );
     assert_eq!(
         result.classes_explored,
         Some(12),
-        "the receive-receive race separates three classes the sends do not",
+        "one execution per equivalence class, deadlocked orders included",
     );
     let hashes: BTreeSet<u64> = std::iter::once(result.baseline_hash)
         .chain(result.schedules.iter().map(|record| record.memory_hash))
@@ -124,7 +137,7 @@ fn the_search_runs_both_orders_of_the_two_receivers() {
     assert_eq!(
         hashes.len(),
         5,
-        "the committed memories those classes reach between them",
+        "the committed memories the orders reach between them",
     );
 }
 

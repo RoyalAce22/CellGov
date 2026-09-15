@@ -30,11 +30,10 @@ use cellgov_time::Budget;
 /// `n` of them are real.
 fn one_waker_many_waiters(waiters: u64) -> Runtime {
     let mut rt = Runtime::new(GuestMemory::new(256), Budget::new(1), 400);
-    let waker: Vec<FakeOp> = (0..waiters)
-        .map(|index| FakeOp::Wake { unit: index + 1 })
-        .chain([FakeOp::End])
-        .collect();
-    rt.register_unit_with(|id| FakeIsaUnit::new(id, waker.clone()));
+    // Waiters first, so the search's default descent parks each of
+    // them before it reaches the waker. An order that wakes a waiter
+    // before it parks wastes that wake, and the waiter never runs
+    // again.
     for index in 0..waiters {
         rt.register_unit_with(|id| {
             FakeIsaUnit::new(
@@ -51,10 +50,17 @@ fn one_waker_many_waiters(waiters: u64) -> Runtime {
             )
         });
     }
+    let waker: Vec<FakeOp> = (0..waiters)
+        .map(|index| FakeOp::Wake { unit: index })
+        .chain([FakeOp::End])
+        .collect();
+    rt.register_unit_with(|id| FakeIsaUnit::new(id, waker.clone()));
     rt
 }
 
-fn classes(waiters: u64) -> usize {
+/// Executions the search runs, baseline included, and the class count
+/// it reports.
+fn measure(waiters: u64) -> (usize, Option<usize>) {
     let result = explore_optimal(
         || one_waker_many_waiters(waiters),
         &ExplorationConfig {
@@ -62,27 +68,30 @@ fn classes(waiters: u64) -> usize {
             max_steps_per_run: 10_000,
         },
     );
-    result
-        .classes_explored
-        .expect("the search covered every class")
+    (result.schedules.len() + 1, result.classes_explored)
 }
 
-/// Each wake is dependent on the one wait it enables and on nothing
-/// else, so the search covers `2^n` classes: each waiter either takes
-/// its store before the next wake or after it.
+/// Each wake depends on the one wait it enables and on nothing else,
+/// so the search runs one execution per equivalence class.
 ///
-/// The rule this replaced paired every wake with every wait, and on
-/// this workload that cost more than budget: from two waiters up it
-/// reported no class count at all. Its false dependencies produced
-/// races whose reversals no state can reach, so the search dropped
-/// branches and stopped claiming full cover. That these counts exist
-/// is the measurement.
+/// Each waiter decides one thing on its own: whether its wake lands
+/// before it parks, which wastes the wake and leaves it parked for
+/// good. Those decisions are independent, so the workload holds two to
+/// the power of the waiters. The counts below are that number twice:
+/// executions on the left, the classes they cover on the right.
+///
+/// Covering every class is what the narrowing buys. The rule this
+/// replaced paired every wake with every wait. Its false dependencies
+/// produced races whose reversals no state can reach, and the search
+/// drops those branches: a single drop withdraws the class count on
+/// the right.
 #[test]
-fn the_narrowed_rule_costs_fewer_classes() {
-    assert_eq!(classes(1), 2);
-    assert_eq!(classes(2), 4);
-    assert_eq!(classes(3), 8);
-    assert_eq!(classes(4), 16);
+fn the_narrowed_rule_covers_every_class_it_explores() {
+    let measured: Vec<(usize, Option<usize>)> = (1..=4).map(measure).collect();
+    assert_eq!(
+        measured,
+        vec![(2, Some(2)), (4, Some(4)), (8, Some(8)), (16, Some(16))],
+    );
 }
 
 /// The rule this replaced, restated: any wake against any wait.

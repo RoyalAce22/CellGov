@@ -11,13 +11,13 @@ use crate::dependency::StepFootprint;
 use crate::util::StopReason;
 use cellgov_core::Runtime;
 
-/// Drive `rt` to stall and return the recorded [`DecisionLog`] with why
-/// the run stopped.
+/// Drive `rt` until it stops and return the recorded [`DecisionLog`]
+/// with why the run stopped.
 ///
 /// The runtime is advanced in place; callers who need the final state
-/// should inspect `rt` after the call. A reason other than
-/// [`StopReason::Stalled`] means the log and `rt`'s memory hash both
-/// describe a prefix of the schedule.
+/// should inspect `rt` after the call. A truncating stop -- see
+/// [`StopReason::is_truncated`] -- means the log and `rt`'s memory
+/// hash both describe a prefix of the schedule.
 pub fn observe_decisions(rt: &mut Runtime) -> (DecisionLog, StopReason) {
     observe(rt, None)
 }
@@ -32,16 +32,15 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
     let mut log = DecisionLog::new();
     let mut committed = 0usize;
     let stop = loop {
-        let runnable: Vec<_> = rt.registry().runnable_ids().collect();
-        if runnable.is_empty() {
-            break StopReason::Stalled;
-        }
         if max_steps.is_some_and(|cap| committed >= cap) {
             break StopReason::StepBound;
         }
         let step_idx = rt.steps_taken();
         match rt.step() {
             Ok(step) => {
+                // A warp inside the step can widen the set the
+                // scheduler chose from, so the point reads it here.
+                let runnable: Vec<_> = rt.last_runnable().to_vec();
                 let mut footprint = StepFootprint::from_effects(&step.effects);
                 // An access through one view of a shared mapping
                 // reaches every sibling view's bytes, whether the
@@ -61,6 +60,11 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
                     break StopReason::CommitError(e);
                 }
+                // A discarded batch reached no guest state, so the step
+                // gets no point, as a refused commit gets none.
+                if let Some(kind) = step.result.fault {
+                    break StopReason::Faulted(kind);
+                }
                 log.push(DecisionPoint {
                     step: step_idx,
                     runnable,
@@ -69,6 +73,8 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 });
                 committed += 1;
             }
+            Err(cellgov_core::StepError::NoRunnableUnit) => break StopReason::Stalled,
+            Err(cellgov_core::StepError::AllBlocked) => break StopReason::Deadlocked,
             Err(e) => break StopReason::StepError(e),
         }
     };

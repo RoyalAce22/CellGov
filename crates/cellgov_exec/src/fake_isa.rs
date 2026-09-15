@@ -14,6 +14,10 @@ use cellgov_event::{PriorityClass, UnitId};
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
+/// The code [`FakeOp::Fault`] raises, distinct from the
+/// `FaultKind::Validation` the commit pipeline gives.
+pub const FAKE_FAULT_CODE: u32 = 0xfa11;
+
 /// A single fake-ISA opcode.
 ///
 /// Atomic opcodes (`ReservationAcquire`, `ConditionalStore`) are
@@ -117,6 +121,11 @@ pub enum FakeOp {
         /// Unit to return to runnable.
         unit: u64,
     },
+    /// Terminal: yield `Fault`, which discards the batch.
+    ///
+    /// The unit reports `Faulted` from here on, so it leaves the
+    /// runnable set.
+    Fault,
     /// Terminal: yield `Finished`.
     End,
 }
@@ -130,6 +139,7 @@ pub struct FakeIsaUnit {
     pc: usize,
     acc: u32,
     finished: bool,
+    faulted: bool,
 }
 
 impl FakeIsaUnit {
@@ -141,6 +151,7 @@ impl FakeIsaUnit {
             pc: 0,
             acc: 0,
             finished: false,
+            faulted: false,
         }
     }
 
@@ -163,7 +174,9 @@ impl ExecutionUnit for FakeIsaUnit {
     }
 
     fn status(&self) -> UnitStatus {
-        if self.finished {
+        if self.faulted {
+            UnitStatus::Faulted
+        } else if self.finished {
             UnitStatus::Finished
         } else {
             UnitStatus::Runnable
@@ -320,6 +333,16 @@ impl ExecutionUnit for FakeIsaUnit {
                     source_time: GuestTicks::ZERO,
                 });
                 YieldReason::BudgetExhausted
+            }
+            FakeOp::Fault => {
+                self.faulted = true;
+                return ExecutionStepResult {
+                    yield_reason: YieldReason::Fault,
+                    consumed_cost: InstructionCost::new(budget.raw()),
+                    local_diagnostics: LocalDiagnostics::empty(),
+                    fault: Some(cellgov_effects::FaultKind::Guest(FAKE_FAULT_CODE)),
+                    syscall_args: None,
+                };
             }
             FakeOp::End => {
                 self.finished = true;
