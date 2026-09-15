@@ -26,18 +26,20 @@ pub struct LocalDiagnostics {
     /// Populated on `YieldReason::Syscall`; the runtime classifier
     /// rejects LEV >= 1 before LV2 dispatch.
     pub syscall_lev: Option<u8>,
-    /// Effective address of the faulting access.
+    /// Effective address of the faulting access. An SPU fault on a
+    /// local-store access carries the local-store address here, whole:
+    /// the fault code's detail half cannot hold one.
     pub faulting_ea: Option<u64>,
-    /// Register snapshot at fault time. PPU and SPU units populate it
-    /// on every fault; synthetic units may leave it `None`.
+    /// Register snapshot at fault time. PPU units populate it on every
+    /// fault. SPU units and synthetic units leave it `None`.
     pub fault_regs: Option<FaultRegisterDump>,
 }
 
-/// Arch-neutral register snapshot at fault time.
+/// PPU register snapshot at fault time.
 ///
 /// The field set matches `PpuStateHash`'s FNV-1a fingerprint
 /// (GPR + LR + CTR + XER + CR) so CLI fault formatting and divergence
-/// traces hash the same state. SPU dumps populate `xer = 0`.
+/// traces hash the same state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FaultRegisterDump {
     /// General-purpose registers r0..r31.
@@ -46,7 +48,7 @@ pub struct FaultRegisterDump {
     pub lr: u64,
     /// Count register.
     pub ctr: u64,
-    /// PowerPC XER (SO/OV/CA carry across instructions). Zero on SPU.
+    /// PowerPC XER (SO/OV/CA carry across instructions).
     pub xer: u64,
     /// Condition register (8 4-bit fields).
     pub cr: u32,

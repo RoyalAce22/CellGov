@@ -29,9 +29,15 @@ pub(crate) fn format_fault(
         .map(|a| format!("0x{a:08x}"))
         .unwrap_or_else(|| "?".to_string());
     use cellgov_ppu::{
-        FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS, FAULT_PC_OUT_OF_RANGE,
-        FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN, FAULT_UNSUPPORTED_SYSCALL,
+        FAULT_ALIGNMENT_INTERRUPT, FAULT_DEBUG_BREAK, FAULT_DECODE_ERROR, FAULT_INVALID_ADDRESS,
+        FAULT_PC_OUT_OF_RANGE, FAULT_PROGRAM_TRAP, FAULT_UNIMPLEMENTED_INSN,
+        FAULT_UNSUPPORTED_SYSCALL,
     };
+    let ea_str = result
+        .local_diagnostics
+        .faulting_ea
+        .map(|a| format!("0x{a:08x}"))
+        .unwrap_or_else(|| "?".to_string());
     let detail = match fault {
         cellgov_effects::FaultKind::Guest(code) => {
             let fault_type = code & 0xFFFF_0000;
@@ -50,12 +56,10 @@ pub(crate) fn format_fault(
                     format!("DECODE_ERROR at PC={pc_str} (raw={raw_str})")
                 }
                 FAULT_INVALID_ADDRESS => {
-                    let ea_str = result
-                        .local_diagnostics
-                        .faulting_ea
-                        .map(|a| format!("0x{a:08x}"))
-                        .unwrap_or_else(|| "?".to_string());
                     format!("INVALID_ADDRESS at PC={pc_str} (ea={ea_str})")
+                }
+                FAULT_ALIGNMENT_INTERRUPT => {
+                    format!("ALIGNMENT_INTERRUPT at PC={pc_str} (ea={ea_str})")
                 }
                 FAULT_UNSUPPORTED_SYSCALL => {
                     let nr = code & 0x0000_FFFF;
@@ -70,7 +74,13 @@ pub(crate) fn format_fault(
                     format!("PROGRAM_TRAP (TO=0x{to:02x}) at PC={pc_str}")
                 }
                 FAULT_DEBUG_BREAK => format!("DEBUG_BREAK at PC={pc_str}"),
-                _ => format!("Guest(0x{code:08x}) at PC={pc_str}"),
+                // The SPU's classes land here: their constants are private
+                // to `cellgov_spu`. The detail half holds at most the low
+                // 16 bits of an address; `faulting_ea` holds it whole.
+                _ => match result.local_diagnostics.faulting_ea {
+                    Some(_) => format!("Guest(0x{code:08x}) at PC={pc_str} (ea={ea_str})"),
+                    None => format!("Guest(0x{code:08x}) at PC={pc_str}"),
+                },
             }
         }
         _ => format!("Validation at PC={pc_str}"),
@@ -314,3 +324,7 @@ pub(crate) fn format_deadlock(rt: &Runtime, steps: usize, pc_ring: &PcRing) -> S
 #[cfg(test)]
 #[path = "tests/fault_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/fault_fallback_tests.rs"]
+mod fallback_arm_tests;

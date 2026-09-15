@@ -46,9 +46,9 @@ use cellgov_time::{Budget, InstructionCost};
 ///   local store cannot hold.
 ///
 /// Local store spans 18 bits, so none of them fits the detail half and
-/// the masked value gives the address modulo 64 KB. The fetch path
-/// carries the whole program counter beside the code in
-/// [`LocalDiagnostics`], which is where a reader takes it from.
+/// the masked value gives the address modulo 64 KB. [`LocalDiagnostics`]
+/// carries the whole value beside the code: the fetch path's program
+/// counter as `pc`, the other two as `faulting_ea`.
 // [CBE-Handbook p:64 s:3.1.1 Local Store] Local store holds 256 KB, so an address inside it needs 18 bits.
 const FAULT_LS_OUT_OF_RANGE: u32 = 0x0002_0000;
 const FAULT_UNSUPPORTED_CHANNEL: u32 = 0x0003_0000;
@@ -65,7 +65,8 @@ const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
 const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
 /// A parked MFC GET whose effective address resolves to no region, or
 /// whose local-store destination escapes the store. Its low bits carry
-/// the transfer's tag id.
+/// the transfer's tag id; [`LocalDiagnostics::faulting_ea`] carries the
+/// effective address whole.
 const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
 /// An MFC command whose staged tag id is outside 0..31. The low bits
 /// carry the value the guest wrote, masked to 16 bits.
@@ -74,6 +75,7 @@ const FAULT_MFC_TAG_ID_OUT_OF_RANGE: u32 = 0x0008_0000;
 /// resolves to no region, or whose local-store destination escapes the
 /// store. Either arm carries the low 16 bits of the effective address,
 /// masked so the detail cannot reach the class field.
+/// [`LocalDiagnostics::faulting_ea`] carries the whole address.
 ///
 /// Distinct from [`FAULT_MFC_GET_UNRESOLVED`] so a trace separates a
 /// line the atomic path never read from a parked transfer that never
@@ -279,7 +281,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                 return ExecutionStepResult {
                     yield_reason: YieldReason::Fault,
                     consumed_cost: InstructionCost::new(0),
-                    local_diagnostics: LocalDiagnostics::with_pc(self.state.pc as u64),
+                    local_diagnostics: LocalDiagnostics::with_pc_ea(self.state.pc as u64, ea),
                     fault: Some(guest_fault(FAULT_MFC_GET_UNRESOLVED, u32::from(tag_id))),
                     syscall_args: None,
                 };
@@ -387,7 +389,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         return ExecutionStepResult {
                             yield_reason: YieldReason::Fault,
                             consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                            local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                            local_diagnostics: LocalDiagnostics::with_pc_ea(step_pc, ea),
                             fault: Some(guest_fault(FAULT_MFC_READ_UNRESOLVED, ea as u32)),
                             syscall_args: None,
                         };
@@ -411,11 +413,17 @@ impl ExecutionUnit for SpuExecutionUnit {
                 }
                 SpuStepOutcome::Fault(f) => {
                     self.status = UnitStatus::Faulted;
+                    let local_diagnostics = match f {
+                        SpuFault::LsOutOfRange(addr) => {
+                            LocalDiagnostics::with_pc_ea(step_pc, u64::from(addr))
+                        }
+                        _ => LocalDiagnostics::with_pc(step_pc),
+                    };
                     let fault = guest_fault_for(f);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Fault,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
-                        local_diagnostics: LocalDiagnostics::with_pc(step_pc),
+                        local_diagnostics,
                         fault: Some(fault),
                         syscall_args: None,
                     };
@@ -468,6 +476,10 @@ mod getllar_tests;
 #[cfg(test)]
 #[path = "tests/atomic_line_tests.rs"]
 mod atomic_line_tests;
+
+#[cfg(test)]
+#[path = "tests/fault_diag_tests.rs"]
+mod fault_diag_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
