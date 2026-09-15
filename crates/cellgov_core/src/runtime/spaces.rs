@@ -20,8 +20,9 @@
 //! against the emitting unit's table only. The one cross-space path
 //! is a shared mapping: replicating a write into a sibling view and
 //! seeding a view at promotion both clear reservations covering the
-//! translated range in that view's space. DMA stays space 0 end to
-//! end.
+//! translated range in that view's space. A DMA transfer resolves both
+//! ends in space 0, and a landing inside a shared view replicates
+//! through that same path.
 
 use std::collections::BTreeMap;
 
@@ -688,65 +689,95 @@ impl Runtime {
                 }
                 _ => continue,
             };
-            let (start, len) = (range.start().raw(), range.length());
-            // Collect replication targets first: (bytes, dst_space, dst_addr).
-            let mut replications: Vec<(Vec<u8>, AddressSpaceId, u64)> = Vec::new();
-            for mapping in self.spaces.shared.values() {
-                let source_view = mapping
-                    .views
-                    .iter()
-                    .find(|(space, base)| {
-                        *space == source_space
-                            && start >= *base
-                            && start + len <= *base + mapping.size
-                    })
-                    .copied();
-                let Some((_, source_base)) = source_view else {
-                    continue;
+            // No holder is exempt: a store to the shared bytes
+            // invalidates every reservation covering an aliasing range,
+            // the writer's own included.
+            cleared += self.fanout_committed_range(source_space, range, None);
+        }
+        cleared
+    }
+
+    /// Replicate one committed range from `source_space` into every
+    /// sibling view of the shared segment it lands in, and return the
+    /// reservations that cleared.
+    ///
+    /// `exempt` is the one unit whose reservation survives the
+    /// replicated write. A DMA landing passes its issuer, so every view
+    /// carries the split the destination write applies in its own
+    /// space.
+    /// [PPC-Book2 p:10 s:1.7.3.1] a reservation granule holds the real
+    /// address an effective address maps to, so every view of one
+    /// segment names one granule, and only another processor's store
+    /// clears it.
+    /// [`Runtime::fanout_shared_writes`] passes `None`: a replicated
+    /// store sweeps every holder, the storing unit included.
+    ///
+    /// Reads the bytes back out of committed memory rather than taking
+    /// them from the caller, so a partial-overlap write replicates what
+    /// the pipeline actually applied.
+    pub(super) fn fanout_committed_range(
+        &mut self,
+        source_space: AddressSpaceId,
+        range: ByteRange,
+        exempt: Option<UnitId>,
+    ) -> usize {
+        if self.spaces.shared.is_empty() {
+            return 0;
+        }
+        let mut cleared = 0usize;
+        let (start, len) = (range.start().raw(), range.length());
+        // Collect replication targets first: (bytes, dst_space, dst_addr).
+        let mut replications: Vec<(Vec<u8>, AddressSpaceId, u64)> = Vec::new();
+        for mapping in self.spaces.shared.values() {
+            let source_view = mapping
+                .views
+                .iter()
+                .find(|(space, base)| {
+                    *space == source_space && start >= *base && start + len <= *base + mapping.size
+                })
+                .copied();
+            let Some((_, source_base)) = source_view else {
+                continue;
+            };
+            let offset = start - source_base;
+            let committed: Vec<u8> = {
+                let mem = match source_space {
+                    AddressSpaceId::BOOT => &self.memory,
+                    s => self.spaces.extra.get(&s).expect("source space exists"),
                 };
-                let offset = start - source_base;
-                let committed: Vec<u8> = {
-                    let mem = match source_space {
-                        AddressSpaceId::BOOT => &self.memory,
-                        s => self.spaces.extra.get(&s).expect("source space exists"),
-                    };
-                    match mem.read(range) {
-                        Some(bytes) => bytes.to_vec(),
-                        // An unreadable source range cannot have
-                        // committed (a committed write reads back), so
-                        // there is nothing to replicate. Reachable
-                        // only when the caller passes effects that
-                        // never landed, e.g. a fault-discarded batch.
-                        None => continue,
-                    }
-                };
-                for &(dst_space, dst_base) in &mapping.views {
-                    // Skip only the exact view the write landed in: a
-                    // second view in the same space is still an alias
-                    // of the shared bytes and must receive the write.
-                    if dst_space == source_space && dst_base == source_base {
-                        continue;
-                    }
-                    replications.push((committed.clone(), dst_space, dst_base + offset));
+                match mem.read(range) {
+                    Some(bytes) => bytes.to_vec(),
+                    // An unreadable source range cannot have committed
+                    // (a committed write reads back), so there is
+                    // nothing to replicate. Reachable only when the
+                    // caller passes effects that never landed, e.g. a
+                    // fault-discarded batch.
+                    None => continue,
                 }
+            };
+            for &(dst_space, dst_base) in &mapping.views {
+                // Skip only the exact view the write landed in: a
+                // second view in the same space is still an alias of
+                // the shared bytes and must receive the write.
+                if dst_space == source_space && dst_base == source_base {
+                    continue;
+                }
+                replications.push((committed.clone(), dst_space, dst_base + offset));
             }
-            for (bytes, dst_space, dst_addr) in replications {
-                let len = bytes.len() as u64;
-                let dst_range = ByteRange::new(GuestAddr::new(dst_addr), len)
-                    .expect("replication range mirrors a validated committed range");
-                // No holder is exempt: a store to the shared bytes
-                // invalidates every reservation covering an aliasing
-                // range, the writer's own included.
-                cleared += self
-                    .host_write(
-                        HostWriter::SharedViewFanout,
-                        dst_space,
-                        dst_range,
-                        &bytes,
-                        None,
-                    )
-                    .expect("sibling view region installed at registration");
-            }
+        }
+        for (bytes, dst_space, dst_addr) in replications {
+            let len = bytes.len() as u64;
+            let dst_range = ByteRange::new(GuestAddr::new(dst_addr), len)
+                .expect("replication range mirrors a validated committed range");
+            cleared += self
+                .host_write(
+                    HostWriter::SharedViewFanout,
+                    dst_space,
+                    dst_range,
+                    &bytes,
+                    exempt,
+                )
+                .expect("sibling view region installed at registration");
         }
         cleared
     }

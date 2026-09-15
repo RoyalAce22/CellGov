@@ -40,7 +40,9 @@ impl Runtime {
                 .expect("DMA source range mapped and readable at enqueue")
                 .to_vec()
         };
-        // DMA stays in space 0 end to end (see the `spaces` module docs).
+        // Both ends resolve in space 0 (see the `spaces` module docs);
+        // the fanout below is the only part of a transfer that reaches
+        // another space.
         self.host_write(
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
@@ -49,6 +51,15 @@ impl Runtime {
             Some(c.issuer()),
         )
         .expect("DMA destination validated as ReadWrite at enqueue");
+        // A landing inside a shared view reaches the sibling views the
+        // same way a committed store does. The bytes are the same bytes
+        // whichever view names them, so a landing that replicated
+        // nothing would leave the siblings holding what the transfer
+        // replaced. The issuer is exempt there for the reason it is
+        // exempt above: every view of the segment shares one
+        // reservation granule, so the split the write already applies
+        // in space 0 is the split the aliases carry.
+        self.fanout_committed_range(AddressSpaceId::BOOT, c.destination(), Some(c.issuer()));
     }
 
     /// Pop and apply DMA completions whose modeled time has arrived;
@@ -96,3 +107,7 @@ impl Runtime {
 #[cfg(test)]
 #[path = "tests/dma_space_tests.rs"]
 mod dma_space_tests;
+
+#[cfg(test)]
+#[path = "tests/dma_shared_view_tests.rs"]
+mod dma_shared_view_tests;

@@ -28,11 +28,15 @@ impl Runtime {
     ///
     /// `exempt` names the one unit that keeps its reservation. The
     /// host passes it for a write it makes on that unit's behalf -- an
-    /// LV2 out-parameter, or a DMA payload the unit issued. A
-    /// mechanism with no unit behind it (the RSX, a sibling-view
-    /// replication) passes `None` and exempts nobody.
+    /// LV2 out-parameter, or a DMA payload the unit issued. A mechanism
+    /// with no unit behind it, such as the RSX, passes `None` and
+    /// exempts nobody.
     /// [PPC-Book2 p:10 s:1.7.3.1] a store by another processor
     /// or mechanism into the granule loses the reservation.
+    ///
+    /// A sibling-view replication carries whatever its own writer
+    /// carries, because every view of a segment names one granule: a
+    /// store replicates with `None`, a DMA landing with its issuer.
     ///
     /// # Errors
     ///

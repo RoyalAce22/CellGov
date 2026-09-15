@@ -101,10 +101,14 @@ installed all-or-nothing. A committed write through one view fans
 out to every sibling view (including a second view in the same
 space), clears reservations on covered lines in the sibling
 spaces, and invalidates predecoded code at the translated alias
-ranges. Atomic `ConditionalStore` through a shared view is
-unmodeled and refuses loudly. DMA stays space-0 end to end, and
-the RSX subsystem reads and mirrors space 0 only; deferred RSX
-effects never join a child-space commit batch.
+ranges. A DMA landing inside a view fans out the same way and
+clears the same lines; it invalidates no predecoded code, at the
+alias ranges or at its own destination. Atomic `ConditionalStore`
+through a shared view is unmodeled and refuses loudly. A DMA
+transfer resolves both its ends in space 0, so the fanout is the
+only part of one that reaches another space. The RSX subsystem
+reads and mirrors space 0 only; deferred RSX effects never join a
+child-space commit batch.
 
 ```mermaid
 flowchart LR
