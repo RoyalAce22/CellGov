@@ -30,6 +30,7 @@ use cellgov_event::UnitId;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
+use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::{Budget, InstructionCost};
 
 /// Fault code constants encoded into `FaultKind::Guest`.
@@ -40,6 +41,10 @@ const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
 /// A refused `rchcnt` keeps its own fault class. The trace then
 /// distinguishes it from a refused `rdch` / `wrch` on the same channel.
 const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
+/// A parked MFC GET whose effective address resolves to no region, or
+/// whose local-store destination escapes the store. Its low bits carry
+/// the transfer's tag id.
+const FAULT_MFC_GET_UNRESOLVED: u32 = 0x0007_0000;
 
 /// Records the bytes a transfer copied from main memory into local store.
 ///
@@ -129,22 +134,44 @@ impl ExecutionUnit for SpuExecutionUnit {
         // transfer's read enters it after the clear.
         let mut parked_get_read = None;
         if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
-            let src_start = ea as usize;
-            // MFC_EAH and MFC_EAL are write channels the SPU program
-            // sets. `ea` can therefore sit at the top of the space,
-            // where the sum carries out of it. The saturating add
-            // leaves the bound check below to refuse the transfer.
+            // The guest writes `ea` through MFC_EAH and MFC_EAL, so it
+            // can name anything, an address no region backs included.
+            // Resolving through the memory's own read reaches whichever
+            // region backs it; a slice of `as_bytes()` reaches only the
+            // region at the base.
             // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
-            let src_end = src_start.saturating_add(size as usize);
-            let mem = ctx.memory().as_bytes();
-            if src_end <= mem.len() {
-                let dst_start = lsa as usize;
-                let dst_end = dst_start + size as usize;
-                if dst_end <= self.state.ls.len() {
-                    self.state.ls[dst_start..dst_end].copy_from_slice(&mem[src_start..src_end]);
-                    parked_get_read = shared_read(ea, size, self.id);
-                }
+            // A transfer of no bytes reads no main storage and writes no
+            // local store, so neither address has to resolve for it.
+            // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
+            let moved = size == 0
+                || ByteRange::new(GuestAddr::new(ea), u64::from(size))
+                    .and_then(|src| ctx.memory().read(src))
+                    .and_then(|bytes| {
+                        let dst_start = lsa as usize;
+                        let dst_end = dst_start.checked_add(size as usize)?;
+                        let slot = self.state.ls.get_mut(dst_start..dst_end)?;
+                        slot.copy_from_slice(bytes);
+                        Some(())
+                    })
+                    .is_some();
+            if !moved {
+                // The tag bit is the guest's only signal that the
+                // transfer finished. Publishing it here would report a
+                // completion over local store the transfer never wrote,
+                // so the refusal is named instead.
+                effects.clear();
+                self.status = UnitStatus::Faulted;
+                return ExecutionStepResult {
+                    yield_reason: YieldReason::Fault,
+                    consumed_cost: InstructionCost::new(0),
+                    local_diagnostics: LocalDiagnostics::with_pc(self.state.pc as u64),
+                    fault: Some(FaultKind::Guest(
+                        FAULT_MFC_GET_UNRESOLVED | u32::from(tag_id),
+                    )),
+                    syscall_args: None,
+                };
             }
+            parked_get_read = shared_read(ea, size, self.id);
             self.state.channels.tag_status |= 1u32 << tag_id;
         }
         self.state.channels.tag_status |= ctx.completed_dma_tags();
@@ -222,8 +249,11 @@ impl ExecutionUnit for SpuExecutionUnit {
                     acquire_line,
                 } => {
                     let src_start = ea as usize;
-                    // The EA is guest-written; see the parked-transfer
-                    // path above for why the sum saturates.
+                    // MFC_EAH and MFC_EAL are write channels the SPU
+                    // program sets, so `ea` can sit at the top of the
+                    // space, where the sum carries out of it. The
+                    // saturating add leaves the bound check below to
+                    // refuse the transfer.
                     let src_end = src_start.saturating_add(size as usize);
                     let mem = ctx.memory().as_bytes();
                     if src_end <= mem.len() {
@@ -292,6 +322,10 @@ impl ExecutionUnit for SpuExecutionUnit {
 #[cfg(test)]
 #[path = "tests/read_intent_tests.rs"]
 mod read_intent_tests;
+
+#[cfg(test)]
+#[path = "tests/parked_get_tests.rs"]
+mod parked_get_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
