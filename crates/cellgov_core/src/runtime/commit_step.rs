@@ -175,10 +175,12 @@ impl Runtime {
             self.dispatch_syscall(result, source);
         }
         // Park before firing completions: fire_dma_completions sets the
-        // wake override (Runnable) for any issuer whose completion just
-        // landed, which overwrites this Blocked override iff a tag bit
-        // got published. Reverse order would leave the SPU Blocked even
-        // when its wake just fired.
+        // wake override (Runnable) for every issuer whose completion
+        // just landed and that is neither Finished nor Faulted, which
+        // overwrites this Blocked override. A tag bit rides along only
+        // where the request carries a tag, and is no part of the wake.
+        // Reverse order would leave the SPU Blocked even when its wake
+        // just fired.
         if result.yield_reason == YieldReason::DmaWait {
             self.registry
                 .set_status_override(source, UnitStatus::Blocked);

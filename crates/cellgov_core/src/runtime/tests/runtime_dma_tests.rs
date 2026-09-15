@@ -65,6 +65,53 @@ fn dma_completion_wakes_issuer() {
     );
 }
 
+/// An untagged transfer publishes no tag bit, and wakes its issuer
+/// anyway.
+///
+/// `dma_completion_wakes_issuer` above already holds the wake half.
+/// This adds the two halves it leaves implicit: that the request
+/// carries no tag, said out loud rather than left to the constructor,
+/// and that nothing reaches the tag-completion map for it. The wake and
+/// the tag bit are separate writes, and only this says so.
+#[test]
+fn an_untagged_completion_wakes_its_issuer_with_no_tag_bit() {
+    use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
+    use cellgov_mem::{ByteRange, GuestAddr};
+    let mut rt = build(256, 5, 100);
+    rt.registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    let issuer = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 10));
+    rt.registry_mut()
+        .set_status_override(issuer, cellgov_exec::UnitStatus::Blocked);
+
+    let req = DmaRequest::new(
+        DmaDirection::Put,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        ByteRange::new(GuestAddr::new(128), 4).unwrap(),
+        issuer,
+    )
+    .unwrap();
+    assert_eq!(req.tag_id(), None, "the premise is an untagged request");
+    rt.dma_queue
+        .enqueue(DmaCompletion::new(req, GuestTicks::new(3)), None);
+
+    let s = rt.step().unwrap();
+    rt.commit_step(&s.result, &s.effects).unwrap();
+
+    assert_eq!(
+        rt.registry().effective_status(issuer),
+        Some(cellgov_exec::UnitStatus::Runnable),
+        "the completion un-parks the issuer whether or not it carried a tag",
+    );
+    assert_eq!(
+        rt.pending_tag_completions.get(&issuer),
+        None,
+        "and publishes no tag bit, because the request named no tag",
+    );
+}
+
 #[test]
 fn a_dma_completion_for_a_finished_issuer_does_not_resurrect_it() {
     use cellgov_dma::{DmaCompletion, DmaDirection, DmaRequest};
