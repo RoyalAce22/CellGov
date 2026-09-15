@@ -250,6 +250,14 @@ fn run_one(
     let mut depth = 0usize;
     let mut dropped_branches = 0usize;
     let halt = loop {
+        // Read before the cap: a window nothing can model is no
+        // caller's bound. The snapshot every execution restores can
+        // carry a pending pass, and the step below would then run under
+        // parks no footprint records -- in every execution the search
+        // runs, not one.
+        if rt.has_pending_child_init() {
+            break Halt::Stopped(StopReason::ChildInitUnserved);
+        }
         // The cap refuses to start a step, so it answers only where
         // there was one to start. An execution that reaches the cap
         // with nothing left to run is maximal, and the step below
@@ -334,6 +342,11 @@ fn run_one(
         }
         footprint.note_inflight(rt);
         footprint.expand_aliases(rt, step.unit);
+        // The pass this parks behind reaches no footprint, so the
+        // relation cannot answer for the steps after it.
+        if rt.has_pending_child_init() {
+            break Halt::Stopped(StopReason::ChildInitUnserved);
+        }
         // The commit is what discards a faulted batch and counts it, so
         // the break reads the fault after it. The step gets no decision
         // point, as a refused commit gets none.

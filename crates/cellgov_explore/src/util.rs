@@ -9,7 +9,7 @@ use cellgov_effects::FaultKind;
 /// [`StopReason::Stalled`] and [`StopReason::Deadlocked`] end a
 /// maximal execution. Every other reason leaves a prefix of the
 /// schedule, whose memory hash is no finished run's answer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumCount)]
 pub enum StopReason {
     /// No unit was runnable: the workload finished.
     Stalled,
@@ -19,6 +19,20 @@ pub enum StopReason {
     /// reads its races, and a schedule that deadlocks where another
     /// finishes is a divergence.
     Deadlocked,
+    /// A child is parked behind a staged init pass no explorer runs.
+    ///
+    /// The pass holds every other runnable unit `Blocked` across the
+    /// child's `module_start` and restores them after, through no
+    /// effect, so no footprint records either half. A relation that
+    /// cannot see those parks would call steps independent that a pass
+    /// separated, which is the silent direction. The search stops
+    /// instead of exploring a window it cannot reason about.
+    ///
+    /// Every step loop reads this before it starts a step, so a runtime
+    /// handed over with a pass already pending runs none. The step that
+    /// stages one commits and reaches no decision point, so a log this
+    /// stop ends covers one step less than the run's memory hash.
+    ChildInitUnserved,
     /// The caller's step cap refused a step the execution had left to
     /// take, so what the run reports covers a prefix.
     ///
@@ -62,6 +76,16 @@ pub enum StopClass {
     /// failing. Only the first names a defect in the model.
     #[strum(serialize = "fault")]
     Fault,
+    /// The search will not answer for this window.
+    ///
+    /// Nothing is wrong with the model or the guest: the window holds
+    /// something the relation cannot see, so no verdict over it would
+    /// mean anything. Separate from [`StopClass::Refusal`] because a
+    /// reader chasing a model defect should not be sent here, and
+    /// separate from [`StopClass::Bound`] because no cap the caller can
+    /// raise would help.
+    #[strum(serialize = "unserved")]
+    Unserved,
 }
 
 impl StopClass {
@@ -95,6 +119,10 @@ impl StopReason {
             Self::StepError(StepError::TimeOverflow | StepError::SchedulerNotReinstalled)
             | Self::CommitError(_) => StopClass::Refusal,
             Self::Faulted(_) => StopClass::Fault,
+            // Neither the model nor the guest is at fault: the window
+            // holds what the relation cannot see, so the search answers
+            // for none of it.
+            Self::ChildInitUnserved => StopClass::Unserved,
         }
     }
 }
@@ -104,6 +132,10 @@ impl std::fmt::Display for StopReason {
         match self {
             Self::Stalled => f.write_str("stalled"),
             Self::Deadlocked => f.write_str("deadlocked: a unit is parked with no wake source"),
+            Self::ChildInitUnserved => f.write_str(
+                "the window spans a spawn whose staged init pass parks every other unit \
+                 through no effect, which no footprint records",
+            ),
             Self::StepBound => f.write_str("replay step bound reached"),
             Self::StepError(e) => write!(f, "step refused: {e}"),
             Self::CommitError(e) => write!(f, "commit refused: {e}"),
@@ -125,10 +157,19 @@ impl std::fmt::Display for StopReason {
 /// A refused commit stops the run: its effects never landed, so every
 /// later step would build on a state the schedule did not produce. A
 /// fault stops it for the same reason -- the commit discards its
-/// batch, and the faulted unit leaves the runnable set.
+/// batch, and the faulted unit leaves the runnable set. A staged child
+/// init the host has not run stops it because the relation cannot see
+/// the parks it holds; see [`StopReason::ChildInitUnserved`].
 pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
     let mut steps = 0;
     loop {
+        // Read before the cap: a window nothing can model is no
+        // caller's bound. A driver can hand over a runtime that already
+        // carries a pending pass, and the step below would run under
+        // parks no footprint records.
+        if rt.has_pending_child_init() {
+            return StopReason::ChildInitUnserved;
+        }
         // The cap refuses to start a step, so it answers only where
         // there was one to start. See `Runtime::can_take_another_step`.
         let at_cap = steps >= max_steps;
@@ -150,6 +191,13 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
                 // fault, as the boot's own step loop ranks them.
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
                     return StopReason::CommitError(e);
+                }
+                // The pass this parks behind reaches no footprint, so
+                // the relation cannot answer for the steps after it.
+                // Ahead of the fault for the same reason the commit
+                // refusal above is: a refusal outranks a fault.
+                if rt.has_pending_child_init() {
+                    return StopReason::ChildInitUnserved;
                 }
                 if let Some(kind) = step.result.fault {
                     return StopReason::Faulted(kind);

@@ -46,6 +46,15 @@ const EXIT_WINDOW_NEVER_OPENED: i32 = exit_codes::command_specific(21);
 /// fault, and this is how `explore title` says it.
 const EXIT_GUEST_FAULT: i32 = exit_codes::command_specific(22);
 
+/// Exit code: the window holds something the search cannot reason
+/// about, so it answers for none of it.
+///
+/// Distinct from [`EXIT_MODEL_REFUSAL`]: nothing is wrong with the
+/// model. It is also what [`EXIT_WINDOW_NEVER_OPENED`] reports for the
+/// same cause met before the window opens, so the two ends of one boot
+/// give one reading.
+const EXIT_WINDOW_UNSERVED: i32 = exit_codes::command_specific(23);
+
 /// Exit code: the window is schedule-sensitive, the same verdict the
 /// scenario and microtest entry points give.
 const EXIT_SCHEDULE_SENSITIVE: i32 = exit_codes::FAILED;
@@ -251,6 +260,12 @@ impl Window {
         self.count_stops(result, |stop| self.is_model_refusal(stop))
     }
 
+    /// How many schedules in `result` the search would not answer for,
+    /// the baseline included.
+    fn unserved(&self, result: &ExplorationResult) -> usize {
+        self.count_stops(result, |stop| stop.class() == StopClass::Unserved)
+    }
+
     /// How many schedules in `result` ended in a guest fault, the
     /// baseline included.
     ///
@@ -286,6 +301,11 @@ fn exit_code(window: &Window, result: &ExplorationResult) -> i32 {
     }
     if window.guest_faults(result) > 0 {
         return EXIT_GUEST_FAULT;
+    }
+    // No verdict rests on a window the search would not answer for, so
+    // this outranks the outcome below and never exits clean.
+    if window.unserved(result) > 0 {
+        return EXIT_WINDOW_UNSERVED;
     }
     match result.outcome {
         OutcomeClass::ScheduleSensitive => EXIT_SCHEDULE_SENSITIVE,
@@ -336,6 +356,15 @@ fn window_lines(window: &Window, result: &ExplorationResult) -> String {
     // The number the guest-fault status comes from: the exploration's
     // own tallies below count refusals and truncations, not faults.
     out.push_str(&format!("guest_faults: {}\n", window.guest_faults(result)));
+    let unserved = window.unserved(result);
+    out.push_str(&format!("unserved: {unserved}\n"));
+    if unserved > 0 {
+        out.push_str(
+            "the window holds a spawn whose staged init pass no exploration runs, \
+             so the search answers for none of it; start the window after the spawn \
+             or end it before\n",
+        );
+    }
     out
 }
 
@@ -367,6 +396,7 @@ fn json(window: &Window, result: &ExplorationResult) -> String {
         },
         "model_refusals": window.model_refusals(result),
         "guest_faults": window.guest_faults(result),
+        "unserved": window.unserved(result),
         "exploration": exploration,
     });
     serde_json::to_string_pretty(&doc)

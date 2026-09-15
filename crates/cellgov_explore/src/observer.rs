@@ -17,7 +17,9 @@ use cellgov_core::Runtime;
 /// The runtime is advanced in place; callers who need the final state
 /// should inspect `rt` after the call. A truncating stop -- see
 /// [`StopReason::is_truncated`] -- means the log and `rt`'s memory
-/// hash both describe a prefix of the schedule.
+/// hash both describe a prefix of the schedule. The two cover the same
+/// steps except under [`StopReason::ChildInitUnserved`], where the hash
+/// covers one step the log leaves out.
 pub fn observe_decisions(rt: &mut Runtime) -> (DecisionLog, StopReason) {
     observe(rt, None)
 }
@@ -32,6 +34,13 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
     let mut log = DecisionLog::new();
     let mut committed = 0usize;
     let stop = loop {
+        // Read before the cap: a window nothing can model is no
+        // caller's bound. A driver can hand over a runtime that already
+        // carries a pending pass, and the step below would run under
+        // parks no footprint records.
+        if rt.has_pending_child_init() {
+            break StopReason::ChildInitUnserved;
+        }
         // The cap refuses to start a step, so it answers only where
         // there was one to start. See `Runtime::can_take_another_step`.
         let at_cap = max_steps.is_some_and(|cap| committed >= cap);
@@ -62,6 +71,11 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 }
                 footprint.note_inflight(rt);
                 footprint.expand_aliases(rt, step.unit);
+                // The pass this parks behind reaches no footprint, so
+                // the relation cannot answer for the steps after it.
+                if rt.has_pending_child_init() {
+                    break StopReason::ChildInitUnserved;
+                }
                 // A discarded batch reached no guest state, so the step
                 // gets no point, as a refused commit gets none.
                 if let Some(kind) = step.result.fault {

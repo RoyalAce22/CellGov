@@ -145,7 +145,9 @@ pub struct ExplorationResult {
     ///
     /// - a bound stops a replay the caller capped;
     /// - a blocked replay stops on the workload's own state;
-    /// - a fault is the guest's own step failing.
+    /// - a fault is the guest's own step failing;
+    /// - an unserved window holds what the relation cannot see, which
+    ///   is the search's own limit rather than the model's.
     pub schedules_refused: usize,
     /// The exploration's first host invariant break as one line for the
     /// caller to report: the baseline's, or the first replay that broke

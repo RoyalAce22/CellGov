@@ -994,6 +994,9 @@ Exit codes particular to this command:
   22  a schedule the exploration ran ended in a guest fault. Distinct
       from 20: the guest's own step failed rather than the model
       declining one. A refusal outranks it.
+  23  the window holds a spawn whose staged init pass no exploration
+      runs, so the search answers for none of it. Nothing is wrong with
+      the model; start the window after the spawn or end it before.
 
 A schedule-sensitive window -- two schedules that both ran themselves
 out committed different memory -- takes the shared status 1. A cap the

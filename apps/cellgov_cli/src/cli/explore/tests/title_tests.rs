@@ -205,6 +205,40 @@ fn a_guest_fault_exits_under_its_own_name() {
     );
 }
 
+/// An unserved window exits non-zero, and not as a model refusal.
+///
+/// Splitting the class without giving the CLI an arm would drop
+/// `model_refusals` to zero and exit clean, which reads as a verdict
+/// over a window that reached none.
+#[test]
+fn an_unserved_window_exits_under_its_own_name() {
+    let w = window(CheckpointTrigger::ProcessExit);
+    let r = result(StopReason::ChildInitUnserved, vec![]);
+
+    assert_eq!(w.model_refusals(&r), 0, "the model refused nothing");
+    assert_eq!(w.guest_faults(&r), 0, "and the guest faulted on nothing");
+    assert_eq!(w.unserved(&r), 1);
+    assert_eq!(exit_code(&w, &r), EXIT_WINDOW_UNSERVED);
+    assert_ne!(EXIT_WINDOW_UNSERVED, 0, "no verdict rests on this window");
+    assert_ne!(EXIT_WINDOW_UNSERVED, EXIT_MODEL_REFUSAL);
+    assert_ne!(EXIT_WINDOW_UNSERVED, EXIT_GUEST_FAULT);
+
+    let text = human(&w, &r);
+    assert!(text.contains("unserved: 1"), "{text}");
+    assert!(
+        text.contains("start the window after the spawn"),
+        "the reading carries a remedy, as the never-opened one does: {text}",
+    );
+
+    let mut sensitive_but_unserved = r;
+    sensitive_but_unserved.outcome = OutcomeClass::ScheduleSensitive;
+    assert_eq!(
+        exit_code(&w, &sensitive_but_unserved),
+        EXIT_WINDOW_UNSERVED,
+        "an outcome computed over a window the search would not answer for is not a verdict",
+    );
+}
+
 /// A refusal and a fault in one run: the refusal is the finding.
 #[test]
 fn a_model_refusal_outranks_a_guest_fault() {

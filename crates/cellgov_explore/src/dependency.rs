@@ -22,12 +22,21 @@
 //!   sweep reservations from no unit's step.
 //! - Every LV2 handler effect, guest write and wake alike: a handler
 //!   commits through `Runtime::host_write`, not through the unit's
-//!   step effects. No fake-ISA workload runs a handler.
+//!   step effects.
 //! - An LV2 syscall's park and the wake that ends it, neither of which
 //!   carries an effect or a yield reason.
-//! - `Runtime::set_unit_status_override`, which `cellgov_boot` uses
-//!   mid-run to hold every other unit `Blocked` across a spawned
-//!   child's `module_start`.
+//!
+//! The last two reach a workload here through one syscall, the spawn
+//! in `tests/child_init_window.rs`, and both are closed by refusing
+//! rather than by recording. `cellgov_boot` holds every other unit
+//! `Blocked` across a spawned child's `module_start` through
+//! `Runtime::set_unit_status_override`, which no footprint sees either.
+//! So every driver stops with
+//! [`crate::util::StopReason::ChildInitUnserved`] before it takes a
+//! step under a staged pass, and the step that stages one reaches no
+//! decision point: neither the parks nor the handler's own writes enter
+//! the relation. A window that spans one reaches no verdict, which is
+//! the honest answer while the relation cannot see the parks.
 //!
 //! A faulted step records no footprint and needs none: its batch is
 //! discarded and every driver stops there, so it is not an event.

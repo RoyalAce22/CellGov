@@ -40,6 +40,7 @@ const REFUSED_COMMIT: CommitError = CommitError::OutOfRange { effect_index: 0 };
 /// without anyone widening anything.
 fn every_truncating_reason() -> Vec<StopReason> {
     std::iter::once(StopReason::StepBound)
+        .chain(std::iter::once(StopReason::ChildInitUnserved))
         .chain(
             StepError::VARIANTS
                 .iter()
@@ -51,6 +52,59 @@ fn every_truncating_reason() -> Vec<StopReason> {
             FAKE_FAULT_CODE,
         ))))
         .collect()
+}
+
+/// Whether a reason leaves a prefix, decided by an exhaustive match.
+///
+/// `StopReason::is_truncated` reads `!matches!(Stalled | Deadlocked)`,
+/// so a variant added to the enum inherits "truncates" without anyone
+/// choosing it. This match does not compile until the new variant is
+/// named, which is what makes the choice deliberate. The sweep below
+/// holds the two readings to the same answer.
+fn declares_a_prefix(reason: StopReason) -> bool {
+    match reason {
+        StopReason::Stalled | StopReason::Deadlocked => false,
+        StopReason::ChildInitUnserved
+        | StopReason::StepBound
+        | StopReason::StepError(_)
+        | StopReason::CommitError(_)
+        | StopReason::Faulted(_) => true,
+    }
+}
+
+/// Every shape the enum holds is one the sweep covers or one
+/// [`MAXIMAL_STOPS`] names.
+///
+/// `declares_a_prefix` makes a new variant name its truncation; this
+/// count makes it join a list, so the sweep cannot stay one case short
+/// while the match reads whole.
+#[test]
+fn every_stop_reason_shape_is_swept_or_maximal() {
+    let swept = every_truncating_reason();
+    let mut shapes: Vec<std::mem::Discriminant<StopReason>> = Vec::new();
+    for reason in swept.iter().chain(&MAXIMAL_STOPS) {
+        let shape = std::mem::discriminant(reason);
+        if !shapes.contains(&shape) {
+            shapes.push(shape);
+        }
+    }
+    assert_eq!(
+        shapes.len(),
+        <StopReason as strum::EnumCount>::COUNT,
+        "a stop reason the enum holds is in neither list",
+    );
+}
+
+#[test]
+fn every_reason_the_sweep_names_declares_the_same_truncation() {
+    for reason in every_truncating_reason() {
+        assert!(declares_a_prefix(reason), "{reason}");
+        assert!(reason.is_truncated(), "{reason}");
+    }
+    for reason in MAXIMAL_STOPS {
+        assert!(!declares_a_prefix(reason), "{reason}");
+        assert!(!reason.is_truncated(), "{reason}");
+    }
 }
 
 /// The two stops that end a maximal execution.
@@ -373,9 +427,9 @@ fn the_sweep_runs_one_case_per_way_a_step_can_refuse() {
     let reasons = every_truncating_reason();
     assert_eq!(
         reasons.len(),
-        StepError::VARIANTS.len() + 3,
-        "the sweep must run one case per step refusal, plus the replay bound, a \
-         refused commit and a fault",
+        StepError::VARIANTS.len() + 4,
+        "the sweep must run one case per step refusal, plus the replay bound, an \
+         unserved child init, a refused commit and a fault",
     );
     for (index, reason) in reasons.iter().enumerate() {
         assert!(
