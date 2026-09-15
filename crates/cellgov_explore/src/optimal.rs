@@ -244,7 +244,12 @@ fn run_one(
     let mut depth = 0usize;
     let mut dropped_branches = 0usize;
     let halt = loop {
-        if depth >= config.max_steps_per_run {
+        // The cap refuses to start a step, so it answers only where
+        // there was one to start. An execution that reaches the cap
+        // with nothing left to run is maximal, and the step below
+        // names the stop its work justifies.
+        let at_cap = depth >= config.max_steps_per_run;
+        if at_cap && rt.can_take_another_step() {
             break Halt::Stopped(StopReason::StepBound);
         }
         let runnable: Vec<UnitId> = rt.registry().runnable_ids().collect();
@@ -281,6 +286,13 @@ fn run_one(
             }
             Err(e) => break Halt::Stopped(StopReason::StepError(e)),
         };
+        // The predicate is a second reading of the question `Runtime::step`
+        // itself answers. A step that runs past the cap is the two
+        // disagreeing, and the cap then bounds nothing.
+        debug_assert!(
+            !at_cap,
+            "the cap was reached, the predicate saw no step left, and one ran",
+        );
         if runnable.is_empty() {
             // The warp resolved the choice; the frame records what it
             // picked so the backtrack below has a branch to retire.

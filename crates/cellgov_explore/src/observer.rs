@@ -32,12 +32,23 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
     let mut log = DecisionLog::new();
     let mut committed = 0usize;
     let stop = loop {
-        if max_steps.is_some_and(|cap| committed >= cap) {
+        // The cap refuses to start a step, so it answers only where
+        // there was one to start. See `Runtime::can_take_another_step`.
+        let at_cap = max_steps.is_some_and(|cap| committed >= cap);
+        if at_cap && rt.can_take_another_step() {
             break StopReason::StepBound;
         }
         let step_idx = rt.steps_taken();
         match rt.step() {
             Ok(step) => {
+                // The predicate is a second reading of the question
+                // `Runtime::step` itself answers. A step that runs past
+                // the cap is the two disagreeing, and the cap then
+                // bounds nothing.
+                debug_assert!(
+                    !at_cap,
+                    "the cap was reached, the predicate saw no step left, and one ran",
+                );
                 // A warp inside the step can widen the set the
                 // scheduler chose from, so the point reads it here.
                 let runnable: Vec<_> = rt.last_runnable().to_vec();

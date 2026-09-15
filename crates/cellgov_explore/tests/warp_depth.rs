@@ -118,9 +118,9 @@ fn a_warp_depth_refuses_a_reversal_it_cannot_deliver() {
         result.classes_explored, None,
         "a reversal the search dropped is cover it cannot claim",
     );
-    // This workload builds the drop deliberately, so it is where the
-    // count has to be non-zero. Without this the empty class total
-    // above reads the same as a bound's.
+    // This workload exists to build the drop, so it is where the count
+    // has to be non-zero. Without this the empty class total above
+    // reads the same as a bound's.
     assert!(
         result.reversals_dropped > 0,
         "the warp depth dropped a branch, and the count is what says so",

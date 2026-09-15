@@ -12,6 +12,39 @@ use crate::runtime::trace_bridge::traced_yield_reason;
 use crate::runtime::types::{RuntimeMode, RuntimeStep, StepError};
 
 impl Runtime {
+    /// True when a unit is runnable, or when one is parked and a queued
+    /// DMA completion or timer deadline can wake it through the time
+    /// warp.
+    ///
+    /// False is the sound half: [`Runtime::step`] then answers
+    /// [`StepError::NoRunnableUnit`] or [`StepError::AllBlocked`], and
+    /// the execution is maximal. True says a unit is there to run and
+    /// no more than that. `step` keeps its own refusals --
+    /// [`StepError::MaxStepsExceeded`] and
+    /// [`StepError::SchedulerNotReinstalled`] -- and a deadline that
+    /// fires without waking anyone still ends in `AllBlocked`.
+    ///
+    /// A caller bounding a run reads this before it reports its own
+    /// bound, so the bound it reports is one the work justified. The
+    /// answer reads the registry the scheduler selects from rather than
+    /// the installed scheduler: [`crate::Scheduler::select_next`]
+    /// answers `None` where no unit is runnable, so a stale prescribed
+    /// choice left over from the previous step cannot narrow it.
+    ///
+    /// It sits beside [`Runtime::step`] because it is a second reading
+    /// of the question that function answers, and a wake source added
+    /// there has to be added here.
+    pub fn can_take_another_step(&self) -> bool {
+        if self.registry.runnable_ids().next().is_some() {
+            return true;
+        }
+        let any_blocked = self.registry.ids().any(|id| {
+            self.registry.effective_status(id) == Some(cellgov_exec::UnitStatus::Blocked)
+        });
+        any_blocked
+            && (self.dma_queue.peek().is_some() || self.timer_wakes.peek_deadline().is_some())
+    }
+
     /// Select a unit, grant budget, run it to yield, advance guest time.
     ///
     /// # Errors

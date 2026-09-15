@@ -19,7 +19,14 @@ pub enum StopReason {
     /// reads its races, and a schedule that deadlocks where another
     /// finishes is a divergence.
     Deadlocked,
-    /// `max_steps` was reached with work still runnable.
+    /// The caller's step cap refused a step the execution had left to
+    /// take, so what the run reports covers a prefix.
+    ///
+    /// An execution that reaches the cap with nothing left to run
+    /// reports the stop its own work justifies instead. Every step loop
+    /// that reads a cap asks
+    /// [`cellgov_core::Runtime::can_take_another_step`] before it
+    /// answers with this.
     StepBound,
     /// `Runtime::step` refused.
     StepError(StepError),
@@ -115,11 +122,22 @@ impl std::fmt::Display for StopReason {
 pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
     let mut steps = 0;
     loop {
-        if steps >= max_steps {
+        // The cap refuses to start a step, so it answers only where
+        // there was one to start. See `Runtime::can_take_another_step`.
+        let at_cap = steps >= max_steps;
+        if at_cap && rt.can_take_another_step() {
             return StopReason::StepBound;
         }
         match rt.step() {
             Ok(step) => {
+                // The predicate is a second reading of the question
+                // `Runtime::step` itself answers. A step that runs past
+                // the cap is the two disagreeing, and the cap then
+                // bounds nothing.
+                debug_assert!(
+                    !at_cap,
+                    "the cap was reached, the predicate saw no step left, and one ran",
+                );
                 // The commit discards the batch and counts it, so the
                 // fault read comes after it. A refusal outranks a
                 // fault, as the boot's own step loop ranks them.

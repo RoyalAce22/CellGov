@@ -20,6 +20,47 @@ fn step_with_no_units_returns_no_runnable() {
     assert_eq!(rt.steps_taken(), 0);
 }
 
+/// `can_take_another_step` is a second reading of what `step` decides,
+/// and a wake source added to one and not the other makes it lie. The
+/// direction that matters is a false `false`: a caller bounding a run
+/// would report a finish where work remained.
+#[test]
+fn the_step_predicate_answers_false_only_where_step_refuses() {
+    // Nothing registered: no unit, no queue entry.
+    let mut empty = build(16, 5, 100);
+    assert!(!empty.can_take_another_step());
+    assert_eq!(empty.step().unwrap_err(), StepError::NoRunnableUnit);
+
+    // A runnable unit.
+    let mut runnable = build(16, 5, 100);
+    runnable
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 2));
+    assert!(runnable.can_take_another_step());
+    assert!(runnable.step().is_ok());
+
+    // Parked with nothing queued to wake it.
+    let mut parked = build(16, 5, 100);
+    parked
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    parked
+        .registry_mut()
+        .set_status_override(UnitId::new(0), cellgov_exec::UnitStatus::Blocked);
+    assert!(!parked.can_take_another_step());
+    assert_eq!(parked.step().unwrap_err(), StepError::AllBlocked);
+
+    // Every unit finished, which is a stall and not a park.
+    let mut finished = build(16, 1, 100);
+    finished
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 1));
+    let step = finished.step().expect("the unit has its one step");
+    finished.commit_step(&step.result, &step.effects).unwrap();
+    assert!(!finished.can_take_another_step());
+    assert_eq!(finished.step().unwrap_err(), StepError::NoRunnableUnit);
+}
+
 #[test]
 fn step_with_all_units_blocked_returns_all_blocked() {
     let mut rt = build(16, 5, 100);
