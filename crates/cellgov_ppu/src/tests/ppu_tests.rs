@@ -1,6 +1,7 @@
 //! PPU execution-unit tests.
 
 use super::*;
+use cellgov_core::AddressSpaceId;
 use cellgov_exec::ExecutionContext;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 
@@ -554,7 +555,7 @@ fn build_lv2_driven_fixture(
             });
 
             let ppu_state = primed_reg.borrow_mut().take().unwrap();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 let mut unit = PpuExecutionUnit::new(id);
                 *unit.state_mut() = ppu_state;
                 unit
@@ -607,7 +608,7 @@ fn spu_fixed_value_runs_through_scenario_runner() {
         })
         .register(move |rt| {
             let state = primed_reg.borrow_mut().take().unwrap();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 let mut unit = PpuExecutionUnit::new(id);
                 *unit.state_mut() = state;
                 unit
@@ -1380,17 +1381,17 @@ fn shadow_inv_crt0_reloc_replay() {
 
     let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 100);
     rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
-    rt.registry_mut().register_with(PpuExecutionUnit::new);
+    rt.register_unit_with(PpuExecutionUnit::new);
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 10);
 
-    rt.memory_mut()
-        .apply_commit(
-            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
-            &li(3, 20).to_be_bytes(),
-        )
-        .unwrap();
+    rt.place_bytes(
+        AddressSpaceId::BOOT,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        &li(3, 20).to_be_bytes(),
+    )
+    .unwrap();
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 20);
@@ -1406,17 +1407,17 @@ fn shadow_inv_hle_trampoline_replant() {
 
     let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 100);
     rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
-    rt.registry_mut().register_with(PpuExecutionUnit::new);
+    rt.register_unit_with(PpuExecutionUnit::new);
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 111);
 
-    rt.memory_mut()
-        .apply_commit(
-            ByteRange::new(GuestAddr::new(0), 4).unwrap(),
-            &li(3, 222).to_be_bytes(),
-        )
-        .unwrap();
+    rt.place_bytes(
+        AddressSpaceId::BOOT,
+        ByteRange::new(GuestAddr::new(0), 4).unwrap(),
+        &li(3, 222).to_be_bytes(),
+    )
+    .unwrap();
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 222);
@@ -1432,17 +1433,17 @@ fn shadow_inv_write_exec_rewrite_exec() {
 
     let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 200);
     rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
-    rt.registry_mut().register_with(PpuExecutionUnit::new);
+    rt.register_unit_with(PpuExecutionUnit::new);
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 100);
 
-    rt.memory_mut()
-        .apply_commit(
-            ByteRange::new(GuestAddr::new(0x00), 4).unwrap(),
-            &li(3, 999).to_be_bytes(),
-        )
-        .unwrap();
+    rt.place_bytes(
+        AddressSpaceId::BOOT,
+        ByteRange::new(GuestAddr::new(0x00), 4).unwrap(),
+        &li(3, 999).to_be_bytes(),
+    )
+    .unwrap();
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 999);
@@ -1464,7 +1465,7 @@ fn shadow_inv_cross_slot_write() {
 
     let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 50);
     rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
-    rt.registry_mut().register_with(PpuExecutionUnit::new);
+    rt.register_unit_with(PpuExecutionUnit::new);
 
     step_n(&mut rt, 3);
     assert_eq!(read_mem_u32(&rt, 0x80), 10);
@@ -1484,7 +1485,7 @@ fn shadow_inv_partial_word_write() {
 
     let mut rt = cellgov_core::Runtime::new(mem, Budget::new(1), 50);
     rt.set_mode(cellgov_core::RuntimeMode::FaultDriven);
-    rt.registry_mut().register_with(PpuExecutionUnit::new);
+    rt.register_unit_with(PpuExecutionUnit::new);
 
     step_n(&mut rt, 2);
     assert_eq!(read_mem_u32(&rt, 0x80), 42);
@@ -1808,7 +1809,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
                     Box::new(unit)
                 });
 
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = PpuExecutionUnit::new(id);
                     unit.state_mut().pc = ppu_pc;
                     unit.state_mut().set_gpr(3, atomic_ea as u64);
@@ -1816,7 +1817,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
                     unit
                 });
 
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     spu_loader::load_spu_elf(&spu_elf, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;

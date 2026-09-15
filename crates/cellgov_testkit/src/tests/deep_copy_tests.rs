@@ -33,8 +33,7 @@ fn two_space_fixture() -> ScenarioFixture {
             .unwrap();
             let seed = ByteRange::new(GuestAddr::new(0), 4).unwrap();
             mem.apply_commit(seed, &[1, 2, 3, 4]).unwrap();
-            rt.registry_mut()
-                .register_with(|id| WritingUnit::at_zero(id, 2));
+            rt.register_unit_with(|id| WritingUnit::at_zero(id, 2));
         })
         .build()
 }
@@ -78,8 +77,7 @@ fn a_single_space_copy_hashes_like_the_runtime_memory() {
         .budget(Budget::new(1))
         .max_steps(10)
         .register(|rt: &mut Runtime| {
-            rt.registry_mut()
-                .register_with(|id| WritingUnit::at_zero(id, 3));
+            rt.register_unit_with(|id| WritingUnit::at_zero(id, 3));
         })
         .build());
     assert_eq!(result.final_spaces.len(), 1);

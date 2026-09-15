@@ -208,12 +208,14 @@ the invariant per path. The sweep fires from three paths:
    byte-deposit path, plus the emitter's own entry is dropped.
 3. A host write, through `Runtime::host_write`: LV2 dispatch
    effects, wake and out-parameter payloads, DMA completion, the
-   RSX control-register and flip-status mirrors, and shared-view
-   seeding and fanout. Validation, the sweep and the trace record
-   sit together there, so a new host-side write inherits the
-   sweep instead of carrying its own call. A write the host makes
-   on one unit's behalf exempts that unit, as (1) exempts its
-   emitter; a mechanism with no unit behind it exempts nobody.
+   RSX control-register and flip-status mirrors, shared-view
+   seeding and fanout, and the placements the driving program
+   makes itself through `Runtime::place_bytes`. Validation, the
+   sweep and the trace record sit together there, so a new
+   host-side write inherits the sweep instead of carrying its own
+   call. A write the host makes on one unit's behalf exempts that
+   unit, as (1) exempts its emitter; a mechanism with no unit
+   behind it exempts nobody.
 
 **Scope and bounds.** The reservation table and local registers
 are the full contention model. Memory-barrier instructions

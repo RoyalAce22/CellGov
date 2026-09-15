@@ -219,10 +219,12 @@ pub(super) fn resolve_commit_targets<'a>(
     match space {
         AddressSpaceId::BOOT => (memory, reservations),
         s => (
-            spaces
-                .extra
-                .get_mut(&s)
-                .expect("commit targeted a space that was never created"),
+            spaces.extra.get_mut(&s).unwrap_or_else(|| {
+                panic!(
+                    "commit targeted a space that was never created: 0x{:08x}",
+                    s.raw()
+                )
+            }),
             spaces
                 .extra_reservations
                 .get_mut(&s)
@@ -272,9 +274,11 @@ impl Runtime {
             .ok_or(SpaceError::UnknownSpace(space.raw()))
     }
 
-    /// Mutable view of `space`'s memory, for boot-time region installs
-    /// and image loads. Committed-state changes mid-run belong to the
-    /// commit pipeline, exactly as with [`Runtime::memory_mut`].
+    /// Mutable view of `space`'s memory, for region installs and image
+    /// loads during space construction.
+    ///
+    /// A write into a live space goes through the commit pipeline, or
+    /// through [`Runtime::place_bytes`].
     ///
     /// # Errors
     /// [`SpaceError::UnknownSpace`] when no such space exists.
@@ -308,9 +312,10 @@ impl Runtime {
             .ok_or(SpaceError::UnknownSpace(space.raw()))
     }
 
-    /// Mutable view of `space`'s reservation table, for test seeding;
-    /// mid-run mutation belongs to the commit pipeline, exactly as
-    /// with [`Runtime::reservations_mut`].
+    /// Mutable view of `space`'s reservation table, for test seeding.
+    ///
+    /// Mid-run, the commit pipeline and the host write's clear sweep
+    /// are the writers that keep the reservation contract.
     ///
     /// # Errors
     /// [`SpaceError::UnknownSpace`] when no such space exists.

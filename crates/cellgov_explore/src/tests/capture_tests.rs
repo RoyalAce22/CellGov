@@ -18,7 +18,7 @@ fn an_unmapped_region_spec_is_captured_unresolved_not_zero_filled() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -28,7 +28,7 @@ fn an_unmapped_region_spec_is_captured_unresolved_not_zero_filled() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -69,7 +69,7 @@ fn a_mapped_region_spec_is_captured_resolved() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -79,7 +79,7 @@ fn a_mapped_region_spec_is_captured_resolved() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![

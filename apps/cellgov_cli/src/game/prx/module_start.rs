@@ -148,13 +148,7 @@ fn seed_tls_thread_id(rt: &mut Runtime, env: &ModuleStartEnv) {
         .raw();
     let range = ByteRange::new(GuestAddr::new(MODULE_START_TLS_THREAD_ID_ADDR), 8)
         .expect("the TLS header word is a fixed in-range address");
-    let mem = rt.space_memory_mut(env.space).unwrap_or_else(|e| {
-        die(&format!(
-            "module_start: address space {} vanished before the TLS seed: {e}",
-            env.space.raw()
-        ))
-    });
-    mem.apply_commit(range, &tid.to_be_bytes())
+    rt.place_bytes(env.space, range, &tid.to_be_bytes())
         .unwrap_or_else(|e| {
             die(&format!(
                 "module_start: TLS thread-id seed at 0x{MODULE_START_TLS_THREAD_ID_ADDR:x} \
@@ -228,7 +222,7 @@ pub(in crate::game) fn run_module_start(
     ms_state.set_lr(0);
     seed_tls_thread_id(rt, env);
 
-    let ms_unit_id = rt.registry_mut().register_with(|id| {
+    let ms_unit_id = rt.register_unit_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = ms_state;
         if let Some((pc, skip)) = env.break_pc {

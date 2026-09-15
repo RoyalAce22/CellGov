@@ -35,7 +35,7 @@ pub(in crate::game) fn print_shadow_stats(rt: &mut Runtime) {
     let mut total_hits = 0u64;
     let mut total_misses = 0u64;
     let mut total_units = 0usize;
-    for (id, unit) in rt.registry_mut().iter_mut() {
+    for (id, unit) in rt.units_mut() {
         total_units += 1;
         let (h, m) = unit.shadow_stats();
         if h + m == 0 {

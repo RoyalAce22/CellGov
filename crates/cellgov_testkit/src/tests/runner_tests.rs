@@ -21,8 +21,7 @@ fn single_unit_runs_to_completion_then_stalls() {
         .budget(Budget::new(1))
         .max_steps(100)
         .register(|rt: &mut Runtime| {
-            let r = rt.registry_mut();
-            r.register_with(|id| CountingUnit::new(id, 5));
+            rt.register_unit_with(|id| CountingUnit::new(id, 5));
         })
         .build());
     assert_eq!(result.outcome, ScenarioOutcome::Stalled);
@@ -41,8 +40,7 @@ fn max_steps_cap_surfaces_as_max_steps_exceeded() {
         .budget(Budget::new(1))
         .max_steps(3)
         .register(|rt: &mut Runtime| {
-            let r = rt.registry_mut();
-            r.register_with(|id| CountingUnit::new(id, u64::MAX));
+            rt.register_unit_with(|id| CountingUnit::new(id, u64::MAX));
         })
         .build());
     assert_eq!(result.outcome, ScenarioOutcome::MaxStepsExceeded);
@@ -57,9 +55,8 @@ fn two_runs_of_the_same_fixture_are_byte_identical() {
             .budget(Budget::new(2))
             .max_steps(100)
             .register(|rt: &mut Runtime| {
-                let r = rt.registry_mut();
-                r.register_with(|id| CountingUnit::new(id, 4));
-                r.register_with(|id| CountingUnit::new(id, 6));
+                rt.register_unit_with(|id| CountingUnit::new(id, 4));
+                rt.register_unit_with(|id| CountingUnit::new(id, 6));
             })
             .build())
     }

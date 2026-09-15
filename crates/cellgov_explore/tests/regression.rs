@@ -21,7 +21,7 @@ fn regression_disjoint_writes_stable() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -31,7 +31,7 @@ fn regression_disjoint_writes_stable() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -62,7 +62,7 @@ fn regression_three_disjoint_writers_stable() {
             for (i, val) in [0xAA, 0xBB, 0xCC].iter().enumerate() {
                 let addr = (i * 8) as u64;
                 let v = *val;
-                rt.registry_mut().register_with(move |id| {
+                rt.register_unit_with(move |id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -91,7 +91,7 @@ fn regression_overlapping_writes_sensitive() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -101,7 +101,7 @@ fn regression_overlapping_writes_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -130,7 +130,7 @@ fn regression_three_overlapping_writers_sensitive() {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
             for val in [0xAA, 0xBB, 0xCC] {
-                rt.registry_mut().register_with(move |id| {
+                rt.register_unit_with(move |id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -159,8 +159,7 @@ fn regression_single_unit_no_branching() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut()
-                .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+            rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
             rt
         },
         &default_config(),
@@ -177,7 +176,7 @@ fn regression_disjoint_writers_pruned() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -187,7 +186,7 @@ fn regression_disjoint_writers_pruned() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -218,7 +217,7 @@ fn regression_overlapping_writers_not_pruned() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -228,7 +227,7 @@ fn regression_overlapping_writers_not_pruned() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -272,7 +271,7 @@ fn regression_rsx_put_write_stable_vs_disjoint_write() {
     let result = explore(
         || {
             let mut rt = build_rsx_runtime();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -285,7 +284,7 @@ fn regression_rsx_put_write_stable_vs_disjoint_write() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -312,7 +311,7 @@ fn regression_rsx_two_writers_to_same_control_slot_sensitive() {
     let result = explore(
         || {
             let mut rt = build_rsx_runtime();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -325,7 +324,7 @@ fn regression_rsx_two_writers_to_same_control_slot_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![

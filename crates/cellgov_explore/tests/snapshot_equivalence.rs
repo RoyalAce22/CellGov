@@ -198,7 +198,7 @@ fn make_disjoint_writes() -> impl FnMut() -> Runtime + Clone {
     || {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -208,7 +208,7 @@ fn make_disjoint_writes() -> impl FnMut() -> Runtime + Clone {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -226,7 +226,7 @@ fn make_overlapping_writes() -> impl FnMut() -> Runtime + Clone {
     || {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -236,7 +236,7 @@ fn make_overlapping_writes() -> impl FnMut() -> Runtime + Clone {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -255,7 +255,7 @@ fn make_three_overlapping_writes() -> impl FnMut() -> Runtime + Clone {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
         for v in [0xAAu32, 0xBB, 0xCC] {
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -275,7 +275,7 @@ fn make_atomic_contention() -> impl FnMut() -> Runtime + Clone {
         let mem = GuestMemory::new(256);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
         for v in [0xAAu32, 0xBB] {
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -299,7 +299,7 @@ fn make_dma_overlapping_writes() -> impl FnMut() -> Runtime + Clone {
     || {
         let mem = GuestMemory::new(256);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -312,7 +312,7 @@ fn make_dma_overlapping_writes() -> impl FnMut() -> Runtime + Clone {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -416,7 +416,7 @@ fn make_baseline_truncated_by_step_cap() -> impl FnMut() -> Runtime + Clone {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 4);
         for v in [0xAAu32, 0xBB] {
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -468,7 +468,7 @@ fn make_pruned_alternates_with_a_truncated_baseline() -> impl FnMut() -> Runtime
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 4);
         for (addr, v) in [(0u64, 0xAAu32), (8, 0xBB)] {
-            rt.registry_mut().register_with(move |id| {
+            rt.register_unit_with(move |id| {
                 FakeIsaUnit::new(
                     id,
                     vec![

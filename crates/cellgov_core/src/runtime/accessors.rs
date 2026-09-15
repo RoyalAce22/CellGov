@@ -44,10 +44,44 @@ impl Runtime {
         &self.registry
     }
 
-    /// Mutable view of the unit registry.
+    /// Mutable view of the unit registry, for test setup.
+    #[cfg(test)]
     #[inline]
-    pub fn registry_mut(&mut self) -> &mut UnitRegistry {
+    pub(crate) fn registry_mut(&mut self) -> &mut UnitRegistry {
         &mut self.registry
+    }
+
+    /// Registers the unit `factory` builds from the id the registry
+    /// assigns. See [`UnitRegistry::register_with`] for the id
+    /// contract.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the new unit reports an id other than the assigned
+    /// one.
+    pub fn register_unit_with<U, F>(&mut self, factory: F) -> UnitId
+    where
+        U: cellgov_exec::ExecutionUnit + Clone + 'static,
+        F: FnOnce(UnitId) -> U,
+    {
+        self.registry.register_with(factory)
+    }
+
+    /// Iterates every registered unit mutably, in id order.
+    pub fn units_mut(&mut self) -> impl Iterator<Item = (UnitId, &mut dyn RegisteredUnit)> + '_ {
+        self.registry.iter_mut()
+    }
+
+    /// Holds `unit` at `status` until
+    /// [`Runtime::clear_unit_status_override`] clears it. Does nothing
+    /// for an unregistered id.
+    pub fn set_unit_status_override(&mut self, unit: UnitId, status: cellgov_exec::UnitStatus) {
+        self.registry.set_status_override(unit, status);
+    }
+
+    /// Returns `unit` to the status it reports for itself.
+    pub fn clear_unit_status_override(&mut self, unit: UnitId) {
+        self.registry.clear_status_override(unit);
     }
 
     /// Immutable view of the mailbox registry.
@@ -72,12 +106,6 @@ impl Runtime {
     #[inline]
     pub fn signal_registry_mut(&mut self) -> &mut SignalRegistry {
         &mut self.signal_registry
-    }
-
-    /// Mutable access to unit and mailbox registries together.
-    #[inline]
-    pub fn registries_mut(&mut self) -> (&mut UnitRegistry, &mut MailboxRegistry) {
-        (&mut self.registry, &mut self.mailbox_registry)
     }
 
     // -- LV2 --
@@ -227,9 +255,10 @@ impl Runtime {
         &self.memory
     }
 
-    /// Mutable view of guest memory.
+    /// Mutable view of guest memory, for test setup.
+    #[cfg(test)]
     #[inline]
-    pub fn memory_mut(&mut self) -> &mut GuestMemory {
+    pub(crate) fn memory_mut(&mut self) -> &mut GuestMemory {
         &mut self.memory
     }
 
@@ -240,9 +269,11 @@ impl Runtime {
         &self.reservations
     }
 
-    /// Mutable view of space 0's load-reservation table.
+    /// Mutable view of space 0's load-reservation table, for test
+    /// setup.
+    #[cfg(test)]
     #[inline]
-    pub fn reservations_mut(&mut self) -> &mut cellgov_sync::ReservationTable {
+    pub(crate) fn reservations_mut(&mut self) -> &mut cellgov_sync::ReservationTable {
         &mut self.reservations
     }
 

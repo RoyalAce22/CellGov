@@ -77,8 +77,68 @@ impl Runtime {
         }
         Ok(cleared)
     }
+
+    /// Places `bytes` over `range` in `space`, and returns the count of
+    /// reservations the clear sweep dropped.
+    ///
+    /// This is the write the program driving the runtime makes on its
+    /// own account, and the trace names it
+    /// [`HostWriter::Placement`]. No unit is behind it, so the clear
+    /// sweep exempts nobody.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`MemError`] that `GuestMemory::apply_commit`
+    /// rejects the write with. A refused placement changes nothing.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `space` is not a live address space.
+    ///
+    /// Panics in a debug build when the bytes land inside a shared
+    /// view. A release build logs
+    /// `runtime.place_bytes_targets_shared_view` instead.
+    pub fn place_bytes(
+        &mut self,
+        space: AddressSpaceId,
+        range: ByteRange,
+        bytes: &[u8],
+    ) -> Result<usize, MemError> {
+        let cleared = self.host_write(HostWriter::Placement, space, range, bytes, None)?;
+        // A placement skips the commit pipeline's shared-view fanout,
+        // so bytes that land inside a shared view leave the sibling
+        // views incoherent. `commit_bytes_at` and the LV2
+        // `SharedWriteIntent` path in `apply_lv2_effects` guard the
+        // same way.
+        if self.range_intersects_shared_view(space, range) {
+            self.lv2_host.log_invariant_break(
+                "runtime.place_bytes_targets_shared_view",
+                format_args!(
+                    "placement at 0x{:x}+0x{:x} targets a shared view in space {}; \
+                     cross-space replication of a placement is not modeled, sibling \
+                     views are now incoherent",
+                    range.start().raw(),
+                    range.length(),
+                    space.raw(),
+                ),
+            );
+            debug_assert!(
+                false,
+                "placement at {:#x}+{:#x} targets a shared view in space {}; \
+                 cross-space replication of a placement is not modeled",
+                range.start().raw(),
+                range.length(),
+                space.raw(),
+            );
+        }
+        Ok(cleared)
+    }
 }
 
 #[cfg(test)]
 #[path = "tests/host_write_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/place_bytes_tests.rs"]
+mod place_bytes_tests;

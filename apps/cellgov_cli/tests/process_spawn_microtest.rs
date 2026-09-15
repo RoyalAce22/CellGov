@@ -89,7 +89,7 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
     state.set_lr(parent_stub);
 
     let mut rt = Runtime::new(mem, Budget::new(10_000), 50_000);
-    rt.registry_mut().register_with(move |id| {
+    rt.register_unit_with(move |id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state.clone();
         unit

@@ -6,7 +6,7 @@ use super::{
     assert_gating_state_coherent_with_host, assert_module_start_completeness,
     LIBLV2_ONCE_MUTEX_SLOT,
 };
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 use cellgov_time::Budget;
 
 fn build_witness_test_rt() -> Runtime {
@@ -25,8 +25,7 @@ fn build_witness_test_rt() -> Runtime {
 fn stamp_mutex_id(rt: &mut Runtime, id: u32) {
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(LIBLV2_ONCE_MUTEX_SLOT), 4)
         .expect("range");
-    rt.memory_mut()
-        .apply_commit(range, &id.to_be_bytes())
+    rt.place_bytes(AddressSpaceId::BOOT, range, &id.to_be_bytes())
         .expect("stamp once-mutex id");
 }
 

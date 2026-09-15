@@ -2,7 +2,7 @@
 //! and the invariants the boot checks before handing the runtime to
 //! the step loop.
 
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 
 use super::module_start::ModuleStartCounts;
 use super::types::PrepareOptions;
@@ -16,11 +16,10 @@ pub(super) fn apply_patch_bytes(rt: &mut Runtime, opts: &PrepareOptions<'_>) {
     for &(addr, val) in opts.patch_bytes {
         let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), 1)
             .unwrap_or_else(|| die(&format!("patch: byte 0x{addr:x}: invalid address range")));
-        rt.memory_mut()
-            .apply_commit(range, &[val])
+        rt.place_bytes(AddressSpaceId::BOOT, range, &[val])
             .unwrap_or_else(|e| {
                 die(&format!(
-                    "patch: byte 0x{addr:x} = 0x{val:02x} FAILED ({e:?}); target not committed"
+                    "patch: byte 0x{addr:x} = 0x{val:02x} FAILED ({e:?}); target not written"
                 ))
             });
         if opts.print_banner {

@@ -1,7 +1,7 @@
 //! Guest stack-walk caller classification and branch-encoding round-trips.
 
 use super::*;
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, PageSize, Region};
 use cellgov_ps3_abi::hw::ppc_isa::{PPC_BCCTR_XO, PPC_BCLR_XO};
 use cellgov_time::Budget;
@@ -54,7 +54,7 @@ fn encode_b_nolink(offset: i32) -> u32 {
 
 fn write_bytes(rt: &mut Runtime, addr: u64, bytes: &[u8]) {
     let range = ByteRange::new(GuestAddr::new(addr), bytes.len() as u64).unwrap();
-    rt.memory_mut().apply_commit(range, bytes).unwrap();
+    rt.place_bytes(AddressSpaceId::BOOT, range, bytes).unwrap();
 }
 
 fn write_u32_be(rt: &mut Runtime, addr: u64, word: u32) {

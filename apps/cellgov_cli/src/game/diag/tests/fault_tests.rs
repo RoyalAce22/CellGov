@@ -1,6 +1,7 @@
 //! Commit-fault and deadlock diagnostic formatting with PC-ring context.
 
 use super::*;
+use cellgov_core::AddressSpaceId;
 use cellgov_exec::FaultRegisterDump;
 use cellgov_mem::{GuestMemory, PageSize, Region};
 use cellgov_time::Budget;
@@ -17,7 +18,7 @@ fn rt_with_layout() -> Runtime {
 fn write_bytes(rt: &mut Runtime, addr: u64, bytes: &[u8]) {
     let range =
         cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(addr), bytes.len() as u64).unwrap();
-    rt.memory_mut().apply_commit(range, bytes).unwrap();
+    rt.place_bytes(AddressSpaceId::BOOT, range, bytes).unwrap();
 }
 
 fn fault_regs() -> FaultRegisterDump {
@@ -62,17 +63,11 @@ fn format_deadlock_dumps_ppu_unit_with_lv2_reason_and_spu_unit_without() {
     use cellgov_testkit::world::CountingUnit;
 
     let mut rt = rt_with_layout();
-    let unit_a = rt
-        .registry_mut()
-        .register_with(|id| CountingUnit::new(id, 100));
-    let unit_b = rt
-        .registry_mut()
-        .register_with(|id| CountingUnit::new(id, 100));
+    let unit_a = rt.register_unit_with(|id| CountingUnit::new(id, 100));
+    let unit_b = rt.register_unit_with(|id| CountingUnit::new(id, 100));
 
-    rt.registry_mut()
-        .set_status_override(unit_a, UnitStatus::Blocked);
-    rt.registry_mut()
-        .set_status_override(unit_b, UnitStatus::Blocked);
+    rt.set_unit_status_override(unit_a, UnitStatus::Blocked);
+    rt.set_unit_status_override(unit_b, UnitStatus::Blocked);
 
     let attrs = PpuThreadAttrs {
         entry: 0x10_0000,
@@ -234,13 +229,12 @@ fn rt_with_child_space(child_unit: cellgov_event::UnitId) -> Runtime {
 
     let space = cellgov_core::AddressSpaceId::new(1);
     rt.create_address_space(space).unwrap();
-    let child_mem = rt.space_memory_mut(space).unwrap();
-    child_mem
+    rt.space_memory_mut(space)
+        .unwrap()
         .install_region(CHILD_PC, 0x1000, "child-main", PageSize::Page4K)
         .unwrap();
     let range = cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(CHILD_PC), 4).unwrap();
-    child_mem
-        .apply_commit(range, &CHILD_WORD.to_be_bytes())
+    rt.place_bytes(space, range, &CHILD_WORD.to_be_bytes())
         .unwrap();
     rt.assign_unit_space(child_unit, space).unwrap();
     rt

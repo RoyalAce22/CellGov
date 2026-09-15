@@ -19,7 +19,7 @@ fn cross_space_pair_is_schedule_stable() {
             .unwrap()
             .install_region(0, 64, "child", PageSize::Page64K)
             .unwrap();
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -29,7 +29,7 @@ fn cross_space_pair_is_schedule_stable() {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -65,7 +65,7 @@ fn child_space_only_divergence_is_not_schedule_stable() {
             .unwrap()
             .install_region(0, 64, "child", PageSize::Page64K)
             .unwrap();
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -75,7 +75,7 @@ fn child_space_only_divergence_is_not_schedule_stable() {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -105,7 +105,7 @@ fn disjoint_writes_are_schedule_stable() {
     let result = explore_pair(|| {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -115,7 +115,7 @@ fn disjoint_writes_are_schedule_stable() {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -141,7 +141,7 @@ fn overlapping_writes_are_schedule_sensitive() {
     let result = explore_pair(|| {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -151,7 +151,7 @@ fn overlapping_writes_are_schedule_sensitive() {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -177,8 +177,7 @@ fn no_branching_returns_none() {
     let result = explore_pair(|| {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut()
-            .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+        rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
         rt
     });
     assert!(result.is_none());
@@ -191,7 +190,7 @@ fn a_pair_whose_runs_stopped_short_reports_no_stability_verdict() {
         // Two 3-op units need 6 steps; the cap refuses the 5th.
         let mut rt = Runtime::new(mem, Budget::new(100), 4);
         for imm in [0xAAu32, 0xBB] {
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![

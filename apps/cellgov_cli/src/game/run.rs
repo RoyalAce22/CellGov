@@ -320,7 +320,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
     }
 
     if profile_pairs {
-        for (id, unit) in rt.registry_mut().iter_mut() {
+        for (id, unit) in rt.units_mut() {
             let insns = unit.drain_profile_insns();
             let total: u64 = insns.iter().map(|(_, c)| c).sum();
             eprintln!();
@@ -337,7 +337,7 @@ pub fn run_game(opts: RunGameOptions<'_>) -> Result<RunSummary, RunError> {
                 );
             }
         }
-        for (id, unit) in rt.registry_mut().iter_mut() {
+        for (id, unit) in rt.units_mut() {
             let pairs = unit.drain_profile_pairs();
             let total: u64 = pairs.iter().map(|(_, c)| c).sum();
             eprintln!();

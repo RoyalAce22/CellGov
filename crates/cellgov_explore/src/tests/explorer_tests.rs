@@ -14,7 +14,7 @@ fn explore_disjoint_writes_is_stable() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -24,7 +24,7 @@ fn explore_disjoint_writes_is_stable() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -49,7 +49,7 @@ fn explore_two_unit_atomic_contention_is_reproducible() {
     let make = || {
         let mem = GuestMemory::new(256);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -60,7 +60,7 @@ fn explore_two_unit_atomic_contention_is_reproducible() {
                 ],
             )
         });
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -96,7 +96,7 @@ fn explore_two_unit_atomic_same_value_is_stable() {
             let mem = GuestMemory::new(256);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
             for _ in 0..2 {
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -127,7 +127,7 @@ fn explore_overlapping_writes_is_sensitive() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -137,7 +137,7 @@ fn explore_overlapping_writes_is_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -171,7 +171,7 @@ fn explore_cross_space_same_address_is_stable() {
                 .unwrap()
                 .install_region(0, 64, "child", PageSize::Page64K)
                 .unwrap();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -181,7 +181,7 @@ fn explore_cross_space_same_address_is_stable() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -216,7 +216,7 @@ fn explore_child_space_only_divergence_is_sensitive() {
                 .unwrap()
                 .install_region(0, 64, "child", PageSize::Page64K)
                 .unwrap();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -226,7 +226,7 @@ fn explore_child_space_only_divergence_is_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -268,7 +268,7 @@ fn explore_shared_view_cross_space_is_sensitive() {
                 ],
             )
             .unwrap();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -281,7 +281,7 @@ fn explore_shared_view_cross_space_is_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -311,8 +311,7 @@ fn single_unit_returns_none() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut()
-                .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+            rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
             rt
         },
         &ExplorationConfig::default(),
@@ -326,7 +325,7 @@ fn three_unit_disjoint_is_stable() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -336,7 +335,7 @@ fn three_unit_disjoint_is_stable() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -346,7 +345,7 @@ fn three_unit_disjoint_is_stable() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -374,7 +373,7 @@ fn three_unit_overlapping_is_sensitive() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -384,7 +383,7 @@ fn three_unit_overlapping_is_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -394,7 +393,7 @@ fn three_unit_overlapping_is_sensitive() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -428,7 +427,7 @@ fn max_schedules_bound_produces_inconclusive() {
             // ordering can change the final memory: the only verdict
             // the bound can produce is an inconclusive one.
             for _ in 0..3 {
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -461,7 +460,7 @@ fn a_replay_cut_short_by_the_step_bound_is_inconclusive_not_a_divergence() {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
             for imm in [0xAAu32, 0xBB] {
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -506,7 +505,7 @@ fn a_replay_cut_short_by_a_step_error_is_inconclusive_not_a_divergence() {
             // Two 3-op units need 6 steps; the cap refuses the 5th.
             let mut rt = Runtime::new(mem, Budget::new(100), 4);
             for imm in [0xAAu32, 0xBB] {
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -536,7 +535,7 @@ fn a_truncated_replay_with_no_divergence_is_inconclusive_not_stable() {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 100);
         for _ in 0..2 {
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -576,7 +575,7 @@ fn a_baseline_stopped_by_the_runtime_step_cap_forces_inconclusive() {
         let mem = GuestMemory::new(64);
         let mut rt = Runtime::new(mem, Budget::new(100), 4);
         for imm in [0xAAu32, 0xBB] {
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -612,7 +611,7 @@ fn a_truncated_baseline_with_every_alternate_pruned_is_not_stable() {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 4);
             for (addr, v) in [(0u64, 0xAAu32), (8, 0xBB)] {
-                rt.registry_mut().register_with(move |id| {
+                rt.register_unit_with(move |id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -645,7 +644,7 @@ fn a_baseline_that_ran_itself_out_leaves_no_truncation_witness() {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
             for imm in [0xAAu32, 0xBB] {
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     FakeIsaUnit::new(
                         id,
                         vec![
@@ -701,7 +700,7 @@ fn result_fields_are_populated() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -711,7 +710,7 @@ fn result_fields_are_populated() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -739,7 +738,7 @@ fn disjoint_pruning_skips_all_alternates() {
         || {
             let mem = GuestMemory::new(64);
             let mut rt = Runtime::new(mem, Budget::new(100), 100);
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![
@@ -749,7 +748,7 @@ fn disjoint_pruning_skips_all_alternates() {
                     ],
                 )
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![

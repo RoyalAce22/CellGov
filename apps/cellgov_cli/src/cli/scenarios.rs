@@ -142,7 +142,7 @@ pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> Sce
                 .borrow_mut()
                 .take()
                 .expect("invariant: seed_memory populates primed_seed before register fires");
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 let mut unit = PpuExecutionUnit::new(id);
                 *unit.state_mut() = ppu_state;
                 unit

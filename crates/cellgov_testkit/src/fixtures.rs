@@ -13,7 +13,7 @@
 //!     .memory_size(64)
 //!     .budget(5)
 //!     .max_steps(1_000)
-//!     .register(|r| { r.register_with(|id| MyUnit::new(id)); })
+//!     .register(|rt| { rt.register_unit_with(|id| MyUnit::new(id)); })
 //!     .build();
 //! ```
 
@@ -166,8 +166,7 @@ pub fn round_robin_fairness_scenario(unit_count: usize, steps_per_unit: u64) -> 
         .max_steps(cap)
         .register(move |rt: &mut Runtime| {
             for _ in 0..unit_count {
-                rt.registry_mut()
-                    .register_with(|id| CountingUnit::new(id, steps_per_unit));
+                rt.register_unit_with(|id| CountingUnit::new(id, steps_per_unit));
             }
         })
         .build()
@@ -185,10 +184,8 @@ pub fn dma_block_unblock_scenario() -> ScenarioFixture {
         .budget(Budget::new(1))
         .max_steps(30)
         .register(move |rt: &mut Runtime| {
-            rt.registry_mut()
-                .register_with(|id| DmaSubmitter::new(id, src, dst, seed.clone()));
-            rt.registry_mut()
-                .register_with(|id| CountingUnit::new(id, 20));
+            rt.register_unit_with(|id| DmaSubmitter::new(id, src, dst, seed.clone()));
+            rt.register_unit_with(|id| CountingUnit::new(id, 20));
         })
         .build()
 }
@@ -210,10 +207,8 @@ pub fn write_conflict_scenario(steps_per_unit: u64) -> ScenarioFixture {
         .budget(Budget::new(1))
         .max_steps(cap)
         .register(move |rt: &mut Runtime| {
-            rt.registry_mut()
-                .register_with(|id| WritingUnit::new(id, steps_per_unit, range));
-            rt.registry_mut()
-                .register_with(|id| WritingUnit::new(id, steps_per_unit, range));
+            rt.register_unit_with(|id| WritingUnit::new(id, steps_per_unit, range));
+            rt.register_unit_with(|id| WritingUnit::new(id, steps_per_unit, range));
         })
         .build()
 }
@@ -234,8 +229,7 @@ pub fn mailbox_send_scenario(message_count: u64) -> ScenarioFixture {
         .max_steps(cap)
         .register(move |rt: &mut Runtime| {
             let target = rt.mailbox_registry_mut().register(4);
-            rt.registry_mut()
-                .register_with(|id| MailboxProducer::new(id, target, message_count));
+            rt.register_unit_with(|id| MailboxProducer::new(id, target, message_count));
         })
         .build()
 }
@@ -253,10 +247,10 @@ pub fn mailbox_roundtrip_scenario(command: u32) -> ScenarioFixture {
             // Registration order pins sender to id 0, responder to id 1.
             let sender_id = cellgov_event::UnitId::new(0);
             let responder_id = cellgov_event::UnitId::new(1);
-            rt.registry_mut()
-                .register_with(|id| MailboxSender::new(id, responder_id, cmd_mb, resp_mb, command));
-            rt.registry_mut()
-                .register_with(|id| MailboxResponder::new(id, sender_id, cmd_mb, resp_mb));
+            rt.register_unit_with(|id| {
+                MailboxSender::new(id, responder_id, cmd_mb, resp_mb, command)
+            });
+            rt.register_unit_with(|id| MailboxResponder::new(id, sender_id, cmd_mb, resp_mb));
         })
         .build()
 }
@@ -282,8 +276,7 @@ pub fn signal_update_scenario(bit_count: u64) -> ScenarioFixture {
         .max_steps(cap)
         .register(move |rt: &mut Runtime| {
             let target = rt.signal_registry_mut().register();
-            rt.registry_mut()
-                .register_with(|id| SignalEmitter::new(id, target, bit_count));
+            rt.register_unit_with(|id| SignalEmitter::new(id, target, bit_count));
         })
         .build()
 }
@@ -297,7 +290,7 @@ pub fn fake_isa_scenario() -> ScenarioFixture {
         .max_steps(20)
         .register(move |rt: &mut Runtime| {
             rt.mailbox_registry_mut().register(4); // mailbox 0
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 FakeIsaUnit::new(
                     id,
                     vec![

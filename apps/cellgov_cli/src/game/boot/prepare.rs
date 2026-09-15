@@ -97,7 +97,7 @@ pub(in crate::game) fn prepare(mut opts: PrepareOptions<'_>) -> PreparedBoot {
     // 15. Invariants, then release the primary to the step loop.
     finish::assert_gating_state_coherent_with_host(&rt, !prx_modules.is_empty());
     finish::assert_module_start_completeness(&counts);
-    rt.registry_mut().clear_status_override(primary_unit_id);
+    rt.clear_unit_status_override(primary_unit_id);
 
     PreparedBoot {
         rt,

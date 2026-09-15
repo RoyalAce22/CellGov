@@ -90,8 +90,7 @@ pub(in crate::game) fn run_pending_child_inits(rt: &mut Runtime, plans: &ChildIn
             .map(|id| (id, rt.registry().status_override(id)))
             .collect();
         for &(id, _) in &held {
-            rt.registry_mut()
-                .set_status_override(id, UnitStatus::Blocked);
+            rt.set_unit_status_override(id, UnitStatus::Blocked);
         }
 
         let env = ModuleStartEnv {
@@ -118,8 +117,8 @@ pub(in crate::game) fn run_pending_child_inits(rt: &mut Runtime, plans: &ChildIn
 
         for (id, prior) in held {
             match prior {
-                Some(status) => rt.registry_mut().set_status_override(id, status),
-                None => rt.registry_mut().clear_status_override(id),
+                Some(status) => rt.set_unit_status_override(id, status),
+                None => rt.clear_unit_status_override(id),
             }
         }
         rt.release_child_init(pending.primary_unit);

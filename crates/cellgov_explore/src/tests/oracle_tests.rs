@@ -17,7 +17,7 @@ fn spec(name: &str, space: AddressSpaceId, addr: u64, size: u64) -> MemoryRegion
 }
 
 fn store_unit(rt: &mut Runtime, imm: u32, addr: u64) {
-    rt.registry_mut().register_with(|id| {
+    rt.register_unit_with(|id| {
         FakeIsaUnit::new(
             id,
             vec![

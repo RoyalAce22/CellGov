@@ -1,7 +1,7 @@
 //! The title's primary entry state, the predecode shadow bounded to
 //! executable code, and the primary unit's registration.
 
-use cellgov_core::Runtime;
+use cellgov_core::{AddressSpaceId, Runtime};
 use cellgov_ppu::PpuExecutionUnit;
 use cellgov_ps3_abi::hw::address_space::PS3_PRIMARY_STACK_TOP;
 
@@ -12,7 +12,7 @@ use crate::cli::env::parse_env_bool;
 use crate::cli::exit::die;
 use crate::game::prx::TLS_BASE;
 
-/// Stamp the title's primary entry state into `state`, committing the
+/// Stamp the title's primary entry state into `state`, and place the
 /// guest args block when the caller supplied one.
 ///
 /// r3..r10 follow the PS3 LV2 process-start convention; the args-block
@@ -46,11 +46,10 @@ pub(super) fn seed_primary_entry_state(
                 block.bytes.len()
             ))
         });
-        rt.memory_mut()
-            .apply_commit(range, &block.bytes)
+        rt.place_bytes(AddressSpaceId::BOOT, range, &block.bytes)
             .unwrap_or_else(|e| {
                 die(&format!(
-                    "--guest-arg: committing args block at 0x{:08x} FAILED ({e:?})",
+                    "--guest-arg: placing args block at 0x{:08x} FAILED ({e:?})",
                     block.base
                 ))
             });
@@ -136,15 +135,14 @@ pub(super) fn register_primary_unit(
     params: &BootParams,
     entry: u64,
 ) -> cellgov_event::UnitId {
-    let primary_unit_id = rt.registry_mut().register_with(|id| {
+    let primary_unit_id = rt.register_unit_with(|id| {
         let mut unit = PpuExecutionUnit::new(id);
         *unit.state_mut() = state;
         unit.set_instruction_shadow(shadow);
         debug_opts.apply(&mut unit);
         unit
     });
-    rt.registry_mut()
-        .set_status_override(primary_unit_id, cellgov_exec::UnitStatus::Blocked);
+    rt.set_unit_status_override(primary_unit_id, cellgov_exec::UnitStatus::Blocked);
     rt.lv2_host_mut().seed_primary_ppu_thread(
         primary_unit_id,
         cellgov_lv2::PpuThreadAttrs {

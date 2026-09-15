@@ -465,7 +465,7 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
                     .force_send(mailbox_value);
 
                 let data = elf;
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     assert_eq!(id.raw(), mbox_id.raw(), "mailbox/unit ID mismatch");
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&data, unit.state_mut()).unwrap();
@@ -534,7 +534,7 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
         .register(move |rt| {
             let elf = elf.clone();
             let elf2 = elf.clone();
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 let mut unit = SpuExecutionUnit::new(id);
                 loader::load_spu_elf(&elf, unit.state_mut()).unwrap();
                 unit.state_mut().pc = 0x80;
@@ -545,7 +545,7 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
                 unit.state_mut().set_reg_word_splat(5, result_ea_a);
                 unit
             });
-            rt.registry_mut().register_with(|id| {
+            rt.register_unit_with(|id| {
                 let mut unit = SpuExecutionUnit::new(id);
                 loader::load_spu_elf(&elf2, unit.state_mut()).unwrap();
                 unit.state_mut().pc = 0x80;
@@ -618,7 +618,7 @@ fn atomic_reservation_matches_rpcs3_baseline() {
             .max_steps(1_000)
             .register(move |rt| {
                 let data = elf;
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&data, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;
@@ -693,7 +693,7 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
             .max_steps(100_000)
             .register(move |rt| {
                 let elf0 = elf.clone();
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&elf0, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;
@@ -703,7 +703,7 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
                 });
 
                 let elf1 = elf;
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&elf1, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;
@@ -777,7 +777,7 @@ fn ls_to_shared_matches_rpcs3_baseline() {
             .max_steps(1_000)
             .register(move |rt| {
                 let data = elf;
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&data, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;
@@ -922,7 +922,7 @@ fn dma_completion_matches_rpcs3_baseline() {
             .max_steps(1_000)
             .register(move |rt| {
                 let data = elf;
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&data, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;
@@ -996,7 +996,7 @@ fn spu_fixed_value_matches_rpcs3_baseline() {
             .max_steps(1_000)
             .register(move |rt| {
                 let data = elf;
-                rt.registry_mut().register_with(|id| {
+                rt.register_unit_with(|id| {
                     let mut unit = SpuExecutionUnit::new(id);
                     loader::load_spu_elf(&data, unit.state_mut()).unwrap();
                     unit.state_mut().pc = 0x80;

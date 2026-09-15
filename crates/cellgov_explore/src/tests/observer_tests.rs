@@ -12,10 +12,8 @@ fn two_units_produces_branching_point() {
     let mem = GuestMemory::new(64);
     let mut rt = Runtime::new(mem, Budget::new(100), 100);
 
-    rt.registry_mut()
-        .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
-    rt.registry_mut()
-        .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+    rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+    rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
 
     let (log, stop) = observe_decisions(&mut rt);
     assert_eq!(stop, StopReason::Stalled);
@@ -40,8 +38,7 @@ fn single_unit_no_branching() {
     let mem = GuestMemory::new(64);
     let mut rt = Runtime::new(mem, Budget::new(100), 100);
 
-    rt.registry_mut()
-        .register_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
+    rt.register_unit_with(|id| FakeIsaUnit::new(id, vec![FakeOp::End]));
 
     let (log, stop) = observe_decisions(&mut rt);
     assert_eq!(stop, StopReason::Stalled);
@@ -55,7 +52,7 @@ fn a_runtime_step_cap_stops_the_observer_with_a_named_reason() {
     // Two 3-op units need 6 steps; the cap refuses the 5th.
     let mut rt = Runtime::new(mem, Budget::new(100), 4);
     for imm in [0xAAu32, 0xBB] {
-        rt.registry_mut().register_with(|id| {
+        rt.register_unit_with(|id| {
             FakeIsaUnit::new(
                 id,
                 vec![
@@ -88,7 +85,7 @@ fn a_refused_commit_stops_the_observer_and_names_itself() {
     ])
     .unwrap();
     let mut rt = Runtime::new(mem, Budget::new(100), 100);
-    rt.registry_mut().register_with(|id| {
+    rt.register_unit_with(|id| {
         FakeIsaUnit::new(
             id,
             vec![

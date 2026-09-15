@@ -181,6 +181,9 @@ pub enum HostWriter {
     /// A syscall out-parameter the runtime writes back at dispatch
     /// time, for a caller that never parked.
     SyscallOutParam = 6,
+    /// Bytes the program driving the runtime places itself, outside
+    /// every modeled mechanism.
+    Placement = 7,
 }
 
 /// Which dispatch arm a [`TraceRecord::SyscallEntered`] record was

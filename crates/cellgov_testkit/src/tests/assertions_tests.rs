@@ -23,9 +23,8 @@ fn counting_unit_scenario_replays_identically() {
                 .budget(Budget::new(1))
                 .max_steps(100)
                 .register(|rt: &mut Runtime| {
-                    let r = rt.registry_mut();
-                    r.register_with(|id| CountingUnit::new(id, 5));
-                    r.register_with(|id| CountingUnit::new(id, 7));
+                    rt.register_unit_with(|id| CountingUnit::new(id, 5));
+                    rt.register_unit_with(|id| CountingUnit::new(id, 7));
                 })
                 .build()
         },
@@ -44,8 +43,7 @@ fn writing_unit_scenario_replays_identically() {
                 .budget(Budget::new(1))
                 .max_steps(100)
                 .register(|rt: &mut Runtime| {
-                    let r = rt.registry_mut();
-                    r.register_with(|id| WritingUnit::at_zero(id, 4));
+                    rt.register_unit_with(|id| WritingUnit::at_zero(id, 4));
                 })
                 .build()
         },
