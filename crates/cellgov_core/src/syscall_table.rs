@@ -42,10 +42,9 @@ impl SyscallResponseTable {
     /// # Panics
     ///
     /// Debug builds panic when a prior entry exists. Release builds
-    /// log the first displacement to stderr (subsequent ones bump
-    /// [`Self::displacement_count`] silently) and return the displaced
-    /// response; `#[must_use]` forces the caller to acknowledge the
-    /// owed r3 and out-pointer writes the displaced response carries.
+    /// bump [`Self::displacement_count`] and return the displaced
+    /// response. The caller records the invariant break; the table
+    /// only counts it.
     #[must_use = "insert may displace an existing pending response; handle the Some case \
                   (the displaced response carries an owed r3 and possible out-pointer \
                   writes that will otherwise be silently lost)"]
@@ -62,25 +61,7 @@ impl SyscallResponseTable {
              wake path is likely not firing"
         );
         let displaced = self.pending.insert(unit, response);
-        if let Some(prev) = displaced.as_ref() {
-            if self.displacement_count == 0 {
-                let new_response = self
-                    .pending
-                    .get(&unit)
-                    .expect("just-inserted response must be present");
-                #[allow(
-                    clippy::print_stderr,
-                    reason = "one-shot diagnostic for an invariant break: a pending syscall response was overwritten before the runtime read it; gated to first occurrence so a runaway loop cannot flood stderr"
-                )]
-                {
-                    eprintln!(
-                        "SyscallResponseTable::insert: displaced pending response for {unit:?}: \
-                         {prev:?} (overwritten by {new_response:?}) -- original r3 and any owed \
-                         out-pointer writes are lost. Further displacements in this table will be \
-                         counted but not logged; inspect displacement_count() for the total."
-                    );
-                }
-            }
+        if displaced.is_some() {
             self.displacement_count = self.displacement_count.saturating_add(1);
         }
         displaced

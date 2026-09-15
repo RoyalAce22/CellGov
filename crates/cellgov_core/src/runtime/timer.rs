@@ -87,8 +87,18 @@ impl Runtime {
             return;
         }
         let deadline = self.deadline_after_usec(usec);
-        self.timer_wakes
+        let displaced = self
+            .timer_wakes
             .insert(deadline, source, TimerWakeKind::SyncWait(reason));
+        if let Some(prior) = displaced {
+            self.lv2_host.log_invariant_break(
+                "runtime.register_wait_deadline_timer_wake_displaced",
+                format_args!(
+                    "{source:?} parked with {prior:?} still live, so the wake path that \
+                     resolved its previous wait failed to cancel the deadline"
+                ),
+            );
+        }
     }
 
     /// Absolute wake deadline for a wait of `usec` microseconds from

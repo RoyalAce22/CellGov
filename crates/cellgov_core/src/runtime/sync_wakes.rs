@@ -236,24 +236,23 @@ impl Runtime {
     /// Notify the LV2 host that `source` finished; if the enclosing
     /// group is fully finished, wake any PPU blocked on its join.
     pub(super) fn resolve_join_wakes(&mut self, source: UnitId) {
-        let finished_group = match self.lv2_host.notify_spu_finished(source) {
+        let notified = self.lv2_host.notify_spu_finished(source);
+        let finished_group = match notified {
             Ok(Some(gid)) => gid,
             Ok(None) => return,
             Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit) => return,
             Err(err) => {
-                // This path fires under normal multi-finalize flows
-                // (e.g. group teardown after the SPU has already been
-                // marked Finished), so it cannot be an assertion.
-                #[allow(
-                    clippy::print_stderr,
-                    reason = "diagnostic for an LV2 host invariant break; one line per offending unit per host instance"
-                )]
-                {
-                    eprintln!(
-                        "lv2 host invariant break at resolve_join_wakes.notify_spu_finished: \
-                         unit {source:?}: {err:?}",
-                    );
-                }
+                // The process-exit sweep excuses AlreadyFinished
+                // because it notifies every unit; this site sees one
+                // finish per unit, so a rejection here is a double
+                // notify against a live unit.
+                self.lv2_host.log_invariant_break(
+                    "runtime.resolve_join_wakes_notify_spu_finished_failed",
+                    format_args!(
+                        "notify_spu_finished rejected {source:?}: {err:?}; no join waiter on \
+                         this unit's group wakes from this finish"
+                    ),
+                );
                 return;
             }
         };

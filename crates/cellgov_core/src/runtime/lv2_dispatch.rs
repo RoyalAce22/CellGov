@@ -361,12 +361,31 @@ impl Runtime {
         let displaced = self
             .syscall_responses
             .insert(source, PendingResponse::ReturnCode { code: 0 });
+        if let Some(prev) = &displaced {
+            self.lv2_host.log_invariant_break(
+                "runtime.dispatch_syscall_timer_park_pending_response_displaced",
+                format_args!(
+                    "{source:?} parked on a timer sleep with {prev:?} still pending, so the \
+                     earlier response is overwritten and its wake never reaches the guest"
+                ),
+            );
+        }
         debug_assert!(
             displaced.is_none(),
             "timer park: source {source:?} already had a pending response: {displaced:?}"
         );
-        self.timer_wakes
-            .insert(deadline, source, crate::timer_queue::TimerWakeKind::Sleep);
+        let displaced_wake =
+            self.timer_wakes
+                .insert(deadline, source, crate::timer_queue::TimerWakeKind::Sleep);
+        if let Some(prior) = displaced_wake {
+            self.lv2_host.log_invariant_break(
+                "runtime.dispatch_syscall_timer_park_timer_wake_displaced",
+                format_args!(
+                    "{source:?} parked on a timer sleep with {prior:?} still live, so the wake \
+                     path that resolved its previous wait failed to cancel the deadline"
+                ),
+            );
+        }
         self.registry
             .set_status_override(source, UnitStatus::Blocked);
     }
@@ -610,24 +629,22 @@ impl Runtime {
                     .set_status_override(*uid, UnitStatus::Finished);
                 // UnknownUnit (non-SPU) and AlreadyFinished are
                 // expected during the per-unit sweep.
-                match self.lv2_host.notify_spu_finished(*uid) {
+                let notified = self.lv2_host.notify_spu_finished(*uid);
+                match notified {
                     Ok(_)
                     | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::UnknownUnit)
                     | Err(cellgov_lv2::thread_group::NotifySpuFinishedError::AlreadyFinished {
                         ..
                     }) => {}
                     Err(err) => {
-                        #[allow(
-                            clippy::print_stderr,
-                            reason = "diagnostic for an LV2 host invariant break reachable only when thread-table state diverges from primitive state; one line per offending unit per host instance"
-                        )]
-                        {
-                            eprintln!(
-                                "lv2 host invariant break at process_exit.notify_spu_finished: \
-                                 unit {:?}: {err:?}",
-                                uid,
-                            );
-                        }
+                        self.lv2_host.log_invariant_break(
+                            "runtime.process_exit_notify_spu_finished_failed",
+                            format_args!(
+                                "notify_spu_finished rejected {uid:?} during the process-exit \
+                                 sweep: {err:?}; the thread table and the SPU group state \
+                                 disagree about this unit"
+                            ),
+                        );
                     }
                 }
                 // The parked response is dropped, so the unit's timer
@@ -680,18 +697,13 @@ impl Runtime {
                     // UnitId that already had a mailbox -- SPU
                     // mailbox state would silently cross-talk
                     // between units.
-                    #[allow(
-                        clippy::print_stderr,
-                        reason = "one-shot release-build diagnostic for SPU mailbox id collision; not guest-reachable under normal operation"
-                    )]
-                    {
-                        eprintln!(
-                            "lv2 host invariant break at dispatch.register_spu_mailbox_collision: \
-                             UnitId({:?}) reused an existing mailbox slot; SPU mailbox crosstalk \
-                             is possible. Baseline anchors must be re-validated if this fires.",
-                            uid.raw()
-                        );
-                    }
+                    self.lv2_host.log_invariant_break(
+                        "runtime.register_spu_mailbox_id_collision",
+                        format_args!(
+                            "{uid:?} reused a live mailbox slot, so SPU mailbox state can cross \
+                             between two units; every anchor needs revalidation if this fires"
+                        ),
+                    );
                     debug_assert!(
                         inserted,
                         "RegisterSpu for UnitId({:?}) found an existing mailbox; \
@@ -709,21 +721,13 @@ impl Runtime {
         self.apply_lv2_effects(&effects, caller_space);
         let displaced = self.syscall_responses.insert(source, pending);
         if let Some(prev) = &displaced {
-            // Displacement overwrites a pending response, losing the
-            // original wake. SyscallResponseTable::insert log-once
-            // covers first occurrence; this site adds source/variant
-            // for cross-syscall attribution.
-            #[allow(
-                clippy::print_stderr,
-                reason = "one-shot release-build diagnostic for pending-response displacement; not guest-reachable under normal operation"
-            )]
-            {
-                eprintln!(
-                    "lv2 host invariant break at dispatch.handle_block.displacement: \
-                     source {source:?} already had pending response {prev:?}; \
-                     new response will be silently overwritten."
-                );
-            }
+            self.lv2_host.log_invariant_break(
+                "runtime.handle_block_pending_response_displaced",
+                format_args!(
+                    "{source:?} blocked again with {prev:?} still pending, so the earlier \
+                     response is overwritten and its wake never reaches the guest"
+                ),
+            );
         }
         debug_assert!(
             displaced.is_none(),
@@ -856,6 +860,15 @@ impl Runtime {
         }
         self.resolve_sync_wakes(&woken_unit_ids);
         let displaced = self.syscall_responses.insert(source, pending);
+        if let Some(prev) = &displaced {
+            self.lv2_host.log_invariant_break(
+                "runtime.handle_block_and_wake_pending_response_displaced",
+                format_args!(
+                    "{source:?} blocked again with {prev:?} still pending, so the earlier \
+                     response is overwritten and its wake never reaches the guest"
+                ),
+            );
+        }
         debug_assert!(
             displaced.is_none(),
             "handle_block_and_wake: source {source:?} already had a pending response: \

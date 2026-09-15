@@ -76,15 +76,23 @@ impl TimerWakeQueue {
         self.by_unit.contains_key(&unit)
     }
 
-    /// Register a wake for `unit` at `deadline`.
+    /// Register a wake for `unit` at `deadline` and return the entry it
+    /// displaced.
+    ///
+    /// A returned entry is an upstream wake-path bug. The caller
+    /// records the invariant break; the queue only counts it.
     ///
     /// # Panics
     ///
     /// Debug builds panic when `unit` already has a pending wake.
-    /// Release builds log the first displacement to stderr (subsequent
-    /// ones bump [`Self::displacement_count`] silently), cancel the
+    /// Release builds bump [`Self::displacement_count`], cancel the
     /// prior entry, and register the new one.
-    pub fn insert(&mut self, deadline: GuestTicks, unit: UnitId, kind: TimerWakeKind) {
+    pub fn insert(
+        &mut self,
+        deadline: GuestTicks,
+        unit: UnitId,
+        kind: TimerWakeKind,
+    ) -> Option<TimerWake> {
         debug_assert!(
             !self.by_unit.contains_key(&unit),
             "TimerWakeQueue::insert: unit {unit:?} already has a pending wake; \
@@ -95,22 +103,9 @@ impl TimerWakeQueue {
             "TimerWakeQueue::insert: pending-wake count exceeded {MAX_TIMER_WAKES}; \
              fire or cancel path is likely not running"
         );
+        let mut displaced = None;
         if let Some(prior_key) = self.by_unit.remove(&unit) {
-            let prior = self.entries.remove(&prior_key);
-            if self.displacement_count == 0 {
-                #[allow(
-                    clippy::print_stderr,
-                    reason = "one-shot diagnostic for an invariant break: a unit re-parked with a live timer entry, meaning its previous wake never cancelled; gated to first occurrence so a runaway loop cannot flood stderr"
-                )]
-                {
-                    eprintln!(
-                        "TimerWakeQueue::insert: displaced pending wake for {unit:?}: \
-                         {prior:?} (superseded by deadline={deadline:?} kind={kind:?}). \
-                         Further displacements will be counted but not logged; inspect \
-                         displacement_count() for the total."
-                    );
-                }
-            }
+            displaced = self.entries.remove(&prior_key);
             self.displacement_count = self.displacement_count.saturating_add(1);
         }
         let seq = self.next_seq;
@@ -118,6 +113,7 @@ impl TimerWakeQueue {
         self.entries
             .insert((deadline, seq), TimerWake { unit, kind });
         self.by_unit.insert(unit, (deadline, seq));
+        displaced
     }
 
     /// Total release-mode displacements observed by [`Self::insert`].
@@ -259,3 +255,9 @@ fn hash_block_reason(hasher: &mut cellgov_mem::Fnv1aHasher, reason: Lv2BlockReas
 #[cfg(test)]
 #[path = "tests/timer_queue_tests.rs"]
 mod tests;
+
+/// A debug build panics in `insert` before a displacement can return
+/// anything.
+#[cfg(all(test, not(debug_assertions)))]
+#[path = "tests/timer_queue_displacement_tests.rs"]
+mod displacement_tests;
