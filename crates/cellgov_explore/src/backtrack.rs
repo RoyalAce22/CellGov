@@ -16,7 +16,7 @@
 use crate::classify::{BaselineRun, ExplorationResult, ScheduleRecord};
 use crate::config::ExplorationConfig;
 use crate::decision::DecisionLog;
-use crate::execution::Execution;
+use crate::execution::{Execution, Race};
 use crate::observer::observe_decisions_bounded;
 use crate::prescribed::PrescribedScheduler;
 use crate::util::{classify_iteration, AlternateIteration, StopClass};
@@ -82,6 +82,10 @@ where
     let mut worklist: Vec<Candidate> = Vec::new();
     let mut schedules_pruned = 0usize;
     let mut dropped_reversals = 0usize;
+    // One entry per undeliverable reversal: its prefix and the race's
+    // two events. Two races over the same pair of positions can still
+    // name different units, so the key carries the events whole.
+    let mut dropped_seen: BTreeSet<(Prefix, Race)> = BTreeSet::new();
 
     // A truncated execution's race set covers a prefix of the
     // workload, so it names no backtrack point worth replaying.
@@ -89,6 +93,7 @@ where
         push_candidates(
             &log,
             &mut seen,
+            &mut dropped_seen,
             &mut worklist,
             &mut schedules_pruned,
             &mut dropped_reversals,
@@ -149,6 +154,7 @@ where
             push_candidates(
                 &log,
                 &mut seen,
+                &mut dropped_seen,
                 &mut worklist,
                 &mut iter.schedules_pruned,
                 &mut dropped_reversals,
@@ -197,6 +203,7 @@ where
 fn push_candidates(
     log: &DecisionLog,
     seen: &mut BTreeSet<Prefix>,
+    dropped_seen: &mut BTreeSet<(Prefix, Race)>,
     worklist: &mut Vec<Candidate>,
     suppressed: &mut usize,
     dropped: &mut usize,
@@ -223,8 +230,14 @@ fn push_candidates(
         // nothing to force: every other unit was parked there. The
         // reversal is owed and undeliverable, so it is counted here
         // rather than given up in silence.
+        //
+        // Counted once per reversal, not once per walk: every replay
+        // sharing this prefix re-reads the same race.
         if forced.is_empty() {
-            *dropped += 1;
+            let prefix: Prefix = points[..at].iter().map(|p| p.chosen).collect();
+            if dropped_seen.insert((prefix, race)) {
+                *dropped += 1;
+            }
         }
         for unit in forced {
             let mut prefix: Prefix = points[..at].iter().map(|p| p.chosen).collect();

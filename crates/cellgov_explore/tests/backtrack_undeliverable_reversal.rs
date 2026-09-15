@@ -128,6 +128,27 @@ fn a_race_that_reaches_no_candidate_is_counted() {
     );
 }
 
+/// The count names distinct lost reversals, not how often the search
+/// re-read them.
+///
+/// Every replay whose prefix reaches an undeliverable race walks that
+/// race again. A count per walk gave 21 here, across 43 executions; a
+/// count per reversal gives 5. Both figures belong to this workload, so
+/// the shared race walk and the fallback order move them.
+#[test]
+fn the_count_names_reversals_rather_than_walks() {
+    let result = run(1_000);
+    assert_eq!(
+        result.schedules.len(),
+        43,
+        "the premise: the search re-walks its races across many replays",
+    );
+    assert_eq!(
+        result.reversals_dropped, 5,
+        "one per distinct prefix and race, not one per walk",
+    );
+}
+
 /// Both searches read the same races of the same workload, so a change
 /// to the shared race walk moves this too.
 #[test]

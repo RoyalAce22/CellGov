@@ -107,10 +107,16 @@ pub struct ExplorationResult {
     /// [`Self::classes_explored`].
     ///
     /// A run that dropped one reversal and one that gave up half its
-    /// classes both report no count, and only this separates them. It
-    /// counts each drop over every execution the search ran, and one
+    /// classes both report no count, and only this separates them. One
     /// drop can carry more than one owed sequence, so it is not a count
     /// of the classes given up.
+    ///
+    /// The two searches count different things, so a ratio between
+    /// their numbers over one workload reads nothing.
+    /// [`crate::backtrack::explore_backtrack`] counts a race once per
+    /// prefix that owed it, however many of its executions re-read that
+    /// race. [`crate::optimal::explore_optimal`] counts each wakeup
+    /// branch it could not take, over every execution that met one.
     ///
     /// Zero beside an empty count means no drop withdrew the count: a
     /// bound or a short stop did, or the search claims no count of its
