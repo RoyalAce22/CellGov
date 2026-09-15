@@ -16,6 +16,15 @@ fn stw_r3_off_r4(off: u16) -> u32 {
     (36 << 26) | (3 << 21) | (4 << 16) | u32::from(off)
 }
 
+/// Stores the block published, apart from the read intents a block
+/// also emits for the text it fetched.
+fn stores(effects: &[cellgov_effects::Effect]) -> usize {
+    effects
+        .iter()
+        .filter(|e| matches!(e, cellgov_effects::Effect::SharedWriteIntent { .. }))
+        .count()
+}
+
 #[test]
 fn a_break_skip_is_not_spent_by_a_store_the_full_buffer_retries() {
     const BREAK_PC: u64 = (STORE_BUFFER_CAPACITY * 4) as u64;
@@ -42,14 +51,14 @@ fn a_break_skip_is_not_spent_by_a_store_the_full_buffer_retries() {
         BREAK_PC,
         "the full buffer leaves the store to retry"
     );
-    assert_eq!(effects.len(), STORE_BUFFER_CAPACITY);
+    assert_eq!(stores(&effects), STORE_BUFFER_CAPACITY);
 
     // The retry is the same hit, the one the skip covers: the store
     // retires and the block runs on to the syscall.
     let mut effects = Vec::new();
     let second = unit.run_until_yield(Budget::new(200), &ctx, &mut effects);
     assert_eq!(second.yield_reason, YieldReason::Syscall);
-    assert_eq!(effects.len(), 1);
+    assert_eq!(stores(&effects), 1);
 
     // The branch back is the second hit: the break fires there.
     let ctx = ExecutionContext::with_syscall_return(&mem, &[], 0);

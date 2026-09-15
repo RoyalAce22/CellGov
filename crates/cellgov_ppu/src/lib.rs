@@ -112,6 +112,29 @@ pub struct PpuExecutionUnit {
     instruction_shadow: Option<shadow::PredecodedShadow>,
     shadow_hits: u64,
     shadow_misses: u64,
+    /// Start of the run of text the block is fetching from now.
+    ///
+    /// A fetch reads the text region whether or not the shadow answers
+    /// it: a committed write there drives `invalidate_code` over the
+    /// slot, so the next fetch takes the new bytes. Fetch is the
+    /// highest-frequency read a boot has, so a straight run costs one
+    /// compare and one add per instruction here and one read intent at
+    /// the block boundary.
+    fetch_start: u64,
+    /// End of that run, or [`NO_FETCH_RUN`] when the block has none.
+    ///
+    /// A fetch that continues the run is one compare against this and
+    /// one store back, which is what keeps the highest-frequency read
+    /// in a boot off the profile.
+    fetch_end: u64,
+    /// Runs this block finished before the one `fetch_start` and
+    /// `fetch_end` hold.
+    ///
+    /// A branch closes a run and opens another. Past
+    /// [`FETCH_RUNS_MAX`] the block stops tracking them apart and
+    /// reports one span covering every address it fetched, which is
+    /// what a loop body would otherwise cost a run per iteration.
+    fetch_runs: Vec<(u64, u64)>,
     store_buf: StoreBuffer,
     profile_mode: bool,
     profile_insns: std::collections::BTreeMap<&'static str, u64>,
@@ -138,6 +161,9 @@ impl PpuExecutionUnit {
             instruction_shadow: None,
             shadow_hits: 0,
             shadow_misses: 0,
+            fetch_start: 0,
+            fetch_end: NO_FETCH_RUN,
+            fetch_runs: Vec::new(),
             store_buf: StoreBuffer::new(),
             profile_mode: false,
             profile_insns: std::collections::BTreeMap::new(),
@@ -206,7 +232,94 @@ impl PpuExecutionUnit {
     }
 }
 
+/// Runs one block reports apart before it collapses them into one
+/// span.
+const FETCH_RUNS_MAX: usize = 8;
+
+/// [`PpuExecutionUnit::fetch_end`] when no run is open.
+///
+/// The value is odd and every branch form writes a word-aligned
+/// target, so no pc reaches it from an aligned entry.
+const NO_FETCH_RUN: u64 = u64::MAX;
+
 impl PpuExecutionUnit {
+    /// Publish what the block did to committed memory: the stores it
+    /// buffered, and the text it fetched.
+    ///
+    /// Both reach the effect list at the block boundary rather than per
+    /// instruction, so the two orders a write to the text region and a
+    /// fetch of it can take are held apart without a packet per fetch.
+    fn close_block(&mut self, effects: &mut Vec<Effect>) {
+        self.store_buf.flush(effects, self.id);
+        if self.fetch_end != NO_FETCH_RUN {
+            self.fetch_runs.push((self.fetch_start, self.fetch_end));
+            self.fetch_end = NO_FETCH_RUN;
+        }
+        for (start, end) in self.fetch_runs.drain(..) {
+            let range =
+                cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(start), end - start)
+                    .expect("a run ends above its start, so its end is the u64 the range needs");
+            effects.push(Effect::SharedReadIntent {
+                range,
+                source: self.id,
+            });
+        }
+    }
+
+    /// Extend the run in flight, or start another.
+    #[inline(always)]
+    fn note_fetch(&mut self, pc: u64) {
+        // Every branch form writes a target with the low two bits
+        // clear, so the sentinel's odd address names no fetch. The
+        // assertion pins that rather than trusting it.
+        debug_assert_ne!(pc, NO_FETCH_RUN, "a fetch at the no-run sentinel address");
+        if self.fetch_end == pc {
+            self.fetch_end = pc + 4;
+        } else {
+            self.start_fetch_run(pc);
+        }
+    }
+
+    /// Drop the runs the block recorded without publishing them.
+    ///
+    /// A discarded batch retired nothing, so the text it fetched
+    /// reaches no effect list. An open run left behind would instead
+    /// publish at the next block's boundary, naming addresses that
+    /// block never fetched.
+    fn drop_fetch_runs(&mut self) {
+        self.fetch_end = NO_FETCH_RUN;
+        self.fetch_runs.clear();
+    }
+
+    /// Close the run in flight and open one at `pc`.
+    ///
+    /// Cold: a block reaches it once, plus once per branch it takes.
+    /// Past [`FETCH_RUNS_MAX`] runs it stops tracking them apart and
+    /// keeps one span, which is what a loop body would otherwise cost
+    /// a run per iteration.
+    #[cold]
+    fn start_fetch_run(&mut self, pc: u64) {
+        if self.fetch_end == NO_FETCH_RUN {
+            self.fetch_start = pc;
+            self.fetch_end = pc + 4;
+            return;
+        }
+        if self.fetch_runs.len() >= FETCH_RUNS_MAX {
+            let mut start = self.fetch_start.min(pc);
+            let mut end = self.fetch_end.max(pc + 4);
+            for (s, e) in self.fetch_runs.drain(..) {
+                start = start.min(s);
+                end = end.max(e);
+            }
+            self.fetch_start = start;
+            self.fetch_end = end;
+            return;
+        }
+        self.fetch_runs.push((self.fetch_start, self.fetch_end));
+        self.fetch_start = pc;
+        self.fetch_end = pc + 4;
+    }
+
     fn capture_regs(&self) -> FaultRegisterDump {
         FaultRegisterDump {
             gprs: *self.state.gpr.as_array(),
@@ -238,8 +351,8 @@ impl PpuExecutionUnit {
     }
 
     /// Fault-discards-all: restore the batch-entry state, drop staged
-    /// stores and effects, rewind the per-step trace to the batch
-    /// entry, and mark the unit faulted.
+    /// stores, fetch runs and effects, rewind the per-step trace to
+    /// the batch entry, and mark the unit faulted.
     ///
     /// Retirements discarded by the rollback never reach the trace
     /// stream: their `PpuStateHash` / `PpuStateFull` entries are
@@ -249,6 +362,7 @@ impl PpuExecutionUnit {
             self.state = snap.clone();
         }
         self.store_buf.clear();
+        self.drop_fetch_runs();
         effects.clear();
         self.per_step_hashes.truncate(entry.hashes);
         self.per_step_full_states.truncate(entry.fulls);
@@ -313,6 +427,7 @@ impl PpuExecutionUnit {
         let mut remaining = max_budget;
         effects.clear();
         self.store_buf.clear();
+        self.drop_fetch_runs();
 
         // Cross-unit reservation clear: committed table is authoritative.
         if self.state.reservation().is_some() && !ctx.reservation_held(self.id) {
@@ -389,6 +504,7 @@ impl PpuExecutionUnit {
                 }
             }
 
+            self.note_fetch(step_pc);
             let insn = if let Some(cached) = self
                 .instruction_shadow
                 .as_ref()
@@ -439,7 +555,7 @@ impl PpuExecutionUnit {
                 self.retirement_counter += 1;
                 remaining = remaining.saturating_sub(1);
                 if remaining == 0 {
-                    self.store_buf.flush(effects, self.id);
+                    self.close_block(effects);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
                         consumed_cost: InstructionCost::new(budget.raw()),
@@ -481,7 +597,7 @@ impl PpuExecutionUnit {
                 }
                 ExecuteVerdict::Branch => {}
                 ExecuteVerdict::Syscall { lev } => {
-                    self.store_buf.flush(effects, self.id);
+                    self.close_block(effects);
                     let args = state::ppu_syscall_args(&self.state);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::Syscall,
@@ -555,7 +671,7 @@ impl PpuExecutionUnit {
                     if self.break_pc == Some(step_pc) {
                         self.break_skip += 1;
                     }
-                    self.store_buf.flush(effects, self.id);
+                    self.close_block(effects);
                     return ExecutionStepResult {
                         yield_reason: YieldReason::BudgetExhausted,
                         consumed_cost: InstructionCost::new(budget.raw() - remaining),
@@ -595,7 +711,7 @@ impl PpuExecutionUnit {
 
             remaining = remaining.saturating_sub(1);
             if remaining == 0 {
-                self.store_buf.flush(effects, self.id);
+                self.close_block(effects);
                 return ExecutionStepResult {
                     yield_reason: YieldReason::BudgetExhausted,
                     consumed_cost: InstructionCost::new(budget.raw()),

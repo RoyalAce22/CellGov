@@ -15,17 +15,20 @@
 //! explorer covers it. Two loads still prune against each other, since
 //! neither changes what the other observes.
 //!
-//! Two reads of shared state reach no footprint. Instruction fetch
-//! reads the text region and records no read, so a unit that races
-//! another unit's write to that region prunes against it.
+//! Instruction fetch reads the text region too. A PPU block records
+//! what it fetched at its boundary, coalesced into one read per run of
+//! addresses and into one covering span past a cap on the runs, so a
+//! unit that races another unit's write to that region conflicts with
+//! it.
 //!
-//! Guest time is the other. One global clock advances per step. A DMA
-//! completion lands at the first commit whose clock reached its
-//! completion tick, and a PPU `mftb` reads that clock into a guest
-//! register. A step that touches no shared resource still moves the
-//! clock relative to every later step. Two steps this module calls
-//! independent can therefore commit different memory when they swap.
-//! `tests/shared_clock.rs` holds the witness.
+//! One read of shared state still reaches no footprint: guest time.
+//! One global clock advances per step. A DMA completion lands at the
+//! first commit whose clock reached its completion tick, and a PPU
+//! `mftb` reads that clock into a guest register. A step that touches
+//! no shared resource still moves the clock relative to every later
+//! step. Two steps this module calls independent can therefore commit
+//! different memory when they swap. `tests/shared_clock.rs` holds the
+//! witness.
 //!
 //! One write reaches no footprint either. The RSX FIFO advance pass
 //! emits effects that commit guest memory and sweep reservations, and
