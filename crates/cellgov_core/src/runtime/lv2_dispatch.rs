@@ -193,6 +193,9 @@ impl Runtime {
                 Effect::RsxLabelWrite { .. } => {
                     "runtime.apply_lv2_effects_unsupported_rsx_label_write"
                 }
+                Effect::SharedReadIntent { .. } => {
+                    "runtime.apply_lv2_effects_unsupported_shared_read_intent"
+                }
             };
             self.lv2_host.log_invariant_break(
                 site,

@@ -181,6 +181,7 @@ fn kind(e: &Effect) -> &'static str {
         Effect::ReservationAcquire { .. } => "acquire",
         Effect::ConditionalStore { .. } => "conditional",
         Effect::SharedWriteIntent { .. } => "plain",
+        Effect::SharedReadIntent { .. } => "read",
         _ => "other",
     }
 }
@@ -245,10 +246,10 @@ fn a_lwarx_after_a_stwcx_in_the_same_block_acquires_after_the_conditional_store(
     let kinds: Vec<_> = effects.iter().map(kind).collect();
     assert_eq!(
         kinds,
-        ["acquire", "conditional", "acquire"],
+        ["read", "acquire", "conditional", "read", "acquire"],
         "the conditional store must precede the later acquire: {effects:?}"
     );
-    match &effects[2] {
+    match &effects[4] {
         Effect::ReservationAcquire { line_addr, .. } => assert_eq!(*line_addr, OTHER_WORD),
         other => panic!("expected the second acquire last, got {other:?}"),
     }
@@ -344,9 +345,11 @@ fn two_ll_sc_sequences_in_one_block_keep_each_acquire_paired_with_its_conditiona
     assert_eq!(
         kinds,
         [
+            "read",
             "acquire",
             "plain",
             "conditional",
+            "read",
             "acquire",
             "conditional",
             "plain"
@@ -357,15 +360,15 @@ fn two_ll_sc_sequences_in_one_block_keep_each_acquire_paired_with_its_conditiona
         .iter()
         .map(|e| match e {
             Effect::ReservationAcquire { line_addr, .. } => *line_addr,
-            Effect::SharedWriteIntent { range, .. } | Effect::ConditionalStore { range, .. } => {
-                range.start().raw()
-            }
+            Effect::SharedWriteIntent { range, .. }
+            | Effect::ConditionalStore { range, .. }
+            | Effect::SharedReadIntent { range, .. } => range.start().raw(),
             other => panic!("unexpected {other:?}"),
         })
         .collect();
     assert_eq!(
         targets,
-        [WORD, 0x1800, WORD, OTHER_WORD, OTHER_WORD, 0x1900],
+        [WORD, WORD, 0x1800, WORD, OTHER_WORD, OTHER_WORD, OTHER_WORD, 0x1900],
         "each acquire is immediately answered by its own conditional store"
     );
 }

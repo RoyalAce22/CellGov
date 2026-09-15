@@ -143,7 +143,10 @@ pub struct CommitOutcome {
     /// emitter-entry drop and cross-unit sweep, and `ReservationAcquire`
     /// clobbers of prior entries on the same unit.
     pub reservations_cleared: usize,
-    /// Effects the pipeline saw and did not act on (fault, trace).
+    /// Effects the validation pass staged nothing for: `FaultRaised`,
+    /// `TraceMarker`, `RsxFlipRequest` and `SharedReadIntent`.
+    ///
+    /// The apply pass still acts on `RsxFlipRequest`.
     pub effects_deferred: usize,
     /// `true` if the step faulted and the whole batch was discarded.
     pub fault_discarded: bool,

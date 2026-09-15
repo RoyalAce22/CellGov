@@ -143,7 +143,8 @@ The full vocabulary of guest-visible operations:
   `SharedWriteIntent`, `MailboxSend`, `MailboxReceiveAttempt`,
   `DmaEnqueue`, `WaitOnEvent`, `WakeUnit`, `SignalUpdate`,
   `FaultRaised`, `TraceMarker`, `ReservationAcquire`,
-  `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`.
+  `ConditionalStore`, `RsxLabelWrite`, `RsxFlipRequest`,
+  `SharedReadIntent`.
 - **Trace record variants** in `cellgov_trace::TraceRecord`:
   - one header, `RunIdentity`, written first and never repeated:
     the format version plus a fingerprint of each half of the

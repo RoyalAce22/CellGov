@@ -48,14 +48,21 @@ pub fn observe_decisions_with_snapshots(
         match rt.step() {
             Ok(step) => {
                 let mut footprint = StepFootprint::from_effects(&step.effects);
-                // A write through one view of a shared mapping is a
-                // write to every sibling view's bytes.
-                let aliases: Vec<_> = footprint
+                // An access through one view of a shared mapping
+                // reaches every sibling view's bytes, whether the
+                // access writes them or reads them.
+                let write_aliases: Vec<_> = footprint
                     .shared_writes
                     .iter()
                     .flat_map(|r| rt.shared_alias_ranges(step.unit, *r))
                     .collect();
-                footprint.shared_writes.extend(aliases);
+                footprint.shared_writes.extend(write_aliases);
+                let read_aliases: Vec<_> = footprint
+                    .shared_reads
+                    .iter()
+                    .flat_map(|r| rt.shared_alias_ranges(step.unit, *r))
+                    .collect();
+                footprint.shared_reads.extend(read_aliases);
                 if let Err(e) = rt.commit_step(&step.result, &step.effects) {
                     break StopReason::CommitError(e);
                 }

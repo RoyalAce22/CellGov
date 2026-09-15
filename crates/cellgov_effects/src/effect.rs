@@ -162,6 +162,25 @@ pub enum Effect {
         /// machine only tracks pending vs done.
         buffer_index: u8,
     },
+    /// Record that the unit read `range` out of globally visible
+    /// memory during this step.
+    ///
+    /// The commit pipeline applies nothing for it: the bytes came
+    /// from the frozen memory view the step already ran against. The
+    /// packet carries the read into dependency analysis, which pairs
+    /// it against another unit's write to the same bytes.
+    ///
+    /// Emission rules:
+    ///
+    /// - A read this unit satisfied out of its own uncommitted store
+    ///   emits nothing.
+    /// - A partly covered read reports its whole range.
+    SharedReadIntent {
+        /// Byte range read in the guest address space.
+        range: ByteRange,
+        /// Reading unit.
+        source: UnitId,
+    },
 }
 
 impl Effect {

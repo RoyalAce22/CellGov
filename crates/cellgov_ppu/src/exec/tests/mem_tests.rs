@@ -18,6 +18,8 @@ mod atomics;
 mod floats;
 #[path = "mem_load_tests.rs"]
 mod loads;
+#[path = "mem_read_intent_tests.rs"]
+mod read_intent;
 #[path = "mem_scalar_tests.rs"]
 mod scalar;
 #[path = "mem_store_order_tests.rs"]

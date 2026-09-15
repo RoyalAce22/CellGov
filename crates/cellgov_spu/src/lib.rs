@@ -41,6 +41,22 @@ const FAULT_DECODE_ERROR: u32 = 0x0005_0000;
 /// distinguishes it from a refused `rdch` / `wrch` on the same channel.
 const FAULT_UNSUPPORTED_CHANNEL_COUNT: u32 = 0x0006_0000;
 
+/// Records the bytes a transfer copied from main memory into local store.
+///
+/// Dependency analysis pairs the range against another unit's write to
+/// the same bytes. The result is `None` for:
+///
+/// - a zero-byte transfer, whose empty range pairs with no write;
+/// - an `ea + size` that carries out of the 64-bit space.
+fn shared_read(ea: u64, size: u32, source: UnitId) -> Option<Effect> {
+    // [CBEA p:116 s:9.1.4 MFC Transfer Size or List Size Channel] Zero is a valid MFC transfer size.
+    if size == 0 {
+        return None;
+    }
+    cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(ea), u64::from(size))
+        .map(|range| Effect::SharedReadIntent { range, source })
+}
+
 /// SPU execution unit snapshot for replay.
 #[derive(Debug, Clone)]
 pub struct SpuSnapshot {
@@ -109,15 +125,24 @@ impl ExecutionUnit for SpuExecutionUnit {
             self.state.pc += 4;
         }
 
+        // This step clears the effect vector below, so the parked
+        // transfer's read enters it after the clear.
+        let mut parked_get_read = None;
         if let Some((ea, lsa, size, tag_id)) = self.state.channels.pending_get.take() {
             let src_start = ea as usize;
-            let src_end = src_start + size as usize;
+            // MFC_EAH and MFC_EAL are write channels the SPU program
+            // sets. `ea` can therefore sit at the top of the space,
+            // where the sum carries out of it. The saturating add
+            // leaves the bound check below to refuse the transfer.
+            // [CBEA p:111 s:9 SPU Channel Map] MFC_EAL is a write channel carrying the low-order SPU effective-address command parameter.
+            let src_end = src_start.saturating_add(size as usize);
             let mem = ctx.memory().as_bytes();
             if src_end <= mem.len() {
                 let dst_start = lsa as usize;
                 let dst_end = dst_start + size as usize;
                 if dst_end <= self.state.ls.len() {
                     self.state.ls[dst_start..dst_end].copy_from_slice(&mem[src_start..src_end]);
+                    parked_get_read = shared_read(ea, size, self.id);
                 }
             }
             self.state.channels.tag_status |= 1u32 << tag_id;
@@ -132,6 +157,7 @@ impl ExecutionUnit for SpuExecutionUnit {
 
         let mut remaining = budget.raw();
         effects.clear();
+        effects.extend(parked_get_read);
 
         loop {
             let step_pc = self.state.pc as u64;
@@ -196,7 +222,9 @@ impl ExecutionUnit for SpuExecutionUnit {
                     acquire_line,
                 } => {
                     let src_start = ea as usize;
-                    let src_end = src_start + size as usize;
+                    // The EA is guest-written; see the parked-transfer
+                    // path above for why the sum saturates.
+                    let src_end = src_start.saturating_add(size as usize);
                     let mem = ctx.memory().as_bytes();
                     if src_end <= mem.len() {
                         let dst_start = lsa as usize;
@@ -204,6 +232,7 @@ impl ExecutionUnit for SpuExecutionUnit {
                         if dst_end <= self.state.ls.len() {
                             self.state.ls[dst_start..dst_end]
                                 .copy_from_slice(&mem[src_start..src_end]);
+                            effects.extend(shared_read(ea, size, self.id));
                         }
                     }
                     // MFC_GETLLAR also installs the unit's reservation entry.
@@ -259,6 +288,10 @@ impl ExecutionUnit for SpuExecutionUnit {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/read_intent_tests.rs"]
+mod read_intent_tests;
 
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]

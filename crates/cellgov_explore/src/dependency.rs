@@ -3,15 +3,21 @@
 //! [`StepFootprint`] summarizes one step's shared-resource accesses.
 //! Two footprints conflict if swapping their execution order could
 //! produce a different observable outcome; non-conflicting steps are
-//! independent and the swap need not be explored.
+//! independent and the swap need not be explored. The analysis
+//! over-approximates: it never reports two dependent steps as
+//! independent, and a false dependency only costs exploration budget.
 //!
-//! The analysis over-approximates dependency for effect-visible
-//! operations (writes, DMA transfers, reservations, mailbox / signal /
-//! barrier traffic): among those, false independencies never occur,
-//! and false dependencies only waste exploration budget. Plain loads
-//! emit no effect (`cellgov_effects` has no read-intent variant), so a
-//! write-read race whose read feeds a later store to a disjoint
-//! address is invisible here and the pair can be pruned.
+//! A guest load of committed memory emits `Effect::SharedReadIntent`
+//! for the bytes it read. The read set gives all three of Bernstein's
+//! intersections over data accesses -- write-write, read-against-write
+//! and write-against-read. A write-read race whose read steers a later
+//! store to a disjoint address therefore conflicts here, and the
+//! explorer covers it. Two loads still prune against each other, since
+//! neither changes what the other observes.
+//!
+//! One access reaches committed memory and emits nothing: instruction
+//! fetch. A unit that races another unit's write to the text region
+//! prunes against it.
 
 use cellgov_effects::Effect;
 use cellgov_mem::ByteRange;
@@ -25,6 +31,8 @@ use cellgov_sync::{BarrierId, MailboxId, SignalId, RESERVATION_LINE_BYTES};
 pub struct StepFootprint {
     /// Byte ranges written via `SharedWriteIntent` or `ConditionalStore`.
     pub shared_writes: Vec<ByteRange>,
+    /// Byte ranges read via `SharedReadIntent`.
+    pub shared_reads: Vec<ByteRange>,
     /// Mailboxes sent to.
     pub mailbox_sends: Vec<MailboxId>,
     /// Mailboxes read from.
@@ -61,6 +69,9 @@ impl StepFootprint {
             match effect {
                 Effect::SharedWriteIntent { range, .. } => {
                     fp.shared_writes.push(*range);
+                }
+                Effect::SharedReadIntent { range, .. } => {
+                    fp.shared_reads.push(*range);
                 }
                 Effect::MailboxSend { mailbox, .. } => {
                     fp.mailbox_sends.push(*mailbox);
@@ -114,8 +125,26 @@ impl StepFootprint {
             }
         }
 
+        // Bernstein's other two intersections. No read-against-read
+        // clause: neither read changes what the other sees.
+        if ranges_overlap(&self.shared_reads, &other.shared_writes)
+            || ranges_overlap(&other.shared_reads, &self.shared_writes)
+        {
+            return true;
+        }
+
         if ranges_overlap(&self.shared_writes, &other.dma_ranges)
             || ranges_overlap(&other.shared_writes, &self.dma_ranges)
+        {
+            return true;
+        }
+
+        // A DMA's source range rides in `dma_ranges` alongside its
+        // destination. Pairing reads against the whole vector
+        // therefore adds read-against-read pairs for two units that
+        // read one buffer.
+        if ranges_overlap(&self.shared_reads, &other.dma_ranges)
+            || ranges_overlap(&other.shared_reads, &self.dma_ranges)
         {
             return true;
         }
@@ -158,6 +187,11 @@ impl StepFootprint {
             return true;
         }
 
+        // No read-against-reservation clause: what loses a reservation
+        // is a store or another modification of the granule, or an act
+        // of the holder itself [PPC-Book2 p:10 s:1.7.3.1]. Another
+        // unit's load leaves the entry, and the verdict of its later
+        // conditional store, alone.
         if write_covers_any_line(&self.shared_writes, &other.reservation_lines)
             || write_covers_any_line(&other.shared_writes, &self.reservation_lines)
         {
@@ -187,6 +221,7 @@ impl StepFootprint {
     /// True when the step accessed no shared resources.
     pub fn is_local_only(&self) -> bool {
         self.shared_writes.is_empty()
+            && self.shared_reads.is_empty()
             && self.mailbox_sends.is_empty()
             && self.mailbox_receives.is_empty()
             && self.dma_ranges.is_empty()
@@ -201,6 +236,7 @@ impl StepFootprint {
     /// Append every access from `other` into `self`.
     pub fn merge(&mut self, other: &StepFootprint) {
         self.shared_writes.extend_from_slice(&other.shared_writes);
+        self.shared_reads.extend_from_slice(&other.shared_reads);
         self.mailbox_sends.extend_from_slice(&other.mailbox_sends);
         self.mailbox_receives
             .extend_from_slice(&other.mailbox_receives);

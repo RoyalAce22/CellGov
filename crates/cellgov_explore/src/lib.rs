@@ -28,5 +28,9 @@ pub use prescribed::PrescribedScheduler;
 pub use util::{StopClass, StopReason};
 
 #[cfg(test)]
+#[path = "tests/read_intent_tests.rs"]
+mod read_intent_tests;
+
+#[cfg(test)]
 #[path = "tests/truncation_tests.rs"]
 mod truncation_tests;

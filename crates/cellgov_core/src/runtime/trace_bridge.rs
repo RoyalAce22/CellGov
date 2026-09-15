@@ -23,6 +23,7 @@ pub(super) fn traced_effect_kind(e: &cellgov_effects::Effect) -> TracedEffectKin
         Effect::ConditionalStore { .. } => TracedEffectKind::ConditionalStore,
         Effect::RsxLabelWrite { .. } => TracedEffectKind::RsxLabelWrite,
         Effect::RsxFlipRequest { .. } => TracedEffectKind::RsxFlipRequest,
+        Effect::SharedReadIntent { .. } => TracedEffectKind::SharedReadIntent,
     }
 }
 

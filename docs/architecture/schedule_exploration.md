@@ -21,16 +21,19 @@ flowchart TD
   cls -->|"a bound, a refusal, or a baseline that committed nothing"| inc["Inconclusive"]
 ```
 
-`StepFootprint`, extracted from the nine shared-resource `Effect`
+`StepFootprint`, extracted from the ten shared-resource `Effect`
 variants, drives conservative dependency analysis: step pairs with
 non-overlapping footprints prune as provably independent, including
 DMA destinations against reservation lines in both directions (a DMA
 completion clears cross-unit reservations covering its destination
 line even when the bytes miss the conditional store's exact range).
-Pruning is sound for effect-visible operations; plain loads emit no
-effect, so a write-read race whose read feeds a later store to a
-disjoint address is invisible. The dependency module states that
-boundary.
+A guest load of committed memory emits `SharedReadIntent`, so all
+three of Bernstein's intersections hold over data accesses and a
+write-read race whose read steers a later store to a disjoint address
+conflicts rather than prunes. Two loads of the same bytes still
+prune, and instruction fetch emits nothing, so a fetch still prunes
+against another unit's write to the text region. The dependency
+module states what each clause pairs.
 
 Schedules compare through the multi-space committed-memory hash, so
 divergence confined to a spawned child's address space is witnessed.

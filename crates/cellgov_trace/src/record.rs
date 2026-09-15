@@ -132,6 +132,8 @@ pub enum TracedEffectKind {
     RsxLabelWrite = 11,
     /// NV4097 flip.
     RsxFlipRequest = 12,
+    /// Shared-memory read intent.
+    SharedReadIntent = 13,
 }
 
 /// Reason a host-side invariant break was recorded into the trace

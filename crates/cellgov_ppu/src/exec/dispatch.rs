@@ -276,7 +276,9 @@ pub fn execute(
         | PpuInstruction::StdStd { .. }
         | PpuInstruction::CmpwiBc { .. }
         | PpuInstruction::CmpwBc { .. }
-        | PpuInstruction::Consumed => super_insn::execute(insn, state, region_views, store_buf),
+        | PpuInstruction::Consumed => {
+            super_insn::execute(insn, state, unit_id, region_views, effects, store_buf)
+        }
 
         // [PPC-Book1 p:26 s:2.4.2] sc surfaces LEV to the system; service dispatch is runtime-defined.
         PpuInstruction::Sc { lev } => ExecuteVerdict::Syscall { lev },

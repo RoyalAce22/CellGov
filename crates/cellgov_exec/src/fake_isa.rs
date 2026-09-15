@@ -32,6 +32,14 @@ pub enum FakeOp {
         /// Byte count.
         len: u64,
     },
+    /// Emit `SharedReadIntent` for `len` bytes of committed memory at
+    /// `addr`, and take the range's first byte into the accumulator.
+    SharedLoad {
+        /// Start address.
+        addr: u64,
+        /// Byte count.
+        len: u64,
+    },
     /// Emit `Effect::ReservationAcquire` for the 128-byte line
     /// containing `line_addr`.
     ReservationAcquire {
@@ -170,6 +178,25 @@ impl ExecutionUnit for FakeIsaUnit {
                     self.id,
                     GuestTicks::ZERO,
                 ));
+                YieldReason::BudgetExhausted
+            }
+            FakeOp::SharedLoad { addr, len } => {
+                let range = ByteRange::new(GuestAddr::new(addr), len)
+                    .expect("SharedLoad range must be valid");
+                let bytes = ctx
+                    .memory()
+                    .read_checked(range)
+                    .expect("SharedLoad range must be readable");
+                // An empty range's `SharedReadIntent` overlaps
+                // nothing, so the opcode would carry no dependency.
+                let first = bytes
+                    .first()
+                    .expect("SharedLoad range must cover at least one byte");
+                self.acc = u32::from(*first);
+                effects.push(Effect::SharedReadIntent {
+                    range,
+                    source: self.id,
+                });
                 YieldReason::BudgetExhausted
             }
             FakeOp::MailboxSend { mailbox } => {

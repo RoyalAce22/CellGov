@@ -1,11 +1,11 @@
 //! Memory dispatch: integer / atomic / vector / floating-point loads
 //! and stores, plus `dcbz`. The scalar loads and stores decode to a
 //! [`Scalar`] and run through one [`load`] and one [`store`]. Every
-//! path shares the `load_ze` / `load_se` / `buffer_store` /
-//! `load_slice` helpers from the parent module so the reservation
-//! clear-sweep stays consistent across them.
+//! path shares the `load_ze` / `load_se` / `buffer_store` helpers and
+//! the `LoadPort` from `memory_helpers`, so the reservation
+//! clear-sweep and the read intent stay consistent across them.
 
-use crate::exec::memory_helpers::{buffer_store, load_se, load_slice, load_ze, Width};
+use crate::exec::memory_helpers::{buffer_store, load_se, load_ze, LoadPort, Width};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
@@ -27,7 +27,8 @@ pub(crate) fn execute(
 ) -> ExecuteVerdict {
     match scalar(insn) {
         Some(Scalar::Load(ea, width, dest, update)) => {
-            return load(state, region_views, store_buf, ea, width, dest, update);
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            return load(state, &mut port, ea, width, dest, update);
         }
         Some(Scalar::Store(ea, width, src, update)) => {
             return store(state, store_buf, ea, width, src, update);
@@ -49,8 +50,9 @@ pub(crate) fn execute(
                 rt
             );
             let mut ea = state.ea_d_form(ra, imm);
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
             for r in (rt as usize)..32 {
-                match load_ze(region_views, store_buf, ea, Width::B4) {
+                match load_ze(&mut port, ea, Width::B4) {
                     Ok(val) => {
                         state.set_gpr(r, val);
                         ea = ea.wrapping_add(4);
@@ -91,12 +93,14 @@ pub(crate) fn execute(
         PpuInstruction::Lswi { rt, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
-            string_load(state, region_views, store_buf, rt as usize, base, n)
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            string_load(state, &mut port, rt as usize, base, n)
         }
         PpuInstruction::Lswx { rt, ra, rb } => {
             let base = state.ea_x_form(ra, rb);
             let n = state.xer_tbc() as usize;
-            string_load(state, region_views, store_buf, rt as usize, base, n)
+            let mut port = LoadPort::new(region_views, store_buf, effects, unit_id);
+            string_load(state, &mut port, rt as usize, base, n)
         }
         PpuInstruction::Stswi { rs, ra, nb } => {
             let n = if nb == 0 { 32usize } else { nb as usize };
@@ -117,7 +121,12 @@ pub(crate) fn execute(
             if ea & 7 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            match load_ze(region_views, store_buf, ea, Width::B8) {
+            let loaded = load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B8,
+            );
+            match loaded {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     let line = ReservedLine::containing(ea);
@@ -179,7 +188,12 @@ pub(crate) fn execute(
             if ea & 3 != 0 {
                 return ExecuteVerdict::Fault(PpuFault::AlignmentInterrupt(ea));
             }
-            match load_ze(region_views, store_buf, ea, Width::B4) {
+            let loaded = load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B4,
+            );
+            match loaded {
                 Ok(val) => {
                     state.set_gpr(rt as usize, val);
                     let line = ReservedLine::containing(ea);
@@ -235,7 +249,10 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let addr = base.wrapping_add(state.gpr[rb as usize]);
             let aligned = addr & !15u64;
-            let val = match read_aligned_16(aligned, region_views, store_buf) {
+            let val = match read_aligned_16(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                aligned,
+            ) {
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
@@ -246,20 +263,23 @@ pub(crate) fn execute(
         PpuInstruction::Lvrx { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let addr = base.wrapping_add(state.gpr[rb as usize]);
-            let aligned = addr & !15u64;
-            let val = match read_aligned_16(aligned, region_views, store_buf) {
+            let lo = addr & 15;
+            // [CBE-Handbook p:744 s:A.3.3 Table A-9] a quadword-aligned
+            // lvrx makes no attempt to access storage and delivers
+            // zero, so it neither faults on an unmapped line nor
+            // records a read of one.
+            if lo == 0 {
+                state.set_vr(vt as usize, 0);
+                return ExecuteVerdict::Continue;
+            }
+            let val = match read_aligned_16(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                addr & !15u64,
+            ) {
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
-            let lo = addr & 15;
-            state.set_vr(
-                vt as usize,
-                if lo == 0 {
-                    0
-                } else {
-                    val >> ((16 - lo) * 8) as u32
-                },
-            );
+            state.set_vr(vt as usize, val >> ((16 - lo) * 8) as u32);
             ExecuteVerdict::Continue
         }
         // [CBE-Handbook p:744 s:A.3.3] lvlxl / lvrxl: identical to lvlx / lvrx,
@@ -268,7 +288,10 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let addr = base.wrapping_add(state.gpr[rb as usize]);
             let aligned = addr & !15u64;
-            let val = match read_aligned_16(aligned, region_views, store_buf) {
+            let val = match read_aligned_16(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                aligned,
+            ) {
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
@@ -279,27 +302,31 @@ pub(crate) fn execute(
         PpuInstruction::Lvrxl { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let addr = base.wrapping_add(state.gpr[rb as usize]);
-            let aligned = addr & !15u64;
-            let val = match read_aligned_16(aligned, region_views, store_buf) {
+            let lo = addr & 15;
+            // [CBE-Handbook p:744 s:A.3.3 Table A-9] see `Lvrx`: the
+            // quadword-aligned form touches no storage.
+            if lo == 0 {
+                state.set_vr(vt as usize, 0);
+                return ExecuteVerdict::Continue;
+            }
+            let val = match read_aligned_16(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                addr & !15u64,
+            ) {
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
-            let lo = addr & 15;
-            state.set_vr(
-                vt as usize,
-                if lo == 0 {
-                    0
-                } else {
-                    val >> ((16 - lo) * 8) as u32
-                },
-            );
+            state.set_vr(vt as usize, val >> ((16 - lo) * 8) as u32);
             ExecuteVerdict::Continue
         }
         // [AltiVec-PEM p:6-21 s:6.2] Load Vector Indexed (lvx, X-form): EA = ((RA|0)+(RB)) & ~0xF; MEM(EA,16) -> vT.
         PpuInstruction::Lvx { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !15u64;
-            let val = match read_aligned_16(ea, region_views, store_buf) {
+            let val = match read_aligned_16(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+            ) {
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
@@ -311,7 +338,10 @@ pub(crate) fn execute(
         PpuInstruction::Lvxl { vt, ra, rb } => {
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !15u64;
-            let val = match read_aligned_16(ea, region_views, store_buf) {
+            let val = match read_aligned_16(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+            ) {
                 Ok(v) => v,
                 Err(ea) => return ExecuteVerdict::MemFault(ea),
             };
@@ -348,7 +378,11 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]);
             let m = (ea & 0xF) as usize;
-            let byte = match load_ze(region_views, store_buf, ea, Width::B1) {
+            let byte = match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B1,
+            ) {
                 Ok(v) => v as u8,
                 Err(e) => return ExecuteVerdict::MemFault(e),
             };
@@ -363,7 +397,11 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !1u64;
             let m = (ea & 0xF) as usize;
-            let val = match load_ze(region_views, store_buf, ea, Width::B2) {
+            let val = match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B2,
+            ) {
                 Ok(v) => v as u16,
                 Err(e) => return ExecuteVerdict::MemFault(e),
             };
@@ -380,7 +418,11 @@ pub(crate) fn execute(
             let base = if ra == 0 { 0 } else { state.gpr[ra as usize] };
             let ea = base.wrapping_add(state.gpr[rb as usize]) & !3u64;
             let m = (ea & 0xF) as usize;
-            let val = match load_ze(region_views, store_buf, ea, Width::B4) {
+            let val = match load_ze(
+                &mut LoadPort::new(region_views, store_buf, effects, unit_id),
+                ea,
+                Width::B4,
+            ) {
                 Ok(v) => v as u32,
                 Err(e) => return ExecuteVerdict::MemFault(e),
             };
@@ -816,8 +858,7 @@ fn scalar(insn: &PpuInstruction) -> Option<Scalar> {
 #[inline]
 fn load(
     state: &mut PpuState,
-    region_views: &[cellgov_mem::RegionView<'_>],
-    store_buf: &StoreBuffer,
+    port: &mut LoadPort<'_, '_>,
     ea: Ea,
     width: Width,
     dest: Dest,
@@ -837,10 +878,8 @@ fn load(
     }
     let addr = ea.resolve(state);
     let loaded = match dest {
-        Dest::Sign(_) => load_se(region_views, store_buf, addr, width),
-        Dest::Zero(_) | Dest::Reversed(_) | Dest::Fpr(_) => {
-            load_ze(region_views, store_buf, addr, width)
-        }
+        Dest::Sign(_) => load_se(port, addr, width),
+        Dest::Zero(_) | Dest::Reversed(_) | Dest::Fpr(_) => load_ze(port, addr, width),
     };
     let val = match loaded {
         Ok(val) => val,
@@ -917,26 +956,21 @@ fn swap_low_bytes(val: u64, width: Width) -> u64 {
 ///
 /// Returns an `Unmapped` `MemError` when no region view covers the line.
 fn read_aligned_16(
+    port: &mut LoadPort<'_, '_>,
     aligned: u64,
-    region_views: &[cellgov_mem::RegionView<'_>],
-    store_buf: &StoreBuffer,
 ) -> Result<u128, cellgov_mem::MemError> {
-    if let Some(v) = store_buf.forward(aligned, 16) {
+    if let Some(v) = port.forward(aligned, 16) {
         return Ok(v);
     }
-    let slice = match load_slice(region_views, aligned, 16) {
-        Some(s) => s,
-        None => {
-            return Err(cellgov_mem::MemError::Unmapped(cellgov_mem::FaultContext {
-                addr: aligned,
-                nearest_below: None,
-                nearest_above: None,
-            }));
-        }
-    };
     let mut bytes = [0u8; 16];
-    bytes.copy_from_slice(slice);
-    store_buf.overlay_range(aligned, &mut bytes);
+    if !port.read_committed(aligned, &mut bytes) {
+        return Err(cellgov_mem::MemError::Unmapped(cellgov_mem::FaultContext {
+            addr: aligned,
+            nearest_below: None,
+            nearest_above: None,
+        }));
+    }
+    port.overlay(aligned, &mut bytes);
     Ok(u128::from_be_bytes(bytes))
 }
 
@@ -978,8 +1012,7 @@ fn single_frs(d: u64) -> u32 {
 /// `rt_start`, wrapping at r31 -> r0. Zero-length is a no-op.
 fn string_load(
     state: &mut PpuState,
-    region_views: &[cellgov_mem::RegionView<'_>],
-    store_buf: &StoreBuffer,
+    port: &mut LoadPort<'_, '_>,
     rt_start: usize,
     base: u64,
     n: usize,
@@ -992,7 +1025,7 @@ fn string_load(
     state.set_gpr(reg, 0);
     for i in 0..n {
         let ea = base.wrapping_add(i as u64);
-        let byte = match load_ze(region_views, store_buf, ea, Width::B1) {
+        let byte = match load_ze(port, ea, Width::B1) {
             Ok(v) => v as u8,
             Err(e) => return ExecuteVerdict::MemFault(e),
         };
