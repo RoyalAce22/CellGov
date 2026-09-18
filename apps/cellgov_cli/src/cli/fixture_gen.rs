@@ -250,9 +250,11 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     let ctx = build_classifier_context(&eboot_bytes, &cellgov)
         .unwrap_or_else(|e| die(&format!("fixture-gen: build classifier context: {e}")));
     let classes = classify_all(&result, &cellgov, &rpcs3, &ctx);
-    let summary = summarize(&result, &classes)
+    let mut summary = summarize(&result, &classes)
         .with_firmware(composition.identity.clone(), rpcs3_firmware)
         .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
+    summary.oracle_gap_ordinals =
+        oracle_gap_count(&vfs_root, &fixtures, &manifest.content_id, &cell);
 
     std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
         die(&format!(
@@ -287,6 +289,31 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
             std::process::exit(1);
         }
     }
+}
+
+fn oracle_gap_count(
+    vfs_root: &Path,
+    fixtures: &Path,
+    content_id: &str,
+    cell: &CellKey,
+) -> Option<u64> {
+    let overlay = vfs_root.join(".cellgov/oracle-gap.tsv");
+    let gap = std::fs::read_to_string(overlay).ok()?;
+    let ordinals: std::collections::BTreeSet<u64> = gap
+        .lines()
+        .skip(2)
+        .filter_map(|line| line.parse().ok())
+        .collect();
+    let anchor = crate::paths::boot_anchor_path_in(fixtures, content_id, cell);
+    let summary: cellgov_compare::BootSummary =
+        serde_json::from_str(&std::fs::read_to_string(anchor).ok()?).ok()?;
+    Some(
+        summary
+            .unsupported_syscalls
+            .keys()
+            .filter(|ordinal| ordinals.contains(ordinal))
+            .count() as u64,
+    )
 }
 
 /// Build a [`ClassifierContext`] from EBOOT bytes + observation.

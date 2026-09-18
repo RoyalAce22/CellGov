@@ -81,6 +81,7 @@ const DISPATCHED: &[&str] = &[
     "dev completions",
     "dev gen-manifest",
     "dev record-anchors",
+    "dev oracle-gap",
 ];
 
 #[test]

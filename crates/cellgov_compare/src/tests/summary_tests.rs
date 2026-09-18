@@ -487,6 +487,7 @@ fn empty_diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     }
 }
 
@@ -500,6 +501,7 @@ fn empty_converged_equivalent() -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     }
 }
 
@@ -528,6 +530,7 @@ fn validate_rejects_converged_with_diverge_byte_parity() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -548,6 +551,7 @@ fn validate_rejects_diverged_without_diverge_byte_parity() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -573,6 +577,7 @@ fn validate_rejects_diverge_reasons_disagree() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -649,6 +654,7 @@ fn validate_rejects_unclassified_denormalization_mismatch() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -677,6 +683,7 @@ fn validate_rejects_unclassified_runs_sum_mismatch() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -698,6 +705,7 @@ fn validate_rejects_equivalent_with_non_zero_totals() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -716,6 +724,7 @@ fn validate_rejects_non_semantic_bytes_disagreement() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -744,6 +753,7 @@ fn validate_rejects_non_semantic_with_unclassified_present() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -772,6 +782,7 @@ fn validate_rejects_pending_non_semantic_disagreement() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -803,6 +814,7 @@ fn validate_rejects_pending_unclassified_disagreement() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),

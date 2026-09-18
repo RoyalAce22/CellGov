@@ -14,6 +14,7 @@ fn equivalent() -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     }
 }
 

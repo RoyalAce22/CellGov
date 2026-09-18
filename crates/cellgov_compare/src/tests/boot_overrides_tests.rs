@@ -251,6 +251,7 @@ fn a_cross_runner_summary_keeps_the_overrides_it_was_written_under() {
         lowest_offset_class: None,
         identity: overridden(every_override()),
         rpcs3_firmware: Some("4.91".to_string()),
+        oracle_gap_ordinals: None,
     };
     let text = serde_json::to_string(&summary).unwrap();
     let back: crate::CrossRunnerSummary = serde_json::from_str(&text).unwrap();

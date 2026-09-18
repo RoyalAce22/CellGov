@@ -296,6 +296,10 @@ pub(crate) const EXAMPLES: &[Examples] = &[
             "cellgov dev record-anchors --all --fw 4.93",
         ],
     },
+    Examples {
+        path: "dev oracle-gap",
+        lines: &["cellgov dev oracle-gap"],
+    },
 ];
 
 /// The block `path`'s help leads with, or `None` when it declares none.

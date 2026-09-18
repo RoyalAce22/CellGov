@@ -174,6 +174,7 @@ pub(crate) fn converged(bytes: u64) -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     }
 }
 
@@ -197,6 +198,7 @@ pub(crate) fn converged_pending(non_semantic: u64, unclassified: u64) -> CrossRu
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     }
 }
 
@@ -216,6 +218,7 @@ pub(crate) fn diverged() -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
+        oracle_gap_ordinals: None,
     }
 }
 

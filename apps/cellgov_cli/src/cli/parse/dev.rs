@@ -49,6 +49,8 @@ pub(crate) enum DevCommand {
     GenManifest(GenManifestArgs),
     /// Re-measure titles and rewrite their committed anchors.
     RecordAnchors(RecordAnchorsArgs),
+    /// Build the local oracle-gap overlay from the operator checkout.
+    OracleGap,
 }
 
 #[derive(Debug, clap::Args)]

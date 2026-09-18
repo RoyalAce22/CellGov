@@ -20,6 +20,7 @@ mod lv2_census;
 mod lv2_discover;
 #[cfg(feature = "decrypt")]
 mod lv2_extract;
+mod oracle_gap;
 mod paths;
 mod progress;
 mod stub_class;
@@ -164,6 +165,7 @@ fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>, globals: &Globals) {
         DevCommand::Completions(args) => cli::cli_gen::completions(args),
         DevCommand::GenManifest(args) => cli::gen_manifest::run(args, vfs_flag),
         DevCommand::RecordAnchors(args) => cli::record_anchors::run(args, globals.render()),
+        DevCommand::OracleGap => oracle_gap::run(vfs_flag),
     }
 }
 

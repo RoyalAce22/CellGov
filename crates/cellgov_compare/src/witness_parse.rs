@@ -345,7 +345,7 @@ pub fn parse_witness_lines(stderr: &str) -> Result<ParsedWitnesses, Vec<WitnessP
             let Some((_, witness)) = fields.iter().find(|(k, _)| *k == key) else {
                 if prefix == "BENCH_UNSUPPORTED_SYSCALL_WITNESS:" {
                     let Some((hits, first_hit)) = raw.split_once('@') else {
-                        if raw.parse::<u64>().is_ok() {
+                        if key.parse::<u64>().is_ok() && raw.parse::<u64>().is_ok() {
                             continue;
                         }
                         errors.push(WitnessParseError {
