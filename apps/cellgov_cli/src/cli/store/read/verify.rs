@@ -7,6 +7,7 @@
 use std::path::Path;
 
 use cellgov_install::firmware_verify::{ModuleDivergence, ModuleFault};
+use cellgov_install::keys::KeyVault;
 use cellgov_install::store::{
     verify_record_tree, Artifact, Divergence, DivergenceKind, InstallRecord, StoreLayout, TitleId,
     VersionKey,
@@ -15,6 +16,7 @@ use cellgov_install::store::{
 use crate::cli::exit::die;
 use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
+use crate::composition::inventory::FirmwareEntry;
 use cellgov_boot::manifest::BASE_GAME_VER;
 
 use super::collect::StoreView;
@@ -32,8 +34,27 @@ pub(crate) fn firmware_verify(root: &Path, version: &str, format: OutputFormat) 
     });
     let keys =
         cellgov_install::keys::KeyVault::load_for_vfs(root).unwrap_or_else(|e| die(&e.to_string()));
+    let entry = firmware_entry_doc(&view, entry, &keys);
+
+    let doc = VerifyDoc {
+        format_version: view.format_version(),
+        store: view.store_label(),
+        subject: version.to_string(),
+        clean: entry.divergences.is_empty(),
+        entries: vec![entry],
+    };
+    finish(&doc, format, &format!("firmware {version}"));
+}
+
+/// Verify one installed firmware entry with the existing module and stored-kernel rules.
+pub(super) fn firmware_entry_doc(
+    view: &StoreView,
+    entry: &FirmwareEntry,
+    keys: &KeyVault,
+) -> VerifiedEntryDoc {
+    let version = &entry.version;
     let mut report =
-        cellgov_install::firmware_verify::verify_firmware_tree(&entry.dev_flash_dir(), &keys)
+        cellgov_install::firmware_verify::verify_firmware_tree(&entry.dev_flash_dir(), keys)
             .unwrap_or_else(|e| die(&format!("firmware verify {version}: {e}")));
 
     // The kernel is one more recorded artefact: hashed as stored, so it
@@ -61,23 +82,23 @@ pub(crate) fn firmware_verify(root: &Path, version: &str, format: OutputFormat) 
         None => Some(KERNEL_NOT_RECORDED.to_string()),
     };
 
-    let doc = VerifyDoc {
-        format_version: view.format_version(),
-        store: view.store_label(),
-        subject: version.to_string(),
-        clean: report.is_clean(),
-        entries: vec![VerifiedEntryDoc {
-            entry: version.to_string(),
-            matched: report.matched,
-            divergences: report
-                .divergences
-                .iter()
-                .map(|f| module_fault_doc(&view, f))
-                .collect(),
-            kernel_omission,
-        }],
+    let doc = VerifiedEntryDoc {
+        entry: version.to_string(),
+        matched: report.matched,
+        divergences: report
+            .divergences
+            .iter()
+            .map(|f| module_fault_doc(view, f))
+            .collect(),
+        kernel_omission,
     };
-    finish(&doc, format, &format!("firmware {version}"));
+    if doc.matched + doc.divergences.len() == 0 {
+        die(&format!(
+            "firmware {version}: the install record names no file, so the pass examined nothing; \
+             reinstall the entry to write a record that covers its tree"
+        ));
+    }
+    doc
 }
 
 /// `cellgov title verify <TITLE_ID> [--ver V]`
@@ -266,26 +287,7 @@ fn finish(doc: &VerifyDoc, format: OutputFormat, subject: &str) -> ! {
 fn render(doc: &VerifyDoc, subject: &str) -> String {
     let mut out = String::new();
     for entry in &doc.entries {
-        // An omission is no divergence: the pass found nothing wrong.
-        // The line keeps the clean summary below from claiming a
-        // kernel the pass did not check.
-        if let Some(why) = &entry.kernel_omission {
-            out.push_str(&format!("{}: kernel not checked: {why}\n", entry.entry));
-        }
-        for divergence in &entry.divergences {
-            out.push_str(
-                &match (&divergence.expected, &divergence.found, &divergence.reason) {
-                    (Some(expected), Some(found), _) => format!(
-                        "{}: modified (recorded {expected}, found {found})\n",
-                        divergence.path
-                    ),
-                    (_, _, Some(reason)) => {
-                        format!("{}: no module image ({reason})\n", divergence.path)
-                    }
-                    _ => format!("{}: missing\n", divergence.path),
-                },
-            );
-        }
+        out.push_str(&render_entry(entry));
     }
     let checked = doc.matched() + doc.diverged();
     out.push_str(&if doc.clean {
@@ -296,6 +298,32 @@ fn render(doc: &VerifyDoc, subject: &str) -> String {
             doc.diverged()
         )
     });
+    out
+}
+
+/// Render one installed entry with the shared verification vocabulary.
+pub(super) fn render_entry(entry: &VerifiedEntryDoc) -> String {
+    let mut out = String::new();
+    // An omission is no divergence: the pass found nothing wrong.
+    // The line keeps a clean summary from claiming a kernel the pass
+    // did not check.
+    if let Some(why) = &entry.kernel_omission {
+        out.push_str(&format!("{}: kernel not checked: {why}\n", entry.entry));
+    }
+    for divergence in &entry.divergences {
+        out.push_str(
+            &match (&divergence.expected, &divergence.found, &divergence.reason) {
+                (Some(expected), Some(found), _) => format!(
+                    "{}: modified (recorded {expected}, found {found})\n",
+                    divergence.path
+                ),
+                (_, _, Some(reason)) => {
+                    format!("{}: no module image ({reason})\n", divergence.path)
+                }
+                _ => format!("{}: missing\n", divergence.path),
+            },
+        );
+    }
     out
 }
 

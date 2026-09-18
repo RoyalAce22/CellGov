@@ -57,6 +57,10 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         ],
     },
     Examples {
+        path: "firmware verify-corpus",
+        lines: &["cellgov firmware verify-corpus dumps/firmware"],
+    },
+    Examples {
         path: "firmware kernels",
         lines: &[
             "cellgov firmware kernels",

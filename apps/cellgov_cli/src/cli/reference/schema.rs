@@ -10,12 +10,20 @@ use cellgov_install::store::{Artifact, StoreLayout, TitleId, TitleTree, VersionK
 
 use crate::cli::store::read::model::{
     store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, DivergenceDoc, FirmwareDoc,
-    FirmwareListDoc, KernelCoverageDoc, KernelCoverageEntryDoc, KernelDoc, StatusDoc, TitleDoc,
-    TitleListDoc, UpdateDoc, VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
+    FirmwareListDoc, KernelCoverageDoc, KernelCoverageEntryDoc, KernelDoc, PupCorpusEntryDoc,
+    PupCorpusMismatchDoc, PupCorpusVerifyDoc, StatusDoc, TitleDoc, TitleListDoc, UpdateDoc,
+    VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
 };
 
 /// A SHA-256 as a document spells one: 64 lowercase hex digits.
 const SAMPLE_SHA: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+/// Distinct SHA-256 values for one sample document whose rows must not
+/// describe the same PUP.
+const SAMPLE_SHA_1: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+const SAMPLE_SHA_2: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+const SAMPLE_SHA_3: &str = "3333333333333333333333333333333333333333333333333333333333333333";
+const SAMPLE_SHA_4: &str = "4444444444444444444444444444444444444444444444444444444444444444";
 
 /// The store root of every sample path.
 const SAMPLE_ROOT: &str = "vfs";
@@ -58,6 +66,7 @@ pub(crate) fn render() -> String {
     );
     push(&mut s, "`title list`, `title show`", &title_list_doc());
     push(&mut s, "`firmware verify`, `title verify`", &verify_doc());
+    push(&mut s, "`firmware verify-corpus`", &pup_corpus_verify_doc());
     push(&mut s, "`firmware kernels`", &kernel_coverage_doc());
     s
 }
@@ -230,6 +239,52 @@ fn verify_doc() -> VerifyDoc {
                 found: Some(SAMPLE_SHA.to_string()),
                 reason: None,
             }],
+            kernel_omission: None,
+        }],
+        clean: false,
+    }
+}
+
+fn pup_corpus_verify_doc() -> PupCorpusVerifyDoc {
+    PupCorpusVerifyDoc {
+        format_version: STORE_FORMAT_VERSION,
+        corpus: "dumps/firmware".to_string(),
+        present: vec![PupCorpusEntryDoc {
+            fw: SAMPLE_FIRMWARE_VERSION.to_string(),
+            pup_sha256: SAMPLE_SHA.to_string(),
+            size_bytes: 206_197_916,
+            image_version: "0x0000000000010b94".to_string(),
+            path: Some("PS3UPDAT-4.93.PUP".to_string()),
+        }],
+        missing: vec![PupCorpusEntryDoc {
+            fw: "1.94".to_string(),
+            pup_sha256: SAMPLE_SHA_1.to_string(),
+            size_bytes: 125_289_664,
+            image_version: "0x0000000000001d56".to_string(),
+            path: None,
+        }],
+        mismatched: vec![
+            PupCorpusMismatchDoc {
+                subject: "PS3UPDAT-4.92.PUP".to_string(),
+                kind: "sha256".to_string(),
+                fw: Some("4.92".to_string()),
+                expected: vec![SAMPLE_SHA_2.to_string()],
+                found: Some(SAMPLE_SHA_3.to_string()),
+                reason: None,
+            },
+            PupCorpusMismatchDoc {
+                subject: "damaged.PUP".to_string(),
+                kind: "invalid-pup".to_string(),
+                fw: None,
+                expected: Vec::new(),
+                found: Some(SAMPLE_SHA_4.to_string()),
+                reason: Some("PUP header is truncated".to_string()),
+            },
+        ],
+        installed: vec![VerifiedEntryDoc {
+            entry: SAMPLE_FIRMWARE_VERSION.to_string(),
+            matched: 370,
+            divergences: Vec::new(),
             kernel_omission: None,
         }],
         clean: false,

@@ -41,6 +41,13 @@ pub(crate) enum FirmwareCommand {
         #[arg(id = "fw_version", value_name = "VERSION")]
         version: String,
     },
+    /// Verify a directory of PUP files against the LV2 archive.
+    #[command(after_help = CORPUS_VERIFY_EXIT_CODES)]
+    VerifyCorpus {
+        /// Directory that holds the PUP corpus.
+        #[arg(value_name = "DIR")]
+        corpus: PathBuf,
+    },
     /// Decrypt every stored LV2 kernel and report which the vault
     /// opens, which it lacks a key for, and which are not unpacked.
     #[command(after_help = KERNELS_EXIT_CODES)]
@@ -53,6 +60,10 @@ pub(crate) enum FirmwareCommand {
 /// A missing key is the normal state of a version and earns no status.
 const KERNELS_EXIT_CODES: &str = "Exit codes particular to this command:
   41  a stored kernel yielded no ELF for a reason other than a missing key";
+
+const CORPUS_VERIFY_EXIT_CODES: &str = "Exit codes:
+  0   every archive PUP and every installed tree whose PUP hash names an archive row matched
+  4   a PUP was missing or mismatched, or one of those installed trees diverged";
 
 #[cfg(feature = "decrypt")]
 const FIRMWARE_INSTALL_EXIT_CODES: &str = "Exit codes particular to this command:

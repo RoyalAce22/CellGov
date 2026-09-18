@@ -53,6 +53,9 @@ fn dispatch(command: &Command, globals: &Globals) {
         Command::Firmware(FirmwareCommand::Verify { version }) => {
             read::firmware_verify(&read::store_root(vfs_flag), version, globals.format);
         }
+        Command::Firmware(FirmwareCommand::VerifyCorpus { corpus }) => {
+            read::firmware_verify_corpus(&read::store_root(vfs_flag), corpus, globals.format);
+        }
         Command::Firmware(FirmwareCommand::Kernels) => {
             read::firmware_kernels(&read::store_root(vfs_flag), globals.format);
         }

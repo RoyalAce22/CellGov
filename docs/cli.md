@@ -297,6 +297,58 @@ comparison records rather than a published API: they carry no
 }
 ```
 
+`firmware verify-corpus`:
+
+```json
+{
+  "format_version": 2,
+  "corpus": "dumps/firmware",
+  "present": [
+    {
+      "fw": "4.93",
+      "pup_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "size_bytes": 206197916,
+      "image_version": "0x0000000000010b94",
+      "path": "PS3UPDAT-4.93.PUP"
+    }
+  ],
+  "missing": [
+    {
+      "fw": "1.94",
+      "pup_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "size_bytes": 125289664,
+      "image_version": "0x0000000000001d56"
+    }
+  ],
+  "mismatched": [
+    {
+      "subject": "PS3UPDAT-4.92.PUP",
+      "kind": "sha256",
+      "fw": "4.92",
+      "expected": [
+        "2222222222222222222222222222222222222222222222222222222222222222"
+      ],
+      "found": "3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "subject": "damaged.PUP",
+      "kind": "invalid-pup",
+      "expected": [],
+      "found": "4444444444444444444444444444444444444444444444444444444444444444",
+      "reason": "PUP header is truncated"
+    }
+  ],
+  "installed": [
+    {
+      "entry": "4.93",
+      "matched": 370,
+      "divergences": []
+    }
+  ],
+  "clean": false
+}
+```
+
 `firmware kernels`:
 
 ```json
@@ -430,6 +482,28 @@ Usage: cellgov firmware verify [OPTIONS] <VERSION>
 Exit codes:
   0   every recorded artefact matched
   4   the tree diverged from what its record holds
+```
+
+#### `cellgov firmware verify-corpus`
+
+Verify a directory of PUP files against the LV2 archive.
+
+```console
+$ cellgov firmware verify-corpus dumps/firmware
+```
+
+```
+Usage: cellgov firmware verify-corpus [OPTIONS] <DIR>
+```
+
+| Argument | Description |
+| --- | --- |
+| `DIR` | Directory that holds the PUP corpus. Required. |
+
+```
+Exit codes:
+  0   every archive PUP and every installed tree whose PUP hash names an archive row matched
+  4   a PUP was missing or mismatched, or one of those installed trees diverged
 ```
 
 #### `cellgov firmware kernels`

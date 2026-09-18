@@ -49,6 +49,7 @@ fn every_store_document_names_the_commands_that_emit_it() {
         "`firmware list`",
         "`firmware show`",
         "`firmware verify`",
+        "`firmware verify-corpus`",
         "`firmware kernels`",
         "`title list`",
         "`title show`",
@@ -66,12 +67,76 @@ fn an_absent_optional_field_is_left_out_of_the_sample() {
         "no optional field the sample does set was serialized, so the absence \
          checks below prove nothing"
     );
-    for absent in ["manifest_error", "\"reason\"", "omission"] {
+    for absent in ["manifest_error", "omission"] {
         assert!(
             !rendered.contains(absent),
             "{absent} is a `skip_serializing_if` field and the sample does not set it"
         );
     }
+}
+
+#[test]
+fn the_pup_corpus_sample_uses_reason_only_for_an_invalid_pup() {
+    let rendered = schema::render();
+    let block = rendered
+        .split("`firmware verify-corpus`:\n\n```json\n")
+        .nth(1)
+        .and_then(|rest| rest.split_once("\n```"))
+        .expect("the firmware verify-corpus sample is fenced JSON")
+        .0;
+    let doc: serde_json::Value = serde_json::from_str(block).expect("the sample is JSON");
+    let mismatched = doc["mismatched"]
+        .as_array()
+        .expect("mismatched is an array");
+    let invalid = mismatched
+        .iter()
+        .find(|row| row["kind"] == "invalid-pup")
+        .expect("the sample includes an invalid PUP");
+    assert!(invalid["reason"]
+        .as_str()
+        .is_some_and(|reason| !reason.is_empty()));
+    let sha256 = mismatched
+        .iter()
+        .find(|row| row["kind"] == "sha256")
+        .expect("the sample includes a SHA-256 mismatch");
+    assert!(
+        sha256.get("reason").is_none(),
+        "a SHA-256 mismatch has no parse-failure reason"
+    );
+}
+
+#[test]
+fn the_pup_corpus_sample_does_not_reuse_one_hash_for_distinct_states() {
+    let rendered = schema::render();
+    let block = rendered
+        .split("`firmware verify-corpus`:\n\n```json\n")
+        .nth(1)
+        .and_then(|rest| rest.split_once("\n```"))
+        .expect("the firmware verify-corpus sample is fenced JSON")
+        .0;
+    let doc: serde_json::Value = serde_json::from_str(block).expect("the sample is JSON");
+
+    let present = doc["present"][0]["pup_sha256"]
+        .as_str()
+        .expect("the present row names its hash");
+    let missing = doc["missing"][0]["pup_sha256"]
+        .as_str()
+        .expect("the missing row names its hash");
+    let expected = doc["mismatched"][0]["expected"][0]
+        .as_str()
+        .expect("the mismatch names an expected hash");
+    let found = doc["mismatched"][0]["found"]
+        .as_str()
+        .expect("the mismatch names the found hash");
+
+    assert_eq!(
+        [present, missing, expected, found]
+            .into_iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        4,
+        "present, missing, and mismatched PUPs must describe distinct hashes"
+    );
 }
 
 #[test]

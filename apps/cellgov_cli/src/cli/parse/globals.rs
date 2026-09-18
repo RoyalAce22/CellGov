@@ -47,6 +47,7 @@ fn names_its_own_store_root(command: &Command) -> bool {
             FirmwareCommand::List
             | FirmwareCommand::Show { .. }
             | FirmwareCommand::Verify { .. }
+            | FirmwareCommand::VerifyCorpus { .. }
             | FirmwareCommand::Kernels
             | FirmwareCommand::Uninstall(_),
         ) => false,
@@ -79,8 +80,8 @@ const VFS_ROOT_READERS: &str =
      gen-manifest";
 
 /// The commands [`reads_format`] answers for, as help text.
-const FORMAT_READERS: &str = "status, the firmware and title list / show / verify commands, \
-     firmware kernels, diff compare, diff observations, and explore";
+const FORMAT_READERS: &str = "status, firmware list / show / verify / verify-corpus / kernels, \
+     title list / show / verify, diff compare, diff observations, and explore";
 
 /// The commands [`reads_quiet`] answers for, as help text.
 const QUIET_READERS: &str = "status, firmware install, title install, title install-update, \
@@ -159,6 +160,7 @@ pub(super) fn reads_format(command: &Command) -> bool {
             FirmwareCommand::List
                 | FirmwareCommand::Show { .. }
                 | FirmwareCommand::Verify { .. }
+                | FirmwareCommand::VerifyCorpus { .. }
                 | FirmwareCommand::Kernels
         ),
         Command::Title(title) => matches!(

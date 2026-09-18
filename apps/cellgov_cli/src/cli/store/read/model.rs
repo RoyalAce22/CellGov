@@ -364,6 +364,61 @@ impl VerifyDoc {
     }
 }
 
+/// One archive PUP row found in or missing from the corpus.
+#[derive(Debug, Serialize)]
+pub(crate) struct PupCorpusEntryDoc {
+    /// Firmware version the row names.
+    pub fw: String,
+    /// Expected SHA-256 over the PUP file bytes.
+    pub pup_sha256: String,
+    /// Expected PUP file length.
+    pub size_bytes: u64,
+    /// Expected PUP-header image version.
+    pub image_version: String,
+    /// Corpus-relative file path, for a present row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// One PUP-corpus or installed-identity mismatch.
+#[derive(Debug, Serialize)]
+pub(crate) struct PupCorpusMismatchDoc {
+    /// File or installed entry that disagreed.
+    pub subject: String,
+    /// Which comparison disagreed.
+    pub kind: String,
+    /// Firmware version read from the file or installed entry.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fw: Option<String>,
+    /// Accepted values from the archive.
+    pub expected: Vec<String>,
+    /// Value the verifier found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub found: Option<String>,
+    /// Why the file could not identify itself as a PUP.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// `firmware verify-corpus`.
+#[derive(Debug, Serialize)]
+pub(crate) struct PupCorpusVerifyDoc {
+    /// See [`STORE_FORMAT_VERSION`].
+    pub format_version: u32,
+    /// Corpus directory the command read.
+    pub corpus: String,
+    /// Archive rows whose file and metadata matched.
+    pub present: Vec<PupCorpusEntryDoc>,
+    /// Archive rows with no matching file.
+    pub missing: Vec<PupCorpusEntryDoc>,
+    /// Corpus files or installed identities that disagreed with the archive.
+    pub mismatched: Vec<PupCorpusMismatchDoc>,
+    /// Installed entries checked with the existing firmware verifier.
+    pub installed: Vec<VerifiedEntryDoc>,
+    /// Whether every corpus and installed check matched.
+    pub clean: bool,
+}
+
 /// One installed firmware version's row of `firmware kernels`.
 #[derive(Debug, Serialize)]
 pub(crate) struct KernelCoverageEntryDoc {
