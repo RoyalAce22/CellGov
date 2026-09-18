@@ -264,7 +264,7 @@ impl Runtime {
         ];
 
         use cellgov_ps3_abi::lv2::syscall::{TIMER_SLEEP, TIMER_USLEEP};
-        let is_timer_fast_path = lev == 0 && (num == TIMER_USLEEP || num == TIMER_SLEEP);
+        let is_timer_fast_path = lev == 0 && cellgov_lv2::request::RUNTIME_FAST_PATH.contains(&num);
 
         // Classify upfront so the entry record can carry the
         // disposition byte. Timer fast-path skips classify (the

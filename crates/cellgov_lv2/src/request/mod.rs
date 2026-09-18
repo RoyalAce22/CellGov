@@ -23,5 +23,5 @@ mod classify;
 pub mod fidelity;
 mod types;
 
-pub use classify::{classify, classify_with_lev};
+pub use classify::{classify, classify_with_lev, RUNTIME_FAST_PATH};
 pub use types::{Lv2Request, Lv2RequestKind};

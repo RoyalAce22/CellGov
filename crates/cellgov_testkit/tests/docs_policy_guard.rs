@@ -23,7 +23,9 @@ const UNTRACKED_TREES: &[&str] = &["docs/dev/", ".claude/", "scripts/", "CLAUDE.
 
 /// Extensions the dangling-pointer scan reads. JSON is generated data
 /// in this tree, so the scan skips it.
-const TEXT_EXTENSIONS: &[&str] = &["rs", "md", "toml", "txt", "yml", "yaml", "template"];
+const TEXT_EXTENSIONS: &[&str] = &[
+    "rs", "md", "toml", "txt", "yml", "yaml", "template", "tsv", "sql",
+];
 
 /// Floors on the populations each check polices. A collapse below one
 /// means the scanner walked or parsed nothing, and would otherwise
@@ -669,9 +671,7 @@ fn no_tracked_text_cites_a_path_git_does_not_track() {
     );
     let mut violations = Vec::new();
     for file in &files {
-        let Ok(text) = fs::read_to_string(file) else {
-            continue;
-        };
+        let text = read(file);
         for (n, line) in text.lines().enumerate() {
             if let Some(tree) = cites_untracked_tree(line) {
                 let shown = file.strip_prefix(&root).unwrap_or(file);

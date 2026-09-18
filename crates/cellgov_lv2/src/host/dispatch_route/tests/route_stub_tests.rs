@@ -26,16 +26,20 @@ fn unsupported_dispatch_returns_cell_enosys() {
 #[test]
 fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
     use crate::request::fidelity::ROUTED_UNSUPPORTED_ARMS;
+    use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 
-    // LV2's syscall table has 1024 slots; the probe covers them all,
-    // so a routed number outside the range would escape it.
-    for (n, name, _) in ROUTED_UNSUPPORTED_ARMS {
-        assert!(*n < 1024, "{name} ({n}) outside the probed slot range");
+    // The probe covers every table slot, so a routed number outside
+    // the range would escape it.
+    for (n, name, _, _) in ROUTED_UNSUPPORTED_ARMS {
+        assert!(
+            *n < SYSCALL_TABLE_SLOTS,
+            "{name} ({n}) outside the probed slot range"
+        );
     }
 
     let rt = FakeRuntime::new(0x10000);
     let mut handled = Vec::new();
-    for number in 0..1024u64 {
+    for number in 0..SYSCALL_TABLE_SLOTS {
         // Fresh host per number: arms mutate state, and the stub-site
         // counter must attribute to exactly one dispatch.
         let mut host = Lv2Host::new();
@@ -52,7 +56,7 @@ fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
         }
     }
     let tagged: Vec<u64> = {
-        let mut v: Vec<u64> = ROUTED_UNSUPPORTED_ARMS.iter().map(|(n, _, _)| *n).collect();
+        let mut v: Vec<u64> = ROUTED_UNSUPPORTED_ARMS.iter().map(|(n, ..)| *n).collect();
         v.sort_unstable();
         v
     };
@@ -60,7 +64,7 @@ fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
         handled, tagged,
         "dispatch's routed-Unsupported set diverged from \
          ROUTED_UNSUPPORTED_ARMS; update the fidelity table (and \
-         regenerate docs/lv2_fidelity.md) to match dispatch.rs"
+         regenerate docs/lv2/) to match dispatch.rs"
     );
 }
 

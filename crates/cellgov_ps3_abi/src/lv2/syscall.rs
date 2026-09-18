@@ -379,6 +379,10 @@ lv2_syscalls! {
     SS_ACCESS_CONTROL_ENGINE = 871;
 }
 
+/// Slots in the LV2 syscall dispatch table. `sc` selects one by the
+/// value in r11. A number at or past this count selects none.
+pub const SYSCALL_TABLE_SLOTS: u64 = 1024;
+
 /// CellGov-private pseudo-syscall: fired by the unresolved-import
 /// trampoline when the guest calls through a GOT slot whose NID
 /// has no firmware export. The trampoline loads the NID into r4

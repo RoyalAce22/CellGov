@@ -52,8 +52,8 @@ Related, outside this directory: [concepts/](../concepts/README.md) for
 the shared vocabulary, [titles.md](../titles.md) for the
 compatibility matrix, [firmware.md](../firmware.md) for the system
 software measured firmware by firmware, and the generated
-[lv2_fidelity.md](../lv2_fidelity.md) for the drift-gated
-per-arm fidelity map.
+[LV2 archive](../lv2/README.md) for the drift-gated per-slot
+routing and per-arm fidelity tables.
 
 For per-crate detail and module layout, run
 `cargo doc --no-deps --open` and read the crate-level doc comments.

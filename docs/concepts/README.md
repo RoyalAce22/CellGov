@@ -129,9 +129,10 @@ standards:
 - **Per-arm fidelity** -- how much real LV2 behavior each
   modeled arm reproduces. A per-arm property, checkable arm by
   arm: the map is code (`cellgov_lv2::request::fidelity`)
-  rendered to [lv2_fidelity.md](../lv2_fidelity.md), and arms
-  tagged `abi-only` return plausible values without backing
-  state -- the first suspects in any divergence investigation.
+  rendered to `arm.tsv` in the [LV2 archive](../lv2/README.md),
+  and arms tagged `abi-only` return plausible values without
+  backing state -- the first suspects in any divergence
+  investigation.
 
 A divergence from RPCS3 is therefore an implementation
 target the oracle named, not a failure of the oracle. The

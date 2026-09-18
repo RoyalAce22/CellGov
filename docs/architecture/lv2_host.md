@@ -117,10 +117,10 @@ from the typed table is not a coverage gap.
 
 Not every classified arm has a row above. This table is
 hand-maintained narrative for the arms worth prose; the generated
-[lv2_fidelity.md](../lv2_fidelity.md), rendered from
-`cellgov_lv2::request::fidelity` with a dispatch probe that fails
-CI when the two disagree, is the complete drift-gated enumeration
-for coverage questions. Typed arms omitted here as self-describing
+[LV2 archive](../lv2/README.md) (`route.tsv` and `arm.tsv`),
+rendered from `cellgov_lv2::request::fidelity` with a dispatch
+probe that fails CI when the two disagree, is the complete
+drift-gated enumeration for coverage questions. Typed arms omitted here as self-describing
 id-mint or constant-return stubs: `sys_process_getpid` (1),
 `sys_process_get_number_of_object` (12), `sys_process_getppid`
 (18), `sys_process_get_sdk_version` (25),
@@ -359,8 +359,8 @@ state, or plausible values with no backing state. That per-arm map
 is code in `cellgov_lv2::request::fidelity` (the typed half is an
 exhaustive match a new arm cannot skip; the routed-`Unsupported`
 half is a const table whose membership a dispatch probe gates),
-rendered to [lv2_fidelity.md](../lv2_fidelity.md) under a
-drift-checked test.
+rendered to `arm.tsv` in the [LV2 archive](../lv2/README.md) under
+a drift-checked test.
 
 The traced records feed cross-runner analysis: an unmodeled-syscall
 diagnostic on a title's boot path names a specific gap, either a

@@ -17,6 +17,12 @@ behaviour: step count, outcome, and witness set in
 `dev record-anchors` is its only writer.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
 
+**Archive** (LV2 archive). The text tables under `docs/lv2/`
+describing the LV2 syscall surface and CellGov's handling of it,
+each owned by one owner class. SQLite is built from them on demand
+and never committed.
+[lv2/README.md](../lv2/README.md)
+
 **Atomic batch.** The effects one unit emits in one step, validated
 and committed together. A fault or a validation rejection discards
 the whole batch; the rest of the system sees nothing the unit tried
@@ -50,6 +56,12 @@ pending`, or `--` when convergence is `No`.
 `(content_id, fw, game_ver)`. Every result is keyed by a cell, and a
 title's manifest declares which cells exist.
 [title_harness.md](../architecture/title_harness.md#title-anchors-and-witnesses)
+
+**Census.** The archive's extracted tables: for each ordinal on each
+retail firmware version read, whether the ordinal exists, whether it
+is implemented or a stub, and what gates it. Keyed by the firmware's
+PUP hash, the same measurement the install record carries.
+[lv2/README.md](../lv2/README.md)
 
 **Checkpoint.** The deterministic event at which an observation
 stops. Kinds: `ProcessExit` (the guest called `sys_process_exit`),
@@ -233,6 +245,16 @@ from any other config.
 field convergence compares.
 [README.md](README.md#two-independent-verdicts-convergence-and-byte-parity)
 
+**Overlay** (local overlay). Data specific to one operator or
+checkout -- key-vault coverage, anything derived from another runner
+-- kept under `vfs/.cellgov/` and never in a tracked file.
+[lv2/README.md](../lv2/README.md)
+
+**Owner class.** Who writes an archive table and under what
+discipline: extracted, generated, curated or attributed. Every table
+names exactly one.
+[lv2/README.md](../lv2/README.md)
+
 **Pending byte.** A divergent byte no `DivergenceClass` covers yet.
 Visible in `compare_report.txt` and `cross_runner_summary.json`
 (`unclassified_runs`); investigation backlog, not regression.
@@ -240,9 +262,9 @@ Visible in `compare_report.txt` and `cross_runner_summary.json`
 
 **Per-arm fidelity.** How much real LV2 behaviour each modeled
 syscall arm reproduces, tagged per arm in
-`cellgov_lv2::request::fidelity` and rendered to
-[lv2_fidelity.md](../lv2_fidelity.md). Separate from the routing
-claim the null backend makes.
+`cellgov_lv2::request::fidelity` and rendered to `arm.tsv` in the
+[LV2 archive](../lv2/README.md). Separate from the routing claim
+the null backend makes.
 [README.md](README.md#the-null-backend-honest-vs-contaminating-divergence)
 
 **Predecoded shadow.** The PPU's per-instruction decode cache over

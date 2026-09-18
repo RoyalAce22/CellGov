@@ -27,6 +27,15 @@ const I32_RANGE_REASONS: [&str; 8] = [
     "arg 7: not representable as i32",
 ];
 
+/// Syscall numbers the runtime answers on its timer path.
+///
+/// A number here never reaches [`classify`] from a real `sc`.
+/// `cellgov_core` parks the caller until guest time reaches the
+/// requested interval, then returns `CELL_OK` itself. The archive's
+/// route table reads these as `runtime_fast_path` before it consults
+/// the classifier.
+pub const RUNTIME_FAST_PATH: &[u64] = &[syscall::TIMER_USLEEP, syscall::TIMER_SLEEP];
+
 /// LEV=0 wrapper around [`classify_with_lev`] for synthetic / fake-ISA
 /// test paths. Real PPU `sc` decode goes through `classify_with_lev`.
 #[inline]

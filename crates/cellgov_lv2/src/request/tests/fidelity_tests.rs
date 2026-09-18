@@ -20,9 +20,38 @@ fn routing_variants_and_only_routing_variants_are_untagged() {
 #[test]
 fn routed_unsupported_numbers_are_unique() {
     let mut seen = std::collections::BTreeSet::new();
-    for (n, name, _) in ROUTED_UNSUPPORTED_ARMS {
+    for (n, name, _, _) in ROUTED_UNSUPPORTED_ARMS {
         assert!(seen.insert(*n), "syscall {n} ({name}) listed twice");
     }
+}
+
+#[test]
+fn routed_arm_identifiers_are_unique_and_name_no_typed_variant() {
+    let variants: Vec<&str> = Lv2RequestKind::VARIANTS
+        .iter()
+        .map(|k| <&'static str>::from(*k))
+        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    for (n, _, arm, _) in ROUTED_UNSUPPORTED_ARMS {
+        assert!(seen.insert(*arm), "arm {arm} ({n}) listed twice");
+        assert!(
+            !variants.contains(arm),
+            "arm {arm} ({n}) collides with a typed variant"
+        );
+        assert!(
+            arm.bytes().all(|b| b.is_ascii_alphanumeric()),
+            "arm {arm} ({n}) is not a bare identifier"
+        );
+    }
+}
+
+#[test]
+fn every_tag_is_listed_once_with_a_distinct_label() {
+    let labels: Vec<&str> = ArmFidelity::ALL.iter().map(|f| f.label()).collect();
+    assert_eq!(
+        labels,
+        ["modeled", "partial-state", "abi-only", "null-backend"]
+    );
 }
 
 #[test]

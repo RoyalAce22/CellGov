@@ -67,3 +67,9 @@ scripts/
 # binary captures + ad-hoc parse helpers. Regenerable via the
 # env-gated diagnostics; never vendored.
 scratch/
+
+# A database docs/lv2/build.sql writes in place; the archive is the text.
+docs/lv2/*.db
+docs/lv2/*.db-journal
+docs/lv2/*.db-wal
+docs/lv2/*.db-shm
