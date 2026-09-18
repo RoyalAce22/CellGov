@@ -1,5 +1,6 @@
 use super::*;
 use crate::archive::handling::Route;
+use crate::archive::name::{Disagreement, NameSource};
 use crate::request::fidelity::ArmFidelity;
 
 #[test]
@@ -50,6 +51,20 @@ fn the_enum_labels_are_the_code_labels_in_order() {
     assert_eq!(routes, ROUTE_LABELS);
     let fidelities: Vec<&str> = ArmFidelity::ALL.iter().map(|f| f.label()).collect();
     assert_eq!(fidelities, FIDELITY_LABELS);
+    let sources: Vec<&str> = NameSource::ALL.iter().map(|s| s.label()).collect();
+    assert_eq!(sources, NAME_SOURCES);
+    let disagreements: Vec<&str> = Disagreement::ALL.iter().map(|d| d.label()).collect();
+    assert_eq!(disagreements, DISAGREEMENTS);
+}
+
+#[test]
+fn only_the_name_tables_have_a_nullable_key() {
+    let nullable: Vec<&str> = TABLES
+        .iter()
+        .filter(|t| t.key_is_nullable())
+        .map(|t| t.name)
+        .collect();
+    assert_eq!(nullable, ["name", "conflicts"]);
 }
 
 #[test]

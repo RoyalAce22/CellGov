@@ -55,7 +55,11 @@ Every ordinal that reaches an arm has a row in the
 [LV2 archive](../lv2/README.md): `route.tsv` names the arm, `arm.tsv`
 its fidelity, and the curated `behavior.tsv` what the modelled
 behaviour rests on and which test pins it. What each arm does is its
-rustdoc under `crates/cellgov_lv2/src/host/`.
+rustdoc under `crates/cellgov_lv2/src/host/`. The ordinal is the
+extracted fact; its name is attributed, and the archive's `name.tsv`
+records the name CellGov's `lv2_syscalls!` macro gives it beside what
+the other committed sources say, with every disagreement kept in
+`conflicts.tsv`.
 
 Three requests carry no ordinal. `Hypercall` (an `sc` with LEV != 0,
 which PS3 usermode never issues) and `Malformed` (a request whose

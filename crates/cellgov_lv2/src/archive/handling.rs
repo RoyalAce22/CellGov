@@ -138,7 +138,7 @@ pub fn route_rows() -> Vec<RouteRow> {
             match classify(ordinal, &[0u64; 8]) {
                 Lv2Request::Unsupported { .. } => {
                     match ROUTED_UNSUPPORTED_ARMS.iter().find(|(n, ..)| *n == ordinal) {
-                        Some((_, _, arm, _)) => RouteRow {
+                        Some((_, arm, _)) => RouteRow {
                             ordinal,
                             route: Route::Routed,
                             arm: Some(arm),
@@ -193,7 +193,7 @@ pub fn arm_rows(routes: &[RouteRow]) -> Vec<ArmRow> {
     rows.extend(
         ROUTED_UNSUPPORTED_ARMS
             .iter()
-            .map(|(_, _, arm, fidelity)| ArmRow {
+            .map(|(_, arm, fidelity)| ArmRow {
                 arm,
                 fidelity: *fidelity,
                 ordinals: served(arm),

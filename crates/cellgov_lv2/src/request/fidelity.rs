@@ -63,11 +63,13 @@ impl ArmFidelity {
 }
 
 /// Syscalls routed inside [`super::Lv2Request::Unsupported`] to a
-/// dedicated arm: `(number, LV2 name, arm, fidelity)`. Numbers absent
-/// from this table dispatch to the null backend.
+/// dedicated arm: `(number, arm, fidelity)`. Numbers absent from this
+/// table dispatch to the null backend.
 ///
 /// The arm identifier keys the row in `arm.tsv`. It has the form of an
-/// [`Lv2RequestKind`] variant name and equals none of them.
+/// [`Lv2RequestKind`] variant name and equals none of them. The LV2
+/// name lives on the number's `lv2_syscalls!` entry in
+/// [`cellgov_ps3_abi::lv2::syscall`].
 ///
 /// # Cross-module contract
 ///
@@ -75,159 +77,118 @@ impl ArmFidelity {
 /// `host/dispatch_route/dispatch.rs`. The
 /// `routed_unsupported_fidelity_table_matches_dispatch_exactly` probe
 /// dispatches every slot and fails when the two sets diverge.
-pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, &str, ArmFidelity)] = {
+pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, ArmFidelity)] = {
     use cellgov_ps3_abi::lv2::syscall;
     &[
         (
             syscall::PPU_THREAD_SET_PRIORITY,
-            "sys_ppu_thread_set_priority",
             "PpuThreadSetPriority",
             ArmFidelity::PartialState,
         ),
         (
             syscall::PPU_THREAD_GET_PRIORITY,
-            "sys_ppu_thread_get_priority",
             "PpuThreadGetPriority",
             ArmFidelity::Modeled,
         ),
         (
             syscall::EVENT_PORT_CONNECT_LOCAL,
-            "sys_event_port_connect_local",
             "EventPortConnectLocal",
             ArmFidelity::Modeled,
         ),
         (
             syscall::EVENT_PORT_DISCONNECT,
-            "sys_event_port_disconnect",
             "EventPortDisconnect",
             ArmFidelity::Modeled,
         ),
         (
             syscall::EVENT_PORT_CONNECT_IPC,
-            "sys_event_port_connect_ipc",
             "EventPortConnectIpc",
             ArmFidelity::Modeled,
         ),
         (
             syscall::MEMORY_CONTAINER_CREATE_324,
-            "sys_memory_container_create",
             "MemoryContainerCreate324",
             ArmFidelity::AbiOnly,
         ),
         (
             syscall::MMAPPER_ALLOCATE_ADDRESS,
-            "sys_mmapper_allocate_address",
             "MmapperAllocateAddress",
             ArmFidelity::PartialState,
         ),
         (
             syscall::MMAPPER_ALLOCATE_SHARED_MEMORY,
-            "sys_mmapper_allocate_shared_memory",
             "MmapperAllocateSharedMemory",
             ArmFidelity::PartialState,
         ),
         (
             syscall::MMAPPER_MAP_SHARED_MEMORY,
-            "sys_mmapper_map_shared_memory",
             "MmapperMapSharedMemory",
             ArmFidelity::PartialState,
         ),
         (
             syscall::MMAPPER_SEARCH_AND_MAP,
-            "sys_mmapper_search_and_map",
             "MmapperSearchAndMap",
             ArmFidelity::PartialState,
         ),
         (
             syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_FROM_CONTAINER,
-            "sys_mmapper_allocate_shared_memory_from_container",
             "MmapperAllocateSharedMemoryFromContainer",
             ArmFidelity::PartialState,
         ),
         (
             syscall::MMAPPER_ALLOCATE_SHARED_MEMORY_EXT,
-            "sys_mmapper_allocate_shared_memory_ext",
             "MmapperAllocateSharedMemoryExt",
             ArmFidelity::PartialState,
         ),
-        (
-            syscall::TTY_READ,
-            "sys_tty_read",
-            "TtyRead",
-            ArmFidelity::Modeled,
-        ),
-        (
-            syscall::UNS_FUNC_462,
-            "uns_func slot 462 (DEX-only)",
-            "UnsFunc462",
-            ArmFidelity::Modeled,
-        ),
+        (syscall::TTY_READ, "TtyRead", ArmFidelity::Modeled),
+        (syscall::UNS_FUNC_462, "UnsFunc462", ArmFidelity::Modeled),
         (
             syscall::SYS_PRX_LOAD_MODULE,
-            "_sys_prx_load_module",
             "PrxLoadModule",
             ArmFidelity::PartialState,
         ),
         (
             syscall::SYS_PRX_START_MODULE,
-            "_sys_prx_start_module",
             "PrxStartModule",
             ArmFidelity::PartialState,
         ),
         (
             syscall::SYS_PRX_STOP_MODULE,
-            "_sys_prx_stop_module",
             "PrxStopModule",
             ArmFidelity::PartialState,
         ),
         (
             syscall::SYS_PRX_UNLOAD_MODULE,
-            "_sys_prx_unload_module",
             "PrxUnloadModule",
             ArmFidelity::PartialState,
         ),
         (
             syscall::SYS_PRX_REGISTER_MODULE,
-            "_sys_prx_register_module",
             "PrxRegisterModule",
             ArmFidelity::Modeled,
         ),
         (
             syscall::SYS_PRX_REGISTER_LIBRARY,
-            "_sys_prx_register_library",
             "PrxRegisterLibrary",
             ArmFidelity::PartialState,
         ),
         (
             syscall::SYS_PRX_GET_MODULE_LIST,
-            "_sys_prx_get_module_list",
             "PrxGetModuleList",
             ArmFidelity::PartialState,
         ),
         (
             syscall::SYS_PRX_LOAD_MODULE_ON_MEMCONTAINER,
-            "_sys_prx_load_module_on_memcontainer",
             "PrxLoadModuleOnMemcontainer",
             ArmFidelity::PartialState,
         ),
-        (
-            syscall::HID_IS_ROOT,
-            "sys_hid_manager_is_process_permission_root",
-            "HidIsRoot",
-            ArmFidelity::Modeled,
-        ),
+        (syscall::HID_IS_ROOT, "HidIsRoot", ArmFidelity::Modeled),
         (
             syscall::GAMEPAD_YCON_IF,
-            "sys_gamepad_ycon_if",
             "GamepadYconIf",
             ArmFidelity::AbiOnly,
         ),
-        (
-            syscall::RSX_ATTRIBUTE,
-            "sys_rsx_attribute",
-            "RsxAttribute",
-            ArmFidelity::AbiOnly,
-        ),
+        (syscall::RSX_ATTRIBUTE, "RsxAttribute", ArmFidelity::AbiOnly),
     ]
 };
 
@@ -236,8 +197,8 @@ pub const ROUTED_UNSUPPORTED_ARMS: &[(u64, &str, &str, ArmFidelity)] = {
 pub fn unsupported_arm_fidelity(number: u64) -> ArmFidelity {
     ROUTED_UNSUPPORTED_ARMS
         .iter()
-        .find(|(n, _, _, _)| *n == number)
-        .map(|(_, _, _, f)| *f)
+        .find(|(n, _, _)| *n == number)
+        .map(|(_, _, f)| *f)
         .unwrap_or(ArmFidelity::NullBackend)
 }
 

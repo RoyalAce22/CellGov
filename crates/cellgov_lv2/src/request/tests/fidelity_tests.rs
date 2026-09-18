@@ -20,9 +20,20 @@ fn routing_variants_and_only_routing_variants_are_untagged() {
 #[test]
 fn routed_unsupported_numbers_are_unique() {
     let mut seen = std::collections::BTreeSet::new();
-    for (n, name, _, _) in ROUTED_UNSUPPORTED_ARMS {
-        assert!(seen.insert(*n), "syscall {n} ({name}) listed twice");
+    for (n, arm, _) in ROUTED_UNSUPPORTED_ARMS {
+        assert!(seen.insert(*n), "syscall {n} ({arm}) listed twice");
     }
+}
+
+/// Only the abi crate's routed list gives a routed number its name. An
+/// arm on a number outside that list would render no name row.
+#[test]
+fn routed_arms_are_exactly_the_abi_routed_numbers() {
+    let mut arms: Vec<u64> = ROUTED_UNSUPPORTED_ARMS.iter().map(|(n, ..)| *n).collect();
+    arms.sort_unstable();
+    let mut abi = cellgov_ps3_abi::lv2::syscall::ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS.to_vec();
+    abi.sort_unstable();
+    assert_eq!(arms, abi);
 }
 
 #[test]
@@ -32,7 +43,7 @@ fn routed_arm_identifiers_are_unique_and_name_no_typed_variant() {
         .map(|k| <&'static str>::from(*k))
         .collect();
     let mut seen = std::collections::BTreeSet::new();
-    for (n, _, arm, _) in ROUTED_UNSUPPORTED_ARMS {
+    for (n, arm, _) in ROUTED_UNSUPPORTED_ARMS {
         assert!(seen.insert(*arm), "arm {arm} ({n}) listed twice");
         assert!(
             !variants.contains(arm),

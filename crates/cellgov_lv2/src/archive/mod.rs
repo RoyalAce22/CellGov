@@ -6,6 +6,7 @@
 
 mod behavior;
 mod handling;
+mod name;
 mod spec;
 mod sql;
 mod table;
@@ -17,10 +18,15 @@ pub use behavior::{
 pub use handling::{
     arm_rows, arm_tsv, route_rows, route_tsv, ArmRow, HandlingCounts, Route, RouteRow,
 };
+pub use name::{
+    conflict_rows, conflicts_tsv, macro_name_rows, name_rows, name_tsv, uncorroborated,
+    with_cellgov_rows, ConflictRow, Disagreement, NameRow, NameSource, CELLGOV_CONSTANT_PATH,
+};
 pub use spec::{
     files, manifest, Column, ColumnKind, ManifestRow, OwnerClass, TableSpec, View, ARM, BEHAVIOR,
-    BEHAVIOR_GATE, EXCEPTIONS, FIDELITY_LABELS, GATE, PROVENANCE_KINDS, REGENERATE, ROUTE,
-    ROUTE_LABELS, SELECTOR_SLOTS, TABLES, VIEWS,
+    BEHAVIOR_GATE, CONFLICTS, DISAGREEMENTS, EXCEPTIONS, FIDELITY_LABELS, GATE, NAME, NAME_GATE,
+    NAME_REGENERATE, NAME_SOURCES, PROVENANCE_KINDS, REGENERATE, ROUTE, ROUTE_LABELS,
+    SELECTOR_SLOTS, TABLES, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};

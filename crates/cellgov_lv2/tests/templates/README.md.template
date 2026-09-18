@@ -82,6 +82,58 @@ baseline, when `arm_source` does not hold the arm, when a reference
 does not fit its kind, and when a `fabricated_success` row does not
 fabricate one.
 
+## Names
+
+An ordinal is extracted: the kernel's dispatch table fixes it. A name
+is attributed: no firmware byte carries one, so `name.tsv` records
+every name a committed source gives an ordinal as one row against
+that source, and an ordinal no source names has no row. That is a
+normal state, not a gap. Where the sources disagree, every candidate
+stays and none is preferred; the disagreement is the information.
+{{named_slots}} slots carry a name.
+
+| Source | Rows | Meaning |
+| --- | ---: | --- |
+{{name_source_rows}}
+
+`packet` is `none` for a name that applies to the whole ordinal.
+`fw_from` and `fw_to` bound the firmware era the source gives the name
+for, or read `none` where it gives none. The `cellgov` rows are
+rendered from the name field of the `lv2_syscalls!` macro in
+`cellgov_ps3_abi::lv2::syscall`: `{{name_gate}}` fails when the
+committed rows differ, `{{name_regenerate}}` rewrites them and leaves
+every other row as it is, and a macro entry with no name field (462)
+renders no row. A row's `ref` has to be what its source's meaning
+promises, and a `psl1ght` name has to be the transform of the token
+its `ref` names; `every_name_row_fits_its_source` fails otherwise.
+
+Another runner's syscall names are not a source: they never enter a
+tracked file. An operator may derive them from their own checkout
+into an overlay under `vfs/.cellgov/` and join it into their own
+build. An exported function that reaches an ordinal is not a name
+for it either; the reach tables report exports beside names.
+
+### Conflicts
+
+`conflicts.tsv` holds the rows of `name.tsv` whose slot carries more
+than one distinct name: `spelling` when the names are one identifier
+under different leading underscores, `name` otherwise.
+{{conflict_count}} slots:
+
+| Slot | Disagreement | Names (sources) |
+| --- | --- | --- |
+{{conflict_rows}}
+
+### Names only CellGov carries
+
+Names no other committed source gives. They are CellGov's own
+vocabulary and nothing here corroborates them; the constant's rustdoc
+carries whatever else is known. {{uncorroborated_count}} slots:
+
+| Slot | Name | Constant |
+| --- | --- | --- |
+{{uncorroborated_rows}}
+
 ## Table rules
 
 The loader in `cellgov_lv2::archive` refuses a table that breaks any
@@ -101,6 +153,10 @@ number, so cell count and cell shape are the loader's alone:
   integer list, one of an enumerated set of labels, or a locator of
   letters, digits and `_ . / : @ + -`.
 
+A table's key may hold a nullable column (`name.packet`): `none`
+sorts as the four letters, and two rows with `none` there and the
+same other key cells repeat the key.
+
 ## Querying
 
 Built and verified with sqlite3 {{sqlite_version}}; the `.import`
@@ -110,9 +166,13 @@ directory:
     sqlite3 lv2.db < build.sql
     sqlite3 lv2.db "SELECT ordinal, arm, fidelity FROM handling WHERE route = 'typed'"
     sqlite3 lv2.db "SELECT ordinal, arm, provenance_kind FROM authority WHERE witness IS NULL"
+    sqlite3 lv2.db "SELECT name, source FROM name WHERE ordinal = 190"
 
 `schema.sql` holds the tables and the join-only views (`handling`
-over route and arm, `authority` over behavior, route and arm);
-`build.sql`
-reads it, imports each table through a staging table, and stops at
-the first error.
+over route and arm, `authority` over behavior, route and arm; none
+joins `name`, so no view reads as giving an ordinal its name);
+`build.sql` reads it, imports each table through a staging table, and
+stops at the first error. A table whose key holds a nullable column
+(`name`, `conflicts`) is `UNIQUE` rather than `PRIMARY KEY` in SQL,
+where a `STRICT` key column could not be null; the loader alone
+refuses a repeated key with a `none` in it.

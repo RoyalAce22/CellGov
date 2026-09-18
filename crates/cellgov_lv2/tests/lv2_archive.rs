@@ -1,17 +1,27 @@
 //! `docs/lv2/` drift gate.
 //!
-//! The gate renders every file of the archive from
+//! The gate renders every generated file of the archive from
 //! `cellgov_lv2::archive` and compares it to the committed copy.
 //! Regenerate with:
 //!
 //! ```text
 //! cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
 //! ```
+//!
+//! The `cellgov` rows of `name.tsv` have their own gate (the test
+//! [`NAME_GATE`] names) and their own regenerate:
+//!
+//! ```text
+//! cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names
+//! ```
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use cellgov_lv2::archive::{self, HandlingCounts, OwnerClass, Route, GATE, REGENERATE, TABLES};
+use cellgov_lv2::archive::{
+    self, ConflictRow, HandlingCounts, NameRow, NameSource, OwnerClass, Route, GATE, NAME,
+    NAME_GATE, NAME_REGENERATE, REGENERATE, TABLES,
+};
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 
@@ -19,6 +29,56 @@ const README_TEMPLATE: &str = include_str!("templates/README.md.template");
 
 fn archive_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/lv2")
+}
+
+/// The committed `name.tsv`, loaded; the generator renders
+/// `conflicts.tsv` and the document's name sections from it.
+fn committed_names() -> Vec<NameRow> {
+    let text = read(&archive_dir().join(NAME.file()));
+    let table = archive::parse(&NAME, &text).unwrap_or_else(|e| panic!("{e}"));
+    archive::name_rows(&table)
+}
+
+fn slot(ordinal: u64, packet: Option<&str>) -> String {
+    match packet {
+        Some(packet) => format!("{ordinal} `{packet}`"),
+        None => ordinal.to_string(),
+    }
+}
+
+/// The sources that give each distinct name of one conflicting slot.
+type NamesBySource<'a> = BTreeMap<&'a str, Vec<&'a str>>;
+
+/// One markdown row per conflicting slot: every distinct name with the
+/// sources that give it.
+fn conflict_markdown(conflicts: &[ConflictRow]) -> Vec<String> {
+    // Keyed on the packet cell as the loader sorts it, so the rows
+    // keep `conflicts.tsv` order once a packet slot exists.
+    let mut slots: BTreeMap<(u64, &str), (&ConflictRow, NamesBySource)> = BTreeMap::new();
+    for row in conflicts {
+        slots
+            .entry((row.ordinal, row.packet.as_deref().unwrap_or(archive::NONE)))
+            .or_insert_with(|| (row, BTreeMap::new()))
+            .1
+            .entry(&row.name)
+            .or_default()
+            .push(row.source.label());
+    }
+    slots
+        .into_iter()
+        .map(|((ordinal, _), (first, names))| {
+            let listed: Vec<String> = names
+                .iter()
+                .map(|(name, sources)| format!("`{name}` ({})", sources.join(", ")))
+                .collect();
+            format!(
+                "| {} | {} | {} |",
+                slot(ordinal, first.packet.as_deref()),
+                first.disagreement.label(),
+                listed.join(", ")
+            )
+        })
+        .collect()
 }
 
 fn fill(template: &str, subs: &[(&str, String)]) -> String {
@@ -38,11 +98,14 @@ fn fill(template: &str, subs: &[(&str, String)]) -> String {
     out
 }
 
-fn readme(counts: &HandlingCounts) -> String {
+fn readme(counts: &HandlingCounts, names: &[NameRow], conflicts: &[ConflictRow]) -> String {
     let manifest_rows: Vec<String> = archive::manifest()
         .iter()
         .map(|row| {
             let regenerate = match row.regenerate {
+                Some(command) if command == NAME_REGENERATE => {
+                    format!("`{command}` (the `cellgov` rows)")
+                }
                 Some(command) => format!("`{command}`"),
                 None => "written by hand".to_string(),
             };
@@ -74,6 +137,33 @@ fn readme(counts: &HandlingCounts) -> String {
         .iter()
         .map(|f| format!("| `{}` | {} |", f.label(), f.meaning()))
         .collect();
+    let name_source_rows: Vec<String> = NameSource::ALL
+        .iter()
+        .map(|s| {
+            let rows = names.iter().filter(|n| n.source == *s).count();
+            format!("| `{}` | {rows} | {} |", s.label(), s.meaning())
+        })
+        .collect();
+    let named_slots: BTreeSet<(u64, Option<&str>)> = names
+        .iter()
+        .map(|n| (n.ordinal, n.packet.as_deref()))
+        .collect();
+    let conflict_rows = conflict_markdown(conflicts);
+    let uncorroborated_rows: Vec<String> = archive::uncorroborated(names)
+        .iter()
+        .map(|n| {
+            let constant = n
+                .reference
+                .as_deref()
+                .and_then(|r| r.strip_prefix(archive::CELLGOV_CONSTANT_PATH))
+                .unwrap_or_else(|| panic!("{} is a cellgov row with no constant", n.ordinal));
+            format!(
+                "| {} | `{}` | `{constant}` |",
+                slot(n.ordinal, n.packet.as_deref()),
+                n.name
+            )
+        })
+        .collect();
     fill(
         README_TEMPLATE,
         &[
@@ -86,17 +176,30 @@ fn readme(counts: &HandlingCounts) -> String {
             ("fidelity_rows", fidelity_rows.join("\n")),
             ("sqlite_version", archive::SQLITE_VERSION.to_string()),
             ("behavior_gate", archive::BEHAVIOR_GATE.to_string()),
+            ("name_source_rows", name_source_rows.join("\n")),
+            ("named_slots", named_slots.len().to_string()),
+            ("name_gate", NAME_GATE.to_string()),
+            ("name_regenerate", NAME_REGENERATE.to_string()),
+            ("conflict_count", conflict_rows.len().to_string()),
+            ("conflict_rows", conflict_rows.join("\n")),
+            (
+                "uncorroborated_count",
+                uncorroborated_rows.len().to_string(),
+            ),
+            ("uncorroborated_rows", uncorroborated_rows.join("\n")),
         ],
     )
 }
 
-/// Every file of the archive, rendered, keyed by file name.
+/// Every generated file of the archive, rendered, keyed by file name.
 fn rendered() -> BTreeMap<String, String> {
     let routes = archive::route_rows();
     let arms = archive::arm_rows(&routes);
     let counts = HandlingCounts::of(&routes);
+    let names = committed_names();
+    let conflicts = archive::conflict_rows(&names);
     let mut files = BTreeMap::new();
-    files.insert("README.md".to_string(), readme(&counts));
+    files.insert("README.md".to_string(), readme(&counts, &names, &conflicts));
     files.insert("schema.sql".to_string(), archive::schema_sql());
     files.insert("build.sql".to_string(), archive::build_sql());
     files.insert(
@@ -107,10 +210,14 @@ fn rendered() -> BTreeMap<String, String> {
         "arm.tsv".to_string(),
         archive::arm_tsv(&arms).unwrap_or_else(|e| panic!("arm.tsv: {e}")),
     );
+    files.insert(
+        "conflicts.tsv".to_string(),
+        archive::conflicts_tsv(&conflicts).unwrap_or_else(|e| panic!("conflicts.tsv: {e}")),
+    );
     let names: Vec<&String> = files.keys().collect();
     let generated: Vec<String> = archive::manifest()
         .into_iter()
-        .filter(|row| row.regenerate.is_some())
+        .filter(|row| row.regenerate == Some(REGENERATE))
         .map(|row| row.file)
         .collect();
     assert_eq!(
@@ -226,6 +333,34 @@ fn committed_tables_load_and_reference_each_other() {
 }
 
 #[test]
+fn cellgov_name_rows_match_the_macro() {
+    let committed: Vec<NameRow> = committed_names()
+        .into_iter()
+        .filter(|row| row.source == NameSource::Cellgov)
+        .collect();
+    let rendered = archive::macro_name_rows();
+    let missing: Vec<&NameRow> = rendered.iter().filter(|r| !committed.contains(r)).collect();
+    let extra: Vec<&NameRow> = committed.iter().filter(|r| !rendered.contains(r)).collect();
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "name.tsv's cellgov rows are not the macro's: missing {missing:?}, extra {extra:?}; \
+         regenerate with:\n  {NAME_REGENERATE}"
+    );
+}
+
+#[test]
+fn every_name_row_fits_its_source() {
+    let unfit: Vec<NameRow> = committed_names()
+        .into_iter()
+        .filter(|row| !row.fits_source())
+        .collect();
+    assert!(
+        unfit.is_empty(),
+        "name.tsv rows whose reference or name is not what the source's meaning promises: {unfit:?}"
+    );
+}
+
+#[test]
 #[ignore = "writes docs/lv2/; run on dispatch-surface changes"]
 fn regenerate() {
     let dir = archive_dir();
@@ -234,4 +369,13 @@ fn regenerate() {
         let path = dir.join(name);
         std::fs::write(&path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
     }
+}
+
+#[test]
+#[ignore = "writes docs/lv2/name.tsv; run when the macro's names change"]
+fn regenerate_cellgov_names() {
+    let rows = archive::with_cellgov_rows(&committed_names());
+    let text = archive::name_tsv(&rows).unwrap_or_else(|e| panic!("name.tsv: {e}"));
+    let path = archive_dir().join(NAME.file());
+    std::fs::write(&path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
 }

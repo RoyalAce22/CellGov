@@ -18,9 +18,14 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
     let full = schema_sql();
     for table in TABLES {
         let schema = create_block(&full, table.name);
+        let constraint = if table.key_is_nullable() {
+            "UNIQUE"
+        } else {
+            "PRIMARY KEY"
+        };
         assert!(
             schema.ends_with(&format!(
-                "    PRIMARY KEY ({})\n) STRICT;\n",
+                "    {constraint} ({})\n) STRICT;\n",
                 table.key.join(", ")
             )),
             "{} is not STRICT with its key",
@@ -70,6 +75,11 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
     }
     let schema_tables = full.matches("CREATE TABLE ").count();
     assert_eq!(schema_tables, TABLES.len());
+    assert!(
+        create_block(&full, "name").contains("    UNIQUE (ordinal, packet, source, name)\n"),
+        "a key with a nullable column is UNIQUE, not PRIMARY KEY"
+    );
+    assert!(create_block(&full, "route").contains("    PRIMARY KEY (ordinal)\n"));
 }
 
 #[test]

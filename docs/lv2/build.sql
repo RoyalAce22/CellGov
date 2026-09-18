@@ -27,3 +27,17 @@ INSERT INTO behavior (ordinal, packet, same_as, selector_slot, provenance_kind, 
 SELECT CAST(ordinal AS INTEGER), NULLIF(packet, 'none'), CAST(NULLIF(same_as, 'none') AS INTEGER), NULLIF(selector_slot, 'none'), provenance_kind, NULLIF(provenance_ref, 'none'), NULLIF(witness, 'none'), NULLIF(exception, 'none'), arm_source
 FROM staging_behavior;
 DROP TABLE staging_behavior;
+
+CREATE TEMP TABLE staging_name (ordinal TEXT, packet TEXT, name TEXT, source TEXT, ref TEXT, fw_from TEXT, fw_to TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 name.tsv staging_name
+INSERT INTO name (ordinal, packet, name, source, ref, fw_from, fw_to)
+SELECT CAST(ordinal AS INTEGER), NULLIF(packet, 'none'), name, source, NULLIF(ref, 'none'), NULLIF(fw_from, 'none'), NULLIF(fw_to, 'none')
+FROM staging_name;
+DROP TABLE staging_name;
+
+CREATE TEMP TABLE staging_conflicts (ordinal TEXT, packet TEXT, name TEXT, source TEXT, disagreement TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 conflicts.tsv staging_conflicts
+INSERT INTO conflicts (ordinal, packet, name, source, disagreement)
+SELECT CAST(ordinal AS INTEGER), NULLIF(packet, 'none'), name, source, disagreement
+FROM staging_conflicts;
+DROP TABLE staging_conflicts;

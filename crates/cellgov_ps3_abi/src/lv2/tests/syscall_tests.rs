@@ -1,4 +1,4 @@
-//! LV2 syscall number uniqueness and named-audit-array consistency.
+//! LV2 syscall number uniqueness and syscall-array consistency.
 
 use super::*;
 use std::collections::BTreeSet;
@@ -18,49 +18,64 @@ fn all_lv2_numbers_are_unique() {
 #[test]
 fn unsupported_routed_syscall_numbers_do_not_collide_with_typed_arms() {
     let typed: BTreeSet<u64> = ALL_LV2_NUMBERS.iter().copied().collect();
-    for &(name, n) in ALL_LV2_UNSUPPORTED_ROUTED_NAMED {
+    for entry in ALL_LV2_UNSUPPORTED_ROUTED_SYSCALLS {
         assert!(
-            !typed.contains(&n),
-            "{name} ({n}) collides with a typed-arm Lv2Request number; \
+            !typed.contains(&entry.number),
+            "{} ({}) collides with a typed-arm Lv2Request number; \
              either remove it from ALL_LV2_NUMBERS (if it should route via Unsupported) \
              or add a typed Lv2Request variant (and remove the Unsupported arm)",
+            entry.constant,
+            entry.number,
         );
     }
     // Also enforce intra-list uniqueness within the unsupported set.
     let mut seen: BTreeSet<u64> = BTreeSet::new();
-    for &(name, n) in ALL_LV2_UNSUPPORTED_ROUTED_NAMED {
+    for entry in ALL_LV2_UNSUPPORTED_ROUTED_SYSCALLS {
         assert!(
-            seen.insert(n),
-            "{name} duplicates another unsupported-routed syscall number ({n})",
+            seen.insert(entry.number),
+            "{} duplicates another unsupported-routed syscall number ({})",
+            entry.constant,
+            entry.number,
         );
     }
     assert_eq!(
-        ALL_LV2_UNSUPPORTED_ROUTED_NAMED.len(),
+        ALL_LV2_UNSUPPORTED_ROUTED_SYSCALLS.len(),
         ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS.len(),
     );
 }
 
-/// Named-array values match `ALL_LV2_NUMBERS` exactly.
 #[test]
-fn audit_array_matches_all_lv2_numbers() {
-    let audit_set: BTreeSet<u64> = ALL_LV2_NAMED.iter().map(|&(_, v)| v).collect();
-    let array_set: BTreeSet<u64> = ALL_LV2_NUMBERS.iter().copied().collect();
-    let missing_from_array: Vec<&(&str, u64)> = ALL_LV2_NAMED
+fn the_syscall_arrays_carry_the_number_arrays_in_order() {
+    let typed: Vec<u64> = ALL_LV2_SYSCALLS.iter().map(|e| e.number).collect();
+    assert_eq!(typed, ALL_LV2_NUMBERS);
+    let routed: Vec<u64> = ALL_LV2_UNSUPPORTED_ROUTED_SYSCALLS
         .iter()
-        .filter(|(_, v)| !array_set.contains(v))
+        .map(|e| e.number)
         .collect();
-    let missing_from_audit: Vec<u64> = ALL_LV2_NUMBERS
+    assert_eq!(routed, ALL_LV2_UNSUPPORTED_ROUTED_NUMBERS);
+}
+
+#[test]
+fn every_name_is_an_lv2_identifier_and_only_the_unnamed_lack_one() {
+    let mut unnamed = Vec::new();
+    for entry in ALL_LV2_SYSCALLS
         .iter()
-        .copied()
-        .filter(|v| !audit_set.contains(v))
-        .collect();
-    assert!(
-        missing_from_array.is_empty(),
-        "constants in ALL_LV2_NAMED missing from ALL_LV2_NUMBERS: {missing_from_array:?}",
-    );
-    assert!(
-        missing_from_audit.is_empty(),
-        "values in ALL_LV2_NUMBERS missing from ALL_LV2_NAMED: {missing_from_audit:?}",
-    );
-    assert_eq!(ALL_LV2_NAMED.len(), ALL_LV2_NUMBERS.len());
+        .chain(ALL_LV2_UNSUPPORTED_ROUTED_SYSCALLS)
+    {
+        match entry.name {
+            Some(name) => {
+                let body = name.strip_prefix('_').unwrap_or(name);
+                assert!(
+                    body.starts_with("sys_")
+                        && body
+                            .bytes()
+                            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+                    "{} names {name:?}, which is not an LV2 identifier",
+                    entry.constant
+                );
+            }
+            None => unnamed.push(entry.constant),
+        }
+    }
+    assert_eq!(unnamed, ["UNS_FUNC_462"]);
 }

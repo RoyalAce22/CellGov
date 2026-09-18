@@ -29,6 +29,26 @@ CREATE TABLE behavior (
     PRIMARY KEY (ordinal)
 ) STRICT;
 
+CREATE TABLE name (
+    ordinal INTEGER NOT NULL REFERENCES route (ordinal),
+    packet TEXT,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('psdevwiki', 'psl1ght', 'cellgov', 'non_public')),
+    ref TEXT,
+    fw_from TEXT,
+    fw_to TEXT,
+    UNIQUE (ordinal, packet, source, name)
+) STRICT;
+
+CREATE TABLE conflicts (
+    ordinal INTEGER NOT NULL REFERENCES route (ordinal),
+    packet TEXT,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('psdevwiki', 'psl1ght', 'cellgov', 'non_public')),
+    disagreement TEXT NOT NULL CHECK (disagreement IN ('spelling', 'name')),
+    UNIQUE (ordinal, packet, source, name)
+) STRICT;
+
 CREATE VIEW handling AS
 SELECT route.ordinal, route.route, route.arm, arm.fidelity
 FROM route

@@ -30,10 +30,10 @@ fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
 
     // The probe covers every table slot, so a routed number outside
     // the range would escape it.
-    for (n, name, _, _) in ROUTED_UNSUPPORTED_ARMS {
+    for (n, arm, _) in ROUTED_UNSUPPORTED_ARMS {
         assert!(
             *n < SYSCALL_TABLE_SLOTS,
-            "{name} ({n}) outside the probed slot range"
+            "{arm} ({n}) outside the probed slot range"
         );
     }
 

@@ -34,7 +34,16 @@ fn create_table(table: &TableSpec) -> String {
         }
         lines.push(line);
     }
-    lines.push(format!("    PRIMARY KEY ({})", table.key.join(", ")));
+    // A STRICT table refuses a null in a PRIMARY KEY column whatever
+    // the column says, so a key with a nullable column is UNIQUE
+    // instead. SQLite treats two nulls as distinct there; the loader
+    // alone catches a repeated key with a `none` in it.
+    let constraint = if table.key_is_nullable() {
+        "UNIQUE"
+    } else {
+        "PRIMARY KEY"
+    };
+    lines.push(format!("    {constraint} ({})", table.key.join(", ")));
     format!(
         "CREATE TABLE {} (\n{}\n) STRICT;\n",
         table.name,

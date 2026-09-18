@@ -101,7 +101,7 @@ fn arm_rows_are_sorted_unique_and_cover_every_tagged_variant_and_routed_arm() {
         let name: &str = (*kind).into();
         assert_eq!(names.contains(&name), kind.fidelity().is_some(), "{name}");
     }
-    for (n, _, arm, fidelity) in ROUTED_UNSUPPORTED_ARMS {
+    for (n, arm, fidelity) in ROUTED_UNSUPPORTED_ARMS {
         let row = arms
             .iter()
             .find(|a| a.arm == *arm)
