@@ -273,9 +273,8 @@ fn parsed_manifests() -> Vec<Parsed> {
         }
         let text = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let doc: toml::Value = text
-            .parse()
-            .unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
+        let doc: toml::Value =
+            toml::from_str(&text).unwrap_or_else(|e| panic!("parse {}: {e}", path.display()));
         let title = manifest_root(&doc)
             .get("title")
             .and_then(toml::Value::as_table)
