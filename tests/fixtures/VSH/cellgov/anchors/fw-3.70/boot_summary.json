@@ -196,6 +196,92 @@
       "class": "exact"
     }
   },
+  "unsupported_syscalls": {
+    "45": {
+      "hits": 2,
+      "first_hit": 600207254
+    },
+    "111": {
+      "hits": 3,
+      "first_hit": 40234
+    },
+    "133": {
+      "hits": 4,
+      "first_hit": 600201657
+    },
+    "230": {
+      "hits": 1,
+      "first_hit": 103021
+    },
+    "248": {
+      "hits": 1,
+      "first_hit": 60037
+    },
+    "380": {
+      "hits": 5,
+      "first_hit": 181374
+    },
+    "382": {
+      "hits": 1,
+      "first_hit": 600198392
+    },
+    "398": {
+      "hits": 1,
+      "first_hit": 20600210769
+    },
+    "465": {
+      "hits": 1,
+      "first_hit": 36100
+    },
+    "563": {
+      "hits": 1,
+      "first_hit": 83956
+    },
+    "610": {
+      "hits": 21,
+      "first_hit": 600205853
+    },
+    "612": {
+      "hits": 1,
+      "first_hit": 600205099
+    },
+    "635": {
+      "hits": 1,
+      "first_hit": 636432831
+    },
+    "650": {
+      "hits": 1,
+      "first_hit": 82106
+    },
+    "699": {
+      "hits": 3,
+      "first_hit": 21593
+    },
+    "811": {
+      "hits": 3,
+      "first_hit": 600227632
+    },
+    "817": {
+      "hits": 9,
+      "first_hit": 600221077
+    },
+    "837": {
+      "hits": 7,
+      "first_hit": 197286
+    },
+    "867": {
+      "hits": 1,
+      "first_hit": 636413899
+    },
+    "873": {
+      "hits": 3,
+      "first_hit": 600219568
+    },
+    "956": {
+      "hits": 1,
+      "first_hit": 36487
+    }
+  },
   "firmware": {
     "version": "3.70",
     "image_version": "0x000000000000cb00",

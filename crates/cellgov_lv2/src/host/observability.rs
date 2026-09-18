@@ -8,7 +8,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use cellgov_time::GuestTicks;
+
 use super::system_ipc_witness::{SystemIpcMapping, SystemIpcWitness};
+
+/// Per-ordinal evidence collected when the null backend refuses a syscall.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnsupportedSyscallWitness {
+    /// Times this ordinal reached the null backend.
+    pub hits: u64,
+    /// Guest tick of the first such call.
+    pub first_hit: GuestTicks,
+}
 
 /// Witness counters, diagnostic logs, and naming aids; inert with
 /// respect to guest-visible execution.
@@ -68,7 +79,7 @@ pub struct Lv2Observability {
     /// Witness: null-backend hits keyed by syscall number. The key set
     /// is the boot's unimplemented-syscall inventory; the counts
     /// separate a one-shot probe from a retry loop.
-    pub unsupported_syscalls: BTreeMap<u64, u64>,
+    pub unsupported_syscalls: BTreeMap<u64, UnsupportedSyscallWitness>,
     /// Witness: system-IPC namespace production counters.
     pub system_ipc_witness: SystemIpcWitness,
     /// Guest ranges where a namespace-keyed shm is mapped, recorded at

@@ -99,7 +99,7 @@ pub(super) fn print(rt: &Runtime) {
         .observability()
         .unsupported_syscalls
         .iter()
-        .map(|(&ordinal, &hits)| {
+        .map(|(&ordinal, witness)| {
             let class = identity.map_or(PupCensusClass::NotExtracted, |identity| {
                 usize::try_from(ordinal)
                     .ok()
@@ -121,7 +121,7 @@ pub(super) fn print(rt: &Runtime) {
                 });
             ReportRow {
                 ordinal,
-                hits,
+                hits: witness.hits,
                 names: names
                     .iter()
                     .filter(|row| row.ordinal == ordinal && row.packet.is_none())

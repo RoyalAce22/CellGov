@@ -22,10 +22,11 @@ use cellgov_lv2::archive::{
     self, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, GateRow, GateState,
     HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, RouteRow, StubRow,
     SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS, CENSUS_GATE,
-    FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH,
-    REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
+    FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PRIORITY, PUP,
+    PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
+use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 use sha2::Digest as _;
 
@@ -182,6 +183,176 @@ fn generated_coverage(routes: &[RouteRow], census_files: &[String]) -> Vec<archi
         })
         .collect();
     archive::coverage_rows(routes, &by_version)
+}
+
+fn generated_priority() -> Vec<Vec<String>> {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let mut title_hits: BTreeMap<u64, BTreeSet<String>> = BTreeMap::new();
+    let mut earliest: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut gaps: BTreeMap<u64, BTreeSet<String>> = BTreeMap::new();
+    let mut walk = vec![root.clone()];
+    while let Some(dir) = walk.pop() {
+        for entry in std::fs::read_dir(dir).expect("read fixture directory") {
+            let entry = entry.expect("read fixture entry");
+            let path = entry.path();
+            if path.is_dir() {
+                walk.push(path);
+            } else if path
+                .file_name()
+                .is_some_and(|name| name == "boot_summary.json")
+            {
+                let text = read(&path);
+                let title = path
+                    .strip_prefix(&root)
+                    .expect("anchor is below fixture root")
+                    .components()
+                    .next()
+                    .expect("anchor has title directory")
+                    .as_os_str()
+                    .to_string_lossy()
+                    .to_string();
+                let mut ordinal = None;
+                let pup = text.lines().find_map(|line| {
+                    line.trim()
+                        .strip_prefix("\"pup_sha256\": \"")
+                        .and_then(|value| value.strip_suffix("\","))
+                        .and_then(|value| {
+                            let mut out = [0u8; 32];
+                            (value.len() == 64).then_some(())?;
+                            for (index, slot) in out.iter_mut().enumerate() {
+                                *slot = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16)
+                                    .ok()?;
+                            }
+                            Some(out)
+                        })
+                });
+                for line in text.lines() {
+                    let trimmed = line.trim();
+                    if let Some(key) = trimmed
+                        .strip_prefix('"')
+                        .and_then(|value| value.split_once('"'))
+                    {
+                        if let Ok(value) = key.0.parse() {
+                            ordinal = Some(value);
+                        }
+                    }
+                    if let Some(value) = trimmed.strip_prefix("\"first_hit\": ") {
+                        if let (Some(ordinal), Some(tick)) =
+                            (ordinal.take(), value.trim_end_matches(',').parse().ok())
+                        {
+                            if pup.is_some_and(|pup| {
+                                matches!(
+                                    usize::try_from(ordinal)
+                                        .ok()
+                                        .map(|ordinal| lookup(&pup, ordinal)),
+                                    Some(PupCensusClass::Implemented)
+                                )
+                            }) {
+                                title_hits.entry(ordinal).or_default().insert(title.clone());
+                                earliest
+                                    .entry(ordinal)
+                                    .and_modify(|prior| *prior = (*prior).min(tick))
+                                    .or_insert(tick);
+                            } else {
+                                gaps.entry(ordinal).or_default().insert(title.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    let mut by_count: Vec<_> = title_hits.iter().collect();
+    by_count.sort_by_key(|(ordinal, titles)| (std::cmp::Reverse(titles.len()), **ordinal));
+    for (index, (&ordinal, titles)) in by_count.iter().enumerate() {
+        rows.push(vec![
+            "title_count".into(),
+            (index + 1).to_string(),
+            ordinal.to_string(),
+            titles.len().to_string(),
+            earliest[&ordinal].to_string(),
+            "0".into(),
+        ]);
+    }
+    let mut by_early: Vec<_> = title_hits.keys().copied().collect();
+    by_early.sort_by_key(|ordinal| (earliest[ordinal], *ordinal));
+    for (index, ordinal) in by_early.iter().enumerate() {
+        rows.push(vec![
+            "earliness".into(),
+            (index + 1).to_string(),
+            ordinal.to_string(),
+            title_hits[ordinal].len().to_string(),
+            earliest[ordinal].to_string(),
+            "0".into(),
+        ]);
+    }
+    for (index, (&ordinal, titles)) in gaps.iter().enumerate() {
+        rows.push(vec![
+            "census_gap".into(),
+            (index + 1).to_string(),
+            ordinal.to_string(),
+            titles.len().to_string(),
+            "none".into(),
+            "0".into(),
+        ]);
+    }
+    let mut caller_modules: BTreeMap<u64, BTreeSet<String>> = BTreeMap::new();
+    let null_backend: BTreeSet<u64> = archive::route_rows()
+        .into_iter()
+        .filter(|row| row.route == Route::NullBackend)
+        .map(|row| row.ordinal)
+        .collect();
+    for spec in [&CALLER, &REACH] {
+        let table = archive::parse(spec, &read(&archive_dir().join(spec.file())))
+            .unwrap_or_else(|error| panic!("{}: {error}", spec.file()));
+        for row in table.rows {
+            let ordinal = row[if spec.name == "caller" { 2 } else { 3 }]
+                .parse()
+                .expect("caller ordinal");
+            let Some(pup) = parse_pup_digest(&row[0]) else {
+                continue;
+            };
+            if null_backend.contains(&ordinal)
+                && usize::try_from(ordinal)
+                    .ok()
+                    .is_some_and(|ordinal| lookup(&pup, ordinal) == PupCensusClass::Implemented)
+            {
+                caller_modules
+                    .entry(ordinal)
+                    .or_default()
+                    .insert(format!("{}:{}", row[0], row[1]));
+            }
+        }
+    }
+    let mut callers: Vec<_> = caller_modules.iter().collect();
+    callers.sort_by_key(|(ordinal, modules)| (std::cmp::Reverse(modules.len()), **ordinal));
+    for (index, (&ordinal, modules)) in callers.iter().enumerate() {
+        rows.push(vec![
+            "caller_modules".into(),
+            (index + 1).to_string(),
+            ordinal.to_string(),
+            "0".into(),
+            "none".into(),
+            modules.len().to_string(),
+        ]);
+    }
+    rows.sort_by_key(|row| {
+        (
+            row[0].clone(),
+            row[1].parse::<u64>().expect("rank is integer"),
+        )
+    });
+    rows
+}
+
+fn parse_pup_digest(value: &str) -> Option<[u8; 32]> {
+    (value.len() == 64).then_some(())?;
+    let mut out = [0u8; 32];
+    for (index, slot) in out.iter_mut().enumerate() {
+        *slot = u8::from_str_radix(&value[index * 2..index * 2 + 2], 16).ok()?;
+    }
+    Some(out)
 }
 
 fn generated_transitions(
@@ -463,6 +634,7 @@ fn rendered() -> BTreeMap<String, String> {
     let transition_rows = generated_transitions(&firmware, &pups, &kernels, &gates, &census_files);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
+    let priority = generated_priority();
     let mut files = BTreeMap::new();
     files.insert(
         "README.md".to_string(),
@@ -508,6 +680,11 @@ fn rendered() -> BTreeMap<String, String> {
     files.insert(
         archive::COVERAGE.file(),
         archive::coverage_tsv(&coverage).unwrap_or_else(|error| panic!("coverage.tsv: {error}")),
+    );
+    files.insert(
+        PRIORITY.file(),
+        archive::render(&PRIORITY, &priority)
+            .unwrap_or_else(|error| panic!("priority.tsv: {error}")),
     );
     let names: Vec<&String> = files.keys().collect();
     let generated: Vec<String> = archive::manifest(&census_files)

@@ -1116,6 +1116,53 @@ pub const CONFLICTS: TableSpec = TableSpec {
     gate: GATE,
 };
 
+/// `priority.tsv`: evidence-ranked unmodelled syscall work from title anchors.
+pub const PRIORITY: TableSpec = TableSpec {
+    name: "priority",
+    owner: OwnerClass::Generated,
+    columns: &[
+        Column {
+            name: "ranking",
+            kind: ColumnKind::Enum(&["title_count", "earliness", "caller_modules", "census_gap"]),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "rank",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "title_count",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "first_tick",
+            kind: ColumnKind::Integer,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "caller_modules",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["ranking", "rank"],
+    regenerate: Some(REGENERATE),
+    gate: GATE,
+};
+
 /// Every table, a referenced table before the table that references it.
 pub const TABLES: &[TableSpec] = &[
     FIRMWARE,
@@ -1136,6 +1183,7 @@ pub const TABLES: &[TableSpec] = &[
     BEHAVIOR,
     NAME,
     CONFLICTS,
+    PRIORITY,
 ];
 
 /// The files under `docs/lv2/` that are not tables; the one regenerate

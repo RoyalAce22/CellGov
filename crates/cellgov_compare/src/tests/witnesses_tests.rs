@@ -19,6 +19,7 @@ fn obs(pairs: &[(&str, u64)]) -> BTreeMap<String, u64> {
 fn parsed(pairs: &[(&str, u64)]) -> ParsedWitnesses {
     ParsedWitnesses {
         values: obs(pairs),
+        unsupported_syscalls: BTreeMap::new(),
         seen_lines: pairs.iter().filter_map(|(k, _)| line_of(k)).collect(),
     }
 }

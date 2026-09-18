@@ -176,6 +176,12 @@
       "class": "exact"
     }
   },
+  "unsupported_syscalls": {
+    "251": {
+      "hits": 1,
+      "first_hit": 10436070
+    }
+  },
   "firmware": {
     "version": "2.76",
     "image_version": "0x0000000000007a73",

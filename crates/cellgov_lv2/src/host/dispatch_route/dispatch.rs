@@ -753,7 +753,7 @@ impl Lv2Host {
                 self.dispatch_no_such_syscall(number, args)
             }
             Lv2Request::Unsupported { number, args } => {
-                self.dispatch_unsupported_default(number, args)
+                self.dispatch_unsupported_default(number, args, tick)
             }
             Lv2Request::Malformed {
                 number,

@@ -279,9 +279,20 @@ pub struct WitnessParseError {
 pub struct ParsedWitnesses {
     /// Witness values keyed by witness name.
     pub values: BTreeMap<String, u64>,
+    /// Per-ordinal null-backend calls from the unsupported-syscall inventory.
+    pub unsupported_syscalls: BTreeMap<u64, UnsupportedSyscallWitness>,
     /// `BENCH_*` prefixes that appeared. Lets a checker distinguish
     /// "this line reported 0" from "this line was never emitted".
     pub seen_lines: BTreeSet<&'static str>,
+}
+
+/// One ordinal's null-backend evidence from a bench witness line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UnsupportedSyscallWitness {
+    /// Number of calls to the ordinal.
+    pub hits: u64,
+    /// Guest tick at the first call.
+    pub first_hit: u64,
 }
 
 /// Extract every witness value from a boot's stderr.
@@ -297,6 +308,7 @@ pub struct ParsedWitnesses {
 pub fn parse_witness_lines(stderr: &str) -> Result<ParsedWitnesses, Vec<WitnessParseError>> {
     let mut out = ParsedWitnesses {
         values: BTreeMap::new(),
+        unsupported_syscalls: BTreeMap::new(),
         seen_lines: BTreeSet::new(),
     };
     let mut errors = Vec::new();
@@ -331,6 +343,31 @@ pub fn parse_witness_lines(stderr: &str) -> Result<ParsedWitnesses, Vec<WitnessP
                 continue;
             };
             let Some((_, witness)) = fields.iter().find(|(k, _)| *k == key) else {
+                if prefix == "BENCH_UNSUPPORTED_SYSCALL_WITNESS:" {
+                    let Some((hits, first_hit)) = raw.split_once('@') else {
+                        if raw.parse::<u64>().is_ok() {
+                            continue;
+                        }
+                        errors.push(WitnessParseError {
+                            line_prefix: prefix.to_string(),
+                            token: token.to_string(),
+                            reason: "expected hits@first_hit".to_string(),
+                        });
+                        continue;
+                    };
+                    match (key.parse(), hits.parse(), first_hit.parse()) {
+                        (Ok(ordinal), Ok(hits), Ok(first_hit)) => {
+                            out.unsupported_syscalls
+                                .insert(ordinal, UnsupportedSyscallWitness { hits, first_hit });
+                        }
+                        _ => errors.push(WitnessParseError {
+                            line_prefix: prefix.to_string(),
+                            token: token.to_string(),
+                            reason: "expected ordinal=hits@first_hit".to_string(),
+                        }),
+                    }
+                    continue;
+                }
                 if !extra.admits(key) {
                     errors.push(WitnessParseError {
                         line_prefix: prefix.to_string(),

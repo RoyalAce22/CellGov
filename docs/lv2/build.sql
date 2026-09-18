@@ -133,6 +133,13 @@ SELECT CAST("ordinal" AS INTEGER), NULLIF("packet", 'none'), "name", "source", "
 FROM staging_conflicts;
 DROP TABLE staging_conflicts;
 
+CREATE TEMP TABLE staging_priority ("ranking" TEXT, "rank" TEXT, "ordinal" TEXT, "title_count" TEXT, "first_tick" TEXT, "caller_modules" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 priority.tsv staging_priority
+INSERT INTO priority ("ranking", "rank", "ordinal", "title_count", "first_tick", "caller_modules")
+SELECT "ranking", CAST("rank" AS INTEGER), CAST("ordinal" AS INTEGER), CAST("title_count" AS INTEGER), CAST(NULLIF("first_tick", 'none') AS INTEGER), CAST("caller_modules" AS INTEGER)
+FROM staging_priority;
+DROP TABLE staging_priority;
+
 CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-1.02.tsv staging_census
 INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")

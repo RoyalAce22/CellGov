@@ -173,6 +173,16 @@ CREATE TABLE conflicts (
     UNIQUE ("ordinal", "packet", "source", "name")
 ) STRICT;
 
+CREATE TABLE priority (
+    "ranking" TEXT NOT NULL CHECK ("ranking" IN ('title_count', 'earliness', 'caller_modules', 'census_gap')),
+    "rank" INTEGER NOT NULL,
+    "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
+    "title_count" INTEGER NOT NULL,
+    "first_tick" INTEGER,
+    "caller_modules" INTEGER NOT NULL,
+    PRIMARY KEY ("ranking", "rank")
+) STRICT;
+
 CREATE TABLE census (
     "fw" TEXT NOT NULL REFERENCES firmware ("fw"),
     "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),

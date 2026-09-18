@@ -176,6 +176,12 @@
       "class": "exact"
     }
   },
+  "unsupported_syscalls": {
+    "465": {
+      "hits": 1,
+      "first_hit": 33653
+    }
+  },
   "firmware": {
     "version": "4.93",
     "image_version": "0x0000000000010b94",

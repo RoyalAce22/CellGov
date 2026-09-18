@@ -196,6 +196,72 @@
       "class": "exact"
     }
   },
+  "unsupported_syscalls": {
+    "45": {
+      "hits": 2,
+      "first_hit": 600167605
+    },
+    "111": {
+      "hits": 3,
+      "first_hit": 36007
+    },
+    "133": {
+      "hits": 4,
+      "first_hit": 600161983
+    },
+    "380": {
+      "hits": 5,
+      "first_hit": 141663
+    },
+    "382": {
+      "hits": 1,
+      "first_hit": 600158703
+    },
+    "563": {
+      "hits": 1,
+      "first_hit": 73405
+    },
+    "610": {
+      "hits": 21,
+      "first_hit": 600166197
+    },
+    "612": {
+      "hits": 1,
+      "first_hit": 600165439
+    },
+    "635": {
+      "hits": 1,
+      "first_hit": 632464761
+    },
+    "650": {
+      "hits": 1,
+      "first_hit": 65695
+    },
+    "699": {
+      "hits": 3,
+      "first_hit": 21600
+    },
+    "811": {
+      "hits": 3,
+      "first_hit": 600188037
+    },
+    "817": {
+      "hits": 9,
+      "first_hit": 600181478
+    },
+    "837": {
+      "hits": 7,
+      "first_hit": 157585
+    },
+    "867": {
+      "hits": 1,
+      "first_hit": 632447124
+    },
+    "873": {
+      "hits": 3,
+      "first_hit": 600179969
+    }
+  },
   "firmware": {
     "version": "2.76",
     "image_version": "0x0000000000007a73",

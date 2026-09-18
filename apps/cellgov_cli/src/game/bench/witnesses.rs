@@ -224,7 +224,7 @@ pub(super) fn print_witness_block(rt: &Runtime, authid_source: AuthorityIdSource
         .observability()
         .unsupported_syscalls
         .iter()
-        .map(|(number, hits)| format!("{number}={hits}"))
+        .map(|(number, witness)| format!("{number}={}@{}", witness.hits, witness.first_hit.raw()))
         .collect();
     if unsupported.is_empty() {
         eprintln!("BENCH_UNSUPPORTED_SYSCALL_WITNESS: distinct=0");

@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::{BootOverrides, FirmwareIdentity, GameIdentity, RunIdentity};
 use crate::runner_cellgov::BootOutcome;
+use crate::witness_parse::UnsupportedSyscallWitness;
 use crate::witnesses::WitnessSet;
+use std::collections::BTreeMap;
 
 /// One cell's run-side summary, JSON-serialized under
 /// `tests/fixtures/<id>/cellgov/anchors/` by convention.
@@ -41,6 +43,9 @@ pub struct BootSummary {
     /// name the boot path emits. Empty until the title is recorded.
     #[serde(default, skip_serializing_if = "WitnessSet::is_empty")]
     pub witnesses: WitnessSet,
+    /// Per-ordinal null-backend evidence collected by the bench run.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unsupported_syscalls: BTreeMap<u64, UnsupportedSyscallWitness>,
     /// The firmware, title version and boot overrides the measurement
     /// ran under. Empty in a summary recorded before the store carried
     /// versions.
@@ -85,6 +90,7 @@ impl BootSummary {
             budget,
             host_invariant_breaks,
             witnesses: WitnessSet::new(),
+            unsupported_syscalls: BTreeMap::new(),
             identity: RunIdentity::default(),
         };
         s.validate()?;
@@ -168,6 +174,8 @@ struct BootSummaryShadow {
     #[serde(default)]
     witnesses: WitnessSet,
     #[serde(default)]
+    unsupported_syscalls: BTreeMap<u64, UnsupportedSyscallWitness>,
+    #[serde(default)]
     firmware: Option<FirmwareIdentity>,
     #[serde(default)]
     game: Option<GameIdentity>,
@@ -187,6 +195,7 @@ impl TryFrom<BootSummaryShadow> for BootSummary {
             s.host_invariant_breaks,
         )?;
         summary.witnesses = s.witnesses;
+        summary.unsupported_syscalls = s.unsupported_syscalls;
         summary.identity = RunIdentity {
             firmware: s.firmware,
             game: s.game,

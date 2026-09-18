@@ -14,6 +14,7 @@ use std::str::FromStr;
 use cellgov_compare::boot_history::{self, BootHistoryEntry};
 use cellgov_compare::runner_cellgov::BootOutcome;
 use cellgov_compare::witness_parse::parse_witness_lines;
+use cellgov_compare::witness_parse::UnsupportedSyscallWitness;
 use cellgov_compare::witnesses::{record, BOOT_STARTED_SENTINEL, TITLE_NOT_INSTALLED_SENTINEL};
 use cellgov_compare::{BootSummary, RunIdentity, RUN_IDENTITY_SENTINEL};
 use cellgov_terminal::caps::RenderFlags;
@@ -38,6 +39,7 @@ type Job = DeclaredCell;
 
 struct Measurement {
     witnesses: BTreeMap<String, u64>,
+    unsupported_syscalls: BTreeMap<u64, UnsupportedSyscallWitness>,
     steps: u64,
     budget: Budget,
     outcome: String,
@@ -227,6 +229,7 @@ fn measure(job: &Job) -> Option<Measurement> {
     }
     Some(Measurement {
         witnesses: witnesses.values,
+        unsupported_syscalls: witnesses.unsupported_syscalls,
         steps,
         budget: Budget::new(budget),
         outcome,
@@ -280,6 +283,7 @@ fn read_previous_anchor(job: &Job, path: &Path) -> Option<BootSummary> {
 fn record_one(job: &Job, strict: bool) -> bool {
     let Some(Measurement {
         witnesses,
+        unsupported_syscalls,
         steps,
         budget,
         outcome,
@@ -339,6 +343,7 @@ fn record_one(job: &Job, strict: bool) -> bool {
         ))
     });
     summary.witnesses = record(previous.as_ref().map(|p| &p.witnesses), &witnesses);
+    summary.unsupported_syscalls = unsupported_syscalls;
     summary.identity = identity;
 
     let dir = path

@@ -382,8 +382,15 @@ impl Lv2Host {
         &mut self,
         number: u64,
         args: [u64; 8],
+        tick: cellgov_time::GuestTicks,
     ) -> Lv2Dispatch {
-        *self.obs.unsupported_syscalls.entry(number).or_insert(0) += 1;
+        let witness = self.obs.unsupported_syscalls.entry(number).or_insert(
+            super::super::UnsupportedSyscallWitness {
+                hits: 0,
+                first_hit: tick,
+            },
+        );
+        witness.hits += 1;
         self.log_invariant_break(
             "dispatch.unsupported_stub",
             format_args!(

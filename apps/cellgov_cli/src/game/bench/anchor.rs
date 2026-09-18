@@ -216,6 +216,9 @@ fn anchor_disagreements(
             "witness {name} is emitted but not recorded in the anchor"
         ));
     }
+    if baseline.unsupported_syscalls != observed.unsupported_syscalls {
+        failures.push("unsupported syscall inventory differs from recorded anchor".to_string());
+    }
     failures
 }
 
