@@ -21,6 +21,10 @@ const VERIFY_EXIT_CODES: &str = "Exit codes:
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum FirmwareCommand {
     /// Install system software from a PS3UPDAT.PUP.
+    #[cfg_attr(
+        feature = "decrypt",
+        command(after_help = FIRMWARE_INSTALL_EXIT_CODES)
+    )]
     Install(FirmwareInstallArgs),
     /// Name every installed firmware version.
     List,
@@ -49,6 +53,10 @@ pub(crate) enum FirmwareCommand {
 /// A missing key is the normal state of a version and earns no status.
 const KERNELS_EXIT_CODES: &str = "Exit codes particular to this command:
   41  a stored kernel yielded no ELF for a reason other than a missing key";
+
+#[cfg(feature = "decrypt")]
+const FIRMWARE_INSTALL_EXIT_CODES: &str = "Exit codes particular to this command:
+  42  --kernel-only completed, but the PUP yielded no stored kernel";
 
 /// `cellgov firmware install`
 #[derive(Debug, clap::Args)]

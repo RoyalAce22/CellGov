@@ -7,6 +7,9 @@ use cellgov_terminal::caps::RenderFlags;
 use crate::cli::parse::FirmwareInstallArgs;
 
 #[cfg(feature = "decrypt")]
+const EXIT_KERNEL_OMITTED: i32 = crate::cli::exit_codes::command_specific(42);
+
+#[cfg(feature = "decrypt")]
 use cellgov_install::firmware_install::{FirmwareInstallError, ManifestOmission, PackageSummary};
 #[cfg(feature = "decrypt")]
 use cellgov_install::progress::FIRMWARE_TASK;
@@ -65,6 +68,10 @@ pub(crate) fn install(
             println!("  the kernel already stored there was written over");
         }
         report_core_os(&outcome.core_os);
+        let status = kernel_only_exit_status(&outcome.core_os);
+        if status != 0 {
+            std::process::exit(status);
+        }
         return;
     }
 
@@ -120,6 +127,15 @@ pub(crate) fn install(
     report_omissions(&outcome.omissions);
     report_core_os(&outcome.core_os);
     super::report_rename_retries(outcome.rename_retries);
+}
+
+#[cfg(feature = "decrypt")]
+fn kernel_only_exit_status(core_os: &CoreOsRecord) -> i32 {
+    if core_os.kernel.is_some() {
+        0
+    } else {
+        EXIT_KERNEL_OMITTED
+    }
 }
 
 /// One `-v` line for a package: the counts it actually has.
@@ -218,3 +234,7 @@ fn install_failure_detail(e: &FirmwareInstallError) -> Vec<String> {
 #[cfg(test)]
 #[path = "tests/firmware_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/kernel_only_exit_tests.rs"]
+mod kernel_only_exit_tests;
