@@ -218,6 +218,19 @@ fn is_ascending_integer_list(cell: &str) -> bool {
     true
 }
 
+fn is_ascending_version_list(cell: &str) -> bool {
+    let mut previous: Option<&str> = None;
+    for version in cell.split(',') {
+        if !super::firmware::is_version_key(version)
+            || previous.is_some_and(|prior| prior >= version)
+        {
+            return false;
+        }
+        previous = Some(version);
+    }
+    true
+}
+
 fn check_cell(
     table: &'static str,
     line: usize,
@@ -254,6 +267,7 @@ fn check_cell(
         ColumnKind::Integer => is_integer(cell),
         ColumnKind::Ident => is_ident(cell),
         ColumnKind::IntegerList => is_ascending_integer_list(cell),
+        ColumnKind::VersionList => is_ascending_version_list(cell),
         ColumnKind::Sha256 => is_lower_hex(cell, 64),
         ColumnKind::Hex32 => cell
             .strip_prefix("0x")

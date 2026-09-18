@@ -19,9 +19,10 @@ pub use behavior::{
     WITNESS_CRATES,
 };
 pub use census::{
-    census_file, census_rows, census_tsv, gate_rows, gate_tsv, kernel_rows, kernel_tsv, stub_rows,
-    stub_tsv, subentry_rows, subentry_tsv, CensusClass, CensusRow, DispatchShape, GateRow,
-    GateState, KernelRow, StubRow, SubentryRow,
+    census_file, census_rows, census_tsv, gate_rows, gate_tsv, kernel_rows, kernel_tsv,
+    presence_rows, presence_tsv, stub_rows, stub_tsv, subentry_rows, subentry_tsv, CensusClass,
+    CensusRow, DispatchShape, GateRow, GateState, KernelRow, PresenceError, PresenceRow, StubRow,
+    SubentryRow,
 };
 pub use firmware::{
     check_firmware_rows, firmware_rows, is_version_key, FirmwareRole, FirmwareRow,
@@ -41,9 +42,9 @@ pub use spec::{
     CENSUS, CENSUS_CLASSES, CENSUS_GATE, CENSUS_REGENERATE, CONFLICTS, DISAGREEMENTS,
     DISCOVERY_CONFIDENCE, DISCOVERY_METHODS, DISPATCH_SHAPES, ENTRY_FORMATS, EXCEPTIONS,
     FIDELITY_LABELS, FIRMWARE, FIRMWARE_GATE, FIRMWARE_ROLES, GATE, GATE_STATES, KERNEL, NAME,
-    NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRIMARY_LABELS, PROVENANCE_KINDS, PUP, PUP_GATE,
-    REACH, REGENERATE, ROUTE, ROUTE_LABELS, SCHEMA_VERSION, SELECTOR_SLOTS, STUB, SUBENTRY,
-    SUBENTRY_ATTRIBUTION, SUBENTRY_SOURCES, TABLES, VIEWS,
+    NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PRESENCE, PRIMARY_LABELS, PROVENANCE_KINDS, PUP,
+    PUP_GATE, REACH, REGENERATE, ROUTE, ROUTE_LABELS, SCHEMA_VERSION, SELECTOR_SLOTS, STUB,
+    SUBENTRY, SUBENTRY_ATTRIBUTION, SUBENTRY_SOURCES, TABLES, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};

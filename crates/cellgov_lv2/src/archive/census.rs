@@ -1,6 +1,8 @@
 //! This module defines the archive rows extracted from LV2 kernels.
 
-use super::spec::{CAPABILITY_GATE, CENSUS, KERNEL, STUB, SUBENTRY};
+use std::collections::BTreeMap;
+
+use super::spec::{CAPABILITY_GATE, CENSUS, KERNEL, PRESENCE, STUB, SUBENTRY};
 use super::table::{self, ArchiveError, Table, NONE};
 
 /// Records the extraction class of an ordinal or packet dispatch.
@@ -156,6 +158,73 @@ pub struct CensusRow {
     pub dispatch: DispatchShape,
 }
 
+/// Summarizes every extracted version's classification of one ordinal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PresenceRow {
+    /// Gives the zero-based syscall-table ordinal.
+    pub ordinal: usize,
+    /// Lists extracted versions where the ordinal is implemented.
+    pub implemented_versions: Vec<String>,
+    /// Lists extracted versions where the ordinal is a constant-error stub.
+    pub stub_versions: Vec<String>,
+    /// Lists extracted versions where the ordinal is absent.
+    pub absent_versions: Vec<String>,
+}
+
+/// Why per-version census rows cannot be reduced to ordinal presence.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PresenceError {
+    /// One version does not cover the same ordinal range as the others.
+    #[error("presence reduction: firmware {fw} has {found} rows, expected {expected}")]
+    EntryCount {
+        /// The firmware version key.
+        fw: String,
+        /// The shared row count required by the reduction.
+        expected: usize,
+        /// The row count supplied for this version.
+        found: usize,
+    },
+    /// A row is not at the ordinal its position requires.
+    #[error("presence reduction: firmware {fw} row {index} names ordinal {found}")]
+    Ordinal {
+        /// The firmware version key.
+        fw: String,
+        /// The zero-based row position.
+        index: usize,
+        /// The ordinal recorded by the row.
+        found: usize,
+    },
+    /// A row names a different firmware version than its input group.
+    #[error("presence reduction: firmware {fw} ordinal {ordinal} names firmware {found}")]
+    Firmware {
+        /// The firmware version key used to group the rows.
+        fw: String,
+        /// The row's ordinal.
+        ordinal: usize,
+        /// The firmware version key recorded by the row.
+        found: String,
+    },
+}
+
+impl PresenceRow {
+    fn cells(&self) -> Vec<String> {
+        vec![
+            self.ordinal.to_string(),
+            version_list_cell(&self.implemented_versions),
+            version_list_cell(&self.stub_versions),
+            version_list_cell(&self.absent_versions),
+        ]
+    }
+}
+
+fn version_list_cell(versions: &[String]) -> String {
+    if versions.is_empty() {
+        NONE.to_string()
+    } else {
+        versions.join(",")
+    }
+}
+
 /// Records one packet target extracted below an LV2 ordinal.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubentryRow {
@@ -260,6 +329,64 @@ impl CensusRow {
 /// Uses the archive path convention for one firmware version.
 pub fn census_file(fw: &str) -> String {
     format!("census/fw-{fw}.tsv")
+}
+
+/// Reduces extracted per-version census rows to one presence row per ordinal.
+///
+/// # Errors
+///
+/// Returns [`PresenceError`] when the versions do not cover the same ordinal
+/// range or a row disagrees with its version or ordinal position.
+pub fn presence_rows(
+    census_by_version: &BTreeMap<String, Vec<CensusRow>>,
+) -> Result<Vec<PresenceRow>, PresenceError> {
+    let entry_count = census_by_version.values().map(Vec::len).max().unwrap_or(0);
+    for (fw, rows) in census_by_version {
+        if rows.len() != entry_count {
+            return Err(PresenceError::EntryCount {
+                fw: fw.clone(),
+                expected: entry_count,
+                found: rows.len(),
+            });
+        }
+        for (index, row) in rows.iter().enumerate() {
+            if row.ordinal != index {
+                return Err(PresenceError::Ordinal {
+                    fw: fw.clone(),
+                    index,
+                    found: row.ordinal,
+                });
+            }
+            if row.fw != *fw {
+                return Err(PresenceError::Firmware {
+                    fw: fw.clone(),
+                    ordinal: row.ordinal,
+                    found: row.fw.clone(),
+                });
+            }
+        }
+    }
+    Ok((0..entry_count)
+        .map(|ordinal| {
+            let mut implemented_versions = Vec::new();
+            let mut stub_versions = Vec::new();
+            let mut absent_versions = Vec::new();
+            for (fw, rows) in census_by_version {
+                let row = &rows[ordinal];
+                match row.class {
+                    CensusClass::Implemented => implemented_versions.push(fw.clone()),
+                    CensusClass::Stub => stub_versions.push(fw.clone()),
+                    CensusClass::Absent => absent_versions.push(fw.clone()),
+                }
+            }
+            PresenceRow {
+                ordinal,
+                implemented_versions,
+                stub_versions,
+                absent_versions,
+            }
+        })
+        .collect())
 }
 
 /// Requires `table` to satisfy the [`KERNEL`] spec.
@@ -420,6 +547,17 @@ pub fn gate_tsv(rows: &[GateRow]) -> Result<String, ArchiveError> {
             .then_with(|| parse_usize(&a[1]).cmp(&parse_usize(&b[1])))
     });
     table::render(&CAPABILITY_GATE, &cells)
+}
+
+/// Canonicalizes ordinal presence rows by ordinal.
+///
+/// # Errors
+///
+/// Returns [`ArchiveError`] when a row violates the frozen schema.
+pub fn presence_tsv(rows: &[PresenceRow]) -> Result<String, ArchiveError> {
+    let mut cells: Vec<Vec<String>> = rows.iter().map(PresenceRow::cells).collect();
+    cells.sort_by(|a, b| parse_usize(&a[0]).cmp(&parse_usize(&b[0])));
+    table::render(&PRESENCE, &cells)
 }
 
 fn hex32(value: u32) -> String {

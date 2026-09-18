@@ -7,7 +7,7 @@ pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +70,8 @@ pub enum ColumnKind {
     Ident,
     /// [`Integer`](ColumnKind::Integer) tokens joined by `,`, strictly ascending.
     IntegerList,
+    /// Firmware version keys joined by `,`, strictly ascending.
+    VersionList,
     /// Accepts exactly 64 lowercase hexadecimal digits.
     Sha256,
     /// Accepts `0x` followed by exactly 8 lowercase hexadecimal digits.
@@ -93,6 +95,7 @@ impl ColumnKind {
             ColumnKind::Integer => "INTEGER",
             ColumnKind::Ident
             | ColumnKind::IntegerList
+            | ColumnKind::VersionList
             | ColumnKind::Sha256
             | ColumnKind::Hex32
             | ColumnKind::Hex64
@@ -108,6 +111,9 @@ impl ColumnKind {
             ColumnKind::Ident => "an identifier of letters, digits and _".to_string(),
             ColumnKind::IntegerList => {
                 "an ascending comma-joined list of decimal integers".to_string()
+            }
+            ColumnKind::VersionList => {
+                "an ascending comma-joined list of firmware version keys".to_string()
             }
             ColumnKind::Sha256 => "64 lowercase hexadecimal digits".to_string(),
             ColumnKind::Hex32 => "0x plus 8 lowercase hexadecimal digits".to_string(),
@@ -718,6 +724,41 @@ pub const CAPABILITY_GATE: TableSpec = TableSpec {
     gate: CENSUS_GATE,
 };
 
+/// Defines `presence.tsv`, the generated per-ordinal census reduction.
+pub const PRESENCE: TableSpec = TableSpec {
+    name: "presence",
+    owner: OwnerClass::Generated,
+    columns: &[
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "implemented_versions",
+            kind: ColumnKind::VersionList,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "stub_versions",
+            kind: ColumnKind::VersionList,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "absent_versions",
+            kind: ColumnKind::VersionList,
+            nullable: true,
+            references: None,
+        },
+    ],
+    key: &["ordinal"],
+    regenerate: Some(REGENERATE),
+    gate: GATE,
+};
+
 /// Defines each `census/fw-<version>.tsv` file.
 pub const CENSUS: TableSpec = TableSpec {
     name: "census",
@@ -987,6 +1028,7 @@ pub const TABLES: &[TableSpec] = &[
     STUB,
     SUBENTRY,
     CAPABILITY_GATE,
+    PRESENCE,
     SUBENTRY_ATTRIBUTION,
     CALLER,
     CALLER_UNRESOLVED,

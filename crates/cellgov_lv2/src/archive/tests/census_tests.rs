@@ -1,5 +1,7 @@
 use super::*;
-use crate::archive::{parse, CAPABILITY_GATE, CENSUS, KERNEL, STUB, SUBENTRY};
+use std::collections::BTreeMap;
+
+use crate::archive::{parse, CAPABILITY_GATE, CENSUS, KERNEL, PRESENCE, STUB, SUBENTRY};
 
 #[test]
 fn kernel_stub_and_census_rows_round_trip_byte_identically() {
@@ -171,4 +173,161 @@ fn gate_rows_round_trip_all_three_states() {
         gate_rows(&parse(&CAPABILITY_GATE, &text).expect("parse gates")),
         rows
     );
+}
+
+#[test]
+fn presence_reduction_keeps_an_explicit_class_for_each_version() {
+    let by_version = BTreeMap::from([
+        (
+            "3.55".to_string(),
+            vec![
+                CensusRow {
+                    fw: "3.55".to_string(),
+                    ordinal: 0,
+                    class: CensusClass::Implemented,
+                    target: Some(0x1000),
+                    dispatch: DispatchShape::Flat,
+                },
+                CensusRow {
+                    fw: "3.55".to_string(),
+                    ordinal: 1,
+                    class: CensusClass::Stub,
+                    target: Some(0x2000),
+                    dispatch: DispatchShape::Flat,
+                },
+            ],
+        ),
+        (
+            "3.56".to_string(),
+            vec![
+                CensusRow {
+                    fw: "3.56".to_string(),
+                    ordinal: 0,
+                    class: CensusClass::Absent,
+                    target: None,
+                    dispatch: DispatchShape::Flat,
+                },
+                CensusRow {
+                    fw: "3.56".to_string(),
+                    ordinal: 1,
+                    class: CensusClass::Stub,
+                    target: Some(0x2000),
+                    dispatch: DispatchShape::Flat,
+                },
+            ],
+        ),
+    ]);
+    let rows = presence_rows(&by_version).expect("reduce presence");
+    assert_eq!(
+        rows,
+        [
+            PresenceRow {
+                ordinal: 0,
+                implemented_versions: vec!["3.55".to_string()],
+                stub_versions: Vec::new(),
+                absent_versions: vec!["3.56".to_string()],
+            },
+            PresenceRow {
+                ordinal: 1,
+                implemented_versions: Vec::new(),
+                stub_versions: vec!["3.55".to_string(), "3.56".to_string()],
+                absent_versions: Vec::new(),
+            },
+        ]
+    );
+    let text = presence_tsv(&rows).expect("render presence");
+    assert_eq!(
+        text,
+        concat!(
+            "ordinal\timplemented_versions\tstub_versions\tabsent_versions\n",
+            "0\t3.55\tnone\t3.56\n",
+            "1\tnone\t3.55,3.56\tnone\n"
+        )
+    );
+    assert_eq!(
+        parse(&PRESENCE, &text).expect("parse presence").rows.len(),
+        2
+    );
+}
+
+#[test]
+fn presence_reduction_refuses_versions_with_different_ordinal_ranges() {
+    let row = |fw: &str, ordinal| CensusRow {
+        fw: fw.to_string(),
+        ordinal,
+        class: CensusClass::Absent,
+        target: None,
+        dispatch: DispatchShape::Flat,
+    };
+    let by_version = BTreeMap::from([
+        ("3.55".to_string(), vec![row("3.55", 0)]),
+        ("3.56".to_string(), vec![row("3.56", 0), row("3.56", 1)]),
+    ]);
+    assert_eq!(
+        presence_rows(&by_version),
+        Err(PresenceError::EntryCount {
+            fw: "3.55".to_string(),
+            expected: 2,
+            found: 1,
+        })
+    );
+}
+
+#[test]
+fn presence_reduction_refuses_a_row_at_the_wrong_ordinal() {
+    let by_version = BTreeMap::from([(
+        "3.55".to_string(),
+        vec![CensusRow {
+            fw: "3.55".to_string(),
+            ordinal: 1,
+            class: CensusClass::Absent,
+            target: None,
+            dispatch: DispatchShape::Flat,
+        }],
+    )]);
+    assert_eq!(
+        presence_rows(&by_version),
+        Err(PresenceError::Ordinal {
+            fw: "3.55".to_string(),
+            index: 0,
+            found: 1,
+        })
+    );
+}
+
+#[test]
+fn presence_reduction_refuses_a_row_from_another_version() {
+    let by_version = BTreeMap::from([(
+        "3.55".to_string(),
+        vec![CensusRow {
+            fw: "3.56".to_string(),
+            ordinal: 0,
+            class: CensusClass::Absent,
+            target: None,
+            dispatch: DispatchShape::Flat,
+        }],
+    )]);
+    assert_eq!(
+        presence_rows(&by_version),
+        Err(PresenceError::Firmware {
+            fw: "3.55".to_string(),
+            ordinal: 0,
+            found: "3.56".to_string(),
+        })
+    );
+}
+
+#[test]
+fn presence_parser_refuses_a_noncanonical_version_key() {
+    let text = concat!(
+        "ordinal\timplemented_versions\tstub_versions\tabsent_versions\n",
+        "0\t123.45\tnone\tnone\n"
+    );
+    assert!(matches!(
+        parse(&PRESENCE, text),
+        Err(ArchiveError::BadCell {
+            column: "implemented_versions",
+            ..
+        })
+    ));
 }

@@ -151,6 +151,23 @@ fn census_files(kernels: &[KernelRow], pups: &[PupRow]) -> Vec<String> {
         .collect()
 }
 
+fn generated_presence(census_files: &[String]) -> Vec<archive::PresenceRow> {
+    let by_version = census_files
+        .iter()
+        .map(|file| {
+            let fw = file
+                .strip_prefix("census/fw-")
+                .and_then(|value| value.strip_suffix(".tsv"))
+                .expect("census file follows the archive path convention");
+            let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
+                .unwrap_or_else(|error| panic!("{file}: {error}"));
+            (fw.to_string(), archive::census_rows(&table))
+        })
+        .collect();
+    archive::presence_rows(&by_version)
+        .unwrap_or_else(|error| panic!("reduce census presence: {error}"))
+}
+
 fn slot(ordinal: u64, packet: Option<&str>) -> String {
     match packet {
         Some(packet) => format!("{ordinal} `{packet}`"),
@@ -220,6 +237,7 @@ struct ReadmeData<'a> {
     stubs: &'a [StubRow],
     subentries: &'a [SubentryRow],
     gates: &'a [GateRow],
+    presence_rows: usize,
     census_files: &'a [String],
 }
 
@@ -333,6 +351,7 @@ fn readme(data: ReadmeData<'_>) -> String {
             ("stub_rows", data.stubs.len().to_string()),
             ("subentry_rows", data.subentries.len().to_string()),
             ("gate_rows", data.gates.len().to_string()),
+            ("presence_rows", data.presence_rows.to_string()),
             ("census_files", data.census_files.len().to_string()),
             ("census_gate", CENSUS_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
@@ -362,6 +381,7 @@ fn rendered() -> BTreeMap<String, String> {
     let subentries = committed_subentries();
     let gates = committed_gates();
     let census_files = census_files(&kernels, &pups);
+    let presence = generated_presence(&census_files);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
     let mut files = BTreeMap::new();
@@ -377,6 +397,7 @@ fn rendered() -> BTreeMap<String, String> {
             stubs: &stubs,
             subentries: &subentries,
             gates: &gates,
+            presence_rows: presence.len(),
             census_files: &census_files,
         }),
     );
@@ -393,6 +414,10 @@ fn rendered() -> BTreeMap<String, String> {
     files.insert(
         "conflicts.tsv".to_string(),
         archive::conflicts_tsv(&conflicts).unwrap_or_else(|e| panic!("conflicts.tsv: {e}")),
+    );
+    files.insert(
+        archive::PRESENCE.file(),
+        archive::presence_tsv(&presence).unwrap_or_else(|error| panic!("presence.tsv: {error}")),
     );
     let names: Vec<&String> = files.keys().collect();
     let generated: Vec<String> = archive::manifest(&census_files)

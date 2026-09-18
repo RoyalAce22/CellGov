@@ -114,6 +114,10 @@ chain produces no guessed packet rows; its census row reads
 row records a recognized permission record with no capability requirement;
 `not_analysed` means the bounded recognizer made no claim.
 
+`presence.tsv` has {{presence_rows}} ordinal rows. Each row lists every
+extracted firmware version under exactly one of `implemented`, `stub`, or
+`absent`; a missing PUP is not represented as an absent version.
+
 `subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
 packet-set disagreement remains visible in the two tables and neither source

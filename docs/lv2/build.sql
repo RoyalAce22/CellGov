@@ -63,6 +63,13 @@ SELECT "pup_sha256", CAST("ordinal" AS INTEGER), "state", NULLIF("reads", 'none'
 FROM staging_gate;
 DROP TABLE staging_gate;
 
+CREATE TEMP TABLE staging_presence ("ordinal" TEXT, "implemented_versions" TEXT, "stub_versions" TEXT, "absent_versions" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 presence.tsv staging_presence
+INSERT INTO presence ("ordinal", "implemented_versions", "stub_versions", "absent_versions")
+SELECT CAST("ordinal" AS INTEGER), NULLIF("implemented_versions", 'none'), NULLIF("stub_versions", 'none'), NULLIF("absent_versions", 'none')
+FROM staging_presence;
+DROP TABLE staging_presence;
+
 CREATE TEMP TABLE staging_subentry_attribution ("ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "source" TEXT, "ref" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry_attribution.tsv staging_subentry_attribution
 INSERT INTO subentry_attribution ("ordinal", "selector_slot", "packet", "source", "ref")

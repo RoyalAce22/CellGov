@@ -13,7 +13,7 @@ would add its full size to public history on every change.
 Nothing reads these tables at dispatch. They describe the code; the
 code does not consult them.
 
-Archive schema version: **4**. `schema.sql` records the
+Archive schema version: **5**. `schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -130,6 +130,7 @@ the directory and this table disagree.
 | `gate.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `kernel.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `name.tsv` | attributed | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
+| `presence.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
 | `reach.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
 | `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
@@ -231,6 +232,10 @@ chain produces no guessed packet rows; its census row reads
 `ctrl_flags1` read and the Cell errno its denied path returns. An `ungated`
 row records a recognized permission record with no capability requirement;
 `not_analysed` means the bounded recognizer made no claim.
+
+`presence.tsv` has 1024 ordinal rows. Each row lists every
+extracted firmware version under exactly one of `implemented`, `stub`, or
+`absent`; a missing PUP is not represented as an absent version.
 
 `subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A

@@ -2,6 +2,7 @@
 //! layout over them, and each subsystem's flag bits, struct layouts
 //! and object ids.
 
+pub mod census;
 pub mod config;
 pub mod errno;
 pub mod fs;
