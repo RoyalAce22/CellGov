@@ -3,7 +3,8 @@
 
 set -euo pipefail
 
-corpus_features='cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner'
+corpus_features="${CORPUS_FEATURES:-$(sed -n '/^[[:space:]]*CORPUS_FEATURES: >-/{n;p;}' .github/workflows/ci.yml | tr -d '[:space:]')}"
+test -n "$corpus_features"
 
 lint() {
     export RUSTFLAGS='-D warnings'
