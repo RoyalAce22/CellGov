@@ -4,6 +4,7 @@ mod artifacts;
 mod options;
 mod report;
 mod stages;
+mod unmodelled;
 
 pub use options::{RunArtifacts, RunExecution, RunReporting};
 pub(crate) use stages::configure_rsx_from_manifest;

@@ -277,6 +277,7 @@ fn report_outcome(rt: &mut Runtime, loop_out: &LoopOutput, sink: &dyn BootSink) 
     report_insn_coverage(&loop_out.insn_coverage, sink);
     report_top_pcs(rt, &loop_out.pc_hits, sink);
     report_shadow_stats(rt, sink);
+    super::unmodelled::print(rt);
     counters
 }
 
