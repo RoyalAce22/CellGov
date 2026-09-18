@@ -109,12 +109,14 @@ fn every_state_the_run_produces_is_a_tallied_one() {
             elf_sha256: Sha256([0; 32]),
         },
         KernelCoverage::NoKey {
+            version: None,
             missing: String::new(),
         },
         KernelCoverage::Unreadable {
             reason: String::new(),
         },
         KernelCoverage::Failed {
+            version: None,
             reason: String::new(),
         },
     ];
@@ -124,5 +126,33 @@ fn every_state_the_run_produces_is_a_tallied_one() {
     assert!(STATES.contains(&NOT_UNPACKED));
     for state in NOT_DECRYPTED_STATES {
         assert!(STATES.contains(&state));
+    }
+}
+
+#[test]
+fn readable_header_versions_reach_no_key_and_failed_rows() {
+    use cellgov_install::kernel_decrypt::KernelCoverage;
+    use cellgov_ps3_abi::format::sce::self_version;
+
+    for (state, coverage) in [
+        (
+            "no_key",
+            KernelCoverage::NoKey {
+                version: Some(self_version(3, 0x60)),
+                missing: "missing key".to_string(),
+            },
+        ),
+        (
+            "failed",
+            KernelCoverage::Failed {
+                version: Some(self_version(3, 0x60)),
+                reason: "refused".to_string(),
+            },
+        ),
+    ] {
+        let mut entry = row("3.60", "not_unpacked", None);
+        apply_coverage(&mut entry, coverage);
+        assert_eq!(entry.state, state);
+        assert_eq!(entry.kernel_version.as_deref(), Some("3.60"));
     }
 }

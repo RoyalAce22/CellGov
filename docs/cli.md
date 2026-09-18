@@ -360,7 +360,8 @@ comparison records rather than a published API: they carry no
     {
       "version": "1.50",
       "state": "no_key",
-      "detail": "an LV2 keyset for firmware 1.50 (the vault holds none)"
+      "detail": "an LV2 keyset for firmware 1.50 (the vault holds none)",
+      "kernel_version": "1.50"
     },
     {
       "version": "4.93",

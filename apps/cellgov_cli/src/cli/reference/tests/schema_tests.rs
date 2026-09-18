@@ -140,6 +140,25 @@ fn the_pup_corpus_sample_does_not_reuse_one_hash_for_distinct_states() {
 }
 
 #[test]
+fn the_kernel_coverage_sample_structures_a_no_key_header_version() {
+    let rendered = schema::render();
+    let block = rendered
+        .split("`firmware kernels`:\n\n```json\n")
+        .nth(1)
+        .and_then(|rest| rest.split_once("\n```"))
+        .expect("the firmware kernels sample is fenced JSON")
+        .0;
+    let doc: serde_json::Value = serde_json::from_str(block).expect("the sample is JSON");
+    let no_key = doc["entries"]
+        .as_array()
+        .expect("entries is an array")
+        .iter()
+        .find(|row| row["state"] == "no_key")
+        .expect("the sample includes a no-key row");
+    assert_eq!(no_key["kernel_version"], "1.50");
+}
+
+#[test]
 fn rendering_is_byte_identical_across_two_invocations() {
     assert_eq!(schema::render(), schema::render());
 }

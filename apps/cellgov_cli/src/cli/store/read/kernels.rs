@@ -47,7 +47,7 @@ pub(crate) fn firmware_kernels(_root: &Path, _format: OutputFormat) {
 #[cfg(feature = "decrypt")]
 pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
     use cellgov_install::kernel_decrypt::{decrypt_stored_kernel, KernelCoverage};
-    use cellgov_install::keys::{version_label, KeyVault, ENV_KEYS};
+    use cellgov_install::keys::{KeyVault, ENV_KEYS};
 
     let view = view(root);
     let location = KeyVault::locate_from(std::env::var_os(ENV_KEYS), root)
@@ -89,22 +89,7 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
             };
             let coverage =
                 KernelCoverage::of(decrypt_stored_kernel(&entry.entry_dir, kernel, &keys));
-            doc.state = coverage.label().to_string();
-            match coverage {
-                KernelCoverage::Decrypted {
-                    version,
-                    elf_len,
-                    elf_sha256,
-                } => {
-                    doc.kernel_version = Some(version_label(version));
-                    doc.elf_bytes = Some(elf_len);
-                    doc.elf_sha256 = Some(elf_sha256.to_hex());
-                }
-                KernelCoverage::NoKey { missing } => doc.detail = Some(missing),
-                KernelCoverage::Unreadable { reason } | KernelCoverage::Failed { reason } => {
-                    doc.detail = Some(reason);
-                }
-            }
+            apply_coverage(&mut doc, coverage);
             doc
         })
         .collect();
@@ -117,6 +102,37 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
     };
     emit(format, &doc, || print!("{}", render(&doc)));
     std::process::exit(exit_status(&doc));
+}
+
+#[cfg(feature = "decrypt")]
+fn apply_coverage(
+    doc: &mut KernelCoverageEntryDoc,
+    coverage: cellgov_install::kernel_decrypt::KernelCoverage,
+) {
+    use cellgov_install::kernel_decrypt::KernelCoverage;
+    use cellgov_install::keys::version_label;
+
+    doc.state = coverage.label().to_string();
+    match coverage {
+        KernelCoverage::Decrypted {
+            version,
+            elf_len,
+            elf_sha256,
+        } => {
+            doc.kernel_version = Some(version_label(version));
+            doc.elf_bytes = Some(elf_len);
+            doc.elf_sha256 = Some(elf_sha256.to_hex());
+        }
+        KernelCoverage::NoKey { version, missing } => {
+            doc.kernel_version = version.map(version_label);
+            doc.detail = Some(missing);
+        }
+        KernelCoverage::Unreadable { reason } => doc.detail = Some(reason),
+        KernelCoverage::Failed { version, reason } => {
+            doc.kernel_version = version.map(version_label);
+            doc.detail = Some(reason);
+        }
+    }
 }
 
 /// 0 unless a row is in one of [`NOT_DECRYPTED_STATES`].

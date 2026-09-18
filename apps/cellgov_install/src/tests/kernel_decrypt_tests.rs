@@ -80,6 +80,7 @@ fn a_vault_with_no_lv2_keyset_is_a_missing_key_naming_the_firmware() {
     assert_eq!(
         coverage,
         KernelCoverage::NoKey {
+            version: Some(V3_60),
             missing: "an LV2 keyset for firmware 3.60 (the vault holds none)".to_string()
         }
     );
@@ -98,6 +99,7 @@ fn lv2_keysets_that_open_nothing_are_a_missing_key_never_a_failure() {
     assert_eq!(
         one,
         KernelCoverage::NoKey {
+            version: Some(V3_60),
             missing: "a keyset for firmware 3.60 (the one candidate in the vault does not open it)"
                 .to_string()
         }
@@ -111,6 +113,7 @@ fn lv2_keysets_that_open_nothing_are_a_missing_key_never_a_failure() {
     assert_eq!(
         two,
         KernelCoverage::NoKey {
+            version: Some(V3_60),
             missing: "one of the 2 LV2 keysets for firmware 3.60 (none in the vault opens it)"
                 .to_string()
         }
@@ -185,7 +188,13 @@ fn a_container_that_never_reaches_the_envelope_is_a_failure() {
     let coverage = KernelCoverage::of(decrypt_stored_kernel(&entry, &record(), &synthetic_vault()));
     assert_eq!(coverage.label(), "failed");
     assert!(
-        matches!(&coverage, KernelCoverage::Failed { reason } if reason.contains("debug/fself")),
+        matches!(
+            &coverage,
+            KernelCoverage::Failed {
+                version: Some(version),
+                reason,
+            } if *version == V3_55 && reason.contains("debug/fself")
+        ),
         "{coverage:?}"
     );
 }

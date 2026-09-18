@@ -106,6 +106,8 @@ pub enum KernelCoverage {
     },
     /// The vault holds no keyset that opens it.
     NoKey {
+        /// The kernel's version word, when its header was readable.
+        version: Option<u64>,
         /// The key the vault lacks.
         missing: String,
     },
@@ -117,6 +119,8 @@ pub enum KernelCoverage {
     /// The vault opened the envelope, or the container never reached
     /// it, and no ELF came out.
     Failed {
+        /// The kernel's version word, when its header was readable.
+        version: Option<u64>,
         /// The refusal.
         reason: String,
     },
@@ -137,10 +141,12 @@ impl KernelCoverage {
             },
             Err(KernelDecryptError::Decrypt { version, source }) if is_key_gap(&source) => {
                 KernelCoverage::NoKey {
+                    version,
                     missing: missing_key(version, &source),
                 }
             }
-            Err(KernelDecryptError::Decrypt { source, .. }) => KernelCoverage::Failed {
+            Err(KernelDecryptError::Decrypt { version, source }) => KernelCoverage::Failed {
+                version,
                 reason: source.to_string(),
             },
         }

@@ -431,9 +431,7 @@ pub(crate) struct KernelCoverageEntryDoc {
     /// install stored no kernel, or the refusal.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
-    /// The firmware version the kernel's own header names, for a
-    /// decrypted kernel; a `no_key` row names the version only inside
-    /// `detail`.
+    /// The firmware version the kernel's own readable header names.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub kernel_version: Option<String>,
     /// Plaintext ELF length, for a decrypted kernel.

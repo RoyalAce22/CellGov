@@ -208,7 +208,7 @@ fn kernel_coverage_doc() -> KernelCoverageDoc {
                 version: "1.50".to_string(),
                 state: "no_key".to_string(),
                 detail: Some("an LV2 keyset for firmware 1.50 (the vault holds none)".to_string()),
-                kernel_version: None,
+                kernel_version: Some("1.50".to_string()),
                 elf_bytes: None,
                 elf_sha256: None,
             },
