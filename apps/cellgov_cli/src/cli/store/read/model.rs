@@ -424,8 +424,8 @@ pub(crate) struct PupCorpusVerifyDoc {
 pub(crate) struct KernelCoverageEntryDoc {
     /// The version key the entry is filed under.
     pub version: String,
-    /// `decrypted`, `no_key`, `not_unpacked`, `unreadable`, or
-    /// `failed`.
+    /// `decrypted`, `no_key`, `not_installed`, `not_unpacked`,
+    /// `unreadable`, or `failed`.
     pub state: String,
     /// What the state rests on: the key the vault lacks, why the
     /// install stored no kernel, or the refusal.
@@ -451,7 +451,8 @@ pub(crate) struct KernelCoverageDoc {
     pub store: String,
     /// The vault the run decrypted with.
     pub vault: String,
-    /// One row per installed firmware version, ascending.
+    /// One row per archive firmware version, in archive order. Installed
+    /// versions absent from the archive follow in version order.
     pub entries: Vec<KernelCoverageEntryDoc>,
 }
 

@@ -213,6 +213,22 @@ fn kernel_coverage_doc() -> KernelCoverageDoc {
                 elf_sha256: None,
             },
             KernelCoverageEntryDoc {
+                version: "2.76".to_string(),
+                state: "not_unpacked".to_string(),
+                detail: Some("update_files carries no CORE_OS_PACKAGE.pkg".to_string()),
+                kernel_version: None,
+                elf_bytes: None,
+                elf_sha256: None,
+            },
+            KernelCoverageEntryDoc {
+                version: "3.60".to_string(),
+                state: "not_installed".to_string(),
+                detail: None,
+                kernel_version: None,
+                elf_bytes: None,
+                elf_sha256: None,
+            },
+            KernelCoverageEntryDoc {
                 version: SAMPLE_FIRMWARE_VERSION.to_string(),
                 state: "decrypted".to_string(),
                 detail: None,

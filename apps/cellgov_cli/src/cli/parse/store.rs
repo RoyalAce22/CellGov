@@ -48,8 +48,8 @@ pub(crate) enum FirmwareCommand {
         #[arg(value_name = "DIR")]
         corpus: PathBuf,
     },
-    /// Decrypt every stored LV2 kernel and report which the vault
-    /// opens, which it lacks a key for, and which are not unpacked.
+    /// Refresh the operator-local LV2 kernel coverage report under
+    /// `<store>/.cellgov/firmware-kernel-coverage.json`.
     #[command(after_help = KERNELS_EXIT_CODES)]
     Kernels,
     /// Remove an installed firmware version.

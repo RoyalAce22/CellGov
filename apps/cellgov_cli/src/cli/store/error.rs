@@ -51,6 +51,26 @@ pub(crate) enum StoreCliError {
         #[source]
         source: std::io::Error,
     },
+    #[cfg(feature = "decrypt")]
+    #[error("serialize firmware kernel coverage: {source}")]
+    KernelCoverageSerializeFailed {
+        #[source]
+        source: serde_json::Error,
+    },
+    #[cfg(feature = "decrypt")]
+    #[error("create {}: {source}", path.display())]
+    KernelCoverageDirCreateFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[cfg(feature = "decrypt")]
+    #[error("write {}: {source}", path.display())]
+    KernelCoverageWriteFailed {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
     #[cfg(not(feature = "decrypt"))]
     #[error("`{command}` decrypts, and this cellgov was built without the `decrypt` cargo feature; rebuild with `cargo build -p cellgov_cli --features decrypt`")]
     DecryptFeatureDisabled { command: String },

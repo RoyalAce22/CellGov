@@ -1,9 +1,10 @@
 //! The store's read surface: `status`, and the `list` / `show` /
 //! `verify` verbs under `firmware` and `title`.
 //!
-//! Every command here reads and reports; none writes. Results go to
-//! stdout -- one JSON document under `--format json`, aligned columns
-//! otherwise. Warnings and hints go to stderr.
+//! Results go to stdout -- one JSON document under `--format json`,
+//! aligned columns otherwise. `firmware kernels` also refreshes its
+//! operator-local coverage report; no command here changes an installed
+//! artefact. Warnings and hints go to stderr.
 
 mod collect;
 mod corpus;

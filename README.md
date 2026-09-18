@@ -121,9 +121,10 @@ import reads these forms:
 A SELF keyset is one of three classes: `app` and `npdrm` keysets are
 labeled by key revision, and `lv2` keysets, which open the stored
 LV2 kernels, by the firmware versions they cover. `firmware kernels`
-decrypts every stored kernel and reports, per installed version,
-whether the vault opened it, which key it lacks, or why the install
-stored no kernel.
+refreshes `vfs/.cellgov/firmware-kernel-coverage.json` with one row per
+archive firmware version. Each row distinguishes not installed, kernel
+not unpacked with its reason, missing key with its name, and decrypted;
+read and decrypt failures remain separate states.
 
 Reading the loose forms is best effort; `keys show` lists whatever
 the import could not place, and `keys.toml` is the exact form to fall

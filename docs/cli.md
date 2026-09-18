@@ -364,6 +364,15 @@ comparison records rather than a published API: they carry no
       "kernel_version": "1.50"
     },
     {
+      "version": "2.76",
+      "state": "not_unpacked",
+      "detail": "update_files carries no CORE_OS_PACKAGE.pkg"
+    },
+    {
+      "version": "3.60",
+      "state": "not_installed"
+    },
+    {
       "version": "4.93",
       "state": "decrypted",
       "kernel_version": "4.93",
@@ -509,7 +518,7 @@ Exit codes:
 
 #### `cellgov firmware kernels`
 
-Decrypt every stored LV2 kernel and report which the vault opens, which it lacks a key for, and which are not unpacked.
+Refresh the operator-local LV2 kernel coverage report under `<store>/.cellgov/firmware-kernel-coverage.json`.
 
 ```console
 $ cellgov firmware kernels

@@ -140,7 +140,7 @@ fn the_pup_corpus_sample_does_not_reuse_one_hash_for_distinct_states() {
 }
 
 #[test]
-fn the_kernel_coverage_sample_structures_a_no_key_header_version() {
+fn the_kernel_coverage_sample_structures_non_decrypted_states() {
     let rendered = schema::render();
     let block = rendered
         .split("`firmware kernels`:\n\n```json\n")
@@ -156,6 +156,16 @@ fn the_kernel_coverage_sample_structures_a_no_key_header_version() {
         .find(|row| row["state"] == "no_key")
         .expect("the sample includes a no-key row");
     assert_eq!(no_key["kernel_version"], "1.50");
+    let entries = doc["entries"].as_array().expect("entries is an array");
+    let not_unpacked = entries
+        .iter()
+        .find(|row| row["state"] == "not_unpacked")
+        .expect("the sample includes a not-unpacked row");
+    assert_eq!(
+        not_unpacked["detail"],
+        "update_files carries no CORE_OS_PACKAGE.pkg"
+    );
+    assert!(entries.iter().any(|row| row["state"] == "not_installed"));
 }
 
 #[test]

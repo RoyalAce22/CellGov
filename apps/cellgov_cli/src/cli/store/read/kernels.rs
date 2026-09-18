@@ -6,7 +6,11 @@
 //! The table distinguishes a missing key from a failed decrypt and
 //! from an entry that never unpacked its kernel.
 
+#[cfg(feature = "decrypt")]
+use std::collections::BTreeMap;
 use std::path::Path;
+#[cfg(feature = "decrypt")]
+use std::path::PathBuf;
 
 use crate::cli::parse::OutputFormat;
 
@@ -25,13 +29,32 @@ const EXIT_KERNEL_NOT_DECRYPTED: i32 = crate::cli::exit_codes::command_specific(
 #[cfg(feature = "decrypt")]
 const NOT_UNPACKED: &str = "not_unpacked";
 
+#[cfg(feature = "decrypt")]
+const NOT_INSTALLED: &str = "not_installed";
+
 /// The states a row takes, in the order the summary line lists them.
 #[cfg(feature = "decrypt")]
-const STATES: [&str; 5] = ["decrypted", "no_key", NOT_UNPACKED, "unreadable", "failed"];
+const STATES: [&str; 6] = [
+    "decrypted",
+    "no_key",
+    NOT_INSTALLED,
+    NOT_UNPACKED,
+    "unreadable",
+    "failed",
+];
 
 /// The states that make the run exit [`EXIT_KERNEL_NOT_DECRYPTED`].
 #[cfg(feature = "decrypt")]
 const NOT_DECRYPTED_STATES: [&str; 2] = ["unreadable", "failed"];
+
+#[cfg(feature = "decrypt")]
+const REPORT_REL: &str = ".cellgov/firmware-kernel-coverage.json";
+
+#[cfg(feature = "decrypt")]
+const FIRMWARE_TSV: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../docs/lv2/firmware.tsv"
+));
 
 #[cfg(not(feature = "decrypt"))]
 pub(crate) fn firmware_kernels(_root: &Path, _format: OutputFormat) {
@@ -55,7 +78,7 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
     let keys = KeyVault::load_from_path(&location)
         .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
 
-    let entries = view
+    let installed = view
         .inventory
         .firmware_entries()
         .map(|entry| {
@@ -93,6 +116,7 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
             doc
         })
         .collect();
+    let entries = complete_entries(&archive_versions(), installed);
 
     let doc = KernelCoverageDoc {
         format_version: view.format_version(),
@@ -100,8 +124,77 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
         vault: location.display().to_string(),
         entries,
     };
-    emit(format, &doc, || print!("{}", render(&doc)));
+    let report = write_report(root, &doc).unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+    emit(format, &doc, || print!("{}", render(&doc, &report)));
     std::process::exit(exit_status(&doc));
+}
+
+#[cfg(feature = "decrypt")]
+fn archive_versions() -> Vec<String> {
+    use cellgov_lv2::archive::{self, FIRMWARE};
+
+    let table = archive::parse(&FIRMWARE, FIRMWARE_TSV)
+        .unwrap_or_else(|e| crate::cli::exit::die(&format!("compiled firmware.tsv: {e}")));
+    let rows = archive::firmware_rows(&table);
+    archive::check_firmware_rows(&rows)
+        .unwrap_or_else(|e| crate::cli::exit::die(&format!("compiled firmware.tsv: {e}")));
+    rows.into_iter().map(|row| row.fw).collect()
+}
+
+#[cfg(feature = "decrypt")]
+fn complete_entries(
+    archive_versions: &[String],
+    installed: Vec<KernelCoverageEntryDoc>,
+) -> Vec<KernelCoverageEntryDoc> {
+    let mut installed: BTreeMap<String, KernelCoverageEntryDoc> = installed
+        .into_iter()
+        .map(|entry| (entry.version.clone(), entry))
+        .collect();
+    let mut entries: Vec<KernelCoverageEntryDoc> = archive_versions
+        .iter()
+        .map(|version| {
+            installed
+                .remove(version)
+                .unwrap_or_else(|| KernelCoverageEntryDoc {
+                    version: version.clone(),
+                    state: NOT_INSTALLED.to_string(),
+                    detail: None,
+                    kernel_version: None,
+                    elf_bytes: None,
+                    elf_sha256: None,
+                })
+        })
+        .collect();
+    entries.extend(installed.into_values());
+    entries
+}
+
+#[cfg(feature = "decrypt")]
+fn report_path(root: &Path) -> PathBuf {
+    REPORT_REL
+        .split('/')
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
+
+#[cfg(feature = "decrypt")]
+fn write_report(
+    root: &Path,
+    doc: &KernelCoverageDoc,
+) -> Result<PathBuf, crate::cli::store::StoreCliError> {
+    use crate::cli::store::StoreCliError;
+
+    let path = report_path(root);
+    let dir = root.join(".cellgov");
+    std::fs::create_dir_all(&dir)
+        .map_err(|source| StoreCliError::KernelCoverageDirCreateFailed { path: dir, source })?;
+    let mut json = serde_json::to_vec_pretty(doc)
+        .map_err(|source| StoreCliError::KernelCoverageSerializeFailed { source })?;
+    json.push(b'\n');
+    std::fs::write(&path, json).map_err(|source| StoreCliError::KernelCoverageWriteFailed {
+        path: path.clone(),
+        source,
+    })?;
+    Ok(path)
 }
 
 #[cfg(feature = "decrypt")]
@@ -146,12 +239,10 @@ fn exit_status(doc: &KernelCoverageDoc) -> i32 {
 }
 
 #[cfg(feature = "decrypt")]
-fn render(doc: &KernelCoverageDoc) -> String {
-    if doc.entries.is_empty() {
-        return format!("no firmware installed under {}\n", doc.store);
-    }
+fn render(doc: &KernelCoverageDoc, report: &Path) -> String {
     let mut out = format!(
-        "key vault: {}\n  VERSION  KERNEL        DETAIL\n",
+        "coverage report: {}\nkey vault: {}\n  VERSION  KERNEL        DETAIL\n",
+        report.display(),
         doc.vault
     );
     for entry in &doc.entries {
@@ -174,11 +265,7 @@ fn render(doc: &KernelCoverageDoc) -> String {
         .iter()
         .map(|state| format!("{} {}", doc.count(state), state.replace('_', " ")))
         .collect();
-    out.push_str(&format!(
-        "{} version(s): {}\n",
-        doc.entries.len(),
-        tally.join(", ")
-    ));
+    out.push_str(&format!("states: {}\n", tally.join(", ")));
     out
 }
 
