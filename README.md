@@ -32,6 +32,8 @@ byte, what a PS3 game would produce under any legal schedule.
   runtime works, one document per subsystem.
 - [docs/cli.md](docs/cli.md) -- generated command reference: every
   command, its examples, its flags, and its exit codes.
+- [docs/firmware_corpus.md](docs/firmware_corpus.md) -- operator runbook
+  for recording and verifying an out-of-repository PUP corpus.
 - [docs/titles.md](docs/titles.md) -- generated compatibility
   matrix: which titles boot, to which checkpoint, and whether they
   converge with RPCS3. This is where current status lives.
