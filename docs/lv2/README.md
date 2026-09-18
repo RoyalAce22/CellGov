@@ -25,6 +25,7 @@ the directory and this table disagree.
 | `behavior.tsv` | curated | written by hand | `behavior_rows_cover_the_handled_surface` |
 | `build.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `conflicts.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
 | `name.tsv` | attributed | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
 | `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
@@ -43,6 +44,36 @@ Every table names exactly one.
 Anything specific to one operator or checkout, such as key-vault
 coverage or data derived from another runner, is a local overlay
 under `vfs/.cellgov/`, never a file here.
+
+## Firmware
+
+`firmware.tsv` is curated: one row per retail firmware version, the
+spine every per-version table of the archive indexes against.
+106 versions, 98 with a release date.
+
+| Column | Meaning |
+| --- | --- |
+| `fw` | The store's version key spelling (`4.91`), so it joins to `--fw`, the anchors' `fw-<ver>` directories and the title manifests with no normalisation. |
+| `order` | An integer sort key rising down the file, since version keys compare as strings only; a reserved word in SQL, so a query spells it `"order"`. |
+| `release_date` | `YYYY-MM-DD` as psdevwiki's page for the version states it; where that page states none, as the Japanese-language encyclopedia article on the system software states it, which is Japan's calendar day and can run one day later; `none` where neither states one. |
+| `priority` | How soon the program needs the version: `1` for every firmware a declared title cell composes and the census reference, `2` for the versions that open a key era or a firmware line, `3` for the rest. |
+| `role` | What the version is to the program beyond being one more row, one of the labels below. |
+
+| Role | Meaning |
+| --- | --- |
+| `baseline` | The first retail release. |
+| `census_reference` | The version the dispatch table is characterised on first; the rest are read against it. |
+| `final` | The last release of the final line. |
+| `none` | No role beyond its row. |
+
+Retail (CEX) releases only; debug and tool firmware get no row. The
+file carries no download link and no source that resolves to firmware
+bytes. `firmware_rows_are_well_formed` fails when a `fw` cell is not a version
+key, when `order` does not rise, when a date is malformed, when a
+priority is not 1, 2 or 3 or the census reference lacks priority 1,
+or when a single role sits on more or fewer than one row; a guard in
+`cellgov_boot` fails when a title manifest declares a firmware this
+table has no row for or gives less than priority 1.
 
 ## Handling
 

@@ -19,8 +19,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
-    self, ConflictRow, HandlingCounts, NameRow, NameSource, OwnerClass, Route, GATE, NAME,
-    NAME_GATE, NAME_REGENERATE, REGENERATE, TABLES,
+    self, ConflictRow, FirmwareRole, FirmwareRow, HandlingCounts, NameRow, NameSource, OwnerClass,
+    Route, FIRMWARE, FIRMWARE_GATE, GATE, NAME, NAME_GATE, NAME_REGENERATE, REGENERATE, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
@@ -37,6 +37,18 @@ fn committed_names() -> Vec<NameRow> {
     let text = read(&archive_dir().join(NAME.file()));
     let table = archive::parse(&NAME, &text).unwrap_or_else(|e| panic!("{e}"));
     archive::name_rows(&table)
+}
+
+fn committed_firmware() -> Vec<FirmwareRow> {
+    let text = read(&archive_dir().join(FIRMWARE.file()));
+    let table = archive::parse(&FIRMWARE, &text).unwrap_or_else(|e| panic!("{e}"));
+    let rerendered =
+        archive::render(&FIRMWARE, &table.rows).unwrap_or_else(|e| panic!("firmware.tsv: {e}"));
+    assert_eq!(
+        rerendered, text,
+        "the firmware loader does not re-render firmware.tsv byte-identically"
+    );
+    archive::firmware_rows(&table)
 }
 
 fn slot(ordinal: u64, packet: Option<&str>) -> String {
@@ -98,7 +110,12 @@ fn fill(template: &str, subs: &[(&str, String)]) -> String {
     out
 }
 
-fn readme(counts: &HandlingCounts, names: &[NameRow], conflicts: &[ConflictRow]) -> String {
+fn readme(
+    counts: &HandlingCounts,
+    firmware: &[FirmwareRow],
+    names: &[NameRow],
+    conflicts: &[ConflictRow],
+) -> String {
     let manifest_rows: Vec<String> = archive::manifest()
         .iter()
         .map(|row| {
@@ -136,6 +153,10 @@ fn readme(counts: &HandlingCounts, names: &[NameRow], conflicts: &[ConflictRow])
     let fidelity_rows: Vec<String> = ArmFidelity::ALL
         .iter()
         .map(|f| format!("| `{}` | {} |", f.label(), f.meaning()))
+        .collect();
+    let firmware_role_rows: Vec<String> = FirmwareRole::ALL
+        .iter()
+        .map(|r| format!("| `{}` | {} |", r.label(), r.meaning()))
         .collect();
     let name_source_rows: Vec<String> = NameSource::ALL
         .iter()
@@ -176,6 +197,17 @@ fn readme(counts: &HandlingCounts, names: &[NameRow], conflicts: &[ConflictRow])
             ("fidelity_rows", fidelity_rows.join("\n")),
             ("sqlite_version", archive::SQLITE_VERSION.to_string()),
             ("behavior_gate", archive::BEHAVIOR_GATE.to_string()),
+            ("firmware_rows", firmware.len().to_string()),
+            (
+                "firmware_dated",
+                firmware
+                    .iter()
+                    .filter(|f| f.release_date.is_some())
+                    .count()
+                    .to_string(),
+            ),
+            ("firmware_gate", FIRMWARE_GATE.to_string()),
+            ("firmware_role_rows", firmware_role_rows.join("\n")),
             ("name_source_rows", name_source_rows.join("\n")),
             ("named_slots", named_slots.len().to_string()),
             ("name_gate", NAME_GATE.to_string()),
@@ -196,10 +228,14 @@ fn rendered() -> BTreeMap<String, String> {
     let routes = archive::route_rows();
     let arms = archive::arm_rows(&routes);
     let counts = HandlingCounts::of(&routes);
+    let firmware = committed_firmware();
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
     let mut files = BTreeMap::new();
-    files.insert("README.md".to_string(), readme(&counts, &names, &conflicts));
+    files.insert(
+        "README.md".to_string(),
+        readme(&counts, &firmware, &names, &conflicts),
+    );
     files.insert("schema.sql".to_string(), archive::schema_sql());
     files.insert("build.sql".to_string(), archive::build_sql());
     files.insert(
@@ -330,6 +366,17 @@ fn committed_tables_load_and_reference_each_other() {
         })
         .collect();
     archive::check_references(&tables).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+fn firmware_rows_are_well_formed() {
+    let rows = committed_firmware();
+    assert!(
+        rows.len() >= 90,
+        "the retail line has more than {} versions",
+        rows.len()
+    );
+    archive::check_firmware_rows(&rows).unwrap_or_else(|e| panic!("{e}"));
 }
 
 #[test]

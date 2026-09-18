@@ -5,6 +5,7 @@
 //! them on `--ignored regenerate` and fails when they drift.
 
 mod behavior;
+mod firmware;
 mod handling;
 mod name;
 mod spec;
@@ -15,6 +16,10 @@ pub use behavior::{
     arm_token, foldable, parse_citation, parse_witness, provenance_ref_fits, Witness, DOC_KEYS,
     WITNESS_CRATES,
 };
+pub use firmware::{
+    check_firmware_rows, firmware_rows, is_version_key, FirmwareRole, FirmwareRow,
+    FirmwareTableError,
+};
 pub use handling::{
     arm_rows, arm_tsv, route_rows, route_tsv, ArmRow, HandlingCounts, Route, RouteRow,
 };
@@ -24,9 +29,9 @@ pub use name::{
 };
 pub use spec::{
     files, manifest, Column, ColumnKind, ManifestRow, OwnerClass, TableSpec, View, ARM, BEHAVIOR,
-    BEHAVIOR_GATE, CONFLICTS, DISAGREEMENTS, EXCEPTIONS, FIDELITY_LABELS, GATE, NAME, NAME_GATE,
-    NAME_REGENERATE, NAME_SOURCES, PROVENANCE_KINDS, REGENERATE, ROUTE, ROUTE_LABELS,
-    SELECTOR_SLOTS, TABLES, VIEWS,
+    BEHAVIOR_GATE, CONFLICTS, DISAGREEMENTS, EXCEPTIONS, FIDELITY_LABELS, FIRMWARE, FIRMWARE_GATE,
+    FIRMWARE_ROLES, GATE, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PROVENANCE_KINDS,
+    REGENERATE, ROUTE, ROUTE_LABELS, SELECTOR_SLOTS, TABLES, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};

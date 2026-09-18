@@ -14,23 +14,33 @@ fn banner() -> String {
     )
 }
 
+/// Quotes every column name so the reserved `order` name needs no special case.
+fn quoted(column: &str) -> String {
+    format!("\"{column}\"")
+}
+
+fn quoted_list(columns: &[&str]) -> String {
+    let quoted: Vec<String> = columns.iter().map(|c| quoted(c)).collect();
+    quoted.join(", ")
+}
+
 fn create_table(table: &TableSpec) -> String {
     let mut lines = Vec::new();
     for column in table.columns {
-        let mut line = format!("    {} {}", column.name, column.kind.sql_type());
+        let name = quoted(column.name);
+        let mut line = format!("    {name} {}", column.kind.sql_type());
         if !column.nullable {
             line.push_str(" NOT NULL");
         }
         if let ColumnKind::Enum(labels) = column.kind {
             let list: Vec<String> = labels.iter().map(|l| format!("'{l}'")).collect();
-            line.push_str(&format!(
-                " CHECK ({} IN ({}))",
-                column.name,
-                list.join(", ")
-            ));
+            line.push_str(&format!(" CHECK ({name} IN ({}))", list.join(", ")));
         }
         if let Some((target_table, target_column)) = column.references {
-            line.push_str(&format!(" REFERENCES {target_table} ({target_column})"));
+            line.push_str(&format!(
+                " REFERENCES {target_table} ({})",
+                quoted(target_column)
+            ));
         }
         lines.push(line);
     }
@@ -43,7 +53,7 @@ fn create_table(table: &TableSpec) -> String {
     } else {
         "PRIMARY KEY"
     };
-    lines.push(format!("    {constraint} ({})", table.key.join(", ")));
+    lines.push(format!("    {constraint} ({})", quoted_list(table.key)));
     format!(
         "CREATE TABLE {} (\n{}\n) STRICT;\n",
         table.name,
@@ -81,12 +91,15 @@ pub fn build_sql() -> String {
     for table in TABLES {
         let staging = format!("staging_{}", table.name);
         let names: Vec<&str> = table.columns.iter().map(|c| c.name).collect();
-        let typed: Vec<String> = names.iter().map(|n| format!("{n} TEXT")).collect();
+        let typed: Vec<String> = names
+            .iter()
+            .map(|n| format!("{} TEXT", quoted(n)))
+            .collect();
         let selected: Vec<String> = table
             .columns
             .iter()
             .map(|column| {
-                let mut expr = column.name.to_string();
+                let mut expr = quoted(column.name);
                 if column.nullable {
                     expr = format!("NULLIF({expr}, '{NONE}')");
                 }
@@ -107,7 +120,7 @@ pub fn build_sql() -> String {
             typed.join(", "),
             table.file(),
             table.name,
-            names.join(", "),
+            quoted_list(&names),
             selected.join(", "),
         ));
     }

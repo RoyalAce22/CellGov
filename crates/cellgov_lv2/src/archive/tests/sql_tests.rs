@@ -26,7 +26,7 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
         assert!(
             schema.ends_with(&format!(
                 "    {constraint} ({})\n) STRICT;\n",
-                table.key.join(", ")
+                quoted_list(table.key)
             )),
             "{} is not STRICT with its key",
             table.name
@@ -34,7 +34,11 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
         for column in table.columns {
             if let ColumnKind::Enum(labels) = column.kind {
                 let quoted: Vec<String> = labels.iter().map(|l| format!("'{l}'")).collect();
-                let check = format!("CHECK ({} IN ({}))", column.name, quoted.join(", "));
+                let check = format!(
+                    "CHECK ({} IN ({}))",
+                    super::quoted(column.name),
+                    quoted.join(", ")
+                );
                 assert!(
                     schema.contains(&check),
                     "{}.{} has no {check}",
@@ -44,10 +48,11 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
             }
             if let Some((target_table, target_column)) = column.references {
                 let reference = format!(
-                    "{} {}{} REFERENCES {target_table} ({target_column})",
-                    column.name,
+                    "{} {}{} REFERENCES {target_table} ({})",
+                    super::quoted(column.name),
                     column.kind.sql_type(),
-                    if column.nullable { "" } else { " NOT NULL" }
+                    if column.nullable { "" } else { " NOT NULL" },
+                    super::quoted(target_column)
                 );
                 assert!(
                     schema.contains(&reference),
@@ -56,7 +61,11 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
                     column.name
                 );
             }
-            let not_null = format!("    {} {} NOT NULL", column.name, column.kind.sql_type());
+            let not_null = format!(
+                "    {} {} NOT NULL",
+                super::quoted(column.name),
+                column.kind.sql_type()
+            );
             assert_eq!(
                 schema.contains(&not_null),
                 !column.nullable,
@@ -76,10 +85,15 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
     let schema_tables = full.matches("CREATE TABLE ").count();
     assert_eq!(schema_tables, TABLES.len());
     assert!(
-        create_block(&full, "name").contains("    UNIQUE (ordinal, packet, source, name)\n"),
+        create_block(&full, "name")
+            .contains("    UNIQUE (\"ordinal\", \"packet\", \"source\", \"name\")\n"),
         "a key with a nullable column is UNIQUE, not PRIMARY KEY"
     );
-    assert!(create_block(&full, "route").contains("    PRIMARY KEY (ordinal)\n"));
+    assert!(create_block(&full, "route").contains("    PRIMARY KEY (\"ordinal\")\n"));
+    assert!(
+        create_block(&full, "firmware").contains("    \"order\" INTEGER NOT NULL,\n"),
+        "a reserved word survives as a column name only quoted"
+    );
 }
 
 #[test]
@@ -101,15 +115,15 @@ fn the_build_reads_the_schema_and_imports_every_table_through_staging_in_order()
         assert!(build.contains(&format!("DROP TABLE staging_{};\n", table.name)));
     }
     assert!(
-        build.contains("NULLIF(arm, 'none')"),
+        build.contains("NULLIF(\"arm\", 'none')"),
         "nullable arm maps none to NULL"
     );
     assert!(
-        build.contains("CAST(ordinal AS INTEGER)"),
+        build.contains("CAST(\"ordinal\" AS INTEGER)"),
         "integer ordinal is cast"
     );
     assert!(
-        !build.contains("NULLIF(ordinal,"),
+        !build.contains("NULLIF(\"ordinal\","),
         "the key column takes no null"
     );
 }

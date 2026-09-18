@@ -1,4 +1,5 @@
 use super::*;
+use crate::archive::firmware::FirmwareRole;
 use crate::archive::handling::Route;
 use crate::archive::name::{Disagreement, NameSource};
 use crate::request::fidelity::ArmFidelity;
@@ -55,6 +56,14 @@ fn the_enum_labels_are_the_code_labels_in_order() {
     assert_eq!(sources, NAME_SOURCES);
     let disagreements: Vec<&str> = Disagreement::ALL.iter().map(|d| d.label()).collect();
     assert_eq!(disagreements, DISAGREEMENTS);
+    // The null cell means no role, so it is not an enum label.
+    let roles: Vec<&str> = FirmwareRole::ALL
+        .iter()
+        .filter(|r| **r != FirmwareRole::None)
+        .map(|r| r.label())
+        .collect();
+    assert_eq!(roles, FIRMWARE_ROLES);
+    assert_eq!(FirmwareRole::None.label(), crate::archive::NONE);
 }
 
 #[test]
@@ -64,7 +73,11 @@ fn only_the_name_tables_have_a_nullable_key() {
         .filter(|t| t.key_is_nullable())
         .map(|t| t.name)
         .collect();
-    assert_eq!(nullable, ["name", "conflicts"]);
+    assert_eq!(
+        nullable,
+        ["name", "conflicts"],
+        "the firmware key is not nullable"
+    );
 }
 
 #[test]

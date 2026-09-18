@@ -36,9 +36,9 @@ byte, what a PS3 game would produce under any legal schedule.
   matrix: which titles boot, to which checkpoint, and whether they
   converge with RPCS3. This is where current status lives.
 - [docs/lv2/](docs/lv2/README.md) -- the LV2 archive: tables of
-  every syscall slot's routing, every arm's fidelity, what each
-  modelled behaviour rests on, and every name a committed source
-  gives an ordinal, queryable through SQLite.
+  the retail firmware line, every syscall slot's routing, every arm's
+  fidelity, what each modelled behaviour rests on, and every name a
+  committed source gives an ordinal, queryable through SQLite.
 - [title_manifests/](title_manifests/manifest_template.README.md) --
   the title registry: one manifest per title.
 

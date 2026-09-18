@@ -312,6 +312,57 @@ pub const BEHAVIOR: TableSpec = TableSpec {
     gate: BEHAVIOR_GATE,
 };
 
+/// Lists the non-null `firmware.role` labels in archive order.
+///
+/// A version without a role uses `none`, the null cell.
+pub const FIRMWARE_ROLES: &[&str] = &["baseline", "census_reference", "final"];
+
+/// Names the firmware-table validation test.
+///
+/// Each firmware version in a title manifest must have a row in this table.
+pub const FIRMWARE_GATE: &str = "firmware_rows_are_well_formed";
+
+/// Defines `firmware.tsv` with one curated row per retail firmware version.
+pub const FIRMWARE: TableSpec = TableSpec {
+    name: "firmware",
+    owner: OwnerClass::Curated,
+    columns: &[
+        Column {
+            name: "fw",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "order",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "release_date",
+            kind: ColumnKind::Locator,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "priority",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "role",
+            kind: ColumnKind::Enum(FIRMWARE_ROLES),
+            nullable: true,
+            references: None,
+        },
+    ],
+    key: &["fw"],
+    regenerate: None,
+    gate: FIRMWARE_GATE,
+};
+
 /// Labels of `name.source`; `NameSource::label` pins the order.
 pub const NAME_SOURCES: &[&str] = &["psdevwiki", "psl1ght", "cellgov", "non_public"];
 
@@ -425,7 +476,7 @@ pub const CONFLICTS: TableSpec = TableSpec {
 };
 
 /// Every table, a referenced table before the table that references it.
-pub const TABLES: &[TableSpec] = &[ARM, ROUTE, BEHAVIOR, NAME, CONFLICTS];
+pub const TABLES: &[TableSpec] = &[FIRMWARE, ARM, ROUTE, BEHAVIOR, NAME, CONFLICTS];
 
 /// The files under `docs/lv2/` that are not tables; the one regenerate
 /// command writes all of them.
