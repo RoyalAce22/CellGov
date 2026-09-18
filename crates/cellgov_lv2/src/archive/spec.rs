@@ -7,7 +7,7 @@ pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub enum OwnerClass {
     Generated,
     /// CellGov's own claims, loader-validated, with provenance on every row.
     Curated,
-    /// Community or non-public names, with a source on every row.
+    /// Every row names the source of its fact.
     Attributed,
 }
 
@@ -54,7 +54,7 @@ impl OwnerClass {
                 "CellGov's own claims, loader-validated, with provenance on every row."
             }
             OwnerClass::Attributed => {
-                "Community or non-public names, with a source on every row, never merged into extracted rows."
+                "Community or non-public facts, with a source on every row, never merged into extracted rows."
             }
         }
     }
@@ -195,7 +195,7 @@ pub const PROVENANCE_KINDS: &[&str] = &[
     "unestablished",
 ];
 
-/// Labels of `behavior.selector_slot`: the argument slot an arm dispatches on.
+/// Labels for selector argument slots in dispatch tables.
 pub const SELECTOR_SLOTS: &[&str] = &["r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10"];
 
 /// Labels of `behavior.exception`: the standing departures from the null backend.
@@ -428,11 +428,11 @@ pub const PUP: TableSpec = TableSpec {
     gate: PUP_GATE,
 };
 
-/// Provides the command form that writes a kernel census and refreshes its index rows.
+/// Provides the command that refreshes extracted rows for one kernel.
 pub const CENSUS_REGENERATE: &str =
     "cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2";
 
-/// Names the corpus-free gate for kernel, stub, and census rows.
+/// Names the corpus-free gate for extracted kernel census rows.
 pub const CENSUS_GATE: &str = "kernel_census_rows_are_well_formed";
 
 /// Lists the accepted labels for `kernel.entry_format`.
@@ -444,7 +444,7 @@ pub const DISCOVERY_METHODS: &[&str] = &["sc_vector_descriptor_array"];
 /// Lists the accepted labels for `kernel.confidence`.
 pub const DISCOVERY_CONFIDENCE: &[&str] = &["high"];
 
-/// Lists the accepted labels for `census.class`.
+/// Lists the accepted labels for extracted dispatch classes.
 pub const CENSUS_CLASSES: &[&str] = &["implemented", "stub", "absent"];
 
 /// Lists the accepted labels for `census.dispatch`.
@@ -452,6 +452,9 @@ pub const DISPATCH_SHAPES: &[&str] = &["flat", "subtable", "chain_incomplete"];
 
 /// Lists the accepted labels for `stub.primary`.
 pub const PRIMARY_LABELS: &[&str] = &["yes", "no"];
+
+/// Restricts packet attribution to sources recorded in the archive.
+pub const SUBENTRY_SOURCES: &[&str] = &["psdevwiki"];
 
 /// Defines `kernel.tsv` with provenance and discovery evidence per PUP.
 pub const KERNEL: TableSpec = TableSpec {
@@ -512,6 +515,12 @@ pub const KERNEL: TableSpec = TableSpec {
             nullable: false,
             references: None,
         },
+        Column {
+            name: "subentry_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: None,
+        },
     ],
     key: &["pup_sha256"],
     regenerate: Some(CENSUS_REGENERATE),
@@ -568,6 +577,94 @@ pub const STUB: TableSpec = TableSpec {
     ],
     key: &["pup_sha256", "descriptor"],
     regenerate: Some(CENSUS_REGENERATE),
+    gate: CENSUS_GATE,
+};
+
+/// Keeps extracted packet dispatch separate for each source PUP.
+pub const SUBENTRY: TableSpec = TableSpec {
+    name: "subentry",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: Some(("kernel", "pup_sha256")),
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "selector_slot",
+            kind: ColumnKind::Enum(SELECTOR_SLOTS),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "packet",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "class",
+            kind: ColumnKind::Enum(CENSUS_CLASSES),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "target",
+            kind: ColumnKind::Hex64,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256", "ordinal", "packet"],
+    regenerate: Some(CENSUS_REGENERATE),
+    gate: CENSUS_GATE,
+};
+
+/// Keeps attributed packet identifiers separate from firmware extraction.
+pub const SUBENTRY_ATTRIBUTION: TableSpec = TableSpec {
+    name: "subentry_attribution",
+    owner: OwnerClass::Attributed,
+    columns: &[
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "selector_slot",
+            kind: ColumnKind::Enum(SELECTOR_SLOTS),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "packet",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "source",
+            kind: ColumnKind::Enum(SUBENTRY_SOURCES),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "ref",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["ordinal", "selector_slot", "packet", "source"],
+    regenerate: None,
     gate: CENSUS_GATE,
 };
 
@@ -834,10 +931,12 @@ pub const CONFLICTS: TableSpec = TableSpec {
 pub const TABLES: &[TableSpec] = &[
     FIRMWARE,
     PUP,
-    KERNEL,
-    STUB,
     ARM,
     ROUTE,
+    KERNEL,
+    STUB,
+    SUBENTRY,
+    SUBENTRY_ATTRIBUTION,
     CALLER,
     CALLER_UNRESOLVED,
     REACH,

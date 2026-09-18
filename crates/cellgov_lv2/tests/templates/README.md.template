@@ -103,6 +103,17 @@ names its PUP, descriptor, code target, Cell errno and symbol, reference
 count, and whether it is the descriptor-histogram mode. The mode is a
 hypothesis until the target decodes as a constant-error leaf.
 
+`subentry.tsv` has {{subentry_rows}} packet targets decoded from bounded
+relative-offset jump tables. Each row keeps its source PUP, top-level
+ordinal, selector argument, packet, class, and code target. A comparison
+chain produces no guessed packet rows; its census row reads
+`chain_incomplete`.
+
+`subentry_attribution.tsv` keeps community packet identifiers separate from
+the extracted rows. Each attributed row names its source and reference. A
+packet-set disagreement remains visible in the two tables and neither source
+overwrites the other.
+
 The `cellgov dev lv2-census` emitter is the only writer of these files.
 It accepts a byte-identical re-extraction. A changed census refuses unless
 `--replace-version` is explicit; that flag first drops every indexed PUP for
@@ -110,7 +121,8 @@ the version, so each release variant must be re-extracted before the refresh
 is complete.
 `{{census_gate}}` checks the 1,024-row ordinal sequence, PUP provenance,
 census-file hashes, class/target agreement, one primary stub per kernel,
-and every stub reference count without reading a corpus.
+every stub reference count, and the census/subentry relation without reading
+a corpus.
 
 ## Firmware callers
 

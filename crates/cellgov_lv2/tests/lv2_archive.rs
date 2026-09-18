@@ -19,10 +19,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
-    self, CensusClass, ConflictRow, FirmwareRole, FirmwareRow, HandlingCounts, KernelRow, NameRow,
-    NameSource, OwnerClass, PupRow, Route, StubRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CENSUS,
-    CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PUP,
-    PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, TABLES,
+    self, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, HandlingCounts,
+    KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, StubRow, SubentryRow, CALLER,
+    CALLER_GATE, CALLER_UNRESOLVED, CENSUS, CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, KERNEL,
+    NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB,
+    SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
@@ -82,6 +83,15 @@ fn committed_stubs() -> Vec<StubRow> {
         archive::render(&STUB, &table.rows).unwrap_or_else(|error| panic!("stub.tsv: {error}"));
     assert_eq!(rerendered, text, "stub.tsv is not byte-canonical");
     archive::stub_rows(&table)
+}
+
+fn committed_subentries() -> Vec<SubentryRow> {
+    let text = read(&archive_dir().join(SUBENTRY.file()));
+    let table = archive::parse(&SUBENTRY, &text).unwrap_or_else(|error| panic!("{error}"));
+    let rerendered = archive::render(&SUBENTRY, &table.rows)
+        .unwrap_or_else(|error| panic!("subentry.tsv: {error}"));
+    assert_eq!(rerendered, text, "subentry.tsv is not byte-canonical");
+    archive::subentry_rows(&table)
 }
 
 fn census_files(kernels: &[KernelRow], pups: &[PupRow]) -> Vec<String> {
@@ -199,6 +209,7 @@ struct ReadmeData<'a> {
     conflicts: &'a [ConflictRow],
     kernels: &'a [KernelRow],
     stubs: &'a [StubRow],
+    subentries: &'a [SubentryRow],
     census_files: &'a [String],
 }
 
@@ -310,6 +321,7 @@ fn readme(data: ReadmeData<'_>) -> String {
             ("pup_gate", PUP_GATE.to_string()),
             ("kernel_rows", data.kernels.len().to_string()),
             ("stub_rows", data.stubs.len().to_string()),
+            ("subentry_rows", data.subentries.len().to_string()),
             ("census_files", data.census_files.len().to_string()),
             ("census_gate", CENSUS_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
@@ -336,6 +348,7 @@ fn rendered() -> BTreeMap<String, String> {
     let pups = committed_pups();
     let kernels = committed_kernels();
     let stubs = committed_stubs();
+    let subentries = committed_subentries();
     let census_files = census_files(&kernels, &pups);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
@@ -350,6 +363,7 @@ fn rendered() -> BTreeMap<String, String> {
             conflicts: &conflicts,
             kernels: &kernels,
             stubs: &stubs,
+            subentries: &subentries,
             census_files: &census_files,
         }),
     );
@@ -542,6 +556,12 @@ fn kernel_census_rows_are_well_formed() {
     let pups = committed_pups();
     let kernels = committed_kernels();
     let stubs = committed_stubs();
+    let subentries = committed_subentries();
+    assert_eq!(
+        subentries.len(),
+        13_791,
+        "committed packet-row golden count"
+    );
     assert_eq!(kernels.len(), 59, "one kernel row per extracted retail PUP");
     assert_eq!(
         census_files(&kernels, &pups).len(),
@@ -559,6 +579,72 @@ fn kernel_census_rows_are_well_formed() {
             .entry(stub.pup_sha256.as_str())
             .or_default()
             .push(stub);
+    }
+    let mut subentries_by_pup: BTreeMap<&str, Vec<&SubentryRow>> = BTreeMap::new();
+    for row in &subentries {
+        subentries_by_pup
+            .entry(row.pup_sha256.as_str())
+            .or_default()
+            .push(row);
+    }
+
+    let mut pups_by_kernel: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for kernel in &kernels {
+        pups_by_kernel
+            .entry(kernel.kernel_elf_sha256.as_str())
+            .or_default()
+            .push(kernel.pup_sha256.as_str());
+    }
+    let duplicate_kernel_groups: Vec<_> = pups_by_kernel
+        .values()
+        .filter(|pups| pups.len() > 1)
+        .collect();
+    assert_eq!(
+        duplicate_kernel_groups.len(),
+        1,
+        "one retail kernel is shared by release variants"
+    );
+    assert_eq!(
+        duplicate_kernel_groups[0].len(),
+        2,
+        "the shared retail kernel belongs to two release variants"
+    );
+    for duplicate_pups in duplicate_kernel_groups {
+        let expected: Vec<_> = subentries_by_pup
+            .get(duplicate_pups[0])
+            .unwrap_or_else(|| panic!("{} has no subentries", duplicate_pups[0]))
+            .iter()
+            .map(|row| {
+                (
+                    row.ordinal,
+                    row.selector_slot.as_str(),
+                    row.packet,
+                    row.class,
+                    row.target,
+                )
+            })
+            .collect();
+        for pup in &duplicate_pups[1..] {
+            let actual: Vec<_> = subentries_by_pup
+                .get(*pup)
+                .unwrap_or_else(|| panic!("{pup} has no subentries"))
+                .iter()
+                .map(|row| {
+                    (
+                        row.ordinal,
+                        row.selector_slot.as_str(),
+                        row.packet,
+                        row.class,
+                        row.target,
+                    )
+                })
+                .collect();
+            assert_eq!(
+                actual, expected,
+                "byte-identical kernels must have byte-identical subentries: {} and {pup}",
+                duplicate_pups[0]
+            );
+        }
     }
 
     for kernel in &kernels {
@@ -580,6 +666,37 @@ fn kernel_census_rows_are_well_formed() {
         );
         let table = archive::parse(&CENSUS, &text).unwrap_or_else(|error| panic!("{error}"));
         let rows = archive::census_rows(&table);
+        let pup_subentries = subentries_by_pup
+            .get(kernel.pup_sha256.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let pup_subentry_rows: Vec<_> = pup_subentries.iter().map(|row| (*row).clone()).collect();
+        let pup_subentry_text =
+            archive::subentry_tsv(&pup_subentry_rows).expect("render PUP subentries");
+        assert_eq!(
+            sha256_hex(pup_subentry_text.as_bytes()),
+            kernel.subentry_sha256,
+            "{fw}: subentry digest"
+        );
+        let subtable_ordinals: BTreeSet<usize> =
+            pup_subentries.iter().map(|row| row.ordinal).collect();
+        for row in &pup_subentries {
+            assert_ne!(
+                row.class,
+                CensusClass::Absent,
+                "subentry {}:{} cannot be absent",
+                row.ordinal,
+                row.packet
+            );
+            assert!(
+                matches!(
+                    row.selector_slot.as_str(),
+                    "r3" | "r4" | "r5" | "r6" | "r7" | "r8" | "r9" | "r10"
+                ),
+                "invalid selector slot {}",
+                row.selector_slot
+            );
+        }
         assert_eq!(rows.len(), kernel.entry_count, "{fw}: entry count");
         let mut stub_references: BTreeMap<u64, usize> = BTreeMap::new();
         for (ordinal, row) in rows.iter().enumerate() {
@@ -595,6 +712,11 @@ fn kernel_census_rows_are_well_formed() {
                     .entry(row.target.expect("stub rows have a target"))
                     .or_default() += 1;
             }
+            assert_eq!(
+                row.dispatch == DispatchShape::Subtable,
+                subtable_ordinals.contains(&ordinal),
+                "{fw}: subtable/subentry mismatch at {ordinal}"
+            );
         }
 
         let pup_stubs = stubs_by_pup
@@ -620,6 +742,34 @@ fn kernel_census_rows_are_well_formed() {
         stubs_by_pup.len(),
         kernels.len(),
         "stub.tsv and kernel.tsv cover different PUP sets"
+    );
+    assert_eq!(
+        subentries_by_pup.len(),
+        kernels.len(),
+        "subentry.tsv and kernel.tsv cover different PUP sets"
+    );
+
+    let attributed = archive::parse(
+        &SUBENTRY_ATTRIBUTION,
+        &read(&archive_dir().join(SUBENTRY_ATTRIBUTION.file())),
+    )
+    .expect("parse attributed subentries");
+    let attributed_861: BTreeSet<u64> = attributed
+        .rows
+        .iter()
+        .filter(|row| row[0] == "861")
+        .map(|row| row[2].parse().expect("packet is an integer"))
+        .collect();
+    assert_eq!(attributed_861, (0..=19).collect());
+    let extracted_861: BTreeSet<u64> = subentries
+        .iter()
+        .filter(|row| row.ordinal == 861)
+        .map(|row| row.packet)
+        .collect();
+    assert_eq!(extracted_861, (0..=17).collect());
+    assert!(
+        attributed_861.is_superset(&extracted_861) && attributed_861 != extracted_861,
+        "the attributed and extracted packet sets must remain separate"
     );
 }
 

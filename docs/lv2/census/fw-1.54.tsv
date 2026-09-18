@@ -59,7 +59,7 @@ fw	ordinal	class	target	dispatch
 1.54	57	stub	0x80000000002dddb0	flat
 1.54	58	stub	0x80000000002dddb0	flat
 1.54	59	stub	0x80000000002dddb0	flat
-1.54	60	implemented	0x8000000000039a58	flat
+1.54	60	implemented	0x8000000000039a58	subtable
 1.54	61	implemented	0x800000000003a150	flat
 1.54	62	implemented	0x800000000003a270	flat
 1.54	63	implemented	0x800000000003a350	flat
@@ -676,7 +676,7 @@ fw	ordinal	class	target	dispatch
 1.54	674	implemented	0x80000000001164d4	flat
 1.54	675	implemented	0x8000000000116848	flat
 1.54	676	implemented	0x80000000001169c0	flat
-1.54	677	implemented	0x8000000000116e28	flat
+1.54	677	implemented	0x8000000000116e28	chain_incomplete
 1.54	678	stub	0x80000000002dddb0	flat
 1.54	679	stub	0x80000000002dddb0	flat
 1.54	680	implemented	0x80000000001214f4	flat
@@ -720,8 +720,8 @@ fw	ordinal	class	target	dispatch
 1.54	718	implemented	0x80000000001ba9a8	flat
 1.54	719	implemented	0x80000000001ba9cc	flat
 1.54	720	implemented	0x80000000001ba9f0	flat
-1.54	721	implemented	0x80000000001baa2c	flat
-1.54	722	implemented	0x80000000001bab64	flat
+1.54	721	implemented	0x80000000001baa2c	subtable
+1.54	722	implemented	0x80000000001bab64	subtable
 1.54	723	implemented	0x80000000001bb030	flat
 1.54	724	implemented	0x80000000001bb16c	flat
 1.54	725	implemented	0x80000000001bb190	flat
@@ -860,14 +860,14 @@ fw	ordinal	class	target	dispatch
 1.54	858	stub	0x80000000002dddb0	flat
 1.54	859	stub	0x80000000002dddb0	flat
 1.54	860	stub	0x80000000002dddb0	flat
-1.54	861	implemented	0x80000000002c2fb8	flat
-1.54	862	implemented	0x80000000002b50c4	flat
-1.54	863	implemented	0x80000000002c3400	flat
-1.54	864	implemented	0x80000000002c8dd4	flat
+1.54	861	implemented	0x80000000002c2fb8	subtable
+1.54	862	implemented	0x80000000002b50c4	subtable
+1.54	863	implemented	0x80000000002c3400	subtable
+1.54	864	implemented	0x80000000002c8dd4	chain_incomplete
 1.54	865	implemented	0x80000000002ca794	flat
-1.54	866	implemented	0x80000000002ca8c8	flat
+1.54	866	implemented	0x80000000002ca8c8	chain_incomplete
 1.54	867	implemented	0x80000000002cb54c	flat
-1.54	868	implemented	0x80000000002cc968	flat
+1.54	868	implemented	0x80000000002cc968	subtable
 1.54	869	implemented	0x80000000002d073c	flat
 1.54	870	stub	0x80000000002dddb0	flat
 1.54	871	implemented	0x80000000002d1ad4	flat
@@ -959,7 +959,7 @@ fw	ordinal	class	target	dispatch
 1.54	957	stub	0x80000000002dddb0	flat
 1.54	958	stub	0x80000000002dddb0	flat
 1.54	959	stub	0x80000000002dddb0	flat
-1.54	960	implemented	0x8000000000054a08	flat
+1.54	960	implemented	0x8000000000054a08	subtable
 1.54	961	implemented	0x8000000000054db8	flat
 1.54	962	implemented	0x8000000000054900	flat
 1.54	963	implemented	0x80000000000569b4	flat
@@ -967,7 +967,7 @@ fw	ordinal	class	target	dispatch
 1.54	965	implemented	0x8000000000056bdc	flat
 1.54	966	implemented	0x8000000000056c9c	flat
 1.54	967	implemented	0x8000000000056e08	flat
-1.54	968	implemented	0x8000000000057510	flat
+1.54	968	implemented	0x8000000000057510	subtable
 1.54	969	stub	0x80000000002dddb0	flat
 1.54	970	stub	0x80000000002dddb0	flat
 1.54	971	stub	0x80000000002dddb0	flat

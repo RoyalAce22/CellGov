@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::{parse, CENSUS, KERNEL, STUB};
+use crate::archive::{parse, CENSUS, KERNEL, STUB, SUBENTRY};
 
 #[test]
 fn kernel_stub_and_census_rows_round_trip_byte_identically() {
@@ -13,17 +13,19 @@ fn kernel_stub_and_census_rows_round_trip_byte_identically() {
         discovery_method: "sc_vector_descriptor_array".to_string(),
         confidence: "high".to_string(),
         census_sha256: "33".repeat(32),
+        subentry_sha256: "44".repeat(32),
     };
     let kernel_text = kernel_tsv(std::slice::from_ref(&kernel)).expect("render kernel");
     assert_eq!(
         kernel_text,
         concat!(
-            "pup_sha256\tkernel_elf_sha256\ttable_base\tentry_width\tentry_format\tentry_count\tdiscovery_method\tconfidence\tcensus_sha256\n",
+            "pup_sha256\tkernel_elf_sha256\ttable_base\tentry_width\tentry_format\tentry_count\tdiscovery_method\tconfidence\tcensus_sha256\tsubentry_sha256\n",
             "1111111111111111111111111111111111111111111111111111111111111111\t",
             "2222222222222222222222222222222222222222222222222222222222222222\t",
             "0x8000000000346570\t8\tppc64_descriptor_pointer\t1024\t",
             "sc_vector_descriptor_array\thigh\t",
-            "3333333333333333333333333333333333333333333333333333333333333333\n"
+            "3333333333333333333333333333333333333333333333333333333333333333\t",
+            "4444444444444444444444444444444444444444444444444444444444444444\n"
         )
     );
     assert_eq!(
@@ -109,5 +111,30 @@ fn renderers_sort_rows_before_serialization() {
     assert_eq!(
         census_tsv(&[second.clone(), first.clone()]).expect("render reverse order"),
         census_tsv(&[first, second]).expect("render forward order")
+    );
+}
+
+#[test]
+fn subentry_rows_round_trip_with_decimal_packets() {
+    let rows = vec![SubentryRow {
+        pup_sha256: "44".repeat(32),
+        ordinal: 863,
+        selector_slot: "r3".to_string(),
+        packet: 0x6001,
+        class: CensusClass::Implemented,
+        target: 0x8000_0000_0024_6458,
+    }];
+    let text = subentry_tsv(&rows).expect("render subentry");
+    assert_eq!(
+        text,
+        concat!(
+            "pup_sha256\tordinal\tselector_slot\tpacket\tclass\ttarget\n",
+            "4444444444444444444444444444444444444444444444444444444444444444\t",
+            "863\tr3\t24577\timplemented\t0x8000000000246458\n"
+        )
+    );
+    assert_eq!(
+        subentry_rows(&parse(&SUBENTRY, &text).expect("parse subentry")),
+        rows
     );
 }

@@ -1,16 +1,16 @@
-//! This module owns extracted LV2 kernel, stub, and per-version census rows.
+//! This module defines the archive rows extracted from LV2 kernels.
 
-use super::spec::{CENSUS, KERNEL, STUB};
+use super::spec::{CENSUS, KERNEL, STUB, SUBENTRY};
 use super::table::{self, ArchiveError, Table, NONE};
 
-/// Records whether firmware implements an ordinal or routes it to a stub.
+/// Records the extraction class of an ordinal or packet dispatch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CensusClass {
-    /// The slot names a non-stub implementation.
+    /// The dispatch names a non-stub implementation.
     Implemented,
-    /// The slot names a decoded constant-error stub.
+    /// The dispatch names a decoded constant-error stub.
     Stub,
-    /// The slot has no target.
+    /// The dispatch has no target.
     Absent,
 }
 
@@ -63,7 +63,7 @@ impl DispatchShape {
     }
 }
 
-/// Links a source PUP to its kernel dispatch table and census digest.
+/// Links a source PUP to its kernel dispatch table and archive-row digests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KernelRow {
     /// Identifies the source PUP by SHA-256.
@@ -84,6 +84,8 @@ pub struct KernelRow {
     pub confidence: String,
     /// Identifies the matching per-version census file by SHA-256.
     pub census_sha256: String,
+    /// Identifies this PUP's canonical subentry rows by SHA-256.
+    pub subentry_sha256: String,
 }
 
 impl KernelRow {
@@ -98,6 +100,7 @@ impl KernelRow {
             self.discovery_method.clone(),
             self.confidence.clone(),
             self.census_sha256.clone(),
+            self.subentry_sha256.clone(),
         ]
     }
 }
@@ -150,6 +153,36 @@ pub struct CensusRow {
     pub dispatch: DispatchShape,
 }
 
+/// Records one packet target extracted below an LV2 ordinal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubentryRow {
+    /// Identifies the source PUP by SHA-256.
+    pub pup_sha256: String,
+    /// Gives the top-level LV2 ordinal.
+    pub ordinal: usize,
+    /// Names the selector argument (`r3` through `r10`).
+    pub selector_slot: String,
+    /// Gives the packet identifier.
+    pub packet: u64,
+    /// Classifies the packet target.
+    pub class: CensusClass,
+    /// Gives the packet target's code address.
+    pub target: u64,
+}
+
+impl SubentryRow {
+    fn cells(&self) -> Vec<String> {
+        vec![
+            self.pup_sha256.clone(),
+            self.ordinal.to_string(),
+            self.selector_slot.clone(),
+            self.packet.to_string(),
+            self.class.label().to_string(),
+            hex64(self.target),
+        ]
+    }
+}
+
 impl CensusRow {
     fn cells(&self) -> Vec<String> {
         vec![
@@ -183,6 +216,7 @@ pub fn kernel_rows(table: &Table) -> Vec<KernelRow> {
             discovery_method: row[6].clone(),
             confidence: row[7].clone(),
             census_sha256: row[8].clone(),
+            subentry_sha256: row[9].clone(),
         })
         .collect()
 }
@@ -221,6 +255,25 @@ pub fn census_rows(table: &Table) -> Vec<CensusRow> {
         .collect()
 }
 
+/// Requires `table` to satisfy the [`SUBENTRY`] spec.
+pub fn subentry_rows(table: &Table) -> Vec<SubentryRow> {
+    debug_assert_eq!(table.spec.name, SUBENTRY.name);
+    table
+        .rows
+        .iter()
+        .map(|row| SubentryRow {
+            pup_sha256: row[0].clone(),
+            ordinal: parse_usize(&row[1]),
+            selector_slot: row[2].clone(),
+            packet: row[3]
+                .parse()
+                .expect("the archive parser checked the packet integer"),
+            class: CensusClass::from_label(&row[4]),
+            target: parse_hex64(&row[5]),
+        })
+        .collect()
+}
+
 /// Canonicalizes kernel rows by source PUP.
 ///
 /// # Errors
@@ -255,6 +308,25 @@ pub fn census_tsv(rows: &[CensusRow]) -> Result<String, ArchiveError> {
             .then_with(|| parse_usize(&a[1]).cmp(&parse_usize(&b[1])))
     });
     table::render(&CENSUS, &cells)
+}
+
+/// Canonicalizes subentry rows by PUP, ordinal, and packet.
+///
+/// # Errors
+///
+/// Returns [`ArchiveError`] when a row violates the frozen schema.
+pub fn subentry_tsv(rows: &[SubentryRow]) -> Result<String, ArchiveError> {
+    let mut cells: Vec<Vec<String>> = rows.iter().map(SubentryRow::cells).collect();
+    cells.sort_by(|a, b| {
+        a[0].cmp(&b[0])
+            .then_with(|| parse_usize(&a[1]).cmp(&parse_usize(&b[1])))
+            .then_with(|| {
+                a[3].parse::<u64>()
+                    .expect("packet cell came from u64")
+                    .cmp(&b[3].parse().expect("packet cell came from u64"))
+            })
+    });
+    table::render(&SUBENTRY, &cells)
 }
 
 fn hex64(value: u64) -> String {

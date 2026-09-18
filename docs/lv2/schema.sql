@@ -2,7 +2,7 @@
 --   cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
 
-PRAGMA user_version = 2;
+PRAGMA user_version = 3;
 
 CREATE TABLE firmware (
     "fw" TEXT NOT NULL,
@@ -23,6 +23,20 @@ CREATE TABLE pup (
     PRIMARY KEY ("pup_sha256")
 ) STRICT;
 
+CREATE TABLE arm (
+    "arm" TEXT NOT NULL,
+    "fidelity" TEXT NOT NULL CHECK ("fidelity" IN ('modeled', 'partial-state', 'abi-only', 'null-backend')),
+    "ordinals" TEXT,
+    PRIMARY KEY ("arm")
+) STRICT;
+
+CREATE TABLE route (
+    "ordinal" INTEGER NOT NULL,
+    "route" TEXT NOT NULL CHECK ("route" IN ('typed', 'routed', 'null_backend', 'runtime_fast_path')),
+    "arm" TEXT REFERENCES arm ("arm"),
+    PRIMARY KEY ("ordinal")
+) STRICT;
+
 CREATE TABLE kernel (
     "pup_sha256" TEXT NOT NULL REFERENCES pup ("pup_sha256"),
     "kernel_elf_sha256" TEXT NOT NULL,
@@ -33,6 +47,7 @@ CREATE TABLE kernel (
     "discovery_method" TEXT NOT NULL CHECK ("discovery_method" IN ('sc_vector_descriptor_array')),
     "confidence" TEXT NOT NULL CHECK ("confidence" IN ('high')),
     "census_sha256" TEXT NOT NULL,
+    "subentry_sha256" TEXT NOT NULL,
     PRIMARY KEY ("pup_sha256")
 ) STRICT;
 
@@ -47,18 +62,23 @@ CREATE TABLE stub (
     PRIMARY KEY ("pup_sha256", "descriptor")
 ) STRICT;
 
-CREATE TABLE arm (
-    "arm" TEXT NOT NULL,
-    "fidelity" TEXT NOT NULL CHECK ("fidelity" IN ('modeled', 'partial-state', 'abi-only', 'null-backend')),
-    "ordinals" TEXT,
-    PRIMARY KEY ("arm")
+CREATE TABLE subentry (
+    "pup_sha256" TEXT NOT NULL REFERENCES kernel ("pup_sha256"),
+    "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
+    "selector_slot" TEXT NOT NULL CHECK ("selector_slot" IN ('r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10')),
+    "packet" INTEGER NOT NULL,
+    "class" TEXT NOT NULL CHECK ("class" IN ('implemented', 'stub', 'absent')),
+    "target" TEXT NOT NULL,
+    PRIMARY KEY ("pup_sha256", "ordinal", "packet")
 ) STRICT;
 
-CREATE TABLE route (
-    "ordinal" INTEGER NOT NULL,
-    "route" TEXT NOT NULL CHECK ("route" IN ('typed', 'routed', 'null_backend', 'runtime_fast_path')),
-    "arm" TEXT REFERENCES arm ("arm"),
-    PRIMARY KEY ("ordinal")
+CREATE TABLE subentry_attribution (
+    "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
+    "selector_slot" TEXT NOT NULL CHECK ("selector_slot" IN ('r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10')),
+    "packet" INTEGER NOT NULL,
+    "source" TEXT NOT NULL CHECK ("source" IN ('psdevwiki')),
+    "ref" TEXT NOT NULL,
+    PRIMARY KEY ("ordinal", "selector_slot", "packet", "source")
 ) STRICT;
 
 CREATE TABLE caller (

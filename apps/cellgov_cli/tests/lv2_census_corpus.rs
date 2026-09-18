@@ -1,3 +1,5 @@
+//! Reproduces the committed LV2 census from the operator-owned firmware corpus.
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -60,7 +62,11 @@ fn corpus_reextracts_byte_identical_census_rows() {
         );
     }
 
-    for file in [KERNEL.file(), archive::STUB.file()] {
+    for file in [
+        KERNEL.file(),
+        archive::STUB.file(),
+        archive::SUBENTRY.file(),
+    ] {
         assert_eq!(
             read(&output.join(&file)),
             read(&committed.join(&file)),

@@ -13,7 +13,7 @@ would add its full size to public history on every change.
 Nothing reads these tables at dispatch. They describe the code; the
 code does not consult them.
 
-Archive schema version: **2**. `schema.sql` records the
+Archive schema version: **3**. `schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -96,6 +96,8 @@ the directory and this table disagree.
 | `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `stub.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `subentry.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `subentry_attribution.tsv` | attributed | written by hand | `kernel_census_rows_are_well_formed` |
 
 ## Owner classes
 
@@ -106,7 +108,7 @@ Every table names exactly one.
 | extracted | Written only by the census emitter from firmware bytes, under anchor discipline. |
 | generated | Rendered from code by a regenerate test; a drift gate fails when the committed copy is stale. |
 | curated | CellGov's own claims, loader-validated, with provenance on every row. |
-| attributed | Community or non-public names, with a source on every row, never merged into extracted rows. |
+| attributed | Community or non-public facts, with a source on every row, never merged into extracted rows. |
 
 Anything specific to one operator or checkout, such as key-vault
 coverage or data derived from another runner, is a local overlay
@@ -180,6 +182,17 @@ names its PUP, descriptor, code target, Cell errno and symbol, reference
 count, and whether it is the descriptor-histogram mode. The mode is a
 hypothesis until the target decodes as a constant-error leaf.
 
+`subentry.tsv` has 13791 packet targets decoded from bounded
+relative-offset jump tables. Each row keeps its source PUP, top-level
+ordinal, selector argument, packet, class, and code target. A comparison
+chain produces no guessed packet rows; its census row reads
+`chain_incomplete`.
+
+`subentry_attribution.tsv` keeps community packet identifiers separate from
+the extracted rows. Each attributed row names its source and reference. A
+packet-set disagreement remains visible in the two tables and neither source
+overwrites the other.
+
 The `cellgov dev lv2-census` emitter is the only writer of these files.
 It accepts a byte-identical re-extraction. A changed census refuses unless
 `--replace-version` is explicit; that flag first drops every indexed PUP for
@@ -187,7 +200,8 @@ the version, so each release variant must be re-extracted before the refresh
 is complete.
 `kernel_census_rows_are_well_formed` checks the 1,024-row ordinal sequence, PUP provenance,
 census-file hashes, class/target agreement, one primary stub per kernel,
-and every stub reference count without reading a corpus.
+every stub reference count, and the census/subentry relation without reading
+a corpus.
 
 ## Firmware callers
 

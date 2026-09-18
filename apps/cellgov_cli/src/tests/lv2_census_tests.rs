@@ -13,6 +13,7 @@ fn kernel(pup_sha256: &str, kernel_elf_sha256: &str, census_sha256: &str) -> Ker
         discovery_method: "sc_vector_descriptor_array".to_string(),
         confidence: "high".to_string(),
         census_sha256: census_sha256.to_string(),
+        subentry_sha256: "00".repeat(32),
     }
 }
 
@@ -97,7 +98,7 @@ fn changed_census_requires_an_explicit_version_replacement() {
         replace_version: false,
     };
     assert!(matches!(
-        write_all(&args, "new\n", "kernel\n", "stub\n"),
+        write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n"),
         Err(Lv2CensusError::CensusConflict { .. })
     ));
     assert_eq!(
@@ -106,7 +107,7 @@ fn changed_census_requires_an_explicit_version_replacement() {
     );
 
     args.replace_version = true;
-    write_all(&args, "new\n", "kernel\n", "stub\n").expect("replace version");
+    write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n").expect("replace version");
     assert_eq!(
         std::fs::read_to_string(&path).expect("read census"),
         "new\n"
@@ -114,11 +115,36 @@ fn changed_census_requires_an_explicit_version_replacement() {
 }
 
 #[test]
+fn an_existing_archive_without_subentries_is_refused_as_partial() {
+    let output = scratch_labeled("lv2_census_partial_subentry");
+    std::fs::create_dir_all(output.as_ref()).expect("create output directory");
+    std::fs::write(
+        output.join(KERNEL.file()),
+        archive::kernel_tsv(&[]).expect("render empty kernel table"),
+    )
+    .expect("write kernel table");
+    std::fs::write(
+        output.join(STUB.file()),
+        archive::stub_tsv(&[]).expect("render empty stub table"),
+    )
+    .expect("write stub table");
+
+    assert!(matches!(
+        load_existing(output.as_ref()),
+        Err(Lv2CensusError::ExistingPartial { .. })
+    ));
+}
+
+#[test]
 fn a_matching_version_census_does_not_hide_a_wrong_pup_kernel() {
     let old = kernel("pup-a", "kernel-a", "same-census");
     let replacement = kernel("pup-a", "kernel-b", "same-census");
+    let existing = ExistingRows {
+        kernels: vec![old],
+        ..ExistingRows::default()
+    };
     assert!(matches!(
-        refuse_extraction_conflict("pup-a", &[old], &[], &replacement, &[], false),
+        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], false),
         Err(Lv2CensusError::KernelDigestConflict { pup_sha256, .. }) if pup_sha256 == "pup-a"
     ));
 }
@@ -127,8 +153,12 @@ fn a_matching_version_census_does_not_hide_a_wrong_pup_kernel() {
 fn replace_version_cannot_reassign_a_pup_to_another_kernel() {
     let old = kernel("pup-a", "kernel-a", "old-census");
     let replacement = kernel("pup-a", "kernel-b", "new-census");
+    let existing = ExistingRows {
+        kernels: vec![old],
+        ..ExistingRows::default()
+    };
     assert!(matches!(
-        refuse_extraction_conflict("pup-a", &[old], &[], &replacement, &[], true),
+        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], true),
         Err(Lv2CensusError::KernelDigestConflict { pup_sha256, .. }) if pup_sha256 == "pup-a"
     ));
 }
@@ -161,30 +191,42 @@ fn version_replacement_removes_every_variant_and_reports_the_other_rows() {
             acquired: None,
         },
     ];
-    let mut kernels = vec![
-        kernel("pup-a", "kernel-a", "census"),
-        kernel("pup-b", "kernel-b", "census"),
-        kernel("pup-c", "kernel-c", "other"),
-    ];
-    let mut stubs = vec![StubRow {
-        pup_sha256: "pup-b".to_string(),
-        descriptor: 1,
-        target: 2,
-        errno: 0x8001_0003,
-        errno_symbol: "CELL_ENOSYS".to_string(),
-        references: 1,
-        primary: true,
-    }];
+    let mut existing = ExistingRows {
+        kernels: vec![
+            kernel("pup-a", "kernel-a", "census"),
+            kernel("pup-b", "kernel-b", "census"),
+            kernel("pup-c", "kernel-c", "other"),
+        ],
+        stubs: vec![StubRow {
+            pup_sha256: "pup-b".to_string(),
+            descriptor: 1,
+            target: 2,
+            errno: 0x8001_0003,
+            errno_symbol: "CELL_ENOSYS".to_string(),
+            references: 1,
+            primary: true,
+        }],
+        subentries: vec![SubentryRow {
+            pup_sha256: "pup-b".to_string(),
+            ordinal: 621,
+            selector_slot: "r3".to_string(),
+            packet: 0,
+            class: CensusClass::Implemented,
+            target: 3,
+        }],
+    };
     assert_eq!(
-        remove_version_rows("3.56", "pup-a", &pups, &mut kernels, &mut stubs),
+        remove_version_rows("3.56", "pup-a", &pups, &mut existing),
         1
     );
     assert_eq!(
-        kernels
+        existing
+            .kernels
             .iter()
             .map(|row| row.pup_sha256.as_str())
             .collect::<Vec<_>>(),
         ["pup-c"]
     );
-    assert!(stubs.is_empty());
+    assert!(existing.stubs.is_empty());
+    assert!(existing.subentries.is_empty());
 }

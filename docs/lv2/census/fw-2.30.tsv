@@ -619,7 +619,7 @@ fw	ordinal	class	target	dispatch
 2.30	617	implemented	0x80000000000ad808	flat
 2.30	618	implemented	0x80000000000ad708	flat
 2.30	619	stub	0x80000000002f10d8	flat
-2.30	620	implemented	0x8000000000114530	flat
+2.30	620	implemented	0x8000000000114530	chain_incomplete
 2.30	621	stub	0x80000000002f10d8	flat
 2.30	622	stub	0x80000000002f10d8	flat
 2.30	623	stub	0x80000000002f10d8	flat
@@ -634,7 +634,7 @@ fw	ordinal	class	target	dispatch
 2.30	632	stub	0x80000000002f10d8	flat
 2.30	633	stub	0x80000000002f10d8	flat
 2.30	634	stub	0x80000000002f10d8	flat
-2.30	635	implemented	0x800000000011c678	flat
+2.30	635	implemented	0x800000000011c678	subtable
 2.30	636	implemented	0x800000000011c2f8	flat
 2.30	637	implemented	0x800000000011c1f0	flat
 2.30	638	stub	0x80000000002f10d8	flat
@@ -676,7 +676,7 @@ fw	ordinal	class	target	dispatch
 2.30	674	implemented	0x8000000000116858	flat
 2.30	675	implemented	0x8000000000116d30	flat
 2.30	676	implemented	0x8000000000116f30	flat
-2.30	677	implemented	0x8000000000117098	flat
+2.30	677	implemented	0x8000000000117098	chain_incomplete
 2.30	678	stub	0x80000000002f10d8	flat
 2.30	679	stub	0x80000000002f10d8	flat
 2.30	680	implemented	0x8000000000126778	flat
@@ -720,8 +720,8 @@ fw	ordinal	class	target	dispatch
 2.30	718	implemented	0x80000000001af610	flat
 2.30	719	implemented	0x80000000001af5e8	flat
 2.30	720	implemented	0x80000000001af5a8	flat
-2.30	721	implemented	0x80000000001af468	flat
-2.30	722	implemented	0x80000000001aef18	flat
+2.30	721	implemented	0x80000000001af468	subtable
+2.30	722	implemented	0x80000000001aef18	subtable
 2.30	723	implemented	0x80000000001aed58	flat
 2.30	724	implemented	0x80000000001aec10	flat
 2.30	725	implemented	0x80000000001aeb20	flat
@@ -860,14 +860,14 @@ fw	ordinal	class	target	dispatch
 2.30	858	stub	0x80000000002f10d8	flat
 2.30	859	stub	0x80000000002f10d8	flat
 2.30	860	stub	0x80000000002f10d8	flat
-2.30	861	implemented	0x80000000002d2970	flat
-2.30	862	implemented	0x80000000002c3928	flat
-2.30	863	implemented	0x80000000002d2db8	flat
+2.30	861	implemented	0x80000000002d2970	subtable
+2.30	862	implemented	0x80000000002c3928	subtable
+2.30	863	implemented	0x80000000002d2db8	subtable
 2.30	864	implemented	0x80000000002d9468	flat
 2.30	865	implemented	0x80000000002db028	flat
 2.30	866	implemented	0x80000000002db168	flat
-2.30	867	implemented	0x80000000002dbe60	flat
-2.30	868	implemented	0x80000000002ddf80	flat
+2.30	867	implemented	0x80000000002dbe60	subtable
+2.30	868	implemented	0x80000000002ddf80	subtable
 2.30	869	implemented	0x80000000002e1f88	flat
 2.30	870	stub	0x80000000002f10d8	flat
 2.30	871	implemented	0x80000000002e3558	flat

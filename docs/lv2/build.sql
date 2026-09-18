@@ -21,20 +21,6 @@ SELECT "pup_sha256", "fw", CAST("size_bytes" AS INTEGER), "image_version", "sour
 FROM staging_pup;
 DROP TABLE staging_pup;
 
-CREATE TEMP TABLE staging_kernel ("pup_sha256" TEXT, "kernel_elf_sha256" TEXT, "table_base" TEXT, "entry_width" TEXT, "entry_format" TEXT, "entry_count" TEXT, "discovery_method" TEXT, "confidence" TEXT, "census_sha256" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 kernel.tsv staging_kernel
-INSERT INTO kernel ("pup_sha256", "kernel_elf_sha256", "table_base", "entry_width", "entry_format", "entry_count", "discovery_method", "confidence", "census_sha256")
-SELECT "pup_sha256", "kernel_elf_sha256", "table_base", CAST("entry_width" AS INTEGER), "entry_format", CAST("entry_count" AS INTEGER), "discovery_method", "confidence", "census_sha256"
-FROM staging_kernel;
-DROP TABLE staging_kernel;
-
-CREATE TEMP TABLE staging_stub ("pup_sha256" TEXT, "descriptor" TEXT, "target" TEXT, "errno" TEXT, "errno_symbol" TEXT, "references" TEXT, "primary" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 stub.tsv staging_stub
-INSERT INTO stub ("pup_sha256", "descriptor", "target", "errno", "errno_symbol", "references", "primary")
-SELECT "pup_sha256", "descriptor", "target", "errno", "errno_symbol", CAST("references" AS INTEGER), "primary"
-FROM staging_stub;
-DROP TABLE staging_stub;
-
 CREATE TEMP TABLE staging_arm ("arm" TEXT, "fidelity" TEXT, "ordinals" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 arm.tsv staging_arm
 INSERT INTO arm ("arm", "fidelity", "ordinals")
@@ -48,6 +34,34 @@ INSERT INTO route ("ordinal", "route", "arm")
 SELECT CAST("ordinal" AS INTEGER), "route", NULLIF("arm", 'none')
 FROM staging_route;
 DROP TABLE staging_route;
+
+CREATE TEMP TABLE staging_kernel ("pup_sha256" TEXT, "kernel_elf_sha256" TEXT, "table_base" TEXT, "entry_width" TEXT, "entry_format" TEXT, "entry_count" TEXT, "discovery_method" TEXT, "confidence" TEXT, "census_sha256" TEXT, "subentry_sha256" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 kernel.tsv staging_kernel
+INSERT INTO kernel ("pup_sha256", "kernel_elf_sha256", "table_base", "entry_width", "entry_format", "entry_count", "discovery_method", "confidence", "census_sha256", "subentry_sha256")
+SELECT "pup_sha256", "kernel_elf_sha256", "table_base", CAST("entry_width" AS INTEGER), "entry_format", CAST("entry_count" AS INTEGER), "discovery_method", "confidence", "census_sha256", "subentry_sha256"
+FROM staging_kernel;
+DROP TABLE staging_kernel;
+
+CREATE TEMP TABLE staging_stub ("pup_sha256" TEXT, "descriptor" TEXT, "target" TEXT, "errno" TEXT, "errno_symbol" TEXT, "references" TEXT, "primary" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 stub.tsv staging_stub
+INSERT INTO stub ("pup_sha256", "descriptor", "target", "errno", "errno_symbol", "references", "primary")
+SELECT "pup_sha256", "descriptor", "target", "errno", "errno_symbol", CAST("references" AS INTEGER), "primary"
+FROM staging_stub;
+DROP TABLE staging_stub;
+
+CREATE TEMP TABLE staging_subentry ("pup_sha256" TEXT, "ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "class" TEXT, "target" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry.tsv staging_subentry
+INSERT INTO subentry ("pup_sha256", "ordinal", "selector_slot", "packet", "class", "target")
+SELECT "pup_sha256", CAST("ordinal" AS INTEGER), "selector_slot", CAST("packet" AS INTEGER), "class", "target"
+FROM staging_subentry;
+DROP TABLE staging_subentry;
+
+CREATE TEMP TABLE staging_subentry_attribution ("ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "source" TEXT, "ref" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry_attribution.tsv staging_subentry_attribution
+INSERT INTO subentry_attribution ("ordinal", "selector_slot", "packet", "source", "ref")
+SELECT CAST("ordinal" AS INTEGER), "selector_slot", CAST("packet" AS INTEGER), "source", "ref"
+FROM staging_subentry_attribution;
+DROP TABLE staging_subentry_attribution;
 
 CREATE TEMP TABLE staging_caller ("pup_sha256" TEXT, "module" TEXT, "ordinal" TEXT, "sites" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 caller.tsv staging_caller
