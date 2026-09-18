@@ -77,6 +77,13 @@ SELECT CAST("record" AS INTEGER), "from_fw", "to_fw", "comparison", NULLIF("kind
 FROM staging_transitions;
 DROP TABLE staging_transitions;
 
+CREATE TEMP TABLE staging_coverage ("scope" TEXT, "extracted" TEXT, "handled" TEXT, "versions" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 coverage.tsv staging_coverage
+INSERT INTO coverage ("scope", "extracted", "handled", "versions")
+SELECT "scope", CAST(NULLIF("extracted", 'none') AS INTEGER), CAST(NULLIF("handled", 'none') AS INTEGER), CAST("versions" AS INTEGER)
+FROM staging_coverage;
+DROP TABLE staging_coverage;
+
 CREATE TEMP TABLE staging_subentry_attribution ("ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "source" TEXT, "ref" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry_attribution.tsv staging_subentry_attribution
 INSERT INTO subentry_attribution ("ordinal", "selector_slot", "packet", "source", "ref")

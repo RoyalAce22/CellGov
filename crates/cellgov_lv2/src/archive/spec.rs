@@ -7,7 +7,7 @@ pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,6 +478,9 @@ pub const TRANSITION_KINDS: &[&str] = &[
     "gate_removed",
 ];
 
+/// Lists extracted-surface coverage denominators.
+pub const COVERAGE_SCOPES: &[&str] = &["implemented", "total"];
+
 /// Defines `kernel.tsv` with provenance and discovery evidence per PUP.
 pub const KERNEL: TableSpec = TableSpec {
     name: "kernel",
@@ -819,6 +822,41 @@ pub const TRANSITIONS: TableSpec = TableSpec {
     gate: GATE,
 };
 
+/// Defines `coverage.tsv`, the generated extracted-surface coverage report.
+pub const COVERAGE: TableSpec = TableSpec {
+    name: "coverage",
+    owner: OwnerClass::Generated,
+    columns: &[
+        Column {
+            name: "scope",
+            kind: ColumnKind::Enum(COVERAGE_SCOPES),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "extracted",
+            kind: ColumnKind::Integer,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "handled",
+            kind: ColumnKind::Integer,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "versions",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["scope"],
+    regenerate: Some(REGENERATE),
+    gate: GATE,
+};
+
 /// Defines each `census/fw-<version>.tsv` file.
 pub const CENSUS: TableSpec = TableSpec {
     name: "census",
@@ -1090,6 +1128,7 @@ pub const TABLES: &[TableSpec] = &[
     CAPABILITY_GATE,
     PRESENCE,
     TRANSITIONS,
+    COVERAGE,
     SUBENTRY_ATTRIBUTION,
     CALLER,
     CALLER_UNRESOLVED,

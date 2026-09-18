@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
     self, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, GateRow, GateState,
-    HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, StubRow,
+    HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, RouteRow, StubRow,
     SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS, CENSUS_GATE,
     FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH,
     REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
@@ -168,6 +168,22 @@ fn generated_presence(census_files: &[String]) -> Vec<archive::PresenceRow> {
         .unwrap_or_else(|error| panic!("reduce census presence: {error}"))
 }
 
+fn generated_coverage(routes: &[RouteRow], census_files: &[String]) -> Vec<archive::CoverageRow> {
+    let by_version = census_files
+        .iter()
+        .map(|file| {
+            let fw = file
+                .strip_prefix("census/fw-")
+                .and_then(|value| value.strip_suffix(".tsv"))
+                .expect("census file follows the archive path convention");
+            let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
+                .unwrap_or_else(|error| panic!("{file}: {error}"));
+            (fw.to_string(), archive::census_rows(&table))
+        })
+        .collect();
+    archive::coverage_rows(routes, &by_version)
+}
+
 fn generated_transitions(
     firmware: &[FirmwareRow],
     pups: &[PupRow],
@@ -296,6 +312,7 @@ struct ReadmeData<'a> {
     gates: &'a [GateRow],
     presence_rows: usize,
     transition_rows: usize,
+    coverage_rows: usize,
     census_files: &'a [String],
 }
 
@@ -411,6 +428,7 @@ fn readme(data: ReadmeData<'_>) -> String {
             ("gate_rows", data.gates.len().to_string()),
             ("presence_rows", data.presence_rows.to_string()),
             ("transition_rows", data.transition_rows.to_string()),
+            ("coverage_rows", data.coverage_rows.to_string()),
             ("census_files", data.census_files.len().to_string()),
             ("census_gate", CENSUS_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
@@ -441,6 +459,7 @@ fn rendered() -> BTreeMap<String, String> {
     let gates = committed_gates();
     let census_files = census_files(&kernels, &pups);
     let presence = generated_presence(&census_files);
+    let coverage = generated_coverage(&routes, &census_files);
     let transition_rows = generated_transitions(&firmware, &pups, &kernels, &gates, &census_files);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
@@ -459,6 +478,7 @@ fn rendered() -> BTreeMap<String, String> {
             gates: &gates,
             presence_rows: presence.len(),
             transition_rows: transition_rows.len(),
+            coverage_rows: coverage.len(),
             census_files: &census_files,
         }),
     );
@@ -484,6 +504,10 @@ fn rendered() -> BTreeMap<String, String> {
         archive::TRANSITIONS.file(),
         archive::transitions_tsv(&transition_rows)
             .unwrap_or_else(|error| panic!("transitions.tsv: {error}")),
+    );
+    files.insert(
+        archive::COVERAGE.file(),
+        archive::coverage_tsv(&coverage).unwrap_or_else(|error| panic!("coverage.tsv: {error}")),
     );
     let names: Vec<&String> = files.keys().collect();
     let generated: Vec<String> = archive::manifest(&census_files)
@@ -933,6 +957,93 @@ fn kernel_census_rows_are_well_formed() {
     assert!(
         attributed_861.is_superset(&extracted_861),
         "the attributed packet set must cover the extracted packet set"
+    );
+}
+
+#[test]
+fn modelled_ordinals_are_not_absent_from_every_extracted_census() {
+    let kernels = committed_kernels();
+    let pups = committed_pups();
+    let census_files = census_files(&kernels, &pups);
+    let census: Vec<Vec<_>> = census_files
+        .iter()
+        .map(|file| {
+            let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
+                .unwrap_or_else(|error| panic!("{file}: {error}"));
+            archive::census_rows(&table)
+        })
+        .collect();
+    let absent: Vec<u64> = archive::route_rows()
+        .into_iter()
+        .filter(|route| route.route != Route::NullBackend)
+        .filter(|route| {
+            census
+                .iter()
+                .all(|rows| rows[route.ordinal as usize].class == CensusClass::Absent)
+        })
+        .map(|route| route.ordinal)
+        .collect();
+    assert!(
+        absent.is_empty(),
+        "modelled ordinals absent from every extracted census: {absent:?}"
+    );
+}
+
+#[test]
+fn every_extracted_kernel_primary_stub_matches_the_null_backend_errno() {
+    let stubs = committed_stubs();
+    let primary: BTreeMap<&str, &StubRow> = stubs
+        .iter()
+        .filter(|stub| stub.primary)
+        .map(|stub| (stub.pup_sha256.as_str(), stub))
+        .collect();
+    assert_eq!(primary.len(), committed_kernels().len());
+    for (pup_sha256, stub) in primary {
+        assert_eq!(
+            stub.errno,
+            cellgov_ps3_abi::lv2::errno::CELL_ENOSYS.code,
+            "{pup_sha256}: primary extracted stub must match the null backend errno"
+        );
+    }
+}
+
+#[test]
+fn nonimplemented_modelled_ordinals_have_behavior_rows() {
+    let kernels = committed_kernels();
+    let pups = committed_pups();
+    let census_files = census_files(&kernels, &pups);
+    let census: Vec<Vec<_>> = census_files
+        .iter()
+        .map(|file| {
+            let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
+                .unwrap_or_else(|error| panic!("{file}: {error}"));
+            archive::census_rows(&table)
+        })
+        .collect();
+    let behavior = archive::parse(
+        &archive::BEHAVIOR,
+        &read(&archive_dir().join(archive::BEHAVIOR.file())),
+    )
+    .expect("parse behavior rows");
+    let behavior_ordinals: BTreeSet<usize> = behavior
+        .rows
+        .iter()
+        .map(|row| row[0].parse().expect("behavior ordinal is an integer"))
+        .collect();
+    let unexplained: Vec<u64> = archive::route_rows()
+        .into_iter()
+        .filter(|route| route.route != Route::NullBackend)
+        .filter(|route| {
+            census
+                .iter()
+                .all(|rows| rows[route.ordinal as usize].class != CensusClass::Implemented)
+        })
+        .filter(|route| !behavior_ordinals.contains(&(route.ordinal as usize)))
+        .map(|route| route.ordinal)
+        .collect();
+    assert!(
+        unexplained.is_empty(),
+        "nonimplemented modelled ordinals lack behavior rows: {unexplained:?}"
     );
 }
 

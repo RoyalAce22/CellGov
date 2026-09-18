@@ -135,6 +135,10 @@ extracted firmware version under exactly one of `implemented`, `stub`, or
 without both extracted sides reads `not_compared`; target relocation moves with
 neighbouring entries and is not reported as a retarget.
 
+`coverage.tsv` has {{coverage_rows}} denominators. It reports handled ordinals
+separately against implemented and total extracted ordinals; a missing census
+reads `none`, never zero.
+
 `subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
 packet-set disagreement remains visible in the two tables and neither source
