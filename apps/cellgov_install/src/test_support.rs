@@ -280,6 +280,97 @@ pub fn build_pup(keys: &KeyVault, image_version: u64, entries: &[(u64, &[u8])]) 
     out
 }
 
+/// Build a decrypted CoreOS image whose file table names `entries` in
+/// order, each payload placed after the table.
+///
+/// The header spells the shape retail images carry: a format word of
+/// 1, the count, a zero word, and the image length.
+///
+/// # Panics
+///
+/// On a name longer than the 32-byte name field.
+pub fn build_core_os_image(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    const HEADER: usize = 0x10;
+    const ENTRY: usize = 0x30;
+    let table_end = HEADER + entries.len() * ENTRY;
+    let mut payload = Vec::new();
+    let mut table = Vec::with_capacity(table_end - HEADER);
+    for (name, data) in entries {
+        assert!(
+            name.len() <= 0x20,
+            "build_core_os_image: name {name:?} is {} bytes; the field holds 32",
+            name.len()
+        );
+        let offset = table_end + payload.len();
+        payload.extend_from_slice(data);
+        table.extend_from_slice(&(offset as u64).to_be_bytes());
+        table.extend_from_slice(&(data.len() as u64).to_be_bytes());
+        let mut field = [0u8; 0x20];
+        field[..name.len()].copy_from_slice(name.as_bytes());
+        table.extend_from_slice(&field);
+    }
+    let len = table_end + payload.len();
+    let mut out = Vec::with_capacity(len);
+    out.extend_from_slice(&1u32.to_be_bytes());
+    out.extend_from_slice(&(entries.len() as u32).to_be_bytes());
+    out.extend_from_slice(&0u32.to_be_bytes());
+    out.extend_from_slice(&(len as u32).to_be_bytes());
+    out.extend_from_slice(&table);
+    out.extend_from_slice(&payload);
+    out
+}
+
+/// Build an SCE package `sce::decrypt_package` opens under `keys`'
+/// first SCE package keyset, carrying `payload` as its one plaintext,
+/// uncompressed section.
+///
+/// The key envelope is AES-256-CBC under the keyset's ERK/RIV, with
+/// the all-zero section key and IV inside; the metadata directory is
+/// AES-128-CTR under that zero key, which is its own inverse.
+#[cfg(feature = "decrypt")]
+pub fn build_scepkg(keys: &KeyVault, payload: &[u8]) -> Vec<u8> {
+    use aes::cipher::{BlockEncryptMut, KeyIvInit, StreamCipher};
+
+    const METADATA_OFFSET: usize = 0x20;
+    const ENVELOPE_OFFSET: usize = METADATA_OFFSET + 0x20;
+    const DIRECTORY_OFFSET: usize = ENVELOPE_OFFSET + 0x40;
+    const DIRECTORY_LEN: usize = 0x20 + 0x30;
+    const HEADER_SIZE: usize = DIRECTORY_OFFSET + DIRECTORY_LEN;
+    const PAYLOAD_OFFSET: usize = 0x100;
+
+    let key = keys
+        .scepkg_keys()
+        .expect("the synthetic vault holds a package keyset")
+        .next()
+        .expect("at least one package keyset");
+
+    // Plaintext envelope: zero section key, zero padding, zero IV.
+    let mut envelope = [0u8; 0x40];
+    cbc::Encryptor::<aes::Aes256>::new((&key.erk).into(), (&key.riv).into())
+        .encrypt_padded_mut::<aes::cipher::block_padding::NoPadding>(&mut envelope, 0x40)
+        .expect("0x40 bytes is a whole number of blocks");
+
+    let mut directory = vec![0u8; DIRECTORY_LEN];
+    directory[0x0C..0x10].copy_from_slice(&1u32.to_be_bytes()); // section_count
+    let row = 0x20;
+    directory[row..row + 8].copy_from_slice(&(PAYLOAD_OFFSET as u64).to_be_bytes());
+    directory[row + 8..row + 0x10].copy_from_slice(&(payload.len() as u64).to_be_bytes());
+    directory[row + 0x20..row + 0x24].copy_from_slice(&1u32.to_be_bytes()); // plaintext
+    directory[row + 0x2C..row + 0x30].copy_from_slice(&1u32.to_be_bytes()); // uncompressed
+    ctr::Ctr128BE::<aes::Aes128>::new(&[0u8; 16].into(), &[0u8; 16].into())
+        .apply_keystream(&mut directory);
+
+    let mut data = vec![0u8; PAYLOAD_OFFSET + payload.len()];
+    data[0..4].copy_from_slice(&cellgov_ps3_abi::format::sce::SCE_MAGIC);
+    data[12..16].copy_from_slice(&(METADATA_OFFSET as u32).to_be_bytes());
+    data[16..24].copy_from_slice(&(HEADER_SIZE as u64).to_be_bytes());
+    data[24..32].copy_from_slice(&(payload.len() as u64).to_be_bytes());
+    data[ENVELOPE_OFFSET..DIRECTORY_OFFSET].copy_from_slice(&envelope);
+    data[DIRECTORY_OFFSET..HEADER_SIZE].copy_from_slice(&directory);
+    data[PAYLOAD_OFFSET..].copy_from_slice(payload);
+    data
+}
+
 /// ISO9660 logical sector size, exposed for byte-level test tampering.
 pub const ISO_SECTOR: usize = 2048;
 

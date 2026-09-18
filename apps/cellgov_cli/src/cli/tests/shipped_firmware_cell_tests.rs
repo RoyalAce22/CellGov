@@ -21,6 +21,7 @@ fn disc_composition(selected_by: FirmwareSelectedBy) -> BootComposition {
                 version: SHIPPED_FW.to_string(),
                 entry_dir: PathBuf::from("store/firmware/3.55"),
                 pup_sha256: "0".repeat(64),
+                core_os: None,
             },
             selected_by,
         }),

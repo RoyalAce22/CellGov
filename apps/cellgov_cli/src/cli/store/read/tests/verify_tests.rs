@@ -99,6 +99,7 @@ fn a_clean_pass_reports_what_it_checked() {
             entry: "base".to_string(),
             matched: 42,
             divergences: Vec::new(),
+            kernel_omission: None,
         }]),
         "title TEST00000",
     );
@@ -109,11 +110,32 @@ fn a_clean_pass_reports_what_it_checked() {
 }
 
 #[test]
+fn a_kernel_the_entry_does_not_store_is_named_as_unchecked_not_as_a_divergence() {
+    let d = doc(vec![VerifiedEntryDoc {
+        entry: "4.93".to_string(),
+        matched: 370,
+        divergences: Vec::new(),
+        kernel_omission: Some("update_files carries no CORE_OS_PACKAGE.pkg".to_string()),
+    }]);
+    assert!(d.clean);
+    let rendered = render(&d, "firmware 4.93");
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "4.93: kernel not checked: update_files carries no CORE_OS_PACKAGE.pkg",
+            "firmware 4.93: 370 artefact(s) match their record",
+        ]
+    );
+}
+
+#[test]
 fn a_pass_that_examined_no_artefact_is_not_a_clean_verdict() {
     let empty = doc(vec![VerifiedEntryDoc {
         entry: "base".to_string(),
         matched: 0,
         divergences: Vec::new(),
+        kernel_omission: None,
     }]);
     assert!(empty.clean);
     assert!(checked_nothing(&empty));
@@ -122,6 +144,7 @@ fn a_pass_that_examined_no_artefact_is_not_a_clean_verdict() {
         entry: "base".to_string(),
         matched: 1,
         divergences: Vec::new(),
+        kernel_omission: None,
     }])));
 }
 
@@ -131,6 +154,7 @@ fn every_divergence_gets_its_own_line() {
         &doc(vec![VerifiedEntryDoc {
             entry: "base".to_string(),
             matched: 1,
+            kernel_omission: None,
             divergences: vec![
                 DivergenceDoc {
                     path: "a/PARAM.SFO".to_string(),

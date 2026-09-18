@@ -25,6 +25,7 @@ fn disc_record(shipped_firmware: Option<&str>) -> InstallRecord {
         }),
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     }
 }
 

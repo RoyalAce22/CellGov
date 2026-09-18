@@ -57,7 +57,50 @@ pub(crate) struct FirmwareDoc {
     /// Why the tree's `firmware.toml` did not load, when it did not.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manifest_error: Option<String>,
+    /// What the entry holds out of the CoreOS package. Absent when the
+    /// install record predates the block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_os: Option<CoreOsDoc>,
 }
+
+/// One firmware entry's CoreOS block: the stored kernel or why there is
+/// none, and the file table the package held.
+#[derive(Debug, Serialize)]
+pub(crate) struct CoreOsDoc {
+    /// The kernel stored beside `dev_flash/`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kernel: Option<KernelDoc>,
+    /// Why the install stored no kernel, when it stored none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omission: Option<String>,
+    /// Every file the package's table named, in table order; empty when
+    /// the install could not read the table.
+    pub files: Vec<CoreOsFileDoc>,
+}
+
+/// The stored LV2 kernel.
+#[derive(Debug, Serialize)]
+pub(crate) struct KernelDoc {
+    /// Entry-relative path of the file, SCE-wrapped as shipped.
+    pub path: String,
+    /// SHA-256 over the bytes as stored, still SCE-wrapped.
+    pub stored_sha256: String,
+}
+
+/// One file the CoreOS package's table named.
+#[derive(Debug, Serialize)]
+pub(crate) struct CoreOsFileDoc {
+    /// The name the table spells.
+    pub name: String,
+    /// Byte length the table declares.
+    pub size: u64,
+}
+
+/// What a human report prints for a firmware entry whose record
+/// predates the `[core_os]` block.
+pub(crate) const KERNEL_NOT_RECORDED: &str =
+    "not unpacked (installed before the kernel was kept; add it with \
+     `cellgov firmware install <PS3UPDAT.PUP> --kernel-only`)";
 
 /// What a human report prints for a base whose PARAM.SFO named no
 /// version. A boot summary's game identity prints the same words for
@@ -287,6 +330,11 @@ pub(crate) struct VerifiedEntryDoc {
     pub matched: usize,
     /// The artefacts that did not, in record order.
     pub divergences: Vec<DivergenceDoc>,
+    /// Why the pass checked no kernel for a firmware entry: the entry
+    /// stores none. Absent for a title entry, and for a firmware entry
+    /// whose kernel the pass checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kernel_omission: Option<String>,
 }
 
 /// `firmware verify` and `title verify`.

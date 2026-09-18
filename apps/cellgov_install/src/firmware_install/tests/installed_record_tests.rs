@@ -26,6 +26,7 @@ fn firmware_record(version: &str) -> InstallRecord {
         title: None,
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     }
 }
 

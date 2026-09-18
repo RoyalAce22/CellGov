@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use crate::store::layout::{tombstone_sibling, Artifact, ArtifactKind, StoreLayout, VersionKey};
 use crate::store::lock::lock_artifact;
-use crate::store::record::InstallRecord;
+use crate::store::record::{InstallRecord, KernelRecord};
 use crate::store::rename::{rename_with_retry, RenameRefused};
 
 /// Why a firmware uninstall failed.
@@ -133,6 +133,9 @@ pub struct FirmwareUninstallPlan {
     /// SHA-256 over the PUP the entry was installed from, so a report
     /// can name the source to reinstall.
     pub pup_sha256: String,
+    /// The kernel the record says the entry stores, for a verifying
+    /// removal to hash with the modules.
+    pub kernel: Option<KernelRecord>,
     /// The identity the removal claims, resolved by the same gate that
     /// resolved `entry_dir`.
     artifact: Artifact,
@@ -262,6 +265,7 @@ pub fn plan(
         entry_dir: layout.resolve_store_path(&record.artifact.store_path),
         record_path,
         pup_sha256: record.source.sha256.to_hex(),
+        kernel: record.core_os.and_then(|block| block.kernel),
         artifact,
         layout,
     })

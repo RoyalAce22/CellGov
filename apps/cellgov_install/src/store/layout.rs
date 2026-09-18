@@ -33,6 +33,11 @@ const HDD0_USER: &str = "00000001";
 /// store rather than in it.
 const CELLGOV_DIR: &str = ".cellgov";
 
+/// Directory inside a firmware entry, beside `dev_flash/`, that holds
+/// what the install copied from the CoreOS package. No mount composes
+/// it, so nothing a boot loads comes from it.
+pub const CORE_OS_DIR: &str = "core_os";
+
 /// Whether a string is safe to use as a single path component under a
 /// store root: non-empty, no leading or trailing dot, no Win32 device
 /// name, and `[A-Za-z0-9._-]` only.

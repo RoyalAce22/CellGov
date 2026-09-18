@@ -191,21 +191,28 @@ fn verify_before_removal(
     let dev_flash = plan
         .entry_dir
         .join(cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT);
-    let report = cellgov_install::firmware_verify::verify_firmware_tree(&dev_flash, &keys)
+    let mut report = cellgov_install::firmware_verify::verify_firmware_tree(&dev_flash, &keys)
         .unwrap_or_else(|e| die(&format!("firmware uninstall --verify: {e}")));
+    if let Some(kernel) = &plan.kernel {
+        match cellgov_install::firmware_verify::verify_stored_kernel(&plan.entry_dir, kernel) {
+            Ok(None) => report.matched += 1,
+            Ok(Some(fault)) => report.divergences.push(fault),
+            Err(e) => die(&format!("firmware uninstall --verify: {e}")),
+        }
+    }
     for fault in &report.divergences {
         eprintln!("  {fault}");
     }
     if report.is_clean() {
         println!(
-            "  verified {} module(s) against firmware.toml before removal",
+            "  verified {} artefact(s) against firmware.toml and the record before removal",
             report.matched
         );
         return;
     }
     if !force {
         die(&format!(
-            "firmware {} diverged from its manifest in {} of {} module(s); pass --force to \
+            "firmware {} diverged from its record in {} of {} artefact(s); pass --force to \
              remove it anyway",
             plan.version,
             report.divergences.len(),
@@ -213,7 +220,7 @@ fn verify_before_removal(
         ));
     }
     eprintln!(
-        "  --force overrode {} module(s) that diverged from firmware.toml",
+        "  --force overrode {} artefact(s) that diverged from the record",
         report.divergences.len()
     );
 }

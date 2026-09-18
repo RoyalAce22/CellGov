@@ -46,6 +46,7 @@ fn tree_and_record(files: &[(&str, &[u8])]) -> (ScratchDir, InstallRecord) {
         }),
         files: recorded,
         rap: None,
+        core_os: None,
     };
     (dir, record)
 }

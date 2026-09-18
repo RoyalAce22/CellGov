@@ -17,6 +17,7 @@ fn firmware(version: &str) -> FirmwareDoc {
         image_version: Some("0x0004008200000000".to_string()),
         modules: Some(412),
         manifest_error: None,
+        core_os: None,
     }
 }
 

@@ -526,6 +526,7 @@ pub(super) fn build_record(
         title: Some(title),
         files,
         rap,
+        core_os: None,
     }
 }
 

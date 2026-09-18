@@ -23,6 +23,7 @@ fn managed(entry_dir: &str) -> BootComposition {
                 version: "4.93".to_string(),
                 entry_dir: PathBuf::from(entry_dir),
                 pup_sha256: "0".repeat(64),
+                core_os: None,
             },
             selected_by: FirmwareSelectedBy::Flag,
         }),

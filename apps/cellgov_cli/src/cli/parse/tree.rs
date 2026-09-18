@@ -13,7 +13,7 @@ use super::store::{FirmwareCommand, KeysCommand, SelfCommand, TitleCommand};
     name = "cellgov",
     bin_name = "cellgov",
     version,
-    about = "Deterministic PS3 oracle: install a corpus, boot it, and diff the result.",
+    about = "Deterministic PS3 oracle: install a PS3 game, boot it, and diff the result.",
     long_about = None,
     propagate_version = true,
     disable_help_subcommand = false,

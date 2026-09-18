@@ -35,6 +35,7 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &[
             "cellgov firmware install dumps/firmware/PS3UPDAT.PUP",
             "cellgov firmware install dumps/firmware/PS3UPDAT.PUP --force --verbose",
+            "cellgov firmware install dumps/firmware/PS3UPDAT.PUP --kernel-only",
         ],
     },
     Examples {

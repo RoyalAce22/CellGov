@@ -30,8 +30,9 @@ pub(crate) use entry::{die_usage, parse_or_exit};
 #[cfg(test)]
 pub(crate) use globals::global_refusal;
 pub(crate) use store::{
-    FirmwareCommand, FirmwareUninstallArgs, InstallContainerArgs, KeysCommand, KeysPathArgs,
-    SelfCommand, SelfDecryptArgs, TitleCommand, TitleInstallArgs, UninstallArgs, VfsOutput,
+    FirmwareCommand, FirmwareInstallArgs, FirmwareUninstallArgs, InstallContainerArgs, KeysCommand,
+    KeysPathArgs, SelfCommand, SelfDecryptArgs, TitleCommand, TitleInstallArgs, UninstallArgs,
+    VfsOutput,
 };
 pub(crate) use tree::{BootCommand, Cli, Command, Globals};
 

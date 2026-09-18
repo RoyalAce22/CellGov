@@ -4,12 +4,14 @@ use std::path::Path;
 
 use cellgov_terminal::caps::RenderFlags;
 
-use crate::cli::parse::InstallContainerArgs;
+use crate::cli::parse::FirmwareInstallArgs;
 
 #[cfg(feature = "decrypt")]
 use cellgov_install::firmware_install::{FirmwareInstallError, ManifestOmission, PackageSummary};
 #[cfg(feature = "decrypt")]
 use cellgov_install::progress::FIRMWARE_TASK;
+#[cfg(feature = "decrypt")]
+use cellgov_install::store::CoreOsRecord;
 #[cfg(feature = "decrypt")]
 use cellgov_terminal::progress::ProgressBar;
 
@@ -17,7 +19,7 @@ use cellgov_terminal::progress::ProgressBar;
 use super::{container_label, install_caps, map_container_or_die, megabytes, vault_or_die};
 
 #[cfg(not(feature = "decrypt"))]
-pub(crate) fn install(_args: &InstallContainerArgs, _store: &Path, _render: RenderFlags, _v: bool) {
+pub(crate) fn install(_args: &FirmwareInstallArgs, _store: &Path, _render: RenderFlags, _v: bool) {
     crate::cli::exit::die(
         &super::StoreCliError::DecryptFeatureDisabled {
             command: "firmware install".to_string(),
@@ -26,10 +28,12 @@ pub(crate) fn install(_args: &InstallContainerArgs, _store: &Path, _render: Rend
     )
 }
 
-/// Install system software from a PUP into `store`.
+/// Install system software from a PUP into `store`, or with
+/// `--kernel-only` add the kernel to the entry the PUP already
+/// installed.
 #[cfg(feature = "decrypt")]
 pub(crate) fn install(
-    args: &InstallContainerArgs,
+    args: &FirmwareInstallArgs,
     store: &Path,
     render: RenderFlags,
     verbose: bool,
@@ -38,6 +42,31 @@ pub(crate) fn install(
     // read first.
     let keys = vault_or_die(store);
     let pup_data = map_container_or_die(&args.path);
+
+    if args.kernel_only {
+        println!(
+            "cellgov: unpacking the kernel from {} ({:.1} MB) into its installed entry",
+            args.path.display(),
+            megabytes(pup_data.len()),
+        );
+        let outcome =
+            cellgov_install::firmware_install::complete_kernel(&pup_data, &keys, store, &())
+                .unwrap_or_else(|e| {
+                    eprintln!("install --kernel-only failed: {e}");
+                    std::process::exit(1);
+                });
+        println!(
+            "  firmware {}: entry {}",
+            outcome.version,
+            outcome.entry_dir.display()
+        );
+        println!("  record {}", outcome.record_path.display());
+        if outcome.replaced {
+            println!("  the kernel already stored there was written over");
+        }
+        report_core_os(&outcome.core_os);
+        return;
+    }
 
     println!(
         "cellgov: installing firmware from {} ({:.1} MB)",
@@ -89,6 +118,7 @@ pub(crate) fn install(
         }
     }
     report_omissions(&outcome.omissions);
+    report_core_os(&outcome.core_os);
     super::report_rename_retries(outcome.rename_retries);
 }
 
@@ -128,6 +158,24 @@ pub(super) fn report_omissions(omissions: &[ManifestOmission]) {
                 eprintln!("    {path}: neither an SCE container nor an ELF ({len} bytes)");
             }
         }
+    }
+}
+
+/// Report what the CoreOS package yielded: the stored kernel, or why
+/// there is none.
+#[cfg(feature = "decrypt")]
+pub(super) fn report_core_os(core_os: &CoreOsRecord) {
+    match (&core_os.kernel, &core_os.omission) {
+        (Some(kernel), _) => println!(
+            "  kernel {} (as stored, sha256 {}; {} in the CoreOS table)",
+            kernel.path,
+            kernel.stored_sha256.to_hex(),
+            plural(core_os.files.len(), "file", "files"),
+        ),
+        (None, Some(why)) => {
+            eprintln!("  kernel not unpacked (the dev_flash tree is unaffected): {why}");
+        }
+        (None, None) => eprintln!("  kernel not unpacked (the dev_flash tree is unaffected)"),
     }
 }
 

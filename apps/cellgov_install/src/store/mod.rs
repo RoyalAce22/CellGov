@@ -21,13 +21,13 @@ pub mod verify;
 pub use layout::{
     record_rel_path, staging_sibling, tombstone_sibling, Artifact, ArtifactKind,
     HiddenSiblingError, StoreKeyError, StoreLayout, StorePathError, TitleId, TitleTree, VersionKey,
-    DEFAULT_VFS_ROOT,
+    CORE_OS_DIR, DEFAULT_VFS_ROOT,
 };
 pub use lock::{lock_artifact, lock_firmware_staging, StoreLock, StoreLockError};
 pub use pre_store::{preflight, PreStoreArtifact, PreStoreError, PreStoreResidue};
 pub use record::{
-    ArtifactRecord, InstallRecord, InstallRecordParseError, RapRecord, SourceRecord, TitleRecord,
-    INSTALL_RECORD_FORMAT_VERSION,
+    ArtifactRecord, CoreOsFileRecord, CoreOsRecord, InstallRecord, InstallRecordParseError,
+    KernelRecord, RapRecord, SourceRecord, TitleRecord, INSTALL_RECORD_FORMAT_VERSION,
 };
 pub use rename::{rename_with_retry, RenameRefused};
 pub use verify::{verify_record_tree, Divergence, DivergenceKind, VerifyReadError, VerifyReport};

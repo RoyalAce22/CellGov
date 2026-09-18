@@ -18,7 +18,7 @@ use crate::cli::parse::OutputFormat;
 use cellgov_boot::manifest::BASE_GAME_VER;
 
 use super::collect::StoreView;
-use super::model::{DivergenceDoc, VerifiedEntryDoc, VerifyDoc};
+use super::model::{DivergenceDoc, VerifiedEntryDoc, VerifyDoc, KERNEL_NOT_RECORDED};
 use super::{emit, view};
 
 /// `cellgov firmware verify <VERSION>`
@@ -32,9 +32,34 @@ pub(crate) fn firmware_verify(root: &Path, version: &str, format: OutputFormat) 
     });
     let keys =
         cellgov_install::keys::KeyVault::load_for_vfs(root).unwrap_or_else(|e| die(&e.to_string()));
-    let report =
+    let mut report =
         cellgov_install::firmware_verify::verify_firmware_tree(&entry.dev_flash_dir(), &keys)
             .unwrap_or_else(|e| die(&format!("firmware verify {version}: {e}")));
+
+    // The kernel is one more recorded artefact: hashed as stored, so it
+    // joins the manifest's modules in the same tally.
+    let kernel_omission = match entry.core_os.as_ref() {
+        Some(block) => match &block.kernel {
+            Some(kernel) => {
+                match cellgov_install::firmware_verify::verify_stored_kernel(
+                    &entry.entry_dir,
+                    kernel,
+                ) {
+                    Ok(None) => report.matched += 1,
+                    Ok(Some(fault)) => report.divergences.push(fault),
+                    Err(e) => die(&format!("firmware verify {version}: {e}")),
+                }
+                None
+            }
+            None => Some(
+                block
+                    .omission
+                    .clone()
+                    .unwrap_or_else(|| "not unpacked".to_string()),
+            ),
+        },
+        None => Some(KERNEL_NOT_RECORDED.to_string()),
+    };
 
     let doc = VerifyDoc {
         format_version: view.format_version(),
@@ -49,6 +74,7 @@ pub(crate) fn firmware_verify(root: &Path, version: &str, format: OutputFormat) 
                 .iter()
                 .map(|f| module_fault_doc(&view, f))
                 .collect(),
+            kernel_omission,
         }],
     };
     finish(&doc, format, &format!("firmware {version}"));
@@ -137,6 +163,7 @@ pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, forma
                 .iter()
                 .map(|d| divergence_doc(&view, d))
                 .collect(),
+            kernel_omission: None,
         });
     }
 
@@ -239,6 +266,12 @@ fn finish(doc: &VerifyDoc, format: OutputFormat, subject: &str) -> ! {
 fn render(doc: &VerifyDoc, subject: &str) -> String {
     let mut out = String::new();
     for entry in &doc.entries {
+        // An omission is no divergence: the pass found nothing wrong.
+        // The line keeps the clean summary below from claiming a
+        // kernel the pass did not check.
+        if let Some(why) = &entry.kernel_omission {
+            out.push_str(&format!("{}: kernel not checked: {why}\n", entry.entry));
+        }
         for divergence in &entry.divergences {
             out.push_str(
                 &match (&divergence.expected, &divergence.found, &divergence.reason) {

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::keys::KeyVault;
 use crate::manifest::{self, FirmwareManifest, ManifestError, Sha256 as HexSha256, MANIFEST_FILE};
+use crate::store::record::KernelRecord;
 
 /// Why one module did not match the manifest entry that names it.
 ///
@@ -371,6 +372,51 @@ pub fn verify_firmware_tree(
     Ok(report)
 }
 
+/// Re-hash the stored kernel `kernel` names under `entry_dir`.
+///
+/// The record holds the as-stored digest, so this hashes the bytes as
+/// they lie and needs no key. `None` is a match.
+///
+/// # Errors
+///
+/// [`FirmwareVerifyError::ModuleRead`] when the read fails with
+/// anything other than `NotFound`.
+pub fn verify_stored_kernel(
+    entry_dir: &Path,
+    kernel: &KernelRecord,
+) -> Result<Option<ModuleFault>, FirmwareVerifyError> {
+    // The record gate proved the path stays inside the entry.
+    let path = kernel
+        .path
+        .split('/')
+        .fold(entry_dir.to_path_buf(), |dir, part| dir.join(part));
+    let raw = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Some(ModuleFault {
+                path,
+                kind: ModuleDivergence::Missing,
+            }))
+        }
+        Err(source) => return Err(FirmwareVerifyError::ModuleRead { path, source }),
+    };
+    let found = manifest::Sha256(manifest::sha256_of(&raw));
+    if found == kernel.stored_sha256 {
+        return Ok(None);
+    }
+    Ok(Some(ModuleFault {
+        path,
+        kind: ModuleDivergence::Modified {
+            expected: kernel.stored_sha256,
+            found,
+        },
+    }))
+}
+
 #[cfg(test)]
 #[path = "tests/firmware_verify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/verify_stored_kernel_tests.rs"]
+mod verify_stored_kernel_tests;

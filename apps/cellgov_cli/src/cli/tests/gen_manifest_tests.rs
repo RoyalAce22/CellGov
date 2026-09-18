@@ -53,6 +53,7 @@ fn hdd_record() -> InstallRecord {
             filename: format!("{HDD_CONTENT_ID}.rap"),
             sha256: Sha256([3u8; 32]),
         }),
+        core_os: None,
     }
 }
 
@@ -76,6 +77,7 @@ fn disc_record() -> InstallRecord {
         }),
         files: BTreeMap::from([("PS3_GAME/USRDIR/EBOOT.BIN".to_string(), Sha256([2u8; 32]))]),
         rap: None,
+        core_os: None,
     }
 }
 
@@ -91,6 +93,7 @@ fn firmware_record() -> InstallRecord {
         title: None,
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     }
 }
 

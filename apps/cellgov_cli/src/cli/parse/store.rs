@@ -21,7 +21,7 @@ const VERIFY_EXIT_CODES: &str = "Exit codes:
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum FirmwareCommand {
     /// Install system software from a PS3UPDAT.PUP.
-    Install(InstallContainerArgs),
+    Install(FirmwareInstallArgs),
     /// Name every installed firmware version.
     List,
     /// Report one installed version in full.
@@ -30,7 +30,7 @@ pub(crate) enum FirmwareCommand {
         #[arg(id = "fw_version", value_name = "VERSION")]
         version: String,
     },
-    /// Re-hash an installed version against its manifest.
+    /// Re-hash an installed version against its manifest and record.
     #[command(after_help = VERIFY_EXIT_CODES)]
     Verify {
         /// Version key of a `firmware/<key>/` entry.
@@ -41,13 +41,31 @@ pub(crate) enum FirmwareCommand {
     Uninstall(FirmwareUninstallArgs),
 }
 
+/// `cellgov firmware install`
+#[derive(Debug, clap::Args)]
+pub(crate) struct FirmwareInstallArgs {
+    /// The PS3UPDAT.PUP to install.
+    #[arg(value_name = "PATH")]
+    pub path: PathBuf,
+    /// Replace the version that is already installed.
+    #[arg(long, conflicts_with = "kernel_only")]
+    pub force: bool,
+    /// Add only the LV2 kernel to the entry this PUP already
+    /// installed; its dev_flash tree stays as it is.
+    #[arg(long)]
+    pub kernel_only: bool,
+    #[command(flatten)]
+    pub output: VfsOutput,
+}
+
 /// `cellgov firmware uninstall`
 #[derive(Debug, clap::Args)]
 pub(crate) struct FirmwareUninstallArgs {
     /// Version key of a `firmware/<key>/` entry.
     #[arg(id = "fw_version", value_name = "VERSION")]
     pub version: String,
-    /// Re-hash the installed tree against its manifest first.
+    /// Re-hash the installed tree against its manifest and record
+    /// first.
     #[arg(long)]
     pub verify: bool,
     /// Remove it even though a committed anchor names it, or though

@@ -91,6 +91,7 @@ fn record(
         }),
         files,
         rap: None,
+        core_os: None,
     }
 }
 

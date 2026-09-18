@@ -33,6 +33,7 @@ fn base_record() -> InstallRecord {
             .into_iter()
             .collect(),
         rap: None,
+        core_os: None,
     }
 }
 
@@ -48,6 +49,7 @@ fn firmware_record() -> InstallRecord {
         title: None,
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     }
 }
 

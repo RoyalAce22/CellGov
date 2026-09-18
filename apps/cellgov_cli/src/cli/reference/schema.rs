@@ -9,8 +9,9 @@ use std::path::Path;
 use cellgov_install::store::{Artifact, StoreLayout, TitleId, TitleTree, VersionKey};
 
 use crate::cli::store::read::model::{
-    store_rel, AnchorDoc, BaseDoc, DivergenceDoc, FirmwareDoc, FirmwareListDoc, StatusDoc,
-    TitleDoc, TitleListDoc, UpdateDoc, VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
+    store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, DivergenceDoc, FirmwareDoc,
+    FirmwareListDoc, KernelDoc, StatusDoc, TitleDoc, TitleListDoc, UpdateDoc, VerifiedEntryDoc,
+    VerifyDoc, STORE_FORMAT_VERSION,
 };
 
 /// A SHA-256 as a document spells one: 64 lowercase hex digits.
@@ -81,6 +82,23 @@ fn firmware_doc() -> FirmwareDoc {
         image_version: Some("0x0004009300000000".to_string()),
         modules: Some(370),
         manifest_error: None,
+        core_os: Some(CoreOsDoc {
+            kernel: Some(KernelDoc {
+                path: "core_os/lv2_kernel.self".to_string(),
+                stored_sha256: SAMPLE_SHA.to_string(),
+            }),
+            omission: None,
+            files: vec![
+                CoreOsFileDoc {
+                    name: "lv1.self".to_string(),
+                    size: 1_280_160,
+                },
+                CoreOsFileDoc {
+                    name: "lv2_kernel.self".to_string(),
+                    size: 1_586_440,
+                },
+            ],
+        }),
     }
 }
 
@@ -185,6 +203,7 @@ fn verify_doc() -> VerifyDoc {
                 found: Some(SAMPLE_SHA.to_string()),
                 reason: None,
             }],
+            kernel_omission: None,
         }],
         clean: false,
     }

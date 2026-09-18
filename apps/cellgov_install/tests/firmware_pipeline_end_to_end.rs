@@ -205,6 +205,77 @@ fn install_keys_the_entry_on_the_version_the_extracted_tree_names() {
 }
 
 #[test]
+fn install_stores_the_kernel_the_core_os_package_carries_beside_the_tree() {
+    use cellgov_ps3_abi::format::core_os::LV2_KERNEL_SELF;
+
+    let pup = locate_pup();
+    let output = scratch::scratch_labeled("fw_kernel");
+    let outcome =
+        run_install(&pup, &output, false).unwrap_or_else(|e| panic!("install failed: {e}"));
+
+    let kernel = outcome.core_os.kernel.as_ref().unwrap_or_else(|| {
+        panic!(
+            "the retail PUP carries a CoreOS package with a kernel, and the install \
+             recorded none: {:?}",
+            outcome.core_os.omission
+        )
+    });
+    let stored = outcome.entry_dir.join("core_os").join(LV2_KERNEL_SELF);
+    assert_eq!(kernel.path, "core_os/lv2_kernel.self");
+    let bytes = std::fs::read(&stored).unwrap_or_else(|e| panic!("read {}: {e}", stored.display()));
+    assert!(
+        bytes.starts_with(&cellgov_ps3_abi::format::sce::SCE_MAGIC),
+        "the kernel is kept SCE-wrapped as shipped"
+    );
+    assert_eq!(
+        kernel.stored_sha256,
+        cellgov_install::manifest::Sha256(cellgov_install::manifest::sha256_of(&bytes)),
+        "the recorded digest is over the bytes as stored"
+    );
+    // The unpack keeps the kernel alone; the table names every entry,
+    // kernel included.
+    assert_eq!(
+        std::fs::read_dir(outcome.entry_dir.join("core_os"))
+            .unwrap()
+            .count(),
+        1
+    );
+    let names: Vec<&str> = outcome
+        .core_os
+        .files
+        .iter()
+        .map(|f| f.name.as_str())
+        .collect();
+    assert!(names.contains(&LV2_KERNEL_SELF), "{names:?}");
+    assert!(
+        names.len() > 1,
+        "the table names more than the kernel: {names:?}"
+    );
+    assert!(
+        !outcome.entry_dir.join(FLASH_MOUNT).join("core_os").exists(),
+        "the kernel sits beside the mount, not inside it"
+    );
+
+    // The record carries the same block, and a verify hashes the file.
+    let layout = StoreLayout::new(&*output);
+    let record_path = layout.record_path(&Artifact::Firmware {
+        version: VersionKey::new(&outcome.version).unwrap(),
+    });
+    let record = InstallRecord::parse(&std::fs::read_to_string(&record_path).unwrap()).unwrap();
+    let recorded = record
+        .core_os
+        .and_then(|block| block.kernel)
+        .expect("the record names the kernel");
+    assert_eq!(&recorded, kernel);
+    assert!(
+        cellgov_install::firmware_verify::verify_stored_kernel(&outcome.entry_dir, &recorded)
+            .expect("readable")
+            .is_none(),
+        "a fresh install verifies clean"
+    );
+}
+
+#[test]
 fn reinstalling_the_same_pup_is_refused_without_force_and_leaves_no_residue() {
     let pup = locate_pup();
     let output = scratch::scratch_labeled("fw_refuse");

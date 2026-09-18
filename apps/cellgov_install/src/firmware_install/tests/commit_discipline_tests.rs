@@ -43,6 +43,7 @@ fn staged_over_an_installed_version(root: &Path) -> (PathBuf, Staged) {
         title: None,
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     };
     std::fs::create_dir_all(record_path.parent().unwrap()).unwrap();
     std::fs::write(&record_path, record.to_toml().unwrap()).unwrap();
@@ -124,6 +125,7 @@ fn a_first_install_commits_with_no_record_to_drop() {
             title: None,
             files: BTreeMap::new(),
             rap: None,
+            core_os: None,
         },
         version: "4.93".to_string(),
         record_path: layout.record_path(&artifact),

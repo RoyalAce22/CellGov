@@ -40,6 +40,8 @@ use std::path::{Path, PathBuf};
 use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 use cellgov_ps3_abi::format::pup::ENTRY_ID_UPDATE_FILES;
 
+#[cfg(feature = "decrypt")]
+use super::core_os;
 use super::error::{FirmwareInstallError, PackageFailure};
 #[cfg(feature = "decrypt")]
 use super::manifest_build::build_manifest;
@@ -52,7 +54,7 @@ use crate::progress::{FirmwarePhase, ProgressSink};
 use crate::store::layout::{Artifact, ArtifactKind, StoreLayout, VersionKey};
 use crate::store::lock::{lock_artifact, lock_firmware_staging};
 use crate::store::record::{
-    ArtifactRecord, InstallRecord, InstallRecordParseError, SourceRecord,
+    ArtifactRecord, CoreOsRecord, InstallRecord, InstallRecordParseError, SourceRecord,
     INSTALL_RECORD_FORMAT_VERSION,
 };
 use crate::store::rename::rename_with_retry;
@@ -74,7 +76,7 @@ const DEV_FLASH_PACKAGE: &str = "dev_flash_";
 ///
 /// The extent is bounds-checked here, so an entry whose declared extent
 /// leaves the buffer is distinguished from an absent entry.
-fn update_files_payload<'a>(
+pub(super) fn update_files_payload<'a>(
     pup_data: &'a [u8],
     pup: &pup::Pup,
 ) -> Result<&'a [u8], FirmwareInstallError> {
@@ -135,6 +137,9 @@ pub struct FirmwareInstallOutcome {
     pub manifest_entries: usize,
     /// Modules the manifest could not cover, and why.
     pub omissions: Vec<ManifestOmission>,
+    /// What the CoreOS package yielded: the kernel stored beside
+    /// `dev_flash/`, or why there is none.
+    pub core_os: CoreOsRecord,
     /// Per-package tallies, in extraction order.
     pub packages: Vec<PackageSummary>,
     /// Files the packages extracted into the tree, not counting the
@@ -207,7 +212,7 @@ fn run_or_clean<T>(
 ///
 /// A stat that fails is not an absent directory: it refuses here
 /// rather than reporting an occupied target as free.
-fn dir_non_empty(path: &Path) -> Result<bool, FirmwareInstallError> {
+pub(super) fn dir_non_empty(path: &Path) -> Result<bool, FirmwareInstallError> {
     if !std::fs::exists(path).map_err(io_err("stat", path))? {
         return Ok(false);
     }
@@ -497,6 +502,10 @@ pub fn install_pup(
         std::fs::write(&staged_manifest, serialize_manifest(&manifest)?)
             .map_err(io_err("write", &staged_manifest))?;
 
+        // A kernel omission fails nothing; the record names it.
+        progress.phase(FirmwarePhase::UnpackingKernel.code());
+        let core_os = core_os::unpack(&outer_tar, &staging_root, keys).into_record();
+
         let staged = Staged {
             record: InstallRecord {
                 format_version: INSTALL_RECORD_FORMAT_VERSION,
@@ -508,10 +517,11 @@ pub fn install_pup(
                 source: SourceRecord::local(FIRMWARE_SOURCE_KIND, pup_sha256),
                 // A firmware entry's per-file manifest is the
                 // `firmware.toml` inside its tree, so the record carries
-                // acquisition data and nothing else.
+                // no file map.
                 title: None,
                 files: std::collections::BTreeMap::new(),
                 rap: None,
+                core_os: Some(core_os),
             },
             version: version.as_str().to_string(),
             entry_dir,
@@ -534,6 +544,10 @@ pub fn install_pup(
         entry_dir: staged.entry_dir,
         manifest_entries: staged.manifest_entries,
         omissions: staged.omissions,
+        core_os: staged
+            .record
+            .core_os
+            .expect("invariant: the staged record carries the block built above"),
         packages: staged.packages,
         files: staged.files,
         record_path: staged.record_path,

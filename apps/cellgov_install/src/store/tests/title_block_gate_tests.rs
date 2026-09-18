@@ -22,6 +22,7 @@ fn base_record_declaring(system_ver: &str) -> InstallRecord {
         }),
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     }
 }
 

@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use cellgov_install::store::{
-    ArtifactKind, InstallRecord, InstallRecordParseError, PreStoreError, StoreKeyError,
-    StoreLayout, TitleId, TitleTree,
+    ArtifactKind, CoreOsRecord, InstallRecord, InstallRecordParseError, PreStoreError,
+    StoreKeyError, StoreLayout, TitleId, TitleTree,
 };
 use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 use cellgov_ps3_abi::format::param_sfo::PARAM_SFO_FILE;
@@ -142,6 +142,10 @@ pub(crate) struct FirmwareEntry {
     pub entry_dir: PathBuf,
     /// SHA-256 over the PUP the entry was installed from.
     pub pup_sha256: String,
+    /// The record's `[core_os]` block: the kernel stored beside
+    /// `dev_flash/`, or why there is none. `None` for a record that
+    /// predates the block.
+    pub core_os: Option<CoreOsRecord>,
 }
 
 impl FirmwareEntry {
@@ -288,6 +292,7 @@ impl StoreInventory {
                     version: record.artifact.version,
                     entry_dir: layout.resolve_store_path(&record.artifact.store_path),
                     pup_sha256: record.source.sha256.to_hex(),
+                    core_os: record.core_os,
                 },
             );
         }

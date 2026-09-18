@@ -43,6 +43,7 @@ fn record(kind: ArtifactKind, version: &str, store_path: &str, files: &[&str]) -
         }),
         files: recorded,
         rap: None,
+        core_os: None,
     }
 }
 

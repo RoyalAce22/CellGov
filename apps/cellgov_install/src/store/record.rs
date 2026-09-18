@@ -4,14 +4,17 @@
 //! # Invariants
 //!
 //! - A record's blocks match its `[artifact] kind`: a firmware record
-//!   has no `[title]` and no `[rap]`, a title record has a `[title]`,
-//!   and only a base record's `[title]` carries `shipped_firmware`.
-//!   [`InstallRecord`] has no `Deserialize`; [`InstallRecord::parse`] is
-//!   the only route from text and refuses every other combination.
+//!   has no `[title]` and no `[rap]`, a title record has a `[title]`
+//!   and no `[core_os]`, and only a base record's `[title]` carries
+//!   `shipped_firmware`. [`InstallRecord`] has no `Deserialize`;
+//!   [`InstallRecord::parse`] is the only route from text and refuses
+//!   every other combination.
+//! - A `[core_os]` block names the stored kernel or says why there is
+//!   none, never both and never neither.
 //! - Every string a consumer joins onto a path -- `store_path`, the
-//!   `[files]` keys, the `[rap]` filename, the `[title]` ids -- is gated
-//!   here, so no record read off disk can name a file outside the tree
-//!   it describes.
+//!   `[files]` keys, the `[rap]` filename, the `[title]` ids, the
+//!   `[core_os] kernel.path` -- is gated here, so no record read off
+//!   disk can name a file outside the tree it describes.
 //! - The version of a kind whose store path encodes one (firmware,
 //!   update) is a usable directory name. A base's version is the one
 //!   its PARAM.SFO names, which the path does not encode and a container
@@ -116,6 +119,24 @@ pub enum InstallRecordParseError {
         /// The offending key.
         path: String,
     },
+    /// A title record carries a `[core_os]` block; only a firmware entry
+    /// holds a kernel.
+    #[error("{} record carries a [core_os] block", kind.as_str())]
+    UnexpectedCoreOsBlock {
+        /// The kind that carries none.
+        kind: ArtifactKind,
+    },
+    /// A `[core_os]` block that neither names a stored kernel nor says
+    /// why there is none, or does both.
+    #[error("[core_os] must carry exactly one of `kernel` and `omission`")]
+    CoreOsBlockShape,
+    /// A `[core_os] kernel.path` that would leave the entry a consumer
+    /// joins it onto.
+    #[error("[core_os] kernel path {path:?} is not a path inside the recorded entry")]
+    UnsafeKernelPath {
+        /// The offending path.
+        path: String,
+    },
 }
 
 /// The store entry a record describes.
@@ -194,6 +215,48 @@ pub struct RapRecord {
     pub sha256: HexSha256,
 }
 
+/// One file the CoreOS package's table named, as the install read it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoreOsFileRecord {
+    /// The name the table spells.
+    pub name: String,
+    /// Byte length the table declares.
+    pub size: u64,
+}
+
+/// The LV2 kernel written beside `dev_flash/`, SCE-wrapped as shipped.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct KernelRecord {
+    /// Entry-relative, `/`-separated path of the stored file.
+    pub path: String,
+    /// SHA-256 over the SCE container as stored. The install holds no
+    /// key that opens the kernel, so the digest has a different basis
+    /// from the post-decrypt ones `firmware.toml` records for modules.
+    pub stored_sha256: HexSha256,
+}
+
+/// What the install read out of `CORE_OS_PACKAGE.pkg`: the table the
+/// package held, and the one file the install copied from it.
+///
+/// Every install writes the block. A record without one predates the
+/// block, reads as "not unpacked", and names no reason.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CoreOsRecord {
+    /// The stored kernel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel: Option<KernelRecord>,
+    /// The reason the install stored no kernel, as text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub omission: Option<String>,
+    /// Every entry the package's file table held, in table order.
+    /// Empty when the install could not read the table.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<CoreOsFileRecord>,
+}
+
 /// Title identity for an install record, all PARAM.SFO-derived.
 ///
 /// `deny_unknown_fields` for the reason the wire shape carries it:
@@ -267,6 +330,10 @@ pub struct InstallRecord {
     /// no-RAP titles.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rap: Option<RapRecord>,
+    /// The [`CoreOsRecord`] of a firmware install. Absent for a title
+    /// entry, and for a firmware record that predates the block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub core_os: Option<CoreOsRecord>,
 }
 
 /// The wire shape, with `deny_unknown_fields` because the optional
@@ -284,6 +351,8 @@ struct RawInstallRecord {
     files: BTreeMap<String, HexSha256>,
     #[serde(default)]
     rap: Option<RapRecord>,
+    #[serde(default)]
+    core_os: Option<CoreOsRecord>,
 }
 
 /// The schema stamp alone, read before the full shape.
@@ -343,6 +412,22 @@ impl TryFrom<RawInstallRecord> for InstallRecord {
                         });
                     }
                 }
+                if raw.core_os.is_some() {
+                    return Err(InstallRecordParseError::UnexpectedCoreOsBlock { kind });
+                }
+            }
+        }
+        if let Some(core_os) = &raw.core_os {
+            match (&core_os.kernel, &core_os.omission) {
+                (Some(_), None) | (None, Some(_)) => {}
+                _ => return Err(InstallRecordParseError::CoreOsBlockShape),
+            }
+            if let Some(kernel) = &core_os.kernel {
+                if !tree_rel_path_is_safe(&kernel.path) {
+                    return Err(InstallRecordParseError::UnsafeKernelPath {
+                        path: kernel.path.clone(),
+                    });
+                }
             }
         }
         for path in raw.files.keys() {
@@ -386,6 +471,7 @@ impl TryFrom<RawInstallRecord> for InstallRecord {
             title: raw.title,
             files: raw.files,
             rap: raw.rap,
+            core_os: raw.core_os,
         })
     }
 }
@@ -446,3 +532,7 @@ mod title_block_gate_tests;
 #[cfg(test)]
 #[path = "tests/shipped_firmware_tests.rs"]
 mod shipped_firmware_tests;
+
+#[cfg(test)]
+#[path = "tests/core_os_record_tests.rs"]
+mod core_os_record_tests;

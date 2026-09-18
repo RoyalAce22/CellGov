@@ -1,7 +1,7 @@
 use super::*;
 
 use crate::cli::store::read::model::{
-    AnchorDoc, BaseDoc, UpdateDoc, NO_VERSION_KEY, STORE_FORMAT_VERSION,
+    AnchorDoc, BaseDoc, CoreOsDoc, UpdateDoc, NO_VERSION_KEY, STORE_FORMAT_VERSION,
 };
 
 /// Placeholder identity: these cases build every document by hand and
@@ -226,7 +226,101 @@ fn firmware(modules: Option<usize>, manifest_error: Option<&str>) -> FirmwareDoc
         image_version: None,
         modules,
         manifest_error: manifest_error.map(str::to_string),
+        core_os: None,
     }
+}
+
+fn core_os(kernel: bool, omission: Option<&str>, files: usize) -> CoreOsDoc {
+    CoreOsDoc {
+        kernel: kernel.then(|| crate::cli::store::read::model::KernelDoc {
+            path: "core_os/lv2_kernel.self".to_string(),
+            stored_sha256: "ab".repeat(32),
+        }),
+        omission: omission.map(str::to_string),
+        files: (0..files)
+            .map(|i| crate::cli::store::read::model::CoreOsFileDoc {
+                name: format!("file{i}"),
+                size: 16,
+            })
+            .collect(),
+    }
+}
+
+#[test]
+fn an_entry_whose_record_predates_the_kernel_reads_as_not_unpacked_never_as_an_error() {
+    let rendered = render_firmware_detail(&firmware(Some(412), None));
+    assert!(
+        rendered.contains(&format!("kernel     {KERNEL_NOT_RECORDED}")),
+        "{rendered}"
+    );
+    assert!(rendered.contains("--kernel-only"), "{rendered}");
+    assert!(
+        !rendered.contains("core os"),
+        "no table to count: {rendered}"
+    );
+}
+
+#[test]
+fn a_stored_kernel_prints_its_path_its_digest_and_the_table_it_came_from() {
+    let mut entry = firmware(Some(412), None);
+    entry.core_os = Some(core_os(true, None, 25));
+    let rendered = render_firmware_detail(&entry);
+    assert!(
+        rendered.contains(&format!(
+            "kernel     core_os/lv2_kernel.self (as stored, sha256 {})",
+            "ab".repeat(32)
+        )),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("core os    25 file(s) in the package table"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn an_omitted_kernel_prints_why_and_still_counts_the_table_it_read() {
+    let mut entry = firmware(Some(412), None);
+    entry.core_os = Some(core_os(
+        false,
+        Some("CORE_OS_PACKAGE.pkg names no lv2_kernel.self among its 3 file(s)"),
+        3,
+    ));
+    let rendered = render_firmware_detail(&entry);
+    assert!(
+        rendered.contains("kernel     not unpacked (CORE_OS_PACKAGE.pkg names no lv2_kernel.self"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("core os    3 file(s)"), "{rendered}");
+
+    entry.core_os = Some(core_os(false, Some("update_files carries no package"), 0));
+    let rendered = render_firmware_detail(&entry);
+    assert!(!rendered.contains("core os"), "{rendered}");
+}
+
+#[test]
+fn the_list_marks_which_versions_store_a_kernel() {
+    let mut with = firmware(Some(412), None);
+    with.core_os = Some(core_os(true, None, 25));
+    let mut without = firmware(Some(400), None);
+    without.version = "3.55".to_string();
+    without.core_os = Some(core_os(false, Some("no package"), 0));
+    let rendered = render_firmware_list(&FirmwareListDoc {
+        format_version: STORE_FORMAT_VERSION,
+        store: "vfs".to_string(),
+        firmware: vec![with, without, firmware(None, None)],
+    });
+    assert!(rendered.contains("KERNEL"), "{rendered}");
+    let lines: Vec<&str> = rendered.lines().collect();
+    assert!(
+        lines[1].contains("4.91") && lines[1].contains("yes"),
+        "{rendered}"
+    );
+    assert!(
+        lines[2].contains("3.55") && !lines[2].contains("yes"),
+        "{rendered}"
+    );
+    assert!(!lines[3].contains("yes"), "{rendered}");
 }
 
 #[test]

@@ -112,7 +112,23 @@ comparison records rather than a published API: they carry no
       "record": ".cellgov/installs/firmware/4.93.install.toml",
       "pup_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "image_version": "0x0004009300000000",
-      "modules": 370
+      "modules": 370,
+      "core_os": {
+        "kernel": {
+          "path": "core_os/lv2_kernel.self",
+          "stored_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "files": [
+          {
+            "name": "lv1.self",
+            "size": 1280160
+          },
+          {
+            "name": "lv2_kernel.self",
+            "size": 1586440
+          }
+        ]
+      }
     }
   ],
   "titles": [
@@ -178,7 +194,23 @@ comparison records rather than a published API: they carry no
       "record": ".cellgov/installs/firmware/4.93.install.toml",
       "pup_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
       "image_version": "0x0004009300000000",
-      "modules": 370
+      "modules": 370,
+      "core_os": {
+        "kernel": {
+          "path": "core_os/lv2_kernel.self",
+          "stored_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "files": [
+          {
+            "name": "lv1.self",
+            "size": 1280160
+          },
+          {
+            "name": "lv2_kernel.self",
+            "size": 1586440
+          }
+        ]
+      }
     }
   ]
 }
@@ -267,7 +299,7 @@ comparison records rather than a published API: they carry no
 
 ## `cellgov`
 
-Deterministic PS3 oracle: install a corpus, boot it, and diff the result.
+Deterministic PS3 oracle: install a PS3 game, boot it, and diff the result.
 
 ```console
 $ cellgov title install dumps/NPUA80001/flow.pkg --rap dumps/NPUA80001/flow.rap
@@ -307,6 +339,7 @@ Install system software from a PS3UPDAT.PUP.
 ```console
 $ cellgov firmware install dumps/firmware/PS3UPDAT.PUP
 $ cellgov firmware install dumps/firmware/PS3UPDAT.PUP --force --verbose
+$ cellgov firmware install dumps/firmware/PS3UPDAT.PUP --kernel-only
 ```
 
 ```
@@ -315,11 +348,12 @@ Usage: cellgov firmware install [OPTIONS] <PATH>
 
 | Argument | Description |
 | --- | --- |
-| `PATH` | The container to install. Required. |
+| `PATH` | The PS3UPDAT.PUP to install. Required. |
 
 | Option | Value | Description |
 | --- | --- | --- |
-| `--force` | -- | Replace what is already installed there. |
+| `--force` | -- | Replace the version that is already installed. |
+| `--kernel-only` | -- | Add only the LV2 kernel to the entry this PUP already installed; its dev_flash tree stays as it is. |
 | `--output` | `DIR` | Store root (default: the directory enclosing the PS3 VFS root). |
 
 #### `cellgov firmware list`
@@ -353,7 +387,7 @@ Usage: cellgov firmware show [OPTIONS] <VERSION>
 
 #### `cellgov firmware verify`
 
-Re-hash an installed version against its manifest.
+Re-hash an installed version against its manifest and record.
 
 ```console
 $ cellgov firmware verify 4.93
@@ -393,7 +427,7 @@ Usage: cellgov firmware uninstall [OPTIONS] <VERSION>
 
 | Option | Value | Description |
 | --- | --- | --- |
-| `--verify` | -- | Re-hash the installed tree against its manifest first. |
+| `--verify` | -- | Re-hash the installed tree against its manifest and record first. |
 | `--force` | -- | Remove it even though a committed anchor names it, or though `--verify` found the tree diverged. |
 | `--dry-run` | -- | Print the removal plan and stop. |
 

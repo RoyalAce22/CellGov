@@ -12,7 +12,8 @@ use crate::composition::inventory::{FirmwareEntry, StoreInventory, TitleEntry};
 use cellgov_boot::manifest::{CellKey, GameSource, TitleManifest, TitleRegistry, BASE_GAME_VER};
 
 use super::model::{
-    store_rel, AnchorDoc, BaseDoc, FirmwareDoc, TitleDoc, UpdateDoc, STORE_FORMAT_VERSION,
+    store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, FirmwareDoc, KernelDoc, TitleDoc,
+    UpdateDoc, STORE_FORMAT_VERSION,
 };
 
 /// The store root, the inventory read under it, and the registry the
@@ -73,6 +74,21 @@ impl StoreView {
             image_version: manifest.as_ref().map(|m| m.firmware.image_version.clone()),
             modules: manifest.as_ref().map(|m| m.files.len()),
             manifest_error,
+            core_os: entry.core_os.as_ref().map(|block| CoreOsDoc {
+                kernel: block.kernel.as_ref().map(|k| KernelDoc {
+                    path: k.path.clone(),
+                    stored_sha256: k.stored_sha256.to_hex(),
+                }),
+                omission: block.omission.clone(),
+                files: block
+                    .files
+                    .iter()
+                    .map(|f| CoreOsFileDoc {
+                        name: f.name.clone(),
+                        size: f.size,
+                    })
+                    .collect(),
+            }),
         }
     }
 

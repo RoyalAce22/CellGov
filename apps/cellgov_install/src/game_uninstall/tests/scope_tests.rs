@@ -97,6 +97,7 @@ fn stage_base(vfs: &Path) {
             filename: "UP0000-TEST00000_00-X.rap".to_string(),
             sha256: sha256_of(&[7u8; 16]),
         }),
+        core_os: None,
     };
     write(
         &base_record_path(vfs),
@@ -139,6 +140,7 @@ fn stage_update(vfs: &Path, version: &str) {
         }),
         files,
         rap: None,
+        core_os: None,
     };
     write(
         &layout.record_path(&artifact),

@@ -99,7 +99,7 @@ pub struct ShippedFirmware {
 #[derive(Debug, Clone)]
 pub enum ShippedFirmwareDisposition {
     /// This install unpacked the disc's package into a new entry.
-    Installed(FirmwareInstallOutcome),
+    Installed(Box<FirmwareInstallOutcome>),
     /// The store already recorded an entry under that version, so this
     /// install unpacked nothing.
     AlreadyInstalled {
@@ -210,7 +210,7 @@ fn shipped_firmware(
                 extracted: outcome.version,
             });
         }
-        Ok(outcome) => ShippedFirmwareDisposition::Installed(outcome),
+        Ok(outcome) => ShippedFirmwareDisposition::Installed(Box::new(outcome)),
         Err(refusal) => settle_installer_refusal(&version, refusal)?,
     };
     Ok(Some(ShippedFirmware {

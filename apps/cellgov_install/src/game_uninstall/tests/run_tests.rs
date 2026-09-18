@@ -75,6 +75,7 @@ fn stage_synthetic_install(
         }),
         files: filemap,
         rap: rap_rec,
+        core_os: None,
     };
     let path = record_path(out, title_id);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -605,6 +606,7 @@ fn a_firmware_record_filed_under_a_title_is_refused_by_kind() {
         title: None,
         files: std::collections::BTreeMap::new(),
         rap: None,
+        core_os: None,
     };
     let path = record_path(&vfs, "NPUA80001");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

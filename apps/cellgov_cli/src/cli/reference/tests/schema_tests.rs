@@ -65,7 +65,7 @@ fn an_absent_optional_field_is_left_out_of_the_sample() {
         "no optional field the sample does set was serialized, so the absence \
          checks below prove nothing"
     );
-    for absent in ["manifest_error", "\"reason\""] {
+    for absent in ["manifest_error", "\"reason\"", "omission"] {
         assert!(
             !rendered.contains(absent),
             "{absent} is a `skip_serializing_if` field and the sample does not set it"

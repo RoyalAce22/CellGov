@@ -8,7 +8,9 @@ use std::path::Path;
 use crate::cli::exit::die;
 use crate::cli::parse::OutputFormat;
 
-use super::model::{BaseDoc, FirmwareDoc, FirmwareListDoc, TitleDoc, TitleListDoc};
+use super::model::{
+    BaseDoc, CoreOsDoc, FirmwareDoc, FirmwareListDoc, TitleDoc, TitleListDoc, KERNEL_NOT_RECORDED,
+};
 use super::{emit, view};
 
 /// The label a title renders under when no registry manifest names it.
@@ -91,18 +93,46 @@ fn render_firmware_list(doc: &FirmwareListDoc) -> String {
     if doc.firmware.is_empty() {
         return format!("no firmware installed under {}\n", doc.store);
     }
-    let mut out = String::from("  VERSION  MODULES  IMAGE\n");
+    let mut out = String::from("  VERSION  MODULES  KERNEL  IMAGE\n");
     for entry in &doc.firmware {
         out.push_str(&format!(
-            "  {:<7}  {:>7}  {}\n",
+            "  {:<7}  {:>7}  {:<6}  {}\n",
             entry.version,
             entry
                 .modules
                 .map_or_else(|| "--".to_string(), |n| n.to_string()),
+            if has_kernel(entry) { "yes" } else { "--" },
             entry.image_version.as_deref().unwrap_or("--"),
         ));
     }
     out
+}
+
+fn has_kernel(entry: &FirmwareDoc) -> bool {
+    entry
+        .core_os
+        .as_ref()
+        .is_some_and(|block| block.kernel.is_some())
+}
+
+/// The `kernel` line of a firmware detail: where the kernel is, or why
+/// there is none.
+fn kernel_label(core_os: Option<&CoreOsDoc>) -> String {
+    match core_os {
+        Some(CoreOsDoc {
+            kernel: Some(kernel),
+            ..
+        }) => format!(
+            "{} (as stored, sha256 {})",
+            kernel.path, kernel.stored_sha256
+        ),
+        Some(CoreOsDoc {
+            omission: Some(why),
+            ..
+        }) => format!("not unpacked ({why})"),
+        Some(_) => "not unpacked".to_string(),
+        None => KERNEL_NOT_RECORDED.to_string(),
+    }
 }
 
 fn render_firmware_detail(entry: &FirmwareDoc) -> String {
@@ -122,6 +152,16 @@ fn render_firmware_detail(entry: &FirmwareDoc) -> String {
         (None, None) => "-- (the mount holds no readable firmware.toml)".to_string(),
     };
     out.push_str(&format!("  modules    {modules}\n"));
+    out.push_str(&format!(
+        "  kernel     {}\n",
+        kernel_label(entry.core_os.as_ref())
+    ));
+    if let Some(block) = entry.core_os.as_ref().filter(|b| !b.files.is_empty()) {
+        out.push_str(&format!(
+            "  core os    {} file(s) in the package table\n",
+            block.files.len()
+        ));
+    }
     out
 }
 

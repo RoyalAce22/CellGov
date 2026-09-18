@@ -25,6 +25,7 @@ fn firmware_record(version: &str, store_path: &str) -> InstallRecord {
         title: None,
         files: std::collections::BTreeMap::new(),
         rap: None,
+        core_os: None,
     }
 }
 

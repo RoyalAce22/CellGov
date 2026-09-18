@@ -71,6 +71,7 @@ fn managed(version: &str) -> FirmwareChoice {
             version: version.to_string(),
             entry_dir: PathBuf::from("store/firmware"),
             pup_sha256: "0".repeat(64),
+            core_os: None,
         },
         selected_by: FirmwareSelectedBy::Flag,
     })

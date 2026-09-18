@@ -171,6 +171,7 @@ fn report_shipped_firmware(shipped: Option<&ShippedFirmware>, declined: bool) {
                 fw.record_path.display(),
             );
             super::firmware::report_omissions(&fw.omissions);
+            super::firmware::report_core_os(&fw.core_os);
             super::report_rename_retries(fw.rename_retries);
         }
         ShippedFirmwareDisposition::AlreadyInstalled { same_pup } => {

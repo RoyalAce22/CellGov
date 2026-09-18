@@ -69,6 +69,9 @@ pub enum FirmwarePhase {
     Clearing = 5,
     /// The commit rename sequence.
     Committing = 6,
+    /// Opening the CoreOS package and writing the kernel beside the
+    /// tree.
+    UnpackingKernel = 7,
 }
 
 impl FirmwarePhase {
@@ -91,6 +94,7 @@ pub const FIRMWARE_TASK: Task = Task {
         "building manifest",
         "clearing old install",
         "committing",
+        "unpacking kernel",
     ],
     measured: FirmwarePhase::Extracting as u8,
     unit: Unit::Bytes,

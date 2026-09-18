@@ -143,6 +143,57 @@ pub enum FirmwareInstallError {
         /// The non-empty entry directory.
         path: PathBuf,
     },
+    /// The version the PUP names has no record, so there is no entry to
+    /// complete.
+    #[error(
+        "firmware {version} is not installed, so there is no entry to complete; install it \
+         with `cellgov firmware install <PS3UPDAT.PUP>`"
+    )]
+    NotInstalled {
+        /// The version the PUP's `version.txt` names.
+        version: String,
+    },
+    /// The installed entry came from a different PUP, so this one cannot
+    /// complete it in place.
+    #[error(
+        "firmware {version} was installed from PUP sha256 {}, and this PUP is {}; completing \
+         an entry in place takes the PUP it was installed from, or reinstall with --force",
+        installed.to_hex(), incoming.to_hex()
+    )]
+    CompletionPupMismatch {
+        /// The installed version.
+        version: String,
+        /// Source hash the installed entry came from.
+        installed: HexSha256,
+        /// Source hash of the PUP offered.
+        incoming: HexSha256,
+    },
+    /// The record names a tree that is not there, so there is nothing
+    /// to write the kernel beside.
+    #[error(
+        "firmware {version} is recorded, but its entry {} holds no tree; reinstall it with \
+         `cellgov firmware install <PS3UPDAT.PUP> --force`",
+        path.display()
+    )]
+    EntryTreeAbsent {
+        /// The installed version.
+        version: String,
+        /// The entry directory the record names.
+        path: PathBuf,
+    },
+    /// The record's `store_path` names a tree that is not this
+    /// version's entry, so a kernel written there would land in an
+    /// entry another record owns.
+    #[error(
+        "install record for firmware {version:?} names the tree {store_path:?}, which is not \
+         this version's entry"
+    )]
+    RecordTreeForeign {
+        /// The installed version.
+        version: String,
+        /// The `store_path` the record declared.
+        store_path: String,
+    },
     /// An install record that is present but this build will not read.
     #[error("install record {}: {source}", path.display())]
     RecordParse {

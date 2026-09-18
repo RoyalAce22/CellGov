@@ -106,6 +106,7 @@ fn write_record(vfs: &Path, artifact: &Artifact, tree: &Path, files: &[&str]) {
             .map(|f| ((*f).to_string(), sha256_of(b"file")))
             .collect(),
         rap: None,
+        core_os: None,
     };
     write(
         &layout.record_path(artifact),

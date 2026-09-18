@@ -65,7 +65,7 @@ fn the_measured_phase_is_the_one_with_a_byte_denominator() {
     );
 }
 
-const ALL_FIRMWARE: [FirmwarePhase; 7] = [
+const ALL_FIRMWARE: [FirmwarePhase; 8] = [
     FirmwarePhase::Reading,
     FirmwarePhase::ValidatingHmac,
     FirmwarePhase::ClearingStaging,
@@ -73,6 +73,7 @@ const ALL_FIRMWARE: [FirmwarePhase; 7] = [
     FirmwarePhase::BuildingManifest,
     FirmwarePhase::Clearing,
     FirmwarePhase::Committing,
+    FirmwarePhase::UnpackingKernel,
 ];
 
 /// The label each variant must carry.
@@ -88,6 +89,7 @@ fn expected_firmware_label(phase: FirmwarePhase) -> &'static str {
         FirmwarePhase::BuildingManifest => "building manifest",
         FirmwarePhase::Clearing => "clearing old install",
         FirmwarePhase::Committing => "committing",
+        FirmwarePhase::UnpackingKernel => "unpacking kernel",
     }
 }
 

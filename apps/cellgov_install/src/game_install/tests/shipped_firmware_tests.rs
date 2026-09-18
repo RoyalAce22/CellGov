@@ -84,6 +84,7 @@ fn record_firmware(vfs: &Path, version: &str, pup_sha256: HexSha256) {
         title: None,
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     };
     let path = layout.record_path(&artifact);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -279,6 +280,7 @@ fn a_record_under_the_shipped_version_describing_another_entry_is_refused() {
         title: None,
         files: BTreeMap::new(),
         rap: None,
+        core_os: None,
     };
     let path = StoreLayout::new(&vfs).record_path(&slot);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

@@ -30,6 +30,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod container;
+pub mod core_os;
 mod field;
 pub mod firmware_install;
 pub mod firmware_uninstall;
