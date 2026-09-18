@@ -7,7 +7,7 @@ pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -465,6 +465,19 @@ pub const SUBENTRY_SOURCES: &[&str] = &["psdevwiki"];
 /// Lists the capability-gate analysis states.
 pub const GATE_STATES: &[&str] = &["gated", "ungated", "not_analysed"];
 
+/// Lists adjacent-pair comparison states.
+pub const COMPARISON_STATES: &[&str] = &["compared", "not_compared"];
+
+/// Lists cross-version census transition kinds.
+pub const TRANSITION_KINDS: &[&str] = &[
+    "added",
+    "removed",
+    "class_changed",
+    "retargeted",
+    "gate_added",
+    "gate_removed",
+];
+
 /// Defines `kernel.tsv` with provenance and discovery evidence per PUP.
 pub const KERNEL: TableSpec = TableSpec {
     name: "kernel",
@@ -759,6 +772,53 @@ pub const PRESENCE: TableSpec = TableSpec {
     gate: GATE,
 };
 
+/// Defines `transitions.tsv`, the generated adjacent-version changelog.
+pub const TRANSITIONS: TableSpec = TableSpec {
+    name: "transitions",
+    owner: OwnerClass::Generated,
+    columns: &[
+        Column {
+            name: "record",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "from_fw",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: Some(("firmware", "fw")),
+        },
+        Column {
+            name: "to_fw",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: Some(("firmware", "fw")),
+        },
+        Column {
+            name: "comparison",
+            kind: ColumnKind::Enum(COMPARISON_STATES),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "kind",
+            kind: ColumnKind::Enum(TRANSITION_KINDS),
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: true,
+            references: Some(("route", "ordinal")),
+        },
+    ],
+    key: &["record"],
+    regenerate: Some(REGENERATE),
+    gate: GATE,
+};
+
 /// Defines each `census/fw-<version>.tsv` file.
 pub const CENSUS: TableSpec = TableSpec {
     name: "census",
@@ -1029,6 +1089,7 @@ pub const TABLES: &[TableSpec] = &[
     SUBENTRY,
     CAPABILITY_GATE,
     PRESENCE,
+    TRANSITIONS,
     SUBENTRY_ATTRIBUTION,
     CALLER,
     CALLER_UNRESOLVED,

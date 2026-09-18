@@ -2,7 +2,7 @@
 --   cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
 
-PRAGMA user_version = 5;
+PRAGMA user_version = 6;
 
 CREATE TABLE firmware (
     "fw" TEXT NOT NULL,
@@ -88,6 +88,16 @@ CREATE TABLE presence (
     "stub_versions" TEXT,
     "absent_versions" TEXT,
     PRIMARY KEY ("ordinal")
+) STRICT;
+
+CREATE TABLE transitions (
+    "record" INTEGER NOT NULL,
+    "from_fw" TEXT NOT NULL REFERENCES firmware ("fw"),
+    "to_fw" TEXT NOT NULL REFERENCES firmware ("fw"),
+    "comparison" TEXT NOT NULL CHECK ("comparison" IN ('compared', 'not_compared')),
+    "kind" TEXT CHECK ("kind" IN ('added', 'removed', 'class_changed', 'retargeted', 'gate_added', 'gate_removed')),
+    "ordinal" INTEGER REFERENCES route ("ordinal"),
+    PRIMARY KEY ("record")
 ) STRICT;
 
 CREATE TABLE subentry_attribution (

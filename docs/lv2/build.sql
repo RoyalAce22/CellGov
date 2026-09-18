@@ -70,6 +70,13 @@ SELECT CAST("ordinal" AS INTEGER), NULLIF("implemented_versions", 'none'), NULLI
 FROM staging_presence;
 DROP TABLE staging_presence;
 
+CREATE TEMP TABLE staging_transitions ("record" TEXT, "from_fw" TEXT, "to_fw" TEXT, "comparison" TEXT, "kind" TEXT, "ordinal" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 transitions.tsv staging_transitions
+INSERT INTO transitions ("record", "from_fw", "to_fw", "comparison", "kind", "ordinal")
+SELECT CAST("record" AS INTEGER), "from_fw", "to_fw", "comparison", NULLIF("kind", 'none'), CAST(NULLIF("ordinal", 'none') AS INTEGER)
+FROM staging_transitions;
+DROP TABLE staging_transitions;
+
 CREATE TEMP TABLE staging_subentry_attribution ("ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "source" TEXT, "ref" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry_attribution.tsv staging_subentry_attribution
 INSERT INTO subentry_attribution ("ordinal", "selector_slot", "packet", "source", "ref")

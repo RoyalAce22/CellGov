@@ -168,6 +168,63 @@ fn generated_presence(census_files: &[String]) -> Vec<archive::PresenceRow> {
         .unwrap_or_else(|error| panic!("reduce census presence: {error}"))
 }
 
+fn generated_transitions(
+    firmware: &[FirmwareRow],
+    pups: &[PupRow],
+    kernels: &[KernelRow],
+    gates: &[GateRow],
+    census_files: &[String],
+) -> Vec<archive::TransitionRow> {
+    let census_by_version = census_files
+        .iter()
+        .map(|file| {
+            let fw = file
+                .strip_prefix("census/fw-")
+                .and_then(|value| value.strip_suffix(".tsv"))
+                .expect("census file follows the archive path convention");
+            let table = archive::parse(&CENSUS, &read(&archive_dir().join(file)))
+                .unwrap_or_else(|error| panic!("{file}: {error}"));
+            (fw.to_string(), archive::census_rows(&table))
+        })
+        .collect();
+    let firmware_by_pup: BTreeMap<&str, &str> = pups
+        .iter()
+        .map(|row| (row.pup_sha256.as_str(), row.fw.as_str()))
+        .collect();
+    let mut gates_by_version = BTreeMap::new();
+    for fw in firmware {
+        let pup_hashes: Vec<&str> = kernels
+            .iter()
+            .filter(|kernel| firmware_by_pup[kernel.pup_sha256.as_str()] == fw.fw)
+            .map(|kernel| kernel.pup_sha256.as_str())
+            .collect();
+        let variants: Vec<Vec<&GateRow>> = pup_hashes
+            .iter()
+            .map(|pup| {
+                gates
+                    .iter()
+                    .filter(|gate| gate.pup_sha256 == *pup)
+                    .collect()
+            })
+            .collect();
+        let Some(first) = variants.first() else {
+            continue;
+        };
+        if variants.iter().all(|variant| {
+            variant
+                .iter()
+                .map(|gate| gate.state)
+                .eq(first.iter().map(|gate| gate.state))
+        }) {
+            gates_by_version.insert(
+                fw.fw.clone(),
+                first.iter().map(|gate| (*gate).clone()).collect(),
+            );
+        }
+    }
+    archive::transitions(firmware, &census_by_version, &gates_by_version)
+}
+
 fn slot(ordinal: u64, packet: Option<&str>) -> String {
     match packet {
         Some(packet) => format!("{ordinal} `{packet}`"),
@@ -238,6 +295,7 @@ struct ReadmeData<'a> {
     subentries: &'a [SubentryRow],
     gates: &'a [GateRow],
     presence_rows: usize,
+    transition_rows: usize,
     census_files: &'a [String],
 }
 
@@ -352,6 +410,7 @@ fn readme(data: ReadmeData<'_>) -> String {
             ("subentry_rows", data.subentries.len().to_string()),
             ("gate_rows", data.gates.len().to_string()),
             ("presence_rows", data.presence_rows.to_string()),
+            ("transition_rows", data.transition_rows.to_string()),
             ("census_files", data.census_files.len().to_string()),
             ("census_gate", CENSUS_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
@@ -382,6 +441,7 @@ fn rendered() -> BTreeMap<String, String> {
     let gates = committed_gates();
     let census_files = census_files(&kernels, &pups);
     let presence = generated_presence(&census_files);
+    let transition_rows = generated_transitions(&firmware, &pups, &kernels, &gates, &census_files);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
     let mut files = BTreeMap::new();
@@ -398,6 +458,7 @@ fn rendered() -> BTreeMap<String, String> {
             subentries: &subentries,
             gates: &gates,
             presence_rows: presence.len(),
+            transition_rows: transition_rows.len(),
             census_files: &census_files,
         }),
     );
@@ -418,6 +479,11 @@ fn rendered() -> BTreeMap<String, String> {
     files.insert(
         archive::PRESENCE.file(),
         archive::presence_tsv(&presence).unwrap_or_else(|error| panic!("presence.tsv: {error}")),
+    );
+    files.insert(
+        archive::TRANSITIONS.file(),
+        archive::transitions_tsv(&transition_rows)
+            .unwrap_or_else(|error| panic!("transitions.tsv: {error}")),
     );
     let names: Vec<&String> = files.keys().collect();
     let generated: Vec<String> = archive::manifest(&census_files)

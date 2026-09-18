@@ -133,7 +133,7 @@ fn the_build_reads_the_schema_and_imports_every_table_through_staging_in_order()
         "integer ordinal is cast"
     );
     assert!(
-        !build.contains("NULLIF(\"ordinal\","),
-        "the key column takes no null"
+        build.contains("NULLIF(\"ordinal\", 'none')"),
+        "the transition ordinal maps none to NULL"
     );
 }

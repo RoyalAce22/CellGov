@@ -118,6 +118,10 @@ row records a recognized permission record with no capability requirement;
 extracted firmware version under exactly one of `implemented`, `stub`, or
 `absent`; a missing PUP is not represented as an absent version.
 
+`transitions.tsv` has {{transition_rows}} adjacent-version changes. A pair
+without both extracted sides reads `not_compared`; target relocation moves with
+neighbouring entries and is not reported as a retarget.
+
 `subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
 packet-set disagreement remains visible in the two tables and neither source

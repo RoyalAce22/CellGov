@@ -13,7 +13,7 @@ would add its full size to public history on every change.
 Nothing reads these tables at dispatch. They describe the code; the
 code does not consult them.
 
-Archive schema version: **5**. `schema.sql` records the
+Archive schema version: **6**. `schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -138,6 +138,7 @@ the directory and this table disagree.
 | `stub.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `subentry.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `subentry_attribution.tsv` | attributed | written by hand | `kernel_census_rows_are_well_formed` |
+| `transitions.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 
 ## Owner classes
 
@@ -236,6 +237,10 @@ row records a recognized permission record with no capability requirement;
 `presence.tsv` has 1024 ordinal rows. Each row lists every
 extracted firmware version under exactly one of `implemented`, `stub`, or
 `absent`; a missing PUP is not represented as an absent version.
+
+`transitions.tsv` has 4521 adjacent-version changes. A pair
+without both extracted sides reads `not_compared`; target relocation moves with
+neighbouring entries and is not reported as a retarget.
 
 `subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
