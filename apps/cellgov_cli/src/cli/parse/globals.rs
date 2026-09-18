@@ -77,7 +77,7 @@ fn names_its_own_store_root(command: &Command) -> bool {
 const VFS_ROOT_READERS: &str = if cfg!(feature = "decrypt") {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
      keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-extract / \
-     fixture-gen / gen-manifest"
+     caller-census / fixture-gen / gen-manifest"
 } else {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
      keys, self, boot, explore title, and dev disasm / prx-imports / funcs / fixture-gen / \
@@ -149,7 +149,7 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
             | DevCommand::FixtureGen(_)
             | DevCommand::GenManifest(_) => true,
             #[cfg(feature = "decrypt")]
-            DevCommand::Lv2Extract(_) => true,
+            DevCommand::Lv2Extract(_) | DevCommand::CallerCensus(_) => true,
             _ => false,
         },
         // `explore title` composes a cell out of the store, exactly as

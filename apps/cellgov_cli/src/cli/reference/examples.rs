@@ -229,6 +229,14 @@ pub(crate) const EXAMPLES: &[Examples] = &[
             "cellgov dev lv2-extract --output-dir ../cellgov-output --format json",
         ],
     },
+    #[cfg(feature = "decrypt")]
+    Examples {
+        path: "dev caller-census",
+        lines: &[
+            "cellgov dev caller-census --fw 4.93 --output-dir ../caller-census",
+            "cellgov dev caller-census --all --output-dir docs/lv2",
+        ],
+    },
     Examples {
         path: "dev rpcs3-attribute",
         lines: &[

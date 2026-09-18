@@ -24,10 +24,13 @@ the directory and this table disagree.
 | `arm.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `behavior.tsv` | curated | written by hand | `behavior_rows_cover_the_handled_surface` |
 | `build.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `caller.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
+| `caller_unresolved.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
 | `conflicts.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
 | `name.tsv` | attributed | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
 | `pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
+| `reach.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
 | `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 
@@ -95,6 +98,21 @@ or a disc carried a different image.
 The repository contains no PUP bytes. `pup_rows_are_well_formed` validates the
 digest, size, image-version and date shapes; the archive loader checks
 that each `fw` names a row of `firmware.tsv`.
+
+## Firmware callers
+
+The caller census contains derived structure only. `caller.tsv` groups
+resolved `sc` sites by PUP hash, module path and LV2 ordinal.
+`caller_unresolved.tsv` has one row for every scanned module; `sites` is
+`none` when the module has no unresolved `sc`, so absence and a completed
+zero-site scan stay distinct. `reach.tsv` links an exported function NID
+to each ordinal that a resolved site in its function span reaches. An
+export NID is never used as a syscall name.
+
+The `cellgov dev caller-census` emitter writes all three tables together
+from installed, decrypted firmware modules. The loader validates shapes,
+sort order and references; `caller_rows_are_well_formed` validates the
+cross-table coverage rules.
 
 ## Handling
 

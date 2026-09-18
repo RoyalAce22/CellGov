@@ -8,6 +8,8 @@
 )]
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+#[cfg(feature = "decrypt")]
+mod caller_census;
 mod cli;
 mod composition;
 mod disasm;
@@ -149,6 +151,8 @@ fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>, globals: &Globals) {
         DevCommand::Funcs(args) => funcs::run(args, vfs_flag),
         #[cfg(feature = "decrypt")]
         DevCommand::Lv2Extract(args) => lv2_extract::run(args, vfs_flag, globals.format),
+        #[cfg(feature = "decrypt")]
+        DevCommand::CallerCensus(args) => caller_census::run(args, vfs_flag),
         DevCommand::Rpcs3Attribute(args) => cli::rpcs3_attribute::run(args),
         DevCommand::FixtureGen(args) => cli::fixture_gen::run(args, vfs_flag),
         DevCommand::TitlesGen(args) => cli::titles_gen::run(args),

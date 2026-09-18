@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
     self, ConflictRow, FirmwareRole, FirmwareRow, HandlingCounts, NameRow, NameSource, OwnerClass,
-    PupRow, Route, FIRMWARE, FIRMWARE_GATE, GATE, NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE,
-    REGENERATE, TABLES,
+    PupRow, Route, CALLER, CALLER_GATE, CALLER_UNRESOLVED, FIRMWARE, FIRMWARE_GATE, GATE, NAME,
+    NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH, REGENERATE, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
@@ -416,6 +416,62 @@ fn pup_rows_are_well_formed() {
         })
         .collect();
     archive::check_references(&tables).unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+fn caller_rows_are_well_formed() {
+    assert_eq!(CALLER.gate, CALLER_GATE);
+    assert_eq!(CALLER_UNRESOLVED.gate, CALLER_GATE);
+    assert_eq!(REACH.gate, CALLER_GATE);
+    let dir = archive_dir();
+    let caller = archive::parse(&CALLER, &read(&dir.join(CALLER.file())))
+        .unwrap_or_else(|error| panic!("{error}"));
+    let unresolved = archive::parse(
+        &CALLER_UNRESOLVED,
+        &read(&dir.join(CALLER_UNRESOLVED.file())),
+    )
+    .unwrap_or_else(|error| panic!("{error}"));
+    let reach = archive::parse(&REACH, &read(&dir.join(REACH.file())))
+        .unwrap_or_else(|error| panic!("{error}"));
+    assert!(!caller.rows.is_empty(), "caller.tsv has no resolved site");
+    assert!(
+        !unresolved.rows.is_empty(),
+        "caller_unresolved.tsv names no scanned module"
+    );
+    assert!(!reach.rows.is_empty(), "reach.tsv names no exported reach");
+
+    let expected_pups: BTreeSet<String> = committed_pups()
+        .into_iter()
+        .map(|row| row.pup_sha256)
+        .collect();
+    let scanned_pups: BTreeSet<String> = unresolved.rows.iter().map(|row| row[0].clone()).collect();
+    assert_eq!(
+        scanned_pups, expected_pups,
+        "caller_unresolved.tsv must cover every PUP image"
+    );
+
+    let scanned: BTreeSet<(&str, &str)> = unresolved
+        .rows
+        .iter()
+        .map(|row| (row[0].as_str(), row[1].as_str()))
+        .collect();
+    for row in &caller.rows {
+        assert!(
+            scanned.contains(&(row[0].as_str(), row[1].as_str())),
+            "caller row names a module absent from caller_unresolved: {row:?}"
+        );
+    }
+    let resolved: BTreeSet<(&str, &str, &str)> = caller
+        .rows
+        .iter()
+        .map(|row| (row[0].as_str(), row[1].as_str(), row[2].as_str()))
+        .collect();
+    for row in &reach.rows {
+        assert!(
+            resolved.contains(&(row[0].as_str(), row[1].as_str(), row[3].as_str())),
+            "reach row names no resolved caller ordinal: {row:?}"
+        );
+    }
 }
 
 #[test]

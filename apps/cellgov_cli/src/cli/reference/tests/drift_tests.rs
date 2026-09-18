@@ -26,7 +26,10 @@ const SCE_NOTE_HEADING: &str = "SCE-wrapped input:";
 /// a build that reads one.
 const VFS_ROOT_ROW: &str = "| `--vfs-root` |";
 
-const LV2_EXTRACT_HEADING: &str = "#### `cellgov dev lv2-extract`";
+const FEATURE_COMMAND_HEADINGS: &[&str] = &[
+    "#### `cellgov dev lv2-extract`",
+    "#### `cellgov dev caller-census`",
+];
 
 const KERNEL_ONLY_EXIT_LINE: &str =
     "  42  --kernel-only completed, but the PUP yielded no stored kernel";
@@ -51,7 +54,7 @@ fn normalize(text: &str) -> String {
             skip_kernel_only_tail = 2;
             continue;
         }
-        if line == LV2_EXTRACT_HEADING {
+        if FEATURE_COMMAND_HEADINGS.contains(&line) {
             in_feature_command = true;
             continue;
         }
@@ -89,11 +92,13 @@ fn normalize(text: &str) -> String {
 #[test]
 fn normalization_removes_the_feature_only_command() {
     let rendered = render_doc(&command_tree());
-    if cfg!(feature = "decrypt") {
-        assert!(rendered.contains(LV2_EXTRACT_HEADING));
-        assert!(!normalize(&rendered).contains(LV2_EXTRACT_HEADING));
-    } else {
-        assert!(!rendered.contains(LV2_EXTRACT_HEADING));
+    for heading in FEATURE_COMMAND_HEADINGS {
+        if cfg!(feature = "decrypt") {
+            assert!(rendered.contains(heading));
+            assert!(!normalize(&rendered).contains(heading));
+        } else {
+            assert!(!rendered.contains(heading));
+        }
     }
 }
 

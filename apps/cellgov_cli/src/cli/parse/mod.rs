@@ -16,7 +16,7 @@ pub(crate) use boot::{
     override_flags, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
 };
 #[cfg(feature = "decrypt")]
-pub(crate) use dev::Lv2ExtractArgs;
+pub(crate) use dev::{CallerCensusArgs, Lv2ExtractArgs};
 pub(crate) use dev::{
     CliGenArgs, CompletionShell, CompletionsArgs, DevCommand, DisasmArgs, FixtureGenArgs,
     FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,

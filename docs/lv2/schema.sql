@@ -35,6 +35,29 @@ CREATE TABLE route (
     PRIMARY KEY ("ordinal")
 ) STRICT;
 
+CREATE TABLE caller (
+    "pup_sha256" TEXT NOT NULL REFERENCES pup ("pup_sha256"),
+    "module" TEXT NOT NULL,
+    "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
+    "sites" TEXT NOT NULL,
+    PRIMARY KEY ("pup_sha256", "module", "ordinal")
+) STRICT;
+
+CREATE TABLE caller_unresolved (
+    "pup_sha256" TEXT NOT NULL REFERENCES pup ("pup_sha256"),
+    "module" TEXT NOT NULL,
+    "sites" TEXT,
+    PRIMARY KEY ("pup_sha256", "module")
+) STRICT;
+
+CREATE TABLE reach (
+    "pup_sha256" TEXT NOT NULL REFERENCES pup ("pup_sha256"),
+    "module" TEXT NOT NULL,
+    "export_nid" INTEGER NOT NULL,
+    "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
+    PRIMARY KEY ("pup_sha256", "module", "export_nid", "ordinal")
+) STRICT;
+
 CREATE TABLE behavior (
     "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
     "packet" TEXT,

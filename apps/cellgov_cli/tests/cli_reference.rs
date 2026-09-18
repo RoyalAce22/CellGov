@@ -129,7 +129,9 @@ fn documented_leaves() -> Vec<Vec<String>> {
 fn the_help_walk_finds_exactly_the_leaves_the_reference_documents() {
     let mut walked = leaf_paths();
     #[cfg(feature = "decrypt")]
-    walked.retain(|path| path.as_slice() != ["dev", "lv2-extract"]);
+    walked.retain(|path| {
+        path.as_slice() != ["dev", "lv2-extract"] && path.as_slice() != ["dev", "caller-census"]
+    });
     let mut documented = documented_leaves();
     assert!(
         documented.len() > 30,
@@ -268,7 +270,10 @@ fn cli_gen_writes_the_committed_reference() {
 const FEATURE_DEPENDENT: &str = "<feature-dependent>";
 const SCE_NOTE_HEADING: &str = "SCE-wrapped input:";
 const VFS_ROOT_ROW: &str = "| `--vfs-root` |";
-const LV2_EXTRACT_HEADING: &str = "#### `cellgov dev lv2-extract`";
+const FEATURE_COMMAND_HEADINGS: &[&str] = &[
+    "#### `cellgov dev lv2-extract`",
+    "#### `cellgov dev caller-census`",
+];
 const KERNEL_ONLY_EXIT_LINE: &str =
     "  42  --kernel-only completed, but the PUP yielded no stored kernel";
 
@@ -289,7 +294,7 @@ fn normalize(text: &str) -> String {
             skip_kernel_only_tail = 2;
             continue;
         }
-        if line == LV2_EXTRACT_HEADING {
+        if FEATURE_COMMAND_HEADINGS.contains(&line) {
             in_feature_command = true;
             continue;
         }

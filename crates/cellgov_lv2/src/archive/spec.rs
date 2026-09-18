@@ -413,6 +413,112 @@ pub const PUP: TableSpec = TableSpec {
     gate: PUP_GATE,
 };
 
+/// Refreshes the firmware caller tables from installed modules.
+pub const CALLER_REGENERATE: &str =
+    "cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2";
+
+/// Checks the three firmware caller tables.
+pub const CALLER_GATE: &str = "caller_rows_are_well_formed";
+
+/// Defines `caller.tsv` with resolved syscall sites grouped by PUP, module, and ordinal.
+pub const CALLER: TableSpec = TableSpec {
+    name: "caller",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: Some(("pup", "pup_sha256")),
+        },
+        Column {
+            name: "module",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "sites",
+            kind: ColumnKind::IntegerList,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256", "module", "ordinal"],
+    regenerate: Some(CALLER_REGENERATE),
+    gate: CALLER_GATE,
+};
+
+/// Defines `caller_unresolved.tsv` with every scanned module and its unresolved sites.
+pub const CALLER_UNRESOLVED: TableSpec = TableSpec {
+    name: "caller_unresolved",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: Some(("pup", "pup_sha256")),
+        },
+        Column {
+            name: "module",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "sites",
+            kind: ColumnKind::IntegerList,
+            nullable: true,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256", "module"],
+    regenerate: Some(CALLER_REGENERATE),
+    gate: CALLER_GATE,
+};
+
+/// Defines `reach.tsv` with exported functions and the resolved ordinals they reach.
+pub const REACH: TableSpec = TableSpec {
+    name: "reach",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: Some(("pup", "pup_sha256")),
+        },
+        Column {
+            name: "module",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "export_nid",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+    ],
+    key: &["pup_sha256", "module", "export_nid", "ordinal"],
+    regenerate: Some(CALLER_REGENERATE),
+    gate: CALLER_GATE,
+};
+
 /// Labels of `name.source`; `NameSource::label` pins the order.
 pub const NAME_SOURCES: &[&str] = &["psdevwiki", "psl1ght", "cellgov", "non_public"];
 
@@ -526,7 +632,18 @@ pub const CONFLICTS: TableSpec = TableSpec {
 };
 
 /// Every table, a referenced table before the table that references it.
-pub const TABLES: &[TableSpec] = &[FIRMWARE, PUP, ARM, ROUTE, BEHAVIOR, NAME, CONFLICTS];
+pub const TABLES: &[TableSpec] = &[
+    FIRMWARE,
+    PUP,
+    ARM,
+    ROUTE,
+    CALLER,
+    CALLER_UNRESOLVED,
+    REACH,
+    BEHAVIOR,
+    NAME,
+    CONFLICTS,
+];
 
 /// The files under `docs/lv2/` that are not tables; the one regenerate
 /// command writes all of them.

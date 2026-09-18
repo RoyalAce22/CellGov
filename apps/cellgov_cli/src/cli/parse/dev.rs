@@ -28,6 +28,9 @@ pub(crate) enum DevCommand {
     /// Decrypt one installed firmware's stored LV2 kernel.
     #[cfg(feature = "decrypt")]
     Lv2Extract(Lv2ExtractArgs),
+    /// Extract the PPU syscall caller census from installed firmware.
+    #[cfg(feature = "decrypt")]
+    CallerCensus(CallerCensusArgs),
     /// Answer which HLE call wrote a guest address, from a trace.
     Rpcs3Attribute(Rpcs3AttributeArgs),
     /// Regenerate a title's cross-runner fixture directory.
@@ -42,6 +45,23 @@ pub(crate) enum DevCommand {
     GenManifest(GenManifestArgs),
     /// Re-measure titles and rewrite their committed anchors.
     RecordAnchors(RecordAnchorsArgs),
+}
+
+#[cfg(feature = "decrypt")]
+#[derive(Debug, clap::Args)]
+#[command(group = clap::ArgGroup::new("caller-census-scope")
+    .required(true)
+    .args(["all", "fw"]))]
+pub(crate) struct CallerCensusArgs {
+    /// Scan every installed firmware, with title firmware first.
+    #[arg(long)]
+    pub all: bool,
+    /// Scan one installed firmware version.
+    #[arg(long, value_name = "VERSION")]
+    pub fw: Option<String>,
+    /// Write the three archive tables to this directory.
+    #[arg(long, value_name = "DIR", default_value = "docs/lv2")]
+    pub output_dir: PathBuf,
 }
 
 /// `cellgov dev lv2-extract`

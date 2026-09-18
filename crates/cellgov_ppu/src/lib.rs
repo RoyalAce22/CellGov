@@ -15,6 +15,7 @@
     )
 )]
 
+pub mod caller_census;
 pub mod decode;
 pub mod differential;
 pub mod exec;

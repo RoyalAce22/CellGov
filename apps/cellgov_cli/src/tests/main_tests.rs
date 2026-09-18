@@ -70,6 +70,8 @@ const DISPATCHED: &[&str] = &[
     "dev funcs",
     #[cfg(feature = "decrypt")]
     "dev lv2-extract",
+    #[cfg(feature = "decrypt")]
+    "dev caller-census",
     "dev rpcs3-attribute",
     "dev fixture-gen",
     "dev titles-gen",
@@ -81,12 +83,31 @@ const DISPATCHED: &[&str] = &[
 
 #[test]
 #[cfg(not(feature = "decrypt"))]
-fn default_help_exposes_no_lv2_extract_entry_point() {
+fn default_help_exposes_no_decrypt_dev_entry_points() {
     let command = Cli::command();
     let dev = command
         .find_subcommand("dev")
         .expect("the tree declares dev");
     assert!(dev.find_subcommand("lv2-extract").is_none());
+    assert!(dev.find_subcommand("caller-census").is_none());
+}
+
+#[test]
+#[cfg(feature = "decrypt")]
+fn decrypt_help_exposes_caller_census_scope_and_output() {
+    let mut command = Cli::command();
+    command.build();
+    let dev = command
+        .find_subcommand("dev")
+        .expect("the tree declares dev");
+    let mut census = dev
+        .find_subcommand("caller-census")
+        .expect("the decrypt tree declares dev caller-census")
+        .clone();
+    let help = census.render_long_help().to_string();
+    assert!(help.contains("--all"), "{help}");
+    assert!(help.contains("--fw <VERSION>"), "{help}");
+    assert!(help.contains("--output-dir <DIR>"), "{help}");
 }
 
 #[test]

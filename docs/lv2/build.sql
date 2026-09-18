@@ -35,6 +35,27 @@ SELECT CAST("ordinal" AS INTEGER), "route", NULLIF("arm", 'none')
 FROM staging_route;
 DROP TABLE staging_route;
 
+CREATE TEMP TABLE staging_caller ("pup_sha256" TEXT, "module" TEXT, "ordinal" TEXT, "sites" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 caller.tsv staging_caller
+INSERT INTO caller ("pup_sha256", "module", "ordinal", "sites")
+SELECT "pup_sha256", "module", CAST("ordinal" AS INTEGER), "sites"
+FROM staging_caller;
+DROP TABLE staging_caller;
+
+CREATE TEMP TABLE staging_caller_unresolved ("pup_sha256" TEXT, "module" TEXT, "sites" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 caller_unresolved.tsv staging_caller_unresolved
+INSERT INTO caller_unresolved ("pup_sha256", "module", "sites")
+SELECT "pup_sha256", "module", NULLIF("sites", 'none')
+FROM staging_caller_unresolved;
+DROP TABLE staging_caller_unresolved;
+
+CREATE TEMP TABLE staging_reach ("pup_sha256" TEXT, "module" TEXT, "export_nid" TEXT, "ordinal" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 reach.tsv staging_reach
+INSERT INTO reach ("pup_sha256", "module", "export_nid", "ordinal")
+SELECT "pup_sha256", "module", CAST("export_nid" AS INTEGER), CAST("ordinal" AS INTEGER)
+FROM staging_reach;
+DROP TABLE staging_reach;
+
 CREATE TEMP TABLE staging_behavior ("ordinal" TEXT, "packet" TEXT, "same_as" TEXT, "selector_slot" TEXT, "provenance_kind" TEXT, "provenance_ref" TEXT, "witness" TEXT, "exception" TEXT, "arm_source" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 behavior.tsv staging_behavior
 INSERT INTO behavior ("ordinal", "packet", "same_as", "selector_slot", "provenance_kind", "provenance_ref", "witness", "exception", "arm_source")
