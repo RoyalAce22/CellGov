@@ -8,6 +8,19 @@ use crate::observation::{
 use cellgov_trace::StateHash;
 use std::path::PathBuf;
 
+/// Construct a cross-runner summary with the fields enabled in this test build.
+macro_rules! cross_runner_summary {
+    ($($field:ident: $value:expr,)*) => {
+        $crate::CrossRunnerSummary {
+            $($field: $value,)*
+            #[cfg(feature = "rpcs3-runner")]
+            oracle_gap_ordinals: None,
+        }
+    };
+}
+
+pub(crate) use cross_runner_summary;
+
 /// Metadata tagged with the given runner name and no step count.
 pub fn meta(runner: &str) -> ObservationMetadata {
     ObservationMetadata {

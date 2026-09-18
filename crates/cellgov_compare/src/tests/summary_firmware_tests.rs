@@ -5,7 +5,7 @@ use super::*;
 use crate::identity::{AppVersion, FirmwareIdentity, GameIdentity};
 
 fn equivalent() -> CrossRunnerSummary {
-    CrossRunnerSummary {
+    crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Equivalent,
         per_class_bytes: BTreeMap::new(),
@@ -14,7 +14,6 @@ fn equivalent() -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     }
 }
 

@@ -476,7 +476,7 @@ fn outcome_mismatch_reason() -> ConvergenceFailure {
 }
 
 fn empty_diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
-    CrossRunnerSummary {
+    crate::test_support::cross_runner_summary! {
         convergence: Convergence::No {
             reason: reason.clone(),
         },
@@ -487,12 +487,11 @@ fn empty_diverged(reason: ConvergenceFailure) -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     }
 }
 
 fn empty_converged_equivalent() -> CrossRunnerSummary {
-    CrossRunnerSummary {
+    crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Equivalent,
         per_class_bytes: BTreeMap::new(),
@@ -501,7 +500,6 @@ fn empty_converged_equivalent() -> CrossRunnerSummary {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     }
 }
 
@@ -519,7 +517,7 @@ fn validate_accepts_canonical_diverged() {
 
 #[test]
 fn validate_rejects_converged_with_diverge_byte_parity() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Diverge {
             reason: outcome_mismatch_reason(),
@@ -530,7 +528,6 @@ fn validate_rejects_converged_with_diverge_byte_parity() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -540,7 +537,7 @@ fn validate_rejects_converged_with_diverge_byte_parity() {
 
 #[test]
 fn validate_rejects_diverged_without_diverge_byte_parity() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::No {
             reason: outcome_mismatch_reason(),
         },
@@ -551,7 +548,6 @@ fn validate_rejects_diverged_without_diverge_byte_parity() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -561,7 +557,7 @@ fn validate_rejects_diverged_without_diverge_byte_parity() {
 
 #[test]
 fn validate_rejects_diverge_reasons_disagree() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::No {
             reason: outcome_mismatch_reason(),
         },
@@ -577,7 +573,6 @@ fn validate_rejects_diverge_reasons_disagree() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -638,7 +633,7 @@ fn validate_rejects_diverged_with_lowest_offset_some() {
 
 #[test]
 fn validate_rejects_unclassified_denormalization_mismatch() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 0,
@@ -654,7 +649,6 @@ fn validate_rejects_unclassified_denormalization_mismatch() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -667,7 +661,7 @@ fn validate_rejects_unclassified_denormalization_mismatch() {
 
 #[test]
 fn validate_rejects_unclassified_runs_sum_mismatch() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 0,
@@ -683,7 +677,6 @@ fn validate_rejects_unclassified_runs_sum_mismatch() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -696,7 +689,7 @@ fn validate_rejects_unclassified_runs_sum_mismatch() {
 
 #[test]
 fn validate_rejects_equivalent_with_non_zero_totals() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Equivalent,
         per_class_bytes: BTreeMap::from([(DivergenceClass::ElfHeader, 1)]),
@@ -705,7 +698,6 @@ fn validate_rejects_equivalent_with_non_zero_totals() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -715,7 +707,7 @@ fn validate_rejects_equivalent_with_non_zero_totals() {
 
 #[test]
 fn validate_rejects_non_semantic_bytes_disagreement() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::NonSemantic { bytes: 5 },
         per_class_bytes: BTreeMap::from([(DivergenceClass::ElfHeader, 3)]),
@@ -724,7 +716,6 @@ fn validate_rejects_non_semantic_bytes_disagreement() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -737,7 +728,7 @@ fn validate_rejects_non_semantic_bytes_disagreement() {
 
 #[test]
 fn validate_rejects_non_semantic_with_unclassified_present() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::NonSemantic { bytes: 3 },
         per_class_bytes: BTreeMap::from([
@@ -753,7 +744,6 @@ fn validate_rejects_non_semantic_with_unclassified_present() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -763,7 +753,7 @@ fn validate_rejects_non_semantic_with_unclassified_present() {
 
 #[test]
 fn validate_rejects_pending_non_semantic_disagreement() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 10,
@@ -782,7 +772,6 @@ fn validate_rejects_pending_non_semantic_disagreement() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
@@ -795,7 +784,7 @@ fn validate_rejects_pending_non_semantic_disagreement() {
 
 #[test]
 fn validate_rejects_pending_unclassified_disagreement() {
-    let bad = CrossRunnerSummary {
+    let bad = crate::test_support::cross_runner_summary! {
         convergence: Convergence::Yes,
         byte_parity: ByteParity::Pending {
             non_semantic_bytes: 3,
@@ -814,7 +803,6 @@ fn validate_rejects_pending_unclassified_disagreement() {
         lowest_offset_class: None,
         identity: RunIdentity::default(),
         rpcs3_firmware: None,
-        oracle_gap_ordinals: None,
     };
     assert!(matches!(
         bad.validate().unwrap_err(),
