@@ -5,6 +5,12 @@
 
 # Count microtest C sources in language stats.
 tests/micro/**/*.c linguist-vendored=false
+# The startup file is maintained source, not a generated linker artifact.
+tests/micro/common/crt0.S linguist-detectable=true linguist-generated=false
+
+# The archive SQL is generated, but remains a reviewed, usable database build
+# script and should contribute to the repository language statistics.
+docs/lv2/**/*.sql linguist-detectable=true linguist-generated=false
 
 # ps3autotests `.expected` files are real-PS3 TTY captures; their
 # bytes (including any embedded \r) must round-trip exactly. Force

@@ -24,15 +24,6 @@ defaults:
     # `run:` below reads the same under bash on both runners.
     shell: bash
 
-env:
-  CARGO_TERM_COLOR: always
-  # RUSTFLAGS is per-job: `-D warnings` on a floating channel lets a new
-  # compiler fail a branch that did not change.
-  #
-  # Corpus suites are type-checked and linted here, never run.
-  CORPUS_FEATURES: >-
-    cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
-
 jobs:
   # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix
   # as a job output rather than a second copy of the number. Only the
@@ -96,24 +87,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-lint-${{ matrix.toolchain }}-
 
-      - name: cargo fmt --check
-        run: cargo fmt --check
-
-      - name: cargo clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-
-      - name: cargo clippy (corpus suites)
-        run: cargo clippy --workspace --all-targets --locked --features "$CORPUS_FEATURES" -- -D warnings
-
-      # The README promises importers can drop the RPCS3 runner with
-      # default-features = false; this is the only build that proves it.
-      - name: cargo clippy (cellgov_compare without rpcs3-runner)
-        run: cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
-
-      - name: cargo doc
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps --locked
+      - name: repository lint
+        run: bash scripts/ci.sh lint
 
   # Blocking. Known vulnerabilities in the dependency tree, from the
   # RustSec advisory database; every dependency's declared license
@@ -185,26 +160,5 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-test-${{ matrix.toolchain }}-
 
-      - name: cargo check (corpus suites)
-        run: cargo check --workspace --all-targets --locked --features "$CORPUS_FEATURES"
-
-      - name: cargo test
-        run: cargo test --workspace --locked
-
-      - name: cargo test --release
-        run: cargo test --workspace --release --locked
-
-      # `decrypt` is not a corpus feature: the SCE/NPDRM/PKG/PUP tests
-      # behind it build their fixtures in-process. A default run compiles
-      # none of them, so they get their own run in both profiles.
-      - name: cargo test (cellgov_install with decrypt)
-        run: cargo test -p cellgov_install --locked --features decrypt
-
-      - name: cargo test --release (cellgov_install with decrypt)
-        run: cargo test -p cellgov_install --release --locked --features decrypt
-
-      - name: cargo test (cellgov_compare without rpcs3-runner)
-        run: cargo test -p cellgov_compare --locked --no-default-features
-
-      - name: cargo bench --no-run --benches
-        run: cargo bench --workspace --no-run --benches --locked
+      - name: repository tests
+        run: bash scripts/ci.sh test

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Shared command groups for GitHub Actions and the local pre-push gate.
+
+set -euo pipefail
+
+corpus_features='cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner'
+
+lint() {
+    export RUSTFLAGS='-D warnings'
+    cargo fmt --check
+    cargo clippy --workspace --all-targets --locked -- -D warnings
+    cargo clippy --workspace --all-targets --locked --features "$corpus_features" -- -D warnings
+    cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
+    RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked
+}
+
+test_suite() {
+    cargo check --workspace --all-targets --locked --features "$corpus_features"
+    cargo test --workspace --locked
+    cargo test --workspace --release --locked
+    cargo test -p cellgov_install --locked --features decrypt
+    cargo test -p cellgov_install --release --locked --features decrypt
+    cargo test -p cellgov_compare --locked --no-default-features
+    cargo bench --workspace --no-run --benches --locked
+}
+
+deny() {
+    cargo deny check advisories bans licenses sources
+}
+
+case "${1:-full}" in
+    lint) lint ;;
+    test) test_suite ;;
+    deny) deny ;;
+    full)
+        lint
+        deny
+        test_suite
+        ;;
+    *)
+        echo "usage: $0 {lint|test|deny|full}" >&2
+        exit 2
+        ;;
+esac

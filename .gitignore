@@ -62,6 +62,9 @@ AGENTS.override.md
 .venv/
 .chroma_db/
 scripts/
+!scripts/
+scripts/*
+!scripts/ci.sh
 
 # Local investigation dumps: hle_watch / value_sample / store_watch
 # binary captures + ad-hoc parse helpers. Regenerable via the
