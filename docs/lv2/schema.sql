@@ -2,6 +2,8 @@
 --   cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
 
+PRAGMA user_version = 2;
+
 CREATE TABLE firmware (
     "fw" TEXT NOT NULL,
     "order" INTEGER NOT NULL,
@@ -19,6 +21,30 @@ CREATE TABLE pup (
     "source_note" TEXT NOT NULL,
     "acquired" TEXT,
     PRIMARY KEY ("pup_sha256")
+) STRICT;
+
+CREATE TABLE kernel (
+    "pup_sha256" TEXT NOT NULL REFERENCES pup ("pup_sha256"),
+    "kernel_elf_sha256" TEXT NOT NULL,
+    "table_base" TEXT NOT NULL,
+    "entry_width" INTEGER NOT NULL,
+    "entry_format" TEXT NOT NULL CHECK ("entry_format" IN ('ppc64_descriptor_pointer')),
+    "entry_count" INTEGER NOT NULL,
+    "discovery_method" TEXT NOT NULL CHECK ("discovery_method" IN ('sc_vector_descriptor_array')),
+    "confidence" TEXT NOT NULL CHECK ("confidence" IN ('high')),
+    "census_sha256" TEXT NOT NULL,
+    PRIMARY KEY ("pup_sha256")
+) STRICT;
+
+CREATE TABLE stub (
+    "pup_sha256" TEXT NOT NULL REFERENCES kernel ("pup_sha256"),
+    "descriptor" TEXT NOT NULL,
+    "target" TEXT NOT NULL,
+    "errno" TEXT NOT NULL,
+    "errno_symbol" TEXT NOT NULL,
+    "references" INTEGER NOT NULL,
+    "primary" TEXT NOT NULL CHECK ("primary" IN ('yes', 'no')),
+    PRIMARY KEY ("pup_sha256", "descriptor")
 ) STRICT;
 
 CREATE TABLE arm (
@@ -89,6 +115,15 @@ CREATE TABLE conflicts (
     "source" TEXT NOT NULL CHECK ("source" IN ('psdevwiki', 'psl1ght', 'cellgov', 'non_public')),
     "disagreement" TEXT NOT NULL CHECK ("disagreement" IN ('spelling', 'name')),
     UNIQUE ("ordinal", "packet", "source", "name")
+) STRICT;
+
+CREATE TABLE census (
+    "fw" TEXT NOT NULL REFERENCES firmware ("fw"),
+    "ordinal" INTEGER NOT NULL REFERENCES route ("ordinal"),
+    "class" TEXT NOT NULL CHECK ("class" IN ('implemented', 'stub', 'absent')),
+    "target" TEXT,
+    "dispatch" TEXT NOT NULL CHECK ("dispatch" IN ('flat', 'subtable', 'chain_incomplete')),
+    PRIMARY KEY ("fw", "ordinal")
 ) STRICT;
 
 CREATE VIEW handling AS

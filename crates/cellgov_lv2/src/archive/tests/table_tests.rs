@@ -87,6 +87,34 @@ static NON_KEY_REFERENCE: TableSpec = TableSpec {
 
 const HEADER: &str = "id\ttag\tarm\tlist\n";
 
+static FIXED_WIDTH_T: TableSpec = TableSpec {
+    name: "fixed_width",
+    owner: OwnerClass::Generated,
+    columns: &[
+        Column {
+            name: "sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "u32",
+            kind: ColumnKind::Hex32,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "u64",
+            kind: ColumnKind::Hex64,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["sha256"],
+    regenerate: Some("r"),
+    gate: "g",
+};
+
 fn with_rows(rows: &str) -> String {
     format!("{HEADER}{rows}")
 }
@@ -104,6 +132,28 @@ fn a_well_formed_table_parses_into_its_rows() {
             vec!["10", "a", "Y", "7"],
         ]
     );
+}
+
+#[test]
+fn fixed_width_hash_and_hex_cells_are_exact_and_lowercase() {
+    let hash = "ab".repeat(32);
+    let text = format!("sha256\tu32\tu64\n{hash}\t0x80010003\t0x8000000000346570\n");
+    parse(&FIXED_WIDTH_T, &text).expect("fixed-width cells");
+    for bad in [
+        format!("{}\t0x80010003\t0x8000000000346570\n", "ab".repeat(31)),
+        format!("{}\t0x80010003\t0x8000000000346570\n", "ab".repeat(33)),
+        format!("{}\t0x80010003\t0x8000000000346570\n", "AB".repeat(32)),
+        format!("{hash}\t0X80010003\t0x8000000000346570\n"),
+        format!("{hash}\t0x8001000A\t0x8000000000346570\n"),
+        format!("{hash}\t0x80010003\t0x800000000346570\n"),
+        format!("{hash}\t0x80010003\t0x08000000000346570\n"),
+        format!("{hash}\t0x80010003\t0x800000000034657A\n"),
+    ] {
+        assert!(matches!(
+            parse(&FIXED_WIDTH_T, &format!("sha256\tu32\tu64\n{bad}")),
+            Err(ArchiveError::BadCell { .. })
+        ));
+    }
 }
 
 #[test]

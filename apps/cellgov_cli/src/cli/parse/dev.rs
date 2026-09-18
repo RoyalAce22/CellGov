@@ -27,6 +27,8 @@ pub(crate) enum DevCommand {
     Funcs(FuncsArgs),
     /// Locate the syscall dispatch table in a decrypted LV2 kernel.
     Lv2Discover(Lv2DiscoverArgs),
+    /// Emit the LV2 census rows for one firmware version.
+    Lv2Census(Lv2CensusArgs),
     /// Decrypt one installed firmware's stored LV2 kernel.
     #[cfg(feature = "decrypt")]
     Lv2Extract(Lv2ExtractArgs),
@@ -47,6 +49,25 @@ pub(crate) enum DevCommand {
     GenManifest(GenManifestArgs),
     /// Re-measure titles and rewrite their committed anchors.
     RecordAnchors(RecordAnchorsArgs),
+}
+
+#[derive(Debug, clap::Args)]
+pub(crate) struct Lv2CensusArgs {
+    /// Decrypted kernel ELF, or a SELF the configured vault can open.
+    #[arg(value_name = "ELF")]
+    pub path: PathBuf,
+    /// Select the firmware version from `pup.tsv`.
+    #[arg(long, value_name = "VERSION")]
+    pub fw: String,
+    /// Use the source PUP's SHA-256 from `pup.tsv`.
+    #[arg(long, value_name = "SHA256")]
+    pub pup_sha256: String,
+    /// Write the archive rows to this directory.
+    #[arg(long, value_name = "DIR", default_value = "docs/lv2")]
+    pub output_dir: PathBuf,
+    /// Replace all rows for this firmware with rows from the selected PUP.
+    #[arg(long)]
+    pub replace_version: bool,
 }
 
 #[cfg(feature = "decrypt")]

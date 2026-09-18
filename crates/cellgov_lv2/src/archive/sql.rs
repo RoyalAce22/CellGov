@@ -1,6 +1,6 @@
 //! `schema.sql` and `build.sql`, rendered from the table list.
 
-use super::spec::{ColumnKind, TableSpec, GATE, REGENERATE, TABLES, VIEWS};
+use super::spec::{ColumnKind, TableSpec, CENSUS, GATE, REGENERATE, SCHEMA_VERSION, TABLES, VIEWS};
 use super::table::NONE;
 
 /// The sqlite3 shell version `build.sql` targets.
@@ -64,10 +64,13 @@ fn create_table(table: &TableSpec) -> String {
 /// The `schema.sql` text: one STRICT table per spec, then the views.
 pub fn schema_sql() -> String {
     let mut out = banner();
+    out.push_str(&format!("\nPRAGMA user_version = {SCHEMA_VERSION};\n"));
     for table in TABLES {
         out.push('\n');
         out.push_str(&create_table(table));
     }
+    out.push('\n');
+    out.push_str(&create_table(&CENSUS));
     for view in VIEWS {
         out.push_str(&format!(
             "\nCREATE VIEW {} AS\n{};\n",
@@ -77,9 +80,10 @@ pub fn schema_sql() -> String {
     out
 }
 
-/// The `build.sql` text: read the schema, then import every table
-/// through a staging table; the first error stops the run.
-pub fn build_sql() -> String {
+/// Renders `build.sql` for the fixed tables and supplied census files.
+///
+/// The script imports through staging tables and stops at the first error.
+pub fn build_sql(census_files: &[String]) -> String {
     let mut out = banner();
     out.push_str(
         "-- Run in docs/lv2/: sqlite3 lv2.db < build.sql\n\
@@ -89,44 +93,59 @@ pub fn build_sql() -> String {
          .read schema.sql\n",
     );
     for table in TABLES {
-        let staging = format!("staging_{}", table.name);
-        let names: Vec<&str> = table.columns.iter().map(|c| c.name).collect();
-        let typed: Vec<String> = names
-            .iter()
-            .map(|n| format!("{} TEXT", quoted(n)))
-            .collect();
-        let selected: Vec<String> = table
-            .columns
-            .iter()
-            .map(|column| {
-                let mut expr = quoted(column.name);
-                if column.nullable {
-                    expr = format!("NULLIF({expr}, '{NONE}')");
-                }
-                if column.kind == ColumnKind::Integer {
-                    expr = format!("CAST({expr} AS INTEGER)");
-                }
-                expr
-            })
-            .collect();
-        out.push_str(&format!(
-            "\n\
+        append_import(&mut out, table, &table.file());
+    }
+    // Sorting preserves byte-deterministic output when the caller discovers
+    // the per-version files in filesystem order.
+    let mut census_files = census_files.to_vec();
+    census_files.sort();
+    for file in &census_files {
+        append_import(&mut out, &CENSUS, file);
+    }
+    out
+}
+
+fn append_import(out: &mut String, table: &TableSpec, file: &str) {
+    let staging = format!("staging_{}", table.name);
+    let names: Vec<&str> = table.columns.iter().map(|c| c.name).collect();
+    let typed: Vec<String> = names
+        .iter()
+        .map(|n| format!("{} TEXT", quoted(n)))
+        .collect();
+    let selected: Vec<String> = table
+        .columns
+        .iter()
+        .map(|column| {
+            let mut expr = quoted(column.name);
+            if column.nullable {
+                expr = format!("NULLIF({expr}, '{NONE}')");
+            }
+            if column.kind == ColumnKind::Integer {
+                expr = format!("CAST({expr} AS INTEGER)");
+            }
+            expr
+        })
+        .collect();
+    out.push_str(&format!(
+        "\n\
              CREATE TEMP TABLE {staging} ({});\n\
              .import --ascii --colsep \"\\t\" --rowsep \"\\n\" --skip 1 {} {staging}\n\
              INSERT INTO {} ({})\n\
              SELECT {}\n\
              FROM {staging};\n\
              DROP TABLE {staging};\n",
-            typed.join(", "),
-            table.file(),
-            table.name,
-            quoted_list(&names),
-            selected.join(", "),
-        ));
-    }
-    out
+        typed.join(", "),
+        file,
+        table.name,
+        quoted_list(&names),
+        selected.join(", "),
+    ));
 }
 
 #[cfg(test)]
 #[path = "tests/sql_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/census_sql_tests.rs"]
+mod census_tests;

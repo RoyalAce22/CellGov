@@ -6,6 +6,9 @@ pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --
 /// The test that fails when a committed generated file is stale.
 pub const GATE: &str = "committed_archive_matches_generator";
 
+/// Pins SQLite's `user_version` to the archive's frozen schema.
+pub const SCHEMA_VERSION: u32 = 2;
+
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OwnerClass {
@@ -67,6 +70,12 @@ pub enum ColumnKind {
     Ident,
     /// [`Integer`](ColumnKind::Integer) tokens joined by `,`, strictly ascending.
     IntegerList,
+    /// Accepts exactly 64 lowercase hexadecimal digits.
+    Sha256,
+    /// Accepts `0x` followed by exactly 8 lowercase hexadecimal digits.
+    Hex32,
+    /// Accepts `0x` followed by exactly 16 lowercase hexadecimal digits.
+    Hex64,
     /// One label from a fixed set.
     Enum(&'static [&'static str]),
     /// One token of ASCII letters, digits and `_ . / : @ + -`, wide
@@ -84,6 +93,9 @@ impl ColumnKind {
             ColumnKind::Integer => "INTEGER",
             ColumnKind::Ident
             | ColumnKind::IntegerList
+            | ColumnKind::Sha256
+            | ColumnKind::Hex32
+            | ColumnKind::Hex64
             | ColumnKind::Enum(_)
             | ColumnKind::Locator => "TEXT",
         }
@@ -97,6 +109,9 @@ impl ColumnKind {
             ColumnKind::IntegerList => {
                 "an ascending comma-joined list of decimal integers".to_string()
             }
+            ColumnKind::Sha256 => "64 lowercase hexadecimal digits".to_string(),
+            ColumnKind::Hex32 => "0x plus 8 lowercase hexadecimal digits".to_string(),
+            ColumnKind::Hex64 => "0x plus 16 lowercase hexadecimal digits".to_string(),
             ColumnKind::Enum(labels) => format!("one of {}", labels.join(", ")),
             ColumnKind::Locator => "a locator of letters, digits and _ . / : @ + -".to_string(),
         }
@@ -373,7 +388,7 @@ pub const PUP: TableSpec = TableSpec {
     columns: &[
         Column {
             name: "pup_sha256",
-            kind: ColumnKind::Ident,
+            kind: ColumnKind::Sha256,
             nullable: false,
             references: None,
         },
@@ -413,6 +428,190 @@ pub const PUP: TableSpec = TableSpec {
     gate: PUP_GATE,
 };
 
+/// Provides the command form that writes a kernel census and refreshes its index rows.
+pub const CENSUS_REGENERATE: &str =
+    "cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2";
+
+/// Names the corpus-free gate for kernel, stub, and census rows.
+pub const CENSUS_GATE: &str = "kernel_census_rows_are_well_formed";
+
+/// Lists the accepted labels for `kernel.entry_format`.
+pub const ENTRY_FORMATS: &[&str] = &["ppc64_descriptor_pointer"];
+
+/// Lists the accepted labels for `kernel.discovery_method`.
+pub const DISCOVERY_METHODS: &[&str] = &["sc_vector_descriptor_array"];
+
+/// Lists the accepted labels for `kernel.confidence`.
+pub const DISCOVERY_CONFIDENCE: &[&str] = &["high"];
+
+/// Lists the accepted labels for `census.class`.
+pub const CENSUS_CLASSES: &[&str] = &["implemented", "stub", "absent"];
+
+/// Lists the accepted labels for `census.dispatch`.
+pub const DISPATCH_SHAPES: &[&str] = &["flat", "subtable", "chain_incomplete"];
+
+/// Lists the accepted labels for `stub.primary`.
+pub const PRIMARY_LABELS: &[&str] = &["yes", "no"];
+
+/// Defines `kernel.tsv` with provenance and discovery evidence per PUP.
+pub const KERNEL: TableSpec = TableSpec {
+    name: "kernel",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: Some(("pup", "pup_sha256")),
+        },
+        Column {
+            name: "kernel_elf_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "table_base",
+            kind: ColumnKind::Hex64,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "entry_width",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "entry_format",
+            kind: ColumnKind::Enum(ENTRY_FORMATS),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "entry_count",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "discovery_method",
+            kind: ColumnKind::Enum(DISCOVERY_METHODS),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "confidence",
+            kind: ColumnKind::Enum(DISCOVERY_CONFIDENCE),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "census_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256"],
+    regenerate: Some(CENSUS_REGENERATE),
+    gate: CENSUS_GATE,
+};
+
+/// Defines `stub.tsv` with every decoded constant-error target per PUP.
+pub const STUB: TableSpec = TableSpec {
+    name: "stub",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: Some(("kernel", "pup_sha256")),
+        },
+        Column {
+            name: "descriptor",
+            kind: ColumnKind::Hex64,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "target",
+            kind: ColumnKind::Hex64,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "errno",
+            kind: ColumnKind::Hex32,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "errno_symbol",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "references",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "primary",
+            kind: ColumnKind::Enum(PRIMARY_LABELS),
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256", "descriptor"],
+    regenerate: Some(CENSUS_REGENERATE),
+    gate: CENSUS_GATE,
+};
+
+/// Defines each `census/fw-<version>.tsv` file.
+pub const CENSUS: TableSpec = TableSpec {
+    name: "census",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "fw",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: Some(("firmware", "fw")),
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "class",
+            kind: ColumnKind::Enum(CENSUS_CLASSES),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "target",
+            kind: ColumnKind::Hex64,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "dispatch",
+            kind: ColumnKind::Enum(DISPATCH_SHAPES),
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["fw", "ordinal"],
+    regenerate: Some(CENSUS_REGENERATE),
+    gate: CENSUS_GATE,
+};
+
 /// Refreshes the firmware caller tables from installed modules.
 pub const CALLER_REGENERATE: &str =
     "cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2";
@@ -427,7 +626,7 @@ pub const CALLER: TableSpec = TableSpec {
     columns: &[
         Column {
             name: "pup_sha256",
-            kind: ColumnKind::Ident,
+            kind: ColumnKind::Sha256,
             nullable: false,
             references: Some(("pup", "pup_sha256")),
         },
@@ -462,7 +661,7 @@ pub const CALLER_UNRESOLVED: TableSpec = TableSpec {
     columns: &[
         Column {
             name: "pup_sha256",
-            kind: ColumnKind::Ident,
+            kind: ColumnKind::Sha256,
             nullable: false,
             references: Some(("pup", "pup_sha256")),
         },
@@ -491,7 +690,7 @@ pub const REACH: TableSpec = TableSpec {
     columns: &[
         Column {
             name: "pup_sha256",
-            kind: ColumnKind::Ident,
+            kind: ColumnKind::Sha256,
             nullable: false,
             references: Some(("pup", "pup_sha256")),
         },
@@ -635,6 +834,8 @@ pub const CONFLICTS: TableSpec = TableSpec {
 pub const TABLES: &[TableSpec] = &[
     FIRMWARE,
     PUP,
+    KERNEL,
+    STUB,
     ARM,
     ROUTE,
     CALLER,
@@ -662,8 +863,10 @@ pub struct ManifestRow {
     pub gate: &'static str,
 }
 
-/// Every file the archive holds, one row each, sorted by file name.
-pub fn manifest() -> Vec<ManifestRow> {
+/// Lists every archive file in file-name order.
+///
+/// The caller supplies the discovered per-version census paths.
+pub fn manifest(census_files: &[String]) -> Vec<ManifestRow> {
     let mut rows: Vec<ManifestRow> = FIXED_FILES
         .iter()
         .map(|file| ManifestRow {
@@ -679,13 +882,24 @@ pub fn manifest() -> Vec<ManifestRow> {
         regenerate: table.regenerate,
         gate: table.gate,
     }));
+    rows.extend(census_files.iter().map(|file| ManifestRow {
+        file: file.clone(),
+        owner: OwnerClass::Extracted,
+        regenerate: Some(CENSUS_REGENERATE),
+        gate: CENSUS_GATE,
+    }));
     rows.sort_by(|a, b| a.file.cmp(&b.file));
     rows
 }
 
-/// Every file the archive holds, sorted.
-pub fn files() -> Vec<String> {
-    manifest().into_iter().map(|row| row.file).collect()
+/// Lists every archive file in file-name order.
+///
+/// The caller supplies the discovered per-version census paths.
+pub fn files(census_files: &[String]) -> Vec<String> {
+    manifest(census_files)
+        .into_iter()
+        .map(|row| row.file)
+        .collect()
 }
 
 /// Every view.

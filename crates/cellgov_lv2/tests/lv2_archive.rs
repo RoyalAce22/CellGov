@@ -19,12 +19,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
-    self, ConflictRow, FirmwareRole, FirmwareRow, HandlingCounts, NameRow, NameSource, OwnerClass,
-    PupRow, Route, CALLER, CALLER_GATE, CALLER_UNRESOLVED, FIRMWARE, FIRMWARE_GATE, GATE, NAME,
-    NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH, REGENERATE, TABLES,
+    self, CensusClass, ConflictRow, FirmwareRole, FirmwareRow, HandlingCounts, KernelRow, NameRow,
+    NameSource, OwnerClass, PupRow, Route, StubRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CENSUS,
+    CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PUP,
+    PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
+use sha2::Digest as _;
 
 const README_TEMPLATE: &str = include_str!("templates/README.md.template");
 
@@ -62,6 +64,72 @@ fn committed_pups() -> Vec<PupRow> {
         "the archive loader does not re-render pup.tsv byte-identically"
     );
     archive::pup_rows(&table)
+}
+
+fn committed_kernels() -> Vec<KernelRow> {
+    let text = read(&archive_dir().join(KERNEL.file()));
+    let table = archive::parse(&KERNEL, &text).unwrap_or_else(|error| panic!("{error}"));
+    let rerendered =
+        archive::render(&KERNEL, &table.rows).unwrap_or_else(|error| panic!("kernel.tsv: {error}"));
+    assert_eq!(rerendered, text, "kernel.tsv is not byte-canonical");
+    archive::kernel_rows(&table)
+}
+
+fn committed_stubs() -> Vec<StubRow> {
+    let text = read(&archive_dir().join(STUB.file()));
+    let table = archive::parse(&STUB, &text).unwrap_or_else(|error| panic!("{error}"));
+    let rerendered =
+        archive::render(&STUB, &table.rows).unwrap_or_else(|error| panic!("stub.tsv: {error}"));
+    assert_eq!(rerendered, text, "stub.tsv is not byte-canonical");
+    archive::stub_rows(&table)
+}
+
+fn census_files(kernels: &[KernelRow], pups: &[PupRow]) -> Vec<String> {
+    let firmware_by_pup: BTreeMap<&str, &str> = pups
+        .iter()
+        .map(|row| (row.pup_sha256.as_str(), row.fw.as_str()))
+        .collect();
+    for fw in ["3.41", "3.56"] {
+        assert_eq!(
+            kernels
+                .iter()
+                .filter(|kernel| firmware_by_pup[kernel.pup_sha256.as_str()] == fw)
+                .count(),
+            2,
+            "firmware {fw} must retain both PUP releases"
+        );
+    }
+    assert_eq!(
+        kernels
+            .iter()
+            .filter(|kernel| firmware_by_pup[kernel.pup_sha256.as_str()] == "3.41")
+            .map(|kernel| kernel.kernel_elf_sha256.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        1,
+        "the two 3.41 PUPs share one kernel"
+    );
+    assert_eq!(
+        kernels
+            .iter()
+            .filter(|kernel| firmware_by_pup[kernel.pup_sha256.as_str()] == "3.56")
+            .map(|kernel| kernel.kernel_elf_sha256.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        2,
+        "the two 3.56 PUPs carry distinct kernels"
+    );
+    kernels
+        .iter()
+        .map(|kernel| {
+            let fw = firmware_by_pup
+                .get(kernel.pup_sha256.as_str())
+                .unwrap_or_else(|| panic!("kernel row names no PUP: {}", kernel.pup_sha256));
+            archive::census_file(fw)
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn slot(ordinal: u64, packet: Option<&str>) -> String {
@@ -123,14 +191,19 @@ fn fill(template: &str, subs: &[(&str, String)]) -> String {
     out
 }
 
-fn readme(
-    counts: &HandlingCounts,
-    firmware: &[FirmwareRow],
-    pups: &[PupRow],
-    names: &[NameRow],
-    conflicts: &[ConflictRow],
-) -> String {
-    let manifest_rows: Vec<String> = archive::manifest()
+struct ReadmeData<'a> {
+    counts: &'a HandlingCounts,
+    firmware: &'a [FirmwareRow],
+    pups: &'a [PupRow],
+    names: &'a [NameRow],
+    conflicts: &'a [ConflictRow],
+    kernels: &'a [KernelRow],
+    stubs: &'a [StubRow],
+    census_files: &'a [String],
+}
+
+fn readme(data: ReadmeData<'_>) -> String {
+    let manifest_rows: Vec<String> = archive::manifest(data.census_files)
         .iter()
         .map(|row| {
             let regenerate = match row.regenerate {
@@ -159,7 +232,7 @@ fn readme(
             format!(
                 "| `{}` | {} | {} |",
                 r.label(),
-                counts.of_route(*r),
+                data.counts.of_route(*r),
                 r.meaning()
             )
         })
@@ -175,16 +248,17 @@ fn readme(
     let name_source_rows: Vec<String> = NameSource::ALL
         .iter()
         .map(|s| {
-            let rows = names.iter().filter(|n| n.source == *s).count();
+            let rows = data.names.iter().filter(|n| n.source == *s).count();
             format!("| `{}` | {rows} | {} |", s.label(), s.meaning())
         })
         .collect();
-    let named_slots: BTreeSet<(u64, Option<&str>)> = names
+    let named_slots: BTreeSet<(u64, Option<&str>)> = data
+        .names
         .iter()
         .map(|n| (n.ordinal, n.packet.as_deref()))
         .collect();
-    let conflict_rows = conflict_markdown(conflicts);
-    let uncorroborated_rows: Vec<String> = archive::uncorroborated(names)
+    let conflict_rows = conflict_markdown(data.conflicts);
+    let uncorroborated_rows: Vec<String> = archive::uncorroborated(data.names)
         .iter()
         .map(|n| {
             let constant = n
@@ -204,6 +278,7 @@ fn readme(
         &[
             ("regenerate", REGENERATE.to_string()),
             ("gate", GATE.to_string()),
+            ("schema_version", SCHEMA_VERSION.to_string()),
             ("manifest_rows", manifest_rows.join("\n")),
             ("owner_rows", owner_rows.join("\n")),
             ("slots", SYSCALL_TABLE_SLOTS.to_string()),
@@ -211,10 +286,10 @@ fn readme(
             ("fidelity_rows", fidelity_rows.join("\n")),
             ("sqlite_version", archive::SQLITE_VERSION.to_string()),
             ("behavior_gate", archive::BEHAVIOR_GATE.to_string()),
-            ("firmware_rows", firmware.len().to_string()),
+            ("firmware_rows", data.firmware.len().to_string()),
             (
                 "firmware_dated",
-                firmware
+                data.firmware
                     .iter()
                     .filter(|f| f.release_date.is_some())
                     .count()
@@ -222,16 +297,21 @@ fn readme(
             ),
             ("firmware_gate", FIRMWARE_GATE.to_string()),
             ("firmware_role_rows", firmware_role_rows.join("\n")),
-            ("pup_rows", pups.len().to_string()),
+            ("pup_rows", data.pups.len().to_string()),
             (
                 "pup_versions",
-                pups.iter()
+                data.pups
+                    .iter()
                     .map(|row| row.fw.as_str())
                     .collect::<BTreeSet<_>>()
                     .len()
                     .to_string(),
             ),
             ("pup_gate", PUP_GATE.to_string()),
+            ("kernel_rows", data.kernels.len().to_string()),
+            ("stub_rows", data.stubs.len().to_string()),
+            ("census_files", data.census_files.len().to_string()),
+            ("census_gate", CENSUS_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
             ("named_slots", named_slots.len().to_string()),
             ("name_gate", NAME_GATE.to_string()),
@@ -254,15 +334,27 @@ fn rendered() -> BTreeMap<String, String> {
     let counts = HandlingCounts::of(&routes);
     let firmware = committed_firmware();
     let pups = committed_pups();
+    let kernels = committed_kernels();
+    let stubs = committed_stubs();
+    let census_files = census_files(&kernels, &pups);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
     let mut files = BTreeMap::new();
     files.insert(
         "README.md".to_string(),
-        readme(&counts, &firmware, &pups, &names, &conflicts),
+        readme(ReadmeData {
+            counts: &counts,
+            firmware: &firmware,
+            pups: &pups,
+            names: &names,
+            conflicts: &conflicts,
+            kernels: &kernels,
+            stubs: &stubs,
+            census_files: &census_files,
+        }),
     );
     files.insert("schema.sql".to_string(), archive::schema_sql());
-    files.insert("build.sql".to_string(), archive::build_sql());
+    files.insert("build.sql".to_string(), archive::build_sql(&census_files));
     files.insert(
         "route.tsv".to_string(),
         archive::route_tsv(&routes).unwrap_or_else(|e| panic!("route.tsv: {e}")),
@@ -276,7 +368,7 @@ fn rendered() -> BTreeMap<String, String> {
         archive::conflicts_tsv(&conflicts).unwrap_or_else(|e| panic!("conflicts.tsv: {e}")),
     );
     let names: Vec<&String> = files.keys().collect();
-    let generated: Vec<String> = archive::manifest()
+    let generated: Vec<String> = archive::manifest(&census_files)
         .into_iter()
         .filter(|row| row.regenerate == Some(REGENERATE))
         .map(|row| row.file)
@@ -362,23 +454,39 @@ fn is_built_database(name: &str) -> bool {
 #[test]
 fn the_archive_directory_holds_exactly_the_manifest() {
     let dir = archive_dir();
-    let mut present: Vec<String> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("read {}: {e}", dir.display()))
-        .map(|entry| {
-            entry
-                .unwrap_or_else(|e| panic!("read entry under {}: {e}", dir.display()))
-                .file_name()
-                .to_string_lossy()
-                .to_string()
-        })
-        .filter(|name| !is_built_database(name))
-        .collect();
+    let kernels = committed_kernels();
+    let pups = committed_pups();
+    let census_files = census_files(&kernels, &pups);
+    let mut present = archive_paths(&dir, &dir);
     present.sort();
     assert_eq!(
         present,
-        archive::files(),
+        archive::files(&census_files),
         "docs/lv2/ and the manifest in cellgov_lv2::archive disagree"
     );
+}
+
+fn archive_paths(root: &Path, directory: &Path) -> Vec<String> {
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+    {
+        let entry = entry.unwrap_or_else(|error| panic!("read entry: {error}"));
+        let path = entry.path();
+        if path.is_dir() {
+            paths.extend(archive_paths(root, &path));
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .expect("archive entry is below its root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !is_built_database(&relative) {
+            paths.push(relative);
+        }
+    }
+    paths
 }
 
 #[test]
@@ -391,6 +499,15 @@ fn committed_tables_load_and_reference_each_other() {
         })
         .collect();
     archive::check_references(&tables).unwrap_or_else(|e| panic!("{e}"));
+    let kernels = committed_kernels();
+    let pups = committed_pups();
+    for file in census_files(&kernels, &pups) {
+        let census = archive::parse(&CENSUS, &read(&dir.join(file)))
+            .unwrap_or_else(|error| panic!("{error}"));
+        let mut with_census = tables.clone();
+        with_census.push(census);
+        archive::check_references(&with_census).unwrap_or_else(|error| panic!("{error}"));
+    }
 }
 
 #[test]
@@ -416,6 +533,101 @@ fn pup_rows_are_well_formed() {
         })
         .collect();
     archive::check_references(&tables).unwrap_or_else(|error| panic!("{error}"));
+}
+
+#[test]
+fn kernel_census_rows_are_well_formed() {
+    assert_eq!(KERNEL.gate, CENSUS_GATE);
+    assert_eq!(STUB.gate, CENSUS_GATE);
+    let pups = committed_pups();
+    let kernels = committed_kernels();
+    let stubs = committed_stubs();
+    assert_eq!(kernels.len(), 59, "one kernel row per extracted retail PUP");
+    assert_eq!(
+        census_files(&kernels, &pups).len(),
+        57,
+        "one census file per displayed firmware version"
+    );
+
+    let firmware_by_pup: BTreeMap<&str, &str> = pups
+        .iter()
+        .map(|row| (row.pup_sha256.as_str(), row.fw.as_str()))
+        .collect();
+    let mut stubs_by_pup: BTreeMap<&str, Vec<&StubRow>> = BTreeMap::new();
+    for stub in &stubs {
+        stubs_by_pup
+            .entry(stub.pup_sha256.as_str())
+            .or_default()
+            .push(stub);
+    }
+
+    for kernel in &kernels {
+        assert_eq!(kernel.entry_width, 8, "dispatch entries are u64 pointers");
+        assert_eq!(
+            kernel.entry_count, SYSCALL_TABLE_SLOTS as usize,
+            "kernel row must cover the architectural archive slot count"
+        );
+        let fw = firmware_by_pup
+            .get(kernel.pup_sha256.as_str())
+            .unwrap_or_else(|| panic!("kernel row names no PUP: {}", kernel.pup_sha256));
+        let path = archive_dir().join(archive::census_file(fw));
+        let text = read(&path);
+        assert_eq!(
+            sha256_hex(text.as_bytes()),
+            kernel.census_sha256,
+            "{} names the wrong census digest",
+            kernel.pup_sha256
+        );
+        let table = archive::parse(&CENSUS, &text).unwrap_or_else(|error| panic!("{error}"));
+        let rows = archive::census_rows(&table);
+        assert_eq!(rows.len(), kernel.entry_count, "{fw}: entry count");
+        let mut stub_references: BTreeMap<u64, usize> = BTreeMap::new();
+        for (ordinal, row) in rows.iter().enumerate() {
+            assert_eq!(row.fw, *fw, "{} row {ordinal}: firmware", path.display());
+            assert_eq!(row.ordinal, ordinal, "{fw}: ordinal sequence");
+            assert_eq!(
+                row.class == CensusClass::Absent,
+                row.target.is_none(),
+                "{fw}: absent/target mismatch at {ordinal}"
+            );
+            if row.class == CensusClass::Stub {
+                *stub_references
+                    .entry(row.target.expect("stub rows have a target"))
+                    .or_default() += 1;
+            }
+        }
+
+        let pup_stubs = stubs_by_pup
+            .get(kernel.pup_sha256.as_str())
+            .unwrap_or_else(|| panic!("{} has no stub rows", kernel.pup_sha256));
+        assert_eq!(
+            pup_stubs.iter().filter(|stub| stub.primary).count(),
+            1,
+            "{} must have one primary stub",
+            kernel.pup_sha256
+        );
+        let mut recorded: BTreeMap<u64, usize> = BTreeMap::new();
+        for stub in pup_stubs {
+            assert!(stub.references > 0, "stub targets must have a reference");
+            let expected = cellgov_ps3_abi::lv2::errno::lookup(stub.errno)
+                .unwrap_or_else(|| panic!("unknown Cell errno 0x{:08x}", stub.errno));
+            assert_eq!(stub.errno_symbol, expected.symbol, "stub errno symbol");
+            *recorded.entry(stub.target).or_default() += stub.references;
+        }
+        assert_eq!(recorded, stub_references, "{fw}: stub reference counts");
+    }
+    assert_eq!(
+        stubs_by_pup.len(),
+        kernels.len(),
+        "stub.tsv and kernel.tsv cover different PUP sets"
+    );
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 #[test]

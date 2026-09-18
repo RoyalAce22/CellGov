@@ -331,6 +331,7 @@ dependencies = [
  "cellgov_testkit",
  "cellgov_time",
  "num_enum",
+ "sha2",
  "strum",
  "thiserror",
 ]

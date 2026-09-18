@@ -16,7 +16,8 @@ fn create_block<'a>(schema: &'a str, table: &str) -> &'a str {
 #[test]
 fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
     let full = schema_sql();
-    for table in TABLES {
+    assert!(full.contains(&format!("PRAGMA user_version = {SCHEMA_VERSION};")));
+    for table in TABLES.iter().chain(std::iter::once(&CENSUS)) {
         let schema = create_block(&full, table.name);
         let constraint = if table.key_is_nullable() {
             "UNIQUE"
@@ -83,7 +84,7 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
         );
     }
     let schema_tables = full.matches("CREATE TABLE ").count();
-    assert_eq!(schema_tables, TABLES.len());
+    assert_eq!(schema_tables, TABLES.len() + 1);
     assert!(
         create_block(&full, "name")
             .contains("    UNIQUE (\"ordinal\", \"packet\", \"source\", \"name\")\n"),
@@ -98,7 +99,11 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
 
 #[test]
 fn the_build_reads_the_schema_and_imports_every_table_through_staging_in_order() {
-    let build = build_sql();
+    let census_files = vec![
+        "census/fw-3.55.tsv".to_string(),
+        "census/fw-3.56.tsv".to_string(),
+    ];
+    let build = build_sql(&census_files);
     assert!(build.starts_with("-- Rendered from cellgov_lv2::archive by\n"));
     assert!(build.contains("\n.bail on\nPRAGMA foreign_keys = ON;\n.read schema.sql\n"));
     let mut cursor = 0;
@@ -113,6 +118,11 @@ fn the_build_reads_the_schema_and_imports_every_table_through_staging_in_order()
             .unwrap_or_else(|| panic!("{} is not imported after the table before it", table.name));
         cursor += at + import.len();
         assert!(build.contains(&format!("DROP TABLE staging_{};\n", table.name)));
+    }
+    for file in &census_files {
+        assert!(build.contains(&format!(
+            ".import --ascii --colsep \"\\t\" --rowsep \"\\n\" --skip 1 {file} staging_census\n"
+        )));
     }
     assert!(
         build.contains("NULLIF(\"arm\", 'none')"),

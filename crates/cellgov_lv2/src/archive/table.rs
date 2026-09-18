@@ -190,6 +190,13 @@ fn is_ident(cell: &str) -> bool {
     !cell.is_empty() && cell.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+fn is_lower_hex(cell: &str, digits: usize) -> bool {
+    cell.len() == digits
+        && cell
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 fn is_locator(cell: &str) -> bool {
     !cell.is_empty()
         && cell
@@ -247,6 +254,13 @@ fn check_cell(
         ColumnKind::Integer => is_integer(cell),
         ColumnKind::Ident => is_ident(cell),
         ColumnKind::IntegerList => is_ascending_integer_list(cell),
+        ColumnKind::Sha256 => is_lower_hex(cell, 64),
+        ColumnKind::Hex32 => cell
+            .strip_prefix("0x")
+            .is_some_and(|digits| is_lower_hex(digits, 8)),
+        ColumnKind::Hex64 => cell
+            .strip_prefix("0x")
+            .is_some_and(|digits| is_lower_hex(digits, 16)),
         ColumnKind::Enum(labels) => labels.contains(&cell),
         ColumnKind::Locator => is_locator(cell),
     };

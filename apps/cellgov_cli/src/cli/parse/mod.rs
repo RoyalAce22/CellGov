@@ -15,7 +15,6 @@ mod value;
 pub(crate) use boot::{
     override_flags, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
 };
-pub(crate) use dev::Lv2DiscoverArgs;
 #[cfg(feature = "decrypt")]
 pub(crate) use dev::{CallerCensusArgs, Lv2ExtractArgs};
 pub(crate) use dev::{
@@ -23,6 +22,7 @@ pub(crate) use dev::{
     FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,
     TitlesGenArgs, MAX_DISASM_COUNT,
 };
+pub(crate) use dev::{Lv2CensusArgs, Lv2DiscoverArgs};
 pub(crate) use diff::{
     CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, ExploreTitleArgs, OutputFormat,
     ScenarioCommand,

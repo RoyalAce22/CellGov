@@ -5,6 +5,7 @@
 //! them on `--ignored regenerate` and fails when they drift.
 
 mod behavior;
+mod census;
 mod firmware;
 mod handling;
 mod name;
@@ -16,6 +17,10 @@ mod table;
 pub use behavior::{
     arm_token, foldable, parse_citation, parse_witness, provenance_ref_fits, Witness, DOC_KEYS,
     WITNESS_CRATES,
+};
+pub use census::{
+    census_file, census_rows, census_tsv, kernel_rows, kernel_tsv, stub_rows, stub_tsv,
+    CensusClass, CensusRow, DispatchShape, KernelRow, StubRow,
 };
 pub use firmware::{
     check_firmware_rows, firmware_rows, is_version_key, FirmwareRole, FirmwareRow,
@@ -31,10 +36,12 @@ pub use name::{
 pub use pup::{check_pup_rows, pup_rows, PupRow, PupTableError};
 pub use spec::{
     files, manifest, Column, ColumnKind, ManifestRow, OwnerClass, TableSpec, View, ARM, BEHAVIOR,
-    BEHAVIOR_GATE, CALLER, CALLER_GATE, CALLER_REGENERATE, CALLER_UNRESOLVED, CONFLICTS,
-    DISAGREEMENTS, EXCEPTIONS, FIDELITY_LABELS, FIRMWARE, FIRMWARE_GATE, FIRMWARE_ROLES, GATE,
-    NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PROVENANCE_KINDS, PUP, PUP_GATE, REACH,
-    REGENERATE, ROUTE, ROUTE_LABELS, SELECTOR_SLOTS, TABLES, VIEWS,
+    BEHAVIOR_GATE, CALLER, CALLER_GATE, CALLER_REGENERATE, CALLER_UNRESOLVED, CENSUS,
+    CENSUS_CLASSES, CENSUS_GATE, CENSUS_REGENERATE, CONFLICTS, DISAGREEMENTS, DISCOVERY_CONFIDENCE,
+    DISCOVERY_METHODS, DISPATCH_SHAPES, ENTRY_FORMATS, EXCEPTIONS, FIDELITY_LABELS, FIRMWARE,
+    FIRMWARE_GATE, FIRMWARE_ROLES, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES,
+    PRIMARY_LABELS, PROVENANCE_KINDS, PUP, PUP_GATE, REACH, REGENERATE, ROUTE, ROUTE_LABELS,
+    SCHEMA_VERSION, SELECTOR_SLOTS, STUB, TABLES, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};

@@ -1340,6 +1340,30 @@ SCE-wrapped input:
   this build reads; rebuild with --features decrypt to read one.
 ```
 
+#### `cellgov dev lv2-census`
+
+Emit the LV2 census rows for one firmware version.
+
+```console
+$ cellgov dev lv2-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192
+$ cellgov dev lv2-census ../cellgov-output/lv2_kernel-3.55.elf --fw 3.55 --pup-sha256 334e60a4ef5843a688c1c6aebf0951c3259429233c7a5aca5a24f0edad78a192 --replace-version
+```
+
+```
+Usage: cellgov dev lv2-census [OPTIONS] --fw <VERSION> --pup-sha256 <SHA256> <ELF>
+```
+
+| Argument | Description |
+| --- | --- |
+| `ELF` | Decrypted kernel ELF, or a SELF the configured vault can open. Required. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--fw` | `VERSION` | Select the firmware version from `pup.tsv`. Required. |
+| `--pup-sha256` | `SHA256` | Use the source PUP's SHA-256 from `pup.tsv`. Required. |
+| `--output-dir` | `DIR` | Write the archive rows to this directory. Default `docs/lv2`. |
+| `--replace-version` | -- | Replace all rows for this firmware with rows from the selected PUP. |
+
 #### `cellgov dev rpcs3-attribute`
 
 Answer which HLE call wrote a guest address, from a trace.

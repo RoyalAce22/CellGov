@@ -4,14 +4,19 @@ use crate::archive::handling::Route;
 use crate::archive::name::{Disagreement, NameSource};
 use crate::request::fidelity::ArmFidelity;
 
+fn all_specs() -> Vec<&'static TableSpec> {
+    TABLES.iter().chain(std::iter::once(&CENSUS)).collect()
+}
+
 #[test]
 fn a_referenced_table_precedes_every_table_that_references_it() {
-    for (index, table) in TABLES.iter().enumerate() {
+    let tables = all_specs();
+    for (index, table) in tables.iter().enumerate() {
         for column in table.columns {
             let Some((target, _)) = column.references else {
                 continue;
             };
-            let position = TABLES.iter().position(|t| t.name == target);
+            let position = tables.iter().position(|t| t.name == target);
             assert!(
                 position.is_some_and(|p| p < index),
                 "{}.{} references {target}, which is not listed before it",
@@ -24,7 +29,8 @@ fn a_referenced_table_precedes_every_table_that_references_it() {
 
 #[test]
 fn every_key_and_reference_names_a_column() {
-    for table in TABLES {
+    let tables = all_specs();
+    for table in &tables {
         assert_eq!(
             table.key_indexes().len(),
             table.key.len(),
@@ -33,7 +39,7 @@ fn every_key_and_reference_names_a_column() {
         );
         for column in table.columns {
             if let Some((target_table, target_column)) = column.references {
-                let target = TABLES
+                let target = tables
                     .iter()
                     .find(|t| t.name == target_table)
                     .unwrap_or_else(|| panic!("{target_table} is not a table"));
@@ -82,7 +88,8 @@ fn only_the_name_tables_have_a_nullable_key() {
 
 #[test]
 fn the_manifest_lists_every_table_and_the_fixed_files_once() {
-    let files = files();
+    let census = vec!["census/fw-3.55.tsv".to_string()];
+    let files = files(&census);
     let mut sorted = files.clone();
     sorted.sort();
     sorted.dedup();
@@ -94,13 +101,14 @@ fn the_manifest_lists_every_table_and_the_fixed_files_once() {
             table.file()
         );
     }
+    assert!(files.contains(&census[0]));
     for fixed in ["README.md", "schema.sql", "build.sql"] {
         assert!(
             files.iter().any(|f| f == fixed),
             "{fixed} has no manifest row"
         );
     }
-    assert_eq!(files.len(), TABLES.len() + 3);
+    assert_eq!(files.len(), TABLES.len() + 4);
 }
 
 #[test]

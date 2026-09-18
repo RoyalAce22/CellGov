@@ -93,6 +93,10 @@ name = "firmware_set_load"
 required-features = ["firmware-corpus"]
 
 [[test]]
+name = "lv2_census_corpus"
+required-features = ["firmware-corpus"]
+
+[[test]]
 name = "ps3autotests"
 required-features = ["ps3autotests"]
 
