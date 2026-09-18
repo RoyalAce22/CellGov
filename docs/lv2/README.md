@@ -17,6 +17,17 @@ Archive schema version: **6**. `schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
+## Census coverage
+
+The census covers 95 of 106 retail firmware
+versions, from 97 of 98 acquired PUPs. Every census
+count below has that coverage; a missing PUP is not evidence that its version
+lacks an ordinal.
+
+Census, presence, gate, and transition rows are extracted from firmware.
+Names and packet identifiers are attributed separately, with their sources
+kept in their own tables.
+
 ## Manifest
 
 Every file in this directory has a row here, and a guard fails when
@@ -237,6 +248,8 @@ row records a recognized permission record with no capability requirement;
 `presence.tsv` has 1024 ordinal rows. Each row lists every
 extracted firmware version under exactly one of `implemented`, `stub`, or
 `absent`; a missing PUP is not represented as an absent version.
+
+### Census history
 
 `transitions.tsv` has 4521 adjacent-version changes. A pair
 without both extracted sides reads `not_compared`; target relocation moves with
