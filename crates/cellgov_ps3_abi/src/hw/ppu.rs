@@ -11,6 +11,10 @@
 /// guest-visible timebase ticks and microseconds.
 pub const CELL_PPU_TIMEBASE_HZ: u64 = 79_800_000;
 
+/// Gives the effective-address offset of the PowerPC System Call interrupt vector.
+// [PPC-Book3 p:73 s:5.5.13] A System Call interrupt resumes at effective address 0xC00.
+pub const SYSTEM_CALL_VECTOR_OFFSET: u64 = 0xC00;
+
 /// Cell BE PPU L1/L2 cache line size in bytes. Reservation
 /// granularity for `lwarx`/`stwcx.`, dcbz target alignment, and the
 /// stride PS3 atomic primitives assume.

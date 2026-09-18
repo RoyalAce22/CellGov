@@ -189,7 +189,7 @@ const _: () = assert!(ELF64_SH_SIZE + 8 <= ELF64_SHENT_SIZE);
 /// [`thread_param`]: crate::lv2::ppu_thread::thread_param
 // No public document states the packing.
 pub mod function_descriptor {
-    /// Bytes one descriptor occupies.
+    /// Gives the descriptor size in bytes.
     pub const SIZE: usize = 8;
 
     /// `code` -- the guest address of the entry point's first
@@ -206,6 +206,26 @@ pub mod function_descriptor {
     // `codegen::trampoline::encode_ps3_packed_opd` writes both words
     // from these offsets.
     const _: () = assert!(CODE_OFFSET + core::mem::size_of::<u32>() <= TOC_OFFSET);
+}
+
+/// The three-doubleword PPC64 ELFv1 function descriptor that LV2 uses.
+///
+/// The packed [`function_descriptor`] form instead stores two 32-bit words.
+pub mod ppc64_function_descriptor {
+    // Retail LV2 inspection: every extracted kernel descriptor uses
+    // three big-endian u64 words in this order.
+    /// Bytes one descriptor occupies.
+    pub const SIZE: usize = 24;
+    /// Gives the byte offset of the code address.
+    pub const CODE_OFFSET: usize = 0;
+    /// Gives the byte offset of the TOC address.
+    pub const TOC_OFFSET: usize = 8;
+    /// Gives the byte offset of the environment word.
+    pub const ENV_OFFSET: usize = 16;
+
+    const _: () = assert!(CODE_OFFSET + core::mem::size_of::<u64>() <= SIZE);
+    const _: () = assert!(TOC_OFFSET + core::mem::size_of::<u64>() <= SIZE);
+    const _: () = assert!(ENV_OFFSET + core::mem::size_of::<u64>() <= SIZE);
 }
 
 /// `r_type` for `R_PPC64_ADDR32` (32-bit absolute).

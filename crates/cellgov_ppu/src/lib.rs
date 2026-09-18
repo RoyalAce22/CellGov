@@ -23,6 +23,7 @@ mod fp;
 pub mod funcmap;
 pub mod instruction;
 pub mod loader;
+pub mod lv2_table;
 pub mod prescan;
 pub mod prx;
 pub mod prx_loader;

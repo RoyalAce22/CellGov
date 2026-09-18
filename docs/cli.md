@@ -1316,6 +1316,30 @@ SCE-wrapped input:
   this build reads; rebuild with --features decrypt to read one.
 ```
 
+#### `cellgov dev lv2-discover`
+
+Locate the syscall dispatch table in a decrypted LV2 kernel.
+
+```console
+$ cellgov dev lv2-discover ../cellgov-output/lv2_kernel-3.55.elf
+$ cellgov dev lv2-discover ../cellgov-output/lv2_kernel-3.55.elf --format json
+```
+
+```
+Usage: cellgov dev lv2-discover [OPTIONS] <ELF>
+```
+
+| Argument | Description |
+| --- | --- |
+| `ELF` | Decrypted LV2 kernel ELF, or an SCE wrapper in a decrypt build. Required. |
+
+```
+SCE-wrapped input:
+  this build has no decrypt support: plaintext ELF / PRX only. An
+  SCE-wrapped input is refused by name, and --vfs-root names no path
+  this build reads; rebuild with --features decrypt to read one.
+```
+
 #### `cellgov dev rpcs3-attribute`
 
 Answer which HLE call wrote a guest address, from a trace.

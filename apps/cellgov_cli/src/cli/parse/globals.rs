@@ -76,21 +76,21 @@ fn names_its_own_store_root(command: &Command) -> bool {
 /// The commands [`reads_vfs_root`] answers for, as help text.
 const VFS_ROOT_READERS: &str = if cfg!(feature = "decrypt") {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
-     keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-extract / \
+     keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-discover / lv2-extract / \
      caller-census / fixture-gen / gen-manifest"
 } else {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
-     keys, self, boot, explore title, and dev disasm / prx-imports / funcs / fixture-gen / \
+     keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-discover / fixture-gen / \
      gen-manifest"
 };
 
 /// The commands [`reads_format`] answers for, as help text.
 const FORMAT_READERS: &str = if cfg!(feature = "decrypt") {
     "status, firmware list / show / verify / verify-corpus / kernels, title list / show / verify, \
-     diff compare, diff observations, explore, and dev lv2-extract"
+     diff compare, diff observations, explore, and dev lv2-discover / lv2-extract"
 } else {
     "status, firmware list / show / verify / verify-corpus / kernels, title list / show / verify, \
-     diff compare, diff observations, and explore"
+     diff compare, diff observations, explore, and dev lv2-discover"
 };
 
 /// The commands [`reads_quiet`] answers for, as help text.
@@ -146,6 +146,7 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
             DevCommand::Disasm(_)
             | DevCommand::PrxImports(_)
             | DevCommand::Funcs(_)
+            | DevCommand::Lv2Discover(_)
             | DevCommand::FixtureGen(_)
             | DevCommand::GenManifest(_) => true,
             #[cfg(feature = "decrypt")]
@@ -180,6 +181,7 @@ pub(super) fn reads_format(command: &Command) -> bool {
             TitleCommand::List | TitleCommand::Show { .. } | TitleCommand::Verify { .. }
         ),
         Command::Dev(dev) => match dev {
+            DevCommand::Lv2Discover(_) => true,
             #[cfg(feature = "decrypt")]
             DevCommand::Lv2Extract(_) => true,
             _ => false,

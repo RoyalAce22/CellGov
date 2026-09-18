@@ -25,6 +25,8 @@ pub(crate) enum DevCommand {
     PrxImports(PrxImportsArgs),
     /// Print the OPD-derived function map for an ELF or PRX.
     Funcs(FuncsArgs),
+    /// Locate the syscall dispatch table in a decrypted LV2 kernel.
+    Lv2Discover(Lv2DiscoverArgs),
     /// Decrypt one installed firmware's stored LV2 kernel.
     #[cfg(feature = "decrypt")]
     Lv2Extract(Lv2ExtractArgs),
@@ -158,6 +160,14 @@ pub(crate) struct FuncsArgs {
     /// Emit the map as JSON instead of a table.
     #[arg(long)]
     pub json: bool,
+}
+
+#[derive(Debug, clap::Args)]
+#[command(after_help = SCE_INPUT_USAGE_NOTE)]
+pub(crate) struct Lv2DiscoverArgs {
+    /// Decrypted LV2 kernel ELF, or an SCE wrapper in a decrypt build.
+    #[arg(value_name = "ELF")]
+    pub path: String,
 }
 
 /// `cellgov dev rpcs3-attribute`

@@ -16,6 +16,7 @@ mod disasm;
 mod dump_prx_imports;
 mod funcs;
 mod game;
+mod lv2_discover;
 #[cfg(feature = "decrypt")]
 mod lv2_extract;
 mod paths;
@@ -149,6 +150,7 @@ fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>, globals: &Globals) {
         DevCommand::Disasm(args) => disasm::run(args, vfs_flag),
         DevCommand::PrxImports(args) => dump_prx_imports::run(args, vfs_flag),
         DevCommand::Funcs(args) => funcs::run(args, vfs_flag),
+        DevCommand::Lv2Discover(args) => lv2_discover::run(args, vfs_flag, globals.format),
         #[cfg(feature = "decrypt")]
         DevCommand::Lv2Extract(args) => lv2_extract::run(args, vfs_flag, globals.format),
         #[cfg(feature = "decrypt")]

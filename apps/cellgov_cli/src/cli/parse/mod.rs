@@ -15,6 +15,7 @@ mod value;
 pub(crate) use boot::{
     override_flags, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
 };
+pub(crate) use dev::Lv2DiscoverArgs;
 #[cfg(feature = "decrypt")]
 pub(crate) use dev::{CallerCensusArgs, Lv2ExtractArgs};
 pub(crate) use dev::{

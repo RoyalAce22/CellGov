@@ -68,6 +68,7 @@ const DISPATCHED: &[&str] = &[
     "dev disasm",
     "dev prx-imports",
     "dev funcs",
+    "dev lv2-discover",
     #[cfg(feature = "decrypt")]
     "dev lv2-extract",
     #[cfg(feature = "decrypt")]
