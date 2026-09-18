@@ -95,7 +95,7 @@ jobs:
             ${{ runner.os }}-cargo-lint-${{ matrix.toolchain }}-
 
       - name: repository lint
-        run: bash scripts/ci.sh lint
+        run: bash .github/ci.sh lint
 
   # Blocking. Known vulnerabilities in the dependency tree, from the
   # RustSec advisory database; every dependency's declared license
@@ -168,4 +168,4 @@ jobs:
             ${{ runner.os }}-cargo-test-${{ matrix.toolchain }}-
 
       - name: repository tests
-        run: bash scripts/ci.sh test
+        run: bash .github/ci.sh test
