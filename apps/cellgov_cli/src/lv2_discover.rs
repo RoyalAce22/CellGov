@@ -1,5 +1,6 @@
 //! Loads an LV2 kernel and reports its syscall dispatch-table discovery.
 
+use cellgov_ppu::lv2_stub::{self, Lv2StubClassification, Lv2StubClassificationError};
 use cellgov_ppu::lv2_table::{self, Lv2TableDiscovery};
 
 use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
@@ -21,6 +22,8 @@ struct Lv2DiscoverDoc {
     entry_format: &'static str,
     toc: String,
     evidence: Lv2DiscoverEvidenceDoc,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    classification: Option<Lv2ClassificationDoc>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -38,6 +41,49 @@ struct Lv2DiscoverEvidenceDoc {
     entry_zero_return: Option<String>,
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum Lv2ClassificationDoc {
+    Classified {
+        implemented: usize,
+        stub: usize,
+        absent: usize,
+        primary_stub: Lv2StubTargetDoc,
+        stub_targets: Vec<Lv2StubTargetDoc>,
+        evidence: Lv2StubEvidenceDoc,
+        ordinals: Vec<Lv2OrdinalDoc>,
+    },
+    Refused {
+        reason: String,
+    },
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Lv2StubTargetDoc {
+    descriptor: String,
+    code: String,
+    errno: String,
+    errno_symbol: &'static str,
+    references: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Lv2StubEvidenceDoc {
+    descriptor_targets: usize,
+    mode_references: usize,
+    runner_up_references: usize,
+    minimum_mode_references: usize,
+    minimum_dominance_factor: usize,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct Lv2OrdinalDoc {
+    ordinal: usize,
+    class: &'static str,
+    descriptor: Option<String>,
+    code: Option<String>,
+}
+
 pub(crate) fn run(
     args: &Lv2DiscoverArgs,
     vfs_flag: Option<&std::path::Path>,
@@ -48,7 +94,11 @@ pub(crate) fn run(
     let elf = decrypt_ppu_self_or_die(&raw, &args.path, &vfs_root);
     let discovery = lv2_table::discover(&elf)
         .unwrap_or_else(|error| die(&format!("lv2-discover: {}: {error}", args.path)));
-    let doc = document(&args.path, discovery);
+    let classification = match lv2_stub::classify_discovered(&elf, discovery) {
+        Ok(classification) => classification_document(&classification),
+        Err(error) => refusal_document(error),
+    };
+    let doc = document(&args.path, discovery, Some(classification));
     match format {
         OutputFormat::Json => println!(
             "{}",
@@ -58,9 +108,13 @@ pub(crate) fn run(
     }
 }
 
-fn document(input: &str, discovery: Lv2TableDiscovery) -> Lv2DiscoverDoc {
+fn document(
+    input: &str,
+    discovery: Lv2TableDiscovery,
+    classification: Option<Lv2ClassificationDoc>,
+) -> Lv2DiscoverDoc {
     Lv2DiscoverDoc {
-        format_version: 1,
+        format_version: if classification.is_some() { 2 } else { 1 },
         input: input.to_string(),
         method: discovery.method.as_str(),
         confidence: discovery.confidence.as_str(),
@@ -85,6 +139,54 @@ fn document(input: &str, discovery: Lv2TableDiscovery) -> Lv2DiscoverDoc {
             post_table_zero: discovery.evidence.post_table_zero,
             entry_zero_return: discovery.evidence.entry_zero_return.map(hex32),
         },
+        classification,
+    }
+}
+
+fn classification_document(classification: &Lv2StubClassification) -> Lv2ClassificationDoc {
+    Lv2ClassificationDoc::Classified {
+        implemented: classification.implemented,
+        stub: classification.stub,
+        absent: classification.absent,
+        primary_stub: stub_target_document(&classification.primary_stub),
+        stub_targets: classification
+            .stub_targets
+            .iter()
+            .map(stub_target_document)
+            .collect(),
+        evidence: Lv2StubEvidenceDoc {
+            descriptor_targets: classification.evidence.descriptor_targets,
+            mode_references: classification.evidence.mode_references,
+            runner_up_references: classification.evidence.runner_up_references,
+            minimum_mode_references: classification.evidence.minimum_mode_references,
+            minimum_dominance_factor: classification.evidence.minimum_dominance_factor,
+        },
+        ordinals: classification
+            .ordinals
+            .iter()
+            .map(|entry| Lv2OrdinalDoc {
+                ordinal: entry.ordinal,
+                class: entry.class.as_str(),
+                descriptor: entry.descriptor.map(hex),
+                code: entry.code.map(hex),
+            })
+            .collect(),
+    }
+}
+
+fn refusal_document(error: Lv2StubClassificationError) -> Lv2ClassificationDoc {
+    Lv2ClassificationDoc::Refused {
+        reason: error.to_string(),
+    }
+}
+
+fn stub_target_document(stub: &cellgov_ppu::lv2_stub::Lv2StubTarget) -> Lv2StubTargetDoc {
+    Lv2StubTargetDoc {
+        descriptor: hex(stub.descriptor),
+        code: hex(stub.code),
+        errno: hex32(stub.errno),
+        errno_symbol: stub.errno_symbol,
+        references: stub.references,
     }
 }
 
@@ -120,6 +222,47 @@ fn render_human(doc: &Lv2DiscoverDoc) {
             .unwrap_or("unknown"),
         doc.evidence.entry_zero_return.as_deref().unwrap_or("unknown"),
     );
+    match &doc.classification {
+        Some(Lv2ClassificationDoc::Classified {
+            implemented,
+            stub,
+            absent,
+            primary_stub,
+            stub_targets,
+            evidence,
+            ..
+        }) => {
+            println!(
+                "  classification: implemented={} stub={} absent={} mode_refs={} runner_up_refs={}",
+                implemented, stub, absent, evidence.mode_references, evidence.runner_up_references,
+            );
+            println!(
+                "  primary stub: descriptor={} code={} errno={} ({}) references={}",
+                primary_stub.descriptor,
+                primary_stub.code,
+                primary_stub.errno,
+                primary_stub.errno_symbol,
+                primary_stub.references,
+            );
+            for candidate in stub_targets {
+                if candidate.descriptor == primary_stub.descriptor {
+                    continue;
+                }
+                println!(
+                    "  additional stub: descriptor={} code={} errno={} ({}) references={}",
+                    candidate.descriptor,
+                    candidate.code,
+                    candidate.errno,
+                    candidate.errno_symbol,
+                    candidate.references,
+                );
+            }
+        }
+        Some(Lv2ClassificationDoc::Refused { reason }) => {
+            println!("  classification: refused ({reason})");
+        }
+        None => {}
+    }
 }
 
 fn hex(value: u64) -> String {
@@ -133,3 +276,7 @@ fn hex32(value: u32) -> String {
 #[cfg(test)]
 #[path = "tests/lv2_discover_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/lv2_stub_tests.rs"]
+mod stub_tests;

@@ -116,6 +116,17 @@ pub struct Lv2TableDiscovery {
     pub evidence: Lv2DiscoveryEvidence,
 }
 
+/// One ordinal read from a discovered dispatch table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Lv2DispatchEntry {
+    /// Zero-based table ordinal.
+    pub(crate) ordinal: usize,
+    /// Function-descriptor address, or `None` for an absent slot.
+    pub(crate) descriptor: Option<u64>,
+    /// Descriptor code address, or `None` for an absent slot.
+    pub(crate) code: Option<u64>,
+}
+
 /// Reports why an ELF did not produce one unique, high-confidence table.
 #[derive(Debug, thiserror::Error)]
 pub enum Lv2TableDiscoveryError {
@@ -156,6 +167,12 @@ pub enum Lv2TableDiscoveryError {
         /// Gives the fully valid candidate count.
         count: usize,
     },
+    /// A table entry changed or became malformed after discovery.
+    #[error("LV2 table discovery: ordinal {ordinal} is not a valid descriptor pointer")]
+    InvalidTableEntry {
+        /// Gives the invalid ordinal.
+        ordinal: usize,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,6 +188,8 @@ struct TableCandidate {
     table_file_offset: u64,
     toc: u64,
     unique_descriptors: usize,
+    descriptor_entries: usize,
+    zero_environments: usize,
     entry_zero_return: Option<u32>,
     entry_zero_references: usize,
     post_table_zero: Option<bool>,
@@ -254,16 +273,62 @@ pub fn discover(elf: &[u8]) -> Result<Lv2TableDiscovery, Lv2TableDiscoveryError>
             vector_targets: vector_targets.len(),
             handler_matches: shapes.len(),
             table_candidates: candidates.len(),
-            descriptor_entries: shape.entry_count,
+            descriptor_entries: candidate.descriptor_entries,
             unique_descriptors: candidate.unique_descriptors,
             entry_zero_references: candidate.entry_zero_references,
             last_entry_is_entry_zero: true,
-            zero_environments: shape.entry_count,
+            zero_environments: candidate.zero_environments,
             consistent_toc: true,
             post_table_zero: candidate.post_table_zero,
             entry_zero_return: candidate.entry_zero_return,
         },
     })
+}
+
+/// Validates and returns the entries from a prior discovery.
+///
+/// # Errors
+///
+/// Returns [`Lv2TableDiscoveryError::InvalidTableEntry`] if a nonzero
+/// entry does not name the descriptor shape that discovery validated.
+pub(crate) fn table_entries(
+    elf: &[u8],
+    discovery: &Lv2TableDiscovery,
+) -> Result<Vec<Lv2DispatchEntry>, Lv2TableDiscoveryError> {
+    let segments = pt_load_segments(elf)?;
+    validate_segments(elf, &segments)?;
+    let mut entries = Vec::with_capacity(discovery.entry_count);
+    for ordinal in 0..discovery.entry_count {
+        let offset = ordinal
+            .checked_mul(discovery.entry_width)
+            .and_then(|value| u64::try_from(value).ok())
+            .ok_or(Lv2TableDiscoveryError::InvalidTableEntry { ordinal })?;
+        let address = discovery
+            .table_vaddr
+            .checked_add(offset)
+            .ok_or(Lv2TableDiscoveryError::InvalidTableEntry { ordinal })?;
+        let pointer = read_u64_at(elf, &segments, address)
+            .ok_or(Lv2TableDiscoveryError::InvalidTableEntry { ordinal })?;
+        if pointer == 0 {
+            entries.push(Lv2DispatchEntry {
+                ordinal,
+                descriptor: None,
+                code: None,
+            });
+            continue;
+        }
+        let descriptor = descriptor_at(elf, &segments, pointer)
+            .ok_or(Lv2TableDiscoveryError::InvalidTableEntry { ordinal })?;
+        if descriptor.toc != discovery.toc || descriptor.env != 0 {
+            return Err(Lv2TableDiscoveryError::InvalidTableEntry { ordinal });
+        }
+        entries.push(Lv2DispatchEntry {
+            ordinal,
+            descriptor: Some(pointer),
+            code: Some(descriptor.code),
+        });
+    }
+    Ok(entries)
 }
 
 fn validate_segments(elf: &[u8], segments: &[LoadSegment]) -> Result<(), Lv2TableDiscoveryError> {
@@ -562,6 +627,8 @@ fn scan_candidates(elf: &[u8], segments: &[LoadSegment], shape: IndexShape) -> V
             let mut unique = BTreeSet::new();
             unique.insert(first_ptr);
             let mut entry_zero_references = 1usize;
+            let mut descriptor_entries = 1usize;
+            let mut zero_environments = usize::from(first.env == 0);
             let mut last_pointer = first_ptr;
             let mut valid = true;
             for index in 1..shape.entry_count {
@@ -574,6 +641,10 @@ fn scan_candidates(elf: &[u8], segments: &[LoadSegment], shape: IndexShape) -> V
                     valid = false;
                     break;
                 };
+                if pointer == 0 {
+                    last_pointer = pointer;
+                    continue;
+                }
                 let Some(descriptor) = descriptor_at(elf, segments, pointer) else {
                     valid = false;
                     break;
@@ -582,6 +653,8 @@ fn scan_candidates(elf: &[u8], segments: &[LoadSegment], shape: IndexShape) -> V
                     valid = false;
                     break;
                 }
+                descriptor_entries += 1;
+                zero_environments += 1;
                 if pointer == first_ptr {
                     entry_zero_references += 1;
                 }
@@ -599,6 +672,8 @@ fn scan_candidates(elf: &[u8], segments: &[LoadSegment], shape: IndexShape) -> V
                 table_file_offset: file_offset as u64,
                 toc: first.toc,
                 unique_descriptors: unique.len(),
+                descriptor_entries,
+                zero_environments,
                 entry_zero_return: Some(entry_zero_return),
                 entry_zero_references,
                 post_table_zero: post.map(|word| word == 0),
@@ -630,13 +705,16 @@ fn descriptor_at(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<D
     Some(Descriptor { code, toc, env })
 }
 
-fn constant_return(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u32> {
+pub(crate) fn constant_return(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option<u32> {
     let words = words_at(elf, segments, address, 3)?;
+    let [first, second, third, ..] = words.as_slice() else {
+        return None;
+    };
     let Ok(PpuInstruction::Addis {
         rt: 3,
         ra: 0,
         imm: high,
-    }) = crate::decode::decode(words[0])
+    }) = crate::decode::decode(*first)
     else {
         return None;
     };
@@ -644,12 +722,12 @@ fn constant_return(elf: &[u8], segments: &[LoadSegment], address: u64) -> Option
         ra: 3,
         rs: 3,
         imm: low,
-    }) = crate::decode::decode(words[1])
+    }) = crate::decode::decode(*second)
     else {
         return None;
     };
     if !matches!(
-        crate::decode::decode(words[2]),
+        crate::decode::decode(*third),
         // [PPC-Book1 p:20 s:2.4.1] BO=1z1zz is unconditional.
         Ok(PpuInstruction::Bclr { bo, link: false, .. }) if bo & 0b10100 == 0b10100
     ) {

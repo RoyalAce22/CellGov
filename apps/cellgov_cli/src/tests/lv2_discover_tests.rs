@@ -53,6 +53,7 @@ fn discovery_document_preserves_method_confidence_and_evidence() {
                 entry_zero_return: Some(0x8001_0003),
             },
         },
+        None,
     );
     let value = serde_json::to_value(doc).expect("serialize report");
     assert_eq!(
