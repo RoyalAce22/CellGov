@@ -4,7 +4,10 @@
 //! methods; shared helpers live in [`super::helpers`].
 
 use cellgov_event::UnitId;
-use cellgov_ps3_abi::lv2::{errno, syscall};
+use cellgov_ps3_abi::lv2::{
+    census::{lookup as lookup_census, PupCensusClass},
+    errno, syscall,
+};
 
 use crate::dispatch::Lv2Dispatch;
 use crate::request::Lv2Request;
@@ -28,9 +31,52 @@ impl Lv2Host {
         requester: UnitId,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
+        self.dispatch_with_census(request, requester, rt, None)
+    }
+
+    /// Dispatch a classified syscall with its source ordinal for firmware census checks.
+    ///
+    /// The runtime supplies `ordinal` before request classification loses
+    /// it. Direct host users that do not have an ordinal should call
+    /// [`Self::dispatch`].
+    pub fn dispatch_with_ordinal(
+        &mut self,
+        request: Lv2Request,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+        ordinal: u64,
+    ) -> Lv2Dispatch {
+        self.dispatch_with_census(request, requester, rt, usize::try_from(ordinal).ok())
+    }
+
+    fn dispatch_with_census(
+        &mut self,
+        request: Lv2Request,
+        requester: UnitId,
+        rt: &dyn Lv2Runtime,
+        ordinal: Option<usize>,
+    ) -> Lv2Dispatch {
+        let census_refuses = if !matches!(request, Lv2Request::Hypercall { .. }) {
+            if let (Some(ordinal), Some(identity)) = (ordinal, self.firmware_identity()) {
+                matches!(
+                    lookup_census(&identity.pup_sha256_bytes, ordinal),
+                    PupCensusClass::Absent | PupCensusClass::OutOfRange
+                )
+            } else {
+                false
+            }
+        } else {
+            false
+        };
         let arm: &'static str = crate::request::Lv2RequestKind::from(&request).into();
         let wait_timeout = request.wait_timeout_usec();
-        let out = self.dispatch_routed(request, requester, rt);
+        // Census refusals still pass the common observation point below:
+        // Lv2Observability promises to count every non-zero immediate return.
+        let out = if census_refuses {
+            Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+        } else {
+            self.dispatch_routed(request, requester, rt)
+        };
         match &out {
             Lv2Dispatch::Immediate { code, .. } | Lv2Dispatch::ImmediateRegisters { code, .. }
                 if *code != 0 =>

@@ -293,7 +293,7 @@ impl Runtime {
         }
 
         if let Some(request) = request {
-            self.dispatch_lv2_request(request, source);
+            self.dispatch_lv2_request_with_ordinal(request, source, (lev == 0).then_some(num));
             return;
         }
 
@@ -387,10 +387,29 @@ impl Runtime {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn dispatch_lv2_request(
         &mut self,
         request: cellgov_lv2::Lv2Request,
         source: UnitId,
+    ) {
+        self.dispatch_lv2_request_inner(request, source, None);
+    }
+
+    fn dispatch_lv2_request_with_ordinal(
+        &mut self,
+        request: cellgov_lv2::Lv2Request,
+        source: UnitId,
+        ordinal: Option<u64>,
+    ) {
+        self.dispatch_lv2_request_inner(request, source, ordinal);
+    }
+
+    fn dispatch_lv2_request_inner(
+        &mut self,
+        request: cellgov_lv2::Lv2Request,
+        source: UnitId,
+        ordinal: Option<u64>,
     ) {
         // Both exit forms terminate the calling process, and an
         // exit-and-spawn whose argv walk finds no target is just an
@@ -405,19 +424,16 @@ impl Runtime {
                 | cellgov_lv2::Lv2Request::ProcessExit2 { .. }
         );
         let wait_timeout_usec = request.wait_timeout_usec();
-        let dispatch = self.lv2_host.dispatch(
-            request,
-            source,
-            // Syscall parameters are read from the CALLER's space.
-            &MemoryView {
-                memory: crate::runtime::spaces::resolve_unit_memory(
-                    &self.memory,
-                    &self.spaces,
-                    source,
-                ),
-                current_tick: self.time,
-            },
-        );
+        let memory = MemoryView {
+            memory: crate::runtime::spaces::resolve_unit_memory(&self.memory, &self.spaces, source),
+            current_tick: self.time,
+        };
+        let dispatch = match ordinal {
+            Some(ordinal) => self
+                .lv2_host
+                .dispatch_with_ordinal(request, source, &memory, ordinal),
+            None => self.lv2_host.dispatch(request, source, &memory),
+        };
         self.drain_invariant_breaks_to_trace();
         // Apply shm region-install requests before the dispatch's effects
         // commit: a 334 that mints a fresh region and an effect targeting

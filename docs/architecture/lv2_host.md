@@ -249,7 +249,8 @@ process.
 
 ## Null backend for unmodeled syscalls
 
-Any syscall without a typed-variant arm dispatches to the **null
+Any syscall not refused by the firmware census and without a
+typed-variant arm dispatches to the **null
 backend**: an ABI-honest per-syscall "not implemented" response,
 traced as a first-class event. The default arm returns
 `CELL_ENOSYS` and emits a `dispatch.unsupported_stub`

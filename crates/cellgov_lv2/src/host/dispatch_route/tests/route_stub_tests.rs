@@ -2,6 +2,7 @@
 
 use super::*;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
+use std::num::NonZeroU8;
 
 #[test]
 fn stub_dispatch_returns_cell_ok_for_process_exit() {
@@ -10,6 +11,84 @@ fn stub_dispatch_returns_cell_ok_for_process_exit() {
     let req = Lv2Request::ProcessExit { code: 0 };
     let result = host.dispatch(req, UnitId::new(0), &rt);
     assert_eq!(result, Lv2Dispatch::immediate(0));
+}
+
+#[test]
+fn extracted_census_rejects_an_ordinal_outside_its_table() {
+    let mut host = Lv2Host::new();
+    host.set_firmware_identity(
+        "3.21",
+        [
+            0x06, 0xa2, 0x23, 0x62, 0xf3, 0x1e, 0xaf, 0x8c, 0x3a, 0x35, 0x28, 0x3b, 0xe3, 0x5a,
+            0x1f, 0xfa, 0x31, 0x40, 0x8c, 0xa3, 0x3b, 0x15, 0x0e, 0x65, 0x64, 0xd0, 0x24, 0x2e,
+            0x4d, 0xbf, 0x4e, 0x25,
+        ],
+    );
+    let rt = FakeRuntime::new(256);
+
+    let result = host.dispatch_with_ordinal(
+        Lv2Request::ProcessExit { code: 0 },
+        UnitId::new(0),
+        &rt,
+        SYSCALL_TABLE_SLOTS,
+    );
+
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_ENOSYS.into()));
+    assert_eq!(
+        host.observability()
+            .dispatch_nonzero_returns
+            .get(&u64::from(errno::CELL_ENOSYS)),
+        Some(&1)
+    );
+    assert_eq!(
+        host.observability()
+            .dispatch_return_pairs
+            .get(&("ProcessExit", u64::from(errno::CELL_ENOSYS))),
+        Some(&1)
+    );
+}
+
+#[test]
+fn unextracted_census_keeps_normal_dispatch() {
+    let mut host = Lv2Host::new();
+    host.set_firmware_identity("unextracted", [0; 32]);
+    let rt = FakeRuntime::new(256);
+
+    let result = host.dispatch_with_ordinal(
+        Lv2Request::ProcessExit { code: 0 },
+        UnitId::new(0),
+        &rt,
+        SYSCALL_TABLE_SLOTS,
+    );
+
+    assert_eq!(result, Lv2Dispatch::immediate(0));
+}
+
+#[test]
+fn census_gating_does_not_replace_a_hypercall_rejection() {
+    let mut host = Lv2Host::new();
+    host.set_firmware_identity(
+        "3.21",
+        [
+            0x06, 0xa2, 0x23, 0x62, 0xf3, 0x1e, 0xaf, 0x8c, 0x3a, 0x35, 0x28, 0x3b, 0xe3, 0x5a,
+            0x1f, 0xfa, 0x31, 0x40, 0x8c, 0xa3, 0x3b, 0x15, 0x0e, 0x65, 0x64, 0xd0, 0x24, 0x2e,
+            0x4d, 0xbf, 0x4e, 0x25,
+        ],
+    );
+    let rt = FakeRuntime::new(256);
+
+    let result = host.dispatch_with_ordinal(
+        Lv2Request::Hypercall {
+            lev: NonZeroU8::new(1).unwrap(),
+            r11: SYSCALL_TABLE_SLOTS,
+            args: [0; 8],
+        },
+        UnitId::new(0),
+        &rt,
+        SYSCALL_TABLE_SLOTS,
+    );
+
+    assert_eq!(result, Lv2Dispatch::immediate(errno::CELL_EINVAL.into()));
 }
 
 #[test]
