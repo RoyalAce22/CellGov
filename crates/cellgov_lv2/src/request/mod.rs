@@ -1,8 +1,7 @@
 //! Typed LV2 syscall requests decoded from PPU `sc` GPR state.
 //!
-//! [`classify`] is total: unknown numbers and malformed arguments
-//! surface as [`Lv2Request::Unsupported`] / [`Lv2Request::Malformed`]
-//! rather than panicking, so host dispatch can match exhaustively.
+//! [`classify`] returns an [`Lv2Request`] for every input. Host dispatch
+//! can therefore match all variants without a classifier panic.
 //!
 //! # Cross-crate contract
 //!

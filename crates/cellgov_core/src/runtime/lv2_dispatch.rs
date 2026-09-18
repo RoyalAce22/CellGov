@@ -863,6 +863,7 @@ impl Runtime {
 /// other variant maps here.
 fn disposition_from_request(request: &cellgov_lv2::Lv2Request) -> TracedSyscallDisposition {
     match request {
+        cellgov_lv2::Lv2Request::NoSuchSyscall { .. } => TracedSyscallDisposition::NoSuchSyscall,
         cellgov_lv2::Lv2Request::Unsupported { .. } => TracedSyscallDisposition::Unsupported,
         cellgov_lv2::Lv2Request::UnresolvedImport { .. } => {
             TracedSyscallDisposition::UnresolvedImport

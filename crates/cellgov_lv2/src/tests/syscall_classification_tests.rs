@@ -1,4 +1,4 @@
-//! Syscall namespace classification tests -- LV2, unresolved-import, hypercall, and unknown routing.
+//! Syscall namespace classification for LV2, unresolved imports, and hypercalls.
 
 use super::*;
 
@@ -12,14 +12,6 @@ fn classify_unresolved_import_decodes_index() {
     assert_eq!(
         classify(0, 0x10005),
         SyscallClassification::UnresolvedImport { index: 5 },
-    );
-}
-
-#[test]
-fn classify_above_all_namespaces_falls_to_unknown() {
-    assert_eq!(
-        classify(0, 0x80000),
-        SyscallClassification::Unknown { r11: 0x80000 },
     );
 }
 

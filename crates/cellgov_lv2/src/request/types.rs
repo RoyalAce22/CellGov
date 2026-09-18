@@ -1047,7 +1047,14 @@ pub enum Lv2Request {
         /// In: r3..=r10 arguments.
         args: [u64; 8],
     },
-    /// Unknown syscall number; raw args preserved for trace.
+    /// `sc` whose `r11` is outside the LV2 syscall table.
+    NoSuchSyscall {
+        /// In: raw `r11` value.
+        number: u64,
+        /// In: raw arguments.
+        args: [u64; 8],
+    },
+    /// Unmodeled LV2 syscall slot with raw arguments for the trace.
     Unsupported {
         /// In: syscall number.
         number: u64,

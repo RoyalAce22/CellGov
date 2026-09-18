@@ -12,7 +12,13 @@ fn routing_variants_and_only_routing_variants_are_untagged() {
         .collect();
     assert_eq!(
         untagged,
-        ["Hypercall", "Unsupported", "UnresolvedImport", "Malformed"],
+        [
+            "Hypercall",
+            "NoSuchSyscall",
+            "Unsupported",
+            "UnresolvedImport",
+            "Malformed"
+        ],
         "fidelity() returns None exactly for the routing-layer variants"
     );
 }
@@ -67,7 +73,7 @@ fn every_tag_is_listed_once_with_a_distinct_label() {
 
 #[test]
 fn unlisted_number_reads_null_backend() {
-    assert_eq!(unsupported_arm_fidelity(9999), ArmFidelity::NullBackend);
+    assert_eq!(unsupported_arm_fidelity(999), ArmFidelity::NullBackend);
     assert_eq!(
         unsupported_arm_fidelity(cellgov_ps3_abi::lv2::syscall::TTY_READ),
         ArmFidelity::Modeled

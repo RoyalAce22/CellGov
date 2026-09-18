@@ -22,6 +22,8 @@ mod io_time;
 mod memory;
 #[path = "route_mmapper_ext_tests.rs"]
 mod mmapper_ext;
+#[path = "no_such_syscall_tests.rs"]
+mod no_such_syscall;
 #[path = "route_process_spu_tests.rs"]
 mod process_spu;
 #[path = "route_prx_tests.rs"]

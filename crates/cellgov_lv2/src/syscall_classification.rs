@@ -1,9 +1,6 @@
-//! LEV-aware dispatch-hint classifier for `sc` yields.
+//! Typed dispatch-hint classification for an `sc` yield.
 //!
-//! Composes the pure namespace partition from
-//! `cellgov_ps3_abi::lv2::namespace` with the hypercall guard so
-//! the runtime can route an `sc` to LV2, an unresolved-import
-//! trampoline, or a fault path off a single typed value.
+//! The classifier combines the syscall namespace with the LEV gate.
 
 use cellgov_ps3_abi::lv2::namespace::SyscallNamespace;
 
@@ -15,6 +12,11 @@ pub enum SyscallClassification {
     Lv2 {
         /// LV2 syscall number from `r11`.
         number: u64,
+    },
+    /// Identifies an `r11` value outside the LV2 syscall table.
+    NoSuchSyscall {
+        /// Raw `r11` at or past the LV2 table boundary.
+        r11: u64,
     },
     /// Routes to the unresolved-import diagnostic dispatch.
     UnresolvedImport {
@@ -33,11 +35,6 @@ pub enum SyscallClassification {
         /// Raw `r11` preserved for diagnostics.
         r11: u64,
     },
-    /// Routes to [`crate::Lv2Request::Unsupported`].
-    Unknown {
-        /// Raw `r11` that did not match any namespace.
-        r11: u64,
-    },
 }
 
 /// Non-zero LEV short-circuits to [`SyscallClassification::Hypercall`]
@@ -49,13 +46,13 @@ pub const fn classify(lev: u8, r11: u64) -> SyscallClassification {
     }
     match SyscallNamespace::of(r11) {
         Some(SyscallNamespace::Lv2) => SyscallClassification::Lv2 { number: r11 },
+        Some(SyscallNamespace::InvalidLv2) | None => SyscallClassification::NoSuchSyscall { r11 },
         Some(SyscallNamespace::UnresolvedImport) => {
             let (start, _) = SyscallNamespace::UnresolvedImport.range();
             SyscallClassification::UnresolvedImport {
                 index: (r11 - start) as u32,
             }
         }
-        None => SyscallClassification::Unknown { r11 },
     }
 }
 

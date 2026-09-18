@@ -703,6 +703,9 @@ impl Lv2Host {
             Lv2Request::Hypercall { lev, r11, args } => {
                 self.dispatch_hypercall_rejection(lev.get(), r11, args)
             }
+            Lv2Request::NoSuchSyscall { number, args } => {
+                self.dispatch_no_such_syscall(number, args)
+            }
             Lv2Request::Unsupported { number, args } => {
                 self.dispatch_unsupported_default(number, args)
             }

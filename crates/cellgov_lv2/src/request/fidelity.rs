@@ -203,15 +203,15 @@ pub fn unsupported_arm_fidelity(number: u64) -> ArmFidelity {
 }
 
 impl Lv2RequestKind {
-    /// Fidelity of this arm, or `None` for the routing-layer variants
-    /// (`Unsupported` has per-number fidelity via
-    /// [`unsupported_arm_fidelity`]; `Hypercall`, `Malformed`, and
-    /// `UnresolvedImport` are rejections, not modeled syscalls).
+    /// Returns the arm fidelity, or `None` for a routing variant.
+    ///
+    /// Use [`unsupported_arm_fidelity`] for an `Unsupported` request.
     pub fn fidelity(self) -> Option<ArmFidelity> {
         use ArmFidelity::{AbiOnly, Modeled, NullBackend, PartialState};
         Some(match self {
             // Routing layer: not arms.
-            Lv2RequestKind::Unsupported
+            Lv2RequestKind::NoSuchSyscall
+            | Lv2RequestKind::Unsupported
             | Lv2RequestKind::Hypercall
             | Lv2RequestKind::UnresolvedImport
             | Lv2RequestKind::Malformed => return None,

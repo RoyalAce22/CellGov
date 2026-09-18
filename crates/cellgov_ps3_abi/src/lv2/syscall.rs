@@ -424,11 +424,9 @@ pub const SYSCALL_TABLE_SLOTS: u64 = 1024;
 /// has no firmware export. The trampoline loads the NID into r4
 /// and the dispatcher emits a structured diagnostic.
 ///
-/// Sits at the start of [`crate::lv2::namespace::SyscallNamespace::UnresolvedImport`]
-/// so the namespace classifier routes it without colliding with
-/// the LV2 syscall range (0..0x10000). Sits outside the
-/// `lv2_syscalls!{}` macro: it is not in the Lv2 namespace and
-/// therefore must not appear in [`ALL_LV2_NUMBERS`].
+/// This private number starts
+/// [`crate::lv2::namespace::SyscallNamespace::UnresolvedImport`] and
+/// stays outside [`ALL_LV2_NUMBERS`].
 pub const UNRESOLVED_IMPORT: u64 = 0x10000;
 
 // -----------------------------------------------------------------

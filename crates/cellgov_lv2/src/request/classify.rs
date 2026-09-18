@@ -92,6 +92,12 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
     // compile error. The UnresolvedImport namespace currently
     // carries one entry; the NID rides in r4 (args[1]).
     match SyscallNamespace::of(syscall_num) {
+        Some(SyscallNamespace::InvalidLv2) | None => {
+            return Lv2Request::NoSuchSyscall {
+                number: syscall_num,
+                args: *args,
+            };
+        }
         Some(SyscallNamespace::UnresolvedImport) if syscall_num == syscall::UNRESOLVED_IMPORT => {
             return Lv2Request::UnresolvedImport { nid: p!(1) };
         }
@@ -101,7 +107,7 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
                 args: *args,
             };
         }
-        Some(SyscallNamespace::Lv2) | None => {}
+        Some(SyscallNamespace::Lv2) => {}
     }
     match syscall_num {
         syscall::SPU_IMAGE_OPEN => Lv2Request::SpuImageOpen {
@@ -582,6 +588,10 @@ pub fn classify_with_lev(lev: u8, syscall_num: u64, args: &[u64; 8]) -> Lv2Reque
 #[cfg(test)]
 #[path = "tests/classify_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/no_such_syscall_tests.rs"]
+mod no_such_syscall_tests;
 
 #[cfg(test)]
 #[path = "tests/classify_usbd_tests.rs"]

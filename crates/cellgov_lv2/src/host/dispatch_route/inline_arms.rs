@@ -365,6 +365,18 @@ impl Lv2Host {
         Lv2Dispatch::immediate(errno::CELL_EINVAL.into())
     }
 
+    pub(super) fn dispatch_no_such_syscall(&mut self, number: u64, args: [u64; 8]) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.no_such_syscall",
+            format_args!(
+                "r11={number} is outside the LV2 syscall table (r3={:#x} r4={:#x} r5={:#x} \
+                 r6={:#x} r7={:#x} r8={:#x} r9={:#x} r10={:#x}); returning CELL_ENOSYS",
+                args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+            ),
+        );
+        Lv2Dispatch::immediate(errno::CELL_ENOSYS.into())
+    }
+
     /// `Unsupported` catch-all: CELL_ENOSYS.
     pub(super) fn dispatch_unsupported_default(
         &mut self,

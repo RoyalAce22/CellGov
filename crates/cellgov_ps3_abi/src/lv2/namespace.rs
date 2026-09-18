@@ -1,8 +1,10 @@
 //! Single source of truth for the `r11` syscall-number namespace.
 //!
-//! Two disjoint, contiguous ranges share the r11 word:
+//! Three disjoint, contiguous ranges share the r11 word:
 //!
-//! - **`Lv2`** -- real PS3 LV2 syscalls (`0..0x10000`).
+//! - **`Lv2`** -- PS3 LV2 syscall-table slots (`0..1024`).
+//! - **`InvalidLv2`** -- values below the private namespace but past
+//!   the LV2 syscall table (`1024..0x10000`).
 //! - **`UnresolvedImport`** -- CellGov-emitted unresolved-import
 //!   pseudo-syscall (`0x10000..0x80000`). Fired by the trampoline
 //!   installed in unpatched GOT slots; the NID rides in r4 and the
@@ -18,8 +20,10 @@ use crate::lv2::syscall;
 /// Half-open ranges in the syscall-number namespace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyscallNamespace {
-    /// Real LV2 syscalls in `0..0x10000`.
+    /// LV2 syscall-table slots in `0..1024`.
     Lv2,
+    /// Values past the LV2 syscall table and below CellGov's private namespace.
+    InvalidLv2,
     /// CellGov-emitted unresolved-import pseudo-syscalls in
     /// `0x10000..0x80000`. Currently a single entry sits at the
     /// namespace start; the NID for the offending GOT slot rides in
@@ -32,7 +36,8 @@ impl SyscallNamespace {
     #[inline]
     pub const fn range(self) -> (u64, u64) {
         match self {
-            Self::Lv2 => (0, 0x10000),
+            Self::Lv2 => (0, syscall::SYSCALL_TABLE_SLOTS),
+            Self::InvalidLv2 => (syscall::SYSCALL_TABLE_SLOTS, 0x10000),
             Self::UnresolvedImport => (0x10000, 0x80000),
         }
     }
@@ -72,9 +77,12 @@ impl SyscallNamespace {
     #[inline]
     pub const fn of(syscall_num: u64) -> Option<SyscallNamespace> {
         let (_lv2_lo, lv2_hi) = Self::Lv2.range();
+        let (_invalid_lo, invalid_hi) = Self::InvalidLv2.range();
         let (_unres_lo, unres_hi) = Self::UnresolvedImport.range();
         if syscall_num < lv2_hi {
             Some(Self::Lv2)
+        } else if syscall_num < invalid_hi {
+            Some(Self::InvalidLv2)
         } else if syscall_num < unres_hi {
             Some(Self::UnresolvedImport)
         } else {
@@ -101,11 +109,16 @@ impl SyscallNamespace {
 // the reserved range.
 const _: () = {
     let (lv2_lo, lv2_hi) = SyscallNamespace::Lv2.range();
+    let (invalid_lo, invalid_hi) = SyscallNamespace::InvalidLv2.range();
     let (unres_lo, _unres_hi) = SyscallNamespace::UnresolvedImport.range();
     assert!(lv2_lo == 0, "Lv2 namespace must start at 0");
     assert!(
-        lv2_hi == unres_lo,
-        "Lv2 and UnresolvedImport must be contiguous (no gap)",
+        lv2_hi == invalid_lo,
+        "Lv2 and InvalidLv2 must be contiguous (no gap)",
+    );
+    assert!(
+        invalid_hi == unres_lo,
+        "InvalidLv2 and UnresolvedImport must be contiguous (no gap)",
     );
 };
 

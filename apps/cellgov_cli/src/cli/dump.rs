@@ -156,6 +156,7 @@ fn dump_trace(result: &ScenarioResult) {
                     TracedSyscallDisposition::Malformed => "Malformed",
                     TracedSyscallDisposition::Hypercall => "Hypercall",
                     TracedSyscallDisposition::TimerFastPath => "TimerFastPath",
+                    TracedSyscallDisposition::NoSuchSyscall => "NoSuchSyscall",
                 };
                 println!(
                     "{i:4}  SyscallEntered     unit={} num=0x{num:x} disposition={disposition_str} \

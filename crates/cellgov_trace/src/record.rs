@@ -220,6 +220,8 @@ pub enum TracedSyscallDisposition {
     /// `Lv2Host::dispatch` entirely; the caller parks on the runtime's
     /// timer-wake queue until guest time reaches its deadline.
     TimerFastPath = 5,
+    /// `Lv2Request::NoSuchSyscall`: `r11` is outside the LV2 syscall table.
+    NoSuchSyscall = 6,
 }
 
 /// Why decoding a trace record stream failed.

@@ -625,6 +625,7 @@ fn syscall_entered_disposition_discriminants_locked() {
     assert_eq!(TracedSyscallDisposition::Malformed as u8, 3);
     assert_eq!(TracedSyscallDisposition::Hypercall as u8, 4);
     assert_eq!(TracedSyscallDisposition::TimerFastPath as u8, 5);
+    assert_eq!(TracedSyscallDisposition::NoSuchSyscall as u8, 6);
 }
 
 #[test]

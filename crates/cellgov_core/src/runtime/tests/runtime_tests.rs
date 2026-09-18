@@ -28,6 +28,8 @@ mod fast_path;
 mod invariant_channel;
 #[path = "runtime_lv2_apply_tests.rs"]
 mod lv2_apply;
+#[path = "no_such_syscall_trace_tests.rs"]
+mod no_such_syscall_trace;
 #[path = "runtime_rsx_tests.rs"]
 mod rsx;
 #[path = "runtime_state_hash_tests.rs"]

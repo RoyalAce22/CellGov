@@ -1,6 +1,7 @@
 //! Stub / unsupported / unresolved-import routing and invariant-break dispositions.
 
 use super::*;
+use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
 
 #[test]
 fn stub_dispatch_returns_cell_ok_for_process_exit() {
@@ -26,8 +27,6 @@ fn unsupported_dispatch_returns_cell_enosys() {
 #[test]
 fn routed_unsupported_fidelity_table_matches_dispatch_exactly() {
     use crate::request::fidelity::ROUTED_UNSUPPORTED_ARMS;
-    use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
-
     // The probe covers every table slot, so a routed number outside
     // the range would escape it.
     for (n, arm, _) in ROUTED_UNSUPPORTED_ARMS {

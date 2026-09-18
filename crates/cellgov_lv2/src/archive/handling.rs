@@ -121,10 +121,14 @@ impl HandlingCounts {
 ///
 /// # Panics
 ///
-/// When the zero-argument probe classifies to a rejection variant
-/// (`Malformed`, `Hypercall`, `UnresolvedImport`). A classify-time
-/// gate that rejects zero arguments would otherwise read as one fewer
-/// typed slot.
+/// Panics if the zero-argument probe yields one of these rejections:
+///
+/// - `NoSuchSyscall`
+/// - `Malformed`
+/// - `Hypercall`
+/// - `UnresolvedImport`
+///
+/// Such a rejection would reduce the apparent typed-slot count.
 pub fn route_rows() -> Vec<RouteRow> {
     (0..SYSCALL_TABLE_SLOTS)
         .map(|ordinal| {
@@ -150,7 +154,8 @@ pub fn route_rows() -> Vec<RouteRow> {
                         },
                     }
                 }
-                Lv2Request::Malformed { .. }
+                Lv2Request::NoSuchSyscall { .. }
+                | Lv2Request::Malformed { .. }
                 | Lv2Request::Hypercall { .. }
                 | Lv2Request::UnresolvedImport { .. } => {
                     panic!("slot {ordinal}: zero probe args classified as a rejection; the census is invalid")
