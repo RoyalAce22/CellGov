@@ -13,10 +13,9 @@ fn repo_root() -> &'static Path {
 
 /// Stands in for a region that switches on the `decrypt` feature.
 ///
-/// Two help strings switch on that feature, so the committed document
-/// cannot be byte-exact in both builds. The gate replaces those
-/// regions on both sides. It then holds under any feature set, and it
-/// still compares every other byte.
+/// Help strings and one command switch on that feature, so the committed
+/// document cannot be byte-exact in both builds. The gate replaces or
+/// removes those regions and still compares every other byte.
 const FEATURE_DEPENDENT: &str = "<feature-dependent>";
 
 /// First line of the note that `cellgov_cli::cli::exit` spells one way
@@ -27,11 +26,41 @@ const SCE_NOTE_HEADING: &str = "SCE-wrapped input:";
 /// a build that reads one.
 const VFS_ROOT_ROW: &str = "| `--vfs-root` |";
 
+const LV2_EXTRACT_HEADING: &str = "#### `cellgov dev lv2-extract`";
+
+const KERNEL_ONLY_EXIT_LINE: &str =
+    "  42  --kernel-only completed, but the PUP yielded no stored kernel";
+
 /// Normalizes line endings and blanks the feature-dependent regions.
 fn normalize(text: &str) -> String {
     let mut out = String::new();
     let mut in_note = false;
+    let mut in_feature_command = false;
+    let mut skip_kernel_only_tail = 0u8;
     for line in text.replace("\r\n", "\n").lines() {
+        if skip_kernel_only_tail > 0 {
+            skip_kernel_only_tail -= 1;
+            continue;
+        }
+        if line == KERNEL_ONLY_EXIT_LINE {
+            const PREFIX: &str = "```\nExit codes particular to this command:\n";
+            assert!(out.ends_with(PREFIX));
+            out.truncate(out.len() - PREFIX.len());
+            // Skip the closing fence and the blank line after it. The
+            // blank line before the opening fence already remains.
+            skip_kernel_only_tail = 2;
+            continue;
+        }
+        if line == LV2_EXTRACT_HEADING {
+            in_feature_command = true;
+            continue;
+        }
+        if in_feature_command {
+            if !line.starts_with("#### `") {
+                continue;
+            }
+            in_feature_command = false;
+        }
         if line == SCE_NOTE_HEADING {
             in_note = true;
             out.push_str(FEATURE_DEPENDENT);
@@ -55,6 +84,17 @@ fn normalize(text: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+#[test]
+fn normalization_removes_the_feature_only_command() {
+    let rendered = render_doc(&command_tree());
+    if cfg!(feature = "decrypt") {
+        assert!(rendered.contains(LV2_EXTRACT_HEADING));
+        assert!(!normalize(&rendered).contains(LV2_EXTRACT_HEADING));
+    } else {
+        assert!(!rendered.contains(LV2_EXTRACT_HEADING));
+    }
 }
 
 fn committed_doc() -> String {

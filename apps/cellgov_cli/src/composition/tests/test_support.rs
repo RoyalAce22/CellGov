@@ -6,25 +6,25 @@ use std::path::{Path, PathBuf};
 use cellgov_testkit::param_sfo::build_param_sfo;
 
 /// A store root removed when the guard drops.
-pub(super) struct SyntheticStore {
+pub(crate) struct SyntheticStore {
     root: cellgov_testkit::scratch::ScratchDir,
 }
 
 impl SyntheticStore {
     /// A store with nothing installed.
-    pub(super) fn new(tag: &str) -> Self {
+    pub(crate) fn new(tag: &str) -> Self {
         let root = cellgov_testkit::scratch::scratch_labeled(tag);
         std::fs::create_dir_all(root.join(".cellgov").join("installs")).unwrap();
         Self { root }
     }
 
-    pub(super) fn root(&self) -> &Path {
+    pub(crate) fn root(&self) -> &Path {
         &self.root
     }
 
     /// Install a firmware version, with its `dev_flash` tree unless
     /// `tree` is false.
-    pub(super) fn add_firmware(&self, version: &str, tree: bool) -> &Self {
+    pub(crate) fn add_firmware(&self, version: &str, tree: bool) -> &Self {
         let record = format!(
             "format_version = 3\n\n\
              [artifact]\n\

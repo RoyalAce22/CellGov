@@ -74,14 +74,24 @@ fn names_its_own_store_root(command: &Command) -> bool {
 }
 
 /// The commands [`reads_vfs_root`] answers for, as help text.
-const VFS_ROOT_READERS: &str =
+const VFS_ROOT_READERS: &str = if cfg!(feature = "decrypt") {
+    "the commands that read or write the store, or open a guest image: status, firmware, title, \
+     keys, self, boot, explore title, and dev disasm / prx-imports / funcs / lv2-extract / \
+     fixture-gen / gen-manifest"
+} else {
     "the commands that read or write the store, or open a guest image: status, firmware, title, \
      keys, self, boot, explore title, and dev disasm / prx-imports / funcs / fixture-gen / \
-     gen-manifest";
+     gen-manifest"
+};
 
 /// The commands [`reads_format`] answers for, as help text.
-const FORMAT_READERS: &str = "status, firmware list / show / verify / verify-corpus / kernels, \
-     title list / show / verify, diff compare, diff observations, and explore";
+const FORMAT_READERS: &str = if cfg!(feature = "decrypt") {
+    "status, firmware list / show / verify / verify-corpus / kernels, title list / show / verify, \
+     diff compare, diff observations, explore, and dev lv2-extract"
+} else {
+    "status, firmware list / show / verify / verify-corpus / kernels, title list / show / verify, \
+     diff compare, diff observations, and explore"
+};
 
 /// The commands [`reads_quiet`] answers for, as help text.
 const QUIET_READERS: &str = "status, firmware install, title install, title install-update, \
@@ -132,14 +142,16 @@ pub(super) fn reads_vfs_root(command: &Command) -> bool {
         | Command::Keys(_)
         | Command::SelfCmd(_)
         | Command::Boot(_) => true,
-        Command::Dev(dev) => matches!(
-            dev,
+        Command::Dev(dev) => match dev {
             DevCommand::Disasm(_)
-                | DevCommand::PrxImports(_)
-                | DevCommand::Funcs(_)
-                | DevCommand::FixtureGen(_)
-                | DevCommand::GenManifest(_)
-        ),
+            | DevCommand::PrxImports(_)
+            | DevCommand::Funcs(_)
+            | DevCommand::FixtureGen(_)
+            | DevCommand::GenManifest(_) => true,
+            #[cfg(feature = "decrypt")]
+            DevCommand::Lv2Extract(_) => true,
+            _ => false,
+        },
         // `explore title` composes a cell out of the store, exactly as
         // the boot family does; the other two explore fixtures.
         Command::Explore(args) => matches!(args.command, Some(ExploreCommand::Title(_))),
@@ -167,10 +179,11 @@ pub(super) fn reads_format(command: &Command) -> bool {
             title,
             TitleCommand::List | TitleCommand::Show { .. } | TitleCommand::Verify { .. }
         ),
-        Command::Keys(_)
-        | Command::SelfCmd(_)
-        | Command::Boot(_)
-        | Command::Scenario(_)
-        | Command::Dev(_) => false,
+        Command::Dev(dev) => match dev {
+            #[cfg(feature = "decrypt")]
+            DevCommand::Lv2Extract(_) => true,
+            _ => false,
+        },
+        Command::Keys(_) | Command::SelfCmd(_) | Command::Boot(_) | Command::Scenario(_) => false,
     }
 }

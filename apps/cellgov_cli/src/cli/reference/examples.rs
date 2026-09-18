@@ -221,6 +221,14 @@ pub(crate) const EXAMPLES: &[Examples] = &[
             "cellgov dev funcs dumps/EBOOT.BIN --json",
         ],
     },
+    #[cfg(feature = "decrypt")]
+    Examples {
+        path: "dev lv2-extract",
+        lines: &[
+            "cellgov dev lv2-extract --fw 4.93 --output-dir ../cellgov-output",
+            "cellgov dev lv2-extract --output-dir ../cellgov-output --format json",
+        ],
+    },
     Examples {
         path: "dev rpcs3-attribute",
         lines: &[

@@ -128,6 +128,8 @@ fn documented_leaves() -> Vec<Vec<String>> {
 #[test]
 fn the_help_walk_finds_exactly_the_leaves_the_reference_documents() {
     let mut walked = leaf_paths();
+    #[cfg(feature = "decrypt")]
+    walked.retain(|path| path.as_slice() != ["dev", "lv2-extract"]);
     let mut documented = documented_leaves();
     assert!(
         documented.len() > 30,
@@ -266,11 +268,37 @@ fn cli_gen_writes_the_committed_reference() {
 const FEATURE_DEPENDENT: &str = "<feature-dependent>";
 const SCE_NOTE_HEADING: &str = "SCE-wrapped input:";
 const VFS_ROOT_ROW: &str = "| `--vfs-root` |";
+const LV2_EXTRACT_HEADING: &str = "#### `cellgov dev lv2-extract`";
+const KERNEL_ONLY_EXIT_LINE: &str =
+    "  42  --kernel-only completed, but the PUP yielded no stored kernel";
 
 fn normalize(text: &str) -> String {
     let mut out = String::new();
     let mut in_note = false;
+    let mut in_feature_command = false;
+    let mut skip_kernel_only_tail = 0u8;
     for line in text.replace("\r\n", "\n").lines() {
+        if skip_kernel_only_tail > 0 {
+            skip_kernel_only_tail -= 1;
+            continue;
+        }
+        if line == KERNEL_ONLY_EXIT_LINE {
+            const PREFIX: &str = "```\nExit codes particular to this command:\n";
+            assert!(out.ends_with(PREFIX));
+            out.truncate(out.len() - PREFIX.len());
+            skip_kernel_only_tail = 2;
+            continue;
+        }
+        if line == LV2_EXTRACT_HEADING {
+            in_feature_command = true;
+            continue;
+        }
+        if in_feature_command {
+            if !line.starts_with("#### `") {
+                continue;
+            }
+            in_feature_command = false;
+        }
         if line == SCE_NOTE_HEADING {
             in_note = true;
             out.push_str(FEATURE_DEPENDENT);

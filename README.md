@@ -31,7 +31,7 @@ byte, what a PS3 game would produce under any legal schedule.
 - [docs/architecture/](docs/architecture/README.md) -- how the
   runtime works, one document per subsystem.
 - [docs/cli.md](docs/cli.md) -- generated command reference: every
-  command, its examples, its flags, and its exit codes.
+  default-build command, its examples, its flags, and its exit codes.
 - [docs/firmware_corpus.md](docs/firmware_corpus.md) -- operator runbook
   for recording and verifying an out-of-repository PUP corpus.
 - [docs/titles.md](docs/titles.md) -- generated compatibility

@@ -25,6 +25,9 @@ pub(crate) enum DevCommand {
     PrxImports(PrxImportsArgs),
     /// Print the OPD-derived function map for an ELF or PRX.
     Funcs(FuncsArgs),
+    /// Decrypt one installed firmware's stored LV2 kernel.
+    #[cfg(feature = "decrypt")]
+    Lv2Extract(Lv2ExtractArgs),
     /// Answer which HLE call wrote a guest address, from a trace.
     Rpcs3Attribute(Rpcs3AttributeArgs),
     /// Regenerate a title's cross-runner fixture directory.
@@ -39,6 +42,21 @@ pub(crate) enum DevCommand {
     GenManifest(GenManifestArgs),
     /// Re-measure titles and rewrite their committed anchors.
     RecordAnchors(RecordAnchorsArgs),
+}
+
+/// `cellgov dev lv2-extract`
+#[cfg(feature = "decrypt")]
+#[derive(Debug, clap::Args)]
+#[command(after_help = "Firmware selection:
+  --fw names an installed version. Without it, the only installed
+  version is selected; none or several installed versions are refused.")]
+pub(crate) struct Lv2ExtractArgs {
+    /// Installed firmware version. Omit when the store holds exactly one.
+    #[arg(long, value_name = "VERSION")]
+    pub fw: Option<String>,
+    /// Directory that receives the plaintext kernel ELF.
+    #[arg(long, value_name = "DIR", required = true)]
+    pub output_dir: PathBuf,
 }
 
 /// `cellgov dev disasm`

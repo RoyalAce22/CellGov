@@ -68,6 +68,8 @@ const DISPATCHED: &[&str] = &[
     "dev disasm",
     "dev prx-imports",
     "dev funcs",
+    #[cfg(feature = "decrypt")]
+    "dev lv2-extract",
     "dev rpcs3-attribute",
     "dev fixture-gen",
     "dev titles-gen",
@@ -76,6 +78,57 @@ const DISPATCHED: &[&str] = &[
     "dev gen-manifest",
     "dev record-anchors",
 ];
+
+#[test]
+#[cfg(not(feature = "decrypt"))]
+fn default_help_exposes_no_lv2_extract_entry_point() {
+    let command = Cli::command();
+    let dev = command
+        .find_subcommand("dev")
+        .expect("the tree declares dev");
+    assert!(dev.find_subcommand("lv2-extract").is_none());
+}
+
+#[test]
+#[cfg(feature = "decrypt")]
+fn decrypt_help_exposes_lv2_extract_selection_and_output() {
+    let mut command = Cli::command();
+    command.build();
+    let dev = command
+        .find_subcommand("dev")
+        .expect("the tree declares dev");
+    let mut extract = dev
+        .find_subcommand("lv2-extract")
+        .expect("the decrypt tree declares dev lv2-extract")
+        .clone();
+    let help = extract.render_long_help().to_string();
+    assert!(help.contains("--fw <VERSION>"), "{help}");
+    assert!(help.contains("--output-dir <DIR>"), "{help}");
+    assert!(help.contains("only installed"), "{help}");
+}
+
+#[test]
+#[cfg(feature = "decrypt")]
+fn lv2_extract_accepts_the_vfs_root_and_json_globals() {
+    let argv: Vec<String> = [
+        "cellgov",
+        "--vfs-root",
+        "store/dev_hdd0",
+        "--format",
+        "json",
+        "dev",
+        "lv2-extract",
+        "--fw",
+        "4.93",
+        "--output-dir",
+        "output",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    let cli = parse::try_parse(&argv).expect("the extraction invocation parses");
+    assert_eq!(parse::global_refusal(&cli), None);
+}
 
 #[test]
 fn every_declared_command_is_dispatched() {
