@@ -49,6 +49,42 @@ static ARM_T: TableSpec = TableSpec {
     gate: "g",
 };
 
+static NON_KEY_TARGET: TableSpec = TableSpec {
+    name: "target",
+    owner: OwnerClass::Generated,
+    columns: &[
+        Column {
+            name: "id",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "label",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["id"],
+    regenerate: Some("r"),
+    gate: "g",
+};
+
+static NON_KEY_REFERENCE: TableSpec = TableSpec {
+    name: "reference",
+    owner: OwnerClass::Generated,
+    columns: &[Column {
+        name: "label",
+        kind: ColumnKind::Ident,
+        nullable: false,
+        references: Some(("target", "label")),
+    }],
+    key: &["label"],
+    regenerate: Some("r"),
+    gate: "g",
+};
+
 const HEADER: &str = "id\ttag\tarm\tlist\n";
 
 fn with_rows(rows: &str) -> String {
@@ -307,6 +343,24 @@ fn references_are_checked_against_the_loaded_target() {
             column: "arm",
             target_table: "arm",
             target_column: "arm",
+        })
+    );
+}
+
+#[test]
+fn a_reference_to_a_non_key_column_is_refused() {
+    let target =
+        parse(&NON_KEY_TARGET, "id\tlabel\n1\tmatch\n").unwrap_or_else(|error| panic!("{error}"));
+    let reference =
+        parse(&NON_KEY_REFERENCE, "label\nmatch\n").unwrap_or_else(|error| panic!("{error}"));
+
+    assert_eq!(
+        check_references(&[target, reference]),
+        Err(ArchiveError::ReferenceTargetNotKey {
+            table: "reference",
+            column: "label",
+            target_table: "target",
+            target_column: "label",
         })
     );
 }

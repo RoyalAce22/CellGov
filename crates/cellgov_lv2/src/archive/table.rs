@@ -149,6 +149,18 @@ pub enum ArchiveError {
         /// The column it references.
         target_column: &'static str,
     },
+    /// The referenced column is not the target table's primary key.
+    #[error("{table}.tsv column {column} references {target_table}.{target_column}, which is not that table's primary key")]
+    ReferenceTargetNotKey {
+        /// The referencing table.
+        table: &'static str,
+        /// The referencing column.
+        column: &'static str,
+        /// The referenced table.
+        target_table: &'static str,
+        /// The referenced column.
+        target_column: &'static str,
+    },
 }
 
 /// One parsed table: the rows in file order, header excluded.
@@ -345,9 +357,9 @@ pub fn render(spec: &'static TableSpec, rows: &[Vec<String>]) -> Result<String, 
 ///
 /// # Errors
 ///
-/// [`ArchiveError::DanglingReference`] for a value the target table
-/// has no row for, and [`ArchiveError::ReferenceTargetMissing`] when
-/// `tables` does not hold the target.
+/// - [`ArchiveError::DanglingReference`] if the target table has no matching row.
+/// - [`ArchiveError::ReferenceTargetMissing`] if `tables` does not hold the target.
+/// - [`ArchiveError::ReferenceTargetNotKey`] if SQLite would reject the foreign key.
 pub fn check_references(tables: &[Table]) -> Result<(), ArchiveError> {
     for table in tables {
         for (column_index, column) in table.spec.columns.iter().enumerate() {
@@ -370,6 +382,14 @@ pub fn check_references(tables: &[Table]) -> Result<(), ArchiveError> {
                 .iter()
                 .position(|c| c.name == target_column)
                 .ok_or_else(missing)?;
+            if target.spec.key != [target_column] {
+                return Err(ArchiveError::ReferenceTargetNotKey {
+                    table: table.spec.name,
+                    column: column.name,
+                    target_table,
+                    target_column,
+                });
+            }
             let values: BTreeSet<&str> = target
                 .rows
                 .iter()
