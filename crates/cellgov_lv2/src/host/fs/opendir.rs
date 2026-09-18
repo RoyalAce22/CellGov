@@ -15,7 +15,11 @@ use cellgov_time::GuestTicks;
 impl Lv2Host {
     /// `sys_fs_opendir` -- snapshot a host-mounted directory and
     /// allocate a directory fd over the lexicographically-sorted
-    /// entries.
+    /// entries. Directories come from the mount table alone, so a
+    /// manifest path never names one. Every root that holds the
+    /// directory contributes to one listing in lexicographic byte
+    /// order. A name several roots hold takes its entry from the
+    /// earliest root.
     ///
     /// # Errors
     ///
@@ -28,7 +32,8 @@ impl Lv2Host {
     /// 5. Host path not-a-directory -> CELL_ENOTDIR; missing ->
     ///    CELL_ENOENT; IO error -> CELL_EIO; `..` traversal ->
     ///    CELL_EACCES.
-    /// 6. Otherwise CELL_OK with one fd-write effect.
+    /// 6. Otherwise CELL_OK with one fd-write effect, or CELL_EMFILE
+    ///    when the fd allocator is exhausted.
     pub(in crate::host) fn dispatch_fs_opendir(
         &mut self,
         path_ptr: u32,

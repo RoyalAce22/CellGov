@@ -812,7 +812,8 @@ impl Lv2Host {
     /// stream into `buf_ptr` and returns the count. An empty stream
     /// returns 0 in non-blocking mode and parks a blocking caller
     /// behind any readers already parked, until sends stage enough
-    /// bytes to reach it.
+    /// bytes to reach it. A process exit purges the readers its
+    /// threads parked.
     ///
     /// The kernel's non-blocking arm answers `CELL_EBUSY` only while
     /// another reader holds the receive lock mid-copy; a dispatch
@@ -919,7 +920,12 @@ impl Lv2Host {
     /// `sys_uart_send` (369): parses every packet in the buffer,
     /// stages the replies and any events they trigger, and hands the
     /// stream to the parked readers in park order, each taking up to
-    /// its own size while bytes remain.
+    /// its own size while bytes remain. The walk advances by each
+    /// header's u16 length plus the four bytes before it, in 16-bit
+    /// arithmetic. An `AVB_PARAM` shorter than its own sub-packet
+    /// counts is a size mismatch. A mode-0 send larger than the TX
+    /// ring reports its first chunk, [`av::SYS_UART_CHUNK`] bytes at
+    /// most.
     ///
     /// # Errors
     ///

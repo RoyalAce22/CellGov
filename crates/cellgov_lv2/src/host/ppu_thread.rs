@@ -12,6 +12,18 @@ use crate::ppu_thread::{AddJoinWaiter, PpuThreadId};
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
+    /// `sys_ppu_thread_join`: writes a finished target's exit value to
+    /// `status_out_ptr` at once. Otherwise it parks the caller on the
+    /// target until `sys_ppu_thread_exit` wakes it.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when `target` names no thread, or the caller has
+    ///   no thread-table entry.
+    /// - `CELL_EFAULT` when the target is finished and
+    ///   `status_out_ptr` is null; the arm drops the exit value.
+    /// - `CELL_EDEADLK` on a self-join.
+    /// - `CELL_EINVAL` when the target is detached.
     pub(super) fn dispatch_ppu_thread_join(
         &mut self,
         target: u64,
@@ -78,6 +90,27 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_ppu_thread_create`: reads the thread param and its entry
+    /// descriptor, takes a stack block from the child-stack arena, and
+    /// hands the runtime a seeded init state. The runtime installs the
+    /// block as a region in the creator's address space and registers
+    /// the unit through the PPU factory. A create the runtime refuses
+    /// returns the block to the arena.
+    ///
+    /// The arena is a deterministic bump allocator: the arm floors the
+    /// requested size at 0x4000, and two fresh hosts hand out the same
+    /// blocks in the same order.
+    ///
+    /// # Errors
+    ///
+    /// Listed in the order they fire.
+    ///
+    /// - `CELL_EFAULT` when the param block is unreadable or its entry
+    ///   descriptor pointer is null.
+    /// - `CELL_EINVAL` when `priority` is outside the window
+    ///   `sys_ppu_thread_set_priority` enforces.
+    /// - `CELL_EFAULT` when the entry descriptor is unreadable.
+    /// - `CELL_ENOMEM` when the arena is exhausted.
     pub(super) fn dispatch_ppu_thread_create(
         &mut self,
         id_ptr: u32,
@@ -159,6 +192,12 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_ppu_thread_exit`: marks the caller's thread Finished with
+    /// `exit_value` and names every joiner to wake with it.
+    ///
+    /// The arm also clears the caller's lwmutex hold count and hands
+    /// every waited-on kernel lwmutex to its next waiter (see
+    /// [`Self::release_held_lwmutexes_on_exit`]).
     pub(super) fn dispatch_ppu_thread_exit(
         &mut self,
         exit_value: u64,

@@ -26,6 +26,13 @@ impl Lv2Host {
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
+    /// `sys_lwmutex_lock` (97).
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown id.
+    /// - `CELL_EDEADLK` for a caller already parked on the sleep queue.
+    ///   An owner re-lock never enters the kernel.
     pub(super) fn dispatch_lwmutex_lock(
         &mut self,
         id: u32,
@@ -69,6 +76,11 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_lwmutex_unlock` (98).
+    ///
+    /// The kernel entry records no owner, so any thread's unlock wakes
+    /// the head of the sleep queue, or sets the signal when the queue
+    /// is empty.
     pub(super) fn dispatch_lwmutex_unlock(&mut self, id: u32, requester: UnitId) -> Lv2Dispatch {
         let Some(caller) = self.state.ppu_threads.thread_id_for_unit(requester) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());

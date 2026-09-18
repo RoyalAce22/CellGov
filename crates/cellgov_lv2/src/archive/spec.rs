@@ -69,6 +69,12 @@ pub enum ColumnKind {
     IntegerList,
     /// One label from a fixed set.
     Enum(&'static [&'static str]),
+    /// One token of ASCII letters, digits and `_ . / : @ + -`, wide
+    /// enough for each locator the archive stores:
+    /// - a file path;
+    /// - a `path:function` witness;
+    /// - a `DOC-KEY:p:N` citation.
+    Locator,
 }
 
 impl ColumnKind {
@@ -76,7 +82,10 @@ impl ColumnKind {
     pub fn sql_type(self) -> &'static str {
         match self {
             ColumnKind::Integer => "INTEGER",
-            ColumnKind::Ident | ColumnKind::IntegerList | ColumnKind::Enum(_) => "TEXT",
+            ColumnKind::Ident
+            | ColumnKind::IntegerList
+            | ColumnKind::Enum(_)
+            | ColumnKind::Locator => "TEXT",
         }
     }
 
@@ -89,6 +98,7 @@ impl ColumnKind {
                 "an ascending comma-joined list of decimal integers".to_string()
             }
             ColumnKind::Enum(labels) => format!("one of {}", labels.join(", ")),
+            ColumnKind::Locator => "a locator of letters, digits and _ . / : @ + -".to_string(),
         }
     }
 }
@@ -117,9 +127,10 @@ pub struct TableSpec {
     pub columns: &'static [Column],
     /// Primary key: rows sort by it and no two rows share it.
     pub key: &'static [&'static str],
-    /// The command that rewrites the file.
-    pub regenerate: &'static str,
-    /// The test that fails when the committed file is stale.
+    /// The command that rewrites the file; `None` for a table written
+    /// by hand.
+    pub regenerate: Option<&'static str>,
+    /// The test that fails when the committed file is stale or wrong.
     pub gate: &'static str,
 }
 
@@ -153,6 +164,21 @@ pub const ROUTE_LABELS: &[&str] = &["typed", "routed", "null_backend", "runtime_
 /// Labels of `arm.fidelity`; `ArmFidelity::label` pins the order.
 pub const FIDELITY_LABELS: &[&str] = &["modeled", "partial-state", "abi-only", "null-backend"];
 
+/// Labels of `behavior.provenance_kind`: what a modelled behaviour rests on.
+pub const PROVENANCE_KINDS: &[&str] = &[
+    "citation",
+    "firmware_reading",
+    "console_capture",
+    "non_public",
+    "unestablished",
+];
+
+/// Labels of `behavior.selector_slot`: the argument slot an arm dispatches on.
+pub const SELECTOR_SLOTS: &[&str] = &["r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10"];
+
+/// Labels of `behavior.exception`: the standing departures from the null backend.
+pub const EXCEPTIONS: &[&str] = &["fabricated_success"];
+
 /// `arm.tsv`: one row per dispatch arm.
 pub const ARM: TableSpec = TableSpec {
     name: "arm",
@@ -178,7 +204,7 @@ pub const ARM: TableSpec = TableSpec {
         },
     ],
     key: &["arm"],
-    regenerate: REGENERATE,
+    regenerate: Some(REGENERATE),
     gate: GATE,
 };
 
@@ -207,12 +233,80 @@ pub const ROUTE: TableSpec = TableSpec {
         },
     ],
     key: &["ordinal"],
-    regenerate: REGENERATE,
+    regenerate: Some(REGENERATE),
     gate: GATE,
 };
 
+/// The test that fails when `behavior.tsv` is wrong.
+pub const BEHAVIOR_GATE: &str = "behavior_rows_cover_the_handled_surface";
+
+/// `behavior.tsv`: one curated row per typed or routed ordinal.
+pub const BEHAVIOR: TableSpec = TableSpec {
+    name: "behavior",
+    owner: OwnerClass::Curated,
+    columns: &[
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "packet",
+            kind: ColumnKind::Ident,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "same_as",
+            kind: ColumnKind::Integer,
+            nullable: true,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "selector_slot",
+            kind: ColumnKind::Enum(SELECTOR_SLOTS),
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "provenance_kind",
+            kind: ColumnKind::Enum(PROVENANCE_KINDS),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "provenance_ref",
+            kind: ColumnKind::Locator,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "witness",
+            kind: ColumnKind::Locator,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "exception",
+            kind: ColumnKind::Enum(EXCEPTIONS),
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "arm_source",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+    ],
+    key: &["ordinal"],
+    regenerate: None,
+    gate: BEHAVIOR_GATE,
+};
+
 /// Every table, a referenced table before the table that references it.
-pub const TABLES: &[TableSpec] = &[ARM, ROUTE];
+pub const TABLES: &[TableSpec] = &[ARM, ROUTE, BEHAVIOR];
 
 /// The files under `docs/lv2/` that are not tables; the one regenerate
 /// command writes all of them.
@@ -225,9 +319,9 @@ pub struct ManifestRow {
     pub file: String,
     /// Who writes it.
     pub owner: OwnerClass,
-    /// The command that rewrites it.
-    pub regenerate: &'static str,
-    /// The test that fails when the committed copy is stale.
+    /// The command that rewrites it; `None` for a file written by hand.
+    pub regenerate: Option<&'static str>,
+    /// The test that fails when the committed copy is stale or wrong.
     pub gate: &'static str,
 }
 
@@ -238,7 +332,7 @@ pub fn manifest() -> Vec<ManifestRow> {
         .map(|file| ManifestRow {
             file: (*file).to_string(),
             owner: OwnerClass::Generated,
-            regenerate: REGENERATE,
+            regenerate: Some(REGENERATE),
             gate: GATE,
         })
         .collect();
@@ -258,12 +352,23 @@ pub fn files() -> Vec<String> {
 }
 
 /// Every view.
-pub const VIEWS: &[View] = &[View {
-    name: "handling",
-    select: "SELECT route.ordinal, route.route, route.arm, arm.fidelity\n\
-             FROM route\n\
-             LEFT JOIN arm ON arm.arm = route.arm",
-}];
+pub const VIEWS: &[View] = &[
+    View {
+        name: "handling",
+        select: "SELECT route.ordinal, route.route, route.arm, arm.fidelity\n\
+                 FROM route\n\
+                 LEFT JOIN arm ON arm.arm = route.arm",
+    },
+    View {
+        name: "authority",
+        select: "SELECT behavior.ordinal, route.arm, arm.fidelity,\n\
+                 \x20      behavior.provenance_kind, behavior.provenance_ref,\n\
+                 \x20      behavior.witness, behavior.exception, behavior.arm_source\n\
+                 FROM behavior\n\
+                 JOIN route ON route.ordinal = behavior.ordinal\n\
+                 LEFT JOIN arm ON arm.arm = route.arm",
+    },
+];
 
 #[cfg(test)]
 #[path = "tests/spec_tests.rs"]

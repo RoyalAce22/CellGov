@@ -182,7 +182,13 @@ impl Lv2Host {
     ///    `module_stop`, so this phase reports `NO_ENTRY`. liblv2
     ///    then skips the call and reports zero.
     /// 2. Phase 2 with `res == 0` completes `Stopping -> Stopped`,
-    ///    and a later unload withdraws the module.
+    ///    and a later unload withdraws the module. `res == 1` is
+    ///    `CELL_PRX_ERROR_CAN_NOT_STOP`; any other value answers
+    ///    CELL_OK with no transition.
+    ///
+    /// cmd 4 and cmd 8 are the pair the teardown helper runs: 4 hands
+    /// back the entries, 8 reports what they returned. Neither moves
+    /// the module's state.
     ///
     /// An unknown `id` together with a null `pOpt` answers
     /// `CELL_ESRCH`. The kernel's own precedence between the two is
@@ -490,7 +496,20 @@ impl Lv2Host {
     /// CELL_PRX_ERROR_ELF_IS_REGISTERED.
     ///
     /// The struct layout is
-    /// [`cellgov_ps3_abi::lv2::prx::register_module_option`].
+    /// [`cellgov_ps3_abi::lv2::prx::register_module_option`]. `size`
+    /// selects the form:
+    ///
+    /// - `0x1c` and `0x20` are the legacy forms: the arm takes
+    ///   `type = 0` and reads no further field.
+    /// - `0x30` carries the module type and the caller's stub table as
+    ///   `(ea, size)`.
+    ///
+    /// [`Self::link_manual_imports`] binds a CoreOS caller's stub table
+    /// against the resolved firmware exports, each entry under the
+    /// library name it carries. A NID that library does not export
+    /// stays unresolved and counts once in
+    /// `prx_register_module_unresolved`; the counter does not record
+    /// which library missed.
     ///
     /// # Errors
     ///
@@ -775,6 +794,13 @@ impl Lv2Host {
     /// names a struct whose `max` / `count` / `idlist` sit elsewhere,
     /// and that layout is not modelled: the call fills nothing,
     /// answers CELL_OK, and logs a break.
+    ///
+    /// The fill stops at `pInfo->max` slots, or at the first slot that
+    /// leaves the 32-bit guest address space; that slot names its own
+    /// invariant break. `count` reports the slots written. A null
+    /// `idlist` skips the slot writes and still writes `count`. The
+    /// walk follows the registry's `BTreeMap` key order, so the bytes
+    /// written do not depend on registration order.
     ///
     /// # Cross-module contract
     ///

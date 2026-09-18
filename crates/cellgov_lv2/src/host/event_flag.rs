@@ -1,8 +1,16 @@
 //! LV2 dispatch for event flags.
 //!
-//! Waiters are FIFO. `set` delivers the observed bit pattern through
-//! each woken waiter's recorded `result_ptr`; a missing thread-table
-//! entry discards its wake.
+//! Waiters are FIFO. A waiter names a bit pattern, an AND or OR match
+//! rule, and whether a match clears its pattern. `set` delivers the
+//! observed bit pattern through each woken waiter's recorded
+//! `result_ptr`; a missing thread-table entry discards its wake.
+//!
+//! The hardware trace in `tests/ps3autotests/tests/lv2/sys_event_flag`
+//! pins a refusal code on every arm here, the set / clear arithmetic,
+//! and the count cancel reports. It never presents two faults at once,
+//! so the mode-before-id order is CellGov's own. It never destroys a
+//! flag with a parked waiter, so destroy's `CELL_EBUSY` has no trace
+//! behind it.
 
 use cellgov_effects::{Effect, WritePayload};
 use cellgov_event::UnitId;
@@ -254,6 +262,9 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_event_flag_clear` (118).
+    ///
+    /// The flag keeps only the bits `bits` names; no waiter wakes.
     pub(super) fn dispatch_event_flag_clear(&mut self, id: u32, bits: u64) -> Lv2Dispatch {
         if !self.state.event_flags.clear_bits(id, bits) {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
@@ -261,6 +272,8 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
+    /// `sys_event_flag_cancel` (132): wakes every parked waiter with
+    /// `CELL_ECANCELED` and reports the count through `num_ptr`.
     pub(super) fn dispatch_event_flag_cancel(
         &mut self,
         id: u32,
@@ -317,6 +330,13 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_event_flag_get` (139): writes the flag's current bits
+    /// through `flags_ptr` as a big-endian u64.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown id.
+    /// - `CELL_EFAULT` for a null `flags_ptr`; the id gate fires first.
     pub(super) fn dispatch_event_flag_get(
         &mut self,
         id: u32,

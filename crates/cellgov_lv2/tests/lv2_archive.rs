@@ -42,11 +42,15 @@ fn readme(counts: &HandlingCounts) -> String {
     let manifest_rows: Vec<String> = archive::manifest()
         .iter()
         .map(|row| {
+            let regenerate = match row.regenerate {
+                Some(command) => format!("`{command}`"),
+                None => "written by hand".to_string(),
+            };
             format!(
-                "| `{}` | {} | `{}` | `{}` |",
+                "| `{}` | {} | {} | `{}` |",
                 row.file,
                 row.owner.label(),
-                row.regenerate,
+                regenerate,
                 row.gate
             )
         })
@@ -81,6 +85,7 @@ fn readme(counts: &HandlingCounts) -> String {
             ("route_rows", route_rows.join("\n")),
             ("fidelity_rows", fidelity_rows.join("\n")),
             ("sqlite_version", archive::SQLITE_VERSION.to_string()),
+            ("behavior_gate", archive::BEHAVIOR_GATE.to_string()),
         ],
     )
 }
@@ -103,11 +108,15 @@ fn rendered() -> BTreeMap<String, String> {
         archive::arm_tsv(&arms).unwrap_or_else(|e| panic!("arm.tsv: {e}")),
     );
     let names: Vec<&String> = files.keys().collect();
-    let manifest = archive::files();
+    let generated: Vec<String> = archive::manifest()
+        .into_iter()
+        .filter(|row| row.regenerate.is_some())
+        .map(|row| row.file)
+        .collect();
     assert_eq!(
         names,
-        manifest.iter().collect::<Vec<_>>(),
-        "the generator and the manifest name different files"
+        generated.iter().collect::<Vec<_>>(),
+        "the generator and the manifest name different generated files"
     );
     files
 }

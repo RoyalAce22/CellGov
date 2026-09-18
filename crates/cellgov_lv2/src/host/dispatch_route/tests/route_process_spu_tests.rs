@@ -221,8 +221,11 @@ fn ppu_thread_yield_is_no_op_returning_ok() {
 fn ppu_thread_start_returns_ok_because_auto_started_at_create() {
     let mut host = Lv2Host::new();
     let rt = FakeRuntime::new(0x10000);
+    crate::host::test_support::seed_primary_ppu(&mut host, UnitId::new(0));
     let result = host.dispatch(
-        Lv2Request::PpuThreadStart { target: 0x101 },
+        Lv2Request::PpuThreadStart {
+            target: crate::ppu_thread::PpuThreadId::PRIMARY.raw(),
+        },
         UnitId::new(0),
         &rt,
     );

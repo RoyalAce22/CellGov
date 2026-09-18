@@ -30,5 +30,7 @@ mod prx;
 mod prx_module_list_fill;
 #[path = "route_stub_tests.rs"]
 mod stub;
+#[path = "route_thread_start_tests.rs"]
+mod thread_start;
 #[path = "unsupported_arg_width_tests.rs"]
 mod unsupported_arg_width;

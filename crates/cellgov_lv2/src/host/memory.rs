@@ -8,6 +8,26 @@ use crate::host::Lv2Host;
 use cellgov_time::GuestTicks;
 
 impl Lv2Host {
+    /// `sys_memory_allocate` (348): bump-allocates 64 KiB-aligned guest
+    /// memory from the user region above the loaded image and writes
+    /// the base to `*alloc_addr_ptr`.
+    ///
+    /// The bump allocator is CellGov's own. Its budget is
+    /// `USER_MEMORY_TOTAL`, the `total` that
+    /// `sys_memory_get_user_memory_size` reports, so an allocation
+    /// succeeds exactly when `available` had room for it.
+    /// `sys_memory_free` reclaims nothing, so consumption is monotonic.
+    /// The arm takes `size` as given: a zero size succeeds, and a size
+    /// that is no page multiple stays unrounded. The arm does not read
+    /// `flags`.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ENOMEM` when `size` does not fit in `u32`, the aligned
+    ///   cursor would wrap, or the budget is exhausted. The cursor does
+    ///   not move.
+    /// - `CELL_EFAULT` for a null `alloc_addr_ptr`. The cursor advances
+    ///   before this check.
     pub(super) fn dispatch_memory_allocate(
         &mut self,
         size: u64,
@@ -15,7 +35,6 @@ impl Lv2Host {
         requester: UnitId,
         tick: GuestTicks,
     ) -> Lv2Dispatch {
-        // The cursor is left unchanged on ENOMEM.
         const ALIGN: u32 = 0x1_0000;
         let Ok(size) = u32::try_from(size) else {
             return Lv2Dispatch::immediate(errno::CELL_ENOMEM.into());

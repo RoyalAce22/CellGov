@@ -488,7 +488,10 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_config_get_service_event` (518).
+    /// `sys_config_get_service_event` (518): writes the
+    /// `sys_config_service_event_t` record behind a queued event. The
+    /// record's `registered` field and its length follow the service's
+    /// state at read time, whatever the queued event announced.
     ///
     /// # Errors
     ///

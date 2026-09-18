@@ -26,7 +26,10 @@ impl Lv2Host {
     /// `sys_process_exit` from a boot-process unit reports CELL_OK so
     /// the calling unit's commit batch lands; termination is handled
     /// by the runtime. A unit bound to a spawned child instead
-    /// finishes only that process.
+    /// finishes only that process. The runtime cascades Finished to
+    /// every unit of the process that exits and records a child's exit
+    /// status for `sys_process_get_status` polls. A child's exit leaves
+    /// the boot process untouched.
     pub(in crate::host) fn dispatch_process_exit(&self, code: i32, source: UnitId) -> Lv2Dispatch {
         let pid = self.state.processes.process_of_unit(source);
         if pid == cellgov_ps3_abi::lv2::process::BOOT_PROCESS_PID {
@@ -119,6 +122,31 @@ impl Lv2Host {
     ///
     /// Only argv[0] is consumed here; argv/envp delivery to the
     /// child's entry is not modeled yet.
+    ///
+    /// `block_size` and [`SPAWN_TABLE_MAX_ENTRIES`] bound the
+    /// pointer-table walk. The path resolves through the content
+    /// store. The runtime hands the image to the injected spawn
+    /// loader, which installs it into a fresh child address space.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT` when `pid_out_ptr` is not writable, or the
+    ///   block's table offset or a table entry is unreadable.
+    /// - `CELL_EFAULT` when `table_off` is at or past `block_size`.
+    /// - `CELL_EFAULT` when the walked bound holds no argv terminator;
+    ///   a named break records it.
+    /// - `CELL_EFAULT` when argv is empty or argv[0] is unreadable.
+    /// - `CELL_ENOENT` when the content store holds no image at
+    ///   argv[0].
+    /// - `CELL_EAGAIN` when the child pid space is exhausted.
+    /// - `CELL_EFAULT` from the runtime when the spawn loader refuses
+    ///   the image. The runtime unwinds the pid this arm minted and
+    ///   the child space under a
+    ///   `runtime.process_spawn_image_load_failed` break.
+    /// - `CELL_ENOSYS` from the runtime when no spawn loader or PPU
+    ///   factory is installed.
+    /// - `CELL_ENOMEM` from the runtime when no address-space id is
+    ///   free for the child.
     #[allow(clippy::too_many_arguments)]
     pub(in crate::host) fn dispatch_process_spawn(
         &mut self,
@@ -307,8 +335,13 @@ impl Lv2Host {
     /// be non-zero and only carry SPU_THR / RAW_SPU bits; the address's
     /// top nibble selects the verdict.
     ///
-    /// Unknown top nibbles return CELL_EINVAL (sys_mmapper regions
-    /// are not tracked).
+    /// - `0x0`, `0x1`, `0x2`, `0xC` and `0xE` (main memory, user, RSX
+    ///   and RawSPU MMIO): CELL_OK.
+    /// - `0xD` (PPU stack): CELL_EPERM.
+    /// - `0xF` (private SPU MMIO): CELL_EPERM under the RAW_SPU flag,
+    ///   CELL_OK otherwise.
+    /// - Any other nibble: CELL_EINVAL. A verdict there needs the
+    ///   per-region sys_vm / sys_mmapper state CellGov does not track.
     pub(in crate::host) fn dispatch_process_is_spu_lock_line_reservation_address(
         &self,
         addr: u32,
@@ -338,9 +371,9 @@ impl Lv2Host {
 
     /// `sys_spu_initialize`: validates `max_raw_spu <= 5` (LV2 cap).
     ///
-    /// Announced limits are not persisted; an invariant-break is
-    /// logged so any caller that reads them back is visible in the
-    /// trace.
+    /// The arm persists no limit and partitions no SPU pool into
+    /// usable and raw slots. It logs an invariant break, so a caller
+    /// that reads the limits back shows in the trace.
     pub(in crate::host) fn dispatch_spu_initialize(
         &mut self,
         _max_usable_spu: u32,

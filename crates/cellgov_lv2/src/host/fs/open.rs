@@ -16,7 +16,11 @@ use cellgov_time::GuestTicks;
 impl Lv2Host {
     /// `sys_fs_open` -- allocate a read-only fd against either a
     /// pre-registered manifest blob or a path resolved through the
-    /// mount table.
+    /// mount table. The store caches a mount hit, so a second open of
+    /// the path is a blob hit. Host construction registers
+    /// `/app_home/PARAM.SFO` and `/app_home/output.txt` as empty blobs;
+    /// both open through this arm, and only `/app_home/output.txt`
+    /// passes the write-flag check.
     ///
     /// # Errors
     ///
@@ -25,8 +29,11 @@ impl Lv2Host {
     /// 2. `path_ptr` unmapped / no NUL within `CELL_FS_MAX_PATH_LENGTH`
     ///    -> CELL_EFAULT or CELL_EINVAL.
     /// 3. Path exists AND flags request write semantics -> CELL_EROFS.
-    /// 4. Path exists, flags OK -> CELL_OK with one fd-write effect.
-    /// 5. Path missing or non-UTF-8 -> CELL_ENOENT.
+    /// 4. Path exists, flags OK -> CELL_OK with one fd-write effect,
+    ///    or CELL_EMFILE when the fd allocator is exhausted.
+    /// 5. Path missing or non-UTF-8 -> CELL_ENOENT. A `..` traversal
+    ///    under a mount is CELL_EACCES. A mount root the host declines
+    ///    to read stops the lookup with CELL_EACCES or CELL_EIO.
     #[allow(
         clippy::too_many_arguments,
         reason = "request payload plus the dispatch tick"

@@ -21,6 +21,17 @@ impl Lv2Host {
     /// dma_control base into `lpar_dma_control` (libgcm derives PUT_ADDR =
     /// base + 0x40).
     ///
+    /// The region is the allocation a prior `sys_rsx_memory_allocate`
+    /// (668) recorded; without one, the cursor advances by
+    /// `region::CONTEXT_RESERVATION`. The reports and driver-info init
+    /// fills go out as effects in the same batch as the four out-pointer
+    /// writes.
+    ///
+    /// `lpar_dma_control` is `control_register::DMA_CONTROL_BASE`. A
+    /// console capture places the same block at `0x4010_0000`, one
+    /// megabyte above the device base; the field offsets inside it
+    /// agree and only the window base differs.
+    ///
     /// # Errors
     ///
     /// `CELL_EINVAL` on double-allocate (single-context invariant);

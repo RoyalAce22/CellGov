@@ -1,6 +1,7 @@
 //! LV2 dispatch for event queues.
 //!
-//! Waiters are FIFO. Receive parks with `payload = None`; send
+//! A queue buffers up to `size` events of four u64 words, in FIFO
+//! order. Waiters are FIFO. Receive parks with `payload = None`; send
 //! installs `Some(payload)` through response_updates at wake time.
 //! The wake path panics on `None` so a missing update surfaces
 //! rather than delivering four zero u64s.
@@ -62,6 +63,9 @@ impl Lv2Host {
     }
 
     /// `sys_event_port_create` (134).
+    ///
+    /// A new port has no binding; `sys_event_port_connect_local` (136)
+    /// or `sys_event_port_connect_ipc` (140) binds it to one queue.
     ///
     /// # Errors
     ///
@@ -229,6 +233,13 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_event_queue_receive` (130): answers a buffered event at
+    /// once through `ImmediateRegisters`, or parks the caller until a
+    /// send delivers the same four registers through the wake channel.
+    ///
+    /// `libaudio.prx` is the witness for the register form: its
+    /// receive wrapper passes a scratch pointer it never reads and
+    /// builds its event record from r4..=r7.
     pub(super) fn dispatch_event_queue_receive(
         &mut self,
         id: u32,
@@ -335,6 +346,14 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_event_port_send` (138).
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown port, or a bound queue the table
+    ///   no longer holds.
+    /// - `CELL_ENOTCONN` for a port with no binding.
+    /// - `CELL_EBUSY` when the queue is full.
     pub(super) fn dispatch_event_port_send(
         &mut self,
         port_id: u32,

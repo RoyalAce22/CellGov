@@ -14,7 +14,9 @@ use cellgov_time::GuestTicks;
 
 impl Lv2Host {
     /// `sys_spu_thread_group_terminate`: SPU teardown is not
-    /// modeled; returns CELL_ENOSYS.
+    /// modeled; returns CELL_ENOSYS and logs an invariant break per
+    /// call. What the kernel does to the group's running SPUs on
+    /// terminate is unestablished; a console witness would fix it.
     pub(super) fn dispatch_spu_thread_group_terminate_stub(
         &mut self,
         group_id: u32,
@@ -50,19 +52,38 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_ppu_thread_start`: no-op CELL_OK.
+    /// `sys_ppu_thread_start`: CELL_OK with no state change for a
+    /// thread the table holds.
     ///
     /// Known gap: real LV2 creates threads SUSPENDED and transitions
-    /// them here; CellGov collapses both into create.
-    pub(super) fn dispatch_ppu_thread_start(&self, _target: u64) -> Lv2Dispatch {
+    /// them here; CellGov collapses both into create, so the start
+    /// itself has nothing to do.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when `target` names no thread, as the join and
+    ///   priority arms answer it.
+    pub(super) fn dispatch_ppu_thread_start(&self, target: u64) -> Lv2Dispatch {
+        if self
+            .state
+            .ppu_threads
+            .get(crate::ppu_thread::PpuThreadId::new(target))
+            .is_none()
+        {
+            return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());
+        }
         Lv2Dispatch::immediate(0)
     }
 
+    /// `sys_time_get_timebase_frequency`: the fixed
+    /// `CELL_PPU_TIMEBASE_HZ`, with no effects.
     pub(super) fn dispatch_time_get_timebase_frequency(&self) -> Lv2Dispatch {
         Lv2Dispatch::immediate(cellgov_time::CELL_PPU_TIMEBASE_HZ)
     }
 
-    /// Writes UTC zeros through both out-pointers; EFAULT on null.
+    /// `sys_time_get_timezone`: writes zero through both out-pointers,
+    /// UTC with no daylight saving; EFAULT on any null pointer. The
+    /// arm reads no host clock.
     pub(super) fn dispatch_time_get_timezone(
         &self,
         timezone_ptr: u32,
@@ -230,6 +251,7 @@ impl Lv2Host {
     ///   identification header via
     ///   [`Lv2Host::set_program_authority_id`]; raw-ELF inputs and
     ///   spawned children serve the retail-application fallback.
+    ///   CELL_EFAULT when `a2` is zero or exceeds `u32`.
     /// - Any other `pkg_id` answers the SS-domain status
     ///   [`cellgov_ps3_abi::lv2::ss::SS_ACCESS_CONTROL_UNKNOWN_PKG_ID`].
     ///   All fourteen syscall-871 sites in the installed firmware --

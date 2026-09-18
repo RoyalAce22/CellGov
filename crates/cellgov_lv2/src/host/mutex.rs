@@ -3,6 +3,9 @@
 //! `acquire_or_enqueue` is atomic: owner re-lock (a recursion-count
 //! bump, or EDEADLK without `recursive`) and contention (park on
 //! FIFO waiter list) are distinguished in one call.
+//!
+//! The kernel entry records the owner and the create-time
+//! attributes; the lightweight mutex entry records neither.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;
@@ -125,6 +128,12 @@ impl Lv2Host {
         self.immediate_write_u32(id, id_ptr, requester, tick)
     }
 
+    /// `sys_mutex_destroy` (101).
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` for an unknown id.
+    /// - `CELL_EBUSY` while the mutex has an owner or a waiter.
     pub(super) fn dispatch_mutex_destroy(&mut self, id: u32) -> Lv2Dispatch {
         let Some(entry) = self.state.mutexes.lookup(id) else {
             return Lv2Dispatch::immediate(errno::CELL_ESRCH.into());

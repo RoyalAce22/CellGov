@@ -9,7 +9,7 @@ use crate::host::{Lv2Host, Lv2Runtime};
 use crate::ppu_thread::PpuThreadAttrs;
 use crate::request::Lv2Request;
 
-pub(super) struct FakeRuntime {
+pub(crate) struct FakeRuntime {
     memory: GuestMemory,
     tick: GuestTicks,
     /// `Some(b)` forces `writable()` to return `b` regardless of
@@ -21,7 +21,7 @@ pub(super) struct FakeRuntime {
 }
 
 impl FakeRuntime {
-    pub(super) fn new(size: usize) -> Self {
+    pub(crate) fn new(size: usize) -> Self {
         Self {
             memory: GuestMemory::new(size),
             tick: GuestTicks::ZERO,

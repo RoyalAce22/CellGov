@@ -178,6 +178,13 @@ fn is_ident(cell: &str) -> bool {
     !cell.is_empty() && cell.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
 }
 
+fn is_locator(cell: &str) -> bool {
+    !cell.is_empty()
+        && cell
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_./:@+-".contains(&b))
+}
+
 fn is_ascending_integer_list(cell: &str) -> bool {
     let mut previous: Option<u64> = None;
     for item in cell.split(',') {
@@ -229,6 +236,7 @@ fn check_cell(
         ColumnKind::Ident => is_ident(cell),
         ColumnKind::IntegerList => is_ascending_integer_list(cell),
         ColumnKind::Enum(labels) => labels.contains(&cell),
+        ColumnKind::Locator => is_locator(cell),
     };
     if well_formed {
         Ok(())

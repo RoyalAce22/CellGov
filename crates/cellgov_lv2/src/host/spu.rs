@@ -206,6 +206,15 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_spu_image_open`: resolve the NUL-terminated path at
+    /// `path_ptr` in the content store and write the kernel-shaped
+    /// `sys_spu_image` record for that image to `img_ptr`.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT` when the path bytes are unreadable.
+    /// - `CELL_EINVAL` when no NUL sits within `IMAGE_PATH_MAX`.
+    /// - `CELL_ENOENT` when the store holds no image at the path.
     pub(super) fn dispatch_image_open(
         &mut self,
         img_ptr: u32,
@@ -252,6 +261,14 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_spu_thread_group_create`: mint a monotonic group id and
+    /// write it to `id_ptr`.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `num_threads` is zero or exceeds
+    ///   [`MAX_SLOTS_PER_GROUP`].
+    /// - `CELL_EAGAIN` when the group allocator is exhausted.
     pub(super) fn dispatch_group_create(
         &mut self,
         id_ptr: u32,
@@ -307,6 +324,8 @@ impl Lv2Host {
     /// `sys_spu_thread_group_destroy`: withdraw a group whose state is
     /// not [`GroupState::Running`]. Unknown id -> CELL_ESRCH; running
     /// group -> CELL_EBUSY (the title must terminate or join first).
+    /// Destroy clears the group's unit and thread maps and withdraws
+    /// the user images its slots registered.
     pub(super) fn dispatch_group_destroy(&mut self, group_id: u32) -> Lv2Dispatch {
         // A user image lives as long as the group whose slot
         // registered it, so its segments go when the group does.
@@ -360,6 +379,8 @@ impl Lv2Host {
     /// `sys_spu_thread_group_start`: register every initialized slot's
     /// SPU and move the group to [`GroupState::Running`]. Unknown id ->
     /// CELL_ESRCH; a group that has already been started -> CELL_ESTAT.
+    /// The runtime creates the SPUs from the returned init states.
+    /// Each slot enters at the entry [`Self::load_image_for`] reports.
     pub(super) fn dispatch_group_start(&mut self, group_id: u32) -> Lv2Dispatch {
         let group = match self.state.groups.get_mut(group_id) {
             Some(g) => g,
@@ -416,6 +437,41 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_spu_thread_initialize`: bind an image and its arguments to
+    /// slot `thread_num` of a group, and write the thread id to
+    /// `thread_ptr`.
+    ///
+    /// The record's `type` word selects the path. A kernel record
+    /// (from `sys_spu_image_open` / `sys_spu_image_import`) carries
+    /// the image id in `entry_point`. A user record's 24-byte segment
+    /// table must meet the kernel's bounds:
+    ///
+    /// - the entry is inside local store;
+    /// - 1 to 32 segments;
+    /// - at least one COPY segment, its source 4-byte aligned;
+    /// - at most one INFO segment, of at most 256 bytes;
+    /// - loadable segments 16-byte aligned, inside local store and
+    ///   non-overlapping.
+    ///
+    /// Group start has no guest-memory access, so this arm snapshots
+    /// a user record's bytes into local-store segments and copies the
+    /// argument block. The slot index is free within the 256-entry
+    /// map, so the arm accepts a slot past the declared thread count.
+    /// Group destroy withdraws the user images.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when `thread_num` is at or past
+    ///   [`MAX_SLOTS_PER_GROUP`]; this screen precedes every pointer
+    ///   read.
+    /// - `CELL_EINVAL` when the record type is unknown, a user record
+    ///   breaks a bound above, or the thread id would overflow.
+    /// - `CELL_EFAULT` when the record, its segment table, a COPY
+    ///   source, or the argument block is unreadable.
+    /// - `CELL_ESRCH` when a kernel record names no image the kernel
+    ///   holds, or the group is unknown.
+    /// - `CELL_EBUSY` when the slot is occupied, the group is already
+    ///   started, or its declared thread count is populated.
     pub(super) fn dispatch_thread_initialize(
         &mut self,
         req: Lv2Request,
@@ -578,6 +634,21 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_spu_thread_group_join`: park the caller on a running group
+    /// until every SPU in it finishes; a finished group answers at
+    /// once. The cause is always `GROUP_EXIT` with status 0, since
+    /// CellGov tracks no abnormal termination cause.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when `group_id` is unknown.
+    /// - `CELL_EINVAL` when the group is not yet started.
+    /// - `CELL_EFAULT` when `cause_ptr` is null; the arm writes
+    ///   nothing.
+    /// - `CELL_EFAULT` when `status_ptr` alone is null; the arm still
+    ///   writes the cause.
+    ///
+    /// Both null screens run after the wait.
     pub(super) fn dispatch_group_join(
         &self,
         group_id: u32,
@@ -644,6 +715,14 @@ impl Lv2Host {
         }
     }
 
+    /// `sys_spu_thread_write_spu_mb`
+    /// ([`cellgov_ps3_abi::lv2::syscall::SPU_THREAD_WRITE_MB`]):
+    /// deposit `value` in the inbound mailbox of the running SPU that
+    /// `thread_id` names.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_ESRCH` when no running SPU carries `thread_id`.
     pub(super) fn dispatch_write_mb(
         &self,
         thread_id: u32,

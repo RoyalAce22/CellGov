@@ -22,6 +22,7 @@ the directory and this table disagree.
 | --- | --- | --- | --- |
 | `README.md` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `arm.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `behavior.tsv` | curated | written by hand | `behavior_rows_cover_the_handled_surface` |
 | `build.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
@@ -70,6 +71,31 @@ dispatch, but a tag's accuracy rests on the review recorded in each
 arm's rustdoc under `crates/cellgov_lv2/src/host/`, not on a machine
 check.
 
+## Behavior
+
+`behavior.tsv` is curated: one row per typed or routed ordinal, written
+by hand, saying what the modelled behaviour rests on and what pins it.
+What the arm does lives in its rustdoc; nothing is restated here.
+
+| Column | Meaning |
+| --- | --- |
+| `packet` | The field an ordinal multiplexes on (`cmd`, `package_id`, `pkg_id`), or `none` for a flat ordinal. |
+| `same_as` | The ordinal whose arm this one shares, or `none`; symmetric. |
+| `selector_slot` | The argument register the arm dispatches on (`r3`..`r10`), or `none`. |
+| `provenance_kind` | `citation` (an official document), `firmware_reading` (a call site or wrapper in the installed firmware), `console_capture` (a fixture captured on a console), `non_public` (a fact from a source that cannot be cited), `unestablished` (nothing fixes it). |
+| `provenance_ref` | The citation as `DOC-KEY:p:N`, the reading or capture as a locator, or `none` for the last two kinds. |
+| `witness` | A non-ignored test that needs no corpus, as `path:function`, or `none` against a committed baseline that only shrinks. |
+| `exception` | `fabricated_success` for an arm whose zero-argument probe answers `CELL_OK` and records an invariant break: the call is acknowledged, not modelled. `none` otherwise, and the gate refuses a `none` on an arm that probes that way. |
+| `arm_source` | The file holding the arm's implementation. |
+
+The gate (`behavior_rows_cover_the_handled_surface` and its siblings in
+`cellgov_lv2::archive`) fails when the rows and the typed or routed
+surface disagree, when a witness is not a non-ignored test in a
+corpus-free crate, when a row without a witness is not in the
+baseline, when `arm_source` does not hold the arm, when a reference
+does not fit its kind, and when a `fabricated_success` row does not
+fabricate one.
+
 ## Table rules
 
 The loader in `cellgov_lv2::archive` refuses a table that breaks any
@@ -86,7 +112,8 @@ number, so cell count and cell shape are the loader's alone:
 - ASCII only; no tab, carriage return or leading `"` inside a cell;
 - every cell matches its column's kind: a decimal integer, an
   identifier of letters, digits and `_`, an ascending comma-joined
-  integer list, or one of an enumerated set of labels.
+  integer list, one of an enumerated set of labels, or a locator of
+  letters, digits and `_ . / : @ + -`.
 
 ## Querying
 
@@ -96,7 +123,10 @@ directory:
 
     sqlite3 lv2.db < build.sql
     sqlite3 lv2.db "SELECT ordinal, arm, fidelity FROM handling WHERE route = 'typed'"
+    sqlite3 lv2.db "SELECT ordinal, arm, provenance_kind FROM authority WHERE witness IS NULL"
 
-`schema.sql` holds the tables and the join-only views; `build.sql`
+`schema.sql` holds the tables and the join-only views (`handling`
+over route and arm, `authority` over behavior, route and arm);
+`build.sql`
 reads it, imports each table through a staging table, and stops at
 the first error.

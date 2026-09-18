@@ -8,10 +8,14 @@ use crate::host::Lv2Host;
 
 impl Lv2Host {
     /// `sys_fs_closedir` -- release a directory fd allocated via
-    /// [`Self::dispatch_fs_opendir`].
+    /// [`Self::dispatch_fs_opendir`]. A successful close drops the fd's
+    /// entry snapshot and cursor.
     ///
-    /// The file and directory fd stores are distinct, so a regular-file
-    /// fd passed here surfaces CELL_EBADF.
+    /// # Errors
+    ///
+    /// CELL_EBADF for a directory fd the store does not hold. The file
+    /// and directory fd stores are distinct, so a regular-file fd
+    /// answers CELL_EBADF here too.
     pub(in crate::host) fn dispatch_fs_closedir(&mut self, fd: u32) -> Lv2Dispatch {
         match self.fs_store_mut().close_dir(fd) {
             Ok(()) => Lv2Dispatch::immediate(0),

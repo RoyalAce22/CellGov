@@ -2,6 +2,12 @@
 //!
 //! Invariant: count never exceeds `max`. A post with a parked waiter hands
 //! off directly without incrementing; over-max post with no waiter is EBUSY.
+//!
+//! The hardware trace in `tests/ps3autotests/tests/lv2/sys_semaphore`
+//! pins a refusal code on every arm here and the wake count on post.
+//! It never presents two faults at once, so every gate order below is
+//! CellGov's own. The zero-post refusal and destroy's `CELL_EBUSY`
+//! have no trace behind them.
 
 use cellgov_event::UnitId;
 use cellgov_ps3_abi::lv2::errno;

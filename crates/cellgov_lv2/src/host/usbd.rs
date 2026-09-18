@@ -304,8 +304,15 @@ impl Lv2Host {
         self.dispatch_usbd_no_device(handle)
     }
 
-    /// The device- and pipe-scoped arms (533, 534, 537, 538, 539): no
-    /// device ever attaches, so no device or pipe handle exists and
+    /// The empty-bus refusal the device- and pipe-scoped arms share:
+    ///
+    /// - `sys_usbd_get_descriptor_size` (533)
+    /// - the device gate of `sys_usbd_get_descriptor` (534)
+    /// - `sys_usbd_open_pipe` (537)
+    /// - `sys_usbd_open_default_pipe` (538)
+    /// - `sys_usbd_close_pipe` (539)
+    ///
+    /// No device ever attaches, so no device or pipe handle exists and
     /// every one answers `CELL_EINVAL`. Counted in
     /// `usbd_no_device_refusals`.
     ///
@@ -373,9 +380,14 @@ impl Lv2Host {
         }
     }
 
-    /// `sys_usbd_detect_event` (541): acknowledged and otherwise
-    /// unmodeled.
+    /// `sys_usbd_detect_event` (541): answers `CELL_OK` and models
+    /// nothing, so each call records an invariant break. No dev_flash
+    /// module issues it.
     pub(super) fn dispatch_usbd_detect_event(&mut self) -> Lv2Dispatch {
+        self.log_invariant_break(
+            "dispatch.usbd_detect_event_unmodeled",
+            format_args!("sys_usbd_detect_event acknowledged with CELL_OK; nothing is modeled"),
+        );
         Lv2Dispatch::immediate(0)
     }
 }

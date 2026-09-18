@@ -24,6 +24,18 @@ pub const PACKAGE_CELLGOV_SET_USER_HANDLER: u32 = 0x8000_010D;
 impl Lv2Host {
     /// `sys_rsx_context_attribute` (674): dispatches on `package_id`.
     ///
+    /// # Errors
+    ///
+    /// - `CELL_EINVAL` when no context is allocated or `context_id` is
+    ///   not the live context's id; this check precedes the package
+    ///   dispatch.
+    /// - `CELL_EINVAL` from `SET_DISPLAY_BUFFER` when the slot id in
+    ///   `a3` is at or past `display_buffer::COUNT_MAX`; the arm
+    ///   writes no slot.
+    /// - `CELL_EINVAL` for a `package_id` with no arm, under a
+    ///   `dispatch.sys_rsx_context_attribute_unsupported_package`
+    ///   break.
+    ///
     /// # Cross-module contract
     ///
     /// Every package arm here commits on dispatch -- the mutation

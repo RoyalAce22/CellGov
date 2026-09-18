@@ -68,6 +68,12 @@ impl Lv2Host {
     /// liblv2.sprx's own reservation asks for 256 MiB at an alignment
     /// of 256 MiB, so this cursor steps in the granule firmware uses.
     ///
+    /// The cursor runs over `[MMAPPER_REGION_START, MMAPPER_REGION_END)`.
+    /// The start sits 256 MiB above `SYS_RSX_MEM_END`, so the reserved
+    /// rsx_context window below it cannot alias a handout. The end is
+    /// the RSX dma_control MMIO base itself; the exclusive bound keeps
+    /// it out of every handout.
+    ///
     /// # Errors
     ///
     /// Listed in the order they fire. Where the argument gates sit
@@ -81,7 +87,8 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when `alloc_addr` is null. The gate is
     ///   CellGov's own; no interface or firmware record establishes
     ///   it.
-    /// - `CELL_ENOMEM` when the VM window is exhausted.
+    /// - `CELL_ENOMEM` when `size` is zero or the VM window is
+    ///   exhausted.
     ///
     /// `CELL_EINVAL` also answers an `alloc_addr` register that carries
     /// high bits, per [`Lv2Host::narrow_u32_args`]. That gate precedes
@@ -311,6 +318,14 @@ impl Lv2Host {
     /// against the 332/362 handle and the caller's committed layout,
     /// then pushes a pending region install.
     ///
+    /// The install carries the handle's ipc key, so the runtime keeps
+    /// every view of one keyed segment coherent. The window also enters
+    /// the host ledger that sc 337's search consults. The first map of
+    /// a seeded key co-emits its `SystemStateSeed` writes in the same
+    /// effect batch. The occupancy test reads the caller's committed
+    /// layout as well as that ledger, because the ledger alone cannot
+    /// see regions the boot pipeline or the spawn loader installed.
+    ///
     /// # Errors
     ///
     /// - `CELL_EINVAL` for `addr < 0x2000_0000 || addr >= 0xC000_0000`
@@ -426,6 +441,13 @@ impl Lv2Host {
     /// separate arguments. The out-pointer receives the address the
     /// search settled on, not the caller's hint.
     ///
+    /// An occupied window advances the candidate; the call does not
+    /// fail on it. Occupied means present in the host install ledger
+    /// or in the caller's committed layout. The kernel's search over
+    /// the caller's VM area behaves the same way. A successful map
+    /// records the window in the ledger and co-emits any registered
+    /// seed for a keyed segment, as sc 334 does.
+    ///
     /// # Errors
     /// - `CELL_EFAULT` when `alloc_addr_ptr` is null.
     /// - `CELL_EINVAL` when `start_addr` is outside the mmapper
@@ -515,6 +537,10 @@ impl Lv2Host {
     /// `sys_mmapper_allocate_shared_memory_from_container` (362):
     /// container variant of 332, with flags at r6 (`args[3]`) and
     /// `mem_id` out-pointer at r7.
+    ///
+    /// There is no ipc-key path: every call mints a fresh `mem_id`, so
+    /// 332's process-shared attach does not apply. The arm does not
+    /// read the container id.
     ///
     /// # Errors
     ///

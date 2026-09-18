@@ -16,7 +16,28 @@ CREATE TABLE route (
     PRIMARY KEY (ordinal)
 ) STRICT;
 
+CREATE TABLE behavior (
+    ordinal INTEGER NOT NULL REFERENCES route (ordinal),
+    packet TEXT,
+    same_as INTEGER REFERENCES route (ordinal),
+    selector_slot TEXT CHECK (selector_slot IN ('r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10')),
+    provenance_kind TEXT NOT NULL CHECK (provenance_kind IN ('citation', 'firmware_reading', 'console_capture', 'non_public', 'unestablished')),
+    provenance_ref TEXT,
+    witness TEXT,
+    exception TEXT CHECK (exception IN ('fabricated_success')),
+    arm_source TEXT NOT NULL,
+    PRIMARY KEY (ordinal)
+) STRICT;
+
 CREATE VIEW handling AS
 SELECT route.ordinal, route.route, route.arm, arm.fidelity
 FROM route
+LEFT JOIN arm ON arm.arm = route.arm;
+
+CREATE VIEW authority AS
+SELECT behavior.ordinal, route.arm, arm.fidelity,
+       behavior.provenance_kind, behavior.provenance_ref,
+       behavior.witness, behavior.exception, behavior.arm_source
+FROM behavior
+JOIN route ON route.ordinal = behavior.ordinal
 LEFT JOIN arm ON arm.arm = route.arm;

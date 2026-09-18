@@ -38,7 +38,7 @@ mod usbd;
 
 #[cfg(test)]
 #[path = "tests/test_support.rs"]
-mod test_support;
+pub(crate) mod test_support;
 
 #[cfg(test)]
 #[path = "tests/host_tests.rs"]

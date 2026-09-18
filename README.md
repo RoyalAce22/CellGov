@@ -35,9 +35,9 @@ byte, what a PS3 game would produce under any legal schedule.
 - [docs/titles.md](docs/titles.md) -- generated compatibility
   matrix: which titles boot, to which checkpoint, and whether they
   converge with RPCS3. This is where current status lives.
-- [docs/lv2/](docs/lv2/README.md) -- the LV2 archive: generated
-  tables of every syscall slot's routing and every arm's fidelity,
-  queryable through SQLite.
+- [docs/lv2/](docs/lv2/README.md) -- the LV2 archive: tables of
+  every syscall slot's routing, every arm's fidelity, and what each
+  modelled behaviour rests on, queryable through SQLite.
 - [title_manifests/](title_manifests/manifest_template.README.md) --
   the title registry: one manifest per title.
 

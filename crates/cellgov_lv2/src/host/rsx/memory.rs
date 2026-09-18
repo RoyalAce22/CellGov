@@ -13,6 +13,12 @@ impl Lv2Host {
     /// `sys_rsx_memory_allocate` (668): bump-allocate `size` bytes and write
     /// `mem_handle` (u32 BE) and `mem_addr` (u64 BE) to the OUT pointers.
     ///
+    /// The cursor starts at [`Lv2Host::SYS_RSX_MEM_BASE`] and handles
+    /// count up from 1. The bump allocator is CellGov's own. The arm
+    /// records the most recent allocation for `sys_rsx_context_allocate`
+    /// (670), which places the context inside it and leaves the cursor
+    /// alone.
+    ///
     /// # Errors
     ///
     /// `CELL_ENOMEM` if `size == 0`, the cursor would wrap, or the end

@@ -23,7 +23,10 @@ impl Lv2Host {
     ///
     /// # Errors
     ///
-    /// `CELL_EINVAL` for any `dev_id` other than `8`.
+    /// Both paths record an invariant break.
+    ///
+    /// - `CELL_EINVAL` for any `dev_id` other than `8`.
+    /// - `CELL_EFAULT` for a null `dev_addr` pointer.
     pub(in crate::host) fn dispatch_sys_rsx_device_map(
         &mut self,
         dev_addr_ptr: u32,

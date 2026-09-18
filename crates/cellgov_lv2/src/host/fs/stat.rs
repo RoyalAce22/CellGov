@@ -13,7 +13,9 @@ use super::stat_layout::{cell_fs_stat_write, is_stat_ptr_writable};
 
 impl Lv2Host {
     /// `sys_fs_fstat` -- populate a `CellFsStat` (56 bytes) for an
-    /// open fd's backing blob.
+    /// open fd's backing blob. [`cell_fs_stat_write`] fixes the record:
+    /// mode `S_IFREG | 0o444`, the blob's size, a 4096-byte block size,
+    /// and zero for uid, gid and the three timestamps.
     ///
     /// # Errors
     ///
@@ -65,7 +67,12 @@ impl Lv2Host {
     /// 1. `stat_out_ptr` misaligned / unwritable for 56 bytes -> CELL_EFAULT.
     /// 2. `path_ptr` unmapped or no NUL within `CELL_FS_MAX_PATH_LENGTH`
     ///    -> CELL_EFAULT or CELL_EINVAL.
-    /// 3. Path not registered -> CELL_ENOENT.
+    /// 3. Non-UTF-8 path -> CELL_ENOENT, with no mount probe.
+    /// 4. Path in neither the store nor the mount table -> CELL_ENOENT.
+    ///    The store caches a mount hit; a root the host declines to
+    ///    read answers CELL_EACCES or CELL_EIO.
+    /// 5. Otherwise CELL_OK with the same 56-byte record as
+    ///    `sys_fs_fstat`.
     pub(in crate::host) fn dispatch_fs_stat(
         &mut self,
         path_ptr: u32,

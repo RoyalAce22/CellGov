@@ -31,7 +31,7 @@ static T: TableSpec = TableSpec {
         },
     ],
     key: &["id"],
-    regenerate: "r",
+    regenerate: Some("r"),
     gate: "g",
 };
 
@@ -45,7 +45,7 @@ static ARM_T: TableSpec = TableSpec {
         references: None,
     }],
     key: &["arm"],
-    regenerate: "r",
+    regenerate: Some("r"),
     gate: "g",
 };
 

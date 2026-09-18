@@ -28,7 +28,8 @@ impl Lv2Host {
     ///
     /// CELL_OK reports success for a YCON operation this arm never
     /// performs. Nothing establishes what the kernel answers instead.
-    /// The break records each call.
+    /// The break records each call. libgem.sprx, libio.sprx and
+    /// vsh.self call it, so the fabricated success reaches firmware.
     pub(in crate::host::dispatch_route) fn dispatch_gamepad_ycon_if(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.gamepad_ycon_if_stub",
@@ -40,7 +41,9 @@ impl Lv2Host {
         Lv2Dispatch::immediate(0)
     }
 
-    /// `sys_rsx_attribute` (677): returns CELL_OK without state change.
+    /// `sys_rsx_attribute` (677): returns CELL_OK without state change
+    /// and logs an invariant break per call. Nothing establishes the
+    /// kernel's answer.
     pub(in crate::host::dispatch_route) fn dispatch_rsx_attribute(&mut self) -> Lv2Dispatch {
         self.log_invariant_break(
             "dispatch.rsx_attribute_stub",

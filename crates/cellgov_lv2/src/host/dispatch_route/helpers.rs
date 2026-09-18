@@ -104,6 +104,12 @@ impl Lv2Host {
     /// written through `pwritelen` with CELL_OK. No established kernel
     /// behaviour decides that answer: it is CellGov's own choice.
     /// `dispatch.tty_write_buffer_unmapped` records each occurrence.
+    /// The arm reads no `fd`: every descriptor appends to the one log.
+    ///
+    /// # Errors
+    ///
+    /// - `CELL_EFAULT` for a null `nwritten_ptr`. The append precedes
+    ///   this check.
     pub(super) fn dispatch_tty_write(
         &mut self,
         buf_ptr: u32,
@@ -130,7 +136,12 @@ impl Lv2Host {
     }
 
     /// Resolve the path at `path_ptr` against [`Self::prx_registry`]
-    /// for syscalls 480 / 497.
+    /// for `_sys_prx_load_module` (480) and
+    /// `_sys_prx_load_module_on_memcontainer` (497).
+    ///
+    /// Both syscalls share this arm. A registered path answers its
+    /// kernel id as the syscall code. The arm does not read 497's
+    /// container argument.
     ///
     /// Miss handling: a `/dev_flash/sys/external/` path whose stem
     /// names a module retail firmware ships (see

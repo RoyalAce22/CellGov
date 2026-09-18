@@ -39,8 +39,10 @@ fn the_schema_creates_every_table_strict_with_its_checks_keys_and_references() {
             }
             if let Some((target_table, target_column)) = column.references {
                 let reference = format!(
-                    "{} TEXT REFERENCES {target_table} ({target_column})",
-                    column.name
+                    "{} {}{} REFERENCES {target_table} ({target_column})",
+                    column.name,
+                    column.kind.sql_type(),
+                    if column.nullable { "" } else { " NOT NULL" }
                 );
                 assert!(
                     schema.contains(&reference),
