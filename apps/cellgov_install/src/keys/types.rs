@@ -136,6 +136,23 @@ pub enum SelfClass {
     App,
     /// NPDRM-wrapped SELFs.
     Npdrm,
+    /// The LV2 kernel SELF; the firmware versions a keyset opens
+    /// ([`super::Lv2Versions`]) label it.
+    Lv2,
+}
+
+impl SelfClass {
+    /// Every class, in report order.
+    pub const ALL: [SelfClass; 3] = [SelfClass::App, SelfClass::Npdrm, SelfClass::Lv2];
+
+    /// The inventory's name for what labels a keyset of this class.
+    #[must_use]
+    pub const fn label_kind(self) -> &'static str {
+        match self {
+            SelfClass::App | SelfClass::Npdrm => "revisions",
+            SelfClass::Lv2 => "versions",
+        }
+    }
 }
 
 impl fmt::Display for SelfClass {
@@ -143,6 +160,7 @@ impl fmt::Display for SelfClass {
         f.write_str(match self {
             SelfClass::App => "app",
             SelfClass::Npdrm => "npdrm",
+            SelfClass::Lv2 => "lv2",
         })
     }
 }

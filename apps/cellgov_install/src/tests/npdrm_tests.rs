@@ -182,13 +182,17 @@ fn resolve_klicensee_license_free_with_rap_derives_the_supplied_rap() {
 }
 
 #[cfg(feature = "decrypt")]
-/// Minimal SCE header (0x20 bytes) carrying the given
-/// `revision_flags`. Satisfies `parse_sce_header`'s magic check
-/// so the debug guard can run; all other fields are zero.
+/// A SELF-shaped container (0x100 bytes) carrying the given
+/// `revision_flags` and a program identification header at 0xC0 typed
+/// APP; every other field is zero. The APP type lets the decrypt reach
+/// its key lookup.
 fn synthetic_sce_header_with_revision_flags(revision_flags: u16) -> Vec<u8> {
-    let mut data = vec![0u8; 0x20];
+    let mut data = vec![0u8; 0x100];
     data[0..4].copy_from_slice(b"SCE\0");
     data[8..10].copy_from_slice(&revision_flags.to_be_bytes());
+    data[0x28..0x30].copy_from_slice(&0xC0u64.to_be_bytes());
+    data[0xCC..0xD0]
+        .copy_from_slice(&cellgov_ps3_abi::format::sce::SELF_PROGRAM_TYPE_APP.to_be_bytes());
     data
 }
 

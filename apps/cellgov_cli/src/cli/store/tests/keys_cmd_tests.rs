@@ -186,6 +186,14 @@ fn the_key_inventory_names_every_slot_and_what_the_decrypt_paths_still_lack() {
         report.contains("app: revisions (none), 0 unlabeled"),
         "{report}"
     );
+    assert!(
+        report.contains("lv2: versions (none), 0 unlabeled"),
+        "{report}"
+    );
+    assert!(
+        report.contains("app (no keyset), npdrm (no keyset), lv2 (no keyset)"),
+        "{report}"
+    );
     assert!(!report.contains("disc"), "{report}");
     assert!(report.contains("k.txt:2: name \"frobnicate\""), "{report}");
     assert!(

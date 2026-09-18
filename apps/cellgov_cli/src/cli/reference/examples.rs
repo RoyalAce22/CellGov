@@ -57,6 +57,13 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         ],
     },
     Examples {
+        path: "firmware kernels",
+        lines: &[
+            "cellgov firmware kernels",
+            "cellgov firmware kernels --format json",
+        ],
+    },
+    Examples {
         path: "firmware uninstall",
         lines: &[
             "cellgov firmware uninstall 4.93 --dry-run",

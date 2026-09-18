@@ -99,12 +99,16 @@ fn a_sprx_that_is_neither_an_sce_container_nor_an_elf_is_left_out_of_the_manifes
 fn an_sce_module_that_will_not_decrypt_is_omitted_carrying_the_decrypts_reason() {
     let dir = scratch();
     std::fs::create_dir_all(dir.join("sys/external")).unwrap();
-    // Minimal SCE container header: magic, then revision_flags 0x0018
-    // at offset 8 -- enough for parse_sce_header, and the empty vault
-    // holds no APP key for that revision.
-    let mut sce = cellgov_ps3_abi::format::sce::SCE_MAGIC.to_vec();
-    sce.extend_from_slice(&[0u8; 0x1c]);
+    // A SELF-shaped container: magic, revision_flags 0x0018 at offset
+    // 8, and a program identification header at 0xC0 typed APP -- the
+    // decrypt reads the type before it consults the vault, and the
+    // empty vault holds no APP key for that revision.
+    let mut sce = vec![0u8; 0x100];
+    sce[0..4].copy_from_slice(&cellgov_ps3_abi::format::sce::SCE_MAGIC);
     sce[9] = 0x18;
+    sce[0x28..0x30].copy_from_slice(&0xC0u64.to_be_bytes());
+    sce[0xCC..0xD0]
+        .copy_from_slice(&cellgov_ps3_abi::format::sce::SELF_PROGRAM_TYPE_APP.to_be_bytes());
     std::fs::write(dir.join("sys/external/libsealed.sprx"), &sce).unwrap();
 
     let (manifest, omissions) = build(&dir).expect("manifest");

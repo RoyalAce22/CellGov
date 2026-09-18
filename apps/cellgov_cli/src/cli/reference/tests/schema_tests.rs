@@ -49,6 +49,7 @@ fn every_store_document_names_the_commands_that_emit_it() {
         "`firmware list`",
         "`firmware show`",
         "`firmware verify`",
+        "`firmware kernels`",
         "`title list`",
         "`title show`",
         "`title verify`",

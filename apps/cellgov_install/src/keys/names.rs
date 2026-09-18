@@ -130,7 +130,9 @@ pub(super) fn classify_name(name: &str, value_len: Option<usize>) -> NameClass {
         _ => {}
     }
     // `<class>-<part>-<suffix>` in any word order: the suffix is
-    // whatever is left once the class and part words are taken.
+    // whatever is left once the class and part words are taken. An
+    // LV2 suffix is a version range whose `.` and `-` the word split
+    // dropped; `Lv2Versions::parse` reads the dashed form back.
     let mut kind: Option<Kind> = None;
     let mut part: Option<Part> = None;
     let mut rest: Vec<String> = Vec::new();
@@ -138,6 +140,10 @@ pub(super) fn classify_name(name: &str, value_len: Option<usize>) -> NameClass {
         match w.as_str() {
             "app" | "appldr" if kind.is_none() => kind = Some(Kind::Class(SelfClass::App)),
             "npdrm" | "np" | "drm" if kind.is_none() => kind = Some(Kind::Class(SelfClass::Npdrm)),
+            // A pasted `lv2ldr <range> ERK RIV` row is one of lv0's
+            // loader keys, which open the loader binary and no kernel,
+            // so `lv2ldr` is no alias.
+            "lv2" if kind.is_none() => kind = Some(Kind::Class(SelfClass::Lv2)),
             "pkg" | "scepkg" | "spkg" if kind.is_none() => kind = Some(Kind::Scepkg),
             "key" | "erk" if part.is_none() => part = Some(Part::Erk),
             "iv" | "riv" if part.is_none() => part = Some(Part::Riv),

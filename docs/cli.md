@@ -297,6 +297,30 @@ comparison records rather than a published API: they carry no
 }
 ```
 
+`firmware kernels`:
+
+```json
+{
+  "format_version": 2,
+  "store": "vfs",
+  "vault": "vfs/.cellgov/keys/keys.toml",
+  "entries": [
+    {
+      "version": "1.50",
+      "state": "no_key",
+      "detail": "an LV2 keyset for firmware 1.50 (the vault holds none)"
+    },
+    {
+      "version": "4.93",
+      "state": "decrypted",
+      "kernel_version": "4.93",
+      "elf_bytes": 3145728,
+      "elf_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}
+```
+
 ## `cellgov`
 
 Deterministic PS3 oracle: install a PS3 game, boot it, and diff the result.
@@ -406,6 +430,24 @@ Usage: cellgov firmware verify [OPTIONS] <VERSION>
 Exit codes:
   0   every recorded artefact matched
   4   the tree diverged from what its record holds
+```
+
+#### `cellgov firmware kernels`
+
+Decrypt every stored LV2 kernel and report which the vault opens, which it lacks a key for, and which are not unpacked.
+
+```console
+$ cellgov firmware kernels
+$ cellgov firmware kernels --format json
+```
+
+```
+Usage: cellgov firmware kernels [OPTIONS]
+```
+
+```
+Exit codes particular to this command:
+  41  a stored kernel yielded no ELF for a reason other than a missing key
 ```
 
 #### `cellgov firmware uninstall`

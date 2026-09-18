@@ -267,6 +267,7 @@ fn is_vault_gap(e: &crate::sce::SceError) -> bool {
         SceError::Keys(_)
             | SceError::NoAppKey { .. }
             | SceError::NoNpdrmKey { .. }
+            | SceError::NoLv2Key { .. }
             | SceError::NoCandidateOpensEnvelope { .. }
             | SceError::NoRapForNpdrmTitle { .. }
             | SceError::RapPboxNotAPermutation { .. }

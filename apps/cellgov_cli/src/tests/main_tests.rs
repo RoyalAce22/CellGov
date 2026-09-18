@@ -39,6 +39,7 @@ const DISPATCHED: &[&str] = &[
     "firmware list",
     "firmware show",
     "firmware verify",
+    "firmware kernels",
     "firmware uninstall",
     "title install",
     "title install-update",

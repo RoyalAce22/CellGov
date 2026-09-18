@@ -10,8 +10,8 @@ use cellgov_install::store::{Artifact, StoreLayout, TitleId, TitleTree, VersionK
 
 use crate::cli::store::read::model::{
     store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, DivergenceDoc, FirmwareDoc,
-    FirmwareListDoc, KernelDoc, StatusDoc, TitleDoc, TitleListDoc, UpdateDoc, VerifiedEntryDoc,
-    VerifyDoc, STORE_FORMAT_VERSION,
+    FirmwareListDoc, KernelCoverageDoc, KernelCoverageEntryDoc, KernelDoc, StatusDoc, TitleDoc,
+    TitleListDoc, UpdateDoc, VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
 };
 
 /// A SHA-256 as a document spells one: 64 lowercase hex digits.
@@ -58,6 +58,7 @@ pub(crate) fn render() -> String {
     );
     push(&mut s, "`title list`, `title show`", &title_list_doc());
     push(&mut s, "`firmware verify`, `title verify`", &verify_doc());
+    push(&mut s, "`firmware kernels`", &kernel_coverage_doc());
     s
 }
 
@@ -185,6 +186,32 @@ fn title_list_doc() -> TitleListDoc {
         format_version: STORE_FORMAT_VERSION,
         store: "vfs".to_string(),
         titles: vec![title_doc()],
+    }
+}
+
+fn kernel_coverage_doc() -> KernelCoverageDoc {
+    KernelCoverageDoc {
+        format_version: STORE_FORMAT_VERSION,
+        store: "vfs".to_string(),
+        vault: "vfs/.cellgov/keys/keys.toml".to_string(),
+        entries: vec![
+            KernelCoverageEntryDoc {
+                version: "1.50".to_string(),
+                state: "no_key".to_string(),
+                detail: Some("an LV2 keyset for firmware 1.50 (the vault holds none)".to_string()),
+                kernel_version: None,
+                elf_bytes: None,
+                elf_sha256: None,
+            },
+            KernelCoverageEntryDoc {
+                version: SAMPLE_FIRMWARE_VERSION.to_string(),
+                state: "decrypted".to_string(),
+                detail: None,
+                kernel_version: Some(SAMPLE_FIRMWARE_VERSION.to_string()),
+                elf_bytes: Some(3_145_728),
+                elf_sha256: Some(SAMPLE_SHA.to_string()),
+            },
+        ],
     }
 }
 

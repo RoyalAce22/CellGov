@@ -108,11 +108,20 @@ import reads these forms:
 
 - `keys.toml`: CellGov's own schema, what `keys import` writes.
 - scetool-style `[keyset]` files: `type` / `self_type` / `revision`
-  plus `erk` or `key` and `riv` or `iv` per block.
+  (`version` for an LV2 keyset) plus `erk` or `key` and `riv` or `iv`
+  per block.
 - `name: HEX` and `name = HEX` lines, and pasted key tables, one key
   per row.
 - Per-key files named `app-key-0A` / `app-iv-0A` / `npdrm-...` /
-  `pkg-key` / `pup-hmac`, holding hex text or the raw bytes.
+  `lv2-key-3.60-3.61` / `pkg-key` / `pup-hmac`, holding hex text or
+  the raw bytes.
+
+A SELF keyset is one of three classes: `app` and `npdrm` keysets are
+labeled by key revision, and `lv2` keysets, which open the stored
+LV2 kernels, by the firmware versions they cover. `firmware kernels`
+decrypts every stored kernel and reports, per installed version,
+whether the vault opened it, which key it lacks, or why the install
+stored no kernel.
 
 Reading the loose forms is best effort; `keys show` lists whatever
 the import could not place, and `keys.toml` is the exact form to fall

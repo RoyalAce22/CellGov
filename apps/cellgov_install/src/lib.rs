@@ -38,6 +38,8 @@ pub mod firmware_verify;
 pub mod game_install;
 pub mod game_uninstall;
 pub mod iso;
+#[cfg(feature = "decrypt")]
+pub mod kernel_decrypt;
 pub mod keys;
 pub mod manifest;
 pub mod npdrm;

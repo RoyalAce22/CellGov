@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use super::{Provenance, Slot, ENV_KEYS};
+use super::{Provenance, SelfClass, Slot, ENV_KEYS};
 
 /// Why a hex string did not decode.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -81,10 +81,10 @@ pub enum KeyVaultError {
         /// Length the slot requires.
         want: usize,
     },
-    /// The same slot or revision is given twice with different values.
+    /// The same slot or label given twice with different values.
     #[error("{what} is given twice with different values: {first} and {second}")]
     Conflict {
-        /// Slot name or `<class> revision 0x..`.
+        /// Slot name, `<class> revision 0x..`, or `lv2 versions <range>`.
         what: String,
         /// The earlier definition.
         first: Provenance,
@@ -106,6 +106,29 @@ pub enum KeyVaultError {
         at: Provenance,
         /// The value as written.
         value: String,
+    },
+    /// An LV2 keyset's version label that names no firmware version or
+    /// range.
+    #[error(
+        "{at}: version {value:?} is not a firmware version (3.55, 3.60-3.61, or 16 hex digits)"
+    )]
+    BadVersion {
+        /// Where.
+        at: Provenance,
+        /// The value as written.
+        value: String,
+    },
+    /// A `keys.toml` keyset whose label field belongs to another class.
+    #[error("{at}: [[{class}]] takes {expected}, not {found}")]
+    WrongLabelKind {
+        /// The file.
+        at: Provenance,
+        /// The keyset's class.
+        class: SelfClass,
+        /// The label field this class takes.
+        expected: &'static str,
+        /// The field the entry carried.
+        found: &'static str,
     },
     /// A decrypt path asked for a scalar the vault does not hold.
     #[error("key vault has no {slot} (needed here); check `cellgov keys show`")]

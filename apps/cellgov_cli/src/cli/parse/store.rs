@@ -37,9 +37,18 @@ pub(crate) enum FirmwareCommand {
         #[arg(id = "fw_version", value_name = "VERSION")]
         version: String,
     },
+    /// Decrypt every stored LV2 kernel and report which the vault
+    /// opens, which it lacks a key for, and which are not unpacked.
+    #[command(after_help = KERNELS_EXIT_CODES)]
+    Kernels,
     /// Remove an installed firmware version.
     Uninstall(FirmwareUninstallArgs),
 }
+
+/// The status `firmware kernels` gives beyond the shared 0-5 contract.
+/// A missing key is the normal state of a version and earns no status.
+const KERNELS_EXIT_CODES: &str = "Exit codes particular to this command:
+  41  a stored kernel yielded no ELF for a reason other than a missing key";
 
 /// `cellgov firmware install`
 #[derive(Debug, clap::Args)]

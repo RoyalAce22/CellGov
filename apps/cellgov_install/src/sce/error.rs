@@ -31,11 +31,18 @@ pub enum SceError {
         /// SELF revision (low 15 bits of `revision_flags`) the vault has no NPDRM key for.
         revision: u16,
     },
+    /// The key vault holds no LV2 keyset at all, so nothing can open a
+    /// kernel SELF.
+    #[error("SCE: no LV2 key configured; the kernel names firmware version {}; check `cellgov keys show`", crate::keys::version_label(*version))]
+    NoLv2Key {
+        /// The version word of the kernel's program identification header.
+        version: u64,
+    },
     /// Several vault keysets were tried for the revision and none
     /// passed the envelope's padding self-check.
     #[error("SCE: none of the {tried} {class} keysets in the vault opens the envelope of the container at key revision 0x{revision:04x} (wrong key material, or a wrong RAP for an NPDRM title)")]
     NoCandidateOpensEnvelope {
-        /// `APP`, `NPDRM`, or `SCE package`.
+        /// `APP`, `NPDRM`, `LV2`, or `SCE package`.
         class: &'static str,
         /// Key revision (low 15 bits of `revision_flags`) the
         /// candidates were tried against.

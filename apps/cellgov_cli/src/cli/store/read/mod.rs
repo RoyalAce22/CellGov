@@ -6,6 +6,7 @@
 //! otherwise. Warnings and hints go to stderr.
 
 mod collect;
+mod kernels;
 mod list;
 pub(crate) mod model;
 mod render;
@@ -14,6 +15,7 @@ mod status;
 mod verify;
 mod view;
 
+pub(crate) use kernels::firmware_kernels;
 pub(crate) use list::{firmware_list, firmware_show, title_list, title_show};
 pub(crate) use status::status;
 pub(crate) use verify::{firmware_verify, title_verify};

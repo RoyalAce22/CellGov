@@ -56,6 +56,9 @@ fn a_vault_that_lacks_the_keyset_is_a_run_level_refusal() {
         })),
         SceError::Keys(Box::new(KeyVaultError::MissingScepkg)),
         SceError::NoAppKey { revision: 0x0A },
+        SceError::NoLv2Key {
+            version: 0x0003_0055_0000_0000,
+        },
         SceError::NoNpdrmKey { revision: 0x0A },
         SceError::RapPboxNotAPermutation { index: 3 },
     ];

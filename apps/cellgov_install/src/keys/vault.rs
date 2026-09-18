@@ -7,7 +7,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::loader::Loader;
-use super::{IgnoreReason, Ignored, KeyVaultError, Provenance, SelfClass, SelfKey, Slot};
+use super::{
+    IgnoreReason, Ignored, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey, Slot,
+};
 
 /// Environment variable naming an external vault (file or directory).
 pub const ENV_KEYS: &str = "CELLGOV_KEYS";
@@ -45,6 +47,23 @@ impl SelfTable {
     }
 }
 
+/// The LV2 keysets: labeled by the firmware versions each opens, or
+/// unlabeled.
+#[derive(Debug, Clone)]
+pub(super) struct Lv2Table {
+    pub(super) labeled: BTreeMap<Lv2Versions, SelfEntry>,
+    pub(super) unlabeled: Vec<SelfEntry>,
+}
+
+impl Lv2Table {
+    const fn new() -> Self {
+        Self {
+            labeled: BTreeMap::new(),
+            unlabeled: Vec::new(),
+        }
+    }
+}
+
 /// The loaded key material.
 #[derive(Clone)]
 pub struct KeyVault {
@@ -52,6 +71,7 @@ pub struct KeyVault {
     pub(super) scepkg: Vec<SelfEntry>,
     pub(super) app: SelfTable,
     pub(super) npdrm: SelfTable,
+    pub(super) lv2: Lv2Table,
     pub(super) ignored: Vec<Ignored>,
     pub(super) sources: Vec<PathBuf>,
 }
@@ -71,6 +91,7 @@ impl KeyVault {
             scepkg: Vec::new(),
             app: SelfTable::new(),
             npdrm: SelfTable::new(),
+            lv2: Lv2Table::new(),
             ignored: Vec::new(),
             sources: Vec::new(),
         }
@@ -190,6 +211,12 @@ impl KeyVault {
                 self.push_unlabeled(class, entry);
             }
         }
+        for (versions, entry) in other.lv2.labeled {
+            self.insert_lv2_labeled(versions, entry)?;
+        }
+        for entry in other.lv2.unlabeled {
+            self.push_unlabeled(SelfClass::Lv2, entry);
+        }
         self.ignored.extend(other.ignored);
         self.sources.extend(other.sources);
         Ok(())
@@ -234,27 +261,46 @@ impl KeyVault {
         }
     }
 
-    fn table_mut(&mut self, class: SelfClass) -> &mut SelfTable {
+    /// The table of `class` whose labels are revisions; `None` for the
+    /// LV2 class, whose labels are versions.
+    pub(super) fn revision_table(&self, class: SelfClass) -> Option<&SelfTable> {
         match class {
-            SelfClass::App => &mut self.app,
-            SelfClass::Npdrm => &mut self.npdrm,
+            SelfClass::App => Some(&self.app),
+            SelfClass::Npdrm => Some(&self.npdrm),
+            SelfClass::Lv2 => None,
         }
     }
 
-    pub(super) fn table(&self, class: SelfClass) -> &SelfTable {
+    /// `(labeled, unlabeled)` for `class`; only the unlabeled list is
+    /// mutable.
+    fn tables_mut(&mut self, class: SelfClass) -> (Vec<&SelfEntry>, &mut Vec<SelfEntry>) {
         match class {
-            SelfClass::App => &self.app,
-            SelfClass::Npdrm => &self.npdrm,
+            SelfClass::App => (self.app.labeled.values().collect(), &mut self.app.unlabeled),
+            SelfClass::Npdrm => (
+                self.npdrm.labeled.values().collect(),
+                &mut self.npdrm.unlabeled,
+            ),
+            SelfClass::Lv2 => (self.lv2.labeled.values().collect(), &mut self.lv2.unlabeled),
         }
     }
 
+    /// File `entry` under `revision` in an APP or NPDRM table.
+    ///
+    /// # Panics
+    ///
+    /// If `class` is [`SelfClass::Lv2`]: no revision labels one, and
+    /// [`KeyVault::insert_lv2_labeled`] files it.
     pub(super) fn insert_labeled(
         &mut self,
         class: SelfClass,
         revision: u16,
         entry: SelfEntry,
     ) -> Result<(), KeyVaultError> {
-        let table = self.table_mut(class);
+        let table = match class {
+            SelfClass::App => &mut self.app,
+            SelfClass::Npdrm => &mut self.npdrm,
+            SelfClass::Lv2 => panic!("an LV2 keyset is labeled by version, not revision"),
+        };
         if let Some(existing) = table.labeled.get(&revision) {
             if existing.key != entry.key {
                 return Err(KeyVaultError::Conflict {
@@ -273,12 +319,33 @@ impl KeyVault {
         Ok(())
     }
 
+    /// File `entry` under the firmware versions it opens.
+    pub(super) fn insert_lv2_labeled(
+        &mut self,
+        versions: Lv2Versions,
+        entry: SelfEntry,
+    ) -> Result<(), KeyVaultError> {
+        if let Some(existing) = self.lv2.labeled.get(&versions) {
+            if existing.key != entry.key {
+                return Err(KeyVaultError::Conflict {
+                    what: format!("lv2 versions {versions}"),
+                    first: existing.at.clone(),
+                    second: entry.at,
+                });
+            }
+            return Ok(());
+        }
+        self.lv2.unlabeled.retain(|e| e.key != entry.key);
+        self.lv2.labeled.insert(versions, entry);
+        Ok(())
+    }
+
     pub(super) fn push_unlabeled(&mut self, class: SelfClass, entry: SelfEntry) {
-        let table = self.table_mut(class);
-        let known = table.labeled.values().any(|e| e.key == entry.key)
-            || table.unlabeled.iter().any(|e| e.key == entry.key);
+        let (labeled, unlabeled) = self.tables_mut(class);
+        let known = labeled.iter().any(|e| e.key == entry.key)
+            || unlabeled.iter().any(|e| e.key == entry.key);
         if !known {
-            table.unlabeled.push(entry);
+            unlabeled.push(entry);
         }
     }
 
@@ -384,37 +451,104 @@ impl KeyVault {
         Ok(self.scepkg.iter().map(|e| &e.key))
     }
 
-    /// The keyset labeled with `revision` in `class`'s table.
+    /// The keyset labeled `revision` in `class`'s table; `None` for
+    /// [`SelfClass::Lv2`], whose labels are versions.
     #[must_use]
     pub fn self_key(&self, class: SelfClass, revision: u16) -> Option<&SelfKey> {
-        self.table(class).labeled.get(&revision).map(|e| &e.key)
+        self.revision_table(class)?
+            .labeled
+            .get(&revision)
+            .map(|e| &e.key)
     }
 
-    /// Every keyset that may open a SELF of `revision`: the labeled one
-    /// first, then each unlabeled candidate in load order.
+    /// Every keyset that may open an APP or NPDRM SELF of `revision`:
+    /// the labeled one first, then each unlabeled candidate in load
+    /// order. The iterator is empty for [`SelfClass::Lv2`]; see
+    /// [`KeyVault::lv2_key_candidates`].
     pub fn self_key_candidates(
         &self,
         class: SelfClass,
         revision: u16,
     ) -> impl Iterator<Item = &SelfKey> + '_ {
-        let table = self.table(class);
-        table
-            .labeled
-            .get(&revision)
+        self.revision_table(class)
             .into_iter()
-            .chain(table.unlabeled.iter())
+            .flat_map(move |table| {
+                table
+                    .labeled
+                    .get(&revision)
+                    .into_iter()
+                    .chain(table.unlabeled.iter())
+            })
             .map(|e| &e.key)
     }
 
-    /// Revisions `class`'s table has labeled keys for.
+    /// Every LV2 keyset that may open a kernel of `version`, in order:
+    ///
+    /// 1. those labeled for a range holding `version`;
+    /// 2. those labeled for other ranges;
+    /// 3. each unlabeled candidate, in load order.
+    ///
+    /// The decrypt still tries a keyset labeled for other versions: the
+    /// label is the operator's, and the envelope's padding is the check.
+    pub fn lv2_key_candidates(&self, version: u64) -> impl Iterator<Item = &SelfKey> + '_ {
+        let (holding, other): (Vec<_>, Vec<_>) = self
+            .lv2
+            .labeled
+            .iter()
+            .partition(|(versions, _)| versions.contains(version));
+        holding
+            .into_iter()
+            .chain(other)
+            .map(|(_, e)| e)
+            .chain(self.lv2.unlabeled.iter())
+            .map(|e| &e.key)
+    }
+
+    /// The revisions that label keysets in `class`'s table; none for
+    /// [`SelfClass::Lv2`].
     pub fn labeled_revisions(&self, class: SelfClass) -> impl Iterator<Item = u16> + '_ {
-        self.table(class).labeled.keys().copied()
+        self.revision_table(class)
+            .into_iter()
+            .flat_map(|table| table.labeled.keys().copied())
+    }
+
+    /// The version ranges that label keysets in the LV2 table.
+    pub fn lv2_versions(&self) -> impl Iterator<Item = Lv2Versions> + '_ {
+        self.lv2.labeled.keys().copied()
+    }
+
+    /// The labels of `class`'s keysets as the inventory prints them:
+    /// `0x000a` revisions, or `3.60-3.61` version ranges.
+    #[must_use]
+    pub fn labels(&self, class: SelfClass) -> Vec<String> {
+        match class {
+            SelfClass::App | SelfClass::Npdrm => self
+                .labeled_revisions(class)
+                .map(|r| format!("0x{r:04x}"))
+                .collect(),
+            SelfClass::Lv2 => self.lv2_versions().map(|v| v.to_string()).collect(),
+        }
     }
 
     /// Number of unlabeled candidates in `class`'s table.
     #[must_use]
     pub fn unlabeled_count(&self, class: SelfClass) -> usize {
-        self.table(class).unlabeled.len()
+        match class {
+            SelfClass::App => self.app.unlabeled.len(),
+            SelfClass::Npdrm => self.npdrm.unlabeled.len(),
+            SelfClass::Lv2 => self.lv2.unlabeled.len(),
+        }
+    }
+
+    /// Number of keysets `class` holds, labeled or not.
+    #[must_use]
+    pub fn keyset_count(&self, class: SelfClass) -> usize {
+        let labeled = match class {
+            SelfClass::App => self.app.labeled.len(),
+            SelfClass::Npdrm => self.npdrm.labeled.len(),
+            SelfClass::Lv2 => self.lv2.labeled.len(),
+        };
+        labeled.saturating_add(self.unlabeled_count(class))
     }
 
     /// Everything the loader read and set aside, with the reason.
@@ -446,9 +580,8 @@ impl KeyVault {
         if self.scepkg.is_empty() {
             missing.push("scepkg".to_string());
         }
-        for class in [SelfClass::App, SelfClass::Npdrm] {
-            let table = self.table(class);
-            if table.labeled.is_empty() && table.unlabeled.is_empty() {
+        for class in SelfClass::ALL {
+            if self.keyset_count(class) == 0 {
                 missing.push(format!("{class} (no keyset)"));
             }
         }
@@ -459,7 +592,7 @@ impl KeyVault {
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
-            "{} of {} scalar slots, {} scepkg, app {}+{}, npdrm {}+{}, {} ignored",
+            "{} of {} scalar slots, {} scepkg, app {}+{}, npdrm {}+{}, lv2 {}+{}, {} ignored",
             self.scalars.len(),
             Slot::ALL.len(),
             self.scepkg.len(),
@@ -467,6 +600,8 @@ impl KeyVault {
             self.app.unlabeled.len(),
             self.npdrm.labeled.len(),
             self.npdrm.unlabeled.len(),
+            self.lv2.labeled.len(),
+            self.lv2.unlabeled.len(),
             self.ignored.len(),
         )
     }

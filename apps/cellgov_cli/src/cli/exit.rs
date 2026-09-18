@@ -134,6 +134,7 @@ fn is_key_vault_refusal(e: &SceError) -> bool {
         SceError::Keys(_)
             | SceError::NoAppKey { .. }
             | SceError::NoNpdrmKey { .. }
+            | SceError::NoLv2Key { .. }
             | SceError::RapPboxNotAPermutation { .. }
     )
 }

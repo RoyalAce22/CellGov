@@ -48,9 +48,13 @@ pub fn codes(phases: &[Phase]) -> Vec<u8> {
     phases.iter().map(|p| p.code()).collect()
 }
 
-/// A vault of made-up values in every slot, one keyset per class at
-/// revision 0x0001 and an SCE package keyset; enough for every
-/// synthetic decrypt path, and nothing a real container opens under.
+/// A vault of made-up values: enough for every synthetic decrypt path,
+/// and nothing a real container opens under. It holds:
+///
+/// - every scalar slot;
+/// - one APP and one NPDRM keyset at revision 0x0001;
+/// - one LV2 keyset for firmware 3.55;
+/// - one SCE package keyset.
 #[cfg_attr(not(feature = "decrypt"), allow(dead_code))]
 pub fn synthetic_vault() -> KeyVault {
     fn rep(byte: u8, len: usize) -> String {
@@ -62,7 +66,8 @@ pub fn synthetic_vault() -> KeyVault {
          rap_e1 = \"{}\"\nrap_e2 = \"{}\"\n\
          [[scepkg]]\nerk = \"{}\"\nriv = \"{}\"\n\
          [[app]]\nrevision = 0x0001\nerk = \"{}\"\nriv = \"{}\"\n\
-         [[npdrm]]\nrevision = 0x0001\nerk = \"{}\"\nriv = \"{}\"\n",
+         [[npdrm]]\nrevision = 0x0001\nerk = \"{}\"\nriv = \"{}\"\n\
+         [[lv2]]\nversion = \"3.55\"\nerk = \"{}\"\nriv = \"{}\"\n",
         rep(0x51, 64),
         rep(0x52, 16),
         rep(0x53, 16),
@@ -76,6 +81,8 @@ pub fn synthetic_vault() -> KeyVault {
         rep(0x72, 16),
         rep(0x81, 32),
         rep(0x82, 16),
+        rep(0x91, 32),
+        rep(0x92, 16),
     );
     KeyVault::parse(Path::new("synthetic-keys.toml"), toml.as_bytes())
         .expect("the synthetic vault is well-formed")

@@ -18,8 +18,9 @@ pub use decrypt::{decrypt_package, decrypt_sce_sections, decrypt_self_to_elf};
 pub use elf::mask_non_semantic_elf_bytes;
 pub use error::SceError;
 pub use raw::{
-    parse_control_flags1, parse_program_authority_id, parse_sce_header, EncryptedMetadataDirectory,
-    EncryptedSectionDescriptor, MetadataKeyEnvelope, SceContainerHeader,
+    parse_control_flags1, parse_program_authority_id, parse_program_identification,
+    parse_sce_header, EncryptedMetadataDirectory, EncryptedSectionDescriptor, MetadataKeyEnvelope,
+    ProgramIdentification, SceContainerHeader,
 };
 pub use trace::{section_trace_enabled, ENV_FW_DEBUG};
 
@@ -38,3 +39,7 @@ mod tests;
 #[cfg(all(test, feature = "decrypt"))]
 #[path = "tests/inflate_bound_tests.rs"]
 mod inflate_bound_tests;
+
+#[cfg(test)]
+#[path = "tests/program_identification_tests.rs"]
+mod program_identification_tests;

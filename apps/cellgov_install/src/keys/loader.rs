@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use super::hex::{decode_hex, is_hex_token, value_bytes};
 use super::names::{classify_name, normalized, parse_revision, words, Kind, NameClass, Part};
 use super::vault::SelfEntry;
-use super::{IgnoreReason, KeyVault, KeyVaultError, Provenance, SelfKey};
+use super::{IgnoreReason, KeyVault, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey};
 
 #[cfg(test)]
 #[path = "tests/loader_tests.rs"]
@@ -102,8 +102,9 @@ impl Loader {
         );
     }
 
-    /// File a complete keyset: labeled by its parsed revision when the
-    /// label is one, otherwise as an unlabeled candidate.
+    /// File a complete keyset: labeled by its parsed revision (APP,
+    /// NPDRM) or version range (LV2) when the label is one, otherwise
+    /// as an unlabeled candidate.
     pub(super) fn add_keyset(
         &mut self,
         kind: Kind,
@@ -117,6 +118,16 @@ impl Loader {
                 self.vault.push_scepkg(SelfEntry { key, label, at });
                 Ok(())
             }
+            Kind::Class(SelfClass::Lv2) => match lv2_label_versions(&label) {
+                Some(versions) => self
+                    .vault
+                    .insert_lv2_labeled(versions, SelfEntry { key, label, at }),
+                None => {
+                    self.vault
+                        .push_unlabeled(SelfClass::Lv2, SelfEntry { key, label, at });
+                    Ok(())
+                }
+            },
             Kind::Class(class) => match parse_revision(&label) {
                 Some(revision) => {
                     self.vault
@@ -254,8 +265,15 @@ impl Loader {
 
     pub(super) fn ingest_bytes(&mut self, path: &Path, bytes: &[u8]) -> Result<(), KeyVaultError> {
         let at = file_at(path);
-        let stem = path
-            .file_stem()
+        let extension = extension_of(path);
+        // The host reads a dotted version in a per-key name
+        // (`lv2-key-3.60-3.61`) as a numeric extension; the name is whole.
+        let name_of = if !extension.is_empty() && extension.bytes().all(|b| b.is_ascii_digit()) {
+            Path::file_name
+        } else {
+            Path::file_stem
+        };
+        let stem = name_of(path)
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
@@ -452,15 +470,18 @@ impl Loader {
         let self_type = prop(&["self_type", "selftype"]).map(|(v, _)| v.to_ascii_uppercase());
         let ty = prop(&["type"]).map(|(v, _)| v.to_ascii_uppercase());
         let revision = prop(&["revision", "key_revision", "sdk_type"]).map(|(v, _)| v);
+        let version = prop(&["version"]).map(|(v, _)| v);
         let name_words = words(&block.name);
         let has_word = |w: &str| name_words.iter().any(|n| n == w);
         let shown = redacted_name(&block.name);
 
         let by_name = || {
             if has_word("npdrm") || has_word("np") || has_word("drm") {
-                Some(Kind::Class(super::SelfClass::Npdrm))
+                Some(Kind::Class(SelfClass::Npdrm))
             } else if has_word("app") || has_word("appldr") {
-                Some(Kind::Class(super::SelfClass::App))
+                Some(Kind::Class(SelfClass::App))
+            } else if has_word("lv2") {
+                Some(Kind::Class(SelfClass::Lv2))
             } else if has_word("pkg") || has_word("scepkg") || has_word("spkg") {
                 Some(Kind::Scepkg)
             } else {
@@ -471,8 +492,9 @@ impl Loader {
         // key) as `type=OTHER`; only a SELF or PKG block is a keyset,
         // so an OTHER block is never read as one by its name.
         let kind = match self_type.as_deref() {
-            Some("APP") => Some(Kind::Class(super::SelfClass::App)),
-            Some("NPDRM") => Some(Kind::Class(super::SelfClass::Npdrm)),
+            Some("APP") => Some(Kind::Class(SelfClass::App)),
+            Some("NPDRM") => Some(Kind::Class(SelfClass::Npdrm)),
+            Some("LV2") => Some(Kind::Class(SelfClass::Lv2)),
             Some(_) => None,
             None => match ty.as_deref() {
                 Some("PKG") => Some(Kind::Scepkg),
@@ -557,8 +579,16 @@ impl Loader {
                     want: 0x10,
                 })?,
         };
-        let label = match revision {
-            Some(r) => match parse_revision(&r) {
+        let label = match (kind, revision, version) {
+            // The firmware versions an LV2 keyset opens label it: the
+            // `version=` word, or the block's own name (`[lv2-3.55]`);
+            // its `revision=` names no key.
+            (Kind::Class(SelfClass::Lv2), _, Some(v)) => match Lv2Versions::parse(&v) {
+                Some(_) => v,
+                None => return Err(KeyVaultError::BadVersion { at, value: v }),
+            },
+            (Kind::Class(SelfClass::Lv2), _, None) => block.name.clone(),
+            (_, Some(r), _) => match parse_revision(&r) {
                 Some(_) => r,
                 // scetool keeps a `revision=8000` keyset for debug
                 // SELFs. Bit 15 of the SCE header's revision word marks
@@ -572,10 +602,20 @@ impl Loader {
                 }
                 None => return Err(KeyVaultError::BadRevision { at, value: r }),
             },
-            None => block.name.clone(),
+            (_, None, _) => block.name.clone(),
         };
         self.add_keyset(kind, Some(&label), key, at)
     }
+}
+
+/// The firmware versions an LV2 label names: the label itself
+/// (`3.60-3.61`, a `version=` word), or a block or file name with the
+/// class word in front (`lv2-3.55`, `lv2-3.60-3.61`).
+fn lv2_label_versions(label: &str) -> Option<Lv2Versions> {
+    Lv2Versions::parse(label).or_else(|| {
+        let rest: Vec<String> = words(label).into_iter().filter(|w| w != "lv2").collect();
+        Lv2Versions::parse(&rest.join("-"))
+    })
 }
 
 /// A revision word with the debug bit set, written as `8000` or
@@ -738,8 +778,9 @@ fn bare_value(line: &str) -> Option<Vec<u8>> {
 /// by a 16-byte RIV token, with the class read off the other columns.
 struct TableRow {
     kind: Option<Kind>,
-    /// `0x..` as written, or `sd-0x..` for a row badged `SD`, which
-    /// files as a candidate beside the plain row at the same revision.
+    /// `0x..` as written (`sd-0x..` for a row badged `SD`, which files
+    /// as a candidate beside the plain row at the same revision), or the
+    /// version range of an LV2 row.
     label: Option<String>,
     first: String,
     erk: [u8; 0x20],
@@ -763,6 +804,7 @@ fn table_row(line: &str) -> Option<TableRow> {
     let riv = decode_hex(riv_token).ok()?;
     let mut kind = None;
     let mut revision = None;
+    let mut versions = None;
     let mut np_marker = false;
     let mut sd_marker = false;
     for (i, t) in tokens.iter().enumerate() {
@@ -770,8 +812,10 @@ fn table_row(line: &str) -> Option<TableRow> {
             continue;
         }
         match normalized(t).as_str() {
-            "app" | "appldr" => kind = kind.or(Some(Kind::Class(super::SelfClass::App))),
-            "npdrm" => kind = kind.or(Some(Kind::Class(super::SelfClass::Npdrm))),
+            "app" | "appldr" => kind = kind.or(Some(Kind::Class(SelfClass::App))),
+            "npdrm" => kind = kind.or(Some(Kind::Class(SelfClass::Npdrm))),
+            // `lv2ldr` rows stay unplaced; see `names::classify_name`.
+            "lv2" => kind = kind.or(Some(Kind::Class(SelfClass::Lv2))),
             "pkg" | "spkg" | "scepkg" => kind = kind.or(Some(Kind::Scepkg)),
             "np" => np_marker = true,
             "sd" => sd_marker = true,
@@ -782,17 +826,24 @@ fn table_row(line: &str) -> Option<TableRow> {
         if i < erk_index && revision.is_none() && t.starts_with("0x") {
             revision = parse_revision(t);
         }
-    }
-    if np_marker && matches!(kind, None | Some(Kind::Class(super::SelfClass::App))) {
-        kind = Some(Kind::Class(super::SelfClass::Npdrm));
-    }
-    let label = revision.map(|r| {
-        if sd_marker {
-            format!("sd-0x{r:04x}")
-        } else {
-            format!("0x{r:04x}")
+        // The version-range column (`3.60-3.61`) labels an LV2 row.
+        if i < erk_index && versions.is_none() && t.contains('.') {
+            versions = Lv2Versions::parse(t);
         }
-    });
+    }
+    if np_marker && matches!(kind, None | Some(Kind::Class(SelfClass::App))) {
+        kind = Some(Kind::Class(SelfClass::Npdrm));
+    }
+    let label = match kind {
+        Some(Kind::Class(SelfClass::Lv2)) => versions.map(|v| v.to_string()),
+        _ => revision.map(|r| {
+            if sd_marker {
+                format!("sd-0x{r:04x}")
+            } else {
+                format!("0x{r:04x}")
+            }
+        }),
+    };
     Some(TableRow {
         kind,
         label,

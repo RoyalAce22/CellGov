@@ -85,18 +85,16 @@ fn render_inventory(location: &Path, vault: &KeyVault) -> String {
     }
     let scepkg = vault.scepkg_keys().map(Iterator::count).unwrap_or(0);
     lines.push(format!("  scepkg: {scepkg} keyset(s)"));
-    for class in [SelfClass::App, SelfClass::Npdrm] {
-        let revisions: Vec<String> = vault
-            .labeled_revisions(class)
-            .map(|r| format!("0x{r:04x}"))
-            .collect();
-        let labeled = if revisions.is_empty() {
+    for class in SelfClass::ALL {
+        let labels = vault.labels(class);
+        let labeled = if labels.is_empty() {
             "(none)".to_string()
         } else {
-            revisions.join(", ")
+            labels.join(", ")
         };
         lines.push(format!(
-            "  {class}: revisions {labeled}, {} unlabeled",
+            "  {class}: {} {labeled}, {} unlabeled",
+            class.label_kind(),
             vault.unlabeled_count(class)
         ));
     }
@@ -123,9 +121,7 @@ fn holds_any_key(vault: &KeyVault) -> bool {
         .iter()
         .any(|s| vault.slot_provenance(*s).is_some())
         || vault.scepkg_keys().is_ok()
-        || [SelfClass::App, SelfClass::Npdrm]
-            .iter()
-            .any(|c| vault.labeled_revisions(*c).next().is_some() || vault.unlabeled_count(*c) > 0)
+        || SelfClass::ALL.iter().any(|c| vault.keyset_count(*c) > 0)
 }
 
 /// Normalize the vault at `path` into `<store>/.cellgov/keys/keys.toml`.

@@ -52,6 +52,11 @@ fn full_toml() -> String {
         h(0xC1, 32),
         h(0xC2, 16)
     ));
+    t.push_str(&format!(
+        "[[lv2]]\nversion = \"3.60-3.61\"\nerk = \"{}\"\nriv = \"{}\"\n",
+        h(0xD1, 32),
+        h(0xD2, 16)
+    ));
     t
 }
 
@@ -82,6 +87,10 @@ fn assert_full(v: &KeyVault) {
     assert_eq!(v.unlabeled_count(SelfClass::App), 1);
     let npdrm = v.self_key(SelfClass::Npdrm, 0x0A).unwrap();
     assert_eq!(npdrm.erk, [0xC1u8; 32]);
+    let lv2: Vec<&SelfKey> = v.lv2_key_candidates(0x0003_0060_0000_0000).collect();
+    assert_eq!(lv2.len(), 1);
+    assert_eq!(lv2[0].erk, [0xD1u8; 32]);
+    assert_eq!(v.labels(SelfClass::Lv2), ["3.60-3.61"]);
     assert!(
         v.missing_for_decrypt().is_empty(),
         "{:?}",
@@ -113,7 +122,7 @@ fn an_empty_vault_refuses_every_slot_by_name() {
         v.scepkg_keys().map(|_| ()).unwrap_err(),
         KeyVaultError::MissingScepkg
     ));
-    assert_eq!(v.missing_for_decrypt().len(), SCALARS.len() + 3);
+    assert_eq!(v.missing_for_decrypt().len(), SCALARS.len() + 4);
     assert!(v.self_key_candidates(SelfClass::App, 0).next().is_none());
 }
 
@@ -168,7 +177,7 @@ fn toml_revisions_outside_the_self_range_are_refused() {
 }
 
 #[test]
-fn a_scetool_keyfile_files_app_npdrm_pkg_and_the_np_scalar_keysets() {
+fn a_scetool_keyfile_files_app_npdrm_lv2_pkg_and_the_np_scalar_keysets() {
     let text = format!(
         "# scetool data/keys\n\
          [app-3.55]\ntype=SELF\nrevision=0A\nversion=0003005500000000\nself_type=APP\n\
@@ -203,10 +212,21 @@ fn a_scetool_keyfile_files_app_npdrm_pkg_and_the_np_scalar_keysets() {
     assert_eq!(v.scepkg_keys().unwrap().next().unwrap().erk, [0xA1u8; 32]);
     assert_eq!(v.np_klic_free().unwrap(), &[0x44u8; 16]);
     assert_eq!(v.np_klic_key().unwrap(), &[0x33u8; 16]);
+    // The LV2 block carries no `version=`, so its name labels it; its
+    // `revision=0A` names no key.
+    let lv2: Vec<String> = v.lv2_versions().map(|r| r.to_string()).collect();
+    assert_eq!(lv2, ["3.55"]);
+    assert_eq!(
+        v.lv2_key_candidates(0x0003_0055_0000_0000)
+            .next()
+            .unwrap()
+            .erk,
+        [0x99u8; 32]
+    );
+    assert_eq!(v.self_key(SelfClass::Lv2, 0x0A), None);
     let ignored: Vec<String> = v.ignored().iter().map(|i| i.reason.to_string()).collect();
-    assert_eq!(ignored.len(), 2, "{ignored:?}");
-    assert!(ignored[0].contains("lv2-3.55"), "{ignored:?}");
-    assert!(ignored[1].contains("NP_tid"), "{ignored:?}");
+    assert_eq!(ignored.len(), 1, "{ignored:?}");
+    assert!(ignored[0].contains("NP_tid"), "{ignored:?}");
 }
 
 #[test]
@@ -956,5 +976,6 @@ fn what_is_missing_is_named_slot_by_slot_and_table_by_table() {
     assert!(missing.contains(&"scepkg".to_string()));
     assert!(missing.contains(&"app (no keyset)".to_string()));
     assert!(missing.contains(&"npdrm (no keyset)".to_string()));
-    assert_eq!(missing.len(), Slot::ALL.len() + 3);
+    assert!(missing.contains(&"lv2 (no keyset)".to_string()));
+    assert_eq!(missing.len(), Slot::ALL.len() + 4);
 }

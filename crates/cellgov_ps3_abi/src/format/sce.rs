@@ -44,6 +44,48 @@ pub const SCE_COMP_KIND_ZLIB: u32 = 2;
 /// over the APP-keyed one.
 pub const SCE_SUPPLEMENTAL_KIND_NPDRM: u32 = 3;
 
+/// Bytes of a SELF's plaintext program identification header: the
+/// authority id, the vendor id, the program type and the version.
+pub const SELF_PROGRAM_ID_SIZE: usize = 0x20;
+
+/// Offset of the `program_type` word inside the program identification
+/// header.
+pub const SELF_PROGRAM_ID_TYPE_OFFSET: usize = 0x0C;
+
+/// Offset of the `version` word inside the program identification
+/// header; see [`self_version`] for its layout.
+pub const SELF_PROGRAM_ID_VERSION_OFFSET: usize = 0x10;
+
+/// `program_type` of the LV2 kernel SELF; the LV2 loader's keys open it.
+pub const SELF_PROGRAM_TYPE_LV2: u32 = 3;
+
+/// `program_type` of an application SELF (a disc executable, a
+/// firmware module); the APP keys open it.
+pub const SELF_PROGRAM_TYPE_APP: u32 = 4;
+
+/// `program_type` of an NPDRM-wrapped application SELF.
+pub const SELF_PROGRAM_TYPE_NPDRM: u32 = 8;
+
+/// The `version` word of a program identification header: the firmware
+/// major in the top 16 bits, then the minor as two BCD digits (3.55 is
+/// `0x0003_0055_0000_0000`).
+#[must_use]
+pub const fn self_version(major: u16, minor_bcd: u16) -> u64 {
+    ((major as u64) << 48) | ((minor_bcd as u64) << 32)
+}
+
+/// The firmware major of a [`self_version`] word.
+#[must_use]
+pub const fn self_version_major(version: u64) -> u16 {
+    (version >> 48) as u16
+}
+
+/// The BCD firmware minor of a [`self_version`] word.
+#[must_use]
+pub const fn self_version_minor(version: u64) -> u16 {
+    (version >> 32) as u16
+}
+
 /// Program authority id carried by retail application SELFs (disc and
 /// NPDRM alike); the boot-identity fallback for a raw ELF with no SELF
 /// identification header.

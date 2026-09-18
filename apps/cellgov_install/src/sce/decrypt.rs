@@ -11,7 +11,7 @@ use aes::cipher::{BlockDecryptMut, KeyIvInit, StreamCipher, StreamCipherSeek};
 
 use cellgov_ps3_abi::format::sce::{
     SCE_COMP_KIND_NONE, SCE_COMP_KIND_ZLIB, SCE_DATA_KEY_SIZE, SCE_ENC_KIND_AES128_CTR,
-    SCE_ENC_KIND_PLAIN, SCE_SECTION_DESCRIPTOR_SIZE, SCE_SECTION_KIND_PHDR,
+    SCE_ENC_KIND_PLAIN, SCE_SECTION_DESCRIPTOR_SIZE, SCE_SECTION_KIND_PHDR, SELF_PROGRAM_TYPE_LV2,
 };
 
 use crate::field::{read_be_u32, read_be_u64, usize_from_header, usize_from_u32};
@@ -20,8 +20,8 @@ use crate::keys::{KeyVault, SelfClass, SelfKey};
 use super::elf::{assemble_elf_from_sections, inner_elf_segment_file_sizes};
 use super::error::SceError;
 use super::raw::{
-    checked_add_oob, checked_mul_oob, parse_sce_header, EncryptedSectionDescriptor,
-    SceContainerHeader,
+    checked_add_oob, checked_mul_oob, parse_program_identification, parse_sce_header,
+    EncryptedSectionDescriptor, SceContainerHeader,
 };
 
 type Aes256CbcDec = cbc::Decryptor<aes::Aes256>;
@@ -55,19 +55,31 @@ pub fn decrypt_package(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError
     Err(no_candidate_fits("SCE package", revision, tried, last))
 }
 
-/// Decrypt a SELF container under the vault's APP keysets and
-/// reconstruct a plaintext ELF64 image.
+/// Decrypt a SELF container under the vault's keysets for its program
+/// type and reconstruct a plaintext ELF64 image.
+///
+/// The program identification header's type selects the key class:
+///
+/// - an LV2 kernel opens under the LV2 keysets, in
+///   [`KeyVault::lv2_key_candidates`] order;
+/// - every other type opens under the APP keysets for its key
+///   revision.
+///
+/// NPDRM-wrapped SELFs enter through [`crate::npdrm`] instead.
 ///
 /// The returned ELF carries none of the SELF's signature material; it
 /// must not be handed to anything that verifies signatures.
 ///
 /// # Errors
 ///
-/// [`SceError::NoAppKey`] when the vault has no APP keyset for the
-/// revision and no unlabeled candidate; every candidate is tried and
-/// [`SceError::NoCandidateOpensEnvelope`] reports when none fits. A
-/// lone candidate that does not fit is reported as its own
-/// [`SceError::KeyEnvelopePadding`].
+/// - [`SceError::NoAppKey`]: the vault has no APP keyset for the
+///   revision and no unlabeled candidate.
+/// - [`SceError::NoLv2Key`]: a kernel meets a vault with no LV2
+///   keyset.
+/// - [`SceError::NoCandidateOpensEnvelope`]: the walk tried every
+///   candidate and none fits.
+/// - [`SceError::KeyEnvelopePadding`]: the one candidate does not fit,
+///   so the walk returns its own refusal.
 pub fn decrypt_self_to_elf(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceError> {
     let hdr = parse_sce_header(data)?;
     // High bit of revision_flags marks an unencrypted debug SELF;
@@ -79,15 +91,30 @@ pub fn decrypt_self_to_elf(data: &[u8], keys: &KeyVault) -> Result<Vec<u8>, SceE
         });
     }
     let revision = hdr.revision_flags & 0x7FFF;
-    let envelope = open_envelope_with(
-        data,
-        &hdr,
-        keys.self_key_candidates(SelfClass::App, revision),
-        None,
-        "APP",
-        revision,
-        || SceError::NoAppKey { revision },
-    )?;
+    let program = parse_program_identification(data)?;
+    let envelope = if program.program_type == SELF_PROGRAM_TYPE_LV2 {
+        open_envelope_with(
+            data,
+            &hdr,
+            keys.lv2_key_candidates(program.version),
+            None,
+            "LV2",
+            revision,
+            || SceError::NoLv2Key {
+                version: program.version,
+            },
+        )?
+    } else {
+        open_envelope_with(
+            data,
+            &hdr,
+            keys.self_key_candidates(SelfClass::App, revision),
+            None,
+            "APP",
+            revision,
+            || SceError::NoAppKey { revision },
+        )?
+    };
     let segment_file_sizes = inner_elf_segment_file_sizes(data)?;
     let sections =
         decrypt_sections_from_envelope(data, &hdr, &envelope, Some(&segment_file_sizes))?;

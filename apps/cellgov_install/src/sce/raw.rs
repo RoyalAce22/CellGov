@@ -7,7 +7,10 @@
     clippy::cast_lossless
 )]
 
-use cellgov_ps3_abi::format::sce::SCE_MAGIC_U32;
+use cellgov_ps3_abi::format::sce::{
+    SCE_MAGIC_U32, SELF_PROGRAM_ID_SIZE, SELF_PROGRAM_ID_TYPE_OFFSET,
+    SELF_PROGRAM_ID_VERSION_OFFSET,
+};
 
 use super::error::SceError;
 use crate::field::{read_be_u16, read_be_u32, read_be_u64, usize_from_header, usize_from_u32};
@@ -175,6 +178,56 @@ pub fn parse_program_authority_id(data: &[u8]) -> Result<u64, SceError> {
         });
     }
     Ok(read_be_u64(data, pid_off))
+}
+
+/// A SELF's plaintext program identification header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProgramIdentification {
+    /// The program authority id, as [`parse_program_authority_id`] reads it.
+    pub authority_id: u64,
+    /// The vendor id word.
+    pub vendor_id: u32,
+    /// The program type, which selects the key class that opens the
+    /// SELF (`SELF_PROGRAM_TYPE_*` in `cellgov_ps3_abi::format::sce`).
+    pub program_type: u32,
+    /// The firmware version word (`cellgov_ps3_abi::format::sce::self_version`).
+    pub version: u64,
+}
+
+/// The whole 0x20-byte program identification header.
+///
+/// Plaintext, like [`parse_program_authority_id`], which reads only the
+/// header's first word and so accepts a container this parse refuses
+/// as truncated.
+///
+/// # Errors
+///
+/// [`SceError::BadMagic`] / [`SceError::TooSmall`] for non-SCE input,
+/// [`SceError::HeaderOffsetOutOfRange`] when the header's offset or
+/// its 0x20 bytes escape the buffer.
+pub fn parse_program_identification(data: &[u8]) -> Result<ProgramIdentification, SceError> {
+    parse_sce_header(data)?;
+    if data.len() < 0x30 {
+        return Err(SceError::TooSmall {
+            what: "SELF extended header",
+            got: data.len(),
+            need: 0x30,
+        });
+    }
+    let out_of_range = || SceError::HeaderOffsetOutOfRange {
+        what: "program identification header",
+    };
+    let Some(header) = usize_from_header(read_be_u64(data, 0x28))
+        .and_then(|offset| data.get(offset..)?.get(..SELF_PROGRAM_ID_SIZE))
+    else {
+        return Err(out_of_range());
+    };
+    Ok(ProgramIdentification {
+        authority_id: read_be_u64(header, 0),
+        vendor_id: read_be_u32(header, 8),
+        program_type: read_be_u32(header, SELF_PROGRAM_ID_TYPE_OFFSET),
+        version: read_be_u64(header, SELF_PROGRAM_ID_VERSION_OFFSET),
+    })
 }
 
 /// Read `ctrl_flags1` from the SELF's plaintext capability header

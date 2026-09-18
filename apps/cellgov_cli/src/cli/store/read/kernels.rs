@@ -1,0 +1,171 @@
+//! `firmware kernels` -- decrypt every stored LV2 kernel and report the
+//! vault's coverage of the store, version by version.
+//!
+//! A version whose kernel the vault cannot open is the normal case of
+//! a store that spans key eras, so the run reports it and continues.
+//! The table distinguishes a missing key from a failed decrypt and
+//! from an entry that never unpacked its kernel.
+
+use std::path::Path;
+
+use crate::cli::parse::OutputFormat;
+
+#[cfg(feature = "decrypt")]
+use super::model::{KernelCoverageDoc, KernelCoverageEntryDoc, KERNEL_NOT_RECORDED};
+#[cfg(feature = "decrypt")]
+use super::{emit, view};
+
+/// Exit status when a stored kernel yielded no ELF for a reason other
+/// than a missing key.
+#[cfg(feature = "decrypt")]
+const EXIT_KERNEL_NOT_DECRYPTED: i32 = crate::cli::exit_codes::command_specific(41);
+
+/// The state of an entry that stored no kernel; the other four states
+/// come from `KernelCoverage::label`.
+#[cfg(feature = "decrypt")]
+const NOT_UNPACKED: &str = "not_unpacked";
+
+/// The states a row takes, in the order the summary line lists them.
+#[cfg(feature = "decrypt")]
+const STATES: [&str; 5] = ["decrypted", "no_key", NOT_UNPACKED, "unreadable", "failed"];
+
+/// The states that make the run exit [`EXIT_KERNEL_NOT_DECRYPTED`].
+#[cfg(feature = "decrypt")]
+const NOT_DECRYPTED_STATES: [&str; 2] = ["unreadable", "failed"];
+
+#[cfg(not(feature = "decrypt"))]
+pub(crate) fn firmware_kernels(_root: &Path, _format: OutputFormat) {
+    crate::cli::exit::die(
+        &crate::cli::store::StoreCliError::DecryptFeatureDisabled {
+            command: "firmware kernels".to_string(),
+        }
+        .to_string(),
+    )
+}
+
+/// `cellgov firmware kernels`
+#[cfg(feature = "decrypt")]
+pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
+    use cellgov_install::kernel_decrypt::{decrypt_stored_kernel, KernelCoverage};
+    use cellgov_install::keys::{version_label, KeyVault, ENV_KEYS};
+
+    let view = view(root);
+    let location = KeyVault::locate_from(std::env::var_os(ENV_KEYS), root)
+        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+    let keys = KeyVault::load_from_path(&location)
+        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+
+    let entries = view
+        .inventory
+        .firmware_entries()
+        .map(|entry| {
+            let mut doc = KernelCoverageEntryDoc {
+                version: entry.version.clone(),
+                state: NOT_UNPACKED.to_string(),
+                detail: None,
+                kernel_version: None,
+                elf_bytes: None,
+                elf_sha256: None,
+            };
+            let kernel = match entry.core_os.as_ref() {
+                Some(block) => match &block.kernel {
+                    Some(kernel) => kernel,
+                    None => {
+                        doc.detail = Some(block.omission.clone().unwrap_or_else(|| {
+                            "the install stored no kernel and named no reason".to_string()
+                        }));
+                        return doc;
+                    }
+                },
+                None => {
+                    // The state column already says "not unpacked".
+                    let reason = KERNEL_NOT_RECORDED
+                        .strip_prefix("not unpacked (")
+                        .and_then(|r| r.strip_suffix(')'))
+                        .unwrap_or(KERNEL_NOT_RECORDED);
+                    doc.detail = Some(reason.to_string());
+                    return doc;
+                }
+            };
+            let coverage =
+                KernelCoverage::of(decrypt_stored_kernel(&entry.entry_dir, kernel, &keys));
+            doc.state = coverage.label().to_string();
+            match coverage {
+                KernelCoverage::Decrypted {
+                    version,
+                    elf_len,
+                    elf_sha256,
+                } => {
+                    doc.kernel_version = Some(version_label(version));
+                    doc.elf_bytes = Some(elf_len);
+                    doc.elf_sha256 = Some(elf_sha256.to_hex());
+                }
+                KernelCoverage::NoKey { missing } => doc.detail = Some(missing),
+                KernelCoverage::Unreadable { reason } | KernelCoverage::Failed { reason } => {
+                    doc.detail = Some(reason);
+                }
+            }
+            doc
+        })
+        .collect();
+
+    let doc = KernelCoverageDoc {
+        format_version: view.format_version(),
+        store: view.store_label(),
+        vault: location.display().to_string(),
+        entries,
+    };
+    emit(format, &doc, || print!("{}", render(&doc)));
+    std::process::exit(exit_status(&doc));
+}
+
+/// 0 unless a row is in one of [`NOT_DECRYPTED_STATES`].
+#[cfg(feature = "decrypt")]
+fn exit_status(doc: &KernelCoverageDoc) -> i32 {
+    if NOT_DECRYPTED_STATES.iter().any(|s| doc.count(s) > 0) {
+        EXIT_KERNEL_NOT_DECRYPTED
+    } else {
+        0
+    }
+}
+
+#[cfg(feature = "decrypt")]
+fn render(doc: &KernelCoverageDoc) -> String {
+    if doc.entries.is_empty() {
+        return format!("no firmware installed under {}\n", doc.store);
+    }
+    let mut out = format!(
+        "key vault: {}\n  VERSION  KERNEL        DETAIL\n",
+        doc.vault
+    );
+    for entry in &doc.entries {
+        let detail = match (&entry.elf_bytes, &entry.elf_sha256, &entry.detail) {
+            (Some(bytes), Some(sha256), _) => format!(
+                "{} ELF (header names firmware {}), sha256 {sha256}",
+                super::human_bytes(*bytes as u64),
+                entry.kernel_version.as_deref().unwrap_or("?"),
+            ),
+            (_, _, Some(detail)) => detail.clone(),
+            _ => String::new(),
+        };
+        out.push_str(&format!(
+            "  {:<7}  {:<12}  {detail}\n",
+            entry.version,
+            entry.state.replace('_', " ")
+        ));
+    }
+    let tally: Vec<String> = STATES
+        .iter()
+        .map(|state| format!("{} {}", doc.count(state), state.replace('_', " ")))
+        .collect();
+    out.push_str(&format!(
+        "{} version(s): {}\n",
+        doc.entries.len(),
+        tally.join(", ")
+    ));
+    out
+}
+
+#[cfg(all(test, feature = "decrypt"))]
+#[path = "tests/kernels_tests.rs"]
+mod tests;

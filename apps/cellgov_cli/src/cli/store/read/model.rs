@@ -364,6 +364,52 @@ impl VerifyDoc {
     }
 }
 
+/// One installed firmware version's row of `firmware kernels`.
+#[derive(Debug, Serialize)]
+pub(crate) struct KernelCoverageEntryDoc {
+    /// The version key the entry is filed under.
+    pub version: String,
+    /// `decrypted`, `no_key`, `not_unpacked`, `unreadable`, or
+    /// `failed`.
+    pub state: String,
+    /// What the state rests on: the key the vault lacks, why the
+    /// install stored no kernel, or the refusal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// The firmware version the kernel's own header names, for a
+    /// decrypted kernel; a `no_key` row names the version only inside
+    /// `detail`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kernel_version: Option<String>,
+    /// Plaintext ELF length, for a decrypted kernel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elf_bytes: Option<usize>,
+    /// SHA-256 over the plaintext ELF, for a decrypted kernel.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub elf_sha256: Option<String>,
+}
+
+/// `firmware kernels`.
+#[derive(Debug, Serialize)]
+pub(crate) struct KernelCoverageDoc {
+    /// See [`STORE_FORMAT_VERSION`].
+    pub format_version: u32,
+    /// The store root the entries were read under.
+    pub store: String,
+    /// The vault the run decrypted with.
+    pub vault: String,
+    /// One row per installed firmware version, ascending.
+    pub entries: Vec<KernelCoverageEntryDoc>,
+}
+
+impl KernelCoverageDoc {
+    /// How many entries carry `state`.
+    #[cfg(feature = "decrypt")]
+    pub(crate) fn count(&self, state: &str) -> usize {
+        self.entries.iter().filter(|e| e.state == state).count()
+    }
+}
+
 #[cfg(test)]
 #[path = "tests/model_tests.rs"]
 mod tests;

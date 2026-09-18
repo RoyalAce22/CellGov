@@ -8,13 +8,18 @@ use serde::Deserialize;
 use super::hex::hex;
 use super::loader::{Loader, PendingHalf};
 use super::names::{classify_name, parse_revision, Kind, NameClass};
-use super::{KeyVault, KeyVaultError, Provenance, SelfClass, SelfKey, Slot};
+use super::{KeyVault, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey, Slot};
 
-/// One `[[app]]` / `[[npdrm]]` / `[[scepkg]]` table.
+/// One `[[app]]` / `[[npdrm]]` / `[[lv2]]` / `[[scepkg]]` table.
+///
+/// `revision` labels an APP or NPDRM keyset and `version` (a
+/// [`Lv2Versions`] label) an LV2 one; the loader refuses the other
+/// field on each.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TomlSelfKey {
     revision: Option<TomlRevision>,
+    version: Option<String>,
     label: Option<String>,
     erk: String,
     riv: String,
@@ -35,6 +40,8 @@ struct TomlVault {
     app: Vec<TomlSelfKey>,
     #[serde(default)]
     npdrm: Vec<TomlSelfKey>,
+    #[serde(default)]
+    lv2: Vec<TomlSelfKey>,
     #[serde(flatten)]
     scalars: BTreeMap<String, toml::Value>,
 }
@@ -115,14 +122,40 @@ impl Loader {
             (Kind::Scepkg, parsed.scepkg),
             (Kind::Class(SelfClass::App), parsed.app),
             (Kind::Class(SelfClass::Npdrm), parsed.npdrm),
+            (Kind::Class(SelfClass::Lv2), parsed.lv2),
         ] {
             for entry in entries {
                 let key = SelfKey {
                     erk: fixed(&at, &format!("[[{kind}]] erk"), &entry.erk)?,
                     riv: fixed(&at, &format!("[[{kind}]] riv"), &entry.riv)?,
                 };
-                let label = match entry.revision {
-                    Some(TomlRevision::Int(i)) => {
+                // The `[[scepkg]]` schema has no `version`, so the loader
+                // refuses one the way the parser refuses a field it does
+                // not know.
+                let wrong_label = |expected, found| match kind {
+                    Kind::Class(class) => KeyVaultError::WrongLabelKind {
+                        at: at.clone(),
+                        class,
+                        expected,
+                        found,
+                    },
+                    Kind::Scepkg => toml_refusal(
+                        &at,
+                        format!("[[scepkg]] takes no {found}; the field applies to [[lv2]] only"),
+                    ),
+                };
+                let label = match (kind, entry.revision, entry.version) {
+                    (Kind::Class(SelfClass::Lv2), Some(_), _) => {
+                        return Err(wrong_label("version", "revision"))
+                    }
+                    (Kind::Class(SelfClass::Lv2), None, Some(v)) => {
+                        if Lv2Versions::parse(&v).is_none() {
+                            return Err(KeyVaultError::BadVersion { at, value: v });
+                        }
+                        v
+                    }
+                    (_, _, Some(_)) => return Err(wrong_label("revision", "version")),
+                    (_, Some(TomlRevision::Int(i)), None) => {
                         let revision =
                             u16::try_from(i)
                                 .ok()
@@ -133,13 +166,13 @@ impl Loader {
                                 })?;
                         format!("0x{revision:04x}")
                     }
-                    Some(TomlRevision::Text(s)) => {
+                    (_, Some(TomlRevision::Text(s)), None) => {
                         if parse_revision(&s).is_none() {
                             return Err(KeyVaultError::BadRevision { at, value: s });
                         }
                         s
                     }
-                    None => entry.label.unwrap_or_default(),
+                    (_, None, None) => entry.label.unwrap_or_default(),
                 };
                 self.add_keyset(kind, Some(&label), key, at.clone())?;
             }
@@ -200,6 +233,17 @@ impl KeyVault {
                 ));
                 push_self_key_body(&mut out, &entry.key);
             }
+        }
+        for (versions, entry) in &self.lv2.labeled {
+            out.push_str(&format!("\n[[lv2]]\nversion = \"{versions}\"\n"));
+            push_self_key_body(&mut out, &entry.key);
+        }
+        for entry in &self.lv2.unlabeled {
+            out.push_str(&format!(
+                "\n[[lv2]]\nlabel = {}\n",
+                toml_string(&entry.label)
+            ));
+            push_self_key_body(&mut out, &entry.key);
         }
         out
     }
