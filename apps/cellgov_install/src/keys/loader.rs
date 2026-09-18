@@ -8,11 +8,18 @@ use std::path::{Path, PathBuf};
 use super::hex::{decode_hex, is_hex_token, value_bytes};
 use super::names::{classify_name, normalized, parse_revision, words, Kind, NameClass, Part};
 use super::vault::SelfEntry;
-use super::{IgnoreReason, KeyVault, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey};
+use super::{
+    version_label, CryptoMaterial, IgnoreReason, KeyVault, KeyVaultError, Lv2Versions, Provenance,
+    SelfClass, SelfKey,
+};
 
 #[cfg(test)]
 #[path = "tests/loader_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/constructor_catalog_tests.rs"]
+mod constructor_catalog_tests;
 
 /// Largest file the directory walk reads; bigger ones are listed as
 /// ignored unread.
@@ -325,6 +332,9 @@ impl Loader {
     }
 
     fn ingest_text(&mut self, path: &Path, text: &str) -> Result<(), KeyVaultError> {
+        if self.ingest_constructor_catalog(path, text)? {
+            return Ok(());
+        }
         let mut block: Option<Block> = None;
         // The nearest preceding prose line names a bare value beneath
         // it, the way a wiki heading sits over its key.
@@ -409,6 +419,99 @@ impl Loader {
             self.flush_block(path, done)?;
         }
         Ok(())
+    }
+
+    /// Import constructor-style key catalog rows without treating their
+    /// values as prose. This preserves all binary components even when no
+    /// CellGov decrypt path consumes that key class yet.
+    fn ingest_constructor_catalog(
+        &mut self,
+        path: &Path,
+        text: &str,
+    ) -> Result<bool, KeyVaultError> {
+        if !text.contains(".emplace_back(") {
+            return Ok(false);
+        }
+        let mut kind = String::from("catalog");
+        let mut lines = text.lines().enumerate().peekable();
+        let mut found = false;
+        while let Some((index, raw)) = lines.next() {
+            let line = raw.trim();
+            if let Some(start) = line.find("LoadSelf") {
+                let rest = &line[start + "LoadSelf".len()..];
+                if let Some(end) = rest.find("Keys") {
+                    kind = rest[..end].to_ascii_lowercase();
+                }
+            }
+            if !line.contains(".emplace_back(") {
+                continue;
+            }
+            if let Some(receiver) = line.split(".emplace_back(").next() {
+                let receiver = receiver.trim();
+                if let Some(name) = receiver
+                    .strip_prefix("sk_")
+                    .and_then(|v| v.strip_suffix("_arr"))
+                {
+                    kind = name.to_ascii_lowercase();
+                }
+            }
+            let mut row = line.to_string();
+            while !row.contains(");") {
+                let Some((_, next)) = lines.next() else { break };
+                row.push(' ');
+                row.push_str(next.trim());
+            }
+            let strings = quoted_hex_values(&row);
+            if strings.is_empty() {
+                continue;
+            }
+            let names = ["erk", "riv", "pub", "priv"];
+            let components = strings
+                .into_iter()
+                .enumerate()
+                .map(|(component, value)| {
+                    let name = names.get(component).copied().unwrap_or("component");
+                    let name = if component < names.len() {
+                        name.to_string()
+                    } else {
+                        format!("{name}_{component}")
+                    };
+                    Ok((
+                        name.clone(),
+                        decode_named_hex(&Provenance::at(path, index + 1), &name, &value)?,
+                    ))
+                })
+                .collect::<Result<Vec<_>, KeyVaultError>>()?;
+            let version_range = constructor_version_range(&row);
+            if kind == "lv2" && components.len() >= 2 {
+                let (erk, riv) = (&components[0].1, &components[1].1);
+                if let (Ok(erk), Ok(riv), Some((start, end))) = (
+                    erk.as_slice().try_into(),
+                    riv.as_slice().try_into(),
+                    version_range,
+                ) {
+                    self.add_keyset(
+                        Kind::Class(SelfClass::Lv2),
+                        Some(&format!("{}-{}", version_label(start), version_label(end))),
+                        SelfKey { erk, riv },
+                        Provenance::at(path, index + 1),
+                    )?;
+                }
+            }
+            self.vault.material.push((
+                CryptoMaterial {
+                    kind: kind.clone(),
+                    label: version_range.map_or_else(
+                        || format!("row-{}", index + 1),
+                        |(start, end)| format!("{start:016x}-{end:016x}"),
+                    ),
+                    components,
+                },
+                Provenance::at(path, index + 1),
+            ));
+            found = true;
+        }
+        Ok(found)
     }
 
     fn add_named(&mut self, name: &str, value: &str, at: Provenance) -> Result<(), KeyVaultError> {
@@ -720,6 +823,38 @@ fn strip_comment(line: &str) -> &str {
         }
     }
     line
+}
+
+/// Quoted hexadecimal values in a constructor record, in source order.
+fn quoted_hex_values(line: &str) -> Vec<String> {
+    let mut values = Vec::new();
+    let mut rest = line;
+    while let Some((_, after_open)) = rest.split_once('"') {
+        let Some((value, after_close)) = after_open.split_once('"') else {
+            break;
+        };
+        if is_hex_token(value, value.len() / 2) && value.len() >= 0x20 {
+            values.push(value.to_string());
+        }
+        rest = after_close;
+    }
+    values
+}
+
+/// The first two hexadecimal constructor arguments are a SELF key's
+/// inclusive firmware-version range.
+fn constructor_version_range(line: &str) -> Option<(u64, u64)> {
+    let before_strings = line.split('"').next()?;
+    let values: Vec<u64> = before_strings
+        .split(|c: char| !c.is_ascii_hexdigit() && c != 'x' && c != 'X')
+        .filter_map(|token| {
+            token
+                .strip_prefix("0x")
+                .or_else(|| token.strip_prefix("0X"))
+        })
+        .filter_map(|hex| u64::from_str_radix(hex, 16).ok())
+        .collect();
+    Some((*values.first()?, *values.get(1)?))
 }
 
 /// `prop=value` inside a `[section]`; the property is a bare word.

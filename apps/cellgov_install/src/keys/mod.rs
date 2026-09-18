@@ -43,7 +43,7 @@ mod vault;
 pub use error::{HexError, KeyVaultError};
 pub use hex::decode_hex;
 pub use lv2_version::{version_label, Lv2Versions};
-pub use types::{IgnoreReason, Ignored, Provenance, SelfClass, SelfKey, Slot};
+pub use types::{CryptoMaterial, IgnoreReason, Ignored, Provenance, SelfClass, SelfKey, Slot};
 pub use vault::{installed_keys_dir, KeyVault, ENV_KEYS, INSTALLED_KEYS_FILE};
 
 #[cfg(test)]

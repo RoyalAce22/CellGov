@@ -18,6 +18,17 @@ fn parse_toml(text: &str) -> Result<KeyVault, KeyVaultError> {
     KeyVault::parse(Path::new("keys.toml"), text.as_bytes())
 }
 
+#[test]
+fn serialized_material_round_trips_without_becoming_a_scalar() {
+    let source = "[[material]]\nkind = \"loader\"\nlabel = \"test\"\nblob = \"0102\"\n";
+    let vault = parse_toml(source).expect("parse material");
+    let reloaded = parse_toml(&vault.to_toml()).expect("reparse rendered material");
+    assert_eq!(
+        reloaded.material().collect::<Vec<_>>(),
+        vault.material().collect::<Vec<_>>()
+    );
+}
+
 fn reasons(v: &KeyVault) -> Vec<IgnoreReason> {
     v.ignored().iter().map(|i| i.reason.clone()).collect()
 }

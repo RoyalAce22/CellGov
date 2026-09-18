@@ -3,12 +3,15 @@
 
 use std::collections::BTreeMap;
 
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::hex::hex;
 use super::loader::{Loader, PendingHalf};
 use super::names::{classify_name, parse_revision, Kind, NameClass};
-use super::{KeyVault, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey, Slot};
+use super::{
+    CryptoMaterial, KeyVault, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey, Slot,
+};
 
 /// One `[[app]]` / `[[npdrm]]` / `[[lv2]]` / `[[scepkg]]` table.
 ///
@@ -32,18 +35,50 @@ enum TomlRevision {
     Text(String),
 }
 
-#[derive(Deserialize)]
 struct TomlVault {
-    #[serde(default)]
     scepkg: Vec<TomlSelfKey>,
-    #[serde(default)]
     app: Vec<TomlSelfKey>,
-    #[serde(default)]
     npdrm: Vec<TomlSelfKey>,
-    #[serde(default)]
     lv2: Vec<TomlSelfKey>,
-    #[serde(flatten)]
+    material: Vec<TomlMaterial>,
     scalars: BTreeMap<String, toml::Value>,
+}
+
+impl TomlVault {
+    /// Separates known table arrays before the remaining top-level values
+    /// become scalar candidates.
+    fn parse(text: &str) -> Result<Self, toml::de::Error> {
+        let mut values: BTreeMap<String, toml::Value> = toml::from_str(text)?;
+        Ok(Self {
+            scepkg: take_table_array(&mut values, "scepkg")?,
+            app: take_table_array(&mut values, "app")?,
+            npdrm: take_table_array(&mut values, "npdrm")?,
+            lv2: take_table_array(&mut values, "lv2")?,
+            material: take_table_array(&mut values, "material")?,
+            scalars: values,
+        })
+    }
+}
+
+fn take_table_array<T: DeserializeOwned>(
+    values: &mut BTreeMap<String, toml::Value>,
+    name: &str,
+) -> Result<Vec<T>, toml::de::Error> {
+    values
+        .remove(name)
+        .map(toml::Value::try_into)
+        .transpose()
+        .map(|rows| rows.unwrap_or_default())
+}
+
+/// A lossless record for key material with no current decrypt-path consumer.
+#[derive(Deserialize)]
+struct TomlMaterial {
+    kind: String,
+    #[serde(default)]
+    label: String,
+    #[serde(flatten)]
+    components: BTreeMap<String, String>,
 }
 
 impl Loader {
@@ -56,7 +91,7 @@ impl Loader {
             at: at.clone(),
             source: Box::new(<toml::de::Error as serde::de::Error>::custom(e)),
         })?;
-        let parsed: TomlVault = toml::from_str(text).map_err(|source| KeyVaultError::Toml {
+        let parsed = TomlVault::parse(text).map_err(|source| KeyVaultError::Toml {
             at: at.clone(),
             source: Box::new(source),
         })?;
@@ -177,6 +212,52 @@ impl Loader {
                 self.add_keyset(kind, Some(&label), key, at.clone())?;
             }
         }
+        for entry in parsed.material {
+            if entry.kind.trim().is_empty()
+                || !entry
+                    .kind
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+            {
+                return Err(toml_refusal(
+                    &at,
+                    "[[material]] kind must be an ASCII identifier".to_string(),
+                ));
+            }
+            let mut components = Vec::new();
+            for (name, value) in entry.components {
+                if name == "kind" || name == "label" {
+                    continue;
+                }
+                if !name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                {
+                    return Err(toml_refusal(
+                        &at,
+                        format!("[[material]] component {name:?} must be an ASCII identifier"),
+                    ));
+                }
+                components.push((
+                    name.clone(),
+                    super::loader::decode_named_hex(&at, &name, &value)?,
+                ));
+            }
+            if components.is_empty() {
+                return Err(toml_refusal(
+                    &at,
+                    "[[material]] needs at least one component".to_string(),
+                ));
+            }
+            self.vault.material.push((
+                CryptoMaterial {
+                    kind: entry.kind,
+                    label: entry.label,
+                    components,
+                },
+                at.clone(),
+            ));
+        }
         Ok(())
     }
 }
@@ -244,6 +325,16 @@ impl KeyVault {
                 toml_string(&entry.label)
             ));
             push_self_key_body(&mut out, &entry.key);
+        }
+        for (material, _) in &self.material {
+            out.push_str(&format!(
+                "\n[[material]]\nkind = {}\nlabel = {}\n",
+                toml_string(&material.kind),
+                toml_string(&material.label)
+            ));
+            for (name, bytes) in &material.components {
+                out.push_str(&format!("{name} = \"{}\"\n", hex(bytes)));
+            }
         }
         out
     }

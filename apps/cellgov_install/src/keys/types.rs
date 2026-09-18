@@ -14,6 +14,20 @@ pub struct SelfKey {
     pub riv: [u8; 0x10],
 }
 
+/// One cryptographic record the operational decrypt paths do not yet use.
+///
+/// The operator vault preserves these records so importing a catalog does
+/// not discard material merely because CellGov has no consumer for it yet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CryptoMaterial {
+    /// The source catalog's key class.
+    pub kind: String,
+    /// The source catalog's range, revision, or other selector.
+    pub label: String,
+    /// Named binary components such as `erk`, `riv`, `pub`, and `priv`.
+    pub components: Vec<(String, Vec<u8>)>,
+}
+
 impl fmt::Debug for SelfKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("SelfKey { .. }")

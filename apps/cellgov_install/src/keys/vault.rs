@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use super::loader::Loader;
 use super::{
-    IgnoreReason, Ignored, KeyVaultError, Lv2Versions, Provenance, SelfClass, SelfKey, Slot,
+    CryptoMaterial, IgnoreReason, Ignored, KeyVaultError, Lv2Versions, Provenance, SelfClass,
+    SelfKey, Slot,
 };
 
 /// Environment variable naming an external vault (file or directory).
@@ -72,6 +73,7 @@ pub struct KeyVault {
     pub(super) app: SelfTable,
     pub(super) npdrm: SelfTable,
     pub(super) lv2: Lv2Table,
+    pub(super) material: Vec<(CryptoMaterial, Provenance)>,
     pub(super) ignored: Vec<Ignored>,
     pub(super) sources: Vec<PathBuf>,
 }
@@ -83,6 +85,12 @@ impl fmt::Debug for KeyVault {
 }
 
 impl KeyVault {
+    /// Every preserved record with no current decrypt-path consumer.
+    #[must_use]
+    pub fn material(&self) -> impl ExactSizeIterator<Item = &CryptoMaterial> {
+        self.material.iter().map(|(material, _)| material)
+    }
+
     /// A vault holding nothing; every accessor refuses by name.
     #[must_use]
     pub const fn empty() -> Self {
@@ -92,6 +100,7 @@ impl KeyVault {
             app: SelfTable::new(),
             npdrm: SelfTable::new(),
             lv2: Lv2Table::new(),
+            material: Vec::new(),
             ignored: Vec::new(),
             sources: Vec::new(),
         }
@@ -203,6 +212,7 @@ impl KeyVault {
         for entry in other.scepkg {
             self.push_scepkg(entry);
         }
+        self.material.extend(other.material);
         for (class, table) in [(SelfClass::App, other.app), (SelfClass::Npdrm, other.npdrm)] {
             for (revision, entry) in table.labeled {
                 self.insert_labeled(class, revision, entry)?;
@@ -592,7 +602,7 @@ impl KeyVault {
     #[must_use]
     pub fn summary(&self) -> String {
         format!(
-            "{} of {} scalar slots, {} scepkg, app {}+{}, npdrm {}+{}, lv2 {}+{}, {} ignored",
+            "{} of {} scalar slots, {} scepkg, app {}+{}, npdrm {}+{}, lv2 {}+{}, {} preserved, {} ignored",
             self.scalars.len(),
             Slot::ALL.len(),
             self.scepkg.len(),
@@ -602,6 +612,7 @@ impl KeyVault {
             self.npdrm.unlabeled.len(),
             self.lv2.labeled.len(),
             self.lv2.unlabeled.len(),
+            self.material.len(),
             self.ignored.len(),
         )
     }
