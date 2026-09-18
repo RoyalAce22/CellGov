@@ -20,7 +20,8 @@ use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
     self, ConflictRow, FirmwareRole, FirmwareRow, HandlingCounts, NameRow, NameSource, OwnerClass,
-    Route, FIRMWARE, FIRMWARE_GATE, GATE, NAME, NAME_GATE, NAME_REGENERATE, REGENERATE, TABLES,
+    PupRow, Route, FIRMWARE, FIRMWARE_GATE, GATE, NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE,
+    REGENERATE, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
@@ -49,6 +50,18 @@ fn committed_firmware() -> Vec<FirmwareRow> {
         "the firmware loader does not re-render firmware.tsv byte-identically"
     );
     archive::firmware_rows(&table)
+}
+
+fn committed_pups() -> Vec<PupRow> {
+    let text = read(&archive_dir().join(PUP.file()));
+    let table = archive::parse(&PUP, &text).unwrap_or_else(|error| panic!("{error}"));
+    let rerendered =
+        archive::render(&PUP, &table.rows).unwrap_or_else(|error| panic!("pup.tsv: {error}"));
+    assert_eq!(
+        rerendered, text,
+        "the archive loader does not re-render pup.tsv byte-identically"
+    );
+    archive::pup_rows(&table)
 }
 
 fn slot(ordinal: u64, packet: Option<&str>) -> String {
@@ -113,6 +126,7 @@ fn fill(template: &str, subs: &[(&str, String)]) -> String {
 fn readme(
     counts: &HandlingCounts,
     firmware: &[FirmwareRow],
+    pups: &[PupRow],
     names: &[NameRow],
     conflicts: &[ConflictRow],
 ) -> String {
@@ -208,6 +222,16 @@ fn readme(
             ),
             ("firmware_gate", FIRMWARE_GATE.to_string()),
             ("firmware_role_rows", firmware_role_rows.join("\n")),
+            ("pup_rows", pups.len().to_string()),
+            (
+                "pup_versions",
+                pups.iter()
+                    .map(|row| row.fw.as_str())
+                    .collect::<BTreeSet<_>>()
+                    .len()
+                    .to_string(),
+            ),
+            ("pup_gate", PUP_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
             ("named_slots", named_slots.len().to_string()),
             ("name_gate", NAME_GATE.to_string()),
@@ -229,12 +253,13 @@ fn rendered() -> BTreeMap<String, String> {
     let arms = archive::arm_rows(&routes);
     let counts = HandlingCounts::of(&routes);
     let firmware = committed_firmware();
+    let pups = committed_pups();
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
     let mut files = BTreeMap::new();
     files.insert(
         "README.md".to_string(),
-        readme(&counts, &firmware, &names, &conflicts),
+        readme(&counts, &firmware, &pups, &names, &conflicts),
     );
     files.insert("schema.sql".to_string(), archive::schema_sql());
     files.insert("build.sql".to_string(), archive::build_sql());
@@ -377,6 +402,20 @@ fn firmware_rows_are_well_formed() {
         rows.len()
     );
     archive::check_firmware_rows(&rows).unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+fn pup_rows_are_well_formed() {
+    archive::check_pup_rows(&committed_pups()).unwrap_or_else(|error| panic!("{error}"));
+    let dir = archive_dir();
+    let tables: Vec<archive::Table> = [FIRMWARE, PUP]
+        .iter()
+        .map(|spec| {
+            archive::parse(spec, &read(&dir.join(spec.file())))
+                .unwrap_or_else(|error| panic!("{error}"))
+        })
+        .collect();
+    archive::check_references(&tables).unwrap_or_else(|error| panic!("{error}"));
 }
 
 #[test]

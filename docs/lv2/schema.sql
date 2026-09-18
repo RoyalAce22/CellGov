@@ -11,6 +11,16 @@ CREATE TABLE firmware (
     PRIMARY KEY ("fw")
 ) STRICT;
 
+CREATE TABLE pup (
+    "pup_sha256" TEXT NOT NULL,
+    "fw" TEXT NOT NULL REFERENCES firmware ("fw"),
+    "size_bytes" INTEGER NOT NULL,
+    "image_version" TEXT NOT NULL,
+    "source_note" TEXT NOT NULL,
+    "acquired" TEXT,
+    PRIMARY KEY ("pup_sha256")
+) STRICT;
+
 CREATE TABLE arm (
     "arm" TEXT NOT NULL,
     "fidelity" TEXT NOT NULL CHECK ("fidelity" IN ('modeled', 'partial-state', 'abi-only', 'null-backend')),

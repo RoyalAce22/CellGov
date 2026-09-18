@@ -27,6 +27,7 @@ the directory and this table disagree.
 | `conflicts.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
 | `name.tsv` | attributed | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
+| `pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
 | `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 | `schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 
@@ -74,6 +75,26 @@ priority is not 1, 2 or 3 or the census reference lacks priority 1,
 or when a single role sits on more or fewer than one row; a guard in
 `cellgov_boot` fails when a title manifest declares a firmware this
 table has no row for or gives less than priority 1.
+
+## PUP provenance
+
+`pup.tsv` is curated: one row per acquired PUP image. It contains
+98 images across 95 firmware versions.
+More than one row can name the same `fw` when a release was replaced
+or a disc carried a different image.
+
+| Column | Meaning |
+| --- | --- |
+| `pup_sha256` | SHA-256 over the PUP file bytes, and the row key. |
+| `fw` | The version key in `firmware.tsv`. |
+| `size_bytes` | PUP file length in bytes. |
+| `image_version` | The PUP header's image-version word as `0x` plus 16 lowercase hexadecimal digits. |
+| `source_note` | A general provenance label, with no URL or acquisition instruction. |
+| `acquired` | The acquisition date as `YYYY-MM-DD`, or `none` if no date was recorded. |
+
+The repository contains no PUP bytes. `pup_rows_are_well_formed` validates the
+digest, size, image-version and date shapes; the archive loader checks
+that each `fw` names a row of `firmware.tsv`.
 
 ## Handling
 

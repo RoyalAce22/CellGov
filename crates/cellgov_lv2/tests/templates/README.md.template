@@ -61,6 +61,26 @@ or when a single role sits on more or fewer than one row; a guard in
 `cellgov_boot` fails when a title manifest declares a firmware this
 table has no row for or gives less than priority 1.
 
+## PUP provenance
+
+`pup.tsv` is curated: one row per acquired PUP image. It contains
+{{pup_rows}} images across {{pup_versions}} firmware versions.
+More than one row can name the same `fw` when a release was replaced
+or a disc carried a different image.
+
+| Column | Meaning |
+| --- | --- |
+| `pup_sha256` | SHA-256 over the PUP file bytes, and the row key. |
+| `fw` | The version key in `firmware.tsv`. |
+| `size_bytes` | PUP file length in bytes. |
+| `image_version` | The PUP header's image-version word as `0x` plus 16 lowercase hexadecimal digits. |
+| `source_note` | A general provenance label, with no URL or acquisition instruction. |
+| `acquired` | The acquisition date as `YYYY-MM-DD`, or `none` if no date was recorded. |
+
+The repository contains no PUP bytes. `{{pup_gate}}` validates the
+digest, size, image-version and date shapes; the archive loader checks
+that each `fw` names a row of `firmware.tsv`.
+
 ## Handling
 
 `route.tsv` has one row per LV2 syscall slot, and `arm.tsv` one row

@@ -363,6 +363,56 @@ pub const FIRMWARE: TableSpec = TableSpec {
     gate: FIRMWARE_GATE,
 };
 
+/// The test that validates `pup.tsv` and its archive relations.
+pub const PUP_GATE: &str = "pup_rows_are_well_formed";
+
+/// Defines `pup.tsv` with one curated row per acquired PUP image.
+pub const PUP: TableSpec = TableSpec {
+    name: "pup",
+    owner: OwnerClass::Curated,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "fw",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: Some(("firmware", "fw")),
+        },
+        Column {
+            name: "size_bytes",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "image_version",
+            kind: ColumnKind::Locator,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "source_note",
+            kind: ColumnKind::Ident,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "acquired",
+            kind: ColumnKind::Locator,
+            nullable: true,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256"],
+    regenerate: None,
+    gate: PUP_GATE,
+};
+
 /// Labels of `name.source`; `NameSource::label` pins the order.
 pub const NAME_SOURCES: &[&str] = &["psdevwiki", "psl1ght", "cellgov", "non_public"];
 
@@ -476,7 +526,7 @@ pub const CONFLICTS: TableSpec = TableSpec {
 };
 
 /// Every table, a referenced table before the table that references it.
-pub const TABLES: &[TableSpec] = &[FIRMWARE, ARM, ROUTE, BEHAVIOR, NAME, CONFLICTS];
+pub const TABLES: &[TableSpec] = &[FIRMWARE, PUP, ARM, ROUTE, BEHAVIOR, NAME, CONFLICTS];
 
 /// The files under `docs/lv2/` that are not tables; the one regenerate
 /// command writes all of them.

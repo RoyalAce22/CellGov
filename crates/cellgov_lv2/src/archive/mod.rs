@@ -8,6 +8,7 @@ mod behavior;
 mod firmware;
 mod handling;
 mod name;
+mod pup;
 mod spec;
 mod sql;
 mod table;
@@ -27,11 +28,12 @@ pub use name::{
     conflict_rows, conflicts_tsv, macro_name_rows, name_rows, name_tsv, uncorroborated,
     with_cellgov_rows, ConflictRow, Disagreement, NameRow, NameSource, CELLGOV_CONSTANT_PATH,
 };
+pub use pup::{check_pup_rows, pup_rows, PupRow, PupTableError};
 pub use spec::{
     files, manifest, Column, ColumnKind, ManifestRow, OwnerClass, TableSpec, View, ARM, BEHAVIOR,
     BEHAVIOR_GATE, CONFLICTS, DISAGREEMENTS, EXCEPTIONS, FIDELITY_LABELS, FIRMWARE, FIRMWARE_GATE,
-    FIRMWARE_ROLES, GATE, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PROVENANCE_KINDS,
-    REGENERATE, ROUTE, ROUTE_LABELS, SELECTOR_SLOTS, TABLES, VIEWS,
+    FIRMWARE_ROLES, GATE, NAME, NAME_GATE, NAME_REGENERATE, NAME_SOURCES, PROVENANCE_KINDS, PUP,
+    PUP_GATE, REGENERATE, ROUTE, ROUTE_LABELS, SELECTOR_SLOTS, TABLES, VIEWS,
 };
 pub use sql::{build_sql, schema_sql, SQLITE_VERSION};
 pub use table::{check_references, parse, render, ArchiveError, Table, NONE};

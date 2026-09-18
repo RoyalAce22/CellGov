@@ -311,7 +311,7 @@ pub fn check_firmware_rows(rows: &[FirmwareRow]) -> Result<(), FirmwareTableErro
     Ok(())
 }
 
-fn is_date(text: &str) -> bool {
+pub(super) fn is_date(text: &str) -> bool {
     let parts: Vec<&str> = text.split('-').collect();
     let [year, month, day] = parts[..] else {
         return false;
@@ -327,6 +327,9 @@ fn is_date(text: &str) -> bool {
     };
     // docs/lv2/README.md defines release_date as a calendar day, so a
     // digit-shaped but impossible date is malformed too.
+    if year == 0 {
+        return false;
+    }
     let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
     let days = match month {
         1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,

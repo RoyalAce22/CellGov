@@ -14,6 +14,13 @@ SELECT "fw", CAST("order" AS INTEGER), NULLIF("release_date", 'none'), CAST("pri
 FROM staging_firmware;
 DROP TABLE staging_firmware;
 
+CREATE TEMP TABLE staging_pup ("pup_sha256" TEXT, "fw" TEXT, "size_bytes" TEXT, "image_version" TEXT, "source_note" TEXT, "acquired" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 pup.tsv staging_pup
+INSERT INTO pup ("pup_sha256", "fw", "size_bytes", "image_version", "source_note", "acquired")
+SELECT "pup_sha256", "fw", CAST("size_bytes" AS INTEGER), "image_version", "source_note", NULLIF("acquired", 'none')
+FROM staging_pup;
+DROP TABLE staging_pup;
+
 CREATE TEMP TABLE staging_arm ("arm" TEXT, "fidelity" TEXT, "ordinals" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 arm.tsv staging_arm
 INSERT INTO arm ("arm", "fidelity", "ordinals")
