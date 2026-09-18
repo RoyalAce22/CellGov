@@ -24,7 +24,7 @@ const UNTRACKED_TREES: &[&str] = &["docs/dev/", ".claude/", "scripts/", "CLAUDE.
 /// Extensions the dangling-pointer scan reads. JSON is generated data
 /// in this tree, so the scan skips it.
 const TEXT_EXTENSIONS: &[&str] = &[
-    "rs", "md", "toml", "txt", "yml", "yaml", "template", "tsv", "sql",
+    "rs", "md", "toml", "txt", "yml", "yaml", "template", "tsv", "sql", "sh", "ps1", "py",
 ];
 
 /// Floors on the populations each check polices. A collapse below one
@@ -664,6 +664,10 @@ fn doc_comments_name_only_workspace_crates() {
 fn no_tracked_text_cites_a_path_git_does_not_track() {
     let root = workspace_root();
     let files = tracked_text_files(&root);
+    assert!(
+        files.contains(&root.join(".github/ci.sh")),
+        "the shared CI shell script must be included in the private-path scan"
+    );
     assert!(
         files.len() >= MIN_TEXT_FILES,
         "gate went vacuous: only {} text file(s) walked",
