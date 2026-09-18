@@ -66,6 +66,7 @@ fn corpus_reextracts_byte_identical_census_rows() {
         KERNEL.file(),
         archive::STUB.file(),
         archive::SUBENTRY.file(),
+        archive::CAPABILITY_GATE.file(),
     ] {
         assert_eq!(
             read(&output.join(&file)),

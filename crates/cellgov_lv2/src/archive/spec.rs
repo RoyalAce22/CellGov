@@ -7,7 +7,7 @@ pub const REGENERATE: &str = "cargo test -p cellgov_lv2 --test lv2_archive -- --
 pub const GATE: &str = "committed_archive_matches_generator";
 
 /// Pins SQLite's `user_version` to the archive's frozen schema.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// Who writes a table, and under what discipline.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -456,6 +456,9 @@ pub const PRIMARY_LABELS: &[&str] = &["yes", "no"];
 /// Restricts packet attribution to sources recorded in the archive.
 pub const SUBENTRY_SOURCES: &[&str] = &["psdevwiki"];
 
+/// Lists the capability-gate analysis states.
+pub const GATE_STATES: &[&str] = &["gated", "ungated", "not_analysed"];
+
 /// Defines `kernel.tsv` with provenance and discovery evidence per PUP.
 pub const KERNEL: TableSpec = TableSpec {
     name: "kernel",
@@ -517,6 +520,12 @@ pub const KERNEL: TableSpec = TableSpec {
         },
         Column {
             name: "subentry_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "gate_sha256",
             kind: ColumnKind::Sha256,
             nullable: false,
             references: None,
@@ -665,6 +674,47 @@ pub const SUBENTRY_ATTRIBUTION: TableSpec = TableSpec {
     ],
     key: &["ordinal", "selector_slot", "packet", "source"],
     regenerate: None,
+    gate: CENSUS_GATE,
+};
+
+/// Defines `gate.tsv` with capability checks extracted from each PUP.
+pub const CAPABILITY_GATE: TableSpec = TableSpec {
+    name: "gate",
+    owner: OwnerClass::Extracted,
+    columns: &[
+        Column {
+            name: "pup_sha256",
+            kind: ColumnKind::Sha256,
+            nullable: false,
+            references: Some(("kernel", "pup_sha256")),
+        },
+        Column {
+            name: "ordinal",
+            kind: ColumnKind::Integer,
+            nullable: false,
+            references: Some(("route", "ordinal")),
+        },
+        Column {
+            name: "state",
+            kind: ColumnKind::Enum(GATE_STATES),
+            nullable: false,
+            references: None,
+        },
+        Column {
+            name: "reads",
+            kind: ColumnKind::Ident,
+            nullable: true,
+            references: None,
+        },
+        Column {
+            name: "fail_errno",
+            kind: ColumnKind::Hex32,
+            nullable: true,
+            references: None,
+        },
+    ],
+    key: &["pup_sha256", "ordinal"],
+    regenerate: Some(CENSUS_REGENERATE),
     gate: CENSUS_GATE,
 };
 
@@ -936,6 +986,7 @@ pub const TABLES: &[TableSpec] = &[
     KERNEL,
     STUB,
     SUBENTRY,
+    CAPABILITY_GATE,
     SUBENTRY_ATTRIBUTION,
     CALLER,
     CALLER_UNRESOLVED,

@@ -109,6 +109,11 @@ ordinal, selector argument, packet, class, and code target. A comparison
 chain produces no guessed packet rows; its census row reads
 `chain_incomplete`.
 
+`gate.tsv` has {{gate_rows}} capability-gate states. A `gated` row names the
+`ctrl_flags1` read and the Cell errno its denied path returns. An `ungated`
+row records a recognized permission record with no capability requirement;
+`not_analysed` means the bounded recognizer made no claim.
+
 `subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
 packet-set disagreement remains visible in the two tables and neither source

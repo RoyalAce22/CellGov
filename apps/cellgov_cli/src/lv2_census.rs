@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use cellgov_install::manifest::{sha256_of, Sha256};
 use cellgov_lv2::archive::{
-    self, CensusClass, CensusRow, DispatchShape, KernelRow, PupRow, StubRow, SubentryRow, CENSUS,
-    KERNEL, PUP, STUB, SUBENTRY,
+    self, CensusClass, CensusRow, DispatchShape, GateRow, GateState, KernelRow, PupRow, StubRow,
+    SubentryRow, CAPABILITY_GATE, CENSUS, KERNEL, PUP, STUB, SUBENTRY,
 };
+use cellgov_ppu::lv2_gate::{self, Lv2Gate, Lv2GateRead};
 use cellgov_ppu::lv2_stub::Lv2OrdinalClass;
 use cellgov_ppu::lv2_subdispatch::{self, Lv2Subdispatch, Lv2SubdispatchError, Lv2SubentryClass};
 
@@ -33,7 +34,7 @@ enum Lv2CensusError {
         recorded: String,
         requested: String,
     },
-    #[error("existing kernel census is partial under {}; kernel.tsv, stub.tsv, and subentry.tsv must all be present", path.display())]
+    #[error("existing kernel census is partial under {}; kernel.tsv, stub.tsv, subentry.tsv, and gate.tsv must all be present", path.display())]
     ExistingPartial { path: PathBuf },
     #[error("read existing {}: {source}", path.display())]
     Read {
@@ -76,6 +77,14 @@ enum Lv2CensusError {
     },
     #[error("existing extracted row names PUP {pup_sha256}, which is absent from kernel.tsv")]
     ExistingKernelReference { pup_sha256: String },
+    #[error(
+        "existing gate.tsv rows for PUP {pup_sha256} hash to {extracted}, not kernel.tsv digest {recorded}"
+    )]
+    ExistingGateDigest {
+        pup_sha256: String,
+        recorded: String,
+        extracted: String,
+    },
     #[error("create output directory {}: {source}", path.display())]
     CreateOutput {
         path: PathBuf,
@@ -96,12 +105,13 @@ pub(crate) fn run(args: &Lv2CensusArgs, vfs_flag: Option<&Path>) {
     let elf = decrypt_ppu_self_or_die(&raw, &args.path.to_string_lossy(), &vfs_root);
     let summary = emit(args, &elf).unwrap_or_else(|error| die(&format!("lv2-census: {error}")));
     println!(
-        "lv2-census: firmware {} PUP {} -> {} ordinals, {} stub targets, {} subentries, {} other same-version PUP rows removed under {}",
+        "lv2-census: firmware {} PUP {} -> {} ordinals, {} stub targets, {} subentries, {} gated ordinals, {} other same-version PUP rows removed under {}",
         args.fw,
         args.pup_sha256,
         summary.ordinals,
         summary.stub_targets,
         summary.subentries,
+        summary.gated,
         summary.removed_pups,
         args.output_dir.display()
     );
@@ -112,6 +122,7 @@ struct EmitSummary {
     ordinals: usize,
     stub_targets: usize,
     subentries: usize,
+    gated: usize,
     removed_pups: usize,
 }
 
@@ -120,6 +131,7 @@ struct ExistingRows {
     kernels: Vec<KernelRow>,
     stubs: Vec<StubRow>,
     subentries: Vec<SubentryRow>,
+    gates: Vec<GateRow>,
 }
 
 fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError> {
@@ -173,11 +185,23 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
             source,
         })?;
     let new_subentry_count = new_subentries.len();
+    let gate_classification =
+        lv2_gate::classify(elf, classification).map_err(Lv2SubdispatchError::from)?;
+    let new_gates = build_gate_rows(&args.pup_sha256, &gate_classification);
+    let new_gate_text = archive::gate_tsv(&new_gates).map_err(|source| Lv2CensusError::Render {
+        table: CAPABILITY_GATE.name,
+        source,
+    })?;
+    let gated_count = new_gates
+        .iter()
+        .filter(|row| row.state == GateState::Gated)
+        .count();
     let mut existing = load_existing(&args.output_dir)?;
     validate_existing(
         &existing.kernels,
         &existing.stubs,
         &existing.subentries,
+        &existing.gates,
         &pups,
     )?;
     let new_kernel = KernelRow {
@@ -191,6 +215,7 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
         confidence: classification.discovery.confidence.as_str().to_string(),
         census_sha256: census_sha256.clone(),
         subentry_sha256: sha256_hex(new_subentry_text.as_bytes()),
+        gate_sha256: sha256_hex(new_gate_text.as_bytes()),
     };
     let new_stubs: Vec<StubRow> = classification
         .stub_targets
@@ -211,6 +236,7 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
         &new_kernel,
         &new_stubs,
         &new_subentries,
+        &new_gates,
         args.replace_version,
     )?;
     let removed_pups = if args.replace_version {
@@ -227,9 +253,13 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
     existing
         .subentries
         .retain(|row| row.pup_sha256 != args.pup_sha256);
+    existing
+        .gates
+        .retain(|row| row.pup_sha256 != args.pup_sha256);
     existing.kernels.push(new_kernel);
     existing.stubs.extend(new_stubs);
     existing.subentries.extend(new_subentries);
+    existing.gates.extend(new_gates);
 
     refuse_digest_conflict(&existing.kernels, &pups)?;
     let kernel_text =
@@ -247,11 +277,24 @@ fn emit(args: &Lv2CensusArgs, elf: &[u8]) -> Result<EmitSummary, Lv2CensusError>
             table: SUBENTRY.name,
             source,
         })?;
-    write_all(args, &census_text, &kernel_text, &stub_text, &subentry_text)?;
+    let gate_text =
+        archive::gate_tsv(&existing.gates).map_err(|source| Lv2CensusError::Render {
+            table: CAPABILITY_GATE.name,
+            source,
+        })?;
+    write_all(
+        args,
+        &census_text,
+        &kernel_text,
+        &stub_text,
+        &subentry_text,
+        &gate_text,
+    )?;
     Ok(EmitSummary {
         ordinals: census_rows.len(),
         stub_targets: classification.stub_targets.len(),
         subentries: new_subentry_count,
+        gated: gated_count,
         removed_pups,
     })
 }
@@ -285,6 +328,34 @@ fn build_subentry_rows(
     rows
 }
 
+fn build_gate_rows(pup_sha256: &str, gates: &BTreeMap<usize, Lv2Gate>) -> Vec<GateRow> {
+    gates
+        .iter()
+        .map(|(ordinal, gate)| {
+            let (state, reads, fail_errno) = match gate {
+                Lv2Gate::Gated { reads, fail_errno } => (
+                    GateState::Gated,
+                    Some(match reads {
+                        Lv2GateRead::ControlFlags1(mask) => {
+                            format!("ctrl_flags1_0x{mask:08x}")
+                        }
+                    }),
+                    Some(*fail_errno),
+                ),
+                Lv2Gate::Ungated => (GateState::Ungated, None, None),
+                Lv2Gate::NotAnalysed => (GateState::NotAnalysed, None, None),
+            };
+            GateRow {
+                pup_sha256: pup_sha256.to_string(),
+                ordinal: *ordinal,
+                state,
+                reads,
+                fail_errno,
+            }
+        })
+        .collect()
+}
+
 fn remove_version_rows(
     fw: &str,
     selected_pup: &str,
@@ -312,6 +383,9 @@ fn remove_version_rows(
     existing
         .subentries
         .retain(|row| !replaced_pups.contains(row.pup_sha256.as_str()));
+    existing
+        .gates
+        .retain(|row| !replaced_pups.contains(row.pup_sha256.as_str()));
     removed
 }
 
@@ -321,6 +395,7 @@ fn refuse_extraction_conflict(
     new_kernel: &KernelRow,
     new_stubs: &[StubRow],
     new_subentries: &[SubentryRow],
+    new_gates: &[GateRow],
     allow_movement: bool,
 ) -> Result<(), Lv2CensusError> {
     let Some(existing_kernel) = existing
@@ -356,9 +431,18 @@ fn refuse_extraction_conflict(
     existing_subentries.sort_by_key(|row| (row.ordinal, row.packet));
     let mut replacement_subentries: Vec<&SubentryRow> = new_subentries.iter().collect();
     replacement_subentries.sort_by_key(|row| (row.ordinal, row.packet));
+    let mut existing_gates: Vec<&GateRow> = existing
+        .gates
+        .iter()
+        .filter(|row| row.pup_sha256 == pup_sha256)
+        .collect();
+    existing_gates.sort_by_key(|row| row.ordinal);
+    let mut replacement_gates: Vec<&GateRow> = new_gates.iter().collect();
+    replacement_gates.sort_by_key(|row| row.ordinal);
     if existing_kernel != new_kernel
         || existing_stubs != replacement_stubs
         || existing_subentries != replacement_subentries
+        || existing_gates != replacement_gates
     {
         return Err(Lv2CensusError::ExtractionConflict {
             pup_sha256: pup_sha256.to_string(),
@@ -376,20 +460,24 @@ fn load_existing(output_dir: &Path) -> Result<ExistingRows, Lv2CensusError> {
     let kernel_path = output_dir.join(KERNEL.file());
     let stub_path = output_dir.join(STUB.file());
     let subentry_path = output_dir.join(SUBENTRY.file());
+    let gate_path = output_dir.join(CAPABILITY_GATE.file());
     match (
         kernel_path.is_file(),
         stub_path.is_file(),
         subentry_path.is_file(),
+        gate_path.is_file(),
     ) {
-        (false, false, false) => Ok(ExistingRows::default()),
-        (true, true, true) => {
+        (false, false, false, false) => Ok(ExistingRows::default()),
+        (true, true, true, true) => {
             let kernel = read_table(&kernel_path, &KERNEL)?;
             let stub = read_table(&stub_path, &STUB)?;
             let subentry = archive::subentry_rows(&read_table(&subentry_path, &SUBENTRY)?);
+            let gate = archive::gate_rows(&read_table(&gate_path, &CAPABILITY_GATE)?);
             Ok(ExistingRows {
                 kernels: archive::kernel_rows(&kernel),
                 stubs: archive::stub_rows(&stub),
                 subentries: subentry,
+                gates: gate,
             })
         }
         _ => Err(Lv2CensusError::ExistingPartial {
@@ -441,6 +529,7 @@ fn validate_existing(
     kernels: &[KernelRow],
     stubs: &[StubRow],
     subentries: &[SubentryRow],
+    gates: &[GateRow],
     pups: &[PupRow],
 ) -> Result<(), Lv2CensusError> {
     let valid_pups: BTreeSet<&str> = pups.iter().map(|row| row.pup_sha256.as_str()).collect();
@@ -470,6 +559,33 @@ fn validate_existing(
             pup_sha256: subentry.pup_sha256.clone(),
         });
     }
+    if let Some(gate) = gates
+        .iter()
+        .find(|row| !kernel_pups.contains(row.pup_sha256.as_str()))
+    {
+        return Err(Lv2CensusError::ExistingKernelReference {
+            pup_sha256: gate.pup_sha256.clone(),
+        });
+    }
+    for kernel in kernels {
+        let pup_gates: Vec<GateRow> = gates
+            .iter()
+            .filter(|row| row.pup_sha256 == kernel.pup_sha256)
+            .cloned()
+            .collect();
+        let text = archive::gate_tsv(&pup_gates).map_err(|source| Lv2CensusError::Render {
+            table: CAPABILITY_GATE.name,
+            source,
+        })?;
+        let extracted = sha256_hex(text.as_bytes());
+        if extracted != kernel.gate_sha256 {
+            return Err(Lv2CensusError::ExistingGateDigest {
+                pup_sha256: kernel.pup_sha256.clone(),
+                recorded: kernel.gate_sha256.clone(),
+                extracted,
+            });
+        }
+    }
     Ok(())
 }
 
@@ -479,6 +595,7 @@ fn write_all(
     kernel_text: &str,
     stub_text: &str,
     subentry_text: &str,
+    gate_text: &str,
 ) -> Result<(), Lv2CensusError> {
     let census_dir = args.output_dir.join("census");
     std::fs::create_dir_all(&census_dir).map_err(|source| Lv2CensusError::CreateOutput {
@@ -505,6 +622,7 @@ fn write_all(
     write(&args.output_dir.join(KERNEL.file()), kernel_text)?;
     write(&args.output_dir.join(STUB.file()), stub_text)?;
     write(&args.output_dir.join(SUBENTRY.file()), subentry_text)?;
+    write(&args.output_dir.join(CAPABILITY_GATE.file()), gate_text)?;
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 //! This module defines the archive rows extracted from LV2 kernels.
 
-use super::spec::{CENSUS, KERNEL, STUB, SUBENTRY};
+use super::spec::{CAPABILITY_GATE, CENSUS, KERNEL, STUB, SUBENTRY};
 use super::table::{self, ArchiveError, Table, NONE};
 
 /// Records the extraction class of an ordinal or packet dispatch.
@@ -86,6 +86,8 @@ pub struct KernelRow {
     pub census_sha256: String,
     /// Identifies this PUP's canonical subentry rows by SHA-256.
     pub subentry_sha256: String,
+    /// Identifies this PUP's canonical capability-gate rows by SHA-256.
+    pub gate_sha256: String,
 }
 
 impl KernelRow {
@@ -101,6 +103,7 @@ impl KernelRow {
             self.confidence.clone(),
             self.census_sha256.clone(),
             self.subentry_sha256.clone(),
+            self.gate_sha256.clone(),
         ]
     }
 }
@@ -183,6 +186,65 @@ impl SubentryRow {
     }
 }
 
+/// Records the capability-gate analysis state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateState {
+    /// A recognized check reads a capability value.
+    Gated,
+    /// A recognized permission record has no capability requirement.
+    Ungated,
+    /// The bounded recognizer did not classify the implementation.
+    NotAnalysed,
+}
+
+impl GateState {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Gated => "gated",
+            Self::Ungated => "ungated",
+            Self::NotAnalysed => "not_analysed",
+        }
+    }
+
+    fn from_label(label: &str) -> Self {
+        match label {
+            "gated" => Self::Gated,
+            "ungated" => Self::Ungated,
+            "not_analysed" => Self::NotAnalysed,
+            _ => unreachable!("the archive parser checked the gate state"),
+        }
+    }
+}
+
+/// Records one PUP's capability-gate state for an ordinal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateRow {
+    /// Identifies the source PUP by SHA-256.
+    pub pup_sha256: String,
+    /// Gives the top-level LV2 ordinal.
+    pub ordinal: usize,
+    /// Gives the bounded analysis result.
+    pub state: GateState,
+    /// Names the capability value read by a recognized gate.
+    pub reads: Option<String>,
+    /// Gives the Cell error returned when the gate fails.
+    pub fail_errno: Option<u32>,
+}
+
+impl GateRow {
+    fn cells(&self) -> Vec<String> {
+        vec![
+            self.pup_sha256.clone(),
+            self.ordinal.to_string(),
+            self.state.label().to_string(),
+            self.reads.clone().unwrap_or_else(|| NONE.to_string()),
+            self.fail_errno
+                .map(hex32)
+                .unwrap_or_else(|| NONE.to_string()),
+        ]
+    }
+}
+
 impl CensusRow {
     fn cells(&self) -> Vec<String> {
         vec![
@@ -217,6 +279,7 @@ pub fn kernel_rows(table: &Table) -> Vec<KernelRow> {
             confidence: row[7].clone(),
             census_sha256: row[8].clone(),
             subentry_sha256: row[9].clone(),
+            gate_sha256: row[10].clone(),
         })
         .collect()
 }
@@ -274,6 +337,22 @@ pub fn subentry_rows(table: &Table) -> Vec<SubentryRow> {
         .collect()
 }
 
+/// Requires `table` to satisfy the [`CAPABILITY_GATE`] spec.
+pub fn gate_rows(table: &Table) -> Vec<GateRow> {
+    debug_assert_eq!(table.spec.name, CAPABILITY_GATE.name);
+    table
+        .rows
+        .iter()
+        .map(|row| GateRow {
+            pup_sha256: row[0].clone(),
+            ordinal: parse_usize(&row[1]),
+            state: GateState::from_label(&row[2]),
+            reads: (row[3] != NONE).then(|| row[3].clone()),
+            fail_errno: (row[4] != NONE).then(|| parse_hex32(&row[4])),
+        })
+        .collect()
+}
+
 /// Canonicalizes kernel rows by source PUP.
 ///
 /// # Errors
@@ -327,6 +406,24 @@ pub fn subentry_tsv(rows: &[SubentryRow]) -> Result<String, ArchiveError> {
             })
     });
     table::render(&SUBENTRY, &cells)
+}
+
+/// Canonicalizes capability-gate rows by PUP and ordinal.
+///
+/// # Errors
+///
+/// Returns [`ArchiveError`] when a row violates the frozen schema.
+pub fn gate_tsv(rows: &[GateRow]) -> Result<String, ArchiveError> {
+    let mut cells: Vec<Vec<String>> = rows.iter().map(GateRow::cells).collect();
+    cells.sort_by(|a, b| {
+        a[0].cmp(&b[0])
+            .then_with(|| parse_usize(&a[1]).cmp(&parse_usize(&b[1])))
+    });
+    table::render(&CAPABILITY_GATE, &cells)
+}
+
+fn hex32(value: u32) -> String {
+    format!("0x{value:08x}")
 }
 
 fn hex64(value: u64) -> String {

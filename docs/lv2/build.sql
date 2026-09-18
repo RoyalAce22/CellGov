@@ -35,10 +35,10 @@ SELECT CAST("ordinal" AS INTEGER), "route", NULLIF("arm", 'none')
 FROM staging_route;
 DROP TABLE staging_route;
 
-CREATE TEMP TABLE staging_kernel ("pup_sha256" TEXT, "kernel_elf_sha256" TEXT, "table_base" TEXT, "entry_width" TEXT, "entry_format" TEXT, "entry_count" TEXT, "discovery_method" TEXT, "confidence" TEXT, "census_sha256" TEXT, "subentry_sha256" TEXT);
+CREATE TEMP TABLE staging_kernel ("pup_sha256" TEXT, "kernel_elf_sha256" TEXT, "table_base" TEXT, "entry_width" TEXT, "entry_format" TEXT, "entry_count" TEXT, "discovery_method" TEXT, "confidence" TEXT, "census_sha256" TEXT, "subentry_sha256" TEXT, "gate_sha256" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 kernel.tsv staging_kernel
-INSERT INTO kernel ("pup_sha256", "kernel_elf_sha256", "table_base", "entry_width", "entry_format", "entry_count", "discovery_method", "confidence", "census_sha256", "subentry_sha256")
-SELECT "pup_sha256", "kernel_elf_sha256", "table_base", CAST("entry_width" AS INTEGER), "entry_format", CAST("entry_count" AS INTEGER), "discovery_method", "confidence", "census_sha256", "subentry_sha256"
+INSERT INTO kernel ("pup_sha256", "kernel_elf_sha256", "table_base", "entry_width", "entry_format", "entry_count", "discovery_method", "confidence", "census_sha256", "subentry_sha256", "gate_sha256")
+SELECT "pup_sha256", "kernel_elf_sha256", "table_base", CAST("entry_width" AS INTEGER), "entry_format", CAST("entry_count" AS INTEGER), "discovery_method", "confidence", "census_sha256", "subentry_sha256", "gate_sha256"
 FROM staging_kernel;
 DROP TABLE staging_kernel;
 
@@ -55,6 +55,13 @@ INSERT INTO subentry ("pup_sha256", "ordinal", "selector_slot", "packet", "class
 SELECT "pup_sha256", CAST("ordinal" AS INTEGER), "selector_slot", CAST("packet" AS INTEGER), "class", "target"
 FROM staging_subentry;
 DROP TABLE staging_subentry;
+
+CREATE TEMP TABLE staging_gate ("pup_sha256" TEXT, "ordinal" TEXT, "state" TEXT, "reads" TEXT, "fail_errno" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 gate.tsv staging_gate
+INSERT INTO gate ("pup_sha256", "ordinal", "state", "reads", "fail_errno")
+SELECT "pup_sha256", CAST("ordinal" AS INTEGER), "state", NULLIF("reads", 'none'), NULLIF("fail_errno", 'none')
+FROM staging_gate;
+DROP TABLE staging_gate;
 
 CREATE TEMP TABLE staging_subentry_attribution ("ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "source" TEXT, "ref" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry_attribution.tsv staging_subentry_attribution
@@ -219,6 +226,13 @@ DROP TABLE staging_census;
 
 CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-1.93.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-1.94.tsv staging_census
 INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
 SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
 FROM staging_census;
@@ -499,6 +513,265 @@ DROP TABLE staging_census;
 
 CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
 .import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-3.73.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.00.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.01.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.10.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.11.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.20.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.21.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.25.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.30.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.31.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.40.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.41.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.45.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.46.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.50.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.53.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.55.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.60.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.65.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.66.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.70.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.75.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.76.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.78.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.80.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.81.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.82.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.83.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.84.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.85.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.86.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.87.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.88.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.89.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.90.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.91.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.92.tsv staging_census
+INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
+SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
+FROM staging_census;
+DROP TABLE staging_census;
+
+CREATE TEMP TABLE staging_census ("fw" TEXT, "ordinal" TEXT, "class" TEXT, "target" TEXT, "dispatch" TEXT);
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 census/fw-4.93.tsv staging_census
 INSERT INTO census ("fw", "ordinal", "class", "target", "dispatch")
 SELECT "fw", CAST("ordinal" AS INTEGER), "class", NULLIF("target", 'none'), "dispatch"
 FROM staging_census;

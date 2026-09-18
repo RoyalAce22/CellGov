@@ -1,5 +1,5 @@
 use super::*;
-use crate::archive::{parse, CENSUS, KERNEL, STUB, SUBENTRY};
+use crate::archive::{parse, CAPABILITY_GATE, CENSUS, KERNEL, STUB, SUBENTRY};
 
 #[test]
 fn kernel_stub_and_census_rows_round_trip_byte_identically() {
@@ -14,18 +14,20 @@ fn kernel_stub_and_census_rows_round_trip_byte_identically() {
         confidence: "high".to_string(),
         census_sha256: "33".repeat(32),
         subentry_sha256: "44".repeat(32),
+        gate_sha256: "55".repeat(32),
     };
     let kernel_text = kernel_tsv(std::slice::from_ref(&kernel)).expect("render kernel");
     assert_eq!(
         kernel_text,
         concat!(
-            "pup_sha256\tkernel_elf_sha256\ttable_base\tentry_width\tentry_format\tentry_count\tdiscovery_method\tconfidence\tcensus_sha256\tsubentry_sha256\n",
+            "pup_sha256\tkernel_elf_sha256\ttable_base\tentry_width\tentry_format\tentry_count\tdiscovery_method\tconfidence\tcensus_sha256\tsubentry_sha256\tgate_sha256\n",
             "1111111111111111111111111111111111111111111111111111111111111111\t",
             "2222222222222222222222222222222222222222222222222222222222222222\t",
             "0x8000000000346570\t8\tppc64_descriptor_pointer\t1024\t",
             "sc_vector_descriptor_array\thigh\t",
             "3333333333333333333333333333333333333333333333333333333333333333\t",
-            "4444444444444444444444444444444444444444444444444444444444444444\n"
+            "4444444444444444444444444444444444444444444444444444444444444444\t",
+            "5555555555555555555555555555555555555555555555555555555555555555\n"
         )
     );
     assert_eq!(
@@ -135,6 +137,38 @@ fn subentry_rows_round_trip_with_decimal_packets() {
     );
     assert_eq!(
         subentry_rows(&parse(&SUBENTRY, &text).expect("parse subentry")),
+        rows
+    );
+}
+
+#[test]
+fn gate_rows_round_trip_all_three_states() {
+    let rows = vec![
+        GateRow {
+            pup_sha256: "44".repeat(32),
+            ordinal: 119,
+            state: GateState::Gated,
+            reads: Some("ctrl_flags1_0x40000000".to_string()),
+            fail_errno: Some(0x8001_0003),
+        },
+        GateRow {
+            pup_sha256: "44".repeat(32),
+            ordinal: 120,
+            state: GateState::Ungated,
+            reads: None,
+            fail_errno: None,
+        },
+        GateRow {
+            pup_sha256: "44".repeat(32),
+            ordinal: 121,
+            state: GateState::NotAnalysed,
+            reads: None,
+            fail_errno: None,
+        },
+    ];
+    let text = gate_tsv(&rows).expect("render gates");
+    assert_eq!(
+        gate_rows(&parse(&CAPABILITY_GATE, &text).expect("parse gates")),
         rows
     );
 }

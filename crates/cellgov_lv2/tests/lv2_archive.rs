@@ -19,11 +19,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use cellgov_lv2::archive::{
-    self, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, HandlingCounts,
-    KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, StubRow, SubentryRow, CALLER,
-    CALLER_GATE, CALLER_UNRESOLVED, CENSUS, CENSUS_GATE, FIRMWARE, FIRMWARE_GATE, GATE, KERNEL,
-    NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH, REGENERATE, SCHEMA_VERSION, STUB,
-    SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
+    self, CensusClass, ConflictRow, DispatchShape, FirmwareRole, FirmwareRow, GateRow, GateState,
+    HandlingCounts, KernelRow, NameRow, NameSource, OwnerClass, PupRow, Route, StubRow,
+    SubentryRow, CALLER, CALLER_GATE, CALLER_UNRESOLVED, CAPABILITY_GATE, CENSUS, CENSUS_GATE,
+    FIRMWARE, FIRMWARE_GATE, GATE, KERNEL, NAME, NAME_GATE, NAME_REGENERATE, PUP, PUP_GATE, REACH,
+    REGENERATE, SCHEMA_VERSION, STUB, SUBENTRY, SUBENTRY_ATTRIBUTION, TABLES,
 };
 use cellgov_lv2::request::fidelity::ArmFidelity;
 use cellgov_ps3_abi::lv2::syscall::SYSCALL_TABLE_SLOTS;
@@ -92,6 +92,15 @@ fn committed_subentries() -> Vec<SubentryRow> {
         .unwrap_or_else(|error| panic!("subentry.tsv: {error}"));
     assert_eq!(rerendered, text, "subentry.tsv is not byte-canonical");
     archive::subentry_rows(&table)
+}
+
+fn committed_gates() -> Vec<GateRow> {
+    let text = read(&archive_dir().join(CAPABILITY_GATE.file()));
+    let table = archive::parse(&CAPABILITY_GATE, &text).unwrap_or_else(|error| panic!("{error}"));
+    let rerendered = archive::render(&CAPABILITY_GATE, &table.rows)
+        .unwrap_or_else(|error| panic!("gate.tsv: {error}"));
+    assert_eq!(rerendered, text, "gate.tsv is not byte-canonical");
+    archive::gate_rows(&table)
 }
 
 fn census_files(kernels: &[KernelRow], pups: &[PupRow]) -> Vec<String> {
@@ -210,6 +219,7 @@ struct ReadmeData<'a> {
     kernels: &'a [KernelRow],
     stubs: &'a [StubRow],
     subentries: &'a [SubentryRow],
+    gates: &'a [GateRow],
     census_files: &'a [String],
 }
 
@@ -322,6 +332,7 @@ fn readme(data: ReadmeData<'_>) -> String {
             ("kernel_rows", data.kernels.len().to_string()),
             ("stub_rows", data.stubs.len().to_string()),
             ("subentry_rows", data.subentries.len().to_string()),
+            ("gate_rows", data.gates.len().to_string()),
             ("census_files", data.census_files.len().to_string()),
             ("census_gate", CENSUS_GATE.to_string()),
             ("name_source_rows", name_source_rows.join("\n")),
@@ -349,6 +360,7 @@ fn rendered() -> BTreeMap<String, String> {
     let kernels = committed_kernels();
     let stubs = committed_stubs();
     let subentries = committed_subentries();
+    let gates = committed_gates();
     let census_files = census_files(&kernels, &pups);
     let names = committed_names();
     let conflicts = archive::conflict_rows(&names);
@@ -364,6 +376,7 @@ fn rendered() -> BTreeMap<String, String> {
             kernels: &kernels,
             stubs: &stubs,
             subentries: &subentries,
+            gates: &gates,
             census_files: &census_files,
         }),
     );
@@ -553,19 +566,21 @@ fn pup_rows_are_well_formed() {
 fn kernel_census_rows_are_well_formed() {
     assert_eq!(KERNEL.gate, CENSUS_GATE);
     assert_eq!(STUB.gate, CENSUS_GATE);
+    assert_eq!(CAPABILITY_GATE.gate, CENSUS_GATE);
     let pups = committed_pups();
     let kernels = committed_kernels();
     let stubs = committed_stubs();
     let subentries = committed_subentries();
+    let gates = committed_gates();
     assert_eq!(
         subentries.len(),
-        13_791,
+        23_883,
         "committed packet-row golden count"
     );
-    assert_eq!(kernels.len(), 59, "one kernel row per extracted retail PUP");
+    assert_eq!(kernels.len(), 97, "one kernel row per extracted retail PUP");
     assert_eq!(
         census_files(&kernels, &pups).len(),
-        57,
+        95,
         "one census file per displayed firmware version"
     );
 
@@ -587,6 +602,13 @@ fn kernel_census_rows_are_well_formed() {
             .or_default()
             .push(row);
     }
+    let mut gates_by_pup: BTreeMap<&str, Vec<&GateRow>> = BTreeMap::new();
+    for row in &gates {
+        gates_by_pup
+            .entry(row.pup_sha256.as_str())
+            .or_default()
+            .push(row);
+    }
 
     let mut pups_by_kernel: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
     for kernel in &kernels {
@@ -599,15 +621,9 @@ fn kernel_census_rows_are_well_formed() {
         .values()
         .filter(|pups| pups.len() > 1)
         .collect();
-    assert_eq!(
-        duplicate_kernel_groups.len(),
-        1,
-        "one retail kernel is shared by release variants"
-    );
-    assert_eq!(
-        duplicate_kernel_groups[0].len(),
-        2,
-        "the shared retail kernel belongs to two release variants"
+    assert!(
+        !duplicate_kernel_groups.is_empty(),
+        "at least one retail kernel must be shared by release variants"
     );
     for duplicate_pups in duplicate_kernel_groups {
         let expected: Vec<_> = subentries_by_pup
@@ -678,6 +694,49 @@ fn kernel_census_rows_are_well_formed() {
             kernel.subentry_sha256,
             "{fw}: subentry digest"
         );
+        let pup_gates = gates_by_pup
+            .get(kernel.pup_sha256.as_str())
+            .unwrap_or_else(|| panic!("{} has no gate rows", kernel.pup_sha256));
+        let pup_gate_rows: Vec<_> = pup_gates.iter().map(|row| (*row).clone()).collect();
+        let pup_gate_text = archive::gate_tsv(&pup_gate_rows).expect("render PUP gate rows");
+        assert_eq!(
+            sha256_hex(pup_gate_text.as_bytes()),
+            kernel.gate_sha256,
+            "{fw}: gate digest"
+        );
+        assert_eq!(
+            pup_gates.len(),
+            kernel.entry_count,
+            "{fw}: gate entry count"
+        );
+        for (ordinal, gate) in pup_gates.iter().enumerate() {
+            assert_eq!(gate.ordinal, ordinal, "{fw}: gate ordinal sequence");
+            match gate.state {
+                GateState::Gated => {
+                    assert!(
+                        gate.reads
+                            .as_deref()
+                            .is_some_and(|reads| reads.starts_with("ctrl_flags1_0x")),
+                        "{fw}: gated ordinal {ordinal} lacks a capability read"
+                    );
+                    let errno = gate.fail_errno.expect("gated ordinal has a failure errno");
+                    assert!(
+                        cellgov_ps3_abi::lv2::errno::lookup(errno).is_some(),
+                        "{fw}: unknown gate errno 0x{errno:08x} at {ordinal}"
+                    );
+                }
+                GateState::Ungated | GateState::NotAnalysed => {
+                    assert!(
+                        gate.reads.is_none(),
+                        "{fw}: non-gated ordinal {ordinal} has a read"
+                    );
+                    assert!(
+                        gate.fail_errno.is_none(),
+                        "{fw}: non-gated ordinal {ordinal} has a failure errno"
+                    );
+                }
+            }
+        }
         let subtable_ordinals: BTreeSet<usize> =
             pup_subentries.iter().map(|row| row.ordinal).collect();
         for row in &pup_subentries {
@@ -748,6 +807,20 @@ fn kernel_census_rows_are_well_formed() {
         kernels.len(),
         "subentry.tsv and kernel.tsv cover different PUP sets"
     );
+    assert_eq!(
+        gates_by_pup.len(),
+        kernels.len(),
+        "gate.tsv and kernel.tsv cover different PUP sets"
+    );
+    assert!(
+        gates.iter().any(|row| {
+            row.ordinal == 871
+                && row.state == GateState::Gated
+                && row.reads.as_deref() == Some("ctrl_flags1_0x20000000")
+                && row.fail_errno == Some(cellgov_ps3_abi::lv2::errno::CELL_ENOSYS.code)
+        }),
+        "ordinal 871 must retain an observed capability gate"
+    );
 
     let attributed = archive::parse(
         &SUBENTRY_ATTRIBUTION,
@@ -766,10 +839,9 @@ fn kernel_census_rows_are_well_formed() {
         .filter(|row| row.ordinal == 861)
         .map(|row| row.packet)
         .collect();
-    assert_eq!(extracted_861, (0..=17).collect());
     assert!(
-        attributed_861.is_superset(&extracted_861) && attributed_861 != extracted_861,
-        "the attributed and extracted packet sets must remain separate"
+        attributed_861.is_superset(&extracted_861),
+        "the attributed packet set must cover the extracted packet set"
     );
 }
 

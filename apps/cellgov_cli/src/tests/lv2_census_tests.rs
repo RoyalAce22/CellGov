@@ -14,6 +14,7 @@ fn kernel(pup_sha256: &str, kernel_elf_sha256: &str, census_sha256: &str) -> Ker
         confidence: "high".to_string(),
         census_sha256: census_sha256.to_string(),
         subentry_sha256: "00".repeat(32),
+        gate_sha256: "00".repeat(32),
     }
 }
 
@@ -98,7 +99,7 @@ fn changed_census_requires_an_explicit_version_replacement() {
         replace_version: false,
     };
     assert!(matches!(
-        write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n"),
+        write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n", "gate\n"),
         Err(Lv2CensusError::CensusConflict { .. })
     ));
     assert_eq!(
@@ -107,7 +108,8 @@ fn changed_census_requires_an_explicit_version_replacement() {
     );
 
     args.replace_version = true;
-    write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n").expect("replace version");
+    write_all(&args, "new\n", "kernel\n", "stub\n", "subentry\n", "gate\n")
+        .expect("replace version");
     assert_eq!(
         std::fs::read_to_string(&path).expect("read census"),
         "new\n"
@@ -144,7 +146,7 @@ fn a_matching_version_census_does_not_hide_a_wrong_pup_kernel() {
         ..ExistingRows::default()
     };
     assert!(matches!(
-        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], false),
+        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], &[], false),
         Err(Lv2CensusError::KernelDigestConflict { pup_sha256, .. }) if pup_sha256 == "pup-a"
     ));
 }
@@ -158,8 +160,38 @@ fn replace_version_cannot_reassign_a_pup_to_another_kernel() {
         ..ExistingRows::default()
     };
     assert!(matches!(
-        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], true),
+        refuse_extraction_conflict("pup-a", &existing, &replacement, &[], &[], &[], true),
         Err(Lv2CensusError::KernelDigestConflict { pup_sha256, .. }) if pup_sha256 == "pup-a"
+    ));
+}
+
+#[test]
+fn existing_gate_rows_must_match_their_kernel_digest() {
+    let pups = vec![PupRow {
+        pup_sha256: "11".repeat(32),
+        fw: "3.56".to_string(),
+        size_bytes: 1,
+        image_version: "0x0000000000035600".to_string(),
+        source_note: "local".to_string(),
+        acquired: None,
+    }];
+    let mut recorded = kernel(&pups[0].pup_sha256, &"22".repeat(32), &"33".repeat(32));
+    recorded.gate_sha256 = sha256_hex(
+        archive::gate_tsv(&[GateRow {
+            pup_sha256: pups[0].pup_sha256.clone(),
+            ordinal: 0,
+            state: GateState::Ungated,
+            reads: None,
+            fail_errno: None,
+        }])
+        .expect("render recorded gates")
+        .as_bytes(),
+    );
+
+    assert!(matches!(
+        validate_existing(&[recorded], &[], &[], &[], &pups),
+        Err(Lv2CensusError::ExistingGateDigest { pup_sha256, .. })
+            if pup_sha256 == pups[0].pup_sha256
     ));
 }
 
@@ -214,6 +246,13 @@ fn version_replacement_removes_every_variant_and_reports_the_other_rows() {
             class: CensusClass::Implemented,
             target: 3,
         }],
+        gates: vec![GateRow {
+            pup_sha256: "pup-b".to_string(),
+            ordinal: 621,
+            state: GateState::Ungated,
+            reads: None,
+            fail_errno: None,
+        }],
     };
     assert_eq!(
         remove_version_rows("3.56", "pup-a", &pups, &mut existing),
@@ -229,4 +268,5 @@ fn version_replacement_removes_every_variant_and_reports_the_other_rows() {
     );
     assert!(existing.stubs.is_empty());
     assert!(existing.subentries.is_empty());
+    assert!(existing.gates.is_empty());
 }
