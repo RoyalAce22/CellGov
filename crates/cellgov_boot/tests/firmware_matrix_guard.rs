@@ -65,19 +65,19 @@ fn declared_cells_and_census_are_exactly_the_priority_one_rows() {
     );
     assert!(
         missing.is_empty(),
-        "title manifests declare firmware versions docs/lv2/firmware.tsv has no row for:\n  {}",
+        "title manifests declare firmware versions docs/lv2/tables/firmware.tsv has no row for:\n  {}",
         missing.join("\n  ")
     );
     assert!(
         not_first.is_empty(),
-        "docs/lv2/firmware.tsv gives priority 1 to every firmware a declared cell composes, \
+        "docs/lv2/tables/firmware.tsv gives priority 1 to every firmware a declared cell composes, \
          and these rows do not carry it:\n  {}",
         not_first.join("\n  ")
     );
     let unexplained = unexplained_priority_one(&firmware, &declared_firmware);
     assert!(
         unexplained.is_empty(),
-        "docs/lv2/firmware.tsv gives priority 1 only to firmware a declared cell composes and \
+        "docs/lv2/tables/firmware.tsv gives priority 1 only to firmware a declared cell composes and \
          the census reference; these rows have no such reason:\n  {}",
         unexplained.join("\n  ")
     );

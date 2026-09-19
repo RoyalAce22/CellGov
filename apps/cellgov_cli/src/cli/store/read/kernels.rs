@@ -53,7 +53,7 @@ const REPORT_REL: &str = ".cellgov/firmware-kernel-coverage.json";
 #[cfg(feature = "decrypt")]
 const FIRMWARE_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/firmware.tsv"
+    "/../../docs/lv2/tables/firmware.tsv"
 ));
 
 #[cfg(not(feature = "decrypt"))]

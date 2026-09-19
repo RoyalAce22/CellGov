@@ -654,18 +654,21 @@ fn rendered() -> BTreeMap<String, String> {
             census_files: &census_files,
         }),
     );
-    files.insert("schema.sql".to_string(), archive::schema_sql());
-    files.insert("build.sql".to_string(), archive::build_sql(&census_files));
+    files.insert("sql/schema.sql".to_string(), archive::schema_sql());
     files.insert(
-        "route.tsv".to_string(),
+        "sql/build.sql".to_string(),
+        archive::build_sql(&census_files),
+    );
+    files.insert(
+        archive::ROUTE.file(),
         archive::route_tsv(&routes).unwrap_or_else(|e| panic!("route.tsv: {e}")),
     );
     files.insert(
-        "arm.tsv".to_string(),
+        archive::ARM.file(),
         archive::arm_tsv(&arms).unwrap_or_else(|e| panic!("arm.tsv: {e}")),
     );
     files.insert(
-        "conflicts.tsv".to_string(),
+        archive::CONFLICTS.file(),
         archive::conflicts_tsv(&conflicts).unwrap_or_else(|e| panic!("conflicts.tsv: {e}")),
     );
     files.insert(
@@ -1322,12 +1325,17 @@ fn regenerate() {
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
     for (name, text) in rendered() {
         let path = dir.join(name);
+        let parent = path
+            .parent()
+            .expect("archive output has a parent directory");
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|e| panic!("create {}: {e}", parent.display()));
         std::fs::write(&path, text).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
     }
 }
 
 #[test]
-#[ignore = "writes docs/lv2/name.tsv; run when the macro's names change"]
+#[ignore = "writes docs/lv2/tables/name.tsv; run when the macro's names change"]
 fn regenerate_cellgov_names() {
     let rows = archive::with_cellgov_rows(&committed_names());
     let text = archive::name_tsv(&rows).unwrap_or_else(|e| panic!("name.tsv: {e}"));

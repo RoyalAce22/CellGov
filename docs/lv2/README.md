@@ -6,14 +6,22 @@ Do not edit by hand: `committed_archive_matches_generator` fails on drift. -->
 
 Text tables describing the LV2 syscall surface and CellGov's handling
 of it. The tables are the archive. SQLite is the query engine, built
-from them on demand by `build.sql` and never committed: a binary
+from them on demand by `sql/build.sql` and never committed: a binary
 would pass every diff-based review unseen, is not byte-stable, and
 would add its full size to public history on every change.
 
 Nothing reads these tables at dispatch. They describe the code; the
 code does not consult them.
 
-Archive schema version: **7**. `schema.sql` records the
+## Directory layout
+
+- `tables/` holds the archive's TSV tables.
+- `census/` holds the per-firmware syscall census tables.
+- `sql/` holds the generated schema and database-build scripts.
+
+Run the SQLite build command from this directory so its relative paths resolve.
+
+Archive schema version: **7**. `sql/schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -36,11 +44,6 @@ the directory and this table disagree.
 | File | Owner class | Regenerate | Gate |
 | --- | --- | --- | --- |
 | `README.md` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `arm.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `behavior.tsv` | curated | written by hand | `behavior_rows_cover_the_handled_surface` |
-| `build.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `caller.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
-| `caller_unresolved.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
 | `census/fw-1.02.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-1.10.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-1.11.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
@@ -136,22 +139,27 @@ the directory and this table disagree.
 | `census/fw-4.91.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-4.92.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
 | `census/fw-4.93.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `conflicts.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `coverage.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
-| `gate.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `kernel.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `name.tsv` | attributed | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
-| `presence.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `priority.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
-| `reach.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
-| `route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
-| `stub.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `subentry.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
-| `subentry_attribution.tsv` | attributed | written by hand | `kernel_census_rows_are_well_formed` |
-| `transitions.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `sql/build.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `sql/schema.sql` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/arm.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/behavior.tsv` | curated | written by hand | `behavior_rows_cover_the_handled_surface` |
+| `tables/caller.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
+| `tables/caller_unresolved.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
+| `tables/conflicts.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/coverage.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/firmware.tsv` | curated | written by hand | `firmware_rows_are_well_formed` |
+| `tables/gate.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `tables/kernel.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `tables/name.tsv` | attributed | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate_cellgov_names` (the `cellgov` rows) | `cellgov_name_rows_match_the_macro` |
+| `tables/presence.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/priority.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/pup.tsv` | curated | written by hand | `pup_rows_are_well_formed` |
+| `tables/reach.tsv` | extracted | `cargo run --release -p cellgov_cli --features decrypt -- dev caller-census --all --output-dir docs/lv2` | `caller_rows_are_well_formed` |
+| `tables/route.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
+| `tables/stub.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `tables/subentry.tsv` | extracted | `cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2` | `kernel_census_rows_are_well_formed` |
+| `tables/subentry_attribution.tsv` | attributed | written by hand | `kernel_census_rows_are_well_formed` |
+| `tables/transitions.tsv` | generated | `cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate` | `committed_archive_matches_generator` |
 
 ## Owner classes
 
@@ -170,7 +178,7 @@ under `vfs/.cellgov/`, never a file here.
 
 ## Firmware
 
-`firmware.tsv` is curated: one row per retail firmware version, the
+`tables/firmware.tsv` is curated: one row per retail firmware version, the
 spine every per-version table of the archive indexes against.
 106 versions, 98 with a release date.
 
@@ -200,7 +208,7 @@ table has no row for or gives less than priority 1.
 
 ## PUP provenance
 
-`pup.tsv` is curated: one row per acquired PUP image. It contains
+`tables/pup.tsv` is curated: one row per acquired PUP image. It contains
 98 images across 95 firmware versions.
 More than one row can name the same `fw` when a release was replaced
 or a disc carried a different image.
@@ -208,7 +216,7 @@ or a disc carried a different image.
 | Column | Meaning |
 | --- | --- |
 | `pup_sha256` | SHA-256 over the PUP file bytes, and the row key. |
-| `fw` | The version key in `firmware.tsv`. |
+| `fw` | The version key in `tables/firmware.tsv`. |
 | `size_bytes` | PUP file length in bytes. |
 | `image_version` | The PUP header's image-version word as `0x` plus 16 lowercase hexadecimal digits. |
 | `source_note` | A general provenance label, with no URL or acquisition instruction. |
@@ -216,11 +224,11 @@ or a disc carried a different image.
 
 The repository contains no PUP bytes. `pup_rows_are_well_formed` validates the
 digest, size, image-version and date shapes; the archive loader checks
-that each `fw` names a row of `firmware.tsv`.
+that each `fw` names a row of `tables/firmware.tsv`.
 
 ## Kernel census
 
-`kernel.tsv` has one provenance and discovery row per extracted PUP.
+`tables/kernel.tsv` has one provenance and discovery row per extracted PUP.
 Its 97 rows name the decrypted kernel ELF digest, table
 base, entry width and format, entry count, discovery method and
 confidence, and the digest of the matching census file.
@@ -231,37 +239,37 @@ its code target, and record whether dispatch is `flat`, `subtable`, or
 `chain_incomplete`. More than one PUP row can use the same version file
 only when the derived census bytes agree.
 
-`stub.tsv` has 1378 decoded constant-error targets. Each row
+`tables/stub.tsv` has 1378 decoded constant-error targets. Each row
 names its PUP, descriptor, code target, Cell errno and symbol, reference
 count, and whether it is the descriptor-histogram mode. The mode is a
 hypothesis until the target decodes as a constant-error leaf.
 
-`subentry.tsv` has 23883 packet targets decoded from bounded
+`tables/subentry.tsv` has 23883 packet targets decoded from bounded
 relative-offset jump tables. Each row keeps its source PUP, top-level
 ordinal, selector argument, packet, class, and code target. A comparison
 chain produces no guessed packet rows; its census row reads
 `chain_incomplete`.
 
-`gate.tsv` has 99328 capability-gate states. A `gated` row names the
+`tables/gate.tsv` has 99328 capability-gate states. A `gated` row names the
 `ctrl_flags1` read and the Cell errno its denied path returns. An `ungated`
 row records a recognized permission record with no capability requirement;
 `not_analysed` means the bounded recognizer made no claim.
 
-`presence.tsv` has 1024 ordinal rows. Each row lists every
+`tables/presence.tsv` has 1024 ordinal rows. Each row lists every
 extracted firmware version under exactly one of `implemented`, `stub`, or
 `absent`; a missing PUP is not represented as an absent version.
 
 ### Census history
 
-`transitions.tsv` has 4521 adjacent-version changes. A pair
+`tables/transitions.tsv` has 4521 adjacent-version changes. A pair
 without both extracted sides reads `not_compared`; target relocation moves with
 neighbouring entries and is not reported as a retarget.
 
-`coverage.tsv` has 2 denominators. It reports handled ordinals
+`tables/coverage.tsv` has 2 denominators. It reports handled ordinals
 separately against implemented and total extracted ordinals; a missing census
 reads `none`, never zero.
 
-`subentry_attribution.tsv` keeps community packet identifiers separate from
+`tables/subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
 packet-set disagreement remains visible in the two tables and neither source
 overwrites the other.
@@ -278,11 +286,11 @@ a corpus.
 
 ## Firmware callers
 
-The caller census contains derived structure only. `caller.tsv` groups
+The caller census contains derived structure only. `tables/caller.tsv` groups
 resolved `sc` sites by PUP hash, module path and LV2 ordinal.
-`caller_unresolved.tsv` has one row for every scanned module; `sites` is
+`tables/caller_unresolved.tsv` has one row for every scanned module; `sites` is
 `none` when the module has no unresolved `sc`, so absence and a completed
-zero-site scan stay distinct. `reach.tsv` links an exported function NID
+zero-site scan stay distinct. `tables/reach.tsv` links an exported function NID
 to each ordinal that a resolved site in its function span reaches. An
 export NID is never used as a syscall name.
 
@@ -293,7 +301,7 @@ cross-table coverage rules.
 
 ## Handling
 
-`route.tsv` has one row per LV2 syscall slot, and `arm.tsv` one row
+`tables/route.tsv` has one row per LV2 syscall slot, and `tables/arm.tsv` one row
 per dispatch arm with the slots that reach it. Of the 1024 slots:
 
 | Route | Slots | Meaning |
@@ -306,7 +314,7 @@ per dispatch arm with the slots that reach it. Of the 1024 slots:
 The routing-layer guarantee -- an unhandled syscall returns
 `CELL_ENOSYS` through the null backend, never a fabricated success --
 holds for the whole surface. How much real LV2 behavior each handled
-arm reproduces is a per-arm property, tagged in `arm.tsv`:
+arm reproduces is a per-arm property, tagged in `tables/arm.tsv`:
 
 | Tag | Meaning |
 | --- | --- |
@@ -322,7 +330,7 @@ check.
 
 ## Behavior
 
-`behavior.tsv` is curated: one row per typed or routed ordinal, written
+`tables/behavior.tsv` is curated: one row per typed or routed ordinal, written
 by hand, saying what the modelled behaviour rests on and what pins it.
 What the arm does lives in its rustdoc; nothing is restated here.
 
@@ -348,7 +356,7 @@ fabricate one.
 ## Names
 
 An ordinal is extracted: the kernel's dispatch table fixes it. A name
-is attributed: no firmware byte carries one, so `name.tsv` records
+is attributed: no firmware byte carries one, so `tables/name.tsv` records
 every name a committed source gives an ordinal as one row against
 that source, and an ordinal no source names has no row. That is a
 normal state, not a gap. Where the sources disagree, every candidate
@@ -381,7 +389,7 @@ for it either; the reach tables report exports beside names.
 
 ### Conflicts
 
-`conflicts.tsv` holds the rows of `name.tsv` whose slot carries more
+`tables/conflicts.tsv` holds the rows of `tables/name.tsv` whose slot carries more
 than one distinct name: `spelling` when the names are one identifier
 under different leading underscores, `name` otherwise.
 31 slots:
@@ -435,7 +443,7 @@ carries whatever else is known. 3 slots:
 ## Table rules
 
 The loader in `cellgov_lv2::archive` refuses a table that breaks any
-of these. `build.sql` re-checks only the column types, the enumerated
+of these. `sql/build.sql` re-checks only the column types, the enumerated
 labels and the foreign keys (STRICT tables, CHECK constraints,
 `PRAGMA foreign_keys`); the sqlite3 import pads a short row, drops a
 long row's extras with a warning, and reads a malformed integer as a
@@ -459,19 +467,19 @@ same other key cells repeat the key.
 ## Querying
 
 Built and verified with sqlite3 3.53.0; the `.import`
-options `build.sql` uses are absent from older shells. From this
+options `sql/build.sql` uses are absent from older shells. From this
 directory:
 
-    sqlite3 lv2.db < build.sql
+    sqlite3 lv2.db < sql/build.sql
     sqlite3 lv2.db "SELECT ordinal, arm, fidelity FROM handling WHERE route = 'typed'"
     sqlite3 lv2.db "SELECT ordinal, arm, provenance_kind FROM authority WHERE witness IS NULL"
     sqlite3 lv2.db "SELECT name, source FROM name WHERE ordinal = 190"
     sqlite3 lv2.db "SELECT fw, class, count(*) FROM census GROUP BY fw, class"
 
-`schema.sql` holds the tables and the join-only views (`handling`
+`sql/schema.sql` holds the tables and the join-only views (`handling`
 over route and arm, `authority` over behavior, route and arm; none
 joins `name`, so no view reads as giving an ordinal its name);
-`build.sql` reads it, imports each table through a staging table, and
+`sql/build.sql` reads it, imports each table through a staging table, and
 stops at the first error. A table whose key holds a nullable column
 (`name`, `conflicts`) is `UNIQUE` rather than `PRIMARY KEY` in SQL,
 where a `STRICT` key column could not be null; the loader alone

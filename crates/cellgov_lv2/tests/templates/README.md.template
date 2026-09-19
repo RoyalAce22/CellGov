@@ -6,14 +6,22 @@ Do not edit by hand: `{{gate}}` fails on drift. -->
 
 Text tables describing the LV2 syscall surface and CellGov's handling
 of it. The tables are the archive. SQLite is the query engine, built
-from them on demand by `build.sql` and never committed: a binary
+from them on demand by `sql/build.sql` and never committed: a binary
 would pass every diff-based review unseen, is not byte-stable, and
 would add its full size to public history on every change.
 
 Nothing reads these tables at dispatch. They describe the code; the
 code does not consult them.
 
-Archive schema version: **{{schema_version}}**. `schema.sql` records the
+## Directory layout
+
+- `tables/` holds the archive's TSV tables.
+- `census/` holds the per-firmware syscall census tables.
+- `sql/` holds the generated schema and database-build scripts.
+
+Run the SQLite build command from this directory so its relative paths resolve.
+
+Archive schema version: **{{schema_version}}**. `sql/schema.sql` records the
 same value in SQLite's `user_version`, so a column change cannot pass as
 an unchanged archive.
 
@@ -51,7 +59,7 @@ under `vfs/.cellgov/`, never a file here.
 
 ## Firmware
 
-`firmware.tsv` is curated: one row per retail firmware version, the
+`tables/firmware.tsv` is curated: one row per retail firmware version, the
 spine every per-version table of the archive indexes against.
 {{firmware_rows}} versions, {{firmware_dated}} with a release date.
 
@@ -78,7 +86,7 @@ table has no row for or gives less than priority 1.
 
 ## PUP provenance
 
-`pup.tsv` is curated: one row per acquired PUP image. It contains
+`tables/pup.tsv` is curated: one row per acquired PUP image. It contains
 {{pup_rows}} images across {{pup_versions}} firmware versions.
 More than one row can name the same `fw` when a release was replaced
 or a disc carried a different image.
@@ -86,7 +94,7 @@ or a disc carried a different image.
 | Column | Meaning |
 | --- | --- |
 | `pup_sha256` | SHA-256 over the PUP file bytes, and the row key. |
-| `fw` | The version key in `firmware.tsv`. |
+| `fw` | The version key in `tables/firmware.tsv`. |
 | `size_bytes` | PUP file length in bytes. |
 | `image_version` | The PUP header's image-version word as `0x` plus 16 lowercase hexadecimal digits. |
 | `source_note` | A general provenance label, with no URL or acquisition instruction. |
@@ -94,11 +102,11 @@ or a disc carried a different image.
 
 The repository contains no PUP bytes. `{{pup_gate}}` validates the
 digest, size, image-version and date shapes; the archive loader checks
-that each `fw` names a row of `firmware.tsv`.
+that each `fw` names a row of `tables/firmware.tsv`.
 
 ## Kernel census
 
-`kernel.tsv` has one provenance and discovery row per extracted PUP.
+`tables/kernel.tsv` has one provenance and discovery row per extracted PUP.
 Its {{kernel_rows}} rows name the decrypted kernel ELF digest, table
 base, entry width and format, entry count, discovery method and
 confidence, and the digest of the matching census file.
@@ -109,37 +117,37 @@ its code target, and record whether dispatch is `flat`, `subtable`, or
 `chain_incomplete`. More than one PUP row can use the same version file
 only when the derived census bytes agree.
 
-`stub.tsv` has {{stub_rows}} decoded constant-error targets. Each row
+`tables/stub.tsv` has {{stub_rows}} decoded constant-error targets. Each row
 names its PUP, descriptor, code target, Cell errno and symbol, reference
 count, and whether it is the descriptor-histogram mode. The mode is a
 hypothesis until the target decodes as a constant-error leaf.
 
-`subentry.tsv` has {{subentry_rows}} packet targets decoded from bounded
+`tables/subentry.tsv` has {{subentry_rows}} packet targets decoded from bounded
 relative-offset jump tables. Each row keeps its source PUP, top-level
 ordinal, selector argument, packet, class, and code target. A comparison
 chain produces no guessed packet rows; its census row reads
 `chain_incomplete`.
 
-`gate.tsv` has {{gate_rows}} capability-gate states. A `gated` row names the
+`tables/gate.tsv` has {{gate_rows}} capability-gate states. A `gated` row names the
 `ctrl_flags1` read and the Cell errno its denied path returns. An `ungated`
 row records a recognized permission record with no capability requirement;
 `not_analysed` means the bounded recognizer made no claim.
 
-`presence.tsv` has {{presence_rows}} ordinal rows. Each row lists every
+`tables/presence.tsv` has {{presence_rows}} ordinal rows. Each row lists every
 extracted firmware version under exactly one of `implemented`, `stub`, or
 `absent`; a missing PUP is not represented as an absent version.
 
 ### Census history
 
-`transitions.tsv` has {{transition_rows}} adjacent-version changes. A pair
+`tables/transitions.tsv` has {{transition_rows}} adjacent-version changes. A pair
 without both extracted sides reads `not_compared`; target relocation moves with
 neighbouring entries and is not reported as a retarget.
 
-`coverage.tsv` has {{coverage_rows}} denominators. It reports handled ordinals
+`tables/coverage.tsv` has {{coverage_rows}} denominators. It reports handled ordinals
 separately against implemented and total extracted ordinals; a missing census
 reads `none`, never zero.
 
-`subentry_attribution.tsv` keeps community packet identifiers separate from
+`tables/subentry_attribution.tsv` keeps community packet identifiers separate from
 the extracted rows. Each attributed row names its source and reference. A
 packet-set disagreement remains visible in the two tables and neither source
 overwrites the other.
@@ -156,11 +164,11 @@ a corpus.
 
 ## Firmware callers
 
-The caller census contains derived structure only. `caller.tsv` groups
+The caller census contains derived structure only. `tables/caller.tsv` groups
 resolved `sc` sites by PUP hash, module path and LV2 ordinal.
-`caller_unresolved.tsv` has one row for every scanned module; `sites` is
+`tables/caller_unresolved.tsv` has one row for every scanned module; `sites` is
 `none` when the module has no unresolved `sc`, so absence and a completed
-zero-site scan stay distinct. `reach.tsv` links an exported function NID
+zero-site scan stay distinct. `tables/reach.tsv` links an exported function NID
 to each ordinal that a resolved site in its function span reaches. An
 export NID is never used as a syscall name.
 
@@ -171,7 +179,7 @@ cross-table coverage rules.
 
 ## Handling
 
-`route.tsv` has one row per LV2 syscall slot, and `arm.tsv` one row
+`tables/route.tsv` has one row per LV2 syscall slot, and `tables/arm.tsv` one row
 per dispatch arm with the slots that reach it. Of the {{slots}} slots:
 
 | Route | Slots | Meaning |
@@ -181,7 +189,7 @@ per dispatch arm with the slots that reach it. Of the {{slots}} slots:
 The routing-layer guarantee -- an unhandled syscall returns
 `CELL_ENOSYS` through the null backend, never a fabricated success --
 holds for the whole surface. How much real LV2 behavior each handled
-arm reproduces is a per-arm property, tagged in `arm.tsv`:
+arm reproduces is a per-arm property, tagged in `tables/arm.tsv`:
 
 | Tag | Meaning |
 | --- | --- |
@@ -194,7 +202,7 @@ check.
 
 ## Behavior
 
-`behavior.tsv` is curated: one row per typed or routed ordinal, written
+`tables/behavior.tsv` is curated: one row per typed or routed ordinal, written
 by hand, saying what the modelled behaviour rests on and what pins it.
 What the arm does lives in its rustdoc; nothing is restated here.
 
@@ -220,7 +228,7 @@ fabricate one.
 ## Names
 
 An ordinal is extracted: the kernel's dispatch table fixes it. A name
-is attributed: no firmware byte carries one, so `name.tsv` records
+is attributed: no firmware byte carries one, so `tables/name.tsv` records
 every name a committed source gives an ordinal as one row against
 that source, and an ordinal no source names has no row. That is a
 normal state, not a gap. Where the sources disagree, every candidate
@@ -250,7 +258,7 @@ for it either; the reach tables report exports beside names.
 
 ### Conflicts
 
-`conflicts.tsv` holds the rows of `name.tsv` whose slot carries more
+`tables/conflicts.tsv` holds the rows of `tables/name.tsv` whose slot carries more
 than one distinct name: `spelling` when the names are one identifier
 under different leading underscores, `name` otherwise.
 {{conflict_count}} slots:
@@ -272,7 +280,7 @@ carries whatever else is known. {{uncorroborated_count}} slots:
 ## Table rules
 
 The loader in `cellgov_lv2::archive` refuses a table that breaks any
-of these. `build.sql` re-checks only the column types, the enumerated
+of these. `sql/build.sql` re-checks only the column types, the enumerated
 labels and the foreign keys (STRICT tables, CHECK constraints,
 `PRAGMA foreign_keys`); the sqlite3 import pads a short row, drops a
 long row's extras with a warning, and reads a malformed integer as a
@@ -296,19 +304,19 @@ same other key cells repeat the key.
 ## Querying
 
 Built and verified with sqlite3 {{sqlite_version}}; the `.import`
-options `build.sql` uses are absent from older shells. From this
+options `sql/build.sql` uses are absent from older shells. From this
 directory:
 
-    sqlite3 lv2.db < build.sql
+    sqlite3 lv2.db < sql/build.sql
     sqlite3 lv2.db "SELECT ordinal, arm, fidelity FROM handling WHERE route = 'typed'"
     sqlite3 lv2.db "SELECT ordinal, arm, provenance_kind FROM authority WHERE witness IS NULL"
     sqlite3 lv2.db "SELECT name, source FROM name WHERE ordinal = 190"
     sqlite3 lv2.db "SELECT fw, class, count(*) FROM census GROUP BY fw, class"
 
-`schema.sql` holds the tables and the join-only views (`handling`
+`sql/schema.sql` holds the tables and the join-only views (`handling`
 over route and arm, `authority` over behavior, route and arm; none
 joins `name`, so no view reads as giving an ordinal its name);
-`build.sql` reads it, imports each table through a staging table, and
+`sql/build.sql` reads it, imports each table through a staging table, and
 stops at the first error. A table whose key holds a nullable column
 (`name`, `conflicts`) is `UNIQUE` rather than `PRIMARY KEY` in SQL,
 where a `STRICT` key column could not be null; the loader alone

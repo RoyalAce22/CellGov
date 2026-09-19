@@ -86,11 +86,11 @@ pub fn schema_sql() -> String {
 pub fn build_sql(census_files: &[String]) -> String {
     let mut out = banner();
     out.push_str(
-        "-- Run in docs/lv2/: sqlite3 lv2.db < build.sql\n\
+        "-- Run in docs/lv2/: sqlite3 lv2.db < sql/build.sql\n\
          \n\
          .bail on\n\
          PRAGMA foreign_keys = ON;\n\
-         .read schema.sql\n",
+         .read sql/schema.sql\n",
     );
     for table in TABLES {
         append_import(&mut out, table, &table.file());

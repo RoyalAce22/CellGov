@@ -102,7 +102,7 @@ fn the_manifest_lists_every_table_and_the_fixed_files_once() {
         );
     }
     assert!(files.contains(&census[0]));
-    for fixed in ["README.md", "schema.sql", "build.sql"] {
+    for fixed in ["README.md", "sql/schema.sql", "sql/build.sql"] {
         assert!(
             files.iter().any(|f| f == fixed),
             "{fixed} has no manifest row"

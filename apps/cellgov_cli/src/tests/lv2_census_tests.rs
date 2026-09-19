@@ -119,7 +119,7 @@ fn changed_census_requires_an_explicit_version_replacement() {
 #[test]
 fn an_existing_archive_without_subentries_is_refused_as_partial() {
     let output = scratch_labeled("lv2_census_partial_subentry");
-    std::fs::create_dir_all(output.as_ref()).expect("create output directory");
+    std::fs::create_dir_all(output.join("tables")).expect("create table directory");
     std::fs::write(
         output.join(KERNEL.file()),
         archive::kernel_tsv(&[]).expect("render empty kernel table"),

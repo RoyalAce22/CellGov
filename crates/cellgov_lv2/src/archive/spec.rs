@@ -158,7 +158,7 @@ pub struct TableSpec {
 impl TableSpec {
     /// The file name under `docs/lv2/`.
     pub fn file(&self) -> String {
-        format!("{}.tsv", self.name)
+        format!("tables/{}.tsv", self.name)
     }
 
     /// Index of each key column in [`TableSpec::columns`].
@@ -1188,7 +1188,7 @@ pub const TABLES: &[TableSpec] = &[
 
 /// The files under `docs/lv2/` that are not tables; the one regenerate
 /// command writes all of them.
-const FIXED_FILES: &[&str] = &["README.md", "schema.sql", "build.sql"];
+const FIXED_FILES: &[&str] = &["README.md", "sql/schema.sql", "sql/build.sql"];
 
 /// One row of the archive document's manifest.
 #[derive(Debug, Clone, PartialEq, Eq)]

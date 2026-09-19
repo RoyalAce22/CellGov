@@ -1,140 +1,140 @@
 -- Rendered from cellgov_lv2::archive by
 --   cargo test -p cellgov_lv2 --test lv2_archive -- --ignored regenerate
 -- Do not edit by hand: committed_archive_matches_generator fails on drift.
--- Run in docs/lv2/: sqlite3 lv2.db < build.sql
+-- Run in docs/lv2/: sqlite3 lv2.db < sql/build.sql
 
 .bail on
 PRAGMA foreign_keys = ON;
-.read schema.sql
+.read sql/schema.sql
 
 CREATE TEMP TABLE staging_firmware ("fw" TEXT, "order" TEXT, "release_date" TEXT, "priority" TEXT, "role" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 firmware.tsv staging_firmware
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/firmware.tsv staging_firmware
 INSERT INTO firmware ("fw", "order", "release_date", "priority", "role")
 SELECT "fw", CAST("order" AS INTEGER), NULLIF("release_date", 'none'), CAST("priority" AS INTEGER), NULLIF("role", 'none')
 FROM staging_firmware;
 DROP TABLE staging_firmware;
 
 CREATE TEMP TABLE staging_pup ("pup_sha256" TEXT, "fw" TEXT, "size_bytes" TEXT, "image_version" TEXT, "source_note" TEXT, "acquired" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 pup.tsv staging_pup
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/pup.tsv staging_pup
 INSERT INTO pup ("pup_sha256", "fw", "size_bytes", "image_version", "source_note", "acquired")
 SELECT "pup_sha256", "fw", CAST("size_bytes" AS INTEGER), "image_version", "source_note", NULLIF("acquired", 'none')
 FROM staging_pup;
 DROP TABLE staging_pup;
 
 CREATE TEMP TABLE staging_arm ("arm" TEXT, "fidelity" TEXT, "ordinals" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 arm.tsv staging_arm
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/arm.tsv staging_arm
 INSERT INTO arm ("arm", "fidelity", "ordinals")
 SELECT "arm", "fidelity", NULLIF("ordinals", 'none')
 FROM staging_arm;
 DROP TABLE staging_arm;
 
 CREATE TEMP TABLE staging_route ("ordinal" TEXT, "route" TEXT, "arm" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 route.tsv staging_route
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/route.tsv staging_route
 INSERT INTO route ("ordinal", "route", "arm")
 SELECT CAST("ordinal" AS INTEGER), "route", NULLIF("arm", 'none')
 FROM staging_route;
 DROP TABLE staging_route;
 
 CREATE TEMP TABLE staging_kernel ("pup_sha256" TEXT, "kernel_elf_sha256" TEXT, "table_base" TEXT, "entry_width" TEXT, "entry_format" TEXT, "entry_count" TEXT, "discovery_method" TEXT, "confidence" TEXT, "census_sha256" TEXT, "subentry_sha256" TEXT, "gate_sha256" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 kernel.tsv staging_kernel
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/kernel.tsv staging_kernel
 INSERT INTO kernel ("pup_sha256", "kernel_elf_sha256", "table_base", "entry_width", "entry_format", "entry_count", "discovery_method", "confidence", "census_sha256", "subentry_sha256", "gate_sha256")
 SELECT "pup_sha256", "kernel_elf_sha256", "table_base", CAST("entry_width" AS INTEGER), "entry_format", CAST("entry_count" AS INTEGER), "discovery_method", "confidence", "census_sha256", "subentry_sha256", "gate_sha256"
 FROM staging_kernel;
 DROP TABLE staging_kernel;
 
 CREATE TEMP TABLE staging_stub ("pup_sha256" TEXT, "descriptor" TEXT, "target" TEXT, "errno" TEXT, "errno_symbol" TEXT, "references" TEXT, "primary" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 stub.tsv staging_stub
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/stub.tsv staging_stub
 INSERT INTO stub ("pup_sha256", "descriptor", "target", "errno", "errno_symbol", "references", "primary")
 SELECT "pup_sha256", "descriptor", "target", "errno", "errno_symbol", CAST("references" AS INTEGER), "primary"
 FROM staging_stub;
 DROP TABLE staging_stub;
 
 CREATE TEMP TABLE staging_subentry ("pup_sha256" TEXT, "ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "class" TEXT, "target" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry.tsv staging_subentry
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/subentry.tsv staging_subentry
 INSERT INTO subentry ("pup_sha256", "ordinal", "selector_slot", "packet", "class", "target")
 SELECT "pup_sha256", CAST("ordinal" AS INTEGER), "selector_slot", CAST("packet" AS INTEGER), "class", "target"
 FROM staging_subentry;
 DROP TABLE staging_subentry;
 
 CREATE TEMP TABLE staging_gate ("pup_sha256" TEXT, "ordinal" TEXT, "state" TEXT, "reads" TEXT, "fail_errno" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 gate.tsv staging_gate
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/gate.tsv staging_gate
 INSERT INTO gate ("pup_sha256", "ordinal", "state", "reads", "fail_errno")
 SELECT "pup_sha256", CAST("ordinal" AS INTEGER), "state", NULLIF("reads", 'none'), NULLIF("fail_errno", 'none')
 FROM staging_gate;
 DROP TABLE staging_gate;
 
 CREATE TEMP TABLE staging_presence ("ordinal" TEXT, "implemented_versions" TEXT, "stub_versions" TEXT, "absent_versions" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 presence.tsv staging_presence
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/presence.tsv staging_presence
 INSERT INTO presence ("ordinal", "implemented_versions", "stub_versions", "absent_versions")
 SELECT CAST("ordinal" AS INTEGER), NULLIF("implemented_versions", 'none'), NULLIF("stub_versions", 'none'), NULLIF("absent_versions", 'none')
 FROM staging_presence;
 DROP TABLE staging_presence;
 
 CREATE TEMP TABLE staging_transitions ("record" TEXT, "from_fw" TEXT, "to_fw" TEXT, "comparison" TEXT, "kind" TEXT, "ordinal" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 transitions.tsv staging_transitions
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/transitions.tsv staging_transitions
 INSERT INTO transitions ("record", "from_fw", "to_fw", "comparison", "kind", "ordinal")
 SELECT CAST("record" AS INTEGER), "from_fw", "to_fw", "comparison", NULLIF("kind", 'none'), CAST(NULLIF("ordinal", 'none') AS INTEGER)
 FROM staging_transitions;
 DROP TABLE staging_transitions;
 
 CREATE TEMP TABLE staging_coverage ("scope" TEXT, "extracted" TEXT, "handled" TEXT, "versions" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 coverage.tsv staging_coverage
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/coverage.tsv staging_coverage
 INSERT INTO coverage ("scope", "extracted", "handled", "versions")
 SELECT "scope", CAST(NULLIF("extracted", 'none') AS INTEGER), CAST(NULLIF("handled", 'none') AS INTEGER), CAST("versions" AS INTEGER)
 FROM staging_coverage;
 DROP TABLE staging_coverage;
 
 CREATE TEMP TABLE staging_subentry_attribution ("ordinal" TEXT, "selector_slot" TEXT, "packet" TEXT, "source" TEXT, "ref" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 subentry_attribution.tsv staging_subentry_attribution
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/subentry_attribution.tsv staging_subentry_attribution
 INSERT INTO subentry_attribution ("ordinal", "selector_slot", "packet", "source", "ref")
 SELECT CAST("ordinal" AS INTEGER), "selector_slot", CAST("packet" AS INTEGER), "source", "ref"
 FROM staging_subentry_attribution;
 DROP TABLE staging_subentry_attribution;
 
 CREATE TEMP TABLE staging_caller ("pup_sha256" TEXT, "module" TEXT, "ordinal" TEXT, "sites" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 caller.tsv staging_caller
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/caller.tsv staging_caller
 INSERT INTO caller ("pup_sha256", "module", "ordinal", "sites")
 SELECT "pup_sha256", "module", CAST("ordinal" AS INTEGER), "sites"
 FROM staging_caller;
 DROP TABLE staging_caller;
 
 CREATE TEMP TABLE staging_caller_unresolved ("pup_sha256" TEXT, "module" TEXT, "sites" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 caller_unresolved.tsv staging_caller_unresolved
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/caller_unresolved.tsv staging_caller_unresolved
 INSERT INTO caller_unresolved ("pup_sha256", "module", "sites")
 SELECT "pup_sha256", "module", NULLIF("sites", 'none')
 FROM staging_caller_unresolved;
 DROP TABLE staging_caller_unresolved;
 
 CREATE TEMP TABLE staging_reach ("pup_sha256" TEXT, "module" TEXT, "export_nid" TEXT, "ordinal" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 reach.tsv staging_reach
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/reach.tsv staging_reach
 INSERT INTO reach ("pup_sha256", "module", "export_nid", "ordinal")
 SELECT "pup_sha256", "module", CAST("export_nid" AS INTEGER), CAST("ordinal" AS INTEGER)
 FROM staging_reach;
 DROP TABLE staging_reach;
 
 CREATE TEMP TABLE staging_behavior ("ordinal" TEXT, "packet" TEXT, "same_as" TEXT, "selector_slot" TEXT, "provenance_kind" TEXT, "provenance_ref" TEXT, "witness" TEXT, "exception" TEXT, "arm_source" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 behavior.tsv staging_behavior
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/behavior.tsv staging_behavior
 INSERT INTO behavior ("ordinal", "packet", "same_as", "selector_slot", "provenance_kind", "provenance_ref", "witness", "exception", "arm_source")
 SELECT CAST("ordinal" AS INTEGER), NULLIF("packet", 'none'), CAST(NULLIF("same_as", 'none') AS INTEGER), NULLIF("selector_slot", 'none'), "provenance_kind", NULLIF("provenance_ref", 'none'), NULLIF("witness", 'none'), NULLIF("exception", 'none'), "arm_source"
 FROM staging_behavior;
 DROP TABLE staging_behavior;
 
 CREATE TEMP TABLE staging_name ("ordinal" TEXT, "packet" TEXT, "name" TEXT, "source" TEXT, "ref" TEXT, "fw_from" TEXT, "fw_to" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 name.tsv staging_name
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/name.tsv staging_name
 INSERT INTO name ("ordinal", "packet", "name", "source", "ref", "fw_from", "fw_to")
 SELECT CAST("ordinal" AS INTEGER), NULLIF("packet", 'none'), "name", "source", NULLIF("ref", 'none'), NULLIF("fw_from", 'none'), NULLIF("fw_to", 'none')
 FROM staging_name;
 DROP TABLE staging_name;
 
 CREATE TEMP TABLE staging_conflicts ("ordinal" TEXT, "packet" TEXT, "name" TEXT, "source" TEXT, "disagreement" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 conflicts.tsv staging_conflicts
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/conflicts.tsv staging_conflicts
 INSERT INTO conflicts ("ordinal", "packet", "name", "source", "disagreement")
 SELECT CAST("ordinal" AS INTEGER), NULLIF("packet", 'none'), "name", "source", "disagreement"
 FROM staging_conflicts;
 DROP TABLE staging_conflicts;
 
 CREATE TEMP TABLE staging_priority ("ranking" TEXT, "rank" TEXT, "ordinal" TEXT, "title_count" TEXT, "first_tick" TEXT, "caller_modules" TEXT);
-.import --ascii --colsep "\t" --rowsep "\n" --skip 1 priority.tsv staging_priority
+.import --ascii --colsep "\t" --rowsep "\n" --skip 1 tables/priority.tsv staging_priority
 INSERT INTO priority ("ranking", "rank", "ordinal", "title_count", "first_tick", "caller_modules")
 SELECT "ranking", CAST("rank" AS INTEGER), CAST("ordinal" AS INTEGER), CAST("title_count" AS INTEGER), CAST(NULLIF("first_tick", 'none') AS INTEGER), CAST("caller_modules" AS INTEGER)
 FROM staging_priority;

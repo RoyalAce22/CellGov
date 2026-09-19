@@ -91,12 +91,12 @@ fn committed_anchors_name_a_pup_row_with_the_same_firmware() {
     );
     assert!(
         missing.is_empty(),
-        "committed anchors name PUPs absent from docs/lv2/pup.tsv:\n  {}",
+        "committed anchors name PUPs absent from docs/lv2/tables/pup.tsv:\n  {}",
         missing.join("\n  ")
     );
     assert!(
         mismatched.is_empty(),
-        "committed anchors disagree with docs/lv2/pup.tsv:\n  {}",
+        "committed anchors disagree with docs/lv2/tables/pup.tsv:\n  {}",
         mismatched.join("\n  ")
     );
 }

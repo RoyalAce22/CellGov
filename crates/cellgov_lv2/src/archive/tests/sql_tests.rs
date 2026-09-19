@@ -105,7 +105,7 @@ fn the_build_reads_the_schema_and_imports_every_table_through_staging_in_order()
     ];
     let build = build_sql(&census_files);
     assert!(build.starts_with("-- Rendered from cellgov_lv2::archive by\n"));
-    assert!(build.contains("\n.bail on\nPRAGMA foreign_keys = ON;\n.read schema.sql\n"));
+    assert!(build.contains("\n.bail on\nPRAGMA foreign_keys = ON;\n.read sql/schema.sql\n"));
     let mut cursor = 0;
     for table in TABLES {
         let import = format!(

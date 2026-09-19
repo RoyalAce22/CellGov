@@ -16,11 +16,11 @@ fn table_rows(path: &Path) -> Vec<Vec<String>> {
 
 fn render_table() -> String {
     let archive = archive_dir();
-    let firmware_by_pup: BTreeMap<String, String> = table_rows(&archive.join("pup.tsv"))
+    let firmware_by_pup: BTreeMap<String, String> = table_rows(&archive.join("tables/pup.tsv"))
         .into_iter()
         .map(|row| (row[0].clone(), row[1].clone()))
         .collect();
-    let mut rows = table_rows(&archive.join("kernel.tsv"));
+    let mut rows = table_rows(&archive.join("tables/kernel.tsv"));
     rows.sort_by(|left, right| left[0].cmp(&right[0]));
     let mut out = String::from(
         "//! `PUP_CENSUS`, rendered from the committed LV2 archive.\n//!\n//! Generated: run `cargo test -p cellgov_ps3_abi --lib -- --ignored regenerate_pup_census`.\n\nuse super::PupCensus;\n\n#[rustfmt::skip]\npub(super) static PUP_CENSUS: &[PupCensus] = &[\n",
@@ -77,11 +77,12 @@ fn committed_pup_census_matches_archive() {
 #[test]
 fn provenance_pups_without_kernel_rows_are_not_extracted() {
     let archive = archive_dir();
-    let kernels: std::collections::BTreeSet<String> = table_rows(&archive.join("kernel.tsv"))
-        .into_iter()
-        .map(|row| row[0].clone())
-        .collect();
-    let absent: Vec<String> = table_rows(&archive.join("pup.tsv"))
+    let kernels: std::collections::BTreeSet<String> =
+        table_rows(&archive.join("tables/kernel.tsv"))
+            .into_iter()
+            .map(|row| row[0].clone())
+            .collect();
+    let absent: Vec<String> = table_rows(&archive.join("tables/pup.tsv"))
         .into_iter()
         .map(|row| row[0].clone())
         .filter(|pup| !kernels.contains(pup))

@@ -123,7 +123,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn behavior_path() -> PathBuf {
-    workspace_root().join("docs/lv2/behavior.tsv")
+    workspace_root().join("docs/lv2/tables/behavior.tsv")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,7 +421,7 @@ fn a_fabricated_success_row_fabricates_a_success() {
 /// Add a placeholder row for every typed or routed ordinal
 /// `behavior.tsv` lacks, and keep the rows it has.
 #[test]
-#[ignore = "writes docs/lv2/behavior.tsv; run when the handled surface grows"]
+#[ignore = "writes docs/lv2/tables/behavior.tsv; run when the handled surface grows"]
 fn add_missing_behavior_rows() {
     let path = behavior_path();
     let mut rows: BTreeMap<u64, BehaviorRow> = if path.exists() {

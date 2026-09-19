@@ -10,7 +10,7 @@ const EXIT_FAILED: i32 = 1;
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/pup.tsv"
+    "/../../docs/lv2/tables/pup.tsv"
 ));
 
 struct Fixture {

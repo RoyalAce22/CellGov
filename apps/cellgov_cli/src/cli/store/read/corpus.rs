@@ -20,7 +20,7 @@ use super::view;
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/pup.tsv"
+    "/../../docs/lv2/tables/pup.tsv"
 ));
 
 struct ScannedPup {
@@ -31,11 +31,17 @@ struct ScannedPup {
 }
 
 fn archive_rows() -> Vec<PupRow> {
-    let table = archive::parse(&PUP, PUP_TSV)
-        .unwrap_or_else(|error| die(&format!("compiled docs/lv2/pup.tsv is invalid: {error}")));
+    let table = archive::parse(&PUP, PUP_TSV).unwrap_or_else(|error| {
+        die(&format!(
+            "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
+        ))
+    });
     let rows = archive::pup_rows(&table);
-    archive::check_pup_rows(&rows)
-        .unwrap_or_else(|error| die(&format!("compiled docs/lv2/pup.tsv is invalid: {error}")));
+    archive::check_pup_rows(&rows).unwrap_or_else(|error| {
+        die(&format!(
+            "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
+        ))
+    });
     rows
 }
 

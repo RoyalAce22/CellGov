@@ -21,12 +21,12 @@ use crate::composition::{select, FirmwareSelectError};
 
 const FIRMWARE_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/firmware.tsv"
+    "/../../docs/lv2/tables/firmware.tsv"
 ));
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/pup.tsv"
+    "/../../docs/lv2/tables/pup.tsv"
 ));
 
 struct CensusTables {
@@ -438,6 +438,13 @@ fn write_tables(output_dir: &Path, tables: &CensusTables) -> Result<(), CallerCe
             source,
         })?;
         let path = output_dir.join(spec.file());
+        let parent = path
+            .parent()
+            .expect("archive output has a parent directory");
+        std::fs::create_dir_all(parent).map_err(|source| CallerCensusError::CreateOutput {
+            path: parent.to_path_buf(),
+            source,
+        })?;
         std::fs::write(&path, text).map_err(|source| CallerCensusError::Write { path, source })?;
     }
     Ok(())

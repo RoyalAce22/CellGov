@@ -17,7 +17,7 @@ use crate::cli::parse::Lv2CensusArgs;
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../docs/lv2/pup.tsv"
+    "/../../docs/lv2/tables/pup.tsv"
 ));
 
 #[derive(Debug, thiserror::Error)]
@@ -627,6 +627,13 @@ fn write_all(
 }
 
 fn write(path: &Path, text: &str) -> Result<(), Lv2CensusError> {
+    let parent = path
+        .parent()
+        .expect("archive output has a parent directory");
+    std::fs::create_dir_all(parent).map_err(|source| Lv2CensusError::CreateOutput {
+        path: parent.to_path_buf(),
+        source,
+    })?;
     std::fs::write(path, text).map_err(|source| Lv2CensusError::Write {
         path: path.to_path_buf(),
         source,

@@ -5,9 +5,9 @@ use cellgov_lv2::archive::{gate_rows, name_rows, parse, GateState, CAPABILITY_GA
 use cellgov_ps3_abi::lv2::census::{lookup, PupCensusClass};
 use serde::Serialize;
 
-const NAME_TSV: &str = include_str!("../../../../../docs/lv2/name.tsv");
-const GATE_TSV: &str = include_str!("../../../../../docs/lv2/gate.tsv");
-const CALLER_TSV: &str = include_str!("../../../../../docs/lv2/caller.tsv");
+const NAME_TSV: &str = include_str!("../../../../../docs/lv2/tables/name.tsv");
+const GATE_TSV: &str = include_str!("../../../../../docs/lv2/tables/gate.tsv");
+const CALLER_TSV: &str = include_str!("../../../../../docs/lv2/tables/caller.tsv");
 
 #[derive(Serialize)]
 struct Name<'a> {

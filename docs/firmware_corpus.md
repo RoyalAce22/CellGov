@@ -1,14 +1,3 @@
-# Firmware PUP corpus
-
-> **Never put PUP bytes in this repository.** Keep every PUP in an
-> operator-owned directory outside the clone. This rule also applies to
-> ignored directories inside the clone: an ignore rule is not permission
-> to store firmware there.
-
-This runbook starts with PUP files the operator already holds. It does not
-describe where or how to obtain them. It records those files in the LV2
-archive and checks the files against that record.
-
 ## Directory layout
 
 Keep the corpus and CellGov's writable state outside the repository. One
@@ -82,7 +71,7 @@ open an installed tree are different states.
 
 ## Register one PUP
 
-`docs/lv2/pup.tsv` is a hand-curated table. One row represents one exact PUP
+`docs/lv2/tables/pup.tsv` is a hand-curated table. One row represents one exact PUP
 image, keyed by the SHA-256 over its file bytes. Two PUPs that declare the
 same firmware version still need separate rows when their hashes differ.
 
