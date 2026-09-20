@@ -28,6 +28,29 @@ fn a_line_carries_the_triple_it_was_measured_under() {
 }
 
 #[test]
+fn a_first_line_names_every_recorded_field_in_sorted_order() {
+    let entry = BootHistoryEntry::new_if_changed(
+        None,
+        100,
+        "ProcessExit",
+        BTreeMap::from([("zeta".to_string(), 2), ("alpha".to_string(), 1)]),
+        identity("4.91", "NPAA00001", "base"),
+    )
+    .expect("a first recording is always a move");
+
+    assert_eq!(
+        entry.changed,
+        [
+            "alpha",
+            "identity (first recorded)",
+            "outcome",
+            "steps",
+            "zeta"
+        ]
+    );
+}
+
+#[test]
 fn a_pre_versioning_line_writes_no_identity_keys() {
     let e = entry(None, RunIdentity::default()).expect("a first recording is always a move");
     let line = render_line(&e).expect("render");

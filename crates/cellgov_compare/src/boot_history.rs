@@ -25,9 +25,8 @@ pub struct BootHistoryEntry {
     pub outcome: String,
     /// Every witness value measured on this run.
     pub witnesses: BTreeMap<String, u64>,
-    /// Fields that differ from the previous entry, sorted on every
-    /// line but the first. Never empty -- an unchanged run is not
-    /// appended.
+    /// Fields recorded or moved on this line, sorted. Never empty --
+    /// an unchanged run is not appended.
     pub changed: Vec<String>,
     /// Which firmware and title version this measurement was taken
     /// against. Empty on a line written before the store carried
@@ -40,9 +39,12 @@ impl BootHistoryEntry {
     /// Build an entry, or `None` when nothing moved.
     ///
     /// `previous` is the last entry in the file, if any. With no
-    /// `previous`, the result is always an entry. Its `changed` names
-    /// the step count, the outcome and every witness, and omits the
-    /// identity.
+    /// `previous`, the result is always an entry. Its `changed` names:
+    ///
+    /// - the step count;
+    /// - the outcome;
+    /// - every witness;
+    /// - a non-empty identity as `identity (first recorded)`.
     ///
     /// An identity triple that differs from the previous line's is a
     /// move on its own, even when every witness and the step count hold.
@@ -57,6 +59,10 @@ impl BootHistoryEntry {
             None => {
                 let mut names = vec!["steps".to_string(), "outcome".to_string()];
                 names.extend(witnesses.keys().cloned());
+                if let Some(name) = identity_move(&RunIdentity::default(), &identity) {
+                    names.push(name);
+                }
+                names.sort();
                 names
             }
             Some(prev) => {
