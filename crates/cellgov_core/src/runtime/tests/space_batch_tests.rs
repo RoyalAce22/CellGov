@@ -218,6 +218,27 @@ fn pending_rsx_effects_defer_past_a_child_space_batch() {
 }
 
 #[test]
+fn pending_rsx_effects_survive_a_refused_boot_space_batch() {
+    let mut rt = build();
+    rt.registry_mut()
+        .register_with(|id| OnceWriter::finished(id, 16, 0xAB));
+    rt.pending_rsx_effects.push(Effect::shared_write(
+        ByteRange::new(GuestAddr::new(8), 4).unwrap(),
+        WritePayload::new(vec![0xEE; 4]),
+        UnitId::new(1),
+        GuestTicks::ZERO,
+    ));
+
+    let step = rt.step().unwrap();
+    assert!(rt.commit_step(&step.result, &step.effects).is_err());
+    assert_eq!(
+        rt.pending_rsx_effects.len(),
+        1,
+        "a rejected carrier batch must not discard deferred RSX work",
+    );
+}
+
+#[test]
 fn a_shared_view_write_invalidates_code_at_sibling_alias_ranges() {
     let mut rt = build();
     rt.create_address_space(S1).unwrap();

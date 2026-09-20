@@ -79,19 +79,23 @@ impl Runtime {
         // not that unit's: which batch carries them is a scheduling
         // accident, so riding on one that faults would lose guest work
         // the pipeline had already accepted. They stay queued.
-        let combined_storage: Vec<Effect>;
+        let mut combined_storage: Option<Vec<Effect>> = None;
+        let deferred_rsx_effect_count: usize;
         let effects: &[Effect] = if self.pending_rsx_effects.is_empty()
             || source_space != crate::runtime::spaces::AddressSpaceId::BOOT
             || result.yield_reason == YieldReason::Fault
         {
+            deferred_rsx_effect_count = 0;
             effects
         } else {
-            combined_storage = self
-                .pending_rsx_effects
-                .drain(..)
-                .chain(effects.iter().cloned())
-                .collect();
-            &combined_storage
+            deferred_rsx_effect_count = self.pending_rsx_effects.len();
+            combined_storage = Some(
+                self.pending_rsx_effects
+                    .drain(..)
+                    .chain(effects.iter().cloned())
+                    .collect(),
+            );
+            combined_storage.as_deref().expect("combined RSX effects")
         };
 
         // Snapshot so the post-apply DONE transition fires only for flips
@@ -127,6 +131,14 @@ impl Runtime {
             tap: self.tap.as_deref_mut(),
         };
         let mut outcome = self.commit_pipeline.process(result, effects, &mut ctx);
+        if outcome.is_err() && deferred_rsx_effect_count != 0 {
+            self.pending_rsx_effects.extend(
+                combined_storage.as_ref().expect("combined RSX effects")
+                    [..deferred_rsx_effect_count]
+                    .iter()
+                    .cloned(),
+            );
+        }
 
         // A fault-closed batch returns Ok with `fault_discarded` set
         // and applies nothing (YieldReason::Fault discards the whole
