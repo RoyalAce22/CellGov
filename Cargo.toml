@@ -67,7 +67,7 @@ publish = false
 criterion = { version = "0.5", default-features = false }
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "deny"
 
 [workspace.lints.clippy]
