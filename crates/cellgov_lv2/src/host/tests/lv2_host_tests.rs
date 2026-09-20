@@ -506,7 +506,7 @@ fn mmapper_alloc_never_returns_address_in_reserved_rsx_window() {
 #[test]
 fn alloc_id_starts_at_kernel_id_sentinel() {
     let mut host = Lv2Host::new();
-    assert_eq!(host.alloc_id(), 0x4000_0001);
+    assert_eq!(host.alloc_id(), crate::FIRST_KERNEL_ID);
 }
 
 #[test]

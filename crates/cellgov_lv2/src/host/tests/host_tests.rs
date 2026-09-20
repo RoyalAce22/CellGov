@@ -7,6 +7,7 @@ use crate::host::test_support::*;
 use crate::host::Lv2Host;
 use crate::ppu_thread::{PpuThreadAttrs, PpuThreadId};
 use crate::request::Lv2Request;
+use crate::FIRST_KERNEL_ID;
 
 #[test]
 fn a_mutex_call_from_a_unit_without_a_thread_record_is_esrch_and_logged() {
@@ -75,9 +76,9 @@ fn lwmutex_and_mutex_id_spaces_are_independent() {
         other => panic!("expected Immediate(0), got {other:?}"),
     };
     // lwmutex ids start at 1; heavy mutex ids come from the shared
-    // next_kernel_id allocator (0x4000_0001+).
+    // next_kernel_id allocator.
     assert_eq!(lw_id, 1);
-    assert!(hv_id >= 0x4000_0001);
+    assert!(hv_id >= FIRST_KERNEL_ID);
     host.dispatch(
         Lv2Request::MutexLock {
             mutex_id: hv_id,

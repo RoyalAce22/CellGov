@@ -2,6 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use cellgov_ps3_abi::hw::address_space::{
+    PS3_CHILD_STACKS_BASE, PS3_CHILD_STACKS_SIZE, PS3_SPU_RESERVED_BASE,
+};
+
 use crate::fs_store::FsStore;
 use crate::image::ContentStore;
 use crate::ppu_thread::{PpuThreadId, PpuThreadTable, ThreadStackAllocator};
@@ -24,10 +28,14 @@ use super::usbd::UsbdState;
 /// host mints outside `lwmutexes` (mutex, cond, semaphore, rwlock,
 /// timer, event queue / port / flag, memory container, mmapper
 /// handle, RSX event queue) is this plus a count. Non-zero so an
-/// uninitialised handle reads as unknown, and above every address
-/// this host maps (RSX window below, mmapper handouts above) so a
-/// handle never looks like a pointer.
-pub const FIRST_KERNEL_ID: u32 = 0x4000_0001;
+/// uninitialised handle reads as unknown. The fixed boot layout leaves
+/// its initial range between the child-stack arena and the SPU-reserved
+/// region.
+pub const FIRST_KERNEL_ID: u32 = 0xD100_0001;
+
+const _: () =
+    assert!(FIRST_KERNEL_ID as u64 > PS3_CHILD_STACKS_BASE + PS3_CHILD_STACKS_SIZE as u64);
+const _: () = assert!((FIRST_KERNEL_ID as u64) < PS3_SPU_RESERVED_BASE);
 
 /// Guest-visible LV2 state; every field folds into the host state
 /// hash per [`Self::state_hash`]'s exhaustive-destructure contract.

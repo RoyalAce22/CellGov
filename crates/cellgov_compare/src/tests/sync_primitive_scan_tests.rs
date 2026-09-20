@@ -242,6 +242,13 @@ fn a_kernel_handle_pair_needs_one_shape_per_side_in_either_order() {
         None,
         "never created on the CellGov side"
     );
+    let iomap_pointer =
+        u32::try_from(cellgov_ps3_abi::hw::address_space::PS3_RSX_IOMAP_BASE).unwrap() + 1;
+    assert_eq!(
+        kernel_handle_pair(runner_id(SYS_MUTEX_OBJECT, 1, 0), iomap_pointer),
+        None,
+        "an RSX iomap pointer is not a CellGov kernel id"
+    );
     assert_eq!(
         kernel_handle_pair(0x0001_2340, 0x0001_2344),
         None,
