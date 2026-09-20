@@ -88,12 +88,11 @@ pub fn parse_version_txt(text: &str) -> Option<String> {
     ))
 }
 
-/// Module stems under `sys/internal/` that the system shell loads by
-/// full path.
+/// Required module stems under `sys/internal/`.
 ///
-/// Import-closure selection cannot derive these stems. The shell names
-/// them by filesystem path from its own runtime data, so a
-/// firmware-exec boot adds them to the candidate set explicitly.
+/// The directory scan already admits every `.sprx`. This list makes
+/// absence of a stem fatal and admits a matching pre-decrypted `.prx`
+/// that the scan did not find.
 pub const FIRMWARE_INTERNAL_PRX_STEMS: &[&str] = &["libfs_utility2"];
 
 /// Module stems shipped in retail firmware's `sys/external/`.
