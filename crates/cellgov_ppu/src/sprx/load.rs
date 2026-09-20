@@ -82,6 +82,14 @@ pub struct LoadedPrx {
     pub relocs_applied: usize,
 }
 
+impl LoadedPrx {
+    /// Highest address exclusive of either resident segment.
+    #[must_use]
+    pub fn resident_end(&self) -> u64 {
+        self.text_end.max(self.data_end)
+    }
+}
+
 /// Relocated OPD entry; both fields are absolute guest addresses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LoadedOpd {
@@ -755,3 +763,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/placeholder_reloc_refusal_tests.rs"]
 mod placeholder_reloc_refusal_tests;
+
+#[cfg(test)]
+#[path = "tests/resident_end_tests.rs"]
+mod resident_end_tests;

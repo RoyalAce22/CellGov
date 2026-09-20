@@ -788,7 +788,7 @@ pub fn load_firmware_set_from(
     let prx_high_water = image
         .loaded
         .values()
-        .map(|p| p.data_end)
+        .map(cellgov_ppu::sprx::LoadedPrx::resident_end)
         .max()
         .unwrap_or(prx_base);
     let tramp_base = page_align_up_u64(prx_high_water)?;
@@ -888,7 +888,7 @@ pub fn load_firmware_set_from(
             name: prx.name.clone(),
             stem,
             base: prx.base,
-            data_end: prx.data_end,
+            data_end: prx.resident_end(),
             toc: prx.toc,
             relocs_applied: prx.relocs_applied,
             module_start: prx.module_start,

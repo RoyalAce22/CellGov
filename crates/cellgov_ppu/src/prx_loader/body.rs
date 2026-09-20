@@ -447,7 +447,7 @@ pub fn load_firmware_set(
         };
         let aligned = align_up_64k(cursor)?;
         let l = crate::sprx::load_prx(parsed, memory, aligned).map_err(PrxLoaderError::Load)?;
-        cursor = l.data_end;
+        cursor = l.resident_end();
         loaded.insert(*id, l);
     }
 

@@ -12,9 +12,10 @@ pub struct PrxLoadInfo {
     pub stem: String,
     /// Guest address the loader placed the module at.
     pub base: u64,
-    /// Exclusive end of the loaded data segment. `alloc_base`
-    /// must clear `max(data_end)` across all loaded PRXs or
-    /// `sys_memory_allocate` hands out addresses inside a PRX.
+    /// Exclusive end of the module's text and data.
+    ///
+    /// `alloc_base` must clear `max(data_end)` for all loaded PRXs.
+    /// Otherwise, `sys_memory_allocate` can place memory inside a PRX.
     pub data_end: u64,
     /// The module's TOC.
     pub toc: u64,
