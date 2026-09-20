@@ -14,16 +14,16 @@ use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_ps3_abi::lv2::errno;
 
+use super::ptr::out_ptr_writable;
 use crate::dispatch::Lv2Dispatch;
-use crate::host::Lv2Host;
-use cellgov_time::GuestTicks;
+use crate::host::{Lv2Host, Lv2Runtime};
 
 impl Lv2Host {
     /// `sys_fs_write` -- no writable fd in the FS model.
     ///
     /// # Errors
     ///
-    /// 1. `nwrite_ptr == 0` -> `CELL_EFAULT`, no effects.
+    /// 1. `nwrite_ptr` misaligned / unwritable -> `CELL_EFAULT`, no effects.
     /// 2. `buf_ptr == 0` -> `CELL_EFAULT`, 8-byte zero write to `nwrite_ptr`.
     /// 3. fd not in FsStore -> `CELL_EBADF`, 8-byte zero write to `nwrite_ptr`.
     ///    The fd gate runs before the zero-size short-circuit, so a bad
@@ -39,16 +39,16 @@ impl Lv2Host {
         size: u64,
         nwrite_ptr: u32,
         requester: UnitId,
-        tick: GuestTicks,
+        rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
-        if nwrite_ptr == 0 {
+        if !out_ptr_writable(rt, nwrite_ptr, 8, 8) {
             return Lv2Dispatch::immediate(errno::CELL_EFAULT.into());
         }
         let nwrite_zero = Effect::shared_write(
             ByteRange::contiguous_u32(nwrite_ptr, 8),
             WritePayload::from_slice(&0u64.to_be_bytes()),
             requester,
-            tick,
+            rt.current_tick(),
         );
         if buf_ptr == 0 {
             return Lv2Dispatch::Immediate {

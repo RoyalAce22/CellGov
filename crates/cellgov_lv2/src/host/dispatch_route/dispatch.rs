@@ -200,7 +200,7 @@ impl Lv2Host {
                 buf_ptr,
                 size,
                 nwrite_ptr,
-            } => self.dispatch_fs_write(fd, buf_ptr, size, nwrite_ptr, requester, tick),
+            } => self.dispatch_fs_write(fd, buf_ptr, size, nwrite_ptr, requester, rt),
             Lv2Request::MutexCreate { id_ptr, attr_ptr } => {
                 self.dispatch_mutex_create(id_ptr, attr_ptr, requester, rt, tick)
             }

@@ -42,6 +42,21 @@ fn null_nwrite_ptr_returns_efault_and_emits_no_effects() {
 }
 
 #[test]
+fn unwritable_nwrite_ptr_returns_efault_and_emits_no_effects() {
+    let mut host = Lv2Host::new();
+    let rt = PathRuntime::empty(0x10000).reserve(0x2000, 0x2008);
+    let d = run(&mut host, &rt, fs_write(1, 0x1000, 16, 0x2000));
+    let Lv2Dispatch::Immediate { code, effects } = d else {
+        panic!("expected Immediate, got {d:?}");
+    };
+    assert_eq!(code, u64::from(errno::CELL_EFAULT));
+    assert!(
+        effects.is_empty(),
+        "unwritable nwrite_ptr must emit no effects"
+    );
+}
+
+#[test]
 fn null_buf_ptr_returns_efault_and_zeros_nwrite() {
     let mut host = Lv2Host::new();
     let rt = PathRuntime::empty(0x10000);
