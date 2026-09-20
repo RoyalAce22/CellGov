@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use cellgov_compare::{
     classify, classify::ClassifierContext, summarize, BootOverrides, ByteParity, Convergence,
     CrossRunnerSummary, DivergenceClass, Observation, ObservationCompareResult, ObservedOutcome,
-    RegionPairOutcome, UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
+    RegionPairOutcome, RunIdentity, UnclassifiedRun, CODE_REGION_NAME, ELF_HEADER_SIZE,
 };
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
@@ -152,6 +152,27 @@ fn overridden_capture_refusal(path: &str, overrides: &BootOverrides) -> Option<S
     ))
 }
 
+/// An absent half remains compatible with observations written before store versioning.
+fn capture_identity_refusal(
+    path: &str,
+    captured: &RunIdentity,
+    composed: &RunIdentity,
+) -> Option<String> {
+    if captured.firmware.is_some() && captured.firmware != composed.firmware {
+        return Some(format!(
+            "fixture-gen: {path} names a firmware identity that differs from the selected cell; \
+             re-capture it with the same --fw selection used for this fixture"
+        ));
+    }
+    if captured.game.is_some() && captured.game != composed.game {
+        return Some(format!(
+            "fixture-gen: {path} names a game identity that differs from the selected cell; \
+             re-capture it with the same title and --game-ver selection used for this fixture"
+        ));
+    }
+    None
+}
+
 pub(crate) fn run(
     args: &FixtureGenArgs,
     vfs_flag: Option<&Path>,
@@ -211,6 +232,11 @@ pub(crate) fn run(
         CommandError::failed(format!("fixture-gen: parse {cellgov_path}: {error}"))
     })?;
     if let Some(refusal) = overridden_capture_refusal(&cellgov_path, &cellgov.identity.overrides) {
+        return Err(CommandError::failed(refusal));
+    }
+    if let Some(refusal) =
+        capture_identity_refusal(&cellgov_path, &cellgov.identity, &composition.identity)
+    {
         return Err(CommandError::failed(refusal));
     }
     let rpcs3_bytes = load_file(&rpcs3_path)?;
@@ -900,3 +926,7 @@ mod cell_tests;
 #[cfg(test)]
 #[path = "tests/fixture_gen_override_tests.rs"]
 mod override_tests;
+
+#[cfg(test)]
+#[path = "tests/fixture_gen_identity_tests.rs"]
+mod identity_tests;
