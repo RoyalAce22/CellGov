@@ -1,7 +1,7 @@
 //! The selection banner: what this run tests, named before the run.
 //!
-//! Three lines on stderr, printed before any other output. The banner
-//! never lands on stdout beside the measurements a consumer parses.
+//! The banner writes to stderr before any other output. Its lines never
+//! land on stdout beside the measurements a consumer parses.
 
 use super::compose::{BootComposition, GameChoice, UnderstatedFirmware};
 use super::select::{FirmwareChoice, GameVersion};
@@ -20,7 +20,7 @@ fn short_digest(hex: &str) -> String {
 ///
 /// Returns the lines in print order.
 pub(crate) fn render(title: &TitleManifest, composition: &BootComposition) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!(
             "title    {}  {}  {}",
             title.name(),
@@ -29,7 +29,9 @@ pub(crate) fn render(title: &TitleManifest, composition: &BootComposition) -> Ve
         ),
         render_game(composition),
         render_firmware(&composition.firmware),
-    ]
+    ];
+    lines.extend(composition.identity.render_lines().into_iter().skip(2));
+    lines
 }
 
 fn render_game(composition: &BootComposition) -> String {
@@ -110,3 +112,7 @@ pub(crate) fn render_firmware_notes(notes: &[UnderstatedFirmware]) -> Vec<String
 #[cfg(test)]
 #[path = "tests/banner_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/banner_override_tests.rs"]
+mod override_tests;
