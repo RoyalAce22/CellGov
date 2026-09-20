@@ -61,9 +61,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 ```
 
-CI runs those on both platforms and additionally `cargo test
---release`, the `cellgov_install` tests with `--features decrypt`,
+CI runs tests on both platforms and checks formatting, Clippy, and
+documentation on Linux. It additionally runs `cargo test --release`,
+the `cellgov_install` tests with `--features decrypt`,
 and `cellgov_compare` with `--no-default-features`.
+See [.github/README.md](.github/README.md) for the shared CI commands,
+contributor requirements, and private external-data validation.
 
 The workspace has no
 runtime dependency on RPCS3. `cellgov_compare` gates its RPCS3

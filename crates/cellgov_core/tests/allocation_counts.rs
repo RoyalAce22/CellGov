@@ -3,7 +3,7 @@
 #![allow(unsafe_code, reason = "a global allocator is the test subject")]
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::cell::Cell;
 
 use cellgov_core::{Runtime, RuntimeMode};
 use cellgov_effects::{Effect, WritePayload};
@@ -16,14 +16,19 @@ use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
 struct CountingAllocator;
 
-static COUNTING: AtomicBool = AtomicBool::new(false);
-static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    // The test harness can allocate on other threads during measurement.
+    static COUNTING: Cell<bool> = const { Cell::new(false) };
+    static ALLOCATIONS: Cell<usize> = const { Cell::new(0) };
+}
 
 unsafe impl GlobalAlloc for CountingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if COUNTING.load(Ordering::Relaxed) {
-            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        }
+        let _ = COUNTING.try_with(|counting| {
+            if counting.get() {
+                let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+            }
+        });
         unsafe { System.alloc(layout) }
     }
 
@@ -90,8 +95,6 @@ fn allocations_after_warmup(writes: bool) -> usize {
     runtime.register_unit_with(|id| Unit { id, writes });
 
     // Prime every reusable buffer across a full measurement-sized run.
-    // One step was insufficient on the Linux MSRV allocator, which made
-    // its first measured batch include one process-lifetime allocation.
     for _ in 0..STEPS {
         let mut warmup = runtime.step().expect("warmup step");
         runtime
@@ -99,20 +102,34 @@ fn allocations_after_warmup(writes: bool) -> usize {
             .expect("warmup commit");
     }
 
-    ALLOCATIONS.store(0, Ordering::Relaxed);
-    COUNTING.store(true, Ordering::Relaxed);
+    ALLOCATIONS.set(0);
+    COUNTING.set(true);
     for _ in 0..STEPS {
         let mut step = runtime.step().expect("steady step");
         runtime
             .commit_step_and_recycle(&mut step)
             .expect("steady commit");
     }
-    COUNTING.store(false, Ordering::Relaxed);
-    ALLOCATIONS.load(Ordering::Relaxed)
+    COUNTING.set(false);
+    ALLOCATIONS.get()
 }
 
 #[test]
 fn warmed_fault_driven_steps_hold_the_allocation_bounds() {
+    // A harness thread must not change the measured thread's count.
+    let start = std::sync::Arc::new(std::sync::Barrier::new(2));
+    let wait = start.clone();
+    let noise = std::thread::spawn(move || {
+        wait.wait();
+        std::hint::black_box(vec![0u8; 4096]);
+    });
+    ALLOCATIONS.set(0);
+    COUNTING.set(true);
+    start.wait();
+    noise.join().expect("noise thread");
+    COUNTING.set(false);
+    assert_eq!(ALLOCATIONS.get(), 0, "another thread affected the count");
+
     assert_eq!(allocations_after_warmup(false), TRIVIAL_STEP_ALLOCATIONS);
     assert_eq!(
         allocations_after_warmup(true),
