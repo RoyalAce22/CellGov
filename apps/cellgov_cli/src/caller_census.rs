@@ -127,6 +127,8 @@ enum CallerCensusError {
         #[source]
         source: std::io::Error,
     },
+    #[error("output table path {} has no parent", path.display())]
+    OutputParent { path: PathBuf },
     #[error("write {}: {source}", path.display())]
     Write {
         path: PathBuf,
@@ -442,8 +444,11 @@ fn write_tables(output_dir: &Path, tables: &CensusTables) -> Result<(), CallerCe
             source,
         })?;
         let path = output_dir.join(spec.file());
-        std::fs::create_dir_all(output_dir).map_err(|source| CallerCensusError::CreateOutput {
-            path: output_dir.to_path_buf(),
+        let parent = path
+            .parent()
+            .ok_or_else(|| CallerCensusError::OutputParent { path: path.clone() })?;
+        std::fs::create_dir_all(parent).map_err(|source| CallerCensusError::CreateOutput {
+            path: parent.to_path_buf(),
             source,
         })?;
         std::fs::write(&path, text).map_err(|source| CallerCensusError::Write { path, source })?;

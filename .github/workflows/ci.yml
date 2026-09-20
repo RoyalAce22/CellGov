@@ -26,8 +26,8 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
-  # Corpus suites are type-checked and linted here, never run. The local
-  # shared CI script reads this declaration when GitHub has not exported it.
+  # Hosted CI type-checks and lints corpus suites. The self-hosted corpus
+  # workflow executes them. Both scripts read this one feature declaration.
   CORPUS_FEATURES: >-
     cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
