@@ -116,14 +116,13 @@ fn a_load_segment_with_filesz_exceeding_memsz_is_refused_not_panicked() {
     write_ph(&mut data, 0, 64 + 56, 0xF0, 0x100, 0x10);
     let mut s = PpuState::new();
     let mut mem = GuestMemory::new(0x100);
-    assert_eq!(
-        load_ppu_elf(&data, &mut mem, &mut s),
-        Err(LoadError::SegmentFileszExceedsMemsz {
-            segment_index: 0,
-            filesz: 0x100,
-            memsz: 0x10,
-        })
-    );
+    let expected = LoadError::SegmentFileszExceedsMemsz {
+        segment_index: 0,
+        filesz: 0x100,
+        memsz: 0x10,
+    };
+    assert_eq!(required_memory_size(&data), Err(expected.clone()));
+    assert_eq!(load_ppu_elf(&data, &mut mem, &mut s), Err(expected));
 }
 
 #[test]
@@ -134,14 +133,13 @@ fn a_filesz_bearing_segment_with_zero_memsz_is_refused_not_skipped() {
     write_ph(&mut data, 0, 0, 0, 0x10, 0);
     let mut s = PpuState::new();
     let mut mem = GuestMemory::new(256);
-    assert_eq!(
-        load_ppu_elf(&data, &mut mem, &mut s),
-        Err(LoadError::SegmentFileszExceedsMemsz {
-            segment_index: 0,
-            filesz: 0x10,
-            memsz: 0,
-        })
-    );
+    let expected = LoadError::SegmentFileszExceedsMemsz {
+        segment_index: 0,
+        filesz: 0x10,
+        memsz: 0,
+    };
+    assert_eq!(required_memory_size(&data), Err(expected.clone()));
+    assert_eq!(load_ppu_elf(&data, &mut mem, &mut s), Err(expected));
 }
 
 #[test]

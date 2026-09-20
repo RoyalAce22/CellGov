@@ -108,6 +108,21 @@ fn ph_slot_base(
     Ok(base)
 }
 
+fn validate_load_segment_sizes(
+    segment_index: usize,
+    filesz: u64,
+    memsz: u64,
+) -> Result<(), LoadError> {
+    if filesz > memsz {
+        return Err(LoadError::SegmentFileszExceedsMemsz {
+            segment_index,
+            filesz,
+            memsz,
+        });
+    }
+    Ok(())
+}
+
 /// Entry point and the minimum guest memory size needed to hold every
 /// PT_LOAD segment.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,7 +164,9 @@ pub fn required_memory_size(data: &[u8]) -> Result<usize, LoadError> {
             continue;
         }
         let p_vaddr = read_u64(data, base + 16);
+        let p_filesz = read_u64(data, base + 32);
         let p_memsz = read_u64(data, base + 40);
+        validate_load_segment_sizes(i, p_filesz, p_memsz)?;
         if p_memsz == 0 {
             continue;
         }
@@ -230,13 +247,7 @@ pub fn load_ppu_elf(
         // segments. The bounds check below is memsz-derived, so a
         // header claiming extra file bytes would route an oversized
         // copy into apply_commit and panic instead of erroring.
-        if p_filesz > p_memsz {
-            return Err(LoadError::SegmentFileszExceedsMemsz {
-                segment_index: i,
-                filesz: p_filesz,
-                memsz: p_memsz,
-            });
-        }
+        validate_load_segment_sizes(i, p_filesz, p_memsz)?;
 
         if p_memsz == 0 {
             continue;
