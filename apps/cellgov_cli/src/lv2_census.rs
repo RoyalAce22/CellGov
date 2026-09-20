@@ -12,8 +12,9 @@ use cellgov_ppu::lv2_gate::{self, Lv2Gate, Lv2GateRead};
 use cellgov_ppu::lv2_stub::Lv2OrdinalClass;
 use cellgov_ppu::lv2_subdispatch::{self, Lv2Subdispatch, Lv2SubdispatchError, Lv2SubentryClass};
 
-use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
+use crate::cli::exit::die;
 use crate::cli::parse::Lv2CensusArgs;
+use crate::cli::self_load::{decrypt_ppu_self_or_die, load_file_or_die};
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),

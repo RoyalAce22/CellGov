@@ -56,7 +56,7 @@ pub(crate) fn install(
             cellgov_install::firmware_install::complete_kernel(&pup_data, &keys, store, &())
                 .unwrap_or_else(|e| {
                     eprintln!("install --kernel-only failed: {e}");
-                    std::process::exit(1);
+                    super::super::exit::exit_failed();
                 });
         println!(
             "  firmware {}: entry {}",
@@ -100,7 +100,7 @@ pub(crate) fn install(
         Err(e) => {
             bar.abort();
             report_install_failure(&e);
-            std::process::exit(1);
+            super::super::exit::exit_failed();
         }
     };
 

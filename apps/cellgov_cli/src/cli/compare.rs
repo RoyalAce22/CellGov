@@ -8,9 +8,10 @@ use cellgov_compare::{
 };
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::exit::{die, die_with_status, load_file_or_die};
+use super::exit::{die, die_with_status};
 use super::parse::{die_usage, CompareArgs, OutputFormat};
 use super::scenarios::scenario_factory;
+use super::self_load::load_file_or_die;
 use crate::cli::exit_codes;
 
 // -- compare dispatch (top-level) --

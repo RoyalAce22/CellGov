@@ -56,7 +56,7 @@ fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8
     match classify_source(&raw) {
         Ok(SourceKind::Elf) => (raw, SourceKind::Elf),
         Ok(SourceKind::SceWrapped) => {
-            let elf = crate::cli::exit::decrypt_ppu_self_or_die(
+            let elf = crate::cli::self_load::decrypt_ppu_self_or_die(
                 &raw,
                 &path.display().to_string(),
                 vfs_root,

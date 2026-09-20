@@ -5,9 +5,10 @@ use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
 use crate::cli::compare::{load_observations_from_dir, report_first_invariant_break};
-use crate::cli::exit::{die, load_file_or_die};
+use crate::cli::exit::die;
 use crate::cli::parse::OutputFormat;
 use crate::cli::scenarios::{build_lv2_fixture, microtest_region_defs, MICROTESTS};
+use crate::cli::self_load::load_file_or_die;
 
 pub(super) fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: OutputFormat) {
     let config = ExplorationConfig::default();
@@ -25,7 +26,7 @@ pub(super) fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, for
                 }
             }
             if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
-                std::process::exit(1);
+                super::super::exit::exit_failed();
             }
         }
         None => {
@@ -57,7 +58,7 @@ pub(super) fn run_explore_micro(name: &str, format: OutputFormat) {
                 }
             }
             if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
-                std::process::exit(1);
+                super::super::exit::exit_failed();
             }
         }
         None => {
@@ -180,7 +181,7 @@ pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, forma
     }
 
     if !all_match {
-        std::process::exit(1);
+        super::super::exit::exit_failed();
     }
 }
 

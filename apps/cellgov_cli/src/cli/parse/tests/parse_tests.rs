@@ -924,7 +924,7 @@ fn every_command_that_reads_an_sce_input_carries_the_shared_note() {
     ] {
         let help = help_of(&path);
         assert!(
-            help.contains(crate::cli::exit::SCE_INPUT_USAGE_NOTE),
+            help.contains(crate::cli::self_load::SCE_INPUT_USAGE_NOTE),
             "{path:?} help is missing the SCE input note:\n{help}"
         );
     }
@@ -934,7 +934,7 @@ fn every_command_that_reads_an_sce_input_carries_the_shared_note() {
 fn the_sce_note_claims_a_decrypt_path_only_when_the_build_has_one() {
     let help = help_of(&["dev", "disasm"]);
     let has_decrypt = cfg!(feature = "decrypt");
-    for claim in crate::cli::exit::DECRYPTION_CLAIMS {
+    for claim in crate::cli::self_load::DECRYPTION_CLAIMS {
         assert_eq!(
             help.contains(claim),
             has_decrypt,

@@ -11,8 +11,9 @@
 
 use cellgov_ppu::funcmap::{self, FunctionMap, FunctionName};
 
-use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
+use crate::cli::exit::die;
 use crate::cli::parse::FuncsArgs;
+use crate::cli::self_load::{decrypt_ppu_self_or_die, load_file_or_die};
 use crate::cli::title::resolve_ps3_vfs_root;
 
 pub(crate) fn run(args: &FuncsArgs, vfs_flag: Option<&std::path::Path>) {

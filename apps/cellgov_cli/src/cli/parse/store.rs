@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use crate::cli::exit::SCE_INPUT_USAGE_NOTE;
+use crate::cli::self_load::SCE_INPUT_USAGE_NOTE;
 
 /// `--output`, the store root the installers write under.
 #[derive(Debug, Clone, clap::Args)]

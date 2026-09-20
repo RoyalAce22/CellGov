@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use super::boot::BootSelection;
 use super::value;
 use crate::cli::args::CliArgError;
-use crate::cli::exit::SCE_INPUT_USAGE_NOTE;
+use crate::cli::self_load::SCE_INPUT_USAGE_NOTE;
 
 /// The outcomes `dev disasm` has beyond the shared 0-5 contract.
 const DISASM_EXIT_CODES: &str = "Exit codes particular to this command:

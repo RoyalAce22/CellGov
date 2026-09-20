@@ -17,11 +17,12 @@ use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
 use super::env::parse_env_bool;
-use super::exit::{die, LoadedPpuImage, TitleNotInstalled};
+use super::exit::die;
 use super::exit_codes;
 use super::parse::{
     die_usage, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
 };
+use super::self_load::{LoadedPpuImage, TitleNotInstalled};
 use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
 use crate::paths::{cell_checkpoint, cell_max_steps};
 
@@ -231,11 +232,12 @@ pub(super) fn resolve_boot_inputs(
     let composition = resolve_composition(selection, vfs_root, &title, overrides);
     let (elf_path, image) = match explicit_elf {
         Some(p) => {
-            let image = crate::cli::exit::load_ppu_image_with_title_or_die(p, &title, vfs_root);
+            let image =
+                crate::cli::self_load::load_ppu_image_with_title_or_die(p, &title, vfs_root);
             (p.to_string(), image)
         }
         None => {
-            let (image, path) = crate::cli::exit::load_ppu_image_walk_candidates_or_die(
+            let (image, path) = crate::cli::self_load::load_ppu_image_walk_candidates_or_die(
                 &title,
                 vfs_root,
                 &composition.eboot_dirs,
@@ -263,7 +265,7 @@ pub(super) fn try_resolve_cell_inputs(
     vfs_root: &Path,
     subcmd: &str,
 ) -> Result<BootInputs, TitleNotInstalled> {
-    let (image, path) = crate::cli::exit::load_ppu_image_walk_candidates(
+    let (image, path) = crate::cli::self_load::load_ppu_image_walk_candidates(
         &title,
         vfs_root,
         &composition.eboot_dirs,

@@ -18,10 +18,11 @@ const DECODE_ERROR_EXIT_CODE: i32 = exit_codes::command_specific(20);
 pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
     args::check_alignment(parsed.vaddr).unwrap_or_else(|e| die_usage(&e.to_string()));
     let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
-    let raw = crate::cli::exit::load_file_or_die(&parsed.elf_path);
+    let raw = crate::cli::self_load::load_file_or_die(&parsed.elf_path);
     // Transparently decrypt an SCE/SELF wrapper (including NPDRM
     // EBOOTs); plaintext ELF input passes through unchanged.
-    let elf_bytes = crate::cli::exit::decrypt_ppu_self_or_die(&raw, &parsed.elf_path, &vfs_root);
+    let elf_bytes =
+        crate::cli::self_load::decrypt_ppu_self_or_die(&raw, &parsed.elf_path, &vfs_root);
     let segments = elf::parse_pt_loads(&elf_bytes).unwrap_or_else(|e| die(&e.message()));
 
     let symbols = parsed.symbolize.then(|| {

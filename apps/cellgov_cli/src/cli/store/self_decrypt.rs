@@ -84,7 +84,7 @@ pub(crate) fn run(args: &SelfDecryptArgs, vfs_root: &Path, store: &Path) {
                 exdata.display()
             );
         }
-        std::process::exit(1);
+        super::super::exit::exit_failed();
     });
 
     std::fs::write(&output_path, &elf)

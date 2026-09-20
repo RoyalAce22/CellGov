@@ -3,8 +3,9 @@
 use cellgov_ppu::lv2_stub::{self, Lv2StubClassification, Lv2StubClassificationError};
 use cellgov_ppu::lv2_table::{self, Lv2TableDiscovery};
 
-use crate::cli::exit::{decrypt_ppu_self_or_die, die, load_file_or_die};
+use crate::cli::exit::die;
 use crate::cli::parse::{Lv2DiscoverArgs, OutputFormat};
+use crate::cli::self_load::{decrypt_ppu_self_or_die, load_file_or_die};
 use crate::cli::title::resolve_ps3_vfs_root;
 
 #[derive(Debug, serde::Serialize)]

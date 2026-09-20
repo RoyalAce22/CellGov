@@ -14,8 +14,9 @@ use cellgov_compare::{
 };
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
-use super::exit::{die, load_file_or_die};
+use super::exit::die;
 use super::parse::FixtureGenArgs;
+use super::self_load::{load_file_or_die, load_ppu_image_with_title_or_die};
 use super::title::resolve_ps3_vfs_root;
 use cellgov_boot::manifest::{CellKey, TitleManifest};
 
@@ -194,7 +195,7 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     let eboot_path = manifest
         .resolve_eboot_in(&composition.eboot_dirs)
         .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
-    let eboot_bytes = crate::cli::exit::load_ppu_image_with_title_or_die(
+    let eboot_bytes = load_ppu_image_with_title_or_die(
         eboot_path.to_str().unwrap_or_else(|| {
             die(&format!(
                 "fixture-gen: EBOOT path {} has invalid UTF-8",
@@ -286,7 +287,7 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
             eprintln!(
                 "fixture-gen: convergence failed ({reason}); pass --allow-divergence to commit a fixture documenting this state"
             );
-            std::process::exit(1);
+            super::exit::exit_failed();
         }
     }
 }

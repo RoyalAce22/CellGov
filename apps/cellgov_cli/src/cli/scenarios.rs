@@ -5,7 +5,7 @@
 use cellgov_testkit::fixtures::{self, ScenarioFixture};
 use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 
-use super::exit::load_file_or_die;
+use super::self_load::load_file_or_die;
 
 pub(crate) fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
     let (label, fixture) = match name {
