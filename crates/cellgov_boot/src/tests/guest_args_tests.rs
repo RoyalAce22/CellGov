@@ -1,9 +1,12 @@
 //! The guest argv block's layout and the refusals that reject it.
 
 use super::{build_args_block, GuestArgsError};
+use cellgov_ps3_abi::hw::address_space::{
+    PS3_PRIMARY_STACK_BASE, PS3_PRIMARY_STACK_SIZE, PS3_PRIMARY_STACK_TOP,
+};
 
-const TOP: u64 = 0xD00F_FFF0;
-const SIZE: u64 = 0x0010_0000;
+const TOP: u64 = PS3_PRIMARY_STACK_TOP;
+const SIZE: u64 = PS3_PRIMARY_STACK_SIZE as u64;
 
 fn be64(bytes: &[u8], off: usize) -> u64 {
     u64::from_be_bytes(bytes[off..off + 8].try_into().unwrap())
@@ -110,18 +113,20 @@ fn r1_sits_a_full_linkage_frame_below_the_pointer_table() {
 
 #[test]
 fn the_fit_check_counts_the_entry_frame_reserve() {
-    // One arg: 4 table slots (0x20). A string chunk of 0xFFF70
-    // makes total + 0x70 == SIZE exactly -> rejected; one 16-byte
-    // granule less fits.
-    let rejected = vec!["x".repeat(0xFFF6F)];
+    // One arg: 4 table slots (0x20). A string chunk of 0xFFF00
+    // makes total + 0xE0 == SIZE exactly, so r1 lands at the
+    // inclusive stack base and fits. One 16-byte granule more does
+    // not fit.
+    let exact = vec!["x".repeat(0xFFEFF)];
+    let block = build_args_block(TOP, SIZE, &exact).unwrap();
+    assert_eq!(block.initial_r1, PS3_PRIMARY_STACK_BASE);
+
+    let rejected = vec!["x".repeat(0xFFF0F)];
     assert!(matches!(
         build_args_block(TOP, SIZE, &rejected),
         Err(GuestArgsError::BlockTooLarge {
-            total: 0xFFF90,
+            total: 0xFFF30,
             stack_size: SIZE,
         })
     ));
-    let fits = vec!["x".repeat(0xFFF5F)];
-    let block = build_args_block(TOP, SIZE, &fits).unwrap();
-    assert_eq!(block.initial_r1, TOP - 0xFFF80 - 0x70);
 }

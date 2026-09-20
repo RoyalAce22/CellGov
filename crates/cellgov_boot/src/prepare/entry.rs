@@ -14,6 +14,27 @@ use crate::guest_args::GuestArgsError;
 use crate::prx::TLS_BASE;
 use crate::BootError;
 
+fn seed_process_start_registers(
+    state: &mut cellgov_ppu::state::PpuState,
+    tls_info: Option<cellgov_ppu::loader::TlsInfo>,
+    malloc_pagesize: u32,
+    entry: u64,
+) {
+    state.set_lr(0);
+    state.set_gpr(6, 0);
+    // No termination function is installed for the primary entry.
+    // [CBE-Handbook p:396 s:14.3.1.2] R7 is the termination-function pointer.
+    state.set_gpr(7, 0);
+    state.set_gpr(8, tls_info.map(|t| t.vaddr).unwrap_or(0));
+    state.set_gpr(9, tls_info.map(|t| t.filesz).unwrap_or(0));
+    state.set_gpr(10, tls_info.map(|t| t.memsz).unwrap_or(0));
+    state.set_gpr(11, entry);
+    state.set_gpr(12, malloc_pagesize as u64);
+    // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
+    // creation and sys_initialize_tls does not touch it.
+    state.set_gpr(13, TLS_BASE + 0x7030);
+}
+
 /// Why the primary thread's entry state could not be seeded.
 #[derive(Debug, thiserror::Error)]
 pub enum EntryError {
@@ -106,17 +127,7 @@ pub(super) fn seed_primary_entry_state(
             state.set_gpr(5, 0);
         }
     }
-    state.set_lr(0);
-    state.set_gpr(6, 0);
-    state.set_gpr(7, 0x0100_0000);
-    state.set_gpr(8, params.tls_info.map(|t| t.vaddr).unwrap_or(0));
-    state.set_gpr(9, params.tls_info.map(|t| t.filesz).unwrap_or(0));
-    state.set_gpr(10, params.tls_info.map(|t| t.memsz).unwrap_or(0));
-    state.set_gpr(11, entry);
-    state.set_gpr(12, params.malloc_pagesize as u64);
-    // r13 is the PS3 PPC64 ABI TLS pointer; LV2 seeds it at process
-    // creation and sys_initialize_tls does not touch it.
-    state.set_gpr(13, TLS_BASE + 0x7030);
+    seed_process_start_registers(state, params.tls_info, params.malloc_pagesize, entry);
     Ok(())
 }
 
@@ -210,3 +221,7 @@ pub(super) fn register_primary_unit(
     );
     Ok(primary_unit_id)
 }
+
+#[cfg(test)]
+#[path = "tests/entry_tests.rs"]
+mod tests;

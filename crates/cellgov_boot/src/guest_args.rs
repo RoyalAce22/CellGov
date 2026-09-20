@@ -48,9 +48,9 @@ pub enum GuestArgsError {
         /// Index into the argv the caller supplied.
         index: usize,
     },
-    /// The block plus the entry frame reserve does not fit the stack.
+    /// The block plus both entry frame reserves does not fit the stack.
     #[error(
-        "args block of {total} bytes plus the 0x70-byte entry frame reserve \
+        "args block of {total} bytes plus two 0x70-byte entry frame reserves \
          does not fit the 0x{stack_size:08x}-byte primary stack"
     )]
     BlockTooLarge {
@@ -109,9 +109,11 @@ pub(crate) fn build_args_block(
         .map(|a| (a.len() as u64 + 1).next_multiple_of(STRING_ALIGN))
         .sum();
     let total = table_size + data_size;
-    // The reserve is part of the footprint: r1 must stay on the
-    // stack, not just the block.
-    if total + ENTRY_FRAME_RESERVE >= stack_size {
+    // The stack top already reserves one entry frame. The r1 below
+    // the argument block consumes a second frame.
+    // Equality is valid: initial_r1 then lands exactly at the
+    // declared stack base, which is part of the stack range.
+    if total + 2 * ENTRY_FRAME_RESERVE > stack_size {
         return Err(GuestArgsError::BlockTooLarge { total, stack_size });
     }
     let base = stack_top - total;
