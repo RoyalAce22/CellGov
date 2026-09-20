@@ -165,14 +165,14 @@ pub(super) fn open_window(
         }
         // An empty runnable set goes to `Runtime::step`, whose warp
         // alone separates `NoRunnableUnit` from `AllBlocked`.
-        let step = match rt.step() {
+        let mut step = match rt.step() {
             Ok(step) => step,
             Err(StepError::NoRunnableUnit) => {
                 return Err(ended(steps, WindowStop::Run(StopReason::Stalled)))
             }
             Err(e) => return Err(ended(steps, WindowStop::Run(StopReason::StepError(e)))),
         };
-        if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+        if let Err(e) = rt.commit_step_and_recycle(&mut step) {
             return Err(ended(steps, WindowStop::Run(StopReason::CommitError(e))));
         }
         // `boot run` drains this between steps; nothing here does. See

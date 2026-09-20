@@ -143,8 +143,8 @@ fn run_internal(fixture: ScenarioFixture, memory: GuestMemory) -> (ScenarioResul
 
     let outcome = loop {
         match rt.step() {
-            Ok(step) => {
-                let _ = rt.commit_step(&step.result, &step.effects);
+            Ok(mut step) => {
+                let _ = rt.commit_step_and_recycle(&mut step);
             }
             Err(StepError::NoRunnableUnit) | Err(StepError::AllBlocked) => {
                 break ScenarioOutcome::Stalled;

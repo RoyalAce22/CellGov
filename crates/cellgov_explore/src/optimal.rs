@@ -371,7 +371,7 @@ fn run_one(
             // wakes a unit delivers the prescription.
             rt.set_scheduler(PrescribedScheduler::single_choice(frames[depth].chosen));
         }
-        let step = match rt.step() {
+        let mut step = match rt.step() {
             Ok(step) => step,
             Err(cellgov_core::StepError::NoRunnableUnit) => {
                 break Halt::Stopped(StopReason::Stalled)
@@ -439,7 +439,7 @@ fn run_one(
         let chosen = frames[depth].chosen;
         let mut footprint =
             StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-        if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+        if let Err(e) = rt.commit_step_and_recycle(&mut step) {
             break Halt::Stopped(StopReason::CommitError(e));
         }
         footprint.note_commit(rt, step.unit);

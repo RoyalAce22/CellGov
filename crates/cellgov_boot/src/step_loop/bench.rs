@@ -62,12 +62,12 @@ fn drive(
             crate::child_init::run_pending_child_inits(rt, child_init, sink)?;
         }
         match rt.step() {
-            Ok(step) => {
+            Ok(mut step) => {
                 *steps += 1;
                 if (*steps).is_multiple_of(STEP_REPORT_BATCH) {
                     progress.advanced(STEP_REPORT_BATCH as u64);
                 }
-                let commit_result = rt.commit_step(&step.result, &step.effects);
+                let commit_result = rt.commit_step_and_recycle(&mut step);
                 match classify_step_outcome(&step.result, &commit_result, checkpoint, target_pc) {
                     StepVerdict::Continue => {}
                     StepVerdict::RsxCheckpoint(_) => return Ok(BootOutcome::RsxWriteCheckpoint),

@@ -42,7 +42,7 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
         }
         let step_idx = rt.steps_taken();
         match rt.step() {
-            Ok(step) => {
+            Ok(mut step) => {
                 // The predicate re-reads the question `Runtime::step`
                 // answers; a step past the cap means the two disagree,
                 // and the cap then bounds nothing.
@@ -55,7 +55,7 @@ fn observe(rt: &mut Runtime, max_steps: Option<usize>) -> (DecisionLog, StopReas
                 let runnable: Vec<_> = rt.last_runnable().to_vec();
                 let mut footprint =
                     StepFootprint::from_step(step.unit, step.result.yield_reason, &step.effects);
-                if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
                     break StopReason::CommitError(e);
                 }
                 footprint.note_commit(rt, step.unit);

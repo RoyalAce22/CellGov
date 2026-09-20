@@ -362,7 +362,7 @@ pub fn run_module_start(
             });
         }
         match rt.step() {
-            Ok(step) => {
+            Ok(mut step) => {
                 steps += 1;
 
                 if let Some(pc) = step.result.local_diagnostics.pc {
@@ -405,7 +405,7 @@ pub fn run_module_start(
                     ));
                 }
 
-                if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
                     sink.warn(&format!(
                         "  module_start commit_step FAILED at step {steps}: {e:?}"
                     ));

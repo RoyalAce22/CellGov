@@ -224,6 +224,28 @@ fn step_then_commit_writes_become_visible() {
 }
 
 #[test]
+fn committing_an_owned_step_reuses_its_effect_capacity() {
+    let mut rt = build(16, 1, 100);
+    rt.registry_mut().register_with(|id| WritingUnit {
+        id,
+        steps: Cell::new(0),
+        max: 5,
+    });
+
+    let mut first = rt.step().unwrap();
+    let capacity = first.effects.capacity();
+    assert!(
+        capacity >= 1,
+        "the writing unit must grow the effect buffer"
+    );
+    rt.commit_step_and_recycle(&mut first).unwrap();
+    assert_eq!(rt.effects_buf_capacity_for_tests(), capacity);
+
+    let second = rt.step().unwrap();
+    assert_eq!(second.effects.capacity(), capacity);
+}
+
+#[test]
 fn max_steps_zero_rejects_first_step() {
     let mem = GuestMemory::new(64);
     let mut rt = Runtime::new(mem, Budget::new(10), 0);

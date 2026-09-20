@@ -10,8 +10,25 @@ use cellgov_trace::HostWriter;
 use crate::commit::{BlockReason, CommitContext, CommitError, CommitOutcome};
 use crate::runtime::spaces::AddressSpaceId;
 use crate::runtime::state::Runtime;
+use crate::runtime::types::RuntimeStep;
 
 impl Runtime {
+    /// Commit a step and recycle its effect buffer for the next step.
+    ///
+    /// This is the hot-path companion to [`Self::commit_step`]. It
+    /// leaves `step.effects` empty, while preserving `step.result` for
+    /// callers that classify the completed step.
+    pub fn commit_step_and_recycle(
+        &mut self,
+        step: &mut RuntimeStep,
+    ) -> Result<CommitOutcome, CommitError> {
+        let effects = std::mem::take(&mut step.effects);
+        let outcome = self.commit_step(&step.result, &effects);
+        self.effects_buf = effects;
+        self.effects_buf.clear();
+        outcome
+    }
+
     /// Drive the commit pipeline for a previously-returned step result.
     ///
     /// Epoch advances on every commit boundary including validation

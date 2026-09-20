@@ -153,7 +153,7 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
             return StopReason::StepBound;
         }
         match rt.step() {
-            Ok(step) => {
+            Ok(mut step) => {
                 // A step past the cap means `can_take_another_step` and
                 // `Runtime::step` disagree, and the cap then bounds
                 // nothing.
@@ -164,7 +164,7 @@ pub fn run_to_stall(rt: &mut Runtime, max_steps: usize) -> StopReason {
                 // The commit discards the batch and counts it, so the
                 // fault read comes after it. A refusal outranks a
                 // fault, as the boot's own step loop ranks them.
-                if let Err(e) = rt.commit_step(&step.result, &step.effects) {
+                if let Err(e) = rt.commit_step_and_recycle(&mut step) {
                     return StopReason::CommitError(e);
                 }
                 // Ahead of the fault for the same reason the commit

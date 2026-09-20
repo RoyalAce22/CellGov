@@ -65,7 +65,7 @@ fn drive(
         let t1 = Instant::now();
 
         match step_result {
-            Ok(step) => {
+            Ok(mut step) => {
                 *ctx.steps += 1;
 
                 // The PC ring tracks attempted execution; it advances
@@ -83,7 +83,7 @@ fn drive(
                 }
 
                 let t2 = Instant::now();
-                let commit_result = rt.commit_step(&step.result, &step.effects);
+                let commit_result = rt.commit_step_and_recycle(&mut step);
                 let t3 = Instant::now();
 
                 // Inertness gate. Commit/wake paths push invariant
