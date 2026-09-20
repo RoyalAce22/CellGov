@@ -19,6 +19,7 @@
 
 pub mod decode;
 pub mod exec;
+pub mod fuzz;
 pub mod instruction;
 pub mod loader;
 pub mod state;

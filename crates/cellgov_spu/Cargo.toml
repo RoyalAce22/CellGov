@@ -21,6 +21,7 @@ cellgov_ps3_abi = { path = "../cellgov_ps3_abi" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 thiserror = "2"
+strum = { version = "0.26", default-features = false, features = ["derive"] }
 
 [features]
 # Opt-in for the SPU micro-test suite. The suite reads ELFs built by

@@ -25,33 +25,34 @@ graph BT
   n6["cellgov_event"]
   n7["cellgov_exec"]
   n8["cellgov_explore"]
-  n9["cellgov_install"]
-  n10["cellgov_lv2"]
-  n11["cellgov_mem"]
-  n12["cellgov_mkelf"]
-  n13["cellgov_ppu"]
-  n14["cellgov_ps3_abi"]
-  n15["cellgov_spu"]
-  n16["cellgov_sync"]
-  n17["cellgov_terminal"]
-  n18["cellgov_testkit"]
-  n19["cellgov_time"]
-  n20["cellgov_trace"]
-  n21["rpcs3_to_observation"]
+  n9["cellgov_fuzz"]
+  n10["cellgov_install"]
+  n11["cellgov_lv2"]
+  n12["cellgov_mem"]
+  n13["cellgov_mkelf"]
+  n14["cellgov_ppu"]
+  n15["cellgov_ps3_abi"]
+  n16["cellgov_spu"]
+  n17["cellgov_sync"]
+  n18["cellgov_terminal"]
+  n19["cellgov_testkit"]
+  n20["cellgov_time"]
+  n21["cellgov_trace"]
+  n22["rpcs3_to_observation"]
   n2 --> n0
   n3 --> n0
   n5 --> n0
   n6 --> n0
   n7 --> n0
-  n9 --> n0
   n10 --> n0
   n11 --> n0
-  n13 --> n0
+  n12 --> n0
   n14 --> n0
   n15 --> n0
-  n17 --> n0
-  n19 --> n0
+  n16 --> n0
+  n18 --> n0
   n20 --> n0
+  n21 --> n0
   n0 --> n1
   n2 --> n1
   n3 --> n1
@@ -59,104 +60,110 @@ graph BT
   n6 --> n1
   n7 --> n1
   n8 --> n1
-  n9 --> n1
   n10 --> n1
   n11 --> n1
-  n13 --> n1
+  n12 --> n1
   n14 --> n1
   n15 --> n1
-  n17 --> n1
+  n16 --> n1
   n18 --> n1
   n19 --> n1
   n20 --> n1
+  n21 --> n1
   n3 --> n2
   n6 --> n2
-  n10 --> n2
   n11 --> n2
-  n14 --> n2
-  n18 --> n2
+  n12 --> n2
+  n15 --> n2
   n19 --> n2
   n20 --> n2
+  n21 --> n2
   n4 --> n3
   n5 --> n3
   n6 --> n3
   n7 --> n3
-  n10 --> n3
   n11 --> n3
-  n14 --> n3
-  n16 --> n3
-  n19 --> n3
+  n12 --> n3
+  n15 --> n3
+  n17 --> n3
   n20 --> n3
+  n21 --> n3
   n6 --> n4
-  n11 --> n4
-  n14 --> n4
-  n19 --> n4
+  n12 --> n4
+  n15 --> n4
+  n20 --> n4
   n4 --> n5
   n6 --> n5
-  n11 --> n5
-  n16 --> n5
-  n19 --> n5
-  n19 --> n6
+  n12 --> n5
+  n17 --> n5
+  n20 --> n5
+  n20 --> n6
   n4 --> n7
   n5 --> n7
   n6 --> n7
-  n11 --> n7
-  n16 --> n7
-  n19 --> n7
+  n12 --> n7
+  n17 --> n7
+  n20 --> n7
   n3 --> n8
   n4 --> n8
   n5 --> n8
   n6 --> n8
   n7 --> n8
-  n11 --> n8
-  n16 --> n8
-  n19 --> n8
+  n12 --> n8
+  n17 --> n8
   n20 --> n8
+  n21 --> n8
+  n5 --> n9
+  n6 --> n9
+  n12 --> n9
   n14 --> n9
+  n16 --> n9
   n17 --> n9
-  n5 --> n10
-  n6 --> n10
-  n11 --> n10
-  n14 --> n10
-  n16 --> n10
-  n19 --> n10
-  n19 --> n11
-  n14 --> n12
-  n5 --> n13
-  n6 --> n13
-  n7 --> n13
-  n11 --> n13
-  n14 --> n13
-  n16 --> n13
-  n19 --> n13
-  n4 --> n15
-  n5 --> n15
-  n6 --> n15
-  n7 --> n15
-  n11 --> n15
-  n14 --> n15
-  n16 --> n15
-  n19 --> n15
+  n15 --> n10
+  n18 --> n10
+  n5 --> n11
+  n6 --> n11
+  n12 --> n11
+  n15 --> n11
+  n17 --> n11
+  n20 --> n11
+  n20 --> n12
+  n15 --> n13
+  n5 --> n14
+  n6 --> n14
+  n7 --> n14
+  n12 --> n14
+  n15 --> n14
+  n17 --> n14
+  n20 --> n14
+  n4 --> n16
+  n5 --> n16
   n6 --> n16
-  n11 --> n16
-  n14 --> n16
-  n19 --> n16
-  n3 --> n18
-  n4 --> n18
-  n5 --> n18
-  n6 --> n18
-  n7 --> n18
-  n11 --> n18
-  n14 --> n18
-  n16 --> n18
-  n19 --> n18
-  n20 --> n18
-  n14 --> n19
-  n5 --> n20
-  n6 --> n20
-  n19 --> n20
-  n2 --> n21
-  n14 --> n21
+  n7 --> n16
+  n12 --> n16
+  n15 --> n16
+  n17 --> n16
+  n20 --> n16
+  n6 --> n17
+  n12 --> n17
+  n15 --> n17
+  n20 --> n17
+  n3 --> n19
+  n4 --> n19
+  n5 --> n19
+  n6 --> n19
+  n7 --> n19
+  n12 --> n19
+  n15 --> n19
+  n17 --> n19
+  n20 --> n19
+  n21 --> n19
+  n15 --> n20
+  n5 --> n21
+  n6 --> n21
+  n20 --> n21
+  n2 --> n22
+  n15 --> n22
 ```
 
 <!-- workspace-gen:dag:end -->
@@ -234,8 +241,9 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_install` | aes, cbc, ctr, flate2, hmac, serde, sha1, sha2, thiserror, toml |
 | `cellgov_terminal` | ctrlc, terminal_size |
 | `cellgov_ppu` | derive_more, strum, thiserror |
-| `cellgov_spu` | thiserror |
+| `cellgov_spu` | strum, thiserror |
 | `cellgov_explore` | serde, serde_json, strum |
+| `cellgov_fuzz` | none |
 | `cellgov_cli` | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
 | `cellgov_mkelf` | none |
 | `rpcs3_to_observation` | serde, serde_json, thiserror, toml |
@@ -259,6 +267,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_core`                 | The runtime: deterministic step loop, commit pipeline, syscall response table, SPU factory hook.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `cellgov_ppu`                  | PPU interpreter, ELF64 / SPRX / PRX loaders, and the PRX loader's dependency-ordered multi-module import resolution; the NID lookup database lives in `cellgov_ps3_abi`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `cellgov_spu`                  | SPU interpreter and SPU ELF loader; MFC / SPU channel-number constants live in `cellgov_ps3_abi::hw::spu`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `cellgov_fuzz`                 | Deterministic library engines for PPU and SPU instruction, sequence, and decoder-partition fuzzing. ISA identity, encoding fields, observable state, legal outcomes, effect footprints, and shrink rules remain owned by the interpreter crates. The caller owns console, clock, environment, process, and parallel execution policy. |
 | `cellgov_testkit`              | Scenario fixtures and the runner used by tests across the workspace, the PARAM.SFO emitter synthetic title trees are built with, and the scratch directories those tests write into -- one guard that removes its tree on drop, including while a panic unwinds, so a failing test leaks nothing. The scratch half sits behind a default-off feature, since this crate is a runtime dependency of the binaries and the directories come from `tempfile`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_terminal`             | Terminal presentation for the host tools: startup capability detection (`Off` / `Plain` / `Ansi`, color policy, width) and the shared progress bar -- a `ProgressSink` event seam instrumented code emits against, and a render thread that owns stderr. Callers describe their work as a `Task` (verb, phase labels, `Bytes`/`Files`/`Steps`/`Items` denominator), so no command's vocabulary is baked in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `cellgov_compare`              | Normalized observation schema, RPCS3 runner adapter, multi-baseline diff, per-step `diverge` scanner, zoom-in `zoom_lookup`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |

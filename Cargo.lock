@@ -301,6 +301,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cellgov_fuzz"
+version = "0.0.0"
+dependencies = [
+ "cellgov_effects",
+ "cellgov_event",
+ "cellgov_mem",
+ "cellgov_ppu",
+ "cellgov_spu",
+ "cellgov_sync",
+]
+
+[[package]]
 name = "cellgov_install"
 version = "0.0.0"
 dependencies = [
@@ -398,6 +410,7 @@ dependencies = [
  "cellgov_sync",
  "cellgov_testkit",
  "cellgov_time",
+ "strum",
  "thiserror",
 ]
 

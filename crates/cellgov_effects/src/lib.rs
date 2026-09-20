@@ -19,5 +19,5 @@
 pub mod effect;
 pub mod payload;
 
-pub use effect::Effect;
+pub use effect::{Effect, EffectKind};
 pub use payload::{FaultKind, MailboxMessage, WaitTarget, WritePayload};

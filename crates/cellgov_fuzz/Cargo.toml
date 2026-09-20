@@ -1,0 +1,21 @@
+[package]
+name = "cellgov_fuzz"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+description = "Deterministic fuzz-engine library for the PPU and SPU interpreters."
+
+[lints]
+workspace = true
+
+[dependencies]
+cellgov_effects = { path = "../cellgov_effects" }
+cellgov_event = { path = "../cellgov_event" }
+cellgov_mem = { path = "../cellgov_mem" }
+cellgov_ppu = { path = "../cellgov_ppu" }
+cellgov_spu = { path = "../cellgov_spu" }
+cellgov_sync = { path = "../cellgov_sync" }

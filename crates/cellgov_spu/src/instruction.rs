@@ -1,7 +1,13 @@
 //! Typed SPU instruction forms produced by decode and consumed by exec.
 
+#![allow(missing_docs)]
+
 /// A decoded SPU instruction.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::EnumDiscriminants)]
+#[strum_discriminants(
+    name(SpuInstructionKind),
+    derive(PartialOrd, Ord, strum::VariantArray, strum::IntoStaticStr)
+)]
 pub enum SpuInstruction {
     // [SPU-ISA p:32 s:3 Load/Store Quadword and Generate-Controls family]
     // Lqd/Lqx/Lqa/Lqr/Stqd/Stqx/Stqa/Stqr pp.32-39; Cbd/Cwd pp.40-45.

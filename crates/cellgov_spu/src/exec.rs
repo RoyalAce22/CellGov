@@ -14,7 +14,7 @@ use cellgov_sync::RESERVATION_LINE_BYTES;
 use cellgov_time::GuestTicks;
 
 /// Outcome of executing a single SPU instruction.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SpuStepOutcome {
     /// Advance PC by 4 and continue.
     Continue,

@@ -24,6 +24,89 @@ pub struct SpuState {
     pub reservation: Option<ReservedLine>,
 }
 
+/// Architectural state for instruction comparison.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpuObservableSnapshot {
+    /// Architectural register file.
+    pub regs: [[u8; 16]; SPU_REG_COUNT],
+    /// Architectural local store.
+    pub ls: Vec<u8>,
+    /// Address of the next instruction.
+    pub pc: u32,
+    /// Architectural channel state.
+    pub channels: SpuChannelSnapshot,
+    /// Atomic reservation state.
+    pub reservation: Option<ReservedLine>,
+}
+
+/// Channel state for instruction comparison.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpuChannelSnapshot {
+    /// Address staged for the next MFC command.
+    pub mfc_lsa: u32,
+    /// High effective-address word for the next MFC command.
+    pub mfc_eah: u32,
+    /// Low effective-address word for the next MFC command.
+    pub mfc_eal: u32,
+    /// Transfer size for the next MFC command.
+    pub mfc_size: u32,
+    /// Tag identifier for the next MFC command.
+    pub mfc_tag_id: u32,
+    /// Mask for tag-status queries.
+    pub tag_mask: u32,
+    /// Completed DMA tags.
+    pub tag_status: u32,
+    /// Status of the last atomic command.
+    pub atomic_status: u32,
+    /// Destination register for a pending mailbox read.
+    pub pending_mbox_rt: Option<u8>,
+    /// Pending MFC GET request.
+    pub pending_get: Option<(u64, u32, u32, u8)>,
+}
+
+impl SpuObservableSnapshot {
+    /// Creates an instruction-comparison snapshot.
+    pub fn capture(state: &SpuState) -> Self {
+        let SpuState {
+            regs,
+            ls,
+            pc,
+            channels,
+            reservation,
+        } = state;
+        let ChannelState {
+            mfc_lsa,
+            mfc_eah,
+            mfc_eal,
+            mfc_size,
+            mfc_tag_id,
+            tag_mask,
+            tag_status,
+            atomic_status,
+            pending_mbox_rt,
+            pending_get,
+        } = channels;
+        Self {
+            regs: *regs,
+            ls: ls.clone(),
+            pc: *pc,
+            channels: SpuChannelSnapshot {
+                mfc_lsa: *mfc_lsa,
+                mfc_eah: *mfc_eah,
+                mfc_eal: *mfc_eal,
+                mfc_size: *mfc_size,
+                mfc_tag_id: *mfc_tag_id,
+                tag_mask: *tag_mask,
+                tag_status: *tag_status,
+                atomic_status: *atomic_status,
+                pending_mbox_rt: *pending_mbox_rt,
+                pending_get: *pending_get,
+            },
+            reservation: *reservation,
+        }
+    }
+}
+
 impl SpuState {
     /// Create a new SPU state with zeroed registers, zeroed LS, PC at 0.
     pub fn new() -> Self {

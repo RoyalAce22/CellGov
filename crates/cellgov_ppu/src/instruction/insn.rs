@@ -8,6 +8,8 @@
 //! can consume `imm` directly as a signed byte offset; no further
 //! shift is needed.
 
+#![allow(missing_docs)]
+
 /// A decoded PPU instruction. Field names follow PPC ISA conventions
 /// (`rt`/`rs`/`ra`/`rb`, `imm`, `offset`, `link`).
 ///
@@ -15,8 +17,11 @@
 /// via `<&'static str>::from(&insn)`. Consumers
 /// (e.g. `PpuExecutionUnit::profile_prev`) store the name in
 /// `&'static str` fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr)]
-#[allow(missing_docs)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, strum::IntoStaticStr, strum::EnumDiscriminants)]
+#[strum_discriminants(
+    name(PpuInstructionKind),
+    derive(PartialOrd, Ord, strum::VariantArray, strum::IntoStaticStr)
+)]
 pub enum PpuInstruction {
     // -- Integer loads --
     // [PPC-Book1 p:34 s:3.3 Fixed-Point Load Instructions] lbz/lhz; lwz at p:37; ld/ldu/lwa at p:38-39.

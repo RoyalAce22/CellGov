@@ -50,15 +50,16 @@ impl PpuStateSnapshot {
 
     /// Snapshot a [`PpuState`].
     pub fn capture(state: &PpuState) -> Self {
+        let fields = state.snapshot_fields();
         Self {
-            gpr: *state.gpr.as_array(),
-            fpr: *state.fpr.as_array(),
-            vr: *state.vr.as_array(),
-            cr: state.cr(),
-            lr: state.lr(),
-            ctr: state.ctr(),
-            xer: state.xer(),
-            reservation: state.reservation(),
+            gpr: fields.gpr,
+            fpr: fields.fpr,
+            vr: fields.vr,
+            cr: fields.cr,
+            lr: fields.lr,
+            ctr: fields.ctr,
+            xer: fields.xer,
+            reservation: fields.reservation,
         }
     }
 

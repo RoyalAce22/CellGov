@@ -196,7 +196,63 @@ pub enum Effect {
     },
 }
 
+/// Stable identity for an [`Effect`] variant used by validation tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EffectKind {
+    /// [`Effect::SharedWriteIntent`].
+    SharedWriteIntent,
+    /// [`Effect::MailboxSend`].
+    MailboxSend,
+    /// [`Effect::MailboxReceiveAttempt`].
+    MailboxReceiveAttempt,
+    /// [`Effect::DmaEnqueue`].
+    DmaEnqueue,
+    /// [`Effect::WaitOnEvent`].
+    WaitOnEvent,
+    /// [`Effect::WakeUnit`].
+    WakeUnit,
+    /// [`Effect::SignalUpdate`].
+    SignalUpdate,
+    /// [`Effect::FaultRaised`].
+    FaultRaised,
+    /// [`Effect::TraceMarker`].
+    TraceMarker,
+    /// [`Effect::ReservationAcquire`].
+    ReservationAcquire,
+    /// [`Effect::ConditionalStore`].
+    ConditionalStore,
+    /// [`Effect::RsxLabelWrite`].
+    RsxLabelWrite,
+    /// [`Effect::RsxFlipRequest`].
+    RsxFlipRequest,
+    /// [`Effect::SharedReadIntent`].
+    SharedReadIntent,
+    /// [`Effect::ClockRead`].
+    ClockRead,
+}
+
 impl Effect {
+    /// Identifies this effect for validation tools.
+    pub fn kind(&self) -> EffectKind {
+        match self {
+            Self::SharedWriteIntent { .. } => EffectKind::SharedWriteIntent,
+            Self::MailboxSend { .. } => EffectKind::MailboxSend,
+            Self::MailboxReceiveAttempt { .. } => EffectKind::MailboxReceiveAttempt,
+            Self::DmaEnqueue { .. } => EffectKind::DmaEnqueue,
+            Self::WaitOnEvent { .. } => EffectKind::WaitOnEvent,
+            Self::WakeUnit { .. } => EffectKind::WakeUnit,
+            Self::SignalUpdate { .. } => EffectKind::SignalUpdate,
+            Self::FaultRaised { .. } => EffectKind::FaultRaised,
+            Self::TraceMarker { .. } => EffectKind::TraceMarker,
+            Self::ReservationAcquire { .. } => EffectKind::ReservationAcquire,
+            Self::ConditionalStore { .. } => EffectKind::ConditionalStore,
+            Self::RsxLabelWrite { .. } => EffectKind::RsxLabelWrite,
+            Self::RsxFlipRequest { .. } => EffectKind::RsxFlipRequest,
+            Self::SharedReadIntent { .. } => EffectKind::SharedReadIntent,
+            Self::ClockRead { .. } => EffectKind::ClockRead,
+        }
+    }
+
     /// Stage a write of `bytes` into `range`.
     #[inline]
     pub fn shared_write(

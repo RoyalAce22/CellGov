@@ -43,6 +43,7 @@ const HOST: &[&str] = &[
     "crates/cellgov_boot",
     "crates/cellgov_testkit",
     "crates/cellgov_explore",
+    "crates/cellgov_fuzz",
     "crates/cellgov_terminal",
     "apps/cellgov_cli",
     "apps/cellgov_mkelf",
