@@ -3,7 +3,7 @@
 use super::*;
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::payload::{MailboxMessage, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::GuestAddr;
 use cellgov_time::GuestTicks;
 
@@ -224,7 +224,6 @@ fn dma_over_reserved_line_conflicts_without_byte_overlap() {
         Effect::ConditionalStore {
             range: range(0x1000, 8),
             bytes: WritePayload::new(vec![0; 8]),
-            ordering: PriorityClass::Normal,
             source: UnitId::new(0),
             source_time: GuestTicks::new(0),
         },

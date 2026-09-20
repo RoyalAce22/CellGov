@@ -3,7 +3,7 @@
 use super::*;
 use cellgov_dma::{DmaDirection, DmaQueue, DmaRequest, FixedLatency};
 use cellgov_effects::{FaultKind, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_exec::LocalDiagnostics;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_sync::ReservationTable;
@@ -851,7 +851,6 @@ fn conditional_store(addr: u64, bytes: Vec<u8>, source: UnitId) -> Effect {
     Effect::ConditionalStore {
         range: range(addr, bytes.len() as u64),
         bytes: WritePayload::new(bytes),
-        ordering: PriorityClass::Normal,
         source,
         source_time: GuestTicks::new(0),
     }
@@ -1052,7 +1051,6 @@ fn conditional_store_payload_length_mismatch_rejects_batch() {
     let bad = Effect::ConditionalStore {
         range: range(0x100, 4),
         bytes: WritePayload::new(vec![0, 0]),
-        ordering: PriorityClass::Normal,
         source: u,
         source_time: GuestTicks::new(0),
     };

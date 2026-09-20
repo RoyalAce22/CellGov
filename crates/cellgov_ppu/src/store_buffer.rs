@@ -8,7 +8,7 @@
 // [PPC-Book2 p:8 s:1.7 Shared Storage] weakly consistent storage model: stores need not be globally visible in program order, only as observed by the executing processor.
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::GuestTicks;
 
@@ -54,7 +54,6 @@ impl StoreEntry {
             Effect::ConditionalStore {
                 range,
                 bytes: payload,
-                ordering: PriorityClass::Normal,
                 source,
                 source_time: GuestTicks::ZERO,
             }

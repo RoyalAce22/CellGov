@@ -1,7 +1,6 @@
 use std::cell::Cell;
 
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::PriorityClass;
 use cellgov_exec::{
     ExecutionContext, ExecutionStepResult, ExecutionUnit, LocalDiagnostics, UnitStatus, YieldReason,
 };
@@ -123,7 +122,6 @@ impl ExecutionUnit for AtomicWriter {
             effects.push(Effect::ConditionalStore {
                 range,
                 bytes: WritePayload::new(vec![0xEE; 4]),
-                ordering: PriorityClass::Normal,
                 source: self.id,
                 source_time: GuestTicks::ZERO,
             });

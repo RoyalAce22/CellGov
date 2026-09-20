@@ -40,7 +40,6 @@ fn shared_write_fills_every_field_of_the_variant() {
         Effect::SharedWriteIntent {
             range: range(0x2000, 2),
             bytes: WritePayload::new(vec![0x01, 0x02]),
-            ordering: PriorityClass::Normal,
             source: UnitId::new(7),
             source_time: GuestTicks::new(42),
         }
@@ -213,14 +212,12 @@ fn conditional_store_roundtrip() {
     let e = Effect::ConditionalStore {
         range: range(0x1000, 4),
         bytes: WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
-        ordering: PriorityClass::Normal,
         source: UnitId::new(2),
         source_time: GuestTicks::new(100),
     };
     let expected = Effect::ConditionalStore {
         range: range(0x1000, 4),
         bytes: WritePayload::new(vec![0xde, 0xad, 0xbe, 0xef]),
-        ordering: PriorityClass::Normal,
         source: UnitId::new(2),
         source_time: GuestTicks::new(100),
     };
@@ -233,14 +230,12 @@ fn conditional_store_distinguishes_source() {
     let a = Effect::ConditionalStore {
         range: range(0x1000, 4),
         bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
         source: UnitId::new(1),
         source_time: GuestTicks::new(0),
     };
     let b = Effect::ConditionalStore {
         range: range(0x1000, 4),
         bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
         source: UnitId::new(2),
         source_time: GuestTicks::new(0),
     };
@@ -334,7 +329,6 @@ fn reservation_variants_distinct_from_existing() {
     let cond = Effect::ConditionalStore {
         range: range(0x1000, 4),
         bytes: WritePayload::new(vec![0; 4]),
-        ordering: PriorityClass::Normal,
         source: UnitId::new(1),
         source_time: GuestTicks::new(0),
     };

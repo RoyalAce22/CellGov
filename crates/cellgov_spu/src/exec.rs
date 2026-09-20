@@ -5,7 +5,7 @@ use crate::instruction::SpuInstruction;
 use crate::state::SpuState;
 use cellgov_dma::{DmaDirection, DmaRequest};
 use cellgov_effects::{Effect, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_exec::YieldReason;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_ps3_abi::hw::spu;
@@ -897,7 +897,6 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     effects: vec![Effect::ConditionalStore {
                         range,
                         bytes: WritePayload::new(ls_bytes),
-                        ordering: PriorityClass::Normal,
                         source: unit_id,
                         source_time: GuestTicks::ZERO,
                     }],

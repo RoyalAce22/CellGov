@@ -3,7 +3,7 @@
 
 use crate::payload::{FaultKind, MailboxMessage, WaitTarget, WritePayload};
 use cellgov_dma::DmaRequest;
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::ByteRange;
 use cellgov_sync::{MailboxId, SignalId};
 use cellgov_time::GuestTicks;
@@ -15,9 +15,9 @@ use cellgov_time::GuestTicks;
 /// preserved end-to-end; validation, conflict resolution, fault
 /// attribution, and trace reconstruction all depend on stable
 /// intra-step ordering even though commit batches are atomic from the
-/// guest's standpoint. Variant discriminants are part of the binary
-/// trace contract: new variants must be appended; existing variants
-/// must not be reordered or have fields removed.
+/// guest's standpoint. The trace bridge records each variant's kind,
+/// not this enum's Rust field layout; new variants require a new
+/// appended trace-kind discriminant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// Stage a write to globally visible memory, applied at the next
@@ -28,8 +28,6 @@ pub enum Effect {
         /// Bytes to deposit; length checked against `range.length()`
         /// at commit validation.
         bytes: WritePayload,
-        /// Tier-2 class for conflict resolution on overlapping writes.
-        ordering: PriorityClass,
         /// Emitting unit.
         source: UnitId,
         /// Guest-time stamp at which this write becomes ordered.
@@ -129,8 +127,6 @@ pub enum Effect {
         range: ByteRange,
         /// Bytes to deposit; length must equal `range.length()`.
         bytes: WritePayload,
-        /// Tier-2 class for conflict resolution on overlapping writes.
-        ordering: PriorityClass,
         /// Unit whose reservation entry this commit retires.
         source: UnitId,
         /// Guest-time stamp at which the store becomes ordered.
@@ -201,9 +197,7 @@ pub enum Effect {
 }
 
 impl Effect {
-    /// Stage a `Normal`-class write of `bytes` into `range`.
-    ///
-    /// Every emitter in the workspace writes at that class.
+    /// Stage a write of `bytes` into `range`.
     #[inline]
     pub fn shared_write(
         range: ByteRange,
@@ -214,7 +208,6 @@ impl Effect {
         Self::SharedWriteIntent {
             range,
             bytes,
-            ordering: PriorityClass::Normal,
             source,
             source_time,
         }

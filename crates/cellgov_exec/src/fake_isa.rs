@@ -8,7 +8,7 @@ use crate::unit::{ExecutionUnit, UnitStatus};
 use crate::yield_reason::YieldReason;
 use crate::LocalDiagnostics;
 use cellgov_effects::{Effect, MailboxMessage, WaitTarget, WritePayload};
-use cellgov_event::{PriorityClass, UnitId};
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr};
 use cellgov_time::{Budget, GuestTicks, InstructionCost};
 
@@ -337,7 +337,6 @@ impl ExecutionUnit for FakeIsaUnit {
                 effects.push(Effect::ConditionalStore {
                     range,
                     bytes: WritePayload::new(vec![byte; len as usize]),
-                    ordering: PriorityClass::Normal,
                     source: self.id,
                     source_time: GuestTicks::ZERO,
                 });

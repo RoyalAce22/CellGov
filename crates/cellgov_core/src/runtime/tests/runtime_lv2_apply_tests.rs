@@ -80,7 +80,7 @@ fn apply_lv2_effects_direct_commits_shared_write_intents() {
 fn apply_lv2_effects_loud_rejects_every_unsupported_effect_variant() {
     use cellgov_dma::{DmaDirection, DmaRequest};
     use cellgov_effects::{FaultKind, WaitTarget, WritePayload};
-    use cellgov_event::PriorityClass;
+
     use cellgov_mem::ByteRange;
     use cellgov_sync::{MailboxId, SignalId};
 
@@ -154,7 +154,6 @@ fn apply_lv2_effects_loud_rejects_every_unsupported_effect_variant() {
             Effect::ConditionalStore {
                 range: slot,
                 bytes: WritePayload::new(vec![0xAA; 4]),
-                ordering: PriorityClass::Normal,
                 source,
                 source_time: GuestTicks::ZERO,
             },
