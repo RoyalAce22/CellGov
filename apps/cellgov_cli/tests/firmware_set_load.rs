@@ -210,12 +210,12 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         }
     }
 
-    // (e) Layout: every module's [text_start, data_end) fits inside
+    // (e) Layout: every module's full resident range fits inside
     // the firmware region and ranges are pairwise disjoint.
     let mut ranges: Vec<(u64, u64, String)> = image
         .loaded
         .values()
-        .map(|p| (p.text_start, p.data_end, p.name.clone()))
+        .map(|p| (p.text_start, p.resident_end(), p.name.clone()))
         .collect();
     for (start, end, name) in &ranges {
         assert!(
