@@ -51,7 +51,7 @@ pub use sync_primitives::{
     EventQueueWaiter, LwMutexAcquire, LwMutexAcquireOrEnqueue, LwMutexEnqueueError, LwMutexEntry,
     LwMutexIdAllocator, LwMutexRelease, LwMutexTable, MutexAcquire, MutexAcquireOrEnqueue,
     MutexAttrs, MutexCreateError, MutexEnqueueError, MutexEntry, MutexRelease, MutexTable,
-    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePost, SemaphoreTable,
+    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePostN, SemaphoreTable,
     SemaphoreWait, WaiterList,
 };
 pub use syscall_classification::{classify as classify_syscall, SyscallClassification};

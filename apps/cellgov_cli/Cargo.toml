@@ -86,7 +86,7 @@ microtests = ["decrypt"]
 # Suite that boots the ps3autotests corpus -- a GPLv2 tree the
 # developer clones locally (tests/ps3autotests.README.md), never
 # vendored, so cellgov stays MIT/Apache-2.0.
-ps3autotests = []
+ps3autotests = ["firmware-corpus"]
 
 [[test]]
 name = "firmware_set_load"

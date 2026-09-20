@@ -18,22 +18,6 @@ pub enum SemaphoreWait {
     Empty,
 }
 
-/// Outcome of a `post_and_wake` call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SemaphorePost {
-    /// Head waiter consumed the post; count not incremented.
-    Woke {
-        /// Thread that consumed the post.
-        new_owner: PpuThreadId,
-    },
-    /// No waiters; count incremented by 1.
-    Incremented,
-    /// Post would push count past `max`; table unchanged.
-    OverMax,
-    /// Unknown id.
-    Unknown,
-}
-
 /// Outcome of a `post_and_wake_n` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SemaphorePostN {
@@ -284,33 +268,6 @@ impl SemaphoreTable {
         SemaphorePostN::Posted {
             woken,
             incremented: leftover,
-        }
-    }
-
-    /// Post one slot. Wakes the FIFO head (without incrementing)
-    /// or increments `count`; `OverMax` if the increment would
-    /// exceed `max`.
-    pub fn post_and_wake(&mut self, id: u32) -> SemaphorePost {
-        let Some(entry) = self.entries.get_mut(&id) else {
-            return SemaphorePost::Unknown;
-        };
-        match entry.waiters.dequeue_one() {
-            Some(new_owner) => SemaphorePost::Woke { new_owner },
-            None => {
-                if entry.count >= entry.max {
-                    SemaphorePost::OverMax
-                } else {
-                    entry.count += 1;
-                    debug_assert!(
-                        entry.count <= entry.max,
-                        "semaphore {:#x} count past max after post: count={} max={}",
-                        id,
-                        entry.count,
-                        entry.max,
-                    );
-                    SemaphorePost::Incremented
-                }
-            }
         }
     }
 

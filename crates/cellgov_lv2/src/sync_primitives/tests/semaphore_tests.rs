@@ -27,8 +27,20 @@ fn purge_waiters_of_leaves_the_count_alone_and_the_next_post_increments() {
         0,
         "parking never spent a slot"
     );
-    assert_eq!(t.post_and_wake(1), SemaphorePost::Woke { new_owner: alive });
-    assert_eq!(t.post_and_wake(1), SemaphorePost::Incremented);
+    assert_eq!(
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![alive],
+            incremented: 0,
+        }
+    );
+    assert_eq!(
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![],
+            incremented: 1,
+        }
+    );
     assert_eq!(t.lookup(1).unwrap().count(), 1);
 }
 
@@ -130,7 +142,13 @@ fn try_wait_after_destroy_returns_none() {
 fn post_with_no_waiters_increments() {
     let mut t = SemaphoreTable::new();
     t.create_with_id(1, 0, 10).unwrap();
-    assert_eq!(t.post_and_wake(1), SemaphorePost::Incremented);
+    assert_eq!(
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![],
+            incremented: 1,
+        }
+    );
     assert_eq!(t.lookup(1).unwrap().count(), 1);
 }
 
@@ -140,9 +158,10 @@ fn post_with_one_waiter_wakes_that_waiter_and_does_not_increment() {
     t.create_with_id(1, 0, 10).unwrap();
     t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
     assert_eq!(
-        t.post_and_wake(1),
-        SemaphorePost::Woke {
-            new_owner: tid(0x0100_0001)
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![tid(0x0100_0001)],
+            incremented: 0,
         },
     );
     assert_eq!(t.lookup(1).unwrap().count(), 0);
@@ -157,24 +176,33 @@ fn post_with_multiple_waiters_wakes_head_in_fifo_order() {
     t.enqueue_waiter(1, tid(0x0100_0002)).unwrap();
     t.enqueue_waiter(1, tid(0x0100_0003)).unwrap();
     assert_eq!(
-        t.post_and_wake(1),
-        SemaphorePost::Woke {
-            new_owner: tid(0x0100_0001)
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![tid(0x0100_0001)],
+            incremented: 0,
         },
     );
     assert_eq!(
-        t.post_and_wake(1),
-        SemaphorePost::Woke {
-            new_owner: tid(0x0100_0002)
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![tid(0x0100_0002)],
+            incremented: 0,
         },
     );
     assert_eq!(
-        t.post_and_wake(1),
-        SemaphorePost::Woke {
-            new_owner: tid(0x0100_0003)
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![tid(0x0100_0003)],
+            incremented: 0,
         },
     );
-    assert_eq!(t.post_and_wake(1), SemaphorePost::Incremented);
+    assert_eq!(
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![],
+            incremented: 1,
+        }
+    );
     assert_eq!(t.lookup(1).unwrap().count(), 1);
 }
 
@@ -182,7 +210,7 @@ fn post_with_multiple_waiters_wakes_head_in_fifo_order() {
 fn post_past_max_with_no_waiters_returns_over_max() {
     let mut t = SemaphoreTable::new();
     t.create_with_id(1, 5, 5).unwrap();
-    assert_eq!(t.post_and_wake(1), SemaphorePost::OverMax);
+    assert_eq!(t.post_and_wake_n(1, 1), SemaphorePostN::OverMax);
     assert_eq!(t.lookup(1).unwrap().count(), 5);
 }
 
@@ -192,9 +220,10 @@ fn post_at_max_with_waiter_still_wakes_without_incrementing() {
     t.create_with_id(1, 5, 5).unwrap();
     t.enqueue_waiter(1, tid(0x0100_0001)).unwrap();
     assert_eq!(
-        t.post_and_wake(1),
-        SemaphorePost::Woke {
-            new_owner: tid(0x0100_0001)
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![tid(0x0100_0001)],
+            incremented: 0,
         },
     );
     assert_eq!(t.lookup(1).unwrap().count(), 5);
@@ -203,7 +232,7 @@ fn post_at_max_with_waiter_still_wakes_without_incrementing() {
 #[test]
 fn post_unknown_id_is_unknown() {
     let mut t = SemaphoreTable::new();
-    assert_eq!(t.post_and_wake(99), SemaphorePost::Unknown);
+    assert_eq!(t.post_and_wake_n(99, 1), SemaphorePostN::Unknown);
 }
 
 #[test]
@@ -231,8 +260,11 @@ fn remove_waiter_leaves_count_and_order_intact() {
     assert_eq!(remaining, vec![w1, w3], "FIFO order of the rest survives");
     assert_eq!(entry.count(), 0, "no count repair on timeout-cancel");
     assert_eq!(
-        t.post_and_wake(1),
-        SemaphorePost::Woke { new_owner: w1 },
+        t.post_and_wake_n(1, 1),
+        SemaphorePostN::Posted {
+            woken: vec![w1],
+            incremented: 0,
+        },
         "post-cancel post must hand the slot to the surviving FIFO head"
     );
 }

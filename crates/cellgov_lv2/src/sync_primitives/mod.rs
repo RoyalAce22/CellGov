@@ -35,7 +35,7 @@ pub use mutex::{
     MutexEntry, MutexRelease, MutexTable,
 };
 pub use semaphore::{
-    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePost, SemaphorePostN,
-    SemaphoreTable, SemaphoreWait,
+    SemaphoreCreateError, SemaphoreEnqueueError, SemaphoreEntry, SemaphorePostN, SemaphoreTable,
+    SemaphoreWait,
 };
 pub use waiter_list::WaiterList;
