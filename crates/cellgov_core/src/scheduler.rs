@@ -111,40 +111,41 @@ impl Scheduler for RoundRobinScheduler {
                  (does not detect id recycling, only disappearance)"
             );
         }
-        // Snapshot-once: reading `effective_status` twice could
-        // diverge if a future refactor makes it stateful.
-        let runnables: Vec<UnitId> = registry
-            .iter()
-            .filter(|(id, _)| registry.effective_status(*id) == Some(UnitStatus::Runnable))
-            .map(|(id, _)| id)
-            .collect();
-
-        // Ascending order is the invariant the two-pass scan below
-        // relies on; bounded size catches a runaway registry.
+        let cursor = self.last_scheduled;
+        let mut prior = None;
+        let mut first = None;
+        let mut after_cursor = None;
+        let mut cursor_runnable = false;
+        let mut runnable_count = 0usize;
+        for (id, _) in registry.iter() {
+            if let Some(previous) = prior {
+                debug_assert!(
+                    previous < id,
+                    "scheduler registry iteration is not ascending"
+                );
+            }
+            prior = Some(id);
+            if registry.effective_status(id) != Some(UnitStatus::Runnable) {
+                continue;
+            }
+            runnable_count += 1;
+            first.get_or_insert(id);
+            if Some(id) == cursor {
+                cursor_runnable = true;
+            }
+            if cursor.is_some_and(|c| id > c) && after_cursor.is_none() {
+                after_cursor = Some(id);
+            }
+        }
         debug_assert!(
-            runnables.windows(2).all(|w| w[0] < w[1]),
-            "scheduler runnables snapshot is not ascending: {runnables:?}"
-        );
-        debug_assert!(
-            runnables.len() < 65_536,
-            "scheduler runnables snapshot exceeded 65536; registry is likely broken"
+            runnable_count < 65_536,
+            "scheduler runnable count exceeded 65536; registry is likely broken"
         );
 
-        let chosen = match runnables.len() {
-            0 => None,
-            1 => Some(runnables[0]),
-            _ => match self.last_scheduled {
-                // Sticky after a non-waking syscall: real PS3 does
-                // not preempt on syscall return when no other unit
-                // became runnable, so reselect the same unit.
-                Some(c) if self.sticky && runnables.contains(&c) => Some(c),
-                Some(c) => runnables
-                    .iter()
-                    .copied()
-                    .find(|&id| id > c)
-                    .or_else(|| runnables.iter().copied().find(|&id| id <= c)),
-                None => Some(runnables[0]),
-            },
+        let chosen = match (cursor, first) {
+            (_, None) => None,
+            (Some(c), _) if self.sticky && cursor_runnable => Some(c),
+            (_, Some(first)) => after_cursor.or(Some(first)),
         };
 
         if let Some(id) = chosen {
