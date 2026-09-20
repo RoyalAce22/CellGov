@@ -247,11 +247,44 @@ fn push_idents(token: &TokenTree, out: &mut Vec<String>) {
 
 /// Every `static` in `stream` that is `mut` or whose type names an
 /// atomic, lock or cell, as its declaration up to the `=`.
-fn mutable_statics(stream: TokenStream, found: &mut Vec<String>) {
+/// Names declared locally as aliases or wrappers around interior-mutability types.
+fn interior_aliases(stream: TokenStream, names: &mut Vec<String>) {
     let tokens: Vec<TokenTree> = stream.into_iter().collect();
     for (i, token) in tokens.iter().enumerate() {
         if let TokenTree::Group(group) = token {
-            mutable_statics(group.stream(), found);
+            interior_aliases(group.stream(), names);
+            continue;
+        }
+        let TokenTree::Ident(kind) = token else {
+            continue;
+        };
+        if kind != "type" && kind != "struct" {
+            continue;
+        }
+        let Some(TokenTree::Ident(name)) = tokens.get(i + 1) else {
+            continue;
+        };
+        let tail = &tokens[i + 2..];
+        let contains_interior = tail.iter().take_while(|token| {
+            !is_punct(token, ';') && !matches!(token, TokenTree::Group(group) if kind == "struct" && group.delimiter() == proc_macro2::Delimiter::Brace)
+        }).any(|token| {
+            let mut idents = Vec::new();
+            push_idents(token, &mut idents);
+            idents.iter().any(|ident| {
+                ident.starts_with("Atomic") || INTERIOR_MUTABLE.contains(&ident.as_str())
+            })
+        });
+        if contains_interior {
+            names.push(name.to_string());
+        }
+    }
+}
+
+fn mutable_statics_in(stream: TokenStream, interior_names: &[String], found: &mut Vec<String>) {
+    let tokens: Vec<TokenTree> = stream.into_iter().collect();
+    for (i, token) in tokens.iter().enumerate() {
+        if let TokenTree::Group(group) = token {
+            mutable_statics_in(group.stream(), interior_names, found);
             continue;
         }
         let TokenTree::Ident(ident) = token else {
@@ -270,14 +303,22 @@ fn mutable_statics(stream: TokenStream, found: &mut Vec<String>) {
         for t in decl.iter().skip_while(|t| !is_punct(t, ':')) {
             push_idents(t, &mut names);
         }
-        let interior = names
-            .iter()
-            .any(|n| n.starts_with("Atomic") || INTERIOR_MUTABLE.contains(&n.as_str()));
+        let interior = names.iter().any(|n| {
+            n.starts_with("Atomic")
+                || INTERIOR_MUTABLE.contains(&n.as_str())
+                || interior_names.contains(n)
+        });
         if is_mut || interior {
             let text: Vec<String> = decl.iter().map(|t| t.to_string()).collect();
             found.push(format!("static {}", text.join(" ")));
         }
     }
+}
+
+fn mutable_statics(stream: TokenStream, found: &mut Vec<String>) {
+    let mut interior_names = Vec::new();
+    interior_aliases(stream.clone(), &mut interior_names);
+    mutable_statics_in(stream, &interior_names, found);
 }
 
 /// Every `include!` call in `stream`, as the call text.
@@ -387,6 +428,16 @@ fn the_static_scan_flags_atomic_lock_cell_and_mut_statics_and_nothing_else() {
         1
     );
     assert_eq!(scan("static mut COUNT: u32 = 0;"), 1);
+    assert_eq!(
+        scan("type Counter = AtomicU32; static COUNT: Counter = Counter::new(0);"),
+        1,
+        "a type alias must not hide an atomic static",
+    );
+    assert_eq!(
+        scan("struct Counter(AtomicU32); static COUNT: Counter = Counter(AtomicU32::new(0));"),
+        1,
+        "a wrapper must not hide an atomic static",
+    );
     assert_eq!(
         scan("pub(super) static NID_TABLE: &[(u32, &str, &str)] = &[];"),
         0
