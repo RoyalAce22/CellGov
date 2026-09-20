@@ -70,10 +70,10 @@ pub(crate) fn firmware_kernels(_root: &Path, _format: OutputFormat) {
 #[cfg(feature = "decrypt")]
 pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
     use cellgov_install::kernel_decrypt::{decrypt_stored_kernel, KernelCoverage};
-    use cellgov_install::keys::{KeyVault, ENV_KEYS};
+    use cellgov_install::keys::KeyVault;
 
     let view = view(root);
-    let location = KeyVault::locate_from(std::env::var_os(ENV_KEYS), root)
+    let location = KeyVault::locate_from(std::env::var_os(crate::env_vars::KEYS), root)
         .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
     let keys = KeyVault::load_from_path(&location)
         .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));

@@ -14,6 +14,7 @@ mod cli;
 mod composition;
 mod disasm;
 mod dump_prx_imports;
+mod env_vars;
 mod funcs;
 mod game;
 mod lv2_census;

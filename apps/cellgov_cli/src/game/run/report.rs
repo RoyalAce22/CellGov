@@ -183,7 +183,7 @@ impl RunSpans {
     pub(super) fn start() -> Self {
         let now = Instant::now();
         Self {
-            enabled: crate::cli::env::parse_env_bool("CELLGOV_RUNGAME_PROFILE"),
+            enabled: crate::cli::env::parse_env_bool(crate::env_vars::RUNGAME_PROFILE),
             start: now,
             prepared: now,
             stepped: now,

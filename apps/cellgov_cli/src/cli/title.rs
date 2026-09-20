@@ -76,7 +76,7 @@ pub(crate) fn resolve_title_manifest(
 /// root before opening any guest image: the vault loads once, on the
 /// first SCE-wrapped one.
 pub(crate) fn resolve_ps3_vfs_root(flag: Option<&Path>) -> PathBuf {
-    let root = resolve_ps3_vfs_root_inner(flag, std::env::var_os("CELLGOV_PS3_VFS_ROOT"))
+    let root = resolve_ps3_vfs_root_inner(flag, std::env::var_os(crate::env_vars::PS3_VFS_ROOT))
         .unwrap_or_else(|msg| die(&msg));
     super::keys::fix_vault_root(&root);
     root
@@ -109,7 +109,7 @@ fn resolve_ps3_vfs_root_inner(
     // still reach the resolver.
     if let Some(p) = env {
         if p.is_empty() {
-            return Err(empty("CELLGOV_PS3_VFS_ROOT"));
+            return Err(empty(crate::env_vars::PS3_VFS_ROOT));
         }
         return Ok(PathBuf::from(p));
     }

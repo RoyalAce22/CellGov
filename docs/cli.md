@@ -82,6 +82,31 @@ A command that streams lines while it works caps the bar at plain
 threshold lines, which interleave harmlessly; the animated bar is
 reserved for commands that are quiet until they report.
 
+## Environment
+
+| Variable | Scope | Effect |
+| --- | --- | --- |
+| `CELLGOV_KEYS` | operator | Override the key-vault file. |
+| `CELLGOV_PS3_VFS_ROOT` | operator | Override the PS3 VFS root. |
+| `CELLGOV_<TITLE_ID>_CONTENT_DIR` | operator | Override one title's installed content directory. |
+| `CELLGOV_NO_COLOR` | operator | Disable color for this program. |
+| `CELLGOV_FORCE_ANSI` | operator | Force ANSI terminal output. |
+| `CELLGOV_FW_DEBUG` | debug | Trace firmware package decryption. |
+| `CELLGOV_BOOT_TRACE_MEM` | debug | Record boot memory tracing. |
+| `CELLGOV_RUNGAME_PROFILE` | debug | Print host-time boot spans. |
+| `CELLGOV_HLE_RETURN_WATCH` | debug | Watch HLE return NIDs. |
+| `CELLGOV_HLE_RETURN_WATCH_PCS` | debug | Limit an HLE watch to PCs. |
+| `CELLGOV_HLE_RETURN_WATCH_PATH` | debug | Write HLE watch records to a file. |
+| `CELLGOV_STORE_WATCH` | debug | Watch guest stores in an address range. |
+| `CELLGOV_STORE_WATCH_PATH` | debug | Write store-watch records to a file. |
+| `CELLGOV_VALUE_SAMPLE` | debug | Sample guest values in an address range. |
+| `CELLGOV_VALUE_SAMPLE_PATH` | debug | Write value samples to a file. |
+| `CELLGOV_VALUE_SAMPLE_STRIDE` | debug | Set the value-sample stride. |
+| `CELLGOV_NO_FIRMWARE_DIR` | test-only | Suppress the synthetic firmware-directory default. |
+| `CELLGOV_OBS_NULL_SINK` | test-only | Discard observation output in a synthetic run. |
+| `CELLGOV_RETAIN_SCRATCH` | test-only | Retain a scratch directory after a test. |
+
+
 ## JSON output
 
 `--format json` writes one document to stdout, with no ANSI and no

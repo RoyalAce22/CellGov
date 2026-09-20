@@ -16,6 +16,8 @@ use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
 use cellgov_ppu::PpuTap;
 
+use crate::env_vars;
+
 use super::error::TapError;
 use super::hle_watch::{HleWatch, HleWatchSpec};
 use super::record_file::RecordFile;
@@ -35,14 +37,14 @@ fn var(var: &'static str) -> Result<Option<String>, TapError> {
 
 /// Every variable a watch reads.
 const WATCH_VARS: [&str; 8] = [
-    "CELLGOV_HLE_RETURN_WATCH",
-    "CELLGOV_HLE_RETURN_WATCH_PCS",
-    "CELLGOV_HLE_RETURN_WATCH_PATH",
-    "CELLGOV_STORE_WATCH",
-    "CELLGOV_STORE_WATCH_PATH",
-    "CELLGOV_VALUE_SAMPLE",
-    "CELLGOV_VALUE_SAMPLE_PATH",
-    "CELLGOV_VALUE_SAMPLE_STRIDE",
+    env_vars::HLE_RETURN_WATCH,
+    env_vars::HLE_RETURN_WATCH_PCS,
+    env_vars::HLE_RETURN_WATCH_PATH,
+    env_vars::STORE_WATCH,
+    env_vars::STORE_WATCH_PATH,
+    env_vars::VALUE_SAMPLE,
+    env_vars::VALUE_SAMPLE_PATH,
+    env_vars::VALUE_SAMPLE_STRIDE,
 ];
 
 /// The watch variables set to a non-empty value, for a command that
@@ -68,18 +70,18 @@ pub(crate) fn set_watch_vars() -> Vec<&'static str> {
 /// - the host refuses to create a capture or to write its header
 pub(crate) fn from_env() -> Result<Rc<dyn DebugTaps>, TapError> {
     let hle = HleWatchSpec::parse(
-        var("CELLGOV_HLE_RETURN_WATCH")?.as_deref(),
-        var("CELLGOV_HLE_RETURN_WATCH_PCS")?.as_deref(),
-        var("CELLGOV_HLE_RETURN_WATCH_PATH")?.as_deref(),
+        var(env_vars::HLE_RETURN_WATCH)?.as_deref(),
+        var(env_vars::HLE_RETURN_WATCH_PCS)?.as_deref(),
+        var(env_vars::HLE_RETURN_WATCH_PATH)?.as_deref(),
     )?;
     let store = StoreWatchSpec::parse(
-        var("CELLGOV_STORE_WATCH")?.as_deref(),
-        var("CELLGOV_STORE_WATCH_PATH")?.as_deref(),
+        var(env_vars::STORE_WATCH)?.as_deref(),
+        var(env_vars::STORE_WATCH_PATH)?.as_deref(),
     )?;
     let sample = ValueSampleSpec::parse(
-        var("CELLGOV_VALUE_SAMPLE")?.as_deref(),
-        var("CELLGOV_VALUE_SAMPLE_PATH")?.as_deref(),
-        var("CELLGOV_VALUE_SAMPLE_STRIDE")?.as_deref(),
+        var(env_vars::VALUE_SAMPLE)?.as_deref(),
+        var(env_vars::VALUE_SAMPLE_PATH)?.as_deref(),
+        var(env_vars::VALUE_SAMPLE_STRIDE)?.as_deref(),
     )?;
     if hle.is_none() && store.is_none() && sample.is_none() {
         return Ok(Rc::new(NoTaps));

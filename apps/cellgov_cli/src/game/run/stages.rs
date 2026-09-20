@@ -232,7 +232,7 @@ fn drive_step_loop(
         tty_oob_count: 0,
         bogus_fd_count: 0,
         dump_mem_fault_ranges: reporting.boot.dump_mem_fault_ranges,
-        obs_null_sink: crate::cli::env::parse_env_bool("CELLGOV_OBS_NULL_SINK"),
+        obs_null_sink: crate::cli::env::parse_env_bool(crate::env_vars::OBS_NULL_SINK),
         child_init,
         progress: reporting.progress,
         sink: Rc::clone(sink),

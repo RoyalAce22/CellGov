@@ -31,7 +31,7 @@ const FIRMWARE_EXTERNAL: [&str; 2] = ["sys", "external"];
 
 /// Set to `1` by synthetic harnesses (e.g. ps3autotests) to suppress
 /// the auto-default.
-pub(crate) const DISABLE_DEFAULT_ENV: &str = "CELLGOV_NO_FIRMWARE_DIR";
+pub(crate) const DISABLE_DEFAULT_ENV: &str = crate::env_vars::NO_FIRMWARE_DIR;
 
 /// Exit code: the runs of a set disagreed on step count, outcome or a
 /// witness.

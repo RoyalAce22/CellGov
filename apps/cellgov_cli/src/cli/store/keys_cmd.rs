@@ -2,9 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cellgov_install::keys::{
-    installed_keys_dir, KeyVault, SelfClass, Slot, ENV_KEYS, INSTALLED_KEYS_FILE,
-};
+use cellgov_install::keys::{installed_keys_dir, KeyVault, SelfClass, Slot, INSTALLED_KEYS_FILE};
 
 use crate::cli::parse::{KeysCommand, KeysPathArgs};
 
@@ -27,7 +25,7 @@ pub(crate) fn run(command: &KeysCommand, store: &Path) {
 fn show(path: Option<&Path>, store: &Path) {
     let location = match path {
         Some(p) => p.to_path_buf(),
-        None => KeyVault::locate_from(std::env::var_os(ENV_KEYS), store)
+        None => KeyVault::locate_from(std::env::var_os(crate::env_vars::KEYS), store)
             .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string())),
     };
     let vault = KeyVault::load_from_path(&location)

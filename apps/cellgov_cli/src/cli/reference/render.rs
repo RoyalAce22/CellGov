@@ -22,6 +22,7 @@ pub(crate) fn render_doc(root: &Command) -> String {
         &[
             ("exit_codes", CONTRACT),
             ("global_options", &option_table(globals(&root))),
+            ("environment", &crate::env_vars::render()),
             ("json_documents", &schema::render()),
             ("commands", &sections.join("\n")),
         ],

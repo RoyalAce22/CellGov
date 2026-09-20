@@ -4,16 +4,12 @@
 //!
 //! Trace format pinned in the patch's `cellgov_hle_trace.h` header.
 //! Records are emitted at every BIND_FUNC entry+exit pair; each record
-//! lists the writes the call made to any `CELLGOV_HLE_WATCH` region
+//! lists the writes the call made to a selected guest region
 //! (diff against the entry-time snapshot).
 //!
 //! # Examples
 //!
 //! ```text
-//! CELLGOV_HLE_TRACE_PATH=title.htrc \
-//! CELLGOV_HLE_WATCH=0x101e3cb8:8 \
-//! tools/rpcs3-src/build-msvc/bin/rpcs3.exe --headless title.elf
-//!
 //! cellgov dev rpcs3-attribute --trace title.htrc --addr 0x101e3cb8
 //! ```
 
