@@ -6,7 +6,7 @@
 
 use crate::loader;
 use cellgov_ps3_abi::format::elf::{
-    ELF_HEADER_SIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET, ELF_PHOFF_OFFSET,
+    ELF_HEADER_SIZE, ELF_PHENTSIZE, ELF_PHENTSIZE_OFFSET, ELF_PHNUM_OFFSET, ELF_PHOFF_OFFSET,
     PHDR_P_FILESZ_OFFSET, PHDR_P_OFFSET_OFFSET, PHDR_P_PADDR_OFFSET, PHDR_P_VADDR_OFFSET,
     PRX_IMPORT_ENTRY_MIN_SIZE, PRX_IMPORT_ENTRY_VAR_MIN_SIZE, PRX_IMPORT_NAME_PTR_OFFSET,
     PRX_IMPORT_NIDS_PTR_OFFSET, PRX_IMPORT_NUM_FUNC_OFFSET, PRX_IMPORT_NUM_VAR_OFFSET,
@@ -159,6 +159,24 @@ pub enum ImportParseError {
         /// Number of NIDs needed (`function_count`).
         function_count: u16,
     },
+    /// An ELF64 program-header slot is smaller than its fixed layout.
+    #[error("ELF64 program-header entry size {phentsize} below minimum {ELF_PHENTSIZE}")]
+    BadPhentsize {
+        /// Declared slot size.
+        phentsize: usize,
+    },
+    /// An ADDR32 relocation patch offset is not 4-byte aligned.
+    #[error("PRX ADDR32 relocation patch offset 0x{offset:x} is not 4-byte aligned")]
+    RelocPatchMisaligned {
+        /// Offset within the target segment.
+        offset: u64,
+    },
+    /// An ADDR32 relocation value needs bits above bit 31.
+    #[error("PRX ADDR32 relocation value 0x{value:x} exceeds 32 bits")]
+    RelocOverflow {
+        /// Computed relocation value.
+        value: u64,
+    },
 }
 
 /// Enumerate every imported module and its (NID, GOT slot) entries.
@@ -179,8 +197,18 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
 
     // Every table pointer below is a relocation target, so the walk
     // reads the resolved image.
-    let image =
-        crate::sprx::relocated_pointer_image(data).map_err(|_| ImportParseError::OutOfBounds)?;
+    let image = crate::sprx::relocated_pointer_image(data).map_err(|error| match error {
+        crate::sprx::RelocatedPointerError::OutOfBounds => ImportParseError::OutOfBounds,
+        crate::sprx::RelocatedPointerError::BadPhentsize { phentsize } => {
+            ImportParseError::BadPhentsize { phentsize }
+        }
+        crate::sprx::RelocatedPointerError::RelocPatchMisaligned { offset } => {
+            ImportParseError::RelocPatchMisaligned { offset }
+        }
+        crate::sprx::RelocatedPointerError::RelocOverflow { value } => {
+            ImportParseError::RelocOverflow { value }
+        }
+    })?;
     let data: &[u8] = &image;
 
     let (imports_table_start_vaddr, imports_table_end_vaddr) =

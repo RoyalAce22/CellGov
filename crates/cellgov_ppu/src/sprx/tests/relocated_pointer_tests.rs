@@ -11,8 +11,11 @@ use cellgov_ps3_abi::format::elf::ELF64_RELA_SIZE;
 const DATA_VADDR: u32 = 0x100;
 const DATA_FILE_OFF: usize = 0x1F0;
 const RELOC_FILE_OFF: usize = 0x3F0;
+const DATA_PHDR_FILE_OFF_FIELD: usize = 64 + 56 + 8;
 const RELOC_OFFSET_FIELD: usize = 64 + 112 + 8;
 const RELOC_FILESZ_FIELD: usize = 64 + 112 + 32;
+const FIRST_RELOC_OFFSET: usize = RELOC_FILE_OFF;
+const FIRST_RELOC_ADDEND: usize = RELOC_FILE_OFF + 16;
 
 /// Rewrite each slot in `slots` to a bare addend and append its relocation.
 ///
@@ -153,5 +156,56 @@ fn a_relocation_segment_whose_file_offset_wraps_is_refused_not_panicked_on() {
     assert!(
         matches!(err, crate::prx::ImportParseError::OutOfBounds),
         "expected the wrap to be named, got {err:?}",
+    );
+}
+
+#[test]
+fn import_parsing_rejects_an_undersized_program_header_slot() {
+    let mut buf = make_test_prx_graph_node("modaaaa", "libaaaa", Some("implib"));
+    buf[54..56].copy_from_slice(&55u16.to_be_bytes());
+
+    assert!(matches!(
+        crate::prx::parse_imports(&buf),
+        Err(crate::prx::ImportParseError::BadPhentsize { phentsize: 55 })
+    ));
+}
+
+#[test]
+fn import_parsing_rejects_a_misaligned_addr32_patch_offset() {
+    let mut buf = make_test_prx_graph_node("modaaaa", "libaaaa", Some("implib"));
+    buf[FIRST_RELOC_OFFSET..FIRST_RELOC_OFFSET + 8].copy_from_slice(&0x51u64.to_be_bytes());
+
+    assert!(matches!(
+        crate::prx::parse_imports(&buf),
+        Err(crate::prx::ImportParseError::RelocPatchMisaligned { offset: 0x51 })
+    ));
+}
+
+#[test]
+fn import_parsing_rejects_an_addr32_value_that_needs_high_bits() {
+    let mut buf = make_test_prx_graph_node("modaaaa", "libaaaa", Some("implib"));
+    buf[FIRST_RELOC_ADDEND..FIRST_RELOC_ADDEND + 8]
+        .copy_from_slice(&0x1_0000_0000i64.to_be_bytes());
+
+    assert!(matches!(
+        crate::prx::parse_imports(&buf),
+        Err(crate::prx::ImportParseError::RelocOverflow {
+            value: 0x1_0000_0000,
+        })
+    ));
+}
+
+#[test]
+fn relocated_pointer_image_rejects_an_addr32_patch_slot_outside_the_file() {
+    let mut buf = make_test_prx_graph_node("modaaaa", "libaaaa", Some("implib"));
+    let outside_file = (buf.len() + 0x100) as u64;
+    buf[DATA_PHDR_FILE_OFF_FIELD..DATA_PHDR_FILE_OFF_FIELD + 8]
+        .copy_from_slice(&outside_file.to_be_bytes());
+
+    let err =
+        super::relocated_pointer_image(&buf).expect_err("declared patch slot escapes the file");
+    assert!(
+        matches!(err, super::RelocatedPointerError::OutOfBounds),
+        "expected the escape to be named, got {err:?}",
     );
 }

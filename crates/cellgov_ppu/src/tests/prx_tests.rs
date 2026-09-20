@@ -55,6 +55,20 @@ fn import_parse_error_display_renders_every_variant() {
             },
             &["nid_ptr", "0x00000500", "3", "unmapped"],
         ),
+        (
+            ImportParseError::BadPhentsize { phentsize: 55 },
+            &["program-header", "55", "56"],
+        ),
+        (
+            ImportParseError::RelocPatchMisaligned { offset: 0x51 },
+            &["patch offset", "0x51", "aligned"],
+        ),
+        (
+            ImportParseError::RelocOverflow {
+                value: 0x1_0000_0000,
+            },
+            &["value", "0x100000000", "32 bits"],
+        ),
     ];
     for (err, needles) in cases {
         // Exhaustive by construction: an added variant fails to
@@ -70,7 +84,10 @@ fn import_parse_error_display_renders_every_variant() {
             | ImportParseError::EntryPastImportsTable { .. }
             | ImportParseError::InvalidNamePtr { .. }
             | ImportParseError::InvalidStubPtr { .. }
-            | ImportParseError::InvalidNidPtr { .. } => {}
+            | ImportParseError::InvalidNidPtr { .. }
+            | ImportParseError::BadPhentsize { .. }
+            | ImportParseError::RelocPatchMisaligned { .. }
+            | ImportParseError::RelocOverflow { .. } => {}
         }
         let s = format!("{err}");
         assert!(!s.is_empty(), "empty Display for {err:?}");
@@ -81,7 +98,7 @@ fn import_parse_error_display_renders_every_variant() {
             );
         }
     }
-    assert_eq!(cases.len(), 10, "one case per ImportParseError variant");
+    assert_eq!(cases.len(), 13, "one case per ImportParseError variant");
 }
 
 /// `p_filesz` written on synthetic PT_PRX_PARAM headers, matching the

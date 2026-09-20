@@ -6,9 +6,9 @@
 use std::borrow::Cow;
 
 use cellgov_ps3_abi::format::elf::{
-    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ET_PRX, EXPORT_ATTR_SYSTEM, EXPORT_ENTRY_MIN_SIZE,
-    NID_MODULE_START, NID_MODULE_STOP, PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD, PT_PRX_RELOC,
-    R_PPC64_ADDR32,
+    ELF64_RELA_SIZE, ELF_HEADER_SIZE, ELF_MAGIC, ELF_PHENTSIZE, ET_PRX, EXPORT_ATTR_SYSTEM,
+    EXPORT_ENTRY_MIN_SIZE, NID_MODULE_START, NID_MODULE_STOP, PRX_RELOC_NO_VALUE_SEGMENT, PT_LOAD,
+    PT_PRX_RELOC, R_PPC64_ADDR32,
 };
 
 use crate::loader;
@@ -199,7 +199,8 @@ pub fn parse_prx(data: &[u8]) -> Result<ParsedPrx, PrxParseError> {
         Some(rp) => parse_relocations(data, &rp)?,
         None => Vec::new(),
     };
-    let image = relocate_pointer_slots(data, &loads, &relocations);
+    let image = relocate_pointer_slots(data, &loads, &relocations)
+        .map_err(|_| PrxParseError::OutOfBounds)?;
 
     // The text segment's p_paddr doubles as the file offset of
     // module_info.
@@ -315,9 +316,19 @@ fn v2f(seg_map: &[SegEntry], vaddr: usize) -> Option<usize> {
 ///
 /// # Errors
 ///
-/// [`PrxParseError::OutOfBounds`] when a declared relocation segment
-/// escapes the file.
-pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, PrxParseError> {
+/// Returns [`RelocatedPointerError`] when relocation metadata escapes the
+/// file or an ADDR32 pointer-slot rewrite would lose data.
+pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, RelocatedPointerError> {
+    if data.len() < ELF_HEADER_SIZE {
+        return Err(RelocatedPointerError::OutOfBounds);
+    }
+    if data[0..4] != ELF_MAGIC || loader::read_u16(data, 16) != ET_PRX {
+        return Ok(Cow::Borrowed(data));
+    }
+    let phentsize = loader::read_u16(data, 54) as usize;
+    if phentsize < ELF_PHENTSIZE {
+        return Err(RelocatedPointerError::BadPhentsize { phentsize });
+    }
     let Ok((loads, reloc_phdr)) = scan_phdrs(data) else {
         return Ok(Cow::Borrowed(data));
     };
@@ -327,8 +338,85 @@ pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, PrxP
     if loads.len() < 2 {
         return Ok(Cow::Borrowed(data));
     }
-    let relocs = parse_relocations(data, &reloc_phdr)?;
-    Ok(Cow::Owned(relocate_pointer_slots(data, &loads, &relocs)))
+    let relocs =
+        parse_relocations(data, &reloc_phdr).map_err(|_| RelocatedPointerError::OutOfBounds)?;
+    Ok(Cow::Owned(relocate_pointer_slots(data, &loads, &relocs)?))
+}
+
+/// Failure while preparing the relocated metadata view used by import parsing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum RelocatedPointerError {
+    /// A declared relocation segment escapes the file.
+    #[error("declared relocation metadata escapes the file")]
+    OutOfBounds,
+    /// An ELF64 program-header slot is smaller than its fixed layout.
+    #[error("ELF64 program-header slot is {phentsize} bytes, below the required 56 bytes")]
+    BadPhentsize {
+        /// Declared slot size.
+        phentsize: usize,
+    },
+    /// An ADDR32 patch offset is not naturally aligned.
+    #[error("ADDR32 patch offset 0x{offset:x} is not 4-byte aligned")]
+    RelocPatchMisaligned {
+        /// Offset within the target segment.
+        offset: u64,
+    },
+    /// An ADDR32 value needs bits above bit 31.
+    #[error("ADDR32 relocation value 0x{value:x} does not fit in 32 bits")]
+    RelocOverflow {
+        /// Computed relocation value.
+        value: u64,
+    },
+}
+
+struct PointerRelocation {
+    slot: std::ops::Range<usize>,
+    value: u32,
+}
+
+fn pointer_relocation(
+    loads: &[RawPhdr],
+    r: &PrxRelocation,
+) -> Result<Option<PointerRelocation>, RelocatedPointerError> {
+    if r.rtype != R_PPC64_ADDR32 {
+        return Ok(None);
+    }
+    // The loader rejects such an index. Skip the slot so the loader
+    // reports the bad index once.
+    let Some(target) = loads.get((r.sym & 0xFF) as usize) else {
+        return Ok(None);
+    };
+    let Some(value_base) = value_segment_base(loads, r.sym) else {
+        return Ok(None);
+    };
+    if r.offset & 3 != 0 {
+        return Err(RelocatedPointerError::RelocPatchMisaligned { offset: r.offset });
+    }
+    let offset_end = r
+        .offset
+        .checked_add(4)
+        .ok_or(RelocatedPointerError::OutOfBounds)?;
+    // A slot past filesz is BSS: it has no file bytes to rewrite.
+    if offset_end > target.p_filesz {
+        return Ok(None);
+    }
+
+    let slot_start = (target.p_offset as u64)
+        .checked_add(r.offset)
+        .and_then(|slot| usize::try_from(slot).ok())
+        .ok_or(RelocatedPointerError::OutOfBounds)?;
+    let slot_end = slot_start
+        .checked_add(4)
+        .ok_or(RelocatedPointerError::OutOfBounds)?;
+    let value = value_base.wrapping_add(r.addend as u64);
+    if value >> 32 != 0 {
+        return Err(RelocatedPointerError::RelocOverflow { value });
+    }
+
+    Ok(Some(PointerRelocation {
+        slot: slot_start..slot_end,
+        value: value as u32,
+    }))
 }
 
 /// Copy of the file image with every `R_PPC64_ADDR32` slot holding the
@@ -343,36 +431,22 @@ pub(crate) fn relocated_pointer_image(data: &[u8]) -> Result<Cow<'_, [u8]>, PrxP
 /// Only the metadata reads take this image; [`PrxSegment::data`] keeps
 /// the file's own bytes for [`crate::sprx::load_prx`] to relocate
 /// against the real base.
-fn relocate_pointer_slots(data: &[u8], loads: &[RawPhdr], relocs: &[PrxRelocation]) -> Vec<u8> {
+fn relocate_pointer_slots(
+    data: &[u8],
+    loads: &[RawPhdr],
+    relocs: &[PrxRelocation],
+) -> Result<Vec<u8>, RelocatedPointerError> {
     let mut image = data.to_vec();
     for r in relocs {
-        if r.rtype != R_PPC64_ADDR32 {
-            continue;
-        }
-        // The loader rejects such an index. This pass skips the slot
-        // so the load reports it once.
-        let Some(target) = loads.get((r.sym & 0xFF) as usize) else {
+        let Some(pointer) = pointer_relocation(loads, r)? else {
             continue;
         };
-        let Some(value_base) = value_segment_base(loads, r.sym) else {
-            continue;
-        };
-        // A slot past filesz is BSS: it has no file bytes to rewrite.
-        if r.offset.saturating_add(4) > target.p_filesz {
-            continue;
-        }
-        let Some(bytes) = (target.p_offset as u64)
-            .checked_add(r.offset)
-            .and_then(|slot| usize::try_from(slot).ok())
-            .and_then(|slot| Some(slot..slot.checked_add(4)?))
-            .and_then(|slot| image.get_mut(slot))
-        else {
-            continue;
-        };
-        let resolved = value_base.wrapping_add(r.addend as u64) as u32;
-        bytes.copy_from_slice(&resolved.to_be_bytes());
+        let bytes = image
+            .get_mut(pointer.slot)
+            .ok_or(RelocatedPointerError::OutOfBounds)?;
+        bytes.copy_from_slice(&pointer.value.to_be_bytes());
     }
-    image
+    Ok(image)
 }
 
 /// PRX-space base for a relocation's addend; zero when `sym` names no
