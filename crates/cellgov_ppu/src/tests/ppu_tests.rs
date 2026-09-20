@@ -551,7 +551,7 @@ fn build_lv2_driven_fixture(
                 unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
                 unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
                 unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
-                Box::new(unit)
+                Ok(Box::new(unit))
             });
 
             let ppu_state = primed_reg.borrow_mut().take().unwrap();
@@ -1806,7 +1806,7 @@ fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
                     unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
                     unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
                     unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
-                    Box::new(unit)
+                    Ok(Box::new(unit))
                 });
 
                 rt.register_unit_with(|id| {

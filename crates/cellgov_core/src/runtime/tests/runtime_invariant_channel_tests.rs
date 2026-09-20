@@ -5,6 +5,8 @@
 
 use super::*;
 
+use std::collections::BTreeMap;
+
 #[cfg(not(debug_assertions))]
 use cellgov_lv2::PendingResponse;
 
@@ -30,6 +32,118 @@ fn record_spu_in_unstarted_group(rt: &mut Runtime, unit: UnitId) {
     groups
         .record_spu(unit, gid, 0)
         .expect("a Created group accepts a slot record");
+}
+
+fn spu_init(group_id: u32) -> cellgov_lv2::SpuInitState {
+    cellgov_lv2::SpuInitState {
+        image: cellgov_lv2::SpuLoadImage::Elf(vec![0xAA]),
+        entry_pc: 0,
+        stack_ptr: 0x3fff0,
+        args: [0; 4],
+        group_id,
+    }
+}
+
+#[test]
+fn a_refused_spu_image_returns_efault_and_restores_the_group() {
+    let mut rt = build(0x1000, 1, 100);
+    let caller = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    let group_id = rt
+        .lv2_host_mut()
+        .thread_groups_mut()
+        .create(1)
+        .expect("a fresh group id exists");
+    rt.lv2_host_mut()
+        .thread_groups_mut()
+        .get_mut(group_id)
+        .expect("group was just created")
+        .state = cellgov_lv2::GroupState::Running;
+    rt.set_spu_factory(|_, _| {
+        Err(crate::SpuFactoryError::ImageLoad {
+            detail: "SPU ELF entry point is outside local store".to_string(),
+        })
+    });
+
+    rt.handle_register_spu(caller, BTreeMap::from([(0, spu_init(group_id))]), vec![], 0);
+
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(caller),
+        Some(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
+    );
+    let group = rt
+        .lv2_host()
+        .thread_groups()
+        .get(group_id)
+        .expect("failed start preserves the group");
+    assert_eq!(group.state, cellgov_lv2::GroupState::Created);
+    assert_eq!(group.remaining_unfinished, 0);
+    assert_eq!(
+        rt.registry().len(),
+        1,
+        "a refused first slot registers no SPU"
+    );
+    assert_eq!(
+        rt.lv2_host()
+            .invariant_break_site_count("runtime.spu_image_load_failed"),
+        1
+    );
+}
+
+#[test]
+fn a_late_spu_image_refusal_publishes_no_partial_group() {
+    let mut rt = build(0x1000, 1, 100);
+    let caller = rt
+        .registry_mut()
+        .register_with(|id| CountingUnit::new(id, 100));
+    let group_id = rt
+        .lv2_host_mut()
+        .thread_groups_mut()
+        .create(2)
+        .expect("a fresh group id exists");
+    rt.lv2_host_mut()
+        .thread_groups_mut()
+        .get_mut(group_id)
+        .expect("group was just created")
+        .state = cellgov_lv2::GroupState::Running;
+    let calls = Cell::new(0);
+    rt.set_spu_factory(move |id, _| {
+        let call = calls.get();
+        calls.set(call + 1);
+        if call == 0 {
+            Ok(Box::new(CountingUnit::new(id, 100)))
+        } else {
+            Err(crate::SpuFactoryError::ImageLoad {
+                detail: "bad second image".to_string(),
+            })
+        }
+    });
+
+    rt.handle_register_spu(
+        caller,
+        BTreeMap::from([(0, spu_init(group_id)), (1, spu_init(group_id))]),
+        vec![],
+        0,
+    );
+
+    assert_eq!(
+        rt.registry_mut().drain_syscall_return(caller),
+        Some(cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into())
+    );
+    assert_eq!(
+        rt.registry().effective_status(UnitId::new(1)),
+        Some(UnitStatus::Finished),
+        "the already constructed slot stays inert"
+    );
+    let groups = rt.lv2_host().thread_groups();
+    let group = groups
+        .get(group_id)
+        .expect("failed start preserves the group");
+    assert_eq!(group.state, cellgov_lv2::GroupState::Created);
+    assert_eq!(group.remaining_unfinished, 0);
+    assert!(groups.unit_for_thread(group_id * 256).is_none());
+    assert!(groups.unit_for_thread(group_id * 256 + 1).is_none());
 }
 
 #[test]

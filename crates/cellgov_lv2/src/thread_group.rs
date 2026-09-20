@@ -335,6 +335,24 @@ impl ThreadGroupTable {
         Ok(())
     }
 
+    /// Restore a group whose runtime-side SPU construction failed.
+    ///
+    /// Returns `false` unless `group_id` names a running group with no
+    /// registered units. That restriction keeps this recovery path from
+    /// restoring a group after any SPU becomes guest-visible.
+    pub(crate) fn cancel_unregistered_start(&mut self, group_id: u32) -> bool {
+        let has_units = self.unit_to_group.values().any(|&gid| gid == group_id)
+            || self.finished_units.values().any(|&gid| gid == group_id);
+        let Some(group) = self.groups.get_mut(&group_id) else {
+            return false;
+        };
+        if group.state != GroupState::Running || group.remaining_unfinished != 0 || has_units {
+            return false;
+        }
+        group.state = GroupState::Created;
+        true
+    }
+
     /// Look up the runtime UnitId for a synthetic thread_id.
     pub fn unit_for_thread(&self, thread_id: u32) -> Option<UnitId> {
         self.thread_id_to_unit.get(&thread_id).copied()

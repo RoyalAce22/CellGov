@@ -57,8 +57,20 @@ pub enum StepError {
     SchedulerNotReinstalled,
 }
 
+/// Failure surface of an [`SpuFactory`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SpuFactoryError {
+    /// The architecture loader refused the guest-provided image.
+    #[error("SPU image load failed: {detail}")]
+    ImageLoad {
+        /// Implementor-rendered architecture load failure.
+        detail: String,
+    },
+}
+
 /// Constructs an SPU unit when `Lv2Dispatch::RegisterSpu` fires.
-pub type SpuFactory = Box<dyn Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit>>;
+pub type SpuFactory =
+    Box<dyn Fn(UnitId, SpuInitState) -> Result<Box<dyn RegisteredUnit>, SpuFactoryError>>;
 
 /// Constructs a child PPU unit when `Lv2Dispatch::PpuThreadCreate` fires.
 pub type PpuFactory = Box<dyn Fn(UnitId, PpuThreadInitState) -> Box<dyn RegisteredUnit>>;

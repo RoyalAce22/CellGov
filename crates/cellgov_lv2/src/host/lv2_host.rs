@@ -1011,6 +1011,11 @@ impl Lv2Host {
         self.state.groups.record_spu(unit_id, group_id, slot)
     }
 
+    /// Restore a group after its runtime factory refused an image.
+    pub fn cancel_unregistered_spu_group_start(&mut self, group_id: u32) -> bool {
+        self.state.groups.cancel_unregistered_start(group_id)
+    }
+
     /// `Ok(Some(group_id))` when this notify drove the group to
     /// `Finished`.
     pub fn notify_spu_finished(

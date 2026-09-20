@@ -50,7 +50,8 @@ pub use state::Runtime;
 pub use tap::RuntimeTap;
 pub use types::{
     default_budget_for_mode, PendingChildInit, PpuFactory, ProcessSpawnLoadError,
-    ProcessSpawnLoader, RuntimeMode, RuntimeStep, SpawnedProcessImage, SpuFactory, StepError,
+    ProcessSpawnLoader, RuntimeMode, RuntimeStep, SpawnedProcessImage, SpuFactory, SpuFactoryError,
+    StepError,
 };
 
 #[cfg(test)]

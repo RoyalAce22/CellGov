@@ -43,16 +43,22 @@ pub(super) fn install_unit_factories(rt: &mut Runtime, debug_opts: BootDebugOpti
         let mut unit = SpuExecutionUnit::new(id);
         match &init.image {
             cellgov_lv2::SpuLoadImage::Elf(bytes) => {
-                spu_loader::load_spu_elf(bytes, unit.state_mut())
-                    .expect("game boot: load_spu_elf on title-provided ELF; failure indicates a bad LV2 thread init");
+                spu_loader::load_spu_elf(bytes, unit.state_mut()).map_err(|source| {
+                    cellgov_core::SpuFactoryError::ImageLoad {
+                        detail: source.to_string(),
+                    }
+                })?;
             }
             cellgov_lv2::SpuLoadImage::Segments(segments) => {
                 let placed: Vec<(u32, &[u8])> = segments
                     .iter()
                     .map(|s| (s.ls_start, s.bytes.as_slice()))
                     .collect();
-                spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut())
-                    .expect("game boot: load_ls_segments on segments sys_spu_thread_initialize already bounded");
+                spu_loader::load_ls_segments(&placed, init.entry_pc, unit.state_mut()).map_err(
+                    |source| cellgov_core::SpuFactoryError::ImageLoad {
+                        detail: source.to_string(),
+                    },
+                )?;
             }
         }
         unit.state_mut().pc = init.entry_pc;
@@ -61,7 +67,7 @@ pub(super) fn install_unit_factories(rt: &mut Runtime, debug_opts: BootDebugOpti
         unit.state_mut().set_reg_word_splat(4, init.args[1] as u32);
         unit.state_mut().set_reg_word_splat(5, init.args[2] as u32);
         unit.state_mut().set_reg_word_splat(6, init.args[3] as u32);
-        Box::new(unit)
+        Ok(Box::new(unit))
     });
 }
 

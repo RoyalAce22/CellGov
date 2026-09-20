@@ -87,6 +87,34 @@ impl UnitRegistry {
         );
         id
     }
+
+    /// Register a boxed unit from a fallible factory.
+    ///
+    /// An error leaves both the registry and its monotonic id counter
+    /// unchanged.
+    pub fn try_register_dynamic<E>(
+        &mut self,
+        factory: &dyn Fn(UnitId) -> Result<Box<dyn RegisteredUnit>, E>,
+    ) -> Result<UnitId, E> {
+        let id = UnitId::new(self.next_id);
+        let unit = factory(id)?;
+        assert_eq!(
+            unit.unit_id(),
+            id,
+            "registered unit reported {} but registry assigned {}",
+            unit.unit_id().raw(),
+            id.raw(),
+        );
+        self.next_id += 1;
+        let prev = self.units.insert(id, unit);
+        debug_assert!(
+            prev.is_none(),
+            "UnitRegistry: next_id {id:?} already had a unit -- monotonic counter wrapped or a \
+             future refactor started recycling ids; duplicate insert would silently drop the \
+             old unit"
+        );
+        Ok(id)
+    }
 }
 
 #[cfg(test)]

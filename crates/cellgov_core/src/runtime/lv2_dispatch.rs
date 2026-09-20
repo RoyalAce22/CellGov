@@ -511,9 +511,6 @@ impl Runtime {
                 effects,
                 code,
             } => {
-                if !inits.is_empty() {
-                    self.step_woke_others = true;
-                }
                 self.handle_register_spu(source, inits, effects, code);
             }
             Lv2Dispatch::Block {
@@ -641,7 +638,7 @@ impl Runtime {
     }
 
     /// `BTreeMap` iteration keeps registration order byte-stable.
-    fn handle_register_spu(
+    pub(super) fn handle_register_spu(
         &mut self,
         source: UnitId,
         inits: BTreeMap<u32, SpuInitState>,
@@ -650,47 +647,93 @@ impl Runtime {
     ) {
         let caller_space = self.spaces.space_of(source);
         self.apply_lv2_effects(&effects, caller_space);
-        if let Some(factory) = &self.spu_factory {
-            for (slot, init) in inits {
-                let gid = init.group_id;
-                let uid = self
-                    .registry
-                    .register_dynamic(&|id| factory(id, init.clone()));
-                self.lv2_host.record_spu(uid, gid, slot).expect(
-                    "record_spu rejected a freshly allocated unit: dispatch-layer \
-                     corruption in the RegisterSpu path",
-                );
-                // SPU Read Inbound Mailbox depth is 4 per
-                // [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
-                // as the default capacity for dispatch-allocated
-                // mailboxes until the SPU exec layer differentiates
-                // outbound (depth 1) from inbound (depth 4).
-                const SPU_INBOUND_MBOX_DEPTH: usize = 4;
-                let inserted = self.mailbox_registry.register_at(
-                    cellgov_sync::MailboxId::new(uid.raw()),
-                    SPU_INBOUND_MBOX_DEPTH,
-                );
-                if !inserted {
-                    // Collision means the dispatch layer reused a
-                    // UnitId that already had a mailbox -- SPU
-                    // mailbox state would silently cross-talk
-                    // between units.
+        if inits.is_empty() {
+            return self.deliver_syscall_return(source, code);
+        }
+        let group_id = inits
+            .values()
+            .next()
+            .expect("nonempty init map checked above")
+            .group_id;
+        let Some(factory) = &self.spu_factory else {
+            let rolled_back = self.lv2_host.cancel_unregistered_spu_group_start(group_id);
+            self.lv2_host.log_invariant_break(
+                "runtime.spu_factory_missing",
+                format_args!(
+                    "SPU group {group_id} started without a factory; rollback={rolled_back}"
+                ),
+            );
+            return self
+                .deliver_syscall_return(source, cellgov_ps3_abi::lv2::errno::CELL_ENOSYS.into());
+        };
+
+        // Construct the whole group before publishing any unit-to-group or
+        // mailbox binding. A later slot can therefore fail without exposing a
+        // partly started group to the guest.
+        let mut created = Vec::with_capacity(inits.len());
+        for (slot, init) in inits {
+            let gid = init.group_id;
+            match self
+                .registry
+                .try_register_dynamic(&|id| factory(id, init.clone()))
+            {
+                Ok(uid) => created.push((slot, gid, uid)),
+                Err(reason) => {
+                    for &(_, _, uid) in &created {
+                        self.registry.set_status_override(uid, UnitStatus::Finished);
+                    }
+                    let rolled_back = self.lv2_host.cancel_unregistered_spu_group_start(group_id);
                     self.lv2_host.log_invariant_break(
-                        "runtime.register_spu_mailbox_id_collision",
+                        "runtime.spu_image_load_failed",
                         format_args!(
-                            "{uid:?} reused a live mailbox slot, so SPU mailbox state can cross \
-                             between two units; every anchor needs revalidation if this fires"
+                            "SPU group {group_id} factory rejected slot {slot}: {reason}; \
+                             rollback={rolled_back}"
                         ),
                     );
-                    debug_assert!(
-                        inserted,
-                        "RegisterSpu for UnitId({:?}) found an existing mailbox; \
-                         the dispatch layer must allocate a fresh unit id per SPU",
-                        uid.raw()
+                    return self.deliver_syscall_return(
+                        source,
+                        cellgov_ps3_abi::lv2::errno::CELL_EFAULT.into(),
                     );
                 }
             }
         }
+
+        for (slot, gid, uid) in created {
+            self.lv2_host.record_spu(uid, gid, slot).expect(
+                "record_spu rejected a freshly allocated unit: dispatch-layer \
+                 corruption in the RegisterSpu path",
+            );
+            // SPU Read Inbound Mailbox depth is 4 per
+            // [CBE-Handbook p:533 s:19.6 Table 19-15]; we use it
+            // as the default capacity for dispatch-allocated
+            // mailboxes until the SPU exec layer differentiates
+            // outbound (depth 1) from inbound (depth 4).
+            const SPU_INBOUND_MBOX_DEPTH: usize = 4;
+            let inserted = self.mailbox_registry.register_at(
+                cellgov_sync::MailboxId::new(uid.raw()),
+                SPU_INBOUND_MBOX_DEPTH,
+            );
+            if !inserted {
+                // Collision means the dispatch layer reused a
+                // UnitId that already had a mailbox -- SPU
+                // mailbox state would silently cross-talk
+                // between units.
+                self.lv2_host.log_invariant_break(
+                    "runtime.register_spu_mailbox_id_collision",
+                    format_args!(
+                        "{uid:?} reused a live mailbox slot, so SPU mailbox state can cross \
+                             between two units; every anchor needs revalidation if this fires"
+                    ),
+                );
+                debug_assert!(
+                    inserted,
+                    "RegisterSpu for UnitId({:?}) found an existing mailbox; \
+                         the dispatch layer must allocate a fresh unit id per SPU",
+                    uid.raw()
+                );
+            }
+        }
+        self.step_woke_others = true;
         self.deliver_syscall_return(source, code);
     }
 

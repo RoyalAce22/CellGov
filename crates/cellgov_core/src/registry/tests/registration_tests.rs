@@ -47,3 +47,14 @@ fn factory_panic_does_not_burn_next_id() {
     );
     assert_eq!(r.len(), 2);
 }
+
+#[test]
+fn fallible_factory_error_does_not_burn_next_id() {
+    let mut r = UnitRegistry::new();
+    let result: Result<UnitId, &str> = r.try_register_dynamic(&|_id| Err("refused"));
+
+    assert_eq!(result, Err("refused"));
+    let id = r.register_with(|id| CountingUnit { id, steps: 0 });
+    assert_eq!(id, UnitId::new(0));
+    assert_eq!(r.len(), 1);
+}

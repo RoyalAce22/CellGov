@@ -154,7 +154,11 @@ impl Runtime {
     /// Invoked when `Lv2Dispatch::RegisterSpu` fires during `commit_step`.
     pub fn set_spu_factory<F>(&mut self, factory: F)
     where
-        F: Fn(UnitId, SpuInitState) -> Box<dyn RegisteredUnit> + 'static,
+        F: Fn(
+                UnitId,
+                SpuInitState,
+            ) -> Result<Box<dyn RegisteredUnit>, super::types::SpuFactoryError>
+            + 'static,
     {
         self.spu_factory = Some(Box::new(factory));
     }

@@ -28,7 +28,7 @@ pub use registry::{RegisteredUnit, UnitRegistry};
 pub use runtime::{
     default_budget_for_mode, AddressSpaceId, PendingChildInit, ProcessSpawnLoadError,
     ProcessSpawnLoader, Runtime, RuntimeMode, RuntimeSnapshot, RuntimeStep, RuntimeTap, SpaceError,
-    SpawnedProcessImage, SpuFactory, StepError, DEFAULT_DMA_LATENCY_TICKS,
+    SpawnedProcessImage, SpuFactory, SpuFactoryError, StepError, DEFAULT_DMA_LATENCY_TICKS,
 };
 pub use scheduler::{RoundRobinScheduler, Scheduler};
 pub use syscall_table::SyscallResponseTable;
