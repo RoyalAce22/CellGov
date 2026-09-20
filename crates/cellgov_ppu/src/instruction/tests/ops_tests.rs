@@ -192,38 +192,3 @@ fn mnemonic_serialization_anchors() {
     assert_eq!(<&'static str>::from(Fp63Op::Fctidz), "fctidz");
     assert_eq!(<&'static str>::from(Fp59Op::Fnmadds), "fnmadds");
 }
-
-/// [PowerISA-3.1 p:App1481 s:Appendix H] the ISA lists every
-/// instruction under one mnemonic spelling, and the op enums render
-/// exactly those spellings.
-#[test]
-#[cfg_attr(
-    not(feature = "rpcs3-src"),
-    ignore = "needs the gitignored tools/rpcs3-src checkout; run with --features rpcs3-src"
-)]
-fn rpcs3_ppudisasm_recognizes_every_mnemonic() {
-    let path = std::path::PathBuf::from("../../tools/rpcs3-src/rpcs3/Emu/Cell/PPUDisAsm.h");
-    let src = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!(
-            "{}: {e}\nthe rpcs3-src feature declares the reference checkout \
-             present",
-            path.display()
-        )
-    });
-    let names = VxOp::iter()
-        .map(|op| <&'static str>::from(op).to_uppercase())
-        .chain(VaOp::iter().map(|op| <&'static str>::from(op).to_uppercase()))
-        .chain(Fp63Op::iter().map(|op| <&'static str>::from(op).to_uppercase()))
-        .chain(Fp59Op::iter().map(|op| <&'static str>::from(op).to_uppercase()));
-    let mut missing = Vec::new();
-    for name in names {
-        let needle = format!("void {name}(ppu_opcode_t");
-        if !src.contains(&needle) {
-            missing.push(name);
-        }
-    }
-    assert!(
-        missing.is_empty(),
-        "RPCS3 PPUDisAsm has no method for: {missing:?}"
-    );
-}

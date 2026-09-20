@@ -45,8 +45,8 @@ pub const SYS_SYNC_NOT_RECURSIVE: u32 = 0x20;
 /// `adaptive = SYS_SYNC_ADAPTIVE`: the create asks that a contending
 /// thread spin before it parks.
 // Neither adaptive enumerant is witnessed: no public document states
-// the pair, and no capture isolates the field. The micro-test corpus
-// passes SYS_SYNC_NOT_ADAPTIVE, and nothing in the corpus passes the
+// the pair, and no capture isolates the field. The built microtests
+// passes SYS_SYNC_NOT_ADAPTIVE, and no capture passes the
 // other member. The kernel answer for a third value is unestablished,
 // so `sys_mutex_create` names it instead of refusing it.
 //
@@ -86,7 +86,7 @@ pub const SYS_SYNC_WAITER_MULTIPLE: u32 = 0x20000;
 ///
 /// Either clear gives the waiter the flag value from before the clear.
 // The split between the two clear bits comes from a non-public
-// description of the wait mode, so it carries no citation. No corpus
+// description of the wait mode, so it carries no citation. No capture
 // caller issues CLEAR_ALL, so nothing in dev_flash witnesses it
 // either.
 pub mod event_flag_wait_mode {
@@ -114,7 +114,7 @@ pub mod event_flag_wait_mode {
 // The field order and the eight-byte name come from a non-public
 // description of the struct, so they carry no citation. The kernel
 // answer for a block whose name bytes are unmapped is unestablished.
-// No corpus trace presents an attribute block that straddles the end
+// No capture presents an attribute block that straddles the end
 // of a mapped region. CellGov gates the create on the whole declared
 // size, which a copy-in of the struct reaches.
 pub mod semaphore_attribute {

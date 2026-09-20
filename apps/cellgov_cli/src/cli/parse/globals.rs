@@ -47,7 +47,7 @@ fn names_its_own_store_root(command: &Command) -> bool {
             FirmwareCommand::List
             | FirmwareCommand::Show { .. }
             | FirmwareCommand::Verify { .. }
-            | FirmwareCommand::VerifyCorpus { .. }
+            | FirmwareCommand::VerifyPups { .. }
             | FirmwareCommand::Kernels
             | FirmwareCommand::Uninstall(_),
         ) => false,
@@ -86,10 +86,10 @@ const VFS_ROOT_READERS: &str = if cfg!(feature = "decrypt") {
 
 /// The commands [`reads_format`] answers for, as help text.
 const FORMAT_READERS: &str = if cfg!(feature = "decrypt") {
-    "status, firmware list / show / verify / verify-corpus / kernels, title list / show / verify, \
+    "status, firmware list / show / verify / verify-pups / kernels, title list / show / verify, \
      diff compare, diff observations, explore, and dev lv2-discover / lv2-extract"
 } else {
-    "status, firmware list / show / verify / verify-corpus / kernels, title list / show / verify, \
+    "status, firmware list / show / verify / verify-pups / kernels, title list / show / verify, \
      diff compare, diff observations, explore, and dev lv2-discover"
 };
 
@@ -174,7 +174,7 @@ pub(super) fn reads_format(command: &Command) -> bool {
             FirmwareCommand::List
                 | FirmwareCommand::Show { .. }
                 | FirmwareCommand::Verify { .. }
-                | FirmwareCommand::VerifyCorpus { .. }
+                | FirmwareCommand::VerifyPups { .. }
                 | FirmwareCommand::Kernels
         ),
         Command::Title(title) => matches!(

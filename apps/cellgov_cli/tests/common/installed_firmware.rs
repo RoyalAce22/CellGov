@@ -1,4 +1,4 @@
-//! Where the local PS3 corpus lives on disk.
+//! Where the installed PS3 firmware lives on disk.
 //!
 //! The store keys firmware on version, so the firmware install record
 //! names the installed tree. This module reads those records the way
@@ -6,9 +6,9 @@
 //! names the version it means.
 //!
 //! Those paths reach a tree git does not track, so this module
-//! declares the corpus features itself. A helper module has no
+//! declares the installed-firmware features itself. A helper module has no
 //! `[[test]]` target to carry `required-features`.
-#![cfg(any(feature = "firmware-corpus", feature = "ps3autotests"))]
+#![cfg(any(feature = "installed-firmware-tests", feature = "ps3autotests"))]
 #![allow(
     dead_code,
     reason = "each integration-test binary compiles this module separately and uses a subset"
@@ -22,7 +22,7 @@ use cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT;
 
 /// Workspace root, found by walking up to the manifest carrying
 /// `[workspace]`. Integration tests run with the crate directory as
-/// CWD, so relative corpus paths must anchor here.
+/// CWD, so relative store paths must anchor here.
 pub fn workspace_root() -> PathBuf {
     let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     loop {
@@ -37,12 +37,12 @@ pub fn workspace_root() -> PathBuf {
     }
 }
 
-/// The firmware version the corpus suites hold their assertions
+/// The firmware version the installed-firmware suites hold their assertions
 /// against.
-pub const CORPUS_FIRMWARE_VERSION: &str = "4.93";
+pub const TEST_FIRMWARE_VERSION: &str = "4.93";
 
 /// Names the firmware key written to generated `system_ver` fields.
-pub const CORPUS_SYSTEM_VERSION: &str = CORPUS_FIRMWARE_VERSION;
+pub const TEST_SYSTEM_VERSION: &str = TEST_FIRMWARE_VERSION;
 
 /// Every installed firmware's `dev_flash` tree, keyed by version.
 ///
@@ -97,7 +97,7 @@ fn dev_flash_trees() -> BTreeMap<String, PathBuf> {
     found
 }
 
-/// The `dev_flash` tree of [`CORPUS_FIRMWARE_VERSION`].
+/// The `dev_flash` tree of [`TEST_FIRMWARE_VERSION`].
 ///
 /// # Panics
 ///
@@ -105,11 +105,11 @@ fn dev_flash_trees() -> BTreeMap<String, PathBuf> {
 pub fn dev_flash() -> PathBuf {
     let trees = dev_flash_trees();
     trees
-        .get(CORPUS_FIRMWARE_VERSION)
+        .get(TEST_FIRMWARE_VERSION)
         .unwrap_or_else(|| {
             let installed: Vec<&str> = trees.keys().map(String::as_str).collect();
             panic!(
-                "the corpus suites are held against firmware {CORPUS_FIRMWARE_VERSION}, \
+                "the installed-firmware suites are held against firmware {TEST_FIRMWARE_VERSION}, \
                  which is not installed (installed: {}). Run \
                  `cellgov firmware install <PS3UPDAT.PUP>` for it.",
                 installed.join(", ")
@@ -122,14 +122,14 @@ pub fn dev_flash() -> PathBuf {
 ///
 /// # Panics
 ///
-/// If the directory is absent. Every caller declares the corpus
-/// installed, through the feature its own target is gated on or
+/// If the directory is absent. Every caller declares the required
+/// firmware installed, through the feature its own target is gated on or
 /// through an `#[ignore]` opt-in.
 pub fn firmware_external_dir() -> PathBuf {
     let dir = dev_flash().join("sys").join("external");
     assert!(
         dir.is_dir(),
-        "no PS3 firmware corpus at {}. Run `cellgov firmware install <PS3UPDAT.PUP>` \
+        "no installed PS3 firmware at {}. Run `cellgov firmware install <PS3UPDAT.PUP>` \
          to populate it.",
         dir.display()
     );

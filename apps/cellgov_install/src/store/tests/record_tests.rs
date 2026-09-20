@@ -3,7 +3,7 @@ use super::*;
 use crate::game_install::sha256_of;
 
 /// Placeholder identity: these name no real title and no installed
-/// corpus.
+/// installed content.
 const SYNTHETIC_TITLE_ID: &str = "TEST00000";
 const SYNTHETIC_CONTENT_ID: &str = "TT0000-TEST00000_00-SYNTHETICRECORD0";
 

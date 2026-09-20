@@ -112,7 +112,7 @@ fn every_bootable_microtest_is_covered_by_the_table() {
     // an emptied `CASES` would produce.
     assert!(
         !bootable.is_empty(),
-        "no manifest under {} declares a title; either the corpus moved \
+        "no manifest under {} declares a title; either the microtest tree moved \
          or the layouts this scan accepts are stale",
         micro.display()
     );
@@ -171,12 +171,12 @@ fn a_scenario_manifest_does_not_declare_a_bootable_microtest() {
     ));
 }
 
-/// The corpus's own scenario manifest, by name: its `[cellgov]` table
+/// The microtest tree's own scenario manifest, by name: its `[cellgov]` table
 /// carries an inline `scenario_args` sub-table, which a predicate keyed
 /// on "the manifest has a `[cellgov]` table" or on any nested table
 /// under it would read as a title.
 #[test]
-fn the_corpus_scenario_manifest_is_not_classified_bootable() {
+fn the_data_scenario_manifest_is_not_classified_bootable() {
     let manifest = workspace_root()
         .join("tests")
         .join("micro")
@@ -218,7 +218,7 @@ fn the_expectation_table_pins_real_values() {
 }
 
 /// Each case's directory must actually hold the built ELF, so a
-/// half-built corpus fails naming the case rather than at whichever
+/// half-built microtest tree fails naming the case rather than at whichever
 /// boot happens to run first.
 #[test]
 fn every_case_has_a_built_elf() {
@@ -236,7 +236,7 @@ fn every_case_has_a_built_elf() {
             .unwrap_or(false);
         assert!(
             has_elf,
-            "{}: no .elf under {}\nthe microtests feature declares the corpus built; \
+            "{}: no .elf under {}\nthe microtests feature declares the microtest tree built; \
              build it with tests/micro/{}/build.sh",
             case.name,
             build.display(),

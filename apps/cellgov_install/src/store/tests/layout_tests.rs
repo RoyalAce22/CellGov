@@ -9,7 +9,7 @@ fn version(v: &str) -> VersionKey {
 }
 
 /// Placeholder identity: these tests are pure path arithmetic and name
-/// no installed corpus.
+/// no installed content.
 const SYNTHETIC_TITLE_ID: &str = "TEST00000";
 
 fn layout() -> StoreLayout {

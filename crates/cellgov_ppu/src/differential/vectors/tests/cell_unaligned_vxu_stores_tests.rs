@@ -1,6 +1,6 @@
-//! Cell-unaligned VXU store differential corpus, including stvlx+stvrx full-vector composition.
+//! Cell-unaligned VXU store differential vectors, including stvlx+stvrx full-vector composition.
 
-use super::super::super::{assert_case, execute_into_memory, run_corpus};
+use super::super::super::{assert_case, execute_into_memory, run_vectors};
 use super::*;
 
 /// Run one store into `memory` with RA=BASE_ADDR, RB=`ea_offset`,
@@ -18,13 +18,13 @@ fn exec_store(raw: u32, vs_index: u8, ea_offset: u64, memory: Vec<u8>) -> Vec<u8
 }
 
 #[test]
-fn cell_unaligned_vxu_store_corpus_passes_against_executor() {
+fn cell_unaligned_vxu_store_vectors_pass_against_executor() {
     let cases = cases();
     assert!(
         !cases.is_empty(),
-        "Cell-unaligned VXU store corpus must produce at least one case"
+        "Cell-unaligned VXU store vectors must produce at least one case"
     );
-    let report = run_corpus(&cases);
+    let report = run_vectors(&cases);
     if !report.is_clean() {
         let detail = report
             .failed
@@ -33,7 +33,7 @@ fn cell_unaligned_vxu_store_corpus_passes_against_executor() {
             .collect::<Vec<_>>()
             .join("\n");
         panic!(
-            "Cell-unaligned VXU store corpus: {} failure(s) of {}:\n{detail}",
+            "Cell-unaligned VXU store vectors: {} failure(s) of {}:\n{detail}",
             report.failed.len(),
             report.total()
         );
@@ -50,19 +50,19 @@ fn each_case_passes_through_assert_case() {
 }
 
 #[test]
-fn corpus_covers_all_four_ops() {
+fn vectors_cover_all_four_ops() {
     let cases = cases();
     let labels: Vec<&str> = cases.iter().map(|c| c.label.as_str()).collect();
     for prefix in ["stvlx_", "stvrx_", "stvlxl_", "stvrxl_"] {
         assert!(
             labels.iter().any(|l| l.starts_with(prefix)),
-            "corpus missing any '{prefix}' case"
+            "vectors missing any '{prefix}' case"
         );
     }
 }
 
-// Every corpus case expects initial == post registers, so a passing
-// run_corpus also proves the executor clobbered no register.
+// Every vector expects initial == post registers, so a passing
+// run_vectors also proves the executor clobbered no register.
 #[test]
 fn store_cases_expect_no_register_side_effects() {
     for case in cases() {

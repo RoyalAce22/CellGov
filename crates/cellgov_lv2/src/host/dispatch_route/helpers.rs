@@ -22,7 +22,7 @@ impl Lv2Host {
     /// argument tests. That is the position the classifier's gate holds.
     ///
     /// Whether the kernel masks a field to 32 bits or refuses it is
-    /// unestablished: every corpus caller passes a value that already
+    /// unestablished: every observed caller passes a value that already
     /// fits, so none separates the two answers. A reading of the
     /// kernel's syscall prologue fixes it.
     ///
@@ -146,13 +146,13 @@ impl Lv2Host {
     /// Miss handling: a `/dev_flash/sys/external/` path whose stem
     /// names a module retail firmware ships (see
     /// `firmware_modules::FIRMWARE_MODULE_STEMS`) but is absent from
-    /// the loaded corpus registers a stub entry under a real kernel
+    /// the loaded firmware registers a stub entry under a real kernel
     /// id, and a repeat load resolves that stub by stem and returns
     /// the same id. Any other miss is `CELL_ENOENT`.
     ///
     /// The stub models no kernel behaviour. A console's `dev_flash`
     /// always holds the module, so the case cannot arise there. The
-    /// stub keeps a boot moving when CellGov's corpus lacks the
+    /// stub keeps a boot moving when CellGov's installed firmware lacks the
     /// module, and `prx_load_hle_stub_count` counts each one.
     ///
     /// # Errors
@@ -160,7 +160,7 @@ impl Lv2Host {
     /// - `CELL_EFAULT` when the pointer is unreadable or no NUL
     ///   terminator appears within the 256-byte cap.
     /// - `CELL_ENOENT` for non-UTF-8 path bytes (CellGov-side
-    ///   narrowing: such a path cannot name anything in the corpus).
+    ///   narrowing: such a path cannot name anything in the installed firmware).
     /// - `CELL_EINVAL` when `path_arg` carries high bits, per
     ///   [`Self::narrow_u32_args`].
     pub(super) fn resolve_prx_load(

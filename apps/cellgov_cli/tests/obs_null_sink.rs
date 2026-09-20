@@ -98,7 +98,7 @@ fn observability_is_inert_wiping_it_every_step_leaves_the_state_trace_byte_ident
 
     // Every registered title carries a committed baseline
     // (`registry_structure` gates that), so an unreadable or malformed
-    // one is a corpus defect. Dropping it would quietly re-order the
+    // one is a input defect. Dropping it would quietly re-order the
     // cheapest-first selection below and boot a different title than
     // the one this gate is sized for.
     let mut by_cost: Vec<(u64, TitleUnderTest)> = titles()

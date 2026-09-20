@@ -9,7 +9,7 @@ engine = "PhyreEngine"
 distribution = "psn-hdd"
 rap_filename = "UP9000-NPUA80001_00-FLOWPS3PROMOTION.rap"
 # PS3_SYSTEM_VER from the title's own PARAM.SFO (01.5000), held against
-# the installed content by the title-corpus suite. Derives the one cell
+# the installed content by the `installed-title-tests` suite. Derives the one cell
 # the headline row is measured at: fw 1.50 x base.
 system_ver = "1.50"
 

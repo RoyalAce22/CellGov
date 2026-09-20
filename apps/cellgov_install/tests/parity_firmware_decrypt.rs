@@ -6,7 +6,7 @@
 //! table's `sprx/` rows name the firmware version and the input each
 //! reference plaintext came from.
 //!
-//! Compiled only under `firmware-corpus`, which declares that install
+//! Compiled only under `installed-firmware-tests`, which declares that install
 //! present: every module is asserted, never skipped.
 
 #![allow(
@@ -46,7 +46,7 @@ use digests::FIRMWARE_MODULES;
 /// - names one version twice, or
 /// - names a tree that is gone.
 ///
-/// `firmware-corpus` declares the install exists, so each is a failure
+/// `installed-firmware-tests` declares the install exists, so each is a failure
 /// rather than a skip.
 fn firmware_external_dir(version: &str) -> PathBuf {
     let root = digests::workspace_root().join(DEFAULT_VFS_ROOT);
@@ -54,7 +54,7 @@ fn firmware_external_dir(version: &str) -> PathBuf {
     let records = layout.installs_dir().join(ArtifactKind::Firmware.as_str());
     let entries = std::fs::read_dir(&records).unwrap_or_else(|e| {
         panic!(
-            "firmware-corpus: no firmware install records at {}: {e}. Run \
+            "installed-firmware-tests: no firmware install records at {}: {e}. Run \
              `cellgov firmware install <PS3UPDAT.PUP>` to populate the store.",
             records.display()
         )
@@ -65,7 +65,7 @@ fn firmware_external_dir(version: &str) -> PathBuf {
         // census.
         let entry = entry.unwrap_or_else(|e| {
             panic!(
-                "firmware-corpus: reading an entry of {}: {e}",
+                "installed-firmware-tests: reading an entry of {}: {e}",
                 records.display()
             )
         });
@@ -88,7 +88,7 @@ fn firmware_external_dir(version: &str) -> PathBuf {
             .join("external");
         if let Some(prev) = found.insert(record.artifact.version.clone(), tree) {
             panic!(
-                "firmware-corpus: two firmware install records claim version {}: {} and {}",
+                "installed-firmware-tests: two firmware install records claim version {}: {} and {}",
                 record.artifact.version,
                 prev.display(),
                 path.display()
@@ -98,7 +98,7 @@ fn firmware_external_dir(version: &str) -> PathBuf {
     let Some(dir) = found.get(version) else {
         let installed: Vec<&str> = found.keys().map(String::as_str).collect();
         panic!(
-            "firmware-corpus: the committed digests were captured from firmware \
+            "installed-firmware-tests: the committed digests were captured from firmware \
              {version}, which is not installed under {} (installed: {})",
             root.display(),
             installed.join(", ")
@@ -106,7 +106,7 @@ fn firmware_external_dir(version: &str) -> PathBuf {
     };
     assert!(
         dir.is_dir(),
-        "firmware-corpus: firmware is recorded but its tree at {} is missing",
+        "installed-firmware-tests: firmware is recorded but its tree at {} is missing",
         dir.display()
     );
     dir.clone()
@@ -165,7 +165,7 @@ fn divergence(
             decrypted.len()
         ));
     }
-    // Shape-check the SPRX inner ELF: this corpus ships with
+    // Shape-check the SPRX inner ELF: this firmware set ships with
     // e_shoff = 0 and `decrypt_self_to_elf` copies it verbatim.
     for (field, range) in [
         ("e_shoff", 0x28..0x30),

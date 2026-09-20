@@ -1,4 +1,4 @@
-//! The operator's dump root: the one corpus location a run may
+//! The operator's dump root: the one external-data location a run may
 //! relocate.
 //!
 //! Dumps are the operator's own PKG / disc / PUP files, often too

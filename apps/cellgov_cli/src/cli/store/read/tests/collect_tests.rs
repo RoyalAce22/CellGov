@@ -8,7 +8,7 @@ use crate::composition::inventory::{BaseEntry, UpdateEntry};
 use cellgov_boot::manifest::TitleRegistry;
 
 /// Placeholder identity: these cases build every entry by hand and name
-/// no installed corpus.
+/// no installed content.
 const TITLE_ID: &str = "TEST00000";
 
 /// A view over an empty store: each case builds the entries it needs.

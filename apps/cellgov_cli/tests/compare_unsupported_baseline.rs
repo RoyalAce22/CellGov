@@ -7,7 +7,7 @@
 //! directory of manifests must not see green for a manifest that
 //! produced no file.
 //!
-//! Neither manifest runs anything, so the tests need no corpus and no
+//! Neither manifest runs anything, so the tests need no external data and no
 //! key vault.
 
 #![allow(

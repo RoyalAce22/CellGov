@@ -1,4 +1,4 @@
-//! Shared registry reader for the title-corpus suites.
+//! Shared registry reader for the installed-title-tests suites.
 //!
 //! An integration test cannot link the CLI's manifest loader, which
 //! lives in a binary crate, so this mirrors its acceptance rules:

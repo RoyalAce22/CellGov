@@ -36,7 +36,7 @@ The prior `14,341,833 / Fault` with three honest residual
 preserved as a documented downstream code path that does
 not re-fire under the new trajectory.
 
-RPCS3 corpus state (Stage E):
+RPCS3 capture state (Stage E):
   outcome: Completed
   step: (not recorded in observation)
   checkpoint: FirstRsxWrite (manifest)

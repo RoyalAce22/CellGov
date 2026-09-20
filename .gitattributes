@@ -15,7 +15,7 @@ docs/lv2/**/*.sql linguist-detectable=true linguist-generated=false
 # ps3autotests `.expected` files are real-PS3 TTY captures; their
 # bytes (including any embedded \r) must round-trip exactly. Force
 # them as binary so autocrlf cannot rewrite \n to \r\n on Windows
-# checkouts. Applies only if anyone ever vendors the corpus; the
+# checkouts. Applies only if anyone ever vendors the test data; the
 # directory is otherwise gitignored.
 tests/ps3autotests/**/*.expected -text
 tests/ps3autotests/**/*.elf -text

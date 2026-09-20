@@ -364,9 +364,9 @@ impl VerifyDoc {
     }
 }
 
-/// One archive PUP row found in or missing from the corpus.
+/// One archive PUP row found in or missing from the input directory.
 #[derive(Debug, Serialize)]
-pub(crate) struct PupCorpusEntryDoc {
+pub(crate) struct PupEntryDoc {
     /// Firmware version the row names.
     pub fw: String,
     /// Expected SHA-256 over the PUP file bytes.
@@ -375,14 +375,14 @@ pub(crate) struct PupCorpusEntryDoc {
     pub size_bytes: u64,
     /// Expected PUP-header image version.
     pub image_version: String,
-    /// Corpus-relative file path, for a present row.
+    /// PUP-directory-relative file path, for a present row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
 
-/// One PUP-corpus or installed-identity mismatch.
+/// One PUP-set or installed-identity mismatch.
 #[derive(Debug, Serialize)]
-pub(crate) struct PupCorpusMismatchDoc {
+pub(crate) struct PupMismatchDoc {
     /// File or installed entry that disagreed.
     pub subject: String,
     /// Which comparison disagreed.
@@ -400,22 +400,22 @@ pub(crate) struct PupCorpusMismatchDoc {
     pub reason: Option<String>,
 }
 
-/// `firmware verify-corpus`.
+/// `firmware verify-pups`.
 #[derive(Debug, Serialize)]
-pub(crate) struct PupCorpusVerifyDoc {
+pub(crate) struct PupVerifyDoc {
     /// See [`STORE_FORMAT_VERSION`].
     pub format_version: u32,
-    /// Corpus directory the command read.
-    pub corpus: String,
+    /// PUP directory the command read.
+    pub pup_directory: String,
     /// Archive rows whose file and metadata matched.
-    pub present: Vec<PupCorpusEntryDoc>,
+    pub present: Vec<PupEntryDoc>,
     /// Archive rows with no matching file.
-    pub missing: Vec<PupCorpusEntryDoc>,
-    /// Corpus files or installed identities that disagreed with the archive.
-    pub mismatched: Vec<PupCorpusMismatchDoc>,
+    pub missing: Vec<PupEntryDoc>,
+    /// PUP files or installed identities that disagreed with the archive.
+    pub mismatched: Vec<PupMismatchDoc>,
     /// Installed entries checked with the existing firmware verifier.
     pub installed: Vec<VerifiedEntryDoc>,
-    /// Whether every corpus and installed check matched.
+    /// Whether every PUP and installed check matched.
     pub clean: bool,
 }
 

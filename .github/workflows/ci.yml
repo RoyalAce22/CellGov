@@ -19,17 +19,17 @@ concurrency:
 
 defaults:
   run:
-    # windows-latest defaults to pwsh, where `$CORPUS_FEATURES` is not
+    # windows-latest defaults to pwsh, where `$EXTERNAL_DATA_FEATURES` is not
     # an environment variable and `grep | cut` does not exist. Every
     # `run:` below reads the same under bash on both runners.
     shell: bash
 
 env:
   CARGO_TERM_COLOR: always
-  # Hosted CI type-checks and lints corpus suites. The self-hosted corpus
+  # Hosted CI type-checks and lints external-data suites. The self-hosted runner
   # workflow executes them. Both scripts read this one feature declaration.
-  CORPUS_FEATURES: >-
-    cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/title-corpus,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/title-corpus,cellgov_install/title-dumps,cellgov_install/firmware-corpus,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_ppu/rpcs3-src,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
+  EXTERNAL_DATA_FEATURES: >-
+    cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/installed-title-tests,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/installed-title-tests,cellgov_install/title-dumps,cellgov_install/installed-firmware-tests,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
 jobs:
   # `strategy.matrix` cannot read `env`, so the MSRV reaches the matrix

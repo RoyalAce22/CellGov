@@ -49,7 +49,7 @@ fn every_store_document_names_the_commands_that_emit_it() {
         "`firmware list`",
         "`firmware show`",
         "`firmware verify`",
-        "`firmware verify-corpus`",
+        "`firmware verify-pups`",
         "`firmware kernels`",
         "`title list`",
         "`title show`",
@@ -76,13 +76,13 @@ fn an_absent_optional_field_is_left_out_of_the_sample() {
 }
 
 #[test]
-fn the_pup_corpus_sample_uses_reason_only_for_an_invalid_pup() {
+fn the_pup_data_sample_uses_reason_only_for_an_invalid_pup() {
     let rendered = schema::render();
     let block = rendered
-        .split("`firmware verify-corpus`:\n\n```json\n")
+        .split("`firmware verify-pups`:\n\n```json\n")
         .nth(1)
         .and_then(|rest| rest.split_once("\n```"))
-        .expect("the firmware verify-corpus sample is fenced JSON")
+        .expect("the firmware verify-pups sample is fenced JSON")
         .0;
     let doc: serde_json::Value = serde_json::from_str(block).expect("the sample is JSON");
     let mismatched = doc["mismatched"]
@@ -106,13 +106,13 @@ fn the_pup_corpus_sample_uses_reason_only_for_an_invalid_pup() {
 }
 
 #[test]
-fn the_pup_corpus_sample_does_not_reuse_one_hash_for_distinct_states() {
+fn the_pup_data_sample_does_not_reuse_one_hash_for_distinct_states() {
     let rendered = schema::render();
     let block = rendered
-        .split("`firmware verify-corpus`:\n\n```json\n")
+        .split("`firmware verify-pups`:\n\n```json\n")
         .nth(1)
         .and_then(|rest| rest.split_once("\n```"))
-        .expect("the firmware verify-corpus sample is fenced JSON")
+        .expect("the firmware verify-pups sample is fenced JSON")
         .0;
     let doc: serde_json::Value = serde_json::from_str(block).expect("the sample is JSON");
 

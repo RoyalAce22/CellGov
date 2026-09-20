@@ -147,7 +147,7 @@ static inline void syscall1_noreturn(u64 num, u64 a)
  * attribute block. The recursive field must be
  * SYS_SYNC_RECURSIVE (0x10) or SYS_SYNC_NOT_RECURSIVE (0x20);
  * no public document states those two values and no capture
- * isolates that field, so the pair is what this corpus is built
+ * isolates that field, so the pair is what this suite is built
  * and verified against. */
 static const struct {
     unsigned int protocol;      /* SYS_SYNC_FIFO */
@@ -174,7 +174,7 @@ static const struct {
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
  * stacksize, flags, threadname*); the user-space wrapper passes
  * unk = 0. No public document states this raw-syscall argument
- * list -- it is the shape the micro-test corpus is built and
+ * list -- it is the shape against which the microtests are built and
  * verified against. The param* in r4 is a two-word thread-init
  * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's

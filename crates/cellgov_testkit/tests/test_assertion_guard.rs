@@ -254,7 +254,7 @@ fn run(source: &str) -> (usize, Vec<(String, Vec<Fault>)>) {
 fn the_attribute_checks_accept_the_house_forms_and_reject_the_bare_ones() {
     let (seen, out) = run(r#"
         #[test] #[should_panic(expected = "index")] fn a() { f(); }
-        #[test] #[ignore = "needs the corpus"] fn b() { assert_eq!(1, 1); }
+        #[test] #[ignore = "needs the external data"] fn b() { assert_eq!(1, 1); }
         #[test] #[should_panic] fn c() { f(); }
         #[test] #[ignore] fn d() { assert_eq!(1, 1); }
     "#);

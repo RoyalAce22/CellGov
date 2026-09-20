@@ -14,7 +14,7 @@ use crate::test_support::{build_iso, build_param_sfo, codes, IsoNode, RecordingR
 use crate::test_support::{build_pup, build_tar};
 use cellgov_ps3_abi::format::pup::{ENTRY_ID_UPDATE_FILES, ENTRY_ID_VERSION_TXT};
 
-/// Placeholder identity: no real title and no installed corpus.
+/// Placeholder identity: no real title and no installed content.
 const TITLE_ID: &str = "TEST00000";
 const SHIPPED: &str = "2.76";
 

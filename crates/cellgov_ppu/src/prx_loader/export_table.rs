@@ -3,7 +3,7 @@
 //!
 //! An import names the library it wants, so the library name is half
 //! the key. Two modules exporting one NID under different library
-//! names each resolve to their own exporter; the firmware corpus
+//! names each resolve to their own exporter; the installed firmware
 //! relies on this, and a NID-only key cannot express it.
 
 use std::collections::{BTreeMap, BTreeSet};

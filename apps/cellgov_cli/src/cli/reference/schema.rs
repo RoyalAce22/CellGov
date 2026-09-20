@@ -10,9 +10,9 @@ use cellgov_install::store::{Artifact, StoreLayout, TitleId, TitleTree, VersionK
 
 use crate::cli::store::read::model::{
     store_rel, AnchorDoc, BaseDoc, CoreOsDoc, CoreOsFileDoc, DivergenceDoc, FirmwareDoc,
-    FirmwareListDoc, KernelCoverageDoc, KernelCoverageEntryDoc, KernelDoc, PupCorpusEntryDoc,
-    PupCorpusMismatchDoc, PupCorpusVerifyDoc, StatusDoc, TitleDoc, TitleListDoc, UpdateDoc,
-    VerifiedEntryDoc, VerifyDoc, STORE_FORMAT_VERSION,
+    FirmwareListDoc, KernelCoverageDoc, KernelCoverageEntryDoc, KernelDoc, PupEntryDoc,
+    PupMismatchDoc, PupVerifyDoc, StatusDoc, TitleDoc, TitleListDoc, UpdateDoc, VerifiedEntryDoc,
+    VerifyDoc, STORE_FORMAT_VERSION,
 };
 
 /// A SHA-256 as a document spells one: 64 lowercase hex digits.
@@ -74,7 +74,7 @@ pub(crate) fn render() -> String {
         &title_list_doc(&title_id, &update_version),
     );
     push(&mut s, "`firmware verify`, `title verify`", &verify_doc());
-    push(&mut s, "`firmware verify-corpus`", &pup_corpus_verify_doc());
+    push(&mut s, "`firmware verify-pups`", &pup_verify_doc());
     push(&mut s, "`firmware kernels`", &kernel_coverage_doc());
     s
 }
@@ -273,18 +273,18 @@ fn verify_doc() -> VerifyDoc {
     }
 }
 
-fn pup_corpus_verify_doc() -> PupCorpusVerifyDoc {
-    PupCorpusVerifyDoc {
+fn pup_verify_doc() -> PupVerifyDoc {
+    PupVerifyDoc {
         format_version: STORE_FORMAT_VERSION,
-        corpus: "dumps/firmware".to_string(),
-        present: vec![PupCorpusEntryDoc {
+        pup_directory: "dumps/firmware".to_string(),
+        present: vec![PupEntryDoc {
             fw: SAMPLE_FIRMWARE_VERSION.to_string(),
             pup_sha256: SAMPLE_SHA.to_string(),
             size_bytes: 206_197_916,
             image_version: "0x0000000000010b94".to_string(),
             path: Some("PS3UPDAT-4.93.PUP".to_string()),
         }],
-        missing: vec![PupCorpusEntryDoc {
+        missing: vec![PupEntryDoc {
             fw: "1.94".to_string(),
             pup_sha256: SAMPLE_SHA_1.to_string(),
             size_bytes: 125_289_664,
@@ -292,7 +292,7 @@ fn pup_corpus_verify_doc() -> PupCorpusVerifyDoc {
             path: None,
         }],
         mismatched: vec![
-            PupCorpusMismatchDoc {
+            PupMismatchDoc {
                 subject: "PS3UPDAT-4.92.PUP".to_string(),
                 kind: "sha256".to_string(),
                 fw: Some("4.92".to_string()),
@@ -300,7 +300,7 @@ fn pup_corpus_verify_doc() -> PupCorpusVerifyDoc {
                 found: Some(SAMPLE_SHA_3.to_string()),
                 reason: None,
             },
-            PupCorpusMismatchDoc {
+            PupMismatchDoc {
                 subject: "damaged.PUP".to_string(),
                 kind: "invalid-pup".to_string(),
                 fw: None,

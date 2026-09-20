@@ -1,6 +1,6 @@
 //! The exit-code contract as an operator reads it: what `--help`
 //! prints, and that a command with an outcome of its own names it.
-//! Needs no corpus.
+//! Self-contained.
 
 use std::process::Command;
 

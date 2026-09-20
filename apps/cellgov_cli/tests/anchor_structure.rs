@@ -1,4 +1,4 @@
-//! Corpus-free structural checks for every declared title cell.
+//! Self-contained structural checks for every declared title cell.
 
 #[path = "common/registry.rs"]
 mod registry;

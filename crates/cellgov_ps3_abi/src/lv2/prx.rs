@@ -143,7 +143,7 @@ pub mod get_module_list_option {
 /// `stub_size@0x24`. The two forms in
 /// [`register_module_option::LEGACY_SIZES`] stop short of all three.
 ///
-/// The layout is unestablished: nothing in the corpus or the public
+/// The layout is unestablished: nothing in the captures or the public
 /// documents fixes the offsets or the three accepted sizes. An sc 484
 /// caller's own code shows which fields it writes before the call, so
 /// a reading of one fixes them together.

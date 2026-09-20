@@ -13,7 +13,7 @@ rap_filename = "UP9000-NPUA80068_00-STARDUSTFULL0001.rap"
 # at this exact value.
 bench_max_steps = 100_000_000
 # PS3_SYSTEM_VER from the title's own PARAM.SFO (03.7000), held against
-# the installed content by the title-corpus suite. Derives the one cell
+# the installed content by the `installed-title-tests` suite. Derives the one cell
 # the headline row is measured at: fw 3.70 x base.
 system_ver = "3.70"
 

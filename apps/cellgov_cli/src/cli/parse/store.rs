@@ -42,11 +42,11 @@ pub(crate) enum FirmwareCommand {
         version: String,
     },
     /// Verify a directory of PUP files against the LV2 archive.
-    #[command(after_help = CORPUS_VERIFY_EXIT_CODES)]
-    VerifyCorpus {
-        /// Directory that holds the PUP corpus.
+    #[command(after_help = PUP_VERIFY_EXIT_CODES)]
+    VerifyPups {
+        /// Directory that holds the PUP files.
         #[arg(value_name = "DIR")]
-        corpus: PathBuf,
+        pup_directory: PathBuf,
     },
     /// Refresh the operator-local LV2 kernel coverage report under
     /// `<store>/.cellgov/firmware-kernel-coverage.json`.
@@ -61,7 +61,7 @@ pub(crate) enum FirmwareCommand {
 const KERNELS_EXIT_CODES: &str = "Exit codes particular to this command:
   41  a stored kernel yielded no ELF for a reason other than a missing key";
 
-const CORPUS_VERIFY_EXIT_CODES: &str = "Exit codes:
+const PUP_VERIFY_EXIT_CODES: &str = "Exit codes:
   0   every archive PUP and every installed tree whose PUP hash names an archive row matched
   4   a PUP was missing or mismatched, or one of those installed trees diverged";
 

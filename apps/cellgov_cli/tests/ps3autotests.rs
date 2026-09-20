@@ -2,12 +2,12 @@
 //! `cellgov boot run` and compares captured TTY against the
 //! real-PS3 `.expected` file.
 //!
-//! Compiled only under the `ps3autotests` feature: the corpus is a
+//! Compiled only under the `ps3autotests` feature: the input is a
 //! GPLv2 tree cloned by the developer (see tests/ps3autotests.README.md)
 //! and gitignored, so opting in declares it present and its absence is
 //! a hard error rather than a silent pass.
 //!
-//! The feature also activates `firmware-corpus`. These ELFs import
+//! The feature also activates `installed-firmware-tests`. These ELFs import
 //! sysPrxForUser NIDs no HLE module binds, so `firmware_dir` resolves
 //! the firmware version each generated manifest names. A store
 //! without that version fails, and the refusal names it.
@@ -31,8 +31,8 @@ use std::sync::{Condvar, Mutex, OnceLock};
 
 use cellgov_compare::{Observation, ObservationMetadata, ObservedOutcome};
 
-#[path = "common/corpus.rs"]
-mod corpus;
+#[path = "common/installed_firmware.rs"]
+mod installed_firmware;
 
 /// Peak RSS budget per subprocess: ~1.8 GiB guest memory plus a
 /// transient JSON-array dump from `--save-observation`. 4 GiB covers
@@ -164,7 +164,7 @@ const LV2_SYS_SEMAPHORE: Case = Case {
 };
 
 /// Every case the boot tests below name, including the `#[ignore]`d
-/// ones, so the corpus gate walks the whole set.
+/// ones, so the external-data gate walks the whole set.
 const CASES: &[Case] = &[
     CPU_BASIC,
     CPU_PPU_BRANCH,
@@ -234,7 +234,7 @@ fn firmware_set_reject_reason(dir: &Path) -> Option<String> {
 /// - holds no entry for that firmware version, or
 /// - names a tree that holds no module.
 fn firmware_dir() -> PathBuf {
-    let dir = corpus::firmware_external_dir();
+    let dir = installed_firmware::firmware_external_dir();
     if let Some(reason) = firmware_set_reject_reason(&dir) {
         panic!(
             "ps3autotests: {reason} -- these ELFs import sysPrxForUser NIDs that only the \
@@ -249,7 +249,7 @@ fn ps3autotests_root() -> PathBuf {
     let dir = workspace_root().join(PS3AUTOTESTS_RELPATH);
     assert!(
         dir.is_dir(),
-        "ps3autotests: the feature declares the corpus present but \
+        "ps3autotests: the feature declares the suite present but \
          {} is missing -- clone \
          https://github.com/AerialX/ps3autotests.git into that path \
          (see tests/ps3autotests.README.md)",
@@ -285,7 +285,7 @@ kind = "process-exit"
         stem_upper = case.stem.to_uppercase(),
         stem = case.stem,
         rel_dir = case.rel_dir,
-        system_ver = corpus::CORPUS_SYSTEM_VERSION,
+        system_ver = installed_firmware::TEST_SYSTEM_VERSION,
     )
 }
 
@@ -568,7 +568,7 @@ fn every_declared_case_names_a_present_non_empty_fixture_pair() {
             let len = std::fs::metadata(&file)
                 .unwrap_or_else(|e| {
                     panic!(
-                        "ps3autotests {}/{}: {} ({e}); the feature declares the corpus \
+                        "ps3autotests {}/{}: {} ({e}); the feature declares the suite \
                          present -- clone \
                          https://github.com/AerialX/ps3autotests.git into {} \
                          (see tests/ps3autotests.README.md)",
@@ -593,7 +593,7 @@ fn every_declared_case_names_a_present_non_empty_fixture_pair() {
 }
 
 #[test]
-fn every_generated_boot_manifest_names_the_corpus_firmware_floor() {
+fn every_generated_boot_manifest_names_the_data_firmware_floor() {
     for case in CASES {
         let manifest = cellgov_boot::manifest::TitleManifest::load_from_text(
             &manifest_content(case),
@@ -607,7 +607,7 @@ fn every_generated_boot_manifest_names_the_corpus_firmware_floor() {
         });
         assert_eq!(
             manifest.system_ver.as_deref(),
-            Some(corpus::CORPUS_SYSTEM_VERSION)
+            Some(installed_firmware::TEST_SYSTEM_VERSION)
         );
     }
 }

@@ -218,16 +218,16 @@ pub fn assert_case(case: &InstructionCase) {
     }
 }
 
-/// Aggregate result of [`run_corpus`].
+/// Aggregate result of [`run_vectors`].
 #[derive(Debug, Default, Clone)]
-pub struct CorpusReport {
+pub struct VectorReport {
     /// Number of cases that returned [`CaseOutcome::Pass`].
     pub passed: usize,
     /// Per-failing-case `(label, outcome)` pairs in input order.
     pub failed: Vec<(String, CaseOutcome)>,
 }
 
-impl CorpusReport {
+impl VectorReport {
     /// True when every case passed.
     pub fn is_clean(&self) -> bool {
         self.failed.is_empty()
@@ -240,8 +240,8 @@ impl CorpusReport {
 }
 
 /// Run every case in `cases` and aggregate results.
-pub fn run_corpus(cases: &[InstructionCase]) -> CorpusReport {
-    let mut report = CorpusReport::default();
+pub fn run_vectors(cases: &[InstructionCase]) -> VectorReport {
+    let mut report = VectorReport::default();
     for case in cases {
         match run_case(case) {
             CaseOutcome::Pass => report.passed += 1,

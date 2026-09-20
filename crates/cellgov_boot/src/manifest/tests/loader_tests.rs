@@ -1373,7 +1373,7 @@ fn an_hdd_title_without_content_id_is_rejected() {
 #[test]
 fn every_microtest_manifest_boots_from_its_own_build_dir() {
     let micro_root = Path::new("../../tests/micro");
-    // This test assembles the path. `corpus_path_guard` flags a
+    // This test assembles the path. `external_data_path_guard` flags a
     // literal path into the VFS as a dependency on an untracked tree.
     let staging_copy = ["vfs", "dev_hdd0"].join("/");
     let mut checked = 0usize;

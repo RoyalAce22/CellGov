@@ -1,9 +1,9 @@
-//! Spec-derived corpora for the differential harness.
+//! Spec-derived vectors for the differential harness.
 //!
 //! Each generator returns a `Vec<InstructionCase>` keyed off the
 //! PowerPC / Cell spec definition of its target class. The expected
 //! post-state is computed from the spec, not from CellGov, so a
-//! corpus run that passes confirms the executor matches the spec
+//! vector run that passes confirms the executor matches the spec
 //! transcription. The [`super::OracleSource::Spec`] tag carries the
 //! per-instruction citation.
 

@@ -31,12 +31,6 @@ strum = { version = "0.26", default-features = false, features = ["derive"] }
 # error.
 ppu-microtests = []
 
-# Opt-in for the differential spot-check against the RPCS3 source
-# checkout under tools/rpcs3-src (gitignored, cloned by the developer).
-# RPCS3 is evidence, not authority: a miss is triaged against the ISA
-# documents by hand.
-rpcs3-src = []
-
 [dev-dependencies]
 cellgov_compare = { path = "../cellgov_compare" }
 cellgov_core = { path = "../cellgov_core" }

@@ -1,4 +1,4 @@
-//! The corpus-free command contract of `firmware verify-corpus`.
+//! The self-contained command contract of `firmware verify-pups`.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -15,21 +15,24 @@ const PUP_TSV: &str = include_str!(concat!(
 
 struct Fixture {
     root: ScratchDir,
-    corpus: PathBuf,
+    pup_directory: PathBuf,
 }
 
 impl Fixture {
     fn new(label: &str) -> Self {
         let root = scratch_labeled(label);
-        let corpus = root.join("pups");
-        std::fs::create_dir_all(&corpus).expect("create corpus directory");
-        Self { root, corpus }
+        let pup_directory = root.join("pups");
+        std::fs::create_dir_all(&pup_directory).expect("create PUP directory");
+        Self {
+            root,
+            pup_directory,
+        }
     }
 
     fn run(&self) -> Output {
         Command::new(env!("CARGO_BIN_EXE_cellgov"))
-            .args(["firmware", "verify-corpus"])
-            .arg(&self.corpus)
+            .args(["firmware", "verify-pups"])
+            .arg(&self.pup_directory)
             .args(["--format", "json", "--vfs-root"])
             .arg(self.root.join("dev_hdd0"))
             .env_remove("CELLGOV_KEYS")
@@ -107,13 +110,16 @@ fn json(output: &Output) -> serde_json::Value {
 }
 
 #[test]
-fn an_empty_partial_corpus_reports_missing_without_mismatch() {
-    let fixture = Fixture::new("pup_corpus_empty");
+fn an_empty_partial_data_reports_missing_without_mismatch() {
+    let fixture = Fixture::new("pup_data_empty");
     let output = fixture.run();
     assert_eq!(output.status.code(), Some(EXIT_DIVERGED));
     let doc = json(&output);
     assert_eq!(doc["format_version"], 2);
-    assert_eq!(doc["corpus"], fixture.corpus.display().to_string());
+    assert_eq!(
+        doc["pup_directory"],
+        fixture.pup_directory.display().to_string()
+    );
     assert_eq!(doc["present"].as_array().map(Vec::len), Some(0));
     assert!(doc["missing"]
         .as_array()
@@ -125,8 +131,8 @@ fn an_empty_partial_corpus_reports_missing_without_mismatch() {
 
 #[test]
 fn an_invalid_pup_is_mismatched_and_does_not_consume_missing_rows() {
-    let fixture = Fixture::new("pup_corpus_invalid");
-    std::fs::write(fixture.corpus.join("bad.PUP"), b"not a PUP").expect("write bad PUP");
+    let fixture = Fixture::new("pup_data_invalid");
+    std::fs::write(fixture.pup_directory.join("bad.PUP"), b"not a PUP").expect("write bad PUP");
     let output = fixture.run();
     assert_eq!(output.status.code(), Some(EXIT_DIVERGED));
     let doc = json(&output);
@@ -144,7 +150,7 @@ fn an_invalid_pup_is_mismatched_and_does_not_consume_missing_rows() {
 
 #[test]
 fn an_installed_archive_candidate_cannot_verify_without_a_vault() {
-    let fixture = Fixture::new("pup_corpus_no_vault");
+    let fixture = Fixture::new("pup_data_no_vault");
     fixture.install_archive_candidate(&first_archive_row());
 
     let output = fixture.run();

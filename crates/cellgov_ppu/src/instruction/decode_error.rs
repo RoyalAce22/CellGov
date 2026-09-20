@@ -61,7 +61,7 @@ pub enum PpuDecodeError {
     },
     /// Neither Table 1 nor Table 2 matched. The encoding may be
     /// garbage, a mis-aligned execution point, or a Cell encoding
-    /// the spec corpus omits; the rejection carries the raw word
+    /// the spec-derived vector set omits; the rejection carries the raw word
     /// only.
     #[error("no documented encoding for raw 0x{raw:08x}")]
     EncodingNotRecognized {

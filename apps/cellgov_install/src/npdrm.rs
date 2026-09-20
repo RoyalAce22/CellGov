@@ -10,7 +10,7 @@
 //!
 //! The NPD header interpretation is available in every build; the
 //! derivation and the decrypt are behind the `decrypt` feature.
-//! Witness vectors over the operator's installed corpus live in
+//! Witness vectors over the operator's installed content live in
 //! `tests/npdrm_oracle_vectors.rs` behind the `npdrm-oracle-vectors`
 //! feature.
 

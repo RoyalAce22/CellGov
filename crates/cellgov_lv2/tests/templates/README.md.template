@@ -160,7 +160,7 @@ is complete.
 `{{census_gate}}` checks the 1,024-row ordinal sequence, PUP provenance,
 census-file hashes, class/target agreement, one primary stub per kernel,
 every stub reference count, and the census/subentry relation without reading
-a corpus.
+external data.
 
 ## Firmware callers
 
@@ -213,14 +213,14 @@ What the arm does lives in its rustdoc; nothing is restated here.
 | `selector_slot` | The argument register the arm dispatches on (`r3`..`r10`), or `none`. |
 | `provenance_kind` | `citation` (an official document), `firmware_reading` (a call site or wrapper in the installed firmware), `console_capture` (a fixture captured on a console), `non_public` (a fact from a source that cannot be cited), `unestablished` (nothing fixes it). |
 | `provenance_ref` | The citation as `DOC-KEY:p:N`, the reading or capture as a locator, or `none` for the last two kinds. |
-| `witness` | A non-ignored test that needs no corpus, as `path:function`, or `none` against a committed baseline that only shrinks. |
+| `witness` | A non-ignored test that is self-contained, as `path:function`, or `none` against a committed baseline that only shrinks. |
 | `exception` | `fabricated_success` for an arm whose zero-argument probe answers `CELL_OK` and records an invariant break: the call is acknowledged, not modelled. `none` otherwise, and the gate refuses a `none` on an arm that probes that way. |
 | `arm_source` | The file holding the arm's implementation. |
 
 The gate (`{{behavior_gate}}` and its siblings in
 `cellgov_lv2::archive`) fails when the rows and the typed or routed
 surface disagree, when a witness is not a non-ignored test in a
-corpus-free crate, when a row without a witness is not in the
+self-contained crate, when a row without a witness is not in the
 baseline, when `arm_source` does not hold the arm, when a reference
 does not fit its kind, and when a `fabricated_success` row does not
 fabricate one.

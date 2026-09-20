@@ -1,7 +1,7 @@
 //! Fault gate over the `sys_*_attribute_t` block the sync-object
 //! create dispatches read.
 //!
-//! No corpus trace presents an attribute block that straddles the end
+//! No capture presents an attribute block that straddles the end
 //! of a mapped region. The CELL_EFAULT these tests pin is CellGov's
 //! model of the copy-in rather than a witnessed kernel answer.
 

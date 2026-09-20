@@ -1,6 +1,6 @@
 ## Directory layout
 
-Keep the corpus and CellGov's writable state outside the repository. One
+Keep the PUP set and CellGov's writable state outside the repository. One
 possible layout is:
 
 ```text
@@ -12,7 +12,7 @@ possible layout is:
     dev_hdd0/
 ```
 
-`firmware verify-corpus` takes the `ps3-pups` directory as its positional
+`firmware verify-pups` takes the `ps3-pups` directory as its positional
 `DIR` argument. It walks subdirectories and reads regular files whose
 extension is `.PUP`, without using the file name as identity. The PUP bytes
 provide the hash, firmware version, image version, and size.
@@ -24,7 +24,7 @@ The state directory is separate. Commands point at it with:
 ```
 
 Do not set `CELLGOV_DUMPS_DIR` for this workflow. That variable selects
-test-corpus locations; it does not configure `firmware verify-corpus`.
+test-data locations; it does not configure `firmware verify-pups`.
 
 ## Build and vault
 
@@ -62,11 +62,11 @@ read by commands that use
 When measuring in a different disposable state root, point
 `CELLGOV_KEYS` at that normalized file for the duration of the command.
 
-Scanning a PUP does not require decryption. However, `verify-corpus` also
+Scanning a PUP does not require decryption. However, `verify-pups` also
 checks any installed firmware whose recorded PUP hash names an archive row.
 That check opens the stored modules. If the vault lacks a required key, the
 command stops instead of calling the installed tree mismatched. A PUP that
-is absent from the corpus and a PUP that is present while the vault cannot
+is absent from the PUP set and a PUP that is present while the vault cannot
 open an installed tree are different states.
 
 ## Register one PUP
@@ -82,7 +82,7 @@ is recorded.
 1. Install the PUP and note the firmware version printed by the command:
 
    ```console
-   cellgov --vfs-root <scratch-state>/dev_hdd0 firmware install <corpus-file>.PUP
+   cellgov --vfs-root <scratch-state>/dev_hdd0 firmware install <data-file>.PUP
    ```
 
 2. Read the installed identity as JSON:
@@ -98,13 +98,13 @@ is recorded.
 3. Record the original file length in bytes. On PowerShell:
 
    ```powershell
-   (Get-Item -LiteralPath '<corpus-file>.PUP').Length
+   (Get-Item -LiteralPath '<data-file>.PUP').Length
    ```
 
    On Linux:
 
    ```console
-   stat -c %s -- '<corpus-file>.PUP'
+   stat -c %s -- '<data-file>.PUP'
    ```
 
 4. Look for `pup_sha256` in the table's first column. If it already has a
@@ -145,10 +145,10 @@ changes:
 cargo build --release -p cellgov_cli --features decrypt
 ```
 
-Then point the rebuilt corpus verifier at the operator-owned directory:
+Then point the rebuilt PUP verifier at the operator-owned directory:
 
 ```console
-cellgov --vfs-root <operator-data>/cellgov-state/dev_hdd0 --format json firmware verify-corpus <operator-data>/ps3-pups
+cellgov --vfs-root <operator-data>/cellgov-state/dev_hdd0 --format json firmware verify-pups <operator-data>/ps3-pups
 ```
 
 Read the JSON categories separately:
@@ -156,16 +156,16 @@ Read the JSON categories separately:
 - `present` contains archive rows whose file bytes and PUP metadata match;
 - `missing` contains archive rows for which the directory has no matching
   file;
-- `mismatched` contains corpus files that disagree with the archive;
+- `mismatched` contains PUP files that disagree with the archive;
 - `installed` contains the existing firmware-verification reports for
   installed entries linked to archive rows.
 
-The pass is clean only when every archive row is present, no corpus file or
+The pass is clean only when every archive row is present, no PUP file or
 installed identity mismatches, and every linked installed entry verifies.
-A partial corpus is valid input, but it is not a clean pass: leave its absent
+A partial PUP set is valid input, but it is not a clean pass: leave its absent
 rows in `missing` rather than deleting archive rows to make the result green.
 
-The [generated CLI reference](cli.md#cellgov-firmware-verify-corpus) owns the
+The [generated CLI reference](cli.md#cellgov-firmware-verify-pups) owns the
 exact options and exit statuses. The [LV2 archive page](lv2/README.md#pup-provenance)
 owns the current table measurements and column definitions; do not copy
 those changing values into this runbook.

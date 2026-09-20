@@ -1,4 +1,4 @@
-# Microtest corpus
+# Microtest suite
 
 PSL1GHT-compiled C microtests live under `tests/micro/<name>/`,
 each with its own `manifest.toml` and `build.sh`, and run

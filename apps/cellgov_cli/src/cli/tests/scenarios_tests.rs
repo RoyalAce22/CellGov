@@ -107,10 +107,10 @@ fn explore_single_unit_returns_none() {
     assert!(result.is_none(), "single-unit isa has no branching points");
 }
 
-// The `microtests` feature is the one declaration that the ELF corpus
+// The `microtests` feature is the one declaration that the ELF set
 // under tests/micro/*/build/ exists; without it this test is not
 // compiled, so no invocation can reach it and silently skip. The
-// `#[ignore]` is unrelated to the corpus -- it is the ~7 min runtime.
+// `#[ignore]` is unrelated to the input set -- it is the ~7 min runtime.
 #[cfg(feature = "microtests")]
 #[test]
 #[ignore = "about seven minutes: runs three ELF microtests with full exploration"]
@@ -126,7 +126,7 @@ fn explore_micro_runs_for_elf_microtests() {
         let base = repo_root.join(format!("tests/micro/{name}/build"));
         let ppu_path = base.join(format!("{name}.elf"));
         let spu_path = base.join("spu_main.elf");
-        // The feature declares the corpus built, so a missing
+        // The feature declares the microtests built, so a missing
         // artifact is a hard error rather than a skip.
         assert!(
             ppu_path.is_file() && spu_path.is_file(),
@@ -135,7 +135,7 @@ fn explore_micro_runs_for_elf_microtests() {
             ppu_path.display(),
             spu_path.display(),
         );
-        // The corpus root is named rather than chdir'd to: the working
+        // The input root is named rather than chdir'd to: the working
         // directory is process-global, so moving it here would have
         // moved it for every test running in parallel in this binary,
         // and a panic between the two calls never restored it.

@@ -698,7 +698,7 @@ fn apply_relocations(
         staging.stage(cellgov_mem::StagedWrite::new(range, &bytes));
     }
 
-    // No-overlap precondition: PRX corpora don't produce
+    // No-overlap precondition: PRX vectors don't produce
     // overlapping read-modify-write relocations. Scoped to the
     // reloc range list because segment writes legitimately overlap
     // with reloc patches in the full staging buffer.

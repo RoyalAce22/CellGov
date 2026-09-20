@@ -1,4 +1,4 @@
-//! Spec-derived corpus for the AltiVec-memory load family (`lvsl`,
+//! Spec-derived vectors for the AltiVec-memory load family (`lvsl`,
 //! `lvsr`, `lvebx`, `lvehx`, `lvewx`, `lvxl`).
 //!
 //! For the element-indexed loads (`lvebx` / `lvehx` / `lvewx`) the

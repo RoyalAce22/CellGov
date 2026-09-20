@@ -124,7 +124,7 @@ fn syscall_480_firmware_miss_registers_stub_and_start_reaches_sentinel() {
     let mut host = Lv2Host::new();
     let mut mem = cellgov_mem::GuestMemory::new(0x10000);
     // libmedi ships in retail firmware but is absent from this host's
-    // (empty) corpus, so the miss path stubs it.
+    // empty firmware set, so the miss path stubs it.
     let path = b"/dev_flash/sys/external/libmedi.sprx\0";
     mem.apply_commit(
         cellgov_mem::ByteRange::new(cellgov_mem::GuestAddr::new(0x4800), path.len() as u64)

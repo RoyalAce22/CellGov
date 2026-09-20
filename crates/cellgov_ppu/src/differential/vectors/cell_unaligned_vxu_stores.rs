@@ -1,4 +1,4 @@
-//! Spec-derived corpus for the Cell-unaligned VXU store family
+//! Spec-derived vectors for the Cell-unaligned VXU store family
 //! (`stvlx`, `stvrx`, `stvlxl`, `stvrxl`).
 //!
 //! `stvlx` writes the high `16 - (EA & 0xF)` bytes of VS starting at
@@ -10,7 +10,7 @@
 //! `lvsl`/`vperm` shuffle).
 //!
 //! The "Last" suffixed twins (`stvlxl` / `stvrxl`) carry an LRU
-//! cache hint that CellGov's no-cache model ignores; the corpus
+//! cache hint that CellGov's no-cache model ignores; the vectors
 //! treats them as direct aliases of `stvlx` / `stvrx`.
 
 use super::super::{InstructionCase, MemorySnapshot};
@@ -24,7 +24,7 @@ const XO_STVRX: u32 = 839;
 const XO_STVLXL: u32 = 903;
 const XO_STVRXL: u32 = 967;
 
-// Register assignments used throughout the corpus.
+// Register assignments used throughout the vectors.
 const RA_IDX: u8 = 4;
 const RB_IDX: u8 = 5;
 const VS_IDX_STVLX: u8 = 11;

@@ -1,4 +1,4 @@
-//! NPDRM witness vectors over the operator's installed corpus.
+//! NPDRM witness vectors over the operator's installed content.
 //!
 //! The operator pins, in `vfs/.cellgov/npdrm_oracle_vectors.toml`,
 //! RAP files under the workspace `vfs/` with the klicensee each must
@@ -109,7 +109,7 @@ fn parse(text: &str, origin: &str) -> Vec<Vector> {
 ///
 /// `vfs.join` replaces the base with an absolute path and follows
 /// `..` out of it, so either would witness a file outside the
-/// installed corpus the suite claims to hold.
+/// installed content the suite claims to hold.
 ///
 /// # Panics
 ///

@@ -48,7 +48,7 @@ fn result(stop: StopReason, alternates: Vec<ScheduleRecord>) -> ExplorationResul
 }
 
 /// A registry name no title claims: these cases render a report and
-/// read no corpus, so naming an installed title would imply one.
+/// read no installed content, so naming an installed title would imply one.
 const SAMPLE_TITLE: &str = "sample-title";
 
 fn window(checkpoint: CheckpointTrigger) -> Window {

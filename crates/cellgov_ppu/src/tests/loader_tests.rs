@@ -254,8 +254,8 @@ fn skips_empty_segment() {
 fn microtest_bytes(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| {
         panic!(
-            "{path}: {e}\nthe ppu-microtests feature declares the micro-test \
-             corpus built; build it with tests/micro/spu_fixed_value/build.sh"
+            "{path}: {e}\nthe ppu-microtests feature declares the microtest artifact \
+             present; build it with tests/micro/spu_fixed_value/build.sh"
         )
     })
 }
@@ -263,7 +263,7 @@ fn microtest_bytes(path: &str) -> Vec<u8> {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn loads_real_ppu_elf() {
     let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
@@ -285,7 +285,7 @@ fn loads_real_ppu_elf() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn find_symbol_locates_result_in_ppu_elf() {
     let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");
@@ -298,7 +298,7 @@ fn find_symbol_locates_result_in_ppu_elf() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn find_symbol_returns_none_for_missing() {
     let data = microtest_bytes("../../tests/micro/spu_fixed_value/build/spu_fixed_value.elf");

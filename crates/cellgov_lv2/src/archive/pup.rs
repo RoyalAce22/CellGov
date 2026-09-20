@@ -1,4 +1,4 @@
-//! Owns the `pup.tsv` rows that identify the archive's firmware corpus.
+//! Owns the `pup.tsv` rows that identify the archive's installed firmware.
 
 use super::firmware::is_date;
 use super::spec::PUP;

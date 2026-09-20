@@ -5,7 +5,7 @@
 //! only.
 //!
 //! The event codes and record sizes below are unestablished: nothing
-//! in the corpus states them. `libusbd.sprx` is the module that would
+//! in the captured evidence states them. `libusbd.sprx` is the module that would
 //! witness them.
 
 /// `sys_usbd_receive_event` arg1: a device was attached.

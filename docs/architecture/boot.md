@@ -108,12 +108,12 @@ SCC-based cycle attribution names only the cycle's participants,
 not their downstream consumers. `start_modules` then invokes each
 module's `module_start` in topo order.
 
-Every loaded module is verified against the corpus's
+Every loaded module is verified against the installed firmware's
 `firmware.toml` manifest, written by `cellgov firmware install`
 and located at or up to two levels above the firmware dir. The
 post-decrypt SHA-256 must match the manifest entry; a file
 missing from the manifest, a digest mismatch, or a firmware dir
-without a manifest is a fatal boot error, so an unusable corpus
+without a manifest is a fatal boot error, so unusable installed firmware
 never degrades silently into a firmware-less run. The verified
 identity (PUP hash + image version) binds into
 `Lv2Host::sync_state_hash`: two runs over the same firmware

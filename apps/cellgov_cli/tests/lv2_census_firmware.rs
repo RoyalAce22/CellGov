@@ -1,4 +1,4 @@
-//! Reproduces the committed LV2 census from the operator-owned firmware corpus.
+//! Reproduces the committed LV2 census from the operator-owned installed firmware.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -16,10 +16,10 @@ fn read(path: &Path) -> String {
 }
 
 #[test]
-fn corpus_reextracts_byte_identical_census_rows() {
+fn firmware_reextracts_byte_identical_census_rows() {
     let dumps = std::env::var_os("CELLGOV_DUMPS_DIR")
         .map(PathBuf::from)
-        .expect("firmware-corpus requires CELLGOV_DUMPS_DIR");
+        .expect("installed-firmware-tests requires CELLGOV_DUMPS_DIR");
     let root = workspace_root();
     let committed = root.join("docs/lv2");
     let pup_table = archive::parse(&PUP, &read(&committed.join(PUP.file())))
@@ -31,7 +31,7 @@ fn corpus_reextracts_byte_identical_census_rows() {
     let kernel_table = archive::parse(&KERNEL, &read(&committed.join(KERNEL.file())))
         .expect("parse committed kernel table");
     let kernels = archive::kernel_rows(&kernel_table);
-    let output = scratch_labeled("lv2_census_corpus");
+    let output = scratch_labeled("lv2_census_firmware");
 
     for kernel in &kernels {
         let fw = firmware_by_pup
@@ -43,7 +43,7 @@ fn corpus_reextracts_byte_identical_census_rows() {
             .join("lv2_kernel.elf");
         assert!(
             elf.is_file(),
-            "missing corpus fixture {}; every kernel.tsv row must have one",
+            "missing firmware fixture {}; every kernel.tsv row must have one",
             elf.display()
         );
         let result = Command::new(env!("CARGO_BIN_EXE_cellgov"))
@@ -71,7 +71,7 @@ fn corpus_reextracts_byte_identical_census_rows() {
         assert_eq!(
             read(&output.join(&file)),
             read(&committed.join(&file)),
-            "{file} changed during corpus re-extraction"
+            "{file} changed during firmware re-extraction"
         );
     }
     let census_files: BTreeSet<String> = kernels
@@ -82,7 +82,7 @@ fn corpus_reextracts_byte_identical_census_rows() {
         assert_eq!(
             read(&output.join(&file)),
             read(&committed.join(&file)),
-            "{file} changed during corpus re-extraction"
+            "{file} changed during firmware re-extraction"
         );
     }
 }

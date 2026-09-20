@@ -32,8 +32,8 @@ byte, what a PS3 game would produce under any legal schedule.
   runtime works, one document per subsystem.
 - [docs/cli.md](docs/cli.md) -- generated command reference: every
   default-build command, its examples, its flags, and its exit codes.
-- [docs/firmware_corpus.md](docs/firmware_corpus.md) -- operator runbook
-  for recording and verifying an out-of-repository PUP corpus.
+- [docs/firmware_inputs.md](docs/firmware_inputs.md) -- operator runbook
+  for recording and verifying an out-of-repository PUP set.
 - [docs/titles.md](docs/titles.md) -- generated compatibility
   matrix: which titles boot, to which checkpoint, and whether they
   converge with RPCS3. This is where current status lives.
@@ -77,15 +77,15 @@ default-off `decrypt` feature of `cellgov_install` and
 `cellgov_cli`. Without it the tools parse containers and boot
 plaintext ELFs; an input whose header shows an SCE wrapper is
 refused with a message naming the missing feature. Installed
-firmware and titles stay SCE-wrapped on disk, so booting a real
-corpus needs it:
+firmware and titles stay SCE-wrapped on disk, so booting installed
+content needs it:
 
 ```bash
 cargo build --release -p cellgov_cli --features decrypt
 ```
 
-The other features (`*-corpus`, `*-dumps`, `*-microtests`,
-`rpcs3-src`, `ps3autotests`) select test suites that read local dumps
+The other features (`installed-*-tests`, `*-dumps`, `*-microtests`,
+`ps3autotests`) select test suites that read local dumps
 or built fixtures. None is needed to build, and `--all-features`
 fails without those assets.
 
@@ -192,12 +192,12 @@ installed and no override, the boot is refused rather than run.
 ## Testing
 
 Assertions run against structured trace records and state hashes,
-never against text logs. Suites that need a local PS3 corpus (a
+never against text logs. Suites that need local PS3 data (a
 firmware image, an owned title dump, compiled micro-test ELFs) sit
 behind cargo features rather than environment variables: with the
 feature off the target is not built; with it on, a missing fixture
 is a hard error. Nothing skips silently, so `cargo test` on a fresh
-clone reports green only for gates that ran. A corpus feature whose
+clone reports green only for gates that ran. An external-data feature whose
 inputs are SCE-wrapped implies `decrypt`; the decrypt pipeline's own
 synthetic-fixture tests run with
 `cargo test -p cellgov_install --features decrypt`.

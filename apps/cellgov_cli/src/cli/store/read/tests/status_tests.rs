@@ -5,7 +5,7 @@ use crate::cli::store::read::model::{
 };
 
 /// Placeholder identity: these cases build every document by hand and
-/// name no installed corpus.
+/// name no installed content.
 const TITLE_ID: &str = "TEST00000";
 
 fn firmware(version: &str) -> FirmwareDoc {

@@ -217,7 +217,7 @@ fn the_elf_entry_parameter_becomes_the_initial_pc() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn loads_real_spu_elf() {
     let data = crate::tests::microtest_elf("../../tests/micro/spu_fixed_value/build/spu_main.elf");

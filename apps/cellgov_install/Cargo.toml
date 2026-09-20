@@ -41,14 +41,14 @@ decrypt = ["dep:aes", "dep:cbc", "dep:ctr", "dep:hmac", "dep:sha1", "dep:flate2"
 
 # The NPDRM witness suite: RAP -> klicensee derivations and the EBOOT
 # decrypts they open, read at run time from the operator's manifest at
-# vfs/.cellgov/npdrm_oracle_vectors.toml. Same contract as the corpus
+# vfs/.cellgov/npdrm_oracle_vectors.toml. Same contract as the external-data
 # features: off means not built, on means a missing manifest is a hard
 # failure. The manifest names the titles, so the source names none.
 npdrm-oracle-vectors = ["decrypt"]
 
 # Suites that install a title from an operator-owned raw dump: a
 # retail PKG plus its RAP, or a ~2GB decrypted disc image, read from
-# the dump root. Distinct from title-corpus: owning the installed
+# the dump root. Distinct from installed-title-tests: owning the installed
 # result under vfs/ does not mean the raw dump was kept, and these
 # suites install from scratch. An install runs the decrypt-proof, so
 # the feature implies `decrypt`.
@@ -58,17 +58,17 @@ title-dumps = ["decrypt"]
 # so a fresh checkout neither builds nor silently skips them; on, they
 # hard-assert. CI type-checks and lints them so they cannot bitrot.
 # The installed EBOOTs are SELFs, so the suites need `decrypt`.
-title-corpus = ["decrypt"]
+installed-title-tests = ["decrypt"]
 
 # Suites that read firmware already installed under vfs/dev_flash.
-# Same contract as title-corpus: off means not built, on means
+# Same contract as installed-title-tests: off means not built, on means
 # hard-assert. The installed modules stay SCE-wrapped on disk, so the
 # suites need `decrypt`.
-firmware-corpus = ["decrypt"]
+installed-firmware-tests = ["decrypt"]
 
 # Suite that installs firmware from an operator-owned PS3UPDAT.PUP in
-# the dump root. Distinct from firmware-corpus for the same reason
-# title-dumps is distinct from title-corpus: having the installed
+# the dump root. Distinct from installed-firmware-tests for the same reason
+# title-dumps is distinct from installed-title-tests: having the installed
 # result under vfs/ does not mean the update package was kept.
 firmware-dumps = ["decrypt"]
 
@@ -86,7 +86,7 @@ required-features = ["title-dumps"]
 
 [[test]]
 name = "parity_title_digests"
-required-features = ["title-corpus"]
+required-features = ["installed-title-tests"]
 
 [[test]]
 name = "firmware_pipeline_end_to_end"
@@ -94,7 +94,7 @@ required-features = ["firmware-dumps"]
 
 [[test]]
 name = "parity_firmware_decrypt"
-required-features = ["firmware-corpus"]
+required-features = ["installed-firmware-tests"]
 
 [lints]
 workspace = true

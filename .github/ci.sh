@@ -3,20 +3,20 @@
 
 set -euo pipefail
 
-corpus_features="${CORPUS_FEATURES:-$(sed -n '/^[[:space:]]*CORPUS_FEATURES: >-/{n;p;}' .github/workflows/ci.yml | tr -d '[:space:]')}"
-test -n "$corpus_features"
+external_data_features="${EXTERNAL_DATA_FEATURES:-$(sed -n '/^[[:space:]]*EXTERNAL_DATA_FEATURES: >-/{n;p;}' .github/workflows/ci.yml | tr -d '[:space:]')}"
+test -n "$external_data_features"
 
 lint() {
     export RUSTFLAGS='-D warnings'
     cargo fmt --check
     cargo clippy --workspace --all-targets --locked -- -D warnings
-    cargo clippy --workspace --all-targets --locked --features "$corpus_features" -- -D warnings
+    cargo clippy --workspace --all-targets --locked --features "$external_data_features" -- -D warnings
     cargo clippy -p cellgov_compare --all-targets --locked --no-default-features -- -D warnings
     RUSTDOCFLAGS='-D warnings' cargo doc --workspace --no-deps --locked
 }
 
 test_suite() {
-    cargo check --workspace --all-targets --locked --features "$corpus_features"
+    cargo check --workspace --all-targets --locked --features "$external_data_features"
     cargo test --workspace --locked
     cargo test --workspace --release --locked
     cargo test -p cellgov_install --locked --features decrypt

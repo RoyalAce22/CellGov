@@ -37,7 +37,7 @@ pub enum FirmwareLoadError {
     },
     /// No `firmware.toml` covers the directory the boot names.
     #[error(
-        "no firmware.toml at or above {}; the firmware corpus is unverifiable. \
+        "no firmware.toml at or above {}; the installed firmware is unverifiable. \
          Reinstall with `cellgov firmware install`, which writes the manifest.",
         dir.display()
     )]
@@ -78,7 +78,7 @@ pub enum FirmwareLoadError {
     },
     /// A loaded module has no `[[files]]` entry vouching for it.
     #[error(
-        "{}: not listed in firmware.toml ({rel:?}); the corpus and its manifest disagree. \
+                "{}: not listed in firmware.toml ({rel:?}); the installed firmware and its manifest disagree. \
          Reinstall with `cellgov firmware install`.",
         file.display()
     )]

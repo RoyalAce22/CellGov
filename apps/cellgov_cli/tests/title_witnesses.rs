@@ -14,7 +14,7 @@
 //! - a cell the registry declares `pending`.
 //!
 //! At least one cell must boot or the suite fails; under the
-//! `title-corpus` feature, green means something ran. Any other failing
+//! `installed-title-tests` feature, green means something ran. Any other failing
 //! boot -- including one that dies before its inputs resolve, e.g. a
 //! present-but-undecryptable dump -- is a suite failure. Re-record with:
 //!
@@ -250,11 +250,11 @@ fn every_installed_title_matches_its_recorded_baseline() {
         failures.len(),
         failures.join("\n")
     );
-    // Anti-vacuity floor: the feature declares a corpus, so a run
+    // Anti-vacuity floor: the feature declares installed titles, so a run
     // that booted nothing must not report green.
     assert!(
         checked > 0,
-        "title-corpus is enabled but none of the {} gated cell(s) is \
+        "installed-title-tests is enabled but none of the {} gated cell(s) is \
          installed (skipped: {}). Install at least one, or run without the \
          feature.",
         titles.len(),

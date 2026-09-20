@@ -29,7 +29,7 @@ use crate::test_support::{
 use cellgov_ps3_abi::format::pup::ENTRY_ID_UPDATE_FILES;
 
 /// Placeholder identities: every fixture here is hand-built and names
-/// no installed corpus.
+/// no installed content.
 const TITLE_ID: &str = "TEST00000";
 const CONTENT_ID: &str = "UP0000-TEST00000_00-SYNTHETIC00000";
 const UPDATE_VERSION: &str = "02.51";

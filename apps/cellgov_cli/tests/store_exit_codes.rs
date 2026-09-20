@@ -1,5 +1,5 @@
 //! The exit-code contract on the store's read and uninstall surface,
-//! asserted against a synthetic store the test builds. Needs no corpus:
+//! asserted against a synthetic store the test builds. Self-contained:
 //! every tree and record here is hand-written.
 
 use cellgov_testkit::param_sfo::build_param_sfo;
@@ -12,7 +12,7 @@ const EXIT_FAILED: i32 = 1;
 const EXIT_USAGE: i32 = 2;
 const EXIT_DIVERGED: i32 = 4;
 
-/// Placeholder identity: nothing here names an installed corpus.
+/// Placeholder identity: nothing here names an installed content.
 const TITLE_ID: &str = "TEST00000";
 
 /// SHA-256 in the hex form a record writes.

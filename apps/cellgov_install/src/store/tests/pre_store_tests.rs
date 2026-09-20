@@ -3,7 +3,7 @@ use super::*;
 use crate::scratch_dir::{scratch, ScratchDir};
 
 /// Placeholder identity: these cases build every tree by hand and name
-/// no installed corpus.
+/// no installed content.
 const SYNTHETIC_TITLE_ID: &str = "TEST00000";
 
 fn write(path: &Path, text: &str) {

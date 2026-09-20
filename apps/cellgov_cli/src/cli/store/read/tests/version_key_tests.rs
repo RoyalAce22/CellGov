@@ -11,7 +11,7 @@ use crate::composition::inventory::{BaseEntry, UpdateEntry};
 use cellgov_boot::manifest::TitleRegistry;
 
 /// Placeholder identity: these cases write every tree by hand and name
-/// no installed corpus.
+/// no installed content.
 const TITLE_ID: &str = "TEST00000";
 
 struct Fixture {

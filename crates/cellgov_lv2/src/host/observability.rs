@@ -74,7 +74,7 @@ pub struct Lv2Observability {
     pub usbd_no_device_refusals: u64,
     /// Witness: guest paths sc 480 / 497 answered `CELL_ENOENT`, with
     /// hit counts. The key set names which modules a title asks for
-    /// that the corpus cannot serve.
+    /// that the installed firmware cannot serve.
     pub prx_load_misses: BTreeMap<String, u64>,
     /// Witness: null-backend hits keyed by syscall number. The key set
     /// is the boot's unimplemented-syscall inventory; the counts

@@ -261,7 +261,7 @@ pub fn sha256_of(bytes: &[u8]) -> [u8; 32] {
 /// over the reconstructed ELF bytes.
 ///
 /// The boot path calls this per PRX it actually loads; the
-/// full-corpus [`ManifestVerifier`] is for verification flows that
+/// whole-tree [`ManifestVerifier`] is for verification flows that
 /// read every manifest entry.
 pub fn verify_post_decrypt(
     manifest: &FirmwareManifest,
@@ -293,12 +293,12 @@ pub fn verify_post_decrypt(
 #[error("firmware.toml has zero [[files]] entries; cannot verify vacuously")]
 pub struct EmptyManifest;
 
-/// Full-corpus aggregate verifier: fed each file's `(path, digest)`
+/// Whole-tree aggregate verifier: fed each file's `(path, digest)`
 /// pair and drained with [`Self::finish`], which fails if any
 /// manifest entry went unverified. For verification flows that read every
 /// installed file; the per-boot check is [`verify_post_decrypt`]
 /// over the loaded subset, since verifying every entry means
-/// decrypting the whole corpus.
+/// decrypting the whole tree.
 #[derive(Debug)]
 pub struct ManifestVerifier<'a> {
     manifest: &'a FirmwareManifest,

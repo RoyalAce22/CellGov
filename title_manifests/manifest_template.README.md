@@ -50,7 +50,7 @@ via `cellgov dev titles-gen`; the system software renders on
 | `distribution`     | string   | yes      | One of `"psn-hdd"`, `"retail-hdd"`, `"disc-iso"`, `"firmware-exec"`, `"microtest"`. Lowercase kebab; the loader rejects other casings.                                                                                               |
 | `rap_filename`     | string   | no       | NPDRM license file under the VFS `exdata/` dir; needed to decrypt PSN EBOOTs whose RAP name does not match the content id.                                                                                                            |
 | `bench_max_steps`  | integer  | no       | Per-title instruction cap for `boot bench-once` and the title suites; defaults to 100,000,000. Raise it when a title's checkpoint sits past the default cap.                                                                          |
-| `system_ver`       | string   | hdd/disc | The firmware the title's own `PARAM.SFO` asks for (`PS3_SYSTEM_VER`), as a store version key: `01.5000` is `"1.50"`. Required on every `hdd` / `disc` title, refused on `firmware-exec` and `manifest-relative` ones, which have no PARAM.SFO. Derives the reference cell; see `[[bench.matrix]]` below. A `title-corpus` suite holds it to the installed table. |
+| `system_ver`       | string   | hdd/disc | The firmware the title's own `PARAM.SFO` asks for (`PS3_SYSTEM_VER`), as a store version key: `01.5000` is `"1.50"`. Required on every `hdd` / `disc` title, refused on `firmware-exec` and `manifest-relative` ones, which have no PARAM.SFO. Derives the reference cell; see `[[bench.matrix]]` below. A `installed-title-tests` suite holds it to the installed table. |
 
 ### `[checkpoint]` (required)
 

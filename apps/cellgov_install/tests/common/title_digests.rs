@@ -2,7 +2,7 @@
 //!
 //! Parsing and well-formedness live here rather than in the parity
 //! suite so a fresh checkout sees a malformed manifest: the suite that
-//! consumes these rows is gated on `title-corpus`, and the rows it does
+//! consumes these rows is gated on `installed-title-tests`, and the rows it does
 //! not compare on this host would otherwise never be looked at.
 
 #![allow(

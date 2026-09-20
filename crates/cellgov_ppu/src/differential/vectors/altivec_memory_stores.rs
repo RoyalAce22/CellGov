@@ -1,4 +1,4 @@
-//! Spec-derived corpus for the AltiVec-memory store family (`stvebx`,
+//! Spec-derived vectors for the AltiVec-memory store family (`stvebx`,
 //! `stvehx`, `stvewx`, `stvxl`).
 //!
 //! Symmetric to the load family at

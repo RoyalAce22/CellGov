@@ -1,4 +1,4 @@
-//! The firmware-floor warning on a real `boot run`. Needs no corpus:
+//! The firmware-floor warning on a real `boot run`. Self-contained:
 //! the store, the firmware entry and the title are synthetic, and the
 //! boot dies after the banner on an executable that is no ELF.
 
@@ -8,7 +8,7 @@ use std::process::Command;
 use cellgov_testkit::param_sfo::build_param_sfo;
 use cellgov_testkit::scratch::scratch_labeled;
 
-/// Placeholder identity: nothing here names an installed corpus.
+/// Placeholder identity: nothing here names an installed content.
 const TITLE_ID: &str = "TEST00000";
 
 /// The one firmware the synthetic store holds.

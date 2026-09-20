@@ -87,7 +87,7 @@ fn provenance_pups_without_kernel_rows_are_not_extracted() {
         .map(|row| row[0].clone())
         .filter(|pup| !kernels.contains(pup))
         .collect();
-    assert!(!absent.is_empty(), "the partial corpus must stay visible");
+    assert!(!absent.is_empty(), "the partial census must stay visible");
     for pup in absent {
         assert_eq!(
             super::lookup(&pup_digest(&pup), 0),

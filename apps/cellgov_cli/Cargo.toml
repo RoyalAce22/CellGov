@@ -64,37 +64,37 @@ sysinfo = "0.32"
 # SCE/SELF decryption at load time (`cellgov_install/decrypt`). Off by
 # default: the CLI then boots and inspects plaintext ELFs only, and an
 # SCE-wrapped input is refused by name. Installed firmware and titles
-# stay SCE-wrapped on disk, so booting a real corpus needs it.
+# stay SCE-wrapped on disk, so booting installed content needs it.
 decrypt = ["cellgov_install/decrypt"]
 
-# Suites that read the operator's local PS3 corpus. Firmware comes from
+# Suites that read the operator's installed PS3 content. Firmware comes from
 # a console update package; titles come from owned game dumps. Both are
 # gitignored and cannot exist on a hosted runner, so the targets below
 # are not built unless the operator opts in -- a bare `cargo test` then
-# reports green only for gates that actually ran. The corpus is
+# reports green only for gates that actually ran. The installed content is
 # SCE-wrapped, so both imply `decrypt`.
-firmware-corpus = ["decrypt"]
-title-corpus = ["firmware-corpus"]
+installed-firmware-tests = ["decrypt"]
+installed-title-tests = ["installed-firmware-tests"]
 
 # Suites that boot the micro-test ELFs built by tests/micro/*/build.sh.
 # The C sources are committed and the toolchain instructions ship with
 # them, but the build output is gitignored, so opting in declares the
-# corpus built and a missing artifact is a hard error. The spawn suite
+# microtests built and a missing artifact is a hard error. The spawn suite
 # wraps a child in a real SCE container, so it needs `decrypt`.
 microtests = ["decrypt"]
 
-# Suite that boots the ps3autotests corpus -- a GPLv2 tree the
+# Suite that boots the ps3autotests suite -- a GPLv2 tree the
 # developer clones locally (tests/ps3autotests.README.md), never
 # vendored, so cellgov stays MIT/Apache-2.0.
-ps3autotests = ["firmware-corpus"]
+ps3autotests = ["installed-firmware-tests"]
 
 [[test]]
 name = "firmware_set_load"
-required-features = ["firmware-corpus"]
+required-features = ["installed-firmware-tests"]
 
 [[test]]
-name = "lv2_census_corpus"
-required-features = ["firmware-corpus"]
+name = "lv2_census_firmware"
+required-features = ["installed-firmware-tests"]
 
 [[test]]
 name = "ps3autotests"
@@ -110,20 +110,20 @@ required-features = ["microtests"]
 
 [[test]]
 name = "title_witnesses"
-required-features = ["title-corpus"]
+required-features = ["installed-title-tests"]
 
 [[test]]
 name = "obs_null_sink"
-required-features = ["title-corpus"]
+required-features = ["installed-title-tests"]
 
 [[test]]
 name = "authority_id"
-required-features = ["title-corpus"]
+required-features = ["installed-title-tests"]
 
 [[test]]
 name = "bench_stdout_purity"
-required-features = ["title-corpus"]
+required-features = ["installed-title-tests"]
 
 [[test]]
 name = "system_ver_floor"
-required-features = ["title-corpus"]
+required-features = ["installed-title-tests"]

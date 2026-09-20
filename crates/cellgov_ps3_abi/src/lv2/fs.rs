@@ -8,7 +8,7 @@
 /// Starting fd value the kernel hands out for file and directory
 /// opens.
 ///
-/// The value is unestablished: nothing in the corpus witnesses a real
+/// The value is unestablished: no capture witnesses a real
 /// console's first fd.
 ///
 /// File fds are small ints in `[3, 255)` on real PS3. Titles encode

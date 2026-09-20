@@ -37,7 +37,7 @@ const fn opcode_key(primary: u8, xo: u16) -> u32 {
 }
 
 /// Resolve a `(primary, xo)` to its canonical mnemonic, or `None`
-/// if the spec corpus does not define the encoding (the rejection
+/// if the spec-derived vector set does not define the encoding (the rejection
 /// site emits `EncodingNotRecognized`).
 ///
 /// O(log N) over [`OPCODE_GAPS`] with no allocation. Intended for

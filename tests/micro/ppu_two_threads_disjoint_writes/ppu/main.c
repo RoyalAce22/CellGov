@@ -16,7 +16,7 @@
  *
  * Uses direct syscalls only (no PSL1GHT HLE wrappers) so the
  * microtest can run on CellGov without loading liblv2.sprx --
- * matches the pattern of the other microtests in this corpus.
+ * matches the pattern of the other microtests in this suite.
  *
  * Output layout (TTY-reported as CGOV magic + 16 bytes):
  *   status       (u32)  0 = pass, nonzero = per-step failure code
@@ -93,7 +93,7 @@ static inline s32 syscall2_s32(u64 num, u64 a, u64 b)
 /* Syscall 52 takes 8 args: (thread_id*, param*, arg, unk, prio,
  * stacksize, flags, threadname*); the user-space wrapper passes
  * unk = 0. No public document states this raw-syscall argument
- * list -- it is the shape the micro-test corpus is built and
+ * list -- it is the shape against which the microtests are built and
  * verified against. The param* in r4 is a two-word thread-init
  * block { u32 entry_opd_ptr; u32 tls }, and the OPD it names is the
  * kernel's 8-byte { u32 code; u32 toc } form. The toolchain's

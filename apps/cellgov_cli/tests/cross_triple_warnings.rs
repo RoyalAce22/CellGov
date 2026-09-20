@@ -2,7 +2,7 @@
 //! come from different identity triples.
 //!
 //! The fixtures are built in-test from `cellgov_compare`'s public
-//! types and carry no title or corpus state.
+//! types and carry no title or external-data state.
 
 #![allow(
     clippy::unwrap_used,

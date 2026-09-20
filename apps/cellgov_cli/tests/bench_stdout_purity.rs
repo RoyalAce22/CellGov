@@ -108,7 +108,7 @@ fn by_cost_from(
 ///
 /// `registry_structure` requires each runnable title to have a
 /// committed baseline. An unreadable or malformed baseline is a
-/// corpus defect.
+/// input defect.
 fn by_cost() -> Vec<(u64, TitleUnderTest)> {
     by_cost_from(titles(), |title| {
         let path = boot_anchor_path(&title.content_id, &title.reference);

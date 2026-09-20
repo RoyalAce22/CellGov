@@ -152,10 +152,10 @@ fn check_titles(
         }
     }
     // Anti-vacuity floor, shared with title_witnesses: the feature
-    // declares a corpus, so a run that booted nothing must not pass.
+    // declares installed titles, so a run that booted nothing must not pass.
     assert!(
         checked > 0,
-        "title-corpus is enabled but none of the {} registered title(s) is \
+        "installed-title-tests is enabled but none of the {} registered title(s) is \
          installed (skipped: {})",
         titles.len(),
         skipped.join(", ")
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "title-corpus is enabled but none of the 2 registered title(s) is installed"
+        expected = "installed-title-tests is enabled but none of the 2 registered title(s) is installed"
     )]
     fn only_pending_or_uninstalled_cells_fail_the_anti_vacuity_floor() {
         let titles = [

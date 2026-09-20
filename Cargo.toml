@@ -113,7 +113,7 @@ invalid_html_tags = "deny"
 
 # The debug gate is only useful if it is short enough to run. At the
 # default `opt-level = 0` the interpreter's inner loop costs ~12x what
-# it does at 1, which put the corpus suites past 25 minutes and out of
+# it does at 1, which put the external-data suites past 25 minutes and out of
 # the habit of being run at all. `1` recovers essentially all of that
 # -- a foundation-title boot lands 10-25% off release, against 12x at
 # `0` -- and measures no slower to build.

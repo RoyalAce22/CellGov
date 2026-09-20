@@ -1,6 +1,6 @@
 //! The operator's key vault, asserted present.
 //!
-//! The corpus suites decrypt real containers, so they need the real
+//! The external-data suites decrypt real containers, so they need the real
 //! key material: `CELLGOV_KEYS` naming a keys file or directory, or the
 //! vault `cellgov keys import` wrote under the workspace's
 //! `vfs/`. A missing vault fails the suite; nothing skips.
@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use cellgov_install::keys::{KeyVault, ENV_KEYS};
 
-/// The workspace `vfs/`, where the installed corpus and an imported
+/// The workspace `vfs/`, where the installed content and an imported
 /// vault live; the test binary's working directory is the crate, not
 /// the workspace.
 pub fn workspace_vfs() -> PathBuf {

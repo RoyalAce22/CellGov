@@ -15,12 +15,12 @@ mod case;
 mod context;
 mod runner;
 
-pub mod corpora;
 pub mod rpcs3_capture;
+pub mod vectors;
 
 pub use case::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
 pub use context::is_context_dependent;
 pub use runner::{
-    assert_case, execute_into_memory, run_case, run_corpus, CaseOutcome, CorpusReport,
-    MemoryByteMismatch, StateDiff,
+    assert_case, execute_into_memory, run_case, run_vectors, CaseOutcome, MemoryByteMismatch,
+    StateDiff, VectorReport,
 };

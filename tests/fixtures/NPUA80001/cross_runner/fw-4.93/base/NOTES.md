@@ -42,7 +42,7 @@ honest not-implemented EINVAL return. The 39 `_sys_prx_stop_module`
 breaks that previously dominated the count retired when the 482
 stop handshake was modeled.
 
-RPCS3 corpus state (Stage E):
+RPCS3 capture state (Stage E):
   outcome: Completed
   step: (not recorded in observation)
   checkpoint: ProcessExit (manifest)

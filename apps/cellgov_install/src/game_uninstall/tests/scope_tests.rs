@@ -15,7 +15,7 @@ use crate::store::record::{
 use crate::store::{ArtifactKind, TitleTree};
 
 /// Placeholder identity: every tree here is hand-written and names no
-/// installed corpus.
+/// installed content.
 const TITLE_ID: &str = "TEST00000";
 
 const NO_VERIFY: UninstallOptions = UninstallOptions {

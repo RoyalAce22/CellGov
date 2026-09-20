@@ -8,7 +8,7 @@ developer = "Sony Liverpool"
 engine = "Studio Liverpool proprietary"
 distribution = "disc-iso"
 # PS3_SYSTEM_VER from the title's own PARAM.SFO (02.7600), held against
-# the installed content by the title-corpus suite. Derives the one cell
+# the installed content by the `installed-title-tests` suite. Derives the one cell
 # the headline row is measured at: fw 2.76 x base.
 system_ver = "2.76"
 

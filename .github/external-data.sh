@@ -1,24 +1,24 @@
 #!/usr/bin/env bash
-# Self-hosted corpus gate. Command logs stay on the runner; Actions sees
+# Self-hosted external-data gate. Command logs stay on the runner; Actions sees
 # only statuses and the aggregate anchor tally.
 
 set -uo pipefail
 
-corpus_features="${CORPUS_FEATURES:-$(sed -n '/^[[:space:]]*CORPUS_FEATURES: >-/{n;p;}' .github/workflows/ci.yml | tr -d '[:space:]')}"
-test -n "$corpus_features" || { echo "corpus tests: configuration failed"; exit 2; }
-test -n "${CELLGOV_CI_LOG_DIR:-}" || { echo "corpus tests: runner log directory is not configured"; exit 2; }
+external_data_features="${EXTERNAL_DATA_FEATURES:-$(sed -n '/^[[:space:]]*EXTERNAL_DATA_FEATURES: >-/{n;p;}' .github/workflows/ci.yml | tr -d '[:space:]')}"
+test -n "$external_data_features" || { echo "external-data tests: configuration failed"; exit 2; }
+test -n "${CELLGOV_CI_LOG_DIR:-}" || { echo "external-data tests: runner log directory is not configured"; exit 2; }
 test -n "${CELLGOV_PS3_VFS_ROOT:-}" || { echo "anchor regression check: VFS root is not configured"; exit 2; }
 
 run_dir="$CELLGOV_CI_LOG_DIR/${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}"
 mkdir -p "$run_dir"
 
 tests_status=0
-cargo test --workspace --locked --features "$corpus_features" \
-  >"$run_dir/corpus-tests.log" 2>&1 || tests_status=$?
+cargo test --workspace --locked --features "$external_data_features" \
+  >"$run_dir/external-data-tests.log" 2>&1 || tests_status=$?
 if [ "$tests_status" -eq 0 ]; then
-  echo "corpus tests: pass"
+  echo "external-data tests: pass"
 else
-  echo "corpus tests: fail (exit $tests_status)"
+  echo "external-data tests: fail (exit $tests_status)"
 fi
 
 build_status=0

@@ -1,6 +1,6 @@
 //! Convention guards on which trees a source file may name.
 //!
-//! No source reads an RPCS3 install tree. CellGov owns its corpus:
+//! No source reads an RPCS3 install tree. CellGov tests read these inputs:
 //!
 //! - `cellgov firmware install` writes firmware into `dev_flash`.
 //! - `cellgov title install` writes titles.
@@ -12,7 +12,7 @@
 //!
 //! No test names a tree git does not track. A test that reads an
 //! operator-owned or built tree cannot run on a fresh clone. The
-//! corpus cargo features declare that dependency at the build level.
+//! external-data cargo features declare that dependency at the build level.
 //! This guard covers the other half, where a path string reaches a
 //! tree nobody else has. It reads the tree list from `.gitignore`, so
 //! it covers a new ignored tree the day someone adds it.
@@ -128,7 +128,7 @@ fn names_tree(line: &str, tree: &IgnoredTree) -> bool {
 ///
 /// The parse skips glob lines and any entry whose last component
 /// looks like a filename. That skip drops `tests/micro/**/build/`;
-/// the microtest corpus features declare that tree instead. `vendor/`
+/// the microtest features declare that tree instead. `vendor/`
 /// and `third_party/` are not in this repo's `.gitignore` -- they are
 /// the directories a contributor would use for a vendored dependency.
 ///
@@ -213,19 +213,19 @@ fn defines_the_boundary(path: &Path) -> bool {
         .is_some_and(|n| n.to_string_lossy().ends_with("_guard.rs"))
 }
 
-/// The corpus features, read from the CI workflow's `CORPUS_FEATURES`.
+/// The external-data features, read from the CI workflow's `EXTERNAL_DATA_FEATURES`.
 ///
 /// CI type-checks exactly that list, so this guard reads it there and
 /// cannot drift from the workflow. Entries arrive as `crate/feature`;
 /// only the feature half appears in a `cfg`.
-fn corpus_features(root: &Path) -> Vec<String> {
+fn external_data_features(root: &Path) -> Vec<String> {
     let ci = root.join(".github").join("workflows").join("ci.yml");
     let text =
         fs::read_to_string(&ci).unwrap_or_else(|e| panic!("cannot read {}: {e}", ci.display()));
     let after = text
-        .split_once("CORPUS_FEATURES:")
+        .split_once("EXTERNAL_DATA_FEATURES:")
         .map(|(_, rest)| rest)
-        .expect("ci.yml declares CORPUS_FEATURES");
+        .expect("ci.yml declares EXTERNAL_DATA_FEATURES");
     let list: String = after
         .lines()
         .skip_while(|l| l.trim().is_empty() || l.trim() == ">-")
@@ -239,24 +239,24 @@ fn corpus_features(root: &Path) -> Vec<String> {
         .collect();
     assert!(
         !features.is_empty(),
-        "no corpus features parsed from {}",
+        "no external-data features parsed from {}",
         ci.display()
     );
     features
 }
 
-/// Whether the file declares a corpus feature in a `cfg`.
+/// Whether the file declares an external-data feature in a `cfg`.
 ///
-/// A cargo feature is how a suite declares a local corpus, so that
+/// A cargo feature is how a suite declares local external data, so that
 /// declaration exempts the file from this guard.
-fn declares_a_corpus_feature(source: &str, features: &[String]) -> bool {
+fn declares_an_external_data_feature(source: &str, features: &[String]) -> bool {
     features
         .iter()
         .any(|f| source.contains(&format!("feature = \"{f}\"")))
 }
 
-/// Integration-test target names a `Cargo.toml` gates behind a corpus
-/// feature via `required-features`.
+/// Integration-test target names that a `Cargo.toml` gates behind an
+/// external-data feature via `required-features`.
 ///
 /// The manifest gate and the in-source `cfg` say the same thing. A
 /// target that uses one carries no trace of the other, so this guard
@@ -285,7 +285,7 @@ fn manifest_gated_targets(manifest: &Path, features: &[String]) -> Vec<String> {
 }
 
 /// Whether `file` is an integration-test target its own crate gates
-/// behind a corpus feature.
+/// behind an external-data feature.
 fn manifest_gates(root: &Path, file: &Path, features: &[String]) -> bool {
     let Ok(relative) = file.strip_prefix(root) else {
         return false;
@@ -415,7 +415,7 @@ fn the_scan_set_contains_this_guard() {
         .join("crates")
         .join("cellgov_testkit")
         .join("tests")
-        .join("corpus_path_guard.rs");
+        .join("external_data_path_guard.rs");
     assert!(
         files.contains(&me),
         "the scan did not reach {}; {} files were collected",
@@ -452,11 +452,12 @@ fn no_source_reads_an_rpcs3_install_tree() {
     }
     assert!(
         violations.is_empty(),
-        "sources naming an RPCS3 install tree. CellGov's corpus is \
-         vfs/ (from the cellgov install commands) plus committed data under \
+        "sources naming an RPCS3 install tree. CellGov tests use vfs/ \
+         (from the cellgov install commands) plus committed data under \
          tests/fixtures/; an RPCS3 install is one operator's machine \
-         state, not a fixture location. The RPCS3 source checkout \
-         (tools/rpcs3-src/) is allowed and unaffected:\n{report}"
+         state, not a fixture location. Bridge tooling may name the \
+         operator-owned, gitignored RPCS3 source checkout under \
+         tools/rpcs3-src/, but no test treats it as a fixture:\n{report}"
     );
 }
 
@@ -572,12 +573,16 @@ fn a_crate_relative_walk_to_the_root_still_names_an_anchored_tree() {
 }
 
 #[test]
-fn ci_yields_the_corpus_features_the_exemption_reads() {
-    let features = corpus_features(&workspace_root());
-    for expected in ["firmware-corpus", "title-corpus", "microtests", "rpcs3-src"] {
+fn ci_yields_the_external_data_features_the_exemption_reads() {
+    let features = external_data_features(&workspace_root());
+    for expected in [
+        "installed-firmware-tests",
+        "installed-title-tests",
+        "microtests",
+    ] {
         assert!(
             features.iter().any(|f| f == expected),
-            "{expected} is missing from the corpus features: {features:?}"
+            "{expected} is missing from the external-data features: {features:?}"
         );
     }
     assert!(
@@ -585,8 +590,11 @@ fn ci_yields_the_corpus_features_the_exemption_reads() {
         "a feature name carries no crate half: {features:?}"
     );
     let gated = format!("#[cfg(feature = \"{}\")]", features[0]);
-    assert!(declares_a_corpus_feature(&gated, &features));
-    assert!(!declares_a_corpus_feature("#[cfg(test)]", &features));
+    assert!(declares_an_external_data_feature(&gated, &features));
+    assert!(!declares_an_external_data_feature(
+        "#[cfg(test)]",
+        &features
+    ));
 }
 
 #[test]
@@ -603,12 +611,14 @@ fn no_test_names_a_tree_git_does_not_track() {
         "no test files found under crates/apps/bridges"
     );
 
-    let features = corpus_features(&root);
+    let features = external_data_features(&root);
     let mut violations = Vec::new();
     for file in &files {
         let source = fs::read_to_string(file)
             .unwrap_or_else(|e| panic!("cannot read {}: {e}", file.display()));
-        if declares_a_corpus_feature(&source, &features) || manifest_gates(&root, file, &features) {
+        if declares_an_external_data_feature(&source, &features)
+            || manifest_gates(&root, file, &features)
+        {
             continue;
         }
         for (n, line) in source.lines().enumerate() {
@@ -631,9 +641,9 @@ fn no_test_names_a_tree_git_does_not_track() {
         violations.is_empty(),
         "{} test line(s) name a tree git does not track. A test that \
          reads an operator-owned or built tree cannot run on a fresh \
-         clone: declare the dependency with a corpus feature, point the \
+clone: declare the dependency with an external-data feature, point the \
          test at committed data under tests/fixtures/, or delete it. \
-         Files carrying a corpus-feature cfg, and the guards whose \
+Files carrying an external-data feature cfg, and the guards whose \
          subject is the boundary, are already exempt:\n{report}",
         violations.len()
     );

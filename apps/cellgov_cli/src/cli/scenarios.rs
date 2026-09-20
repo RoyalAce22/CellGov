@@ -91,7 +91,7 @@ pub(crate) fn build_lv2_runtime(name: &str) -> Result<cellgov_core::Runtime, Com
     Ok(rt)
 }
 
-/// Builds a microtest fixture under an explicit corpus root.
+/// Builds a microtest fixture under an explicit input root.
 ///
 /// The explicit root avoids changes to the process-wide working directory.
 ///

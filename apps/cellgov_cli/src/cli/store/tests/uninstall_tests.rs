@@ -1,6 +1,6 @@
 use super::*;
 
-/// Placeholder identity: this case names no installed corpus.
+/// Placeholder identity: this case names no installed content.
 const SYNTHETIC_TITLE_ID: &str = "TEST00000";
 
 fn args(ver: Option<&str>, updates: bool, all: bool) -> UninstallArgs {

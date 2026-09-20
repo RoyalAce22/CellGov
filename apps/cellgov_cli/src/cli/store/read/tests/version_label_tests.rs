@@ -3,7 +3,7 @@ use super::*;
 use crate::cli::store::read::model::{BaseDoc, UpdateDoc, NO_VERSION_KEY, STORE_FORMAT_VERSION};
 
 /// Placeholder identity: these cases build every document by hand and
-/// name no installed corpus.
+/// name no installed content.
 const TITLE_ID: &str = "TEST00000";
 
 fn base(version: &str, key: Option<&str>, error: Option<&str>) -> BaseDoc {

@@ -1,4 +1,4 @@
-//! Spec-derived corpus for the byte-reverse indexed family
+//! Spec-derived vectors for the byte-reverse indexed family
 //! (`ldbrx`, `lwbrx`, `lhbrx`, `sdbrx`, `stwbrx`, `sthbrx`).
 //!
 //! The cases verify CellGov's executor against the PowerPC

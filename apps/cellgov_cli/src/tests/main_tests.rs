@@ -39,7 +39,7 @@ const DISPATCHED: &[&str] = &[
     "firmware list",
     "firmware show",
     "firmware verify",
-    "firmware verify-corpus",
+    "firmware verify-pups",
     "firmware kernels",
     "firmware uninstall",
     "title install",
@@ -178,28 +178,28 @@ fn every_declared_command_is_dispatched() {
 }
 
 #[test]
-fn format_refusal_names_verify_corpus_as_a_supported_reader() {
+fn format_refusal_names_verify_data_as_a_supported_reader() {
     let argv: Vec<String> = ["cellgov", "--format", "json", "scenario", "list"]
         .into_iter()
         .map(str::to_string)
         .collect();
     let cli = parse::try_parse(&argv).expect("the invocation parses before global validation");
     let refusal = parse::global_refusal(&cli).expect("scenario list does not render a report");
-    assert!(refusal.contains("verify-corpus"), "{refusal}");
+    assert!(refusal.contains("verify-pups"), "{refusal}");
 }
 
 #[test]
-fn verify_corpus_help_limits_installed_checks_to_archive_backed_entries() {
+fn verify_data_help_limits_installed_checks_to_archive_backed_entries() {
     let mut command = Cli::command();
     command.build();
     let firmware = command
         .find_subcommand("firmware")
         .expect("the tree declares firmware");
-    let mut verify_corpus = firmware
-        .find_subcommand("verify-corpus")
-        .expect("the tree declares firmware verify-corpus")
+    let mut verify_pups = firmware
+        .find_subcommand("verify-pups")
+        .expect("the tree declares firmware verify-pups")
         .clone();
-    let help = verify_corpus.render_long_help().to_string();
+    let help = verify_pups.render_long_help().to_string();
     assert!(
         help.contains("whose PUP hash names an archive row matched"),
         "{help}"

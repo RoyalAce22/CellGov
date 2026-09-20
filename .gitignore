@@ -10,7 +10,7 @@ docs/dev/
 # tools/ is third-party; CellGov-owned bridges live under bridges/
 tools/
 
-# ps3autotests fixture: GPLv2-licensed test corpus from
+# ps3autotests fixture: GPLv2-licensed test suite from
 # https://github.com/AerialX/ps3autotests. Cloned locally by the
 # developer; not vendored, so cellgov stays MIT/Apache-2.0. The
 # tracked tests/ps3autotests.README.md sibling explains setup.

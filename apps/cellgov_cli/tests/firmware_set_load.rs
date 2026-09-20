@@ -1,12 +1,12 @@
 //! End-to-end exercise of [`cellgov_ppu::prx_loader::load_firmware_set`]
-//! against the user's full installed firmware corpus: every viable
+//! against the user's full installed firmware: every viable
 //! `sys/external` module, selected by import-closure viability.
 //!
 //! The (namespace, NID) export key is what makes the full-install
 //! load possible; a regression to NID-only resolution surfaces here
 //! as `ConflictingExport` long before any title boot sees it.
 //!
-//! Requires the `firmware-corpus` feature and a firmware set
+//! Requires the `installed-firmware-tests` feature and a firmware set
 //! installed by `cellgov firmware install`.
 
 #![allow(
@@ -20,16 +20,16 @@ use std::path::PathBuf;
 use cellgov_mem::{GuestMemory, PageSize, Region};
 use cellgov_ppu::prx_loader::{load_firmware_set, select_import_closure, PrxModuleId};
 
-#[path = "common/corpus.rs"]
-mod corpus;
+#[path = "common/installed_firmware.rs"]
+mod installed_firmware;
 
 #[test]
-fn load_firmware_set_against_installed_corpus_is_coherent() {
-    let dir = corpus::firmware_external_dir();
+fn load_firmware_set_against_installed_data_is_coherent() {
+    let dir = installed_firmware::firmware_external_dir();
 
     let mut candidates: BTreeMap<String, Vec<u8>> = BTreeMap::new();
     // An unreadable entry is a hard error: dropping it would shrink the
-    // corpus under test without changing a single assertion.
+    // installed set under test without changing a single assertion.
     let mut sprx_paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .expect("read_dir on validated firmware dir")
         .map(|e| {
@@ -48,8 +48,10 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         "expected a full retail install (100+ modules), found {} -- wrong directory?",
         sprx_paths.len()
     );
-    let keys = cellgov_install::keys::KeyVault::load_for_vfs(&corpus::workspace_root().join("vfs"))
-        .unwrap_or_else(|e| panic!("firmware-corpus: {e}"));
+    let keys = cellgov_install::keys::KeyVault::load_for_vfs(
+        &installed_firmware::workspace_root().join("vfs"),
+    )
+    .unwrap_or_else(|e| panic!("installed-firmware-tests: {e}"));
     for sprx_path in &sprx_paths {
         let raw = std::fs::read(sprx_path)
             .unwrap_or_else(|e| panic!("read {}: {e}", sprx_path.display()));
@@ -87,7 +89,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         selection.pruned.len()
     );
     // Anti-vacuity floor: every coherence assertion below iterates
-    // `image.loaded`, so a selection that pruned the corpus down to
+    // `image.loaded`, so a selection that pruned the installed set down to
     // nothing would satisfy all of them. The 100-module candidate
     // floor above does not cover that -- pruning happens after it.
     assert!(
@@ -138,7 +140,7 @@ fn load_firmware_set_against_installed_corpus_is_coherent() {
         .collect();
     let table_keys: BTreeSet<(&str, u32)> = image.export_table.keys().collect();
     // Two empty sets compare equal, so the equality below says nothing
-    // unless the corpus actually published exports.
+    // unless the installed firmware actually published exports.
     assert!(
         image.export_table.len() >= 1000,
         "export table holds {} (namespace, NID) pairs across {} modules; \

@@ -58,7 +58,7 @@ The reference cell is derived from the title. Every title states the
 firmware it shipped against in its own `PARAM.SFO`, under
 `PS3_SYSTEM_VER`, disc and network alike; `02.7600` names firmware 2.76.
 The manifest repeats that value as `[title] system_ver` in the store's
-key spelling, a `title-corpus` suite holds the repetition to the
+key spelling, a `installed-title-tests` suite holds the repetition to the
 installed table, and the loader builds the reference cell from it:
 `(system_ver, base)`. The installer records the same table entry,
 verbatim, as `[title] system_ver` in the install record of every base
@@ -288,13 +288,13 @@ verdict" into a nonzero exit, for a box with nothing else on it; it
 needs two runs to have a spread to enforce, and refuses a one-run set.
 
 The title suites (`title_witnesses`, `authority_id`) sit behind
-the `title-corpus` cargo feature because they need the operator's
+the `installed-title-tests` cargo feature because they need the operator's
 owned dumps. Within a run, boots split "not installed" from "boot
 failure" via explicit stderr markers (`BENCH_TITLE_NOT_INSTALLED`,
 `BENCH_BOOT_INPUTS_RESOLVED`), skip missing titles by name, and
 fail unless at least one title booted.
 
-A corpus-gated suite locates its fixtures the way the boot path does:
+An external-data-gated suite locates its fixtures the way the boot path does:
 through the install record that names the tree, never through a layout
 path of its own. "Not installed" is then the absence of a record, and a
 record naming a tree whose file is gone fails as drift rather than

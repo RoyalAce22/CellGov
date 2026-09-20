@@ -48,7 +48,7 @@ fields under the same rule and answers CELL_EINVAL with a
 must reproduce its own low word under sign extension, and one that
 does not answers CELL_EINVAL with a `dispatch.arg_not_sign_extended`
 break. Whether the kernel masks such a field or refuses it is
-unestablished -- every corpus caller passes a value that already fits
+unestablished -- every observed caller passes a value that already fits
 in 32 bits.
 
 Every ordinal that reaches an arm has a row in the

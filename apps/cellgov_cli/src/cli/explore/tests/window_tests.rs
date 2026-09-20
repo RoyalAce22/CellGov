@@ -263,7 +263,7 @@ fn a_boot_that_reached_the_cell_s_checkpoint_is_not_reported_as_a_refusal() {
 }
 
 /// A real `sys_process_spawn` drives the trigger, and only the
-/// `microtests` corpus reaches one; this case pins the line an operator
+/// `microtests` suite reaches one; this case pins the line an operator
 /// reads when it fires.
 #[test]
 fn an_unserved_child_init_is_reported_as_neither_a_stall_nor_a_refusal() {

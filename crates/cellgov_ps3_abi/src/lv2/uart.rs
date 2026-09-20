@@ -6,7 +6,7 @@
 //! only.
 //!
 //! The PS3AV protocol is not a guest-facing API and nothing in the
-//! corpus states it. The ring sizes, the header version and the
+//! captured evidence states it. The ring sizes, the header version and the
 //! command ids below are all unestablished. The packets vsh sends over
 //! this UART during boot would witness them.
 
@@ -346,7 +346,7 @@ pub mod video_mode {
 /// `ps3av_monitor_info` field offsets, the descriptor body of a
 /// `GET_MONITOR_INFO` reply and of a plugged event.
 ///
-/// Provenance is the module's: nothing in the corpus states the PS3AV
+/// Provenance is the module's: nothing in the captured evidence states the PS3AV
 /// protocol, so every offset here is unestablished. The layout an
 /// AV-manager reply carries during boot would witness them.
 pub mod monitor_info {

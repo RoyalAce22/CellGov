@@ -63,8 +63,8 @@ fn decoder_rejection_surfaces_as_decode_error() {
 }
 
 #[test]
-fn empty_corpus_is_clean() {
-    let report = run_corpus(&[]);
+fn empty_pup_set_is_clean() {
+    let report = run_vectors(&[]);
     assert!(report.is_clean());
     assert_eq!(report.total(), 0);
 }

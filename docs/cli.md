@@ -322,12 +322,12 @@ comparison records rather than a published API: they carry no
 }
 ```
 
-`firmware verify-corpus`:
+`firmware verify-pups`:
 
 ```json
 {
   "format_version": 2,
-  "corpus": "dumps/firmware",
+  "pup_directory": "dumps/firmware",
   "present": [
     {
       "fw": "4.93",
@@ -519,21 +519,21 @@ Exit codes:
   4   the tree diverged from what its record holds
 ```
 
-#### `cellgov firmware verify-corpus`
+#### `cellgov firmware verify-pups`
 
 Verify a directory of PUP files against the LV2 archive.
 
 ```console
-$ cellgov firmware verify-corpus dumps/firmware
+$ cellgov firmware verify-pups dumps/firmware
 ```
 
 ```
-Usage: cellgov firmware verify-corpus [OPTIONS] <DIR>
+Usage: cellgov firmware verify-pups [OPTIONS] <DIR>
 ```
 
 | Argument | Description |
 | --- | --- |
-| `DIR` | Directory that holds the PUP corpus. Required. |
+| `DIR` | Directory that holds the PUP files. Required. |
 
 ```
 Exit codes:

@@ -1,5 +1,5 @@
 //! The help an operator reads, and the two generators that publish it.
-//! Needs no corpus.
+//! Self-contained.
 
 use cellgov_testkit::scratch::scratch_labeled;
 use std::path::{Path, PathBuf};

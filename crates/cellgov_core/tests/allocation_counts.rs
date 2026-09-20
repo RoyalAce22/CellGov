@@ -88,10 +88,16 @@ fn allocations_after_warmup(writes: bool) -> usize {
     let mut runtime = Runtime::new(GuestMemory::new(64), Budget::new(1), 1_000);
     runtime.set_mode(RuntimeMode::FaultDriven);
     runtime.register_unit_with(|id| Unit { id, writes });
-    let mut warmup = runtime.step().expect("warmup step");
-    runtime
-        .commit_step_and_recycle(&mut warmup)
-        .expect("warmup commit");
+
+    // Prime every reusable buffer across a full measurement-sized run.
+    // One step was insufficient on the Linux MSRV allocator, which made
+    // its first measured batch include one process-lifetime allocation.
+    for _ in 0..STEPS {
+        let mut warmup = runtime.step().expect("warmup step");
+        runtime
+            .commit_step_and_recycle(&mut warmup)
+            .expect("warmup commit");
+    }
 
     ALLOCATIONS.store(0, Ordering::Relaxed);
     COUNTING.store(true, Ordering::Relaxed);

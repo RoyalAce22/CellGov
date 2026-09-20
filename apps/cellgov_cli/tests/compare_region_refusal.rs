@@ -2,7 +2,7 @@
 //! that declares zero bytes.
 //!
 //! The manifests name the synthetic `dma` scenario, so the tests need
-//! no corpus and no key vault.
+//! no external data and no key vault.
 
 #![allow(
     clippy::unwrap_used,

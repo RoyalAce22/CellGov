@@ -71,8 +71,8 @@ fn microtest_bytes<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
     let path = path.as_ref();
     std::fs::read(path).unwrap_or_else(|e| {
         panic!(
-            "{}: {e}\nthe ppu-microtests feature declares the micro-test corpus \
-             built; build it with the corresponding tests/micro/*/build.sh",
+            "{}: {e}\nthe ppu-microtests feature declares the microtest artifacts \
+             present; build them with the corresponding tests/micro/*/build.sh",
             path.display()
         )
     })
@@ -412,7 +412,7 @@ fn run_microtest_ppu(rel_path: &str) -> (YieldReason, u64, u64, u64) {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn dma_completion_runs_to_process_exit() {
     let (reason, r11, consumed, _pc) =
@@ -430,7 +430,7 @@ fn dma_completion_runs_to_process_exit() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn spu_fixed_value_runs_to_process_exit() {
     let (reason, r11, consumed, _pc) =
@@ -448,7 +448,7 @@ fn spu_fixed_value_runs_to_process_exit() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn mailbox_roundtrip_runs_to_process_exit() {
     let (reason, r11, consumed, _pc) =
@@ -465,7 +465,7 @@ fn mailbox_roundtrip_runs_to_process_exit() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn atomic_reservation_runs_to_process_exit() {
     let (reason, r11, consumed, _pc) =
@@ -482,7 +482,7 @@ fn atomic_reservation_runs_to_process_exit() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn barrier_wakeup_runs_to_process_exit() {
     let (reason, r11, consumed, _pc) =
@@ -567,7 +567,7 @@ fn build_lv2_driven_fixture(
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn spu_fixed_value_runs_through_scenario_runner() {
     use cellgov_testkit::fixtures::ScenarioFixture;
@@ -629,7 +629,7 @@ fn spu_fixed_value_runs_through_scenario_runner() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn ls_to_shared_runs_to_process_exit() {
     let (reason, r11, consumed, _pc) =
@@ -749,7 +749,7 @@ fn drain_profile_insns_actually_drains() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn spu_fixed_value_image_open_writes_handle_to_guest_memory() {
     let ppu_path =
@@ -877,7 +877,7 @@ fn run_lv2_driven_baseline_check(
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn spu_fixed_value_lv2_baseline() {
     run_lv2_driven_baseline_check(
@@ -891,7 +891,7 @@ fn spu_fixed_value_lv2_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn dma_completion_lv2_baseline() {
     run_lv2_driven_baseline_check(
@@ -905,7 +905,7 @@ fn dma_completion_lv2_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn ls_to_shared_lv2_baseline() {
     run_lv2_driven_baseline_check(
@@ -919,7 +919,7 @@ fn ls_to_shared_lv2_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn atomic_reservation_lv2_baseline() {
     run_lv2_driven_baseline_check(
@@ -933,7 +933,7 @@ fn atomic_reservation_lv2_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn mailbox_roundtrip_lv2_baseline() {
     run_lv2_driven_baseline_check(
@@ -947,7 +947,7 @@ fn mailbox_roundtrip_lv2_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn barrier_wakeup_lv2_baseline() {
     run_lv2_driven_baseline_check(
@@ -964,7 +964,7 @@ fn barrier_wakeup_lv2_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn lv2_driven_dma_completion_is_deterministic() {
     let ppu_path =
@@ -1741,7 +1741,7 @@ fn profile_mode_counts_raw_instructions() {
 #[test]
 #[cfg_attr(
     not(feature = "ppu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features ppu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features ppu-microtests"
 )]
 fn cross_unit_atomic_conflict_ppu_vs_spu_counter_sums_cleanly() {
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};

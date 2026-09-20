@@ -46,7 +46,7 @@ flowchart LR
 | [schedule_exploration.md](schedule_exploration.md) | Bounded alternate-schedule enumeration in `cellgov_explore`.                                                                                            |
 | [comparison.md](comparison.md)                     | Observation schema, per-step divergence localization, the RPCS3 bridge, and the oracle-mode config contract.                                            |
 | [title_harness.md](title_harness.md)               | Title manifests, anchors and witnesses, EBOOT resolution, the diagnostic CLI surface.                                                                   |
-| [microtests.md](microtests.md)                     | The PSL1GHT microtest corpus.                                                                                                                           |
+| [microtests.md](microtests.md)                     | The PSL1GHT microtest suite.                                                                                                                           |
 
 Related, outside this directory: [concepts/](../concepts/README.md) for
 the shared vocabulary, [titles.md](../titles.md) for the

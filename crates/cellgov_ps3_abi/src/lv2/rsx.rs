@@ -105,7 +105,7 @@ pub mod reports {
 ///
 /// `sys_rsx_context_allocate` (670) writes every field below as a
 /// 32-bit big-endian word. The offsets are unestablished: no trace in
-/// the corpus records a guest read of this region. The field order
+/// a capture records a guest read of this region. The field order
 /// alone pins each word to its offset. A libgcm read of the
 /// driver-info region would witness them. The words the kernel leaves
 /// zero carry no constant here.

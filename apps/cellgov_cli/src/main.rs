@@ -79,8 +79,8 @@ fn dispatch(command: &Command, globals: &Globals) -> Result<CommandExitCode, Com
         Command::Firmware(FirmwareCommand::Verify { version }) => {
             read::firmware_verify(&read::store_root(vfs_flag)?, version, globals.format)
         }
-        Command::Firmware(FirmwareCommand::VerifyCorpus { corpus }) => {
-            read::firmware_verify_corpus(&read::store_root(vfs_flag)?, corpus, globals.format)
+        Command::Firmware(FirmwareCommand::VerifyPups { pup_directory }) => {
+            read::firmware_verify_pups(&read::store_root(vfs_flag)?, pup_directory, globals.format)
         }
         Command::Firmware(FirmwareCommand::Kernels) => {
             read::firmware_kernels(&read::store_root(vfs_flag)?, globals.format)

@@ -1,4 +1,4 @@
-name: corpus
+name: external data
 
 on:
   push:
@@ -11,13 +11,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: corpus
+  group: external-data
   cancel-in-progress: false
 
 jobs:
   regression:
-    name: corpus and anchor regression check
-    runs-on: [self-hosted, Windows, X64, cellgov-corpus]
+    name: external-data and anchor regression check
+    runs-on: [self-hosted, Windows, X64]
     timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
@@ -29,6 +29,6 @@ jobs:
         with:
           toolchain: "1.95.0"
 
-      - name: Run corpus and anchor gates
+      - name: Run external-data and anchor gates
         shell: bash
-        run: bash .github/corpus.sh
+        run: bash .github/external-data.sh

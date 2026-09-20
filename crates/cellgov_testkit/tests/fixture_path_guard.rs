@@ -10,10 +10,10 @@
 //! A test that names a committed fixture which does not exist fails on
 //! a fresh clone for a reason the message rarely explains.
 //!
-//! Corpus fixtures are the exception. Those are operator-owned or
+//! External-data fixtures are the exception. Those are operator-owned or
 //! locally built, gitignored, and their suites sit behind a
 //! cargo feature that hard-asserts when the file is absent. They are
-//! listed in [`CORPUS_PREFIXES`].
+//! listed in [`EXTERNAL_DATA_PREFIXES`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,12 +23,12 @@ use std::path::{Path, PathBuf};
 /// `tests/micro/<name>/build/` holds ELFs produced by that test's
 /// `build.sh` in a ps3dev toolchain container. The suites reading them
 /// are behind `spu-microtests` / `ppu-microtests` / `microtests`.
-const CORPUS_PREFIXES: &[&str] = &["tests/micro/", "tests/ps3autotests/"];
+const EXTERNAL_DATA_PREFIXES: &[&str] = &["tests/micro/", "tests/ps3autotests/"];
 
-/// The subset of [`CORPUS_PREFIXES`] whose whole tree `.gitignore`
+/// The subset of [`EXTERNAL_DATA_PREFIXES`] whose whole tree `.gitignore`
 /// drops, so only an operator who cloned it has the directory at all.
 /// The rest commit their sources and gitignore only build artifacts.
-const OPERATOR_CORPUS_PREFIXES: &[&str] = &["tests/ps3autotests/"];
+const OPERATOR_DATA_PREFIXES: &[&str] = &["tests/ps3autotests/"];
 
 /// Extensions that only ever name a capture intermediate. A committed
 /// artifact never carries one, so a test naming one is reading
@@ -161,8 +161,10 @@ fn guard_source_path(root: &Path) -> PathBuf {
         .join("fixture_path_guard.rs")
 }
 
-fn is_corpus(repo_path: &str) -> bool {
-    CORPUS_PREFIXES.iter().any(|p| repo_path.starts_with(p))
+fn is_external_data(repo_path: &str) -> bool {
+    EXTERNAL_DATA_PREFIXES
+        .iter()
+        .any(|p| repo_path.starts_with(p))
 }
 
 /// Whether `repo_path` names a capture intermediate by extension.
@@ -199,19 +201,21 @@ fn the_intermediate_extension_matcher_flags_a_capture_and_spares_committed_data(
     }
 }
 
-/// Positive control for the corpus allowlist, whose only other use is
+/// Positive control for the external-data allowlist, whose only other use is
 /// an early `continue` that a mis-spelled prefix would turn into a
 /// silent no-op.
 #[test]
-fn the_corpus_allowlist_exempts_built_output_and_nothing_else() {
-    assert!(is_corpus("tests/micro/process_spawn_wait/build/parent.elf"));
-    assert!(is_corpus(
+fn the_data_allowlist_exempts_built_output_and_nothing_else() {
+    assert!(is_external_data(
+        "tests/micro/process_spawn_wait/build/parent.elf"
+    ));
+    assert!(is_external_data(
         "tests/ps3autotests/tests/cpu/basic/basic.ppu.elf"
     ));
-    assert!(!is_corpus(
+    assert!(!is_external_data(
         "tests/fixtures/NPUA80145/cellgov/anchors/fw-4.93/base/boot_summary.json"
     ));
-    assert!(!is_corpus("tests/title_manifests/flow.toml"));
+    assert!(!is_external_data("tests/title_manifests/flow.toml"));
 }
 
 /// Floors on the population each gate polices. The workspace has
@@ -324,7 +328,7 @@ fn every_committed_fixture_a_test_names_exists() {
     for lit in fixture_literals(&root) {
         // A bare literal is joined onto a base the scan cannot see, so
         // the workspace root is not where it resolves.
-        if !lit.anchored || is_corpus(&lit.repo_path) {
+        if !lit.anchored || is_external_data(&lit.repo_path) {
             continue;
         }
         checked += 1;
@@ -339,28 +343,28 @@ fn every_committed_fixture_a_test_names_exists() {
     }
     assert!(
         checked >= MIN_CHECKED_FIXTURES,
-        "gate went vacuous: only {checked} literal(s) reached the existence          check, expected at least {MIN_CHECKED_FIXTURES}. Either the corpus          allowlist swallowed the population or the scan lost its anchored          literals"
+        "gate went vacuous: only {checked} literal(s) reached the existence          check, expected at least {MIN_CHECKED_FIXTURES}. Either the external-data          allowlist swallowed the population or the scan lost its anchored          literals"
     );
     assert!(
         missing.is_empty(),
         "tests naming committed fixtures that do not exist. A path outside \
-         {CORPUS_PREFIXES:?} is committed data and must be present in a \
+         {EXTERNAL_DATA_PREFIXES:?} is committed data and must be present in a \
          fresh clone:\n{}",
         missing.join("\n")
     );
 }
 
 #[test]
-fn corpus_prefixes_name_directories_that_exist() {
+fn external_data_prefixes_name_directories_that_exist() {
     let root = workspace_root();
-    for prefix in CORPUS_PREFIXES
+    for prefix in EXTERNAL_DATA_PREFIXES
         .iter()
-        .filter(|p| !OPERATOR_CORPUS_PREFIXES.contains(p))
+        .filter(|p| !OPERATOR_DATA_PREFIXES.contains(p))
     {
         let dir = root.join(prefix.trim_end_matches('/'));
         assert!(
             dir.is_dir(),
-            "corpus prefix {prefix} names {}, which is not a directory; the \
+            "external-data prefix {prefix} names {}, which is not a directory; the \
              allowlist would silently exempt nothing",
             dir.display()
         );
@@ -368,21 +372,21 @@ fn corpus_prefixes_name_directories_that_exist() {
 }
 
 #[test]
-fn operator_corpus_prefixes_are_dropped_by_name_in_gitignore() {
+fn operator_data_prefixes_are_dropped_by_name_in_gitignore() {
     let root = workspace_root();
     let ignore = fs::read_to_string(root.join(".gitignore")).expect("workspace .gitignore");
-    for prefix in OPERATOR_CORPUS_PREFIXES {
+    for prefix in OPERATOR_DATA_PREFIXES {
         let bare = prefix.trim_end_matches('/');
         assert!(
-            CORPUS_PREFIXES.contains(prefix),
-            "{prefix} is absent from the corpus allowlist, so it exempts nothing"
+            EXTERNAL_DATA_PREFIXES.contains(prefix),
+            "{prefix} is absent from the external-data allowlist, so it exempts nothing"
         );
         assert!(
             ignore.lines().any(|line| {
                 let line = line.trim();
                 !line.starts_with('#') && line.trim_start_matches('/').trim_end_matches('/') == bare
             }),
-            "operator corpus prefix {prefix} has no `.gitignore` rule naming \
+            "operator external-data prefix {prefix} has no `.gitignore` rule naming \
              it. Either the tree is committed now, and the prefix belongs in \
              the existence check instead, or the prefix is stale and exempts \
              nothing"

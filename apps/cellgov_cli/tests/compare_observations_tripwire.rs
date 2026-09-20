@@ -4,7 +4,7 @@
 //! `format_observation_compare_human` and `summarize` all fire, so
 //! the `debug_assert!`s on those paths are evaluated. The fixture is
 //! built in-test from `cellgov_compare`'s public types and carries no
-//! title or corpus state; the gate is honest only while the pair
+//! title or external-data state; the gate is honest only while the pair
 //! stays divergent, which
 //! `synthetic_pair_is_constructed_divergent_not_identical` pins. The
 //! `OneMissing` guards are covered by `cellgov_compare`'s in-crate
@@ -23,7 +23,7 @@ use cellgov_compare::{
 
 /// Build a minimal observation pair that diverges in two regions at
 /// three byte runs. Title-agnostic: all addresses, region names, and
-/// data shapes are local to this test and carry no corpus state.
+/// data shapes are local to this test and carry no external-data state.
 ///
 /// Layout: a `code` region of `ELF_HEADER_SIZE` bytes (needed for
 /// `ClassifierContext::from_observation`) with two divergence runs,

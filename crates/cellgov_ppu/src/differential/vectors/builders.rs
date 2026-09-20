@@ -1,4 +1,4 @@
-//! State and case builders the corpus generators share.
+//! State and case builders the vectors generators share.
 
 use super::super::{InstructionCase, MemorySnapshot, OracleSource, PpuStateSnapshot};
 use cellgov_ps3_abi::hw::ppu::GPR_COUNT;

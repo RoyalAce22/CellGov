@@ -55,7 +55,7 @@ fn key_vault() -> &'static cellgov_install::keys::KeyVault {
 fn microtest_bytes(path: &str) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| {
         panic!(
-            "{path}: {e}\nthe microtests feature declares the corpus built; \
+            "{path}: {e}\nthe microtests feature declares the microtest tree built; \
              build it with tests/micro/process_spawn_wait/build.sh"
         )
     })

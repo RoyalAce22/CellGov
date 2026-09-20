@@ -1,7 +1,7 @@
 //! Ungated home for the shared test-helper unit tests.
 //!
-//! Every other consumer of `common/` sits behind `title-corpus` /
-//! `title-dumps` / `firmware-corpus` / `firmware-dumps`, so without
+//! Every other consumer of `common/` sits behind `installed-title-tests` /
+//! `title-dumps` / `installed-firmware-tests` / `firmware-dumps`, so without
 //! this binary a fresh checkout would run none of: the digest-table
 //! parser's own unit tests, the check that the committed table lists
 //! every key the parity suites read, the well-formedness of every row

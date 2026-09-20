@@ -5,7 +5,7 @@
 //! and masked SHA-256 hashes; APP rows (WipEout) carry a
 //! CellGov-derived refactor-invariance baseline (unmasked only).
 //!
-//! Compiled only under `title-corpus`, which declares the operator
+//! Compiled only under `installed-title-tests`, which declares the operator
 //! owns title dumps -- though not necessarily every row pinned here.
 //! A row with no base record is passed over; a row whose record names
 //! a tree with no EBOOT or RAP fails as drift; a run that compared no
@@ -275,12 +275,12 @@ fn eboot_byte_identity_against_committed_digests() {
             }
         }
     }
-    // title-corpus declares the operator owns title dumps. Which rows
+    // installed-title-tests declares the operator owns title dumps. Which rows
     // they own is theirs to decide, but owning none makes this gate a
     // no-op that still reports ok, so the floor is one.
     assert!(
         compared > 0,
-        "title-corpus is on but none of the {} pinned titles is installed. \
+        "installed-title-tests is on but none of the {} pinned titles is installed. \
          Install one with `cellgov title install`, or build without \
          the feature.",
         titles.len()

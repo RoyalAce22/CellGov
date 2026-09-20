@@ -1,4 +1,4 @@
-//! Corpus-free structural checks on the title registry and its
+//! Self-contained structural checks on the title registry and its
 //! committed fixtures.
 //!
 //! The gated set is:

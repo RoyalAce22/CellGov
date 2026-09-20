@@ -3,7 +3,7 @@
 //! fixes.
 //!
 //! Compiled only under the `microtests` feature: the ELFs are
-//! gitignored build output, so opting in declares the corpus built and
+//! gitignored build output, so opting in declares the microtest tree built and
 //! a missing artifact is a hard error rather than a skip. Build each
 //! with `tests/micro/<name>/build.sh` in a ps3dev+PSL1GHT toolchain
 //! image -- requirements are in each script's header.
@@ -307,7 +307,7 @@ fn run_observation(case: &Case, run_id: &str) -> Observation {
 
     let json = std::fs::read_to_string(&observation_path).unwrap_or_else(|e| {
         panic!(
-            "{}: read {}: {e}\nthe microtests feature declares the corpus built; \
+            "{}: read {}: {e}\nthe microtests feature declares the microtest tree built; \
              build it with tests/micro/{}/build.sh",
             case.name,
             observation_path.display(),

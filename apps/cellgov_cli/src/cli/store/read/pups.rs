@@ -11,8 +11,7 @@ use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
 
 use super::model::{
-    store_rel, PupCorpusEntryDoc, PupCorpusMismatchDoc, PupCorpusVerifyDoc, VerifiedEntryDoc,
-    STORE_FORMAT_VERSION,
+    store_rel, PupEntryDoc, PupMismatchDoc, PupVerifyDoc, VerifiedEntryDoc, STORE_FORMAT_VERSION,
 };
 use super::render::emit;
 use super::verify::{firmware_entry_doc, render_entry};
@@ -48,15 +47,15 @@ fn archive_rows() -> Result<Vec<PupRow>, CommandError> {
 fn pup_paths(dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), CommandError> {
         let entries = std::fs::read_dir(dir).map_err(|error| {
-            CommandError::failed(format!("read corpus {}: {error}", dir.display()))
+            CommandError::failed(format!("read PUP directory {}: {error}", dir.display()))
         })?;
         for entry in entries {
             let entry = entry.map_err(|error| {
-                CommandError::failed(format!("read corpus {}: {error}", dir.display()))
+                CommandError::failed(format!("read PUP directory {}: {error}", dir.display()))
             })?;
             let path = entry.path();
             let kind = entry.file_type().map_err(|error| {
-                CommandError::failed(format!("inspect corpus path {}: {error}", path.display()))
+                CommandError::failed(format!("inspect PUP path {}: {error}", path.display()))
             })?;
             if kind.is_dir() {
                 walk(&path, out)?;
@@ -73,7 +72,7 @@ fn pup_paths(dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
 
     if !dir.is_dir() {
         return Err(CommandError::failed(format!(
-            "firmware PUP corpus {} is not a directory",
+            "firmware PUP directory {} is not a directory",
             dir.display()
         )));
     }
@@ -83,7 +82,7 @@ fn pup_paths(dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
     Ok(out)
 }
 
-fn scan_pup(corpus: &Path, path: &Path) -> Result<ScannedPup, CommandError> {
+fn scan_pup(pup_directory: &Path, path: &Path) -> Result<ScannedPup, CommandError> {
     let bytes = filebuffer::FileBuffer::open(path)
         .map_err(|error| CommandError::failed(format!("read PUP {}: {error}", path.display())))?;
     let sha256 = Sha256(cellgov_install::manifest::sha256_of(&bytes)).to_hex();
@@ -94,15 +93,15 @@ fn scan_pup(corpus: &Path, path: &Path) -> Result<ScannedPup, CommandError> {
         })
         .map_err(|error| error.to_string());
     Ok(ScannedPup {
-        path: store_rel(corpus, path),
+        path: store_rel(pup_directory, path),
         sha256,
         size_bytes: bytes.len() as u64,
         fw,
     })
 }
 
-fn expected_doc(row: &PupRow, path: Option<String>) -> PupCorpusEntryDoc {
-    PupCorpusEntryDoc {
+fn expected_doc(row: &PupRow, path: Option<String>) -> PupEntryDoc {
+    PupEntryDoc {
         fw: row.fw.clone(),
         pup_sha256: row.pup_sha256.clone(),
         size_bytes: row.size_bytes,
@@ -114,11 +113,7 @@ fn expected_doc(row: &PupRow, path: Option<String>) -> PupCorpusEntryDoc {
 fn classify(
     rows: &[PupRow],
     scanned: &[ScannedPup],
-) -> (
-    Vec<PupCorpusEntryDoc>,
-    Vec<PupCorpusEntryDoc>,
-    Vec<PupCorpusMismatchDoc>,
-) {
+) -> (Vec<PupEntryDoc>, Vec<PupEntryDoc>, Vec<PupMismatchDoc>) {
     let by_hash: BTreeMap<&str, &PupRow> = rows
         .iter()
         .map(|row| (row.pup_sha256.as_str(), row))
@@ -146,7 +141,7 @@ fn classify(
                         present.push(expected_doc(row, Some(found.path.clone())));
                     }
                 }
-                Ok((fw, image_version)) => mismatched.push(PupCorpusMismatchDoc {
+                Ok((fw, image_version)) => mismatched.push(PupMismatchDoc {
                     subject: found.path.clone(),
                     kind: "metadata".to_string(),
                     fw: Some(fw.clone()),
@@ -160,7 +155,7 @@ fn classify(
                     )),
                     reason: None,
                 }),
-                Err(reason) => mismatched.push(PupCorpusMismatchDoc {
+                Err(reason) => mismatched.push(PupMismatchDoc {
                     subject: found.path.clone(),
                     kind: "invalid-pup".to_string(),
                     fw: None,
@@ -172,7 +167,7 @@ fn classify(
             continue;
         }
         match &found.fw {
-            Ok((fw, _)) => mismatched.push(PupCorpusMismatchDoc {
+            Ok((fw, _)) => mismatched.push(PupMismatchDoc {
                 subject: found.path.clone(),
                 kind: "sha256".to_string(),
                 fw: Some(fw.clone()),
@@ -182,7 +177,7 @@ fn classify(
                 found: Some(found.sha256.clone()),
                 reason: None,
             }),
-            Err(reason) => mismatched.push(PupCorpusMismatchDoc {
+            Err(reason) => mismatched.push(PupMismatchDoc {
                 subject: found.path.clone(),
                 kind: "invalid-pup".to_string(),
                 fw: None,
@@ -208,11 +203,11 @@ fn installed_identity_mismatches(
     manifest_hash: &str,
     manifest_image: &str,
     row: &PupRow,
-) -> Vec<PupCorpusMismatchDoc> {
+) -> Vec<PupMismatchDoc> {
     let subject = format!("installed firmware {installed_version}");
     let mut mismatched = Vec::new();
     if installed_version != row.fw {
-        mismatched.push(PupCorpusMismatchDoc {
+        mismatched.push(PupMismatchDoc {
             subject: subject.clone(),
             kind: "firmware-version".to_string(),
             fw: Some(installed_version.to_string()),
@@ -222,7 +217,7 @@ fn installed_identity_mismatches(
         });
     }
     if manifest_image != row.image_version {
-        mismatched.push(PupCorpusMismatchDoc {
+        mismatched.push(PupMismatchDoc {
             subject: subject.clone(),
             kind: "image-version".to_string(),
             fw: Some(installed_version.to_string()),
@@ -232,7 +227,7 @@ fn installed_identity_mismatches(
         });
     }
     if record_hash != manifest_hash {
-        mismatched.push(PupCorpusMismatchDoc {
+        mismatched.push(PupMismatchDoc {
             subject,
             kind: "source-sha256".to_string(),
             fw: Some(installed_version.to_string()),
@@ -248,13 +243,13 @@ fn installed_manifest_version_mismatch(
     installed_version: &str,
     manifest_version: &str,
     row: &PupRow,
-) -> Option<PupCorpusMismatchDoc> {
+) -> Option<PupMismatchDoc> {
     if manifest_version == row.fw {
         return None;
     }
     // The boot identity gate rejects this same stale-manifest state in
     // `composition::identity::firmware_identity`.
-    Some(PupCorpusMismatchDoc {
+    Some(PupMismatchDoc {
         subject: format!("installed firmware {installed_version}"),
         kind: "manifest-version".to_string(),
         fw: Some(manifest_version.to_string()),
@@ -264,9 +259,9 @@ fn installed_manifest_version_mismatch(
     })
 }
 
-fn corpus_is_clean(
-    missing: &[PupCorpusEntryDoc],
-    mismatched: &[PupCorpusMismatchDoc],
+fn pup_set_is_clean(
+    missing: &[PupEntryDoc],
+    mismatched: &[PupMismatchDoc],
     installed: &[VerifiedEntryDoc],
 ) -> bool {
     missing.is_empty()
@@ -274,15 +269,15 @@ fn corpus_is_clean(
         && installed.iter().all(|entry| entry.divergences.is_empty())
 }
 
-pub(crate) fn firmware_verify_corpus(
+pub(crate) fn firmware_verify_pups(
     root: &Path,
-    corpus: &Path,
+    pup_directory: &Path,
     format: OutputFormat,
 ) -> Result<CommandExitCode, CommandError> {
     let rows = archive_rows()?;
-    let scanned: Vec<ScannedPup> = pup_paths(corpus)?
+    let scanned: Vec<ScannedPup> = pup_paths(pup_directory)?
         .into_iter()
-        .map(|path| scan_pup(corpus, &path))
+        .map(|path| scan_pup(pup_directory, &path))
         .collect::<Result<_, _>>()?;
     let (present, missing, mut mismatched) = classify(&rows, &scanned);
     let by_hash: BTreeMap<&str, &PupRow> = rows
@@ -326,16 +321,16 @@ pub(crate) fn firmware_verify_corpus(
         ));
         let Some(keys) = keys.as_ref() else {
             return Err(CommandError::failed(
-                "firmware verify-corpus: installed candidates exist but the key vault was not loaded",
+                "firmware verify-pups: installed candidates exist but the key vault was not loaded",
             ));
         };
         installed.push(firmware_entry_doc(&store, entry, keys)?);
     }
     mismatched.sort_by(|a, b| a.subject.cmp(&b.subject));
-    let clean = corpus_is_clean(&missing, &mismatched, &installed);
-    let doc = PupCorpusVerifyDoc {
+    let clean = pup_set_is_clean(&missing, &mismatched, &installed);
+    let doc = PupVerifyDoc {
         format_version: STORE_FORMAT_VERSION,
-        corpus: corpus.display().to_string(),
+        pup_directory: pup_directory.display().to_string(),
         present,
         missing,
         mismatched,
@@ -350,7 +345,7 @@ pub(crate) fn firmware_verify_corpus(
     }))
 }
 
-fn render(doc: &PupCorpusVerifyDoc) -> String {
+fn render(doc: &PupVerifyDoc) -> String {
     let mut out = String::new();
     out.push_str("present:\n");
     for row in &doc.present {
@@ -391,7 +386,7 @@ fn render(doc: &PupCorpusVerifyDoc) -> String {
         }
     }
     out.push_str(&format!(
-        "firmware corpus: {} present, {} missing, {} mismatched; {} installed entr{} checked\n",
+        "installed firmware: {} present, {} missing, {} mismatched; {} installed entr{} checked\n",
         doc.present.len(),
         doc.missing.len(),
         doc.mismatched.len(),
@@ -402,5 +397,5 @@ fn render(doc: &PupCorpusVerifyDoc) -> String {
 }
 
 #[cfg(test)]
-#[path = "tests/corpus_tests.rs"]
+#[path = "tests/pup_tests.rs"]
 mod tests;

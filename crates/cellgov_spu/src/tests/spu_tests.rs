@@ -9,8 +9,8 @@ pub(crate) fn microtest_elf<P: AsRef<std::path::Path>>(path: P) -> Vec<u8> {
     let path = path.as_ref();
     std::fs::read(path).unwrap_or_else(|e| {
         panic!(
-            "{}: {e}\nthe spu-microtests feature declares the micro-test corpus \
-             built; build it with the corresponding tests/micro/*/build.sh",
+            "{}: {e}\nthe spu-microtests feature declares the microtest artifacts \
+             present; build them with the corresponding tests/micro/*/build.sh",
             path.display()
         )
     })
@@ -356,7 +356,7 @@ fn wrch_mfc_cmd_yields_dma_submitted() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn run_spu_fixed_value_binary() {
     let elf_data = microtest_elf("../../tests/micro/spu_fixed_value/build/spu_main.elf");
@@ -446,7 +446,7 @@ fn run_spu_fixed_value_binary() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn mailbox_roundtrip_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/mailbox_roundtrip/build/spu_main.elf");
@@ -526,7 +526,7 @@ fn mailbox_roundtrip_matches_rpcs3_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn spu_atomic_cross_spu_counter_is_exactly_2n() {
     const INCREMENTS_PER_THREAD: u32 = 32;
@@ -612,7 +612,7 @@ fn spu_atomic_cross_spu_counter_is_exactly_2n() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn atomic_reservation_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/atomic_reservation/build/spu_main.elf");
@@ -686,7 +686,7 @@ fn atomic_reservation_matches_rpcs3_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn barrier_wakeup_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/barrier_wakeup/build/spu_main.elf");
@@ -771,7 +771,7 @@ fn barrier_wakeup_matches_rpcs3_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn ls_to_shared_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/ls_to_shared/build/spu_main.elf");
@@ -845,7 +845,7 @@ fn ls_to_shared_matches_rpcs3_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn dma_completion_payloads_are_correct() {
     let elf_data = microtest_elf("../../tests/micro/dma_completion/build/spu_main.elf");
@@ -916,7 +916,7 @@ fn dma_completion_payloads_are_correct() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn dma_completion_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/dma_completion/build/spu_main.elf");
@@ -990,7 +990,7 @@ fn dma_completion_matches_rpcs3_baseline() {
 #[test]
 #[cfg_attr(
     not(feature = "spu-microtests"),
-    ignore = "needs the built micro-test corpus (tests/micro/*/build.sh); run with --features spu-microtests"
+    ignore = "needs the built built microtests (tests/micro/*/build.sh); run with --features spu-microtests"
 )]
 fn spu_fixed_value_matches_rpcs3_baseline() {
     let elf_path = std::path::Path::new("../../tests/micro/spu_fixed_value/build/spu_main.elf");

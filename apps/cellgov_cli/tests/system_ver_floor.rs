@@ -2,7 +2,7 @@
 //! PARAM.SFO states.
 //!
 //! The manifest carries the floor as a scalar so the generated documents
-//! render the same on a checkout with no corpus. This suite holds that
+//! render the same on a checkout with no external data. This suite holds that
 //! scalar to the `PS3_SYSTEM_VER` in the installed base tree, found
 //! through the install record.
 //!
@@ -104,7 +104,7 @@ fn every_installed_titles_system_ver_is_the_floor_its_param_sfo_states() {
     );
     assert!(
         checked > 0,
-        "title-corpus is enabled but no registered game title is installed (skipped: {}). \
+        "installed-title-tests is enabled but no registered game title is installed (skipped: {}). \
          Install at least one, or run without the feature.",
         skipped.join(", ")
     );

@@ -1,6 +1,6 @@
 //! Which install records `dev gen-manifest` generates a manifest from,
 //! and which it refuses. Each refusal goes through `die`, so it is only
-//! observable from a spawned process. Needs no corpus: every record and
+//! observable from a spawned process. Self-contained: every record and
 //! every PARAM.SFO here is hand-written.
 
 use cellgov_testkit::param_sfo::build_param_sfo;
@@ -11,7 +11,7 @@ use std::process::Command;
 /// The status every refused operation shares, as `--help` documents it.
 const EXIT_FAILED: i32 = 1;
 
-/// Placeholder identity: nothing here names an installed corpus.
+/// Placeholder identity: nothing here names an installed content.
 const TITLE_ID: &str = "TEST00000";
 
 /// Where a base record's tree sits under the default store root, which

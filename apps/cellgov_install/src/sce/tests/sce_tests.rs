@@ -362,7 +362,7 @@ fn parse_program_authority_id_rejects_truncated_ext_header() {
 const DISC_DISTRIBUTION: &str = "disc-iso";
 
 /// The store, rooted at this workspace's VFS root.
-fn corpus_layout() -> crate::store::StoreLayout {
+fn input_layout() -> crate::store::StoreLayout {
     let mut root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     root.pop();
     root.pop();
@@ -407,7 +407,7 @@ fn records_of_kind(dir: &std::path::Path) -> Vec<crate::store::InstallRecord> {
 ///
 /// Panics when the record names a tree whose executable is gone.
 fn installed_title_eboot(title_id: &str, label: &str) -> Option<std::path::PathBuf> {
-    let layout = corpus_layout();
+    let layout = input_layout();
     let key = crate::store::TitleId::new(title_id).expect("a pinned title id is a store key");
     let record_path = layout.record_path(&crate::store::Artifact::TitleBase { title_id: key });
     let text = match std::fs::read_to_string(&record_path) {
@@ -450,7 +450,7 @@ fn installed_title_eboot(title_id: &str, label: &str) -> Option<std::path::PathB
 ///   kind;
 /// - a firmware entry holds no `vsh.self`.
 fn installed_vsh_selfs() -> Vec<(String, std::path::PathBuf)> {
-    let layout = corpus_layout();
+    let layout = input_layout();
     let records = layout
         .installs_dir()
         .join(crate::store::ArtifactKind::Firmware.as_str());
@@ -490,10 +490,10 @@ fn installed_vsh_selfs() -> Vec<(String, std::path::PathBuf)> {
 /// `0x1010_0000_0100_0003`.
 #[test]
 #[cfg_attr(
-    not(feature = "title-corpus"),
-    ignore = "pins values read off installed titles under vfs/; run with --features title-corpus"
+    not(feature = "installed-title-tests"),
+    ignore = "pins values read off installed titles under vfs/; run with --features installed-title-tests"
 )]
-fn parse_program_authority_id_matches_known_corpus_values() {
+fn parse_program_authority_id_matches_known_data_values() {
     let cases = [
         ("NPUA80001", "flOw (NPDRM SELF)"),
         ("BCES00664", "WipEout (disc SELF)"),
@@ -501,7 +501,9 @@ fn parse_program_authority_id_matches_known_corpus_values() {
     let mut checked = 0;
     for (title_id, label) in cases {
         let Some(path) = installed_title_eboot(title_id, label) else {
-            eprintln!("parse_program_authority_id corpus pin: skipping {label} (not installed)");
+            eprintln!(
+                "parse_program_authority_id installed-data pin: skipping {label} (not installed)"
+            );
             continue;
         };
         let bytes =
@@ -517,7 +519,7 @@ fn parse_program_authority_id_matches_known_corpus_values() {
     // makes this pin a no-op that still reports ok.
     assert!(
         checked > 0,
-        "title-corpus is on but none of the {} pinned titles is installed",
+        "installed-title-tests is on but none of the {} pinned titles is installed",
         cases.len()
     );
 }
@@ -525,7 +527,7 @@ fn parse_program_authority_id_matches_known_corpus_values() {
 #[test]
 fn mask_non_semantic_elf_bytes_zeroes_section_header_fields_and_moves_nothing_else() {
     // The {e_shoff, e_shnum, e_shstrndx} set is empirically
-    // sufficient for the current title corpus (flOw / SSHD /
+    // sufficient for the current installed titles (flOw / SSHD /
     // WipEout + the firmware-PRX byte parity).
     let mut elf: Vec<u8> = (0u8..=0xFFu8).cycle().take(0x80).collect();
     elf[0x28..0x30].copy_from_slice(&0xDEADBEEFCAFEBABEu64.to_be_bytes());
@@ -928,14 +930,14 @@ fn parse_control_flags1_rejects_non_sce_input() {
 /// The `ctrl_flags1` word a root-capable SELF carries.
 const CTRL_FLAGS1_ROOT: u32 = 0x4000_0000;
 
-/// Corpus pin for the privilege split: vsh.self is root-capable,
+/// Installed-data pin for the privilege split: vsh.self is root-capable,
 /// retail application SELFs are not.
 #[test]
 #[cfg_attr(
-    not(feature = "title-corpus"),
-    ignore = "pins values read off an installed vfs/; run with --features title-corpus"
+    not(feature = "installed-title-tests"),
+    ignore = "pins values read off an installed vfs/; run with --features installed-title-tests"
 )]
-fn parse_control_flags1_matches_known_corpus_values() {
+fn parse_control_flags1_matches_known_data_values() {
     let retail = [
         ("NPUA80001", "flOw (NPDRM SELF)"),
         ("NPUA80068", "Super Stardust HD (NPDRM SELF)"),
@@ -959,7 +961,7 @@ fn parse_control_flags1_matches_known_corpus_values() {
     // one class still checks what it can rather than failing.
     assert!(
         !pins.is_empty(),
-        "title-corpus is on but the store holds neither a firmware nor a pinned title"
+        "installed-title-tests is on but the store holds neither a firmware nor a pinned title"
     );
     for (label, path, expected) in &pins {
         let bytes =
@@ -972,14 +974,14 @@ fn parse_control_flags1_matches_known_corpus_values() {
     }
     let root_capable = pins.iter().filter(|p| p.2 == CTRL_FLAGS1_ROOT).count();
     eprintln!(
-        "parse_control_flags1 corpus pin: checked {} fixtures ({root_capable} root-capable, \
+        "parse_control_flags1 installed-data pin: checked {} fixtures ({root_capable} root-capable, \
          {} unprivileged)",
         pins.len(),
         pins.len() - root_capable,
     );
     if root_capable == 0 || root_capable == pins.len() {
         eprintln!(
-            "parse_control_flags1 corpus pin: only one privilege class is installed, so this \
+            "parse_control_flags1 installed-data pin: only one privilege class is installed, so this \
              run did not hold the root-vs-non-root split apart"
         );
     }

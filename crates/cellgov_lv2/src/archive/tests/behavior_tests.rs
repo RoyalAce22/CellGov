@@ -15,7 +15,7 @@ use crate::request::classify;
 const UNWITNESSED_BASELINE: &[u64] = &[31, 70, 71, 101, 120, 121, 135];
 
 #[test]
-fn a_witness_is_a_path_and_a_function_in_a_corpus_free_crate() {
+fn a_witness_is_a_path_and_a_function_in_a_data_free_crate() {
     let w = parse_witness("crates/cellgov_lv2/src/host/tests/uart_tests.rs:a_test")
         .unwrap_or_else(|| panic!("a well-formed witness parses"));
     assert_eq!(
@@ -247,7 +247,7 @@ fn attributes_of(source: &str, function: &str) -> Option<Vec<String>> {
 }
 
 #[test]
-fn every_witness_is_a_non_ignored_test_in_a_corpus_free_crate() {
+fn every_witness_is_a_non_ignored_test_in_a_data_free_crate() {
     let root = workspace_root();
     let mut checked = 0usize;
     for row in read_rows() {

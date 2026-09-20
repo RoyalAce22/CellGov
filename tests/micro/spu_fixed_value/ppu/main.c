@@ -28,7 +28,7 @@
 
 SYS_PROCESS_PARAM(1001, 0x10000)
 
-/* Two-word fixed result layout shared across the microtest corpus:
+/* Two-word fixed result layout shared across the microtest suite:
  * status is 0 on pass, value carries the test-specific result word. */
 struct TestResult {
     unsigned int status;

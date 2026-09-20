@@ -9,7 +9,7 @@ pub struct Witness<'a> {
     pub function: &'a str,
 }
 
-/// Crates whose tests need no corpus, so a witness may live in them.
+/// Crates whose tests are self-contained, so a witness may live in them.
 pub const WITNESS_CRATES: &[&str] = &[
     "crates/cellgov_lv2/",
     "crates/cellgov_core/",

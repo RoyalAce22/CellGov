@@ -7,7 +7,7 @@ use crate::store::record::{ArtifactRecord, RapRecord, TitleRecord};
 use crate::store::{ArtifactKind, INSTALL_RECORD_FORMAT_VERSION};
 
 /// Placeholder identity: these cases build every tree by hand and name
-/// no installed corpus.
+/// no installed content.
 const SYNTHETIC_TITLE_ID: &str = "TEST00000";
 
 fn write(path: &Path, bytes: &[u8]) {

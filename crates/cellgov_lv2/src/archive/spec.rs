@@ -438,7 +438,7 @@ pub const PUP: TableSpec = TableSpec {
 pub const CENSUS_REGENERATE: &str =
     "cargo run --release -p cellgov_cli -- dev lv2-census <ELF> --fw <VERSION> --pup-sha256 <SHA256> --output-dir docs/lv2";
 
-/// Names the corpus-free gate for extracted kernel census rows.
+/// Names the self-contained gate for extracted kernel census rows.
 pub const CENSUS_GATE: &str = "kernel_census_rows_are_well_formed";
 
 /// Lists the accepted labels for `kernel.entry_format`.

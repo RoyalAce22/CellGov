@@ -23,7 +23,7 @@ fn found(path: &str, hash: &str, fw: Result<&str, &str>) -> ScannedPup {
 }
 
 #[test]
-fn an_empty_archive_and_empty_corpus_verify_cleanly() {
+fn an_empty_archive_and_empty_data_verify_cleanly() {
     let header = PUP_TSV
         .lines()
         .next()
@@ -36,7 +36,7 @@ fn an_empty_archive_and_empty_corpus_verify_cleanly() {
     assert!(present.is_empty());
     assert!(missing.is_empty());
     assert!(mismatched.is_empty());
-    assert!(corpus_is_clean(&missing, &mismatched, &[]));
+    assert!(pup_set_is_clean(&missing, &mismatched, &[]));
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn a_known_hash_with_wrong_metadata_is_mismatched_not_missing() {
 }
 
 #[test]
-fn a_matching_file_preserves_the_archive_identity_and_corpus_path() {
+fn a_matching_file_preserves_the_archive_identity_and_data_path() {
     let rows = [row("00", "1.00")];
     let scanned = [found("nested/one.pup", "00", Ok("1.00"))];
     let (present, missing, mismatched) = classify(&rows, &scanned);
@@ -89,15 +89,15 @@ fn a_matching_file_preserves_the_archive_identity_and_corpus_path() {
 
 #[test]
 fn human_report_keeps_the_three_categories() {
-    let doc = PupCorpusVerifyDoc {
+    let doc = PupVerifyDoc {
         format_version: STORE_FORMAT_VERSION,
-        corpus: "pups".to_string(),
+        pup_directory: "pups".to_string(),
         present: vec![expected_doc(
             &row("00", "1.00"),
             Some("one.pup".to_string()),
         )],
         missing: vec![expected_doc(&row("11", "2.00"), None)],
-        mismatched: vec![PupCorpusMismatchDoc {
+        mismatched: vec![PupMismatchDoc {
             subject: "changed.pup".to_string(),
             kind: "sha256".to_string(),
             fw: Some("2.00".to_string()),
