@@ -17,7 +17,7 @@
 
 #![allow(
     clippy::print_stderr,
-    reason = "integration test: named not-installed skips are its only output channel"
+    reason = "integration test: named pending and not-installed skips are its only output channel"
 )]
 
 use std::process::Command;
@@ -84,31 +84,45 @@ fn assert_result_stream(run: &Run, needle: &str, what: &str) {
     );
 }
 
-/// Registered titles, cheapest recorded trajectory first.
-///
-/// Every registered title carries a committed baseline
-/// (`registry_structure` gates that), so an unreadable or malformed one
-/// is a corpus defect rather than a reason to drop the title and
-/// quietly re-order this list.
-fn by_cost() -> Vec<(u64, TitleUnderTest)> {
-    let mut out: Vec<(u64, TitleUnderTest)> = titles()
-        .into_iter()
-        .map(|t| {
-            let path = boot_anchor_path(&t.content_id, &t.reference);
-            let text = std::fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("{}: read {}: {e}", t.short_name, path.display()));
-            let summary: BootSummary = serde_json::from_str(&text).unwrap_or_else(|e| {
-                panic!(
-                    "{}: {} is not a BootSummary: {e}",
-                    t.short_name,
-                    path.display()
-                )
-            });
-            (summary.steps, t)
-        })
-        .collect();
+fn by_cost_from(
+    titles: Vec<TitleUnderTest>,
+    mut anchor_steps: impl FnMut(&TitleUnderTest) -> u64,
+) -> Vec<(u64, TitleUnderTest)> {
+    let mut out = Vec::new();
+    for title in titles {
+        if let Some(why) = &title.reference.pending {
+            eprintln!(
+                "SKIP pending: {} ({}): {why}",
+                title.short_name,
+                title.reference.label()
+            );
+            continue;
+        }
+        out.push((anchor_steps(&title), title));
+    }
     out.sort_by_key(|(steps, _)| *steps);
     out
+}
+
+/// Registered runnable titles, cheapest recorded trajectory first.
+///
+/// `registry_structure` requires each runnable title to have a
+/// committed baseline. An unreadable or malformed baseline is a
+/// corpus defect.
+fn by_cost() -> Vec<(u64, TitleUnderTest)> {
+    by_cost_from(titles(), |title| {
+        let path = boot_anchor_path(&title.content_id, &title.reference);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{}: read {}: {e}", title.short_name, path.display()));
+        let summary: BootSummary = serde_json::from_str(&text).unwrap_or_else(|e| {
+            panic!(
+                "{}: {} is not a BootSummary: {e}",
+                title.short_name,
+                path.display()
+            )
+        });
+        summary.steps
+    })
 }
 
 /// The first installed title's rendering run, with the argv that
@@ -270,4 +284,51 @@ fn the_boot_run_bar_never_changes_what_stdout_says() {
         !with_bar.run.stdout.contains("[boot]"),
         "a threshold line landed on the result stream"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use registry::ReferenceCell;
+
+    fn title(short_name: &str, pending: Option<&str>) -> TitleUnderTest {
+        TitleUnderTest {
+            short_name: short_name.to_string(),
+            content_id: format!("TEST-{short_name}"),
+            max_steps: 1,
+            reference: ReferenceCell {
+                fw: "1.50".to_string(),
+                game_ver: Some("base".to_string()),
+                pending: pending.map(str::to_string),
+            },
+        }
+    }
+
+    #[test]
+    fn pending_cells_are_set_aside_before_their_anchors_are_read() {
+        let titles = vec![
+            title("pending", Some("no anchor by contract")),
+            title("later", None),
+            title("earlier", None),
+        ];
+        let mut read = Vec::new();
+
+        let sorted = by_cost_from(titles, |title| {
+            read.push(title.short_name.clone());
+            if title.short_name == "earlier" {
+                10
+            } else {
+                20
+            }
+        });
+
+        assert_eq!(read, ["later", "earlier"]);
+        assert_eq!(
+            sorted
+                .iter()
+                .map(|(_, title)| title.short_name.as_str())
+                .collect::<Vec<_>>(),
+            ["earlier", "later"]
+        );
+    }
 }
