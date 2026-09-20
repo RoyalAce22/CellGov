@@ -10,6 +10,14 @@
 //! [`IsoEntry::read_data`]), because a BD-DL image's content does not
 //! fit in host memory.
 
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless
+)]
+
+use crate::field::{read_le_u32, usize_from_u32};
+
 /// ISO9660 logical sector size.
 pub(crate) const SECTOR: usize = 2048;
 /// Standard identifier offset within a volume descriptor (after the
@@ -222,17 +230,9 @@ fn join_path(prefix: &str, name: &str) -> String {
 /// above 2^21 (a 4 GiB image), and a wrapped base would pass the
 /// end-bound test and alias the wrong bytes with no error.
 fn extent_range(start: u32, size: u32, image_len: usize) -> Option<std::ops::Range<usize>> {
-    let base = (start as usize).checked_mul(SECTOR)?;
-    let end = base.checked_add(size as usize)?;
+    let base = usize_from_u32(start).checked_mul(SECTOR)?;
+    let end = base.checked_add(usize_from_u32(size))?;
     (end <= image_len).then_some(base..end)
-}
-
-fn read_le_u32(data: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes(
-        data[off..off + 4]
-            .try_into()
-            .expect("invariant: caller bounds-checked this 4-byte read"),
-    )
 }
 
 /// One parsed directory record: identity plus its (first) extent.
@@ -291,8 +291,10 @@ fn walk_volume_descriptors(image: &[u8]) -> Result<RootInfo, IsoError> {
     let mut joliet: Option<RootInfo> = None;
     let mut sector = VDS_START_SECTOR;
     loop {
-        let base = sector * SECTOR;
-        if base + SECTOR > image.len() {
+        let base = sector
+            .checked_mul(SECTOR)
+            .ok_or(IsoError::UnterminatedVds)?;
+        if base.checked_add(SECTOR).is_none_or(|end| end > image.len()) {
             return Err(IsoError::UnterminatedVds);
         }
         let descriptor_type = image[base];
@@ -306,15 +308,17 @@ fn walk_volume_descriptors(image: &[u8]) -> Result<RootInfo, IsoError> {
             }
             _ => {}
         }
-        sector += 1;
+        sector = sector.checked_add(1).ok_or(IsoError::UnterminatedVds)?;
     }
     joliet.or(primary).ok_or(IsoError::NoRootDescriptor)
 }
 
 /// Read the root-directory extent out of a PVD/SVD at `base`.
 fn read_root_info(image: &[u8], base: usize, ucs2: bool) -> Result<RootInfo, IsoError> {
-    let rec = parse_dir_record(image, base + ROOT_RECORD_OFFSET, ucs2)?
-        .ok_or(IsoError::NoRootDescriptor)?;
+    let pos = base
+        .checked_add(ROOT_RECORD_OFFSET)
+        .ok_or(IsoError::RecordTruncated { pos: base })?;
+    let rec = parse_dir_record(image, pos, ucs2)?.ok_or(IsoError::NoRootDescriptor)?;
     let (start, size) = rec.extents[0];
     Ok(RootInfo {
         root_sector: start,
@@ -328,8 +332,11 @@ fn read_root_info(image: &[u8], base: usize, ucs2: bool) -> Result<RootInfo, Iso
 /// escape sequence. `base + SECTOR` is already bounds-checked by the
 /// caller, so the 32-byte read is in range.
 fn is_joliet_svd(image: &[u8], base: usize) -> bool {
-    let esc = &image[base + 88..base + 120];
-    JOLIET_ESCAPES.iter().any(|seq| esc.starts_with(seq))
+    let esc = base
+        .checked_add(88)
+        .zip(base.checked_add(120))
+        .and_then(|(start, end)| image.get(start..end));
+    esc.is_some_and(|bytes| JOLIET_ESCAPES.iter().any(|seq| bytes.starts_with(seq)))
 }
 
 /// Parse the directory record at `pos`. Returns `Ok(None)` for a
@@ -339,35 +346,41 @@ fn parse_dir_record(image: &[u8], pos: usize, ucs2: bool) -> Result<Option<DirRe
     if pos >= image.len() {
         return Err(IsoError::RecordTruncated { pos });
     }
-    let entry_length = image[pos] as usize;
+    let entry_length = usize::from(image[pos]);
     if entry_length == 0 {
         return Ok(None);
     }
-    if pos + DIR_RECORD_FIXED > image.len() || pos + entry_length > image.len() {
+    let fixed_end = pos.checked_add(DIR_RECORD_FIXED);
+    let entry_end = pos.checked_add(entry_length);
+    let (Some(fixed_end), Some(entry_end)) = (fixed_end, entry_end) else {
+        return Err(IsoError::RecordTruncated { pos });
+    };
+    if fixed_end > image.len() || entry_end > image.len() {
         return Err(IsoError::RecordTruncated { pos });
     }
+    let record = &image[pos..entry_end];
 
     // Extended Attribute Record length (offset 1, in logical blocks).
     // A nonzero EAR shifts the file-data start past the EAR blocks and
     // is excluded from the data length; PS3 discs emit none, so reject
     // rather than silently read EAR bytes as content.
-    let ear_len = image[pos + 1];
+    let ear_len = record[1];
     if ear_len != 0 {
         return Err(IsoError::UnsupportedExtendedAttributes { pos, ear_len });
     }
 
-    let start_sector = read_le_u32(image, pos + 2);
-    let file_size = read_le_u32(image, pos + 10);
-    let flags = image[pos + 25];
-    let file_unit_size = image[pos + 26];
-    let interleave = image[pos + 27];
-    let name_len = image[pos + 32] as usize;
+    let start_sector = read_le_u32(record, 2);
+    let file_size = read_le_u32(record, 10);
+    let flags = record[25];
+    let file_unit_size = record[26];
+    let interleave = record[27];
+    let name_len = usize::from(record[32]);
 
-    let name_start = pos + DIR_RECORD_FIXED;
-    if name_start + name_len > pos + entry_length || name_start + name_len > image.len() {
+    let name_end = DIR_RECORD_FIXED.checked_add(name_len);
+    let Some(name_end) = name_end.filter(|&end| end <= record.len()) else {
         return Err(IsoError::RecordTruncated { pos });
-    }
-    let name_bytes = &image[name_start..name_start + name_len];
+    };
+    let name_bytes = &record[DIR_RECORD_FIXED..name_end];
 
     let is_dir = flags & FLAG_DIRECTORY != 0;
     let has_more_extents = flags & FLAG_MULTI_EXTENT != 0;
@@ -478,9 +491,20 @@ fn walk_directory(
     if depth > MAX_DEPTH {
         return Err(IsoError::DepthExceeded);
     }
-    let base = (dir_sector as usize) * SECTOR;
+    let base = usize_from_u32(dir_sector)
+        .checked_mul(SECTOR)
+        .ok_or_else(|| IsoError::ExtentOutOfBounds {
+            path: if prefix.is_empty() {
+                "/".to_string()
+            } else {
+                prefix.to_string()
+            },
+            sector: dir_sector,
+            size: dir_size,
+            len: image.len(),
+        })?;
     let end = base
-        .checked_add(dir_size as usize)
+        .checked_add(usize_from_u32(dir_size))
         .filter(|&e| e <= image.len())
         .ok_or_else(|| IsoError::ExtentOutOfBounds {
             path: if prefix.is_empty() {
@@ -498,13 +522,17 @@ fn walk_directory(
     while pos < end {
         if image[pos] == 0 {
             // Records never span a sector; skip padding to the next.
-            let next_sector = (pos / SECTOR) + 1;
-            pos = next_sector * SECTOR;
+            pos = (pos / SECTOR)
+                .checked_add(1)
+                .and_then(|sector| sector.checked_mul(SECTOR))
+                .ok_or(IsoError::RecordTruncated { pos })?;
             continue;
         }
-        let entry_length = image[pos] as usize;
+        let entry_length = usize::from(image[pos]);
         let rec = parse_dir_record(image, pos, ucs2)?;
-        pos += entry_length;
+        pos = pos
+            .checked_add(entry_length)
+            .ok_or(IsoError::RecordTruncated { pos })?;
         let Some(rec) = rec else { continue };
         if rec.name == "." || rec.name == ".." {
             continue;
@@ -543,7 +571,8 @@ fn walk_directory(
                 extents: Vec::new(),
             });
             let (sector, size) = rec.extents[0];
-            walk_directory(image, sector, size, ucs2, &path, out, depth + 1)?;
+            let next_depth = depth.checked_add(1).ok_or(IsoError::DepthExceeded)?;
+            walk_directory(image, sector, size, ucs2, &path, out, next_depth)?;
         } else {
             // Validate every extent here so the entry's bounds are
             // proven against this image before any consumer resolves it.

@@ -1,6 +1,13 @@
 //! ISO9660 reader: nested-tree extraction over a hand-emitted PVD +
 //! directory records (no UDF structures), plus rejection paths.
 
+#![allow(
+    clippy::arithmetic_side_effects,
+    clippy::cast_possible_truncation,
+    clippy::cast_lossless,
+    reason = "fixture geometry uses small compile-time sectors and record lengths"
+)]
+
 use super::*;
 use crate::test_support::{build_iso, IsoNode as Node, ISO_SECTOR as SEC};
 
@@ -107,13 +114,42 @@ fn rejects_extent_escaping_image() {
     let dot_len = image[root] as usize;
     let dotdot_len = image[root + dot_len] as usize;
     let child = root + dot_len + dotdot_len;
-    // Point the file extent far past the image end (both-endian).
-    image[child + 2..child + 6].copy_from_slice(&0x000F_FFFFu32.to_le_bytes());
-    image[child + 6..child + 10].copy_from_slice(&0x000F_FFFFu32.to_be_bytes());
-    assert!(matches!(
-        read_iso(&image).unwrap_err(),
-        IsoError::ExtentOutOfBounds { .. }
-    ));
+    // `u32::MAX` drives the checked byte-offset path on 32-bit hosts.
+    image[child + 2..child + 6].copy_from_slice(&u32::MAX.to_le_bytes());
+    image[child + 6..child + 10].copy_from_slice(&u32::MAX.to_be_bytes());
+    let err = read_iso(&image).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            IsoError::ExtentOutOfBounds { path, sector, size, len }
+                if path == "X.BIN"
+                    && *sector == u32::MAX
+                    && *size == 5
+                    && *len == image.len()
+        ),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn rejects_root_directory_extent_whose_byte_offset_cannot_fit() {
+    let mut image = vec![0u8; 18 * SEC];
+    put_descriptor(&mut image, 16, 1, u32::MAX);
+    image[17 * SEC] = 255;
+    image[17 * SEC + 1..17 * SEC + 6].copy_from_slice(b"CD001");
+
+    let err = read_iso(&image).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            IsoError::ExtentOutOfBounds { path, sector, size, len }
+                if path == "/"
+                    && *sector == u32::MAX
+                    && *size == SEC as u32
+                    && *len == image.len()
+        ),
+        "got {err:?}"
+    );
 }
 
 // --- Hand-built records for cases build_iso cannot emit --------------
