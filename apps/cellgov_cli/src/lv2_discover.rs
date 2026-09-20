@@ -103,7 +103,9 @@ pub(crate) fn run(
     match format {
         OutputFormat::Json => println!(
             "{}",
-            serde_json::to_string_pretty(&doc).expect("discovery report is plain data")
+            serde_json::to_string_pretty(&doc).map_err(|error| {
+                CommandError::failed(format!("lv2-discover: encode JSON: {error}"))
+            })?
         ),
         OutputFormat::Human => render_human(&doc),
     }

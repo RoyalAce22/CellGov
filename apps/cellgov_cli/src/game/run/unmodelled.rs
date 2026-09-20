@@ -72,12 +72,14 @@ fn caller_evidence<'a>(pup: &str, ordinal: u64) -> Vec<CallerEvidence<'a>> {
             else {
                 return None;
             };
-            (row_pup == pup && row_ordinal.parse().ok() == Some(ordinal)).then(|| CallerEvidence {
-                module,
-                sites: sites
-                    .parse()
-                    .expect("committed caller archive has integer sites"),
-            })
+            if row_pup != pup || row_ordinal.parse().ok() != Some(ordinal) {
+                return None;
+            }
+            let Ok(sites) = sites.parse() else {
+                debug_assert!(false, "committed caller archive has non-integer sites");
+                return None;
+            };
+            Some(CallerEvidence { module, sites })
         })
         .collect()
 }
@@ -90,8 +92,11 @@ fn caller_evidence<'a>(pup: &str, ordinal: u64) -> Vec<CallerEvidence<'a>> {
 pub(super) fn print(rt: &Runtime) {
     let identity = rt.lv2_host().firmware_identity();
     let pup = identity.map(|value| pup_hex(&value.pup_sha256_bytes));
-    let names = parse(&NAME, NAME_TSV).expect("committed name archive parses");
-    let gates = parse(&CAPABILITY_GATE, GATE_TSV).expect("committed gate archive parses");
+    let (Ok(names), Ok(gates)) = (parse(&NAME, NAME_TSV), parse(&CAPABILITY_GATE, GATE_TSV)) else {
+        debug_assert!(false, "committed LV2 report archives must parse");
+        eprintln!("unmodelled_syscall_report_error: committed LV2 archive did not parse");
+        return;
+    };
     let names = name_rows(&names);
     let gates = gate_rows(&gates);
     let rows: Vec<ReportRow<'_>> = rt
@@ -143,10 +148,16 @@ pub(super) fn print(rt: &Runtime) {
         })
         .collect();
     if !rows.is_empty() {
-        println!(
-            "unmodelled_syscall_report: {}",
-            serde_json::to_string(&rows).expect("report rows serialize")
-        );
+        match serde_json::to_string(&rows) {
+            Ok(json) => println!("unmodelled_syscall_report: {json}"),
+            Err(error) => {
+                debug_assert!(
+                    false,
+                    "unmodelled syscall report serialization failed: {error}"
+                );
+                eprintln!("unmodelled_syscall_report_error: {error}");
+            }
+        }
     }
 }
 

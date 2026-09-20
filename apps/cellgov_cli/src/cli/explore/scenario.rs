@@ -1,13 +1,15 @@
 //! Schedule exploration over a testkit scenario or an LV2-driven ELF
 //! microtest.
 
+use std::cell::Cell;
+
 use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
 use crate::cli::compare::{load_observations_from_dir, report_first_invariant_break};
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::OutputFormat;
-use crate::cli::scenarios::{build_lv2_fixture, microtest_region_defs, MICROTESTS};
+use crate::cli::scenarios::{build_lv2_runtime, microtest_region_defs, MICROTESTS};
 use crate::cli::self_load::load_file;
 
 pub(super) fn run_explore(
@@ -55,19 +57,23 @@ pub(super) fn run_explore_micro(
             MICROTESTS.join(", ")
         )));
     }
-    // The explorer calls its factory once and snapshots that runtime.
-    // Keep the successful load so no second filesystem read can fail.
-    let mut fixture = Some(build_lv2_fixture(name)?);
+    let mut seed = Some(build_lv2_runtime(name)?);
+    let reused = Cell::new(false);
     let config = ExplorationConfig::default();
     let result = cellgov_explore::explore(
         || {
-            fixture
-                .take()
-                .expect("the explorer calls its runtime factory once")
-                .build_runtime()
+            seed.take().unwrap_or_else(|| {
+                reused.set(true);
+                ScenarioFixture::empty().build_runtime()
+            })
         },
         &config,
     );
+    if reused.get() {
+        return Err(CommandError::failed(
+            "explore micro: runtime factory was invoked more than once",
+        ));
+    }
     match result {
         Some(r) => {
             report_first_invariant_break(r.first_invariant_break.as_deref());
@@ -135,19 +141,23 @@ pub(super) fn run_explore_micro_oracle(
         .collect();
 
     let config = ExplorationConfig::default();
-    // The explorer calls its factory once and snapshots that runtime.
-    // Keep the successful load so no second filesystem read can fail.
-    let mut fixture = Some(build_lv2_fixture(name)?);
+    let mut seed = Some(build_lv2_runtime(name)?);
+    let reused = Cell::new(false);
     let result = cellgov_explore::explore_with_regions(
         || {
-            fixture
-                .take()
-                .expect("the explorer calls its runtime factory once")
-                .build_runtime()
+            seed.take().unwrap_or_else(|| {
+                reused.set(true);
+                ScenarioFixture::empty().build_runtime()
+            })
         },
         &config,
         &region_specs,
     );
+    if reused.get() {
+        return Err(CommandError::failed(
+            "explore micro: runtime factory was invoked more than once",
+        ));
+    }
 
     let Some(r) = result else {
         println!("microtest: {name}");
@@ -202,10 +212,14 @@ pub(super) fn run_explore_micro_oracle(
             }
         }
         OutputFormat::Json => {
+            let exploration = serde_json::from_str::<serde_json::Value>(
+                &cellgov_explore::report::format_json(&r.exploration),
+            )
+            .map_err(|error| {
+                CommandError::failed(format!("explore micro: decode report JSON: {error}"))
+            })?;
             let json = serde_json::json!({
-                "exploration": serde_json::from_str::<serde_json::Value>(
-                    &cellgov_explore::report::format_json(&r.exploration)
-                ).expect("invariant: exploration report is float-free by construction (style doc 0.5d contract)"),
+                "exploration": exploration,
                 "oracle": {
                     "baselines_count": baselines.len(),
                     "baseline_matches": baseline_matches,
@@ -216,8 +230,9 @@ pub(super) fn run_explore_micro_oracle(
             });
             println!(
                 "{}",
-                serde_json::to_string_pretty(&json)
-                    .expect("invariant: primitive-only serde_json::Value tree always serializes (style doc 0.5d contract)"),
+                serde_json::to_string_pretty(&json).map_err(|error| {
+                    CommandError::failed(format!("explore micro: encode JSON: {error}"))
+                })?,
             );
         }
     }

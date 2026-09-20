@@ -81,7 +81,8 @@ pub(crate) fn resolve_title_manifest(
 pub(crate) fn resolve_ps3_vfs_root(flag: Option<&Path>) -> Result<PathBuf, CommandError> {
     let root = resolve_ps3_vfs_root_inner(flag, std::env::var_os(crate::env_vars::PS3_VFS_ROOT))
         .map_err(CommandError::failed)?;
-    super::keys::fix_vault_root(&root);
+    super::keys::fix_vault_root(&root)
+        .map_err(|error| CommandError::failed(format!("VFS root: {error}")))?;
     Ok(root)
 }
 

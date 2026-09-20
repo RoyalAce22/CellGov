@@ -52,7 +52,14 @@ impl CellResult {
                     // on every deserialize, which is the only way a
                     // summary reaches here.
                     ByteParity::Diverge { .. } => {
-                        unreachable!("a loaded summary cannot pair Convergence::Yes with Diverge")
+                        debug_assert!(
+                            false,
+                            "a loaded summary paired Convergence::Yes with Diverge"
+                        );
+                        Self::Frontier {
+                            reason: "invalid summary: convergence conflicts with byte parity"
+                                .to_string(),
+                        }
                     }
                 },
                 (Convergence::No { reason }, true) => Self::Probe {
@@ -93,10 +100,6 @@ impl CellResult {
             Self::Unrecorded { reason: None } => ".".to_string(),
             Self::Unrecorded { reason: Some(r) } => format!(". ({r})"),
         };
-        debug_assert!(
-            !token.contains('|') && !token.contains('\n'),
-            "cell token contains markdown-table-breaking char(s): {token:?}"
-        );
         token
     }
 

@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use super::cell::CellResult;
-use super::index::assert_table_safe;
 use super::load::TitleDocs;
 use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
@@ -30,48 +29,27 @@ const FIRMWARE_LINK: &str = "the [firmware page](../firmware.md)";
 
 /// The index's link to one title's page.
 pub(crate) fn detail_page_link(content_id: &str) -> String {
-    assert_page_name_safe(content_id);
     format!("[{content_id}]({DETAIL_DIR}/{content_id}.md)")
 }
 
 /// Where one title's page is written, relative to the output
 /// directory.
 pub(crate) fn detail_page_path(content_id: &str) -> PathBuf {
-    assert_page_name_safe(content_id);
     PathBuf::from(DETAIL_DIR).join(format!("{content_id}.md"))
 }
 
-/// Refuse a content id that is not one file name and one bare link
-/// target.
-///
-/// The manifest loader takes the field as free text. It lands here as
-/// a path component under [`DETAIL_DIR`] and as the target of the
-/// index's link. A separator or a `..` writes the page outside the
-/// directory the generator owns and sweeps. A bracket or a space ends
-/// the link early.
-///
-/// # Panics
-///
-/// Panics when `content_id` is empty, is `.` or `..`, or holds a
-/// character outside ASCII alphanumerics, `-`, `_`, and `.`.
-fn assert_page_name_safe(content_id: &str) {
-    assert!(
-        !content_id.is_empty()
-            && content_id != "."
-            && content_id != ".."
-            && content_id
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')),
-        "title manifest field `content_id` is neither one file name nor a bare markdown link \
-         target: {content_id:?}"
-    );
+pub(crate) fn page_name_safe(content_id: &str) -> bool {
+    !content_id.is_empty()
+        && content_id != "."
+        && content_id != ".."
+        && content_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// Render one title's detail page.
 pub(crate) fn render(docs: &TitleDocs<'_>) -> String {
     let title = docs.title;
-    assert_table_safe("title manifest field `content_id`", &title.content_id);
-    assert_table_safe("title manifest field `display_name`", &title.display_name);
     let back = if docs.ships_in_firmware() {
         FIRMWARE_LINK
     } else {
@@ -165,9 +143,6 @@ fn render_token(
                 ""
             };
             let token = format!("{}{mark}", result.token());
-            // A token quotes a committed summary's reason or outcome;
-            // no loader checks a summary against the table's rules.
-            assert_table_safe("the grid cell for this title", &token);
             token
         }
     }

@@ -6,7 +6,16 @@
     clippy::print_stderr,
     reason = "CLI binary: stdout/stderr are the user-facing output channel"
 )]
-#![cfg_attr(test, allow(clippy::unwrap_used))]
+#![deny(clippy::expect_used, clippy::panic, clippy::unreachable)]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unreachable,
+        clippy::unwrap_used
+    )
+)]
 
 #[cfg(feature = "decrypt")]
 mod caller_census;

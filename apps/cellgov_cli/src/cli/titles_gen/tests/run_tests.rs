@@ -54,6 +54,22 @@ fn an_empty_registry_still_emits_both_indexes() {
 }
 
 #[test]
+fn unsafe_manifest_text_is_a_typed_render_refusal() {
+    let mut t = title("NPAA90007", "Broken | Row", 2009, "Studio");
+    let fixtures = Fixtures::new("unsafe-table-text");
+    assert!(matches!(
+        render_docs([&t], fixtures.path()),
+        Err(SummaryLoadError::UnsafeTableText { .. })
+    ));
+
+    t.content_id = "../outside".to_string();
+    assert!(matches!(
+        render_docs([&t], fixtures.path()),
+        Err(SummaryLoadError::UnsafePageName { .. })
+    ));
+}
+
+#[test]
 fn a_firmware_shipped_title_gets_a_detail_page_under_the_same_directory() {
     let t = firmware_exec_title("VSHTEST", "Firmware Exec", &["4.93"]);
     let fixtures = Fixtures::new("output-firmware-exec");

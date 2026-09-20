@@ -124,7 +124,7 @@ fn a_window_with_no_choice_in_it_says_so() {
 fn the_json_document_names_the_window_beside_the_exploration() {
     let r = result(StopReason::Stalled, vec![]);
     let v: serde_json::Value =
-        serde_json::from_str(&json(&window(CheckpointTrigger::ProcessExit), &r))
+        serde_json::from_str(&json(&window(CheckpointTrigger::ProcessExit), &r).unwrap())
             .expect("the document parses");
     assert_eq!(v["title"], SAMPLE_TITLE);
     assert_eq!(v["window"]["opened_at"], 1_200);
@@ -279,7 +279,7 @@ fn the_reports_name_the_fault_count_the_status_came_from() {
     );
 
     let v: serde_json::Value =
-        serde_json::from_str(&json(&w, &faulted)).expect("the document parses");
+        serde_json::from_str(&json(&w, &faulted).unwrap()).expect("the document parses");
     assert_eq!(v["guest_faults"], 1);
     assert_eq!(v["model_refusals"], 0);
     assert_eq!(v["exploration"]["schedules"][0]["stop_class"], "fault");

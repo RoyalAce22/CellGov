@@ -247,21 +247,11 @@ fn cross_present_boot_absent_renders_dashes_then_yes() {
 }
 
 #[test]
-#[should_panic(expected = "markdown-table-breaking")]
-fn assert_table_safe_panics_on_pipe_char() {
-    assert_table_safe("display_name", "Bad | Name");
-}
-
-#[test]
-#[should_panic(expected = "markdown-table-breaking")]
-fn assert_table_safe_panics_on_newline() {
-    assert_table_safe("developer", "Studio\nLine 2");
-}
-
-#[test]
-#[should_panic(expected = "markdown-table-breaking")]
-fn assert_table_safe_panics_on_bare_carriage_return() {
-    assert_table_safe("engine", "Studio\rLine 2");
+fn table_safety_rejects_row_breaking_characters() {
+    assert!(!table_safe("Bad | Name"));
+    assert!(!table_safe("Studio\nLine 2"));
+    assert!(!table_safe("Studio\rLine 2"));
+    assert!(table_safe("Studio Name"));
 }
 
 #[test]

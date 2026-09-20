@@ -89,7 +89,7 @@ fn classify_source(raw: &[u8]) -> Result<SourceKind, LoadError> {
     if raw.len() < cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE {
         return Err(LoadError::TooSmall { len: raw.len() });
     }
-    let magic: [u8; 4] = raw[0..4].try_into().expect("4-byte prefix");
+    let magic = [raw[0], raw[1], raw[2], raw[3]];
     if magic == ELF_MAGIC {
         return Ok(SourceKind::Elf);
     }

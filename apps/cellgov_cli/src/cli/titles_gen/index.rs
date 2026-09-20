@@ -76,12 +76,6 @@ fn render_row(docs: &TitleDocs<'_>) -> String {
         .reference_key()
         .map_or_else(|| NO_DATA.to_string(), |k| k.label());
 
-    assert_table_safe("title manifest field `content_id`", &title.content_id);
-    assert_table_safe("title manifest field `display_name`", &title.display_name);
-    assert_table_safe("title manifest field `developer`", &title.developer);
-    assert_table_safe("title manifest field `engine`", &title.engine);
-    assert_table_safe("the reference cell's label", &config_cell);
-
     format!(
         "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
         detail_page_link(&title.content_id),
@@ -119,11 +113,6 @@ pub(super) fn data_cells(artifacts: &CellArtifacts) -> (String, String, String, 
         Some(c) => c.display_matrix_columns(),
         None => (NO_DATA.to_string(), NO_DATA.to_string()),
     };
-    // These three quote a committed summary; no loader checks a
-    // summary against the table's rules.
-    assert_table_safe("the cell's checkpoint", &checkpoint);
-    assert_table_safe("the cell's convergence", &convergence);
-    assert_table_safe("the cell's byte parity", &byte_parity);
     (checkpoint, steps, insns, convergence, byte_parity)
 }
 
@@ -148,23 +137,8 @@ pub(crate) fn sort_by_content_id<'a>(
     titles
 }
 
-/// Refuse a `|` or a line break in a value bound for a table cell.
-///
-/// The documented way to regenerate these documents is a release
-/// build. A debug-only check is absent there, so a broken row reaches
-/// the committed document as the generator's answer. The manifest
-/// loader refuses `[[bench.matrix]] pending` for the same reason.
-///
-/// # Panics
-///
-/// Panics when `value` holds a `|`, an LF, or a CR. A markdown line
-/// ending is an LF, a CRLF, or a bare CR, so a lone CR ends the row
-/// as an LF does.
-pub(crate) fn assert_table_safe(field: &str, value: &str) {
-    assert!(
-        !value.contains('|') && !value.contains('\n') && !value.contains('\r'),
-        "`{field}` contains markdown-table-breaking char(s): {value:?}"
-    );
+pub(crate) fn table_safe(value: &str) -> bool {
+    !value.contains('|') && !value.contains('\n') && !value.contains('\r')
 }
 
 #[cfg(test)]

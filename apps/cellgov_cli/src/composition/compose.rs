@@ -85,6 +85,12 @@ pub(crate) enum ComposeError {
         /// The VFS root the store was read under.
         root: String,
     },
+    /// A title entry exists but has no base record.
+    #[error("{title_id} has updates in the store but no base record; reinstall the title")]
+    BaseRecordMissing {
+        /// Title whose base record is absent.
+        title_id: String,
+    },
     /// A firmware-relative executable path with no firmware entry to
     /// resolve it against.
     #[error(
@@ -388,13 +394,16 @@ fn resolve_game(
         GameVersion::Base => None,
         GameVersion::Update(v) => entry.updates.get(v).cloned(),
     };
+    let base = entry
+        .base
+        .clone()
+        .ok_or_else(|| ComposeError::BaseRecordMissing {
+            title_id: title_id.clone(),
+        })?;
     Ok(GameChoice::Stored(Box::new(StoredGame {
         title_id: title_id.clone(),
         version,
-        base: entry
-            .base
-            .clone()
-            .expect("invariant: select_game_version refuses an entry with no base"),
+        base,
         update,
     })))
 }

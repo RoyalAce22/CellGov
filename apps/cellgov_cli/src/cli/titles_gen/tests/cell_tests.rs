@@ -126,14 +126,13 @@ fn a_cross_runner_verdict_outranks_the_anchor_beside_it() {
     );
 }
 
-#[cfg(debug_assertions)]
 #[test]
-#[should_panic(expected = "markdown-table-breaking")]
-fn a_reason_carrying_a_table_separator_is_caught_before_it_reaches_the_grid() {
-    CellResult::Frontier {
+fn a_reason_carrying_a_table_separator_is_not_table_safe() {
+    let token = CellResult::Frontier {
         reason: "region a | region b".to_string(),
     }
     .token();
+    assert!(!super::super::index::table_safe(&token));
 }
 
 #[test]

@@ -32,7 +32,8 @@ pub(crate) fn run(
     if args.json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&render_json(&map)).expect("funcmap JSON is plain data")
+            serde_json::to_string_pretty(&render_json(&map))
+                .map_err(|error| CommandError::failed(format!("funcs: encode JSON: {error}")))?
         );
     } else {
         print!("{}", render_human(&map));

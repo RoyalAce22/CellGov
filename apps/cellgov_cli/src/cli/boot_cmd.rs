@@ -812,7 +812,9 @@ pub(crate) fn bench_boot(
         }
         game::BenchGate::AnchorDrift => {
             let game::AnchorVerdict::Drift(failures) = &outcome.anchor else {
-                unreachable!("invariant: only a drift verdict reaches the anchor-drift gate")
+                return Err(CommandError::failed(
+                    "boot bench: anchor-drift gate carried no drift verdict",
+                ));
             };
             let cell = plan
                 .cell
@@ -850,9 +852,11 @@ pub(crate) fn bench_boot(
                 game::ThroughputVerdict::Unmeasurable => {
                     "a run reported a zero wall, so there is no spread to compare".to_string()
                 }
-                game::ThroughputVerdict::Measured { .. } => unreachable!(
-                    "invariant: a measured throughput verdict does not reach the strict gate"
-                ),
+                game::ThroughputVerdict::Measured { .. } => {
+                    return Err(CommandError::failed(
+                        "boot bench: spread-exceeded gate carried a measured verdict",
+                    ))
+                }
             };
             eprintln!(
                 "boot bench: --strict-perf: no throughput verdict -- {detail}. \

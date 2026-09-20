@@ -122,9 +122,7 @@ pub(crate) fn parse_patch_byte_pair_value(pair: &str) -> Result<(u64, u8), CliAr
         return Err(CliArgError::PatchByteEmpty);
     }
     let mut parts = pair.splitn(2, '=');
-    let a_raw = parts
-        .next()
-        .expect("splitn(2) yields at least one element on a non-empty input");
+    let a_raw = parts.next().unwrap_or(pair);
     let b_raw = parts
         .next()
         .ok_or_else(|| CliArgError::PatchByteMissingEq {

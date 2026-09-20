@@ -14,6 +14,13 @@ static NO_KEYS: KeyVault = KeyVault::empty();
 /// fixed by [`fix_vault_root`] before the first SCE-wrapped image.
 static VAULT_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("key vault root already fixed at {} and cannot become {}", fixed.display(), requested.display())]
+pub(crate) struct VaultRootConflict {
+    fixed: PathBuf,
+    requested: PathBuf,
+}
+
 /// The install root enclosing the PS3 VFS root a subcommand was given.
 ///
 /// `--vfs-root` names the `dev_hdd0` mount, while the store commands
@@ -61,25 +68,28 @@ pub(crate) fn install_root_of(ps3_vfs_root: &Path) -> PathBuf {
 /// `cellgov_boot::prx::load`) have no root in hand and read what was
 /// fixed here.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if a second call names a different root. The vault can
-/// already contain keys from the first root.
-pub(crate) fn fix_vault_root(ps3_vfs_root: &Path) {
-    fix_vault_root_in(&VAULT_ROOT, ps3_vfs_root);
+/// Returns an error if a second call names a different root.
+pub(crate) fn fix_vault_root(ps3_vfs_root: &Path) -> Result<(), VaultRootConflict> {
+    fix_vault_root_in(&VAULT_ROOT, ps3_vfs_root)
 }
 
 /// [`fix_vault_root`] against an explicit cell, so a test can drive
 /// the conflict arm without settling the process-wide one.
-fn fix_vault_root_in(cell: &OnceLock<PathBuf>, ps3_vfs_root: &Path) {
+fn fix_vault_root_in(
+    cell: &OnceLock<PathBuf>,
+    ps3_vfs_root: &Path,
+) -> Result<(), VaultRootConflict> {
     let root = install_root_of(ps3_vfs_root);
     let fixed = cell.get_or_init(|| root.clone());
-    assert!(
-        *fixed == root,
-        "key vault root already fixed at {} and cannot become {}",
-        fixed.display(),
-        root.display(),
-    );
+    if *fixed != root {
+        return Err(VaultRootConflict {
+            fixed: fixed.clone(),
+            requested: root,
+        });
+    }
+    Ok(())
 }
 
 /// The root [`fix_vault_root`] settled on, or `None` while nothing has

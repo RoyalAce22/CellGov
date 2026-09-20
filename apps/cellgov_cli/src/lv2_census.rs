@@ -630,9 +630,7 @@ fn write_all(
 }
 
 fn write(path: &Path, text: &str) -> Result<(), Lv2CensusError> {
-    let parent = path
-        .parent()
-        .expect("archive output has a parent directory");
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
     std::fs::create_dir_all(parent).map_err(|source| Lv2CensusError::CreateOutput {
         path: parent.to_path_buf(),
         source,

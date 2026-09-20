@@ -7,7 +7,7 @@
 //! them.
 
 use super::detail::detail_page_link;
-use super::index::{assert_table_safe, coverage_counts, data_cells};
+use super::index::{coverage_counts, data_cells};
 use super::load::TitleDocs;
 
 const FIRMWARE_TEMPLATE: &str = include_str!("../templates/firmware.md.template");
@@ -45,9 +45,6 @@ fn render_row(docs: &TitleDocs<'_>, cell: &super::load::LoadedCell) -> String {
     let title = docs.title;
     let (checkpoint, steps, insns, convergence, byte_parity) = data_cells(&cell.artifacts);
     let config = cell.key.label();
-    assert_table_safe("title manifest field `content_id`", &title.content_id);
-    assert_table_safe("title manifest field `display_name`", &title.display_name);
-    assert_table_safe("the cell's label", &config);
     format!(
         "| {} | {} | {} | {} | {} | {} | {} | {} |",
         detail_page_link(&title.content_id),

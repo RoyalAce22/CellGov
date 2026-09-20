@@ -248,7 +248,8 @@ pub(super) fn not_installed_reason(e: &ComposeError) -> Option<String> {
             GameVersionSelectError::NotInstalled { .. }
             | GameVersionSelectError::OrphanUpdates { .. },
         )
-        | ComposeError::TitleNotInStore { .. } => Some(e.to_string()),
+        | ComposeError::TitleNotInStore { .. }
+        | ComposeError::BaseRecordMissing { .. } => Some(e.to_string()),
         ComposeError::Firmware(_)
         | ComposeError::GameVersion(_)
         | ComposeError::Inventory(_)
@@ -265,14 +266,18 @@ pub(super) fn not_installed_reason(e: &ComposeError) -> Option<String> {
 }
 
 /// The verdict a completed run set gives its cell.
-pub(super) fn classify(outcome: game::BenchRunsOutcome) -> CellVerdict {
-    match outcome.gate {
+pub(super) fn classify(outcome: game::BenchRunsOutcome) -> Result<CellVerdict, CommandError> {
+    let verdict = match outcome.gate {
         game::BenchGate::DeterminismBreak => {
             CellVerdict::DeterminismBreak(outcome.determinism_failures.len())
         }
         game::BenchGate::AnchorDrift => match outcome.anchor {
             game::AnchorVerdict::Drift(failures) => CellVerdict::Moved(failures),
-            _ => unreachable!("invariant: only a drift verdict reaches the anchor-drift gate"),
+            _ => {
+                return Err(CommandError::failed(
+                    "boot bench --all: anchor-drift gate carried no drift verdict",
+                ))
+            }
         },
         game::BenchGate::SpreadExceeded => CellVerdict::NoThroughputVerdict,
         game::BenchGate::Pass => match outcome.anchor {
@@ -281,10 +286,13 @@ pub(super) fn classify(outcome: game::BenchRunsOutcome) -> CellVerdict {
             game::AnchorVerdict::NotComparable(reasons) => CellVerdict::NotCompared(reasons),
             game::AnchorVerdict::Skipped => CellVerdict::NotChecked,
             game::AnchorVerdict::Drift(_) => {
-                unreachable!("invariant: a drift verdict fails the gate")
+                return Err(CommandError::failed(
+                    "boot bench --all: passing gate carried an anchor drift",
+                ))
             }
         },
-    }
+    };
+    Ok(verdict)
 }
 
 /// Boot one declared cell as a run set and hold it against its anchor.
@@ -375,7 +383,7 @@ fn gate_cell(
     match outcome {
         Ok(o) => {
             bar.finish();
-            Ok(classify(o))
+            classify(o)
         }
         Err(game::SpawnError::Command(error)) => {
             bar.abort();
@@ -457,7 +465,12 @@ pub(crate) fn run(
                 let title = titles
                     .iter()
                     .find(|t| t.content_id == cell.content_id)
-                    .expect("invariant: every declared cell came from a registry title");
+                    .ok_or_else(|| {
+                        CommandError::failed(format!(
+                            "{COMMAND}: declared cell {} has no registry title",
+                            cell.label()
+                        ))
+                    })?;
                 gate_cell(cell, title, gate_args, vfs_flag, &vfs_root, render)?
             }
         };

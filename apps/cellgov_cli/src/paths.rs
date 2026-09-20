@@ -60,11 +60,7 @@ pub(crate) fn checkpoint_kind(cp: CheckpointTrigger) -> CheckpointKind {
 /// fixtures; callers that gate on an anchor must probe the returned
 /// path rather than treating a miss as "nothing recorded".
 pub(crate) fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root is two levels above apps/cellgov_cli")
-        .to_path_buf()
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
 pub(crate) fn fixtures_dir(root: &Path) -> PathBuf {

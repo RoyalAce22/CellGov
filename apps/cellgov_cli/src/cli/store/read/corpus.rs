@@ -324,11 +324,12 @@ pub(crate) fn firmware_verify_corpus(
             &manifest.firmware.image_version,
             row,
         ));
-        installed.push(firmware_entry_doc(
-            &store,
-            entry,
-            keys.as_ref().expect("candidates made the vault load"),
-        )?);
+        let Some(keys) = keys.as_ref() else {
+            return Err(CommandError::failed(
+                "firmware verify-corpus: installed candidates exist but the key vault was not loaded",
+            ));
+        };
+        installed.push(firmware_entry_doc(&store, entry, keys)?);
     }
     mismatched.sort_by(|a, b| a.subject.cmp(&b.subject));
     let clean = corpus_is_clean(&missing, &mismatched, &installed);

@@ -17,29 +17,16 @@ use crate::paths::workspace_root;
 pub(crate) fn run(vfs_flag: Option<&Path>) -> Result<CommandExitCode, CommandError> {
     let root = vfs_flag.unwrap_or_else(|| Path::new("vfs"));
     let checkout = ["rpc", "s3-src"].concat();
-    let source = workspace_root()
-        .join("tools")
-        .join(checkout)
-        .join(["rpc", "s3/Emu/Cell/lv2/lv2.cpp"].concat());
+    let checkout_root = workspace_root().join("tools").join(checkout);
+    let source = checkout_root.join(["rpc", "s3/Emu/Cell/lv2/lv2.cpp"].concat());
     if !source.exists() {
         println!("oracle gap: not computed -- local oracle checkout is unavailable");
         return Ok(CommandExitCode::SUCCESS);
     }
     let revision = std::process::Command::new("git")
-        .args([
-            "-C",
-            source
-                .parent()
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .and_then(Path::parent)
-                .expect("oracle source has repository parents")
-                .to_str()
-                .expect("checkout path is UTF-8"),
-            "rev-parse",
-            "HEAD",
-        ])
+        .arg("-C")
+        .arg(&checkout_root)
+        .args(["rev-parse", "HEAD"])
         .output()
         .map_err(|error| {
             CommandError::failed(format!("oracle gap: read checkout revision: {error}"))
@@ -72,7 +59,7 @@ pub(crate) fn run(vfs_flag: Option<&Path>) -> Result<CommandExitCode, CommandErr
         }
     }
     let out = root.join(".cellgov/oracle-gap.tsv");
-    std::fs::create_dir_all(out.parent().expect("overlay has parent"))
+    std::fs::create_dir_all(root.join(".cellgov"))
         .map_err(|error| CommandError::failed(format!("oracle gap: create overlay: {error}")))?;
     let mut text = format!(
         "revision\t{}\nordinal\n",

@@ -75,6 +75,22 @@ pub(crate) fn build_lv2_fixture(name: &str) -> Result<ScenarioFixture, CommandEr
     build_lv2_fixture_under(std::path::Path::new("."), name)
 }
 
+/// Builds and validates an LV2-driven ELF microtest runtime.
+///
+/// # Errors
+///
+/// Returns an error if the fixture cannot be built or if runtime
+/// construction produced no execution units.
+pub(crate) fn build_lv2_runtime(name: &str) -> Result<cellgov_core::Runtime, CommandError> {
+    let rt = build_lv2_fixture(name)?.build_runtime();
+    if rt.registry().is_empty() {
+        return Err(CommandError::failed(format!(
+            "microtest {name}: runtime construction produced no execution units"
+        )));
+    }
+    Ok(rt)
+}
+
 /// Builds a microtest fixture under an explicit corpus root.
 ///
 /// The explicit root avoids changes to the process-wide working directory.
@@ -114,12 +130,16 @@ pub(crate) fn build_lv2_fixture_under(
             let mut stub_bytes = Vec::with_capacity(8);
             stub_bytes.extend_from_slice(&li_r11_22.to_be_bytes());
             stub_bytes.extend_from_slice(&sc.to_be_bytes());
-            mem.apply_commit(stub_range, &stub_bytes)
-                .expect("scenario seed: apply_commit on freshly-allocated memory");
+            if let Err(error) = mem.apply_commit(stub_range, &stub_bytes) {
+                debug_assert!(false, "scenario stub placement failed: {error}");
+                return;
+            }
 
             let mut state = cellgov_ppu::state::PpuState::new();
-            cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state)
-                .expect("scenario seed: load_ppu_elf on bundled microtest ELF");
+            if let Err(error) = cellgov_ppu::loader::load_ppu_elf(&ppu_elf, mem, &mut state) {
+                debug_assert!(false, "bundled microtest ELF failed to load: {error}");
+                return;
+            }
             state.set_gpr(1, stack_top);
             state.set_lr(0);
             *primed_seed.borrow_mut() = Some(state);
@@ -159,10 +179,10 @@ pub(crate) fn build_lv2_fixture_under(
                 Ok(Box::new(unit))
             });
 
-            let ppu_state = primed_reg
-                .borrow_mut()
-                .take()
-                .expect("invariant: seed_memory populates primed_seed before register fires");
+            let Some(ppu_state) = primed_reg.borrow_mut().take() else {
+                debug_assert!(false, "scenario seed did not produce a PPU state");
+                return;
+            };
             rt.register_unit_with(|id| {
                 let mut unit = PpuExecutionUnit::new(id);
                 *unit.state_mut() = ppu_state;

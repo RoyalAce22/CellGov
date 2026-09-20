@@ -76,7 +76,7 @@ fn the_worst_cell_decides_the_status() {
 #[test]
 fn a_passing_set_is_classified_by_its_anchor_verdict() {
     assert_eq!(
-        classify(outcome(BenchGate::Pass, AnchorVerdict::Match, Vec::new())),
+        classify(outcome(BenchGate::Pass, AnchorVerdict::Match, Vec::new())).unwrap(),
         CellVerdict::Matches
     );
     assert_eq!(
@@ -84,7 +84,8 @@ fn a_passing_set_is_classified_by_its_anchor_verdict() {
             BenchGate::Pass,
             AnchorVerdict::NotRecorded("fw 4.93 x base".to_string()),
             Vec::new()
-        )),
+        ))
+        .unwrap(),
         CellVerdict::NotRecorded,
         "an unrecorded cell passes the single gate and is a finding here"
     );
@@ -93,11 +94,12 @@ fn a_passing_set_is_classified_by_its_anchor_verdict() {
             BenchGate::Pass,
             AnchorVerdict::NotComparable(vec!["retargeted".to_string()]),
             Vec::new()
-        )),
+        ))
+        .unwrap(),
         CellVerdict::NotCompared(vec!["retargeted".to_string()])
     );
     assert_eq!(
-        classify(outcome(BenchGate::Pass, AnchorVerdict::Skipped, Vec::new())),
+        classify(outcome(BenchGate::Pass, AnchorVerdict::Skipped, Vec::new())).unwrap(),
         CellVerdict::NotChecked
     );
 }
@@ -110,7 +112,8 @@ fn a_failing_set_is_classified_by_its_gate() {
             BenchGate::AnchorDrift,
             AnchorVerdict::Drift(failures.clone()),
             Vec::new()
-        )),
+        ))
+        .unwrap(),
         CellVerdict::Moved(failures)
     );
     assert_eq!(
@@ -118,7 +121,8 @@ fn a_failing_set_is_classified_by_its_gate() {
             BenchGate::DeterminismBreak,
             AnchorVerdict::Match,
             vec!["a".to_string(), "b".to_string()]
-        )),
+        ))
+        .unwrap(),
         CellVerdict::DeterminismBreak(2)
     );
     assert_eq!(
@@ -126,7 +130,8 @@ fn a_failing_set_is_classified_by_its_gate() {
             BenchGate::SpreadExceeded,
             AnchorVerdict::Match,
             Vec::new()
-        )),
+        ))
+        .unwrap(),
         CellVerdict::NoThroughputVerdict
     );
 }

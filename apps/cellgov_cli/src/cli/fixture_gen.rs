@@ -446,9 +446,12 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
             len: eboot_bytes.len(),
         });
     }
-    let magic: [u8; 4] = eboot_bytes[0..4]
-        .try_into()
-        .expect("guarded by len() >= ELF_HEADER_SIZE");
+    let magic = [
+        eboot_bytes[0],
+        eboot_bytes[1],
+        eboot_bytes[2],
+        eboot_bytes[3],
+    ];
     if magic != ELF_MAGIC {
         return Err(ElfHeaderParseError::BadMagic { found: magic });
     }
@@ -460,21 +463,18 @@ fn elf_header_plus_phdr_table_end(eboot_bytes: &[u8]) -> Result<u64, ElfHeaderPa
     if endian != 2 {
         return Err(ElfHeaderParseError::WrongEndian { found: endian });
     }
-    let phoff = u64::from_be_bytes(
-        eboot_bytes[32..40]
-            .try_into()
-            .expect("guarded by len() >= ELF_HEADER_SIZE"),
-    );
-    let phentsize = u16::from_be_bytes(
-        eboot_bytes[54..56]
-            .try_into()
-            .expect("guarded by len() >= ELF_HEADER_SIZE"),
-    ) as u64;
-    let phnum = u16::from_be_bytes(
-        eboot_bytes[56..58]
-            .try_into()
-            .expect("guarded by len() >= ELF_HEADER_SIZE"),
-    ) as u64;
+    let phoff = u64::from_be_bytes([
+        eboot_bytes[32],
+        eboot_bytes[33],
+        eboot_bytes[34],
+        eboot_bytes[35],
+        eboot_bytes[36],
+        eboot_bytes[37],
+        eboot_bytes[38],
+        eboot_bytes[39],
+    ]);
+    let phentsize = u16::from_be_bytes([eboot_bytes[54], eboot_bytes[55]]) as u64;
+    let phnum = u16::from_be_bytes([eboot_bytes[56], eboot_bytes[57]]) as u64;
     // phentsize * phnum cannot exceed u16::MAX * u16::MAX = 0xFFFE_0001,
     // safely inside u64. Only the phoff add can overflow.
     let tbl = phentsize * phnum;

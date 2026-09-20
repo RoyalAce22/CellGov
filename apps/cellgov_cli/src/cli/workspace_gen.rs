@@ -1,6 +1,6 @@
 //! `cellgov dev workspace-gen` -- Cargo-derived architecture-map regions.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -128,18 +128,22 @@ fn render_dag(metadata: &Metadata) -> String {
     }
 
     let mut out = String::from("```mermaid\ngraph BT\n");
+    let indices: BTreeMap<_, _> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| (*name, index))
+        .collect();
     for (index, name) in names.iter().enumerate() {
         out.push_str(&format!("  n{index}[\"{name}\"]\n"));
     }
     for (from, to) in edges {
-        let from_index = names
-            .iter()
-            .position(|name| *name == from)
-            .expect("workspace package");
-        let to_index = names
-            .iter()
-            .position(|name| *name == to)
-            .expect("workspace package");
+        let (Some(&from_index), Some(&to_index)) = (indices.get(from), indices.get(to)) else {
+            debug_assert!(
+                false,
+                "a workspace edge names a package outside the workspace"
+            );
+            continue;
+        };
         out.push_str(&format!("  n{to_index} --> n{from_index}\n"));
     }
     out.push_str("```\n");

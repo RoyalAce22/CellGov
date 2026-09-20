@@ -118,6 +118,12 @@ pub(crate) enum GameIdentityError {
         /// What the tree's PARAM.SFO names, under its key.
         found: Option<AppVersion>,
     },
+    /// The selected update has no matching store entry.
+    #[error("selected update {version} has no store entry")]
+    SelectedUpdateMissing {
+        /// Selected update version.
+        version: String,
+    },
 }
 
 fn render_named_version(found: &Option<AppVersion>) -> String {
@@ -216,7 +222,7 @@ fn game_identity(stored: &StoredGame) -> Result<GameIdentity, GameIdentityError>
             let update = stored
                 .update
                 .as_ref()
-                .expect("invariant: resolve_game carries the entry of the selected update");
+                .ok_or_else(|| GameIdentityError::SelectedUpdateMissing { version: v.clone() })?;
             (
                 format!("update:{v}"),
                 &update.version,

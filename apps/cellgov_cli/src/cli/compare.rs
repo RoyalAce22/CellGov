@@ -178,9 +178,9 @@ fn compare_against_baseline(
         OutputFormat::Json => {
             println!(
                 "{}",
-                format_json(&result, &baseline, &obs).expect(
-                    "observation data is float-free by construction (style doc 0.5d contract)"
-                )
+                format_json(&result, &baseline, &obs).map_err(|error| {
+                    CommandError::failed(format!("compare: encode JSON: {error}"))
+                })?
             );
         }
     }
@@ -229,9 +229,9 @@ fn run_compare(
         OutputFormat::Json => {
             println!(
                 "{}",
-                serde_json::to_string_pretty(&obs).expect(
-                    "observation data is float-free by construction (style doc 0.5d contract)"
-                )
+                serde_json::to_string_pretty(&obs).map_err(|error| {
+                    CommandError::failed(format!("compare: encode observation JSON: {error}"))
+                })?
             );
         }
     }
@@ -363,9 +363,11 @@ fn run_manifest_compare(
             OutputFormat::Json => {
                 println!(
                     "{}",
-                    format_multi_json(&result, &baselines, &obs).expect(
-                        "observation data is float-free by construction (style doc 0.5d contract)"
-                    )
+                    format_multi_json(&result, &baselines, &obs).map_err(|error| {
+                        CommandError::failed(format!(
+                            "compare: encode multi-baseline JSON: {error}"
+                        ))
+                    })?
                 );
             }
         }
@@ -390,9 +392,9 @@ fn run_manifest_compare(
             OutputFormat::Json => {
                 println!(
                     "{}",
-                    format_json(&result, &baseline, &obs).expect(
-                        "observation data is float-free by construction (style doc 0.5d contract)"
-                    )
+                    format_json(&result, &baseline, &obs).map_err(|error| {
+                        CommandError::failed(format!("compare: encode JSON: {error}"))
+                    })?
                 );
             }
         }
@@ -426,9 +428,9 @@ fn run_manifest_compare(
             OutputFormat::Json => {
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&obs).expect(
-                        "observation data is float-free by construction (style doc 0.5d contract)"
-                    )
+                    serde_json::to_string_pretty(&obs).map_err(|error| {
+                        CommandError::failed(format!("compare: encode observation JSON: {error}"))
+                    })?
                 );
             }
         }
@@ -536,8 +538,9 @@ pub(crate) fn run_compare_observations(
             // machine-parseable JSON payload.
             println!(
                 "{}",
-                cellgov_compare::format_observation_compare_json(&result)
-                    .expect("ObservationCompareResult is float-free by construction (style doc 0.5d contract)")
+                cellgov_compare::format_observation_compare_json(&result).map_err(|error| {
+                    CommandError::failed(format!("compare: encode cross-runner JSON: {error}"))
+                })?
             );
             if result.is_vacuous() {
                 eprintln!(

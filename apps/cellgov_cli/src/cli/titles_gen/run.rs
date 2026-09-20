@@ -109,6 +109,7 @@ pub(crate) fn render_docs<'a>(
         .iter()
         .map(|t| load_title(t, fixtures))
         .collect::<Result<Vec<_>, _>>()?;
+    validate_render_inputs(&loaded)?;
 
     let mut out = vec![
         GeneratedDoc {
@@ -125,6 +126,54 @@ pub(crate) fn render_docs<'a>(
         body: detail::render(d),
     }));
     Ok(out)
+}
+
+fn validate_render_inputs(docs: &[super::load::TitleDocs<'_>]) -> Result<(), SummaryLoadError> {
+    for doc in docs {
+        let title = doc.title;
+        if !detail::page_name_safe(&title.content_id) {
+            return Err(SummaryLoadError::UnsafePageName {
+                content_id: title.content_id.clone(),
+            });
+        }
+        for (field, value) in [
+            (
+                "title manifest field `content_id`",
+                title.content_id.as_str(),
+            ),
+            (
+                "title manifest field `display_name`",
+                title.display_name.as_str(),
+            ),
+            ("title manifest field `developer`", title.developer.as_str()),
+            ("title manifest field `engine`", title.engine.as_str()),
+        ] {
+            ensure_table_safe(field, value)?;
+        }
+        for cell in &doc.cells {
+            ensure_table_safe("the cell's label", &cell.key.label())?;
+            if let Some(game_ver) = &cell.key.game_ver {
+                ensure_table_safe("the cell's game version", game_ver)?;
+            }
+            ensure_table_safe("the grid cell for this title", &cell.result.token())?;
+            let (checkpoint, _, _, convergence, byte_parity) = index::data_cells(&cell.artifacts);
+            ensure_table_safe("the cell's checkpoint", &checkpoint)?;
+            ensure_table_safe("the cell's convergence", &convergence)?;
+            ensure_table_safe("the cell's byte parity", &byte_parity)?;
+        }
+    }
+    Ok(())
+}
+
+fn ensure_table_safe(field: &str, value: &str) -> Result<(), SummaryLoadError> {
+    if index::table_safe(value) {
+        Ok(())
+    } else {
+        Err(SummaryLoadError::UnsafeTableText {
+            field: field.to_string(),
+            value: value.to_string(),
+        })
+    }
 }
 
 /// Pages under the detail directory that no title in `docs` claims.

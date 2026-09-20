@@ -125,6 +125,20 @@ pub(crate) enum SummaryLoadError {
         /// The title whose manifest does not declare it.
         content_id: String,
     },
+    /// Text would break a generated Markdown table row.
+    #[error("{field} contains markdown-table-breaking characters: {value:?}")]
+    UnsafeTableText {
+        /// Source field or derived value.
+        field: String,
+        /// Refused text.
+        value: String,
+    },
+    /// A content id is not one safe page-name component.
+    #[error("title manifest content_id is not a safe page name: {content_id:?}")]
+    UnsafePageName {
+        /// Refused content id.
+        content_id: String,
+    },
 }
 
 /// One declared cell with what its directories hold.

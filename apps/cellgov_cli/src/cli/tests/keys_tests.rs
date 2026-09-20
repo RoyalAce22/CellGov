@@ -82,15 +82,17 @@ fn a_drive_root_stands_in_for_its_own_parent() {
 #[test]
 fn two_mounts_under_one_install_root_agree_on_the_vault() {
     let cell = OnceLock::new();
-    fix_vault_root_in(&cell, Path::new("ps3/dev_hdd0"));
-    fix_vault_root_in(&cell, Path::new("ps3/dev_bdvd"));
+    fix_vault_root_in(&cell, Path::new("ps3/dev_hdd0")).unwrap();
+    fix_vault_root_in(&cell, Path::new("ps3/dev_bdvd")).unwrap();
     assert_eq!(cell.get().map(PathBuf::as_path), Some(Path::new("ps3")));
 }
 
 #[test]
-#[should_panic(expected = "key vault root already fixed")]
 fn a_second_root_under_a_different_install_root_is_refused_not_ignored() {
     let cell = OnceLock::new();
-    fix_vault_root_in(&cell, Path::new("ps3/dev_hdd0"));
-    fix_vault_root_in(&cell, Path::new("/dumps/ps3/dev_hdd0"));
+    fix_vault_root_in(&cell, Path::new("ps3/dev_hdd0")).unwrap();
+    let error = fix_vault_root_in(&cell, Path::new("/dumps/ps3/dev_hdd0")).unwrap_err();
+    assert_eq!(error.fixed, PathBuf::from("ps3"));
+    assert_eq!(error.requested, PathBuf::from("/dumps/ps3"));
+    assert!(error.to_string().contains("already fixed at ps3"));
 }

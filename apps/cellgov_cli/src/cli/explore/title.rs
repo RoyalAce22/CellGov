@@ -7,6 +7,7 @@
 //! a title-scale exploration costs one composition rather than one per
 //! schedule.
 
+use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -20,6 +21,7 @@ use cellgov_boot::BootSink;
 use cellgov_compare::BootOverrides;
 use cellgov_core::Runtime;
 use cellgov_explore::{ExplorationConfig, ExplorationResult, OutcomeClass, StopClass, StopReason};
+use cellgov_testkit::fixtures::ScenarioFixture;
 
 use super::window::{open_window, start_past_cap, WindowStart};
 use crate::cli::boot_cmd::{firmware_module_dir, resolve_boot_inputs, ResolvedPlan};
@@ -115,16 +117,22 @@ pub(super) fn run(
         max_schedules: args.max_schedules,
         max_steps_per_run: args.max_steps_per_run,
     };
-    // The explorer calls its factory once, so the factory hands over
-    // the runtime the boot built.
-    let mut once = Some(rt);
+    let mut seed = Some(rt);
+    let reused = Cell::new(false);
     let result = cellgov_explore::explore_window(
         || {
-            once.take()
-                .expect("invariant: cellgov_explore::explore_window builds one runtime")
+            seed.take().unwrap_or_else(|| {
+                reused.set(true);
+                ScenarioFixture::empty().build_runtime()
+            })
         },
         &config,
     );
+    if reused.get() {
+        return Err(CommandError::failed(
+            "explore title: runtime factory was invoked more than once",
+        ));
+    }
 
     report_first_invariant_break(result.first_invariant_break.as_deref());
     let window = Window {
@@ -135,7 +143,7 @@ pub(super) fn run(
     };
     match format {
         OutputFormat::Human => print!("{}", human(&window, &result)),
-        OutputFormat::Json => println!("{}", json(&window, &result)),
+        OutputFormat::Json => println!("{}", json(&window, &result)?),
     }
     Ok(CommandExitCode::new(exit_code(&window, &result)))
 }
@@ -358,10 +366,11 @@ fn human(window: &Window, result: &ExplorationResult) -> String {
     out
 }
 
-fn json(window: &Window, result: &ExplorationResult) -> String {
+fn json(window: &Window, result: &ExplorationResult) -> Result<String, CommandError> {
     let exploration: serde_json::Value =
-        serde_json::from_str(&cellgov_explore::report::format_json(result))
-            .expect("invariant: the exploration report is float-free by construction");
+        serde_json::from_str(&cellgov_explore::report::format_json(result)).map_err(|error| {
+            CommandError::failed(format!("explore title: decode JSON: {error}"))
+        })?;
     let doc = serde_json::json!({
         "title": window.title,
         "window": {
@@ -378,7 +387,7 @@ fn json(window: &Window, result: &ExplorationResult) -> String {
         "exploration": exploration,
     });
     serde_json::to_string_pretty(&doc)
-        .expect("invariant: a primitive-only serde_json::Value tree always serializes")
+        .map_err(|error| CommandError::failed(format!("explore title: encode JSON: {error}")))
 }
 
 #[cfg(test)]

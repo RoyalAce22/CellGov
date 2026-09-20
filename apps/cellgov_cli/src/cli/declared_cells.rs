@@ -155,7 +155,11 @@ pub(crate) fn filter_declared(
             (Some(f), Some(v)) => format!("fw {f} x {v}"),
             (Some(f), None) => format!("fw {f}"),
             (None, Some(v)) => format!("game version {v}"),
-            (None, None) => unreachable!("an unfiltered selection returned above"),
+            (None, None) => {
+                return Err(CommandError::failed(format!(
+                    "{command}: an unfiltered cell selection unexpectedly became empty"
+                )))
+            }
         };
         return Err(CommandError::failed(format!(
             "{command}: the registry declares no cell matching {asked}; declared: {}. \

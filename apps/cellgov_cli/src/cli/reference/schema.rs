@@ -47,24 +47,32 @@ fn record(artifact: &Artifact) -> Option<String> {
     Some(rel(&layout().record_path(artifact)))
 }
 
-fn sample_title_id() -> TitleId {
-    TitleId::new(SAMPLE_TITLE_ID).expect("invariant: the sample title id is a store key")
-}
-
-fn sample_version(version: &str) -> VersionKey {
-    VersionKey::new(version).expect("invariant: the sample versions are store keys")
-}
-
 /// Every versioned document, each under the commands that emit it.
 pub(crate) fn render() -> String {
+    let (Ok(title_id), Ok(firmware_version), Ok(update_version)) = (
+        TitleId::new(SAMPLE_TITLE_ID),
+        VersionKey::new(SAMPLE_FIRMWARE_VERSION),
+        VersionKey::new(SAMPLE_UPDATE_VERSION),
+    ) else {
+        debug_assert!(false, "CLI reference sample keys must be valid store keys");
+        return "CLI reference schema samples are invalid.\n".to_string();
+    };
     let mut s = String::new();
-    push(&mut s, "`status`", &status_doc());
+    push(
+        &mut s,
+        "`status`",
+        &status_doc(&title_id, &firmware_version, &update_version),
+    );
     push(
         &mut s,
         "`firmware list`, `firmware show`",
-        &firmware_list_doc(),
+        &firmware_list_doc(&firmware_version),
     );
-    push(&mut s, "`title list`, `title show`", &title_list_doc());
+    push(
+        &mut s,
+        "`title list`, `title show`",
+        &title_list_doc(&title_id, &update_version),
+    );
     push(&mut s, "`firmware verify`, `title verify`", &verify_doc());
     push(&mut s, "`firmware verify-corpus`", &pup_corpus_verify_doc());
     push(&mut s, "`firmware kernels`", &kernel_coverage_doc());
@@ -73,16 +81,16 @@ pub(crate) fn render() -> String {
 
 /// One document under its heading, as a fenced JSON block.
 fn push<T: serde::Serialize>(out: &mut String, commands: &str, doc: &T) {
-    let body = serde_json::to_string_pretty(doc).expect(
-        "invariant: the read documents are derived Serialize over scalars, String, Option \
-         and Vec -- no map key that is not a string, and no impl that can refuse",
-    );
+    let body = serde_json::to_string_pretty(doc).unwrap_or_else(|error| {
+        debug_assert!(false, "CLI reference JSON serialization failed: {error}");
+        "{\n  \"error\": \"CLI reference schema serialization failed\"\n}".to_string()
+    });
     out.push_str(&format!("{commands}:\n\n```json\n{body}\n```\n\n"));
 }
 
-fn firmware_doc() -> FirmwareDoc {
+fn firmware_doc(version: &VersionKey) -> FirmwareDoc {
     let artifact = Artifact::Firmware {
-        version: sample_version(SAMPLE_FIRMWARE_VERSION),
+        version: version.clone(),
     };
     FirmwareDoc {
         version: SAMPLE_FIRMWARE_VERSION.to_string(),
@@ -112,13 +120,13 @@ fn firmware_doc() -> FirmwareDoc {
     }
 }
 
-fn title_doc() -> TitleDoc {
+fn title_doc(title_id: &TitleId, update_version: &VersionKey) -> TitleDoc {
     let base = Artifact::TitleBase {
-        title_id: sample_title_id(),
+        title_id: title_id.clone(),
     };
     let update = Artifact::TitleUpdate {
-        title_id: sample_title_id(),
-        version: sample_version(SAMPLE_UPDATE_VERSION),
+        title_id: title_id.clone(),
+        version: update_version.clone(),
     };
     TitleDoc {
         title_id: SAMPLE_TITLE_ID.to_string(),
@@ -171,30 +179,34 @@ fn title_doc() -> TitleDoc {
     }
 }
 
-fn status_doc() -> StatusDoc {
+fn status_doc(
+    title_id: &TitleId,
+    firmware_version: &VersionKey,
+    update_version: &VersionKey,
+) -> StatusDoc {
     StatusDoc {
         format_version: STORE_FORMAT_VERSION,
         store: "vfs".to_string(),
         store_bytes: 21_474_836_480,
         unreadable_paths: 0,
-        firmware: vec![firmware_doc()],
-        titles: vec![title_doc()],
+        firmware: vec![firmware_doc(firmware_version)],
+        titles: vec![title_doc(title_id, update_version)],
     }
 }
 
-fn firmware_list_doc() -> FirmwareListDoc {
+fn firmware_list_doc(firmware_version: &VersionKey) -> FirmwareListDoc {
     FirmwareListDoc {
         format_version: STORE_FORMAT_VERSION,
         store: "vfs".to_string(),
-        firmware: vec![firmware_doc()],
+        firmware: vec![firmware_doc(firmware_version)],
     }
 }
 
-fn title_list_doc() -> TitleListDoc {
+fn title_list_doc(title_id: &TitleId, update_version: &VersionKey) -> TitleListDoc {
     TitleListDoc {
         format_version: STORE_FORMAT_VERSION,
         store: "vfs".to_string(),
-        titles: vec![title_doc()],
+        titles: vec![title_doc(title_id, update_version)],
     }
 }
 

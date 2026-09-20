@@ -442,11 +442,8 @@ fn write_tables(output_dir: &Path, tables: &CensusTables) -> Result<(), CallerCe
             source,
         })?;
         let path = output_dir.join(spec.file());
-        let parent = path
-            .parent()
-            .expect("archive output has a parent directory");
-        std::fs::create_dir_all(parent).map_err(|source| CallerCensusError::CreateOutput {
-            path: parent.to_path_buf(),
+        std::fs::create_dir_all(output_dir).map_err(|source| CallerCensusError::CreateOutput {
+            path: output_dir.to_path_buf(),
             source,
         })?;
         std::fs::write(&path, text).map_err(|source| CallerCensusError::Write { path, source })?;

@@ -15,23 +15,20 @@ use cellgov_boot::manifest::CellKey;
 /// subprocesses, gate on what the runs must reproduce, and report
 /// throughput.
 ///
-/// # Panics
-///
-/// Panics if `policy.runs` is zero. A set of no runs has nothing to
-/// compare, and the argument parser refuses the value.
-///
 /// # Errors
 ///
-/// Returns an error if a child does not produce a valid result.
+/// Returns an error if the run count is zero or a child does not
+/// produce a valid result.
 pub fn bench_boot_runs(
     opts: BenchOptions<'_>,
     policy: ThroughputPolicy,
     progress: &dyn crate::progress::ProgressSink,
 ) -> Result<BenchRunsOutcome, SpawnError> {
-    assert!(
-        policy.runs > 0,
-        "invariant: a run set takes at least one measurement"
-    );
+    if policy.runs == 0 {
+        return Err(SpawnError::Command(crate::cli::exit::CommandError::failed(
+            "boot bench: a run set requires at least one measurement",
+        )));
+    }
     // Optional trailing tokens, each carrying its own leading space
     // so the banner has no gap when none is present.
     let mut overrides = String::new();
@@ -114,7 +111,10 @@ pub fn bench_boot_runs(
                     stderr: &streams[0],
                 },
             ),
-            (true, None) => unreachable!("an unnameable cell is itself an incomparable reason"),
+            (true, None) => {
+                debug_assert!(false, "an unnameable cell had no incomparable reason");
+                AnchorVerdict::NotComparable(vec!["the run has no cell identity".to_string()])
+            }
             (false, _) => AnchorVerdict::NotComparable(reasons),
         }
     };
