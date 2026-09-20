@@ -148,10 +148,8 @@ pub(super) fn locate_divergence(
              {LOCALIZE_MAX_STEPS} a traced re-run is affordable at. Localize it by hand:"
         ));
         for i in 0..2 {
-            out.push(format!(
-                "  cellgov boot bench-once --title {} --save-state-trace run{i}.state",
-                opts.title.name()
-            ));
+            let argv = localization_command_argv(opts, i, &format!("run{i}.state"));
+            out.push(format!("  {}", render_command(&argv)));
         }
         out.push("  cellgov diff diverge run0.state run1.state".to_string());
         return Ok(out);
@@ -177,11 +175,6 @@ pub(super) fn locate_divergence(
             cleanup_traces(&paths);
             return Ok(out);
         };
-        let mut traced = opts;
-        // The offset puts these indices outside the measured set's
-        // range, so a captured log cannot read a diagnostic boot as a
-        // measurement.
-        traced.run_index = opts.run_index + 1000 + i;
         let exe = match std::env::current_exe() {
             Ok(e) => e,
             Err(e) => {
@@ -191,8 +184,8 @@ pub(super) fn locate_divergence(
             }
         };
         let mut cmd = std::process::Command::new(exe);
-        traced.encode_to_command(&mut cmd);
-        cmd.arg("--save-state-trace").arg(text);
+        let argv = localization_command_argv(opts, i, text);
+        cmd.args(&argv[1..]);
         match cmd.output() {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
@@ -227,6 +220,48 @@ pub(super) fn locate_divergence(
         &traces[0], &traces[1],
     )));
     Ok(out)
+}
+
+fn localization_command_argv(
+    mut opts: BenchOptions<'_>,
+    diagnostic_index: usize,
+    trace_path: &str,
+) -> Vec<String> {
+    // The offset puts these indices outside the measured set's range,
+    // so a captured log cannot read a diagnostic boot as a measurement.
+    opts.run_index += 1000 + diagnostic_index;
+    let mut cmd = std::process::Command::new("cellgov");
+    opts.encode_to_command(&mut cmd);
+    cmd.arg("--save-state-trace").arg(trace_path);
+    std::iter::once("cellgov".to_string())
+        .chain(cmd.get_args().map(|arg| arg.to_string_lossy().into_owned()))
+        .collect()
+}
+
+fn render_command(argv: &[String]) -> String {
+    argv.iter()
+        .map(|arg| {
+            if arg
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_-./:=+".contains(c))
+            {
+                arg.clone()
+            } else {
+                quote_command_arg(arg)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(windows)]
+fn quote_command_arg(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "''"))
+}
+
+#[cfg(not(windows))]
+fn quote_command_arg(arg: &str) -> String {
+    format!("'{}'", arg.replace('\'', "'\"'\"'"))
 }
 
 /// Lines a failing child left on stderr, indented for the report.
@@ -310,3 +345,7 @@ fn format_diverge(report: &cellgov_compare::DivergeReport) -> String {
 #[cfg(test)]
 #[path = "tests/divergence_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/localization_command_tests.rs"]
+mod localization_command_tests;
