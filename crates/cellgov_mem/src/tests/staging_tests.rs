@@ -8,10 +8,7 @@ fn range(start: u64, length: u64) -> ByteRange {
 }
 
 fn staged(start: u64, bytes: &[u8]) -> StagedWrite {
-    StagedWrite {
-        range: range(start, bytes.len() as u64),
-        bytes: bytes.to_vec(),
-    }
+    StagedWrite::new(range(start, bytes.len() as u64), bytes)
 }
 
 #[test]
@@ -32,6 +29,14 @@ fn stage_preserves_order() {
     let starts: Vec<u64> = s.pending().iter().map(|w| w.range.start().raw()).collect();
     assert_eq!(starts, vec![0, 2, 4]);
     s.clear();
+}
+
+#[test]
+fn small_staged_payloads_stay_inline() {
+    let inline = staged(0, &[0xAA; 16]);
+    assert!(matches!(inline.bytes, StagedBytes::Inline { .. }));
+    let heap = staged(0, &[0xBB; 17]);
+    assert!(matches!(heap.bytes, StagedBytes::Heap(_)));
 }
 
 #[test]
@@ -84,10 +89,7 @@ fn drain_into_length_mismatch_rejects_whole_batch_with_neighbors_intact() {
     let mut s = StagingMemory::new();
     // good, bad, good: validator must stop on the first offender.
     s.stage(staged(0, &[1, 1, 1, 1]));
-    s.stage(StagedWrite {
-        range: range(4, 4),
-        bytes: vec![9, 9],
-    });
+    s.stage(StagedWrite::new(range(4, 4), &[9, 9]));
     s.stage(staged(8, &[2, 2, 2, 2]));
     let err = s.drain_into(&mut mem).unwrap_err();
     assert_eq!(err, MemError::LengthMismatch);

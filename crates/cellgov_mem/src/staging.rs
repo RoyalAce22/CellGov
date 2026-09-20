@@ -20,6 +20,60 @@
 use crate::guest::{GuestMemory, MemError};
 use crate::range::ByteRange;
 
+const INLINE_BYTES: usize = 16;
+
+/// Bytes held by a staged write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedBytes {
+    /// Small payload stored with the staging entry.
+    Inline {
+        /// Fixed storage for a small payload.
+        buf: [u8; INLINE_BYTES],
+        /// Number of initialized bytes in `buf`.
+        len: u8,
+    },
+    /// Large payload that requires heap storage.
+    Heap(Vec<u8>),
+}
+
+impl StagedBytes {
+    /// Copy `bytes`, using inline storage when possible.
+    #[inline]
+    pub fn from_slice(bytes: &[u8]) -> Self {
+        if bytes.len() <= INLINE_BYTES {
+            let mut buf = [0; INLINE_BYTES];
+            buf[..bytes.len()].copy_from_slice(bytes);
+            Self::Inline {
+                buf,
+                len: bytes.len() as u8,
+            }
+        } else {
+            Self::Heap(bytes.to_vec())
+        }
+    }
+
+    /// Borrow the staged payload.
+    #[inline]
+    pub fn as_slice(&self) -> &[u8] {
+        match self {
+            Self::Inline { buf, len } => &buf[..*len as usize],
+            Self::Heap(bytes) => bytes,
+        }
+    }
+
+    /// Number of bytes in the payload.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
+    /// Whether the payload has no bytes.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
 /// A single staged write awaiting commit.
 ///
 /// `bytes.len() as u64 == range.length()` is the caller's invariant; drain
@@ -29,7 +83,18 @@ pub struct StagedWrite {
     /// Target byte range in committed memory.
     pub range: ByteRange,
     /// Bytes to deposit into `range` at commit time.
-    pub bytes: Vec<u8>,
+    pub bytes: StagedBytes,
+}
+
+impl StagedWrite {
+    /// Construct a staged write, storing small payloads inline.
+    #[inline]
+    pub fn new(range: ByteRange, bytes: &[u8]) -> Self {
+        Self {
+            range,
+            bytes: StagedBytes::from_slice(bytes),
+        }
+    }
 }
 
 /// A buffer of staged writes pending commit.
@@ -119,11 +184,11 @@ impl StagingMemory {
         self.validate_pending(target)?;
         let count = self.pending.len();
         for w in self.pending.drain(..) {
-            target.apply_commit(w.range, &w.bytes).expect(
+            target.apply_commit(w.range, w.bytes.as_slice()).expect(
                 "validate_pending called validate_write; apply_commit calls the same predicate, \
                  so this Err path is structurally unreachable",
             );
-            observe(w.range, &w.bytes);
+            observe(w.range, w.bytes.as_slice());
         }
         Ok(count)
     }

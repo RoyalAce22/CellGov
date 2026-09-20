@@ -82,10 +82,7 @@ fn stage_unresolved_trampoline(staging: &mut StagingMemory, slot_base: u64, nid:
     let mut opd_bytes = [0u8; 8];
     opd_bytes[0..4].copy_from_slice(&(body_addr as u32).to_be_bytes());
     let opd_range = ByteRange::new(GuestAddr::new(slot_base), 8).expect("trampoline OPD range");
-    staging.stage(StagedWrite {
-        range: opd_range,
-        bytes: opd_bytes.to_vec(),
-    });
+    staging.stage(StagedWrite::new(opd_range, &opd_bytes));
 
     let body = build_unresolved_trampoline_body(nid);
     let body_range = ByteRange::new(
@@ -93,10 +90,7 @@ fn stage_unresolved_trampoline(staging: &mut StagingMemory, slot_base: u64, nid:
         UNRESOLVED_TRAMP_BODY_BYTES as u64,
     )
     .expect("trampoline body range");
-    staging.stage(StagedWrite {
-        range: body_range,
-        bytes: body.to_vec(),
-    });
+    staging.stage(StagedWrite::new(body_range, &body));
 }
 
 /// Stage one 4-byte GOT write per import and apply the whole batch
@@ -197,10 +191,7 @@ fn stage_got_batch(
                     nid: func.nid,
                 },
             )?;
-            staging.stage(StagedWrite {
-                range,
-                bytes: opd_u32.to_be_bytes().to_vec(),
-            });
+            staging.stage(StagedWrite::new(range, &opd_u32.to_be_bytes()));
         }
     }
 

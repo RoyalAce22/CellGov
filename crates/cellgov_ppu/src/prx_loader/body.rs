@@ -558,10 +558,7 @@ fn patch_imports_against(
     let count = resolved.len();
     let mut staging = cellgov_mem::StagingMemory::new();
     for (range, bytes) in resolved {
-        staging.stage(cellgov_mem::StagedWrite {
-            range,
-            bytes: bytes.to_vec(),
-        });
+        staging.stage(cellgov_mem::StagedWrite::new(range, &bytes));
     }
     match staging.drain_into(memory) {
         Ok(_) => Ok(()),

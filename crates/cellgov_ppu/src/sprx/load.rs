@@ -421,10 +421,7 @@ fn stage_segment(
                     addr: guest_addr,
                     length: seg.filesz,
                 })?;
-        staging.stage(cellgov_mem::StagedWrite {
-            range,
-            bytes: seg.data.clone(),
-        });
+        staging.stage(cellgov_mem::StagedWrite::new(range, &seg.data));
     }
     let bss_size = seg.memsz.saturating_sub(seg.filesz);
     if bss_size > 0 {
@@ -434,10 +431,10 @@ fn stage_segment(
                 addr: bss_addr,
                 length: bss_size,
             })?;
-        staging.stage(cellgov_mem::StagedWrite {
+        staging.stage(cellgov_mem::StagedWrite::new(
             range,
-            bytes: vec![0u8; bss_size as usize],
-        });
+            &vec![0u8; bss_size as usize],
+        ));
     }
     Ok(())
 }
@@ -698,7 +695,7 @@ fn apply_relocations(
                 length: write_size,
             })?;
         staged_ranges.push(range);
-        staging.stage(cellgov_mem::StagedWrite { range, bytes });
+        staging.stage(cellgov_mem::StagedWrite::new(range, &bytes));
     }
 
     // No-overlap precondition: PRX corpora don't produce

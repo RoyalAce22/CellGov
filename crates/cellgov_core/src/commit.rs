@@ -329,10 +329,7 @@ impl CommitPipeline {
                         if ctx.memory.containing_region(start, length).is_none() {
                             return Err(CommitError::OutOfRange { effect_index: idx });
                         }
-                        staging.stage(StagedWrite {
-                            range: *range,
-                            bytes: bytes.bytes().to_vec(),
-                        });
+                        staging.stage(StagedWrite::new(*range, bytes.bytes()));
                         writes += 1;
                     }
                     Effect::MailboxSend { mailbox, .. } => {
@@ -472,10 +469,7 @@ impl CommitPipeline {
                                 source_unit: *source,
                             });
                         }
-                        staging.stage(StagedWrite {
-                            range: *range,
-                            bytes: bytes.bytes().to_vec(),
-                        });
+                        staging.stage(StagedWrite::new(*range, bytes.bytes()));
                         conditional_stores += 1;
                     }
                     Effect::ReservationAcquire { source, .. } => {
@@ -517,10 +511,7 @@ impl CommitPipeline {
                         else {
                             return Err(CommitError::OutOfRange { effect_index: idx });
                         };
-                        staging.stage(StagedWrite {
-                            range,
-                            bytes: value.to_be_bytes().to_vec(),
-                        });
+                        staging.stage(StagedWrite::new(range, &value.to_be_bytes()));
                         writes += 1;
                     }
                     Effect::FaultRaised { kind, source } => {
