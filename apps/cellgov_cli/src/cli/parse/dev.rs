@@ -43,6 +43,8 @@ pub(crate) enum DevCommand {
     TitlesGen(TitlesGenArgs),
     /// Regenerate `docs/cli.md` from this command tree.
     CliGen(CliGenArgs),
+    /// Regenerate Cargo-derived regions of `docs/architecture/workspace.md`.
+    WorkspaceGen(WorkspaceGenArgs),
     /// Print a shell completion script for this command tree.
     Completions(CompletionsArgs),
     /// Emit a title-manifest stub from an install record.
@@ -257,6 +259,14 @@ pub(crate) struct TitlesGenArgs {
 #[derive(Debug, clap::Args)]
 pub(crate) struct CliGenArgs {
     /// Document to write.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+}
+
+/// `cellgov dev workspace-gen`
+#[derive(Debug, clap::Args)]
+pub(crate) struct WorkspaceGenArgs {
+    /// Architecture document to update.
     #[arg(long, value_name = "PATH")]
     pub output: Option<PathBuf>,
 }

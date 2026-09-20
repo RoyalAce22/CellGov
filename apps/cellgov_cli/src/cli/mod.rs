@@ -22,3 +22,4 @@ pub(crate) mod scenarios;
 pub(crate) mod store;
 pub(crate) mod title;
 pub(crate) mod titles_gen;
+pub(crate) mod workspace_gen;

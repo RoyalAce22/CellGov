@@ -1443,6 +1443,22 @@ Usage: cellgov dev cli-gen [OPTIONS]
 | --- | --- | --- |
 | `--output` | `PATH` | Document to write. |
 
+#### `cellgov dev workspace-gen`
+
+Regenerate Cargo-derived regions of `docs/architecture/workspace.md`.
+
+```console
+$ cellgov dev workspace-gen
+```
+
+```
+Usage: cellgov dev workspace-gen [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--output` | `PATH` | Architecture document to update. |
+
 #### `cellgov dev completions`
 
 Print a shell completion script for this command tree.

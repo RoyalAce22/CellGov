@@ -13,106 +13,153 @@ does no I/O; it depends on nothing in the workspace; every layer that consumes P
 ABI literals depends on it, and `cellgov_install` and `cellgov_mkelf`
 depend on it alone.
 
+<!-- workspace-gen:dag:start -->
 ```mermaid
 graph BT
-  subgraph apps ["apps/"]
-    firmware["cellgov_install"]
-    mkelf["cellgov_mkelf"]
-    cli["cellgov_cli"]
-  end
-
-  subgraph bridges ["bridges/"]
-    rpcs3obs["rpcs3_to_observation"]
-  end
-
-  ps3_abi[cellgov_ps3_abi]
-  time[cellgov_time]
-  event[cellgov_event]
-  mem[cellgov_mem]
-  sync[cellgov_sync]
-  dma[cellgov_dma]
-  effects[cellgov_effects]
-  exec[cellgov_exec]
-  trace[cellgov_trace]
-  lv2[cellgov_lv2]
-  core[cellgov_core]
-  ppu[cellgov_ppu]
-  spu[cellgov_spu]
-  testkit[cellgov_testkit]
-  terminal[cellgov_terminal]
-  explore[cellgov_explore]
-  compare[cellgov_compare]
-  boot[cellgov_boot]
-
-  ps3_abi --> time
-  ps3_abi --> sync
-  ps3_abi --> dma
-  ps3_abi --> lv2
-  ps3_abi --> ppu
-  ps3_abi --> spu
-  ps3_abi --> core
-  ps3_abi --> testkit
-  ps3_abi --> boot
-  ps3_abi --> cli
-  ps3_abi --> firmware
-  ps3_abi --> mkelf
-
-  time --> event
-  time --> mem
-
-  event --> sync
-  event --> dma
-  mem --> sync
-  mem --> dma
-
-  sync --> effects
-  dma --> effects
-
-  effects --> exec
-  effects --> trace
-  effects --> lv2
-  effects --> ppu
-  effects --> spu
-
-  exec --> core
-  exec --> ppu
-  exec --> spu
-  trace --> core
-  lv2 --> core
-
-  core --> testkit
-  core --> explore
-
-  testkit --> compare
-  core --> compare
-  lv2 --> compare
-  trace --> compare
-  event --> compare
-  time --> compare
-  mem --> compare
-
-  core --> boot
-  lv2 --> boot
-  ppu --> boot
-  spu --> boot
-  trace --> boot
-  compare --> boot
-  firmware --> boot
-  terminal --> boot
-
-  boot --> cli
-  ppu --> cli
-  spu --> cli
-  compare --> cli
-  explore --> cli
-  compare --> rpcs3obs
-  trace --> rpcs3obs
-
-  ppu ~~~ spu
-  firmware --> cli
-  terminal --> firmware
-  terminal --> cli
+  n0["cellgov_boot"]
+  n1["cellgov_cli"]
+  n2["cellgov_compare"]
+  n3["cellgov_core"]
+  n4["cellgov_dma"]
+  n5["cellgov_effects"]
+  n6["cellgov_event"]
+  n7["cellgov_exec"]
+  n8["cellgov_explore"]
+  n9["cellgov_install"]
+  n10["cellgov_lv2"]
+  n11["cellgov_mem"]
+  n12["cellgov_mkelf"]
+  n13["cellgov_ppu"]
+  n14["cellgov_ps3_abi"]
+  n15["cellgov_spu"]
+  n16["cellgov_sync"]
+  n17["cellgov_terminal"]
+  n18["cellgov_testkit"]
+  n19["cellgov_time"]
+  n20["cellgov_trace"]
+  n21["rpcs3_to_observation"]
+  n2 --> n0
+  n3 --> n0
+  n5 --> n0
+  n6 --> n0
+  n7 --> n0
+  n9 --> n0
+  n10 --> n0
+  n11 --> n0
+  n13 --> n0
+  n14 --> n0
+  n15 --> n0
+  n17 --> n0
+  n19 --> n0
+  n20 --> n0
+  n0 --> n1
+  n2 --> n1
+  n3 --> n1
+  n5 --> n1
+  n6 --> n1
+  n7 --> n1
+  n8 --> n1
+  n9 --> n1
+  n10 --> n1
+  n11 --> n1
+  n13 --> n1
+  n14 --> n1
+  n15 --> n1
+  n17 --> n1
+  n18 --> n1
+  n19 --> n1
+  n20 --> n1
+  n3 --> n2
+  n6 --> n2
+  n10 --> n2
+  n11 --> n2
+  n14 --> n2
+  n18 --> n2
+  n19 --> n2
+  n20 --> n2
+  n4 --> n3
+  n5 --> n3
+  n6 --> n3
+  n7 --> n3
+  n10 --> n3
+  n11 --> n3
+  n14 --> n3
+  n16 --> n3
+  n19 --> n3
+  n20 --> n3
+  n6 --> n4
+  n11 --> n4
+  n14 --> n4
+  n19 --> n4
+  n4 --> n5
+  n6 --> n5
+  n11 --> n5
+  n16 --> n5
+  n19 --> n5
+  n19 --> n6
+  n4 --> n7
+  n5 --> n7
+  n6 --> n7
+  n11 --> n7
+  n16 --> n7
+  n19 --> n7
+  n3 --> n8
+  n4 --> n8
+  n5 --> n8
+  n6 --> n8
+  n7 --> n8
+  n11 --> n8
+  n16 --> n8
+  n19 --> n8
+  n20 --> n8
+  n14 --> n9
+  n17 --> n9
+  n5 --> n10
+  n6 --> n10
+  n11 --> n10
+  n14 --> n10
+  n16 --> n10
+  n19 --> n10
+  n19 --> n11
+  n14 --> n12
+  n5 --> n13
+  n6 --> n13
+  n7 --> n13
+  n11 --> n13
+  n14 --> n13
+  n16 --> n13
+  n19 --> n13
+  n4 --> n15
+  n5 --> n15
+  n6 --> n15
+  n7 --> n15
+  n11 --> n15
+  n14 --> n15
+  n16 --> n15
+  n19 --> n15
+  n6 --> n16
+  n11 --> n16
+  n14 --> n16
+  n19 --> n16
+  n3 --> n18
+  n4 --> n18
+  n5 --> n18
+  n6 --> n18
+  n7 --> n18
+  n11 --> n18
+  n14 --> n18
+  n16 --> n18
+  n19 --> n18
+  n20 --> n18
+  n14 --> n19
+  n5 --> n20
+  n6 --> n20
+  n19 --> n20
+  n2 --> n21
+  n14 --> n21
 ```
+
+<!-- workspace-gen:dag:end -->
 
 Five structural rules:
 
@@ -163,15 +210,37 @@ Five structural rules:
   command the binary accepts and a command the reference documents
   cannot differ.
 
-External dependencies: `serde`, `serde_json`, and `toml` in
-`cellgov_compare`; `serde` and `serde_json` in `cellgov_explore` and
-`cellgov_cli`; `clap`, `clap_complete` and `filebuffer` in
-`cellgov_cli`; `terminal_size` and `ctrlc` in `cellgov_terminal`, for
-the console width query and the Ctrl-C handler, each FFI on both
-platforms, plus `signal-hook` on Unix to die by the signal the handler
-caught; crypto crates in `cellgov_install` only.
-Everything else is workspace-internal. The workspace compiles under
-`unsafe_code = "forbid"`.
+The direct external dependencies below come from `cargo metadata`; test-only,
+build-only, and target-specific dependencies are intentionally absent. The
+workspace compiles under `unsafe_code = "forbid"`.
+
+<!-- workspace-gen:external:start -->
+| Crate | Direct external dependencies |
+| --- | --- |
+| `cellgov_ps3_abi` | none |
+| `cellgov_time` | derive_more, serde |
+| `cellgov_event` | strum |
+| `cellgov_mem` | derive_more, serde, thiserror |
+| `cellgov_effects` | none |
+| `cellgov_dma` | none |
+| `cellgov_sync` | derive_more |
+| `cellgov_exec` | strum |
+| `cellgov_trace` | num_enum, strum, thiserror |
+| `cellgov_core` | strum, thiserror |
+| `cellgov_lv2` | num_enum, strum, thiserror |
+| `cellgov_testkit` | tempfile |
+| `cellgov_compare` | serde, serde_json, strum, thiserror, toml |
+| `cellgov_boot` | serde, serde_json, strum, thiserror, toml |
+| `cellgov_install` | aes, cbc, ctr, flate2, hmac, serde, sha1, sha2, thiserror, toml |
+| `cellgov_terminal` | ctrlc, terminal_size |
+| `cellgov_ppu` | derive_more, strum, thiserror |
+| `cellgov_spu` | thiserror |
+| `cellgov_explore` | serde, serde_json, strum |
+| `cellgov_cli` | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
+| `cellgov_mkelf` | none |
+| `rpcs3_to_observation` | serde, serde_json, thiserror, toml |
+
+<!-- workspace-gen:external:end -->
 
 ## Per-crate responsibilities
 

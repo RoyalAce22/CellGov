@@ -71,6 +71,7 @@ const EVERY_LEAF: &[&[&str]] = &[
         "b.json",
     ],
     &["dev", "titles-gen"],
+    &["dev", "workspace-gen"],
     &["dev", "gen-manifest", "--title-id", "NPAA00001"],
     &["dev", "record-anchors", "--all"],
 ];

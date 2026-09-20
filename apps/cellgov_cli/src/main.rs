@@ -162,6 +162,7 @@ fn dispatch_dev(dev: &DevCommand, vfs_flag: Option<&Path>, globals: &Globals) {
         DevCommand::FixtureGen(args) => cli::fixture_gen::run(args, vfs_flag),
         DevCommand::TitlesGen(args) => cli::titles_gen::run(args),
         DevCommand::CliGen(args) => cli::cli_gen::run(args),
+        DevCommand::WorkspaceGen(args) => cli::workspace_gen::run(args),
         DevCommand::Completions(args) => cli::cli_gen::completions(args),
         DevCommand::GenManifest(args) => cli::gen_manifest::run(args, vfs_flag),
         DevCommand::RecordAnchors(args) => cli::record_anchors::run(args, globals.render()),

@@ -20,7 +20,7 @@ pub(crate) use dev::{CallerCensusArgs, Lv2ExtractArgs};
 pub(crate) use dev::{
     CliGenArgs, CompletionShell, CompletionsArgs, DevCommand, DisasmArgs, FixtureGenArgs,
     FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,
-    TitlesGenArgs, MAX_DISASM_COUNT,
+    TitlesGenArgs, WorkspaceGenArgs, MAX_DISASM_COUNT,
 };
 pub(crate) use dev::{Lv2CensusArgs, Lv2DiscoverArgs};
 pub(crate) use diff::{

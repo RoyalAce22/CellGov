@@ -28,6 +28,47 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn marked_region<'a>(document: &'a str, start: &str, end: &str) -> &'a str {
+    let after_start = document.split_once(start).expect("region start").1;
+    after_start.split_once(end).expect("region end").0
+}
+
+#[test]
+fn committed_workspace_regions_match_the_generator() {
+    let source = repo_root().join("docs/architecture/workspace.md");
+    let scratch = scratch_labeled("workspace-gen");
+    let output = scratch.join("workspace.md");
+    std::fs::copy(&source, &output).expect("copy workspace document");
+    let result = cellgov(&[
+        "dev",
+        "workspace-gen",
+        "--output",
+        output.to_str().expect("UTF-8 path"),
+    ]);
+    assert!(
+        result.status.success(),
+        "workspace-gen failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let committed = std::fs::read_to_string(source).expect("read committed workspace document");
+    let generated = std::fs::read_to_string(output).expect("read generated workspace document");
+    for (start, end) in [
+        (
+            "<!-- workspace-gen:dag:start -->",
+            "<!-- workspace-gen:dag:end -->",
+        ),
+        (
+            "<!-- workspace-gen:external:start -->",
+            "<!-- workspace-gen:external:end -->",
+        ),
+    ] {
+        assert_eq!(
+            marked_region(&committed, start, end),
+            marked_region(&generated, start, end)
+        );
+    }
+}
+
 /// The verbs a help text lists under `Commands:`, without clap's own
 /// `help`.
 fn verbs(text: &str) -> Vec<String> {
