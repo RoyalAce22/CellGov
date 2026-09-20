@@ -203,10 +203,28 @@ pub mod function_descriptor {
     const _: () = assert!(CODE_OFFSET + core::mem::size_of::<u32>() <= SIZE);
     const _: () = assert!(TOC_OFFSET + core::mem::size_of::<u32>() <= SIZE);
 
-    // `codegen::trampoline::encode_ps3_packed_opd` writes both words
-    // from these offsets.
+    /// Encodes one packed `.opd` entry as big-endian words.
+    #[inline]
+    pub const fn encode_ps3_packed_opd(code_addr: u32, toc: u32) -> [u8; SIZE] {
+        let code_b = code_addr.to_be_bytes();
+        let toc_b = toc.to_be_bytes();
+        let mut out = [0u8; SIZE];
+        let mut i = 0;
+        while i < code_b.len() {
+            out[CODE_OFFSET + i] = code_b[i];
+            out[TOC_OFFSET + i] = toc_b[i];
+            i += 1;
+        }
+        out
+    }
+
+    // `encode_ps3_packed_opd` writes both words from these offsets.
     const _: () = assert!(CODE_OFFSET + core::mem::size_of::<u32>() <= TOC_OFFSET);
 }
+
+#[cfg(test)]
+#[path = "tests/elf_tests.rs"]
+mod tests;
 
 /// The three-doubleword PPC64 ELFv1 function descriptor that LV2 uses.
 ///

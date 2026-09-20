@@ -1,4 +1,4 @@
-//! Byte-exact encodings for lis/ori/sc trampolines, blr, and packed OPD entries.
+//! Byte-exact encodings for lis/ori/sc trampolines and blr.
 
 use super::*;
 
@@ -89,20 +89,4 @@ fn encode_lis_ori_sc_rejects_bit_31_set() {
 #[test]
 fn encode_blr_canonical_byte_pattern() {
     assert_eq!(encode_blr(), [0x4E, 0x80, 0x00, 0x20]);
-}
-
-#[test]
-fn encode_ps3_packed_opd_byte_pattern() {
-    assert_eq!(
-        encode_ps3_packed_opd(0xCAFE_BABE, 0xDEAD_BEEF),
-        [0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF],
-    );
-}
-
-#[test]
-fn encode_ps3_packed_opd_zero_toc_byte_pattern() {
-    assert_eq!(
-        encode_ps3_packed_opd(0x0000_FF00, 0),
-        [0x00, 0x00, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00],
-    );
 }

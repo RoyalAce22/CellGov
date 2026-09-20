@@ -81,27 +81,6 @@ const _: () = assert!(
     "blr canonical encoding drifted",
 );
 
-/// One [`function_descriptor`] entry, big-endian.
-///
-/// [`function_descriptor`]: crate::format::elf::function_descriptor
-#[inline]
-pub const fn encode_ps3_packed_opd(
-    code_addr: u32,
-    toc: u32,
-) -> [u8; crate::format::elf::function_descriptor::SIZE] {
-    use crate::format::elf::function_descriptor as layout;
-    let code_b = code_addr.to_be_bytes();
-    let toc_b = toc.to_be_bytes();
-    let mut out = [0u8; layout::SIZE];
-    let mut i = 0;
-    while i < code_b.len() {
-        out[layout::CODE_OFFSET + i] = code_b[i];
-        out[layout::TOC_OFFSET + i] = toc_b[i];
-        i += 1;
-    }
-    out
-}
-
 #[cfg(test)]
 #[path = "tests/trampoline_tests.rs"]
 mod tests;

@@ -3,7 +3,9 @@
 
 use crate::state::SpuState;
 use cellgov_mem::be::{read_u16, read_u32};
-use cellgov_ps3_abi::format::elf::{ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD};
+use cellgov_ps3_abi::format::elf::{
+    ELF32_E_ENTRY, ELF32_HEADER_SIZE, ELF32_PHDR_SIZE, ELF_MAGIC, PT_LOAD,
+};
 
 /// Load failure.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -83,7 +85,7 @@ pub fn load_spu_elf(data: &[u8], state: &mut SpuState) -> Result<(), LoadError> 
         return Err(LoadError::NotBigEndian);
     }
 
-    let entry = read_u32(data, 24);
+    let entry = read_u32(data, ELF32_E_ENTRY);
     let phoff = read_u32(data, 28) as usize;
     let phnum = read_u16(data, 44) as usize;
     let phentsize = read_u16(data, 42) as usize;
