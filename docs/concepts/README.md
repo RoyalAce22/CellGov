@@ -298,40 +298,6 @@ source would live in `NOTES.md`. The verdict moves to
 `equivalent` (no pending) only when a new structurally-grounded
 `DivergenceClass` lands that covers them.
 
-### Why the two-column split matters
-
-A single verdict collapses two independent failure shapes into
-one cell. A title that converges with a small classifier backlog
-reads the same as a title that does not converge at all -- and a
-reader cannot tell which is which without opening the fixture.
-The two columns separate the two questions:
-
-- Convergence answers "did CellGov reach where RPCS3 reached?"
-  This is the actually-bad-when-No state.
-- Byte parity answers "are the captured bytes the same?" This is
-  meaningful only when convergence is `Yes`, and a `Pending`
-  count is investigation backlog, not regression.
-
-If the matrix silently treated unclassified bytes as `equivalent`
-when convergence holds, the project would slide into per-title
-compatibility hacks: each new title would arrive with its own
-list of "trust me, these bytes are fine" entries. `Pending`
-is the honest verdict: bytes differ, no general rule covers
-them yet, the fixture is on disk so a human can see exactly
-which bytes, and the verdict moves to `N non-semantic` only
-after a new structurally-grounded `DivergenceClass` lands.
-
-The verdict vocabulary appears in three places:
-
-- `docs/titles.md` compatibility matrix columns.
-- `tests/fixtures/<serial>/cross_runner/fw-<ver>/<game-ver>/compare_report.txt`
-  two-line header.
-- This document.
-
-`CrossRunnerSummary::display_matrix_columns()` is the source of
-truth for the wording. If this document disagrees with the code,
-fix this document.
-
 ## Why this matters for static recomp
 
 CellGov exists to be the oracle layer for static recompilation of
