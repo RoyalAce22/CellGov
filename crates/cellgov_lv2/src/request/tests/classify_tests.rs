@@ -21,7 +21,7 @@ fn classify_unresolved_import_namespace_above_base_is_unsupported() {
 #[test]
 fn classify_spu_image_open() {
     let args = [0x1000, 0x2000, 0, 0, 0, 0, 0, 0];
-    let req = classify(156, &args);
+    let req = classify(syscall::SPU_IMAGE_OPEN, &args);
     assert_eq!(
         req,
         Lv2Request::SpuImageOpen {
@@ -34,7 +34,7 @@ fn classify_spu_image_open() {
 #[test]
 fn classify_spu_image_import() {
     let args = [0x1000, 0x2000, 0x4000, 0xAA, 0, 0, 0, 0];
-    let req = classify(158, &args);
+    let req = classify(syscall::SPU_IMAGE_IMPORT, &args);
     assert_eq!(
         req,
         Lv2Request::SpuImageImport {
@@ -49,7 +49,7 @@ fn classify_spu_image_import() {
 #[test]
 fn classify_thread_group_create() {
     let args = [0x3000, 2, 100, 0x4000, 0, 0, 0, 0];
-    let req = classify(170, &args);
+    let req = classify(syscall::SPU_THREAD_GROUP_CREATE, &args);
     assert_eq!(
         req,
         Lv2Request::SpuThreadGroupCreate {
@@ -64,7 +64,7 @@ fn classify_thread_group_create() {
 #[test]
 fn classify_thread_initialize() {
     let args = [0x6000, 1, 0, 0x7000, 0x8000, 0x9000, 0, 0];
-    let req = classify(172, &args);
+    let req = classify(syscall::SPU_THREAD_INITIALIZE, &args);
     assert_eq!(
         req,
         Lv2Request::SpuThreadInitialize {
@@ -81,14 +81,14 @@ fn classify_thread_initialize() {
 #[test]
 fn classify_thread_group_start() {
     let args = [7, 0, 0, 0, 0, 0, 0, 0];
-    let req = classify(173, &args);
+    let req = classify(syscall::SPU_THREAD_GROUP_START, &args);
     assert_eq!(req, Lv2Request::SpuThreadGroupStart { group_id: 7 });
 }
 
 #[test]
 fn classify_thread_group_join() {
     let args = [3, 0x6000, 0x7000, 0, 0, 0, 0, 0];
-    let req = classify(178, &args);
+    let req = classify(syscall::SPU_THREAD_GROUP_JOIN, &args);
     assert_eq!(
         req,
         Lv2Request::SpuThreadGroupJoin {
@@ -102,7 +102,7 @@ fn classify_thread_group_join() {
 #[test]
 fn classify_thread_group_terminate_is_separate_from_join() {
     let args = [3, 0xFFFF_FFFF_FFFF_FFFF, 0, 0, 0, 0, 0, 0];
-    let req = classify(177, &args);
+    let req = classify(syscall::SPU_THREAD_GROUP_TERMINATE, &args);
     assert_eq!(
         req,
         Lv2Request::SpuThreadGroupTerminate {
@@ -115,7 +115,7 @@ fn classify_thread_group_terminate_is_separate_from_join() {
 #[test]
 fn classify_tty_write() {
     let args = [0, 0x8000, 64, 0x9000, 0, 0, 0, 0];
-    let req = classify(403, &args);
+    let req = classify(syscall::TTY_WRITE, &args);
     assert_eq!(
         req,
         Lv2Request::TtyWrite {
@@ -161,20 +161,26 @@ fn classify_process_exit_rejects_non_i32_range() {
 #[test]
 fn classify_ppu_thread_yield() {
     let args = [0xDEAD, 0, 0, 0, 0, 0, 0, 0];
-    assert_eq!(classify(43, &args), Lv2Request::PpuThreadYield);
+    assert_eq!(
+        classify(syscall::PPU_THREAD_YIELD, &args),
+        Lv2Request::PpuThreadYield
+    );
 }
 
 #[test]
 fn classify_time_get_timebase_frequency_ignores_args() {
     let args = [0xDEAD, 0xBEEF, 0, 0, 0, 0, 0, 0];
-    assert_eq!(classify(147, &args), Lv2Request::TimeGetTimebaseFrequency);
+    assert_eq!(
+        classify(syscall::TIME_GET_TIMEBASE_FREQUENCY, &args),
+        Lv2Request::TimeGetTimebaseFrequency
+    );
 }
 
 #[test]
 fn classify_time_get_current_time_captures_out_pointers() {
     let args = [0x9000, 0x9008, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(145, &args),
+        classify(syscall::TIME_GET_CURRENT_TIME, &args),
         Lv2Request::TimeGetCurrentTime {
             sec_ptr: 0x9000,
             nsec_ptr: 0x9008,
@@ -186,7 +192,7 @@ fn classify_time_get_current_time_captures_out_pointers() {
 fn classify_time_get_timezone_captures_out_pointers() {
     let args = [0xd000_fd10, 0xd000_fd14, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(144, &args),
+        classify(syscall::TIME_GET_TIMEZONE, &args),
         Lv2Request::TimeGetTimezone {
             timezone_ptr: 0xd000_fd10,
             summer_time_ptr: 0xd000_fd14,
@@ -198,7 +204,7 @@ fn classify_time_get_timezone_captures_out_pointers() {
 fn classify_memory_get_user_memory_size_captures_out_pointer() {
     let args = [0xd000_fdf4, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(352, &args),
+        classify(syscall::MEMORY_GET_USER_MEMORY_SIZE, &args),
         Lv2Request::MemoryGetUserMemorySize {
             mem_info_ptr: 0xd000_fdf4,
         }
@@ -209,7 +215,7 @@ fn classify_memory_get_user_memory_size_captures_out_pointer() {
 fn classify_ppu_thread_exit_captures_exit_value() {
     let args = [0xDEAD_BEEF, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(41, &args),
+        classify(syscall::PPU_THREAD_EXIT, &args),
         Lv2Request::PpuThreadExit {
             exit_value: 0xDEAD_BEEF
         },
@@ -220,7 +226,7 @@ fn classify_ppu_thread_exit_captures_exit_value() {
 fn classify_ppu_thread_join_captures_target_and_out_ptr() {
     let args = [0x0100_0003, 0x5000, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(44, &args),
+        classify(syscall::PPU_THREAD_JOIN, &args),
         Lv2Request::PpuThreadJoin {
             target: 0x0100_0003,
             status_out_ptr: 0x5000,
@@ -243,7 +249,7 @@ fn classify_ppu_thread_create_captures_all_eight_kernel_slots() {
         0x7000,
     ];
     assert_eq!(
-        classify(52, &args),
+        classify(syscall::PPU_THREAD_CREATE, &args),
         Lv2Request::PpuThreadCreate {
             id_ptr: 0x3000,
             param_ptr: 0x2_0000,
@@ -263,7 +269,7 @@ fn classify_ppu_thread_create_reads_priority_from_the_fifth_slot() {
     // decode shifted one slot early reads prio 0 and misreads the
     // stack size as prio.
     let args = [0x3000, 0x2_0000, 0, 0, 1000, 0x4000, 0, 0];
-    match classify(52, &args) {
+    match classify(syscall::PPU_THREAD_CREATE, &args) {
         Lv2Request::PpuThreadCreate {
             priority,
             stacksize,
@@ -319,7 +325,7 @@ fn spu_thread_group_range_stubs_classify_as_unsupported() {
 #[test]
 fn classify_mutex_create() {
     let args = [0x5000, 0x6000, 0, 0, 0, 0, 0, 0];
-    let req = classify(100, &args);
+    let req = classify(syscall::MUTEX_CREATE, &args);
     assert_eq!(
         req,
         Lv2Request::MutexCreate {
@@ -333,7 +339,7 @@ fn classify_mutex_create() {
 fn classify_lwmutex_create_destroy() {
     let create_args = [0x5000, 0x6000, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(95, &create_args),
+        classify(syscall::LWMUTEX_CREATE, &create_args),
         Lv2Request::LwMutexCreate {
             id_ptr: 0x5000,
             attr_ptr: 0x6000,
@@ -341,7 +347,7 @@ fn classify_lwmutex_create_destroy() {
     );
     let destroy_args = [7, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(96, &destroy_args),
+        classify(syscall::LWMUTEX_DESTROY, &destroy_args),
         Lv2Request::LwMutexDestroy { id: 7 }
     );
 }
@@ -350,7 +356,7 @@ fn classify_lwmutex_create_destroy() {
 fn classify_lwmutex_lock() {
     let args = [7, 100, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(97, &args),
+        classify(syscall::LWMUTEX_LOCK, &args),
         Lv2Request::LwMutexLock {
             id: 7,
             mutex_ptr: 0,
@@ -362,20 +368,26 @@ fn classify_lwmutex_lock() {
 #[test]
 fn classify_lwmutex_unlock() {
     let args = [9, 0, 0, 0, 0, 0, 0, 0];
-    assert_eq!(classify(98, &args), Lv2Request::LwMutexUnlock { id: 9 });
+    assert_eq!(
+        classify(syscall::LWMUTEX_UNLOCK, &args),
+        Lv2Request::LwMutexUnlock { id: 9 }
+    );
 }
 
 #[test]
 fn classify_lwmutex_trylock() {
     let args = [11, 0, 0, 0, 0, 0, 0, 0];
-    assert_eq!(classify(99, &args), Lv2Request::LwMutexTryLock { id: 11 });
+    assert_eq!(
+        classify(syscall::LWMUTEX_TRYLOCK, &args),
+        Lv2Request::LwMutexTryLock { id: 11 }
+    );
 }
 
 #[test]
 fn classify_mutex_trylock() {
     let args = [42, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(103, &args),
+        classify(syscall::MUTEX_TRYLOCK, &args),
         Lv2Request::MutexTryLock { mutex_id: 42 }
     );
 }
@@ -383,7 +395,10 @@ fn classify_mutex_trylock() {
 #[test]
 fn classify_event_queue_receive_send() {
     assert_eq!(
-        classify(130, &[7, 0x1000, 500, 0, 0, 0, 0, 0]),
+        classify(
+            syscall::EVENT_QUEUE_RECEIVE,
+            &[7, 0x1000, 500, 0, 0, 0, 0, 0]
+        ),
         Lv2Request::EventQueueReceive {
             queue_id: 7,
             out_ptr: 0x1000,
@@ -391,7 +406,7 @@ fn classify_event_queue_receive_send() {
         }
     );
     assert_eq!(
-        classify(138, &[7, 0xaa, 0xbb, 0xcc, 0, 0, 0, 0]),
+        classify(syscall::EVENT_PORT_SEND, &[7, 0xaa, 0xbb, 0xcc, 0, 0, 0, 0]),
         Lv2Request::EventPortSend {
             port_id: 7,
             data1: 0xaa,
@@ -400,7 +415,10 @@ fn classify_event_queue_receive_send() {
         }
     );
     assert_eq!(
-        classify(131, &[7, 0x2000, 4, 0x3000, 0, 0, 0, 0]),
+        classify(
+            syscall::EVENT_QUEUE_TRY_RECEIVE,
+            &[7, 0x2000, 4, 0x3000, 0, 0, 0, 0]
+        ),
         Lv2Request::EventQueueTryReceive {
             queue_id: 7,
             event_array: 0x2000,
@@ -413,11 +431,11 @@ fn classify_event_queue_receive_send() {
 #[test]
 fn classify_semaphore_trywait_and_get_value() {
     assert_eq!(
-        classify(93, &[7, 0, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::SEMAPHORE_TRY_WAIT, &[7, 0, 0, 0, 0, 0, 0, 0]),
         Lv2Request::SemaphoreTryWait { id: 7 }
     );
     assert_eq!(
-        classify(114, &[7, 0x1000, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::SEMAPHORE_GET_VALUE, &[7, 0x1000, 0, 0, 0, 0, 0, 0]),
         Lv2Request::SemaphoreGetValue {
             id: 7,
             out_ptr: 0x1000
@@ -429,7 +447,7 @@ fn classify_semaphore_trywait_and_get_value() {
 fn classify_semaphore_post() {
     let args = [7, 1, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(94, &args),
+        classify(syscall::SEMAPHORE_POST, &args),
         Lv2Request::SemaphorePost { id: 7, val: 1 }
     );
 }
@@ -438,7 +456,7 @@ fn classify_semaphore_post() {
 fn classify_semaphore_create_destroy_wait() {
     let create_args = [0x5000, 0x6000, 2, 10, 0, 0, 0, 0];
     assert_eq!(
-        classify(90, &create_args),
+        classify(syscall::SEMAPHORE_CREATE, &create_args),
         Lv2Request::SemaphoreCreate {
             id_ptr: 0x5000,
             attr_ptr: 0x6000,
@@ -448,12 +466,12 @@ fn classify_semaphore_create_destroy_wait() {
     );
     let destroy_args = [7, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(91, &destroy_args),
+        classify(syscall::SEMAPHORE_DESTROY, &destroy_args),
         Lv2Request::SemaphoreDestroy { id: 7 }
     );
     let wait_args = [7, 100, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(92, &wait_args),
+        classify(syscall::SEMAPHORE_WAIT, &wait_args),
         Lv2Request::SemaphoreWait {
             id: 7,
             timeout: 100
@@ -465,14 +483,14 @@ fn classify_semaphore_create_destroy_wait() {
 fn classify_mutex_lock_unlock() {
     let args = [42, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(102, &args),
+        classify(syscall::MUTEX_LOCK, &args),
         Lv2Request::MutexLock {
             mutex_id: 42,
             timeout: 0,
         }
     );
     assert_eq!(
-        classify(104, &args),
+        classify(syscall::MUTEX_UNLOCK, &args),
         Lv2Request::MutexUnlock { mutex_id: 42 }
     );
 }
@@ -481,7 +499,7 @@ fn classify_mutex_lock_unlock() {
 fn classify_event_queue_create_destroy() {
     let args = [0x7000, 0x8000, 0x100, 64, 0, 0, 0, 0];
     assert_eq!(
-        classify(128, &args),
+        classify(syscall::EVENT_QUEUE_CREATE, &args),
         Lv2Request::EventQueueCreate {
             id_ptr: 0x7000,
             attr_ptr: 0x8000,
@@ -491,7 +509,7 @@ fn classify_event_queue_create_destroy() {
     );
     let args2 = [99, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(129, &args2),
+        classify(syscall::EVENT_QUEUE_DESTROY, &args2),
         Lv2Request::EventQueueDestroy { queue_id: 99 }
     );
 }
@@ -611,7 +629,7 @@ fn classify_config_family_reads_each_register_position() {
 #[test]
 fn classify_cond_create_destroy_wait() {
     assert_eq!(
-        classify(105, &[0x5000, 7, 0x6000, 0, 0, 0, 0, 0]),
+        classify(syscall::COND_CREATE, &[0x5000, 7, 0x6000, 0, 0, 0, 0, 0]),
         Lv2Request::CondCreate {
             id_ptr: 0x5000,
             mutex_id: 7,
@@ -619,11 +637,11 @@ fn classify_cond_create_destroy_wait() {
         }
     );
     assert_eq!(
-        classify(106, &[9, 0, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::COND_DESTROY, &[9, 0, 0, 0, 0, 0, 0, 0]),
         Lv2Request::CondDestroy { id: 9 }
     );
     assert_eq!(
-        classify(107, &[9, 500, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::COND_WAIT, &[9, 500, 0, 0, 0, 0, 0, 0]),
         Lv2Request::CondWait {
             id: 9,
             timeout: 500,
@@ -634,15 +652,15 @@ fn classify_cond_create_destroy_wait() {
 #[test]
 fn classify_cond_signal_variants() {
     assert_eq!(
-        classify(108, &[9, 0, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::COND_SIGNAL, &[9, 0, 0, 0, 0, 0, 0, 0]),
         Lv2Request::CondSignal { id: 9 }
     );
     assert_eq!(
-        classify(109, &[9, 0, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::COND_SIGNAL_ALL, &[9, 0, 0, 0, 0, 0, 0, 0]),
         Lv2Request::CondSignalAll { id: 9 }
     );
     assert_eq!(
-        classify(110, &[9, 0x0100_0005, 0, 0, 0, 0, 0, 0]),
+        classify(syscall::COND_SIGNAL_TO, &[9, 0x0100_0005, 0, 0, 0, 0, 0, 0]),
         Lv2Request::CondSignalTo {
             id: 9,
             target_thread: 0x0100_0005,
@@ -654,7 +672,7 @@ fn classify_cond_signal_variants() {
 fn classify_memory_allocate_free() {
     let args = [0x10000, 0x200, 0x9000, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(348, &args),
+        classify(syscall::MEMORY_ALLOCATE, &args),
         Lv2Request::MemoryAllocate {
             size: 0x10000,
             flags: 0x200,
@@ -663,7 +681,7 @@ fn classify_memory_allocate_free() {
     );
     let args2 = [0x0001_0000, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(349, &args2),
+        classify(syscall::MEMORY_FREE, &args2),
         Lv2Request::MemoryFree { addr: 0x0001_0000 }
     );
 }
@@ -671,7 +689,7 @@ fn classify_memory_allocate_free() {
 #[test]
 fn narrow_ptr_rejects_high_bits_in_u32_field() {
     let args = [0x1_0000_1000, 0x2000, 0, 0, 0, 0, 0, 0];
-    match classify(100, &args) {
+    match classify(syscall::MUTEX_CREATE, &args) {
         Lv2Request::Malformed {
             number,
             reason,
@@ -701,7 +719,7 @@ fn narrow_i32_accepts_sign_extended_negatives() {
         0,
     ];
     assert_eq!(
-        classify(90, &args),
+        classify(syscall::SEMAPHORE_CREATE, &args),
         Lv2Request::SemaphoreCreate {
             id_ptr: 0x5000,
             attr_ptr: 0x6000,
@@ -714,7 +732,7 @@ fn narrow_i32_accepts_sign_extended_negatives() {
 #[test]
 fn narrow_i32_rejects_values_outside_i32_range() {
     let args = [0x5000, 0x6000, 0x1_0000_0001, 10, 0, 0, 0, 0];
-    match classify(90, &args) {
+    match classify(syscall::SEMAPHORE_CREATE, &args) {
         Lv2Request::Malformed { number, reason, .. } => {
             assert_eq!(number, 90);
             assert!(
@@ -731,7 +749,7 @@ fn narrow_i32_rejects_large_positive() {
     // 2^31 fits u32 but not i32; an `as i32` cast wraps to i32::MIN.
     let args = [0x5000, 0x6000, 0x8000_0000, 10, 0, 0, 0, 0];
     assert!(matches!(
-        classify(90, &args),
+        classify(syscall::SEMAPHORE_CREATE, &args),
         Lv2Request::Malformed { number: 90, .. }
     ));
 }
@@ -949,12 +967,12 @@ fn every_u32_slot_rejects_high_bits() {
 fn semaphore_post_val_narrowing() {
     let ok = [7u64, 0xFFFF_FFFF_FFFF_FFFF, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(94, &ok),
+        classify(syscall::SEMAPHORE_POST, &ok),
         Lv2Request::SemaphorePost { id: 7, val: -1 }
     );
     let bad = [7u64, 0x1_0000_0001, 0, 0, 0, 0, 0, 0];
     assert!(matches!(
-        classify(94, &bad),
+        classify(syscall::SEMAPHORE_POST, &bad),
         Lv2Request::Malformed { number: 94, .. }
     ));
 }
@@ -963,7 +981,7 @@ fn semaphore_post_val_narrowing() {
 fn classify_sys_rsx_memory_allocate() {
     let args = [0x1000, 0x1008, 0x0010_0000, 0x400, 0, 0, 0, 0];
     assert_eq!(
-        classify(668, &args),
+        classify(syscall::SYS_RSX_MEMORY_ALLOCATE, &args),
         Lv2Request::SysRsxMemoryAllocate {
             mem_handle_ptr: 0x1000,
             mem_addr_ptr: 0x1008,
@@ -980,7 +998,7 @@ fn classify_sys_rsx_memory_allocate() {
 fn classify_sys_rsx_memory_free() {
     let args = [0xA001, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(669, &args),
+        classify(syscall::SYS_RSX_MEMORY_FREE, &args),
         Lv2Request::SysRsxMemoryFree { mem_handle: 0xA001 }
     );
 }
@@ -989,7 +1007,7 @@ fn classify_sys_rsx_memory_free() {
 fn classify_sys_rsx_context_allocate() {
     let args = [0x2000, 0x2008, 0x2010, 0x2018, 0xA001, 0, 0, 0];
     assert_eq!(
-        classify(670, &args),
+        classify(syscall::SYS_RSX_CONTEXT_ALLOCATE, &args),
         Lv2Request::SysRsxContextAllocate {
             context_id_ptr: 0x2000,
             lpar_dma_control_ptr: 0x2008,
@@ -1005,7 +1023,7 @@ fn classify_sys_rsx_context_allocate() {
 fn classify_sys_rsx_context_free() {
     let args = [0x5555_5555, 0, 0, 0, 0, 0, 0, 0];
     assert_eq!(
-        classify(671, &args),
+        classify(syscall::SYS_RSX_CONTEXT_FREE, &args),
         Lv2Request::SysRsxContextFree {
             context_id: 0x5555_5555,
         }
@@ -1150,7 +1168,7 @@ fn classify_spu_initialize() {
 fn classify_sys_rsx_context_attribute() {
     let args = [0x5555_5555, 0x102, 0xAA, 0xBB, 0xCC, 0xDD, 0, 0];
     assert_eq!(
-        classify(674, &args),
+        classify(syscall::SYS_RSX_CONTEXT_ATTRIBUTE, &args),
         Lv2Request::SysRsxContextAttribute {
             context_id: 0x5555_5555,
             package_id: 0x102,
