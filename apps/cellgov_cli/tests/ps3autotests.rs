@@ -263,7 +263,11 @@ fn ps3autotests_root() -> PathBuf {
 /// a PS3 VFS layout, so the manifest carries the candidate purely so
 /// the schema validates.
 fn write_manifest(path: &Path, case: &Case) {
-    let content = format!(
+    std::fs::write(path, manifest_content(case)).expect("write manifest");
+}
+
+fn manifest_content(case: &Case) -> String {
+    format!(
         r#"[title]
 content_id = "AT_{stem_upper}"
 short_name = "at_{stem}"
@@ -273,6 +277,7 @@ year = 2007
 developer = "ps3autotests"
 engine = "ps3autotests"
 distribution = "psn-hdd"
+system_ver = "{system_ver}"
 
 [checkpoint]
 kind = "process-exit"
@@ -280,8 +285,8 @@ kind = "process-exit"
         stem_upper = case.stem.to_uppercase(),
         stem = case.stem,
         rel_dir = case.rel_dir,
-    );
-    std::fs::write(path, content).expect("write manifest");
+        system_ver = corpus::CORPUS_SYSTEM_VERSION,
+    )
 }
 
 /// `run_id` discriminates concurrent or sequential re-runs of one
@@ -584,6 +589,26 @@ fn every_declared_case_names_a_present_non_empty_fixture_pair() {
                 file.display(),
             );
         }
+    }
+}
+
+#[test]
+fn every_generated_boot_manifest_names_the_corpus_firmware_floor() {
+    for case in CASES {
+        let manifest = cellgov_boot::manifest::TitleManifest::load_from_text(
+            &manifest_content(case),
+            Path::new("ps3autotests-generated.toml"),
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "ps3autotests {}/{} generated an invalid manifest: {error}",
+                case.rel_dir, case.stem
+            )
+        });
+        assert_eq!(
+            manifest.system_ver.as_deref(),
+            Some(corpus::CORPUS_SYSTEM_VERSION)
+        );
     }
 }
 

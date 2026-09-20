@@ -41,6 +41,9 @@ pub fn workspace_root() -> PathBuf {
 /// against.
 pub const CORPUS_FIRMWARE_VERSION: &str = "4.93";
 
+/// Names the firmware key written to generated `system_ver` fields.
+pub const CORPUS_SYSTEM_VERSION: &str = CORPUS_FIRMWARE_VERSION;
+
 /// Every installed firmware's `dev_flash` tree, keyed by version.
 ///
 /// # Panics
