@@ -88,21 +88,21 @@ fn an_unreachable_root_has_no_finish_line() {
 #[test]
 fn a_run_with_no_cell_or_off_the_anchors_trajectory_has_no_finish_line() {
     assert!(
-        anchor_finish_line("NPUA80001", Some(&cell()), false).is_some(),
+        anchor_finish_line("BCES00664", Some(&cell()), false).is_some(),
         "the cell's committed anchor is what the two refusals below withhold"
     );
-    assert_eq!(anchor_finish_line("NPUA80001", None, false), None);
-    assert_eq!(anchor_finish_line("NPUA80001", Some(&cell()), true), None);
+    assert_eq!(anchor_finish_line("BCES00664", None, false), None);
+    assert_eq!(anchor_finish_line("BCES00664", Some(&cell()), true), None);
 }
 
 #[test]
 fn a_committed_cell_anchor_reaches_the_bar_through_the_workspace_root() {
-    let path = boot_anchor_path(&workspace_root(), "NPUA80001", &cell());
+    let path = boot_anchor_path(&workspace_root(), "BCES00664", &cell());
     let recorded: BootSummary =
         serde_json::from_str(&std::fs::read_to_string(&path).expect("committed anchor"))
             .expect("committed anchor parses");
     assert_eq!(
-        anchor_finish_line("NPUA80001", Some(&cell()), false),
+        anchor_finish_line("BCES00664", Some(&cell()), false),
         Some(recorded.steps)
     );
 }

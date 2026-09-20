@@ -31,5 +31,11 @@ override_env = "CELLGOV_NPUA80001_CONTENT_DIR"
 # past its floor. Recorded evidence about how much of a divergence is
 # the firmware's rather than the title's.
 [[bench.matrix]]
+fw = "1.50"
+game_ver = "base"
+pending = "the resident title image or firmware set crosses the fixed TLS reservation, so boot refuses before TLS initialization"
+
+[[bench.matrix]]
 fw = "4.93"
 game_ver = "base"
+pending = "the resident title image or firmware set crosses the fixed TLS reservation, so boot refuses before TLS initialization"

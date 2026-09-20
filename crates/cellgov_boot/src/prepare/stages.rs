@@ -52,6 +52,7 @@ pub fn prepare(opts: PrepareOptions<'_>) -> Result<PreparedBoot, BootError> {
         image.code_floor,
         t_start,
     )?;
+    firmware::check_tls_reservation(image.image_end, &prx_modules)?;
     pre_init_tls(&elf_data, &mut image.mem, sink)?;
 
     // 3. The guest heap floor, above everything now resident.

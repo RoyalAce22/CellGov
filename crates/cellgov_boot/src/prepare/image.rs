@@ -81,6 +81,8 @@ pub(super) struct LoadedImage {
     /// Guest address of the title's OPD entry descriptor.
     pub entry: u64,
     pub mem_size: usize,
+    /// Highest address exclusive of the title ELF's PT_LOAD ranges.
+    pub image_end: usize,
     /// First page past the title image: the floor the HLE trampolines
     /// and the firmware set are placed from.
     pub code_floor: u32,
@@ -207,6 +209,7 @@ pub(super) fn load_image(
         state,
         entry: load_result.entry,
         mem_size,
+        image_end: required_size,
         code_floor,
         t_mem_alloc,
         t_elf_load,

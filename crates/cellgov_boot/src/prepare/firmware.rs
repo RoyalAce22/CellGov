@@ -7,7 +7,7 @@ use super::types::{BootServices, DiagnosticOptions, TitleOptions};
 use crate::error::narrow_u32;
 use crate::prx::{
     install_unresolved_trampolines_only, load_firmware_set_bound, FirmwareLoadError, HostLinkMaps,
-    PrxLoadInfo, VerifiedFirmware,
+    PrxLoadInfo, VerifiedFirmware, TLS_BASE,
 };
 use crate::BootError;
 
@@ -20,6 +20,25 @@ pub(super) struct FirmwareSet {
     pub host_link: HostLinkMaps,
     pub t_hle_bind: Duration,
     pub t_prx_load: Duration,
+}
+
+pub(super) fn check_tls_reservation(
+    title_image_end: usize,
+    prx_modules: &[PrxLoadInfo],
+) -> Result<(), FirmwareLoadError> {
+    let image_end = prx_modules
+        .iter()
+        .map(|module| module.data_end)
+        .max()
+        .unwrap_or(0)
+        .max(title_image_end as u64);
+    if image_end > TLS_BASE {
+        return Err(FirmwareLoadError::RegionSize {
+            image_end,
+            tls_base: TLS_BASE,
+        });
+    }
+    Ok(())
 }
 
 /// Parse the title's import tables and load the firmware modules they
@@ -145,3 +164,7 @@ pub(super) fn place_guest_heap(
 #[cfg(test)]
 #[path = "tests/firmware_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/tls_reservation_tests.rs"]
+mod tls_reservation_tests;

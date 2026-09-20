@@ -196,6 +196,17 @@ pub enum FirmwareLoadError {
         /// The loader's own account of the refusal.
         source: cellgov_ppu::prx_loader::PrxLoaderError,
     },
+    /// The resident boot image would overlap a fixed boot reservation.
+    #[error(
+        "boot image and firmware set end at 0x{image_end:016x}, past the TLS reservation at \
+         0x{tls_base:016x}"
+    )]
+    RegionSize {
+        /// Highest address exclusive of the title image and firmware set.
+        image_end: u64,
+        /// First address of the fixed TLS reservation.
+        tls_base: u64,
+    },
     /// The GOT batch was rejected, so no import was bound.
     #[error("prx: firmware-set GOT patch aborted ({source})")]
     GotPatch {

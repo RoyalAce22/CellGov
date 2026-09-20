@@ -142,7 +142,7 @@ fn a_measured_run_that_named_no_triple_is_a_disagreement() {
     let root = crate::paths::workspace_root();
     let verdict = check_anchor_under(
         &root,
-        "NPUA80001",
+        "BCES00664",
         &test_cell(),
         &measured_run("BENCH_HOST_INVARIANT_BREAKS_WITNESS: count=0\n"),
     );
