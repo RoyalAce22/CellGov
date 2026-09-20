@@ -9,9 +9,9 @@ mod parse;
 pub(crate) mod test_fixtures;
 
 pub use load::{
-    is_applier_supported, load_prx, LoadedOpd, LoadedPrx, PrxLoadError, RelocMisalignedKind,
-    APPLIER_SUPPORTED_TYPES, R_PPC64_ADDR16_HA, R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO,
-    R_PPC64_ADDR16_LO_DS, R_PPC64_ADDR32, R_PPC64_ADDR64, R_PPC64_REL24,
+    load_prx, LoadedOpd, LoadedPrx, PrxLoadError, RelocMisalignedKind, R_PPC64_ADDR16_HA,
+    R_PPC64_ADDR16_HI, R_PPC64_ADDR16_LO, R_PPC64_ADDR16_LO_DS, R_PPC64_ADDR32, R_PPC64_ADDR64,
+    R_PPC64_REL24,
 };
 pub(crate) use parse::relocated_pointer_image;
 pub use parse::{

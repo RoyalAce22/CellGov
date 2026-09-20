@@ -116,7 +116,7 @@ fn resolve_ps3_vfs_root_inner(
         }
         return Ok(PathBuf::from(p));
     }
-    Ok(PathBuf::from("vfs/dev_hdd0"))
+    Ok(Path::new(cellgov_install::store::DEFAULT_VFS_ROOT).join("dev_hdd0"))
 }
 
 #[cfg(test)]
