@@ -811,6 +811,10 @@ impl ExecutionUnit for PpuExecutionUnit {
         }
     }
 
+    fn caches_code(&self) -> bool {
+        self.instruction_shadow.is_some()
+    }
+
     fn shadow_stats(&self) -> (u64, u64) {
         (self.shadow_hits, self.shadow_misses)
     }

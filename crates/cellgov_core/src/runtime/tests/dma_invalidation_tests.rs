@@ -135,6 +135,10 @@ impl ExecutionUnit for InvalidationRecorder {
         self.calls.borrow_mut().push((addr, len));
     }
 
+    fn caches_code(&self) -> bool {
+        true
+    }
+
     fn snapshot(&self) {}
 }
 

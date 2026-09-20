@@ -59,6 +59,9 @@ pub trait RegisteredUnit: 'static {
     /// See [`ExecutionUnit::invalidate_code`] for the must-override contract.
     fn invalidate_code(&mut self, addr: u64, len: u64);
 
+    /// Whether this unit caches decoded guest code.
+    fn caches_code(&self) -> bool;
+
     /// Shadow hit/miss counters. See [`ExecutionUnit::shadow_stats`].
     fn shadow_stats(&self) -> (u64, u64);
 
@@ -124,6 +127,11 @@ impl<U: ExecutionUnit + Clone + 'static> RegisteredUnit for U {
     #[inline]
     fn invalidate_code(&mut self, addr: u64, len: u64) {
         ExecutionUnit::invalidate_code(self, addr, len)
+    }
+
+    #[inline]
+    fn caches_code(&self) -> bool {
+        ExecutionUnit::caches_code(self)
     }
 
     #[inline]

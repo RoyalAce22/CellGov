@@ -175,6 +175,7 @@ impl Runtime {
         }
 
         if batch_applied {
+            let mut invalidation_ranges = Vec::new();
             for effect in effects {
                 if let cellgov_effects::Effect::SharedWriteIntent { range, .. } = effect {
                     // The fanout above replicated shared-view writes
@@ -185,12 +186,33 @@ impl Runtime {
                         Some(unit) => self.shared_alias_ranges(unit, *range),
                         None => Vec::new(),
                     };
-                    for (_, unit) in self.registry.iter_mut() {
-                        unit.invalidate_code(range.start().raw(), range.length());
-                        for alias in &alias_ranges {
-                            unit.invalidate_code(alias.start().raw(), alias.length());
-                        }
-                    }
+                    invalidation_ranges.push(*range);
+                    invalidation_ranges.extend(alias_ranges);
+                }
+            }
+            invalidation_ranges.sort_by_key(|range| range.start().raw());
+            let mut merged = Vec::with_capacity(invalidation_ranges.len());
+            for range in invalidation_ranges {
+                let can_merge = merged.last().is_some_and(|prior: &cellgov_mem::ByteRange| {
+                    prior.end().raw() >= range.start().raw()
+                });
+                if can_merge {
+                    let prior = merged.pop().expect("range checked above");
+                    let end = prior.end().raw().max(range.end().raw());
+                    let combined =
+                        cellgov_mem::ByteRange::new(prior.start(), end - prior.start().raw())
+                            .expect("merged committed ranges remain addressable");
+                    merged.push(combined);
+                } else {
+                    merged.push(range);
+                }
+            }
+            for (_, unit) in self.registry.iter_mut() {
+                if !unit.caches_code() {
+                    continue;
+                }
+                for range in &merged {
+                    unit.invalidate_code(range.start().raw(), range.length());
                 }
             }
         }

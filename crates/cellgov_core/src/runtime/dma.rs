@@ -31,14 +31,17 @@ impl Runtime {
     /// processor element or device modifies the line, and the issuer's
     /// own MFC transfer is a local SPE action rather than that outside
     /// entity.
-    fn apply_dma_transfer(&mut self, c: &DmaCompletion, payload: &Option<Vec<u8>>) {
+    fn apply_dma_transfer(&mut self, c: &DmaCompletion, payload: Option<&[u8]>) {
+        let owned;
         let bytes = if let Some(data) = payload {
-            data.clone()
+            data
         } else {
-            self.memory
+            owned = self
+                .memory
                 .read(c.source())
                 .expect("DMA source range mapped and readable at enqueue")
-                .to_vec()
+                .to_vec();
+            &owned
         };
         // Both ends resolve in space 0 (see the `spaces` module docs);
         // the fanout below is the only part of a transfer that reaches
@@ -47,7 +50,7 @@ impl Runtime {
             HostWriter::DmaCompletion,
             AddressSpaceId::BOOT,
             c.destination(),
-            &bytes,
+            bytes,
             Some(c.issuer()),
         )
         .expect("DMA destination validated as ReadWrite at enqueue");
@@ -68,6 +71,9 @@ impl Runtime {
         let aliases = self.shared_alias_ranges_in(AddressSpaceId::BOOT, c.destination());
         let (dst, len) = (c.destination().start().raw(), c.destination().length());
         for (_, unit) in self.registry.iter_mut() {
+            if !unit.caches_code() {
+                continue;
+            }
             unit.invalidate_code(dst, len);
             for alias in &aliases {
                 unit.invalidate_code(alias.start().raw(), alias.length());
@@ -80,7 +86,7 @@ impl Runtime {
     pub(super) fn fire_dma_completions(&mut self) -> Vec<(DmaCompletion, Option<Vec<u8>>)> {
         let due = self.dma_queue.pop_due(self.time);
         for (c, payload) in &due {
-            self.apply_dma_transfer(c, payload);
+            self.apply_dma_transfer(c, payload.as_deref());
             // The transfer still commits, so the terminal memory
             // snapshot holds the payload. The `Runnable` override below
             // would replace either of these issuer states:
@@ -112,7 +118,7 @@ impl Runtime {
     pub fn drain_pending_dma(&mut self) {
         let due = self.dma_queue.pop_due(GuestTicks::new(u64::MAX));
         for (c, payload) in &due {
-            self.apply_dma_transfer(c, payload);
+            self.apply_dma_transfer(c, payload.as_deref());
         }
     }
 }

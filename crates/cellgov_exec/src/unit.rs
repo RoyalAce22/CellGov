@@ -137,6 +137,11 @@ pub trait ExecutionUnit {
     /// from guest code (synthetic / scenario units).
     fn invalidate_code(&mut self, _addr: u64, _len: u64) {}
 
+    /// Whether this unit holds guest-code-derived state that needs invalidation.
+    fn caches_code(&self) -> bool {
+        false
+    }
+
     /// Hash of the unit's private memory the guest reads back, or `None`
     /// for a unit with none.
     ///
