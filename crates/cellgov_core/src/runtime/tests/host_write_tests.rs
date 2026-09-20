@@ -63,6 +63,7 @@ fn unit_write_error(rt: &mut Runtime, target: ByteRange) -> CommitError {
     // drain -- the same `validate_write` `apply_commit` runs.
     let mut rsx_label_writes = 0u64;
     let mut ctx = CommitContext {
+        space: 0,
         memory: &mut rt.memory,
         dma_memory: None,
         units: &mut rt.registry,

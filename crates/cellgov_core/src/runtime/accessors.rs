@@ -175,6 +175,7 @@ impl Runtime {
         F: Fn(
                 &[u8],
                 &mut cellgov_mem::GuestMemory,
+                super::spaces::AddressSpaceId,
             )
                 -> Result<super::types::SpawnedProcessImage, super::types::ProcessSpawnLoadError>
             + 'static,

@@ -62,6 +62,7 @@ impl CommitTestBed {
         let mut flip = crate::rsx::flip::RsxFlipState::new();
         let mut label_writes = 0u64;
         let mut ctx = CommitContext {
+            space: 0,
             memory: &mut self.mem,
             dma_memory: None,
             units: &mut self.units,

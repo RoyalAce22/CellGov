@@ -211,6 +211,8 @@ pub enum BlockReason {
 
 /// Mutable references to every subsystem the commit pipeline touches.
 pub struct CommitContext<'a> {
+    /// Address-space id of [`Self::memory`].
+    pub space: u32,
     /// Guest memory the staged writes drain into.
     pub memory: &'a mut GuestMemory,
     /// Space 0's memory, `Some` only where [`Self::memory`] is a child
@@ -555,7 +557,7 @@ impl CommitPipeline {
         let tap = &mut ctx.tap;
         let drained = staging.drain_into_observed(ctx.memory, |range, bytes| {
             if let Some(tap) = tap.as_deref_mut() {
-                tap.write(range.start().raw(), bytes);
+                tap.write(ctx.space, range.start().raw(), bytes);
             }
         });
         if let Err(e) = drained {

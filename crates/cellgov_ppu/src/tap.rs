@@ -2,6 +2,7 @@
 
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
+use cellgov_event::UnitId;
 
 /// What a PPU unit reports to the observer the host installs with
 /// [`crate::PpuExecutionUnit::set_tap`].
@@ -20,5 +21,5 @@ pub trait PpuTap {
     /// - The second slot of a fused pair retires: the unit makes no call.
     /// - A step faults: the unit rewinds to its batch entry and retracts
     ///   no call.
-    fn dispatch(&self, insn: &PpuInstruction, state: &PpuState);
+    fn dispatch(&self, unit: UnitId, insn: &PpuInstruction, state: &PpuState);
 }

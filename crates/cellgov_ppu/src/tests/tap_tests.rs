@@ -16,7 +16,7 @@ const STORE_BUFFER_CAPACITY: usize = 64;
 struct Pcs(RefCell<Vec<u64>>);
 
 impl PpuTap for Pcs {
-    fn dispatch(&self, _insn: &PpuInstruction, state: &PpuState) {
+    fn dispatch(&self, _unit: UnitId, _insn: &PpuInstruction, state: &PpuState) {
         self.0.borrow_mut().push(state.pc);
     }
 }

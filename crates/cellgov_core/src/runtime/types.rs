@@ -151,6 +151,7 @@ pub type ProcessSpawnLoader = Box<
     dyn Fn(
         &[u8],
         &mut cellgov_mem::GuestMemory,
+        super::spaces::AddressSpaceId,
     ) -> Result<SpawnedProcessImage, ProcessSpawnLoadError>,
 >;
 

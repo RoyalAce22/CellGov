@@ -91,7 +91,7 @@ fn build_spawn_ready() -> Runtime {
         .content_store_mut()
         .register(CHILD_PATH, vec![0xEE; 16]);
     rt.set_ppu_factory(|id, _init| Box::new(Idle::new(id)));
-    rt.set_process_spawn_loader(|elf_bytes, mem| {
+    rt.set_process_spawn_loader(|elf_bytes, mem, _space| {
         assert_eq!(
             elf_bytes,
             vec![0xEE; 16],
@@ -218,7 +218,7 @@ fn spawn_unknown_path_returns_enoent() {
 #[test]
 fn spawn_loader_failure_rolls_back_space_and_pid() {
     let mut rt = build_spawn_ready();
-    rt.set_process_spawn_loader(|_bytes, _mem| {
+    rt.set_process_spawn_loader(|_bytes, _mem, _space| {
         Err(crate::runtime::types::ProcessSpawnLoadError::ImageParse {
             detail: "refused".into(),
         })

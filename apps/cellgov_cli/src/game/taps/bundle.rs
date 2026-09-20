@@ -10,6 +10,7 @@ use std::rc::Rc;
 
 use cellgov_boot::{DebugTaps, NoTaps};
 use cellgov_core::RuntimeTap;
+use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory};
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
@@ -94,12 +95,12 @@ struct PpuTaps {
 }
 
 impl PpuTap for PpuTaps {
-    fn dispatch(&self, insn: &PpuInstruction, state: &PpuState) {
+    fn dispatch(&self, unit: UnitId, insn: &PpuInstruction, state: &PpuState) {
         if let Some(last_pc) = &self.last_pc {
             last_pc.set(state.pc as u32);
         }
         if let Some(hle) = &self.hle {
-            hle.borrow_mut().dispatch(insn, state);
+            hle.borrow_mut().dispatch(unit, insn, state);
         }
     }
 }
@@ -112,9 +113,11 @@ struct RuntimeTaps {
 }
 
 impl RuntimeTap for RuntimeTaps {
-    fn write(&mut self, addr: u64, bytes: &[u8]) {
-        if let Some(store) = &mut self.store {
-            store.write(self.last_pc.get(), addr, bytes);
+    fn write(&mut self, space: u32, addr: u64, bytes: &[u8]) {
+        if space == 0 {
+            if let Some(store) = &mut self.store {
+                store.write(self.last_pc.get(), addr, bytes);
+            }
         }
     }
 
@@ -253,7 +256,15 @@ impl DebugTaps for EnvTaps {
             .map(|r| Box::new(r) as Box<dyn RuntimeTap>)
     }
 
-    fn firmware_bound(&self, exports: &BTreeMap<String, BTreeMap<u32, u32>>, mem: &GuestMemory) {
+    fn firmware_bound(
+        &self,
+        space: u32,
+        exports: &BTreeMap<String, BTreeMap<u32, u32>>,
+        mem: &GuestMemory,
+    ) {
+        if space != 0 {
+            return;
+        }
         let Some(hle) = self.ppu.as_ref().and_then(|p| p.hle.as_ref()) else {
             return;
         };

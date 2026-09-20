@@ -43,7 +43,13 @@ pub trait DebugTaps {
     ///   refuse the spawn. `mem` is the child's memory. A refused spawn
     ///   reports nothing, and a boot with no firmware directory reports
     ///   no child set.
-    fn firmware_bound(&self, _exports: &BTreeMap<String, BTreeMap<u32, u32>>, _mem: &GuestMemory) {}
+    fn firmware_bound(
+        &self,
+        _space: u32,
+        _exports: &BTreeMap<String, BTreeMap<u32, u32>>,
+        _mem: &GuestMemory,
+    ) {
+    }
 }
 
 /// A [`DebugTaps`] that installs no observer.

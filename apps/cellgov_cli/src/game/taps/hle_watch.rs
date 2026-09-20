@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::PathBuf;
 
+use cellgov_event::UnitId;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
 
@@ -321,6 +322,7 @@ struct Resolved {
 
 #[derive(Clone, Copy)]
 struct InFlightCall {
+    unit: UnitId,
     on_wire_nid: u32,
     return_pc: u32,
     entry_record_no: u64,
@@ -328,6 +330,7 @@ struct InFlightCall {
 
 #[derive(Clone, Copy)]
 struct PendingSyscallReturn {
+    unit: UnitId,
     return_pc: u32,
     syscall_num: u32,
     on_wire_nid: u32,
@@ -343,6 +346,7 @@ pub(super) struct HleWatch<W: Write> {
     record_counter: u64,
     in_flight: Vec<InFlightCall>,
     pending_syscall_returns: Vec<PendingSyscallReturn>,
+    last_dispatch: BTreeMap<UnitId, (u32, u32)>,
 }
 
 impl<W: Write> HleWatch<W> {
@@ -356,6 +360,7 @@ impl<W: Write> HleWatch<W> {
             record_counter: 0,
             in_flight: Vec::new(),
             pending_syscall_returns: Vec::new(),
+            last_dispatch: BTreeMap::new(),
         };
         for (pc, name) in &spec.raw_pcs {
             let on_wire_nid = pc | RAW_PC_ID_BIT;
@@ -397,12 +402,12 @@ impl<W: Write> HleWatch<W> {
 
     /// Record what `insn`, about to execute in `state`, means for the
     /// watched functions.
-    pub(super) fn dispatch(&mut self, insn: &PpuInstruction, state: &PpuState) {
+    pub(super) fn dispatch(&mut self, unit: UnitId, insn: &PpuInstruction, state: &PpuState) {
         let pc = state.pc as u32;
         let gpr = state.gpr.as_array();
-        self.on_dispatch(pc, gpr, state.lr());
+        self.on_dispatch(unit, pc, gpr, state.lr());
         match *insn {
-            PpuInstruction::Sc { .. } => self.on_syscall(pc, gpr),
+            PpuInstruction::Sc { .. } => self.on_syscall(unit, pc, gpr),
             PpuInstruction::B {
                 offset,
                 aa,
@@ -413,19 +418,19 @@ impl<W: Write> HleWatch<W> {
                 } else {
                     (pc as i32).wrapping_add(offset) as u32
                 };
-                self.on_branch_link(pc, gpr, target);
+                self.on_branch_link(unit, pc, gpr, target);
             }
             PpuInstruction::Bcctr { link: true, .. } => {
-                self.on_branch_link(pc, gpr, state.ctr() as u32);
+                self.on_branch_link(unit, pc, gpr, state.ctr() as u32);
             }
             PpuInstruction::Bclr { link: true, .. } => {
-                self.on_branch_link(pc, gpr, state.lr() as u32);
+                self.on_branch_link(unit, pc, gpr, state.lr() as u32);
             }
             _ => {}
         }
     }
 
-    fn on_dispatch(&mut self, pc: u32, gpr: &[u64; 32], lr: u64) {
+    fn on_dispatch(&mut self, unit: UnitId, pc: u32, gpr: &[u64; 32], lr: u64) {
         // Exit before entry, so a PC that is both an outer frame's
         // return PC and a watched entry pops the outer frame first.
         //
@@ -433,7 +438,12 @@ impl<W: Write> HleWatch<W> {
         // visit pops then matches entry at the same PC, emitting a
         // phantom entry. Analyzers should treat back-to-back entries
         // with no body events as suspect on PCs that host this pattern.
-        if let Some(call) = self.in_flight.last().copied().filter(|c| c.return_pc == pc) {
+        if let Some(index) = self
+            .in_flight
+            .iter()
+            .rposition(|c| c.unit == unit && c.return_pc == pc)
+        {
+            let call = self.in_flight[index];
             self.append(|record_no| {
                 wire::exit(
                     record_no,
@@ -443,7 +453,7 @@ impl<W: Write> HleWatch<W> {
                     gpr[3],
                 )
             });
-            self.in_flight.pop();
+            self.in_flight.remove(index);
         }
 
         let entry = self.resolved.values().find(|r| r.entry_pc == pc).copied();
@@ -460,16 +470,16 @@ impl<W: Write> HleWatch<W> {
             // a watched function's first instruction is often a store.
             // A match on the same frame, with nothing recorded since its
             // entry, is that retry.
-            let retried = self.in_flight.last().is_some_and(|c| {
-                c.on_wire_nid == r.on_wire_nid
-                    && c.return_pc == lr32
-                    && c.entry_record_no.wrapping_add(1) == self.record_counter
-            });
+            let retried = self
+                .last_dispatch
+                .get(&unit)
+                .is_some_and(|&(last_pc, last_lr)| last_pc == pc && last_lr == lr32);
             if !retried {
                 let record_no = self.append(|record_no| {
                     wire::entry(record_no, r.on_wire_nid, r.entry_pc, pc, lr32, gpr)
                 });
                 self.in_flight.push(InFlightCall {
+                    unit,
                     on_wire_nid: r.on_wire_nid,
                     return_pc: lr32,
                     entry_record_no: record_no,
@@ -477,12 +487,12 @@ impl<W: Write> HleWatch<W> {
             }
         }
 
-        if let Some(p) = self
+        if let Some(index) = self
             .pending_syscall_returns
-            .last()
-            .copied()
-            .filter(|p| p.return_pc == pc)
+            .iter()
+            .rposition(|p| p.unit == unit && p.return_pc == pc)
         {
+            let p = self.pending_syscall_returns[index];
             self.append(|record_no| {
                 wire::body_syscall_return(
                     record_no,
@@ -493,15 +503,22 @@ impl<W: Write> HleWatch<W> {
                     gpr[3],
                 )
             });
-            self.pending_syscall_returns.pop();
+            self.pending_syscall_returns.remove(index);
         }
+        self.last_dispatch.insert(unit, (pc, lr as u32));
     }
 
     /// Record an `sc` during a watched call and queue its return at `pc + 4`.
     ///
     /// The watch ignores an `sc` while no watched call is open.
-    fn on_syscall(&mut self, pc: u32, gpr: &[u64; 32]) {
-        let Some(call) = self.in_flight.last().copied() else {
+    fn on_syscall(&mut self, unit: UnitId, pc: u32, gpr: &[u64; 32]) {
+        let Some(call) = self
+            .in_flight
+            .iter()
+            .rev()
+            .find(|c| c.unit == unit)
+            .copied()
+        else {
             return;
         };
         let syscall_num = gpr[11] as u32;
@@ -516,6 +533,7 @@ impl<W: Write> HleWatch<W> {
             )
         });
         self.pending_syscall_returns.push(PendingSyscallReturn {
+            unit,
             return_pc: pc.wrapping_add(4),
             syscall_num,
             on_wire_nid: call.on_wire_nid,
@@ -526,8 +544,14 @@ impl<W: Write> HleWatch<W> {
     /// Record a `bl` / `bctrl` / `blrl` during a watched call.
     ///
     /// The watch ignores such a branch while no watched call is open.
-    fn on_branch_link(&mut self, pc: u32, gpr: &[u64; 32], target: u32) {
-        let Some(call) = self.in_flight.last().copied() else {
+    fn on_branch_link(&mut self, unit: UnitId, pc: u32, gpr: &[u64; 32], target: u32) {
+        let Some(call) = self
+            .in_flight
+            .iter()
+            .rev()
+            .find(|c| c.unit == unit)
+            .copied()
+        else {
             return;
         };
         self.append(|record_no| {

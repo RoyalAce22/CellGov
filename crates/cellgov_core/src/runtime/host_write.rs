@@ -67,7 +67,7 @@ impl Runtime {
         // writes no trace record and still publishes this entry.
         self.last_host_writes.push((writer, space, range));
         if let Some(tap) = self.tap.as_deref_mut() {
-            tap.write(addr, bytes);
+            tap.write(space.raw(), addr, bytes);
         }
         if self.mode != RuntimeMode::FaultDriven {
             // Both casts narrow to the record's u32 fields:

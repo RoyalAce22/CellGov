@@ -2,6 +2,7 @@
 //! each write with the PC the PPU half saw last.
 
 use cellgov_boot::DebugTaps;
+use cellgov_event::UnitId;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
 
@@ -27,8 +28,8 @@ fn a_store_write_carries_the_last_dispatched_pc() {
 
     let mut state = PpuState::new();
     state.pc = 0x0001_2340;
-    ppu.dispatch(&PpuInstruction::Consumed, &state);
-    runtime.write(0x1004, &[0xEE; 4]);
+    ppu.dispatch(UnitId::new(0), &PpuInstruction::Consumed, &state);
+    runtime.write(0, 0x1004, &[0xEE; 4]);
     drop(runtime);
 
     let bytes = std::fs::read(&path).unwrap();

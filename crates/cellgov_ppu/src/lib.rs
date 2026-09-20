@@ -416,7 +416,13 @@ struct NoTap;
 
 impl PpuTap for NoTap {
     #[inline(always)]
-    fn dispatch(&self, _insn: &instruction::PpuInstruction, _state: &state::PpuState) {}
+    fn dispatch(
+        &self,
+        _unit: UnitId,
+        _insn: &instruction::PpuInstruction,
+        _state: &state::PpuState,
+    ) {
+    }
 }
 
 impl PpuExecutionUnit {
@@ -578,7 +584,7 @@ impl PpuExecutionUnit {
                 continue;
             }
 
-            tap.dispatch(&insn, &self.state);
+            tap.dispatch(self.id, &insn, &self.state);
             match exec::execute(
                 &insn,
                 &mut self.state,

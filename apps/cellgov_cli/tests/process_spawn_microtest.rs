@@ -107,7 +107,7 @@ fn build_runtime(parent_elf: &[u8], child_elf: &[u8]) -> Runtime {
         }
         Box::new(unit)
     });
-    rt.set_process_spawn_loader(|elf_bytes, mem| {
+    rt.set_process_spawn_loader(|elf_bytes, mem, _space| {
         // Same call the boot spawn loader makes: the content store
         // hands over whatever the title shipped, so an SCE-wrapped
         // child.self decrypts here rather than at staging time.

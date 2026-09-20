@@ -172,7 +172,7 @@ fn spawns_a_child() -> Runtime {
             steps: Cell::new(0),
         })
     });
-    rt.set_process_spawn_loader(move |_bytes, mem| {
+    rt.set_process_spawn_loader(move |_bytes, mem, _space| {
         mem.install_region(0, 0x1000, "child", PageSize::Page64K)
             .map_err(|source| ProcessSpawnLoadError::RegionInstall { source })?;
         Ok(SpawnedProcessImage {

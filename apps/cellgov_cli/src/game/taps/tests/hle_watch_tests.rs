@@ -3,6 +3,7 @@
 
 use std::collections::BTreeMap;
 
+use cellgov_event::UnitId;
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
 
@@ -232,11 +233,19 @@ fn a_watched_call_records_entry_body_events_and_exit_in_order() {
     };
     // Entry at the watched PC, a bl inside the body, an sc and the
     // instruction after it, then the return to the caller.
-    w.dispatch(&PpuInstruction::Consumed, &at(ENTRY_PC, RETURN_PC));
-    w.dispatch(&bl, &at(ENTRY_PC + 4, RETURN_PC));
-    w.dispatch(&sc, &at(ENTRY_PC + 8, RETURN_PC));
-    w.dispatch(&PpuInstruction::Consumed, &at(ENTRY_PC + 12, RETURN_PC));
-    w.dispatch(&PpuInstruction::Consumed, &at(RETURN_PC, 0));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, RETURN_PC),
+    );
+    w.dispatch(UnitId::new(0), &bl, &at(ENTRY_PC + 4, RETURN_PC));
+    w.dispatch(UnitId::new(0), &sc, &at(ENTRY_PC + 8, RETURN_PC));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC + 12, RETURN_PC),
+    );
+    w.dispatch(UnitId::new(0), &PpuInstruction::Consumed, &at(RETURN_PC, 0));
 
     let recs = records(&w.into_inner());
     let kinds: Vec<u8> = recs.iter().map(|(k, _)| *k).collect();
@@ -268,12 +277,56 @@ fn a_watched_call_records_entry_body_events_and_exit_in_order() {
 }
 
 #[test]
+fn interleaved_units_return_to_their_own_watched_calls() {
+    let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
+        .unwrap()
+        .unwrap();
+    let mut w = watch(&spec);
+    let first = UnitId::new(1);
+    let second = UnitId::new(2);
+    let first_return = 0x20000;
+    let second_return = 0x30000;
+
+    w.dispatch(
+        first,
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, first_return),
+    );
+    w.dispatch(
+        second,
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, second_return),
+    );
+    w.dispatch(first, &PpuInstruction::Consumed, &at(first_return, 0));
+    w.dispatch(second, &PpuInstruction::Consumed, &at(second_return, 0));
+
+    let recs = records(&w.into_inner());
+    let kinds: Vec<u8> = recs.iter().map(|(kind, _)| *kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            KIND_RESOLUTION,
+            KIND_ENTRY,
+            KIND_ENTRY,
+            KIND_EXIT,
+            KIND_EXIT
+        ]
+    );
+    assert_eq!(le64(&recs[3].1, 13), le64(&recs[1].1, 1));
+    assert_eq!(le64(&recs[4].1, 13), le64(&recs[2].1, 1));
+}
+
+#[test]
 fn body_events_outside_a_watched_call_write_nothing() {
     let spec = HleWatchSpec::parse(None, Some("10000=f"), Some("w"))
         .unwrap()
         .unwrap();
     let mut w = watch(&spec);
-    w.dispatch(&PpuInstruction::Sc { lev: 0 }, &at(0x3_0000, 0));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Sc { lev: 0 },
+        &at(0x3_0000, 0),
+    );
     let recs = records(&w.into_inner());
     assert_eq!(recs.len(), 1, "only the raw-PC resolution record");
 }
@@ -302,7 +355,11 @@ fn a_nid_one_library_exports_resolves_through_its_opd() {
         lines[0]
     );
 
-    w.dispatch(&PpuInstruction::Consumed, &at(ENTRY_PC, RETURN_PC));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, RETURN_PC),
+    );
     let kinds: Vec<u8> = records(&w.into_inner()).iter().map(|(k, _)| *k).collect();
     assert_eq!(kinds, vec![KIND_RESOLUTION, KIND_ENTRY]);
 }
@@ -318,7 +375,11 @@ fn a_nid_several_libraries_export_stays_unwatched() {
         |_| Some(ENTRY_PC as u32),
     );
     assert!(lines[0].contains("_cellAudio, cellAudio"), "{}", lines[0]);
-    w.dispatch(&PpuInstruction::Consumed, &at(ENTRY_PC, RETURN_PC));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, RETURN_PC),
+    );
     assert!(w.into_inner().is_empty());
 }
 
@@ -391,12 +452,12 @@ fn a_retried_entry_instruction_records_one_entry_and_one_exit() {
     let mut w = watch(&spec);
     let store = PpuInstruction::Consumed;
     // A full store buffer sends the entry instruction back once.
-    w.dispatch(&store, &at(ENTRY_PC, RETURN_PC));
-    w.dispatch(&store, &at(ENTRY_PC, RETURN_PC));
-    w.dispatch(&store, &at(ENTRY_PC + 4, RETURN_PC));
-    w.dispatch(&store, &at(RETURN_PC, 0));
+    w.dispatch(UnitId::new(0), &store, &at(ENTRY_PC, RETURN_PC));
+    w.dispatch(UnitId::new(0), &store, &at(ENTRY_PC, RETURN_PC));
+    w.dispatch(UnitId::new(0), &store, &at(ENTRY_PC + 4, RETURN_PC));
+    w.dispatch(UnitId::new(0), &store, &at(RETURN_PC, 0));
     // A second visit to the return PC finds no stale frame to pop.
-    w.dispatch(&store, &at(RETURN_PC, 0));
+    w.dispatch(UnitId::new(0), &store, &at(RETURN_PC, 0));
     let kinds: Vec<u8> = records(&w.into_inner()).iter().map(|(k, _)| *k).collect();
     assert_eq!(kinds, vec![KIND_RESOLUTION, KIND_ENTRY, KIND_EXIT]);
 }
@@ -412,9 +473,17 @@ fn a_recursive_call_after_a_body_event_is_a_second_entry() {
         aa: false,
         link: true,
     };
-    w.dispatch(&PpuInstruction::Consumed, &at(ENTRY_PC, RETURN_PC));
-    w.dispatch(&bl, &at(ENTRY_PC + 4, RETURN_PC));
-    w.dispatch(&PpuInstruction::Consumed, &at(ENTRY_PC, ENTRY_PC + 8));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, RETURN_PC),
+    );
+    w.dispatch(UnitId::new(0), &bl, &at(ENTRY_PC + 4, RETURN_PC));
+    w.dispatch(
+        UnitId::new(0),
+        &PpuInstruction::Consumed,
+        &at(ENTRY_PC, ENTRY_PC + 8),
+    );
     let kinds: Vec<u8> = records(&w.into_inner()).iter().map(|(k, _)| *k).collect();
     assert_eq!(
         kinds,

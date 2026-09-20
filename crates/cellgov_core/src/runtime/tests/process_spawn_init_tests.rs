@@ -86,7 +86,7 @@ fn build(init_token: Option<u64>) -> Runtime {
         .content_store_mut()
         .register(CHILD_PATH, vec![0xEE; 16]);
     rt.set_ppu_factory(|id, _init| Box::new(idle(id)));
-    rt.set_process_spawn_loader(move |_bytes, mem| {
+    rt.set_process_spawn_loader(move |_bytes, mem, _space| {
         mem.install_region(0, 0x1000, "child", PageSize::Page64K)
             .map_err(|source| ProcessSpawnLoadError::RegionInstall { source })?;
         Ok(SpawnedProcessImage {

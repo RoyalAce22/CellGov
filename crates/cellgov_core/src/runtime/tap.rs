@@ -9,7 +9,7 @@ use cellgov_mem::GuestMemory;
 /// observer cannot change what a run computes. Every method defaults
 /// to a no-op.
 pub trait RuntimeTap {
-    /// `bytes` landed at guest address `addr`, in any address space.
+    /// `bytes` landed at guest address `addr` in `space`.
     ///
     /// The runtime calls this once per staged write of a committed batch
     /// and once per host write, in the order that the writes land. It
@@ -19,7 +19,7 @@ pub trait RuntimeTap {
     /// - the image that a [`super::ProcessSpawnLoader`] loads into a
     ///   child's address space;
     /// - the memory that [`super::Runtime::restore_into`] puts back.
-    fn write(&mut self, _addr: u64, _bytes: &[u8]) {}
+    fn write(&mut self, _space: u32, _addr: u64, _bytes: &[u8]) {}
 
     /// Step number `step` ran; the first step is 1.
     ///

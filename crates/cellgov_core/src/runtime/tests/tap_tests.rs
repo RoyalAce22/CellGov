@@ -17,7 +17,7 @@ use crate::runtime::{AddressSpaceId, Runtime};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Seen {
-    Write(u64, Vec<u8>),
+    Write(u32, u64, Vec<u8>),
     /// The step number and the byte at address 0 the step saw.
     Step(u64, u8),
 }
@@ -25,8 +25,10 @@ enum Seen {
 struct Recorder(Rc<RefCell<Vec<Seen>>>);
 
 impl RuntimeTap for Recorder {
-    fn write(&mut self, addr: u64, bytes: &[u8]) {
-        self.0.borrow_mut().push(Seen::Write(addr, bytes.to_vec()));
+    fn write(&mut self, space: u32, addr: u64, bytes: &[u8]) {
+        self.0
+            .borrow_mut()
+            .push(Seen::Write(space, addr, bytes.to_vec()));
     }
 
     fn step(&mut self, step: u64, memory: &GuestMemory) {
@@ -114,9 +116,9 @@ fn each_step_is_reported_before_its_batch_commits() {
         *seen.borrow(),
         vec![
             Seen::Step(1, 0),
-            Seen::Write(0, vec![1; 4]),
+            Seen::Write(0, 0, vec![1; 4]),
             Seen::Step(2, 1),
-            Seen::Write(0, vec![2; 4]),
+            Seen::Write(0, 0, vec![2; 4]),
         ]
     );
 }
@@ -133,7 +135,7 @@ fn a_faulted_batch_reports_no_write() {
         .collect();
     assert_eq!(
         writes,
-        vec![Seen::Write(0, vec![1; 4]), Seen::Write(0, vec![3; 4])]
+        vec![Seen::Write(0, 0, vec![1; 4]), Seen::Write(0, 0, vec![3; 4])]
     );
 }
 
@@ -148,7 +150,7 @@ fn a_host_write_is_reported() {
         &[0xAB, 0xCD],
     )
     .unwrap();
-    assert_eq!(*seen.borrow(), vec![Seen::Write(0x10, vec![0xAB, 0xCD])]);
+    assert_eq!(*seen.borrow(), vec![Seen::Write(0, 0x10, vec![0xAB, 0xCD])]);
 }
 
 #[test]

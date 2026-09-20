@@ -111,6 +111,7 @@ impl Runtime {
                 source_space,
             );
         let mut ctx = CommitContext {
+            space: source_space.raw(),
             memory: space_memory,
             dma_memory,
             units: &mut self.registry,

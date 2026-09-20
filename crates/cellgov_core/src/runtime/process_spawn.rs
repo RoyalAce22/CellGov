@@ -87,7 +87,7 @@ impl Runtime {
                 .extra
                 .get_mut(&space)
                 .expect("space created above");
-            loader(&elf_bytes, mem)
+            loader(&elf_bytes, mem, space)
         };
         let image = match image {
             Ok(image) => image,

@@ -21,9 +21,11 @@ pub trait RegisteredUnit: 'static {
     /// Stable id assigned at registration.
     fn unit_id(&self) -> UnitId;
 
-    /// Deep-clone behind a fresh box. Used by [`super::UnitRegistry::clone`]
-    /// (and thus [`crate::Runtime::snapshot`]) to fork per-unit
-    /// state without aliasing.
+    /// Deep-clone guest state behind a fresh box.
+    ///
+    /// Observers held in shared pointers may remain shared across a
+    /// snapshot fork. They report diagnostics and do not affect guest
+    /// execution.
     fn clone_box(&self) -> Box<dyn RegisteredUnit>;
 
     /// Coarse runnability state queried by the scheduler.

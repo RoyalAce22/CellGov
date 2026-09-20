@@ -99,7 +99,7 @@ pub(super) fn install_spawn_loader(
     let sink: Rc<dyn crate::BootSink> = Rc::clone(&services.sink);
     let keys: Rc<dyn crate::KeyVaultSource> = Rc::clone(&services.keys);
     let taps: Rc<dyn crate::DebugTaps> = Rc::clone(&services.taps);
-    rt.set_process_spawn_loader(move |elf_bytes, mem| {
+    rt.set_process_spawn_loader(move |elf_bytes, mem, space| {
         // A child image may arrive SCE-wrapped (vsh spawns SELFs, not
         // raw ELFs). The spawn loader is APP-keyed: klicensee
         // resolution belongs to the title-install layer, which is not
@@ -236,7 +236,7 @@ pub(super) fn install_spawn_loader(
         // `process_spawn.rs` `handle_process_spawn`). An earlier report
         // can name OPDs in a space that the runtime then removes.
         if let Some(exports) = &child_exports {
-            taps.firmware_bound(exports, mem);
+            taps.firmware_bound(space.raw(), exports, mem);
         }
 
         let stack_top = (child_mem_size as u64) - 0x1000;
