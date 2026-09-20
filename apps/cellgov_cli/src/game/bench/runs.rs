@@ -86,6 +86,12 @@ pub fn bench_boot_runs(
     // `determinism_disagreements` above already checked that every run
     // produced the same stream.
     let first = runs[0];
+    if let Some(line) = streams[0]
+        .lines()
+        .find(|line| line.contains("invariant break at"))
+    {
+        eprintln!("{line}");
+    }
     let anchor = if !opts.check_anchor {
         AnchorVerdict::Skipped
     } else {
