@@ -6,12 +6,12 @@
 //! system-class id makes libsysmodule's `module_start` skip init, and
 //! its LoadModule sequence then fails on a never-created lwmutex.
 //!
-//! Titles come from the shared registry; not-installed titles skip by
-//! name and at least one must boot, mirroring `title_witnesses`.
+//! Titles come from the shared registry. Pending cells and
+//! not-installed titles skip by name. At least one title must boot.
 
 #![allow(
     clippy::print_stderr,
-    reason = "integration test: named not-installed skips are its only output channel"
+    reason = "integration test: named pending and not-installed skips are its only output channel"
 )]
 
 #[path = "common/registry.rs"]
@@ -96,19 +96,30 @@ fn boot(title: &TitleUnderTest, force_system_authid: bool) -> Option<AuthorityWi
     }))
 }
 
-#[test]
-fn every_installed_title_is_served_its_own_authority_id() {
-    let titles = titles();
+fn check_titles(
+    titles: &[TitleUnderTest],
+    mut boot_title: impl FnMut(&TitleUnderTest, bool) -> Option<AuthorityWitness>,
+) {
     let mut checked = 0usize;
-    let mut skipped: Vec<&str> = Vec::new();
+    let mut skipped: Vec<String> = Vec::new();
     let mut any_forced_delta = false;
-    for title in &titles {
-        let Some(normal) = boot(title, false) else {
+    for title in titles {
+        if let Some(why) = &title.reference.pending {
             eprintln!(
-                "{}: skipped -- not installed on this machine",
-                title.short_name
+                "{} ({}): skipped -- declared pending ({why})",
+                title.short_name,
+                title.reference.label()
             );
-            skipped.push(&title.short_name);
+            skipped.push(format!("{} {}", title.short_name, title.reference.label()));
+            continue;
+        }
+        let Some(normal) = boot_title(title, false) else {
+            eprintln!(
+                "{} ({}): skipped -- not installed on this machine",
+                title.short_name,
+                title.reference.label()
+            );
+            skipped.push(format!("{} {}", title.short_name, title.reference.label()));
             continue;
         };
         checked += 1;
@@ -130,7 +141,7 @@ fn every_installed_title_is_served_its_own_authority_id() {
             "{}: unknown-lwmutex lock failures under a retail-class authid",
             title.short_name,
         );
-        let forced = boot(title, true).expect("installed above; forced boot must also start");
+        let forced = boot_title(title, true).expect("installed above; forced boot must also start");
         assert_eq!(
             forced.program_authority_id, BDJ_SELF_PROGRAM_AUTHORITY_ID,
             "{}: --force-system-authid must serve the bdj.self constant",
@@ -157,4 +168,76 @@ fn every_installed_title_is_served_its_own_authority_id() {
          forced system authid than under its own id; the class pin has lost \
          its negative control and the `== 0` assertions are unfalsifiable"
     );
+}
+
+#[test]
+fn every_installed_title_is_served_its_own_authority_id() {
+    let titles = titles();
+    check_titles(&titles, boot);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use registry::ReferenceCell;
+
+    fn title(short_name: &str, pending: Option<&str>) -> TitleUnderTest {
+        TitleUnderTest {
+            short_name: short_name.to_string(),
+            content_id: format!("TEST-{short_name}"),
+            max_steps: 1,
+            reference: ReferenceCell {
+                fw: "1.50".to_string(),
+                game_ver: Some("base".to_string()),
+                pending: pending.map(str::to_string),
+            },
+        }
+    }
+
+    fn witness(force_system_authid: bool) -> AuthorityWitness {
+        AuthorityWitness {
+            program_authority_id: if force_system_authid {
+                BDJ_SELF_PROGRAM_AUTHORITY_ID
+            } else {
+                1
+            },
+            authid_source: "self".to_string(),
+            lwmutex_unknown_locks: u64::from(force_system_authid),
+        }
+    }
+
+    #[test]
+    fn pending_cell_is_set_aside_while_runnable_sibling_executes() {
+        let titles = [
+            title("pending", Some("known boot refusal")),
+            title("runnable", None),
+        ];
+        let mut calls = Vec::new();
+
+        check_titles(&titles, |title, forced| {
+            calls.push((title.short_name.clone(), forced));
+            Some(witness(forced))
+        });
+
+        assert_eq!(
+            calls,
+            [
+                ("runnable".to_string(), false),
+                ("runnable".to_string(), true)
+            ]
+        );
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "title-corpus is enabled but none of the 2 registered title(s) is installed"
+    )]
+    fn only_pending_or_uninstalled_cells_fail_the_anti_vacuity_floor() {
+        let titles = [
+            title("pending", Some("known boot refusal")),
+            title("uninstalled", None),
+        ];
+
+        check_titles(&titles, |_, _| None);
+    }
 }
