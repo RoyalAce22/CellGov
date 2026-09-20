@@ -1,0 +1,47 @@
+name: external data
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-data
+  cancel-in-progress: false
+
+jobs:
+  regression:
+    if: github.event.repository.private == true
+    name: external-data and anchor regression check
+    runs-on: [self-hosted, Windows, X64]
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: RoyalAce22/CellGov
+          ref: main
+          persist-credentials: false
+
+      - name: Select Git Bash
+        shell: powershell
+        run: |
+          $gitDirectory = Split-Path (Get-Command git -ErrorAction Stop).Source
+          $bashDirectory = [System.IO.Path]::GetFullPath((Join-Path $gitDirectory '../bin'))
+          if (!(Test-Path -LiteralPath (Join-Path $bashDirectory 'bash.exe'))) {
+            throw 'Install Git for Windows with Git Bash before using this runner.'
+          }
+          $bashDirectory | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: "1.95.0"
+
+      - name: Run external-data and anchor gates
+        shell: bash
+        run: bash .github/external-data.sh

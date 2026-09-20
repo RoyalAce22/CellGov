@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # Nothing in this workflow writes to the repository: no release, no
 # comment, no push. A leaked token from any step can only read.
@@ -26,8 +27,7 @@ defaults:
 
 env:
   CARGO_TERM_COLOR: always
-  # Hosted CI type-checks and lints external-data suites. The self-hosted runner
-  # workflow executes them. Both scripts read this one feature declaration.
+  # External-data suites compile here; operators execute them separately.
   EXTERNAL_DATA_FEATURES: >-
     cellgov_install/decrypt,cellgov_cli/decrypt,cellgov_cli/installed-title-tests,cellgov_cli/microtests,cellgov_cli/ps3autotests,cellgov_install/npdrm-oracle-vectors,cellgov_install/installed-title-tests,cellgov_install/title-dumps,cellgov_install/installed-firmware-tests,cellgov_install/firmware-dumps,cellgov_ppu/ppu-microtests,cellgov_spu/spu-microtests,cellgov_compare/rpcs3-runner
 
@@ -42,7 +42,9 @@ jobs:
     outputs:
       msrv: ${{ steps.read.outputs.msrv }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Read MSRV from [workspace.package]
         id: read
@@ -51,6 +53,11 @@ jobs:
           test -n "$msrv" || { echo "no rust-version in Cargo.toml"; exit 1; }
           echo "msrv=$msrv" >> "$GITHUB_OUTPUT"
           echo "MSRV is $msrv"
+
+      - name: Validate workflow and shell syntax
+        run: |
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          bash -n .github/ci.sh .github/external-data.sh
 
   # The only job that denies warnings. The pinned entry is blocking, on
   # a version that moves only when this file does; the stable entry is
@@ -75,16 +82,18 @@ jobs:
     env:
       RUSTFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Install ${{ matrix.toolchain }} toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt, clippy
 
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/registry
@@ -110,10 +119,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: cargo deny check
-        uses: EmbarkStudios/cargo-deny-action@v2
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check advisories bans licenses sources
 
@@ -148,16 +159,18 @@ jobs:
             toolchain: beta
             informational: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       # Exports RUSTUP_TOOLCHAIN, which outranks rust-toolchain.toml.
       - name: Install ${{ matrix.toolchain }} toolchain
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
         with:
           toolchain: ${{ matrix.toolchain }}
 
       - name: Cache cargo
-        uses: actions/cache@v5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             ~/.cargo/registry
@@ -169,3 +182,16 @@ jobs:
 
       - name: repository tests
         run: bash .github/ci.sh test
+
+  success:
+    name: CI
+    if: always()
+    needs: [config, lint, deny, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all blocking checks
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "$RESULTS" | jq -e 'all(.[]; .result == "success")'
