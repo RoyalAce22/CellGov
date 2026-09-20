@@ -475,7 +475,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     // ordering (put first, then get) matches the cursor->MMIO
     // writeback in commit_step::mirror_rsx_cursor_to_mmio.
     let mut host = Lv2Host::new();
-    let source = UnitId::new(0);
+    let source = UnitId::new(1);
     allocate_context(&mut host, source);
 
     let rt = FakeRuntime::new(0x1_0000).with_writable_override(true);
@@ -504,6 +504,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     let Effect::SharedWriteIntent {
         range: range0,
         bytes: bytes0,
+        source: effect_source0,
         ..
     } = &effects[0]
     else {
@@ -519,6 +520,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
          writeback in commit_step uses the same put-then-get ordering)",
     );
     assert_eq!(range0.length(), 4);
+    assert_eq!(*effect_source0, source);
     assert_eq!(
         u32::from_be_bytes(bytes0.bytes().try_into().unwrap()),
         0x2200,
@@ -529,6 +531,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
     let Effect::SharedWriteIntent {
         range: range1,
         bytes: bytes1,
+        source: effect_source1,
         ..
     } = &effects[1]
     else {
@@ -544,6 +547,7 @@ fn sys_rsx_context_attribute_fifo_setup_emits_mmio_writes_when_writable() {
          type-check cleanly so this assertion is the catch",
     );
     assert_eq!(range1.length(), 4);
+    assert_eq!(*effect_source1, source);
     assert_eq!(
         u32::from_be_bytes(bytes1.bytes().try_into().unwrap()),
         0x1100,

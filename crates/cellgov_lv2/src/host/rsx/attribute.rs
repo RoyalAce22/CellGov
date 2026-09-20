@@ -60,6 +60,7 @@ impl Lv2Host {
         a4: u64,
         a5: u64,
         _a6: u64,
+        requester: UnitId,
         tick: GuestTicks,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
@@ -73,7 +74,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(errno::CELL_EINVAL.into());
         }
         match package_id {
-            package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(a3, a4, tick, rt),
+            package::FIFO_SETUP => self.sys_rsx_attribute_fifo_setup(a3, a4, requester, tick, rt),
             package::FLIP_MODE => {
                 self.state.rsx_context.flip_mode = a4 as u32;
                 Lv2Dispatch::immediate(0)
@@ -104,6 +105,7 @@ impl Lv2Host {
         &mut self,
         a3: u64,
         a4: u64,
+        requester: UnitId,
         tick: GuestTicks,
         rt: &dyn Lv2Runtime,
     ) -> Lv2Dispatch {
@@ -115,7 +117,7 @@ impl Lv2Host {
             return Lv2Dispatch::immediate(0);
         }
         let now = tick;
-        let effects = mmio_init_effects(a3 as u32, a4 as u32, now);
+        let effects = mmio_init_effects(a3 as u32, a4 as u32, requester, now);
         Lv2Dispatch::Immediate { code: 0, effects }
     }
 
@@ -242,19 +244,21 @@ impl Lv2Host {
 ///
 /// # Cross-module contract
 ///
-/// Same-batch ordering vs. a unit's PPU store to the same range is
-/// set by commit_step: `commit_pipeline.process` runs first, then
-/// `apply_lv2_effects` (these effects). The
-/// `(PriorityClass, source_time, source)` triple is unused for
-/// ordering today but tracks the workspace LV2-host convention.
-fn mmio_init_effects(fifo_get: u32, fifo_put: u32, now: GuestTicks) -> Vec<Effect> {
+/// These writes retain the unit that requested FIFO setup. The commit
+/// pipeline clears reservations held by other units, not the emitter.
+fn mmio_init_effects(
+    fifo_get: u32,
+    fifo_put: u32,
+    requester: UnitId,
+    now: GuestTicks,
+) -> Vec<Effect> {
     let make = |addr: u32, value: u32| {
         let range = ByteRange::new(GuestAddr::new(addr as u64), 4)
             .expect("MMIO control-register address + 4 fits in u64");
         Effect::shared_write(
             range,
             WritePayload::from_slice(&value.to_be_bytes()),
-            UnitId::new(0),
+            requester,
             now,
         )
     };

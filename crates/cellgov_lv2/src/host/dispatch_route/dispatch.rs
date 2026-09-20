@@ -508,7 +508,7 @@ impl Lv2Host {
                 a5,
                 a6,
             } => self.dispatch_sys_rsx_context_attribute(
-                context_id, package_id, a3, a4, a5, a6, tick, rt,
+                context_id, package_id, a3, a4, a5, a6, requester, tick, rt,
             ),
             Lv2Request::SysRsxContextIomap {
                 context_id,
