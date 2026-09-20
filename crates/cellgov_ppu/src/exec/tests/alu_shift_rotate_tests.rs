@@ -3,19 +3,6 @@
 use super::*;
 
 #[test]
-fn rlwinm_mask_contiguous() {
-    assert_eq!(rlwinm_mask(0, 31), 0xFFFFFFFF);
-    assert_eq!(rlwinm_mask(16, 31), 0x0000FFFF);
-    assert_eq!(rlwinm_mask(0, 15), 0xFFFF0000);
-}
-
-#[test]
-fn rlwinm_mask_wrapped() {
-    // mb > me: mask wraps around; here bits [0..3] and [28..31].
-    assert_eq!(rlwinm_mask(28, 3), 0xF000000F);
-}
-
-#[test]
 fn rlwinm_slwi() {
     let mut s = PpuState::new();
     s.set_gpr(5, 0x0001);
@@ -74,7 +61,7 @@ fn rlwnm_ignores_high_bits_of_rb() {
 }
 
 #[test]
-fn rlwimi_preserves_ra_high_32() {
+fn rlwimi_nonwrapping_mask_preserves_ra_high_32() {
     // Per PPC-Book1 p:76, rlwimi inserts the rotated/masked source into
     // RA under MASK(MB+32, ME+32); the mask only covers the low 32, so
     // RA[0:31] must be PRESERVED. A prior implementation cast RA to u32

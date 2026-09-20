@@ -14,6 +14,8 @@ mod logical;
 mod muldiv;
 #[path = "alu_retire_tests.rs"]
 mod retire;
+#[path = "alu_rotate_word_wrap_tests.rs"]
+mod rotate_word_wrap;
 #[path = "alu_shift_rotate_tests.rs"]
 mod shift_rotate;
 #[path = "alu_spr_trap_tests.rs"]

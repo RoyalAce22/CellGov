@@ -691,22 +691,12 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             rc,
         } => {
             let val = state.gpr[rs as usize] as u32;
-            let rotated = val.rotate_left(sh as u32);
-            let mask = rlwinm_mask(mb, me);
-            let result = (rotated & mask) as u64;
-            // `rlwinm_mask` is 32 bits wide, so `result` is always
-            // a word and CR0 never reads LT. That matches the
-            // architecture for MB <= ME. With MB > ME the mask
-            // wraps into RA[0:31], where ROTL32 leaves a second
-            // copy of the rotated word; `rlwinm_mask` models no
-            // part of that wrapped half.
-            // [PPC-Book1 p:71 s:3.3.12] the rotate/shift mask is 64 bits and wraps from position 63 to position 0 when mstart > mstop; ROTL32 places a copy of the rotated word in bits 0:31.
+            let rotated = rotl32(val, sh as u32);
+            let mask = mask64(mb + 32, me + 32);
+            let result = rotated & mask;
             retire(state, ra, result, None, rc)
         }
-        // [PPC-Book1 p:76 s:3.3.12] rlwimi: rotate left word, insert under
-        // mask MB..ME into RA. Spec's RA <- r&m | (RA)&~m operates on 64-bit
-        // operands; mask MASK(MB+32, ME+32) only has 1-bits in the low 32, so
-        // the high 32 of RA must be PRESERVED.
+        // [PPC-Book1 p:76 s:3.3.12] rlwimi: rotate left word, insert under MASK(MB+32, ME+32) into RA.
         PpuInstruction::Rlwimi {
             ra,
             rs,
@@ -716,10 +706,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
             rc,
         } => {
             let val = state.gpr[rs as usize] as u32;
-            let rotated = val.rotate_left(sh as u32);
-            let mask_lo32 = rlwinm_mask(mb, me);
-            let mask64 = u64::from(mask_lo32);
-            let merged = (u64::from(rotated) & mask64) | (state.gpr[ra as usize] & !mask64);
+            let rotated = rotl32(val, sh as u32);
+            let mask = mask64(mb + 32, me + 32);
+            let merged = (rotated & mask) | (state.gpr[ra as usize] & !mask);
             retire(state, ra, merged, None, rc)
         }
         // [PPC-Book1 p:75 s:3.3.12] rlwnm: rotate left word by RB[59:63], AND with mask MB..ME.
@@ -733,10 +722,9 @@ pub(crate) fn execute(insn: &PpuInstruction, state: &mut PpuState) -> ExecuteVer
         } => {
             let val = state.gpr[rs as usize] as u32;
             let n = (state.gpr[rb as usize] & 0x1F) as u32;
-            let rotated = val.rotate_left(n);
-            let mask = rlwinm_mask(mb, me);
-            let result = (rotated & mask) as u64;
-            // Same 32-bit mask and same MB > ME gap as Rlwinm.
+            let rotated = rotl32(val, n);
+            let mask = mask64(mb + 32, me + 32);
+            let result = rotated & mask;
             retire(state, ra, result, None, rc)
         }
         // [PPC-Book1 p:72 s:3.3.12] rldicl: rotate left doubleword immediate, mask MB..63 (clear left).
@@ -850,18 +838,10 @@ fn cmp_cr_field(lt: bool, gt: bool, so: bool) -> u8 {
     nib
 }
 
-/// 32-bit rlwinm mask. `mb > me` wraps to bits `[0..me]` and `[mb..31]`.
-// [PPC-Book1 p:11 s:1.7] M-form MB/ME mask: 1s from MB to ME inclusive, wraps when MB>ME.
-pub(super) fn rlwinm_mask(mb: u8, me: u8) -> u32 {
-    if mb <= me {
-        let top = 0xFFFF_FFFFu32 >> mb;
-        let bottom = 0xFFFF_FFFFu32 << (31 - me);
-        top & bottom
-    } else {
-        let top = 0xFFFF_FFFFu32 << (31 - me);
-        let bottom = 0xFFFF_FFFFu32 >> mb;
-        top | bottom
-    }
+// [PPC-Book1 p:71 s:3.3.12] ROTL32 duplicates the rotated word in both halves.
+fn rotl32(value: u32, shift: u32) -> u64 {
+    let rotated = u64::from(value.rotate_left(shift));
+    rotated | (rotated << 32)
 }
 
 /// 64-bit PPC mask from MSB-numbered bits `mb..=me`; `mb > me` wraps
