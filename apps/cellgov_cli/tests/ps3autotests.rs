@@ -7,10 +7,10 @@
 //! and gitignored, so opting in declares it present and its absence is
 //! a hard error rather than a silent pass.
 //!
-//! The boot cases need a second corpus the feature does not name.
-//! These ELFs import sysPrxForUser NIDs no HLE module binds, so
-//! `firmware_dir` resolves the one firmware version the corpus suites
-//! name. A store without that version fails, and the refusal names it.
+//! The feature also activates `firmware-corpus`. These ELFs import
+//! sysPrxForUser NIDs no HLE module binds, so `firmware_dir` resolves
+//! the firmware version each generated manifest names. A store
+//! without that version fails, and the refusal names it.
 //!
 //! Cross-module contract: assumes `sys_tty_write` HLE captures
 //! byte-identical output to a real PS3 TTY. A capture-side
