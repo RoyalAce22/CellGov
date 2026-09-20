@@ -187,7 +187,7 @@ fn a_declared_cells_overrides_are_what_the_run_and_the_anchor_are_taken_at() {
     );
     assert_eq!(plan.max_steps, 4_000);
     assert_eq!(plan.checkpoint, CheckpointTrigger::FirstRsxWrite);
-    assert_eq!(plan.max_steps_usize(&title), 4_000);
+    assert_eq!(plan.max_steps_usize(&title).expect("cap fits usize"), 4_000);
 }
 
 #[test]

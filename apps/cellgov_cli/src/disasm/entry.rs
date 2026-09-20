@@ -4,9 +4,9 @@
 
 use std::io::Write;
 
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
-use crate::cli::parse::{die_usage, DisasmArgs};
+use crate::cli::parse::DisasmArgs;
 use crate::disasm::stream::StreamError;
 use crate::disasm::{args, elf, stream};
 
@@ -15,22 +15,28 @@ use crate::disasm::{args, elf, stream};
 /// bytes; some weren't instructions".
 const DECODE_ERROR_EXIT_CODE: i32 = exit_codes::command_specific(20);
 
-pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
-    args::check_alignment(parsed.vaddr).unwrap_or_else(|e| die_usage(&e.to_string()));
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
-    let raw = crate::cli::self_load::load_file_or_die(&parsed.elf_path);
+pub(crate) fn run(
+    parsed: &DisasmArgs,
+    vfs_flag: Option<&std::path::Path>,
+) -> Result<CommandExitCode, CommandError> {
+    args::check_alignment(parsed.vaddr)
+        .map_err(|error| CommandError::status(exit_codes::USAGE, error.to_string()))?;
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
+    let raw = crate::cli::self_load::load_file(&parsed.elf_path)?;
     // Transparently decrypt an SCE/SELF wrapper (including NPDRM
     // EBOOTs); plaintext ELF input passes through unchanged.
-    let elf_bytes =
-        crate::cli::self_load::decrypt_ppu_self_or_die(&raw, &parsed.elf_path, &vfs_root);
-    let segments = elf::parse_pt_loads(&elf_bytes).unwrap_or_else(|e| die(&e.message()));
+    let elf_bytes = crate::cli::self_load::decrypt_ppu_self(&raw, &parsed.elf_path, &vfs_root)?;
+    let segments =
+        elf::parse_pt_loads(&elf_bytes).map_err(|error| CommandError::failed(error.message()))?;
 
-    let symbols = parsed.symbolize.then(|| {
+    let symbols = if parsed.symbolize {
         let mut map = cellgov_ppu::funcmap::build(&elf_bytes)
-            .unwrap_or_else(|e| die(&format!("disasm --symbolize: {e}")));
+            .map_err(|error| CommandError::failed(format!("disasm --symbolize: {error}")))?;
         crate::funcs::resolve_nids(&mut map);
-        map
-    });
+        Some(map)
+    } else {
+        None
+    };
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -43,27 +49,31 @@ pub(crate) fn run(parsed: &DisasmArgs, vfs_flag: Option<&std::path::Path>) {
         &mut out,
     ) {
         Ok(s) => s,
-        Err(StreamError::BadVaddr(e)) => die(&e.message()),
-        Err(StreamError::Io(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {
-            std::process::exit(exit_codes::BROKEN_PIPE);
+        Err(StreamError::BadVaddr(error)) => {
+            return Err(CommandError::failed(error.message()));
         }
-        Err(StreamError::Io(e)) => die(&format!("disasm: stdout write: {e}")),
+        Err(StreamError::Io(e)) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+            return Ok(CommandExitCode::new(exit_codes::BROKEN_PIPE));
+        }
+        Err(StreamError::Io(error)) => {
+            return Err(CommandError::failed(format!(
+                "disasm: stdout write: {error}"
+            )));
+        }
     };
 
-    // process::exit skips destructors, so the StdoutLock's drop-flush
-    // never runs. Under `| less` or `> file`, the buffered tail of the
-    // stream would be lost. Flush explicitly before any exit below.
     if let Err(e) = out.flush() {
         if e.kind() == std::io::ErrorKind::BrokenPipe {
-            std::process::exit(exit_codes::BROKEN_PIPE);
+            return Ok(CommandExitCode::new(exit_codes::BROKEN_PIPE));
         }
-        die(&format!("disasm: stdout flush: {e}"));
+        return Err(CommandError::failed(format!("disasm: stdout flush: {e}")));
     }
 
     // Contract: exit code DECODE_ERROR_EXIT_CODE iff at least one
     // word failed to decode. A boundary marker (BSS / past-end) on
     // its own is not an error.
     if stats.decode_errors > 0 {
-        std::process::exit(DECODE_ERROR_EXIT_CODE);
+        return Ok(CommandExitCode::new(DECODE_ERROR_EXIT_CODE));
     }
+    Ok(CommandExitCode::SUCCESS)
 }

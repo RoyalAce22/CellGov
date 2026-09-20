@@ -5,23 +5,26 @@
 //! ELF / PRX and, in a build with the `decrypt` feature, an APP-keyed
 //! SCE wrapper or an NPDRM SELF (retail EBOOT). NPDRM titles resolve
 //! their RAP from the standard vfs exdata directory by content id;
-//! see [`decrypt_ppu_self_or_die`].
+//! see [`decrypt_ppu_self`].
 //! Human output is one row per function; `--json` emits the map for
 //! tooling.
 
 use cellgov_ppu::funcmap::{self, FunctionMap, FunctionName};
 
-use crate::cli::exit::die;
+use crate::cli::exit::CommandError;
 use crate::cli::parse::FuncsArgs;
-use crate::cli::self_load::{decrypt_ppu_self_or_die, load_file_or_die};
+use crate::cli::self_load::{decrypt_ppu_self, load_file};
 use crate::cli::title::resolve_ps3_vfs_root;
 
-pub(crate) fn run(args: &FuncsArgs, vfs_flag: Option<&std::path::Path>) {
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
-    let raw = load_file_or_die(&args.path);
-    let elf = decrypt_ppu_self_or_die(&raw, &args.path, &vfs_root);
-    let mut map =
-        funcmap::build(&elf).unwrap_or_else(|e| die(&format!("funcs: {}: {e}", args.path)));
+pub(crate) fn run(
+    args: &FuncsArgs,
+    vfs_flag: Option<&std::path::Path>,
+) -> Result<(), CommandError> {
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
+    let raw = load_file(&args.path)?;
+    let elf = decrypt_ppu_self(&raw, &args.path, &vfs_root)?;
+    let mut map = funcmap::build(&elf)
+        .map_err(|error| CommandError::failed(format!("funcs: {}: {error}", args.path)))?;
     resolve_nids(&mut map);
     if let Some(note) = truncation_note(&map) {
         eprintln!("{note}");
@@ -34,6 +37,7 @@ pub(crate) fn run(args: &FuncsArgs, vfs_flag: Option<&std::path::Path>) {
     } else {
         print!("{}", render_human(&map));
     }
+    Ok(())
 }
 
 /// Stderr note when the map is a prefix of reality (discovery hit

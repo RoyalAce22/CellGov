@@ -1,4 +1,4 @@
-//! The files a finished `boot run` writes.
+//! This module defines run refusals and writes files after a `boot run`.
 
 use cellgov_boot::manifest::TitleManifest;
 use cellgov_boot::observation::{self, save_boot_observation};
@@ -8,15 +8,45 @@ use cellgov_time::Budget;
 
 use super::options::RunArtifacts;
 
-/// Why the run refused an artifact.
+/// Preserves the refusal category for the CLI status contract.
 #[derive(Debug, thiserror::Error)]
 pub enum RunError {
+    /// A shared command input or environment setting contains an invalid value.
+    #[error("{0}")]
+    Command(#[from] crate::cli::exit::CommandError),
+    /// The state-trace path and capture mode disagree.
+    #[error("{0}")]
+    StateTraceConfiguration(String),
+    /// A debug watch from the environment cannot start.
+    #[error("{0}")]
+    DebugTaps(String),
+    /// Boot preparation or the diagnostic step loop refused the run.
+    #[error("{0}")]
+    Boot(#[from] cellgov_boot::BootError),
     /// The `--save-observation` write failed.
     #[error("save-observation: {0}")]
     SaveObservation(#[source] observation::ObservationSaveError),
     /// The `--save-boot-summary` write failed.
     #[error("save-boot-summary: {0}")]
     SaveBootSummary(#[source] observation::ObservationSaveError),
+    /// The `--save-state-trace` write failed.
+    #[error("save-state-trace: failed to write {path} ({bytes} bytes): {source}")]
+    SaveStateTrace {
+        /// The output path the command received.
+        path: String,
+        /// The trace size the command tried to write.
+        bytes: usize,
+        /// The host write failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+impl RunError {
+    /// `boot run` assigns observation and summary refusals to status 14.
+    pub fn is_report_artifact_failure(&self) -> bool {
+        matches!(self, Self::SaveObservation(_) | Self::SaveBootSummary(_))
+    }
 }
 
 /// What the finished run contributes to every artifact it writes.
@@ -39,11 +69,10 @@ pub(super) struct RunFacts<'a> {
 ///
 /// # Errors
 ///
-/// [`RunError`] names the artifact that failed.
+/// Returns an error if an artifact write fails.
 /// [`observation::ObservationSaveError`] says which failures leave a
 /// partial file. This function writes the observation first, so a
-/// refused observation leaves the summary unwritten. A
-/// `--save-state-trace` write failure exits the process instead.
+/// refused observation leaves the summary unwritten.
 pub(super) fn save_artifacts(
     rt: &mut Runtime,
     artifacts: &RunArtifacts<'_>,
@@ -86,13 +115,11 @@ pub(super) fn save_artifacts(
     }
     if let Some(path) = artifacts.state_trace {
         let bytes = rt.trace().bytes();
-        std::fs::write(path, bytes).unwrap_or_else(|e| {
-            crate::cli::exit::die(&format!(
-                "save-state-trace: failed to write {} ({} bytes): {e}",
-                path,
-                bytes.len(),
-            ))
-        });
+        std::fs::write(path, bytes).map_err(|source| RunError::SaveStateTrace {
+            path: path.to_string(),
+            bytes: bytes.len(),
+            source,
+        })?;
         eprintln!("save-state-trace: wrote {} bytes to {path}", bytes.len());
     }
     Ok(())

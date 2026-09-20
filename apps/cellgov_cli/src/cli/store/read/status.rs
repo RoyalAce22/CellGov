@@ -4,14 +4,15 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
+use crate::cli::exit::CommandError;
 use crate::cli::parse::OutputFormat;
 
 use super::model::{StatusDoc, TitleDoc};
 use super::{emit, human_bytes, tree_bytes, view};
 
 /// `cellgov status`
-pub(crate) fn status(root: &Path, format: OutputFormat, quiet: bool) {
-    let view = view(root);
+pub(crate) fn status(root: &Path, format: OutputFormat, quiet: bool) -> Result<(), CommandError> {
+    let view = view(root)?;
     let mut titles = view.title_docs();
     // A declared title with nothing installed still has cells, and its
     // absence is the answer to "why does no anchor exist for it".
@@ -36,7 +37,8 @@ pub(crate) fn status(root: &Path, format: OutputFormat, quiet: bool) {
         if !quiet {
             hint(&doc);
         }
-    });
+    })?;
+    Ok(())
 }
 
 fn render(doc: &StatusDoc) -> String {

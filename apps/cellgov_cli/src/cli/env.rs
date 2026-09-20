@@ -1,13 +1,12 @@
 //! CLI environment-variable parsing helpers.
 
 use super::args::CliArgError;
-use super::exit::die;
+use super::exit::CommandError;
 
-/// Strict boolean parse for a `CELLGOV_*` env var. Unset and empty
-/// both read as `false`. Any other value dies with a named diagnostic
-/// so a stale shell setting cannot silently enable instrumentation.
-pub(crate) fn parse_env_bool(name: &str) -> bool {
-    parse_env_bool_inner(name, std::env::var(name).ok()).unwrap_or_else(|e| die(&e.to_string()))
+/// Rejects unknown values so a stale shell setting cannot enable instrumentation.
+pub(crate) fn parse_env_bool(name: &str) -> Result<bool, CommandError> {
+    parse_env_bool_inner(name, std::env::var(name).ok())
+        .map_err(|error| CommandError::failed(error.to_string()))
 }
 
 fn parse_env_bool_inner(name: &str, value: Option<String>) -> Result<bool, CliArgError> {

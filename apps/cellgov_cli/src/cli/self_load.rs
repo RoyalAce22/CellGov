@@ -1,6 +1,7 @@
 //! SELF loading, decryption, and title-image selection.
 
 use std::path::{Path, PathBuf};
+use std::{cell::RefCell, rc::Rc};
 
 use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
 use cellgov_install::sce::SceError;
@@ -9,7 +10,7 @@ use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
 use cellgov_boot::manifest::{ResolveEbootError, TitleManifest};
 
-use super::exit::die;
+use super::exit::CommandError;
 
 /// The note on SCE-wrapped input carried in the help of every command
 /// that accepts such a path.
@@ -32,24 +33,19 @@ pub(crate) const SCE_INPUT_USAGE_NOTE: &str = if cfg!(feature = "decrypt") {
 #[cfg(test)]
 pub(crate) const DECRYPTION_CLAIMS: [&str; 3] = ["exdata", "RAP", "key vault"];
 
-/// Read a file or die with a context-rich error.
-pub(crate) fn load_file_or_die(path: &str) -> Vec<u8> {
-    std::fs::read(path).unwrap_or_else(|e| die(&format!("failed to read {path}: {e}")))
+pub(crate) fn load_file(path: &str) -> Result<Vec<u8>, CommandError> {
+    std::fs::read(path)
+        .map_err(|error| CommandError::failed(format!("failed to read {path}: {error}")))
 }
 
-/// Plaintext-ize a PPU image: pass non-SCE bytes (plaintext ELF /
-/// PRX) through unchanged, and decrypt an SCE/SELF wrapper.
-///
-/// NPDRM titles resolve their RAP at
-/// `<vfs_root>/home/00000001/exdata/<content_id>.rap`, the console's
-/// per-user license directory on the internal HDD. The resolver finds
-/// a once-installed RAP by content id, with no per-invocation
-/// `--rap` or `--title`.
-/// An absent RAP returns `None`: license-3 (free) titles fall back
-/// to the vault's free klicensee, Network / Local titles surface
-/// `NoRapForNpdrmTitle`. `path` is used only in diagnostics.
-pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path) -> Vec<u8> {
+pub(crate) fn decrypt_ppu_self(
+    bytes: &[u8],
+    path: &str,
+    vfs_root: &Path,
+) -> Result<Vec<u8>, CommandError> {
     let exdata = super::title::exdata_dir(vfs_root);
+    let resolver_error = Rc::new(RefCell::new(None));
+    let resolver_error_for_closure = Rc::clone(&resolver_error);
     let resolver = |npd: &NpdHeaderInfo| -> Option<Rap> {
         let rap_path = exdata.join(format!("{}.rap", npd.content_id));
         // Only "no such file" is an absent RAP. Any other read failure
@@ -59,36 +55,49 @@ pub(crate) fn decrypt_ppu_self_or_die(bytes: &[u8], path: &str, vfs_root: &Path)
         let rap_bytes = match std::fs::read(&rap_path) {
             Ok(b) => b,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-            Err(e) => die(&format!(
-                "failed to read RAP for NPDRM content {} at {}: {}",
-                npd.content_id,
-                rap_path.display(),
-                e,
-            )),
+            Err(error) => {
+                *resolver_error_for_closure.borrow_mut() = Some(CommandError::failed(format!(
+                    "failed to read RAP for NPDRM content {} at {}: {}",
+                    npd.content_id,
+                    rap_path.display(),
+                    error,
+                )));
+                return None;
+            }
         };
-        let rap_arr: [u8; 16] = rap_bytes.as_slice().try_into().unwrap_or_else(|_| {
-            die(&format!(
-                "RAP file {} is {} bytes; expected exactly 16",
-                rap_path.display(),
-                rap_bytes.len(),
-            ))
-        });
+        let rap_arr: [u8; 16] = match rap_bytes.as_slice().try_into() {
+            Ok(value) => value,
+            Err(_) => {
+                *resolver_error_for_closure.borrow_mut() = Some(CommandError::failed(format!(
+                    "RAP file {} is {} bytes; expected exactly 16",
+                    rap_path.display(),
+                    rap_bytes.len(),
+                )));
+                return None;
+            }
+        };
         Some(Rap(rap_arr))
     };
-    match to_plaintext_elf(
+    let plaintext = to_plaintext_elf(
         bytes,
-        super::keys::key_vault_for(bytes),
+        super::keys::key_vault_for(bytes)?,
         KeyPolicy::Auto(&resolver),
-    ) {
-        Ok(elf) => elf.into_owned(),
-        Err(e @ SceError::NoRapForNpdrmTitle { .. }) => die(&format!(
+    );
+    if let Some(error) = resolver_error.borrow_mut().take() {
+        return Err(error);
+    }
+    match plaintext {
+        Ok(elf) => Ok(elf.into_owned()),
+        Err(e @ SceError::NoRapForNpdrmTitle { .. }) => Err(CommandError::failed(format!(
             "{e}; expected its RAP at {}/<content_id>.rap",
             exdata.display()
-        )),
-        Err(e) if is_key_vault_refusal(&e) => {
-            die(&format!("failed to decrypt SELF {path}: {e}\n{KEYS_HINT}"))
-        }
-        Err(e) => die(&format!("failed to decrypt SELF {path}: {e}")),
+        ))),
+        Err(e) if is_key_vault_refusal(&e) => Err(CommandError::failed(format!(
+            "failed to decrypt SELF {path}: {e}\n{KEYS_HINT}"
+        ))),
+        Err(e) => Err(CommandError::failed(format!(
+            "failed to decrypt SELF {path}: {e}"
+        ))),
     }
 }
 
@@ -123,30 +132,36 @@ enum LoadCandidateError {
 fn rap_resolver(
     title: &TitleManifest,
     vfs_root: PathBuf,
+    error: Rc<RefCell<Option<CommandError>>>,
 ) -> impl Fn(&NpdHeaderInfo) -> Option<Rap> {
     let rap_filename = title.rap_filename.clone();
     move |npd: &NpdHeaderInfo| -> Option<Rap> {
-        // license 3 (free) falls back to the vault's free klicensee
-        // downstream when None.
         let rap_filename = rap_filename.as_ref()?;
         let rap_path = super::title::exdata_dir(&vfs_root).join(rap_filename);
         let rap_bytes = match std::fs::read(&rap_path) {
-            Ok(b) => b,
-            Err(e) => die(&format!(
-                "failed to read RAP for NPDRM title {} (license {}) at {}: {}",
-                npd.content_id,
-                npd.license as u32,
-                rap_path.display(),
-                e,
-            )),
+            Ok(bytes) => bytes,
+            Err(read_error) => {
+                *error.borrow_mut() = Some(CommandError::failed(format!(
+                    "failed to read RAP for NPDRM title {} (license {}) at {}: {}",
+                    npd.content_id,
+                    npd.license as u32,
+                    rap_path.display(),
+                    read_error,
+                )));
+                return None;
+            }
         };
-        let rap_arr: [u8; 16] = rap_bytes.as_slice().try_into().unwrap_or_else(|_| {
-            die(&format!(
-                "RAP file {} is {} bytes; expected exactly 16",
-                rap_path.display(),
-                rap_bytes.len(),
-            ))
-        });
+        let rap_arr: [u8; 16] = match rap_bytes.as_slice().try_into() {
+            Ok(value) => value,
+            Err(_) => {
+                *error.borrow_mut() = Some(CommandError::failed(format!(
+                    "RAP file {} is {} bytes; expected exactly 16",
+                    rap_path.display(),
+                    rap_bytes.len(),
+                )));
+                return None;
+            }
+        };
         Some(Rap(rap_arr))
     }
 }
@@ -162,52 +177,63 @@ pub(crate) struct LoadedPpuImage {
     pub control_flags1: Option<u32>,
 }
 
-/// Read a PPU image at an explicit path, resolving the RAP for NPDRM
-/// titles from the manifest's `rap_filename`.
-pub(crate) fn load_ppu_image_with_title_or_die(
+/// Reads a PPU image and resolves its RAP from the title manifest.
+///
+/// # Errors
+///
+/// Returns an error if the command cannot load the image.
+pub(crate) fn load_ppu_image_with_title(
     path: &str,
     title: &TitleManifest,
     vfs_root: &Path,
-) -> LoadedPpuImage {
-    let bytes = load_file_or_die(path);
+) -> Result<LoadedPpuImage, CommandError> {
+    let bytes = load_file(path)?;
     if !is_sce_wrapped(&bytes) {
-        return LoadedPpuImage {
+        return Ok(LoadedPpuImage {
             elf_data: bytes,
             authority_id: None,
             control_flags1: None,
-        };
+        });
     }
     let authority_id = Some(
-        cellgov_install::sce::parse_program_authority_id(&bytes)
-            .unwrap_or_else(|e| die(&format!("SELF {path}: identification header: {e}"))),
+        cellgov_install::sce::parse_program_authority_id(&bytes).map_err(|error| {
+            CommandError::failed(format!("SELF {path}: identification header: {error}"))
+        })?,
     );
-    let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes)
-        .unwrap_or_else(|e| die(&format!("SELF {path}: capability header: {e}")));
-    let resolver = rap_resolver(title, vfs_root.to_path_buf());
-    let elf_data = to_plaintext_elf(
+    let control_flags1 = cellgov_install::sce::parse_control_flags1(&bytes).map_err(|error| {
+        CommandError::failed(format!("SELF {path}: capability header: {error}"))
+    })?;
+    let resolver_error = Rc::new(RefCell::new(None));
+    let resolver = rap_resolver(title, vfs_root.to_path_buf(), Rc::clone(&resolver_error));
+    let plaintext = to_plaintext_elf(
         &bytes,
-        super::keys::key_vault_for(&bytes),
+        super::keys::key_vault_for(&bytes)?,
         KeyPolicy::Auto(&resolver),
-    )
-    .unwrap_or_else(|e| {
-        if is_key_vault_refusal(&e) {
-            die(&format!("failed to decrypt SELF {path}: {e}\n{KEYS_HINT}"))
-        }
-        die(&format!("failed to decrypt SELF {path}: {e}"))
-    })
-    .into_owned();
-    LoadedPpuImage {
+    );
+    if let Some(error) = resolver_error.borrow_mut().take() {
+        return Err(error);
+    }
+    let elf_data = plaintext
+        .map_err(|error| {
+            if is_key_vault_refusal(&error) {
+                CommandError::failed(format!(
+                    "failed to decrypt SELF {path}: {error}\n{KEYS_HINT}"
+                ))
+            } else {
+                CommandError::failed(format!("failed to decrypt SELF {path}: {error}"))
+            }
+        })?
+        .into_owned();
+    Ok(LoadedPpuImage {
         elf_data,
         authority_id,
         control_flags1,
-    }
+    })
 }
 
-/// Why a title's dump is not on this machine.
+/// Represents an absent title dump.
 ///
-/// Only an absence is one of these. A file that exists and fails to
-/// decrypt or parse is a broken dump. The walk dies on it without the
-/// not-installed marker, so the suites report it as a boot failure.
+/// A present file that fails to load is a [`LoadPpuImageError::Failed`].
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum TitleNotInstalled {
     /// Every candidate is a plain miss in every content directory
@@ -230,13 +256,21 @@ pub(crate) enum TitleNotInstalled {
 }
 
 impl TitleNotInstalled {
-    /// The parenthetical the not-installed marker line carries.
-    fn marker_note(&self) -> &'static str {
+    pub(crate) fn marker_note(&self) -> &'static str {
         match self {
             Self::NoContentDirectory { .. } => "no content directory",
             Self::NoEbootCandidate { .. } => "no eboot candidate present",
         }
     }
+}
+
+/// Distinguishes an absent dump from a broken input.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum LoadPpuImageError {
+    #[error(transparent)]
+    NotInstalled(#[from] TitleNotInstalled),
+    #[error(transparent)]
+    Failed(#[from] CommandError),
 }
 
 /// Whether a probe refusal says only that nothing is there.
@@ -262,31 +296,10 @@ fn is_plain_miss(e: &ResolveEbootError) -> bool {
     )
 }
 
-/// [`load_ppu_image_walk_candidates`]; when the dump is not on this
-/// machine, it prints the not-installed marker and dies.
-pub(crate) fn load_ppu_image_walk_candidates_or_die(
-    title: &TitleManifest,
-    vfs_root: &Path,
-    eboot_dirs: &[PathBuf],
-) -> (LoadedPpuImage, PathBuf) {
-    load_ppu_image_walk_candidates(title, vfs_root, eboot_dirs).unwrap_or_else(|e| {
-        eprintln!(
-            "{} title={} ({})",
-            cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL,
-            title.name(),
-            e.marker_note()
-        );
-        die(&format!("load ppu image: {e}"))
-    })
-}
-
-/// Walk `eboot_candidates` in declaration order and return the first
-/// plaintext ELF that loads. A build without the `decrypt` feature
-/// dies at the first SCE-wrapped candidate, and so does a run whose
-/// key vault is missing or lacks the keyset. The manifest lists the
-/// SCE-wrapped binary first so an in-tree plaintext copy cannot
-/// shadow it (`title_manifests/manifest_template.README.md`,
-/// `eboot_candidates`).
+/// Returns the first plaintext ELF from `eboot_candidates`.
+///
+/// A decrypt refusal stops the walk so a plaintext candidate cannot
+/// replace the canonical SCE image.
 ///
 /// The walk runs in the first entry of `eboot_dirs` that holds any
 /// candidate. A selected update's executable therefore shadows the
@@ -294,13 +307,13 @@ pub(crate) fn load_ppu_image_walk_candidates_or_die(
 ///
 /// # Errors
 ///
-/// The dump is not on this machine. A candidate that exists and fails
-/// to load dies here instead and names each candidate's cause.
+/// - Returns `NotInstalled` if no candidate exists.
+/// - Returns `Failed` if a present candidate cannot load.
 pub(crate) fn load_ppu_image_walk_candidates(
     title: &TitleManifest,
     vfs_root: &Path,
     eboot_dirs: &[PathBuf],
-) -> Result<(LoadedPpuImage, PathBuf), TitleNotInstalled> {
+) -> Result<(LoadedPpuImage, PathBuf), LoadPpuImageError> {
     let resolved = match title.resolve_eboot_in(eboot_dirs) {
         Ok(p) => p,
         // A plain miss in every probed directory: the dump is not on
@@ -310,19 +323,24 @@ pub(crate) fn load_ppu_image_walk_candidates(
             return Err(TitleNotInstalled::NoContentDirectory {
                 title: title.name().to_string(),
                 source: Box::new(e),
-            })
+            }
+            .into())
         }
-        Err(e) => die(&format!(
-            "load ppu image: resolve_eboot for title {}: {e}",
-            title.name(),
-        )),
+        Err(e) => {
+            return Err(CommandError::failed(format!(
+                "load ppu image: resolve_eboot for title {}: {e}",
+                title.name(),
+            ))
+            .into())
+        }
     };
-    let usrdir = resolved
-        .parent()
-        .unwrap_or_else(|| die("load ppu image: resolved EBOOT has no parent directory"))
-        .to_path_buf();
+    let usrdir = resolved.parent().ok_or_else(|| {
+        CommandError::failed("load ppu image: resolved EBOOT has no parent directory")
+    })?;
+    let usrdir = usrdir.to_path_buf();
 
-    let resolver = rap_resolver(title, vfs_root.to_path_buf());
+    let resolver_error = Rc::new(RefCell::new(None));
+    let resolver = rap_resolver(title, vfs_root.to_path_buf(), Rc::clone(&resolver_error));
     let mut attempts: Vec<(String, LoadCandidateError)> = Vec::new();
     for candidate in &title.eboot_candidates {
         let path = usrdir.join(candidate);
@@ -359,11 +377,15 @@ pub(crate) fn load_ppu_image_walk_candidates(
                     None
                 }
             };
-            match to_plaintext_elf(
+            let plaintext = to_plaintext_elf(
                 &bytes,
-                super::keys::key_vault_for(&bytes),
+                super::keys::key_vault_for(&bytes).map_err(LoadPpuImageError::Failed)?,
                 KeyPolicy::Auto(&resolver),
-            ) {
+            );
+            if let Some(error) = resolver_error.borrow_mut().take() {
+                return Err(error.into());
+            }
+            match plaintext {
                 Ok(elf) => {
                     return Ok((
                         LoadedPpuImage {
@@ -377,19 +399,25 @@ pub(crate) fn load_ppu_image_walk_candidates(
                 // The next candidate answers the same if it is
                 // SCE-wrapped, and a plaintext one would boot in place
                 // of the canonical binary without a word.
-                Err(e @ SceError::DecryptFeatureDisabled) => die(&format!(
-                    "load ppu image: {}: {e}; no later eboot_candidate is tried \
-                     for title {}",
-                    path.display(),
-                    title.name(),
-                )),
+                Err(e @ SceError::DecryptFeatureDisabled) => {
+                    return Err(CommandError::failed(format!(
+                        "load ppu image: {}: {e}; no later eboot_candidate is tried \
+                         for title {}",
+                        path.display(),
+                        title.name(),
+                    ))
+                    .into())
+                }
                 // Same reasoning; see `is_key_vault_refusal`.
-                Err(e) if is_key_vault_refusal(&e) => die(&format!(
-                    "load ppu image: {}: {e}; no later eboot_candidate is tried \
-                     for title {}\n{KEYS_HINT}",
-                    path.display(),
-                    title.name(),
-                )),
+                Err(e) if is_key_vault_refusal(&e) => {
+                    return Err(CommandError::failed(format!(
+                        "load ppu image: {}: {e}; no later eboot_candidate is tried \
+                         for title {}\n{KEYS_HINT}",
+                        path.display(),
+                        title.name(),
+                    ))
+                    .into())
+                }
                 Err(e) => {
                     attempts.push((candidate.clone(), LoadCandidateError::Decrypt(e)));
                     continue;
@@ -425,12 +453,14 @@ pub(crate) fn load_ppu_image_walk_candidates(
             title: title.name().to_string(),
             usrdir: usrdir_str,
             attempts: attempts_str,
-        });
+        }
+        .into());
     }
-    die(&format!(
+    Err(CommandError::failed(format!(
         "load ppu image: every eboot_candidate for title {} failed under {usrdir_str}:\n{attempts_str}",
         title.name(),
     ))
+    .into())
 }
 
 #[cfg(test)]

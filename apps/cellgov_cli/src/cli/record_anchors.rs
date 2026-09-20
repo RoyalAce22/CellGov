@@ -25,7 +25,7 @@ use crate::cli::declared_cells::{
     declared_cells, filter_declared, read_registry, refuse_undeclared, select_titles,
     split_pending, DeclaredCell,
 };
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
@@ -47,11 +47,12 @@ struct Measurement {
 }
 
 /// One `u64` field of the `BENCH_RESULT` line.
-fn parse_result_field(job: &Job, name: &str, value: &str) -> u64 {
-    value.parse().unwrap_or_else(|e| {
-        die(&format!(
+fn parse_result_field(job: &Job, name: &str, value: &str) -> Result<u64, CommandError> {
+    value.parse().map_err(|error| {
+        CommandError::failed(format!(
             "{}: BENCH_RESULT {name}={value:?} did not parse: {e}",
-            job.label()
+            job.label(),
+            e = error,
         ))
     })
 }
@@ -114,12 +115,14 @@ fn cell_disagreements(identity: &RunIdentity, cell: &CellKey) -> Vec<String> {
     out
 }
 
-/// Boot one cell; `None` when its dump is not installed (the boot
-/// printed the not-installed marker). Any other failure dies: past
-/// the boot-inputs sentinel, a broken run must never look like a
-/// skip.
-fn measure(job: &Job) -> Option<Measurement> {
-    let exe = std::env::current_exe().unwrap_or_else(|e| die(&format!("current_exe: {e}")));
+/// Boots one cell, or returns `None` when its dump is not installed.
+///
+/// # Errors
+///
+/// Returns an error for every failure except the title-not-installed marker.
+fn measure(job: &Job) -> Result<Option<Measurement>, CommandError> {
+    let exe = std::env::current_exe()
+        .map_err(|error| CommandError::failed(format!("current_exe: {error}")))?;
     let mut cmd = Command::new(exe);
     cmd.arg("boot")
         .arg("bench-once")
@@ -142,112 +145,116 @@ fn measure(job: &Job) -> Option<Measurement> {
     let output = cmd
         .current_dir(workspace_root())
         .output()
-        .unwrap_or_else(|e| die(&format!("spawn boot bench-once: {e}")));
-    super::exit::propagate_interrupt(output.status);
+        .map_err(|error| CommandError::failed(format!("spawn boot bench-once: {error}")))?;
+    super::exit::propagate_interrupt(output.status)?;
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !output.status.success() {
         if stderr.contains(TITLE_NOT_INSTALLED_SENTINEL) {
-            return None;
+            return Ok(None);
         }
         let phase = if stderr.contains(BOOT_STARTED_SENTINEL) {
             "boot started then failed"
         } else {
             "boot inputs failed to resolve (dump present but unusable?)"
         };
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{}: {phase}; refusing to record a broken run. stderr tail:\n{}",
             job.label(),
             stderr.lines().rev().take(8).collect::<Vec<_>>().join("\n")
-        ));
+        )));
     }
 
-    let witnesses = parse_witness_lines(&stderr).unwrap_or_else(|errs| {
-        let lines: Vec<String> = errs.iter().map(ToString::to_string).collect();
-        die(&format!(
+    let witnesses = parse_witness_lines(&stderr).map_err(|errors| {
+        let lines: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        CommandError::failed(format!(
             "{}: malformed witness lines:\n  {}",
             job.label(),
             lines.join("\n  ")
         ))
-    });
+    })?;
 
     let mut results = stdout.lines().filter(|l| l.starts_with("BENCH_RESULT"));
     let result = results
         .next()
-        .unwrap_or_else(|| die(&format!("{}: no BENCH_RESULT line", job.label())));
+        .ok_or_else(|| CommandError::failed(format!("{}: no BENCH_RESULT line", job.label())))?;
     // One boot prints the line once. Two lines mean two runs' output
     // reached one pipe, and neither can be attributed -- the same
     // reason a repeated RUN_IDENTITY line is refused.
     if results.next().is_some() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{}: more than one BENCH_RESULT line; refusing to record from output that \
              cannot be attributed to one run",
             job.label()
-        ));
+        )));
     }
     let mut steps = None;
     let mut budget = None;
     let mut outcome = None;
     for tok in result.split_whitespace() {
         if let Some(v) = tok.strip_prefix("steps=") {
-            steps = Some(parse_result_field(job, "steps", v));
+            steps = Some(parse_result_field(job, "steps", v)?);
         } else if let Some(v) = tok.strip_prefix("budget=") {
-            budget = Some(parse_result_field(job, "budget", v));
+            budget = Some(parse_result_field(job, "budget", v)?);
         } else if let Some(v) = tok.strip_prefix("outcome=") {
             outcome = Some(v.to_string());
         }
     }
-    let steps =
-        steps.unwrap_or_else(|| die(&format!("{}: BENCH_RESULT has no steps=", job.label())));
-    let budget =
-        budget.unwrap_or_else(|| die(&format!("{}: BENCH_RESULT has no budget=", job.label())));
-    let outcome =
-        outcome.unwrap_or_else(|| die(&format!("{}: BENCH_RESULT has no outcome=", job.label())));
+    let steps = steps.ok_or_else(|| {
+        CommandError::failed(format!("{}: BENCH_RESULT has no steps=", job.label()))
+    })?;
+    let budget = budget.ok_or_else(|| {
+        CommandError::failed(format!("{}: BENCH_RESULT has no budget=", job.label()))
+    })?;
+    let outcome = outcome.ok_or_else(|| {
+        CommandError::failed(format!("{}: BENCH_RESULT has no outcome=", job.label()))
+    })?;
     // The boot prints the line even when the store names nothing, with
     // an empty payload. A missing line therefore means the child was
     // not this binary, or its stderr never arrived.
     let identity = RunIdentity::parse_sentinel_lines(&stderr)
-        .unwrap_or_else(|e| die(&format!("{}: {e}", job.label())))
-        .unwrap_or_else(|| {
-            die(&format!(
+        .map_err(|error| CommandError::failed(format!("{}: {error}", job.label())))?
+        .ok_or_else(|| {
+            CommandError::failed(format!(
                 "{}: the boot printed no {RUN_IDENTITY_SENTINEL} line; refusing to record an \
                  anchor that cannot name what it was measured against",
                 job.label()
             ))
-        });
+        })?;
     let disagreements = cell_disagreements(&identity, &job.cell);
     if !disagreements.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{}: the run {}; refusing to file the measurement under that cell. The \
              anchor tree is keyed by the composed identity triple and records no boot \
              override, so the gate would hold one configuration against another \
              configuration's run",
             job.label(),
             disagreements.join(", and ")
-        ));
+        )));
     }
-    Some(Measurement {
+    Ok(Some(Measurement {
         witnesses: witnesses.values,
         unsupported_syscalls: witnesses.unsupported_syscalls,
         steps,
         budget: Budget::new(budget),
         outcome,
         identity,
-    })
+    }))
 }
 
-/// Read and parse the existing history, dying on any error other than
-/// a missing file. A read failure must not be mistaken for an empty
-/// history -- that would silently replace the append-only record.
-fn read_history(path: &Path) -> String {
+/// Reads the existing append-only history.
+///
+/// A missing file is an empty history. The command returns every other read failure and leaves the history unchanged.
+fn read_history(path: &Path) -> Result<String, CommandError> {
     match std::fs::read_to_string(path) {
-        Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
-        Err(e) => die(&format!(
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(CommandError::failed(format!(
             "read {}: {e}; refusing to treat an unreadable history as empty",
-            path.display()
-        )),
+            path.display(),
+            e = error,
+        ))),
     }
 }
 
@@ -256,31 +263,34 @@ fn read_history(path: &Path) -> String {
 ///
 /// Only an absent file means "never recorded". An unreadable or
 /// unparseable one names itself.
-fn read_previous_anchor(job: &Job, path: &Path) -> Option<BootSummary> {
+fn read_previous_anchor(job: &Job, path: &Path) -> Result<Option<BootSummary>, CommandError> {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => die(&format!(
-            "{}: read {}: {e}; refusing to treat an unreadable anchor as absent",
-            job.label(),
-            path.display()
-        )),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(CommandError::failed(format!(
+                "{}: read {}: {e}; refusing to treat an unreadable anchor as absent",
+                job.label(),
+                path.display(),
+                e = error,
+            )))
+        }
     };
-    Some(serde_json::from_str(&text).unwrap_or_else(|e| {
-        die(&format!(
+    serde_json::from_str(&text).map(Some).map_err(|error| {
+        CommandError::failed(format!(
             "{}: parse {}: {e}; the anchor exists but is malformed. Repair it rather than \
              letting this run recreate it without its recorded witness classes.",
             job.label(),
-            path.display()
+            path.display(),
+            e = error,
         ))
-    }))
+    })
 }
 
-/// Rewrite one cell's anchor and keep any hand-promoted witness class.
+/// Rewrites one cell's anchor and preserves its promoted witness classes.
 ///
-/// Returns `false` when the title is not installed: `--all` skips it by
-/// name, a named scope treats it as an error.
-fn record_one(job: &Job, strict: bool) -> bool {
+/// With `--all`, an uninstalled title returns `Ok(false)`. A named title returns an error.
+fn record_one(job: &Job, strict: bool) -> Result<bool, CommandError> {
     let Some(Measurement {
         witnesses,
         unsupported_syscalls,
@@ -288,21 +298,21 @@ fn record_one(job: &Job, strict: bool) -> bool {
         budget,
         outcome,
         identity,
-    }) = measure(job)
+    }) = measure(job)?
     else {
         if strict {
-            die(&format!(
+            return Err(CommandError::failed(format!(
                 "{}: the title's dump is not installed",
                 job.label()
-            ));
+            )));
         }
         println!("{}: skipped -- not installed on this machine", job.label());
-        return false;
+        return Ok(false);
     };
 
     let root = workspace_root();
     let path = boot_anchor_path(&root, &job.content_id, &job.cell);
-    let previous = read_previous_anchor(job, &path);
+    let previous = read_previous_anchor(job, &path)?;
     let previous_identity = previous
         .as_ref()
         .map(|p| p.identity.clone())
@@ -312,9 +322,9 @@ fn record_one(job: &Job, strict: bool) -> bool {
     // history line must abort while the anchor is still untouched,
     // never leave a moved anchor with no history entry.
     let hist_path = history_path(&root, &job.content_id, &job.cell);
-    let existing_history = read_history(&hist_path);
+    let existing_history = read_history(&hist_path)?;
     let history_entries = boot_history::parse(&existing_history)
-        .unwrap_or_else(|e| die(&format!("parse {}: {e}", hist_path.display())));
+        .map_err(|error| CommandError::failed(format!("parse {}: {error}", hist_path.display())))?;
     let history_entry = BootHistoryEntry::new_if_changed(
         history_entries.last(),
         steps,
@@ -323,12 +333,13 @@ fn record_one(job: &Job, strict: bool) -> bool {
         identity.clone(),
     );
 
-    let outcome_parsed = BootOutcome::from_str(&outcome).unwrap_or_else(|e| {
-        die(&format!(
+    let outcome_parsed = BootOutcome::from_str(&outcome).map_err(|error| {
+        CommandError::failed(format!(
             "{}: outcome {outcome:?} did not parse: {e}",
-            job.label()
+            job.label(),
+            e = error,
         ))
-    });
+    })?;
     let mut summary = BootSummary::new_with_breaks(
         checkpoint_kind(job.checkpoint),
         outcome_parsed,
@@ -336,24 +347,26 @@ fn record_one(job: &Job, strict: bool) -> bool {
         budget,
         witnesses.get("host_invariant_breaks").copied().unwrap_or(0),
     )
-    .unwrap_or_else(|e| {
-        die(&format!(
+    .map_err(|error| {
+        CommandError::failed(format!(
             "{}: recorded summary is invalid: {e}",
-            job.label()
+            job.label(),
+            e = error,
         ))
-    });
+    })?;
     summary.witnesses = record(previous.as_ref().map(|p| &p.witnesses), &witnesses);
     summary.unsupported_syscalls = unsupported_syscalls;
     summary.identity = identity;
 
-    let dir = path
-        .parent()
-        .unwrap_or_else(|| die(&format!("{} has no parent directory", path.display())));
-    std::fs::create_dir_all(dir).unwrap_or_else(|e| die(&format!("create {}: {e}", dir.display())));
+    let dir = path.parent().ok_or_else(|| {
+        CommandError::failed(format!("{} has no parent directory", path.display()))
+    })?;
+    std::fs::create_dir_all(dir)
+        .map_err(|error| CommandError::failed(format!("create {}: {error}", dir.display())))?;
     let json = serde_json::to_string_pretty(&summary)
-        .unwrap_or_else(|e| die(&format!("serialize {}: {e}", path.display())));
+        .map_err(|error| CommandError::failed(format!("serialize {}: {error}", path.display())))?;
     std::fs::write(&path, json + "\n")
-        .unwrap_or_else(|e| die(&format!("write {}: {e}", path.display())));
+        .map_err(|error| CommandError::failed(format!("write {}: {error}", path.display())))?;
 
     // The history's move rule compares against the previous history
     // line, which can carry no identity triple. The anchor's own
@@ -379,15 +392,17 @@ fn record_one(job: &Job, strict: bool) -> bool {
             summary.witnesses.len()
         ),
         Some(entry_line) => {
-            let line = boot_history::render_line(&entry_line)
-                .unwrap_or_else(|e| die(&format!("serialize history entry: {e}")));
+            let line = boot_history::render_line(&entry_line).map_err(|error| {
+                CommandError::failed(format!("serialize history entry: {error}"))
+            })?;
             let mut text = existing_history;
             if !text.is_empty() && !text.ends_with('\n') {
                 text.push('\n');
             }
             text.push_str(&line);
-            std::fs::write(&hist_path, text)
-                .unwrap_or_else(|e| die(&format!("write {}: {e}", hist_path.display())));
+            std::fs::write(&hist_path, text).map_err(|error| {
+                CommandError::failed(format!("write {}: {error}", hist_path.display()))
+            })?;
             println!(
                 "{}: moved ({outcome}, {steps} steps) -- {}",
                 job.label(),
@@ -395,7 +410,7 @@ fn record_one(job: &Job, strict: bool) -> bool {
             );
         }
     }
-    true
+    Ok(true)
 }
 
 /// Refuse a `--registry` the spawned measurement cannot honour.
@@ -405,13 +420,13 @@ fn record_one(job: &Job, strict: bool) -> bool {
 /// directory. A `--registry` pointing elsewhere would enumerate one
 /// set of manifests, boot the same-named title from another, and then
 /// write the anchor under the first manifest's content id.
-fn reject_unforwardable_registry(registry: &Path, default: &Path) {
+fn reject_unforwardable_registry(registry: &Path, default: &Path) -> Result<(), CommandError> {
     let same = match (registry.canonicalize(), default.canonicalize()) {
         (Ok(a), Ok(b)) => a == b,
         _ => registry == default,
     };
     if !same {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "record-anchors: --registry {} is not the registry the measurement reads. \
              The boot is re-entered as `boot bench-once --title <name>`, which resolves \
              names against {}, so the anchor would be measured from one manifest and \
@@ -419,34 +434,41 @@ fn reject_unforwardable_registry(registry: &Path, default: &Path) {
             registry.display(),
             default.display(),
             default.display(),
-        ));
+        )));
     }
+    Ok(())
 }
 
-pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
+pub(crate) fn run(
+    args: &RecordAnchorsArgs,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
     let default_registry = workspace_root().join(DEFAULT_TITLE_REGISTRY_DIR);
     let registry = match &args.registry {
         Some(given) => {
-            reject_unforwardable_registry(given, &default_registry);
+            reject_unforwardable_registry(given, &default_registry)?;
             given.clone()
         }
         None => default_registry,
     };
 
-    let titles = read_registry(&registry);
+    let titles = read_registry(&registry)?;
     if titles.is_empty() {
-        die(&format!("no title manifests under {}", registry.display()));
+        return Err(CommandError::failed(format!(
+            "no title manifests under {}",
+            registry.display()
+        )));
     }
 
     let one = args.scope.title.as_deref();
-    let selected = select_titles(&titles, one);
-    refuse_undeclared(&selected);
+    let selected = select_titles(&titles, one)?;
+    refuse_undeclared(&selected)?;
     let jobs = filter_declared(
         selected.into_iter().flat_map(declared_cells).collect(),
         args.fw.as_deref(),
         args.game_ver.as_deref(),
         "record-anchors",
-    );
+    )?;
     // A named selection asks for the measurement of a pending cell
     // regardless; once the anchor exists, the structure gate says to
     // drop the marker.
@@ -460,7 +482,7 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
         );
     }
     if jobs.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "every selected cell is declared pending ({}); nothing to record. Name one with \
              --fw / --game-ver to measure it regardless",
             pending
@@ -468,7 +490,7 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
                 .map(Job::label)
                 .collect::<Vec<_>>()
                 .join(", ")
-        ));
+        )));
     }
 
     let strict = one.is_some();
@@ -479,7 +501,7 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
     sink.totals(0, total as u64);
     for (index, job) in jobs.iter().enumerate() {
         sink.item_started(&format!("{} ({}/{total})", job.label(), index + 1));
-        if record_one(job, strict) {
+        if record_one(job, strict)? {
             recorded += 1;
         }
         sink.advanced(1);
@@ -489,10 +511,11 @@ pub(crate) fn run(args: &RecordAnchorsArgs, render: RenderFlags) {
     // --all over a machine with zero installed titles must not exit 0
     // having recorded nothing.
     if recorded == 0 {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "none of the {total} declared cell(s) is installed; nothing recorded"
-        ));
+        )));
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
 #[cfg(test)]

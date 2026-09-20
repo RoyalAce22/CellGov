@@ -123,7 +123,7 @@ fn every_archive_version_appears_and_unknown_installs_follow() {
 
 #[test]
 fn the_committed_firmware_matrix_is_complete_when_nothing_is_installed() {
-    let versions = archive_versions();
+    let versions = archive_versions().expect("the committed firmware archive parses");
     assert!(!versions.is_empty(), "the firmware archive has no rows");
     let entries = complete_entries(&versions, Vec::new());
     assert_eq!(entries.len(), versions.len());

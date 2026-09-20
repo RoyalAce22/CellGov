@@ -12,6 +12,23 @@ use cellgov_boot::prepare::{
 };
 use cellgov_boot::step_loop::bench_step_loop;
 
+/// Carries a measured boot refusal to the command boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum BenchBootError {
+    /// The boot library refused the measured run.
+    #[error("{0}")]
+    Boot(#[from] cellgov_boot::BootError),
+    /// The optional state-trace write failed.
+    #[error("boot bench: writing state trace to {path}: {source}")]
+    StateTrace {
+        /// The output path the command received.
+        path: String,
+        /// The host write failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
 /// Run one boot with the minimum step-loop bookkeeping needed to
 /// detect termination.
 ///
@@ -30,7 +47,7 @@ fn bench_boot(
     control_flags1: Option<u32>,
     trace_path: Option<&str>,
     progress: &dyn crate::progress::ProgressSink,
-) -> BenchBootResult {
+) -> Result<BenchBootResult, BenchBootError> {
     progress.phase(crate::progress::BootPhase::Loading.code());
     let sink = crate::game::console_sink();
     let ignored = crate::game::set_watch_vars();
@@ -74,8 +91,7 @@ fn bench_boot(
             keys: std::rc::Rc::new(crate::cli::keys::ProcessKeyVault),
             taps: std::rc::Rc::new(cellgov_boot::NoTaps),
         },
-    })
-    .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+    })?;
     let mut rt = prepared.rt;
     let authid_source = prepared.authid_source;
     let child_init = prepared.child_init;
@@ -91,18 +107,20 @@ fn bench_boot(
         opts.retargets_trajectory(),
     );
     crate::progress::enter_step_loop(progress, crate::game::within_runtime_cap(finish_line, &rt));
-    let outcome = bench_step_loop(
+    let outcome = match bench_step_loop(
         &mut rt,
         active_checkpoint,
         &mut steps,
         &child_init,
         progress,
         &sink,
-    )
-    .unwrap_or_else(|e| {
-        warn_first_invariant_break(&rt, sink.as_ref());
-        crate::cli::exit::die(&e.to_string())
-    });
+    ) {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            warn_first_invariant_break(&rt, sink.as_ref());
+            return Err(error.into());
+        }
+    };
     let wall = t0.elapsed();
     // Stop the bar before the witness block prints; see
     // `ProgressSink::finished`.
@@ -114,18 +132,19 @@ fn bench_boot(
     // After the witness block: the write is host I/O, and a reader
     // that scrapes stderr must not have to wait on a disk.
     if let Some(path) = trace_path {
-        std::fs::write(path, rt.trace().bytes()).unwrap_or_else(|e| {
-            crate::cli::exit::die(&format!("boot bench: writing state trace to {path}: {e}"))
-        });
+        std::fs::write(path, rt.trace().bytes()).map_err(|source| BenchBootError::StateTrace {
+            path: path.to_string(),
+            source,
+        })?;
     }
 
-    BenchBootResult {
+    Ok(BenchBootResult {
         run_index: opts.run_index,
         steps,
         wall,
         budget: step_budget,
         outcome,
-    }
+    })
 }
 
 /// Report the first LV2 host invariant break of the boot as a warning.
@@ -139,7 +158,11 @@ fn warn_first_invariant_break(rt: &cellgov_core::Runtime, sink: &dyn cellgov_boo
     }
 }
 
-/// Run a single bench invocation and print one `BENCH_RESULT` line.
+/// Emits one parent-readable result from a measured boot.
+///
+/// # Errors
+///
+/// Returns an error if the measured boot cannot produce its result line.
 pub fn bench_boot_one_run(
     opts: BenchOptions<'_>,
     elf_data: Vec<u8>,
@@ -147,7 +170,7 @@ pub fn bench_boot_one_run(
     control_flags1: Option<u32>,
     trace_path: Option<&str>,
     progress: &dyn crate::progress::ProgressSink,
-) -> BenchBootResult {
+) -> Result<BenchBootResult, BenchBootError> {
     let r = bench_boot(
         opts,
         elf_data,
@@ -155,7 +178,7 @@ pub fn bench_boot_one_run(
         control_flags1,
         trace_path,
         progress,
-    );
+    )?;
     println!("{}", format_bench_result(&r));
-    r
+    Ok(r)
 }

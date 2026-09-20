@@ -37,7 +37,7 @@ fn resolve_ps3_vfs_root_prefers_cli_flag() {
 fn resolve_ps3_vfs_root_default_is_project_relative() {
     let _guard = EnvGuard::unset("CELLGOV_PS3_VFS_ROOT");
     let default_root = Path::new(cellgov_install::store::DEFAULT_VFS_ROOT);
-    let got = resolve_ps3_vfs_root(None);
+    let got = resolve_ps3_vfs_root(None).expect("default root resolves");
     assert_eq!(got, default_root.join("dev_hdd0"));
     assert_eq!(
         crate::cli::keys::fixed_vault_root(),

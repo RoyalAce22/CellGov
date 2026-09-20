@@ -30,13 +30,19 @@ pub(crate) fn container_label(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
-/// Map a container for a sequential read.
+/// Maps a container for a sequential read.
 ///
 /// A disc image can exceed host RAM. Every installer reads its
 /// container in sequence, so the host streams pages in and evicts them.
-pub(crate) fn map_container_or_die(path: &Path) -> filebuffer::FileBuffer {
-    filebuffer::FileBuffer::open(path).unwrap_or_else(|e| {
-        crate::cli::exit::die(&format!("failed to map {}: {e}", path.display()))
+///
+/// # Errors
+///
+/// Returns an error if the host cannot map `path`.
+pub(crate) fn map_container(
+    path: &Path,
+) -> Result<filebuffer::FileBuffer, crate::cli::exit::CommandError> {
+    filebuffer::FileBuffer::open(path).map_err(|error| {
+        crate::cli::exit::CommandError::failed(format!("failed to map {}: {error}", path.display()))
     })
 }
 
@@ -45,10 +51,11 @@ pub(crate) fn megabytes(len: usize) -> f64 {
     len as f64 / (1024.0 * 1024.0)
 }
 
-/// Load the operator's vault for `store`, or die naming the refusal.
-pub(crate) fn vault_or_die(store: &Path) -> cellgov_install::keys::KeyVault {
+pub(crate) fn vault(
+    store: &Path,
+) -> Result<cellgov_install::keys::KeyVault, crate::cli::exit::CommandError> {
     cellgov_install::keys::KeyVault::load_for_vfs(store)
-        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()))
+        .map_err(|error| crate::cli::exit::CommandError::failed(error.to_string()))
 }
 
 #[cfg(test)]

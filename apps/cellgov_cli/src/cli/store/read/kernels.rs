@@ -12,6 +12,7 @@ use std::path::Path;
 #[cfg(feature = "decrypt")]
 use std::path::PathBuf;
 
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::OutputFormat;
 
 #[cfg(feature = "decrypt")]
@@ -57,26 +58,32 @@ const FIRMWARE_TSV: &str = include_str!(concat!(
 ));
 
 #[cfg(not(feature = "decrypt"))]
-pub(crate) fn firmware_kernels(_root: &Path, _format: OutputFormat) {
-    crate::cli::exit::die(
-        &crate::cli::store::StoreCliError::DecryptFeatureDisabled {
+pub(crate) fn firmware_kernels(
+    _root: &Path,
+    _format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    Err(CommandError::failed(
+        crate::cli::store::StoreCliError::DecryptFeatureDisabled {
             command: "firmware kernels".to_string(),
         }
         .to_string(),
-    )
+    ))
 }
 
 /// `cellgov firmware kernels`
 #[cfg(feature = "decrypt")]
-pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
+pub(crate) fn firmware_kernels(
+    root: &Path,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
     use cellgov_install::kernel_decrypt::{decrypt_stored_kernel, KernelCoverage};
     use cellgov_install::keys::KeyVault;
 
-    let view = view(root);
+    let view = view(root)?;
     let location = KeyVault::locate_from(std::env::var_os(crate::env_vars::KEYS), root)
-        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+        .map_err(|error| CommandError::failed(error.to_string()))?;
     let keys = KeyVault::load_from_path(&location)
-        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+        .map_err(|error| CommandError::failed(error.to_string()))?;
 
     let installed = view
         .inventory
@@ -116,7 +123,7 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
             doc
         })
         .collect();
-    let entries = complete_entries(&archive_versions(), installed);
+    let entries = complete_entries(&archive_versions()?, installed);
 
     let doc = KernelCoverageDoc {
         format_version: view.format_version(),
@@ -124,21 +131,22 @@ pub(crate) fn firmware_kernels(root: &Path, format: OutputFormat) {
         vault: location.display().to_string(),
         entries,
     };
-    let report = write_report(root, &doc).unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
-    emit(format, &doc, || print!("{}", render(&doc, &report)));
-    std::process::exit(exit_status(&doc));
+    let report =
+        write_report(root, &doc).map_err(|error| CommandError::failed(error.to_string()))?;
+    emit(format, &doc, || print!("{}", render(&doc, &report)))?;
+    Ok(CommandExitCode::new(exit_status(&doc)))
 }
 
 #[cfg(feature = "decrypt")]
-fn archive_versions() -> Vec<String> {
+fn archive_versions() -> Result<Vec<String>, CommandError> {
     use cellgov_lv2::archive::{self, FIRMWARE};
 
     let table = archive::parse(&FIRMWARE, FIRMWARE_TSV)
-        .unwrap_or_else(|e| crate::cli::exit::die(&format!("compiled firmware.tsv: {e}")));
+        .map_err(|error| CommandError::failed(format!("compiled firmware.tsv: {error}")))?;
     let rows = archive::firmware_rows(&table);
     archive::check_firmware_rows(&rows)
-        .unwrap_or_else(|e| crate::cli::exit::die(&format!("compiled firmware.tsv: {e}")));
-    rows.into_iter().map(|row| row.fw).collect()
+        .map_err(|error| CommandError::failed(format!("compiled firmware.tsv: {error}")))?;
+    Ok(rows.into_iter().map(|row| row.fw).collect())
 }
 
 #[cfg(feature = "decrypt")]

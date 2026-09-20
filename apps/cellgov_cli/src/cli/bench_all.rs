@@ -14,15 +14,16 @@ use cellgov_terminal::progress::ProgressBar;
 use cellgov_time::Budget;
 
 use super::boot_cmd::{
-    firmware_module_dir, selection_args, try_resolve_cell_inputs, try_resolve_composition,
-    ResolvedPlan, EXIT_SPREAD_EXCEEDED,
+    firmware_module_dir, selection_args, separate_spawn_command_error, try_resolve_cell_inputs,
+    try_resolve_composition, CompositionResolutionError, ResolvedPlan, EXIT_SPREAD_EXCEEDED,
 };
 use super::declared_cells::{
     declared_cells, filter_declared, read_registry, refuse_undeclared, DeclaredCell,
 };
-use super::exit::die;
+use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
-use super::parse::{die_usage, BenchGateArgs, BootSelection};
+use super::parse::{BenchGateArgs, BootSelection};
+use super::self_load::LoadPpuImageError;
 use super::title::{resolve_ps3_vfs_root, DEFAULT_TITLE_REGISTRY_DIR};
 use crate::composition::{ComposeError, FirmwareSelectError, GameVersionSelectError};
 use crate::game;
@@ -192,8 +193,6 @@ pub(super) fn titles_spanned(cells: &[DeclaredCell]) -> usize {
         .len()
 }
 
-/// The refusal a sweep dies with when no cell ran; it counts the cells
-/// set aside under each reason.
 pub(super) fn nothing_ran_line(verdicts: &[CellVerdict]) -> String {
     let not_installed = verdicts
         .iter()
@@ -239,8 +238,7 @@ pub(super) fn tally_line(verdicts: &[CellVerdict]) -> String {
 /// for a dump the image walk cannot find. An update archived over an
 /// uninstalled base is an absence: `status` reports that version as
 /// not installed for the same reason (`game_version_is_installed` in
-/// `cli::store::read::collect`). Every other refusal names a broken
-/// store, and the sweep dies on it.
+/// `cli::store::read::collect`). Every other refusal is a store error.
 pub(super) fn not_installed_reason(e: &ComposeError) -> Option<String> {
     match e {
         ComposeError::Firmware(
@@ -254,6 +252,8 @@ pub(super) fn not_installed_reason(e: &ComposeError) -> Option<String> {
         ComposeError::Firmware(_)
         | ComposeError::GameVersion(_)
         | ComposeError::Inventory(_)
+        | ComposeError::FirmwareDirectory { .. }
+        | ComposeError::IdentityRender { .. }
         | ComposeError::Identity(_)
         | ComposeError::ResolveEboot(_)
         | ComposeError::FirmwareRelativeWithoutEntry { .. }
@@ -299,7 +299,7 @@ fn gate_cell(
     vfs_flag: Option<&Path>,
     vfs_root: &Path,
     render: RenderFlags,
-) -> CellVerdict {
+) -> Result<CellVerdict, CommandError> {
     let args = &gate_args.bench;
     let selection = BootSelection {
         fw: Some(cell.cell.fw.clone()),
@@ -309,31 +309,41 @@ fn gate_cell(
     let composition =
         match try_resolve_composition(&selection, vfs_root, title, args.overrides.overrides()) {
             Ok(c) => c,
-            Err(e) => match not_installed_reason(&e) {
-                Some(why) => return CellVerdict::NotInstalled(why),
-                None => die(&format!("{COMMAND}: {}: {e}", cell.label())),
+            Err(CompositionResolutionError::Compose(e)) => match not_installed_reason(&e) {
+                Some(why) => return Ok(CellVerdict::NotInstalled(why)),
+                None => {
+                    return Err(CommandError::failed(format!(
+                        "{COMMAND}: {}: {e}",
+                        cell.label()
+                    )))
+                }
             },
+            Err(CompositionResolutionError::Command(error)) => return Err(error),
         };
     let inputs = match try_resolve_cell_inputs(title.clone(), composition, vfs_root, COMMAND) {
         Ok(i) => i,
-        Err(e) => return CellVerdict::NotInstalled(e.to_string()),
+        Err(LoadPpuImageError::NotInstalled(error)) => {
+            return Ok(CellVerdict::NotInstalled(error.to_string()))
+        }
+        Err(LoadPpuImageError::Failed(error)) => return Err(error),
     };
     let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
     if plan.cell.as_ref() != Some(&cell.cell) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{COMMAND}: {}: the composition keyed the run under {} rather than the declared \
              cell; refusing to hold one cell's run against another cell's anchor",
             cell.label(),
             plan.cell
                 .as_ref()
                 .map_or_else(|| "no cell".to_string(), |c| c.label()),
-        ));
+        )));
     }
-    let max_steps = args
-        .max_steps
-        .unwrap_or_else(|| plan.max_steps_usize(&inputs.title));
-    let firmware_dir = firmware_module_dir(&inputs.composition);
-    let owned = selection_args(&selection, vfs_flag);
+    let max_steps = match args.max_steps {
+        Some(max_steps) => max_steps,
+        None => plan.max_steps_usize(&inputs.title)?,
+    };
+    let firmware_dir = firmware_module_dir(&inputs.composition)?;
+    let owned = selection_args(&selection, vfs_flag)?;
     let bar = ProgressBar::start(render.caps(), &BENCH_PAIR_TASK, inputs.title.name());
     let sink = bar.sink();
     let outcome = game::bench_boot_runs(
@@ -365,10 +375,15 @@ fn gate_cell(
     match outcome {
         Ok(o) => {
             bar.finish();
-            classify(o)
+            Ok(classify(o))
         }
-        Err(e) => {
+        Err(game::SpawnError::Command(error)) => {
             bar.abort();
+            Err(error)
+        }
+        Err(error) => {
+            bar.abort();
+            let e = separate_spawn_command_error(error)?;
             let stderr_tail: Vec<&str> = e.captured_stderr().lines().rev().take(8).collect();
             if !stderr_tail.is_empty() {
                 eprintln!("{COMMAND}: {}: stderr tail:", cell.label());
@@ -376,45 +391,53 @@ fn gate_cell(
                     eprintln!("  {line}");
                 }
             }
-            CellVerdict::BootFailed(e.to_string())
+            Ok(CellVerdict::BootFailed(e.to_string()))
         }
     }
 }
 
 /// Refuse a sweep over an unmanaged firmware tree.
-fn refuse_firmware_dir(gate_args: &BenchGateArgs) {
+fn refuse_firmware_dir(gate_args: &BenchGateArgs) -> Result<(), CommandError> {
     if let Some(dir) = &gate_args.bench.selection.firmware_dir {
-        die_usage(&format!(
-            "{COMMAND}: --firmware-dir {} names an unmanaged tree, which carries no firmware \
+        return Err(CommandError::status(
+            exit_codes::USAGE,
+            format!(
+                "{COMMAND}: --firmware-dir {} names an unmanaged tree, which carries no firmware \
              version, and a sweep names each cell by the version its row declares. Gate one \
              cell against that tree with `boot bench --title NAME --firmware-dir DIR`.",
-            dir.display()
+                dir.display()
+            ),
         ));
     }
+    Ok(())
 }
 
-pub(crate) fn run(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, render: RenderFlags) -> ! {
+pub(crate) fn run(
+    gate_args: &BenchGateArgs,
+    vfs_flag: Option<&Path>,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
     // A refused invocation must not read the store, so this runs ahead
     // of every resolution below.
-    refuse_firmware_dir(gate_args);
+    refuse_firmware_dir(gate_args)?;
     let selection = &gate_args.bench.selection;
     // The sweep reads the registry the children resolve `--title`
     // against, so a child composes the manifest the sweep enumerated.
-    let titles = read_registry(Path::new(DEFAULT_TITLE_REGISTRY_DIR));
+    let titles = read_registry(Path::new(DEFAULT_TITLE_REGISTRY_DIR))?;
     if titles.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{COMMAND}: no title manifests under {DEFAULT_TITLE_REGISTRY_DIR}"
-        ));
+        )));
     }
     let selected: Vec<&TitleManifest> = titles.iter().collect();
-    refuse_undeclared(&selected);
+    refuse_undeclared(&selected)?;
     let cells = filter_declared(
         selected.into_iter().flat_map(declared_cells).collect(),
         selection.fw.as_deref(),
         selection.game_ver.as_deref(),
         COMMAND,
-    );
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    )?;
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
     println!(
         "{COMMAND}: {} declared cell(s) over {} title(s), runs={} per cell",
         cells.len(),
@@ -435,7 +458,7 @@ pub(crate) fn run(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, render: Re
                     .iter()
                     .find(|t| t.content_id == cell.content_id)
                     .expect("invariant: every declared cell came from a registry title");
-                gate_cell(cell, title, gate_args, vfs_flag, &vfs_root, render)
+                gate_cell(cell, title, gate_args, vfs_flag, &vfs_root, render)?
             }
         };
         for line in summary_lines(cell, &verdict) {
@@ -448,13 +471,13 @@ pub(crate) fn run(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, render: Re
     // A sweep over a machine that holds none of its cells gated
     // nothing, and must not exit 0.
     if !verdicts.iter().any(CellVerdict::ran) {
-        die(&nothing_ran_line(&verdicts));
+        return Err(CommandError::failed(nothing_ran_line(&verdicts)));
     }
     let code = sweep_exit_code(&verdicts);
     if code != 0 {
         println!("{COMMAND}: exiting with status {code}");
     }
-    std::process::exit(code)
+    Ok(CommandExitCode::new(code))
 }
 
 #[cfg(test)]

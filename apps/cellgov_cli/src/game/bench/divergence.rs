@@ -136,7 +136,10 @@ const LOCALIZE_MAX_STEPS: usize = 25_000;
 ///
 /// The cap reads the longest run: when a break moves the step count,
 /// run 1 bounds neither re-run.
-pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]) -> Vec<String> {
+pub(super) fn locate_divergence(
+    opts: BenchOptions<'_>,
+    runs: &[BenchBootResult],
+) -> Result<Vec<String>, crate::cli::exit::CommandError> {
     let mut out = Vec::new();
     let steps = runs.iter().map(|r| r.steps).max().unwrap_or(0);
     if steps > LOCALIZE_MAX_STEPS {
@@ -151,7 +154,7 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
             ));
         }
         out.push("  cellgov diff diverge run0.state run1.state".to_string());
-        return out;
+        return Ok(out);
     }
     // This prints before the two boots below, which run in
     // DeterminismCheck mode with no progress bar and take far longer
@@ -172,7 +175,7 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
                 path.display()
             ));
             cleanup_traces(&paths);
-            return out;
+            return Ok(out);
         };
         let mut traced = opts;
         // The offset puts these indices outside the measured set's
@@ -184,7 +187,7 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
             Err(e) => {
                 out.push(format!("cannot localize: current_exe: {e}"));
                 cleanup_traces(&paths);
-                return out;
+                return Ok(out);
             }
         };
         let mut cmd = std::process::Command::new(exe);
@@ -193,11 +196,8 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
         match cmd.output() {
             Ok(o) if o.status.success() => {}
             Ok(o) => {
-                // An interrupt ends this process inside the propagate
-                // call, so cleanup of the earlier re-run's trace runs
-                // first.
                 cleanup_traces(&paths);
-                crate::cli::exit::propagate_interrupt(o.status);
+                crate::cli::exit::propagate_interrupt(o.status)?;
                 out.push(format!(
                     "cannot localize: the traced re-run exited {:?}",
                     o.status.code()
@@ -205,12 +205,12 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
                 // The child's own stderr is the only account of why it
                 // refused.
                 out.extend(stderr_tail(&o.stderr));
-                return out;
+                return Ok(out);
             }
             Err(e) => {
                 out.push(format!("cannot localize: spawning the traced re-run: {e}"));
                 cleanup_traces(&paths);
-                return out;
+                return Ok(out);
             }
         }
         match std::fs::read(path) {
@@ -218,7 +218,7 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
             Err(e) => {
                 out.push(format!("cannot localize: reading {}: {e}", path.display()));
                 cleanup_traces(&paths);
-                return out;
+                return Ok(out);
             }
         }
     }
@@ -226,7 +226,7 @@ pub(super) fn locate_divergence(opts: BenchOptions<'_>, runs: &[BenchBootResult]
     out.push(format_diverge(&cellgov_compare::diverge(
         &traces[0], &traces[1],
     )));
-    out
+    Ok(out)
 }
 
 /// Lines a failing child left on stderr, indented for the report.

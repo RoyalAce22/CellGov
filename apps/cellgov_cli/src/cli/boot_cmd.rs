@@ -17,12 +17,10 @@ use crate::progress::{BENCH_PAIR_TASK, BENCH_TASK, RUN_TASK};
 use cellgov_boot::manifest::{CellKey, BASE_GAME_VER};
 
 use super::env::parse_env_bool;
-use super::exit::die;
+use super::exit::{CommandError, CommandExitCode};
 use super::exit_codes;
-use super::parse::{
-    die_usage, BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector,
-};
-use super::self_load::{LoadedPpuImage, TitleNotInstalled};
+use super::parse::{BenchArgs, BenchGateArgs, BootRunArgs, BootSelection, TitleSelector};
+use super::self_load::{LoadPpuImageError, LoadedPpuImage};
 use super::title::{resolve_ps3_vfs_root, resolve_title_manifest};
 use crate::paths::{cell_checkpoint, cell_max_steps};
 
@@ -33,6 +31,23 @@ const FIRMWARE_EXTERNAL: [&str; 2] = ["sys", "external"];
 /// Set to `1` by synthetic harnesses (e.g. ps3autotests) to suppress
 /// the auto-default.
 pub(crate) const DISABLE_DEFAULT_ENV: &str = crate::env_vars::NO_FIRMWARE_DIR;
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum CompositionResolutionError {
+    #[error(transparent)]
+    Compose(#[from] ComposeError),
+    #[error(transparent)]
+    Command(#[from] CommandError),
+}
+
+impl CompositionResolutionError {
+    fn into_boot_command_error(self) -> CommandError {
+        match self {
+            Self::Compose(error) => CommandError::failed(format!("boot: {error}")),
+            Self::Command(error) => error,
+        }
+    }
+}
 
 /// Exit code: the runs of a set disagreed on step count, outcome or a
 /// witness.
@@ -77,9 +92,10 @@ pub(super) fn resolve_composition(
     vfs_root: &Path,
     title: &cellgov_boot::manifest::TitleManifest,
     overrides: BootOverrides,
-) -> BootComposition {
-    try_resolve_composition(selection, vfs_root, title, overrides)
-        .unwrap_or_else(|e| die(&format!("boot: {e}")))
+) -> Result<BootComposition, CommandError> {
+    let composition = try_resolve_composition(selection, vfs_root, title, overrides)
+        .map_err(CompositionResolutionError::into_boot_command_error)?;
+    Ok(composition)
 }
 
 /// [`resolve_composition`] with the refusal returned, so a sweep can
@@ -90,20 +106,24 @@ pub(super) fn resolve_composition(
 ///
 /// # Errors
 ///
-/// Every [`ComposeError`]; the banner prints only for a composition
-/// that resolved.
+/// Returns an error when:
+///
+/// - composition fails;
+/// - command input is invalid.
+///
+/// The banner prints only after composition succeeds.
 pub(super) fn try_resolve_composition(
     selection: &BootSelection,
     vfs_root: &Path,
     title: &cellgov_boot::manifest::TitleManifest,
     overrides: BootOverrides,
-) -> Result<BootComposition, ComposeError> {
+) -> Result<BootComposition, CompositionResolutionError> {
     if let Some(explicit) = &selection.firmware_dir {
         if !explicit.is_dir() {
-            die(&format!(
-                "--firmware-dir: {} is not an existing directory",
-                explicit.display()
-            ));
+            return Err(ComposeError::FirmwareDirectory {
+                path: explicit.display().to_string(),
+            }
+            .into());
         }
     }
     let install_root = super::keys::install_root_of(vfs_root);
@@ -116,7 +136,7 @@ pub(super) fn try_resolve_composition(
         firmware_dir: selection.firmware_dir.as_deref(),
         // The value decides: `CELLGOV_NO_FIRMWARE_DIR=0` leaves the
         // default in place.
-        no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV),
+        no_firmware: parse_env_bool(DISABLE_DEFAULT_ENV)?,
         disable_env: DISABLE_DEFAULT_ENV,
     })?;
     composition.identity.overrides = overrides;
@@ -130,14 +150,25 @@ pub(super) fn try_resolve_composition(
     // spawned this boot can record what the run was measured against.
     match composition.identity.render_sentinel_line() {
         Ok(line) => eprintln!("{line}"),
-        Err(e) => die(&format!("boot: serializing the run identity: {e}")),
+        Err(error) => {
+            return Err(ComposeError::IdentityRender {
+                message: error.to_string(),
+            }
+            .into())
+        }
     }
     Ok(composition)
 }
 
 /// The `sys/external` directory the firmware loader reads its modules
 /// from, or `None` for a boot with no firmware.
-pub(super) fn firmware_module_dir(composition: &BootComposition) -> Option<String> {
+///
+/// # Errors
+///
+/// Returns an error if the module path is not valid UTF-8.
+pub(super) fn firmware_module_dir(
+    composition: &BootComposition,
+) -> Result<Option<String>, CommandError> {
     let dir = match &composition.firmware {
         FirmwareChoice::Managed(managed) => FIRMWARE_EXTERNAL
             .iter()
@@ -145,18 +176,15 @@ pub(super) fn firmware_module_dir(composition: &BootComposition) -> Option<Strin
         // `--firmware-dir` names a `sys/external` tree directly, so
         // this arm joins nothing onto it.
         FirmwareChoice::Unmanaged { dir } => dir.clone(),
-        FirmwareChoice::None => return None,
+        FirmwareChoice::None => return Ok(None),
     };
-    Some(
-        dir.to_str()
-            .unwrap_or_else(|| {
-                die(&format!(
-                    "boot: firmware module directory {} is not valid UTF-8",
-                    dir.display()
-                ))
-            })
-            .to_string(),
-    )
+    let dir = dir.to_str().ok_or_else(|| {
+        CommandError::failed(format!(
+            "boot: firmware module directory {} is not valid UTF-8",
+            dir.display()
+        ))
+    })?;
+    Ok(Some(dir.to_string()))
 }
 
 /// The selection flags this process received, owned so a
@@ -182,26 +210,28 @@ impl OwnedSelection {
 
 /// A path a child invocation must be able to spell back on its own
 /// command line.
-fn forwardable(path: Option<&Path>, flag: &str) -> Option<String> {
+fn forwardable(path: Option<&Path>, flag: &str) -> Result<Option<String>, CommandError> {
     path.map(|p| {
-        p.to_str()
-            .unwrap_or_else(|| {
-                die(&format!(
-                    "{flag} {} is not valid UTF-8, so a child run cannot be given it",
-                    p.display()
-                ))
-            })
-            .to_string()
+        p.to_str().map(str::to_string).ok_or_else(|| {
+            CommandError::failed(format!(
+                "{flag} {} is not valid UTF-8, so a child run cannot be given it",
+                p.display()
+            ))
+        })
     })
+    .transpose()
 }
 
-pub(super) fn selection_args(selection: &BootSelection, vfs_flag: Option<&Path>) -> OwnedSelection {
-    OwnedSelection {
+pub(super) fn selection_args(
+    selection: &BootSelection,
+    vfs_flag: Option<&Path>,
+) -> Result<OwnedSelection, CommandError> {
+    Ok(OwnedSelection {
         fw: selection.fw.clone(),
         game_ver: selection.game_ver.clone(),
-        firmware_dir: forwardable(selection.firmware_dir.as_deref(), "--firmware-dir"),
-        vfs_root: forwardable(vfs_flag, "--vfs-root"),
-    }
+        firmware_dir: forwardable(selection.firmware_dir.as_deref(), "--firmware-dir")?,
+        vfs_root: forwardable(vfs_flag, "--vfs-root")?,
+    })
 }
 
 pub(super) struct BootInputs {
@@ -227,25 +257,37 @@ pub(super) fn resolve_boot_inputs(
     vfs_root: &Path,
     explicit_elf: Option<&str>,
     subcmd: &str,
-) -> BootInputs {
-    let title = resolve_title_manifest(selector, subcmd);
-    let composition = resolve_composition(selection, vfs_root, &title, overrides);
+) -> Result<BootInputs, CommandError> {
+    let title = resolve_title_manifest(selector, subcmd)?;
+    let composition = resolve_composition(selection, vfs_root, &title, overrides)?;
     let (elf_path, image) = match explicit_elf {
         Some(p) => {
-            let image =
-                crate::cli::self_load::load_ppu_image_with_title_or_die(p, &title, vfs_root);
+            let image = crate::cli::self_load::load_ppu_image_with_title(p, &title, vfs_root)?;
             (p.to_string(), image)
         }
         None => {
-            let (image, path) = crate::cli::self_load::load_ppu_image_walk_candidates_or_die(
+            let loaded = crate::cli::self_load::load_ppu_image_walk_candidates(
                 &title,
                 vfs_root,
                 &composition.eboot_dirs,
             );
-            (forwardable_eboot_path(&path, subcmd), image)
+            let (image, path) = match loaded {
+                Ok(loaded) => loaded,
+                Err(LoadPpuImageError::NotInstalled(error)) => {
+                    eprintln!(
+                        "{} title={} ({})",
+                        cellgov_compare::witnesses::TITLE_NOT_INSTALLED_SENTINEL,
+                        title.name(),
+                        error.marker_note()
+                    );
+                    return Err(CommandError::failed(format!("load ppu image: {error}")));
+                }
+                Err(LoadPpuImageError::Failed(error)) => return Err(error),
+            };
+            (forwardable_eboot_path(&path, subcmd)?, image)
         }
     };
-    boot_inputs(title, composition, elf_path, image)
+    Ok(boot_inputs(title, composition, elf_path, image))
 }
 
 /// The inputs a sweep resolves for one declared cell, or the reason
@@ -257,33 +299,34 @@ pub(super) fn resolve_boot_inputs(
 ///
 /// # Errors
 ///
-/// The dump is not on this machine. A candidate that exists and fails
-/// to load dies in the walk.
+/// Returns an error when:
+///
+/// - the dump is absent;
+/// - a candidate cannot load;
+/// - the command cannot pass the EBOOT path to a child command.
 pub(super) fn try_resolve_cell_inputs(
     title: cellgov_boot::manifest::TitleManifest,
     composition: BootComposition,
     vfs_root: &Path,
     subcmd: &str,
-) -> Result<BootInputs, TitleNotInstalled> {
+) -> Result<BootInputs, LoadPpuImageError> {
     let (image, path) = crate::cli::self_load::load_ppu_image_walk_candidates(
         &title,
         vfs_root,
         &composition.eboot_dirs,
     )?;
-    let elf_path = forwardable_eboot_path(&path, subcmd);
+    let elf_path = forwardable_eboot_path(&path, subcmd)?;
     Ok(boot_inputs(title, composition, elf_path, image))
 }
 
 /// A resolved EBOOT path as a child invocation spells it.
-fn forwardable_eboot_path(path: &Path, subcmd: &str) -> String {
-    path.to_str()
-        .map(|s| s.replace('\\', "/"))
-        .unwrap_or_else(|| {
-            die(&format!(
-                "{subcmd}: resolved EBOOT path is not valid UTF-8: {}",
-                path.display()
-            ))
-        })
+fn forwardable_eboot_path(path: &Path, subcmd: &str) -> Result<String, CommandError> {
+    path.to_str().map(|s| s.replace('\\', "/")).ok_or_else(|| {
+        CommandError::failed(format!(
+            "{subcmd}: resolved EBOOT path is not valid UTF-8: {}",
+            path.display()
+        ))
+    })
 }
 
 /// Announce the loaded image and assemble the inputs.
@@ -317,14 +360,20 @@ fn boot_inputs(
     }
 }
 
-pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
-    let observation_regions: Option<Vec<cellgov_compare::RegionDescriptor>> =
-        args.observation_manifest.as_deref().map(|path| {
+pub(crate) fn run_game(
+    args: &BootRunArgs,
+    vfs_flag: Option<&Path>,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
+    let observation_regions = match args.observation_manifest.as_deref() {
+        Some(path) => Some(
             cellgov_compare::checkpoint_manifest::load(Path::new(path))
-                .unwrap_or_else(|e| die(&format!("--observation-manifest: {e}")))
-                .region_descriptors()
-        });
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+                .map_err(|error| CommandError::failed(format!("--observation-manifest: {error}")))?
+                .region_descriptors(),
+        ),
+        None => None,
+    };
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
@@ -332,8 +381,8 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
         &vfs_root,
         args.elf_path.as_deref(),
         "boot run",
-    );
-    let firmware_dir = firmware_module_dir(&inputs.composition);
+    )?;
+    let firmware_dir = firmware_module_dir(&inputs.composition)?;
     let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
     let ends_at_cell_checkpoint =
         run_ends_at_cell_checkpoint(plan.checkpoint, inputs.title.checkpoint_trigger());
@@ -388,11 +437,6 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
             finish_line,
         },
     );
-    // Down before any exit: `process::exit` runs no destructor, so a
-    // bar left standing keeps its render thread and a hidden cursor.
-    // The failure arm takes `abort`, which flags the terminal-native
-    // progress state as an error instead of clearing it as a run that
-    // completed.
     let summary = match result {
         Ok(s) => {
             bar.finish();
@@ -400,13 +444,29 @@ pub(crate) fn run_game(args: &BootRunArgs, vfs_flag: Option<&Path>, render: Rend
         }
         Err(e) => {
             bar.abort();
-            eprintln!("boot run: {e}");
-            std::process::exit(EXIT_RUN_GAME_SAVE_ARTIFACT);
+            if e.is_report_artifact_failure() {
+                return Err(CommandError::status(
+                    EXIT_RUN_GAME_SAVE_ARTIFACT,
+                    format!("boot run: {e}"),
+                ));
+            }
+            return Err(boot_run_error(&e));
         }
     };
     let code = classify_run_game_exit(&summary);
-    if code != 0 {
-        std::process::exit(code);
+    Ok(CommandExitCode::new(code))
+}
+
+fn boot_run_error(error: &impl std::fmt::Display) -> CommandError {
+    CommandError::failed(format!("boot run: {error}"))
+}
+
+pub(super) fn separate_spawn_command_error(
+    error: game::SpawnError,
+) -> Result<game::SpawnError, CommandError> {
+    match error {
+        game::SpawnError::Command(error) => Err(error),
+        error => Ok(error),
     }
 }
 
@@ -530,9 +590,16 @@ impl ResolvedPlan {
 
     /// The cap as a step count, so an un-overridden bench run stays
     /// comparable to the anchor `dev record-anchors` measured.
-    pub(super) fn max_steps_usize(&self, title: &cellgov_boot::manifest::TitleManifest) -> usize {
-        usize::try_from(self.max_steps).unwrap_or_else(|_| {
-            die(&format!(
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the cap does not fit `usize`.
+    pub(super) fn max_steps_usize(
+        &self,
+        title: &cellgov_boot::manifest::TitleManifest,
+    ) -> Result<usize, CommandError> {
+        usize::try_from(self.max_steps).map_err(|_| {
+            CommandError::failed(format!(
                 "{}: bench_max_steps {} does not fit this host's usize",
                 title.name(),
                 self.max_steps
@@ -541,8 +608,12 @@ impl ResolvedPlan {
     }
 }
 
-pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+pub(crate) fn bench_boot_once(
+    args: &BenchArgs,
+    vfs_flag: Option<&Path>,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
@@ -550,16 +621,17 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render:
         &vfs_root,
         None,
         "boot bench-once",
-    );
+    )?;
     let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
-    let max_steps = args
-        .max_steps
-        .unwrap_or_else(|| plan.max_steps_usize(&inputs.title));
-    let firmware_dir = firmware_module_dir(&inputs.composition);
-    let selection = selection_args(&args.selection, vfs_flag);
+    let max_steps = match args.max_steps {
+        Some(max_steps) => max_steps,
+        None => plan.max_steps_usize(&inputs.title)?,
+    };
+    let firmware_dir = firmware_module_dir(&inputs.composition)?;
+    let selection = selection_args(&args.selection, vfs_flag)?;
     let bar = ProgressBar::start(render.caps(), &BENCH_TASK, inputs.title.name());
     let sink = bar.sink();
-    game::bench_boot_one_run(
+    let result = game::bench_boot_one_run(
         game::BenchOptions {
             title: &inputs.title,
             elf_path: &inputs.elf_path,
@@ -586,52 +658,72 @@ pub(crate) fn bench_boot_once(args: &BenchArgs, vfs_flag: Option<&Path>, render:
         args.save_state_trace.as_deref(),
         &*sink,
     );
-    bar.finish();
+    match result {
+        Ok(_) => bar.finish(),
+        Err(error) => {
+            bar.abort();
+            return Err(CommandError::failed(error.to_string()));
+        }
+    }
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// Both `bench` and `bench-once` flatten [`BenchArgs`], so clap accepts
 /// `--save-state-trace` and `--run-index` on either. The run set
 /// forwards neither to its children.
-fn refuse_bench_once_only_flags(args: &BenchArgs) {
+fn refuse_bench_once_only_flags(args: &BenchArgs) -> Result<(), CommandError> {
     if let Some(path) = &args.save_state_trace {
-        die_usage(&format!(
-            "boot bench: --save-state-trace {path} names one path, and a run set takes \
+        return Err(CommandError::status(
+            exit_codes::USAGE,
+            format!(
+                "boot bench: --save-state-trace {path} names one path, and a run set takes \
              several measurements that would each write over it. A traced boot is a \
              divergence diagnostic rather than a measurement, so take it with \
              `boot bench-once --save-state-trace PATH`."
+            ),
         ));
     }
     if let Some(index) = args.run_index {
-        die_usage(&format!(
-            "boot bench: --run-index {index} has no meaning for a run set: the set stamps \
+        return Err(CommandError::status(
+            exit_codes::USAGE,
+            format!(
+                "boot bench: --run-index {index} has no meaning for a run set: the set stamps \
              each child it spawns with that child's own index. Pass it to \
              `boot bench-once` only."
+            ),
         ));
     }
+    Ok(())
 }
 
 /// One measurement spreads against nothing, so a strict gate over it
 /// would report OK for a check that never runs.
-fn refuse_strict_perf_without_a_spread(gate_args: &BenchGateArgs) {
+fn refuse_strict_perf_without_a_spread(gate_args: &BenchGateArgs) -> Result<(), CommandError> {
     if gate_args.strict_perf && gate_args.runs < 2 {
-        die_usage(
+        return Err(CommandError::status(
+            exit_codes::USAGE,
             "boot bench: --strict-perf enforces the cross-run spread, and --runs 1 \
              measures no spread to enforce. Take at least two runs, or drop \
              --strict-perf.",
-        );
+        ));
     }
+    Ok(())
 }
 
-pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, render: RenderFlags) {
+pub(crate) fn bench_boot(
+    gate_args: &BenchGateArgs,
+    vfs_flag: Option<&Path>,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
     let args: &BenchArgs = &gate_args.bench;
     // Ahead of every resolution below: a refused invocation must not
     // first read the store.
-    refuse_bench_once_only_flags(args);
-    refuse_strict_perf_without_a_spread(gate_args);
+    refuse_bench_once_only_flags(args)?;
+    refuse_strict_perf_without_a_spread(gate_args)?;
     if gate_args.all {
-        super::bench_all::run(gate_args, vfs_flag, render);
+        return super::bench_all::run(gate_args, vfs_flag, render);
     }
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
@@ -639,13 +731,14 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
         &vfs_root,
         None,
         "boot bench",
-    );
+    )?;
     let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
-    let max_steps = args
-        .max_steps
-        .unwrap_or_else(|| plan.max_steps_usize(&inputs.title));
-    let firmware_dir = firmware_module_dir(&inputs.composition);
-    let selection = selection_args(&args.selection, vfs_flag);
+    let max_steps = match args.max_steps {
+        Some(max_steps) => max_steps,
+        None => plan.max_steps_usize(&inputs.title)?,
+    };
+    let firmware_dir = firmware_module_dir(&inputs.composition)?;
+    let selection = selection_args(&args.selection, vfs_flag)?;
     let bar = ProgressBar::start(render.caps(), &BENCH_PAIR_TASK, inputs.title.name());
     let sink = bar.sink();
     let outcome = match game::bench_boot_runs(
@@ -675,8 +768,13 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
         &*sink,
     ) {
         Ok(o) => o,
-        Err(e) => {
+        Err(game::SpawnError::Command(error)) => {
             bar.abort();
+            return Err(error);
+        }
+        Err(error) => {
+            bar.abort();
+            let e = separate_spawn_command_error(error)?;
             eprintln!("boot bench: {e}");
             let captured_stdout = e.captured_stdout();
             if !captured_stdout.is_empty() {
@@ -686,11 +784,9 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
             if !captured_stderr.is_empty() {
                 eprintln!("stderr:\n{captured_stderr}");
             }
-            std::process::exit(EXIT_SUBPROCESS_FAIL);
+            return Ok(CommandExitCode::new(EXIT_SUBPROCESS_FAIL));
         }
     };
-    // Down before the gate: every arm below it exits the process, and
-    // `process::exit` runs no destructor.
     bar.finish();
     match outcome.gate {
         game::BenchGate::Pass => {}
@@ -712,7 +808,7 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
                  the localization could not run. \
                  exiting with status {EXIT_DETERMINISM_BREAK}"
             );
-            std::process::exit(EXIT_DETERMINISM_BREAK);
+            return Ok(CommandExitCode::new(EXIT_DETERMINISM_BREAK));
         }
         game::BenchGate::AnchorDrift => {
             let game::AnchorVerdict::Drift(failures) = &outcome.anchor else {
@@ -741,7 +837,7 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
                  exiting with status {EXIT_ANCHOR_DRIFT}",
                 inputs.title.name(),
             );
-            std::process::exit(EXIT_ANCHOR_DRIFT);
+            return Ok(CommandExitCode::new(EXIT_ANCHOR_DRIFT));
         }
         game::BenchGate::SpreadExceeded => {
             let detail = match outcome.throughput {
@@ -764,9 +860,10 @@ pub(crate) fn bench_boot(gate_args: &BenchGateArgs, vfs_flag: Option<&Path>, ren
                  running anything else measures the host. \
                  exiting with status {EXIT_SPREAD_EXCEEDED}"
             );
-            std::process::exit(EXIT_SPREAD_EXCEEDED);
+            return Ok(CommandExitCode::new(EXIT_SPREAD_EXCEEDED));
         }
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
 #[cfg(test)]
@@ -788,3 +885,7 @@ mod shipped_firmware_cell_tests;
 #[cfg(test)]
 #[path = "tests/boot_run_override_finish_line_tests.rs"]
 mod boot_run_override_finish_line_tests;
+
+#[cfg(test)]
+#[path = "tests/boot_command_boundary_tests.rs"]
+mod command_boundary_tests;

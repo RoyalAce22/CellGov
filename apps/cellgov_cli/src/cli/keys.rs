@@ -6,6 +6,8 @@ use std::sync::OnceLock;
 use cellgov_install::keys::{KeyVault, KeyVaultError};
 use cellgov_install::self_image::is_sce_wrapped;
 
+use super::exit::CommandError;
+
 static NO_KEYS: KeyVault = KeyVault::empty();
 
 /// The install root [`key_vault`] reads the imported vault under,
@@ -61,9 +63,8 @@ pub(crate) fn install_root_of(ps3_vfs_root: &Path) -> PathBuf {
 ///
 /// # Panics
 ///
-/// A second call naming a different root: the vault may already have
-/// been loaded under the first, so the later root would apply to some
-/// images in the run and not others.
+/// Panics if a second call names a different root. The vault can
+/// already contain keys from the first root.
 pub(crate) fn fix_vault_root(ps3_vfs_root: &Path) {
     fix_vault_root_in(&VAULT_ROOT, ps3_vfs_root);
 }
@@ -88,15 +89,15 @@ pub(crate) fn fixed_vault_root() -> Option<&'static Path> {
     VAULT_ROOT.get().map(PathBuf::as_path)
 }
 
-/// The vault `bytes` decrypts under: the operator's for an SCE
-/// wrapper, an empty one for a plaintext image; a vault that will not
-/// load dies naming the cause.
-pub(crate) fn key_vault_for(bytes: &[u8]) -> &'static KeyVault {
-    try_key_vault_for(bytes).unwrap_or_else(|e| super::exit::die(&format!("key vault: {e}")))
+/// Returns the vault for `bytes`:
+///
+/// - SCE input uses the operator vault.
+/// - Plaintext input uses an empty vault.
+pub(crate) fn key_vault_for(bytes: &[u8]) -> Result<&'static KeyVault, CommandError> {
+    try_key_vault_for(bytes).map_err(|error| CommandError::failed(format!("key vault: {error}")))
 }
 
-/// [`key_vault_for`] returning the load refusal instead of dying, for
-/// a loader that runs inside `Runtime::step`.
+/// Exposes vault load failures to runtime callers.
 pub(crate) fn try_key_vault_for(bytes: &[u8]) -> Result<&'static KeyVault, &'static KeyVaultError> {
     if is_sce_wrapped(bytes) {
         key_vault()

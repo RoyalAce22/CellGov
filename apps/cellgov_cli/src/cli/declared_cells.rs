@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use crate::cli::exit::die;
+use crate::cli::exit::CommandError;
 use crate::paths::{cell_checkpoint, cell_max_steps};
 use cellgov_boot::manifest::{CellKey, CheckpointTrigger, TitleManifest, TitleRegistry};
 
@@ -51,9 +51,8 @@ pub(crate) fn declared_cells(title: &TitleManifest) -> Vec<DeclaredCell> {
 /// Split `cells` into `(kept, pending)` by the registry's `pending`
 /// marker; `keep_pending` moves the pending cells into `kept` too.
 ///
-/// Something outside the registry stops a pending cell. A sweep that
-/// measures it dies at that boot and takes every other cell of the
-/// title with it.
+/// An external constraint stops a pending cell. A sweep that measures
+/// it stops at that boot and skips the title's remaining cells.
 pub(crate) fn split_pending(
     cells: Vec<DeclaredCell>,
     keep_pending: bool,
@@ -64,30 +63,39 @@ pub(crate) fn split_pending(
 }
 
 /// Every manifest under `dir`, ascending by short name.
-pub(crate) fn read_registry(dir: &Path) -> Vec<TitleManifest> {
-    let registry = TitleRegistry::scan_dir(dir)
-        .unwrap_or_else(|e| die(&format!("scan registry {}: {e}", dir.display())));
+///
+/// # Errors
+///
+/// Returns an error if the registry cannot be read.
+pub(crate) fn read_registry(dir: &Path) -> Result<Vec<TitleManifest>, CommandError> {
+    let registry = TitleRegistry::scan_dir(dir).map_err(|error| {
+        CommandError::failed(format!("scan registry {}: {error}", dir.display()))
+    })?;
     let mut out: Vec<TitleManifest> = registry.iter().cloned().collect();
     out.sort_by(|a, b| a.short_name.cmp(&b.short_name));
-    out
+    Ok(out)
 }
 
 /// The one title `one` names, or every registered title.
+///
+/// # Errors
+///
+/// Returns an error if `one` does not name a registered title.
 pub(crate) fn select_titles<'a>(
     titles: &'a [TitleManifest],
     one: Option<&str>,
-) -> Vec<&'a TitleManifest> {
+) -> Result<Vec<&'a TitleManifest>, CommandError> {
     let Some(name) = one else {
-        return titles.iter().collect();
+        return Ok(titles.iter().collect());
     };
     let Some(hit) = titles.iter().find(|t| t.short_name == name) else {
         let known: Vec<&str> = titles.iter().map(|t| t.short_name.as_str()).collect();
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "unknown title {name:?}; registry has: {}",
             known.join(", ")
-        ));
+        )));
     };
-    vec![hit]
+    Ok(vec![hit])
 }
 
 /// Refuse a selection that includes a title with no declared cell.
@@ -95,35 +103,44 @@ pub(crate) fn select_titles<'a>(
 /// A title with a PARAM.SFO always declares the cell its `system_ver`
 /// derives. Only a title shipped inside the firmware, or built beside
 /// its manifest, can reach here with nothing declared.
-pub(crate) fn refuse_undeclared(selected: &[&TitleManifest]) {
+///
+/// # Errors
+///
+/// Returns an error if a selected title declares no cell.
+pub(crate) fn refuse_undeclared(selected: &[&TitleManifest]) -> Result<(), CommandError> {
     let undeclared: Vec<&str> = selected
         .iter()
         .filter(|t| t.matrix.is_empty())
         .map(|t| t.short_name.as_str())
         .collect();
     if !undeclared.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "no cells declared for: {}. An anchor is keyed by (content id, firmware, game \
              version), and a title with no floor of its own declares its cells as \
              [[bench.matrix]] rows alone; with none it has nothing to record and nothing \
              for the gate to read",
             undeclared.join(", ")
-        ));
+        )));
     }
+    Ok(())
 }
 
 /// Narrow the declared cells to those `--fw` / `--game-ver` name, and
 /// refuse a cell the registry does not declare.
 ///
 /// `command` names the invocation in the refusal.
+///
+/// # Errors
+///
+/// Returns an error if no declared cell matches the filters.
 pub(crate) fn filter_declared(
     cells: Vec<DeclaredCell>,
     fw: Option<&str>,
     game_ver: Option<&str>,
     command: &str,
-) -> Vec<DeclaredCell> {
+) -> Result<Vec<DeclaredCell>, CommandError> {
     if fw.is_none() && game_ver.is_none() {
-        return cells;
+        return Ok(cells);
     }
     let declared: Vec<String> = cells.iter().map(DeclaredCell::label).collect();
     let kept: Vec<DeclaredCell> = cells
@@ -140,7 +157,7 @@ pub(crate) fn filter_declared(
             (None, Some(v)) => format!("game version {v}"),
             (None, None) => unreachable!("an unfiltered selection returned above"),
         };
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{command}: the registry declares no cell matching {asked}; declared: {}. \
              The gate reads declared cells, so an anchor recorded outside the declaration \
              would be compared against by nothing. Add the row to [[bench.matrix]] first",
@@ -149,9 +166,9 @@ pub(crate) fn filter_declared(
             } else {
                 declared.join(", ")
             }
-        ));
+        )));
     }
-    kept
+    Ok(kept)
 }
 
 #[cfg(test)]

@@ -44,6 +44,18 @@ const GAME_USRDIR: &str = "USRDIR";
 /// Why a boot could not be composed.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ComposeError {
+    /// `--firmware-dir` does not name a readable module tree.
+    #[error("--firmware-dir: {path} is not an existing directory")]
+    FirmwareDirectory {
+        /// The supplied host path.
+        path: String,
+    },
+    /// A child run could not render the composed identity.
+    #[error("serializing the run identity: {message}")]
+    IdentityRender {
+        /// The rendering refusal.
+        message: String,
+    },
     /// The store's records could not be read.
     #[error("{0}")]
     Inventory(#[from] InventoryError),

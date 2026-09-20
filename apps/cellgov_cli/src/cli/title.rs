@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::exit::die;
+use super::exit::CommandError;
 use super::parse::TitleSelector;
 
 /// Registry directory every title-driven subcommand resolves
@@ -29,39 +29,38 @@ const HDD0_USER: &str = "00000001";
 ///
 /// # Errors
 ///
-/// Any error in file loading or registry lookup prints a diagnostic
-/// prefixed with `subcmd` and exits with status 1.
+/// Returns a diagnostic if the title selection cannot resolve.
 pub(crate) fn resolve_title_manifest(
     selector: &TitleSelector,
     subcmd: &str,
-) -> cellgov_boot::manifest::TitleManifest {
+) -> Result<cellgov_boot::manifest::TitleManifest, CommandError> {
     if let Some(p) = &selector.title_manifest {
         return cellgov_boot::manifest::TitleManifest::load_from_path(p)
-            .unwrap_or_else(|e| die(&format!("{subcmd}: {e}")));
+            .map_err(|error| CommandError::failed(format!("{subcmd}: {error}")));
     }
     let registry =
         cellgov_boot::manifest::TitleRegistry::scan_dir(Path::new(DEFAULT_TITLE_REGISTRY_DIR))
-            .unwrap_or_else(|e| die(&format!("{subcmd}: title registry: {e}")));
+            .map_err(|error| CommandError::failed(format!("{subcmd}: title registry: {error}")))?;
     if let Some(cid) = &selector.content_id {
-        return registry.by_content_id(cid).cloned().unwrap_or_else(|| {
-            die(&format!(
+        return registry.by_content_id(cid).cloned().ok_or_else(|| {
+            CommandError::failed(format!(
                 "{subcmd}: unknown content id '{cid}'. Known titles: {}",
                 registry.known_names_csv()
             ))
         });
     }
     if let Some(sn) = &selector.title {
-        return registry.by_short_name(sn).cloned().unwrap_or_else(|| {
-            die(&format!(
+        return registry.by_short_name(sn).cloned().ok_or_else(|| {
+            CommandError::failed(format!(
                 "{subcmd}: unknown title '{sn}'. Known titles: {}",
                 registry.known_names_csv()
             ))
         });
     }
-    die(&format!(
+    Err(CommandError::failed(format!(
         "{subcmd}: one of --title, --content-id, or --title-manifest is required. Known titles: {}",
         registry.known_names_csv()
-    ));
+    )))
 }
 
 /// Resolve the PS3 VFS root using, in priority order: the `--vfs-root`
@@ -75,11 +74,15 @@ pub(crate) fn resolve_title_manifest(
 /// relocated VFS decrypts under that VFS's imported vault. Resolve the
 /// root before opening any guest image: the vault loads once, on the
 /// first SCE-wrapped one.
-pub(crate) fn resolve_ps3_vfs_root(flag: Option<&Path>) -> PathBuf {
+///
+/// # Errors
+///
+/// Returns an error for an empty root override.
+pub(crate) fn resolve_ps3_vfs_root(flag: Option<&Path>) -> Result<PathBuf, CommandError> {
     let root = resolve_ps3_vfs_root_inner(flag, std::env::var_os(crate::env_vars::PS3_VFS_ROOT))
-        .unwrap_or_else(|msg| die(&msg));
+        .map_err(CommandError::failed)?;
     super::keys::fix_vault_root(&root);
-    root
+    Ok(root)
 }
 
 /// # Errors

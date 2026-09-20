@@ -8,31 +8,35 @@ use std::path::Path;
 use cellgov_install::game_uninstall::UninstallScope;
 use cellgov_install::{firmware_uninstall, game_uninstall};
 
-use crate::cli::exit::die;
-use crate::cli::parse::{die_usage, FirmwareUninstallArgs, UninstallArgs};
+use crate::cli::exit::{CommandError, CommandExitCode};
+use crate::cli::parse::{FirmwareUninstallArgs, UninstallArgs};
 use cellgov_boot::manifest::{ManifestError, TitleRegistry};
 
 use super::confirm::{confirm, Answers};
 use super::registry_dir;
 
 /// `cellgov title uninstall <TITLE_ID> [--ver V | --updates | --all]`
-pub(crate) fn title(args: &UninstallArgs, store: &Path, answers: Answers) {
+pub(crate) fn title(
+    args: &UninstallArgs,
+    store: &Path,
+    answers: Answers,
+) -> Result<CommandExitCode, CommandError> {
     let scope = args.scope();
     let plan = game_uninstall::plan(&args.title_id, store, &scope)
-        .unwrap_or_else(|e| die(&format!("uninstall failed: {e}")));
+        .map_err(|error| CommandError::failed(format!("uninstall failed: {error}")))?;
 
     if plan.entries.is_empty() {
         // An empty plan means `--updates` found no update; every other
         // scope names an entry or refuses. Re-plan at Base scope to
         // tell that from a title with no record at all.
         if let Err(e) = game_uninstall::plan(&args.title_id, store, &UninstallScope::Base) {
-            die(&format!("uninstall failed: {e}"));
+            return Err(CommandError::failed(format!("uninstall failed: {e}")));
         }
         println!(
             "cellgov: title {} has no entry this scope names; nothing to remove",
             plan.title_id
         );
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
 
     println!("cellgov: uninstall {} would remove", plan.title_id);
@@ -57,7 +61,7 @@ pub(crate) fn title(args: &UninstallArgs, store: &Path, answers: Answers) {
     }
     if args.dry_run {
         println!("  --dry-run: nothing was removed");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
     if !confirm(
         &format!(
@@ -69,7 +73,7 @@ pub(crate) fn title(args: &UninstallArgs, store: &Path, answers: Answers) {
         answers,
     ) {
         println!("cellgov: nothing was removed");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
 
     let opts = game_uninstall::UninstallOptions {
@@ -78,7 +82,7 @@ pub(crate) fn title(args: &UninstallArgs, store: &Path, answers: Answers) {
         force: args.force,
     };
     let outcome = game_uninstall::execute(&plan, opts)
-        .unwrap_or_else(|e| die(&format!("uninstall failed: {e}")));
+        .map_err(|error| CommandError::failed(format!("uninstall failed: {error}")))?;
 
     println!("cellgov: uninstalled {}", outcome.title_id);
     for entry in &outcome.removed {
@@ -103,12 +107,17 @@ pub(crate) fn title(args: &UninstallArgs, store: &Path, answers: Answers) {
         }
     }
     super::report_rename_retries(outcome.rename_retries);
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// `cellgov firmware uninstall <VERSION>`
-pub(crate) fn firmware(args: &FirmwareUninstallArgs, store: &Path, answers: Answers) {
+pub(crate) fn firmware(
+    args: &FirmwareUninstallArgs,
+    store: &Path,
+    answers: Answers,
+) -> Result<CommandExitCode, CommandError> {
     let plan = firmware_uninstall::plan(&args.version, store)
-        .unwrap_or_else(|e| die(&format!("firmware uninstall failed: {e}")));
+        .map_err(|error| CommandError::failed(format!("firmware uninstall failed: {error}")))?;
 
     println!("cellgov: uninstall firmware {} would remove", plan.version);
     println!("  entry  {}", plan.entry_dir.display());
@@ -137,17 +146,20 @@ pub(crate) fn firmware(args: &FirmwareUninstallArgs, store: &Path, answers: Answ
     // refusal below and reports the anchors as part of the plan.
     if args.dry_run {
         println!("  --dry-run: nothing was removed");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
     if !anchored.is_empty() {
         if !args.force {
-            die_usage(&format!(
+            return Err(CommandError::status(
+                crate::cli::exit_codes::USAGE,
+                format!(
                 "firmware {} is named by {} committed anchor(s) ({}); removing it turns the next \
                  `boot bench` of those cells into a resolve failure rather than a clear refusal. \
                  Pass --force to remove it anyway.",
                 plan.version,
                 anchored.len(),
                 anchored.join(", "),
+            ),
             ));
         }
         eprintln!(
@@ -157,7 +169,7 @@ pub(crate) fn firmware(args: &FirmwareUninstallArgs, store: &Path, answers: Answ
         );
     }
     if args.verify {
-        verify_before_removal(&plan, store, args.force);
+        verify_before_removal(&plan, store, args.force)?;
     }
     if !confirm(
         &format!(
@@ -167,37 +179,47 @@ pub(crate) fn firmware(args: &FirmwareUninstallArgs, store: &Path, answers: Answ
         answers,
     ) {
         println!("cellgov: nothing was removed");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
 
     let outcome = firmware_uninstall::execute(&plan)
-        .unwrap_or_else(|e| die(&format!("firmware uninstall failed: {e}")));
+        .map_err(|error| CommandError::failed(format!("firmware uninstall failed: {error}")))?;
     println!("cellgov: uninstalled firmware {}", outcome.version);
     println!("  removed entry {}", outcome.entry_removed.display());
     println!("  removed record {}", outcome.record_removed.display());
     super::report_rename_retries(outcome.rename_retries);
+    Ok(CommandExitCode::SUCCESS)
 }
 
-/// Hold the installed tree against its manifest before removal.
+/// Checks the installed tree against its manifest before removal.
 ///
-/// Exits the process when the tree diverged, unless `force`.
+/// # Errors
+///
+/// Returns an error in these cases:
+///
+/// - Verification cannot run.
+/// - The tree diverges and `force` is false.
 fn verify_before_removal(
     plan: &firmware_uninstall::FirmwareUninstallPlan,
     store: &Path,
     force: bool,
-) {
+) -> Result<(), CommandError> {
     let keys = cellgov_install::keys::KeyVault::load_for_vfs(store)
-        .unwrap_or_else(|e| die(&format!("firmware uninstall --verify: {e}")));
+        .map_err(|error| CommandError::failed(format!("firmware uninstall --verify: {error}")))?;
     let dev_flash = plan
         .entry_dir
         .join(cellgov_ps3_abi::format::dev_flash::FLASH_MOUNT);
     let mut report = cellgov_install::firmware_verify::verify_firmware_tree(&dev_flash, &keys)
-        .unwrap_or_else(|e| die(&format!("firmware uninstall --verify: {e}")));
+        .map_err(|error| CommandError::failed(format!("firmware uninstall --verify: {error}")))?;
     if let Some(kernel) = &plan.kernel {
         match cellgov_install::firmware_verify::verify_stored_kernel(&plan.entry_dir, kernel) {
             Ok(None) => report.matched += 1,
             Ok(Some(fault)) => report.divergences.push(fault),
-            Err(e) => die(&format!("firmware uninstall --verify: {e}")),
+            Err(error) => {
+                return Err(CommandError::failed(format!(
+                    "firmware uninstall --verify: {error}"
+                )))
+            }
         }
     }
     for fault in &report.divergences {
@@ -208,21 +230,22 @@ fn verify_before_removal(
             "  verified {} artefact(s) against firmware.toml and the record before removal",
             report.matched
         );
-        return;
+        return Ok(());
     }
     if !force {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "firmware {} diverged from its record in {} of {} artefact(s); pass --force to \
              remove it anyway",
             plan.version,
             report.divergences.len(),
             report.checked(),
-        ));
+        )));
     }
     eprintln!(
         "  --force overrode {} artefact(s) that diverged from the record",
         report.divergences.len()
     );
+    Ok(())
 }
 
 /// Every committed anchor whose cell names firmware `version`, as

@@ -5,12 +5,16 @@ use cellgov_explore::ExplorationConfig;
 use cellgov_testkit::fixtures::ScenarioFixture;
 
 use crate::cli::compare::{load_observations_from_dir, report_first_invariant_break};
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::OutputFormat;
 use crate::cli::scenarios::{build_lv2_fixture, microtest_region_defs, MICROTESTS};
-use crate::cli::self_load::load_file_or_die;
+use crate::cli::self_load::load_file;
 
-pub(super) fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, format: OutputFormat) {
+pub(super) fn run_explore(
+    factory: &dyn Fn() -> ScenarioFixture,
+    name: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
     let config = ExplorationConfig::default();
     let result = cellgov_explore::explore(|| factory().build_runtime(), &config);
     match result {
@@ -25,26 +29,45 @@ pub(super) fn run_explore(factory: &dyn Fn() -> ScenarioFixture, name: &str, for
                     println!("{}", cellgov_explore::report::format_json(&r));
                 }
             }
-            if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
-                super::super::exit::exit_failed();
-            }
+            return Ok(CommandExitCode::new(
+                if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
+                    crate::cli::exit_codes::FAILED
+                } else {
+                    0
+                },
+            ));
         }
         None => {
             println!("scenario: {name}");
             println!("outcome: no branching points (single-unit or trivial)");
         }
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
-pub(super) fn run_explore_micro(name: &str, format: OutputFormat) {
+pub(super) fn run_explore_micro(
+    name: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
     if !MICROTESTS.contains(&name) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "unknown microtest: {name}\navailable: {}",
             MICROTESTS.join(", ")
-        ));
+        )));
     }
+    // The explorer calls its factory once and snapshots that runtime.
+    // Keep the successful load so no second filesystem read can fail.
+    let mut fixture = Some(build_lv2_fixture(name)?);
     let config = ExplorationConfig::default();
-    let result = cellgov_explore::explore(|| build_lv2_fixture(name).build_runtime(), &config);
+    let result = cellgov_explore::explore(
+        || {
+            fixture
+                .take()
+                .expect("the explorer calls its runtime factory once")
+                .build_runtime()
+        },
+        &config,
+    );
     match result {
         Some(r) => {
             report_first_invariant_break(r.first_invariant_break.as_deref());
@@ -57,37 +80,48 @@ pub(super) fn run_explore_micro(name: &str, format: OutputFormat) {
                     println!("{}", cellgov_explore::report::format_json(&r));
                 }
             }
-            if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
-                super::super::exit::exit_failed();
-            }
+            return Ok(CommandExitCode::new(
+                if r.outcome == cellgov_explore::OutcomeClass::ScheduleSensitive {
+                    crate::cli::exit_codes::FAILED
+                } else {
+                    0
+                },
+            ));
         }
         None => {
             println!("microtest: {name}");
             println!("outcome: no branching points (single-unit or trivial)");
         }
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
-pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, format: OutputFormat) {
+pub(super) fn run_explore_micro_oracle(
+    name: &str,
+    observations_dir: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
     if !MICROTESTS.contains(&name) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "unknown microtest: {name}\navailable: {}",
             MICROTESTS.join(", ")
-        ));
+        )));
     }
 
-    let baselines = load_observations_from_dir(observations_dir);
+    let baselines = load_observations_from_dir(observations_dir)
+        .map_err(|error| CommandError::failed(error.to_string()))?;
     if baselines.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "no observation .json files found in {observations_dir}"
-        ));
+        )));
     }
 
-    let (symbol, region_defs) = microtest_region_defs(name);
+    let (symbol, region_defs) = microtest_region_defs(name)?;
     let base = format!("tests/micro/{name}/build");
-    let ppu_elf = load_file_or_die(&format!("{base}/{name}.elf"));
-    let base_addr = cellgov_ppu::loader::find_symbol(&ppu_elf, symbol)
-        .unwrap_or_else(|| die(&format!("symbol '{symbol}' not found in {base}/{name}.elf")));
+    let ppu_elf = load_file(&format!("{base}/{name}.elf"))?;
+    let base_addr = cellgov_ppu::loader::find_symbol(&ppu_elf, symbol).ok_or_else(|| {
+        CommandError::failed(format!("symbol '{symbol}' not found in {base}/{name}.elf"))
+    })?;
 
     let region_specs: Vec<cellgov_explore::MemoryRegionSpec> = region_defs
         .iter()
@@ -101,8 +135,16 @@ pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, forma
         .collect();
 
     let config = ExplorationConfig::default();
+    // The explorer calls its factory once and snapshots that runtime.
+    // Keep the successful load so no second filesystem read can fail.
+    let mut fixture = Some(build_lv2_fixture(name)?);
     let result = cellgov_explore::explore_with_regions(
-        || build_lv2_fixture(name).build_runtime(),
+        || {
+            fixture
+                .take()
+                .expect("the explorer calls its runtime factory once")
+                .build_runtime()
+        },
         &config,
         &region_specs,
     );
@@ -111,7 +153,7 @@ pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, forma
         println!("microtest: {name}");
         println!("outcome: no branching points");
         println!("oracle_verdict: NOT COMPARED -- no branching points to explore");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     };
 
     report_first_invariant_break(r.exploration.first_invariant_break.as_deref());
@@ -121,13 +163,13 @@ pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, forma
     // would report a harness fault as an oracle mismatch.
     let unresolved = unresolved_region_names(&r.baseline, &r.alternates);
     if !unresolved.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "explore micro {name}: {} region capture(s) could not be read from committed memory: {}\n\
              a spec that does not resolve makes every verdict below it meaningless; \
              fix the region spec or the microtest before reading one",
             unresolved.len(),
             unresolved.join(", "),
-        ));
+        )));
     }
 
     let baseline_matches = compare_regions_against_oracle(&r.baseline.regions, &baselines);
@@ -180,9 +222,11 @@ pub(super) fn run_explore_micro_oracle(name: &str, observations_dir: &str, forma
         }
     }
 
-    if !all_match {
-        super::super::exit::exit_failed();
-    }
+    Ok(CommandExitCode::new(if all_match {
+        0
+    } else {
+        crate::cli::exit_codes::FAILED
+    }))
 }
 
 /// `schedule:region` for every capture whose range could not be read,

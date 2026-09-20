@@ -1,21 +1,26 @@
 //! How a read command renders its report.
 
-use crate::cli::exit::die;
+use crate::cli::exit::CommandError;
 use crate::cli::parse::OutputFormat;
 
-/// Print one document to stdout as JSON, or die naming the field that
-/// would not serialize.
-fn emit_json<T: serde::Serialize>(doc: &T) {
-    match serde_json::to_string_pretty(doc) {
-        Ok(text) => println!("{text}"),
-        Err(e) => die(&format!("rendering the report as JSON: {e}")),
-    }
+fn emit_json<T: serde::Serialize>(doc: &T) -> Result<(), CommandError> {
+    let text = serde_json::to_string_pretty(doc)
+        .map_err(|error| CommandError::failed(format!("rendering the report as JSON: {error}")))?;
+    println!("{text}");
+    Ok(())
 }
 
-pub(super) fn emit<T: serde::Serialize>(format: OutputFormat, doc: &T, human: impl FnOnce()) {
+pub(super) fn emit<T: serde::Serialize>(
+    format: OutputFormat,
+    doc: &T,
+    human: impl FnOnce(),
+) -> Result<(), CommandError> {
     match format {
         OutputFormat::Json => emit_json(doc),
-        OutputFormat::Human => human(),
+        OutputFormat::Human => {
+            human();
+            Ok(())
+        }
     }
 }
 

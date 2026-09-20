@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::OutputFormat;
 
 use super::model::{
@@ -20,25 +20,33 @@ const NO_MANIFEST: &str = "<no manifest>";
 const NO_RECORD: &str = "-- (the key is not a store directory name)";
 
 /// `cellgov firmware list`
-pub(crate) fn firmware_list(root: &Path, format: OutputFormat) {
-    let view = view(root);
+pub(crate) fn firmware_list(
+    root: &Path,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let view = view(root)?;
     let doc = FirmwareListDoc {
         format_version: view.format_version(),
         store: view.store_label(),
         firmware: view.firmware_docs(),
     };
-    emit(format, &doc, || print!("{}", render_firmware_list(&doc)));
+    emit(format, &doc, || print!("{}", render_firmware_list(&doc)))?;
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// `cellgov firmware show <VERSION>`
-pub(crate) fn firmware_show(root: &Path, version: &str, format: OutputFormat) {
-    let view = view(root);
-    let entry = view.inventory.firmware(version).unwrap_or_else(|| {
-        die(&format!(
+pub(crate) fn firmware_show(
+    root: &Path,
+    version: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let view = view(root)?;
+    let entry = view.inventory.firmware(version).ok_or_else(|| {
+        CommandError::failed(format!(
             "no firmware {version:?} is installed; installed: {}",
             super::key_list(&view.inventory.firmware_versions())
         ))
-    });
+    })?;
     let doc = FirmwareListDoc {
         format_version: view.format_version(),
         store: view.store_label(),
@@ -48,25 +56,34 @@ pub(crate) fn firmware_show(root: &Path, version: &str, format: OutputFormat) {
         for entry in &doc.firmware {
             print!("{}", render_firmware_detail(entry));
         }
-    });
+    })?;
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// `cellgov title list`
-pub(crate) fn title_list(root: &Path, format: OutputFormat) {
-    let view = view(root);
+pub(crate) fn title_list(
+    root: &Path,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let view = view(root)?;
     let doc = TitleListDoc {
         format_version: view.format_version(),
         store: view.store_label(),
         titles: view.title_docs(),
     };
-    emit(format, &doc, || print!("{}", render_title_list(&doc)));
+    emit(format, &doc, || print!("{}", render_title_list(&doc)))?;
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// `cellgov title show <TITLE_ID>`
-pub(crate) fn title_show(root: &Path, title_id: &str, format: OutputFormat) {
-    let view = view(root);
-    let entry = view.inventory.title(title_id).unwrap_or_else(|| {
-        die(&format!(
+pub(crate) fn title_show(
+    root: &Path,
+    title_id: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let view = view(root)?;
+    let entry = view.inventory.title(title_id).ok_or_else(|| {
+        CommandError::failed(format!(
             "no title {title_id:?} is installed; installed: {}",
             super::key_list(
                 &view
@@ -76,7 +93,7 @@ pub(crate) fn title_show(root: &Path, title_id: &str, format: OutputFormat) {
                     .collect::<Vec<_>>()
             )
         ))
-    });
+    })?;
     let doc = TitleListDoc {
         format_version: view.format_version(),
         store: view.store_label(),
@@ -86,7 +103,8 @@ pub(crate) fn title_show(root: &Path, title_id: &str, format: OutputFormat) {
         for title in &doc.titles {
             print!("{}", render_title_detail(title));
         }
-    });
+    })?;
+    Ok(CommandExitCode::SUCCESS)
 }
 
 fn render_firmware_list(doc: &FirmwareListDoc) -> String {

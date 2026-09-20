@@ -70,13 +70,15 @@ fn the_selection_narrows_to_the_named_cell() {
         cell("3.55", Some("base"), None),
         cell("4.93", Some("01.02"), None),
     ]);
-    let kept = filter_declared(declared_cells(&title), Some("4.93"), None, "t");
+    let kept = filter_declared(declared_cells(&title), Some("4.93"), None, "t")
+        .expect("the registry declares the selected firmware");
     assert_eq!(
         kept.iter().map(DeclaredCell::label).collect::<Vec<_>>(),
         vec!["test fw 4.93 x base", "test fw 4.93 x 01.02"]
     );
 
-    let kept = filter_declared(declared_cells(&title), Some("4.93"), Some("01.02"), "t");
+    let kept = filter_declared(declared_cells(&title), Some("4.93"), Some("01.02"), "t")
+        .expect("the registry declares the selected cell");
     assert_eq!(
         kept.iter().map(DeclaredCell::label).collect::<Vec<_>>(),
         vec!["test fw 4.93 x 01.02"]
@@ -90,7 +92,9 @@ fn no_selection_keeps_every_declared_cell() {
         cell("3.55", Some("base"), None),
     ]);
     assert_eq!(
-        filter_declared(declared_cells(&title), None, None, "t").len(),
+        filter_declared(declared_cells(&title), None, None, "t")
+            .expect("an unfiltered selection keeps every cell")
+            .len(),
         2
     );
 }
@@ -136,9 +140,18 @@ fn titles_read_from_a_registry_come_back_in_short_name_order() {
         )
         .expect("write manifest");
     }
-    let titles = read_registry(&dir);
+    let titles = read_registry(&dir).expect("the synthetic registry loads");
     let names: Vec<&str> = titles.iter().map(|t| t.short_name.as_str()).collect();
     assert_eq!(names, vec!["alpha", "zeta"]);
-    assert_eq!(select_titles(&titles, None).len(), 2);
-    assert_eq!(select_titles(&titles, Some("zeta"))[0].content_id, "CG_B");
+    assert_eq!(
+        select_titles(&titles, None)
+            .expect("no selector keeps every title")
+            .len(),
+        2
+    );
+    assert_eq!(
+        select_titles(&titles, Some("zeta")).expect("zeta is present in the registry")[0]
+            .content_id,
+        "CG_B"
+    );
 }

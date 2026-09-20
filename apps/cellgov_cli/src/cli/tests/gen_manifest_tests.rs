@@ -186,10 +186,12 @@ fn the_recorded_digest_key_of_the_param_sfo_follows_its_place_in_the_tree() {
 
 #[test]
 fn a_firmware_record_consults_no_store_root() {
-    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
+    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+        .expect("the synthetic firmware version is valid");
     let gen = Generated::from_record(&firmware_record(), &record_path, || {
         panic!("a firmware stub reads no title tree")
-    });
+    })
+    .expect("a firmware record generates a manifest");
     assert_eq!(gen.content_id(), "VSH");
 }
 
@@ -233,7 +235,8 @@ fn the_title_id_lookup_lands_on_the_record_cellgov_install_writes() {
         title_id: TitleId::new(HDD_TITLE_ID).expect("a synthetic title id is a store key"),
     };
     assert_eq!(
-        base_record_under(&default_installs(), HDD_TITLE_ID),
+        base_record_under(&default_installs(), HDD_TITLE_ID)
+            .expect("the synthetic title id is valid"),
         StoreLayout::new(DEFAULT_VFS_ROOT).record_path(&artifact),
     );
 }
@@ -244,7 +247,8 @@ fn the_firmware_lookup_lands_on_the_record_cellgov_install_writes() {
         version: VersionKey::new(FIRMWARE_VERSION).expect("a version key is a store key"),
     };
     assert_eq!(
-        firmware_record_under(&default_installs(), FIRMWARE_VERSION),
+        firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+            .expect("the synthetic firmware version is valid"),
         StoreLayout::new(DEFAULT_VFS_ROOT).record_path(&artifact),
     );
 }
@@ -253,8 +257,10 @@ fn the_firmware_lookup_lands_on_the_record_cellgov_install_writes() {
 fn the_firmware_stub_spells_no_firmware_version() {
     // Render through the path `--firmware` resolves, so the version
     // reaches the renderer.
-    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
+    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+        .expect("the synthetic firmware version is valid");
     let stub = Generated::from_record(&firmware_record(), &record_path, || unreachable!())
+        .expect("a firmware record generates a manifest")
         .render_stub(&record_path);
     assert!(
         !stub.contains(FIRMWARE_VERSION),
@@ -287,15 +293,18 @@ fn the_firmware_stub_names_where_a_firmware_tree_puts_the_system_software() {
 
 #[test]
 fn a_firmware_record_generates_the_system_software_manifest() {
-    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
-    let gen = Generated::from_record(&firmware_record(), &record_path, || unreachable!());
+    let record_path = firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+        .expect("the synthetic firmware version is valid");
+    let gen = Generated::from_record(&firmware_record(), &record_path, || unreachable!())
+        .expect("a firmware record generates a manifest");
     assert_eq!(gen.content_id(), "VSH");
     assert_eq!(gen.render_stub(&record_path), render_firmware_stub());
 }
 
 #[test]
 fn a_selector_refuses_a_records_directory_holding_another_kind() {
-    let path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
+    let path = firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+        .expect("the synthetic firmware version is valid");
     let refusal = selector_mismatch(Some(ArtifactKind::TitleBase), &firmware_record(), &path)
         .expect("a firmware record is not the base record --title-id asked for");
     assert!(refusal.contains("declares a firmware entry"), "{refusal}");
@@ -307,14 +316,16 @@ fn a_selector_refuses_a_records_directory_holding_another_kind() {
 
 #[test]
 fn a_selector_accepts_the_kind_its_records_directory_holds() {
-    let path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
+    let path = firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+        .expect("the synthetic firmware version is valid");
     assert!(selector_mismatch(Some(ArtifactKind::Firmware), &firmware_record(), &path).is_none());
     assert!(selector_mismatch(Some(ArtifactKind::TitleBase), &hdd_record(), &path).is_none());
 }
 
 #[test]
 fn a_record_named_by_path_is_read_as_the_kind_it_declares() {
-    let path = firmware_record_under(&default_installs(), FIRMWARE_VERSION);
+    let path = firmware_record_under(&default_installs(), FIRMWARE_VERSION)
+        .expect("the synthetic firmware version is valid");
     assert!(selector_mismatch(None, &firmware_record(), &path).is_none());
     assert!(selector_mismatch(None, &hdd_record(), &path).is_none());
 }
@@ -323,7 +334,7 @@ fn a_record_named_by_path_is_read_as_the_kind_it_declares() {
 fn an_installs_flag_names_the_record_directory_not_a_vfs_root() {
     let installs = std::path::Path::new("elsewhere").join("installs");
     assert_eq!(
-        base_record_under(&installs, HDD_TITLE_ID),
+        base_record_under(&installs, HDD_TITLE_ID).expect("the synthetic title id is valid"),
         installs
             .join("titles")
             .join(HDD_TITLE_ID)

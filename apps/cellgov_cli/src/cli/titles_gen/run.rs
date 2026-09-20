@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use super::detail::{detail_page_path, DETAIL_DIR};
 use super::load::{load_title, SummaryLoadError};
 use super::{detail, firmware, index};
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::TitlesGenArgs;
 use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use cellgov_boot::manifest::{TitleManifest, TitleRegistry};
@@ -27,7 +27,7 @@ pub(crate) struct GeneratedDoc {
     pub(crate) body: String,
 }
 
-pub(crate) fn run(args: &TitlesGenArgs) {
+pub(crate) fn run(args: &TitlesGenArgs) -> Result<CommandExitCode, CommandError> {
     let registry_dir = args
         .registry
         .clone()
@@ -43,36 +43,40 @@ pub(crate) fn run(args: &TitlesGenArgs) {
     // An empty path reads as the working directory, and this command
     // sweeps `<output-dir>/titles/` for pages to delete.
     if output_dir.is_empty() {
-        die(
+        return Err(CommandError::failed(
             "titles-gen: --output-dir is empty; name the directory the documents are written under",
-        );
+        ));
     }
 
-    let registry = TitleRegistry::scan_dir(Path::new(&registry_dir))
-        .unwrap_or_else(|e| die(&format!("titles-gen: scan {registry_dir}: {e}")));
+    let registry = TitleRegistry::scan_dir(Path::new(&registry_dir)).map_err(|error| {
+        CommandError::failed(format!("titles-gen: scan {registry_dir}: {error}"))
+    })?;
 
     let titles = registry.iter().count();
     let docs = render_docs(registry.iter(), Path::new(&fixtures_dir))
-        .unwrap_or_else(|e| die(&format!("titles-gen: {e}")));
+        .map_err(|error| CommandError::failed(format!("titles-gen: {error}")))?;
 
     let out = Path::new(&output_dir);
     for doc in &docs {
         let path = out.join(&doc.path);
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .unwrap_or_else(|e| die(&format!("titles-gen: create {}: {e}", parent.display())));
+            std::fs::create_dir_all(parent).map_err(|error| {
+                CommandError::failed(format!("titles-gen: create {}: {error}", parent.display()))
+            })?;
         }
-        std::fs::write(&path, &doc.body)
-            .unwrap_or_else(|e| die(&format!("titles-gen: write {}: {e}", path.display())));
+        std::fs::write(&path, &doc.body).map_err(|error| {
+            CommandError::failed(format!("titles-gen: write {}: {error}", path.display()))
+        })?;
     }
-    for orphan in orphaned_pages(out, &docs).unwrap_or_else(|e| {
-        die(&format!(
-            "titles-gen: list {}: {e}",
+    for orphan in orphaned_pages(out, &docs).map_err(|error| {
+        CommandError::failed(format!(
+            "titles-gen: list {}: {error}",
             out.join(DETAIL_DIR).display()
         ))
-    }) {
-        std::fs::remove_file(&orphan)
-            .unwrap_or_else(|e| die(&format!("titles-gen: remove {}: {e}", orphan.display())));
+    })? {
+        std::fs::remove_file(&orphan).map_err(|error| {
+            CommandError::failed(format!("titles-gen: remove {}: {error}", orphan.display()))
+        })?;
         println!(
             "titles-gen: removed {} (no title declares it)",
             orphan.display()
@@ -82,6 +86,7 @@ pub(crate) fn run(args: &TitlesGenArgs) {
         "titles-gen: wrote {} file(s) under {output_dir} ({titles} title(s))",
         docs.len(),
     );
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// Render every file the generator owns: the title index, the firmware

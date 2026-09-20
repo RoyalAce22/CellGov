@@ -7,6 +7,7 @@ use cellgov_install::keys::{installed_keys_dir, KeyVault, SelfClass, Slot, INSTA
 use crate::cli::parse::{KeysCommand, KeysPathArgs};
 
 use super::StoreCliError;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 
 /// Exit status of `keys show` when a decrypt path would find a key
@@ -14,35 +15,42 @@ use crate::cli::exit_codes;
 const EXIT_KEYS_INCOMPLETE: i32 = exit_codes::command_specific(40);
 
 /// Run one `keys` command against the vault under `store`.
-pub(crate) fn run(command: &KeysCommand, store: &Path) {
+pub(crate) fn run(command: &KeysCommand, store: &Path) -> Result<CommandExitCode, CommandError> {
     match command {
         KeysCommand::Show { path, .. } => show(path.as_deref(), store),
-        KeysCommand::Import(args) => import(args, store),
-        KeysCommand::Remove { .. } => remove(store),
+        KeysCommand::Import(args) => {
+            import(args, store)?;
+            Ok(CommandExitCode::SUCCESS)
+        }
+        KeysCommand::Remove { .. } => {
+            remove(store)?;
+            Ok(CommandExitCode::SUCCESS)
+        }
     }
 }
 
-fn show(path: Option<&Path>, store: &Path) {
+fn show(path: Option<&Path>, store: &Path) -> Result<CommandExitCode, CommandError> {
     let location = match path {
         Some(p) => p.to_path_buf(),
         None => KeyVault::locate_from(std::env::var_os(crate::env_vars::KEYS), store)
-            .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string())),
+            .map_err(|error| CommandError::failed(error.to_string()))?,
     };
     let vault = KeyVault::load_from_path(&location)
-        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+        .map_err(|error| CommandError::failed(error.to_string()))?;
     print!("{}", render_inventory(&location, &vault));
     if !vault.missing_for_decrypt().is_empty() {
-        std::process::exit(EXIT_KEYS_INCOMPLETE);
+        return Ok(CommandExitCode::new(EXIT_KEYS_INCOMPLETE));
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
-fn import(args: &KeysPathArgs, store: &Path) {
+fn import(args: &KeysPathArgs, store: &Path) -> Result<(), CommandError> {
     let file = installed_keys_dir(store).join(INSTALLED_KEYS_FILE);
     // This check runs before the import writes: "merged" is true only
     // when a vault was already there to merge into.
     let merged = !args.replace && file.is_file();
     let vault = merge_into_installed(&args.path, store, args.replace)
-        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+        .map_err(|error| CommandError::failed(error.to_string()))?;
     println!(
         "cellgov: {} {} into {}",
         if merged { "merged" } else { "wrote" },
@@ -59,15 +67,17 @@ fn import(args: &KeysPathArgs, store: &Path) {
     } else {
         println!("  missing for decrypt: {}", missing.join(", "));
     }
+    Ok(())
 }
 
-fn remove(store: &Path) {
+fn remove(store: &Path) -> Result<(), CommandError> {
     let dir = installed_keys_dir(store);
     match remove_installed(store) {
         Ok(true) => println!("cellgov: removed {}", dir.display()),
         Ok(false) => println!("cellgov: nothing installed at {}", dir.display()),
-        Err(e) => crate::cli::exit::die(&e.to_string()),
+        Err(error) => return Err(CommandError::failed(error.to_string())),
     }
+    Ok(())
 }
 
 /// The `keys show` report for the vault loaded from `location`.

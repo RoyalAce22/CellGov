@@ -4,20 +4,20 @@
 use cellgov_testkit::runner::ScenarioResult;
 use cellgov_trace::TraceReader;
 
-use super::exit::die;
+use super::exit::CommandError;
 use super::scenarios::run_scenario;
 
-pub(crate) fn run(name: &str, scenarios_list: &[&str]) {
+pub(crate) fn run(name: &str, scenarios_list: &[&str]) -> Result<(), CommandError> {
     match run_scenario(name) {
         Some((_label, result)) => dump_trace(&result),
-        None => die(&format!(
+        None => Err(CommandError::failed(format!(
             "unknown scenario: {name}\navailable: {}",
             scenarios_list.join(", ")
-        )),
+        ))),
     }
 }
 
-fn dump_trace(result: &ScenarioResult) {
+fn dump_trace(result: &ScenarioResult) -> Result<(), CommandError> {
     use cellgov_trace::{
         TraceRecord, TracedBlockReason, TracedInvariantBreakReason, TracedSyscallDisposition,
         TracedWakeReason,
@@ -25,8 +25,11 @@ fn dump_trace(result: &ScenarioResult) {
 
     let mut count = 0usize;
     for (i, rec) in TraceReader::new(&result.trace_bytes).enumerate() {
-        let rec =
-            rec.unwrap_or_else(|e| die(&format!("trace decode failed at record index {i}: {e:?}")));
+        let rec = rec.map_err(|error| {
+            CommandError::failed(format!(
+                "trace decode failed at record index {i}: {error:?}"
+            ))
+        })?;
         count = i + 1;
         match rec {
             TraceRecord::RunIdentity {
@@ -206,4 +209,5 @@ fn dump_trace(result: &ScenarioResult) {
         }
     }
     println!("--- {count} records total ---");
+    Ok(())
 }

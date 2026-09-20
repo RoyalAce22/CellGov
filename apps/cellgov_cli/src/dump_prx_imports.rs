@@ -7,6 +7,7 @@
 //! `--save-elf <path>` writes the decrypted plaintext ELF to `path`:
 //! the same bytes the parser consumed for the printed table.
 
+use crate::cli::exit::CommandError;
 use crate::cli::parse::PrxImportsArgs;
 
 const NAME_COLUMN_WIDTH: usize = 49;
@@ -49,26 +50,29 @@ enum LoadError {
 /// Read `path` and return its plaintext ELF bytes plus the source
 /// kind. Auto-detects SCE wrappers by magic and decrypts them; NPDRM
 /// SELFs resolve their RAP from `vfs_root`'s exdata directory.
-fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8>, SourceKind) {
-    let raw = std::fs::read(path).unwrap_or_else(|e| {
-        crate::cli::exit::die(&format!("prx-imports: read {}: {e}", path.display()))
-    });
+fn load_elf_bytes(
+    path: &std::path::Path,
+    vfs_root: &std::path::Path,
+) -> Result<(Vec<u8>, SourceKind), CommandError> {
+    let raw = std::fs::read(path).map_err(|error| {
+        CommandError::failed(format!("prx-imports: read {}: {error}", path.display()))
+    })?;
     match classify_source(&raw) {
-        Ok(SourceKind::Elf) => (raw, SourceKind::Elf),
+        Ok(SourceKind::Elf) => Ok((raw, SourceKind::Elf)),
         Ok(SourceKind::SceWrapped) => {
-            let elf = crate::cli::self_load::decrypt_ppu_self_or_die(
+            let elf = crate::cli::self_load::decrypt_ppu_self(
                 &raw,
                 &path.display().to_string(),
                 vfs_root,
-            );
-            (elf, SourceKind::SceWrapped)
+            )?;
+            Ok((elf, SourceKind::SceWrapped))
         }
-        Err(LoadError::TooSmall { len }) => crate::cli::exit::die(&format!(
+        Err(LoadError::TooSmall { len }) => Err(CommandError::failed(format!(
             "prx-imports: {} is {len} byte(s); needs at least {} for an ELF64 header",
             path.display(),
             cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE,
-        )),
-        Err(LoadError::BadMagic { magic }) => crate::cli::exit::die(&format!(
+        ))),
+        Err(LoadError::BadMagic { magic }) => Err(CommandError::failed(format!(
             "prx-imports: {} has unrecognized magic 0x{:02x}{:02x}{:02x}{:02x} \
              (expected ELF or SCE)",
             path.display(),
@@ -76,7 +80,7 @@ fn load_elf_bytes(path: &std::path::Path, vfs_root: &std::path::Path) -> (Vec<u8
             magic[1],
             magic[2],
             magic[3]
-        )),
+        ))),
     }
 }
 
@@ -120,17 +124,20 @@ fn module_identity(
     }
 }
 
-pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
-    let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path, &vfs_root);
+pub(crate) fn run(
+    parsed: &PrxImportsArgs,
+    vfs_flag: Option<&std::path::Path>,
+) -> Result<(), CommandError> {
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
+    let (elf_bytes, source_kind) = load_elf_bytes(&parsed.path, &vfs_root)?;
 
     if let Some(out) = &parsed.save_elf {
-        std::fs::write(out, &elf_bytes).unwrap_or_else(|e| {
-            crate::cli::exit::die(&format!(
-                "prx-imports: --save-elf write {}: {e}",
+        std::fs::write(out, &elf_bytes).map_err(|error| {
+            CommandError::failed(format!(
+                "prx-imports: --save-elf write {}: {error}",
                 out.display()
             ))
-        });
+        })?;
         println!(
             "prx-imports: wrote {} byte(s) of plaintext ELF to {}",
             elf_bytes.len(),
@@ -151,9 +158,9 @@ pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
         }
     };
 
-    let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).unwrap_or_else(|e| {
-        crate::cli::exit::die(&format!("prx-imports: parse_imports failed: {e}"))
-    });
+    let modules = cellgov_ppu::prx::parse_imports(&elf_bytes).map_err(|error| {
+        CommandError::failed(format!("prx-imports: parse_imports failed: {error}"))
+    })?;
 
     let total_funcs: usize = modules.iter().map(|m| m.functions.len()).sum();
     let path_str = parsed.path.to_string_lossy().replace('\\', "/");
@@ -291,6 +298,7 @@ pub(crate) fn run(parsed: &PrxImportsArgs, vfs_flag: Option<&std::path::Path>) {
             eprintln!("  {name}");
         }
     }
+    Ok(())
 }
 
 /// Render an entry-point OPD, in the listing's unrelocated PRX-space vaddrs.

@@ -2,11 +2,19 @@
 
 use std::path::Path;
 
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::paths::workspace_root;
 
-/// Write the source revision and every table slot whose local oracle entry is not bound.
-pub(crate) fn run(vfs_flag: Option<&Path>) {
+/// Writes the source revision and each unbound table slot.
+///
+/// # Errors
+///
+/// Returns an error if:
+///
+/// - Git cannot read the checkout revision.
+/// - The command cannot read the dispatch table.
+/// - The command cannot write the overlay.
+pub(crate) fn run(vfs_flag: Option<&Path>) -> Result<CommandExitCode, CommandError> {
     let root = vfs_flag.unwrap_or_else(|| Path::new("vfs"));
     let checkout = ["rpc", "s3-src"].concat();
     let source = workspace_root()
@@ -15,7 +23,7 @@ pub(crate) fn run(vfs_flag: Option<&Path>) {
         .join(["rpc", "s3/Emu/Cell/lv2/lv2.cpp"].concat());
     if !source.exists() {
         println!("oracle gap: not computed -- local oracle checkout is unavailable");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
     let revision = std::process::Command::new("git")
         .args([
@@ -33,12 +41,17 @@ pub(crate) fn run(vfs_flag: Option<&Path>) {
             "HEAD",
         ])
         .output()
-        .unwrap_or_else(|error| die(&format!("oracle gap: read checkout revision: {error}")));
+        .map_err(|error| {
+            CommandError::failed(format!("oracle gap: read checkout revision: {error}"))
+        })?;
     if !revision.status.success() {
-        die("oracle gap: checkout has no readable revision");
+        return Err(CommandError::failed(
+            "oracle gap: checkout has no readable revision",
+        ));
     }
-    let table = std::fs::read_to_string(&source)
-        .unwrap_or_else(|error| die(&format!("oracle gap: read dispatch table: {error}")));
+    let table = std::fs::read_to_string(&source).map_err(|error| {
+        CommandError::failed(format!("oracle gap: read dispatch table: {error}"))
+    })?;
     let mut ordinals = std::collections::BTreeSet::new();
     for line in table.lines() {
         let Some(comment) = line.split("//").nth(1) else {
@@ -60,7 +73,7 @@ pub(crate) fn run(vfs_flag: Option<&Path>) {
     }
     let out = root.join(".cellgov/oracle-gap.tsv");
     std::fs::create_dir_all(out.parent().expect("overlay has parent"))
-        .unwrap_or_else(|error| die(&format!("oracle gap: create overlay: {error}")));
+        .map_err(|error| CommandError::failed(format!("oracle gap: create overlay: {error}")))?;
     let mut text = format!(
         "revision\t{}\nordinal\n",
         String::from_utf8_lossy(&revision.stdout).trim()
@@ -69,6 +82,7 @@ pub(crate) fn run(vfs_flag: Option<&Path>) {
         text.push_str(&format!("{ordinal}\n"));
     }
     std::fs::write(&out, text)
-        .unwrap_or_else(|error| die(&format!("oracle gap: write overlay: {error}")));
+        .map_err(|error| CommandError::failed(format!("oracle gap: write overlay: {error}")))?;
     println!("oracle gap: wrote {}", out.display());
+    Ok(CommandExitCode::SUCCESS)
 }

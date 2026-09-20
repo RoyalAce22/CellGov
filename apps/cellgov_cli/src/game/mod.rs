@@ -10,8 +10,8 @@ mod taps;
 
 pub use bench::{
     bench_boot_one_run, bench_boot_runs, AnchorPlan, AnchorVerdict, BenchGate, BenchOptions,
-    BenchRunsOutcome, SelectionArgs, ThroughputPolicy, ThroughputVerdict, BENCH_DEFAULT_RUNS,
-    BENCH_SPREAD_CEILING_PCT,
+    BenchRunsOutcome, SelectionArgs, SpawnError, ThroughputPolicy, ThroughputVerdict,
+    BENCH_DEFAULT_RUNS, BENCH_SPREAD_CEILING_PCT,
 };
 pub(crate) use finish_line::{anchor_finish_line, within_runtime_cap};
 pub(crate) use run::configure_rsx_from_manifest;

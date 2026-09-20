@@ -14,10 +14,10 @@ use cellgov_compare::{
 };
 use cellgov_ps3_abi::format::elf::ELF_MAGIC;
 
-use super::exit::die;
+use super::exit::{CommandError, CommandExitCode};
+use super::exit_codes;
 use super::parse::FixtureGenArgs;
-use super::self_load::{load_file_or_die, load_ppu_image_with_title_or_die};
-use super::title::resolve_ps3_vfs_root;
+use super::self_load::{load_file, load_ppu_image_with_title};
 use cellgov_boot::manifest::{CellKey, TitleManifest};
 
 /// `ELF_HEADER_SIZE >= 58` is required for the `e_phnum` (56..58)
@@ -152,14 +152,17 @@ fn overridden_capture_refusal(path: &str, overrides: &BootOverrides) -> Option<S
     ))
 }
 
-pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
+pub(crate) fn run(
+    args: &FixtureGenArgs,
+    vfs_flag: Option<&Path>,
+) -> Result<CommandExitCode, CommandError> {
     let cellgov_path = args.cellgov.clone();
     let rpcs3_path = args.rpcs3.clone();
     let allow_divergence = args.allow_divergence;
 
     let manifest = TitleManifest::load_from_path(&args.manifest)
-        .unwrap_or_else(|e| die(&format!("fixture-gen: load manifest: {e}")));
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+        .map_err(|error| CommandError::failed(format!("fixture-gen: load manifest: {error}")))?;
+    let vfs_root = super::title::resolve_ps3_vfs_root(vfs_flag)?;
     // The fixture must name the EBOOT a boot run picks, so the
     // selection goes through the boot family's resolver.
     let composition = super::boot_cmd::resolve_composition(
@@ -167,9 +170,9 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
         &vfs_root,
         &manifest,
         BootOverrides::default(),
-    );
-    let cell = super::boot_cmd::composed_cell(&composition).unwrap_or_else(|| {
-        die(&format!(
+    )?;
+    let cell = super::boot_cmd::composed_cell(&composition).ok_or_else(|| {
+        CommandError::failed(format!(
             "fixture-gen: {} composed no cell: a cross-runner result is filed under \
              (content id, firmware, game version), and this composition names none. An \
              unmanaged or absent firmware carries no version, a title the store does not \
@@ -177,7 +180,7 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
              belongs to no firmware entry",
             manifest.name()
         ))
-    });
+    })?;
     let fixtures = args
         .fixtures_dir
         .clone()
@@ -194,81 +197,84 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
     }
     let eboot_path = manifest
         .resolve_eboot_in(&composition.eboot_dirs)
-        .unwrap_or_else(|e| die(&format!("fixture-gen: resolve EBOOT: {e}")));
-    let eboot_bytes = load_ppu_image_with_title_or_die(
-        eboot_path.to_str().unwrap_or_else(|| {
-            die(&format!(
-                "fixture-gen: EBOOT path {} has invalid UTF-8",
-                eboot_path.display()
-            ))
-        }),
-        &manifest,
-        &vfs_root,
-    )
-    .elf_data;
+        .map_err(|error| CommandError::failed(format!("fixture-gen: resolve EBOOT: {error}")))?;
+    let eboot_path = eboot_path.to_str().ok_or_else(|| {
+        CommandError::failed(format!(
+            "fixture-gen: EBOOT path {} has invalid UTF-8",
+            eboot_path.display()
+        ))
+    })?;
+    let eboot_bytes = load_ppu_image_with_title(eboot_path, &manifest, &vfs_root)?.elf_data;
 
-    let cellgov: Observation = serde_json::from_slice(&load_file_or_die(&cellgov_path))
-        .unwrap_or_else(|e| die(&format!("fixture-gen: parse {cellgov_path}: {e}")));
+    let cellgov_bytes = load_file(&cellgov_path)?;
+    let cellgov: Observation = serde_json::from_slice(&cellgov_bytes).map_err(|error| {
+        CommandError::failed(format!("fixture-gen: parse {cellgov_path}: {error}"))
+    })?;
     if let Some(refusal) = overridden_capture_refusal(&cellgov_path, &cellgov.identity.overrides) {
-        die(&refusal);
+        return Err(CommandError::failed(refusal));
     }
-    let rpcs3: Observation = serde_json::from_slice(&load_file_or_die(&rpcs3_path))
-        .unwrap_or_else(|e| die(&format!("fixture-gen: parse {rpcs3_path}: {e}")));
+    let rpcs3_bytes = load_file(&rpcs3_path)?;
+    let rpcs3: Observation = serde_json::from_slice(&rpcs3_bytes).map_err(|error| {
+        CommandError::failed(format!("fixture-gen: parse {rpcs3_path}: {error}"))
+    })?;
 
     // A zero-region non-Timeout observation would let the comparator
     // emit a confident verdict against empty data.
     if cellgov.memory_regions.is_empty() && !matches!(cellgov.outcome, ObservedOutcome::Timeout) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "fixture-gen: CellGov observation at {cellgov_path} has zero \
              memory regions but reports outcome={}; the dump is incomplete. \
              Re-capture via `boot run --save-observation`.",
             cellgov.outcome,
-        ));
+        )));
     }
     if rpcs3.memory_regions.is_empty() && !matches!(rpcs3.outcome, ObservedOutcome::Timeout) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "fixture-gen: RPCS3 observation at {rpcs3_path} has zero \
              memory regions but reports outcome={}; the dump is incomplete. \
              Re-capture per REPRODUCTION.md, or pass --outcome timeout to \
              the bridge if the RPCS3 run was actually capped.",
             rpcs3.outcome,
-        ));
+        )));
     }
 
     // The other runner's firmware comes from the capture, stamped when
     // the dump was converted. This command can run long after that
     // runner's installation changed, so a version read now would name a
     // library the dump never saw.
-    let rpcs3_firmware = rpcs3.runner_firmware.clone().unwrap_or_else(|| {
-        die(&format!(
+    let rpcs3_firmware = rpcs3.runner_firmware.clone().ok_or_else(|| {
+        CommandError::failed(format!(
             "fixture-gen: {rpcs3_path} names no runner firmware, so nothing says which \
              library produced it. Re-convert the dump with `rpcs3_to_observation \
              --rpcs3-dir <dir>`"
         ))
-    });
+    })?;
 
     let result = cellgov_compare::compare_observations(&cellgov, &rpcs3);
-    let ctx = build_classifier_context(&eboot_bytes, &cellgov)
-        .unwrap_or_else(|e| die(&format!("fixture-gen: build classifier context: {e}")));
+    let ctx = build_classifier_context(&eboot_bytes, &cellgov).map_err(|error| {
+        CommandError::failed(format!("fixture-gen: build classifier context: {error}"))
+    })?;
     let classes = classify_all(&result, &cellgov, &rpcs3, &ctx);
     let mut summary = summarize(&result, &classes)
         .with_firmware(composition.identity.clone(), rpcs3_firmware)
-        .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
+        .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
     summary.oracle_gap_ordinals =
         oracle_gap_count(&vfs_root, &fixtures, &manifest.content_id, &cell);
 
-    std::fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-        die(&format!(
+    std::fs::create_dir_all(&out_dir).map_err(|error| {
+        CommandError::failed(format!(
             "fixture-gen: create_dir_all {}: {e}",
-            out_dir.display()
+            out_dir.display(),
+            e = error,
         ))
-    });
+    })?;
 
     write_compare_report(&out_dir, &result, &summary, &cellgov, &rpcs3)
-        .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
+        .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
     write_reproduction(&out_dir, &manifest, &cell)
-        .unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
-    write_summary_json(&out_dir, &summary).unwrap_or_else(|e| die(&format!("fixture-gen: {e}")));
+        .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
+    write_summary_json(&out_dir, &summary)
+        .map_err(|error| CommandError::failed(format!("fixture-gen: {error}")))?;
 
     let (conv_str, parity_str) = summary.display_matrix_columns();
     println!(
@@ -287,9 +293,10 @@ pub(crate) fn run(args: &FixtureGenArgs, vfs_flag: Option<&Path>) {
             eprintln!(
                 "fixture-gen: convergence failed ({reason}); pass --allow-divergence to commit a fixture documenting this state"
             );
-            super::exit::exit_failed();
+            return Ok(CommandExitCode::new(exit_codes::FAILED));
         }
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
 fn oracle_gap_count(

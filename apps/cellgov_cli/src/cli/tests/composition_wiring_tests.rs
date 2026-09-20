@@ -39,7 +39,7 @@ fn managed(entry_dir: &str) -> BootComposition {
 fn a_managed_firmware_resolves_its_modules_under_the_entrys_dev_flash() {
     let dir = firmware_module_dir(&managed("store/firmware/4.93")).expect("managed has modules");
     assert_eq!(
-        PathBuf::from(dir),
+        PathBuf::from(dir.expect("firmware module directory resolves")),
         PathBuf::from("store/firmware/4.93")
             .join("dev_flash")
             .join("sys")
@@ -54,7 +54,9 @@ fn an_unmanaged_tree_is_passed_through_as_the_module_directory() {
         dir: PathBuf::from("elsewhere/sys/external"),
     };
     assert_eq!(
-        firmware_module_dir(&composition).as_deref(),
+        firmware_module_dir(&composition)
+            .expect("firmware module directory resolves")
+            .as_deref(),
         Some("elsewhere/sys/external")
     );
 }
@@ -63,7 +65,10 @@ fn an_unmanaged_tree_is_passed_through_as_the_module_directory() {
 fn a_firmware_free_boot_names_no_module_directory() {
     let mut composition = managed("unused");
     composition.firmware = FirmwareChoice::None;
-    assert_eq!(firmware_module_dir(&composition), None);
+    assert_eq!(
+        firmware_module_dir(&composition).expect("firmware-free composition resolves"),
+        None
+    );
 }
 
 #[test]
@@ -72,6 +77,7 @@ fn the_selection_capture_carries_every_flag_a_child_re_resolves_from() {
         &selection(Some("4.91"), Some("02.51"), None),
         Some(Path::new("elsewhere/dev_hdd0")),
     );
+    let owned = owned.expect("selection paths resolve");
     let selection = owned.as_args();
     assert_eq!(selection.vfs_root, Some("elsewhere/dev_hdd0"));
     assert_eq!(selection.fw, Some("4.91"));
@@ -82,6 +88,7 @@ fn the_selection_capture_carries_every_flag_a_child_re_resolves_from() {
 #[test]
 fn an_invocation_naming_no_selection_flag_captures_none_of_them() {
     let owned = selection_args(&selection(None, None, None), None);
+    let owned = owned.expect("selection paths resolve");
     let selection = owned.as_args();
     assert_eq!(selection.vfs_root, None);
     assert_eq!(selection.fw, None);

@@ -2,10 +2,8 @@
 
 use std::path::Path;
 
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::SelfDecryptArgs;
-
-#[cfg(feature = "decrypt")]
-use crate::cli::exit::die;
 
 #[cfg(feature = "decrypt")]
 use cellgov_install::npdrm::{NpdHeaderInfo, Rap};
@@ -15,13 +13,17 @@ use cellgov_install::{sce, self_image};
 use std::cell::RefCell;
 
 #[cfg(not(feature = "decrypt"))]
-pub(crate) fn run(_args: &SelfDecryptArgs, _vfs_root: &Path, _store: &Path) {
-    crate::cli::exit::die(
-        &super::StoreCliError::DecryptFeatureDisabled {
+pub(crate) fn run(
+    _args: &SelfDecryptArgs,
+    _vfs_root: &Path,
+    _store: &Path,
+) -> Result<CommandExitCode, CommandError> {
+    Err(CommandError::failed(
+        super::StoreCliError::DecryptFeatureDisabled {
             command: "self decrypt".to_string(),
         }
         .to_string(),
-    )
+    ))
 }
 
 /// Write the plaintext ELF of one SELF.
@@ -29,16 +31,21 @@ pub(crate) fn run(_args: &SelfDecryptArgs, _vfs_root: &Path, _store: &Path) {
 /// - `vfs_root`: the PS3 VFS root that holds the RAP.
 /// - `store`: the root that holds the key vault.
 #[cfg(feature = "decrypt")]
-pub(crate) fn run(args: &SelfDecryptArgs, vfs_root: &Path, store: &Path) {
+pub(crate) fn run(
+    args: &SelfDecryptArgs,
+    vfs_root: &Path,
+    store: &Path,
+) -> Result<CommandExitCode, CommandError> {
     let self_path = &args.self_path;
     let output_path = args.output.clone().unwrap_or_else(|| {
         let stem = self_path.file_stem().unwrap_or_default().to_string_lossy();
         self_path.with_file_name(format!("{stem}.elf"))
     });
 
-    let keys = super::vault_or_die(store);
-    let data = std::fs::read(self_path)
-        .unwrap_or_else(|e| die(&format!("failed to read {}: {e}", self_path.display())));
+    let keys = super::vault(store)?;
+    let data = std::fs::read(self_path).map_err(|error| {
+        CommandError::failed(format!("failed to read {}: {error}", self_path.display()))
+    })?;
     println!(
         "cellgov: decrypting {} ({:.1} MB)",
         self_path.display(),
@@ -71,27 +78,35 @@ pub(crate) fn run(args: &SelfDecryptArgs, vfs_root: &Path, store: &Path) {
     // no key. That fallback would otherwise hide a refused RAP behind a
     // "successful" decrypt.
     if let Some(rap_err) = resolve_error.borrow_mut().take() {
-        die(&rap_err.to_string());
+        return Err(CommandError::failed(rap_err.to_string()));
     }
 
-    let elf = decrypted.unwrap_or_else(|e| {
-        eprintln!("SELF decryption failed: {e}");
-        // This arm is reachable only without --rap: the code above
-        // already refuses an explicit RAP that will not read.
-        if let sce::SceError::NoRapForNpdrmTitle { .. } = e {
-            eprintln!(
+    let elf = match decrypted {
+        Ok(elf) => elf,
+        Err(error) => {
+            eprintln!("SELF decryption failed: {error}");
+            // Without --rap, this arm can report an automatic RAP lookup failure.
+            // The explicit RAP path returns its read error above.
+            if let sce::SceError::NoRapForNpdrmTitle { .. } = error {
+                eprintln!(
                 "  searched {} for <content_id>.rap; pass --rap <path> for an uninstalled title",
                 exdata.display()
             );
+            }
+            return Ok(CommandExitCode::new(crate::cli::exit_codes::FAILED));
         }
-        super::super::exit::exit_failed();
-    });
+    };
 
-    std::fs::write(&output_path, &elf)
-        .unwrap_or_else(|e| die(&format!("failed to write {}: {e}", output_path.display())));
+    std::fs::write(&output_path, &elf).map_err(|error| {
+        CommandError::failed(format!(
+            "failed to write {}: {error}",
+            output_path.display()
+        ))
+    })?;
     println!(
         "cellgov: wrote {} ({:.1} MB)",
         output_path.display(),
         super::megabytes(elf.len()),
     );
+    Ok(CommandExitCode::SUCCESS)
 }

@@ -8,7 +8,7 @@ use cellgov_install::manifest::{sha256_of, Sha256};
 use cellgov_install::store::KernelRecord;
 
 use crate::cli::boot_cmd::DISABLE_DEFAULT_ENV;
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{Lv2ExtractArgs, OutputFormat};
 use crate::cli::store::read::model::STORE_FORMAT_VERSION;
 use crate::composition::inventory::{FirmwareEntry, InventoryError, StoreInventory};
@@ -72,13 +72,19 @@ enum Lv2ExtractError {
     Serialize(#[from] serde_json::Error),
 }
 
-pub(crate) fn run(args: &Lv2ExtractArgs, vfs_flag: Option<&Path>, format: OutputFormat) {
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
-    let doc = extract(args, &vfs_root).unwrap_or_else(|e| die(&format!("lv2-extract: {e}")));
+pub(crate) fn run(
+    args: &Lv2ExtractArgs,
+    vfs_flag: Option<&Path>,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
+    let doc = extract(args, &vfs_root)
+        .map_err(|error| CommandError::failed(format!("lv2-extract: {error}")))?;
     match format {
         OutputFormat::Json => {
-            let json = serde_json::to_string_pretty(&doc)
-                .unwrap_or_else(|e| die(&Lv2ExtractError::Serialize(e).to_string()));
+            let json = serde_json::to_string_pretty(&doc).map_err(|error| {
+                CommandError::failed(Lv2ExtractError::Serialize(error).to_string())
+            })?;
             println!("{json}");
         }
         OutputFormat::Human => {
@@ -92,6 +98,7 @@ pub(crate) fn run(args: &Lv2ExtractArgs, vfs_flag: Option<&Path>, format: Output
             );
         }
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
 fn extract(args: &Lv2ExtractArgs, vfs_root: &Path) -> Result<Lv2ExtractDoc, Lv2ExtractError> {

@@ -4,10 +4,8 @@ use std::path::Path;
 
 use cellgov_terminal::caps::RenderFlags;
 
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{InstallContainerArgs, TitleInstallArgs};
-
-#[cfg(feature = "decrypt")]
-use crate::cli::exit::die;
 
 #[cfg(feature = "decrypt")]
 use cellgov_install::container::{self, Container};
@@ -21,46 +19,63 @@ use cellgov_install::progress::INSTALL_TASK;
 use cellgov_terminal::progress::ProgressBar;
 
 #[cfg(feature = "decrypt")]
-use super::{container_label, install_caps, map_container_or_die, megabytes, vault_or_die};
+use super::{container_label, install_caps, map_container, megabytes, vault};
 
 #[cfg(not(feature = "decrypt"))]
-pub(crate) fn install(_args: &TitleInstallArgs, _store: &Path, _render: RenderFlags) {
-    crate::cli::exit::die(
-        &super::StoreCliError::DecryptFeatureDisabled {
+pub(crate) fn install(
+    _args: &TitleInstallArgs,
+    _store: &Path,
+    _render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
+    Err(CommandError::failed(
+        super::StoreCliError::DecryptFeatureDisabled {
             command: "title install".to_string(),
         }
         .to_string(),
-    )
+    ))
 }
 
 /// Install a base title, routed by the container the file holds.
 #[cfg(feature = "decrypt")]
-pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags) {
-    let data = map_container_or_die(&args.path);
+pub(crate) fn install(
+    args: &TitleInstallArgs,
+    store: &Path,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
+    let data = map_container(&args.path)?;
     let head = &data[..data.len().min(container::SNIFF_LEN)];
-    let kind = container::sniff(head).unwrap_or_else(|| {
-        die(&format!(
+    let kind = container::sniff(head).ok_or_else(|| {
+        CommandError::failed(format!(
             "title install: {} is neither a PKG (magic 0x7F PKG) nor an ISO9660 image \
              (CD001 at sector 16)",
             args.path.display(),
         ))
-    });
+    })?;
     // The sniff alone decides this mismatch, so it comes before the
     // vault load and the RAP read. Either of those would otherwise
     // report its own failure in place of the misuse.
     if kind == Container::Iso && args.rap.is_some() {
-        die("--rap names an NPDRM license; a disc image carries none");
+        return Err(CommandError::failed(
+            "--rap names an NPDRM license; a disc image carries none",
+        ));
     }
     if kind == Container::Pkg && args.no_firmware {
-        die("--no-firmware declines the system software a disc image ships; a PKG ships none");
+        return Err(CommandError::failed(
+            "--no-firmware declines the system software a disc image ships; a PKG ships none",
+        ));
     }
     // Vault before install: a missing one should not cost a full
     // container read first.
-    let keys = vault_or_die(store);
-    let rap_data = args.rap.as_ref().map(|p| {
-        std::fs::read(p)
-            .unwrap_or_else(|e| die(&format!("failed to read RAP {}: {e}", p.display())))
-    });
+    let keys = vault(store)?;
+    let rap_data = args
+        .rap
+        .as_ref()
+        .map(|path| {
+            std::fs::read(path).map_err(|error| {
+                CommandError::failed(format!("failed to read RAP {}: {error}", path.display()))
+            })
+        })
+        .transpose()?;
 
     println!(
         "cellgov: installing {} from {} ({:.1} MB)",
@@ -99,7 +114,7 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
         Err(e) => {
             bar.abort();
             eprintln!("title install failed: {e}");
-            std::process::exit(crate::cli::exit_codes::FAILED);
+            return Ok(CommandExitCode::new(crate::cli::exit_codes::FAILED));
         }
     };
 
@@ -142,6 +157,7 @@ pub(crate) fn install(args: &TitleInstallArgs, store: &Path, render: RenderFlags
         }
     }
     super::report_rename_retries(outcome.rename_retries);
+    Ok(CommandExitCode::SUCCESS)
 }
 
 #[cfg(feature = "decrypt")]
@@ -189,20 +205,28 @@ fn report_shipped_firmware(shipped: Option<&ShippedFirmware>, declined: bool) {
 }
 
 #[cfg(not(feature = "decrypt"))]
-pub(crate) fn install_update(_args: &InstallContainerArgs, _store: &Path, _render: RenderFlags) {
-    crate::cli::exit::die(
-        &super::StoreCliError::DecryptFeatureDisabled {
+pub(crate) fn install_update(
+    _args: &InstallContainerArgs,
+    _store: &Path,
+    _render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
+    Err(CommandError::failed(
+        super::StoreCliError::DecryptFeatureDisabled {
             command: "title install-update".to_string(),
         }
         .to_string(),
-    )
+    ))
 }
 
 /// Install a GD/HG update PKG over an installed base.
 #[cfg(feature = "decrypt")]
-pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: RenderFlags) {
-    let pkg_data = map_container_or_die(&args.path);
-    let keys = vault_or_die(store);
+pub(crate) fn install_update(
+    args: &InstallContainerArgs,
+    store: &Path,
+    render: RenderFlags,
+) -> Result<CommandExitCode, CommandError> {
+    let pkg_data = map_container(&args.path)?;
+    let keys = vault(store)?;
 
     println!(
         "cellgov: installing update from {} ({:.1} MB)",
@@ -234,7 +258,7 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
         Err(e) => {
             bar.abort();
             eprintln!("title install-update failed: {e}");
-            std::process::exit(crate::cli::exit_codes::FAILED);
+            return Ok(CommandExitCode::new(crate::cli::exit_codes::FAILED));
         }
     };
 
@@ -257,4 +281,5 @@ pub(crate) fn install_update(args: &InstallContainerArgs, store: &Path, render: 
         );
     }
     super::report_rename_retries(outcome.rename_retries);
+    Ok(CommandExitCode::SUCCESS)
 }

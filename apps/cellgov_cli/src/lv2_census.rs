@@ -12,9 +12,9 @@ use cellgov_ppu::lv2_gate::{self, Lv2Gate, Lv2GateRead};
 use cellgov_ppu::lv2_stub::Lv2OrdinalClass;
 use cellgov_ppu::lv2_subdispatch::{self, Lv2Subdispatch, Lv2SubdispatchError, Lv2SubentryClass};
 
-use crate::cli::exit::die;
+use crate::cli::exit::CommandError;
 use crate::cli::parse::Lv2CensusArgs;
-use crate::cli::self_load::{decrypt_ppu_self_or_die, load_file_or_die};
+use crate::cli::self_load::{decrypt_ppu_self, load_file};
 
 const PUP_TSV: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -100,11 +100,12 @@ enum Lv2CensusError {
     },
 }
 
-pub(crate) fn run(args: &Lv2CensusArgs, vfs_flag: Option<&Path>) {
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
-    let raw = load_file_or_die(&args.path.to_string_lossy());
-    let elf = decrypt_ppu_self_or_die(&raw, &args.path.to_string_lossy(), &vfs_root);
-    let summary = emit(args, &elf).unwrap_or_else(|error| die(&format!("lv2-census: {error}")));
+pub(crate) fn run(args: &Lv2CensusArgs, vfs_flag: Option<&Path>) -> Result<(), CommandError> {
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
+    let raw = load_file(&args.path.to_string_lossy())?;
+    let elf = decrypt_ppu_self(&raw, &args.path.to_string_lossy(), &vfs_root)?;
+    let summary =
+        emit(args, &elf).map_err(|error| CommandError::failed(format!("lv2-census: {error}")))?;
     println!(
         "lv2-census: firmware {} PUP {} -> {} ordinals, {} stub targets, {} subentries, {} gated ordinals, {} other same-version PUP rows removed under {}",
         args.fw,
@@ -116,6 +117,7 @@ pub(crate) fn run(args: &Lv2CensusArgs, vfs_flag: Option<&Path>) {
         summary.removed_pups,
         args.output_dir.display()
     );
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

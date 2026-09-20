@@ -14,7 +14,7 @@ use cellgov_ppu::funcmap::{self, FuncMapError, FunctionName};
 use cellgov_ps3_abi::format::elf::{ELF_HEADER_SIZE, ELF_MAGIC, EM_PPC64};
 
 use crate::cli::boot_cmd::DISABLE_DEFAULT_ENV;
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::CallerCensusArgs;
 use crate::composition::inventory::{FirmwareEntry, InventoryError, StoreInventory};
 use crate::composition::{select, FirmwareSelectError};
@@ -137,14 +137,17 @@ enum CallerCensusError {
     Vault(#[from] KeyVaultError),
 }
 
-pub(crate) fn run(args: &CallerCensusArgs, vfs_flag: Option<&Path>) {
-    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag);
-    let mut tables =
-        build(args, &vfs_root).unwrap_or_else(|error| die(&format!("caller-census: {error}")));
+pub(crate) fn run(
+    args: &CallerCensusArgs,
+    vfs_flag: Option<&Path>,
+) -> Result<CommandExitCode, CommandError> {
+    let vfs_root = crate::cli::title::resolve_ps3_vfs_root(vfs_flag)?;
+    let mut tables = build(args, &vfs_root)
+        .map_err(|error| CommandError::failed(format!("caller-census: {error}")))?;
     merge_existing(&args.output_dir, &mut tables)
-        .unwrap_or_else(|error| die(&format!("caller-census: {error}")));
+        .map_err(|error| CommandError::failed(format!("caller-census: {error}")))?;
     write_tables(&args.output_dir, &tables)
-        .unwrap_or_else(|error| die(&format!("caller-census: {error}")));
+        .map_err(|error| CommandError::failed(format!("caller-census: {error}")))?;
     println!(
         "caller-census: {} module(s), {} resolved site(s), {} unresolved site(s) -> {}",
         tables.modules,
@@ -152,6 +155,7 @@ pub(crate) fn run(args: &CallerCensusArgs, vfs_flag: Option<&Path>) {
         tables.unresolved_sites,
         args.output_dir.display()
     );
+    Ok(CommandExitCode::SUCCESS)
 }
 
 fn build(args: &CallerCensusArgs, vfs_root: &Path) -> Result<CensusTables, CallerCensusError> {

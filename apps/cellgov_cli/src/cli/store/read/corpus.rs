@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use cellgov_install::manifest::Sha256;
 use cellgov_lv2::archive::{self, PupRow, PUP};
 
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
 
@@ -30,34 +30,36 @@ struct ScannedPup {
     fw: Result<(String, String), String>,
 }
 
-fn archive_rows() -> Vec<PupRow> {
-    let table = archive::parse(&PUP, PUP_TSV).unwrap_or_else(|error| {
-        die(&format!(
+fn archive_rows() -> Result<Vec<PupRow>, CommandError> {
+    let table = archive::parse(&PUP, PUP_TSV).map_err(|error| {
+        CommandError::failed(format!(
             "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
         ))
-    });
+    })?;
     let rows = archive::pup_rows(&table);
-    archive::check_pup_rows(&rows).unwrap_or_else(|error| {
-        die(&format!(
+    archive::check_pup_rows(&rows).map_err(|error| {
+        CommandError::failed(format!(
             "compiled docs/lv2/tables/pup.tsv is invalid: {error}"
         ))
-    });
-    rows
+    })?;
+    Ok(rows)
 }
 
-fn pup_paths(dir: &Path) -> Vec<PathBuf> {
-    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
-        let entries = std::fs::read_dir(dir)
-            .unwrap_or_else(|error| die(&format!("read corpus {}: {error}", dir.display())));
+fn pup_paths(dir: &Path) -> Result<Vec<PathBuf>, CommandError> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), CommandError> {
+        let entries = std::fs::read_dir(dir).map_err(|error| {
+            CommandError::failed(format!("read corpus {}: {error}", dir.display()))
+        })?;
         for entry in entries {
-            let entry = entry
-                .unwrap_or_else(|error| die(&format!("read corpus {}: {error}", dir.display())));
+            let entry = entry.map_err(|error| {
+                CommandError::failed(format!("read corpus {}: {error}", dir.display()))
+            })?;
             let path = entry.path();
-            let kind = entry.file_type().unwrap_or_else(|error| {
-                die(&format!("inspect corpus path {}: {error}", path.display()))
-            });
+            let kind = entry.file_type().map_err(|error| {
+                CommandError::failed(format!("inspect corpus path {}: {error}", path.display()))
+            })?;
             if kind.is_dir() {
-                walk(&path, out);
+                walk(&path, out)?;
             } else if kind.is_file()
                 && path.extension().is_some_and(|extension| {
                     extension.to_string_lossy().eq_ignore_ascii_case("pup")
@@ -66,23 +68,24 @@ fn pup_paths(dir: &Path) -> Vec<PathBuf> {
                 out.push(path);
             }
         }
+        Ok(())
     }
 
     if !dir.is_dir() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "firmware PUP corpus {} is not a directory",
             dir.display()
-        ));
+        )));
     }
     let mut out = Vec::new();
-    walk(dir, &mut out);
+    walk(dir, &mut out)?;
     out.sort();
-    out
+    Ok(out)
 }
 
-fn scan_pup(corpus: &Path, path: &Path) -> ScannedPup {
+fn scan_pup(corpus: &Path, path: &Path) -> Result<ScannedPup, CommandError> {
     let bytes = filebuffer::FileBuffer::open(path)
-        .unwrap_or_else(|error| die(&format!("read PUP {}: {error}", path.display())));
+        .map_err(|error| CommandError::failed(format!("read PUP {}: {error}", path.display())))?;
     let sha256 = Sha256(cellgov_install::manifest::sha256_of(&bytes)).to_hex();
     let fw = cellgov_install::pup::parse(&bytes)
         .and_then(|pup| {
@@ -90,12 +93,12 @@ fn scan_pup(corpus: &Path, path: &Path) -> ScannedPup {
             Ok((version, format!("0x{:016x}", pup.image_version)))
         })
         .map_err(|error| error.to_string());
-    ScannedPup {
+    Ok(ScannedPup {
         path: store_rel(corpus, path),
         sha256,
         size_bytes: bytes.len() as u64,
         fw,
-    }
+    })
 }
 
 fn expected_doc(row: &PupRow, path: Option<String>) -> PupCorpusEntryDoc {
@@ -271,32 +274,42 @@ fn corpus_is_clean(
         && installed.iter().all(|entry| entry.divergences.is_empty())
 }
 
-pub(crate) fn firmware_verify_corpus(root: &Path, corpus: &Path, format: OutputFormat) {
-    let rows = archive_rows();
-    let scanned: Vec<ScannedPup> = pup_paths(corpus)
-        .iter()
-        .map(|path| scan_pup(corpus, path))
-        .collect();
+pub(crate) fn firmware_verify_corpus(
+    root: &Path,
+    corpus: &Path,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let rows = archive_rows()?;
+    let scanned: Vec<ScannedPup> = pup_paths(corpus)?
+        .into_iter()
+        .map(|path| scan_pup(corpus, &path))
+        .collect::<Result<_, _>>()?;
     let (present, missing, mut mismatched) = classify(&rows, &scanned);
     let by_hash: BTreeMap<&str, &PupRow> = rows
         .iter()
         .map(|row| (row.pup_sha256.as_str(), row))
         .collect();
 
-    let store = view(root);
+    let store = view(root)?;
     let mut candidates = Vec::new();
     for entry in store.inventory.firmware_entries() {
         let manifest = cellgov_install::firmware_verify::load_manifest(&entry.dev_flash_dir())
-            .unwrap_or_else(|error| die(&format!("firmware verify {}: {error}", entry.version)));
+            .map_err(|error| {
+                CommandError::failed(format!("firmware verify {}: {error}", entry.version))
+            })?;
         let manifest_hash = manifest.firmware.pup_sha256.to_hex();
         if let Some(row) = by_hash.get(manifest_hash.as_str()) {
             candidates.push((entry, *row, manifest, manifest_hash));
         }
     }
-    let keys = (!candidates.is_empty()).then(|| {
-        cellgov_install::keys::KeyVault::load_for_vfs(root)
-            .unwrap_or_else(|error| die(&error.to_string()))
-    });
+    let keys = if candidates.is_empty() {
+        None
+    } else {
+        Some(
+            cellgov_install::keys::KeyVault::load_for_vfs(root)
+                .map_err(|error| CommandError::failed(error.to_string()))?,
+        )
+    };
     let mut installed = Vec::new();
     for (entry, row, manifest, manifest_hash) in candidates {
         if let Some(mismatch) =
@@ -315,7 +328,7 @@ pub(crate) fn firmware_verify_corpus(root: &Path, corpus: &Path, format: OutputF
             &store,
             entry,
             keys.as_ref().expect("candidates made the vault load"),
-        ));
+        )?);
     }
     mismatched.sort_by(|a, b| a.subject.cmp(&b.subject));
     let clean = corpus_is_clean(&missing, &mismatched, &installed);
@@ -328,8 +341,12 @@ pub(crate) fn firmware_verify_corpus(root: &Path, corpus: &Path, format: OutputF
         installed,
         clean,
     };
-    emit(format, &doc, || print!("{}", render(&doc)));
-    std::process::exit(if doc.clean { 0 } else { exit_codes::DIVERGED });
+    emit(format, &doc, || print!("{}", render(&doc)))?;
+    Ok(CommandExitCode::new(if doc.clean {
+        0
+    } else {
+        exit_codes::DIVERGED
+    }))
 }
 
 fn render(doc: &PupCorpusVerifyDoc) -> String {

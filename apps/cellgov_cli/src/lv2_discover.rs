@@ -3,9 +3,9 @@
 use cellgov_ppu::lv2_stub::{self, Lv2StubClassification, Lv2StubClassificationError};
 use cellgov_ppu::lv2_table::{self, Lv2TableDiscovery};
 
-use crate::cli::exit::die;
+use crate::cli::exit::CommandError;
 use crate::cli::parse::{Lv2DiscoverArgs, OutputFormat};
-use crate::cli::self_load::{decrypt_ppu_self_or_die, load_file_or_die};
+use crate::cli::self_load::{decrypt_ppu_self, load_file};
 use crate::cli::title::resolve_ps3_vfs_root;
 
 #[derive(Debug, serde::Serialize)]
@@ -89,12 +89,12 @@ pub(crate) fn run(
     args: &Lv2DiscoverArgs,
     vfs_flag: Option<&std::path::Path>,
     format: OutputFormat,
-) {
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
-    let raw = load_file_or_die(&args.path);
-    let elf = decrypt_ppu_self_or_die(&raw, &args.path, &vfs_root);
+) -> Result<(), CommandError> {
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
+    let raw = load_file(&args.path)?;
+    let elf = decrypt_ppu_self(&raw, &args.path, &vfs_root)?;
     let discovery = lv2_table::discover(&elf)
-        .unwrap_or_else(|error| die(&format!("lv2-discover: {}: {error}", args.path)));
+        .map_err(|error| CommandError::failed(format!("lv2-discover: {}: {error}", args.path)))?;
     let classification = match lv2_stub::classify_discovered(&elf, discovery) {
         Ok(classification) => classification_document(&classification),
         Err(error) => refusal_document(error),
@@ -107,6 +107,7 @@ pub(crate) fn run(
         ),
         OutputFormat::Human => render_human(&doc),
     }
+    Ok(())
 }
 
 fn document(

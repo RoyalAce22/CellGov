@@ -4,6 +4,7 @@ use std::path::Path;
 
 use cellgov_terminal::caps::RenderFlags;
 
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::FirmwareInstallArgs;
 
 #[cfg(feature = "decrypt")]
@@ -19,16 +20,21 @@ use cellgov_install::store::CoreOsRecord;
 use cellgov_terminal::progress::ProgressBar;
 
 #[cfg(feature = "decrypt")]
-use super::{container_label, install_caps, map_container_or_die, megabytes, vault_or_die};
+use super::{container_label, install_caps, map_container, megabytes, vault};
 
 #[cfg(not(feature = "decrypt"))]
-pub(crate) fn install(_args: &FirmwareInstallArgs, _store: &Path, _render: RenderFlags, _v: bool) {
-    crate::cli::exit::die(
-        &super::StoreCliError::DecryptFeatureDisabled {
+pub(crate) fn install(
+    _args: &FirmwareInstallArgs,
+    _store: &Path,
+    _render: RenderFlags,
+    _v: bool,
+) -> Result<CommandExitCode, CommandError> {
+    Err(CommandError::failed(
+        super::StoreCliError::DecryptFeatureDisabled {
             command: "firmware install".to_string(),
         }
         .to_string(),
-    )
+    ))
 }
 
 /// Install system software from a PUP into `store`, or with
@@ -40,11 +46,11 @@ pub(crate) fn install(
     store: &Path,
     render: RenderFlags,
     verbose: bool,
-) {
+) -> Result<CommandExitCode, CommandError> {
     // Vault before container: a missing one should not cost a full PUP
     // read first.
-    let keys = vault_or_die(store);
-    let pup_data = map_container_or_die(&args.path);
+    let keys = vault(store)?;
+    let pup_data = map_container(&args.path)?;
 
     if args.kernel_only {
         println!(
@@ -52,12 +58,19 @@ pub(crate) fn install(
             args.path.display(),
             megabytes(pup_data.len()),
         );
-        let outcome =
-            cellgov_install::firmware_install::complete_kernel(&pup_data, &keys, store, &())
-                .unwrap_or_else(|e| {
-                    eprintln!("install --kernel-only failed: {e}");
-                    super::super::exit::exit_failed();
-                });
+        let outcome = match cellgov_install::firmware_install::complete_kernel(
+            &pup_data,
+            &keys,
+            store,
+            &(),
+        ) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                return Err(CommandError::failed(format!(
+                    "install --kernel-only failed: {error}"
+                )))
+            }
+        };
         println!(
             "  firmware {}: entry {}",
             outcome.version,
@@ -69,10 +82,7 @@ pub(crate) fn install(
         }
         report_core_os(&outcome.core_os);
         let status = kernel_only_exit_status(&outcome.core_os);
-        if status != 0 {
-            std::process::exit(status);
-        }
-        return;
+        return Ok(CommandExitCode::new(status));
     }
 
     println!(
@@ -99,8 +109,7 @@ pub(crate) fn install(
         }
         Err(e) => {
             bar.abort();
-            report_install_failure(&e);
-            super::super::exit::exit_failed();
+            return Err(CommandError::failed(install_failure_message(&e)));
         }
     };
 
@@ -127,6 +136,7 @@ pub(crate) fn install(
     report_omissions(&outcome.omissions);
     report_core_os(&outcome.core_os);
     super::report_rename_retries(outcome.rename_retries);
+    Ok(CommandExitCode::SUCCESS)
 }
 
 #[cfg(feature = "decrypt")]
@@ -202,11 +212,12 @@ fn plural(n: usize, one: &str, many: &str) -> String {
 }
 
 #[cfg(feature = "decrypt")]
-fn report_install_failure(e: &FirmwareInstallError) {
-    eprintln!("install failed: {e}");
+fn install_failure_message(e: &FirmwareInstallError) -> String {
+    let mut message = format!("install failed: {e}");
     for line in install_failure_detail(e) {
-        eprintln!("  {line}");
+        message.push_str(&format!("\n  {line}"));
     }
+    message
 }
 
 /// The per-package and per-entry failures behind `e`, one line each.

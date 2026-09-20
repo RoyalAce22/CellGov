@@ -140,7 +140,11 @@ fn explore_micro_runs_for_elf_microtests() {
         // moved it for every test running in parallel in this binary,
         // and a panic between the two calls never restored it.
         let result = cellgov_explore::explore(
-            || build_lv2_fixture_under(repo_root, name).build_runtime(),
+            || {
+                build_lv2_fixture_under(repo_root, name)
+                    .expect("microtest fixture loads")
+                    .build_runtime()
+            },
             &config,
         );
         assert!(

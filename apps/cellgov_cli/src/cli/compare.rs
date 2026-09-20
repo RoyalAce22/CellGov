@@ -8,15 +8,19 @@ use cellgov_compare::{
 };
 use cellgov_testkit::fixtures::ScenarioFixture;
 
-use super::exit::{die, die_with_status};
-use super::parse::{die_usage, CompareArgs, OutputFormat};
+use super::exit::{CommandError, CommandExitCode};
+use super::parse::{CompareArgs, OutputFormat};
 use super::scenarios::scenario_factory;
-use super::self_load::load_file_or_die;
+use super::self_load::load_file;
 use crate::cli::exit_codes;
 
 // -- compare dispatch (top-level) --
 
-pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&str]) {
+pub(crate) fn run(
+    args: &CompareArgs,
+    format: OutputFormat,
+    scenarios_list: &[&str],
+) -> Result<CommandExitCode, CommandError> {
     let target = args.target.as_str();
     let mode: CompareMode = args.mode.into();
     let save_path = args.save_baseline.clone();
@@ -28,7 +32,10 @@ pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&s
     // the subcommand never reaches the conflict check. A baseline run
     // prints no report, so the flag would be dropped.
     if save_path.is_some() && format != OutputFormat::Human {
-        die_usage("--format applies to a run that produces a comparison report only");
+        return Err(CommandError::status(
+            exit_codes::USAGE,
+            "--format applies to a run that produces a comparison report only",
+        ));
     }
 
     if target.ends_with(".toml") {
@@ -40,53 +47,59 @@ pub(crate) fn run(args: &CompareArgs, format: OutputFormat, scenarios_list: &[&s
             against_path,
             args.observations_dir.clone(),
             scenarios_list,
-        );
+        )
     } else {
         // Multi-observation compare needs a manifest's memory-region
         // descriptors. A bare scenario has none, so the flag would be
         // read and then never used.
         if args.observations_dir.is_some() {
-            die_usage("--observations-dir applies to a manifest.toml target only");
+            return Err(CommandError::status(
+                exit_codes::USAGE,
+                "--observations-dir applies to a manifest.toml target only",
+            ));
         }
         match scenario_factory(target) {
             Some(factory) => {
                 if let Some(path) = save_path.as_deref() {
                     // A bare scenario names no regions, so neither
                     // side of the round trip observes any.
-                    save_baseline(&factory, target, path, &[]);
+                    save_baseline(&factory, target, path, &[])?;
+                    Ok(CommandExitCode::SUCCESS)
                 } else if let Some(path) = against_path.as_deref() {
-                    compare_against_baseline(&factory, target, path, mode, format);
+                    compare_against_baseline(&factory, target, path, mode, format)
                 } else {
-                    run_compare(&factory, target, mode, format);
+                    run_compare(&factory, target, mode, format)?;
+                    Ok(CommandExitCode::SUCCESS)
                 }
             }
-            None => die(&format!(
+            None => Err(CommandError::failed(format!(
                 "unknown scenario: {target}\navailable: {}",
                 scenarios_list.join(", ")
-            )),
+            ))),
         }
     }
 }
 
-/// Observe `name` twice and die unless both runs yield the same observation.
+/// Checks that two observations of `name` match.
 ///
-/// A region both runs refuse the same way is a failed run. The message
-/// names the region so the operator can find its manifest line. A
-/// region only one run refuses is a determinism break.
+/// # Errors
+///
+/// - Returns status 1 if both runs refuse the same region.
+/// - Returns status 3 if the observations differ.
 fn require_determinism(
     factory: &dyn Fn() -> ScenarioFixture,
     name: &str,
     regions: &[RegionDescriptor],
-) -> Observation {
-    let run = observe_checked(factory, regions).unwrap_or_else(|e| {
-        let msg = match &e {
-            DeterminismError::Observe(e) => format!("observing {name}: {e}"),
-            e => format!("determinism break for {name}: {e}"),
+) -> Result<Observation, CommandError> {
+    let run = observe_checked(factory, regions).map_err(|error| {
+        let message = match &error {
+            DeterminismError::Observe(error) => format!("observing {name}: {error}"),
+            error => format!("determinism break for {name}: {error}"),
         };
-        die_with_status(&msg, determinism_exit_status(&e))
-    });
+        CommandError::status(determinism_exit_status(&error), message)
+    })?;
     report_first_invariant_break(run.first_invariant_break.as_deref());
-    run.observation
+    Ok(run.observation)
 }
 
 /// Report a run's first LV2 host invariant break, the line every
@@ -100,13 +113,7 @@ pub(super) fn report_first_invariant_break(line: Option<&str>) {
     }
 }
 
-/// The status a failed twice-run check exits with.
-///
-/// The two runs took identical inputs. A field that differs between
-/// them is the shared "runs that had to reproduce each other disagreed"
-/// outcome. A refusal to observe that only one run raised is the same
-/// outcome. Two runs that refused the same way compared nothing; the
-/// check ran and failed.
+/// Distinguishes an observation refusal from disagreement between two runs.
 fn determinism_exit_status(e: &DeterminismError) -> i32 {
     match e {
         DeterminismError::Observe(_) => exit_codes::FAILED,
@@ -128,22 +135,23 @@ fn save_baseline(
     name: &str,
     path: &str,
     regions: &[RegionDescriptor],
-) {
-    let obs = require_determinism(factory, name, regions);
+) -> Result<(), CommandError> {
+    let obs = require_determinism(factory, name, regions)?;
     let p = std::path::Path::new(path);
     if let Some(parent) = p.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).unwrap_or_else(|e| {
-                die(&format!(
-                    "failed to create baseline parent dir {}: {e}",
+            std::fs::create_dir_all(parent).map_err(|error| {
+                CommandError::failed(format!(
+                    "failed to create baseline parent dir {}: {error}",
                     parent.display()
                 ))
-            });
+            })?;
         }
     }
     cellgov_compare::baseline::save(&obs, p)
-        .unwrap_or_else(|e| die(&format!("failed to save baseline: {e:?}")));
+        .map_err(|error| CommandError::failed(format!("failed to save baseline: {error:?}")))?;
     println!("saved baseline for {name} to {path}");
+    Ok(())
 }
 
 fn compare_against_baseline(
@@ -152,10 +160,12 @@ fn compare_against_baseline(
     path: &str,
     mode: CompareMode,
     format: OutputFormat,
-) {
-    let obs = require_determinism(factory, name, &[]);
-    let baseline = cellgov_compare::baseline::load(std::path::Path::new(path))
-        .unwrap_or_else(|e| die(&format!("failed to load baseline from {path}: {e:?}")));
+) -> Result<CommandExitCode, CommandError> {
+    let obs = require_determinism(factory, name, &[])?;
+    let baseline =
+        cellgov_compare::baseline::load(std::path::Path::new(path)).map_err(|error| {
+            CommandError::failed(format!("failed to load baseline from {path}: {error:?}"))
+        })?;
 
     report_identity(&baseline, path, &obs, name);
     let result = compare(&baseline, &obs, mode);
@@ -174,9 +184,13 @@ fn compare_against_baseline(
             );
         }
     }
-    if result.classification == Classification::Divergence {
-        std::process::exit(exit_codes::FAILED);
-    }
+    Ok(CommandExitCode::new(
+        if result.classification == Classification::Divergence {
+            exit_codes::FAILED
+        } else {
+            0
+        },
+    ))
 }
 
 fn report_identity(a: &Observation, a_label: &str, b: &Observation, b_label: &str) {
@@ -190,8 +204,8 @@ fn run_compare(
     name: &str,
     mode: CompareMode,
     format: OutputFormat,
-) {
-    let obs = require_determinism(factory, name, &[]);
+) -> Result<(), CommandError> {
+    let obs = require_determinism(factory, name, &[])?;
     match format {
         OutputFormat::Human => {
             println!("scenario: {name}");
@@ -221,6 +235,7 @@ fn run_compare(
             );
         }
     }
+    Ok(())
 }
 
 /// Report, or refuse, a manifest that names no scenario this runner has.
@@ -234,15 +249,16 @@ fn unsupported_manifest(
     test_name: &str,
     reason: &str,
     baseline_flag: Option<&str>,
-) {
+) -> Result<(), CommandError> {
     match baseline_flag {
-        Some(flag) => die(&format!(
+        Some(flag) => Err(CommandError::failed(format!(
             "manifest {manifest_path}: {reason}; {flag} needs a CellGov run, and this manifest names none"
-        )),
+        ))),
         None => {
             println!("test: {test_name}");
             println!("classification: UNSUPPORTED");
             println!("reason: {reason}");
+            Ok(())
         }
     }
 }
@@ -255,9 +271,13 @@ fn run_manifest_compare(
     against_path: Option<String>,
     observations_dir: Option<String>,
     scenarios_list: &[&str],
-) {
-    let manifest = cellgov_compare::manifest::load(std::path::Path::new(manifest_path))
-        .unwrap_or_else(|e| die(&format!("failed to load manifest {manifest_path}: {e:?}")));
+) -> Result<CommandExitCode, CommandError> {
+    let manifest =
+        cellgov_compare::manifest::load(std::path::Path::new(manifest_path)).map_err(|error| {
+            CommandError::failed(format!(
+                "failed to load manifest {manifest_path}: {error:?}"
+            ))
+        })?;
 
     let test_name = &manifest.test.name;
 
@@ -292,8 +312,8 @@ fn run_manifest_compare(
                 test_name,
                 "no [cellgov] section in manifest",
                 baseline_flag,
-            );
-            return;
+            )?;
+            return Ok(CommandExitCode::SUCCESS);
         }
     };
 
@@ -309,23 +329,25 @@ fn run_manifest_compare(
                     scenarios_list.join(", ")
                 ),
                 baseline_flag,
-            );
-            return;
+            )?;
+            return Ok(CommandExitCode::SUCCESS);
         }
     };
 
     if let Some(path) = save_path {
-        save_baseline(&factory, test_name, &path, &regions);
-        return;
+        save_baseline(&factory, test_name, &path, &regions)?;
+        return Ok(CommandExitCode::SUCCESS);
     }
 
-    let obs = require_determinism(&factory, test_name, &regions);
+    let obs = require_determinism(&factory, test_name, &regions)?;
 
     if let Some(dir) = observations_dir {
         let (baseline_paths, baselines): (Vec<std::path::PathBuf>, Vec<Observation>) =
-            load_observations_with_paths(&dir).into_iter().unzip();
+            load_observations_with_paths(&dir)?.into_iter().unzip();
         if baselines.is_empty() {
-            die(&format!("no observation .json files found in {dir}"));
+            return Err(CommandError::failed(format!(
+                "no observation .json files found in {dir}"
+            )));
         }
         for (path, baseline) in baseline_paths.iter().zip(&baselines) {
             report_identity(baseline, &path.display().to_string(), &obs, test_name);
@@ -348,11 +370,13 @@ fn run_manifest_compare(
             }
         }
         if result.classification.exits_failure() {
-            std::process::exit(exit_codes::FAILED);
+            return Ok(CommandExitCode::new(exit_codes::FAILED));
         }
     } else if let Some(path) = against_path {
-        let baseline = cellgov_compare::baseline::load(std::path::Path::new(&path))
-            .unwrap_or_else(|e| die(&format!("failed to load baseline from {path}: {e:?}")));
+        let baseline =
+            cellgov_compare::baseline::load(std::path::Path::new(&path)).map_err(|error| {
+                CommandError::failed(format!("failed to load baseline from {path}: {error:?}"))
+            })?;
 
         report_identity(&baseline, &path, &obs, test_name);
         let result = compare(&baseline, &obs, mode);
@@ -373,7 +397,7 @@ fn run_manifest_compare(
             }
         }
         if result.classification == Classification::Divergence {
-            std::process::exit(exit_codes::FAILED);
+            return Ok(CommandExitCode::new(exit_codes::FAILED));
         }
     } else {
         match format {
@@ -409,29 +433,38 @@ fn run_manifest_compare(
             }
         }
     }
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// Load every `.json` observation in a directory, sorted by name.
-/// Read failures die via [`die`].
-pub(crate) fn load_observations_from_dir(dir: &str) -> Vec<Observation> {
-    load_observations_with_paths(dir)
+///
+/// # Errors
+///
+/// Returns an error if the command cannot load an observation.
+pub(crate) fn load_observations_from_dir(dir: &str) -> Result<Vec<Observation>, CommandError> {
+    Ok(load_observations_with_paths(dir)?
         .into_iter()
         .map(|(_, obs)| obs)
-        .collect()
+        .collect())
 }
 
 /// [`load_observations_from_dir`] with the file each observation was
 /// read from, so a report can name the file.
-fn load_observations_with_paths(dir: &str) -> Vec<(std::path::PathBuf, Observation)> {
-    let rd = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| die(&format!("failed to read observations directory {dir}: {e}")));
+fn load_observations_with_paths(
+    dir: &str,
+) -> Result<Vec<(std::path::PathBuf, Observation)>, CommandError> {
+    let rd = std::fs::read_dir(dir).map_err(|error| {
+        CommandError::failed(format!(
+            "failed to read observations directory {dir}: {error}"
+        ))
+    })?;
     let mut entries: Vec<std::path::PathBuf> = Vec::new();
     for entry in rd {
-        let entry = entry.unwrap_or_else(|e| {
-            die(&format!(
-                "observations directory {dir}: failed to read entry: {e}"
+        let entry = entry.map_err(|error| {
+            CommandError::failed(format!(
+                "observations directory {dir}: failed to read entry: {error}"
             ))
-        });
+        })?;
         let path = entry.path();
         if path.extension().is_some_and(|ext| ext == "json") {
             entries.push(path);
@@ -442,13 +475,14 @@ fn load_observations_with_paths(dir: &str) -> Vec<(std::path::PathBuf, Observati
     entries
         .into_iter()
         .map(|path| {
-            let obs = cellgov_compare::baseline::load(&path).unwrap_or_else(|e| {
-                die(&format!(
-                    "failed to load observation {}: {e:?}",
-                    path.display()
-                ))
-            });
-            (path, obs)
+            cellgov_compare::baseline::load(&path)
+                .map(|obs| (path.clone(), obs))
+                .map_err(|error| {
+                    CommandError::failed(format!(
+                        "failed to load observation {}: {error:?}",
+                        path.display()
+                    ))
+                })
         })
         .collect()
 }
@@ -456,13 +490,21 @@ fn load_observations_with_paths(dir: &str) -> Vec<(std::path::PathBuf, Observati
 // -- diff observations --
 
 /// Diff two JSON-encoded [`Observation`] files.
-pub(crate) fn run_compare_observations(a_path: &str, b_path: &str, format: OutputFormat) {
-    let a_bytes = load_file_or_die(a_path);
-    let b_bytes = load_file_or_die(b_path);
-    let a: cellgov_compare::Observation =
-        serde_json::from_slice(&a_bytes).unwrap_or_else(|e| die(&format!("parse {a_path}: {e}")));
-    let b: cellgov_compare::Observation =
-        serde_json::from_slice(&b_bytes).unwrap_or_else(|e| die(&format!("parse {b_path}: {e}")));
+///
+/// # Errors
+///
+/// Returns an error if the command cannot load an input.
+pub(crate) fn run_compare_observations(
+    a_path: &str,
+    b_path: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let a_bytes = load_file(a_path)?;
+    let b_bytes = load_file(b_path)?;
+    let a = serde_json::from_slice(&a_bytes)
+        .map_err(|error| CommandError::failed(format!("parse {a_path}: {error}")))?;
+    let b = serde_json::from_slice(&b_bytes)
+        .map_err(|error| CommandError::failed(format!("parse {b_path}: {error}")))?;
 
     let result = cellgov_compare::compare_observations(&a, &b);
     // The report prints before the verdict. A reader who stops at the
@@ -510,9 +552,11 @@ pub(crate) fn run_compare_observations(a_path: &str, b_path: &str, format: Outpu
             }
         }
     }
-    if result.has_divergence() {
-        std::process::exit(exit_codes::FAILED);
-    }
+    Ok(CommandExitCode::new(if result.has_divergence() {
+        exit_codes::FAILED
+    } else {
+        0
+    }))
 }
 
 // -- diverge --
@@ -526,18 +570,20 @@ const EXIT_MISSING_STEP: i32 = exit_codes::command_specific(30);
 
 /// Streaming scan of two per-step state-trace files.
 ///
+/// # Exit status
+///
+/// - Status 0 means every `PpuStateHash` record matches.
+/// - Status 1 means the step or trace length differs.
+/// - [`EXIT_CORRUPT_TRACE`] means a trace failed to decode before the
+///   scan finished. The scan prints no verdict for that file.
+///
 /// # Errors
 ///
-/// Exit codes:
-///
-/// - 0 -- every `PpuStateHash` record matches.
-/// - 1 -- a step verdict or a length verdict.
-/// - [`EXIT_CORRUPT_TRACE`] -- a trace failed to decode before the
-///   scan finished, so the scan prints no verdict for that file.
-pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
+/// Returns an error if a trace file cannot be read.
+pub(crate) fn run_diverge(a_path: &str, b_path: &str) -> Result<CommandExitCode, CommandError> {
     use cellgov_compare::{diverge, DivergeField, DivergeReport, TraceDecodeError};
-    let a_bytes = load_file_or_die(a_path);
-    let b_bytes = load_file_or_die(b_path);
+    let a_bytes = load_file(a_path)?;
+    let b_bytes = load_file(b_path)?;
     report_trace_identity(&a_bytes, a_path, &b_bytes, b_path);
     match diverge(&a_bytes, &b_bytes) {
         DivergeReport::Identical { count } => {
@@ -547,6 +593,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
                     "WARN: zero PpuStateHash records matched; trace files may be empty or truncated"
                 );
             }
+            Ok(CommandExitCode::SUCCESS)
         }
         DivergeReport::Differs {
             step,
@@ -563,7 +610,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
             println!(
                 "DIVERGE step={step} field={field_str}  a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  a_hash=0x{a_hash:x} b_hash=0x{b_hash:x}"
             );
-            std::process::exit(exit_codes::FAILED);
+            Ok(CommandExitCode::new(exit_codes::FAILED))
         }
         DivergeReport::LengthDiffers {
             common_count,
@@ -573,7 +620,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
             println!(
                 "LENGTH_DIFFERS  common={common_count}  a={a_count}  b={b_count}  ({a_path} vs {b_path})"
             );
-            std::process::exit(exit_codes::FAILED);
+            Ok(CommandExitCode::new(exit_codes::FAILED))
         }
         DivergeReport::CorruptTrace {
             common_count,
@@ -587,7 +634,7 @@ pub(crate) fn run_diverge(a_path: &str, b_path: &str) {
                 describe(a_error),
                 describe(b_error)
             );
-            std::process::exit(EXIT_CORRUPT_TRACE);
+            Ok(CommandExitCode::new(EXIT_CORRUPT_TRACE))
         }
     }
 }
@@ -607,18 +654,24 @@ fn report_trace_identity(a: &[u8], a_path: &str, b: &[u8], b_path: &str) {
 
 /// Per-field register diff at the named step.
 ///
+/// # Exit status
+///
+/// - Status 0 means every fingerprint field and the PC agree.
+/// - Status 1 means a register field or the PC differs.
+/// - [`EXIT_MISSING_STEP`] means one or both windows omit the step.
+/// - [`EXIT_CORRUPT_TRACE`] means a zoom trace failed to decode.
+///
 /// # Errors
 ///
-/// Exit codes:
-///
-/// - 0 -- every fingerprint field and the PC agree at the step.
-/// - 1 -- a register field or the PC differs.
-/// - [`EXIT_MISSING_STEP`] -- one or both windows omit the step.
-/// - [`EXIT_CORRUPT_TRACE`] -- a zoom trace failed to decode.
-pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
+/// Returns an error if a trace file cannot be read.
+pub(crate) fn run_zoom(
+    a_path: &str,
+    b_path: &str,
+    step: u64,
+) -> Result<CommandExitCode, CommandError> {
     use cellgov_compare::{zoom_lookup, ZoomLookup};
-    let a_bytes = load_file_or_die(a_path);
-    let b_bytes = load_file_or_die(b_path);
+    let a_bytes = load_file(a_path)?;
+    let b_bytes = load_file(b_path)?;
     match zoom_lookup(&a_bytes, &b_bytes, step) {
         ZoomLookup::Found {
             step,
@@ -634,9 +687,10 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
                     println!(
                         "PC_DIFF step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  registers agree but control flow diverged; the PC split is the divergence"
                     );
-                    std::process::exit(exit_codes::FAILED);
+                    return Ok(CommandExitCode::new(exit_codes::FAILED));
                 }
                 println!("NO_FIELD_DIFF step={step} pc=0x{a_pc:x}  snapshots agree on every fingerprint field and PC; if the hash stream diverged at this step, the harness is skewing snapshots against hashes -- investigate, do not resume the scan");
+                Ok(CommandExitCode::SUCCESS)
             } else {
                 println!(
                     "ZOOM step={step} a_pc=0x{a_pc:x} b_pc=0x{b_pc:x}  {} field(s) differ:",
@@ -645,7 +699,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
                 for d in &diffs {
                     println!("  {:<5}  a=0x{:016x}  b=0x{:016x}", d.field, d.a, d.b);
                 }
-                std::process::exit(exit_codes::FAILED);
+                Ok(CommandExitCode::new(exit_codes::FAILED))
             }
         }
         ZoomLookup::MissingStep {
@@ -658,7 +712,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
             println!(
                 "MISSING_STEP step={step}  a_has_step={a_has_step}  b_has_step={b_has_step}  (zoom window did not cover this step on at least one side)"
             );
-            std::process::exit(EXIT_MISSING_STEP);
+            Ok(CommandExitCode::new(EXIT_MISSING_STEP))
         }
         ZoomLookup::CorruptTrace { a_error, b_error } => {
             let describe = |e: Option<String>| e.unwrap_or_else(|| "ok".into());
@@ -667,7 +721,7 @@ pub(crate) fn run_zoom(a_path: &str, b_path: &str, step: u64) {
                 describe(a_error),
                 describe(b_error)
             );
-            std::process::exit(EXIT_CORRUPT_TRACE);
+            Ok(CommandExitCode::new(EXIT_CORRUPT_TRACE))
         }
     }
 }

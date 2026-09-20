@@ -179,15 +179,19 @@ pub(super) struct RunSpans {
 }
 
 impl RunSpans {
-    /// Start the run's span and read the toggle once.
-    pub(super) fn start() -> Self {
+    /// Reads the profile toggle once for all run spans.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the environment value is not a Boolean.
+    pub(super) fn start() -> Result<Self, crate::cli::exit::CommandError> {
         let now = Instant::now();
-        Self {
-            enabled: crate::cli::env::parse_env_bool(crate::env_vars::RUNGAME_PROFILE),
+        Ok(Self {
+            enabled: crate::cli::env::parse_env_bool(crate::env_vars::RUNGAME_PROFILE)?,
             start: now,
             prepared: now,
             stepped: now,
-        }
+        })
     }
 
     /// Close the prepare span.

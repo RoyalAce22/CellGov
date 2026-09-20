@@ -24,9 +24,9 @@ use cellgov_explore::{ExplorationConfig, ExplorationResult, OutcomeClass, StopCl
 use super::window::{open_window, start_past_cap, WindowStart};
 use crate::cli::boot_cmd::{firmware_module_dir, resolve_boot_inputs, ResolvedPlan};
 use crate::cli::compare::report_first_invariant_break;
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
-use crate::cli::parse::{die_usage, ExploreTitleArgs, OutputFormat};
+use crate::cli::parse::{ExploreTitleArgs, OutputFormat};
 use crate::cli::title::resolve_ps3_vfs_root;
 
 /// The subcommand name every refusal below carries.
@@ -67,9 +67,13 @@ impl BootSink for StderrSink {
     }
 }
 
-pub(super) fn run(args: &ExploreTitleArgs, format: OutputFormat, vfs_flag: Option<&Path>) {
+pub(super) fn run(
+    args: &ExploreTitleArgs,
+    format: OutputFormat,
+    vfs_flag: Option<&Path>,
+) -> Result<CommandExitCode, CommandError> {
     let start = window_start(args);
-    let vfs_root = resolve_ps3_vfs_root(vfs_flag);
+    let vfs_root = resolve_ps3_vfs_root(vfs_flag)?;
     let inputs = resolve_boot_inputs(
         &args.selector,
         &args.selection,
@@ -79,28 +83,31 @@ pub(super) fn run(args: &ExploreTitleArgs, format: OutputFormat, vfs_flag: Optio
         &vfs_root,
         None,
         SUBCMD,
-    );
-    let firmware_dir = firmware_module_dir(&inputs.composition);
+    )?;
+    let firmware_dir = firmware_module_dir(&inputs.composition)?;
     let plan = ResolvedPlan::resolve(&inputs.title, &inputs.composition);
     // Without a cap of its own the exploration takes the cell's, so a
     // window opens over the same prefix the anchor covers.
-    let max_steps = args
-        .max_steps
-        .unwrap_or_else(|| plan.max_steps_usize(&inputs.title));
+    let max_steps = match args.max_steps {
+        Some(max_steps) => max_steps,
+        None => plan.max_steps_usize(&inputs.title)?,
+    };
     let checkpoint = plan.as_plan().checkpoint;
-    let mut rt = prepared_runtime(&inputs, firmware_dir.as_deref(), max_steps);
+    let mut rt = prepared_runtime(&inputs, firmware_dir.as_deref(), max_steps)?;
     crate::game::configure_rsx_from_manifest(&mut rt, &inputs.title);
     // Both counts are runtime steps; see the doc on `WindowStart::Step`.
     if let Some(refusal) = start_past_cap(start, rt.max_steps()) {
         // A flag value this boot cannot satisfy is a usage error.
-        die_usage(&refusal);
+        return Err(CommandError::status(exit_codes::USAGE, refusal));
     }
 
     let opened_at = match open_window(&mut rt, start, checkpoint) {
         Ok(step) => step,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(EXIT_WINDOW_NEVER_OPENED);
+        Err(error) => {
+            return Err(CommandError::status(
+                EXIT_WINDOW_NEVER_OPENED,
+                error.to_string(),
+            ))
         }
     };
 
@@ -130,7 +137,7 @@ pub(super) fn run(args: &ExploreTitleArgs, format: OutputFormat, vfs_flag: Optio
         OutputFormat::Human => print!("{}", human(&window, &result)),
         OutputFormat::Json => println!("{}", json(&window, &result)),
     }
-    std::process::exit(exit_code(&window, &result));
+    Ok(CommandExitCode::new(exit_code(&window, &result)))
 }
 
 /// The start condition the flags name.
@@ -144,8 +151,7 @@ fn window_start(args: &ExploreTitleArgs) -> WindowStart {
     }
 }
 
-/// Bring the title to a runtime one `step()` from its first
-/// instruction. A refusal ends the process.
+/// Bring the title to a runtime one `step()` from its first instruction.
 ///
 /// No staged child-init pass runs here or in the explorer's replays;
 /// [`open_window`] refuses the first one it meets.
@@ -153,7 +159,7 @@ fn prepared_runtime(
     inputs: &crate::cli::boot_cmd::BootInputs,
     firmware_dir: Option<&str>,
     max_steps: usize,
-) -> Runtime {
+) -> Result<Runtime, CommandError> {
     let prepared: PreparedBoot = prepare(PrepareOptions {
         title: TitleOptions {
             manifest: &inputs.title,
@@ -189,8 +195,8 @@ fn prepared_runtime(
             taps: Rc::new(cellgov_boot::NoTaps),
         },
     })
-    .unwrap_or_else(|e| die(&format!("{SUBCMD}: {e}")));
-    prepared.rt
+    .map_err(|error| CommandError::failed(format!("{SUBCMD}: {error}")))?;
+    Ok(prepared.rt)
 }
 
 /// Which part of the boot a verdict covers.

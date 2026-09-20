@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::Path;
 
-use super::exit::die;
+use super::exit::CommandError;
 use super::parse::Rpcs3AttributeArgs;
 
 const HEADER_MAGIC: u32 = 0xC0E6_0001;
@@ -234,15 +234,21 @@ fn read_u64<R: Read>(r: &mut R, field: &'static str) -> Result<u64, ParseError> 
     Ok(u64::from_le_bytes(buf))
 }
 
-/// Run one of the query modes (`--addr`, `--list`, `--ranked`,
-/// `--name`). All modes stream the trace.
-pub fn run(args: &Rpcs3AttributeArgs) {
+/// Streams an RPCS3 trace through the selected query mode.
+///
+/// # Errors
+///
+/// Returns an error in these cases:
+///
+/// - The trace path does not name a file.
+/// - The trace cannot be parsed.
+pub fn run(args: &Rpcs3AttributeArgs) -> Result<(), CommandError> {
     let path: &Path = &args.trace;
     let trace_path = path.display();
     if !path.is_file() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "trace file not found: {trace_path} (did the patched runner produce one?)"
-        ));
+        )));
     }
 
     let want_list = args.list;
@@ -255,7 +261,7 @@ pub fn run(args: &Rpcs3AttributeArgs) {
     let mut name_hits: Vec<CallRecord> = Vec::new();
     let mut tally: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
 
-    if let Err(e) = parse_streaming(path, |rec| {
+    parse_streaming(path, |rec| {
         total_records += 1;
         if total_records.is_multiple_of(1_000_000) {
             eprintln!("rpcs3-attribute: streamed {total_records} records...");
@@ -283,9 +289,8 @@ pub fn run(args: &Rpcs3AttributeArgs) {
             }
         }
         Ok(())
-    }) {
-        die(&format!("failed to parse trace: {e}"));
-    }
+    })
+    .map_err(|error| CommandError::failed(format!("failed to parse trace: {error}")))?;
 
     eprintln!("rpcs3-attribute: streamed {total_records} record(s) from {trace_path}",);
 
@@ -332,6 +337,7 @@ pub fn run(args: &Rpcs3AttributeArgs) {
             }
         }
     }
+    Ok(())
 }
 
 fn print_record(rec: &CallRecord, indent: &str) {

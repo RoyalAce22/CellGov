@@ -16,9 +16,7 @@ pub(crate) mod title;
 pub(crate) mod uninstall;
 
 #[cfg(feature = "decrypt")]
-pub(crate) use container::{
-    container_label, install_caps, map_container_or_die, megabytes, vault_or_die,
-};
+pub(crate) use container::{container_label, install_caps, map_container, megabytes, vault};
 pub(crate) use error::StoreCliError;
 pub(crate) use registry::registry_dir;
 

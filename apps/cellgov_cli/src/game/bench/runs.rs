@@ -19,6 +19,10 @@ use cellgov_boot::manifest::CellKey;
 ///
 /// Panics if `policy.runs` is zero. A set of no runs has nothing to
 /// compare, and the argument parser refuses the value.
+///
+/// # Errors
+///
+/// Returns an error if a child does not produce a valid result.
 pub fn bench_boot_runs(
     opts: BenchOptions<'_>,
     policy: ThroughputPolicy,
@@ -152,7 +156,7 @@ pub fn bench_boot_runs(
         for failure in &determinism_failures {
             println!("    {failure}");
         }
-        for line in locate_divergence(opts, &runs) {
+        for line in locate_divergence(opts, &runs)? {
             println!("    {line}");
         }
     }

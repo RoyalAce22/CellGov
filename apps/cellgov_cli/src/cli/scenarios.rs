@@ -5,7 +5,8 @@
 use cellgov_testkit::fixtures::{self, ScenarioFixture};
 use cellgov_testkit::runner::{run, ScenarioOutcome, ScenarioResult};
 
-use super::self_load::load_file_or_die;
+use super::exit::CommandError;
+use super::self_load::load_file;
 
 pub(crate) fn run_scenario(name: &str) -> Option<(&str, ScenarioResult)> {
     let (label, fixture) = match name {
@@ -63,17 +64,28 @@ pub(crate) const SCENARIOS: &[&str] = &[
 pub(crate) const MICROTESTS: &[&str] =
     &["barrier_wakeup", "mailbox_roundtrip", "atomic_reservation"];
 
-/// Build a ScenarioFixture for an LV2-driven ELF microtest. Reads
-/// PPU and SPU ELF binaries from `tests/micro/<name>/build/`, relative
-/// to the working directory.
-pub(crate) fn build_lv2_fixture(name: &str) -> ScenarioFixture {
+/// Builds an LV2-driven ELF microtest fixture.
+///
+/// Reads PPU and SPU ELF binaries from `tests/micro/<name>/build/`.
+///
+/// # Errors
+///
+/// Returns an error if either ELF cannot be read.
+pub(crate) fn build_lv2_fixture(name: &str) -> Result<ScenarioFixture, CommandError> {
     build_lv2_fixture_under(std::path::Path::new("."), name)
 }
 
-/// [`build_lv2_fixture`] with the corpus root named explicitly, so a
-/// caller that is not run from the workspace root does not have to
-/// move the process's working directory to reach it.
-pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> ScenarioFixture {
+/// Builds a microtest fixture under an explicit corpus root.
+///
+/// The explicit root avoids changes to the process-wide working directory.
+///
+/// # Errors
+///
+/// See [`build_lv2_fixture`].
+pub(crate) fn build_lv2_fixture_under(
+    root: &std::path::Path,
+    name: &str,
+) -> Result<ScenarioFixture, CommandError> {
     use cellgov_mem::ByteRange;
     use cellgov_ppu::PpuExecutionUnit;
     use cellgov_spu::{loader as spu_loader, SpuExecutionUnit};
@@ -82,8 +94,8 @@ pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> Sce
     use std::rc::Rc;
 
     let base = root.join(format!("tests/micro/{name}/build"));
-    let ppu_elf = load_file_or_die(&base.join(format!("{name}.elf")).to_string_lossy());
-    let spu_elf = load_file_or_die(&base.join("spu_main.elf").to_string_lossy());
+    let ppu_elf = load_file(&base.join(format!("{name}.elf")).to_string_lossy())?;
+    let spu_elf = load_file(&base.join("spu_main.elf").to_string_lossy())?;
 
     let mem_size = 0x1002_0000usize;
     let stack_top = (mem_size as u64) - 0x1000;
@@ -91,7 +103,7 @@ pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> Sce
     let primed_seed = Rc::clone(&primed);
     let primed_reg = Rc::clone(&primed);
 
-    ScenarioFixture::builder()
+    Ok(ScenarioFixture::builder()
         .memory_size(mem_size)
         .budget(Budget::new(100_000))
         .max_steps(10_000)
@@ -152,17 +164,28 @@ pub(crate) fn build_lv2_fixture_under(root: &std::path::Path, name: &str) -> Sce
                 unit
             });
         })
-        .build()
+        .build())
 }
 
-/// Region specs for each microtest: `(symbol_name, [(region_name, offset, size)])`.
-pub(crate) fn microtest_region_defs(name: &str) -> (&str, Vec<(&str, u64, u64)>) {
-    match name {
+type MicrotestRegion = (&'static str, u64, u64);
+type MicrotestRegionDefinition = (&'static str, Vec<MicrotestRegion>);
+
+/// Returns the symbol and region specifications for a microtest.
+///
+/// # Errors
+///
+/// Returns an error if `name` is not registered.
+pub(crate) fn microtest_region_defs(name: &str) -> Result<MicrotestRegionDefinition, CommandError> {
+    Ok(match name {
         "barrier_wakeup" => ("buf", vec![("spu0_result", 0, 8), ("spu1_result", 16, 8)]),
         "mailbox_roundtrip" => ("result", vec![("result", 0, 8)]),
         "atomic_reservation" => ("buf", vec![("header", 0, 8), ("data", 16, 128)]),
-        _ => super::exit::die(&format!("no region defs for microtest: {name}")),
-    }
+        _ => {
+            return Err(CommandError::failed(format!(
+                "no region defs for microtest: {name}"
+            )))
+        }
+    })
 }
 
 /// Format a [`ScenarioResult`] as a deterministic, ASCII-only summary.

@@ -103,7 +103,7 @@ fn a_long_boot_names_the_localization_commands_instead_of_running_them() {
     let opts = bench_options(&title, Some(&cell), &[]);
     let mut runs = set_of(&[Duration::from_millis(100)]);
     runs[0].steps = LOCALIZE_MAX_STEPS + 1;
-    let lines = locate_divergence(opts, &runs);
+    let lines = locate_divergence(opts, &runs).expect("localization does not interrupt");
     assert!(lines[0].contains("not run automatically"), "got {lines:?}");
     assert!(
         lines.iter().any(|l| l.contains("--save-state-trace"))
@@ -120,7 +120,7 @@ fn the_localization_cap_reads_the_longest_run_not_the_first() {
     let mut runs = set_of(&[Duration::from_millis(100); 2]);
     runs[0].steps = 10;
     runs[1].steps = LOCALIZE_MAX_STEPS + 1;
-    let lines = locate_divergence(opts, &runs);
+    let lines = locate_divergence(opts, &runs).expect("localization does not interrupt");
     assert!(lines[0].contains("not run automatically"), "got {lines:?}");
     assert!(
         lines[0].contains(&(LOCALIZE_MAX_STEPS + 1).to_string()),

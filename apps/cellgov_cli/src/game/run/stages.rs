@@ -40,8 +40,7 @@ pub(crate) fn configure_rsx_from_manifest(rt: &mut Runtime, title: &TitleManifes
 ///
 /// # Errors
 ///
-/// [`RunError`], when the run cannot write an artifact the caller asked
-/// for. A refusal inside the step loop ends the process.
+/// Returns an error if any stage refuses the run.
 pub fn run_game(
     execution: RunExecution<'_>,
     artifacts: RunArtifacts<'_>,
@@ -51,14 +50,14 @@ pub fn run_game(
     if let Some(refusal) =
         state_trace_mismatch(artifacts.state_trace, execution.limits.capture_state_trace)
     {
-        crate::cli::exit::die(&refusal);
+        return Err(RunError::StateTraceConfiguration(refusal));
     }
-    let mut spans = RunSpans::start();
+    let mut spans = RunSpans::start()?;
     let sink = crate::game::console_sink();
     let title = execution.title.manifest;
     let identity = execution.title.identity;
 
-    let prepared = prepare_boot(execution, &reporting, &sink);
+    let prepared = prepare_boot(execution, &reporting, &sink)?;
     spans.mark_prepared();
     let PreparedBoot {
         mut rt,
@@ -73,7 +72,7 @@ pub fn run_game(
         report::print_out(&report::startup_timing_lines(&timings));
     }
 
-    let loop_out = drive_step_loop(&mut rt, title, &child_init, &reporting, &sink);
+    let loop_out = drive_step_loop(&mut rt, title, &child_init, &reporting, &sink)?;
     spans.mark_stepped();
     let dirty_pages = rt.memory().dirty_page_count();
 
@@ -154,24 +153,22 @@ fn debug_assert_dumpable(ranges: &[(u64, u64)]) {
     }
 }
 
-/// Bring the title to a runtime one `step()` from its first
-/// instruction. A refusal ends the process.
 fn prepare_boot(
     execution: RunExecution<'_>,
     reporting: &RunReporting<'_>,
     sink: &Rc<dyn BootSink>,
-) -> PreparedBoot {
+) -> Result<PreparedBoot, RunError> {
     eprintln!(
         "boot run: title = {} ({})",
         execution.title.manifest.name(),
         execution.title.manifest.display_name()
     );
     let taps = crate::game::debug_taps_from_env()
-        .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()));
+        .map_err(|error| RunError::DebugTaps(error.to_string()))?;
     reporting
         .progress
         .phase(crate::progress::BootPhase::Loading.code());
-    prepare(PrepareOptions {
+    Ok(prepare(PrepareOptions {
         title: execution.title,
         execution: execution.limits,
         diagnostics: reporting.boot,
@@ -180,8 +177,7 @@ fn prepare_boot(
             keys: Rc::new(crate::cli::keys::ProcessKeyVault),
             taps,
         },
-    })
-    .unwrap_or_else(|e| crate::cli::exit::die(&e.to_string()))
+    })?)
 }
 
 /// What one step-loop drive produced.
@@ -201,15 +197,13 @@ struct LoopOutput {
     tty_bogus_fd: usize,
 }
 
-/// Drive the diagnostic step loop to a terminal state. A refusal ends
-/// the process.
 fn drive_step_loop(
     rt: &mut Runtime,
     title: &TitleManifest,
     child_init: &ChildInitPlans,
     reporting: &RunReporting<'_>,
     sink: &Rc<dyn BootSink>,
-) -> LoopOutput {
+) -> Result<LoopOutput, RunError> {
     let mut steps: usize = 0;
     let mut hle_calls = BTreeMap::new();
     let mut insn_coverage = BTreeMap::new();
@@ -232,7 +226,7 @@ fn drive_step_loop(
         tty_oob_count: 0,
         bogus_fd_count: 0,
         dump_mem_fault_ranges: reporting.boot.dump_mem_fault_ranges,
-        obs_null_sink: crate::cli::env::parse_env_bool(crate::env_vars::OBS_NULL_SINK),
+        obs_null_sink: crate::cli::env::parse_env_bool(crate::env_vars::OBS_NULL_SINK)?,
         child_init,
         progress: reporting.progress,
         sink: Rc::clone(sink),
@@ -241,10 +235,13 @@ fn drive_step_loop(
         reporting.progress,
         crate::game::within_runtime_cap(reporting.finish_line, rt),
     );
-    let (outcome, boot_outcome) = step_loop(rt, &mut ctx).unwrap_or_else(|e| {
-        report_first_invariant_break(rt, sink.as_ref());
-        crate::cli::exit::die(&e.to_string())
-    });
+    let (outcome, boot_outcome) = match step_loop(rt, &mut ctx) {
+        Ok(output) => output,
+        Err(error) => {
+            report_first_invariant_break(rt, sink.as_ref());
+            return Err(error.into());
+        }
+    };
     let t_loop = loop_start.elapsed();
     // Stop the bar here: it clears within a tick of this call, so the
     // caller's result report prints on a clear terminal. See
@@ -252,7 +249,7 @@ fn drive_step_loop(
     reporting.progress.finished();
     let tty_oob_dropped = ctx.tty_oob_count;
     let tty_bogus_fd = ctx.bogus_fd_count;
-    LoopOutput {
+    Ok(LoopOutput {
         outcome,
         boot_outcome,
         steps,
@@ -263,7 +260,7 @@ fn drive_step_loop(
         t_loop,
         tty_oob_dropped,
         tty_bogus_fd,
-    }
+    })
 }
 
 /// Report where the run ended and what the runtime counted on the way.

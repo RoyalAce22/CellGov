@@ -13,7 +13,7 @@ use cellgov_install::store::{
     VersionKey,
 };
 
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::exit_codes;
 use crate::cli::parse::OutputFormat;
 use crate::composition::inventory::FirmwareEntry;
@@ -24,17 +24,21 @@ use super::model::{DivergenceDoc, VerifiedEntryDoc, VerifyDoc, KERNEL_NOT_RECORD
 use super::{emit, view};
 
 /// `cellgov firmware verify <VERSION>`
-pub(crate) fn firmware_verify(root: &Path, version: &str, format: OutputFormat) {
-    let view = view(root);
-    let entry = view.inventory.firmware(version).unwrap_or_else(|| {
-        die(&format!(
+pub(crate) fn firmware_verify(
+    root: &Path,
+    version: &str,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let view = view(root)?;
+    let entry = view.inventory.firmware(version).ok_or_else(|| {
+        CommandError::failed(format!(
             "no firmware {version:?} is installed; installed: {}",
             super::key_list(&view.inventory.firmware_versions())
         ))
-    });
-    let keys =
-        cellgov_install::keys::KeyVault::load_for_vfs(root).unwrap_or_else(|e| die(&e.to_string()));
-    let entry = firmware_entry_doc(&view, entry, &keys);
+    })?;
+    let keys = cellgov_install::keys::KeyVault::load_for_vfs(root)
+        .map_err(|error| CommandError::failed(error.to_string()))?;
+    let entry = firmware_entry_doc(&view, entry, &keys)?;
 
     let doc = VerifyDoc {
         format_version: view.format_version(),
@@ -43,7 +47,7 @@ pub(crate) fn firmware_verify(root: &Path, version: &str, format: OutputFormat) 
         clean: entry.divergences.is_empty(),
         entries: vec![entry],
     };
-    finish(&doc, format, &format!("firmware {version}"));
+    finish(&doc, format, &format!("firmware {version}"))
 }
 
 /// Verify one installed firmware entry with the existing module and stored-kernel rules.
@@ -51,11 +55,11 @@ pub(super) fn firmware_entry_doc(
     view: &StoreView,
     entry: &FirmwareEntry,
     keys: &KeyVault,
-) -> VerifiedEntryDoc {
+) -> Result<VerifiedEntryDoc, CommandError> {
     let version = &entry.version;
     let mut report =
         cellgov_install::firmware_verify::verify_firmware_tree(&entry.dev_flash_dir(), keys)
-            .unwrap_or_else(|e| die(&format!("firmware verify {version}: {e}")));
+            .map_err(|error| CommandError::failed(format!("firmware verify {version}: {error}")))?;
 
     // The kernel is one more recorded artefact: hashed as stored, so it
     // joins the manifest's modules in the same tally.
@@ -68,7 +72,11 @@ pub(super) fn firmware_entry_doc(
                 ) {
                     Ok(None) => report.matched += 1,
                     Ok(Some(fault)) => report.divergences.push(fault),
-                    Err(e) => die(&format!("firmware verify {version}: {e}")),
+                    Err(error) => {
+                        return Err(CommandError::failed(format!(
+                            "firmware verify {version}: {error}"
+                        )))
+                    }
                 }
                 None
             }
@@ -93,19 +101,24 @@ pub(super) fn firmware_entry_doc(
         kernel_omission,
     };
     if doc.matched + doc.divergences.len() == 0 {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "firmware {version}: the install record names no file, so the pass examined nothing; \
              reinstall the entry to write a record that covers its tree"
-        ));
+        )));
     }
-    doc
+    Ok(doc)
 }
 
 /// `cellgov title verify <TITLE_ID> [--ver V]`
-pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, format: OutputFormat) {
-    let view = view(root);
-    let entry = view.inventory.title(title_id).unwrap_or_else(|| {
-        die(&format!(
+pub(crate) fn title_verify(
+    root: &Path,
+    title_id: &str,
+    ver: Option<&str>,
+    format: OutputFormat,
+) -> Result<CommandExitCode, CommandError> {
+    let view = view(root)?;
+    let entry = view.inventory.title(title_id).ok_or_else(|| {
+        CommandError::failed(format!(
             "no title {title_id:?} is installed; installed: {}",
             super::key_list(
                 &view
@@ -115,9 +128,9 @@ pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, forma
                     .collect::<Vec<_>>()
             )
         ))
-    });
-    let key =
-        TitleId::new(title_id).unwrap_or_else(|e| die(&format!("title verify {title_id}: {e}")));
+    })?;
+    let key = TitleId::new(title_id)
+        .map_err(|error| CommandError::failed(format!("title verify {title_id}: {error}")))?;
 
     // Which entries the run covers: everything installed, or the one
     // version `--ver` names.
@@ -133,15 +146,15 @@ pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, forma
                 ));
             }
             for version in entry.updates.keys() {
-                wanted.push((version.clone(), update_artifact(&key, version)));
+                wanted.push((version.clone(), update_artifact(&key, version)?));
             }
         }
         Some(BASE_GAME_VER) => {
             if entry.base.is_none() {
-                die(&format!(
+                return Err(CommandError::failed(format!(
                     "title {title_id} has no base installed; installed: {}",
                     super::key_list(&entry.candidates())
-                ));
+                )));
             }
             wanted.push((
                 BASE_GAME_VER.to_string(),
@@ -152,18 +165,18 @@ pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, forma
         }
         Some(version) => {
             if !entry.updates.contains_key(version) {
-                die(&format!(
+                return Err(CommandError::failed(format!(
                     "title {title_id} has no version {version:?} installed; installed: {}",
                     super::key_list(&entry.candidates())
-                ));
+                )));
             }
-            wanted.push((version.to_string(), update_artifact(&key, version)));
+            wanted.push((version.to_string(), update_artifact(&key, version)?));
         }
     }
     if wanted.is_empty() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "title {title_id} has a records directory but no installed entry to verify"
-        ));
+        )));
     }
 
     let layout = StoreLayout::new(root);
@@ -171,11 +184,11 @@ pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, forma
     let mut entries = Vec::with_capacity(wanted.len());
     for (label, artifact) in &wanted {
         let record_path = layout.record_path(artifact);
-        let record = load_record(&record_path);
+        let record = load_record(&record_path)?;
         let tree_dir = layout.resolve_store_path(&record.artifact.store_path);
         let rap = record.rap.as_ref().map(|r| live_rap_dir.join(&r.filename));
         let report = verify_record_tree(&tree_dir, rap.as_deref(), &record)
-            .unwrap_or_else(|e| die(&format!("title verify {title_id}: {e}")));
+            .map_err(|error| CommandError::failed(format!("title verify {title_id}: {error}")))?;
         entries.push(VerifiedEntryDoc {
             entry: label.clone(),
             matched: report.matched,
@@ -195,24 +208,27 @@ pub(crate) fn title_verify(root: &Path, title_id: &str, ver: Option<&str>, forma
         clean: entries.iter().all(|e| e.divergences.is_empty()),
         entries,
     };
-    finish(&doc, format, &format!("title {title_id}"));
+    finish(&doc, format, &format!("title {title_id}"))
 }
 
-fn update_artifact(title_id: &TitleId, version: &str) -> Artifact {
-    Artifact::TitleUpdate {
+fn update_artifact(title_id: &TitleId, version: &str) -> Result<Artifact, CommandError> {
+    Ok(Artifact::TitleUpdate {
         title_id: title_id.clone(),
         // The version came from a record filed under this key, so the
         // store already accepted it as a directory name.
-        version: VersionKey::new(version)
-            .unwrap_or_else(|e| die(&format!("installed update version {version:?}: {e}"))),
-    }
+        version: VersionKey::new(version).map_err(|error| {
+            CommandError::failed(format!("installed update version {version:?}: {error}"))
+        })?,
+    })
 }
 
-fn load_record(path: &Path) -> InstallRecord {
-    let text = std::fs::read_to_string(path)
-        .unwrap_or_else(|e| die(&format!("read install record {}: {e}", path.display())));
-    InstallRecord::parse(&text)
-        .unwrap_or_else(|e| die(&format!("install record {}: {e}", path.display())))
+fn load_record(path: &Path) -> Result<InstallRecord, CommandError> {
+    let text = std::fs::read_to_string(path).map_err(|error| {
+        CommandError::failed(format!("read install record {}: {error}", path.display()))
+    })?;
+    InstallRecord::parse(&text).map_err(|error| {
+        CommandError::failed(format!("install record {}: {error}", path.display()))
+    })
 }
 
 fn divergence_doc(view: &StoreView, d: &Divergence) -> DivergenceDoc {
@@ -268,20 +284,23 @@ fn checked_nothing(doc: &VerifyDoc) -> bool {
     doc.matched() + doc.diverged() == 0
 }
 
-/// Render the report, then exit 0 when clean and
-/// [`exit_codes::DIVERGED`] otherwise.
-fn finish(doc: &VerifyDoc, format: OutputFormat, subject: &str) -> ! {
+fn finish(
+    doc: &VerifyDoc,
+    format: OutputFormat,
+    subject: &str,
+) -> Result<CommandExitCode, CommandError> {
     if checked_nothing(doc) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "{subject}: the install record names no file, so the pass examined nothing; \
              reinstall the entry to write a record that covers its tree"
-        ));
+        )));
     }
-    emit(format, doc, || print!("{}", render(doc, subject)));
-    if doc.clean {
-        std::process::exit(0)
-    }
-    std::process::exit(exit_codes::DIVERGED)
+    emit(format, doc, || print!("{}", render(doc, subject)))?;
+    Ok(CommandExitCode::new(if doc.clean {
+        0
+    } else {
+        exit_codes::DIVERGED
+    }))
 }
 
 fn render(doc: &VerifyDoc, subject: &str) -> String {

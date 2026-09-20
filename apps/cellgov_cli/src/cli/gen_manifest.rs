@@ -29,10 +29,10 @@ use cellgov_ps3_abi::format::dev_flash::{FLASH_MOUNT, VSH_MODULE_DIR, VSH_SELF};
 use cellgov_ps3_abi::format::param_sfo::{PARAM_SFO_FILE, PS3_SYSTEM_VER_KEY};
 use cellgov_ps3_abi::format::title_tree::DISC_GAME_DIR;
 
-use crate::cli::exit::die;
+use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::keys::install_root_of;
 use crate::cli::parse::GenManifestArgs;
-use crate::cli::title::{resolve_ps3_vfs_root, DEFAULT_TITLE_REGISTRY_DIR};
+use crate::cli::title::DEFAULT_TITLE_REGISTRY_DIR;
 use cellgov_boot::manifest::TitleManifest;
 
 /// The `distribution` tag a disc install records; its PARAM.SFO sits
@@ -53,8 +53,10 @@ const VSH_DISTRIBUTION: &str = "firmware-exec";
 
 /// The store root `--vfs-root` implies: the install root that encloses
 /// the PS3 VFS root, where the read commands look too.
-fn store_root_of(vfs_flag: Option<&Path>) -> PathBuf {
-    install_root_of(&resolve_ps3_vfs_root(vfs_flag))
+fn store_root_of(vfs_flag: Option<&Path>) -> Result<PathBuf, CommandError> {
+    Ok(install_root_of(&super::title::resolve_ps3_vfs_root(
+        vfs_flag,
+    )?))
 }
 
 /// The install-record directory under `store_root`, where the
@@ -63,9 +65,10 @@ fn store_root_of(vfs_flag: Option<&Path>) -> PathBuf {
 /// The store preflight runs here because only this lookup resolves a
 /// root: `--installs` names a record directory and `--record` names a
 /// file.
-fn installs_checked(store_root: &Path) -> PathBuf {
-    preflight(store_root).unwrap_or_else(|e| die(&format!("gen-manifest failed: {e}")));
-    StoreLayout::new(store_root).installs_dir()
+fn installs_checked(store_root: &Path) -> Result<PathBuf, CommandError> {
+    preflight(store_root)
+        .map_err(|error| CommandError::failed(format!("gen-manifest failed: {error}")))?;
+    Ok(StoreLayout::new(store_root).installs_dir())
 }
 
 /// The base record for `title_id` under an `installs/` directory.
@@ -73,19 +76,19 @@ fn installs_checked(store_root: &Path) -> PathBuf {
 /// `--installs` names the record directory itself, so the path is built
 /// from the same relative arithmetic [`StoreLayout::record_path`] uses
 /// below a VFS root.
-fn base_record_under(installs: &Path, title_id: &str) -> PathBuf {
-    let title_id =
-        TitleId::new(title_id).unwrap_or_else(|e| die(&format!("gen-manifest --title-id: {e}")));
-    installs.join(record_rel_path(&Artifact::TitleBase { title_id }))
+fn base_record_under(installs: &Path, title_id: &str) -> Result<PathBuf, CommandError> {
+    let title_id = TitleId::new(title_id)
+        .map_err(|error| CommandError::failed(format!("gen-manifest --title-id: {error}")))?;
+    Ok(installs.join(record_rel_path(&Artifact::TitleBase { title_id })))
 }
 
 /// The firmware record for `version` under an `installs/` directory.
 ///
 /// See [`base_record_under`] for why the path is built relatively.
-fn firmware_record_under(installs: &Path, version: &str) -> PathBuf {
-    let version =
-        VersionKey::new(version).unwrap_or_else(|e| die(&format!("gen-manifest --firmware: {e}")));
-    installs.join(record_rel_path(&Artifact::Firmware { version }))
+fn firmware_record_under(installs: &Path, version: &str) -> Result<PathBuf, CommandError> {
+    let version = VersionKey::new(version)
+        .map_err(|error| CommandError::failed(format!("gen-manifest --firmware: {error}")))?;
+    Ok(installs.join(record_rel_path(&Artifact::Firmware { version })))
 }
 
 /// Escape a string for a double-quoted TOML basic string.
@@ -93,7 +96,10 @@ fn toml_escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-pub(crate) fn run(args: &GenManifestArgs, vfs_flag: Option<&Path>) {
+pub(crate) fn run(
+    args: &GenManifestArgs,
+    vfs_flag: Option<&Path>,
+) -> Result<CommandExitCode, CommandError> {
     // The closure resolves the root only where a read needs it: the
     // record directory a `--title-id` / `--firmware` lookup defaults
     // to, and the tree a title's `system_ver` comes from. One root
@@ -101,34 +107,36 @@ pub(crate) fn run(args: &GenManifestArgs, vfs_flag: Option<&Path>) {
     // come from two stores. A firmware record named by path resolves
     // none.
     let store_root = || store_root_of(vfs_flag);
-    let (record_path, asked) = resolve_record_path(args, &store_root);
+    let (record_path, asked) = resolve_record_path(args, &store_root)?;
     let registry = args
         .registry
         .clone()
         .unwrap_or_else(|| PathBuf::from(DEFAULT_TITLE_REGISTRY_DIR));
     let force = args.force;
 
-    let text = std::fs::read_to_string(&record_path)
-        .unwrap_or_else(|e| die(&format!("failed to read {}: {e}", record_path.display())));
-    let record = InstallRecord::parse(&text)
-        .unwrap_or_else(|e| die(&format!("parse {}: {e}", record_path.display())));
+    let text = std::fs::read_to_string(&record_path).map_err(|error| {
+        CommandError::failed(format!("failed to read {}: {error}", record_path.display()))
+    })?;
+    let record = InstallRecord::parse(&text).map_err(|error| {
+        CommandError::failed(format!("parse {}: {error}", record_path.display()))
+    })?;
     if let Some(refusal) = selector_mismatch(asked, &record, &record_path) {
-        die(&refusal);
+        return Err(CommandError::failed(refusal));
     }
 
-    let gen = Generated::from_record(&record, &record_path, store_root);
-    let manifest_path = registry.join(format!("{}.toml", gen.content_id()));
+    let generated = Generated::from_record(&record, &record_path, store_root)?;
+    let manifest_path = registry.join(format!("{}.toml", generated.content_id()));
 
-    let stub = gen.render_stub(&record_path);
+    let stub = generated.render_stub(&record_path);
     // A record's `distribution` is a free-form string and its `title`
     // is PARAM.SFO text, so a stub can carry a field the manifest
     // loader refuses. The check runs ahead of the identity report as
     // well as the write, so both answer the same for every record.
     if let Err(e) = TitleManifest::load_from_text(&stub, &manifest_path) {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "the stub generated from {} is not a title manifest: {e}",
             record_path.display()
-        ));
+        )));
     }
 
     if manifest_path.exists() && !force {
@@ -137,19 +145,25 @@ pub(crate) fn run(args: &GenManifestArgs, vfs_flag: Option<&Path>) {
             manifest_path.display()
         );
         println!("  generated identity from {}:", record_path.display());
-        gen.print_identity();
+        generated.print_identity();
         println!("  reconcile by hand if any generated field drifted.");
-        return;
+        return Ok(CommandExitCode::SUCCESS);
     }
 
     if let Some(parent) = manifest_path.parent() {
-        std::fs::create_dir_all(parent)
-            .unwrap_or_else(|e| die(&format!("create {}: {e}", parent.display())));
+        std::fs::create_dir_all(parent).map_err(|error| {
+            CommandError::failed(format!("create {}: {error}", parent.display()))
+        })?;
     }
-    std::fs::write(&manifest_path, stub)
-        .unwrap_or_else(|e| die(&format!("write {}: {e}", manifest_path.display())));
+    std::fs::write(&manifest_path, stub).map_err(|error| {
+        CommandError::failed(format!("write {}: {error}", manifest_path.display()))
+    })?;
     println!("wrote title-manifest stub {}", manifest_path.display());
-    println!("  fill in the curated fields ({}).", gen.curated_fields());
+    println!(
+        "  fill in the curated fields ({}).",
+        generated.curated_fields()
+    );
+    Ok(CommandExitCode::SUCCESS)
 }
 
 /// The record a selector names, and the kind that selector asked for.
@@ -160,25 +174,30 @@ pub(crate) fn run(args: &GenManifestArgs, vfs_flag: Option<&Path>) {
 /// three.
 fn resolve_record_path(
     args: &GenManifestArgs,
-    store_root: &impl Fn() -> PathBuf,
-) -> (PathBuf, Option<ArtifactKind>) {
-    let lookup = |id: &str, resolve: fn(&Path, &str) -> PathBuf| {
-        let installs = args
-            .installs
-            .clone()
-            .unwrap_or_else(|| installs_checked(&store_root()));
+    store_root: &impl Fn() -> Result<PathBuf, CommandError>,
+) -> Result<(PathBuf, Option<ArtifactKind>), CommandError> {
+    let lookup = |id: &str,
+                  resolve: fn(&Path, &str) -> Result<PathBuf, CommandError>|
+     -> Result<PathBuf, CommandError> {
+        let installs = match &args.installs {
+            Some(installs) => installs.clone(),
+            None => installs_checked(&store_root()?)?,
+        };
         resolve(&installs, id)
     };
     match (&args.record, &args.title_id, &args.firmware) {
-        (Some(p), _, _) => (p.clone(), None),
-        (None, Some(id), _) => (lookup(id, base_record_under), Some(ArtifactKind::TitleBase)),
-        (None, None, Some(version)) => (
-            lookup(version, firmware_record_under),
+        (Some(p), _, _) => Ok((p.clone(), None)),
+        (None, Some(id), _) => Ok((
+            lookup(id, base_record_under)?,
+            Some(ArtifactKind::TitleBase),
+        )),
+        (None, None, Some(version)) => Ok((
+            lookup(version, firmware_record_under)?,
             Some(ArtifactKind::Firmware),
-        ),
-        (None, None, None) => {
-            die("gen-manifest requires --record <path>, --title-id <id>, or --firmware <version>")
-        }
+        )),
+        (None, None, None) => Err(CommandError::failed(
+            "gen-manifest requires --record <path>, --title-id <id>, or --firmware <version>",
+        )),
     }
 }
 
@@ -221,28 +240,30 @@ impl Generated {
     fn from_record(
         record: &InstallRecord,
         record_path: &Path,
-        store_root: impl FnOnce() -> PathBuf,
-    ) -> Self {
+        store_root: impl FnOnce() -> Result<PathBuf, CommandError>,
+    ) -> Result<Self, CommandError> {
         match (record.artifact.kind, record.title.as_ref()) {
-            (ArtifactKind::Firmware, _) => Self::Firmware,
+            (ArtifactKind::Firmware, _) => Ok(Self::Firmware),
             // An update record names a title, but its `distribution`
             // is the update's own tag, which no title manifest holds.
-            (ArtifactKind::TitleUpdate, _) => die(&format!(
+            (ArtifactKind::TitleUpdate, _) => Err(CommandError::failed(format!(
                 "{} describes a {} entry; a manifest is generated from the title's base record",
                 record_path.display(),
                 record.artifact.kind.as_str()
-            )),
+            ))),
             (ArtifactKind::TitleBase, Some(title)) => {
-                let sfo = param_sfo_path(&store_root(), record, title);
+                let sfo = param_sfo_path(&store_root()?, record, title);
                 let recorded = record.files.get(&param_sfo_rel(title));
-                let system_ver = read_system_ver(&sfo, recorded, record_path);
-                Self::Title(TitleFields::from_record(record, title, system_ver))
+                let system_ver = read_system_ver(&sfo, recorded, record_path)?;
+                Ok(Self::Title(TitleFields::from_record(
+                    record, title, system_ver,
+                )))
             }
-            (ArtifactKind::TitleBase, None) => die(&format!(
+            (ArtifactKind::TitleBase, None) => Err(CommandError::failed(format!(
                 "{} describes a {} entry, which names no title",
                 record_path.display(),
                 record.artifact.kind.as_str()
-            )),
+            ))),
         }
     }
 
@@ -308,14 +329,19 @@ fn param_sfo_path(store_root: &Path, record: &InstallRecord, title: &TitleRecord
 /// The record does not carry the floor, so a tree that cannot answer
 /// refuses the generation by name. `recorded` is the digest the record
 /// holds for this table, when its `[files]` lists one.
-fn read_system_ver(sfo: &Path, recorded: Option<&Sha256>, record_path: &Path) -> String {
-    let bytes = std::fs::read(sfo).unwrap_or_else(|e| {
-        die(&format!(
+fn read_system_ver(
+    sfo: &Path,
+    recorded: Option<&Sha256>,
+    record_path: &Path,
+) -> Result<String, CommandError> {
+    let bytes = std::fs::read(sfo).map_err(|error| {
+        CommandError::failed(format!(
             "read {}: {e}; the stub's system_ver is the PS3_SYSTEM_VER this table states, so \
              the installed tree must be present under the store root (--vfs-root names it)",
-            sfo.display()
+            sfo.display(),
+            e = error,
         ))
-    });
+    })?;
     // The record digests every file it installed, and the uninstall
     // gate holds the tree to those digests. A table that hashes
     // differently belongs to some other install of this title id, so
@@ -323,7 +349,7 @@ fn read_system_ver(sfo: &Path, recorded: Option<&Sha256>, record_path: &Path) ->
     if let Some(recorded) = recorded {
         let found = Sha256(sha256_of(&bytes));
         if found.0 != recorded.0 {
-            die(&format!(
+            return Err(CommandError::failed(format!(
                 "{}: SHA-256 {} is not the {} that {} recorded for it; the tree under the \
                  store root is not the one the record describes, so its {PS3_SYSTEM_VER_KEY} \
                  is not this record's floor (--vfs-root names the store root)",
@@ -331,18 +357,19 @@ fn read_system_ver(sfo: &Path, recorded: Option<&Sha256>, record_path: &Path) ->
                 found.to_hex(),
                 recorded.to_hex(),
                 record_path.display()
-            ));
+            )));
         }
     }
-    let table =
-        param_sfo::parse(&bytes).unwrap_or_else(|e| die(&format!("{}: {e}", sfo.display())));
-    let raw = table.get_string(PS3_SYSTEM_VER_KEY).unwrap_or_else(|| {
-        die(&format!(
+    let table = param_sfo::parse(&bytes)
+        .map_err(|error| CommandError::failed(format!("{}: {error}", sfo.display())))?;
+    let raw = table.get_string(PS3_SYSTEM_VER_KEY).ok_or_else(|| {
+        CommandError::failed(format!(
             "{}: no {PS3_SYSTEM_VER_KEY} string; the stub's system_ver has nothing to derive from",
             sfo.display()
         ))
-    });
-    firmware_version_key(raw).unwrap_or_else(|e| die(&format!("{}: {e}", sfo.display())))
+    })?;
+    firmware_version_key(raw)
+        .map_err(|error| CommandError::failed(format!("{}: {error}", sfo.display())))
 }
 
 /// The PARAM.SFO / install-derived fields of a title manifest.

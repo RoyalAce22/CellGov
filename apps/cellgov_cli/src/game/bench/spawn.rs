@@ -8,6 +8,9 @@ use super::types::BenchBootResult;
 /// Subprocess invocation failure surfaced by [`spawn_one_run`].
 #[derive(Debug, thiserror::Error)]
 pub enum SpawnError {
+    /// The child ended from Ctrl-C.
+    #[error(transparent)]
+    Command(#[from] crate::cli::exit::CommandError),
     #[error("subprocess spawn failed: {0}")]
     Io(#[source] std::io::Error),
     #[error("subprocess exited nonzero (status={status:?})")]
@@ -28,14 +31,14 @@ pub enum SpawnError {
 impl SpawnError {
     pub fn captured_stdout(&self) -> &str {
         match self {
-            Self::Io(_) => "",
+            Self::Io(_) | Self::Command(_) => "",
             Self::SubprocessNonzero { stdout, .. } | Self::ParseFailed { stdout, .. } => stdout,
         }
     }
 
     pub fn captured_stderr(&self) -> &str {
         match self {
-            Self::Io(_) => "",
+            Self::Io(_) | Self::Command(_) => "",
             Self::SubprocessNonzero { stderr, .. } | Self::ParseFailed { stderr, .. } => stderr,
         }
     }
@@ -49,8 +52,9 @@ impl SpawnError {
 /// one process drift ~60 percent in wall time on Windows, from 1 GB
 /// guest-memory page-commit reuse.
 ///
-/// Returns the parsed result alongside the subprocess stderr, which
-/// carries the `BENCH_*` witness lines the anchor check reads.
+/// # Errors
+///
+/// Returns an error if the child does not produce a valid result.
 pub(super) fn spawn_one_run(
     opts: BenchOptions<'_>,
 ) -> Result<(BenchBootResult, String), SpawnError> {
@@ -58,7 +62,7 @@ pub(super) fn spawn_one_run(
     let mut cmd = std::process::Command::new(&exe);
     opts.encode_to_command(&mut cmd);
     let output = cmd.output().map_err(SpawnError::Io)?;
-    crate::cli::exit::propagate_interrupt(output.status);
+    crate::cli::exit::propagate_interrupt(output.status)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     if !output.status.success() {

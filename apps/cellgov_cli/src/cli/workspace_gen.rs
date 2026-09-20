@@ -6,7 +6,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use super::exit::die;
+use super::exit::CommandError;
 use super::parse::WorkspaceGenArgs;
 
 const DEFAULT_OUTPUT: &str = "docs/architecture/workspace.md";
@@ -35,34 +35,43 @@ struct Dependency {
     target: Option<String>,
 }
 
-pub(crate) fn run(args: &WorkspaceGenArgs) {
+pub(crate) fn run(args: &WorkspaceGenArgs) -> Result<(), CommandError> {
     let output = args
         .output
         .clone()
         .unwrap_or_else(|| PathBuf::from(DEFAULT_OUTPUT));
-    let metadata = cargo_metadata();
-    let document = std::fs::read_to_string(&output)
-        .unwrap_or_else(|e| die(&format!("workspace-gen: read {}: {e}", output.display())));
+    let metadata = cargo_metadata()?;
+    let document = std::fs::read_to_string(&output).map_err(|error| {
+        CommandError::failed(format!("workspace-gen: read {}: {error}", output.display()))
+    })?;
     let rendered = render_document(&document, &metadata)
-        .unwrap_or_else(|e| die(&format!("workspace-gen: {}", e)));
-    std::fs::write(&output, rendered)
-        .unwrap_or_else(|e| die(&format!("workspace-gen: write {}: {e}", output.display())));
+        .map_err(|error| CommandError::failed(format!("workspace-gen: {error}")))?;
+    std::fs::write(&output, rendered).map_err(|error| {
+        CommandError::failed(format!(
+            "workspace-gen: write {}: {error}",
+            output.display()
+        ))
+    })?;
     println!("workspace-gen: wrote {}", output.display());
+    Ok(())
 }
 
-fn cargo_metadata() -> Metadata {
+fn cargo_metadata() -> Result<Metadata, CommandError> {
     let output = Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--no-deps"])
         .output()
-        .unwrap_or_else(|e| die(&format!("workspace-gen: run cargo metadata: {e}")));
+        .map_err(|error| {
+            CommandError::failed(format!("workspace-gen: run cargo metadata: {error}"))
+        })?;
     if !output.status.success() {
-        die(&format!(
+        return Err(CommandError::failed(format!(
             "workspace-gen: cargo metadata failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        ));
+        )));
     }
-    serde_json::from_slice(&output.stdout)
-        .unwrap_or_else(|e| die(&format!("workspace-gen: parse cargo metadata: {e}")))
+    serde_json::from_slice(&output.stdout).map_err(|error| {
+        CommandError::failed(format!("workspace-gen: parse cargo metadata: {error}"))
+    })
 }
 
 fn render_document(document: &str, metadata: &Metadata) -> Result<String, String> {
