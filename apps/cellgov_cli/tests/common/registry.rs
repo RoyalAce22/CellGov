@@ -195,6 +195,7 @@ fn game_ver_of(path: &Path, row: &toml::Value) -> String {
 /// - the title states no `system_ver` string,
 /// - `system_ver` uses the PARAM.SFO spelling, or
 /// - a row states no `fw` or `game_ver` string.
+#[allow(dead_code, reason = "not every registry suite reads reference cells")]
 fn derived_cell(path: &Path, root: &toml::Value, title: &toml::Table) -> ReferenceCell {
     let Some(system_ver) = title.get("system_ver").and_then(toml::Value::as_str) else {
         panic!(
@@ -330,6 +331,7 @@ fn parsed_manifests() -> Vec<Parsed> {
 ///
 /// A title shipped inside the firmware has no reference cell and is not
 /// here; see [`firmware_exec_titles`].
+#[allow(dead_code, reason = "not every registry suite boots game titles")]
 pub fn titles() -> Vec<TitleUnderTest> {
     parsed_manifests()
         .into_iter()
@@ -360,6 +362,54 @@ pub fn titles() -> Vec<TitleUnderTest> {
             }
         })
         .collect()
+}
+
+/// Preserves manifest and row declaration order.
+///
+/// # Panics
+///
+/// Panics if a stored title's row has no game version, or a
+/// firmware-shipped title's row has one.
+#[allow(
+    dead_code,
+    reason = "only the anchor-structure suite reads every matrix row"
+)]
+pub fn declared_cells() -> Vec<TitleUnderTest> {
+    let mut out = Vec::new();
+    for m in parsed_manifests() {
+        let firmware_exec = is_firmware_exec(m.root());
+        for row in matrix_rows(&m.path, m.root()) {
+            let game_ver = if firmware_exec {
+                if let Some(v) = row.get("game_ver") {
+                    panic!(
+                        "{}: a [[bench.matrix]] row states game_ver {v:?}, which does not apply \
+                         to a title shipped inside the firmware",
+                        m.path.display()
+                    );
+                }
+                None
+            } else {
+                Some(game_ver_of(&m.path, row))
+            };
+            out.push(TitleUnderTest {
+                short_name: m.short_name.clone(),
+                content_id: m.content_id.clone(),
+                max_steps: max_steps_key(
+                    &m.path,
+                    row.get("bench_max_steps"),
+                    "a [[bench.matrix]] row",
+                )
+                .or_else(|| m.title_max_steps())
+                .unwrap_or(DEFAULT_BENCH_MAX_STEPS),
+                reference: ReferenceCell {
+                    fw: fw_of(&m.path, row),
+                    game_ver,
+                    pending: pending_of(&m.path, row),
+                },
+            });
+        }
+    }
+    out
 }
 
 /// Every declared cell of every registered title shipped inside the
