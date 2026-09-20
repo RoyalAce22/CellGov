@@ -695,6 +695,7 @@ fn state_hash_every_variant_tag_is_unique() {
         }
     }
     assert_eq!(seen.len(), variants.len());
+    assert_eq!(variants.len(), PendingResponse::VARIANT_COUNT);
 }
 
 /// Independent reconstruction of the per-variant wire bytes.
@@ -867,11 +868,13 @@ fn state_hash_wire_bytes_match_the_hash() {
         );
     }
 
-    // The wire alphabet is contiguous by contract, so a hole means
-    // either `encode` skipped a tag or `cases` misses one. Omitting
-    // the variant that holds the HIGHEST tag shortens the range
-    // instead of holing it and slips through.
-    let expected: std::collections::BTreeSet<u8> = (0..tags.len() as u8).collect();
+    assert_eq!(
+        tags.len(),
+        PendingResponse::VARIANT_COUNT,
+        "wire cases do not cover every PendingResponse variant",
+    );
+    let expected: std::collections::BTreeSet<u8> =
+        (0..PendingResponse::VARIANT_COUNT as u8).collect();
     assert_eq!(tags, expected, "state-hash wire tags are not contiguous");
 }
 

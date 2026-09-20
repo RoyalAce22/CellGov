@@ -451,21 +451,32 @@ pub enum PendingResponse {
     },
 }
 
-impl PendingResponse {
-    /// Stable variant discriminant for `response_updates` variant-tag
-    /// checks in [`Lv2Dispatch::WakeAndReturn`] and
-    /// [`Lv2Dispatch::BlockAndWake`].
-    pub fn variant_tag(&self) -> u8 {
-        match self {
-            PendingResponse::ReturnCode { .. } => 0,
-            PendingResponse::ThreadGroupJoin { .. } => 1,
-            PendingResponse::PpuThreadJoin { .. } => 2,
-            PendingResponse::EventQueueReceive { .. } => 3,
-            PendingResponse::EventFlagWake { .. } => 4,
-            PendingResponse::CondWakeReacquire { .. } => 5,
-            PendingResponse::LwMutexWake { .. } => 6,
-            PendingResponse::EventFlagCancelWake { .. } => 7,
+macro_rules! pending_response_variant_tags {
+    ($($variant:pat => $tag:expr),+ $(,)?) => {
+        /// Number of response variants with stable tags.
+        pub const VARIANT_COUNT: usize = [$(stringify!($variant)),+].len();
+
+        /// Stable variant discriminant for `response_updates` variant-tag
+        /// checks in [`Lv2Dispatch::WakeAndReturn`] and
+        /// [`Lv2Dispatch::BlockAndWake`].
+        pub fn variant_tag(&self) -> u8 {
+            match self {
+                $($variant => $tag),+
+            }
         }
+    };
+}
+
+impl PendingResponse {
+    pending_response_variant_tags! {
+        PendingResponse::ReturnCode { .. } => 0,
+        PendingResponse::ThreadGroupJoin { .. } => 1,
+        PendingResponse::PpuThreadJoin { .. } => 2,
+        PendingResponse::EventQueueReceive { .. } => 3,
+        PendingResponse::EventFlagWake { .. } => 4,
+        PendingResponse::CondWakeReacquire { .. } => 5,
+        PendingResponse::LwMutexWake { .. } => 6,
+        PendingResponse::EventFlagCancelWake { .. } => 7,
     }
 }
 
