@@ -101,6 +101,19 @@ pub enum PpuPathError {
     /// The shared observation contract refused the batch.
     #[error("PPU path observation failed: {0}")]
     Observation(#[from] PpuObservationError),
+    /// A path emitted effects that the observation contract refused to commit.
+    #[error("PPU path {path:?} commit refused: {error}")]
+    CommitRefusal {
+        /// Path that emitted the refused batch.
+        path: PpuExecutionPath,
+        /// Typed commit refusal.
+        #[source]
+        error: PpuObservationError,
+        /// Effects staged before the commit boundary.
+        staged_effects: Vec<cellgov_effects::Effect>,
+        /// Effects accepted by the commit boundary.
+        committed_effects: Vec<cellgov_effects::Effect>,
+    },
     /// The instruction sequence contains no instructions.
     #[error("PPU path sequence must contain at least one instruction")]
     EmptySequence,
@@ -139,6 +152,28 @@ pub fn run_all_paths(
     data: &[u8],
 ) -> Result<Vec<PpuPathRun>, PpuPathError> {
     run_paths(words, initial, data, None)
+}
+
+/// Runs one internal path through the same observation contract as a full comparison.
+pub fn run_one_path(
+    path: PpuExecutionPath,
+    words: &[u32],
+    initial: &PpuState,
+    data: &[u8],
+) -> Result<PpuPathRun, PpuPathError> {
+    if words.is_empty() {
+        return Err(PpuPathError::EmptySequence);
+    }
+    if data.is_empty() {
+        return Err(PpuPathError::EmptyData);
+    }
+    let code = words
+        .iter()
+        .copied()
+        .chain(std::iter::repeat_n(24 << 26, words.len()))
+        .flat_map(u32::to_be_bytes)
+        .collect::<Vec<_>>();
+    run_path(path, &code, &code, words.len(), initial, data, None)
 }
 
 /// Compares internal paths after rewriting one word and invalidating any cached shadow slots.
@@ -284,6 +319,7 @@ fn run_path(
             stores: StoreBuffer::new(),
             unit: UNIT,
         })?;
+        refuse_commit(path, &observed)?;
         data = observed.memory;
         reservations = reservation_table(&observed.reservations);
         effects_all.extend(
@@ -376,7 +412,10 @@ fn run_plain(
         executed_pcs.push(step_pc);
         let mut effects = Vec::new();
         let mut stores = StoreBuffer::new();
-        let views = [RegionView::plain(DATA_BASE, &data)];
+        let views = [
+            RegionView::plain(0, code),
+            RegionView::plain(DATA_BASE, &data),
+        ];
         let verdict = execute(
             &instruction,
             &mut state,
@@ -439,6 +478,7 @@ fn run_plain(
             stores: StoreBuffer::new(),
             unit: UNIT,
         })?;
+        refuse_commit(PpuExecutionPath::Plain, &observed)?;
         data = observed.memory;
         reservations = reservation_table(&observed.reservations);
         effects_all.extend(
@@ -470,6 +510,18 @@ fn run_plain(
 
 fn is_read_intent(effect: &cellgov_effects::Effect) -> bool {
     matches!(effect, cellgov_effects::Effect::SharedReadIntent { .. })
+}
+
+fn refuse_commit(path: PpuExecutionPath, observed: &PpuObservation) -> Result<(), PpuPathError> {
+    if let Some(error) = &observed.commit_error {
+        return Err(PpuPathError::CommitRefusal {
+            path,
+            error: error.clone(),
+            staged_effects: observed.staged_effects.clone(),
+            committed_effects: observed.committed_effects.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn make_memory(code: &[u8], data: &[u8]) -> Result<GuestMemory, PpuPathError> {
