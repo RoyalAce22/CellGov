@@ -29,6 +29,7 @@ use crate::report::{
 };
 use crate::retention::{CrossReferenceAsymmetry, SemanticObservation, StateTransitionClass};
 use crate::rng::{Rng, WordGenerationFailure};
+use crate::seeded;
 use crate::{
     FuzzConfig, GenerationStrategy, ParameterStream, ReplayCoordinates, TargetPanicPayload,
 };
@@ -165,7 +166,7 @@ pub(crate) fn sequence_case_words(
         })??,
         GenerationStrategy::RawWords => rng
             .decoder_accepted_words(config.sequence_words as usize, |raw| {
-                call_target(|| cellgov_ppu::decode::decode(raw)).map(|decoded| decoded.is_ok())
+                call_target(|| seeded::ppu_decode(raw)).map(|decoded| decoded.is_ok())
             })
             .map(|words| GeneratedSequence {
                 words,
@@ -301,7 +302,7 @@ fn run_instructions_inner(
         let raw = override_words
             .and_then(|words| words.first().copied())
             .unwrap_or(generated.raw);
-        let decoded = match call_target(|| cellgov_ppu::decode::decode(raw)) {
+        let decoded = match call_target(|| seeded::ppu_decode(raw)) {
             Ok(decoded) => decoded,
             Err(payload) => {
                 record_target_panic(
@@ -355,7 +356,26 @@ fn run_instructions_inner(
         report.assessed(&assessment)?;
         report.executed(1)?;
         report.observed_effects(first.observation.committed_effects.iter().map(Effect::kind))?;
-        let outcome = PpuOutcomeClass::from_verdict(&first.verdict);
+        // An unsupported or undefined case enters no check, so it produces no finding.
+        if assessment.eligibility != CaseEligibility::Eligible {
+            report.observe_case(
+                iteration,
+                ppu_observation(
+                    [identity],
+                    &assessment,
+                    PpuTerminalObservation::from_step(&first),
+                    &first.observation.committed_effects,
+                    1,
+                    ppu_step_changed(&initial, &first),
+                    CrossReferenceAsymmetry::None,
+                ),
+            )?;
+            continue;
+        }
+        let outcome = seeded::ppu_outcome(
+            PpuOutcomeClass::from_verdict(&first.verdict),
+            descriptor.outcomes,
+        );
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if !descriptor.outcomes.contains(&outcome) {
             asymmetry = ppu_outcome_asymmetry(outcome);
@@ -379,6 +399,7 @@ fn run_instructions_inner(
             .staged_effects
             .iter()
             .map(Effect::kind)
+            .chain(seeded::extra_effect(descriptor.effects))
             .find(|effect| !descriptor.effects.contains(effect))
         {
             asymmetry = asymmetry.max(CrossReferenceAsymmetry::Effect);
@@ -397,24 +418,12 @@ fn run_instructions_inner(
                 iteration,
             )?;
         }
-        if assessment.eligibility != CaseEligibility::Eligible {
-            report.observe_case(
-                iteration,
-                ppu_observation(
-                    [identity],
-                    &assessment,
-                    PpuTerminalObservation::from_step(&first),
-                    &first.observation.committed_effects,
-                    1,
-                    ppu_step_changed(&initial, &first),
-                    asymmetry,
-                ),
-            )?;
-            continue;
-        }
         if requests_replay(descriptor.relations) {
             let second = match call_target(|| run_once(&instruction, &initial, &memory)) {
-                Ok(Ok(second)) => second,
+                Ok(Ok(mut second)) => {
+                    seeded::ppu_replayed(&mut second.observation);
+                    second
+                }
                 Ok(Err(error)) => return Err(error.into()),
                 Err(payload) => {
                     record_target_panic(
@@ -571,37 +580,39 @@ fn run_metamorphic_checks(
                 continue;
             }
         };
-        let partner_instruction =
-            match call_target(|| cellgov_ppu::decode::decode(case.partner_word)) {
-                Ok(Ok(instruction)) => instruction,
-                Ok(Err(_)) => {
-                    record_invalid_metamorphic_partner(
-                        report,
-                        relation,
-                        identity,
-                        DivergenceClass::Outcome,
-                        Some(OutcomeIdentity::PpuDecodeRefusal),
-                        vec![raw, case.partner_word],
-                        iteration,
-                    )?;
-                    strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
-                    continue;
-                }
-                Err(payload) => {
-                    record_target_panic(
-                        report,
-                        relation_check(relation),
-                        Some(identity),
-                        vec![raw, case.partner_word],
-                        iteration,
-                        payload,
-                    )?;
-                    strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
-                    continue;
-                }
-            };
+        let partner_instruction = match call_target(|| seeded::ppu_decode(case.partner_word)) {
+            Ok(Ok(instruction)) => instruction,
+            Ok(Err(_)) => {
+                record_invalid_metamorphic_partner(
+                    report,
+                    relation,
+                    identity,
+                    DivergenceClass::Outcome,
+                    Some(OutcomeIdentity::PpuDecodeRefusal),
+                    vec![raw, case.partner_word],
+                    iteration,
+                )?;
+                strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
+                continue;
+            }
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    relation_check(relation),
+                    Some(identity),
+                    vec![raw, case.partner_word],
+                    iteration,
+                    payload,
+                )?;
+                strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
+                continue;
+            }
+        };
         let partner = match call_target(|| run_once(&partner_instruction, initial, memory)) {
-            Ok(Ok(observed)) => observed,
+            Ok(Ok(mut observed)) => {
+                seeded::ppu_partner(&mut observed.observation);
+                observed
+            }
             Ok(Err(error)) => return Err(error.into()),
             Err(payload) => {
                 record_target_panic(
@@ -726,7 +737,7 @@ fn run_sequences_inner(
             }
             GenerationStrategy::RawWords => rng
                 .decoder_accepted_words(config.sequence_words as usize, |raw| {
-                    call_target(|| cellgov_ppu::decode::decode(raw)).map(|decoded| decoded.is_ok())
+                    call_target(|| seeded::ppu_decode(raw)).map(|decoded| decoded.is_ok())
                 })
                 .map(|words| GeneratedSequence {
                     words,
@@ -805,7 +816,10 @@ fn run_sequences_inner(
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if first.observed.deterministic {
             let second = match call_target(|| run_sequence(&words, &initial, &memory)) {
-                Ok(Ok(second)) => second,
+                Ok(Ok(mut second)) => {
+                    seeded::ppu_replayed(&mut second.observed.observation);
+                    second
+                }
                 Ok(Err(error)) => return Err(error.into()),
                 Err(payload) => {
                     record_target_panic(
@@ -871,6 +885,7 @@ fn run_once(
     initial: &PpuState,
     memory: &[u8],
 ) -> Result<ObservedStep, PpuObservationError> {
+    seeded::executor_boundary();
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
@@ -902,7 +917,9 @@ fn run_once(
 fn finish_fuzz_observation(
     input: PpuObservationInput<'_>,
 ) -> Result<PpuObservation, PpuObservationError> {
-    finish_observation(input)
+    let mut observation = finish_observation(input)?;
+    seeded::ppu_observed(&mut observation);
+    Ok(observation)
 }
 
 fn ppu_observation(
@@ -1118,6 +1135,7 @@ fn run_sequence(
     initial: &PpuState,
     memory: &[u8],
 ) -> Result<ObservedSequenceRun, PpuObservationError> {
+    seeded::executor_boundary();
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
@@ -1141,7 +1159,7 @@ fn run_sequence(
         let Some(&raw) = words.get(index) else {
             break;
         };
-        let Ok(instruction) = cellgov_ppu::decode::decode(raw) else {
+        let Ok(instruction) = seeded::ppu_decode(raw) else {
             decode_refusal = Some((state.pc, raw));
             break;
         };

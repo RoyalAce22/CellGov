@@ -301,6 +301,11 @@ pub fn replay_reference(
         let instruction = cellgov_spu::decode::decode(raw)
             .map_err(|source| SpuReferenceError::Decode { pc, source })?;
         outcome = execute(&instruction, &mut state, UnitId::new(0));
+        crate::seeded::spu_observed(
+            &instruction,
+            cellgov_spu::fuzz::SpuOutcomeClass::from_outcome(&outcome),
+            &mut state.regs,
+        );
         match outcome {
             SpuStepOutcome::Continue => state.pc = state.pc.wrapping_add(4),
             SpuStepOutcome::Branch => {}

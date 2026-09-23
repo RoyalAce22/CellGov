@@ -343,12 +343,12 @@ pub struct DecodeSweepReport {
 
 /// Checks the PPU decoder across the supplied word range.
 pub fn ppu_decode_partition(words: RangeInclusive<u32>) -> DecodeSweepReport {
-    run(words, |raw| cellgov_ppu::decode::decode(raw).is_ok())
+    run(words, |raw| crate::seeded::ppu_decode(raw).is_ok())
 }
 
 /// Checks the SPU decoder across the supplied word range.
 pub fn spu_decode_partition(words: RangeInclusive<u32>) -> DecodeSweepReport {
-    run(words, |raw| cellgov_spu::decode::decode(raw).is_ok())
+    run(words, |raw| crate::seeded::spu_decode(raw).is_ok())
 }
 
 fn run(words: RangeInclusive<u32>, decode: impl Fn(u32) -> bool) -> DecodeSweepReport {

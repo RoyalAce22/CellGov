@@ -199,7 +199,7 @@ impl From<&crate::SemanticObservation> for ArtifactObservation {
 pub struct ArtifactCoverage {
     /// Cases the containing engine run considered.
     pub cases: u64,
-    /// Successfully decoded cases.
+    /// Decoded cases, or decoded instruction words for a sequence engine.
     pub decoded: u64,
     /// Cases eligible for their semantic check.
     pub eligible: u64,
@@ -523,6 +523,17 @@ impl FuzzFindingArtifact {
                 "case is outside the selected campaign",
             ));
         }
+        // An instruction engine decodes one word per case. A sequence engine
+        // counts decoded words, at most `sequence_words` per case: the PPU
+        // executor fetches at most one word per generated word and the SPU
+        // executor runs under a `sequence_words` budget.
+        let decoded_bound = match self.original.replay.target {
+            FuzzTarget::PpuInstruction | FuzzTarget::SpuInstruction => self.coverage.cases,
+            FuzzTarget::PpuSequence | FuzzTarget::SpuSequence => self
+                .coverage
+                .cases
+                .saturating_mul(u64::from(self.campaign.sequence_words)),
+        };
         if self.finding_kind.is_empty()
             || self.fingerprint.check.is_empty()
             || self.fingerprint.divergence.is_empty()
@@ -534,7 +545,7 @@ impl FuzzFindingArtifact {
                 .unwrap_or(0)
                 == 0
             || self.coverage.cases == 0
-            || self.coverage.decoded > self.coverage.cases
+            || self.coverage.decoded > decoded_bound
             || self.coverage.eligible > self.coverage.cases
         {
             return Err(ArtifactError::Invalid(

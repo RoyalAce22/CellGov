@@ -210,7 +210,7 @@ pub fn sweep_ppu(descriptors: &[PpuGenerationDescriptor]) -> SemanticSweepReport
                 .map_err(|payload| (kind, payload))
         }),
         |raw| {
-            cellgov_ppu::decode::decode(raw)
+            crate::seeded::ppu_decode(raw)
                 .ok()
                 .map(|instruction| InstructionIdentity::Ppu(instruction.fuzz_descriptor(raw).kind))
         },
@@ -260,7 +260,7 @@ pub fn sweep_spu(descriptors: &[SpuGenerationDescriptor]) -> SemanticSweepReport
                 .map_err(|payload| (kind, payload))
         }),
         |raw| {
-            cellgov_spu::decode::decode(raw)
+            crate::seeded::spu_decode(raw)
                 .ok()
                 .map(|instruction| InstructionIdentity::Spu(instruction.into()))
         },

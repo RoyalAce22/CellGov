@@ -25,6 +25,7 @@ use crate::report::{
 };
 use crate::retention::{CrossReferenceAsymmetry, SemanticObservation, StateTransitionClass};
 use crate::rng::{Rng, WordGenerationFailure};
+use crate::seeded;
 use crate::{
     FuzzConfig, GenerationStrategy, ParameterStream, ReplayCoordinates, TargetPanicPayload,
 };
@@ -141,7 +142,7 @@ pub(crate) fn sequence_case_words(
         })??,
         GenerationStrategy::RawWords => rng
             .decoder_accepted_words(config.sequence_words as usize, |raw| {
-                call_target(|| cellgov_spu::decode::decode(raw)).map(|decoded| decoded.is_ok())
+                call_target(|| seeded::spu_decode(raw)).map(|decoded| decoded.is_ok())
             })
             .map(|words| GeneratedSequence {
                 words,
@@ -278,7 +279,7 @@ fn run_instructions_inner(
         let raw = override_words
             .and_then(|words| words.first().copied())
             .unwrap_or(generated.raw);
-        let decoded = match call_target(|| cellgov_spu::decode::decode(raw)) {
+        let decoded = match call_target(|| seeded::spu_decode(raw)) {
             Ok(decoded) => decoded,
             Err(payload) => {
                 record_target_panic(
@@ -345,7 +346,10 @@ fn run_instructions_inner(
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if requests_replay(descriptor.relations) {
             let second = match call_target(|| run_once(&instruction, &initial)) {
-                Ok(second) => second,
+                Ok(mut second) => {
+                    seeded::spu_replayed(&mut second.state);
+                    second
+                }
                 Err(payload) => {
                     record_target_panic(
                         report,
@@ -389,7 +393,10 @@ fn run_instructions_inner(
                 )?;
             }
         }
-        let outcome = SpuOutcomeClass::from_outcome(&first.outcome);
+        let outcome = seeded::spu_outcome(
+            SpuOutcomeClass::from_outcome(&first.outcome),
+            descriptor.outcomes,
+        );
         if !descriptor.outcomes.contains(&outcome) {
             asymmetry = asymmetry.max(spu_outcome_class_asymmetry(outcome));
             record(
@@ -410,6 +417,7 @@ fn run_instructions_inner(
         if let Some(effect) = outcome_effects(&first.outcome)
             .iter()
             .map(Effect::kind)
+            .chain(seeded::extra_effect(descriptor.effects))
             .find(|effect| !descriptor.effects.contains(effect))
         {
             asymmetry = asymmetry.max(CrossReferenceAsymmetry::Effect);
@@ -547,10 +555,13 @@ fn run_metamorphic_checks(
             }
         };
         let partner = match call_target(|| {
-            let decoded = cellgov_spu::decode::decode(case.partner_word);
+            let decoded = seeded::spu_decode(case.partner_word);
             decoded.map(|instruction| run_once(&instruction, initial))
         }) {
-            Ok(Ok(partner)) => partner,
+            Ok(Ok(mut partner)) => {
+                seeded::spu_partner(&mut partner.state);
+                partner
+            }
             Ok(Err(_)) => {
                 strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
                 record(
@@ -677,7 +688,7 @@ fn run_sequences_inner(
             }
             GenerationStrategy::RawWords => rng
                 .decoder_accepted_words(config.sequence_words as usize, |raw| {
-                    call_target(|| cellgov_spu::decode::decode(raw)).map(|decoded| decoded.is_ok())
+                    call_target(|| seeded::spu_decode(raw)).map(|decoded| decoded.is_ok())
                 })
                 .map(|words| GeneratedSequence {
                     words,
@@ -788,7 +799,10 @@ fn run_sequences_inner(
                     config.strategy,
                 )
             }) {
-                Ok(second) => second,
+                Ok(mut second) => {
+                    seeded::spu_replayed(&mut second.0.state);
+                    second
+                }
                 Err(payload) => {
                     record_target_panic(
                         report,
@@ -901,8 +915,14 @@ fn run_once(
     instruction: &cellgov_spu::instruction::SpuInstruction,
     initial: &SpuState,
 ) -> ObservedStep {
+    seeded::executor_boundary();
     let mut state = initial.clone();
     let outcome = execute(instruction, &mut state, UNIT);
+    seeded::spu_observed(
+        instruction,
+        SpuOutcomeClass::from_outcome(&outcome),
+        &mut state.regs,
+    );
     ObservedStep {
         outcome,
         state: SpuObservableSnapshot::capture(&state),
@@ -1072,6 +1092,7 @@ fn run_sequence_with_limit(
     budget: usize,
     program_words: Option<usize>,
 ) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+    seeded::executor_boundary();
     let mut state = initial.clone();
     let mut decoded = 0u64;
     let mut kinds = Vec::new();
@@ -1093,7 +1114,7 @@ fn run_sequence_with_limit(
         let Some(raw) = state.fetch() else {
             break;
         };
-        let Ok(instruction) = cellgov_spu::decode::decode(raw) else {
+        let Ok(instruction) = seeded::spu_decode(raw) else {
             decode_refusal = Some((state.pc, raw));
             break;
         };
@@ -1105,6 +1126,11 @@ fn run_sequence_with_limit(
         kinds.push(InstructionIdentity::Spu(descriptor.kind));
         let before = state.clone();
         let outcome = execute(&instruction, &mut state, UNIT);
+        seeded::spu_observed(
+            &instruction,
+            SpuOutcomeClass::from_outcome(&outcome),
+            &mut state.regs,
+        );
         footprint_violations.extend(
             SpuAllowedFootprint::for_instruction(&instruction)
                 .violations(&before, &SpuObservation::capture(&state, &outcome)),
@@ -1121,6 +1147,7 @@ fn run_sequence_with_limit(
             }
         }
     }
+    seeded::spu_program_counter(&mut state.pc);
     (
         ObservedSequence {
             state: SpuObservableSnapshot::capture(&state),

@@ -59,7 +59,7 @@ impl ArtifactRecord {
 pub(crate) struct CampaignSummary {
     /// Cases considered, decode refusals included.
     pub cases: u64,
-    /// Successfully decoded cases.
+    /// Decoded cases, or decoded instruction words for a sequence engine.
     pub decoded: u64,
     /// Cases eligible for their semantic check.
     pub eligible: u64,

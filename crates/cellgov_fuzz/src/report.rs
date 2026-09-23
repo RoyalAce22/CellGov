@@ -219,7 +219,7 @@ pub struct FuzzReport {
     pub strategy: GenerationStrategy,
     /// Cases considered, including decode refusals.
     pub cases: u64,
-    /// Successfully decoded cases.
+    /// Decoded cases, or decoded instruction words for a sequence engine.
     pub decoded: u64,
     /// Cases eligible for their selected semantic check.
     pub eligible_cases: u64,
@@ -503,6 +503,9 @@ pub enum RunOutcome {
     TargetPanic,
     /// The caller stopped scheduling at a deterministic boundary.
     Cancelled,
+    /// No finding, no eligible case, and no unsupported or undefined case:
+    /// nothing reached a check.
+    NoEligibleCases,
     /// No finding, no clean eligible completion, and the run met unsupported
     /// cases only.
     UnsupportedCase,
@@ -547,11 +550,13 @@ impl FuzzRun {
         } else if report.is_clean() && report.eligible_cases != 0 {
             RunOutcome::CleanCompletion
         } else {
+            // A clean report with no eligible case proves nothing about the
+            // target; it never reads as a clean completion.
             match (has_unsupported, has_undefined) {
                 (true, false) => RunOutcome::UnsupportedCase,
                 (false, true) => RunOutcome::UndefinedCase,
                 (true, true) => RunOutcome::UnsupportedAndUndefinedCases,
-                (false, false) => RunOutcome::CleanCompletion,
+                (false, false) => RunOutcome::NoEligibleCases,
             }
         };
         Self { outcome, report }

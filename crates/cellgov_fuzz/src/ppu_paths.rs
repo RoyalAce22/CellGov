@@ -382,19 +382,21 @@ fn run_path(
         syscall_args: result.syscall_args,
     };
     let executed_pcs = trace.0.borrow().clone();
+    let mut observation = PpuObservation {
+        state: PpuArchitecturalState::capture(unit.state()),
+        memory: data,
+        outcome: PpuObservedOutcome::NoInstruction,
+        staged_effects: effects_all.clone(),
+        committed_effects: effects_all,
+        commit_error: None,
+        reservations: reservations.iter().collect(),
+        store_buffer: Vec::new(),
+        fault_discarded: stop.reason == YieldReason::Fault,
+    };
+    crate::seeded::ppu_observed(&mut observation);
     Ok(PpuPathRun {
         path,
-        observation: PpuObservation {
-            state: PpuArchitecturalState::capture(unit.state()),
-            memory: data,
-            outcome: PpuObservedOutcome::NoInstruction,
-            staged_effects: effects_all.clone(),
-            committed_effects: effects_all,
-            commit_error: None,
-            reservations: reservations.iter().collect(),
-            store_buffer: Vec::new(),
-            fault_discarded: stop.reason == YieldReason::Fault,
-        },
+        observation,
         stop,
         retired,
         executed_pcs,
@@ -608,19 +610,21 @@ fn run_plain(
         stop.pc = Some(step_pc);
         stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
     }
+    let mut observation = PpuObservation {
+        state: PpuArchitecturalState::capture(&state),
+        memory: data,
+        outcome: PpuObservedOutcome::NoInstruction,
+        staged_effects: effects_all.clone(),
+        committed_effects: effects_all,
+        commit_error: None,
+        reservations: reservations.iter().collect(),
+        store_buffer: Vec::new(),
+        fault_discarded: stop.reason == YieldReason::Fault,
+    };
+    crate::seeded::ppu_observed(&mut observation);
     Ok(PpuPathRun {
         path: PpuExecutionPath::Plain,
-        observation: PpuObservation {
-            state: PpuArchitecturalState::capture(&state),
-            memory: data,
-            outcome: PpuObservedOutcome::NoInstruction,
-            staged_effects: effects_all.clone(),
-            committed_effects: effects_all,
-            commit_error: None,
-            reservations: reservations.iter().collect(),
-            store_buffer: Vec::new(),
-            fault_discarded: stop.reason == YieldReason::Fault,
-        },
+        observation,
         stop,
         retired,
         executed_pcs,

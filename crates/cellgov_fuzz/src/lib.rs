@@ -24,6 +24,7 @@ mod error;
 mod parameters;
 mod retention;
 mod rng;
+mod seeded;
 
 const MAX_SEQUENCE_WORDS: usize = 65_536;
 const MAX_RETAINED_FINDINGS: usize = 1_024;

@@ -605,8 +605,21 @@ fn an_inapplicability_finding_makes_the_report_unclean() {
 }
 
 #[test]
-fn an_empty_report_completes_clean() {
-    assert_eq!(outcome_for(&[], 0, 0, 0), RunOutcome::CleanCompletion);
+fn an_empty_report_is_not_a_clean_completion() {
+    assert_eq!(outcome_for(&[], 0, 0, 0), RunOutcome::NoEligibleCases);
+}
+
+#[test]
+fn decoded_cases_that_never_reach_a_check_are_not_a_clean_completion() {
+    let mut report = report(0);
+    report.cases = 4;
+    report.decoded = 4;
+    report.executed_steps = 4;
+
+    assert_eq!(
+        FuzzRun::completed(report).outcome,
+        RunOutcome::NoEligibleCases
+    );
 }
 
 #[test]

@@ -487,9 +487,8 @@ pub fn classify_run(finding: &Finding, run: &FuzzRun) -> Result<CandidateVerdict
             source: Box::new(source.clone()),
         });
     }
-    // Applicability comes before identity: the instruction engines record
-    // an illegal outcome or effect for an undefined case too, and an undefined
-    // or unsupported case reproduces nothing.
+    // Applicability comes before identity: an undefined or unsupported case
+    // enters no check and reproduces nothing.
     if run.report.unsupported_cases > 0 || run.report.undefined_cases > 0 {
         return Ok(CandidateVerdict::Inapplicable);
     }

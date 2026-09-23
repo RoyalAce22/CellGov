@@ -203,6 +203,37 @@ fn a_case_outside_the_shard_or_cancellation_refuses_before_running() {
 }
 
 #[test]
+fn decoded_words_are_bounded_per_case_by_the_engine() {
+    let (artifact, _) = sample();
+    let mut instruction = artifact.clone();
+    instruction.coverage.decoded = 2;
+    assert!(matches!(
+        instruction.validate(),
+        Err(ArtifactError::Invalid(
+            "finding or coverage context is inconsistent"
+        ))
+    ));
+    // A sequence engine decodes up to `sequence_words` words per case.
+    let mut sequence = artifact;
+    sequence.original.replay.target = FuzzTarget::PpuSequence;
+    sequence.fingerprint.target = FuzzTarget::PpuSequence;
+    let per_case = u64::from(sequence.campaign.sequence_words);
+    assert!(per_case > 1);
+    sequence.coverage.decoded = per_case;
+    assert_eq!(
+        sequence.validate().map_err(|error| error.to_string()),
+        Ok(())
+    );
+    sequence.coverage.decoded = per_case + 1;
+    assert!(matches!(
+        sequence.validate(),
+        Err(ArtifactError::Invalid(
+            "finding or coverage context is inconsistent"
+        ))
+    ));
+}
+
+#[test]
 fn optional_observation_and_failed_reduction_keep_original_words() {
     let (mut artifact, _) = sample();
     artifact.reduction = ArtifactReduction::Failed {
