@@ -67,6 +67,11 @@ publish = false
 
 [workspace.dependencies]
 criterion = { version = "0.5", default-features = false }
+# Generated-input tests. `std` alone: the fork and timeout runners
+# spawn processes and read the host clock, which no property here
+# needs, and the file persistence that records a counterexample is
+# part of `std`.
+proptest = { version = "1.11", default-features = false, features = ["std"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

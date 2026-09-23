@@ -948,3 +948,7 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 #[cfg(test)]
 #[path = "tests/decode_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/decode_proptests.rs"]
+mod proptests;
