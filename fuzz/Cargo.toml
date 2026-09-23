@@ -1,0 +1,61 @@
+# The cargo-fuzz targets for the ELF and PRX parsers. Not a workspace
+# member: libFuzzer needs a nightly toolchain, and the workspace builds
+# on the pinned stable. Run them with `bash .github/loader_fuzz.sh run
+# <target>`; see README.md beside this file.
+[package]
+name = "cellgov-loader-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+description = "cargo-fuzz targets for the CellGov ELF and PRX parsers"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+cellgov_fuzz = { path = "../crates/cellgov_fuzz" }
+
+# One binary per parser; the target list is pinned against
+# `cellgov_fuzz::loaders::LoaderTarget::ALL` by that crate's tests.
+[[bin]]
+name = "pt_load_segments"
+path = "fuzz_targets/pt_load_segments.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "load_ppu_elf"
+path = "fuzz_targets/load_ppu_elf.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_prx"
+path = "fuzz_targets/parse_prx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_imports"
+path = "fuzz_targets/parse_imports.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "funcmap_build"
+path = "fuzz_targets/funcmap_build.rs"
+test = false
+doc = false
+bench = false
+
+# Standalone: the parent workspace excludes this directory.
+[workspace]
+
+[profile.release]
+debug = 1

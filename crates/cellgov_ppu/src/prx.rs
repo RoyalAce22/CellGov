@@ -194,6 +194,12 @@ pub fn parse_imports(data: &[u8]) -> Result<Vec<ImportedModule>, ImportParseErro
     let phoff = loader::read_u64(data, ELF_PHOFF_OFFSET) as usize;
     let phentsize = loader::read_u16(data, ELF_PHENTSIZE_OFFSET) as usize;
     let phnum = loader::read_u16(data, ELF_PHNUM_OFFSET) as usize;
+    // Every slot reader below bounds the slot by `phentsize`, then
+    // reads fields at the fixed ELF64 offsets. A slot narrower than
+    // the layout puts those reads past the checked bound.
+    if phnum > 0 && phentsize < ELF_PHENTSIZE {
+        return Err(ImportParseError::BadPhentsize { phentsize });
+    }
 
     // Every table pointer below is a relocation target, so the walk
     // reads the resolved image.
@@ -657,3 +663,7 @@ fn read_cstring(data: &[u8], segments: &[Segment], vaddr: u32) -> Result<String,
 #[cfg(test)]
 #[path = "tests/prx_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/prx_finding_tests.rs"]
+mod finding_tests;

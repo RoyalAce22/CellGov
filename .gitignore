@@ -68,6 +68,13 @@ scripts/
 # env-gated diagnostics; never vendored.
 scratch/
 
+# What a cargo-fuzz run grows or builds; the seeds beside them are
+# committed and regenerated from cellgov_fuzz::loader_images.
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/coverage/
+fuzz/target/
+
 # A database docs/lv2/sql/build.sql writes in place; the archive is the text.
 docs/lv2/*.db
 docs/lv2/*.db-journal

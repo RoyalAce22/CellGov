@@ -57,7 +57,7 @@ jobs:
       - name: Validate workflow and shell syntax
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
-          bash -n .github/ci.sh .github/external-data.sh .github/fuzz.sh
+          bash -n .github/ci.sh .github/external-data.sh .github/fuzz.sh .github/loader_fuzz.sh
 
   # The only job that denies warnings. The pinned entry is blocking, on
   # a version that moves only when this file does; the stable entry is

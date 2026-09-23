@@ -424,6 +424,10 @@ pub const PRX_IMPORT_VSTUBS_PTR_OFFSET: usize = 32;
 /// this are treated as function-only.
 pub const PRX_IMPORT_ENTRY_VAR_MIN_SIZE: u8 = 36;
 
+/// The entry size every installed firmware module declares, with the
+/// variable fields and eight bytes past them.
+pub const PRX_IMPORT_ENTRY_FIRMWARE_SIZE: u8 = 0x2C;
+
 /// Smallest declared entry size a `PrxImportEntry` can carry and
 /// still be parseable: an entry whose declared `size` byte is below
 /// this is structurally corrupt, because its fields would not cover
@@ -448,5 +452,10 @@ pub const PRX_LIB_INFO_IMPORTS_START_OFFSET: usize = 44;
 /// Offset of the `imports_end` u32 field in `ppu_prx_library_info`.
 pub const PRX_LIB_INFO_IMPORTS_END_OFFSET: usize = 48;
 
-/// Size in bytes of one `ppu_prx_library_info` struct.
+/// Size in bytes of one `ppu_prx_library_info` struct;
+/// `sys_prx_module_info_t` shares the layout.
 pub const PRX_LIB_INFO_SIZE: usize = 52;
+
+/// Bytes of the `name` field at +4 of `sys_prx_module_info_t`, NUL
+/// included.
+pub const PRX_MODULE_INFO_NAME_LEN: usize = 28;

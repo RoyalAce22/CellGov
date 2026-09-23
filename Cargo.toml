@@ -25,6 +25,10 @@ members = [
     "apps/cellgov_install",
     "bridges/rpcs3_to_observation",
 ]
+# The cargo-fuzz targets need nightly and libFuzzer, so they stay out
+# of every workspace build; the scheduled loader-fuzz workflow builds
+# them from their own manifest.
+exclude = ["fuzz"]
 # Default-build excludes the RPCS3 bridge so a plain `cargo build`
 # does not pull in any RPCS3-aware code. Build it explicitly with
 # `cargo build -p rpcs3_to_observation` when running the

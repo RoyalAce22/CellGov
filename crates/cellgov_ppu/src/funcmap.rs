@@ -114,7 +114,7 @@ impl FunctionOrigin {
 }
 
 /// Why a function map could not be built.
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum FuncMapError {
     /// Input shorter than an ELF header.
     #[error("funcmap: input shorter than an ELF header")]
@@ -258,17 +258,27 @@ pub fn build(data: &[u8]) -> Result<FunctionMap, FuncMapError> {
     }
 
     // Fallback sweep over all non-executable file-backed bytes;
-    // the TOC-set check does the false-positive filtering.
+    // the TOC-set check does the false-positive filtering. The walk
+    // ends at the file end: nothing validates `p_filesz`, and a
+    // claim far past the file would cost this loop one step per
+    // claimed word.
     'sweep: for seg in segments.iter().filter(|s| !s.executable) {
-        let mut vaddr = seg.vaddr;
-        let seg_end = seg.vaddr.saturating_add(seg.filesz);
-        while vaddr.saturating_add(8) <= seg_end {
+        let backed = (data.len() as u64)
+            .saturating_sub(seg.file_offset)
+            .min(seg.filesz);
+        let mut offset = 0u64;
+        while offset.saturating_add(8) <= backed {
+            // A segment near the top of the address space has fewer
+            // addresses left than backed bytes.
+            let Some(vaddr) = seg.vaddr.checked_add(offset) else {
+                break;
+            };
             if let Some(code) = validate_descriptor(data, &segments, &toc_set, vaddr) {
                 if !insert_scanned(&mut starts, code) {
                     break 'sweep;
                 }
             }
-            vaddr += 4;
+            offset += 4;
         }
     }
 
@@ -354,3 +364,7 @@ fn validate_descriptor(
 #[cfg(test)]
 #[path = "tests/funcmap_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/funcmap_finding_tests.rs"]
+mod finding_tests;
