@@ -304,6 +304,13 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         path: "dev oracle-gap",
         lines: &["cellgov dev oracle-gap"],
     },
+    Examples {
+        path: "dev decoder-sweep",
+        lines: &[
+            "cellgov dev decoder-sweep ppu --count 65536 --output ppu-bounded.json",
+            "cellgov dev decoder-sweep spu --full --shard 0 --shards 16 --output spu-shard0.json",
+        ],
+    },
 ];
 
 /// The block `path`'s help leads with, or `None` when it declares none.

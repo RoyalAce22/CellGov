@@ -216,6 +216,7 @@ fn dispatch_dev(
         DevCommand::GenManifest(args) => cli::gen_manifest::run(args, vfs_flag),
         DevCommand::RecordAnchors(args) => cli::record_anchors::run(args, globals.render()),
         DevCommand::OracleGap => oracle_gap::run(vfs_flag),
+        DevCommand::DecoderSweep(args) => cli::decoder_sweep::run(args),
     }
 }
 

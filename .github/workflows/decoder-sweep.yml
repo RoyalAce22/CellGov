@@ -1,0 +1,51 @@
+name: decoder-sweep
+
+on:
+  schedule:
+    - cron: '31 4 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: decoder-sweep-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-raw-domain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        decoder: [ppu, spu]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: '1.95.0'
+
+      - name: Build the offline decoder command
+        run: cargo build --release -p cellgov_cli --locked
+
+      - name: Sweep one complete-domain shard
+        run: |
+          mkdir -p target/decoder-sweep
+          target/release/cellgov dev decoder-sweep '${{ matrix.decoder }}' \
+            --full --shard '${{ matrix.shard }}' --shards 16 \
+            --output 'target/decoder-sweep/${{ matrix.decoder }}-${{ matrix.shard }}.json'
+
+      - name: Preserve replayable shard evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: decoder-${{ matrix.decoder }}-${{ matrix.shard }}
+          path: target/decoder-sweep/*.json
+          if-no-files-found: warn
+          retention-days: 14

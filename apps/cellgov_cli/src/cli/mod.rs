@@ -6,6 +6,7 @@ pub(crate) mod boot_cmd;
 pub(crate) mod cli_gen;
 pub(crate) mod compare;
 pub(crate) mod declared_cells;
+pub(crate) mod decoder_sweep;
 pub(crate) mod dump;
 pub(crate) mod env;
 pub(crate) mod exit;

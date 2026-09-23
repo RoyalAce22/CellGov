@@ -43,6 +43,9 @@ pub(crate) enum CommandError {
     #[error("{0}")]
     Failed(#[source] Diagnostic),
 
+    #[error(transparent)]
+    DecoderSweep(#[from] super::decoder_sweep::DecoderSweepError),
+
     #[error("{diagnostic}")]
     Status {
         code: CommandExitCode,
@@ -71,6 +74,11 @@ impl CommandError {
     pub(crate) const fn code(&self) -> Option<CommandExitCode> {
         match self {
             Self::Failed(_) => Some(CommandExitCode::new(super::exit_codes::FAILED)),
+            Self::DecoderSweep(error) => Some(CommandExitCode::new(if error.is_usage() {
+                super::exit_codes::USAGE
+            } else {
+                super::exit_codes::FAILED
+            })),
             Self::Status { code, .. } => Some(*code),
             Self::Interrupted => None,
         }

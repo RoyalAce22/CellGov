@@ -24,6 +24,7 @@ cellgov_core = { path = "../../crates/cellgov_core" }
 cellgov_effects = { path = "../../crates/cellgov_effects" }
 cellgov_event = { path = "../../crates/cellgov_event" }
 cellgov_exec = { path = "../../crates/cellgov_exec" }
+cellgov_fuzz = { path = "../../crates/cellgov_fuzz" }
 cellgov_explore = { path = "../../crates/cellgov_explore" }
 cellgov_install = { path = "../cellgov_install" }
 cellgov_lv2 = { path = "../../crates/cellgov_lv2" }

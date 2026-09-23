@@ -83,6 +83,7 @@ const DISPATCHED: &[&str] = &[
     "dev gen-manifest",
     "dev record-anchors",
     "dev oracle-gap",
+    "dev decoder-sweep",
 ];
 
 #[test]

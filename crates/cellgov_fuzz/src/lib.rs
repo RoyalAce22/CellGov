@@ -6,6 +6,7 @@ pub mod ppu;
 pub mod ppu_paths;
 pub mod ppu_reference;
 pub mod ppu_sequences;
+pub mod raw_decode;
 pub mod reference;
 pub mod report;
 pub mod spu;

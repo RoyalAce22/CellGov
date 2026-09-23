@@ -317,7 +317,8 @@ where
 }
 
 /// One decoder panic captured at the target boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DecodePanic {
     /// Raw word passed to the decoder.
     pub raw: u32,

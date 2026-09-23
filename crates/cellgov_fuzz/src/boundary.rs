@@ -4,7 +4,8 @@ use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Stable panic payload retained without addresses or `Debug` formatting.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "message", rename_all = "snake_case")]
 pub enum TargetPanicPayload {
     /// A static string payload.
     StaticStr(String),

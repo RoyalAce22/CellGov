@@ -176,6 +176,7 @@ dependencies = [
  "cellgov_event",
  "cellgov_exec",
  "cellgov_explore",
+ "cellgov_fuzz",
  "cellgov_install",
  "cellgov_lv2",
  "cellgov_mem",

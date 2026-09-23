@@ -22,6 +22,7 @@ pub(crate) use dev::{
     FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,
     TitlesGenArgs, WorkspaceGenArgs, MAX_DISASM_COUNT,
 };
+pub(crate) use dev::{DecoderSweepArgs, SweepDecoder};
 pub(crate) use dev::{Lv2CensusArgs, Lv2DiscoverArgs};
 pub(crate) use diff::{
     CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, ExploreTitleArgs, OutputFormat,
