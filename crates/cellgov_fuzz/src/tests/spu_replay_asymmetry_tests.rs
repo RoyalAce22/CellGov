@@ -64,6 +64,7 @@ fn spu_sequence_replay_compares_depth_and_execution_order() {
         deterministic: true,
         has_undefined_operands: false,
         has_unmodeled_execution: false,
+        footprint_violations: BTreeSet::new(),
     };
     let nop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop);
     let lnop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Lnop);

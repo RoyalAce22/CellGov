@@ -63,6 +63,32 @@ fn structured_spu_campaign_executes_both_typed_relations() {
 }
 
 #[test]
+fn structured_spu_sequences_keep_complete_footprints_and_fault_discard() {
+    let config = FuzzConfig {
+        schedule: CampaignSchedule {
+            cases: CaseRange {
+                first: 0,
+                count: 4_096,
+            },
+            ..CampaignSchedule::default()
+        },
+        sequence_words: 4,
+        ..small_config()
+    };
+    let run = spu::run_sequences(config);
+    assert_eq!(run.outcome, RunOutcome::CleanCompletion);
+    assert_eq!(run.report.cases, 4_096);
+    assert!(
+        run.report.finding_counts.is_empty(),
+        "{:?}: {:?}",
+        run.outcome,
+        run.report.findings
+    );
+    assert!(run.report.eligible_cases > 0);
+    assert!(run.report.executed_steps > run.report.cases);
+}
+
+#[test]
 fn engines_are_deterministic_library_calls() {
     let config = small_config();
     assert_eq!(ppu::run_instructions(config), ppu::run_instructions(config));

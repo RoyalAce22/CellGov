@@ -8,7 +8,8 @@ use cellgov_spu::exec::{execute, SpuStepOutcome};
 use cellgov_spu::fuzz::{
     encoding_execution_is_supported, encoding_has_undefined_operands, generation_descriptors,
     SpuFuzzDescriptor, SpuGenerationDescriptor, SpuGenerationError, SpuMetamorphicRelation,
-    SpuOperandClass, SpuOutcomeClass, SpuRelationRefusal, SpuSequenceFlow, SpuStateInput,
+    SpuOperandClass, SpuOutcomeClass, SpuRelationRefusal, SpuSequenceFlow, SpuSequenceInteraction,
+    SpuStateInput,
 };
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_LS_SIZE};
@@ -41,6 +42,7 @@ struct GeneratedWord {
 struct GeneratedSequence {
     words: Vec<u32>,
     features: BTreeSet<CaseFeature>,
+    interaction: Option<(SpuSequenceInteraction, u32)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +65,7 @@ struct ObservedSequence {
     deterministic: bool,
     has_undefined_operands: bool,
     has_unmodeled_execution: bool,
+    footprint_violations: BTreeSet<SpuObservationComponent>,
 }
 
 #[derive(Clone, Copy)]
@@ -539,6 +542,7 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                 .map(|words| GeneratedSequence {
                     words,
                     features: BTreeSet::new(),
+                    interaction: None,
                 }),
         };
         let generated = match generated {
@@ -564,6 +568,9 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             GenerationStrategy::Structured => state_aware_state(&mut rng, None)?,
             GenerationStrategy::RawWords => (random_state(&mut rng)?, BTreeSet::new()),
         };
+        if let Some((interaction, data_base)) = generated.interaction {
+            interaction.prepare_state(&mut initial, data_base);
+        }
         initial.pc = 0;
         for (index, word) in words.iter().enumerate() {
             let start = index * 4;
@@ -690,6 +697,38 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                 iteration,
             )?;
         }
+        for component in &first.0.footprint_violations {
+            let divergence = match component {
+                SpuObservationComponent::ProgramCounter => DivergenceClass::ControlFlow,
+                SpuObservationComponent::Effects => DivergenceClass::Effect,
+                SpuObservationComponent::Outcome | SpuObservationComponent::FaultDiscard => {
+                    DivergenceClass::Outcome
+                }
+                SpuObservationComponent::Registers
+                | SpuObservationComponent::LocalStore
+                | SpuObservationComponent::Channels
+                | SpuObservationComponent::Reservation => DivergenceClass::ArchitecturalState,
+            };
+            asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
+            record(
+                report,
+                FindingKind::IllegalFootprint,
+                SemanticFingerprint {
+                    target: FuzzTarget::SpuSequence,
+                    instruction_kind: None,
+                    check: CheckIdentity::AllowedFootprint,
+                    divergence,
+                    outcome: first
+                        .0
+                        .terminal_outcome
+                        .as_ref()
+                        .map(|outcome| outcome_identity(SpuOutcomeClass::from_outcome(outcome))),
+                    effect: None,
+                },
+                words.clone(),
+                iteration,
+            )?;
+        }
         report.observe_case(
             iteration,
             spu_observation(
@@ -794,6 +833,7 @@ fn spu_sequence_replay_asymmetry(
         || first.0.deterministic != second.0.deterministic
         || first.0.has_undefined_operands != second.0.has_undefined_operands
         || first.0.has_unmodeled_execution != second.0.has_unmodeled_execution
+        || first.0.footprint_violations != second.0.footprint_violations
         || first.1 != second.1
         || first.2 != second.2;
     let first_outcome = first.0.terminal_outcome.as_ref();
@@ -885,6 +925,7 @@ fn run_sequence_with_limit(
     let mut deterministic = true;
     let mut has_undefined_operands = false;
     let mut has_unmodeled_execution = false;
+    let mut footprint_violations = BTreeSet::new();
     for _ in 0..budget {
         let Some(slot) = usize::try_from(state.pc / 4).ok() else {
             break;
@@ -907,7 +948,12 @@ fn run_sequence_with_limit(
         deterministic &= requests_replay(descriptor.relations);
         decoded += 1;
         kinds.push(InstructionIdentity::Spu(descriptor.kind));
+        let before = state.clone();
         let outcome = execute(&instruction, &mut state, UNIT);
+        footprint_violations.extend(
+            SpuAllowedFootprint::for_instruction(&instruction)
+                .violations(&before, &SpuObservation::capture(&state, &outcome)),
+        );
         terminal_outcome = Some(outcome.clone());
         match outcome {
             SpuStepOutcome::Continue => state.pc = state.pc.wrapping_add(4),
@@ -929,6 +975,7 @@ fn run_sequence_with_limit(
             deterministic,
             has_undefined_operands,
             has_unmodeled_execution,
+            footprint_violations,
         },
         decoded,
         kinds,
@@ -941,6 +988,44 @@ fn structured_sequence(
     count: usize,
 ) -> Result<GeneratedSequence, GeneratorError> {
     // [Wang2024 p:340:1 s:Abstract] Generated programs track program state statically.
+    if count >= 3 && rng.chance(1, 8)? {
+        // [Padhye2019 p:329 s:Abstract] Structural parameter mutation retains valid inputs.
+        // [Feng2026 p:25 s:Abstract] Paired runs compare normalized fault outcomes.
+        let choices = SpuSequenceInteraction::ALL.len();
+        let index = rng.below(choices as u64)? as usize;
+        let interaction = SpuSequenceInteraction::ALL[index];
+        let data_base =
+            STRUCTURED_LS_DATA_BASE + (rng.below(16)? as u32 * RESERVATION_LINE_BYTES as u32);
+        let mut words = interaction.words(descriptors)?;
+        let nop = descriptors
+            .iter()
+            .find(|descriptor| descriptor.kind == cellgov_spu::instruction::SpuInstructionKind::Nop)
+            .ok_or(SpuGenerationError::MissingSequenceKind {
+                kind: cellgov_spu::instruction::SpuInstructionKind::Nop,
+            })?
+            .canonical_word;
+        words.resize(count, nop);
+        let features = match interaction {
+            SpuSequenceInteraction::Branch | SpuSequenceInteraction::Stop => {
+                BTreeSet::from([CaseFeature::ControlledFlow])
+            }
+            SpuSequenceInteraction::LocalStore => BTreeSet::from([CaseFeature::MappedMemory]),
+            SpuSequenceInteraction::LocalStoreFault => {
+                BTreeSet::from([CaseFeature::ChannelState, CaseFeature::NamedFaultBoundary])
+            }
+            SpuSequenceInteraction::Channel
+            | SpuSequenceInteraction::Mailbox
+            | SpuSequenceInteraction::Dma
+            | SpuSequenceInteraction::DmaGet
+            | SpuSequenceInteraction::MemoryRead
+            | SpuSequenceInteraction::Reservation => BTreeSet::from([CaseFeature::ChannelState]),
+        };
+        return Ok(GeneratedSequence {
+            words,
+            features,
+            interaction: Some((interaction, data_base)),
+        });
+    }
     let chain_register = rng.chance(3, 4)?.then(|| rng.next_u32());
     let mut words = Vec::with_capacity(count);
     let mut features = BTreeSet::new();
@@ -956,7 +1041,11 @@ fn structured_sequence(
     if dependency_chain {
         features.insert(CaseFeature::DependencyChain);
     }
-    Ok(GeneratedSequence { words, features })
+    Ok(GeneratedSequence {
+        words,
+        features,
+        interaction: None,
+    })
 }
 
 fn structured_generated_word_for_flow(
