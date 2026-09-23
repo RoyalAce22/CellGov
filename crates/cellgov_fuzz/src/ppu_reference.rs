@@ -8,32 +8,13 @@ use cellgov_ppu::observation::PpuArchitecturalState;
 use cellgov_ppu::state::PpuState;
 use serde::{Deserialize, Serialize};
 
+pub use crate::reference::ReferenceField;
+
 use crate::ppu_paths::{first_path_divergence, run_all_paths, PpuPathDivergence, PpuPathRun};
 
 /// Current repository-data schema version.
 pub const PPU_REFERENCE_SCHEMA_VERSION: u32 = 1;
 const REFERENCE_DATA_BASE: u64 = 0x1000_0000;
-
-/// A represented value or an explicit reason that no comparison is valid.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
-pub enum ReferenceField<T> {
-    /// The source represents this field.
-    Value {
-        /// Expected value.
-        value: T,
-    },
-    /// The source states that the field is architecturally undefined.
-    Undefined {
-        /// Source-specific reason.
-        reason: String,
-    },
-    /// The source or capture format cannot represent the field.
-    Unsupported {
-        /// Source-specific reason.
-        reason: String,
-    },
-}
 
 /// Provenance for an independent PPU observation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

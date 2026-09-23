@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "case_id": "spu-isa-rotqbyi-12",
+  "provenance": {
+    "kind": "documented_vector",
+    "citation": "SPU-ISA p:132 s:6. Shift and Rotate Instructions",
+    "vector_id": "rotqbyi-r4-r2-12-sequential-bytes"
+  },
+  "words": [1065550084],
+  "initial_state": {
+    "regs_hex": { "2": "000102030405060708090a0b0c0d0e0f" },
+    "local_store": {},
+    "pc": 0,
+    "channels": null,
+    "reservation": null
+  },
+  "expected": {
+    "regs_hex": { "status": "value", "value": { "4": "0c0d0e0f000102030405060708090a0b" } },
+    "local_store": { "status": "value", "value": {} },
+    "pc": { "status": "value", "value": 4 },
+    "channels": { "status": "unsupported", "reason": "the cited instruction rule does not specify initial MFC channel state" },
+    "reservation": { "status": "unsupported", "reason": "the cited instruction rule does not specify initial reservation state" },
+    "outcome": { "status": "value", "value": "continue" },
+    "effects": { "status": "value", "value": [] },
+    "fault_discarded": { "status": "value", "value": false }
+  }
+}
