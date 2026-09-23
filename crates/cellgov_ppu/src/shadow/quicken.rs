@@ -107,3 +107,7 @@ pub(super) fn quicken_insn(insn: PpuInstruction) -> Option<PpuInstruction> {
 #[cfg(test)]
 #[path = "tests/quicken_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/quicken_proptests.rs"]
+mod proptests;

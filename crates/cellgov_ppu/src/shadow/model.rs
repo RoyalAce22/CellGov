@@ -225,5 +225,17 @@ impl PredecodedShadow {
 }
 
 #[cfg(test)]
+impl PredecodedShadow {
+    /// The decoded content and stale flag of slot `idx`.
+    pub(super) fn slot(&self, idx: usize) -> Option<(Option<PpuInstruction>, bool)> {
+        Some((*self.slots.get(idx)?, self.stale[idx]))
+    }
+}
+
+#[cfg(test)]
 #[path = "tests/model_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/model_proptests.rs"]
+mod proptests;

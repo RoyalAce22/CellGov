@@ -23,4 +23,8 @@ mod superpair;
 #[path = "tests/test_support.rs"]
 mod test_support;
 
+#[cfg(test)]
+#[path = "tests/semantics_support.rs"]
+mod semantics_support;
+
 pub use model::PredecodedShadow;

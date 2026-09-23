@@ -168,3 +168,7 @@ pub(super) fn make_super_pair(a: PpuInstruction, b: PpuInstruction) -> Option<Pp
 #[cfg(test)]
 #[path = "tests/superpair_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/superpair_proptests.rs"]
+mod proptests;
