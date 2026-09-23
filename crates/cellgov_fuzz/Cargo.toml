@@ -22,7 +22,5 @@ cellgov_spu = { path = "../cellgov_spu" }
 cellgov_sync = { path = "../cellgov_sync" }
 cellgov_time = { path = "../cellgov_time" }
 serde = { version = "1", features = ["derive"] }
-thiserror = "2"
-
-[dev-dependencies]
 serde_json = "1"
+thiserror = "2"

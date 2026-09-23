@@ -245,7 +245,7 @@ workspace compiles under `unsafe_code = "forbid"`.
 | `cellgov_ppu` | derive_more, strum, thiserror |
 | `cellgov_spu` | strum, thiserror |
 | `cellgov_explore` | serde, serde_json, strum |
-| `cellgov_fuzz` | serde, thiserror |
+| `cellgov_fuzz` | serde, serde_json, thiserror |
 | `cellgov_cli` | clap, clap_complete, filebuffer, serde, serde_json, strum, thiserror, toml |
 | `cellgov_mkelf` | none |
 | `rpcs3_to_observation` | serde, serde_json, thiserror, toml |
