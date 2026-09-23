@@ -120,6 +120,73 @@ impl PpuOutcomeClass {
 pub enum PpuMetamorphicRelation {
     /// Identical inputs give identical outputs.
     Deterministic,
+    /// Rc permits changes only to CR field 0.
+    RecordCr0,
+    /// Rc permits changes only to CR field 1.
+    RecordCr1,
+    /// Rc on a vector compare permits changes only to CR field 6.
+    RecordCr6,
+    /// OE permits changes only to the XER overflow fields.
+    OverflowEnable,
+}
+
+/// Observation field that one metamorphic relation may change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PpuPermittedDelta {
+    /// Condition-register field 0.
+    Cr0,
+    /// Condition-register field 1.
+    Cr1,
+    /// Condition-register field 6.
+    Cr6,
+    /// XER overflow and summary-overflow bits.
+    XerOverflow,
+}
+
+/// One eligible transformed input and its comparison rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PpuMetamorphicCase {
+    /// Relation that produced this case.
+    pub relation: PpuMetamorphicRelation,
+    /// Transformed instruction word.
+    pub partner_word: u32,
+    /// Architectural delta the relation permits.
+    pub permitted_delta: PpuPermittedDelta,
+}
+
+/// Why a requested metamorphic partner is inapplicable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum PpuRelationRefusal {
+    /// The instruction does not declare this relation.
+    #[error("PPU instruction does not declare relation {relation:?}")]
+    Undeclared {
+        /// Requested relation.
+        relation: PpuMetamorphicRelation,
+    },
+    /// The transformed control is already enabled.
+    #[error("PPU relation {relation:?} requires its control bit to be clear")]
+    AlreadyEnabled {
+        /// Requested relation.
+        relation: PpuMetamorphicRelation,
+    },
+    /// Another enabled control would widen the permitted observation delta.
+    #[error("PPU relation {relation:?} requires other controls to be clear")]
+    IncompatibleControls {
+        /// Requested relation.
+        relation: PpuMetamorphicRelation,
+    },
+    /// The instruction-state pair has undefined architectural behavior.
+    #[error("PPU relation {relation:?} is undefined for this input state")]
+    ArchitecturallyUndefined {
+        /// Requested relation.
+        relation: PpuMetamorphicRelation,
+    },
+    /// The transformed word did not preserve the exact instruction kind.
+    #[error("PPU relation {relation:?} produced an invalid partner")]
+    InvalidPartner {
+        /// Requested relation.
+        relation: PpuMetamorphicRelation,
+    },
 }
 
 /// Complete fuzz contract for one decoded PPU instruction.
@@ -413,6 +480,23 @@ const UNCONDITIONAL_BRANCH: &[PpuOutcomeClass] = &[PpuOutcomeClass::Branch];
 const BRANCH: &[PpuOutcomeClass] = &[PpuOutcomeClass::Continue, PpuOutcomeClass::Branch];
 const SYSCALL: &[PpuOutcomeClass] = &[PpuOutcomeClass::Syscall];
 const RELATIONS: &[PpuMetamorphicRelation] = &[PpuMetamorphicRelation::Deterministic];
+const RECORD_CR0_RELATIONS: &[PpuMetamorphicRelation] = &[
+    PpuMetamorphicRelation::Deterministic,
+    PpuMetamorphicRelation::RecordCr0,
+];
+const RECORD_CR1_RELATIONS: &[PpuMetamorphicRelation] = &[
+    PpuMetamorphicRelation::Deterministic,
+    PpuMetamorphicRelation::RecordCr1,
+];
+const RECORD_CR6_RELATIONS: &[PpuMetamorphicRelation] = &[
+    PpuMetamorphicRelation::Deterministic,
+    PpuMetamorphicRelation::RecordCr6,
+];
+const RECORD_CR0_OE_RELATIONS: &[PpuMetamorphicRelation] = &[
+    PpuMetamorphicRelation::Deterministic,
+    PpuMetamorphicRelation::RecordCr0,
+    PpuMetamorphicRelation::OverflowEnable,
+];
 
 impl PpuInstruction {
     /// Return the interpreter-owned fuzz contract for this instruction.
@@ -426,8 +510,50 @@ impl PpuInstruction {
             observable_state: PpuObservableState::Complete,
             effects,
             outcomes,
-            relations: RELATIONS,
+            relations: relations_for_instruction(*self),
         }
+    }
+
+    /// Builds an eligible partner for one declared relation.
+    // [Le2014 p:147 s:Abstract] A metamorphic partner is equivalent only under stated input conditions.
+    pub fn metamorphic_case(
+        &self,
+        raw: u32,
+        state: &PpuState,
+        relation: PpuMetamorphicRelation,
+    ) -> Result<PpuMetamorphicCase, PpuRelationRefusal> {
+        if !self.fuzz_descriptor(raw).relations.contains(&relation) {
+            return Err(PpuRelationRefusal::Undeclared { relation });
+        }
+        if self.fuzz_case_is_architecturally_undefined(state) {
+            return Err(PpuRelationRefusal::ArchitecturallyUndefined { relation });
+        }
+        let (mask, permitted_delta) = match relation {
+            PpuMetamorphicRelation::Deterministic => {
+                return Err(PpuRelationRefusal::Undeclared { relation });
+            }
+            PpuMetamorphicRelation::RecordCr0 => (0x0000_0001, PpuPermittedDelta::Cr0),
+            PpuMetamorphicRelation::RecordCr1 => (0x0000_0001, PpuPermittedDelta::Cr1),
+            PpuMetamorphicRelation::RecordCr6 => (0x0000_0400, PpuPermittedDelta::Cr6),
+            PpuMetamorphicRelation::OverflowEnable => (0x0000_0400, PpuPermittedDelta::XerOverflow),
+        };
+        if raw & mask != 0 {
+            return Err(PpuRelationRefusal::AlreadyEnabled { relation });
+        }
+        if relation == PpuMetamorphicRelation::OverflowEnable && raw & 1 != 0 {
+            return Err(PpuRelationRefusal::IncompatibleControls { relation });
+        }
+        let partner_word = raw | mask;
+        let partner = crate::decode::decode(partner_word)
+            .map_err(|_| PpuRelationRefusal::InvalidPartner { relation })?;
+        if partner.fuzz_descriptor(partner_word).kind != self.fuzz_descriptor(raw).kind {
+            return Err(PpuRelationRefusal::InvalidPartner { relation });
+        }
+        Ok(PpuMetamorphicCase {
+            relation,
+            partner_word,
+            permitted_delta,
+        })
     }
 
     /// Classifies instruction-state pairs that fuzz comparison must exclude.
@@ -445,6 +571,15 @@ impl PpuInstruction {
             }
             // [PPC-Book1 p:59 s:3.3.8] Unsigned doubleword division is undefined for zero.
             I::Divdu { rb, .. } => state.gpr[rb as usize] == 0,
+            // [PPC-Book1 p:117 s:4.6.6] fctiw and fctiwz leave the high half of FRT undefined.
+            I::Fp63 {
+                op: Fp63Op::Fctiw | Fp63Op::Fctiwz,
+                ..
+            } => true,
+            // [PPC-Book1 p:120 s:4.6.8] mffs leaves the high half of FRT undefined.
+            I::Fp63 {
+                op: Fp63Op::Mffs, ..
+            } => true,
             // [PowerISA-3.1 p:I128 s:3.3] mfocrf leaves RT undefined unless FXM is one-hot.
             I::Mfocrf { crm, .. } => crm.count_ones() != 1,
             // [PPC-Book1 p:124 s:5.1.1] mtocrf leaves CR undefined unless FXM is one-hot.
@@ -453,6 +588,102 @@ impl PpuInstruction {
             I::Lswx { .. } => state.xer_tbc() == 0,
             _ => false,
         }
+    }
+}
+
+fn relations_for_instruction(instruction: PpuInstruction) -> &'static [PpuMetamorphicRelation] {
+    use PpuInstruction as I;
+
+    match instruction {
+        I::Add { .. }
+        | I::Subf { .. }
+        | I::Subfc { .. }
+        | I::Subfe { .. }
+        | I::Neg { .. }
+        | I::Mullw { .. }
+        | I::Adde { .. }
+        | I::Addze { .. }
+        | I::Subfze { .. }
+        | I::Subfme { .. }
+        | I::Addme { .. }
+        | I::Mulld { .. }
+        | I::Divw { .. }
+        | I::Divwu { .. }
+        | I::Divd { .. }
+        | I::Divdu { .. } => RECORD_CR0_OE_RELATIONS,
+        I::Or { .. }
+        | I::Mulhwu { .. }
+        | I::Mulhw { .. }
+        | I::Mulhdu { .. }
+        | I::Mulhd { .. }
+        | I::And { .. }
+        | I::Andc { .. }
+        | I::Nor { .. }
+        | I::Xor { .. }
+        | I::Eqv { .. }
+        | I::Nand { .. }
+        | I::Orc { .. }
+        | I::Slw { .. }
+        | I::Srw { .. }
+        | I::Srd { .. }
+        | I::Srawi { .. }
+        | I::Sraw { .. }
+        | I::Srad { .. }
+        | I::Sradi { .. }
+        | I::Sld { .. }
+        | I::Cntlzw { .. }
+        | I::Cntlzd { .. }
+        | I::Extsh { .. }
+        | I::Extsb { .. }
+        | I::Extsw { .. }
+        | I::Rlwinm { .. }
+        | I::Rlwimi { .. }
+        | I::Rlwnm { .. }
+        | I::Rldicl { .. }
+        | I::Rldicr { .. }
+        | I::Rldic { .. }
+        | I::Rldimi { .. }
+        | I::Rldcl { .. }
+        | I::Rldcr { .. } => RECORD_CR0_RELATIONS,
+        I::Fp59 { .. }
+        | I::Fp63 {
+            op:
+                Fp63Op::Frsp
+                | Fp63Op::Fctiw
+                | Fp63Op::Fctiwz
+                | Fp63Op::Fdiv
+                | Fp63Op::Fsub
+                | Fp63Op::Fadd
+                | Fp63Op::Fsqrt
+                | Fp63Op::Fsel
+                | Fp63Op::Fmul
+                | Fp63Op::Frsqrte
+                | Fp63Op::Fmsub
+                | Fp63Op::Fmadd
+                | Fp63Op::Fnmsub
+                | Fp63Op::Fnmadd
+                | Fp63Op::Mtfsb1
+                | Fp63Op::Fneg
+                | Fp63Op::Mtfsb0
+                | Fp63Op::Fmr
+                | Fp63Op::Mtfsfi
+                | Fp63Op::Fnabs
+                | Fp63Op::Fabs
+                | Fp63Op::Mffs
+                | Fp63Op::Mtfsf
+                | Fp63Op::Fctid
+                | Fp63Op::Fctidz
+                | Fp63Op::Fcfid,
+            ..
+        } => RECORD_CR1_RELATIONS,
+        // [PPC-Book1 p:119 s:4.6.7] Floating compares reserve raw bit 31.
+        // [PPC-Book1 p:120 s:4.6.8] mcrfs also reserves raw bit 31.
+        I::Fp63 {
+            op: Fp63Op::Fcmpu | Fp63Op::Fcmpo | Fp63Op::Mcrfs,
+            ..
+        } => RELATIONS,
+        I::Vx { op, .. } if op.is_vxr_compare() => RECORD_CR6_RELATIONS,
+        _ => RELATIONS,
     }
 }
 
@@ -1433,3 +1664,7 @@ fn classify_kind(kind: PpuInstructionKind) {
 #[cfg(test)]
 #[path = "tests/fuzz_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/metamorphic_tests.rs"]
+mod metamorphic_tests;

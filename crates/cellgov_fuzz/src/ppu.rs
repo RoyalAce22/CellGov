@@ -8,7 +8,7 @@ use cellgov_mem::RegionView;
 use cellgov_ppu::exec::{execute, ExecuteVerdict};
 use cellgov_ppu::instruction::fuzz::{
     generation_descriptors, PpuGenerationDescriptor, PpuGenerationError, PpuMetamorphicRelation,
-    PpuOperandClass, PpuOutcomeClass, PpuSequenceClass, PpuSequenceFlow,
+    PpuOperandClass, PpuOutcomeClass, PpuRelationRefusal, PpuSequenceClass, PpuSequenceFlow,
 };
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::observation::{
@@ -329,6 +329,20 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 )?;
             }
         }
+        let relation_asymmetry = run_metamorphic_checks(
+            report,
+            MetamorphicRun {
+                instruction: &instruction,
+                descriptor,
+                initial: &initial,
+                memory: &memory,
+                raw,
+                identity,
+                iteration,
+                baseline: &first,
+            },
+        )?;
+        asymmetry = asymmetry.max(relation_asymmetry);
         report.observe_case(
             iteration,
             ppu_observation(
@@ -343,6 +357,189 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         )?;
     }
     Ok(())
+}
+
+struct MetamorphicRun<'a> {
+    instruction: &'a PpuInstruction,
+    descriptor: cellgov_ppu::instruction::fuzz::PpuFuzzDescriptor,
+    initial: &'a PpuState,
+    memory: &'a [u8],
+    raw: u32,
+    identity: InstructionIdentity,
+    iteration: u64,
+    baseline: &'a ObservedStep,
+}
+
+fn run_metamorphic_checks(
+    report: &mut FuzzReport,
+    run: MetamorphicRun<'_>,
+) -> Result<CrossReferenceAsymmetry, FuzzError> {
+    let MetamorphicRun {
+        instruction,
+        descriptor,
+        initial,
+        memory,
+        raw,
+        identity,
+        iteration,
+        baseline,
+    } = run;
+    if !matches!(
+        baseline.verdict,
+        ExecuteVerdict::Continue | ExecuteVerdict::Branch
+    ) {
+        for &relation in descriptor
+            .relations
+            .iter()
+            .filter(|relation| **relation != PpuMetamorphicRelation::Deterministic)
+        {
+            report.metamorphic_skipped(relation_check(relation))?;
+        }
+        return Ok(CrossReferenceAsymmetry::None);
+    }
+    let mut strongest = CrossReferenceAsymmetry::None;
+    for &relation in descriptor
+        .relations
+        .iter()
+        .filter(|relation| **relation != PpuMetamorphicRelation::Deterministic)
+    {
+        let case = match call_target(|| instruction.metamorphic_case(raw, initial, relation)) {
+            Ok(Ok(case)) => case,
+            Ok(Err(
+                PpuRelationRefusal::AlreadyEnabled { .. }
+                | PpuRelationRefusal::IncompatibleControls { .. }
+                | PpuRelationRefusal::ArchitecturallyUndefined { .. },
+            )) => {
+                report.metamorphic_skipped(relation_check(relation))?;
+                continue;
+            }
+            Ok(Err(
+                PpuRelationRefusal::Undeclared { .. } | PpuRelationRefusal::InvalidPartner { .. },
+            )) => {
+                record_invalid_metamorphic_partner(
+                    report,
+                    relation,
+                    identity,
+                    DivergenceClass::ReferenceDisagreement,
+                    None,
+                    vec![raw],
+                    iteration,
+                )?;
+                strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
+                continue;
+            }
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    relation_check(relation),
+                    Some(identity),
+                    vec![raw],
+                    iteration,
+                    payload,
+                )?;
+                strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
+                continue;
+            }
+        };
+        let partner_instruction =
+            match call_target(|| cellgov_ppu::decode::decode(case.partner_word)) {
+                Ok(Ok(instruction)) => instruction,
+                Ok(Err(_)) => {
+                    record_invalid_metamorphic_partner(
+                        report,
+                        relation,
+                        identity,
+                        DivergenceClass::Outcome,
+                        Some(OutcomeIdentity::PpuDecodeRefusal),
+                        vec![raw, case.partner_word],
+                        iteration,
+                    )?;
+                    strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
+                    continue;
+                }
+                Err(payload) => {
+                    record_target_panic(
+                        report,
+                        relation_check(relation),
+                        Some(identity),
+                        vec![raw, case.partner_word],
+                        iteration,
+                        payload,
+                    )?;
+                    strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
+                    continue;
+                }
+            };
+        let partner = match call_target(|| run_once(&partner_instruction, initial, memory)) {
+            Ok(Ok(observed)) => observed,
+            Ok(Err(error)) => return Err(error.into()),
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    relation_check(relation),
+                    Some(identity),
+                    vec![raw, case.partner_word],
+                    iteration,
+                    payload,
+                )?;
+                strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
+                continue;
+            }
+        };
+        report.metamorphic_executed(relation_check(relation))?;
+        let comparison = baseline
+            .observation
+            .compare_metamorphic(&partner.observation, case.permitted_delta);
+        if comparison.disallowed_differences.is_empty() {
+            continue;
+        }
+        let (divergence, asymmetry) = metamorphic_divergence(&comparison.disallowed_differences);
+        strongest = strongest.max(asymmetry);
+        record(
+            report,
+            FindingKind::MetamorphicViolation,
+            SemanticFingerprint {
+                target: FuzzTarget::PpuInstruction,
+                instruction_kind: Some(identity),
+                check: relation_check(relation),
+                divergence,
+                outcome: None,
+                effect: None,
+            },
+            vec![raw, case.partner_word],
+            iteration,
+        )?;
+    }
+    Ok(strongest)
+}
+
+fn relation_check(relation: PpuMetamorphicRelation) -> CheckIdentity {
+    match relation {
+        PpuMetamorphicRelation::Deterministic => CheckIdentity::DeterministicReplay,
+        PpuMetamorphicRelation::RecordCr0 => CheckIdentity::PpuRecordCr0,
+        PpuMetamorphicRelation::RecordCr1 => CheckIdentity::PpuRecordCr1,
+        PpuMetamorphicRelation::RecordCr6 => CheckIdentity::PpuRecordCr6,
+        PpuMetamorphicRelation::OverflowEnable => CheckIdentity::PpuOverflowEnable,
+    }
+}
+
+fn metamorphic_divergence(
+    differences: &BTreeSet<PpuObservationComponent>,
+) -> (DivergenceClass, CrossReferenceAsymmetry) {
+    if differences.contains(&PpuObservationComponent::FaultDiscard) {
+        (DivergenceClass::Outcome, CrossReferenceAsymmetry::Fault)
+    } else if differences.contains(&PpuObservationComponent::StagedEffects)
+        || differences.contains(&PpuObservationComponent::CommittedEffects)
+    {
+        (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
+    } else if differences.contains(&PpuObservationComponent::Outcome) {
+        (DivergenceClass::Outcome, CrossReferenceAsymmetry::Outcome)
+    } else {
+        (
+            DivergenceClass::ArchitecturalState,
+            CrossReferenceAsymmetry::State,
+        )
+    }
 }
 
 /// Replays PPU instruction sequences to find nondeterministic outcomes.
@@ -1287,6 +1484,31 @@ fn record(
     })
 }
 
+fn record_invalid_metamorphic_partner(
+    report: &mut FuzzReport,
+    relation: PpuMetamorphicRelation,
+    instruction_kind: InstructionIdentity,
+    divergence: DivergenceClass,
+    outcome: Option<OutcomeIdentity>,
+    original_words: Vec<u32>,
+    iteration: u64,
+) -> Result<(), InvariantError> {
+    record(
+        report,
+        FindingKind::MetamorphicViolation,
+        SemanticFingerprint {
+            target: FuzzTarget::PpuInstruction,
+            instruction_kind: Some(instruction_kind),
+            check: relation_check(relation),
+            divergence,
+            outcome,
+            effect: None,
+        },
+        original_words,
+        iteration,
+    )
+}
+
 fn record_target_panic(
     report: &mut FuzzReport,
     check: CheckIdentity,
@@ -1349,3 +1571,7 @@ fn guarded_run(
 #[cfg(test)]
 #[path = "tests/ppu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/ppu_metamorphic_tests.rs"]
+mod metamorphic_tests;

@@ -53,6 +53,14 @@ pub enum CheckIdentity {
     SpuExecutor,
     /// Deterministic replay comparison.
     DeterministicReplay,
+    /// PPU record-form CR0 relation.
+    PpuRecordCr0,
+    /// PPU record-form CR1 relation.
+    PpuRecordCr1,
+    /// PPU vector record-form CR6 relation.
+    PpuRecordCr6,
+    /// PPU overflow-enable XER relation.
+    PpuOverflowEnable,
     /// Interpreter-owned legal-outcome contract.
     LegalOutcome,
     /// Interpreter-owned legal-effect contract.
@@ -146,6 +154,8 @@ pub enum FindingKind {
     TargetPanic,
     /// Identical inputs produced a different result.
     Nondeterministic,
+    /// A metamorphic relation violated its declared contract.
+    MetamorphicViolation,
     /// Execution returned a result class outside the descriptor.
     IllegalOutcome,
     /// Execution emitted an effect class outside the descriptor.
@@ -211,6 +221,10 @@ pub struct FuzzReport {
     pub case_features: BTreeMap<CaseFeature, u64>,
     /// Counts guest-visible effect classes that executed cases emit.
     pub effect_classes: BTreeMap<EffectKind, u64>,
+    /// Counts executed partners for each metamorphic relation.
+    pub metamorphic_executions: BTreeMap<CheckIdentity, u64>,
+    /// Counts inapplicable partners for each metamorphic relation.
+    pub metamorphic_inapplicable: BTreeMap<CheckIdentity, u64>,
     /// Counts instructions that assessed cases execute.
     pub executed_steps: u64,
     /// Records the largest instruction depth that one case executes.
@@ -250,6 +264,8 @@ impl FuzzReport {
             eligibility_reasons: BTreeMap::new(),
             case_features: BTreeMap::new(),
             effect_classes: BTreeMap::new(),
+            metamorphic_executions: BTreeMap::new(),
+            metamorphic_inapplicable: BTreeMap::new(),
             executed_steps: 0,
             max_executed_depth: 0,
             retained_cases: RetainedCases::from_config_unchecked(retention),
@@ -388,6 +404,32 @@ impl FuzzReport {
                     counter: "effect class",
                 })?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn metamorphic_executed(
+        &mut self,
+        relation: CheckIdentity,
+    ) -> Result<(), InvariantError> {
+        let count = self.metamorphic_executions.entry(relation).or_insert(0);
+        *count = count
+            .checked_add(1)
+            .ok_or(InvariantError::CounterOverflow {
+                counter: "metamorphic executions",
+            })?;
+        Ok(())
+    }
+
+    pub(crate) fn metamorphic_skipped(
+        &mut self,
+        relation: CheckIdentity,
+    ) -> Result<(), InvariantError> {
+        let count = self.metamorphic_inapplicable.entry(relation).or_insert(0);
+        *count = count
+            .checked_add(1)
+            .ok_or(InvariantError::CounterOverflow {
+                counter: "inapplicable metamorphic relations",
+            })?;
         Ok(())
     }
 

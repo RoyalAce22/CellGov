@@ -7,6 +7,7 @@ use cellgov_event::UnitId;
 use cellgov_sync::{ReservationTable, ReservedLine};
 
 use crate::exec::ExecuteVerdict;
+use crate::instruction::fuzz::PpuPermittedDelta;
 use crate::state::PpuState;
 use crate::store_buffer::{PendingStore, StoreBuffer};
 
@@ -157,6 +158,15 @@ pub struct PpuObservationComparison {
     pub relevant_differences: BTreeSet<PpuObservationComponent>,
 }
 
+/// Differences outside one metamorphic relation's permitted delta.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PpuMetamorphicComparison {
+    /// Complete component-level differences before the relation mask.
+    pub complete_differences: BTreeSet<PpuObservationComponent>,
+    /// Components that the relation does not permit to change.
+    pub disallowed_differences: BTreeSet<PpuObservationComponent>,
+}
+
 /// Complete PPU state at one execution boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PpuObservation {
@@ -221,6 +231,60 @@ impl PpuObservation {
             relevant_differences: relevant,
         }
     }
+
+    /// Compares complete observations under one typed permitted delta.
+    pub fn compare_metamorphic(
+        &self,
+        other: &Self,
+        permitted: PpuPermittedDelta,
+    ) -> PpuMetamorphicComparison {
+        let comparison = self.compare(other, PpuObservationCheck::DeterministicReplay);
+        let mut disallowed = comparison.complete_differences.clone();
+        if !state_differs_outside(&self.state, &other.state, permitted) {
+            disallowed.remove(&PpuObservationComponent::State);
+        }
+        PpuMetamorphicComparison {
+            complete_differences: comparison.complete_differences,
+            disallowed_differences: disallowed,
+        }
+    }
+}
+
+fn state_differs_outside(
+    first: &PpuArchitecturalState,
+    second: &PpuArchitecturalState,
+    permitted: PpuPermittedDelta,
+) -> bool {
+    let (first_cr, second_cr, first_xer, second_xer) = match permitted {
+        PpuPermittedDelta::Cr0 => masked_state_fields(first, second, 0),
+        PpuPermittedDelta::Cr1 => masked_state_fields(first, second, 1),
+        PpuPermittedDelta::Cr6 => masked_state_fields(first, second, 6),
+        PpuPermittedDelta::XerOverflow => {
+            let mask = !((1u64 << 30) | (1u64 << 31));
+            (first.cr, second.cr, first.xer & mask, second.xer & mask)
+        }
+    };
+    first.gpr != second.gpr
+        || first.fpr != second.fpr
+        || first.vr != second.vr
+        || first.pc != second.pc
+        || first_cr != second_cr
+        || first.lr != second.lr
+        || first.ctr != second.ctr
+        || first_xer != second_xer
+        || first.vrsave != second.vrsave
+        || first.tb != second.tb
+        || first.reservation != second.reservation
+}
+
+fn masked_state_fields(
+    first: &PpuArchitecturalState,
+    second: &PpuArchitecturalState,
+    field: u8,
+) -> (u32, u32, u64, u64) {
+    let shift = u32::from(7 - field) * 4;
+    let mask = !(0x0fu32 << shift);
+    (first.cr & mask, second.cr & mask, first.xer, second.xer)
 }
 
 /// Why a PPU observation could not apply its emitted effect batch.
@@ -458,3 +522,7 @@ fn apply_write(
 #[cfg(test)]
 #[path = "tests/observation_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/metamorphic_observation_tests.rs"]
+mod metamorphic_tests;
