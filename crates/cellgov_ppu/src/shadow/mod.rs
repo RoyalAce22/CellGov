@@ -1,8 +1,8 @@
 //! Predecoded instruction shadow for PT_LOAD text ranges.
 //!
-//! Fetch is a bounds check plus array index; slots are decoded once
-//! at construction, then quickened (`quicken`) and super-paired
-//! (`superpair`) before first use.
+//! Fetch uses a bounds check and an array index. Construction decodes
+//! and quickens slots; [`PredecodedShadow::build`] also fuses eligible
+//! pairs. [`PredecodedShadow::build_quickened`] leaves pairs separate.
 //!
 //! [ErtlGregg2003 p:4 s:2] flat sequential VM-code layout.
 //! [Bala2000 p:2 s:2] code cache indexed by source-binary address.
