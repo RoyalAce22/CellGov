@@ -44,7 +44,7 @@ pub(crate) enum CommandError {
     Failed(#[source] Diagnostic),
 
     #[error(transparent)]
-    DecoderSweep(#[from] super::decoder_sweep::DecoderSweepError),
+    Fuzz(#[from] super::fuzz::FuzzCliError),
 
     #[error("{diagnostic}")]
     Status {
@@ -71,10 +71,12 @@ impl CommandError {
     }
 
     /// Returns no status for Ctrl-C.
-    pub(crate) const fn code(&self) -> Option<CommandExitCode> {
+    pub(crate) fn code(&self) -> Option<CommandExitCode> {
         match self {
             Self::Failed(_) => Some(CommandExitCode::new(super::exit_codes::FAILED)),
-            Self::DecoderSweep(error) => Some(CommandExitCode::new(if error.is_usage() {
+            Self::Fuzz(error) => Some(CommandExitCode::new(if error.is_broken_pipe() {
+                super::exit_codes::BROKEN_PIPE
+            } else if error.is_usage() {
                 super::exit_codes::USAGE
             } else {
                 super::exit_codes::FAILED

@@ -1,0 +1,584 @@
+use super::*;
+
+use crate::cli::parse::{try_parse, Command, DevCommand};
+
+fn parse(argv: &[&str]) -> Result<FuzzArgs, clap::Error> {
+    let mut args = vec!["cellgov", "dev", "fuzz"];
+    args.extend_from_slice(argv);
+    let cli = try_parse(&args.iter().map(ToString::to_string).collect::<Vec<_>>())?;
+    let Command::Dev(DevCommand::Fuzz(fuzz)) = cli.command else {
+        panic!("fuzz must remain a dev command");
+    };
+    Ok(fuzz)
+}
+
+#[test]
+fn every_fuzz_mode_is_a_declarative_dev_subcommand() {
+    for mode in [
+        "ppu-instruction",
+        "ppu-sequence",
+        "spu-instruction",
+        "spu-sequence",
+        "semantic",
+    ] {
+        let parsed = parse(&[mode]).expect("mode must parse");
+        assert!(
+            matches!(
+                (mode, parsed.command),
+                ("ppu-instruction", FuzzCommand::PpuInstruction(_))
+                    | ("ppu-sequence", FuzzCommand::PpuSequence(_))
+                    | ("spu-instruction", FuzzCommand::SpuInstruction(_))
+                    | ("spu-sequence", FuzzCommand::SpuSequence(_))
+                    | ("semantic", FuzzCommand::Semantic(_))
+            ),
+            "{mode} selected the wrong engine"
+        );
+    }
+    assert!(matches!(
+        parse(&["raw", "ppu", "--count", "1"])
+            .expect("PPU raw mode")
+            .command,
+        FuzzCommand::Raw(FuzzRawArgs {
+            decoder: FuzzRawDecoder::Ppu,
+            ..
+        })
+    ));
+    assert!(matches!(
+        parse(&["raw", "spu", "--full", "--shard", "1", "--shards", "4"])
+            .expect("SPU raw mode")
+            .command,
+        FuzzCommand::Raw(FuzzRawArgs {
+            decoder: FuzzRawDecoder::Spu,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn quiet_progress_campaign_parses_and_dispatches() {
+    let cli = try_parse(
+        &[
+            "cellgov",
+            "--quiet",
+            "dev",
+            "fuzz",
+            "ppu-instruction",
+            "--progress",
+            "--count",
+            "1",
+            "--workers",
+            "1",
+        ]
+        .map(str::to_string),
+    )
+    .expect("quiet campaign must parse");
+    assert!(cli.globals.quiet);
+    let quiet = cli.globals.quiet;
+    let Command::Dev(DevCommand::Fuzz(parsed)) = cli.command else {
+        panic!("quiet campaign must dispatch to fuzz")
+    };
+    let FuzzCommand::PpuInstruction(ref args) = parsed.command else {
+        panic!("quiet campaign must select PPU instructions")
+    };
+    assert!(args.progress);
+    assert!(!reports_progress(args.progress, quiet));
+    assert_eq!(
+        run_inner_with_quiet(&parsed, quiet).expect("quiet campaign must run"),
+        CommandExitCode::SUCCESS
+    );
+}
+
+#[test]
+fn campaign_parser_keeps_replay_and_selection_fields_typed() {
+    let parsed = parse(&[
+        "spu-sequence",
+        "--campaign-version",
+        "4",
+        "--seed",
+        "77",
+        "--first",
+        "12",
+        "--count",
+        "30",
+        "--workers",
+        "2",
+        "--shard",
+        "1",
+        "--shards",
+        "3",
+        "--deadline-ms",
+        "300",
+        "--progress",
+        "--finding-limit",
+        "9",
+        "--sequence-words",
+        "8",
+        "--strategy",
+        "structured",
+        "--check",
+        "all",
+        "--reduction",
+        "none",
+    ])
+    .expect("typed campaign");
+    let FuzzCommand::SpuSequence(args) = parsed.command else {
+        panic!("wrong mode")
+    };
+    assert_eq!(
+        (args.campaign_version, args.seed, args.first, args.count),
+        (4, 77, 12, 30)
+    );
+    assert_eq!((args.workers, args.shard, args.shards), (Some(2), 1, 3));
+    assert_eq!(
+        (
+            args.deadline_ms,
+            args.progress,
+            args.finding_limit,
+            args.sequence_words
+        ),
+        (Some(300), true, 9, Some(8))
+    );
+}
+
+#[test]
+fn raw_scope_and_replay_conflicts_fail_during_parse() {
+    assert_eq!(
+        parse(&["raw", "ppu"]).expect_err("scope required").kind(),
+        clap::error::ErrorKind::MissingRequiredArgument
+    );
+    assert_eq!(
+        parse(&["raw", "ppu", "--full", "--count", "3"])
+            .expect_err("conflict")
+            .kind(),
+        clap::error::ErrorKind::ArgumentConflict
+    );
+    assert_eq!(
+        parse(&["ppu-instruction", "--replay-case", "7", "--count", "2"])
+            .expect_err("conflict")
+            .kind(),
+        clap::error::ErrorKind::ArgumentConflict
+    );
+    assert_eq!(
+        parse(&["spu-instruction", "--stratgey", "raw-words"])
+            .expect_err("typo")
+            .kind(),
+        clap::error::ErrorKind::UnknownArgument
+    );
+}
+
+#[test]
+fn host_validation_rejects_unsupported_and_invalid_options() {
+    let unsupported = parse(&["ppu-instruction", "--check", "paths"]).expect("typed selection");
+    assert!(matches!(
+        run_inner(&unsupported),
+        Err(FuzzCliError::CheckUnavailable)
+    ));
+    let reduction = parse(&["spu-sequence", "--reduction", "on-finding"]).expect("typed selection");
+    assert!(matches!(
+        run_inner(&reduction),
+        Err(FuzzCliError::ReductionUnavailable)
+    ));
+    for args in [
+        vec!["ppu-instruction", "--workers", "0"],
+        vec!["ppu-instruction", "--deadline-ms", "0"],
+        vec!["ppu-instruction", "--finding-limit", "0"],
+        vec!["ppu-instruction", "--sequence-words", "8"],
+        vec!["ppu-instruction", "--count", "0"],
+        vec!["ppu-instruction", "--shard", "2", "--shards", "2"],
+    ] {
+        let parsed = parse(&args).expect("typed flags parse");
+        assert!(run_inner(&parsed).is_err(), "{args:?}");
+    }
+    let version = parse(&[
+        "ppu-instruction",
+        "--campaign-version",
+        "999",
+        "--count",
+        "1",
+        "--workers",
+        "1",
+    ])
+    .expect("version parses");
+    let error = run(&version).expect_err("unsupported generator version");
+    assert_eq!(
+        error.code().expect("status").value(),
+        super::super::exit_codes::USAGE as u8
+    );
+    let sequence = parse(&[
+        "spu-sequence",
+        "--sequence-words",
+        "0",
+        "--count",
+        "1",
+        "--workers",
+        "1",
+    ])
+    .expect("word count parses");
+    let error = run(&sequence).expect_err("empty sequence");
+    assert_eq!(
+        error.code().expect("status").value(),
+        super::super::exit_codes::USAGE as u8
+    );
+}
+
+#[test]
+fn selected_independent_references_are_replayed_and_checked() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/cellgov_fuzz/tests/fixtures");
+    let ppu = root.join("ppu_reference/li_r3_7_v1.json");
+    let spu = root.join("spu_reference/rotqbyi_12_v1.json");
+    let parsed = parse(&["ppu-instruction", "--reference", "vector.json"])
+        .expect("reference selector parses");
+    let FuzzCommand::PpuInstruction(args) = parsed.command else {
+        panic!("PPU mode")
+    };
+    assert_eq!(
+        args.reference,
+        Some(std::path::PathBuf::from("vector.json"))
+    );
+    let mut ppu_run =
+        parse(&["ppu-instruction", "--replay-case", "0", "--workers", "1"]).expect("PPU campaign");
+    let FuzzCommand::PpuInstruction(ref mut args) = ppu_run.command else {
+        panic!("PPU mode")
+    };
+    args.reference = Some(ppu.clone());
+    assert_eq!(
+        run_inner(&ppu_run).expect("PPU reference"),
+        CommandExitCode::SUCCESS
+    );
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_reference_mismatch");
+    let mismatched = scratch.join("ppu.json");
+    let mut altered: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&ppu).expect("PPU reference fixture"))
+            .expect("reference JSON");
+    altered["expected"]["state"]["gpr"]["value"][3] = serde_json::json!(8);
+    std::fs::write(
+        &mismatched,
+        serde_json::to_vec(&altered).expect("encode JSON"),
+    )
+    .expect("write altered reference");
+    let FuzzCommand::PpuInstruction(ref mut args) = ppu_run.command else {
+        panic!("PPU mode")
+    };
+    args.reference = Some(mismatched);
+    assert!(matches!(
+        run_inner(&ppu_run),
+        Err(FuzzCliError::ReferenceMismatch)
+    ));
+    let FuzzCommand::PpuInstruction(ref mut args) = ppu_run.command else {
+        panic!("PPU mode")
+    };
+    args.reference = Some(spu.clone());
+    assert!(matches!(
+        run_inner(&ppu_run),
+        Err(FuzzCliError::PpuReference(_))
+    ));
+
+    let mut spu_run = parse(&[
+        "spu-instruction",
+        "--replay-case",
+        "0",
+        "--seed",
+        "11",
+        "--workers",
+        "1",
+    ])
+    .expect("SPU campaign");
+    let FuzzCommand::SpuInstruction(ref mut args) = spu_run.command else {
+        panic!("SPU mode")
+    };
+    args.reference = Some(spu.clone());
+    assert_eq!(
+        run_inner(&spu_run).expect("SPU reference"),
+        CommandExitCode::SUCCESS
+    );
+    let mismatched = scratch.join("spu.json");
+    let mut altered: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&spu).expect("SPU reference fixture"))
+            .expect("reference JSON");
+    altered["expected"]["regs_hex"]["value"]["4"] =
+        serde_json::json!("000102030405060708090a0b0c0d0e0f");
+    std::fs::write(
+        &mismatched,
+        serde_json::to_vec(&altered).expect("encode JSON"),
+    )
+    .expect("write altered reference");
+    let FuzzCommand::SpuInstruction(ref mut args) = spu_run.command else {
+        panic!("SPU mode")
+    };
+    args.reference = Some(mismatched);
+    assert!(matches!(
+        run_inner(&spu_run),
+        Err(FuzzCliError::ReferenceMismatch)
+    ));
+}
+
+#[test]
+fn parser_suggests_the_known_option_after_a_typo() {
+    let error = parse(&["ppu-instruction", "--stratgey", "raw-words"]).expect_err("unknown option");
+    assert_eq!(error.kind(), clap::error::ErrorKind::UnknownArgument);
+    assert!(error.to_string().contains("--strategy"));
+}
+
+#[test]
+fn short_campaigns_and_semantic_enumeration_reach_the_library() {
+    let campaign = parse(&[
+        "ppu-instruction",
+        "--count",
+        "4",
+        "--workers",
+        "2",
+        "--strategy",
+        "structured",
+    ])
+    .expect("campaign parses");
+    assert!(matches!(run_inner(&campaign), Ok(CommandExitCode::SUCCESS)));
+    let semantic = parse(&["semantic", "both"]).expect("semantic parses");
+    assert!(matches!(run_inner(&semantic), Ok(CommandExitCode::SUCCESS)));
+}
+
+#[test]
+fn raw_replay_with_no_decoded_case_does_not_report_clean_completion() {
+    let config = cellgov_fuzz::FuzzConfig {
+        seed: 38,
+        strategy: GenerationStrategy::RawWords,
+        schedule: CampaignSchedule {
+            cases: CaseRange { first: 0, count: 1 },
+            ..CampaignSchedule::default()
+        },
+        ..cellgov_fuzz::FuzzConfig::default()
+    };
+    let library = ppu::run_instructions(config);
+    assert_eq!(library.report.cases, 1);
+    assert_eq!(library.report.eligible_cases, 0);
+    assert!(library.report.finding_counts.is_empty());
+
+    let parsed = parse(&[
+        "ppu-instruction",
+        "--strategy",
+        "raw-words",
+        "--seed",
+        "38",
+        "--count",
+        "1",
+        "--workers",
+        "1",
+    ])
+    .expect("raw replay parses");
+    assert!(matches!(
+        run_inner(&parsed),
+        Err(FuzzCliError::NoEligibleCases {
+            cases: 1,
+            decoded: 0,
+            unsupported: 0,
+            undefined: 0
+        })
+    ));
+    assert_eq!(
+        run(&parsed)
+            .expect_err("empty validation must fail")
+            .code()
+            .expect("failed status")
+            .value(),
+        super::super::exit_codes::FAILED as u8
+    );
+}
+
+#[test]
+fn raw_spu_replays_report_unsupported_and_undefined_cases() {
+    for (seed, unsupported, undefined) in [
+        ("11853982799468969514", 0, 1),
+        ("2090528820835688248", 1, 0),
+    ] {
+        let parsed = parse(&[
+            "spu-instruction",
+            "--strategy",
+            "raw-words",
+            "--seed",
+            seed,
+            "--count",
+            "1",
+            "--workers",
+            "1",
+        ])
+        .expect("raw SPU replay parses");
+        assert!(matches!(
+            run_inner(&parsed),
+            Err(FuzzCliError::NoEligibleCases {
+                cases: 1,
+                decoded: 1,
+                unsupported: actual_unsupported,
+                undefined: actual_undefined
+            }) if actual_unsupported == unsupported && actual_undefined == undefined
+        ));
+    }
+}
+
+#[test]
+fn bounded_raw_scan_writes_a_versioned_replayable_result() {
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_raw_bounded");
+    let output = scratch.join("raw.json");
+    let mut parsed = parse(&[
+        "raw",
+        "spu",
+        "--start",
+        "0x0",
+        "--count",
+        "257",
+        "--workers",
+        "2",
+        "--chunk-size",
+        "17",
+    ])
+    .expect("raw parses");
+    let FuzzCommand::Raw(ref mut args) = parsed.command else {
+        panic!("raw mode")
+    };
+    args.output = Some(output.clone());
+    assert_eq!(
+        run_inner(&parsed).expect("raw scan"),
+        CommandExitCode::SUCCESS
+    );
+    let json = std::fs::read_to_string(&output).expect("written artifact");
+    let artifact = RawDecodeArtifact::parse_json(&json).expect("versioned result");
+    assert_eq!(artifact.processed, 257);
+    assert_eq!(artifact.accepted + artifact.refused + artifact.panics, 257);
+    assert_eq!(artifact.word_at(256), Some(256));
+}
+
+#[test]
+fn cancelled_raw_scan_keeps_an_explicit_partial_artifact() {
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_raw_cancelled");
+    let output = scratch.join("raw.json");
+    let mut parsed = parse(&[
+        "raw",
+        "spu",
+        "--count",
+        "10",
+        "--cancel-after",
+        "3",
+        "--chunk-size",
+        "4",
+        "--workers",
+        "2",
+    ])
+    .expect("bounded scan parses");
+    let FuzzCommand::Raw(ref mut args) = parsed.command else {
+        panic!("raw mode")
+    };
+    args.output = Some(output.clone());
+    assert_eq!(
+        run_inner(&parsed).expect("partial result").value(),
+        super::super::exit_codes::FAILED as u8
+    );
+    let json = std::fs::read_to_string(output).expect("partial artifact");
+    let artifact = RawDecodeArtifact::parse_json(&json).expect("valid cancellation");
+    assert_eq!(artifact.status, RawDecodeStatus::Cancelled);
+    assert_eq!(artifact.processed, 3);
+}
+
+#[test]
+fn invalid_raw_settings_and_write_failures_have_typed_status() {
+    let zero_chunk = parse(&["raw", "ppu", "--count", "1", "--chunk-size", "0"]).expect("parse");
+    let usage = run(&zero_chunk).expect_err("invalid chunk");
+    assert_eq!(
+        usage.code().expect("status").value(),
+        super::super::exit_codes::USAGE as u8
+    );
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_raw_write_refusal");
+    let output = scratch.join("missing-parent").join("raw.json");
+    let mut parsed = parse(&["raw", "ppu", "--count", "1"]).expect("parse");
+    let FuzzCommand::Raw(ref mut args) = parsed.command else {
+        panic!("raw mode")
+    };
+    args.output = Some(output);
+    assert!(matches!(
+        run_inner(&parsed),
+        Err(FuzzCliError::Write { .. })
+    ));
+    let limit = parse(&["raw", "ppu", "--count", "1", "--finding-limit", "1"]).expect("parse");
+    assert!(matches!(
+        run_inner(&limit),
+        Err(FuzzCliError::RawFindingLimit)
+    ));
+}
+
+#[test]
+fn broken_stdout_retains_the_pipe_status() {
+    let error = CommandError::from(FuzzCliError::Stdout(std::io::Error::from(
+        std::io::ErrorKind::BrokenPipe,
+    )));
+    assert_eq!(
+        error.code().expect("status").value(),
+        super::super::exit_codes::BROKEN_PIPE as u8
+    );
+}
+
+#[test]
+fn a_panicking_worker_does_not_unwind_the_host_and_all_workers_join() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    let completed = Arc::new(AtomicUsize::new(0));
+    let work = (0..2)
+        .map(|index| {
+            let completed = Arc::clone(&completed);
+            move || {
+                if index == 0 {
+                    panic!("seeded worker panic");
+                }
+                completed.fetch_add(1, Ordering::SeqCst);
+                index
+            }
+        })
+        .collect();
+    assert!(matches!(run_workers(work), Err(FuzzCliError::WorkerPanic)));
+    assert_eq!(completed.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn every_generated_engine_dispatches_with_replay_coordinates() {
+    for mode in [
+        "ppu-instruction",
+        "ppu-sequence",
+        "spu-instruction",
+        "spu-sequence",
+    ] {
+        let parsed = parse(&[mode, "--replay-case", "0", "--seed", "11", "--workers", "1"])
+            .expect("exact case parses");
+        assert_eq!(
+            run_inner(&parsed).expect("replayed case must run"),
+            CommandExitCode::SUCCESS,
+            "{mode}"
+        );
+    }
+}
+
+#[test]
+fn host_workers_preserve_the_selected_shard_across_batches() {
+    use cellgov_fuzz::{CampaignSchedule, CampaignShard, CaseRange};
+    let first = 100u64;
+    let count = 130u64;
+    let mut observed = std::collections::BTreeSet::new();
+    for offset in [0u64, 64, 128] {
+        let batch = (count - offset).min(64);
+        for worker in 0..3u32 {
+            let index = worker_shard_index(1, 2, worker, 6, (offset % 6) as u32)
+                .expect("valid worker partition");
+            let schedule = CampaignSchedule {
+                cases: CaseRange {
+                    first: first + offset,
+                    count: batch,
+                },
+                shard: CampaignShard { index, count: 6 },
+                cancellation: None,
+            };
+            for case in schedule.case_indices().expect("bounded schedule") {
+                assert!(observed.insert(case), "case {case} was assigned twice");
+            }
+        }
+    }
+    let expected = (first..first + count)
+        .filter(|case| (case - first) % 2 == 1)
+        .collect();
+    assert_eq!(observed, expected);
+}

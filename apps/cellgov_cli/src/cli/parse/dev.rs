@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use super::boot::BootSelection;
+use super::fuzz::FuzzArgs;
 use super::value;
 use crate::cli::args::CliArgError;
 use crate::cli::self_load::SCE_INPUT_USAGE_NOTE;
@@ -53,51 +54,8 @@ pub(crate) enum DevCommand {
     RecordAnchors(RecordAnchorsArgs),
     /// Build the local oracle-gap overlay from the operator checkout.
     OracleGap,
-    /// Scan a bounded instruction-word range or an explicit full-domain shard.
-    DecoderSweep(DecoderSweepArgs),
-}
-
-#[derive(Debug, Clone, Copy, clap::ValueEnum)]
-pub(crate) enum SweepDecoder {
-    /// PowerPC decoder.
-    Ppu,
-    /// Synergistic-processor decoder.
-    Spu,
-}
-
-#[derive(Debug, clap::Args)]
-#[command(group = clap::ArgGroup::new("scan-scope").required(true).args(["full", "count"]))]
-pub(crate) struct DecoderSweepArgs {
-    /// Decoder whose outcomes to classify.
-    #[arg(value_enum)]
-    pub decoder: SweepDecoder,
-    /// Explicitly scan one shard of the full 32-bit word space.
-    #[arg(long, conflicts_with = "count")]
-    pub full: bool,
-    /// First bounded word, in hexadecimal; zero when omitted.
-    #[arg(long, conflicts_with = "full", value_parser = value::hex_u32)]
-    pub start: Option<u32>,
-    /// Word count for a bounded scan.
-    #[arg(long)]
-    pub count: Option<u64>,
-    /// Zero-based full-domain shard index; zero when omitted.
-    #[arg(long, conflicts_with = "count")]
-    pub shard: Option<u32>,
-    /// Number of full-domain shards; one when omitted.
-    #[arg(long, conflicts_with = "count")]
-    pub shards: Option<u32>,
-    /// Maximum words per bounded chunk.
-    #[arg(long, default_value_t = cellgov_fuzz::raw_decode::MAX_RAW_DECODE_CHUNK)]
-    pub chunk_size: usize,
-    /// Deterministic worker partition count.
-    #[arg(long, default_value_t = 1)]
-    pub workers: usize,
-    /// Stop after this many words and mark the artifact cancelled.
-    #[arg(long)]
-    pub cancel_after: Option<u64>,
-    /// Write the versioned JSON result here.
-    #[arg(long, value_name = "PATH")]
-    pub output: std::path::PathBuf,
+    /// Run a typed interpreter or decoder campaign.
+    Fuzz(FuzzArgs),
 }
 
 #[derive(Debug, clap::Args)]

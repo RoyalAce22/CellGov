@@ -1581,17 +1581,174 @@ $ cellgov dev oracle-gap
 Usage: cellgov dev oracle-gap [OPTIONS]
 ```
 
-#### `cellgov dev decoder-sweep`
+#### `cellgov dev fuzz`
 
-Scan a bounded instruction-word range or an explicit full-domain shard.
+Run a typed interpreter or decoder campaign.
+
+```
+Usage: cellgov dev fuzz [OPTIONS] <COMMAND>
+```
+
+##### `cellgov dev fuzz ppu-instruction`
+
+Check generated PPU instructions.
 
 ```console
-$ cellgov dev decoder-sweep ppu --count 65536 --output ppu-bounded.json
-$ cellgov dev decoder-sweep spu --full --shard 0 --shards 16 --output spu-shard0.json
+$ cellgov dev fuzz ppu-instruction --seed 7 --count 1000
+$ cellgov dev fuzz ppu-instruction --quiet --progress --count 100
 ```
 
 ```
-Usage: cellgov dev decoder-sweep [OPTIONS] --output <PATH> <--full|--count <COUNT>> <DECODER>
+Usage: cellgov dev fuzz ppu-instruction [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--campaign-version` | `CAMPAIGN_VERSION` | Serialized generator version required for exact replay. Default `4`. |
+| `--seed` | `SEED` | Master deterministic seed. Default `1`. |
+| `--first` | `FIRST` | First case index in a bounded range. Default `0`. |
+| `--count` | `COUNT` | Number of case indices to consider. Default `100`. |
+| `--replay-case` | `REPLAY_CASE` | Run exactly this original case index. |
+| `--shard` | `SHARD` | Zero-based deterministic shard index. Default `0`. |
+| `--shards` | `SHARDS` | Number of deterministic shards. Default `1`. |
+| `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
+| `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
+| `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
+| `--progress` | -- | Report bounded progress after each batch. |
+| `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
+| `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
+| `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
+| `--check` | `CHECK` | Select checks from the chosen engine. One of `all`, `invariant`, `metamorphic`, `paths`. Default `all`. |
+| `--reference` | `PATH` | Optional versioned independent PPU or SPU reference artifact. |
+| `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
+
+##### `cellgov dev fuzz ppu-sequence`
+
+Check generated PPU sequences.
+
+```console
+$ cellgov dev fuzz ppu-sequence --seed 7 --count 100 --sequence-words 16
+```
+
+```
+Usage: cellgov dev fuzz ppu-sequence [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--campaign-version` | `CAMPAIGN_VERSION` | Serialized generator version required for exact replay. Default `4`. |
+| `--seed` | `SEED` | Master deterministic seed. Default `1`. |
+| `--first` | `FIRST` | First case index in a bounded range. Default `0`. |
+| `--count` | `COUNT` | Number of case indices to consider. Default `100`. |
+| `--replay-case` | `REPLAY_CASE` | Run exactly this original case index. |
+| `--shard` | `SHARD` | Zero-based deterministic shard index. Default `0`. |
+| `--shards` | `SHARDS` | Number of deterministic shards. Default `1`. |
+| `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
+| `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
+| `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
+| `--progress` | -- | Report bounded progress after each batch. |
+| `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
+| `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
+| `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
+| `--check` | `CHECK` | Select checks from the chosen engine. One of `all`, `invariant`, `metamorphic`, `paths`. Default `all`. |
+| `--reference` | `PATH` | Optional versioned independent PPU or SPU reference artifact. |
+| `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
+
+##### `cellgov dev fuzz spu-instruction`
+
+Check generated SPU instructions.
+
+```console
+$ cellgov dev fuzz spu-instruction --seed 7 --count 1000
+```
+
+```
+Usage: cellgov dev fuzz spu-instruction [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--campaign-version` | `CAMPAIGN_VERSION` | Serialized generator version required for exact replay. Default `4`. |
+| `--seed` | `SEED` | Master deterministic seed. Default `1`. |
+| `--first` | `FIRST` | First case index in a bounded range. Default `0`. |
+| `--count` | `COUNT` | Number of case indices to consider. Default `100`. |
+| `--replay-case` | `REPLAY_CASE` | Run exactly this original case index. |
+| `--shard` | `SHARD` | Zero-based deterministic shard index. Default `0`. |
+| `--shards` | `SHARDS` | Number of deterministic shards. Default `1`. |
+| `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
+| `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
+| `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
+| `--progress` | -- | Report bounded progress after each batch. |
+| `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
+| `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
+| `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
+| `--check` | `CHECK` | Select checks from the chosen engine. One of `all`, `invariant`, `metamorphic`, `paths`. Default `all`. |
+| `--reference` | `PATH` | Optional versioned independent PPU or SPU reference artifact. |
+| `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
+
+##### `cellgov dev fuzz spu-sequence`
+
+Check generated SPU sequences.
+
+```console
+$ cellgov dev fuzz spu-sequence --seed 7 --count 100 --sequence-words 16
+```
+
+```
+Usage: cellgov dev fuzz spu-sequence [OPTIONS]
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--campaign-version` | `CAMPAIGN_VERSION` | Serialized generator version required for exact replay. Default `4`. |
+| `--seed` | `SEED` | Master deterministic seed. Default `1`. |
+| `--first` | `FIRST` | First case index in a bounded range. Default `0`. |
+| `--count` | `COUNT` | Number of case indices to consider. Default `100`. |
+| `--replay-case` | `REPLAY_CASE` | Run exactly this original case index. |
+| `--shard` | `SHARD` | Zero-based deterministic shard index. Default `0`. |
+| `--shards` | `SHARDS` | Number of deterministic shards. Default `1`. |
+| `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
+| `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
+| `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
+| `--progress` | -- | Report bounded progress after each batch. |
+| `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
+| `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
+| `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
+| `--check` | `CHECK` | Select checks from the chosen engine. One of `all`, `invariant`, `metamorphic`, `paths`. Default `all`. |
+| `--reference` | `PATH` | Optional versioned independent PPU or SPU reference artifact. |
+| `--reduction` | `REDUCTION` | Request reduction of retained findings. One of `none`, `on-finding`. Default `none`. |
+
+##### `cellgov dev fuzz semantic`
+
+Enumerate interpreter-owned semantic classes.
+
+```console
+$ cellgov dev fuzz semantic both
+```
+
+```
+Usage: cellgov dev fuzz semantic [OPTIONS] [TARGET]
+```
+
+| Argument | Description |
+| --- | --- |
+| `TARGET` | Interpreter registry to enumerate. One of `both`, `ppu`, `spu`. Default `both`. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--progress` | -- | Report a line after each selected interpreter. |
+
+##### `cellgov dev fuzz raw`
+
+Scan raw instruction words through one decoder.
+
+```console
+$ cellgov dev fuzz raw ppu --count 65536 --output ppu-bounded.json
+$ cellgov dev fuzz raw spu --full --shard 0 --shards 16 --output spu-shard0.json
+```
+
+```
+Usage: cellgov dev fuzz raw [OPTIONS] <--full|--count <COUNT>> <DECODER>
 ```
 
 | Argument | Description |
@@ -1600,15 +1757,19 @@ Usage: cellgov dev decoder-sweep [OPTIONS] --output <PATH> <--full|--count <COUN
 
 | Option | Value | Description |
 | --- | --- | --- |
-| `--full` | -- | Explicitly scan one shard of the full 32-bit word space. |
-| `--start` | `START` | First bounded word, in hexadecimal; zero when omitted. |
-| `--count` | `COUNT` | Word count for a bounded scan. |
-| `--shard` | `SHARD` | Zero-based full-domain shard index; zero when omitted. |
-| `--shards` | `SHARDS` | Number of full-domain shards; one when omitted. |
-| `--chunk-size` | `CHUNK_SIZE` | Maximum words per bounded chunk. Default `65536`. |
-| `--workers` | `WORKERS` | Deterministic worker partition count. Default `1`. |
-| `--cancel-after` | `CANCEL_AFTER` | Stop after this many words and mark the artifact cancelled. |
-| `--output` | `PATH` | Write the versioned JSON result here. Required. |
+| `--full` | -- | Scan one shard of the full 32-bit word space. |
+| `--start` | `START` | First bounded word, in hexadecimal. |
+| `--count` | `COUNT` | Bounded word count. |
+| `--shard` | `SHARD` | Zero-based full-domain shard index. |
+| `--shards` | `SHARDS` | Number of full-domain shards. |
+| `--chunk-size` | `CHUNK_SIZE` | Maximum words per finite-domain batch. Default `65536`. |
+| `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
+| `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic word offset. |
+| `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
+| `--progress` | -- | Report bounded progress after each batch. |
+| `--finding-limit` | `FINDING_LIMIT` | Maximum detailed target panic records. Default `128`. |
+| `--output` | `PATH` | Write the versioned JSON result here. |
+| `--reduction` | `REDUCTION` | Request a same-class reduced case. One of `none`, `on-finding`. Default `none`. |
 
 Generated by `cellgov dev cli-gen`. Do not hand-edit; rerun the
 generator after changing a command, a flag, or an example.

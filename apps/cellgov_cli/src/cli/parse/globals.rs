@@ -95,7 +95,7 @@ const FORMAT_READERS: &str = if cfg!(feature = "decrypt") {
 
 /// The commands [`reads_quiet`] answers for, as help text.
 const QUIET_READERS: &str = "status, firmware install, title install, title install-update, \
-     the boot family, and dev record-anchors";
+     the boot family, dev record-anchors, and dev fuzz";
 
 /// The commands [`reads_verbose`] answers for, as help text.
 const VERBOSE_READERS: &str = "firmware install";
@@ -106,7 +106,8 @@ const FORCE_ANSI_READERS: &str = "firmware install, title install, title install
 
 /// Whether `--quiet` silences anything `command` would print.
 fn reads_quiet(command: &Command) -> bool {
-    matches!(command, Command::Status) || renders_progress(command)
+    matches!(command, Command::Status | Command::Dev(DevCommand::Fuzz(_)))
+        || renders_progress(command)
 }
 
 /// Whether `command` renders a progress bar.

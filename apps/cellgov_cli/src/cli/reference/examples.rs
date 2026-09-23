@@ -305,10 +305,33 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         lines: &["cellgov dev oracle-gap"],
     },
     Examples {
-        path: "dev decoder-sweep",
+        path: "dev fuzz ppu-instruction",
         lines: &[
-            "cellgov dev decoder-sweep ppu --count 65536 --output ppu-bounded.json",
-            "cellgov dev decoder-sweep spu --full --shard 0 --shards 16 --output spu-shard0.json",
+            "cellgov dev fuzz ppu-instruction --seed 7 --count 1000",
+            "cellgov dev fuzz ppu-instruction --quiet --progress --count 100",
+        ],
+    },
+    Examples {
+        path: "dev fuzz ppu-sequence",
+        lines: &["cellgov dev fuzz ppu-sequence --seed 7 --count 100 --sequence-words 16"],
+    },
+    Examples {
+        path: "dev fuzz spu-instruction",
+        lines: &["cellgov dev fuzz spu-instruction --seed 7 --count 1000"],
+    },
+    Examples {
+        path: "dev fuzz spu-sequence",
+        lines: &["cellgov dev fuzz spu-sequence --seed 7 --count 100 --sequence-words 16"],
+    },
+    Examples {
+        path: "dev fuzz semantic",
+        lines: &["cellgov dev fuzz semantic both"],
+    },
+    Examples {
+        path: "dev fuzz raw",
+        lines: &[
+            "cellgov dev fuzz raw ppu --count 65536 --output ppu-bounded.json",
+            "cellgov dev fuzz raw spu --full --shard 0 --shards 16 --output spu-shard0.json",
         ],
     },
 ];

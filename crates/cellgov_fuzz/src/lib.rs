@@ -130,6 +130,22 @@ impl Default for FuzzConfig {
 }
 
 impl FuzzConfig {
+    /// Checks a campaign before the host schedules any interpreter work.
+    ///
+    /// # Errors
+    ///
+    /// Refuses incompatible versions, ranges, bounds, or retention settings.
+    pub fn validate_for_target(self, target: FuzzTarget) -> Result<(), ConfigurationError> {
+        let sequence_limit = match target {
+            FuzzTarget::PpuInstruction | FuzzTarget::SpuInstruction => None,
+            FuzzTarget::PpuSequence => Some(MAX_SEQUENCE_WORDS),
+            FuzzTarget::SpuSequence => {
+                Some((cellgov_spu::state::SPU_LS_SIZE / 4).min(MAX_SEQUENCE_WORDS))
+            }
+        };
+        self.validate(sequence_limit)
+    }
+
     /// Lists this invocation's stable case indices.
     pub fn case_indices(self) -> Result<CaseIndices, ConfigurationError> {
         self.validate_version()?;

@@ -7,6 +7,7 @@ mod boot;
 mod dev;
 mod diff;
 mod entry;
+mod fuzz;
 mod globals;
 mod store;
 mod tree;
@@ -22,7 +23,6 @@ pub(crate) use dev::{
     FuncsArgs, GenManifestArgs, PrxImportsArgs, RecordAnchorsArgs, Rpcs3AttributeArgs,
     TitlesGenArgs, WorkspaceGenArgs, MAX_DISASM_COUNT,
 };
-pub(crate) use dev::{DecoderSweepArgs, SweepDecoder};
 pub(crate) use dev::{Lv2CensusArgs, Lv2DiscoverArgs};
 pub(crate) use diff::{
     CompareArgs, DiffCommand, ExploreArgs, ExploreCommand, ExploreTitleArgs, OutputFormat,
@@ -31,6 +31,10 @@ pub(crate) use diff::{
 #[cfg(test)]
 pub(crate) use entry::try_parse;
 pub(crate) use entry::{die_usage, parse_or_exit};
+pub(crate) use fuzz::{
+    FuzzArgs, FuzzCampaignArgs, FuzzCheck, FuzzCommand, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
+    FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
+};
 #[cfg(test)]
 pub(crate) use globals::global_refusal;
 pub(crate) use store::{
