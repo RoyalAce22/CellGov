@@ -89,6 +89,7 @@ const DISPATCHED: &[&str] = &[
     "dev fuzz spu-sequence",
     "dev fuzz semantic",
     "dev fuzz raw",
+    "dev fuzz replay",
 ];
 
 #[test]

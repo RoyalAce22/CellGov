@@ -4,10 +4,15 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use cellgov_fuzz::artifact::{
+    ArtifactCheckSelection, ArtifactError, ArtifactExecutionPolicy, ArtifactReductionRequest,
+    ArtifactReference, ArtifactReplayError, FuzzFindingArtifact,
+};
 use cellgov_fuzz::raw_decode::{
     scan_raw_decoder, RawDecodeArtifact, RawDecodeDomain, RawDecodeError, RawDecodeStatus,
     RawDecoder, MAX_RAW_DECODE_CHUNK, MAX_RAW_DECODE_PANIC_SAMPLES, RAW_DECODE_SCHEMA_VERSION,
 };
+use cellgov_fuzz::report::Finding;
 use cellgov_fuzz::semantic_sweep::{sweep_ppu, sweep_spu, SemanticSweepReport};
 use cellgov_fuzz::{
     ppu, spu, CampaignSchedule, CampaignShard, CampaignVersion, CaseRange, FuzzConfig, FuzzRun,
@@ -17,7 +22,7 @@ use cellgov_fuzz::{
 use super::exit::{CommandError, CommandExitCode};
 use super::parse::{
     FuzzArgs, FuzzCampaignArgs, FuzzCheck, FuzzCommand, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
-    FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
+    FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
 };
 
 const CAMPAIGN_BATCH_CASES: u64 = 64;
@@ -78,6 +83,34 @@ pub(crate) enum FuzzCliError {
         unsupported: u64,
         undefined: u64,
     },
+    #[error("fuzz: finding artifact: {0}")]
+    Artifact(#[from] ArtifactError),
+    #[error("fuzz: finding replay: {0}")]
+    ArtifactReplay(#[from] ArtifactReplayError),
+    #[error("fuzz: artifact read {}: {source}", path.display())]
+    ArtifactRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("fuzz: artifact encoding failed: {source}; original case {} words {:?}", artifact.original.replay.case_index, artifact.original.words)]
+    ArtifactEncoding {
+        #[source]
+        source: serde_json::Error,
+        artifact: Box<FuzzFindingArtifact>,
+    },
+    #[error("fuzz: artifact write {} failed: {source}; original case {} words {:?}", path.display(), artifact.original.replay.case_index, artifact.original.words)]
+    ArtifactWrite {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+        artifact: Box<FuzzFindingArtifact>,
+    },
+    #[error("fuzz: artifact path {} already holds different evidence; original case {} words {:?}", path.display(), artifact.original.replay.case_index, artifact.original.words)]
+    ArtifactCollision {
+        path: PathBuf,
+        artifact: Box<FuzzFindingArtifact>,
+    },
 }
 
 impl FuzzCliError {
@@ -103,6 +136,12 @@ impl FuzzCliError {
             | Self::Harness(_)
             | Self::CounterOverflow
             | Self::NoEligibleCases { .. } => false,
+            Self::Artifact(_)
+            | Self::ArtifactReplay(_)
+            | Self::ArtifactRead { .. }
+            | Self::ArtifactEncoding { .. }
+            | Self::ArtifactWrite { .. }
+            | Self::ArtifactCollision { .. } => false,
         }
     }
 
@@ -168,6 +207,7 @@ fn run_inner_with_quiet(args: &FuzzArgs, quiet: bool) -> Result<CommandExitCode,
         FuzzCommand::SpuSequence(args) => run_campaign(args, FuzzEngine::SpuSequence, quiet),
         FuzzCommand::Semantic(args) => run_semantic(args, quiet),
         FuzzCommand::Raw(args) => run_raw(args, quiet),
+        FuzzCommand::Replay(args) => run_replay(args),
     }
 }
 
@@ -223,6 +263,12 @@ fn run_campaign(
             "shard must be below a positive shards count",
         ));
     }
+    // `FuzzFindingArtifact::from_finding` refuses a non-UTF-8 replay path
+    // only after the campaign ran, and its error carries no finding. This
+    // check refuses the directory before the campaign schedules a case.
+    if args.artifacts_dir.to_str().is_none() {
+        return Err(FuzzCliError::Invalid("artifacts-dir must be valid UTF-8"));
+    }
     let (first, count) = args
         .replay_case
         .map_or((args.first, args.count), |index| (index, 1));
@@ -241,7 +287,7 @@ fn run_campaign(
         .checked_mul(workers_u32)
         .ok_or(FuzzCliError::Invalid("shards times workers overflows"))?;
     let timeout = deadline(args.deadline_ms)?;
-    FuzzConfig {
+    let campaign_config = FuzzConfig {
         campaign_version: CampaignVersion(args.campaign_version),
         seed: args.seed,
         strategy: match args.strategy {
@@ -259,12 +305,14 @@ fn run_campaign(
         retention: Default::default(),
         max_findings: args.finding_limit,
         sequence_words: args.sequence_words.unwrap_or(32),
-    }
-    .validate_for_target(engine.target())?;
+    };
+    campaign_config.validate_for_target(engine.target())?;
     let start = Instant::now();
-    if let Some(path) = &args.reference {
-        check_reference(path, engine)?;
-    }
+    let reference = if let Some(path) = &args.reference {
+        check_reference(path, engine)?
+    } else {
+        ArtifactReference::Local
+    };
     let mut offset = 0u64;
     let mut cases = 0u64;
     let mut decoded = 0u64;
@@ -274,6 +322,8 @@ fn run_campaign(
     let mut findings = 0u64;
     let mut failed = false;
     let mut harness_failure = None;
+    let mut artifact_index = 0u64;
+    let mut artifact_failure = None;
     while offset < limit {
         if timeout.is_some_and(|bound| start.elapsed() >= bound) {
             break;
@@ -313,6 +363,44 @@ fn run_campaign(
         }
         let runs = run_workers(work)?;
         for run in runs {
+            for finding in &run.report.findings {
+                let path = args.artifacts_dir.join(format!(
+                    "{:?}-{:?}-{}-{}-{}.json",
+                    engine.target(),
+                    campaign_config.strategy,
+                    args.seed,
+                    finding.replay.case_index,
+                    artifact_index,
+                ));
+                let stored = FuzzFindingArtifact::from_finding(
+                    campaign_config,
+                    ArtifactExecutionPolicy {
+                        workers: workers_u32,
+                        deadline_ms: args.deadline_ms,
+                        progress: args.progress,
+                        check: ArtifactCheckSelection::All,
+                        reduction: ArtifactReductionRequest::None,
+                    },
+                    &run.report,
+                    finding,
+                    reference.clone(),
+                    &path,
+                )
+                .map_err(FuzzCliError::from)
+                .and_then(|artifact| persist_finding(&path, artifact));
+                // A failed write stops neither the findings after it nor the
+                // summary line. The loop prints every failure with its retained
+                // evidence, and the first failure becomes the command's result.
+                if let Err(error) = stored {
+                    eprintln!("fuzz: {error}");
+                    if artifact_failure.is_none() {
+                        artifact_failure = Some(error);
+                    }
+                }
+                artifact_index = artifact_index
+                    .checked_add(1)
+                    .ok_or(FuzzCliError::CounterOverflow)?;
+            }
             cases = cases
                 .checked_add(run.report.cases)
                 .ok_or(FuzzCliError::CounterOverflow)?;
@@ -361,6 +449,9 @@ fn run_campaign(
         engine
     );
     write_stdout(&line)?;
+    if let Some(error) = artifact_failure {
+        return Err(error);
+    }
     if let Some(source) = harness_failure {
         return Err(FuzzCliError::Harness(source));
     }
@@ -433,12 +524,12 @@ fn worker_shard_index(
     })
 }
 
-fn check_reference(path: &PathBuf, engine: FuzzEngine) -> Result<(), FuzzCliError> {
+fn check_reference(path: &PathBuf, engine: FuzzEngine) -> Result<ArtifactReference, FuzzCliError> {
     let json = std::fs::read_to_string(path).map_err(|source| FuzzCliError::ReferenceRead {
         path: path.clone(),
         source,
     })?;
-    if engine.is_ppu() {
+    let reference = if engine.is_ppu() {
         let artifact = cellgov_fuzz::ppu_reference::parse_reference_json(&json)?;
         let replay = cellgov_fuzz::ppu_reference::replay_reference(&artifact)?;
         if replay.comparisons.is_empty()
@@ -450,14 +541,99 @@ fn check_reference(path: &PathBuf, engine: FuzzEngine) -> Result<(), FuzzCliErro
         {
             return Err(FuzzCliError::ReferenceMismatch);
         }
+        ArtifactReference::ppu(&json)?
     } else {
         let artifact = cellgov_fuzz::spu_reference::parse_reference_json(&json)?;
         let replay = cellgov_fuzz::spu_reference::replay_reference(&artifact)?;
         if !replay.comparison.is_match() {
             return Err(FuzzCliError::ReferenceMismatch);
         }
-    }
-    Ok(())
+        ArtifactReference::spu(&json)?
+    };
+    Ok(reference)
+}
+
+fn persist_finding(path: &PathBuf, artifact: FuzzFindingArtifact) -> Result<(), FuzzCliError> {
+    let parent = path
+        .parent()
+        .ok_or(FuzzCliError::Invalid("artifact path has no parent"))?;
+    std::fs::create_dir_all(parent).map_err(|source| FuzzCliError::ArtifactWrite {
+        path: path.clone(),
+        source,
+        artifact: Box::new(artifact.clone()),
+    })?;
+    let encoded =
+        serde_json::to_vec_pretty(&artifact).map_err(|source| FuzzCliError::ArtifactEncoding {
+            source,
+            artifact: Box::new(artifact.clone()),
+        })?;
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+            let existing =
+                std::fs::read_to_string(path).map_err(|source| FuzzCliError::ArtifactWrite {
+                    path: path.clone(),
+                    source,
+                    artifact: Box::new(artifact.clone()),
+                })?;
+            // A rerun with another `ArtifactExecutionPolicy` or campaign range
+            // produces the same finding, so the first file stands. Only
+            // different finding evidence collides.
+            return if FuzzFindingArtifact::parse_json(&existing)
+                .is_ok_and(|stored| stored.describes_same_finding(&artifact))
+            {
+                Ok(())
+            } else {
+                Err(FuzzCliError::ArtifactCollision {
+                    path: path.clone(),
+                    artifact: Box::new(artifact),
+                })
+            };
+        }
+        Err(source) => {
+            return Err(FuzzCliError::ArtifactWrite {
+                path: path.clone(),
+                source,
+                artifact: Box::new(artifact),
+            })
+        }
+    };
+    file.write_all(&encoded)
+        .and_then(|()| file.sync_all())
+        .map_err(|source| FuzzCliError::ArtifactWrite {
+            path: path.clone(),
+            source,
+            artifact: Box::new(artifact),
+        })
+}
+
+fn run_replay(args: &FuzzReplayArgs) -> Result<CommandExitCode, FuzzCliError> {
+    run_replay_with(args, FuzzFindingArtifact::replay)
+}
+
+fn run_replay_with(
+    args: &FuzzReplayArgs,
+    replay: impl FnOnce(&FuzzFindingArtifact) -> Result<Finding, ArtifactReplayError>,
+) -> Result<CommandExitCode, FuzzCliError> {
+    let json =
+        std::fs::read_to_string(&args.artifact).map_err(|source| FuzzCliError::ArtifactRead {
+            path: args.artifact.clone(),
+            source,
+        })?;
+    let artifact = FuzzFindingArtifact::parse_json(&json)?;
+    let finding = replay(&artifact)?;
+    write_stdout(&format!(
+        "fuzz replay: reproduced case={} kind={:?} fingerprint={:?}\n",
+        finding.replay.case_index, finding.kind, artifact.fingerprint
+    ))?;
+    // A reproduced finding is still a finding. The campaign that stored it
+    // exited with `FAILED` for the same fingerprint, and replay returns the
+    // same code.
+    Ok(CommandExitCode::new(super::exit_codes::FAILED))
 }
 
 fn run_semantic(args: &FuzzSemanticArgs, quiet: bool) -> Result<CommandExitCode, FuzzCliError> {

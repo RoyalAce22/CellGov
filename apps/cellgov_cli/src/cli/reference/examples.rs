@@ -334,6 +334,10 @@ pub(crate) const EXAMPLES: &[Examples] = &[
             "cellgov dev fuzz raw spu --full --shard 0 --shards 16 --output spu-shard0.json",
         ],
     },
+    Examples {
+        path: "dev fuzz replay",
+        lines: &["cellgov dev fuzz replay --artifact target/fuzz-findings/finding.json"],
+    },
 ];
 
 /// The block `path`'s help leads with, or `None` when it declares none.

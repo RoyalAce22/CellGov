@@ -28,6 +28,8 @@ pub(crate) enum FuzzCommand {
     Semantic(FuzzSemanticArgs),
     /// Scan raw instruction words through one decoder.
     Raw(FuzzRawArgs),
+    /// Replay a versioned finding artifact against its original engine.
+    Replay(FuzzReplayArgs),
 }
 
 /// Input construction strategy supported by instruction and sequence engines.
@@ -116,6 +118,9 @@ pub(crate) struct FuzzCampaignArgs {
     /// Request reduction of retained findings.
     #[arg(long, value_enum, default_value_t = FuzzReduction::None)]
     pub reduction: FuzzReduction,
+    /// Directory that receives one versioned artifact per retained finding.
+    #[arg(long, value_name = "DIR", default_value = "target/fuzz-findings")]
+    pub artifacts_dir: PathBuf,
 }
 
 /// Interpreter set for descriptor-derived enumeration.
@@ -195,4 +200,12 @@ pub(crate) struct FuzzRawArgs {
     /// Request a same-class reduced case.
     #[arg(long, value_enum, default_value_t = FuzzReduction::None)]
     pub reduction: FuzzReduction,
+}
+
+/// Exact replay of one stored finding artifact.
+#[derive(Debug, Args)]
+pub(crate) struct FuzzReplayArgs {
+    /// Versioned finding JSON to replay.
+    #[arg(long, value_name = "PATH")]
+    pub artifact: PathBuf,
 }

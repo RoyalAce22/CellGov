@@ -1396,6 +1396,7 @@ fn record(
             report.sequence_words,
         ),
         original_words,
+        observation: None,
         reduction: ReductionOutcome::NotAttempted,
         panic_payload: None,
     })
@@ -1427,6 +1428,7 @@ fn record_target_panic(
             report.sequence_words,
         ),
         original_words,
+        observation: None,
         reduction: ReductionOutcome::NotAttempted,
         panic_payload: Some(payload),
     })

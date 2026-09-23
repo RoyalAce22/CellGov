@@ -187,6 +187,8 @@ pub struct Finding {
     pub replay: ReplayCoordinates,
     /// Original unreduced instruction words.
     pub original_words: Vec<u32>,
+    /// Case observation, when execution reached semantic classification.
+    pub observation: Option<SemanticObservation>,
     /// Reduction state; failures retain the original and replay coordinates above.
     pub reduction: ReductionOutcome,
     /// Deterministic panic payload classification for target panics.
@@ -386,6 +388,11 @@ impl FuzzReport {
         case_index: u64,
         observation: SemanticObservation,
     ) -> Result<RetentionDecision, InvariantError> {
+        for finding in &mut self.findings {
+            if finding.replay.case_index == case_index {
+                finding.observation = Some(observation.clone());
+            }
+        }
         let decision = self.retained_cases.consider(case_index, observation);
         let count = self
             .distribution

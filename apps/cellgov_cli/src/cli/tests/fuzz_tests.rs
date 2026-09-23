@@ -52,6 +52,12 @@ fn every_fuzz_mode_is_a_declarative_dev_subcommand() {
             ..
         })
     ));
+    assert!(matches!(
+        parse(&["replay", "--artifact", "finding.json"])
+            .expect("artifact mode")
+            .command,
+        FuzzCommand::Replay(_)
+    ));
 }
 
 #[test]
@@ -581,4 +587,205 @@ fn host_workers_preserve_the_selected_shard_across_batches() {
         .filter(|case| (case - first) % 2 == 1)
         .collect();
     assert_eq!(observed, expected);
+}
+
+fn synthetic_finding_artifact() -> FuzzFindingArtifact {
+    use cellgov_fuzz::artifact::{
+        ArtifactCase, ArtifactCoverage, ArtifactFingerprint, ArtifactReduction, ArtifactStateSource,
+    };
+    use cellgov_fuzz::{FuzzConfig, FuzzTarget, GenerationStrategy, ReplayCoordinates};
+    FuzzFindingArtifact {
+        schema_version: cellgov_fuzz::artifact::FINDING_ARTIFACT_VERSION,
+        campaign: FuzzConfig::default(),
+        execution: cellgov_fuzz::artifact::ArtifactExecutionPolicy {
+            workers: 1,
+            deadline_ms: None,
+            progress: false,
+            check: cellgov_fuzz::artifact::ArtifactCheckSelection::All,
+            reduction: cellgov_fuzz::artifact::ArtifactReductionRequest::None,
+        },
+        original: ArtifactCase {
+            replay: ReplayCoordinates {
+                campaign_version: cellgov_fuzz::CAMPAIGN_VERSION,
+                target: FuzzTarget::PpuInstruction,
+                strategy: GenerationStrategy::Structured,
+                seed: 1,
+                case_index: 0,
+                sequence_words: 32,
+            },
+            words: vec![0x3860_0007],
+            state_source: ArtifactStateSource::VersionedGenerator,
+        },
+        finding_kind: "IllegalOutcome".into(),
+        fingerprint: ArtifactFingerprint {
+            target: FuzzTarget::PpuInstruction,
+            instruction_kind: None,
+            check: "LegalOutcome".into(),
+            divergence: "Outcome".into(),
+            outcome: None,
+            effect: None,
+        },
+        reference: ArtifactReference::Local,
+        observation: None,
+        coverage: ArtifactCoverage {
+            cases: 1,
+            decoded: 1,
+            eligible: 1,
+            unsupported: 0,
+            undefined: 0,
+            finding_counts: std::collections::BTreeMap::from([("IllegalOutcome".into(), 1)]),
+        },
+        reduction: ArtifactReduction::NotAttempted,
+        panic_payload: None,
+        replay_command: vec![
+            "cellgov".into(),
+            "dev".into(),
+            "fuzz".into(),
+            "replay".into(),
+            "--artifact".into(),
+            "finding.json".into(),
+        ],
+    }
+}
+
+#[test]
+fn artifact_storage_keeps_existing_evidence_and_returns_the_original_on_failure() {
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_artifact_storage");
+    let path = scratch.join("finding.json");
+    let artifact = synthetic_finding_artifact();
+    artifact.validate().expect("synthetic artifact is complete");
+    persist_finding(&path, artifact.clone()).expect("first write");
+    persist_finding(&path, artifact.clone()).expect("identical result is idempotent");
+    let on_disk = std::fs::read_to_string(&path).expect("stored artifact");
+    assert_eq!(
+        FuzzFindingArtifact::parse_json(&on_disk).expect("versioned JSON"),
+        artifact
+    );
+
+    let mut rerun = artifact.clone();
+    rerun.execution.workers = 8;
+    rerun.execution.progress = true;
+    rerun.campaign.schedule.cases.count = 4;
+    rerun.coverage.cases = 4;
+    persist_finding(&path, rerun).expect("same finding under another host budget");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("first evidence kept"),
+        on_disk
+    );
+
+    let mut conflicting = artifact.clone();
+    conflicting.original.words[0] ^= 1;
+    let collision = persist_finding(&path, conflicting.clone())
+        .expect_err("different evidence cannot overwrite");
+    assert!(
+        matches!(collision,FuzzCliError::ArtifactCollision {artifact: retained,..}
+        if retained.original.words == conflicting.original.words)
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("old file intact"),
+        on_disk
+    );
+
+    let truncated = scratch.join("truncated.json");
+    std::fs::write(&truncated, &on_disk.as_bytes()[..on_disk.len() / 2]).expect("partial file");
+    assert!(matches!(
+        persist_finding(&truncated, artifact.clone()),
+        Err(FuzzCliError::ArtifactCollision { .. })
+    ));
+
+    let blocked = scratch.join("occupied");
+    std::fs::write(&blocked, b"file").expect("blocking file");
+    let error = persist_finding(&blocked.join("finding.json"), artifact.clone())
+        .expect_err("a file cannot act as a directory");
+    assert!(
+        matches!(error,FuzzCliError::ArtifactWrite {artifact: retained,..}
+        if retained.original.words == artifact.original.words)
+    );
+}
+
+#[test]
+fn artifact_replay_refuses_an_unreproduced_case_and_a_changed_schema() {
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_artifact_replay");
+    let path = scratch.join("finding.json");
+    let artifact = synthetic_finding_artifact();
+    persist_finding(&path, artifact.clone()).expect("write artifact");
+    let args = FuzzReplayArgs { artifact: path };
+    assert!(matches!(
+        run_replay(&args),
+        Err(FuzzCliError::ArtifactReplay(
+            ArtifactReplayError::NotReproduced { case_index: 0 }
+        ))
+    ));
+    let newer = FuzzReplayArgs {
+        artifact: scratch.join("future.json"),
+    };
+    let mut changed = artifact;
+    changed.schema_version += 1;
+    persist_finding(&newer.artifact, changed).expect("write changed schema for refusal");
+    assert!(matches!(
+        run_replay(&newer),
+        Err(FuzzCliError::Artifact(ArtifactError::Version { .. }))
+    ));
+}
+
+#[test]
+fn a_reproduced_finding_is_reported_as_a_failed_run() {
+    use cellgov_fuzz::report::{CheckIdentity, DivergenceClass, FindingKind, SemanticFingerprint};
+    use cellgov_fuzz::ReductionOutcome;
+    let scratch = cellgov_testkit::scratch::scratch_labeled("fuzz_artifact_reproduced");
+    let path = scratch.join("finding.json");
+    let artifact = synthetic_finding_artifact();
+    persist_finding(&path, artifact.clone()).expect("write artifact");
+    let args = FuzzReplayArgs { artifact: path };
+    let finding = Finding {
+        fingerprint: SemanticFingerprint {
+            target: FuzzTarget::PpuInstruction,
+            instruction_kind: None,
+            check: CheckIdentity::LegalOutcome,
+            divergence: DivergenceClass::Outcome,
+            outcome: None,
+            effect: None,
+        },
+        kind: FindingKind::IllegalOutcome,
+        replay: artifact.original.replay,
+        original_words: artifact.original.words.clone(),
+        observation: None,
+        reduction: ReductionOutcome::NotAttempted,
+        panic_payload: None,
+    };
+    let code = run_replay_with(&args, |stored| {
+        assert_eq!(stored, &artifact);
+        Ok(finding)
+    })
+    .expect("the stored finding reproduces");
+    assert_eq!(code, CommandExitCode::new(super::super::exit_codes::FAILED));
+}
+
+fn non_utf8_path() -> std::path::PathBuf {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        std::path::PathBuf::from(std::ffi::OsString::from_wide(&[0xD800]))
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![0xFF]))
+    }
+}
+
+#[test]
+fn a_non_utf8_artifacts_dir_is_refused_before_any_case_runs() {
+    let mut parsed =
+        parse(&["ppu-instruction", "--count", "1", "--workers", "1"]).expect("campaign parses");
+    let FuzzCommand::PpuInstruction(ref mut args) = parsed.command else {
+        panic!("PPU mode")
+    };
+    args.artifacts_dir = non_utf8_path();
+    assert!(args.artifacts_dir.to_str().is_none());
+    let error = run(&parsed).expect_err("artifact directory cannot be replayed");
+    assert_eq!(
+        error.code().expect("status").value(),
+        super::super::exit_codes::USAGE as u8
+    );
 }
