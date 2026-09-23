@@ -12,6 +12,7 @@ mod campaign;
 mod case;
 mod error;
 mod parameters;
+mod retention;
 mod rng;
 
 const MAX_SEQUENCE_WORDS: usize = 65_536;
@@ -32,6 +33,12 @@ pub use report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, OutcomeIdentity, ReductionOutcome, RunOutcome, SemanticFingerprint,
 };
+pub use retention::{
+    BoundaryClass, CampaignDistribution, CrossReferenceAsymmetry, EvaluationDistribution,
+    EvaluationError, ExplorationPolicy, OperandAliasClass, RetainedCase, RetainedCases,
+    RetentionClass, RetentionConfig, RetentionConfigError, RetentionDecision, SemanticObservation,
+    StateTransitionClass, TrialMetrics,
+};
 pub use sweep::{ppu_decode_partition, spu_decode_partition, DecodePanic, DecodeSweepReport};
 
 /// Reusable configuration shared by all fuzz engines.
@@ -46,6 +53,8 @@ pub struct FuzzConfig {
     pub strategy: GenerationStrategy,
     /// Schedule for the campaign.
     pub schedule: CampaignSchedule,
+    /// Case-retention limits, weights, and exploration policy.
+    pub retention: RetentionConfig,
     /// Maximum number of detailed findings retained in memory.
     pub max_findings: u32,
     /// Instruction count used by sequence engines.
@@ -60,6 +69,8 @@ struct FuzzConfigArtifact {
     #[serde(default)]
     strategy: Option<GenerationStrategy>,
     schedule: CampaignSchedule,
+    #[serde(default)]
+    retention: Option<RetentionConfig>,
     max_findings: u32,
     sequence_words: u32,
 }
@@ -75,11 +86,17 @@ impl<'de> serde::Deserialize<'de> for FuzzConfig {
             (CampaignVersion(1), None) => GenerationStrategy::RawWords,
             (_, None) => return Err(serde::de::Error::missing_field("strategy")),
         };
+        let retention = match (artifact.campaign_version, artifact.retention) {
+            (_, Some(retention)) => retention,
+            (CAMPAIGN_VERSION, None) => return Err(serde::de::Error::missing_field("retention")),
+            (_, None) => RetentionConfig::default(),
+        };
         Ok(Self {
             campaign_version: artifact.campaign_version,
             seed: artifact.seed,
             strategy,
             schedule: artifact.schedule,
+            retention,
             max_findings: artifact.max_findings,
             sequence_words: artifact.sequence_words,
         })
@@ -93,6 +110,7 @@ impl Default for FuzzConfig {
             seed: 1,
             strategy: GenerationStrategy::Structured,
             schedule: CampaignSchedule::default(),
+            retention: RetentionConfig::default(),
             max_findings: 20,
             sequence_words: 32,
         }
@@ -109,6 +127,9 @@ impl FuzzConfig {
     pub(crate) fn validate(self, sequence_limit: Option<usize>) -> Result<(), ConfigurationError> {
         self.validate_version()?;
         self.schedule.validate()?;
+        self.retention
+            .validate()
+            .map_err(|source| ConfigurationError::Retention { source })?;
         if let Some(maximum) = sequence_limit {
             if self.sequence_words == 0 {
                 return Err(ConfigurationError::ZeroSequenceWords);
@@ -143,3 +164,7 @@ impl FuzzConfig {
 #[cfg(test)]
 #[path = "tests/lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/retention_tests.rs"]
+mod retention_tests;

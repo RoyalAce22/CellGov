@@ -121,6 +121,49 @@ fn version_three_artifacts_require_an_explicit_generation_strategy() {
 }
 
 #[test]
+fn current_artifacts_require_an_explicit_retention_policy() {
+    let config = serde_json::from_value::<FuzzConfig>(serde_json::json!({
+        "campaign_version": 4,
+        "seed": 7,
+        "strategy": "structured",
+        "schedule": {
+            "cases": { "first": 0, "count": 1 },
+            "shard": { "index": 0, "count": 1 },
+            "cancellation": null,
+        },
+        "max_findings": 1,
+        "sequence_words": 1,
+    }));
+
+    assert_eq!(config.unwrap_err().to_string(), "missing field `retention`");
+}
+
+#[test]
+fn version_three_artifacts_default_the_new_retention_policy_then_receive_a_typed_refusal() {
+    let config = serde_json::from_value::<FuzzConfig>(serde_json::json!({
+        "campaign_version": 3,
+        "seed": 7,
+        "strategy": "structured",
+        "schedule": {
+            "cases": { "first": 0, "count": 1 },
+            "shard": { "index": 0, "count": 1 },
+            "cancellation": null,
+        },
+        "max_findings": 1,
+        "sequence_words": 1,
+    }))
+    .unwrap();
+
+    assert_eq!(config.retention, RetentionConfig::default());
+    assert!(matches!(
+        ppu::run_instructions(config).outcome,
+        RunOutcome::HarnessFailure(FuzzError::Configuration(
+            ConfigurationError::UnsupportedCampaignVersion { .. }
+        ))
+    ));
+}
+
+#[test]
 fn campaign_version_mismatch_is_a_typed_refusal() {
     let found = CampaignVersion(CAMPAIGN_VERSION.0 + 1);
     let run = ppu::run_instructions(FuzzConfig {
@@ -153,6 +196,7 @@ fn inapplicable_cases_are_classified_without_becoming_findings() {
         FuzzTarget::PpuInstruction,
         7,
         GenerationStrategy::Structured,
+        RetentionConfig::default(),
         4,
         1,
     );
@@ -189,6 +233,7 @@ fn legacy_inapplicability_findings_do_not_become_clean_completion() {
             FuzzTarget::PpuInstruction,
             7,
             GenerationStrategy::Structured,
+            RetentionConfig::default(),
             4,
             1,
         );
@@ -212,6 +257,25 @@ fn zero_case_campaign_is_a_harness_failure() {
         run.outcome,
         RunOutcome::HarnessFailure(FuzzError::Configuration(ConfigurationError::ZeroIterations))
     ));
+}
+
+#[test]
+fn invalid_retention_policy_is_a_typed_configuration_failure() {
+    let run = ppu::run_instructions(FuzzConfig {
+        retention: RetentionConfig {
+            capacity: 0,
+            ..RetentionConfig::default()
+        },
+        ..FuzzConfig::default()
+    });
+
+    assert!(matches!(
+        run.outcome,
+        RunOutcome::HarnessFailure(FuzzError::Configuration(ConfigurationError::Retention {
+            source: RetentionConfigError::ZeroCapacity,
+        }))
+    ));
+    assert_eq!(run.report.cases, 0);
 }
 
 #[test]
@@ -334,13 +398,21 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(
         serde_json::to_value(config).unwrap(),
         serde_json::json!({
-            "campaign_version": 3,
+            "campaign_version": 4,
             "seed": 0x0123_4567_89ab_cdef_u64,
             "strategy": "structured",
             "schedule": {
                 "cases": { "first": u64::MAX, "count": 1 },
                 "shard": { "index": 0, "count": 1 },
                 "cancellation": null,
+            },
+            "retention": {
+                "capacity": 256,
+                "per_kind_capacity": 8,
+                "novelty_weight": 8,
+                "rarity_weight": 4,
+                "asymmetry_weight": 16,
+                "policy": "balanced",
             },
             "max_findings": 20,
             "sequence_words": 17,
@@ -349,7 +421,7 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(
         serde_json::to_value(replay).unwrap(),
         serde_json::json!({
-            "campaign_version": 3,
+            "campaign_version": 4,
             "target": "PpuSequence",
             "strategy": "structured",
             "seed": 0x0123_4567_89ab_cdef_u64,

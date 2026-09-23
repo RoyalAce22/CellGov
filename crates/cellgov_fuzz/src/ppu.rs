@@ -23,6 +23,7 @@ use crate::report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, OutcomeIdentity, ReductionOutcome, SemanticFingerprint,
 };
+use crate::retention::{CrossReferenceAsymmetry, SemanticObservation, StateTransitionClass};
 use crate::rng::{Rng, WordGenerationFailure};
 use crate::{
     FuzzConfig, GenerationStrategy, ParameterStream, ReplayCoordinates, TargetPanicPayload,
@@ -74,6 +75,37 @@ struct ObservedSequence {
     decode_refusal: Option<(u64, u32)>,
     deterministic: bool,
     effects: Vec<Effect>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ObservedSequenceRun {
+    observed: ObservedSequence,
+    decoded: u64,
+    decoded_kinds: Vec<InstructionIdentity>,
+    executed: u64,
+    executed_kinds: Vec<InstructionIdentity>,
+}
+
+#[derive(Clone, Copy)]
+enum PpuTerminalObservation<'a> {
+    Execution(Option<&'a ExecuteVerdict>),
+    DecodeRefusal(Option<&'a ExecuteVerdict>),
+}
+
+impl<'a> PpuTerminalObservation<'a> {
+    fn from_sequence(observed: &'a ObservedSequence) -> Self {
+        if observed.decode_refusal.is_some() {
+            Self::DecodeRefusal(observed.terminal_verdict.as_ref())
+        } else {
+            Self::Execution(observed.terminal_verdict.as_ref())
+        }
+    }
+
+    fn verdict(self) -> Option<&'a ExecuteVerdict> {
+        match self {
+            Self::Execution(verdict) | Self::DecodeRefusal(verdict) => verdict,
+        }
+    }
 }
 
 /// Checks each decoded PPU instruction against its descriptor.
@@ -187,7 +219,9 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         report.executed(1)?;
         report.observed_effects(first.effects.iter().map(Effect::kind))?;
         let outcome = PpuOutcomeClass::from_verdict(&first.verdict);
+        let mut asymmetry = CrossReferenceAsymmetry::None;
         if !descriptor.outcomes.contains(&outcome) {
+            asymmetry = ppu_outcome_asymmetry(outcome);
             record(
                 report,
                 FindingKind::IllegalOutcome,
@@ -209,6 +243,7 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
             .map(Effect::kind)
             .find(|effect| !descriptor.effects.contains(effect))
         {
+            asymmetry = asymmetry.max(CrossReferenceAsymmetry::Effect);
             record(
                 report,
                 FindingKind::IllegalEffect,
@@ -225,6 +260,18 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
             )?;
         }
         if assessment.eligibility != CaseEligibility::Eligible {
+            report.observe_case(
+                iteration,
+                ppu_observation(
+                    [identity],
+                    &assessment,
+                    PpuTerminalObservation::Execution(Some(&first.verdict)),
+                    &first.effects,
+                    1,
+                    ppu_step_changed(&initial, &first),
+                    asymmetry,
+                ),
+            )?;
             continue;
         }
         if requests_replay(descriptor.relations) {
@@ -239,10 +286,24 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                         iteration,
                         payload,
                     )?;
+                    report.observe_case(
+                        iteration,
+                        ppu_observation(
+                            [identity],
+                            &assessment,
+                            PpuTerminalObservation::Execution(Some(&first.verdict)),
+                            &first.effects,
+                            1,
+                            ppu_step_changed(&initial, &first),
+                            CrossReferenceAsymmetry::TargetPanic,
+                        ),
+                    )?;
                     continue;
                 }
             };
-            if first != second {
+            let replay_asymmetry = ppu_step_replay_asymmetry(&first, &second);
+            if replay_asymmetry != CrossReferenceAsymmetry::None {
+                asymmetry = asymmetry.max(replay_asymmetry);
                 record(
                     report,
                     FindingKind::Nondeterministic,
@@ -259,6 +320,18 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 )?;
             }
         }
+        report.observe_case(
+            iteration,
+            ppu_observation(
+                [identity],
+                &assessment,
+                PpuTerminalObservation::Execution(Some(&first.verdict)),
+                &first.effects,
+                1,
+                ppu_step_changed(&initial, &first),
+                asymmetry,
+            ),
+        )?;
     }
     Ok(())
 }
@@ -353,17 +426,30 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                 continue;
             }
         };
-        report.reached_many(first.1, first.2.iter().copied())?;
+        report.reached_many(first.decoded, first.decoded_kinds.iter().copied())?;
         let mut features = generated.features;
         features.extend(state_features);
-        let assessment = assess_sequence_case(config.strategy, first.1, features);
+        let assessment = assess_sequence_case(config.strategy, first.executed, features);
         report.assessed(&assessment)?;
-        report.executed(first.1)?;
-        report.observed_effects(first.0.effects.iter().map(Effect::kind))?;
+        report.executed(first.executed)?;
+        report.observed_effects(first.observed.effects.iter().map(Effect::kind))?;
         if assessment.eligibility != CaseEligibility::Eligible {
+            report.observe_case(
+                iteration,
+                ppu_observation(
+                    first.executed_kinds.iter().copied(),
+                    &assessment,
+                    PpuTerminalObservation::from_sequence(&first.observed),
+                    &first.observed.effects,
+                    first.executed,
+                    ppu_sequence_changed(&initial, &first.observed),
+                    CrossReferenceAsymmetry::None,
+                ),
+            )?;
             continue;
         }
-        if first.0.deterministic {
+        let mut asymmetry = CrossReferenceAsymmetry::None;
+        if first.observed.deterministic {
             let second = match call_target(|| run_sequence(&words, &initial, &memory)) {
                 Ok(second) => second,
                 Err(payload) => {
@@ -375,10 +461,24 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                         iteration,
                         payload,
                     )?;
+                    report.observe_case(
+                        iteration,
+                        ppu_observation(
+                            first.executed_kinds.iter().copied(),
+                            &assessment,
+                            PpuTerminalObservation::from_sequence(&first.observed),
+                            &first.observed.effects,
+                            first.executed,
+                            ppu_sequence_changed(&initial, &first.observed),
+                            CrossReferenceAsymmetry::TargetPanic,
+                        ),
+                    )?;
                     continue;
                 }
             };
-            if first.0 != second.0 {
+            let replay_asymmetry = ppu_sequence_replay_asymmetry(&first, &second);
+            if replay_asymmetry != CrossReferenceAsymmetry::None {
+                asymmetry = asymmetry.max(replay_asymmetry);
                 record(
                     report,
                     FindingKind::Nondeterministic,
@@ -395,6 +495,18 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                 )?;
             }
         }
+        report.observe_case(
+            iteration,
+            ppu_observation(
+                first.executed_kinds.iter().copied(),
+                &assessment,
+                PpuTerminalObservation::from_sequence(&first.observed),
+                &first.observed.effects,
+                first.executed,
+                ppu_sequence_changed(&initial, &first.observed),
+                asymmetry,
+            ),
+        )?;
     }
     Ok(())
 }
@@ -428,17 +540,159 @@ fn run_once(instruction: &PpuInstruction, initial: &PpuState, memory: &[u8]) -> 
     }
 }
 
-fn run_sequence(
-    words: &[u32],
-    initial: &PpuState,
-    memory: &[u8],
-) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+fn ppu_observation(
+    kinds: impl IntoIterator<Item = InstructionIdentity>,
+    assessment: &CaseAssessment,
+    terminal: PpuTerminalObservation<'_>,
+    effects: &[Effect],
+    depth: u64,
+    state_changed: bool,
+    asymmetry: CrossReferenceAsymmetry,
+) -> SemanticObservation {
+    let kinds = kinds.into_iter().collect::<Vec<_>>();
+    let verdict = terminal.verdict();
+    let outcome = verdict.map(PpuOutcomeClass::from_verdict);
+    let state_transition = match outcome {
+        Some(PpuOutcomeClass::Fault | PpuOutcomeClass::MemoryFault) if !state_changed => {
+            StateTransitionClass::FaultDiscarded
+        }
+        _ if !effects.is_empty() => StateTransitionClass::Effect,
+        Some(PpuOutcomeClass::Branch) => StateTransitionClass::ControlFlow,
+        _ if state_changed => StateTransitionClass::ArchitecturalState,
+        _ => StateTransitionClass::Unchanged,
+    };
+    SemanticObservation {
+        first_instruction_kind: kinds.first().copied(),
+        instruction_kinds: kinds.into_iter().collect(),
+        operands: SemanticObservation::operands_from_features(&assessment.features),
+        eligibility: assessment.eligibility,
+        outcome: match terminal {
+            PpuTerminalObservation::DecodeRefusal(_) => Some(OutcomeIdentity::PpuDecodeRefusal),
+            PpuTerminalObservation::Execution(_) => outcome.map(outcome_identity),
+        },
+        state_transition,
+        effects: effects.iter().map(Effect::kind).collect(),
+        boundaries: SemanticObservation::boundaries_from_features(&assessment.features),
+        sequence_depth: depth,
+        asymmetry,
+    }
+}
+
+fn ppu_step_changed(initial: &PpuState, observed: &ObservedStep) -> bool {
+    observed.state != PpuStateSnapshot::capture(initial)
+        || observed.pc != initial.pc
+        || observed.vrsave != initial.vrsave
+        || observed.vrsave_written != initial.vrsave_written
+        || observed.tb != initial.tb
+}
+
+fn ppu_sequence_changed(initial: &PpuState, observed: &ObservedSequence) -> bool {
+    observed.state != PpuStateSnapshot::capture(initial)
+        || observed.pc != initial.pc
+        || observed.vrsave != initial.vrsave
+        || observed.vrsave_written != initial.vrsave_written
+        || observed.tb != initial.tb
+}
+
+fn ppu_step_replay_asymmetry(
+    first: &ObservedStep,
+    second: &ObservedStep,
+) -> CrossReferenceAsymmetry {
+    let state_differs = first.state != second.state
+        || first.pc != second.pc
+        || first.vrsave != second.vrsave
+        || first.vrsave_written != second.vrsave_written
+        || first.tb != second.tb;
+    replay_asymmetry(
+        state_differs,
+        ppu_verdict_asymmetry(Some(&first.verdict), Some(&second.verdict)),
+        first.effects != second.effects,
+    )
+}
+
+fn ppu_sequence_replay_asymmetry(
+    first: &ObservedSequenceRun,
+    second: &ObservedSequenceRun,
+) -> CrossReferenceAsymmetry {
+    let decode_refusal_differs = first.observed.decode_refusal != second.observed.decode_refusal;
+    let state_or_trajectory_differs = first.observed.state != second.observed.state
+        || first.observed.pc != second.observed.pc
+        || first.observed.vrsave != second.observed.vrsave
+        || first.observed.vrsave_written != second.observed.vrsave_written
+        || first.observed.tb != second.observed.tb
+        || decode_refusal_differs
+        || first.observed.deterministic != second.observed.deterministic
+        || first.decoded != second.decoded
+        || first.decoded_kinds != second.decoded_kinds
+        || first.executed != second.executed
+        || first.executed_kinds != second.executed_kinds;
+    let mut outcome_asymmetry = ppu_verdict_asymmetry(
+        first.observed.terminal_verdict.as_ref(),
+        second.observed.terminal_verdict.as_ref(),
+    );
+    if first.observed.decode_refusal.is_some() != second.observed.decode_refusal.is_some() {
+        outcome_asymmetry = outcome_asymmetry.max(CrossReferenceAsymmetry::Outcome);
+    }
+    replay_asymmetry(
+        state_or_trajectory_differs,
+        outcome_asymmetry,
+        first.observed.effects != second.observed.effects,
+    )
+}
+
+fn ppu_verdict_asymmetry(
+    first: Option<&ExecuteVerdict>,
+    second: Option<&ExecuteVerdict>,
+) -> CrossReferenceAsymmetry {
+    if first == second {
+        return CrossReferenceAsymmetry::None;
+    }
+    if [first, second].into_iter().flatten().any(|verdict| {
+        ppu_outcome_asymmetry(PpuOutcomeClass::from_verdict(verdict))
+            == CrossReferenceAsymmetry::Fault
+    }) {
+        CrossReferenceAsymmetry::Fault
+    } else {
+        CrossReferenceAsymmetry::Outcome
+    }
+}
+
+fn ppu_outcome_asymmetry(outcome: PpuOutcomeClass) -> CrossReferenceAsymmetry {
+    if matches!(
+        outcome,
+        PpuOutcomeClass::Fault | PpuOutcomeClass::MemoryFault
+    ) {
+        CrossReferenceAsymmetry::Fault
+    } else {
+        CrossReferenceAsymmetry::Outcome
+    }
+}
+
+fn replay_asymmetry(
+    state_differs: bool,
+    outcome: CrossReferenceAsymmetry,
+    effects_differ: bool,
+) -> CrossReferenceAsymmetry {
+    let mut asymmetry = CrossReferenceAsymmetry::None;
+    if state_differs {
+        asymmetry = CrossReferenceAsymmetry::State;
+    }
+    asymmetry = asymmetry.max(outcome);
+    if effects_differ {
+        asymmetry = asymmetry.max(CrossReferenceAsymmetry::Effect);
+    }
+    asymmetry
+}
+
+fn run_sequence(words: &[u32], initial: &PpuState, memory: &[u8]) -> ObservedSequenceRun {
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
     let views = [RegionView::plain(DATA_REGION_BASE, memory)];
     let mut decoded = 0u64;
-    let mut kinds = Vec::new();
+    let mut decoded_kinds = Vec::new();
+    let mut executed = 0u64;
+    let mut executed_kinds = Vec::new();
     let mut terminal_verdict = None;
     let mut decode_refusal = None;
     let mut deterministic = true;
@@ -461,7 +715,8 @@ fn run_sequence(
         let descriptor = instruction.fuzz_descriptor(raw);
         deterministic &= requests_replay(descriptor.relations);
         decoded += 1;
-        kinds.push(InstructionIdentity::Ppu(descriptor.kind));
+        let identity = InstructionIdentity::Ppu(descriptor.kind);
+        decoded_kinds.push(identity);
         let verdict = execute(
             &instruction,
             &mut state,
@@ -471,6 +726,11 @@ fn run_sequence(
             &mut stores,
         );
         terminal_verdict = Some(verdict.clone());
+        // The runtime retries `BufferFull`.
+        if verdict != ExecuteVerdict::BufferFull {
+            executed += 1;
+            executed_kinds.push(identity);
+        }
         match verdict {
             ExecuteVerdict::Continue => state.pc = state.pc.wrapping_add(4),
             ExecuteVerdict::Branch => {}
@@ -488,8 +748,8 @@ fn run_sequence(
     if state.clock_read {
         effects.push(Effect::ClockRead { source: UNIT });
     }
-    (
-        ObservedSequence {
+    ObservedSequenceRun {
+        observed: ObservedSequence {
             state: PpuStateSnapshot::capture(&state),
             pc: state.pc,
             vrsave: state.vrsave,
@@ -501,8 +761,10 @@ fn run_sequence(
             effects,
         },
         decoded,
-        kinds,
-    )
+        decoded_kinds,
+        executed,
+        executed_kinds,
+    }
 }
 
 #[cfg(test)]
@@ -961,6 +1223,7 @@ fn guarded_run(
         target,
         config.seed,
         config.strategy,
+        config.retention,
         config.max_findings as usize,
         config.sequence_words,
     );

@@ -8,6 +8,10 @@ use cellgov_spu::instruction::SpuInstructionKind;
 
 use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::error::{FuzzError, InvariantError};
+use crate::retention::{
+    CampaignDistribution, RetainedCases, RetentionClass, RetentionConfig, RetentionDecision,
+    SemanticObservation, TrialMetrics,
+};
 use crate::TargetPanicPayload;
 
 /// Stable interpreter-owned identity of a decoded instruction.
@@ -80,7 +84,7 @@ pub enum DivergenceClass {
     Undefined,
 }
 
-/// Typed target outcome used when it contributes to finding identity.
+/// Typed terminal outcome used when it contributes to semantic identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OutcomeIdentity {
     /// Ordinary PPU completion.
@@ -95,6 +99,8 @@ pub enum OutcomeIdentity {
     PpuMemoryFault,
     /// PPU store-buffer refusal.
     PpuBufferFull,
+    /// PPU sequence stopped when its next word did not decode.
+    PpuDecodeRefusal,
     /// Ordinary SPU completion.
     SpuContinue,
     /// SPU branch.
@@ -105,6 +111,8 @@ pub enum OutcomeIdentity {
     SpuMemoryRead,
     /// SPU architectural fault.
     SpuFault,
+    /// SPU sequence stopped when its next word did not decode.
+    SpuDecodeRefusal,
 }
 
 /// Stable identity used to bucket and rank semantically equal findings.
@@ -205,6 +213,10 @@ pub struct FuzzReport {
     pub executed_steps: u64,
     /// Records the largest instruction depth that one case executes.
     pub max_executed_depth: u64,
+    /// Ordered retained cases from this run.
+    pub retained_cases: RetainedCases,
+    /// Separate attempt, eligibility, execution-depth, and retention distributions.
+    pub distribution: CampaignDistribution,
     /// Stable instruction kinds reached.
     pub instruction_kinds: BTreeSet<InstructionIdentity>,
     /// Finding counts by rule.
@@ -220,6 +232,7 @@ impl FuzzReport {
         target: FuzzTarget,
         seed: u64,
         strategy: GenerationStrategy,
+        retention: RetentionConfig,
         max_findings: usize,
         sequence_words: u32,
     ) -> Self {
@@ -237,6 +250,8 @@ impl FuzzReport {
             effect_classes: BTreeMap::new(),
             executed_steps: 0,
             max_executed_depth: 0,
+            retained_cases: RetainedCases::from_config_unchecked(retention),
+            distribution: CampaignDistribution::default(),
             instruction_kinds: BTreeSet::new(),
             finding_counts: BTreeMap::new(),
             findings: Vec::new(),
@@ -250,6 +265,13 @@ impl FuzzReport {
             .cases
             .checked_add(1)
             .ok_or(InvariantError::CounterOverflow { counter: "cases" })?;
+        self.distribution.attempted =
+            self.distribution
+                .attempted
+                .checked_add(1)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "attempted distribution",
+                })?;
         Ok(())
     }
 
@@ -286,6 +308,17 @@ impl FuzzReport {
             .ok_or(InvariantError::CounterOverflow {
                 counter: "case eligibility",
             })?;
+        let eligibility_count = self
+            .distribution
+            .eligibility
+            .entry(assessment.eligibility)
+            .or_insert(0);
+        *eligibility_count =
+            eligibility_count
+                .checked_add(1)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "eligibility distribution",
+                })?;
         for reason in &assessment.reasons {
             let count = self.eligibility_reasons.entry(*reason).or_insert(0);
             *count = count
@@ -313,7 +346,32 @@ impl FuzzReport {
                     counter: "executed steps",
                 })?;
         self.max_executed_depth = self.max_executed_depth.max(depth);
+        let depth_count = self.distribution.executed_depths.entry(depth).or_insert(0);
+        *depth_count = depth_count
+            .checked_add(1)
+            .ok_or(InvariantError::CounterOverflow {
+                counter: "executed-depth distribution",
+            })?;
         Ok(())
+    }
+
+    pub(crate) fn observe_case(
+        &mut self,
+        case_index: u64,
+        observation: SemanticObservation,
+    ) -> Result<RetentionDecision, InvariantError> {
+        let decision = self.retained_cases.consider(case_index, observation);
+        let count = self
+            .distribution
+            .retention
+            .entry(RetentionClass::from(decision))
+            .or_insert(0);
+        *count = count
+            .checked_add(1)
+            .ok_or(InvariantError::CounterOverflow {
+                counter: "retention distribution",
+            })?;
+        Ok(decision)
     }
 
     pub(crate) fn observed_effects(
@@ -338,6 +396,17 @@ impl FuzzReport {
             .checked_add(self.unsupported_cases)?
             .checked_add(self.undefined_cases)?;
         (classified != 0).then_some((self.eligible_cases, classified))
+    }
+
+    /// Returns the equal-budget evaluation metrics for this run.
+    pub fn trial_metrics(&self) -> TrialMetrics {
+        TrialMetrics {
+            seed: self.seed,
+            attempted: self.distribution.attempted,
+            eligible: self.eligible_cases,
+            executed: self.executed_steps,
+            retained: self.retained_cases.entries().len() as u64,
+        }
     }
 
     pub(crate) fn finding(&mut self, finding: Finding) -> Result<(), InvariantError> {

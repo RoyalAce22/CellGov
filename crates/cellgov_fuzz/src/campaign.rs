@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigurationError, FuzzTarget, ReplayVersionError};
 
 /// Version of the deterministic case-to-input mapping.
-pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(3);
+pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(4);
 
 /// Specifies how a fuzz campaign constructs input.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

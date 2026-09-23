@@ -1,10 +1,12 @@
 use super::*;
 
 #[test]
-fn campaign_version_three_preserves_the_seed_index_mapping() {
-    let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 7, 0);
+fn campaign_versions_preserve_the_seed_index_mapping() {
+    for version in 1..=crate::CAMPAIGN_VERSION.0 {
+        let mut rng = Rng::for_case(crate::CampaignVersion(version), 7, 0);
 
-    assert_eq!(rng.next_u64(), 0x044c_3cd7_f43c_661c);
+        assert_eq!(rng.next_u64(), 0x044c_3cd7_f43c_661c);
+    }
 }
 
 #[test]

@@ -57,6 +57,13 @@ pub enum ConfigurationError {
         /// Largest supported retained-finding count.
         maximum: usize,
     },
+    /// Case-retention limits or weights are invalid.
+    #[error("invalid case-retention configuration: {source}")]
+    Retention {
+        /// Underlying case-retention configuration error.
+        #[source]
+        source: crate::RetentionConfigError,
+    },
 }
 
 /// A deterministic case generator could not produce a valid case.
