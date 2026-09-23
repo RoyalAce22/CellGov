@@ -86,11 +86,13 @@ pub(crate) enum FuzzReductionPolicy {
 
 /// The outcomes a generated campaign has beyond the shared 0-5 contract.
 pub(crate) const CAMPAIGN_EXIT_CODES: &str = "Exit codes particular to this command:
-  1   a finding was retained and its artifact names the exact replay;
-      also the shared failed-operation status when --reference could
-      not be read or disagreed with the interpreter, or a worker failed
+  0   every scheduled case ran, with or without findings; the summary
+      line's outcome field says which, and each finding line names a
+      replay
+  1   the shared failed-operation status when --reference could not be
+      read or disagreed with the interpreter, or a worker failed
   10  the range ended on --deadline-ms or --cancel-after before every
-      case ran, with no finding
+      case ran, findings or not
   11  every case ran and none was eligible for its check
   12  the engine failed inside the harness rather than the target
   13  a finding's artifact could not be stored; its evidence was printed

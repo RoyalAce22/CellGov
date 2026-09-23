@@ -6,8 +6,8 @@
 //! [Chen2013 p:2 s:1 Introduction] A triage that filters failures by text
 //! patterns over their output is the ad hoc one the fuzzer-taming work replaces.
 
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 use cellgov_fuzz::artifact::{ArtifactFingerprint, ArtifactReduction};
 use cellgov_fuzz::decode_census::ClassCounts;
@@ -20,7 +20,7 @@ use crate::cli::exit::CommandExitCode;
 use crate::cli::exit_codes;
 
 /// Exit code: a deadline or `--cancel-after` ended the range before every
-/// case ran, and the campaign retained no finding.
+/// case ran, whether or not the campaign retained a finding.
 pub(crate) const EXIT_CANCELLED: i32 = exit_codes::command_specific(10);
 /// Exit code: every scheduled case ran and none was eligible for its check.
 pub(crate) const EXIT_NO_ELIGIBLE_CASES: i32 = exit_codes::command_specific(11);
@@ -274,12 +274,14 @@ pub(crate) enum CampaignOutcome {
     HarnessFailure,
     /// A retained finding's reduction failed.
     ReductionFailed,
-    /// The campaign retained a finding or a target panic.
+    /// The range ended before every case ran, findings or not.
+    Cancelled,
+    /// Every case ran and the campaign retained a finding or a target
+    /// panic. The artifacts are the campaign's product, so the run
+    /// succeeded; the summary line's outcome field carries the signal.
     Findings,
     /// Every case ran and none was eligible.
     NoEligibleCases,
-    /// The range ended before every case ran.
-    Cancelled,
     /// Every case ran clean.
     Clean,
 }
@@ -297,10 +299,10 @@ impl CampaignOutcome {
             Self::HarnessFailure
         } else if summary.reductions_failed > 0 {
             Self::ReductionFailed
-        } else if summary.findings() > 0 {
-            Self::Findings
         } else if summary.cancelled {
             Self::Cancelled
+        } else if summary.findings() > 0 {
+            Self::Findings
         } else if summary.eligible == 0 {
             Self::NoEligibleCases
         } else {
@@ -315,10 +317,9 @@ impl CampaignOutcome {
             Self::EvidenceNotStored => CommandExitCode::new(EXIT_EVIDENCE_NOT_STORED),
             Self::HarnessFailure => CommandExitCode::new(EXIT_HARNESS_FAILURE),
             Self::ReductionFailed => CommandExitCode::new(EXIT_REDUCTION_FAILED),
-            Self::Findings => CommandExitCode::new(exit_codes::FAILED),
-            Self::NoEligibleCases => CommandExitCode::new(EXIT_NO_ELIGIBLE_CASES),
             Self::Cancelled => CommandExitCode::new(EXIT_CANCELLED),
-            Self::Clean => CommandExitCode::SUCCESS,
+            Self::NoEligibleCases => CommandExitCode::new(EXIT_NO_ELIGIBLE_CASES),
+            Self::Findings | Self::Clean => CommandExitCode::SUCCESS,
         }
     }
 }
@@ -339,8 +340,9 @@ pub(crate) struct ReplayOutcome {
 }
 
 impl ReplayOutcome {
-    /// A reproduced finding is still a finding: the same status the campaign
-    /// that stored it returned.
+    /// Reproduction is the assertion a replay makes, so a reproduced
+    /// finding is the failed-operation status and a vanished one is
+    /// [`EXIT_NOT_REPRODUCED`].
     #[must_use]
     pub const fn exit_code(&self) -> CommandExitCode {
         CommandExitCode::new(exit_codes::FAILED)
@@ -505,8 +507,112 @@ pub(crate) fn render_comparison(comparison: &Comparison) -> String {
     text
 }
 
-/// Renders a campaign's summary: one status line, then one line per artifact
-/// with its exact replay command.
+/// The retained artifacts that share one finding kind, check and
+/// divergence class: one summary line, however many cases hit it.
+struct FindingGroup<'a> {
+    kind: FindingKind,
+    check: &'a str,
+    divergence: &'a str,
+    /// In storage order.
+    records: Vec<&'a ArtifactRecord>,
+}
+
+/// Instruction kinds a group line names before it counts the rest.
+const LISTED_INSTRUCTION_KINDS: usize = 4;
+
+impl FindingGroup<'_> {
+    fn render(&self) -> String {
+        let kinds: BTreeSet<&str> = self
+            .records
+            .iter()
+            .filter_map(|record| record.fingerprint.instruction_kind.as_deref())
+            .collect();
+        let instructions = if kinds.is_empty() {
+            "none".to_owned()
+        } else {
+            let mut listed = kinds
+                .iter()
+                .take(LISTED_INSTRUCTION_KINDS)
+                .copied()
+                .collect::<Vec<_>>()
+                .join(",");
+            let rest = kinds.len().saturating_sub(LISTED_INSTRUCTION_KINDS);
+            if rest > 0 {
+                listed.push_str(&format!(",+{rest} more"));
+            }
+            listed
+        };
+        let mut line = format!(
+            "fuzz: findings={} kind={:?} check={} divergence={} instructions={instructions}",
+            self.records.len(),
+            self.kind,
+            self.check,
+            self.divergence,
+        );
+        let (mut reduced, mut irreducible, mut failed) = (0usize, 0usize, 0usize);
+        for record in &self.records {
+            match record.reduction {
+                ArtifactReduction::Reduced { .. } => reduced += 1,
+                ArtifactReduction::Irreducible => irreducible += 1,
+                ArtifactReduction::Failed { .. } => failed += 1,
+                ArtifactReduction::NotAttempted => {}
+            }
+        }
+        if reduced + irreducible + failed > 0 {
+            line.push_str(&format!(
+                " reduced={reduced} irreducible={irreducible} reduction_failed={failed}"
+            ));
+        }
+        line.push_str(&format!(" replay: {}\n", self.replay().replay_command()));
+        line
+    }
+
+    /// The earliest record whose artifact reached its path, so the
+    /// replay names a file that exists; with none stored, the earliest.
+    fn replay(&self) -> &ArtifactRecord {
+        self.records
+            .iter()
+            .copied()
+            .find(|record| record.stored)
+            .unwrap_or(self.records[0])
+    }
+}
+
+/// Group `records` by finding, largest group first, ties in kind order.
+fn finding_groups(records: &[ArtifactRecord]) -> Vec<FindingGroup<'_>> {
+    let mut groups: Vec<FindingGroup<'_>> = Vec::new();
+    for record in records {
+        let check = record.fingerprint.check.as_str();
+        let divergence = record.fingerprint.divergence.as_str();
+        let same = |group: &&mut FindingGroup<'_>| {
+            group.kind == record.finding_kind
+                && group.check == check
+                && group.divergence == divergence
+        };
+        match groups.iter_mut().find(same) {
+            Some(group) => group.records.push(record),
+            None => groups.push(FindingGroup {
+                kind: record.finding_kind,
+                check,
+                divergence,
+                records: vec![record],
+            }),
+        }
+    }
+    groups.sort_by(|a, b| {
+        b.records
+            .len()
+            .cmp(&a.records.len())
+            .then_with(|| a.kind.cmp(&b.kind))
+            .then_with(|| a.check.cmp(b.check))
+            .then_with(|| a.divergence.cmp(b.divergence))
+    });
+    groups
+}
+
+/// Renders a campaign's summary: one status line, one line per
+/// distinct finding with its count, its instruction kinds and one
+/// replay command, then the artifact tally with its directory.
 #[must_use]
 pub(crate) fn render_campaign_summary(
     target: FuzzTarget,
@@ -524,8 +630,18 @@ pub(crate) fn render_campaign_summary(
         summary.reductions_failed,
         summary.cancelled,
     );
-    for artifact in &summary.artifacts {
-        text.push_str(&artifact.render("fuzz: finding "));
+    for group in finding_groups(&summary.artifacts) {
+        text.push_str(&group.render());
+    }
+    if let Some(first) = summary.artifacts.first() {
+        let stored = summary.artifacts.iter().filter(|a| a.stored).count();
+        let dir = first.path.parent().unwrap_or_else(|| Path::new(""));
+        text.push_str(&format!(
+            "fuzz: artifacts={} stored={stored} not_stored={} dir={}\n",
+            summary.artifacts.len(),
+            summary.artifacts.len() - stored,
+            dir.display(),
+        ));
     }
     text
 }
