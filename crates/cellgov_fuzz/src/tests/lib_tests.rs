@@ -46,6 +46,7 @@ fn replay_version_mismatch_is_a_typed_refusal() {
     let coordinates = ReplayCoordinates {
         campaign_version: CampaignVersion(CAMPAIGN_VERSION.0 + 1),
         target: FuzzTarget::PpuSequence,
+        strategy: GenerationStrategy::Structured,
         seed: 7,
         case_index: u64::MAX,
         sequence_words: 4,
@@ -58,6 +59,65 @@ fn replay_version_mismatch_is_a_typed_refusal() {
             supported: CAMPAIGN_VERSION,
         })
     );
+}
+
+#[test]
+fn version_one_artifacts_parse_as_raw_words_then_receive_a_typed_refusal() {
+    let config: FuzzConfig = serde_json::from_value(serde_json::json!({
+        "campaign_version": 1,
+        "seed": 7,
+        "schedule": {
+            "cases": { "first": 0, "count": 1 },
+            "shard": { "index": 0, "count": 1 },
+            "cancellation": null,
+        },
+        "max_findings": 1,
+        "sequence_words": 1,
+    }))
+    .unwrap();
+    let replay: ReplayCoordinates = serde_json::from_value(serde_json::json!({
+        "campaign_version": 1,
+        "target": "PpuInstruction",
+        "seed": 7,
+        "case_index": 0,
+        "sequence_words": 1,
+    }))
+    .unwrap();
+
+    assert_eq!(config.strategy, GenerationStrategy::RawWords);
+    assert_eq!(replay.strategy, GenerationStrategy::RawWords);
+    assert!(matches!(
+        ppu::run_instructions(config).outcome,
+        RunOutcome::HarnessFailure(FuzzError::Configuration(
+            ConfigurationError::UnsupportedCampaignVersion { .. }
+        ))
+    ));
+    assert!(matches!(replay.validate(), Err(ReplayVersionError { .. })));
+}
+
+#[test]
+fn version_two_artifacts_require_an_explicit_generation_strategy() {
+    let config = serde_json::from_value::<FuzzConfig>(serde_json::json!({
+        "campaign_version": 2,
+        "seed": 7,
+        "schedule": {
+            "cases": { "first": 0, "count": 1 },
+            "shard": { "index": 0, "count": 1 },
+            "cancellation": null,
+        },
+        "max_findings": 1,
+        "sequence_words": 1,
+    }));
+    let replay = serde_json::from_value::<ReplayCoordinates>(serde_json::json!({
+        "campaign_version": 2,
+        "target": "PpuInstruction",
+        "seed": 7,
+        "case_index": 0,
+        "sequence_words": 1,
+    }));
+
+    assert!(config.is_err());
+    assert!(replay.is_err());
 }
 
 #[test]
@@ -212,6 +272,7 @@ fn campaign_and_replay_artifacts_round_trip() {
     let decoded: FuzzConfig = serde_json::from_str(&encoded).unwrap();
     let replay = ReplayCoordinates::new(
         FuzzTarget::PpuSequence,
+        config.strategy,
         config.seed,
         u64::MAX,
         config.sequence_words,
@@ -222,8 +283,9 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(
         serde_json::to_value(config).unwrap(),
         serde_json::json!({
-            "campaign_version": 1,
+            "campaign_version": 2,
             "seed": 0x0123_4567_89ab_cdef_u64,
+            "strategy": "structured",
             "schedule": {
                 "cases": { "first": u64::MAX, "count": 1 },
                 "shard": { "index": 0, "count": 1 },
@@ -236,8 +298,9 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(
         serde_json::to_value(replay).unwrap(),
         serde_json::json!({
-            "campaign_version": 1,
+            "campaign_version": 2,
             "target": "PpuSequence",
+            "strategy": "structured",
             "seed": 0x0123_4567_89ab_cdef_u64,
             "case_index": u64::MAX,
             "sequence_words": 17,
@@ -246,4 +309,19 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(decoded, config);
     assert_eq!(replay_decoded, replay);
     assert_eq!(replay_decoded.validate(), Ok(()));
+}
+
+#[test]
+fn parameter_stream_mutation_is_structural_and_bounds_checked() {
+    let mut parameters = ParameterStream::new(vec![1, 2, 3]);
+
+    assert_eq!(parameters.mutate(1, 9), Ok(()));
+    assert_eq!(parameters.values(), [1, 9, 3]);
+    assert_eq!(
+        parameters.mutate(3, 0),
+        Err(GeneratorError::ParameterIndex {
+            index: 3,
+            length: 3,
+        })
+    );
 }

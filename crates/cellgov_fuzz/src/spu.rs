@@ -3,20 +3,26 @@
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_spu::exec::{execute, SpuStepOutcome};
-use cellgov_spu::fuzz::{SpuMetamorphicRelation, SpuOutcomeClass};
+use cellgov_spu::fuzz::{
+    generation_descriptors, SpuGenerationDescriptor, SpuGenerationError, SpuMetamorphicRelation,
+    SpuOperandClass, SpuOutcomeClass,
+};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_LS_SIZE};
 use cellgov_sync::ReservedLine;
 
 use crate::boundary::{call_harness, call_target};
-use crate::error::{FuzzError, InvariantError};
+use crate::error::{FuzzError, GeneratorError, InvariantError};
 use crate::report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, OutcomeIdentity, ReductionOutcome, SemanticFingerprint,
 };
 use crate::rng::{Rng, WordGenerationFailure};
-use crate::{FuzzConfig, ReplayCoordinates, TargetPanicPayload};
+use crate::{
+    FuzzConfig, GenerationStrategy, ParameterStream, ReplayCoordinates, TargetPanicPayload,
+};
 
 const UNIT: UnitId = UnitId::new(0);
+const STRUCTURED_ENCODING_ATTEMPTS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedStep {
@@ -41,10 +47,50 @@ pub fn run_instructions(config: FuzzConfig) -> FuzzRun {
 
 fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
     config.validate(None)?;
-    for iteration in config.case_indices()? {
+    let iterations = config.case_indices()?;
+    let descriptors = match (config.strategy, iterations.clone().next()) {
+        (GenerationStrategy::Structured, Some(first)) => {
+            match call_target(generation_descriptors) {
+                Ok(descriptors) => descriptors,
+                Err(payload) => {
+                    report.considered()?;
+                    record_target_panic(
+                        report,
+                        CheckIdentity::SpuDecoder,
+                        None,
+                        Vec::new(),
+                        first,
+                        payload,
+                    )?;
+                    return Ok(());
+                }
+            }
+        }
+        (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
+    };
+    for iteration in iterations {
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
-        let raw = rng.next_u32();
+        let raw = match config.strategy {
+            GenerationStrategy::Structured => {
+                match call_target(|| structured_word(&descriptors, &mut rng)) {
+                    Ok(Ok(raw)) => raw,
+                    Ok(Err(error)) => return Err(error.into()),
+                    Err(payload) => {
+                        record_target_panic(
+                            report,
+                            CheckIdentity::SpuDecoder,
+                            None,
+                            Vec::new(),
+                            iteration,
+                            payload,
+                        )?;
+                        continue;
+                    }
+                }
+            }
+            GenerationStrategy::RawWords => rng.next_u32(),
+        };
         let decoded = match call_target(|| cellgov_spu::decode::decode(raw)) {
             Ok(decoded) => decoded,
             Err(payload) => {
@@ -160,12 +206,46 @@ pub fn run_sequences(config: FuzzConfig) -> FuzzRun {
 
 fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
     config.validate(Some((SPU_LS_SIZE / 4).min(crate::MAX_SEQUENCE_WORDS)))?;
-    for iteration in config.case_indices()? {
+    let iterations = config.case_indices()?;
+    let descriptors = match (config.strategy, iterations.clone().next()) {
+        (GenerationStrategy::Structured, Some(first)) => {
+            match call_target(generation_descriptors) {
+                Ok(descriptors) => descriptors,
+                Err(payload) => {
+                    report.considered()?;
+                    record_target_panic(
+                        report,
+                        CheckIdentity::SpuDecoder,
+                        None,
+                        Vec::new(),
+                        first,
+                        payload,
+                    )?;
+                    return Ok(());
+                }
+            }
+        }
+        (GenerationStrategy::Structured | GenerationStrategy::RawWords, _) => Vec::new(),
+    };
+    for iteration in iterations {
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
-        let words = rng.decoder_accepted_words(config.sequence_words as usize, |raw| {
-            call_target(|| cellgov_spu::decode::decode(raw)).map(|decoded| decoded.is_ok())
-        });
+        let words = match config.strategy {
+            GenerationStrategy::Structured => {
+                match call_target(|| {
+                    structured_words(&descriptors, &mut rng, config.sequence_words as usize)
+                }) {
+                    Ok(Ok(words)) => Ok(words),
+                    Ok(Err(error)) => Err(WordGenerationFailure::Exhausted(error)),
+                    Err(payload) => Err(WordGenerationFailure::DecoderPanic(0, payload)),
+                }
+            }
+            GenerationStrategy::RawWords => {
+                rng.decoder_accepted_words(config.sequence_words as usize, |raw| {
+                    call_target(|| cellgov_spu::decode::decode(raw)).map(|decoded| decoded.is_ok())
+                })
+            }
+        };
         let words = match words {
             Ok(words) => words,
             Err(WordGenerationFailure::DecoderPanic(raw, payload)) => {
@@ -193,7 +273,9 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             }
             initial.ls[start..start + 4].copy_from_slice(&word.to_be_bytes());
         }
-        let first = match call_target(|| run_sequence(&initial, config.sequence_words as usize)) {
+        let first = match call_target(|| {
+            run_generated_sequence(&initial, config.sequence_words as usize, config.strategy)
+        }) {
             Ok(first) => first,
             Err(payload) => {
                 record_target_panic(
@@ -209,21 +291,22 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
         };
         report.reached_many(first.1, first.2.iter().copied())?;
         if first.0.deterministic {
-            let second =
-                match call_target(|| run_sequence(&initial, config.sequence_words as usize)) {
-                    Ok(second) => second,
-                    Err(payload) => {
-                        record_target_panic(
-                            report,
-                            CheckIdentity::SpuExecutor,
-                            None,
-                            words.clone(),
-                            iteration,
-                            payload,
-                        )?;
-                        continue;
-                    }
-                };
+            let second = match call_target(|| {
+                run_generated_sequence(&initial, config.sequence_words as usize, config.strategy)
+            }) {
+                Ok(second) => second,
+                Err(payload) => {
+                    record_target_panic(
+                        report,
+                        CheckIdentity::SpuExecutor,
+                        None,
+                        words.clone(),
+                        iteration,
+                        payload,
+                    )?;
+                    continue;
+                }
+            };
             if first.0 != second.0 {
                 record(
                     report,
@@ -277,6 +360,25 @@ fn run_sequence(
     initial: &SpuState,
     budget: usize,
 ) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+    run_sequence_with_limit(initial, budget, None)
+}
+
+fn run_generated_sequence(
+    initial: &SpuState,
+    budget: usize,
+    strategy: GenerationStrategy,
+) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
+    match strategy {
+        GenerationStrategy::Structured => run_sequence_with_limit(initial, budget, Some(budget)),
+        GenerationStrategy::RawWords => run_sequence(initial, budget),
+    }
+}
+
+fn run_sequence_with_limit(
+    initial: &SpuState,
+    budget: usize,
+    program_words: Option<usize>,
+) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
     let mut state = initial.clone();
     let mut decoded = 0u64;
     let mut kinds = Vec::new();
@@ -284,6 +386,14 @@ fn run_sequence(
     let mut decode_refusal = None;
     let mut deterministic = true;
     for _ in 0..budget {
+        let Some(slot) = usize::try_from(state.pc / 4).ok() else {
+            break;
+        };
+        // Stop structured execution at the program bound because the finding records no other
+        // local-store words.
+        if program_words.is_some_and(|word_count| slot >= word_count) {
+            break;
+        }
         let Some(raw) = state.fetch() else {
             break;
         };
@@ -319,6 +429,67 @@ fn run_sequence(
         decoded,
         kinds,
     )
+}
+
+fn structured_words(
+    descriptors: &[SpuGenerationDescriptor],
+    rng: &mut Rng,
+    count: usize,
+) -> Result<Vec<u32>, GeneratorError> {
+    (0..count)
+        .map(|_| structured_word(descriptors, rng))
+        .collect()
+}
+
+fn structured_word(
+    descriptors: &[SpuGenerationDescriptor],
+    rng: &mut Rng,
+) -> Result<u32, GeneratorError> {
+    if descriptors.is_empty() {
+        return Err(GeneratorError::EmptyDescriptorRegistry { target: "SPU" });
+    }
+    let index = rng.below(descriptors.len() as u64)? as usize;
+    let Some(descriptor) = descriptors.get(index) else {
+        return Err(GeneratorError::EmptyDescriptorRegistry { target: "SPU" });
+    };
+    // [Yang2011 p:1 s:Abstract] Only valid typed operand combinations reach comparison.
+    for _ in 0..STRUCTURED_ENCODING_ATTEMPTS {
+        let parameters = spu_parameters(descriptor, rng)?;
+        match descriptor.encode(parameters.values()) {
+            Ok(raw) => return Ok(raw),
+            Err(SpuGenerationError::InvalidOperands) => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Err(GeneratorError::ConstraintAttemptsExhausted {
+        target: "SPU",
+        attempts: STRUCTURED_ENCODING_ATTEMPTS,
+    })
+}
+
+fn spu_parameters(
+    descriptor: &SpuGenerationDescriptor,
+    rng: &mut Rng,
+) -> Result<ParameterStream, GeneratorError> {
+    let alias = rng.chance(1, 8)?.then(|| rng.next_u32());
+    let mut values = Vec::with_capacity(descriptor.operands.len());
+    for field in &descriptor.operands {
+        let value = if field.class == SpuOperandClass::Register && alias.is_some() {
+            alias.unwrap_or(0) & field.maximum()
+        } else if rng.chance(1, 4)? {
+            let boundaries = field.boundary_values();
+            let boundary_index = rng.below(boundaries.len() as u64)? as usize;
+            boundaries.get(boundary_index).copied().ok_or(
+                GeneratorError::EmptyDescriptorRegistry {
+                    target: "SPU operand boundaries",
+                },
+            )?
+        } else {
+            rng.next_u32() & field.maximum()
+        };
+        values.push(value);
+    }
+    Ok(ParameterStream::new(values))
 }
 
 fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
@@ -398,6 +569,7 @@ fn record(
         kind,
         replay: ReplayCoordinates::new(
             report.target,
+            report.strategy,
             report.seed,
             iteration,
             report.sequence_words,
@@ -428,6 +600,7 @@ fn record_target_panic(
         kind: FindingKind::TargetPanic,
         replay: ReplayCoordinates::new(
             report.target,
+            report.strategy,
             report.seed,
             iteration,
             report.sequence_words,
@@ -446,6 +619,7 @@ fn guarded_run(
     let mut report = FuzzReport::new(
         target,
         config.seed,
+        config.strategy,
         config.max_findings as usize,
         config.sequence_words,
     );
@@ -467,3 +641,7 @@ fn guarded_run(
 #[cfg(test)]
 #[path = "tests/spu_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/structured_sequence_tests.rs"]
+mod structured_sequence_tests;

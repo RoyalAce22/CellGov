@@ -5,7 +5,18 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigurationError, FuzzTarget, ReplayVersionError};
 
 /// Version of the deterministic case-to-input mapping.
-pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(1);
+pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(2);
+
+/// Specifies how a fuzz campaign constructs input.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GenerationStrategy {
+    /// Selects an interpreter-owned descriptor, then encodes typed operands.
+    Structured,
+    /// Generates complete words to test decoder robustness.
+    #[default]
+    RawWords,
+}
 
 /// Version of a serialized campaign and its generator behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -159,13 +170,15 @@ impl Iterator for CaseIndices {
 }
 
 /// Exact coordinates needed to reconstruct one generated case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplayCoordinates {
     /// Version of the deterministic generator behavior.
     pub campaign_version: CampaignVersion,
     /// Engine that generates the case.
     pub target: FuzzTarget,
+    /// Selects how this case constructs input.
+    pub strategy: GenerationStrategy,
     /// Master campaign seed.
     pub seed: u64,
     /// Case index within the campaign's stable coordinate space.
@@ -174,11 +187,54 @@ pub struct ReplayCoordinates {
     pub sequence_words: u32,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplayCoordinatesArtifact {
+    campaign_version: CampaignVersion,
+    target: FuzzTarget,
+    #[serde(default)]
+    strategy: Option<GenerationStrategy>,
+    seed: u64,
+    case_index: u64,
+    sequence_words: u32,
+}
+
+impl<'de> Deserialize<'de> for ReplayCoordinates {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let artifact = ReplayCoordinatesArtifact::deserialize(deserializer)?;
+        let strategy = match (artifact.campaign_version, artifact.strategy) {
+            (_, Some(strategy)) => strategy,
+            (CAMPAIGN_VERSION, None) => {
+                return Err(serde::de::Error::missing_field("strategy"));
+            }
+            (_, None) => GenerationStrategy::RawWords,
+        };
+        Ok(Self {
+            campaign_version: artifact.campaign_version,
+            target: artifact.target,
+            strategy,
+            seed: artifact.seed,
+            case_index: artifact.case_index,
+            sequence_words: artifact.sequence_words,
+        })
+    }
+}
+
 impl ReplayCoordinates {
-    pub(crate) fn new(target: FuzzTarget, seed: u64, case_index: u64, sequence_words: u32) -> Self {
+    pub(crate) fn new(
+        target: FuzzTarget,
+        strategy: GenerationStrategy,
+        seed: u64,
+        case_index: u64,
+        sequence_words: u32,
+    ) -> Self {
         Self {
             campaign_version: CAMPAIGN_VERSION,
             target,
+            strategy,
             seed,
             case_index,
             sequence_words,

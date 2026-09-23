@@ -33,7 +33,7 @@ pub enum FuzzTarget {
     SpuSequence,
 }
 
-use crate::ReplayCoordinates;
+use crate::{GenerationStrategy, ReplayCoordinates};
 
 /// Validation rule or target boundary associated with a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -182,6 +182,8 @@ pub struct FuzzReport {
     pub target: FuzzTarget,
     /// Master seed.
     pub seed: u64,
+    /// Records how the run constructed input.
+    pub strategy: GenerationStrategy,
     /// Cases considered, including decode refusals.
     pub cases: u64,
     /// Successfully decoded cases.
@@ -200,12 +202,14 @@ impl FuzzReport {
     pub(crate) fn new(
         target: FuzzTarget,
         seed: u64,
+        strategy: GenerationStrategy,
         max_findings: usize,
         sequence_words: u32,
     ) -> Self {
         Self {
             target,
             seed,
+            strategy,
             cases: 0,
             decoded: 0,
             instruction_kinds: BTreeSet::new(),

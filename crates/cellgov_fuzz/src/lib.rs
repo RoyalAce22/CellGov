@@ -10,6 +10,7 @@ pub mod sweep;
 mod boundary;
 mod campaign;
 mod error;
+mod parameters;
 mod rng;
 
 const MAX_SEQUENCE_WORDS: usize = 65_536;
@@ -18,12 +19,13 @@ const MAX_RETAINED_FINDINGS: usize = 1_024;
 pub use boundary::TargetPanicPayload;
 pub use campaign::{
     CampaignSchedule, CampaignShard, CampaignVersion, CancellationBoundary, CaseIndices, CaseRange,
-    ReplayCoordinates, CAMPAIGN_VERSION,
+    GenerationStrategy, ReplayCoordinates, CAMPAIGN_VERSION,
 };
 pub use error::{
     ConfigurationError, FuzzError, GeneratorError, InvariantError, ReductionError,
     ReferenceDisagreement, ReplayVersionError, ReportingError, SynchronizationError, WorkerError,
 };
+pub use parameters::ParameterStream;
 pub use report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
     InstructionIdentity, OutcomeIdentity, ReductionOutcome, RunOutcome, SemanticFingerprint,
@@ -31,13 +33,15 @@ pub use report::{
 pub use sweep::{ppu_decode_partition, spu_decode_partition, DecodePanic, DecodeSweepReport};
 
 /// Reusable configuration shared by all fuzz engines.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct FuzzConfig {
     /// Version of the serialized campaign and generator behavior.
     pub campaign_version: CampaignVersion,
     /// Master seed.
     pub seed: u64,
+    /// Selects how the campaign constructs input.
+    pub strategy: GenerationStrategy,
     /// Schedule for the campaign.
     pub schedule: CampaignSchedule,
     /// Maximum number of detailed findings retained in memory.
@@ -46,11 +50,48 @@ pub struct FuzzConfig {
     pub sequence_words: u32,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FuzzConfigArtifact {
+    campaign_version: CampaignVersion,
+    seed: u64,
+    #[serde(default)]
+    strategy: Option<GenerationStrategy>,
+    schedule: CampaignSchedule,
+    max_findings: u32,
+    sequence_words: u32,
+}
+
+impl<'de> serde::Deserialize<'de> for FuzzConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let artifact = <FuzzConfigArtifact as serde::Deserialize>::deserialize(deserializer)?;
+        let strategy = match (artifact.campaign_version, artifact.strategy) {
+            (_, Some(strategy)) => strategy,
+            (CAMPAIGN_VERSION, None) => {
+                return Err(serde::de::Error::missing_field("strategy"));
+            }
+            (_, None) => GenerationStrategy::RawWords,
+        };
+        Ok(Self {
+            campaign_version: artifact.campaign_version,
+            seed: artifact.seed,
+            strategy,
+            schedule: artifact.schedule,
+            max_findings: artifact.max_findings,
+            sequence_words: artifact.sequence_words,
+        })
+    }
+}
+
 impl Default for FuzzConfig {
     fn default() -> Self {
         Self {
             campaign_version: CAMPAIGN_VERSION,
             seed: 1,
+            strategy: GenerationStrategy::Structured,
             schedule: CampaignSchedule::default(),
             max_findings: 20,
             sequence_words: 32,

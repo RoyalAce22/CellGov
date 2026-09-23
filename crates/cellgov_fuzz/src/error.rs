@@ -62,6 +62,34 @@ pub enum ConfigurationError {
 /// A deterministic case generator could not produce a valid case.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum GeneratorError {
+    /// Structural constraints rejected all candidates within the deterministic attempt limit.
+    #[error("{target} structured generation exhausted {attempts} constraint attempts")]
+    ConstraintAttemptsExhausted {
+        /// Names the target.
+        target: &'static str,
+        /// Records the number of rejected candidates.
+        attempts: usize,
+    },
+    /// An interpreter declared no structured generation recipes.
+    #[error("{target} descriptor registry is empty")]
+    EmptyDescriptorRegistry {
+        /// Names the target.
+        target: &'static str,
+    },
+    /// A structural mutation selected an index outside the parameter stream.
+    #[error("parameter index {index} is outside stream length {length}")]
+    ParameterIndex {
+        /// Records the requested parameter index.
+        index: usize,
+        /// Records the number of parameters in the stream.
+        length: usize,
+    },
+    /// An interpreter-owned PPU descriptor rejected its operand values.
+    #[error("PPU structural generation failed: {0}")]
+    Ppu(#[from] cellgov_ppu::instruction::fuzz::PpuGenerationError),
+    /// An interpreter-owned SPU descriptor rejected its operand values.
+    #[error("SPU structural generation failed: {0}")]
+    Spu(#[from] cellgov_spu::fuzz::SpuGenerationError),
     /// A probability denominator was zero.
     #[error("generator probability denominator must be nonzero")]
     ZeroProbabilityDenominator,
