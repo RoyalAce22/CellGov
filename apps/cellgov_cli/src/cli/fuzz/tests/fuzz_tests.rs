@@ -1,6 +1,20 @@
+use super::artifact::{persist_finding, run_replay, run_replay_with};
+use super::campaign::{reduce_retained_finding, run_workers, worker_shard_index};
+use super::entry::{reports_progress, run, run_inner, run_inner_with_quiet};
 use super::*;
 
-use crate::cli::parse::{try_parse, Command, DevCommand};
+use cellgov_fuzz::artifact::{
+    ArtifactError, ArtifactReference, ArtifactReplayError, FuzzFindingArtifact,
+};
+use cellgov_fuzz::raw_decode::{RawDecodeArtifact, RawDecodeStatus};
+use cellgov_fuzz::report::Finding;
+use cellgov_fuzz::{ppu, CampaignSchedule, CaseRange, FuzzTarget, GenerationStrategy};
+
+use crate::cli::exit::{CommandError, CommandExitCode};
+use crate::cli::parse::{
+    try_parse, Command, DevCommand, FuzzArgs, FuzzCommand, FuzzRawArgs, FuzzRawDecoder,
+    FuzzReduction, FuzzReductionPolicy, FuzzReplayArgs,
+};
 
 fn parse(argv: &[&str]) -> Result<FuzzArgs, clap::Error> {
     let mut args = vec!["cellgov", "dev", "fuzz"];
@@ -490,7 +504,7 @@ fn raw_replay_with_no_decoded_case_does_not_report_clean_completion() {
             .code()
             .expect("failed status")
             .value(),
-        super::super::exit_codes::FAILED as u8
+        u8::try_from(super::outcome::EXIT_NO_ELIGIBLE_CASES).expect("small code")
     );
 }
 
@@ -579,7 +593,7 @@ fn cancelled_raw_scan_keeps_an_explicit_partial_artifact() {
     args.output = Some(output.clone());
     assert_eq!(
         run_inner(&parsed).expect("partial result").value(),
-        super::super::exit_codes::FAILED as u8
+        u8::try_from(super::outcome::EXIT_CANCELLED).expect("small code")
     );
     let json = std::fs::read_to_string(output).expect("partial artifact");
     let artifact = RawDecodeArtifact::parse_json(&json).expect("valid cancellation");
@@ -693,7 +707,7 @@ fn host_workers_preserve_the_selected_shard_across_batches() {
     assert_eq!(observed, expected);
 }
 
-fn synthetic_finding_artifact() -> FuzzFindingArtifact {
+pub(super) fn synthetic_finding_artifact() -> FuzzFindingArtifact {
     use cellgov_fuzz::artifact::{
         ArtifactCase, ArtifactCoverage, ArtifactFingerprint, ArtifactReduction, ArtifactStateSource,
     };

@@ -72,8 +72,45 @@ pub(crate) enum FuzzReductionPolicy {
     Greedy,
 }
 
+/// The outcomes a generated campaign has beyond the shared 0-5 contract.
+pub(crate) const CAMPAIGN_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   a finding was retained and its artifact names the exact replay;
+      also the shared failed-operation status when --reference could
+      not be read or disagreed with the interpreter, or a worker failed
+  10  the range ended on --deadline-ms or --cancel-after before every
+      case ran, with no finding
+  11  every case ran and none was eligible for its check
+  12  the engine failed inside the harness rather than the target
+  13  a finding's artifact could not be stored; its evidence was printed
+  14  a retained finding's reduction failed; its original case is stored
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz semantic` has beyond the shared 0-5 contract.
+pub(crate) const SEMANTIC_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   a descriptor registry disagreed with its interpreter
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz raw` has beyond the shared 0-5 contract.
+pub(crate) const RAW_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   the decoder panicked on at least one word; also the shared
+      failed-operation status when --output could not be written or the
+      sweep failed before its words were classified
+  10  the scan ended on --deadline-ms or --cancel-after before every
+      word ran, with no panic
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz replay` has beyond the shared 0-5 contract.
+pub(crate) const REPLAY_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   the stored finding reproduced; also the shared failed-operation
+      status when --artifact could not be read or its independent
+      reference no longer matched
+  12  the engine failed inside the harness rather than the target
+  15  the stored case no longer reproduces its finding
+  141 stdout was closed by a downstream reader";
+
 /// Common settings for a generated interpreter campaign.
 #[derive(Debug, Args)]
+#[command(after_help = CAMPAIGN_EXIT_CODES)]
 #[command(group = clap::ArgGroup::new("case-selection").args(["replay_case", "first"]))]
 pub(crate) struct FuzzCampaignArgs {
     /// Serialized generator version required for exact replay.
@@ -151,6 +188,7 @@ pub(crate) enum FuzzSemanticTarget {
 
 /// Settings for a descriptor-derived semantic enumeration.
 #[derive(Debug, Args)]
+#[command(after_help = SEMANTIC_EXIT_CODES)]
 pub(crate) struct FuzzSemanticArgs {
     /// Interpreter registry to enumerate.
     #[arg(value_enum, default_value_t = FuzzSemanticTarget::Both)]
@@ -171,6 +209,7 @@ pub(crate) enum FuzzRawDecoder {
 
 /// Settings for a bounded or explicitly sharded raw decoder scan.
 #[derive(Debug, Args)]
+#[command(after_help = RAW_EXIT_CODES)]
 #[command(group = clap::ArgGroup::new("scan-scope").required(true).args(["full", "count"]))]
 pub(crate) struct FuzzRawArgs {
     /// Decoder whose outcomes to classify.
@@ -219,6 +258,7 @@ pub(crate) struct FuzzRawArgs {
 
 /// Exact replay of one stored finding artifact.
 #[derive(Debug, Args)]
+#[command(after_help = REPLAY_EXIT_CODES)]
 pub(crate) struct FuzzReplayArgs {
     /// Versioned finding JSON to replay.
     #[arg(long, value_name = "PATH")]

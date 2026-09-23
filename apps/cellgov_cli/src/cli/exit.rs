@@ -74,13 +74,7 @@ impl CommandError {
     pub(crate) fn code(&self) -> Option<CommandExitCode> {
         match self {
             Self::Failed(_) => Some(CommandExitCode::new(super::exit_codes::FAILED)),
-            Self::Fuzz(error) => Some(CommandExitCode::new(if error.is_broken_pipe() {
-                super::exit_codes::BROKEN_PIPE
-            } else if error.is_usage() {
-                super::exit_codes::USAGE
-            } else {
-                super::exit_codes::FAILED
-            })),
+            Self::Fuzz(error) => Some(CommandExitCode::new(error.exit_code())),
             Self::Status { code, .. } => Some(*code),
             Self::Interrupted => None,
         }

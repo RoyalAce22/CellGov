@@ -1626,6 +1626,20 @@ Usage: cellgov dev fuzz ppu-instruction [OPTIONS]
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
 | `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
 
+```
+Exit codes particular to this command:
+  1   a finding was retained and its artifact names the exact replay;
+      also the shared failed-operation status when --reference could
+      not be read or disagreed with the interpreter, or a worker failed
+  10  the range ended on --deadline-ms or --cancel-after before every
+      case ran, with no finding
+  11  every case ran and none was eligible for its check
+  12  the engine failed inside the harness rather than the target
+  13  a finding's artifact could not be stored; its evidence was printed
+  14  a retained finding's reduction failed; its original case is stored
+  141 stdout was closed by a downstream reader
+```
+
 ##### `cellgov dev fuzz ppu-sequence`
 
 Check generated PPU sequences.
@@ -1660,6 +1674,20 @@ Usage: cellgov dev fuzz ppu-sequence [OPTIONS]
 | `--reduction-policy` | `REDUCTION_POLICY` | Candidate selection policy for reduction. One of `deterministic`, `greedy`. Default `deterministic`. |
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
 | `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
+
+```
+Exit codes particular to this command:
+  1   a finding was retained and its artifact names the exact replay;
+      also the shared failed-operation status when --reference could
+      not be read or disagreed with the interpreter, or a worker failed
+  10  the range ended on --deadline-ms or --cancel-after before every
+      case ran, with no finding
+  11  every case ran and none was eligible for its check
+  12  the engine failed inside the harness rather than the target
+  13  a finding's artifact could not be stored; its evidence was printed
+  14  a retained finding's reduction failed; its original case is stored
+  141 stdout was closed by a downstream reader
+```
 
 ##### `cellgov dev fuzz spu-instruction`
 
@@ -1696,6 +1724,20 @@ Usage: cellgov dev fuzz spu-instruction [OPTIONS]
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
 | `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
 
+```
+Exit codes particular to this command:
+  1   a finding was retained and its artifact names the exact replay;
+      also the shared failed-operation status when --reference could
+      not be read or disagreed with the interpreter, or a worker failed
+  10  the range ended on --deadline-ms or --cancel-after before every
+      case ran, with no finding
+  11  every case ran and none was eligible for its check
+  12  the engine failed inside the harness rather than the target
+  13  a finding's artifact could not be stored; its evidence was printed
+  14  a retained finding's reduction failed; its original case is stored
+  141 stdout was closed by a downstream reader
+```
+
 ##### `cellgov dev fuzz spu-sequence`
 
 Check generated SPU sequences.
@@ -1731,6 +1773,20 @@ Usage: cellgov dev fuzz spu-sequence [OPTIONS]
 | `--reduction-budget` | `REDUCTION_BUDGET` | Maximum candidate evaluations spent on each finding. Default `4096`. |
 | `--artifacts-dir` | `DIR` | Directory that receives one versioned artifact per retained finding. Default `target/fuzz-findings`. |
 
+```
+Exit codes particular to this command:
+  1   a finding was retained and its artifact names the exact replay;
+      also the shared failed-operation status when --reference could
+      not be read or disagreed with the interpreter, or a worker failed
+  10  the range ended on --deadline-ms or --cancel-after before every
+      case ran, with no finding
+  11  every case ran and none was eligible for its check
+  12  the engine failed inside the harness rather than the target
+  13  a finding's artifact could not be stored; its evidence was printed
+  14  a retained finding's reduction failed; its original case is stored
+  141 stdout was closed by a downstream reader
+```
+
 ##### `cellgov dev fuzz semantic`
 
 Enumerate interpreter-owned semantic classes.
@@ -1750,6 +1806,12 @@ Usage: cellgov dev fuzz semantic [OPTIONS] [TARGET]
 | Option | Value | Description |
 | --- | --- | --- |
 | `--progress` | -- | Report a line after each selected interpreter. |
+
+```
+Exit codes particular to this command:
+  1   a descriptor registry disagreed with its interpreter
+  141 stdout was closed by a downstream reader
+```
 
 ##### `cellgov dev fuzz raw`
 
@@ -1784,6 +1846,16 @@ Usage: cellgov dev fuzz raw [OPTIONS] <--full|--count <COUNT>> <DECODER>
 | `--output` | `PATH` | Write the versioned JSON result here. |
 | `--reduction` | `REDUCTION` | Request a same-class reduced case. One of `none`, `on-finding`. Default `none`. |
 
+```
+Exit codes particular to this command:
+  1   the decoder panicked on at least one word; also the shared
+      failed-operation status when --output could not be written or the
+      sweep failed before its words were classified
+  10  the scan ended on --deadline-ms or --cancel-after before every
+      word ran, with no panic
+  141 stdout was closed by a downstream reader
+```
+
 ##### `cellgov dev fuzz replay`
 
 Replay a versioned finding artifact against its original engine.
@@ -1801,6 +1873,16 @@ Usage: cellgov dev fuzz replay [OPTIONS] --artifact <PATH>
 | --- | --- | --- |
 | `--artifact` | `PATH` | Versioned finding JSON to replay. Required. |
 | `--reduced` | -- | Replay the recorded reduced case instead of the original. |
+
+```
+Exit codes particular to this command:
+  1   the stored finding reproduced; also the shared failed-operation
+      status when --artifact could not be read or its independent
+      reference no longer matched
+  12  the engine failed inside the harness rather than the target
+  15  the stored case no longer reproduces its finding
+  141 stdout was closed by a downstream reader
+```
 
 Generated by `cellgov dev cli-gen`. Do not hand-edit; rerun the
 generator after changing a command, a flag, or an example.

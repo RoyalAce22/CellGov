@@ -36,6 +36,10 @@ pub(crate) use fuzz::{
     FuzzReductionPolicy, FuzzReplayArgs, FuzzSemanticArgs, FuzzSemanticTarget, FuzzStrategy,
 };
 #[cfg(test)]
+pub(crate) use fuzz::{
+    CAMPAIGN_EXIT_CODES, RAW_EXIT_CODES, REPLAY_EXIT_CODES, SEMANTIC_EXIT_CODES,
+};
+#[cfg(test)]
 pub(crate) use globals::global_refusal;
 pub(crate) use store::{
     FirmwareCommand, FirmwareInstallArgs, FirmwareUninstallArgs, InstallContainerArgs, KeysCommand,
