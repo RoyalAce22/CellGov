@@ -3,7 +3,7 @@
     "kind": "first_rsx_write"
   },
   "outcome": "RsxWriteCheckpoint",
-  "steps": 43055,
+  "steps": 37130,
   "budget": 256,
   "host_invariant_breaks": 3,
   "witnesses": {
@@ -32,19 +32,19 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 11780,
+      "value": 9816,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 10798,
+      "value": 9816,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 982,
+      "value": 0,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 982,
+      "value": 0,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -108,11 +108,11 @@
       "class": "at-least"
     },
     "stdcx": {
-      "value": 10798,
+      "value": 9816,
       "class": "at-least"
     },
     "stwcx": {
-      "value": 8833,
+      "value": 9815,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -179,7 +179,7 @@
   "unsupported_syscalls": {
     "111": {
       "hits": 1,
-      "first_hit": 10434925
+      "first_hit": 9193677
     }
   },
   "firmware": {

@@ -138,6 +138,13 @@ pub enum PpuPathError {
         /// First guest byte of the refused write.
         addr: u64,
     },
+    /// The forwarding model refused a write for a reason other than capacity.
+    #[error("PPU path forwarding refused a write: {source}")]
+    ForwardingRefused {
+        /// The store buffer's own refusal.
+        #[source]
+        source: cellgov_ppu::store_buffer::StoreRefusal,
+    },
     /// The instruction sequence contains no instructions.
     #[error("PPU path sequence must contain at least one instruction")]
     EmptySequence,
@@ -596,10 +603,14 @@ fn run_plain(
                 .bytes()
                 .iter()
                 .fold(0u128, |value, byte| (value << 8) | u128::from(*byte));
-            if !forwarding.insert(range.start().raw(), len, value) {
-                return Err(PpuPathError::ForwardingCapacity {
-                    addr: range.start().raw(),
-                });
+            match forwarding.insert(range.start().raw(), len, value) {
+                Ok(()) => {}
+                Err(cellgov_ppu::store_buffer::StoreRefusal::Full) => {
+                    return Err(PpuPathError::ForwardingCapacity {
+                        addr: range.start().raw(),
+                    });
+                }
+                Err(source) => return Err(PpuPathError::ForwardingRefused { source }),
             }
         }
         data = observed.memory;

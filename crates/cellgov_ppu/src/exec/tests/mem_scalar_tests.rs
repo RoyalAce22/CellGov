@@ -53,7 +53,7 @@ fn lfsux_with_ra_zero_panics_in_debug() {
 fn stwu_buffer_full_leaves_ra_unchanged() {
     let mut store_buf = StoreBuffer::new();
     while !store_buf.is_full() {
-        assert!(store_buf.insert(0x1000, 4, 0));
+        store_buf.insert(0x1000, 4, 0).expect("staged");
     }
     let mut s = PpuState::new();
     s.set_gpr(1, 0x80);

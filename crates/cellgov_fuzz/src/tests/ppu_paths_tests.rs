@@ -23,6 +23,10 @@ fn stw(rs: u32, ra: u32, offset: u16) -> u32 {
     (36 << 26) | (rs << 21) | (ra << 16) | u32::from(offset)
 }
 
+fn sth(rs: u32, ra: u32, offset: u16) -> u32 {
+    (44 << 26) | (rs << 21) | (ra << 16) | u32::from(offset)
+}
+
 fn lwz(rt: u32, ra: u32, offset: u16) -> u32 {
     (32 << 26) | (rt << 21) | (ra << 16) | u32::from(offset)
 }
@@ -74,6 +78,17 @@ fn path_error_display_names_every_refusal() {
         PpuPathError::ForwardingCapacity { addr: 0x10 }.to_string(),
         "PPU path forwarding buffer is full at address 0x0000000000000010"
     );
+    let refused = PpuPathError::ForwardingRefused {
+        source: cellgov_ppu::store_buffer::StoreRefusal::AddressWraps {
+            addr: u64::MAX,
+            len: 2,
+        },
+    };
+    assert_eq!(
+        refused.to_string(),
+        "PPU path forwarding refused a write: store at 0xffffffffffffffff of 2 bytes wraps the address space"
+    );
+    assert!(refused.source().is_some());
     assert_eq!(
         PpuPathError::EmptySequence.to_string(),
         "PPU path sequence must contain at least one instruction"
@@ -335,6 +350,42 @@ fn plain_path_refuses_the_store_that_overflows_its_forwarding_buffer() {
         run_all_paths(&overflow, &state, &[0; 64]),
         Err(PpuPathError::ForwardingCapacity { addr: DATA_BASE })
     ));
+}
+
+#[test]
+fn a_load_the_latest_store_only_partly_covers_is_a_committed_read_on_every_path() {
+    let state = data_state();
+    let covered = run_all_paths(
+        &[li(3, 0x1111), stw(3, 4, 0), lwz(6, 4, 0)],
+        &state,
+        &[0; 64],
+    )
+    .expect("covered runs");
+    assert!(first_path_divergence(&covered).is_none(), "{covered:#?}");
+    for run in &covered {
+        assert_eq!(run.observation.state.gpr[6], 0x1111, "{:?}", run.path);
+        assert!(run.committed_data_reads.is_empty(), "{:?}", run.path);
+    }
+
+    // The halfword store is the most recent store that touches the word
+    // load, and it covers only two of its four bytes. The older word
+    // store forwards nothing, so the load reads committed memory on
+    // every path.
+    let words = [
+        li(3, 0x1111),
+        stw(3, 4, 0),
+        li(5, 0x2222),
+        sth(5, 4, 0),
+        lwz(6, 4, 0),
+    ];
+    let runs = run_all_paths(&words, &state, &[0; 64]).expect("partly covered runs");
+    assert!(first_path_divergence(&runs).is_none(), "{runs:#?}");
+    let load = ByteRange::new(GuestAddr::new(DATA_BASE), 4).expect("fits");
+    for run in &runs {
+        assert_eq!(run.observation.state.gpr[6], 0x2222_1111, "{:?}", run.path);
+        assert_eq!(run.observation.memory[..4], [0x22u8, 0x22, 0x11, 0x11]);
+        assert_eq!(run.committed_data_reads, [load], "{:?}", run.path);
+    }
 }
 
 #[test]

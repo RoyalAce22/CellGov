@@ -396,7 +396,7 @@ fn a_full_buffer_makes_a_stdcx_yield_before_it_takes_the_reservation() {
     );
     let mut n = 0;
     while !buf.is_full() {
-        assert!(buf.insert(0x1800 + n * 8, 8, 0));
+        buf.insert(0x1800 + n * 8, 8, 0).expect("staged");
         n += 1;
     }
     let cr_before = s.cr();
@@ -461,7 +461,7 @@ fn a_stwcx_may_take_the_last_buffer_slot() {
     // Leave exactly one free slot.
     let mut n = 0;
     while buf.has_capacity_for(2) {
-        assert!(buf.insert(0x1800 + n * 4, 4, 0));
+        buf.insert(0x1800 + n * 4, 4, 0).expect("staged");
         n += 1;
     }
     assert!(!buf.is_full());
@@ -549,7 +549,7 @@ fn a_full_buffer_makes_a_stwcx_yield_before_it_takes_the_reservation() {
     // survives.
     let mut n = 0;
     while !buf.is_full() {
-        assert!(buf.insert(0x1800 + n * 4, 4, 0));
+        buf.insert(0x1800 + n * 4, 4, 0).expect("staged");
         n += 1;
     }
     let cr_before = s.cr();

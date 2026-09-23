@@ -170,7 +170,7 @@ fn stvx_pre_checks_capacity_for_both_halves() {
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     for i in 0..63 {
-        assert!(store_buf.insert((i as u64) * 8, 8, 0));
+        store_buf.insert((i as u64) * 8, 8, 0).expect("staged");
     }
     let v = execute(
         &PpuInstruction::Stvx {
@@ -203,7 +203,9 @@ fn lvlx_partial_overlap_merges_buffered_bytes_with_region() {
     s.set_gpr(2, 0);
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
-    assert!(store_buf.insert(0x1004, 4, 0xDEAD_BEEFu128));
+    store_buf
+        .insert(0x1004, 4, 0xDEAD_BEEFu128)
+        .expect("staged");
     let mut mem = vec![0u8; 0x2000];
     for i in 0..16 {
         mem[0x1000 + i] = 0x10 + i as u8;
@@ -241,7 +243,7 @@ fn lvlx_full_overlap_forwards_without_yielding() {
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     let val = 0xAABB_CCDD_EEFF_0011_2233_4455_6677_8899u128;
-    assert!(store_buf.insert(0x1000, 16, val));
+    store_buf.insert(0x1000, 16, val).expect("staged");
     let v = execute(
         &PpuInstruction::Lvlx {
             vt: 3,

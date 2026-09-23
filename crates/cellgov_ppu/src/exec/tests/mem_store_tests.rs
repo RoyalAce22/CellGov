@@ -214,7 +214,7 @@ fn dcbz_pre_checks_capacity_for_full_block() {
     let mut effects = Vec::new();
     let mut store_buf = StoreBuffer::new();
     for i in 0..50 {
-        assert!(store_buf.insert((i as u64) * 8, 8, 0));
+        store_buf.insert((i as u64) * 8, 8, 0).expect("staged");
     }
     let v = execute(
         &PpuInstruction::Dcbz { ra: 1, rb: 2 },

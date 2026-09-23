@@ -17,7 +17,7 @@ fn range(addr: u64, len: u64) -> ByteRange {
 fn buffered_store_is_committed_and_remains_visible_as_staged_work() {
     let state = PpuState::new();
     let mut stores = StoreBuffer::new();
-    assert!(stores.insert(BASE + 4, 4, 0x1122_3344));
+    stores.insert(BASE + 4, 4, 0x1122_3344).expect("staged");
 
     let observation = finish_observation(PpuObservationInput {
         initial_state: &state,

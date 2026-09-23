@@ -914,7 +914,9 @@ fn stdstd_no_partial_commit_on_buffer_full() {
     // Pre-fill the buffer to capacity - 1.
     let mut store_buf = StoreBuffer::new();
     for i in 0..63 {
-        assert!(store_buf.insert(0x4000 + (i as u64) * 16, 1, 0));
+        store_buf
+            .insert(0x4000 + (i as u64) * 16, 1, 0)
+            .expect("staged");
     }
     let mut effects = Vec::new();
     let v = crate::exec::execute(

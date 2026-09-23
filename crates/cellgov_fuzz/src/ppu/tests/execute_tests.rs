@@ -66,7 +66,9 @@ fn a_ppu_sequence_retains_terminal_effects() {
 fn a_commit_refusal_is_not_a_successful_fuzz_observation() {
     let state = PpuState::new();
     let mut stores = StoreBuffer::new();
-    assert!(stores.insert(DATA_REGION_BASE - 4, 4, 0x1122_3344));
+    stores
+        .insert(DATA_REGION_BASE - 4, 4, 0x1122_3344)
+        .expect("staged");
 
     let observation = finish_fuzz_observation(PpuObservationInput {
         initial_state: &state,

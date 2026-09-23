@@ -110,7 +110,7 @@ Column definitions:
 
 | Serial | Title | Year | Developer | Engine | Format | Config | Checkpoint | Steps | Insns | Convergence | Byte parity |
 | --- | --- | --- | --- | --- | --- | --- | --- | ---: | ---: | --- | --- |
-| [BCES00664](titles/BCES00664.md) | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | fw 2.76 x base | FirstRsxWrite -> RsxWriteCheckpoint | 43,056 | 11,022,336 | Yes | 1020 non-semantic |
+| [BCES00664](titles/BCES00664.md) | WipEout HD Fury | 2009 | Sony Liverpool | Studio Liverpool proprietary | Disc ISO | fw 2.76 x base | FirstRsxWrite -> RsxWriteCheckpoint | 37,131 | 9,505,536 | Yes | 1020 non-semantic |
 | [BCUS98103](titles/BCUS98103.md) | Uncharted: Drake's Fortune | 2007 | Naughty Dog | Naughty Dog proprietary | Disc ISO | fw 1.94 x base | -- | -- | -- | -- | -- |
 | [NPUA80001](titles/NPUA80001.md) | flOw | 2007 | thatgamecompany | PhyreEngine | PSN HDD | fw 1.50 x base | -- | -- | -- | -- | -- |
 | [NPUA80068](titles/NPUA80068.md) | Super Stardust HD | 2007 | Housemarque | Housemarque proprietary | PSN HDD | fw 3.70 x base | FirstRsxWrite -> MaxSteps | 390,435 | 99,951,360 | -- | -- |

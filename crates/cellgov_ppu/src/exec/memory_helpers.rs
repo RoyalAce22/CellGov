@@ -6,7 +6,7 @@
 
 use crate::exec::verdict::ExecuteVerdict;
 use crate::state::PpuState;
-use crate::store_buffer::StoreBuffer;
+use crate::store_buffer::{StoreBuffer, StoreRefusal};
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::{ByteRange, GuestAddr, RegionView};
@@ -197,6 +197,9 @@ pub(crate) fn load_se(
 /// Stage a store. The unit's own reservation survives it: only a
 /// store from another processor or mechanism to the granule clears
 /// a reservation, so `lwarx; stw <neighbour>; stwcx.` succeeds.
+///
+/// A store whose last byte lies past the end of the address space
+/// faults as unmapped: no region can hold it.
 // [PPC-Book2 p:10 s:1.7.3.1] a reservation is lost to another processor's store or dcbz to the granule, not to the holder's own stores.
 #[inline]
 pub(crate) fn buffer_store(
@@ -206,9 +209,26 @@ pub(crate) fn buffer_store(
     size: u8,
     value: u64,
 ) -> ExecuteVerdict {
-    if store_buf.insert(ea, size, value as u128) {
-        ExecuteVerdict::Continue
-    } else {
-        ExecuteVerdict::BufferFull
+    match store_buf.insert(ea, size, value as u128) {
+        Ok(()) => ExecuteVerdict::Continue,
+        Err(StoreRefusal::Full) => ExecuteVerdict::BufferFull,
+        Err(StoreRefusal::AddressWraps { .. }) => ExecuteVerdict::MemFault(unmapped(ea)),
+    }
+}
+
+/// Stage a successful `stwcx.` / `stdcx.`; see [`buffer_store`] for
+/// the wrap refusal.
+#[inline]
+pub(crate) fn buffer_conditional_store(
+    store_buf: &mut StoreBuffer,
+    ea: u64,
+    size: u8,
+    value: u64,
+    emit_at: usize,
+) -> ExecuteVerdict {
+    match store_buf.insert_conditional(ea, size, value as u128, emit_at) {
+        Ok(()) => ExecuteVerdict::Continue,
+        Err(StoreRefusal::Full) => ExecuteVerdict::BufferFull,
+        Err(StoreRefusal::AddressWraps { .. }) => ExecuteVerdict::MemFault(unmapped(ea)),
     }
 }

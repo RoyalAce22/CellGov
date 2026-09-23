@@ -432,7 +432,9 @@ fn stfsux_buffer_full_does_not_write_ra() {
     use crate::store_buffer::StoreBuffer;
     let mut store_buf = StoreBuffer::new();
     for i in 0..64 {
-        assert!(store_buf.insert(0x1000 + i * 4, 4, i as u128));
+        store_buf
+            .insert(0x1000 + i * 4, 4, i as u128)
+            .expect("staged");
     }
     assert!(store_buf.is_full());
     let mut s = PpuState::new();
@@ -464,7 +466,9 @@ fn stfdux_buffer_full_does_not_write_ra() {
     use crate::store_buffer::StoreBuffer;
     let mut store_buf = StoreBuffer::new();
     for i in 0..64 {
-        assert!(store_buf.insert(0x2000 + i * 4, 4, i as u128));
+        store_buf
+            .insert(0x2000 + i * 4, 4, i as u128)
+            .expect("staged");
     }
     let mut s = PpuState::new();
     s.set_gpr(4, 0x60);
@@ -548,7 +552,7 @@ fn stfsu_buffer_full_does_not_update_ra() {
     // Fill the buffer to capacity. CAPACITY is private; saturate by
     // inserting until insert reports `is_full`.
     while !store_buf.is_full() {
-        assert!(store_buf.insert(0, 1, 0));
+        store_buf.insert(0, 1, 0).expect("staged");
     }
     let mut effects = Vec::new();
     let v = execute(
@@ -577,7 +581,7 @@ fn stfdu_buffer_full_does_not_update_ra() {
     s.set_fpr(6, 0xDEAD_BEEF_CAFE_F00Du64);
     let mut store_buf = StoreBuffer::new();
     while !store_buf.is_full() {
-        assert!(store_buf.insert(0, 1, 0));
+        store_buf.insert(0, 1, 0).expect("staged");
     }
     let mut effects = Vec::new();
     let v = execute(

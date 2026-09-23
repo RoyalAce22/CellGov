@@ -51,18 +51,33 @@ pub struct PendingStore {
     pub value: u128,
 }
 
+/// Why the buffer refused a store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum StoreRefusal {
+    /// The buffer holds its capacity of entries.
+    #[error("store buffer is full")]
+    Full,
+    /// `addr + len` overflows `u64`: the store's last byte is the last
+    /// byte of the address space or lies beyond it. [`ByteRange`]
+    /// shares this limit.
+    #[error("store at 0x{addr:016x} of {len} bytes wraps the address space")]
+    AddressWraps {
+        /// First byte of the store.
+        addr: u64,
+        /// Store width in bytes.
+        len: u8,
+    },
+}
+
 impl StoreEntry {
     fn effect(&self, source: UnitId) -> Effect {
         let bytes = &self.value.to_be_bytes();
         let offset = 16 - self.len as usize;
         let payload = WritePayload::from_slice(&bytes[offset..]);
-        // The insert paths reject any (addr, len) that would
-        // overflow on `addr + len`, so `ByteRange::new` cannot
-        // fail here; a `None` would be an invariant breach, and
-        // panicking surfaces it rather than silently dropping a
-        // guest store.
+        // `stage` refuses any (addr, len) whose end wraps, so every
+        // entry is a valid range.
         let range = ByteRange::new(GuestAddr::new(self.addr), self.len as u64)
-            .expect("store buffer entry violates addr+len invariant; insert should reject");
+            .expect("store buffer entry violates addr+len invariant; insert refuses it");
         if self.emit_at.is_some() {
             Effect::ConditionalStore {
                 range,
@@ -78,9 +93,9 @@ impl StoreEntry {
 
 /// Fixed-capacity (64-entry) store-forwarding buffer.
 ///
-/// Stores are appended in program order; [`Self::forward`] scans in
-/// reverse so the most recent covering store wins. Full buffer
-/// returns `false` from `insert`; the caller must yield the block.
+/// [`Self::insert`] appends stores in program order; [`Self::forward`]
+/// scans in reverse, so the most recent store that touches a load
+/// decides what the load sees.
 #[derive(Clone)]
 pub struct StoreBuffer {
     entries: Vec<StoreEntry>,
@@ -147,82 +162,105 @@ impl StoreBuffer {
         self.entries.clear();
     }
 
-    /// Insert a pending store. Returns `false` when the buffer is
-    /// full; caller must flush (yield the block) before retrying.
+    /// Insert a pending store.
+    ///
+    /// # Errors
+    ///
+    /// - [`StoreRefusal::AddressWraps`]: `addr + len` overflows `u64`.
+    /// - [`StoreRefusal::Full`]: the buffer holds its capacity. The
+    ///   caller flushes (yields the block), then retries.
+    ///
+    /// # Panics
+    ///
+    /// Panics in a debug build if `len` is outside `1..=16`.
     #[inline]
-    pub fn insert(&mut self, addr: u64, len: u8, value: u128) -> bool {
-        debug_assert!(
-            len > 0 && len <= 16,
-            "store width out of range: len={len} (architectural stores are 1..=16 bytes; \
-             value: u128 carries at most 16 bytes)"
-        );
-        debug_assert!(
-            addr.checked_add(len as u64).is_some(),
-            "store addr=0x{addr:x} + len={len} overflows u64"
-        );
-        if self.entries.len() >= CAPACITY {
-            return false;
-        }
-        self.entries.push(StoreEntry {
-            addr,
-            len,
-            emit_at: None,
-            value,
-        });
-        true
+    pub fn insert(&mut self, addr: u64, len: u8, value: u128) -> Result<(), StoreRefusal> {
+        self.stage(addr, len, value, None)
     }
 
     /// Insert a successful `stwcx` / `stdcx`, forwarded to later loads
     /// in the block and emitted by [`Self::flush`] as a
     /// `ConditionalStore` at effect slot `emit_at` (see `StoreEntry`).
-    /// Returns `false` when the buffer is full.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same refusals as [`Self::insert`].
+    ///
+    /// # Panics
+    ///
+    /// Panics as [`Self::insert`] does.
     // [PPC-Book2 p:9 s:1.7.3 Atomic Update] stwcx./stdcx. commit through the ConditionalStore effect path; the entry keeps their bytes in program order with the block's plain stores.
     #[inline]
-    pub fn insert_conditional(&mut self, addr: u64, len: u8, value: u128, emit_at: usize) -> bool {
+    pub fn insert_conditional(
+        &mut self,
+        addr: u64,
+        len: u8,
+        value: u128,
+        emit_at: usize,
+    ) -> Result<(), StoreRefusal> {
+        self.stage(addr, len, value, Some(emit_at))
+    }
+
+    #[inline]
+    fn stage(
+        &mut self,
+        addr: u64,
+        len: u8,
+        value: u128,
+        emit_at: Option<usize>,
+    ) -> Result<(), StoreRefusal> {
         debug_assert!(
             len > 0 && len <= 16,
-            "conditional store width out of range: len={len}"
+            "store width out of range: len={len} (architectural stores are 1..=16 bytes; \
+             value: u128 carries at most 16 bytes)"
         );
-        debug_assert!(
-            addr.checked_add(len as u64).is_some(),
-            "conditional store addr=0x{addr:x} + len={len} overflows u64"
-        );
+        if addr.checked_add(len as u64).is_none() {
+            return Err(StoreRefusal::AddressWraps { addr, len });
+        }
         if self.entries.len() >= CAPACITY {
-            return false;
+            return Err(StoreRefusal::Full);
         }
         self.entries.push(StoreEntry {
             addr,
             len,
-            emit_at: Some(emit_at),
+            emit_at,
             value,
         });
-        true
+        Ok(())
     }
 
-    /// Fast-path forward: a single buffered store fully covers the
-    /// load. Returns `None` for partial overlap or when multiple
-    /// narrower stores tile the range -- the caller must read
-    /// pre-block memory and call [`Self::overlay_range`] to stitch
-    /// in the buffered bytes (see `load_ze` / `load_se` in
-    /// `exec.rs` and `read_aligned_16` in `exec/mem.rs`).
+    /// Forward a load from the most recent buffered store that touches it.
+    ///
+    /// On `None` the caller reads pre-block memory, then calls
+    /// [`Self::overlay_range`]. The result is `None` when:
+    ///
+    /// - no buffered store touches the load;
+    /// - the most recent touching store covers only part of the load,
+    ///   even if an older store covers all of it: the later store
+    ///   replaced some of the older store's bytes;
+    /// - the load's own range wraps the address space.
     ///
     /// # Performance
     /// O(n) reverse scan over up to 64 entries per load.
     #[inline]
     pub fn forward(&self, addr: u64, len: u8) -> Option<u128> {
-        let load_end = addr + len as u64;
+        let load_end = addr.checked_add(len as u64)?;
         for i in (0..self.entries.len()).rev() {
             let e = &self.entries[i];
             let store_end = e.addr + e.len as u64;
-            if e.addr <= addr && store_end >= load_end {
-                let all = e.value.to_be_bytes();
-                let store_off = 16 - e.len as usize;
-                let load_off = store_off + (addr - e.addr) as usize;
-                let mut out = [0u8; 16];
-                let dest = 16 - len as usize;
-                out[dest..].copy_from_slice(&all[load_off..load_off + len as usize]);
-                return Some(u128::from_be_bytes(out));
+            if e.addr >= load_end || store_end <= addr {
+                continue;
             }
+            if e.addr > addr || store_end < load_end {
+                return None;
+            }
+            let all = e.value.to_be_bytes();
+            let store_off = 16 - e.len as usize;
+            let load_off = store_off + (addr - e.addr) as usize;
+            let mut out = [0u8; 16];
+            let dest = 16 - len as usize;
+            out[dest..].copy_from_slice(&all[load_off..load_off + len as usize]);
+            return Some(u128::from_be_bytes(out));
         }
         None
     }
@@ -285,12 +323,9 @@ impl StoreBuffer {
     /// the only intra-step record of those bytes, and a vector load
     /// that overlaps must observe them.
     pub fn overlay_range(&self, base: u64, output: &mut [u8]) {
-        debug_assert!(
-            base.checked_add(output.len() as u64).is_some(),
-            "overlay base=0x{base:x} + len={} overflows u64",
-            output.len()
-        );
-        let base_end = base + output.len() as u64;
+        // The window stops at the end of the address space; no entry
+        // ends beyond it.
+        let base_end = base.saturating_add(output.len() as u64);
         for e in &self.entries {
             let entry_end = e.addr + e.len as u64;
             let overlap_start = e.addr.max(base);
@@ -331,3 +366,11 @@ impl StoreBuffer {
 #[cfg(test)]
 #[path = "tests/store_buffer_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/store_buffer_refusal_tests.rs"]
+mod refusal_tests;
+
+#[cfg(test)]
+#[path = "tests/store_buffer_proptests.rs"]
+mod proptests;

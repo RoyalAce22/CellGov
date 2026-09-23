@@ -16,11 +16,11 @@
       "class": "absent"
     },
     "event_port_ipc_connect_attempts": {
-      "value": 12420,
+      "value": 12428,
       "class": "at-least"
     },
     "event_port_ipc_connect_bound": {
-      "value": 12420,
+      "value": 12428,
       "class": "at-least"
     },
     "event_port_keyed_queues": {
@@ -32,19 +32,19 @@
       "class": "exact"
     },
     "ldarx": {
-      "value": 47997,
+      "value": 47968,
       "class": "at-least"
     },
     "lwarx": {
-      "value": 97681,
+      "value": 97705,
       "class": "at-least"
     },
     "lwmutex_acquires": {
-      "value": 24,
+      "value": 0,
       "class": "at-least"
     },
     "lwmutex_releases": {
-      "value": 29,
+      "value": 0,
       "class": "at-least"
     },
     "lwmutex_unknown_locks": {
@@ -112,7 +112,7 @@
       "class": "at-least"
     },
     "stwcx": {
-      "value": 97632,
+      "value": 97704,
       "class": "at-least"
     },
     "system_ipc_cond_creates": {
@@ -164,7 +164,7 @@
       "class": "absent"
     },
     "timer_sleeps": {
-      "value": 6231,
+      "value": 6235,
       "class": "at-least"
     },
     "uart_cids_distinct": {
@@ -199,7 +199,7 @@
   "unsupported_syscalls": {
     "45": {
       "hits": 2,
-      "first_hit": 600167605
+      "first_hit": 600162445
     },
     "111": {
       "hits": 3,
@@ -207,15 +207,15 @@
     },
     "133": {
       "hits": 4,
-      "first_hit": 600161983
+      "first_hit": 600156823
     },
     "380": {
       "hits": 5,
-      "first_hit": 141663
+      "first_hit": 136503
     },
     "382": {
       "hits": 1,
-      "first_hit": 600158703
+      "first_hit": 600153543
     },
     "563": {
       "hits": 1,
@@ -223,15 +223,15 @@
     },
     "610": {
       "hits": 21,
-      "first_hit": 600166197
+      "first_hit": 600161037
     },
     "612": {
       "hits": 1,
-      "first_hit": 600165439
+      "first_hit": 600160279
     },
     "635": {
       "hits": 1,
-      "first_hit": 632464761
+      "first_hit": 632440320
     },
     "650": {
       "hits": 1,
@@ -243,23 +243,23 @@
     },
     "811": {
       "hits": 3,
-      "first_hit": 600188037
+      "first_hit": 600182877
     },
     "817": {
       "hits": 9,
-      "first_hit": 600181478
+      "first_hit": 600176318
     },
     "837": {
       "hits": 7,
-      "first_hit": 157585
+      "first_hit": 152425
     },
     "867": {
       "hits": 1,
-      "first_hit": 632447124
+      "first_hit": 632422683
     },
     "873": {
       "hits": 3,
-      "first_hit": 600179969
+      "first_hit": 600174809
     }
   },
   "firmware": {

@@ -5,7 +5,9 @@
 //! the `LoadPort` from `memory_helpers`, so the reservation
 //! clear-sweep and the read intent stay consistent across them.
 
-use crate::exec::memory_helpers::{buffer_store, load_se, load_ze, LoadPort, Width};
+use crate::exec::memory_helpers::{
+    buffer_conditional_store, buffer_store, load_se, load_ze, LoadPort, Width,
+};
 use crate::exec::{ExecuteVerdict, PpuFault};
 use crate::instruction::PpuInstruction;
 use crate::state::PpuState;
@@ -74,11 +76,13 @@ pub(crate) fn execute(
             let mut ea = state.ea_d_form(ra, imm);
             for r in (rs as usize)..32 {
                 let v = buffer_store(store_buf, state, ea, 4, state.gpr[r]);
-                debug_assert_eq!(
-                    v,
-                    ExecuteVerdict::Continue,
+                debug_assert!(
+                    v != ExecuteVerdict::BufferFull,
                     "stmw word store failed after capacity pre-check"
                 );
+                if v != ExecuteVerdict::Continue {
+                    return v;
+                }
                 ea = ea.wrapping_add(4);
             }
             ExecuteVerdict::Continue
@@ -174,8 +178,14 @@ pub(crate) fn execute(
                 }
                 state.set_cr_field(0, 0b0010 | so);
                 let value = state.gpr[rs as usize];
-                let staged = store_buf.insert_conditional(ea, 8, value as u128, effects.len());
-                debug_assert!(staged, "stdcx. insert after has_capacity_for(1) passed");
+                let staged = buffer_conditional_store(store_buf, ea, 8, value, effects.len());
+                debug_assert!(
+                    staged != ExecuteVerdict::BufferFull,
+                    "stdcx. insert after has_capacity_for(1) passed"
+                );
+                if staged != ExecuteVerdict::Continue {
+                    return staged;
+                }
             } else {
                 state.set_cr_field(0, so);
             }
@@ -234,8 +244,15 @@ pub(crate) fn execute(
                 }
                 state.set_cr_field(0, 0b0010 | so);
                 let value32 = state.gpr[rs as usize] as u32;
-                let staged = store_buf.insert_conditional(ea, 4, value32 as u128, effects.len());
-                debug_assert!(staged, "stwcx. insert after has_capacity_for(1) passed");
+                let staged =
+                    buffer_conditional_store(store_buf, ea, 4, u64::from(value32), effects.len());
+                debug_assert!(
+                    staged != ExecuteVerdict::BufferFull,
+                    "stwcx. insert after has_capacity_for(1) passed"
+                );
+                if staged != ExecuteVerdict::Continue {
+                    return staged;
+                }
             } else {
                 state.set_cr_field(0, so);
             }
@@ -473,11 +490,13 @@ pub(crate) fn execute(
             let bytes = state.vr[vs as usize].to_be_bytes();
             for (i, &b) in bytes.iter().take(count).enumerate() {
                 let v = buffer_store(store_buf, state, ea + i as u64, 1, b as u64);
-                debug_assert_eq!(
-                    v,
-                    ExecuteVerdict::Continue,
+                debug_assert!(
+                    v != ExecuteVerdict::BufferFull,
                     "stvlx byte store failed after capacity pre-check"
                 );
+                if v != ExecuteVerdict::Continue {
+                    return v;
+                }
             }
             ExecuteVerdict::Continue
         }
@@ -501,11 +520,13 @@ pub(crate) fn execute(
                     1,
                     bytes[16 - m + i] as u64,
                 );
-                debug_assert_eq!(
-                    v,
-                    ExecuteVerdict::Continue,
+                debug_assert!(
+                    v != ExecuteVerdict::BufferFull,
                     "stvrx byte store failed after capacity pre-check"
                 );
+                if v != ExecuteVerdict::Continue {
+                    return v;
+                }
             }
             ExecuteVerdict::Continue
         }
@@ -522,11 +543,13 @@ pub(crate) fn execute(
             let bytes = state.vr[vs as usize].to_be_bytes();
             for (i, &b) in bytes.iter().take(count).enumerate() {
                 let v = buffer_store(store_buf, state, ea + i as u64, 1, b as u64);
-                debug_assert_eq!(
-                    v,
-                    ExecuteVerdict::Continue,
+                debug_assert!(
+                    v != ExecuteVerdict::BufferFull,
                     "stvlxl byte store failed after capacity pre-check"
                 );
+                if v != ExecuteVerdict::Continue {
+                    return v;
+                }
             }
             ExecuteVerdict::Continue
         }
@@ -550,11 +573,13 @@ pub(crate) fn execute(
                     1,
                     bytes[16 - m + i] as u64,
                 );
-                debug_assert_eq!(
-                    v,
-                    ExecuteVerdict::Continue,
+                debug_assert!(
+                    v != ExecuteVerdict::BufferFull,
                     "stvrxl byte store failed after capacity pre-check"
                 );
+                if v != ExecuteVerdict::Continue {
+                    return v;
+                }
             }
             ExecuteVerdict::Continue
         }
@@ -579,15 +604,16 @@ pub(crate) fn execute(
                 bytes[15],
             ]);
             let v1 = buffer_store(store_buf, state, ea, 8, hi);
-            debug_assert_eq!(
-                v1,
-                ExecuteVerdict::Continue,
+            debug_assert!(
+                v1 != ExecuteVerdict::BufferFull,
                 "stvx first half failed after capacity pre-check"
             );
+            if v1 != ExecuteVerdict::Continue {
+                return v1;
+            }
             let v2 = buffer_store(store_buf, state, ea + 8, 8, lo);
-            debug_assert_eq!(
-                v2,
-                ExecuteVerdict::Continue,
+            debug_assert!(
+                v2 != ExecuteVerdict::BufferFull,
                 "stvx second half failed after capacity pre-check"
             );
             v2
@@ -609,15 +635,16 @@ pub(crate) fn execute(
                 bytes[15],
             ]);
             let v1 = buffer_store(store_buf, state, ea, 8, hi);
-            debug_assert_eq!(
-                v1,
-                ExecuteVerdict::Continue,
+            debug_assert!(
+                v1 != ExecuteVerdict::BufferFull,
                 "stvxl first half failed after capacity pre-check"
             );
+            if v1 != ExecuteVerdict::Continue {
+                return v1;
+            }
             let v2 = buffer_store(store_buf, state, ea + 8, 8, lo);
-            debug_assert_eq!(
-                v2,
-                ExecuteVerdict::Continue,
+            debug_assert!(
+                v2 != ExecuteVerdict::BufferFull,
                 "stvxl second half failed after capacity pre-check"
             );
             v2
@@ -640,9 +667,8 @@ pub(crate) fn execute(
             }
             for i in 0..DCBZ_STORES {
                 let step = buffer_store(store_buf, state, ea + (i as u64) * 8, 8, 0);
-                debug_assert_eq!(
-                    step,
-                    ExecuteVerdict::Continue,
+                debug_assert!(
+                    step != ExecuteVerdict::BufferFull,
                     "dcbz store unexpectedly failed after capacity check"
                 );
                 if step != ExecuteVerdict::Continue {
@@ -1070,11 +1096,13 @@ fn string_store(
             1,
             byte as u64,
         );
-        debug_assert_eq!(
-            v,
-            ExecuteVerdict::Continue,
+        debug_assert!(
+            v != ExecuteVerdict::BufferFull,
             "string-store byte failed after capacity pre-check"
         );
+        if v != ExecuteVerdict::Continue {
+            return v;
+        }
         byte_idx += 1;
         if byte_idx == 4 {
             byte_idx = 0;

@@ -7,12 +7,12 @@ engine: Studio Liverpool proprietary
 distribution: Disc ISO
 cell: fw 2.76 x base
 checkpoint: FirstRsxWrite
-steps: 43056
+steps: 37131
 convergence: Yes
 byte_parity: 1020 non-semantic
 ---
 
-WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 43,056)
+WipEout HD Fury converges with RPCS3 at `FirstRsxWrite` (step 37,131)
 and every divergent byte classifies. The step count reproduces across
 three `boot bench` runs and matches this cell's committed anchor.
 

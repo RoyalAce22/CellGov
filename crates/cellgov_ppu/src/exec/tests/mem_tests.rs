@@ -28,3 +28,5 @@ mod store_order;
 mod stores;
 #[path = "mem_string_tests.rs"]
 mod strings;
+#[path = "mem_wrap_tests.rs"]
+mod wrap;
