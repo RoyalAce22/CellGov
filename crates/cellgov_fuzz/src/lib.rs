@@ -2,6 +2,7 @@
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
+pub mod decoder_manifest;
 pub mod ppu;
 pub mod ppu_paths;
 pub mod ppu_reference;

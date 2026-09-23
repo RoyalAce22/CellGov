@@ -14,7 +14,7 @@ pub const MAX_RAW_DECODE_CHUNK: usize = 1 << 16;
 pub const MAX_RAW_DECODE_PANIC_SAMPLES: usize = 128;
 
 /// Interpreter decoder whose identity a replay must preserve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RawDecoder {
     /// PowerPC decoder.

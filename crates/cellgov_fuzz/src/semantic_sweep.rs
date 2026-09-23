@@ -15,7 +15,10 @@ use crate::boundary::call_target;
 use crate::{InstructionIdentity, TargetPanicPayload};
 
 /// Why the interpreter generated an instruction-word candidate.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SemanticCaseClass {
     /// Descriptor's known decodable word.
     Canonical,
@@ -125,7 +128,10 @@ pub enum SemanticSweepFinding {
 }
 
 /// Target boundary whose panic prevented a semantic comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
 pub enum SemanticTargetStage {
     /// Decode the instruction word.
     Decoder,

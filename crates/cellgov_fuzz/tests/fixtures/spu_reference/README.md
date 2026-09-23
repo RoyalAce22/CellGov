@@ -1,7 +1,7 @@
 # SPU reference fixtures
 
 CI reads these bounded JSON fixtures offline. It needs no PS3, network,
-external emulator, or private corpus.
+external emulator, or private data.
 
 For a documented vector:
 
