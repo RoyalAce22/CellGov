@@ -212,6 +212,7 @@ fn generated_ppu_parameters(
     }
     let mut values = Vec::with_capacity(descriptor.operands.len());
     for field in &descriptor.operands {
+        // [Jiang2022 p:5 s:3.1.1] An immediate's mutation set holds its maximum and minimum beside random values, so one draw in four takes a boundary value and the rest are random.
         let value = if field.class == PpuOperandClass::Register && alias.is_some() {
             alias.unwrap_or(0) & field.maximum()
         } else if rng.chance(1, 4)? {
@@ -234,6 +235,7 @@ fn generated_ppu_parameters(
     })
 }
 
+// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes; the registers are drawn here and the memory bytes in the engine.
 pub(super) fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
     let mut state = PpuState::new();
     let mut gpr = [0u64; 32];

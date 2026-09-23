@@ -5,6 +5,10 @@
 //! reports agreement or classifiable divergence. Each runner's adapter
 //! coalesces raw outputs into the shared schema; the comparison layer
 //! never touches runner-specific internals.
+//!
+//! [McKeeman1998 p:100 s:Differential Testing] Two or more comparable
+//! systems run the same input; a differing result is a candidate for
+//! a bug-exposing test.
 
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 

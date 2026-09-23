@@ -15,6 +15,10 @@
 ///   invalidation state).
 /// - Time-base reads (`mftb`, `mftbu`). CellGov advances TB per
 ///   retired instruction; RPCS3 tracks wall clock.
+///
+/// [Wang2024 p:340:17 s:3.8 Ensuring Determinism] A value the two
+/// backends may legitimately compute differently is kept out of the
+/// compared state, because such a difference is not a defect.
 pub fn is_context_dependent(raw: u32) -> bool {
     let primary = (raw >> 26) & 0x3f;
     if primary != 31 {
@@ -30,7 +34,7 @@ pub fn is_context_dependent(raw: u32) -> bool {
         // [PPC-Book2 p:25 s:3.3.2] stwcx / stdcx: success bit
         // depends on full reservation context.
         150 | 214 => true, // stwcx. / stdcx.
-        // [PPC-Book2 p:30 s:6.2] mftb / mftbu: returns the TB
+        // [PPC-Book2 p:30 s:4.1] mftb / mftbu: returns the TB
         // register, which the two emulators model differently.
         371 => {
             // mftb (TBR=268) and mftbu (TBR=269) live under the

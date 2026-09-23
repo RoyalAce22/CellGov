@@ -5,9 +5,12 @@
 //! races, and puts the sequence that reverses each race into the wakeup
 //! tree at the prefix before the earlier event. The next execution
 //! takes the least branch a tree holds. A sleep set carries the units
-//! already explored from a prefix; [`crate::wakeup`] says how the tree
-//! keeps it from blocking. Each maximal execution stands for one
-//! equivalence class.
+//! already explored from a prefix [Godefroid1996 p:72 s:5.1];
+//! [`crate::wakeup`] says how the tree keeps it from blocking. Each
+//! maximal execution stands for one equivalence class
+//! [Abdulla2017 p:42:30 s:Theorem 7.11], the executions that differ
+//! only in the order of adjacent independent events
+//! [Mazurkiewicz1977 p:4 s:1].
 
 use crate::classify::{BaselineRun, ExplorationResult, ScheduleRecord};
 use crate::config::ExplorationConfig;
@@ -144,7 +147,8 @@ enum Halt {
     /// The execution reached a maximal sequence or a bound.
     Stopped(StopReason),
     /// The search already explored every runnable unit from this
-    /// prefix, so the run explored no class.
+    /// prefix, so the run explored no class
+    /// [Abdulla2017 p:42:30 s:Definition 7.12].
     SleepBlocked,
 }
 
@@ -484,7 +488,9 @@ fn run_one(
 }
 
 /// The sleep set and wakeup tree one depth inherits from the one above
-/// [Abdulla2017 p:42:24 s:Algorithm 2 lines 17-18].
+/// [Abdulla2017 p:42:24 s:Algorithm 2 lines 17-18]. The sleep half is
+/// the rule that keeps the sleepers independent of the step taken
+/// [Godefroid1996 p:73 s:5.1].
 ///
 /// A parent with no footprint for its chosen unit wakes every sleeper,
 /// which costs exploration and no soundness.

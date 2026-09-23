@@ -929,6 +929,7 @@ fn compare_state(
     );
 }
 
+// [McKeeman1998 p:101 s:Differential Testing] Two results can differ and both be correct where the standard leaves a construct undefined, so a field the documentation marks undefined is excluded from the comparison.
 fn compare_field<T: std::fmt::Debug + PartialEq>(
     field: PpuReferenceComponent,
     expected: &ReferenceField<T>,

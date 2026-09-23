@@ -158,6 +158,9 @@ tool prints `MATCH`.
 `MATCH` is strong evidence that CellGov's model is correct for the
 code path the title exercised up to that checkpoint. `DIVERGE` is
 the starting point for investigation -- not a conclusion.
+[McKeeman1998 p:100 s:Differential Testing] A differing result
+between comparable systems is a candidate for a bug-exposing test,
+not yet a verdict.
 
 ### Two committed reference trees
 
@@ -185,6 +188,9 @@ and the compatibility matrix will look self-contradictory.
 Two independent PS3 implementations can produce byte-different
 observations without disagreeing about what the program did. The
 bytes differ; the program behaviour does not.
+[McKeeman1998 p:101 s:Differential Testing] The results of two tested
+programs may differ and still both be correct where the value is
+unspecified or implementation-defined.
 
 - The ELF-in-memory layout includes metadata bytes the guest never
   reads.

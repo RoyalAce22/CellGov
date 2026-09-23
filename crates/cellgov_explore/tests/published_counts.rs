@@ -96,10 +96,12 @@ fn two_writers_and_a_reader() -> Runtime {
 /// Every pair of the three accesses interferes, so all `3! = 6`
 /// interleavings are distinct traces [Aronis2018 p:231 s:2].
 ///
-/// The paper reaches two with observers, which decide interference by
-/// whether a write is ever read. This search has no observer
-/// reduction, so six is the number to expect, and it is the number
-/// that moves if one ever lands.
+/// With observers, which decide interference by whether a write is
+/// ever read, the paper merges the schedulings that start with the
+/// read, since neither written value is observed after it
+/// [Aronis2018 p:232 s:2]. This search has no observer reduction, so
+/// six is the number to expect, and it is the number that moves if
+/// one ever lands.
 #[test]
 fn the_two_writers_and_a_reader_program_has_the_published_six_classes() {
     assert_eq!(classes(two_writers_and_a_reader), 6);

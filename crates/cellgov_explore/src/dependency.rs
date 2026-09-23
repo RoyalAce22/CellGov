@@ -2,8 +2,9 @@
 //!
 //! [`StepFootprint`] holds the shared resources one step touched, and
 //! [`StepFootprint::conflicts`] answers whether a swap of two steps
-//! could change what either observes. The answer over-approximates: a
-//! false dependency costs exploration budget alone. A faulted step
+//! could change what either observes. The answer over-approximates
+//! [FlanaganGodefroid2005 p:3 s:2.2]: a false dependency costs
+//! exploration budget alone. A faulted step
 //! records no footprint: the commit discards its batch and every driver
 //! stops there, so it is not an event. An order in which the step does
 //! not fault records its read instead
@@ -352,7 +353,7 @@ impl StepFootprint {
     }
 
     /// True when swapping these two steps could change the observable
-    /// outcome.
+    /// outcome [FlanaganGodefroid2005 p:3 s:2.2 Definition 1].
     ///
     /// The two steps must belong to different units. The reservation
     /// and DMA clauses read only the cross-unit half of the hardware

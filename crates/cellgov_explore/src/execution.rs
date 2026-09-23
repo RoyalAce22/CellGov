@@ -6,7 +6,7 @@
 //!
 //! - program order: the order one unit ran its own events.
 //! - conflict order: the order the schedule ran two events whose
-//!   footprints conflict.
+//!   footprints conflict [FlanaganGodefroid2005 p:4 s:3].
 //! - a wake that ended a park, before the step it released. No
 //!   footprint pair reaches that order, because the wake names a unit
 //!   and the released step emits no wait.
@@ -48,7 +48,8 @@ pub struct Race {
     pub second: EventId,
 }
 
-/// Latest event of each unit that happens-before one event.
+/// Latest event of each unit that happens-before one event
+/// [FlanaganGodefroid2005 p:6 s:4.1].
 ///
 /// Happens-before is irreflexive, so the own-unit entry names the event
 /// itself [Lamport1978 p:559 s:The Partial Ordering].
@@ -104,7 +105,8 @@ pub struct ClockCost {
     pub widest_clock: usize,
 }
 
-/// Happens-before over one execution, one clock vector per event.
+/// Happens-before over one execution, one clock vector per event
+/// [FlanaganGodefroid2005 p:6 s:4.1].
 #[derive(Debug, Clone)]
 pub struct HappensBefore {
     clocks: Vec<ClockVector>,
@@ -113,6 +115,9 @@ pub struct HappensBefore {
 
 impl HappensBefore {
     /// True when `first` happens-before `second`.
+    ///
+    /// The answer is the entry for `first`'s unit in `second`'s clock
+    /// [FlanaganGodefroid2005 p:6 s:4.1].
     ///
     /// # Panics
     ///

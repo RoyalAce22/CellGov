@@ -12,6 +12,11 @@ pub use cellgov_ps3_abi::format::elf::ELF_HEADER_SIZE;
 
 /// Classified shape of a single byte-divergence run.
 ///
+/// [McKeeman1998 p:101 s:Differential Testing] Two implementations may
+/// differ and both be correct where the value is unspecified or
+/// implementation-defined; the classes below name the byte ranges
+/// where that holds for the two runners.
+///
 /// Display strings are part of the on-disk fixture wire form
 /// (`compare_report.txt`, `NOTES.md`); pinned by
 /// `divergence_class_display_strings_are_stable`.
@@ -76,6 +81,10 @@ impl DivergenceClass {
     /// True for classes whose bytes are known not to influence
     /// guest-observable behavior; the [`Unclassified`](Self::Unclassified)
     /// catch-all returns false.
+    ///
+    /// [Martignoni2009 p:126 s:2] A deviation confined to state no
+    /// guest instruction can observe cannot change the emulated
+    /// program's execution.
     pub fn is_non_semantic(&self) -> bool {
         match self {
             Self::ElfHeader | Self::SysProcParam | Self::HleOpdSlot | Self::SyncPrimitiveId => true,

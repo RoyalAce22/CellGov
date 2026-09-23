@@ -60,6 +60,11 @@ struct Args {
 /// settings compare against nothing meaningful and are rejected at
 /// conversion time.
 ///
+/// [Wang2024 p:340:17 s:3.8 Ensuring Determinism] A backend that may
+/// legitimately produce different results on the same input is
+/// unsuited to differential testing, so the settings that remove that
+/// freedom are fixed here and hashed.
+///
 /// Kept beside this crate: `bridges/rpcs3-patch/` is GPL-2.0-only and
 /// this binary is Apache-2.0 / MIT.
 const REFERENCE_MODE_CONFIG_YAML: &str = include_str!("../oracle_mode_config.yml");

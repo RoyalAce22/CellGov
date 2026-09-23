@@ -1,9 +1,10 @@
 //! Predecoded shadow output: quickened single-instruction rewrites
-//! and super-paired 2-instruction fusions. Profiling-driven; the
-//! shadow build picks candidates above frequency thresholds and
-//! rewrites them into these specialized variants. None of these
-//! arms is ISA-native; they all decompose into one or two real PPC
-//! instructions whose execution semantics they replicate.
+//! and super-paired 2-instruction fusions. The shadow build rewrites
+//! a fixed set of patterns into these specialized variants; the set
+//! was chosen offline from the frequency of the patterns in traced
+//! titles. None of these arms is ISA-native; they all decompose into
+//! one or two real PPC instructions whose execution semantics they
+//! replicate.
 //!
 //! [Brunthaler2010 p:2 s:2] dispatch for quickened arms.
 //! [ErtlGregg2003 p:20 s:6.3] dispatch for super-instruction arms.

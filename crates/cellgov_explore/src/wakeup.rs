@@ -3,7 +3,8 @@
 //! An ordered tree of unit sequences: each branch is an initial
 //! fragment of an execution the search owes, in the order the search
 //! takes them. A sleep set alone can block, with every runnable unit
-//! asleep and the owed execution unexplored; a wakeup tree carries
+//! asleep and the owed execution unexplored
+//! [Abdulla2017 p:42:30 s:Definition 7.12]; a wakeup tree carries
 //! enough of the owed sequence to reach the state the race asked for.
 
 use cellgov_event::UnitId;

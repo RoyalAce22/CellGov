@@ -1,5 +1,5 @@
 //! The already-explored test Algorithm 2 line 6 asks of a sequence
-//! [Abdulla2017 p:42:24 s:Algorithm 2].
+//! [Abdulla2017 p:42:24 s:Algorithm 2 line 6].
 
 use super::*;
 use cellgov_mem::{ByteRange, GuestAddr};

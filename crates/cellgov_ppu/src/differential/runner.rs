@@ -60,6 +60,10 @@ impl StateDiff {
 }
 
 /// Outcome of running an [`InstructionCase`] through the harness.
+///
+/// [Martignoni2009 p:132 s:4.3] Behavioural differences are grouped
+/// as register state, memory state and exception state; the
+/// variants below keep that split.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaseOutcome {
     /// Post-state and memory match the expected values.

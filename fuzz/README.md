@@ -31,7 +31,7 @@ mutation reaches fails the continuous build without libFuzzer.
 rustup toolchain install nightly
 cargo install cargo-fuzz --version 0.13.2 --locked
 
-# Seed the corpus and fuzz one target for fifteen minutes.
+# Seed the input set and fuzz one target for fifteen minutes.
 bash .github/loader_fuzz.sh run parse_prx
 
 # Shorter, or a different nightly.
@@ -46,9 +46,9 @@ PATH="/c/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/<ver
   bash .github/loader_fuzz.sh run parse_prx
 ```
 
-Everything a run writes lives under `fuzz/corpus/<target>/` and
+Everything a run writes lives under `fuzz/inputs/<target>/` and
 `fuzz/artifacts/<target>/`, both ignored by git. The workflow caches
-each target's corpus between runs.
+each target's input set between runs.
 
 ## Seeds
 
@@ -59,11 +59,11 @@ ways, zero-sized placeholder segments. `loaders::tests` fails when the
 files drift from the generator; after changing a seed image, run
 
 ```bash
-cargo test -p cellgov_fuzz --lib -- --ignored regenerate_seed_corpus
+cargo test -p cellgov_fuzz --lib -- --ignored regenerate_seeds
 ```
 
 Real images make better seeds than synthetic ones. Copy any decrypted
-firmware module or title executable into `fuzz/corpus/<target>/` before
+firmware module or title executable into `fuzz/inputs/<target>/` before
 a run; `cellgov self decrypt` unwraps an SCE-wrapped one. They are
 never committed.
 

@@ -5,6 +5,10 @@
 //! O(min(len_a, len_b)) with constant auxiliary memory: both streams
 //! are consumed as iterators and never materialized.
 //!
+//! [Armstrong2019 p:71:24 s:7] A trace comparison between two
+//! simulators checks that they execute matching instructions and make
+//! matching register writes; here the PC is checked before the hash.
+//!
 //! `PpuStateHash` covers scalar integer state only, so the reported step
 //! is the first *scalar-visible* disagreement. Two runs diverging in a
 //! float or vector register agree here until that value reaches a covered

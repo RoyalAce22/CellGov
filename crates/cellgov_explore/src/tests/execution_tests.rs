@@ -367,7 +367,7 @@ fn disjoint_writers(steps_per_unit: u64) -> Runtime {
     rt
 }
 
-/// The cost an epoch representation shrinks [FlanaganFreund2009 p:2] is
+/// The cost an epoch representation shrinks [FlanaganFreund2009 p:2 s:1] is
 /// the clock-vector width and the join count. Neither grows with the
 /// run: a clock vector holds one entry per unit, and a run has a
 /// handful of units. The conflict scan does grow, and no clock-vector

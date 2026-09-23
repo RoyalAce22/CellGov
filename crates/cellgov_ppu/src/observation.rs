@@ -181,6 +181,7 @@ pub struct PpuObservation {
     /// Architectural state after commit or fault rollback.
     pub state: PpuArchitecturalState,
     /// Bytes after committed writes, over the observed input region.
+    // [Jiang2022 p:5 s:3.2.1] The compared memory is only the region the case can write, because comparing the whole space costs too much.
     pub memory: Vec<u8>,
     /// Terminal result.
     pub outcome: PpuObservedOutcome,
@@ -411,6 +412,7 @@ pub fn finish_observation(
         effects
     };
 
+    // [Martignoni2009 p:127 s:2.2] After an exception the program counter, the registers and the memory stay as they were, so a discarded batch reports its entry state.
     Ok(PpuObservation {
         state: PpuArchitecturalState::capture(if fault_discarded {
             initial_state

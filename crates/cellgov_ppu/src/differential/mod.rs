@@ -9,6 +9,11 @@
 //! the executor staged to a memory copy, and diffs the post-state and
 //! memory against the expected values.
 //!
+//! [Martignoni2009 p:127 s:2.3] Both machines start from one synthetic
+//! state, execute the instruction at pc, and their resulting states
+//! are compared; any difference proves the emulation unfaithful for
+//! that state.
+//!
 //! Every case is single-shot, single-unit, and reads no host state.
 
 mod case;

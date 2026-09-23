@@ -180,7 +180,7 @@ pub enum FiniteSweepError<E: Error + 'static, S: Error + 'static> {
 /// and pass its results to [`reduce_finite_results`].
 ///
 /// The results merge in domain order, so the report is the same whatever the
-/// completion order. [Krook2023 p:4 s:4 Design and Implementation (testing loop)]
+/// completion order. [Krook2023 p:5 s:4 Design and Implementation (parallel shrinking)]
 ///
 /// # Errors
 ///

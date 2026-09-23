@@ -207,27 +207,27 @@ fn generated_seeds() -> BTreeMap<String, Vec<u8>> {
 }
 
 #[test]
-fn the_committed_seed_corpus_matches_the_generator() {
+fn the_committed_seeds_match_the_generator() {
     let committed = committed_seeds();
     let generated = generated_seeds();
     let committed_names: Vec<&String> = committed.keys().collect();
     let generated_names: Vec<&String> = generated.keys().collect();
     assert_eq!(
         committed_names, generated_names,
-        "fuzz/seeds holds a different set; run the ignored regenerate_seed_corpus test"
+        "fuzz/seeds holds a different set; run the ignored regenerate_seeds test"
     );
     for (name, bytes) in &generated {
         assert_eq!(
             &committed[name], bytes,
-            "fuzz/seeds/{name}.bin differs; run the ignored regenerate_seed_corpus test"
+            "fuzz/seeds/{name}.bin differs; run the ignored regenerate_seeds test"
         );
     }
 }
 
-/// `cargo test -p cellgov_fuzz --lib -- --ignored regenerate_seed_corpus`
+/// `cargo test -p cellgov_fuzz --lib -- --ignored regenerate_seeds`
 #[test]
 #[ignore = "rewrites fuzz/seeds; run it after changing the seed images"]
-fn regenerate_seed_corpus() {
+fn regenerate_seeds() {
     let dir = seed_dir();
     std::fs::create_dir_all(&dir).expect("create fuzz/seeds");
     for (name, _) in committed_seeds() {

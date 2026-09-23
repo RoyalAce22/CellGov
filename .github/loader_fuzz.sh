@@ -15,13 +15,13 @@ toolchain="${FUZZ_TOOLCHAIN:-nightly}"
 # toolchain's `clang_rt.asan_dynamic-x86_64.dll` on the path.
 sanitizer="${FUZZ_SANITIZER:-address}"
 
-# The committed seeds start every target's corpus; libFuzzer adds what
-# it finds beside them, and the workflow caches the directory between
-# runs.
+# The committed seeds start every target's input set; libFuzzer adds
+# what it finds beside them, and the workflow caches the directory
+# between runs.
 seed() {
     local target=$1
-    mkdir -p "fuzz/corpus/$target"
-    cp fuzz/seeds/*.bin "fuzz/corpus/$target/"
+    mkdir -p "fuzz/inputs/$target"
+    cp fuzz/seeds/*.bin "fuzz/inputs/$target/"
 }
 
 build() {
@@ -31,7 +31,7 @@ build() {
 run() {
     local target=$1
     seed "$target"
-    cargo "+$toolchain" fuzz run --fuzz-dir fuzz -s "$sanitizer" "$target" -- \
+    cargo "+$toolchain" fuzz run --fuzz-dir fuzz -s "$sanitizer" "$target" "fuzz/inputs/$target" -- \
         "-max_total_time=$seconds" "-timeout=$timeout_s" "-rss_limit_mb=$rss_mb"
 }
 

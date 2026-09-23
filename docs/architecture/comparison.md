@@ -89,7 +89,10 @@ flowchart LR
 
 ## Per-step divergence localization
 
-Two scanners turn per-step state-trace files into diff reports:
+Two scanners turn per-step state-trace files into diff reports.
+[Wang2024 p:340:17 s:3.9] A hash of the state is compared first, and
+the full state is exposed only around the step where the hashes
+differ:
 
 - `cellgov_compare::diverge(a, b)` walks two trace byte buffers,
   filters each to `PpuStateHash` records, and reports the first
@@ -166,5 +169,9 @@ embedded in `bridges/rpcs3_to_observation/`; the adapter hashes it
 every invocation, so a dump produced under a different RPCS3 config
 is rejected at adapter entry instead of feeding a wrong-config
 observation into the comparator.
+[Wang2024 p:340:17 s:3.8 Ensuring Determinism] A backend that may
+legitimately produce different results on the same input is unsuited
+to differential testing; the hash pins the settings that remove that
+freedom.
 `rpcs3_to_observation --print-expected-config-hash` prints the
 expected hash for scripting.

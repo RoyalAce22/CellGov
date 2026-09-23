@@ -26,7 +26,7 @@ pub struct TrialBudget {
 ///
 /// The plan fixes every seed before the first trial runs. A result reports
 /// all of them, so a trial nobody liked cannot drop out of the sample.
-/// [Klees2018 p:2126 s:Overview]
+/// [Klees2018 p:2128 s:4 Statistically Sound Comparisons]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EvaluationPlan {

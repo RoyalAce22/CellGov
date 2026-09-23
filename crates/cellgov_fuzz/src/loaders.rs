@@ -259,6 +259,10 @@ pub fn sweep(
 }
 
 /// One to four byte-level mutations of `base`.
+///
+/// The operators are the model-less fuzzer's: a bit flip, a byte or word
+/// replaced by an interesting value, and a block truncated, inserted, or
+/// duplicated. [Manes2021 p:10 s:5.2 Model-less (Mutation-based) Fuzzers]
 fn mutate(rng: &mut Rng, base: &[u8]) -> Result<Vec<u8>, GeneratorError> {
     let mut out = base.to_vec();
     let rounds = 1 + rng.below(MAX_MUTATION_ROUNDS)?;

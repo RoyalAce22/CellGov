@@ -12,6 +12,10 @@ pub const CODE_REGION_NAME: &str = "code";
 /// allocates the region, fully initializes it to a known value, and
 /// writes its result before terminating. Comparison must not depend on
 /// uninitialized or partially-written memory.
+///
+/// [Martignoni2009 p:131 s:3.2.1] The final-state comparison does not
+/// cover the whole address space; only the memory the run wrote is
+/// fetched and compared.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamedMemoryRegion {
     /// Region name from the manifest.

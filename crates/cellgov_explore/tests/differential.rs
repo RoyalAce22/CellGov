@@ -1,7 +1,8 @@
 //! The two searches over one workload, in one process.
 //!
 //! The optimal search carries the sequence each race asks for and runs
-//! one execution per equivalence class. The backtrack-set search
+//! one execution per equivalence class
+//! [Abdulla2017 p:42:30 s:Theorem 7.11]. The backtrack-set search
 //! reverses each race on its own and can reach one class more than
 //! once. Both reach the same set of final memory hashes, which is the
 //! property a reduction can silently lose. They are free to disagree on

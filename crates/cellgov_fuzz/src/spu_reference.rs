@@ -443,6 +443,7 @@ pub fn compare_reference(
     Ok(comparison)
 }
 
+// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies trace to behaviour the manual leaves undefined, so a component the documentation marks undefined is excluded rather than counted as a difference.
 fn compare_field<T>(
     component: SpuReferenceComponent,
     field: &ReferenceField<T>,

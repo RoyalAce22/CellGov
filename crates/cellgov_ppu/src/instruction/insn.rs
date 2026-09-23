@@ -656,7 +656,7 @@ pub enum PpuInstruction {
     },
 
     // -- CR-logical (XL-form, opcode 19) --
-    // [PPC-Book1 p:30 s:2.4.3 Condition Register Logical Instructions] mcrf XL-form (move CR field).
+    // [PPC-Book1 p:30 s:2.4.4 Condition Register Field Instruction] mcrf XL-form (move CR field).
     /// `mcrf BF, BFA`: copy 4-bit CR field `crfs` into field `crfd`.
     Mcrf {
         crfd: u8,
@@ -907,7 +907,7 @@ pub enum PpuInstruction {
     },
 
     // -- Special-purpose register moves --
-    // [PPC-Book2 p:30 s:6.2 Reading the Time Base] mftb XFX-form; SPR encoding TBR=268 (TB), 269 (TBU).
+    // [PPC-Book2 p:30 s:4.1 Time Base Instructions] mftb XFX-form; SPR encoding TBR=268 (TB), 269 (TBU).
     /// Move-from-time-base. The model advances TB by 1 per read.
     Mftb {
         rt: u8,

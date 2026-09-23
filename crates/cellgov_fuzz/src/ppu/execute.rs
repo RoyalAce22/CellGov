@@ -308,6 +308,7 @@ fn ppu_observed_outcome_asymmetry(
     }
 }
 
+// [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies differ in the signal raised and few in register or memory values alone, so a fault on either side outranks a state or outcome difference.
 pub(super) fn ppu_outcome_asymmetry(outcome: PpuOutcomeClass) -> CrossReferenceAsymmetry {
     if matches!(
         outcome,

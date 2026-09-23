@@ -152,6 +152,9 @@ pub struct ByteDivergence {
 /// non-determinism; cross-runner mismatches are notes because the
 /// two runners can legitimately reach the same observable state via
 /// different amounts of internal work.
+///
+/// [Martignoni2009 p:126 s:2] A deviation confined to internal state
+/// is invisible to the emulated program and is not a defect.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StepCompare {

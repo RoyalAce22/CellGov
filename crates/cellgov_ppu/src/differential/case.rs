@@ -11,6 +11,9 @@ use crate::state::PpuState;
 /// (the harness runs one instruction). Reservation state is
 /// included so `lwarx` / `ldarx` / `stwcx` / `stdcx` replay
 /// faithfully.
+/// [Armstrong2019 p:71:24 s:7] A trace comparison between two
+/// simulators checks LR/SC reservation-state changes beside the
+/// register writes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PpuStateSnapshot {
     /// General-purpose registers r0..r31.

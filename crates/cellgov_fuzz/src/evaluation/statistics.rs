@@ -71,10 +71,10 @@ pub enum Magnitude {
 ///
 /// This is the Mann-Whitney U statistic over the number of sample pairs. It
 /// compares two randomized outcomes and assumes no shape for either
-/// distribution. [Klees2018 p:2128 s:Statistically Sound Comparisons]
+/// distribution. [Klees2018 p:2128 s:4 Statistically Sound Comparisons]
 /// The same ratio is the A12 effect size, so one number says both whether
 /// the candidate tends to win and by how much.
-/// [Klees2018 p:2129 s:Statistically Sound Comparisons]
+/// [Klees2018 p:2129 s:4 Statistically Sound Comparisons]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Superiority {

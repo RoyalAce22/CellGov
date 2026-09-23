@@ -88,6 +88,7 @@ impl<'a> FieldStream<'a> {
     }
 
     /// A value from the set a byte-level fuzzer substitutes as interesting.
+    /// [Padhye2019 p:331 s:2.2 Coverage-Guided Fuzzing]
     pub fn interesting_u64(&mut self) -> u64 {
         match self.below(8) {
             0 => 0,

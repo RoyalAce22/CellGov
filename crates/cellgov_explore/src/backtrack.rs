@@ -4,7 +4,8 @@
 //! The search runs one execution, walks its races, and adds a
 //! backtrack point at the earlier event of each race; every backtrack
 //! point becomes one schedule to replay, and two points can reach one
-//! equivalence class. Figure 3 reads the next transition of every
+//! equivalence class [FlanaganGodefroid2005 p:6 s:3 footnote 3].
+//! Figure 3 reads the next transition of every
 //! process at every state, including a disabled one
 //! [FlanaganGodefroid2005 p:5 s:3]; this search learns a step's
 //! footprint only once the step runs, so a unit blocked through every

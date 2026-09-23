@@ -347,6 +347,7 @@ impl SpuAllowedFootprint {
     ) -> BTreeSet<SpuObservationComponent> {
         let before = SpuObservableSnapshot::capture(initial);
         let mut violations = BTreeSet::new();
+        // [Martignoni2009 p:127 s:2.2] After an exception the program counter, the registers and the memory stay as they were, so a discarded step may change none of them.
         if observed.fault_discarded {
             if before.regs != observed.state.regs {
                 violations.insert(SpuObservationComponent::Registers);

@@ -179,7 +179,7 @@ pub enum ComparisonError {
 /// - the trial count
 ///
 /// A ranking between their results
-/// then ranks the generators and nothing else. [Klees2018 p:2126 s:Overview]
+/// then ranks the generators and nothing else. [Klees2018 p:2126 s:3 Overview and Experimental Setup]
 /// A caller with a baseline in hand calls this before it runs the
 /// candidate's trials. A plan the baseline can never rank then costs no trial.
 ///
@@ -204,7 +204,7 @@ pub fn comparable(
     }
     // Words per case bound the instructions a sequence trial can execute. Two
     // lengths are two budgets, and every coverage metric would rank the
-    // length. [Klees2018 p:2126 s:Overview]
+    // length. [Klees2018 p:2130 s:6 Timeouts]
     if matches!(
         baseline.target,
         crate::FuzzTarget::PpuSequence | crate::FuzzTarget::SpuSequence
@@ -227,7 +227,7 @@ pub fn comparable(
 /// Ranks `candidate` against `baseline` on every metric both sampled.
 ///
 /// The plans pass [`comparable`] first: a comparison at unequal budgets
-/// ranks the budget. [Klees2018 p:2126 s:Overview] A trial the harness did
+/// ranks the budget. [Klees2018 p:2130 s:6 Timeouts] A trial the harness did
 /// not finish measured nothing, so `compare` refuses a side that holds one.
 ///
 /// # Errors

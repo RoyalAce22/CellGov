@@ -2,11 +2,11 @@
 //!
 //! One number from one seed says nothing about a generator. The outcome of a
 //! randomized campaign is a distribution, and an evaluation samples it with
-//! repeated trials at the same budget. [Klees2018 p:2126 s:Overview]
+//! repeated trials at the same budget. [Klees2018 p:2127 s:4 Statistically Sound Comparisons]
 //! A plan lists every seed before a trial runs. The results record every
 //! trial the plan named. A comparison ranks two results only at equal
 //! budgets, with a rank-based statistic over the full distributions.
-//! [Klees2018 p:2128 s:Statistically Sound Comparisons]
+//! [Klees2018 p:2128 s:4 Statistically Sound Comparisons]
 //!
 //! The library runs trials and folds them into records; the caller owns the
 //! clock, the file system, and the host description it stores beside them.

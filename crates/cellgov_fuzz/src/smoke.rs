@@ -12,7 +12,9 @@
 //! A bounded campaign that reaches nothing proves nothing. Every campaign
 //! carries a coverage floor pinned from a measured run; a run under the floor
 //! is a vacuous run and fails the set. The seeded-defect tests prove each
-//! campaign still detects a defect at its budget.
+//! campaign still detects a defect at its budget: an injected defect is
+//! ground truth, since the run knows which defect a finding hit.
+//! [Klees2018 p:2132 s:7.1 Ground Truth: Bugs Found]
 
 use crate::report::{FuzzReport, FuzzRun};
 use crate::{

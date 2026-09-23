@@ -7,8 +7,8 @@ name: loader-fuzz
 # panic is the finding. libFuzzer needs a nightly toolchain, so the
 # jobs run here on a schedule rather than in the continuous build; the
 # bounded stable sample of the same property runs in
-# `cargo test -p cellgov_fuzz`. The corpus a run grows is cached for
-# the next one, seeded from the committed images under fuzz/seeds.
+# `cargo test -p cellgov_fuzz`. The input set a run grows is cached
+# for the next one, seeded from the committed images under fuzz/seeds.
 on:
   schedule:
     - cron: '17 5 * * 0'
@@ -46,10 +46,10 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version 0.13.2 --locked
 
-      - name: Restore the corpus the last run grew
+      - name: Restore the inputs the last run grew
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          path: fuzz/corpus/${{ matrix.target }}
+          path: fuzz/inputs/${{ matrix.target }}
           key: loader-fuzz-${{ matrix.target }}-${{ github.run_id }}
           restore-keys: |
             loader-fuzz-${{ matrix.target }}-
@@ -60,12 +60,12 @@ jobs:
         run: bash .github/loader_fuzz.sh run '${{ matrix.target }}'
 
       # Saved on failure too: the inputs that reached the crash are the
-      # corpus the next run should start from.
-      - name: Save the corpus for the next run
+      # set the next run should start from.
+      - name: Save the inputs for the next run
         if: always()
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
-          path: fuzz/corpus/${{ matrix.target }}
+          path: fuzz/inputs/${{ matrix.target }}
           key: loader-fuzz-${{ matrix.target }}-${{ github.run_id }}
 
       # A crash artifact replays with

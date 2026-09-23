@@ -13,7 +13,7 @@
 //! the raw fetch + decode path until it is repopulated from committed
 //! memory.
 //!
-//! [Bala2000 p:3 s:4.1] flushable code cache.
+//! [Bala2000 p:7 s:6 Fragment Cache Management] flushable code cache.
 
 mod model;
 mod quicken;

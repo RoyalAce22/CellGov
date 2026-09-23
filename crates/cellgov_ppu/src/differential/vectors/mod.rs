@@ -6,6 +6,9 @@
 //! vector run that passes confirms the executor matches the spec
 //! transcription. The [`super::OracleSource::Spec`] tag carries the
 //! per-instruction citation.
+//! [McKeeman1998 p:101 s:Seeking an Oracle] A check that a result has
+//! not changed proves nothing unless the result is known to be
+//! correct, so the expected state comes from outside the executor.
 
 pub mod altivec_memory_loads;
 pub mod altivec_memory_stores;

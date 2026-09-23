@@ -5,11 +5,15 @@
 //! and asserts the finding kind that defect must produce; the same campaign
 //! without the defect must stay clean. Simple bugs seeded into the
 //! implementation and found within minutes validate the fuzzing
-//! configuration itself. [Watt2023 p:110:20 s:5.2] A defect that reaches
-//! every run of a self-differential check the same way is invisible to it,
-//! so an independent reference remains a separate tier. [Watt2023 p:110:2 s:1]
-//! Seeded disagreement, crash, and corrupted state prove each comparison tier
-//! can detect them. [McKeeman1998 p:101 s:Differential Testing]
+//! configuration itself. [Watt2023 p:110:20 s:5.2] A comparison exposes a
+//! bug only through a differing result, so a defect that reaches every run
+//! of a self-differential check the same way is invisible to it and an
+//! independent reference remains a separate tier.
+//! [McKeeman1998 p:101 s:Differential Testing] That reference earns its
+//! trust from its proven correspondence to the specification, not from
+//! agreement with the implementation it checks. [Watt2023 p:110:2 s:1]
+//! Seeded disagreement, crash, and corrupted state prove each comparison
+//! tier can detect them.
 //!
 //! Each hook sits at the boundary its defect corrupts, so removing the check
 //! that boundary feeds turns exactly one named test red:

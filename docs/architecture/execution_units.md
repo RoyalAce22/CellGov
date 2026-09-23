@@ -100,7 +100,10 @@ The PPU keeps a `PredecodedShadow` over the main text region: every
 into a flat `Vec<Option<PpuInstruction>>` indexed by
 `(pc - base) / 4`, `None` marking decode failure. The hot-path fetch
 is a bounds check plus an array index instead of a raw-memory read
-plus decode.
+plus decode. [ErtlGregg2003 p:4 s:2] Efficient interpreters keep a
+flat, sequential layout of the decoded operations, like machine code.
+[Bala2000 p:2 s:2] The cache is keyed by the guest binary address of
+the code it stands for.
 
 Two optimization passes run at shadow build time:
 
@@ -111,6 +114,10 @@ Two optimization passes run at shadow build time:
    `cmpwi crF, rA, 0` -> `CmpwZero`, `rldicl`/`rldicr` subsets
    -> `Clrldi`/`Sldi`/`Srdi`. Candidates come from instruction
    profiling data (> 0.5% frequency threshold).
+   [Brunthaler2010 p:2 s:2] Quickening rewrites an instruction from
+   its generic implementation to an optimized derivative in place.
+   [Brunthaler2010 p:3 s:3.2] The variants worth building are chosen
+   from a frequency analysis of the executed instructions.
 
 2. **Super-pairing.** Frequent 2-instruction sequences fuse into
    single dispatch entries: `lwz + cmpwi` -> `LwzCmpwi`,
@@ -120,7 +127,9 @@ Two optimization passes run at shadow build time:
    `cmpwi + bc` -> `CmpwiBc`, `cmpw + bc` -> `CmpwBc`. The second
    slot is marked `Consumed` and the fetch loop skips it. Candidates
    come from adjacent-pair profiling data (> 1% frequency
-   threshold).
+   threshold). [ErtlGregg2003 p:20 s:6.3] Combining common sequences
+   of VM instructions into superinstructions reduces the number of
+   dispatches executed.
 
 The fetch loop resolves one instruction per iteration from the
 current PC. Batching over precomputed basic-block lengths was
@@ -134,7 +143,9 @@ halves transition together. The runtime falls back to raw fetch +
 decode until `refresh(pc, raw)` repopulates a slot; refresh
 re-applies quickening but not super-pairing, so fusable pairs
 refreshed after invalidation run as separate dispatches until the
-next full shadow rebuild.
+next full shadow rebuild. [Bala2000 p:7 s:6 Fragment Cache Management]
+A flushed cache entry is regenerated when its address is executed
+again.
 
 Slot lifecycle:
 

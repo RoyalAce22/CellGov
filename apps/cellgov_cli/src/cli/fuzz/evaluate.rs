@@ -26,7 +26,7 @@ use crate::cli::parse::{
 /// Runs one evaluation as a fixed sequence of stages.
 ///
 /// Every refusal of the request comes before the first trial runs.
-/// [Manes2021 p:3 s:Model Fuzzer] A model fuzzer is a fixed sequence of
+/// [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] A model fuzzer is a fixed sequence of
 /// stages with separate design decisions.
 pub(super) fn run_evaluate(
     args: &FuzzEvaluateArgs,

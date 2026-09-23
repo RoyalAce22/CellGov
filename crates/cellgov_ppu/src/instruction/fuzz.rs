@@ -117,6 +117,7 @@ impl PpuOutcomeClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PpuMetamorphicRelation {
     /// Identical inputs give identical outputs.
+    // [Le2014 p:219 s:3.1] The comparison assumes deterministic semantics, where repeated executions on the same input yield the same result, and this relation checks that assumption.
     Deterministic,
     /// Rc permits changes only to CR field 0.
     RecordCr0,
@@ -266,6 +267,7 @@ impl PpuOperandField {
     }
 
     /// Returns values at important signed and unsigned boundaries.
+    // [Jiang2022 p:5 s:3.1.1] The maximum and the minimum are the two boundary values an immediate must cover.
     pub fn boundary_values(self) -> Vec<u32> {
         let maximum = self.maximum();
         let sign = 1u32

@@ -60,7 +60,6 @@ pub(super) fn structured_sequence(
     // [Wang2024 p:340:9 s:3.2] Generation records which places earlier words wrote so later words can read them.
     if count >= 3 && rng.chance(1, 8)? {
         // [Padhye2019 p:332 s:3.1] One random draw selects a whole structured program, so every draw yields a valid input.
-        // [Feng2026 p:32 s:4.3.2] The comparison normalizes the two runs' fault signatures before it compares them.
         let choices = SpuSequenceInteraction::ALL.len();
         let index = rng.below(choices as u64)? as usize;
         let interaction = SpuSequenceInteraction::ALL[index];
@@ -75,6 +74,7 @@ pub(super) fn structured_sequence(
             })?
             .canonical_word;
         words.resize(count, nop);
+        // [Feng2026 p:32 s:4.3.3] An expected termination keeps its own code so it is not confused with a behavioural divergence; the fault the LocalStoreFault family intends is marked as a named boundary.
         let features = match interaction {
             SpuSequenceInteraction::Branch | SpuSequenceInteraction::Stop => {
                 BTreeSet::from([CaseFeature::ControlledFlow])
@@ -214,6 +214,8 @@ fn generated_spu_parameters(
     }
     let mut values = Vec::with_capacity(descriptor.operands.len());
     for field in &descriptor.operands {
+        // [Wang2024 p:340:9 s:3.1] Choices carry hand-set weights that favour the operations judged more likely to reach a defect, so three draws in four take a channel the executor models.
+        // [Jiang2022 p:5 s:3.1.1] An immediate's mutation set holds its maximum and minimum beside random values, so one draw in four takes a boundary value and the rest are random.
         let value = if field.class == SpuOperandClass::Channel
             && !descriptor.channel_values.is_empty()
             && rng.chance(3, 4)?
@@ -248,6 +250,7 @@ fn generated_spu_parameters(
     })
 }
 
+// [Martignoni2009 p:128 s:3.1] A test case is code plus data, and the data are the register values and the remaining memory bytes, so both are drawn at random here.
 pub(super) fn random_state(rng: &mut Rng) -> Result<SpuState, FuzzError> {
     let mut state = SpuState::new();
     for register in &mut state.regs {
@@ -299,6 +302,7 @@ pub(super) fn state_aware_state(
     state.reservation = Some(ReservedLine::containing(u64::from(STRUCTURED_LS_DATA_BASE)));
     // [Wang2024 p:340:10 s:3.2] The generator filters candidate inputs to values that satisfy the instruction's precondition before it uses one.
     if let Some(input) = input {
+        // [Wang2024 p:340:9 s:3.1] Choices carry hand-set weights that favour the operations judged more likely to reach a defect, so the preferred value wins half the draws.
         let value = if input.preferred.is_some() && rng.chance(1, 2)? {
             input.preferred.unwrap_or(0)
         } else {

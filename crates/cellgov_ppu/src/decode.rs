@@ -919,15 +919,17 @@ fn decode_x31(raw: u32) -> Result<PpuInstruction, PpuDecodeError> {
 
         // Cache and memory-barrier hints. Under the deterministic
         // single-unit model these all collapse to a nop:
-        //   [PPC-Book2 p:24 s:3.2] dcbst (54), dcbf (86), dcbt (278),
-        //                          dcbtst (246), icbi (982).
-        //   [PPC-Book2 p:23 s:3.1] sync / lwsync / ptesync (598)
-        //                          (L-field selects the flavor).
-        //   [PPC-Book2 p:23 s:3.1] eieio (854).
-        //   [AltiVec-PEM p:6-117] dst (342), dstst (374),
-        //                         dss (822): AltiVec data-stream
-        //                         touch hints; no cache model means
-        //                         no architectural side-effect.
+        //   [PPC-Book2 p:21 s:3.2.2] dcbst (54), dcbf (86).
+        //   [PPC-Book2 p:19 s:3.2.2] dcbt (278), dcbtst (246).
+        //   [PPC-Book2 p:18 s:3.2.1] icbi (982).
+        //   [PPC-Book2 p:26 s:3.3.3] sync / lwsync / ptesync (598)
+        //                            (L-field selects the flavor).
+        //   [PPC-Book2 p:28 s:3.3.3] eieio (854).
+        //   [AltiVec-PEM p:6-10 s:6.2] dst (342),
+        //   [AltiVec-PEM p:6-12 s:6.2] dstst (374),
+        //   [AltiVec-PEM p:6-9 s:6.2] dss (822): AltiVec data-stream
+        //                           touch hints; no cache model means
+        //                           no architectural side-effect.
         54 | 86 | 246 | 278 | 342 | 374 | 598 | 822 | 854 | 982 => {
             return Ok(PpuInstruction::Ori {
                 ra: 0,

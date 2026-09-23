@@ -70,7 +70,7 @@ scratch/
 
 # What a cargo-fuzz run grows or builds; the seeds beside them are
 # committed and regenerated from cellgov_fuzz::loader_images.
-fuzz/corpus/
+fuzz/inputs/
 fuzz/artifacts/
 fuzz/coverage/
 fuzz/target/
