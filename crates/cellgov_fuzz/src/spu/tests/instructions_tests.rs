@@ -14,18 +14,21 @@ fn schedule(count: u64) -> CampaignSchedule {
 #[test]
 fn a_substituted_word_replaces_the_generated_word_of_every_case() {
     let nop = 0x4020_007fu32;
+    let nop_only = BTreeSet::from([InstructionIdentity::Spu(SpuInstructionKind::Nop)]);
     let config = FuzzConfig {
         schedule: schedule(3),
         ..FuzzConfig::default()
     };
+    // The premise: the generator's own draw for these cases is not nop alone,
+    // so an ignored substitution cannot pass the assertion below.
+    let control = run_instructions(config);
+    assert_eq!(control.report.cases, 3);
+    assert_ne!(control.report.instruction_kinds, nop_only);
 
     let run = run_instructions_with(config, Some(&[nop]));
 
     assert_eq!(run.report.cases, 3);
-    assert_eq!(
-        run.report.instruction_kinds,
-        BTreeSet::from([InstructionIdentity::Spu(SpuInstructionKind::Nop)])
-    );
+    assert_eq!(run.report.instruction_kinds, nop_only);
 }
 
 #[test]
