@@ -2,8 +2,8 @@
 
 use cellgov_effects::EffectKind;
 use cellgov_fuzz::{
-    ppu, spu, CampaignSchedule, CaseFeature, CaseRange, EligibilityReason, FuzzConfig,
-    GenerationStrategy, InstructionIdentity, RunOutcome,
+    ppu, spu, CampaignSchedule, CaseFeature, CaseRange, CheckIdentity, EligibilityReason,
+    FuzzConfig, GenerationStrategy, InstructionIdentity, RunOutcome,
 };
 use cellgov_spu::instruction::SpuInstructionKind;
 
@@ -20,6 +20,45 @@ fn small_config() -> FuzzConfig {
         max_findings: 4,
         sequence_words: 4,
         ..FuzzConfig::default()
+    }
+}
+
+#[test]
+fn structured_spu_campaign_executes_both_typed_relations() {
+    let config = FuzzConfig {
+        schedule: CampaignSchedule {
+            cases: CaseRange {
+                first: 0,
+                count: 8_192,
+            },
+            ..CampaignSchedule::default()
+        },
+        ..small_config()
+    };
+    let run = spu::run_instructions(config);
+    assert!(
+        !matches!(run.outcome, RunOutcome::HarnessFailure(_)),
+        "{:?}",
+        run.outcome
+    );
+    assert!(
+        run.report.finding_counts.is_empty(),
+        "{:?}",
+        run.report.findings
+    );
+    for check in [
+        CheckIdentity::SpuNopFalseTarget,
+        CheckIdentity::SpuRotateByteCountHighBit,
+    ] {
+        assert!(
+            run.report
+                .metamorphic_executions
+                .get(&check)
+                .copied()
+                .unwrap_or(0)
+                > 0,
+            "missing {check:?}"
+        );
     }
 }
 

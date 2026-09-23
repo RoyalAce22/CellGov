@@ -1,6 +1,90 @@
 use super::*;
 
 #[test]
+fn declared_spu_relations_have_executed_witnesses_and_detect_seeded_state_leaks() {
+    use crate::observation::{SpuObservation, SpuObservationComponent};
+    use crate::state::SpuState;
+    use cellgov_event::UnitId;
+
+    for (kind, relation) in [
+        (
+            SpuInstructionKind::Nop,
+            SpuMetamorphicRelation::NopFalseTarget,
+        ),
+        (
+            SpuInstructionKind::Rotqbyi,
+            SpuMetamorphicRelation::RotateByteCountHighBit,
+        ),
+    ] {
+        let descriptor = generation_descriptors()
+            .into_iter()
+            .find(|descriptor| descriptor.kind == kind)
+            .expect("every declared relation needs a reachable instruction kind");
+        let raw = if kind == SpuInstructionKind::Rotqbyi {
+            let mut parameters = descriptor.canonical_parameters();
+            let immediate = descriptor
+                .operands
+                .iter()
+                .position(|field| field.class == SpuOperandClass::Immediate)
+                .expect("rotation must carry an immediate");
+            parameters[immediate] = 3;
+            descriptor
+                .encode(&parameters)
+                .expect("three-byte rotation must encode")
+        } else {
+            descriptor.canonical_word
+        };
+        let instruction = crate::decode::decode(raw).expect("canonical word must decode");
+        let case = instruction
+            .metamorphic_case(raw, relation)
+            .expect("relation must have a witness");
+        assert_ne!(case.partner_word, raw);
+        let partner = crate::decode::decode(case.partner_word).expect("partner must decode");
+        let mut left = SpuState::new();
+        left.regs[0] = std::array::from_fn(|index| index as u8 + 1);
+        left.regs[1] = [0xa5; 16];
+        let mut right = left.clone();
+        let baseline = crate::exec::execute(&instruction, &mut left, UnitId::new(0));
+        let alternate = crate::exec::execute(&partner, &mut right, UnitId::new(0));
+        let baseline = SpuObservation::capture(&left, &baseline);
+        let alternate = SpuObservation::capture(&right, &alternate);
+        assert!(
+            baseline.compare(&alternate).differences.is_empty(),
+            "{kind:?}"
+        );
+        if kind == SpuInstructionKind::Rotqbyi {
+            assert_eq!(
+                baseline.state.regs[0][0], 4,
+                "rotation must move nonzero bytes"
+            );
+            let wrong =
+                crate::decode::decode(raw ^ 0x0000_4000).expect("adjacent count must decode");
+            let mut wrong_state = SpuState::new();
+            wrong_state.regs[0] = std::array::from_fn(|index| index as u8 + 1);
+            let wrong_outcome = crate::exec::execute(&wrong, &mut wrong_state, UnitId::new(0));
+            assert!(baseline
+                .compare(&SpuObservation::capture(&wrong_state, &wrong_outcome))
+                .differences
+                .contains(&SpuObservationComponent::Registers));
+        }
+        let mut defective = alternate.clone();
+        defective.state.regs[0][0] ^= 1;
+        assert!(baseline
+            .compare(&defective)
+            .differences
+            .contains(&SpuObservationComponent::Registers));
+        assert!(matches!(
+            instruction.metamorphic_case(raw ^ 0xffff_ffff, relation),
+            Err(SpuRelationRefusal::InvalidPartner { .. })
+        ));
+        assert!(matches!(
+            instruction.metamorphic_case(raw, SpuMetamorphicRelation::Deterministic),
+            Err(SpuRelationRefusal::Undeclared { .. })
+        ));
+    }
+}
+
+#[test]
 fn generation_registry_covers_every_instruction_kind() {
     let actual = generation_descriptors()
         .iter()
@@ -8,6 +92,68 @@ fn generation_registry_covers_every_instruction_kind() {
         .collect::<BTreeSet<_>>();
 
     assert_eq!(actual, expected_generation_kinds());
+}
+
+#[test]
+fn every_supported_spu_kind_has_a_decodable_executable_witness() {
+    use crate::state::SpuState;
+    use cellgov_event::UnitId;
+
+    let mut unreachable = BTreeSet::new();
+    for descriptor in generation_descriptors() {
+        let candidate = if descriptor.kind == SpuInstructionKind::Heq
+            || descriptor.kind == SpuInstructionKind::Stop
+        {
+            unreachable.insert(descriptor.kind);
+            continue;
+        } else if let Some((index, field)) = descriptor
+            .operands
+            .iter()
+            .enumerate()
+            .find(|(_, field)| field.class == SpuOperandClass::Channel)
+        {
+            let mut operands = descriptor.canonical_parameters();
+            operands[index] = *descriptor
+                .channel_values
+                .first()
+                .expect("channel kind needs a supported selector")
+                & field.maximum();
+            descriptor
+                .encode(&operands)
+                .expect("supported channel selector must encode")
+        } else {
+            descriptor.canonical_word
+        };
+        assert!(
+            !encoding_has_undefined_operands(candidate),
+            "{:?}",
+            descriptor.kind
+        );
+        assert!(
+            encoding_execution_is_supported(candidate),
+            "{:?}",
+            descriptor.kind
+        );
+        let instruction = crate::decode::decode(candidate).expect("witness must decode");
+        assert_eq!(SpuInstructionKind::from(instruction), descriptor.kind);
+        let mut state = SpuState::new();
+        let outcome = crate::exec::execute(&instruction, &mut state, UnitId::new(0));
+        assert!(
+            instruction
+                .fuzz_descriptor()
+                .outcomes
+                .contains(&SpuOutcomeClass::from_outcome(&outcome)),
+            "{:?}",
+            descriptor.kind
+        );
+    }
+    // HEQ lacks its source operands in the decoded model; STOP's signal is not emitted.
+    // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ compares two source operands.
+    // [SPU-ISA p:238 s:10 Control Instructions] STOP signals its encoded value externally.
+    assert_eq!(
+        unreachable,
+        BTreeSet::from([SpuInstructionKind::Heq, SpuInstructionKind::Stop])
+    );
 }
 
 #[test]

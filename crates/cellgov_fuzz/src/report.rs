@@ -61,6 +61,10 @@ pub enum CheckIdentity {
     PpuRecordCr6,
     /// PPU overflow-enable XER relation.
     PpuOverflowEnable,
+    /// Checks that changing NOP's RT field leaves the complete observation unchanged.
+    SpuNopFalseTarget,
+    /// Checks that upper I7 bits leave the quadword byte rotation unchanged.
+    SpuRotateByteCountHighBit,
     /// Interpreter-owned legal-outcome contract.
     LegalOutcome,
     /// Interpreter-owned legal-effect contract.

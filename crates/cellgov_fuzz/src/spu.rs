@@ -8,7 +8,7 @@ use cellgov_spu::exec::{execute, SpuStepOutcome};
 use cellgov_spu::fuzz::{
     encoding_execution_is_supported, encoding_has_undefined_operands, generation_descriptors,
     SpuFuzzDescriptor, SpuGenerationDescriptor, SpuGenerationError, SpuMetamorphicRelation,
-    SpuOperandClass, SpuOutcomeClass, SpuSequenceFlow, SpuStateInput,
+    SpuOperandClass, SpuOutcomeClass, SpuRelationRefusal, SpuSequenceFlow, SpuStateInput,
 };
 use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_LS_SIZE};
@@ -326,6 +326,16 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 iteration,
             )?;
         }
+        asymmetry = asymmetry.max(run_metamorphic_checks(
+            report,
+            &instruction,
+            descriptor,
+            &initial,
+            &first,
+            raw,
+            identity,
+            iteration,
+        )?);
         report.observe_case(
             iteration,
             spu_observation(
@@ -340,6 +350,143 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         )?;
     }
     Ok(())
+}
+
+fn spu_relation_check(relation: SpuMetamorphicRelation) -> CheckIdentity {
+    match relation {
+        SpuMetamorphicRelation::Deterministic => CheckIdentity::DeterministicReplay,
+        SpuMetamorphicRelation::NopFalseTarget => CheckIdentity::SpuNopFalseTarget,
+        SpuMetamorphicRelation::RotateByteCountHighBit => CheckIdentity::SpuRotateByteCountHighBit,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_metamorphic_checks(
+    report: &mut FuzzReport,
+    instruction: &cellgov_spu::instruction::SpuInstruction,
+    descriptor: SpuFuzzDescriptor,
+    initial: &SpuState,
+    first: &ObservedStep,
+    raw: u32,
+    identity: InstructionIdentity,
+    iteration: u64,
+) -> Result<CrossReferenceAsymmetry, FuzzError> {
+    let mut strongest = CrossReferenceAsymmetry::None;
+    for &relation in descriptor
+        .relations
+        .iter()
+        .filter(|relation| **relation != SpuMetamorphicRelation::Deterministic)
+    {
+        let check = spu_relation_check(relation);
+        let case = match call_target(|| instruction.metamorphic_case(raw, relation)) {
+            Ok(Ok(case)) => case,
+            Ok(Err(
+                SpuRelationRefusal::NoPartner { .. } | SpuRelationRefusal::Ineligible { .. },
+            )) => {
+                report.metamorphic_skipped(check)?;
+                continue;
+            }
+            Ok(Err(
+                SpuRelationRefusal::Undeclared { .. } | SpuRelationRefusal::InvalidPartner { .. },
+            )) => {
+                strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
+                record(
+                    report,
+                    FindingKind::MetamorphicViolation,
+                    SemanticFingerprint {
+                        target: FuzzTarget::SpuInstruction,
+                        instruction_kind: Some(identity),
+                        check,
+                        divergence: DivergenceClass::ReferenceDisagreement,
+                        outcome: None,
+                        effect: None,
+                    },
+                    vec![raw],
+                    iteration,
+                )?;
+                continue;
+            }
+            Err(payload) => {
+                record_target_panic(report, check, Some(identity), vec![raw], iteration, payload)?;
+                strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
+                continue;
+            }
+        };
+        let partner = match call_target(|| {
+            let decoded = cellgov_spu::decode::decode(case.partner_word);
+            decoded.map(|instruction| run_once(&instruction, initial))
+        }) {
+            Ok(Ok(partner)) => partner,
+            Ok(Err(_)) => {
+                strongest = strongest.max(CrossReferenceAsymmetry::Outcome);
+                record(
+                    report,
+                    FindingKind::MetamorphicViolation,
+                    SemanticFingerprint {
+                        target: FuzzTarget::SpuInstruction,
+                        instruction_kind: Some(identity),
+                        check,
+                        divergence: DivergenceClass::Outcome,
+                        outcome: None,
+                        effect: None,
+                    },
+                    vec![raw, case.partner_word],
+                    iteration,
+                )?;
+                continue;
+            }
+            Err(payload) => {
+                strongest = strongest.max(CrossReferenceAsymmetry::TargetPanic);
+                record_target_panic(
+                    report,
+                    check,
+                    Some(identity),
+                    vec![raw, case.partner_word],
+                    iteration,
+                    payload,
+                )?;
+                continue;
+            }
+        };
+        report.metamorphic_executed(check)?;
+        let differences = SpuObservation::from_parts(first.state.clone(), first.outcome.clone())
+            .compare(&SpuObservation::from_parts(partner.state, partner.outcome))
+            .differences;
+        if differences.is_empty() {
+            continue;
+        }
+        let (divergence, asymmetry) =
+            if differences.contains(&SpuObservationComponent::FaultDiscard) {
+                (DivergenceClass::Outcome, CrossReferenceAsymmetry::Fault)
+            } else if differences.contains(&SpuObservationComponent::Effects) {
+                (DivergenceClass::Effect, CrossReferenceAsymmetry::Effect)
+            } else if differences.contains(&SpuObservationComponent::Outcome) {
+                (DivergenceClass::Outcome, CrossReferenceAsymmetry::Outcome)
+            } else if differences.contains(&SpuObservationComponent::ProgramCounter) {
+                (DivergenceClass::ControlFlow, CrossReferenceAsymmetry::State)
+            } else {
+                (
+                    DivergenceClass::ArchitecturalState,
+                    CrossReferenceAsymmetry::State,
+                )
+            };
+        strongest = strongest.max(asymmetry);
+        record(
+            report,
+            FindingKind::MetamorphicViolation,
+            SemanticFingerprint {
+                target: FuzzTarget::SpuInstruction,
+                instruction_kind: Some(identity),
+                check,
+                divergence,
+                outcome: None,
+                effect: None,
+            },
+            vec![raw, case.partner_word],
+            iteration,
+        )?;
+    }
+    Ok(strongest)
 }
 
 /// Replays SPU instruction sequences to find nondeterministic outcomes.

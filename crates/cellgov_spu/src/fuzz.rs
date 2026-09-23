@@ -72,6 +72,48 @@ impl SpuOutcomeClass {
 pub enum SpuMetamorphicRelation {
     /// Identical inputs give identical outputs.
     Deterministic,
+    /// NOP's false target field leaves the complete observation unchanged.
+    NopFalseTarget,
+    /// The high immediate bits do not affect a quadword byte rotation.
+    RotateByteCountHighBit,
+}
+
+/// A partner word whose complete observation must match the original.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpuMetamorphicCase {
+    /// Selects the rule used to derive the partner word.
+    pub relation: SpuMetamorphicRelation,
+    /// Encodes the instruction to run from the original initial state.
+    pub partner_word: u32,
+}
+
+/// Reason a partner word cannot be compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum SpuRelationRefusal {
+    /// The instruction does not declare the requested relation.
+    #[error("SPU instruction does not declare relation {relation:?}")]
+    Undeclared {
+        /// Relation absent from the instruction descriptor.
+        relation: SpuMetamorphicRelation,
+    },
+    /// No valid partner word exists for this encoding.
+    #[error("SPU relation {relation:?} has no alternate encoding")]
+    NoPartner {
+        /// Relation without a valid partner word.
+        relation: SpuMetamorphicRelation,
+    },
+    /// The original or partner word has undefined or unsupported behavior.
+    #[error("SPU relation {relation:?} is undefined or unsupported")]
+    Ineligible {
+        /// Relation refused by the eligibility checks.
+        relation: SpuMetamorphicRelation,
+    },
+    /// The partner word fails the relation's decoding condition.
+    #[error("SPU relation {relation:?} produced an invalid partner")]
+    InvalidPartner {
+        /// Relation whose partner word failed the decoding check.
+        relation: SpuMetamorphicRelation,
+    },
 }
 
 /// Complete fuzz contract for one decoded SPU instruction.
@@ -339,6 +381,14 @@ const WRCH: &[SpuOutcomeClass] = &[
     SpuOutcomeClass::MemoryRead,
     SpuOutcomeClass::Fault,
 ];
+const NOP_RELATIONS: &[SpuMetamorphicRelation] = &[
+    SpuMetamorphicRelation::Deterministic,
+    SpuMetamorphicRelation::NopFalseTarget,
+];
+const ROTATE_RELATIONS: &[SpuMetamorphicRelation] = &[
+    SpuMetamorphicRelation::Deterministic,
+    SpuMetamorphicRelation::RotateByteCountHighBit,
+];
 const RELATIONS: &[SpuMetamorphicRelation] = &[SpuMetamorphicRelation::Deterministic];
 
 impl SpuInstruction {
@@ -353,10 +403,71 @@ impl SpuInstruction {
             observable_state: SpuObservableState::Complete,
             effects,
             outcomes,
-            relations: RELATIONS,
+            relations: if kind == SpuInstructionKind::Rotqbyi {
+                ROTATE_RELATIONS
+            } else if kind == SpuInstructionKind::Nop {
+                NOP_RELATIONS
+            } else {
+                RELATIONS
+            },
             decoded_execution_supported: execution_supported(*self),
             state_input: state_input(*self),
         }
+    }
+
+    /// Derives a same-observation partner word from an eligible instruction.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed refusal if the transformation is inapplicable or unsafe.
+    pub fn metamorphic_case(
+        &self,
+        raw: u32,
+        relation: SpuMetamorphicRelation,
+    ) -> Result<SpuMetamorphicCase, SpuRelationRefusal> {
+        // [Le2014 p:147 s:Abstract] Input-constrained variants permit comparison only after their preconditions hold.
+        if !self.fuzz_descriptor().relations.contains(&relation)
+            || relation == SpuMetamorphicRelation::Deterministic
+        {
+            return Err(SpuRelationRefusal::Undeclared { relation });
+        }
+        if crate::decode::decode(raw).ok() != Some(*self) {
+            return Err(SpuRelationRefusal::InvalidPartner { relation });
+        }
+        if encoding_has_undefined_operands(raw) || !encoding_execution_is_supported(raw) {
+            return Err(SpuRelationRefusal::Ineligible { relation });
+        }
+        let partner_word = match relation {
+            SpuMetamorphicRelation::NopFalseTarget => {
+                // [SPU-ISA p:241 s:10 Control Instructions] NOP does not use its RT false target.
+                raw ^ 1
+            }
+            SpuMetamorphicRelation::RotateByteCountHighBit => {
+                // [SPU-ISA p:132 s:6. Shift and Rotate Instructions] ROTQBYI uses only I7's low four bits for its byte count.
+                raw ^ 0x0004_0000
+            }
+            SpuMetamorphicRelation::Deterministic => {
+                return Err(SpuRelationRefusal::Undeclared { relation })
+            }
+        };
+        if encoding_has_undefined_operands(partner_word)
+            || !encoding_execution_is_supported(partner_word)
+        {
+            return Err(SpuRelationRefusal::Ineligible { relation });
+        }
+        let same_decoding = crate::decode::decode(partner_word).ok() == Some(*self);
+        let same_rotation = matches!((relation, *self, crate::decode::decode(partner_word)),
+            (SpuMetamorphicRelation::RotateByteCountHighBit,
+             SpuInstruction::Rotqbyi { rt, ra, imm },
+             Ok(SpuInstruction::Rotqbyi { rt: other_rt, ra: other_ra, imm: other_imm }))
+            if rt == other_rt && ra == other_ra && (imm & 0x0f) == (other_imm & 0x0f));
+        if !(same_decoding && relation == SpuMetamorphicRelation::NopFalseTarget || same_rotation) {
+            return Err(SpuRelationRefusal::InvalidPartner { relation });
+        }
+        Ok(SpuMetamorphicCase {
+            relation,
+            partner_word,
+        })
     }
 }
 
