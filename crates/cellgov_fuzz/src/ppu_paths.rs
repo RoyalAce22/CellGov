@@ -699,3 +699,7 @@ fn initial_reservations(initial: &PpuState) -> ReservationTable {
     }
     table
 }
+
+#[cfg(test)]
+#[path = "tests/ppu_paths_tests.rs"]
+mod tests;

@@ -4,7 +4,7 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigurationError {
     /// The campaign artifact uses a generator format this build cannot replay.
-    #[error("campaign version {found:?} does not match supported version {supported:?}")]
+    #[error("campaign version {found} does not match supported version {supported}")]
     UnsupportedCampaignVersion {
         /// Version carried by the campaign artifact.
         found: crate::CampaignVersion,
@@ -282,3 +282,7 @@ pub enum FuzzError {
     #[error("PPU observation failed: {0}")]
     PpuObservation(#[from] cellgov_ppu::observation::PpuObservationError),
 }
+
+#[cfg(test)]
+#[path = "tests/error_tests.rs"]
+mod tests;

@@ -706,3 +706,7 @@ fn omission_reason<T>(field: &ReferenceField<T>) -> Option<&str> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/spu_reference_tests.rs"]
+mod tests;

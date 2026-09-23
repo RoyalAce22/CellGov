@@ -372,3 +372,7 @@ fn run(words: RangeInclusive<u32>, decode: impl Fn(u32) -> bool) -> DecodeSweepR
         panics,
     }
 }
+
+#[cfg(test)]
+#[path = "tests/sweep_tests.rs"]
+mod tests;

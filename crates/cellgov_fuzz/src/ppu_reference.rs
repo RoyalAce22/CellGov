@@ -979,3 +979,7 @@ fn reference_yield(reason: YieldReason) -> PpuReferenceYieldReason {
 fn render_effects(effects: &[Effect]) -> Vec<String> {
     effects.iter().map(|effect| format!("{effect:?}")).collect()
 }
+
+#[cfg(test)]
+#[path = "tests/ppu_reference_tests.rs"]
+mod tests;

@@ -198,3 +198,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests/retention_tests.rs"]
 mod retention_tests;
+
+#[cfg(test)]
+#[path = "tests/module_coverage_tests.rs"]
+mod module_coverage_tests;

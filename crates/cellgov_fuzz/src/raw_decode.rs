@@ -316,3 +316,7 @@ pub fn scan_raw_decoder(
     }
     Ok(artifact)
 }
+
+#[cfg(test)]
+#[path = "tests/raw_decode_tests.rs"]
+mod tests;

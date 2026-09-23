@@ -503,11 +503,14 @@ pub enum RunOutcome {
     TargetPanic,
     /// The caller stopped scheduling at a deterministic boundary.
     Cancelled,
-    /// Every classified case was explicitly unsupported.
+    /// No finding, no clean eligible completion, and the run met unsupported
+    /// cases only.
     UnsupportedCase,
-    /// Every classified case was architecturally undefined.
+    /// No finding, no clean eligible completion, and the run met
+    /// architecturally undefined cases only.
     UndefinedCase,
-    /// The campaign encountered both unsupported and undefined cases.
+    /// No finding, no clean eligible completion, and the run met both
+    /// unsupported and undefined cases.
     UnsupportedAndUndefinedCases,
     /// The harness itself failed; this is not a target finding.
     HarnessFailure(FuzzError),
@@ -568,3 +571,7 @@ impl FuzzRun {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/report_tests.rs"]
+mod tests;

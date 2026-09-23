@@ -22,3 +22,7 @@ pub enum ReferenceField<T> {
         reason: String,
     },
 }
+
+#[cfg(test)]
+#[path = "tests/reference_tests.rs"]
+mod tests;

@@ -37,3 +37,7 @@ impl ParameterStream {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "tests/parameters_tests.rs"]
+mod tests;

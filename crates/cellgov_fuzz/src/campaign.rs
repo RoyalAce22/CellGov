@@ -255,3 +255,7 @@ impl ReplayCoordinates {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/campaign_tests.rs"]
+mod tests;

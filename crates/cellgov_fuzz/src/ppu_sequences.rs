@@ -396,3 +396,7 @@ fn stwcx(rs: u32, ra: u32, rb: u32) -> u32 {
 fn branch_relative(bytes: u32) -> u32 {
     (18 << 26) | (bytes & 0x03ff_fffc)
 }
+
+#[cfg(test)]
+#[path = "tests/ppu_sequences_tests.rs"]
+mod tests;

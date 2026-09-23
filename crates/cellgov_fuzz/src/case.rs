@@ -84,3 +84,7 @@ impl CaseAssessment {
         self
     }
 }
+
+#[cfg(test)]
+#[path = "tests/case_tests.rs"]
+mod tests;
