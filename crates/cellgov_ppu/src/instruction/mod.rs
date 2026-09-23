@@ -7,6 +7,7 @@
 //! [`PpuDecodeError::EncodingNotRecognized`].
 
 mod decode_error;
+pub mod encode;
 pub mod fmt;
 pub mod fuzz;
 mod insn;

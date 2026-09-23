@@ -482,7 +482,7 @@ pub enum Fp63Shape {
 
 impl Fp63Op {
     /// Whether this op is A-form (5-bit XO; FRC is an operand).
-    fn is_a_form(self) -> bool {
+    pub fn is_a_form(self) -> bool {
         matches!(
             self,
             Self::Fdiv
