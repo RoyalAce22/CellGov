@@ -77,6 +77,13 @@ fn the_anchor_task_measures_the_one_phase_it_has() {
     assert_eq!(RECORD_ANCHORS_TASK.unit, Unit::Items);
 }
 
+#[test]
+fn the_fuzz_task_measures_cases_in_the_one_phase_it_has() {
+    assert_eq!(FUZZ_CAMPAIGN_TASK.phases.len(), 1);
+    assert!((FUZZ_CAMPAIGN_TASK.measured as usize) < FUZZ_CAMPAIGN_TASK.phases.len());
+    assert_eq!(FUZZ_CAMPAIGN_TASK.unit, Unit::Cases);
+}
+
 /// A task streams exactly when its command writes lines while the bar
 /// is up. An in-place frame under a streaming writer cursor-ups over
 /// lines that have already scrolled.
@@ -93,6 +100,8 @@ fn a_task_streams_exactly_when_its_command_prints_while_working() {
         // phase, and a child's init pass prints from inside the step
         // loop.
         (&BENCH_TASK, true),
+        // The batch loop holds its failure lines until the bar is down.
+        (&FUZZ_CAMPAIGN_TASK, false),
     ] {
         assert_eq!(task.streaming, streams, "{}", task.tag);
     }
@@ -105,6 +114,7 @@ fn every_task_string_is_ascii_so_a_byte_budget_is_a_column_budget() {
         &RUN_TASK,
         &BENCH_PAIR_TASK,
         &RECORD_ANCHORS_TASK,
+        &FUZZ_CAMPAIGN_TASK,
     ] {
         assert!(task.verb.is_ascii(), "{}", task.tag);
         assert!(task.tag.is_ascii(), "{}", task.tag);
@@ -134,6 +144,7 @@ fn every_task_leaves_label_room_at_the_forty_column_floor() {
         &RUN_TASK,
         &BENCH_PAIR_TASK,
         &RECORD_ANCHORS_TASK,
+        &FUZZ_CAMPAIGN_TASK,
     ] {
         let widest = task
             .phases

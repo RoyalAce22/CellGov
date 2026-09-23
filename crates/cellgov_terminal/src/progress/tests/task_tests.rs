@@ -22,7 +22,7 @@ fn bytes_format_in_binary_multiples() {
 
 #[test]
 fn counting_units_format_with_k_and_m_suffixes() {
-    for unit in [Unit::Files, Unit::Steps, Unit::Items] {
+    for unit in [Unit::Files, Unit::Steps, Unit::Cases, Unit::Items] {
         assert_eq!(unit.amount(0), "0");
         assert_eq!(unit.amount(999), "999");
         assert_eq!(unit.amount(1_000), "1.0k");
@@ -41,6 +41,8 @@ fn rate_suffixes_name_the_unit_only_when_the_amount_does_not() {
     assert_eq!(Unit::Steps.rate(12_400_000.0), "12.4M steps/s");
     assert_eq!(Unit::Files.rate(3.0), "3 files/s");
     assert_eq!(Unit::Items.rate(1_500.0), "1.5k items/s");
+    assert_eq!(Unit::Cases.rate(2_400.0), "2.4k cases/s");
+    assert_eq!(Unit::Cases.tally(640), "640 cases");
     // The EWMA can drive a rate negative; the cast to u64 must not wrap.
     assert_eq!(Unit::Steps.rate(-5.0), "0 steps/s");
 }
@@ -48,7 +50,7 @@ fn rate_suffixes_name_the_unit_only_when_the_amount_does_not() {
 #[test]
 fn the_eta_floor_is_a_kibibyte_for_bytes_and_one_for_counts() {
     assert_eq!(Unit::Bytes.eta_rate_floor(), 1024.0);
-    for unit in [Unit::Files, Unit::Steps, Unit::Items] {
+    for unit in [Unit::Files, Unit::Steps, Unit::Cases, Unit::Items] {
         assert_eq!(unit.eta_rate_floor(), 1.0);
     }
 }

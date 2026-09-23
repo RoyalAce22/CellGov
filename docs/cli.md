@@ -1615,7 +1615,7 @@ Usage: cellgov dev fuzz ppu-instruction [OPTIONS]
 | `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
 | `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
 | `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
-| `--progress` | -- | Report bounded progress after each batch. |
+| `--progress` | -- | Show a progress bar on stderr; threshold lines when stderr is not a terminal. |
 | `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
 | `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
 | `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
@@ -1664,7 +1664,7 @@ Usage: cellgov dev fuzz ppu-sequence [OPTIONS]
 | `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
 | `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
 | `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
-| `--progress` | -- | Report bounded progress after each batch. |
+| `--progress` | -- | Show a progress bar on stderr; threshold lines when stderr is not a terminal. |
 | `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
 | `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
 | `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
@@ -1713,7 +1713,7 @@ Usage: cellgov dev fuzz spu-instruction [OPTIONS]
 | `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
 | `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
 | `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
-| `--progress` | -- | Report bounded progress after each batch. |
+| `--progress` | -- | Show a progress bar on stderr; threshold lines when stderr is not a terminal. |
 | `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
 | `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
 | `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |
@@ -1762,7 +1762,7 @@ Usage: cellgov dev fuzz spu-sequence [OPTIONS]
 | `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
 | `--cancel-after` | `CANCEL_AFTER` | Stop at this deterministic offset in the requested range. |
 | `--deadline-ms` | `DEADLINE_MS` | Host deadline in milliseconds. The engine checks it between bounded batches. |
-| `--progress` | -- | Report bounded progress after each batch. |
+| `--progress` | -- | Show a progress bar on stderr; threshold lines when stderr is not a terminal. |
 | `--finding-limit` | `FINDING_LIMIT` | Maximum detailed findings to retain. Default `20`. |
 | `--sequence-words` | `SEQUENCE_WORDS` | Number of words generated for each sequence case. |
 | `--strategy` | `STRATEGY` | Generate typed instruction forms or raw decoder words. One of `structured`, `raw-words`. Default `structured`. |

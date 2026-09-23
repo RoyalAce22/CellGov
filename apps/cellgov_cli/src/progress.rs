@@ -120,6 +120,21 @@ pub(crate) const RECORD_ANCHORS_TASK: Task = Task {
     streaming: true,
 };
 
+/// How a renderer presents a generated `dev fuzz` campaign.
+///
+/// The denominator is the case indices the schedule considers. The
+/// batch loop advances it one batch at a time. The loop holds every
+/// stderr line until the bar is down, so the task owns the terminal.
+pub(crate) const FUZZ_CAMPAIGN_TASK: Task = Task {
+    verb: "Fuzzing",
+    tag: "fuzz",
+    phases: &["running"],
+    measured: 0,
+    unit: Unit::Cases,
+    items: "",
+    streaming: false,
+};
+
 #[cfg(test)]
 #[path = "tests/progress_tests.rs"]
 mod tests;

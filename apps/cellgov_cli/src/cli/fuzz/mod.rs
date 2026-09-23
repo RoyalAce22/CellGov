@@ -12,7 +12,7 @@ mod outcome;
 mod scan;
 mod smoke;
 
-pub(crate) use entry::run_with_quiet;
+pub(crate) use entry::run_with_render;
 pub(crate) use error::FuzzCliError;
 
 #[cfg(test)]

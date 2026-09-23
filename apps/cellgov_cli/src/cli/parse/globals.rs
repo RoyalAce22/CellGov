@@ -7,6 +7,7 @@
 
 use super::dev::DevCommand;
 use super::diff::{DiffCommand, ExploreCommand, OutputFormat};
+use super::fuzz::FuzzCommand;
 use super::store::{FirmwareCommand, KeysCommand, TitleCommand};
 use super::tree::{Cli, Command};
 
@@ -102,7 +103,8 @@ const VERBOSE_READERS: &str = "firmware install";
 
 /// The commands [`renders_progress`] answers for, as help text.
 const FORCE_ANSI_READERS: &str = "firmware install, title install, title install-update, \
-     the boot family, and dev record-anchors";
+     the boot family, dev record-anchors, and dev fuzz ppu-instruction / ppu-sequence / \
+     spu-instruction / spu-sequence";
 
 /// Whether `--quiet` silences anything `command` would print.
 fn reads_quiet(command: &Command) -> bool {
@@ -119,7 +121,19 @@ pub(super) fn renders_progress(command: &Command) -> bool {
             TitleCommand::Install(_) | TitleCommand::InstallUpdate(_)
         ),
         Command::Boot(_) => true,
-        Command::Dev(dev) => matches!(dev, DevCommand::RecordAnchors(_)),
+        Command::Dev(dev) => match dev {
+            DevCommand::RecordAnchors(_) => true,
+            // The generated campaigns own the terminal while they run.
+            // Every other fuzz command prints lines.
+            DevCommand::Fuzz(fuzz) => matches!(
+                fuzz.command,
+                FuzzCommand::PpuInstruction(_)
+                    | FuzzCommand::PpuSequence(_)
+                    | FuzzCommand::SpuInstruction(_)
+                    | FuzzCommand::SpuSequence(_)
+            ),
+            _ => false,
+        },
         Command::Status
         | Command::Keys(_)
         | Command::SelfCmd(_)

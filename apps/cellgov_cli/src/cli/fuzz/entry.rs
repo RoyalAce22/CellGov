@@ -4,6 +4,8 @@
 use std::io::Write;
 use std::time::Duration;
 
+use cellgov_terminal::caps::RenderFlags;
+
 use super::artifact::run_replay;
 use super::campaign::{run_campaign, FuzzEngine};
 use super::census::{run_census, run_census_merge};
@@ -16,32 +18,44 @@ use crate::cli::parse::{FuzzArgs, FuzzCommand};
 
 pub(super) const MAX_HOST_WORKERS: usize = 64;
 
-pub(crate) fn run_with_quiet(
+pub(crate) fn run_with_render(
     args: &FuzzArgs,
-    quiet: bool,
+    render: RenderFlags,
 ) -> Result<CommandExitCode, CommandError> {
-    run_inner_with_quiet(args, quiet).map_err(CommandError::from)
+    run_inner_with_render(args, render).map_err(CommandError::from)
 }
+
+/// The render decision the in-process tests run under: no bar, so a
+/// test never starts the one live render thread a process may own.
+#[cfg(test)]
+pub(super) const TEST_RENDER: RenderFlags = RenderFlags {
+    no_progress: true,
+    no_color: false,
+    quiet: false,
+    json: false,
+    force_ansi: false,
+};
 
 #[cfg(test)]
 pub(crate) fn run(args: &FuzzArgs) -> Result<CommandExitCode, CommandError> {
-    run_with_quiet(args, false)
+    run_with_render(args, TEST_RENDER)
 }
 
 #[cfg(test)]
 pub(super) fn run_inner(args: &FuzzArgs) -> Result<CommandExitCode, FuzzCliError> {
-    run_inner_with_quiet(args, false)
+    run_inner_with_render(args, TEST_RENDER)
 }
 
-pub(super) fn run_inner_with_quiet(
+pub(super) fn run_inner_with_render(
     args: &FuzzArgs,
-    quiet: bool,
+    render: RenderFlags,
 ) -> Result<CommandExitCode, FuzzCliError> {
+    let quiet = render.quiet;
     match &args.command {
-        FuzzCommand::PpuInstruction(args) => run_campaign(args, FuzzEngine::PpuInstruction, quiet),
-        FuzzCommand::PpuSequence(args) => run_campaign(args, FuzzEngine::PpuSequence, quiet),
-        FuzzCommand::SpuInstruction(args) => run_campaign(args, FuzzEngine::SpuInstruction, quiet),
-        FuzzCommand::SpuSequence(args) => run_campaign(args, FuzzEngine::SpuSequence, quiet),
+        FuzzCommand::PpuInstruction(args) => run_campaign(args, FuzzEngine::PpuInstruction, render),
+        FuzzCommand::PpuSequence(args) => run_campaign(args, FuzzEngine::PpuSequence, render),
+        FuzzCommand::SpuInstruction(args) => run_campaign(args, FuzzEngine::SpuInstruction, render),
+        FuzzCommand::SpuSequence(args) => run_campaign(args, FuzzEngine::SpuSequence, render),
         FuzzCommand::Semantic(args) => run_semantic(args, quiet),
         FuzzCommand::Raw(args) => run_raw(args, quiet),
         FuzzCommand::Census(args) => run_census(args, quiet),

@@ -264,15 +264,7 @@ fn the_summary_names_each_artifact_with_its_exact_replay_command() {
 }
 
 #[test]
-fn progress_replay_semantic_and_raw_lines_render_from_their_records() {
-    assert_eq!(
-        render_campaign_progress(CampaignProgress {
-            considered: 64,
-            count: 100,
-            processed: 60,
-        }),
-        "fuzz: considered 64 of 100 case indices; processed 60"
-    );
+fn replay_semantic_and_raw_lines_render_from_their_records() {
     let replay = ReplayOutcome {
         case_index: 12,
         reduced: true,

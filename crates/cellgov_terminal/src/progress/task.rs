@@ -10,6 +10,8 @@ pub enum Unit {
     Files,
     /// Interpreter steps, formatted as a count.
     Steps,
+    /// Fuzz cases, formatted as a count.
+    Cases,
     /// Anything else countable, formatted as a count.
     Items,
 }
@@ -22,6 +24,7 @@ impl Unit {
             Self::Bytes => "",
             Self::Files => "files",
             Self::Steps => "steps",
+            Self::Cases => "cases",
             Self::Items => "items",
         }
     }

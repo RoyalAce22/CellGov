@@ -1,7 +1,16 @@
 use super::artifact::{persist_finding, run_replay, run_replay_with};
-use super::campaign::{reduce_retained_finding, run_workers, worker_shard_index};
-use super::entry::{reports_progress, run, run_inner, run_inner_with_quiet};
+use super::campaign::{
+    drive, plan_campaign, reduce_retained_finding, run_workers, worker_shard_index, CampaignRun,
+    FuzzEngine,
+};
+use super::entry::{run, run_inner, run_inner_with_render, TEST_RENDER};
 use super::*;
+
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Mutex;
+
+use cellgov_terminal::caps::RenderFlags;
+use cellgov_terminal::progress::ProgressSink;
 
 use cellgov_fuzz::artifact::{
     ArtifactError, ArtifactReference, ArtifactReplayError, FuzzFindingArtifact,
@@ -107,11 +116,96 @@ fn quiet_progress_campaign_parses_and_dispatches() {
         panic!("quiet campaign must select PPU instructions")
     };
     assert!(args.progress);
-    assert!(!reports_progress(args.progress, quiet));
     assert_eq!(
-        run_inner_with_quiet(&parsed, quiet).expect("quiet campaign must run"),
+        run_inner_with_render(
+            &parsed,
+            RenderFlags {
+                quiet,
+                ..TEST_RENDER
+            }
+        )
+        .expect("quiet campaign must run"),
         CommandExitCode::SUCCESS
     );
+}
+
+#[derive(Default)]
+struct RecordingSink {
+    totals: Mutex<Vec<(usize, u64)>>,
+    advanced: AtomicU64,
+    items: Mutex<Vec<String>>,
+}
+
+impl ProgressSink for RecordingSink {
+    fn phase(&self, _code: u8) {}
+    fn totals(&self, items: usize, amount: u64) {
+        self.totals.lock().expect("totals").push((items, amount));
+    }
+    fn preset_done(&self, _amount: u64) {}
+    fn item_started(&self, name: &str) {
+        self.items.lock().expect("items").push(name.to_owned());
+    }
+    fn advanced(&self, delta: u64) {
+        self.advanced.fetch_add(delta, Ordering::Relaxed);
+    }
+    fn item_finished(&self) {}
+    fn finished(&self) {}
+}
+
+fn drive_recorded(label: &str, argv: &[&str]) -> (CampaignRun, RecordingSink) {
+    let scratch = cellgov_testkit::scratch::scratch_labeled(label);
+    let artifacts = scratch.join("findings");
+    let artifacts = artifacts.to_str().expect("scratch path is UTF-8");
+    let mut full = vec![
+        "ppu-instruction",
+        "--workers",
+        "1",
+        "--artifacts-dir",
+        artifacts,
+    ];
+    full.extend_from_slice(argv);
+    let parsed = parse(&full).expect("campaign must parse");
+    let FuzzCommand::PpuInstruction(args) = &parsed.command else {
+        panic!("wrong mode")
+    };
+    let plan = plan_campaign(args, FuzzEngine::PpuInstruction).expect("plan");
+    let mut state = CampaignRun::default();
+    let sink = RecordingSink::default();
+    drive(&plan, &mut state, &sink).expect("drive");
+    assert_eq!(state.offset(), plan.limit());
+    (state, sink)
+}
+
+#[test]
+fn the_batch_loop_declares_the_range_as_its_denominator_and_advances_to_it() {
+    let (_, sink) = drive_recorded("fuzz_progress_range", &["--count", "150"]);
+    assert_eq!(*sink.totals.lock().expect("totals"), vec![(0, 150)]);
+    assert_eq!(sink.advanced.load(Ordering::Relaxed), 150);
+    // Three batches of at most 64: the item names walk the range.
+    let items = sink.items.lock().expect("items");
+    assert_eq!(items.len(), 3);
+    assert!(items[0].starts_with("cases 0..=63"), "{}", items[0]);
+    assert!(items[1].starts_with("cases 64..=127"), "{}", items[1]);
+    assert!(items[2].starts_with("cases 128..=149"), "{}", items[2]);
+}
+
+#[test]
+fn a_failure_line_waits_for_an_in_place_bar_and_prints_at_once_otherwise() {
+    let held = CampaignRun::report_under(true, "fuzz: held");
+    assert_eq!(held.held(), ["fuzz: held".to_owned()]);
+    let printed = CampaignRun::report_under(false, "fuzz: printed");
+    assert!(printed.held().is_empty());
+}
+
+#[test]
+fn the_batch_loop_measures_a_cancelled_range_against_its_stop_offset() {
+    let (_, sink) = drive_recorded(
+        "fuzz_progress_cancelled",
+        &["--count", "150", "--cancel-after", "70"],
+    );
+    assert_eq!(*sink.totals.lock().expect("totals"), vec![(0, 70)]);
+    assert_eq!(sink.advanced.load(Ordering::Relaxed), 70);
+    assert_eq!(sink.items.lock().expect("items").len(), 2);
 }
 
 #[test]

@@ -323,17 +323,6 @@ impl CampaignOutcome {
     }
 }
 
-/// Progress after one batch of a generated campaign.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CampaignProgress {
-    /// Case indices considered so far.
-    pub considered: u64,
-    /// Case indices the campaign will consider.
-    pub count: u64,
-    /// Cases the workers processed so far.
-    pub processed: u64,
-}
-
 /// One replayed artifact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ReplayOutcome {
@@ -514,14 +503,6 @@ pub(crate) fn render_comparison(comparison: &Comparison) -> String {
         ));
     }
     text
-}
-
-#[must_use]
-pub(crate) fn render_campaign_progress(progress: CampaignProgress) -> String {
-    format!(
-        "fuzz: considered {} of {} case indices; processed {}",
-        progress.considered, progress.count, progress.processed
-    )
 }
 
 /// Renders a campaign's summary: one status line, then one line per artifact

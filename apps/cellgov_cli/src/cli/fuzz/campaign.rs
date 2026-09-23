@@ -1,7 +1,7 @@
 //! Generated interpreter campaigns: worker scheduling, batch deadlines,
 //! finding reduction, and artifact storage.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cellgov_fuzz::artifact::{
     ArtifactCheckSelection, ArtifactExecutionPolicy, ArtifactFingerprint, ArtifactReduction,
@@ -13,18 +13,18 @@ use cellgov_fuzz::{
     ppu, spu, CampaignSchedule, CampaignShard, CampaignVersion, CaseRange, FuzzConfig, FuzzReport,
     FuzzRun, FuzzTarget, GenerationStrategy, ReductionOutcome, RunOutcome,
 };
+use cellgov_terminal::caps::{RenderFlags, RenderMode};
+use cellgov_terminal::progress::{ProgressBar, ProgressSink};
 
 use super::artifact::{check_reference, persist_finding};
-use super::entry::{deadline, reports_progress, worker_count, write_stdout};
+use super::entry::{deadline, worker_count, write_stdout};
 use super::error::FuzzCliError;
-use super::outcome::{
-    render_campaign_progress, render_campaign_summary, ArtifactRecord, CampaignOutcome,
-    CampaignProgress, CampaignSummary,
-};
+use super::outcome::{render_campaign_summary, ArtifactRecord, CampaignOutcome, CampaignSummary};
 use crate::cli::exit::CommandExitCode;
 use crate::cli::parse::{
     FuzzCampaignArgs, FuzzCheck, FuzzReduction, FuzzReductionPolicy, FuzzStrategy,
 };
+use crate::progress::FUZZ_CAMPAIGN_TASK;
 
 const CAMPAIGN_BATCH_CASES: u64 = 64;
 
@@ -59,13 +59,103 @@ impl FuzzEngine {
             Self::SpuSequence => FuzzTarget::SpuSequence,
         }
     }
+
+    /// The subcommand's name, as the progress bar labels the campaign.
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::PpuInstruction => "ppu-instruction",
+            Self::PpuSequence => "ppu-sequence",
+            Self::SpuInstruction => "spu-instruction",
+            Self::SpuSequence => "spu-sequence",
+        }
+    }
 }
 
-pub(super) fn run_campaign(
-    args: &FuzzCampaignArgs,
+/// A campaign's host settings, after every refusal check passes.
+pub(super) struct CampaignPlan<'a> {
+    args: &'a FuzzCampaignArgs,
     engine: FuzzEngine,
-    quiet: bool,
-) -> Result<CommandExitCode, FuzzCliError> {
+    /// First case index the schedule considers.
+    first: u64,
+    /// Case indices the schedule declares.
+    count: u64,
+    /// Case indices the loop considers: `count`, or `--cancel-after`.
+    limit: u64,
+    workers: usize,
+    workers_u32: u32,
+    total_shards: u32,
+    timeout: Option<Duration>,
+    campaign_config: FuzzConfig,
+    reduction: Option<ReductionRequest>,
+    artifacts_dir: &'a str,
+    reference: ArtifactReference,
+}
+
+#[cfg(test)]
+impl CampaignPlan<'_> {
+    pub(super) const fn limit(&self) -> u64 {
+        self.limit
+    }
+}
+
+/// What the batch loop accumulates.
+#[derive(Default)]
+pub(super) struct CampaignRun {
+    summary: CampaignSummary,
+    /// Case indices considered so far.
+    offset: u64,
+    harness_failure: Option<cellgov_fuzz::FuzzError>,
+    artifact_failure: Option<FuzzCliError>,
+    artifact_index: u64,
+    /// True while an in-place bar owns the terminal, so a stderr line
+    /// waits in `diagnostics` until the bar is down. Otherwise the line
+    /// prints at once: threshold lines interleave harmlessly, and an
+    /// interrupt drops a held line.
+    hold_diagnostics: bool,
+    /// Failure lines held for stderr.
+    diagnostics: Vec<String>,
+}
+
+impl CampaignRun {
+    fn holding(hold: bool) -> Self {
+        Self {
+            hold_diagnostics: hold,
+            ..Self::default()
+        }
+    }
+
+    /// One failure line for stderr.
+    fn report(&mut self, line: String) {
+        if self.hold_diagnostics {
+            self.diagnostics.push(line);
+        } else {
+            eprintln!("{line}");
+        }
+    }
+}
+
+#[cfg(test)]
+impl CampaignRun {
+    pub(super) const fn offset(&self) -> u64 {
+        self.offset
+    }
+
+    pub(super) fn held(&self) -> &[String] {
+        &self.diagnostics
+    }
+
+    pub(super) fn report_under(hold: bool, line: &str) -> Self {
+        let mut run = Self::holding(hold);
+        run.report(line.to_owned());
+        run
+    }
+}
+
+/// Refuse or accept `args` for `engine` before the loop schedules a case.
+pub(super) fn plan_campaign<'a>(
+    args: &'a FuzzCampaignArgs,
+    engine: FuzzEngine,
+) -> Result<CampaignPlan<'a>, FuzzCliError> {
     // [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model fuzzer runs one preprocessing step before its iteration loop. Every refusal below lands in that step, before the loop schedules the first case.
     if !matches!(args.check, FuzzCheck::All) {
         return Err(FuzzCliError::CheckUnavailable);
@@ -151,31 +241,60 @@ pub(super) fn run_campaign(
         sequence_words: args.sequence_words.unwrap_or(32),
     };
     campaign_config.validate_for_target(engine.target())?;
-    let start = Instant::now();
     let reference = if let Some(path) = &args.reference {
         check_reference(path, engine)?
     } else {
         ArtifactReference::Local
     };
-    let mut offset = 0u64;
-    let mut summary = CampaignSummary::default();
-    let mut harness_failure = None;
-    let mut artifact_index = 0u64;
-    let mut artifact_failure = None;
+    Ok(CampaignPlan {
+        args,
+        engine,
+        first,
+        count,
+        limit,
+        workers,
+        workers_u32,
+        total_shards,
+        timeout,
+        campaign_config,
+        reduction,
+        artifacts_dir,
+        reference,
+    })
+}
+
+/// Run the batches of `plan` and report each one to `progress`.
+///
+/// A failure line goes through [`CampaignRun::report`]. After the bar
+/// is down, the caller prints the lines `state` held.
+pub(super) fn drive(
+    plan: &CampaignPlan<'_>,
+    state: &mut CampaignRun,
+    progress: &dyn ProgressSink,
+) -> Result<(), FuzzCliError> {
+    let args = plan.args;
+    let engine = plan.engine;
+    let start = Instant::now();
+    progress.totals(0, plan.limit);
     // [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model loop iterates until its time limit passes or its continue check says stop; this loop keeps both exits.
-    while offset < limit {
-        if timeout.is_some_and(|bound| start.elapsed() >= bound) {
+    while state.offset < plan.limit {
+        if plan.timeout.is_some_and(|bound| start.elapsed() >= bound) {
             break;
         }
-        let batch = (limit - offset).min(CAMPAIGN_BATCH_CASES);
-        let batch_first = first
-            .checked_add(offset)
-            .ok_or(FuzzCliError::Range { first, count })?;
-        let shift = (offset % u64::from(total_shards)) as u32;
-        let mut work = Vec::with_capacity(workers);
-        for worker in 0..workers_u32 {
+        let batch = (plan.limit - state.offset).min(CAMPAIGN_BATCH_CASES);
+        let batch_first = plan
+            .first
+            .checked_add(state.offset)
+            .ok_or(FuzzCliError::Range {
+                first: plan.first,
+                count: plan.count,
+            })?;
+        progress.item_started(&batch_label(batch_first, batch, state.summary.findings()));
+        let shift = (state.offset % u64::from(plan.total_shards)) as u32;
+        let mut work = Vec::with_capacity(plan.workers);
+        for worker in 0..plan.workers_u32 {
             let local_shard =
-                worker_shard_index(args.shard, args.shards, worker, total_shards, shift)?;
+                worker_shard_index(args.shard, args.shards, worker, plan.total_shards, shift)?;
             let config = FuzzConfig {
                 campaign_version: CampaignVersion(args.campaign_version),
                 seed: args.seed,
@@ -190,7 +309,7 @@ pub(super) fn run_campaign(
                     },
                     shard: CampaignShard {
                         index: local_shard,
-                        count: total_shards,
+                        count: plan.total_shards,
                     },
                     cancellation: None,
                 },
@@ -208,27 +327,29 @@ pub(super) fn run_campaign(
                 // one forward slash, then the file.
                 let path = std::path::PathBuf::from(format!(
                     "{}/{:?}-{:?}-{}-{}-{}.json",
-                    artifacts_dir,
+                    plan.artifacts_dir,
                     engine.target(),
-                    campaign_config.strategy,
+                    plan.campaign_config.strategy,
                     args.seed,
                     finding.replay.case_index,
-                    artifact_index,
+                    state.artifact_index,
                 ));
                 let mut finding = finding.clone();
-                if let Some(request) = reduction {
-                    finding.reduction = reduce_retained_finding(campaign_config, &finding, request);
+                if let Some(request) = plan.reduction {
+                    finding.reduction =
+                        reduce_retained_finding(plan.campaign_config, &finding, request);
                     // The artifact records the refusal; the terminal names it too,
                     // like the artifact write failures below.
                     if let ReductionOutcome::Failed(error) = &finding.reduction {
-                        summary.reductions_failed = summary
+                        state.summary.reductions_failed = state
+                            .summary
                             .reductions_failed
                             .checked_add(1)
                             .ok_or(FuzzCliError::CounterOverflow)?;
-                        eprintln!(
+                        state.report(format!(
                             "fuzz: reduction of case {} failed: {error}; original case kept",
                             finding.replay.case_index
-                        );
+                        ));
                     }
                 }
                 let mut record = ArtifactRecord {
@@ -242,63 +363,105 @@ pub(super) fn run_campaign(
                     stored: false,
                 };
                 let stored = FuzzFindingArtifact::from_finding(
-                    campaign_config,
+                    plan.campaign_config,
                     ArtifactExecutionPolicy {
-                        workers: workers_u32,
+                        workers: plan.workers_u32,
                         deadline_ms: args.deadline_ms,
                         progress: args.progress,
                         check: ArtifactCheckSelection::All,
-                        reduction: reduction.map_or(ArtifactReductionRequest::None, |request| {
-                            ArtifactReductionRequest::OnFinding {
+                        reduction: plan.reduction.map_or(
+                            ArtifactReductionRequest::None,
+                            |request| ArtifactReductionRequest::OnFinding {
                                 policy: request.policy,
                                 budget: request.budget,
-                            }
-                        }),
+                            },
+                        ),
                     },
                     &run.report,
                     &finding,
-                    reference.clone(),
+                    plan.reference.clone(),
                     &path,
                 )
                 .map_err(FuzzCliError::from)
                 .and_then(|artifact| persist_finding(&path, artifact));
                 // A failed write stops neither the findings after it nor the
-                // summary line. The loop prints every failure with its retained
+                // summary line. The loop keeps every failure with its retained
                 // evidence, and the first failure becomes the command's result.
                 match stored {
                     Ok(()) => record.stored = true,
                     Err(error) => {
-                        eprintln!("fuzz: {error}");
-                        if artifact_failure.is_none() {
-                            artifact_failure = Some(error);
+                        state.report(format!("fuzz: {error}"));
+                        if state.artifact_failure.is_none() {
+                            state.artifact_failure = Some(error);
                         }
                     }
                 }
-                summary.artifacts.push(record);
-                artifact_index = artifact_index
+                state.summary.artifacts.push(record);
+                state.artifact_index = state
+                    .artifact_index
                     .checked_add(1)
                     .ok_or(FuzzCliError::CounterOverflow)?;
             }
-            accumulate(&mut summary, &run.report)?;
+            accumulate(&mut state.summary, &run.report)?;
             if let RunOutcome::HarnessFailure(source) = &run.outcome {
-                if harness_failure.is_none() {
-                    harness_failure = Some(source.clone());
+                if state.harness_failure.is_none() {
+                    state.harness_failure = Some(source.clone());
                 }
             }
         }
-        offset += batch;
-        if reports_progress(args.progress, quiet) {
-            eprintln!(
-                "{}",
-                render_campaign_progress(CampaignProgress {
-                    considered: offset,
-                    count,
-                    processed: summary.cases,
-                })
-            );
-        }
+        state.offset += batch;
+        progress.advanced(batch);
     }
-    summary.cancelled = offset < count;
+    Ok(())
+}
+
+/// The bar's current-item text for one batch.
+fn batch_label(first: u64, batch: u64, findings: u64) -> String {
+    let last = first + (batch - 1);
+    if findings == 0 {
+        format!("cases {first}..={last}")
+    } else {
+        format!("cases {first}..={last}, {findings} findings")
+    }
+}
+
+pub(super) fn run_campaign(
+    args: &FuzzCampaignArgs,
+    engine: FuzzEngine,
+    render: RenderFlags,
+) -> Result<CommandExitCode, FuzzCliError> {
+    let plan = plan_campaign(args, engine)?;
+    // `--progress` enables the bar; the globals then decide how it
+    // renders.
+    let caps = RenderFlags {
+        no_progress: render.no_progress || !args.progress,
+        ..render
+    }
+    .caps();
+    let mut state = CampaignRun::holding(caps.mode == RenderMode::Ansi);
+    let bar = ProgressBar::start(caps, &FUZZ_CAMPAIGN_TASK, engine.label());
+    let sink = bar.sink();
+    let driven = drive(&plan, &mut state, &*sink);
+    // Bar down first: the render thread owns stderr while it runs, and
+    // its next frame moves the cursor up over the lines below. A
+    // deadline or a failed batch leaves the bar short of its denominator.
+    if driven.is_ok() && state.offset >= plan.limit {
+        bar.finish();
+    } else {
+        bar.abort();
+    }
+    for line in &state.diagnostics {
+        eprintln!("{line}");
+    }
+    driven?;
+    let CampaignRun {
+        mut summary,
+        offset,
+        harness_failure,
+        artifact_failure,
+        ..
+    } = state;
+    summary.cancelled = offset < plan.count;
     let outcome = CampaignOutcome::classify(
         &summary,
         artifact_failure.is_some(),

@@ -748,6 +748,13 @@ fn a_global_that_promises_output_is_refused_where_there_is_none() {
         refusal(&["boot", "run", "--title", "synthetic", "--force-ansi"]),
         None
     );
+    // The generated fuzz campaigns render a bar; the other fuzz commands
+    // print lines.
+    assert_eq!(
+        refusal(&["dev", "fuzz", "spu-sequence", "--force-ansi"]),
+        None
+    );
+    assert!(refusal(&["dev", "fuzz", "semantic", "--force-ansi"]).is_some());
 }
 
 #[test]

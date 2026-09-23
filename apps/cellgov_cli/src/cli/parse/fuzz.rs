@@ -191,7 +191,7 @@ pub(crate) struct FuzzCampaignArgs {
     /// Host deadline in milliseconds. The engine checks it between bounded batches.
     #[arg(long)]
     pub deadline_ms: Option<u64>,
-    /// Report bounded progress after each batch.
+    /// Show a progress bar on stderr; threshold lines when stderr is not a terminal.
     #[arg(long)]
     pub progress: bool,
     /// Maximum detailed findings to retain.
