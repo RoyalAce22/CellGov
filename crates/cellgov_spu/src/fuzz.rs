@@ -6,7 +6,6 @@ use crate::state::{SpuState, SPU_LS_SIZE};
 use cellgov_effects::EffectKind;
 use cellgov_ps3_abi::hw::spu;
 use cellgov_sync::ReservedLine;
-#[cfg(test)]
 use strum::VariantArray;
 
 use crate::instruction::{SpuInstruction, SpuInstructionKind};
@@ -415,6 +414,18 @@ impl SpuGenerationDescriptor {
     /// - If the number of values is incorrect, the method returns [`SpuGenerationError::OperandCount`].
     /// - If the operands are invalid, the method returns [`SpuGenerationError::InvalidOperands`].
     pub fn encode(&self, values: &[u32]) -> Result<u32, SpuGenerationError> {
+        let word = self.pack_operands(values)?;
+        if !operand_combination_is_valid(self.kind, word) {
+            return Err(SpuGenerationError::InvalidOperands);
+        }
+        exact_kind(word)
+            .filter(|kind| *kind == self.kind)
+            .map(|_| word)
+            .ok_or(SpuGenerationError::InvalidOperands)
+    }
+
+    /// Packs in-range descriptor operands without consulting the decoder.
+    pub fn pack_operands(&self, values: &[u32]) -> Result<u32, SpuGenerationError> {
         if values.len() != self.operands.len() {
             return Err(SpuGenerationError::OperandCount {
                 expected: self.operands.len(),
@@ -432,13 +443,12 @@ impl SpuGenerationDescriptor {
         for (field, value) in self.operands.iter().zip(values) {
             word = (word & !field.mask) | deposit_bits(*value, field.mask);
         }
-        if !operand_combination_is_valid(self.kind, word) {
-            return Err(SpuGenerationError::InvalidOperands);
-        }
-        exact_kind(word)
-            .filter(|kind| *kind == self.kind)
-            .map(|_| word)
-            .ok_or(SpuGenerationError::InvalidOperands)
+        Ok(word)
+    }
+
+    /// Checks documented operand combinations without consulting the decoder.
+    pub fn operands_are_defined(&self, word: u32) -> bool {
+        operand_combination_is_valid(self.kind, word)
     }
 
     /// Reads the canonical values in operand order.
@@ -999,8 +1009,8 @@ fn low_mask(bits: u32) -> u32 {
     1u32.checked_shl(bits).map_or(u32::MAX, |limit| limit - 1)
 }
 
-#[cfg(test)]
-fn expected_generation_kinds() -> BTreeSet<SpuInstructionKind> {
+/// Lists every decoded SPU kind without consulting generator recipes.
+pub fn expected_generation_kinds() -> BTreeSet<SpuInstructionKind> {
     SpuInstructionKind::VARIANTS.iter().copied().collect()
 }
 

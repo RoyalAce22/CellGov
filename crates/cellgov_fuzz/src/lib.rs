@@ -9,6 +9,7 @@ pub mod ppu_sequences;
 pub mod raw_decode;
 pub mod reference;
 pub mod report;
+pub mod semantic_sweep;
 pub mod spu;
 pub mod spu_reference;
 pub mod sweep;
