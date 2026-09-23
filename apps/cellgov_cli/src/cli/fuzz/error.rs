@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use cellgov_fuzz::artifact::{
     ArtifactError, ArtifactReduction, ArtifactReplayError, FuzzFindingArtifact,
 };
+use cellgov_fuzz::evaluation::{ComparisonError, EvaluationPlanError, ResultsError};
 use cellgov_fuzz::raw_decode::{RawDecodeError, MAX_RAW_DECODE_PANIC_SAMPLES};
 
 use super::outcome;
@@ -99,6 +100,20 @@ pub(crate) enum FuzzCliError {
         stored: ArtifactReduction,
         artifact: Box<FuzzFindingArtifact>,
     },
+    #[error("fuzz: evaluation plan: {0}")]
+    EvaluationPlan(#[from] EvaluationPlanError),
+    #[error("fuzz: evaluation results: {0}")]
+    EvaluationResults(#[from] ResultsError),
+    #[error("fuzz: evaluation results read {}: {source}", path.display())]
+    EvaluationRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("fuzz: evaluation comparison: {0}")]
+    EvaluationComparison(#[from] ComparisonError),
+    #[error("fuzz: evaluation trial seed {seed} failed inside the harness: {message}")]
+    TrialHarness { seed: u64, message: String },
 }
 
 impl FuzzCliError {
@@ -110,8 +125,18 @@ impl FuzzCliError {
             | Self::ReductionUnavailable
             | Self::Configuration(_)
             | Self::RawFindingLimit
-            | Self::Harness(cellgov_fuzz::FuzzError::Configuration(_)) => true,
+            | Self::Harness(cellgov_fuzz::FuzzError::Configuration(_))
+            | Self::EvaluationPlan(_) => true,
             Self::Raw(source) => source.is_invalid_request(),
+            // Two results the command cannot rank are a refused request. An
+            // incomplete or unfinished result is a failed operation.
+            Self::EvaluationComparison(source) => !matches!(
+                source,
+                ComparisonError::Invalid { .. } | ComparisonError::HarnessFailed { .. }
+            ),
+            Self::EvaluationResults(_)
+            | Self::EvaluationRead { .. }
+            | Self::TrialHarness { .. } => false,
             Self::ReferenceRead { .. }
             | Self::PpuReference(_)
             | Self::SpuReference(_)
@@ -147,7 +172,9 @@ impl FuzzCliError {
             return exit_codes::USAGE;
         }
         match self {
-            Self::Harness(_) | Self::ArtifactReplay(ArtifactReplayError::HarnessFailure { .. }) => {
+            Self::Harness(_)
+            | Self::TrialHarness { .. }
+            | Self::ArtifactReplay(ArtifactReplayError::HarnessFailure { .. }) => {
                 outcome::EXIT_HARNESS_FAILURE
             }
             Self::NoEligibleCases { .. } => outcome::EXIT_NO_ELIGIBLE_CASES,
@@ -182,6 +209,10 @@ impl FuzzCliError {
             | Self::WorkerSpawn(_)
             | Self::CounterOverflow
             | Self::ArtifactRead { .. }
+            | Self::EvaluationPlan(_)
+            | Self::EvaluationResults(_)
+            | Self::EvaluationRead { .. }
+            | Self::EvaluationComparison(_)
             | Self::ArtifactReplay(
                 ArtifactReplayError::ReferenceMismatch
                 | ArtifactReplayError::PpuReference(_)

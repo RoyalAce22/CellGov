@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use cellgov_fuzz::artifact::{ArtifactFingerprint, ArtifactReduction};
+use cellgov_fuzz::evaluation::{Comparison, ComparisonVerdict, EvaluationSummary};
 use cellgov_fuzz::raw_decode::{RawDecodeStatus, RawDecoder};
 use cellgov_fuzz::{FindingKind, FuzzTarget};
 
@@ -29,6 +30,9 @@ pub(crate) const EXIT_EVIDENCE_NOT_STORED: i32 = exit_codes::command_specific(13
 pub(crate) const EXIT_REDUCTION_FAILED: i32 = exit_codes::command_specific(14);
 /// Exit code: a stored finding no longer reproduces at its case.
 pub(crate) const EXIT_NOT_REPRODUCED: i32 = exit_codes::command_specific(15);
+/// Exit code: an evaluation regressed a validity or coverage metric against
+/// its baseline.
+pub(crate) const EXIT_REGRESSION: i32 = exit_codes::command_specific(16);
 
 /// One retained finding's artifact, as the summary names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,6 +234,83 @@ impl RawSummary {
             CommandExitCode::SUCCESS
         }
     }
+}
+
+/// One stored evaluation, as the summary names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EvaluationOutcome {
+    /// Engine every trial ran.
+    pub target: FuzzTarget,
+    /// Path the evaluation wrote its results to.
+    pub output: PathBuf,
+    /// Distributions over the trials.
+    pub summary: EvaluationSummary,
+}
+
+/// The exit status a comparison maps to.
+#[must_use]
+pub(crate) const fn comparison_exit_code(verdict: ComparisonVerdict) -> CommandExitCode {
+    match verdict {
+        ComparisonVerdict::Regressed => CommandExitCode::new(EXIT_REGRESSION),
+        ComparisonVerdict::Improved | ComparisonVerdict::Indistinguishable => {
+            CommandExitCode::SUCCESS
+        }
+    }
+}
+
+#[must_use]
+pub(crate) fn render_evaluation_progress(seed: u64, completed: u64, trials: u64) -> String {
+    format!("fuzz evaluate: trial seed={seed} done; {completed} of {trials} trials")
+}
+
+/// Renders an evaluation: one line for the run, then one per sampled metric.
+#[must_use]
+pub(crate) fn render_evaluation_summary(outcome: &EvaluationOutcome) -> String {
+    let mut text = format!(
+        "fuzz evaluate: {:?} trials={} cases_per_trial={} output={}\n",
+        outcome.target,
+        outcome.summary.trials,
+        outcome.summary.cases_per_trial,
+        outcome.output.display(),
+    );
+    for (metric, distribution) in &outcome.summary.distributions {
+        text.push_str(&format!(
+            "fuzz evaluate: {metric:?} samples={} min={} q1={} median={} q3={} max={}\n",
+            distribution.samples.len(),
+            distribution.minimum,
+            distribution.lower_quartile,
+            distribution.median,
+            distribution.upper_quartile,
+            distribution.maximum,
+        ));
+    }
+    text
+}
+
+/// Renders a comparison: one line for the verdict, then one per metric.
+#[must_use]
+pub(crate) fn render_comparison(comparison: &Comparison) -> String {
+    let regressions = comparison.regressions();
+    let mut text = format!(
+        "fuzz compare: trials={} cases_per_trial={} verdict={:?} regressions={:?}\n",
+        comparison.trials,
+        comparison.cases_per_trial,
+        comparison.verdict(),
+        regressions,
+    );
+    for metric in &comparison.metrics {
+        text.push_str(&format!(
+            "fuzz compare: {:?} baseline_median={} candidate_median={} superiority={}/{} magnitude={:?} verdict={:?}\n",
+            metric.metric,
+            metric.baseline.median,
+            metric.candidate.median,
+            metric.superiority.favourable,
+            metric.superiority.pairs,
+            metric.magnitude,
+            metric.verdict,
+        ));
+    }
+    text
 }
 
 #[must_use]

@@ -30,6 +30,10 @@ pub(crate) enum FuzzCommand {
     Raw(FuzzRawArgs),
     /// Replay a versioned finding artifact against its original engine.
     Replay(FuzzReplayArgs),
+    /// Run repeated trials of one engine at one budget and store their distributions.
+    Evaluate(FuzzEvaluateArgs),
+    /// Rank a stored evaluation against a baseline at equal budgets.
+    Compare(FuzzCompareArgs),
 }
 
 /// Input construction strategy supported by instruction and sequence engines.
@@ -106,6 +110,24 @@ pub(crate) const REPLAY_EXIT_CODES: &str = "Exit codes particular to this comman
       reference no longer matched
   12  the engine failed inside the harness rather than the target
   15  the stored case no longer reproduces its finding
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz evaluate` has beyond the shared 0-5 contract.
+pub(crate) const EVALUATE_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   the shared failed-operation status when --output could not be
+      written or --baseline could not be read
+  12  a trial's engine failed inside the harness; the results were
+      still written
+  16  the candidate regressed a validity or coverage metric against
+      --baseline
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz compare` has beyond the shared 0-5 contract.
+pub(crate) const COMPARE_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   the shared failed-operation status when a stored evaluation could
+      not be read or is not a complete evaluation
+  16  the candidate regressed a validity or coverage metric against the
+      baseline
   141 stdout was closed by a downstream reader";
 
 /// Common settings for a generated interpreter campaign.
@@ -266,4 +288,77 @@ pub(crate) struct FuzzReplayArgs {
     /// Replay the recorded reduced case instead of the original.
     #[arg(long)]
     pub reduced: bool,
+}
+
+/// Engine under repeated-trial evaluation.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum FuzzEvaluateEngine {
+    /// Generated PPU instructions.
+    PpuInstruction,
+    /// Generated PPU sequences.
+    PpuSequence,
+    /// Generated SPU instructions.
+    SpuInstruction,
+    /// Generated SPU sequences.
+    SpuSequence,
+}
+
+/// Settings for repeated equal-budget trials of one engine.
+#[derive(Debug, Args)]
+#[command(after_help = EVALUATE_EXIT_CODES)]
+pub(crate) struct FuzzEvaluateArgs {
+    /// Engine every trial runs.
+    #[arg(value_enum)]
+    pub engine: FuzzEvaluateEngine,
+    /// Number of trials; each runs one consecutive seed from --first-seed.
+    #[arg(long, default_value_t = 10)]
+    pub trials: u32,
+    /// Seed of the first trial.
+    #[arg(long, default_value_t = 1)]
+    pub first_seed: u64,
+    /// Case indices every trial considers.
+    #[arg(long, default_value_t = 100)]
+    pub cases: u64,
+    /// Number of words generated for each sequence case.
+    #[arg(long)]
+    pub sequence_words: Option<u32>,
+    /// Generate typed instruction forms or raw decoder words.
+    #[arg(long, value_enum, default_value_t = FuzzStrategy::Structured)]
+    pub strategy: FuzzStrategy,
+    /// Maximum detailed findings each trial retains.
+    #[arg(long, default_value_t = 20)]
+    pub finding_limit: u32,
+    /// Reduce each trial's retained findings and record the cost.
+    #[arg(long, value_enum, default_value_t = FuzzReduction::None)]
+    pub reduction: FuzzReduction,
+    /// Candidate selection policy for reduction.
+    #[arg(long, value_enum, default_value_t = FuzzReductionPolicy::Deterministic)]
+    pub reduction_policy: FuzzReductionPolicy,
+    /// Maximum candidate evaluations spent on each finding.
+    #[arg(long, default_value_t = cellgov_fuzz::reduce::DEFAULT_REDUCTION_BUDGET)]
+    pub reduction_budget: u64,
+    /// Trials run at once; defaults to available parallelism.
+    #[arg(long)]
+    pub workers: Option<usize>,
+    /// Report a line after each trial.
+    #[arg(long)]
+    pub progress: bool,
+    /// Write the versioned JSON results here.
+    #[arg(long, value_name = "PATH")]
+    pub output: PathBuf,
+    /// Stored evaluation to rank these results against.
+    #[arg(long, value_name = "PATH")]
+    pub baseline: Option<PathBuf>,
+}
+
+/// Two stored evaluations to rank.
+#[derive(Debug, Args)]
+#[command(after_help = COMPARE_EXIT_CODES)]
+pub(crate) struct FuzzCompareArgs {
+    /// Stored evaluation to rank the candidate against.
+    #[arg(long, value_name = "PATH")]
+    pub baseline: PathBuf,
+    /// Stored evaluation under review.
+    #[arg(long, value_name = "PATH")]
+    pub candidate: PathBuf,
 }

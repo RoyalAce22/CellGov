@@ -342,6 +342,17 @@ pub(crate) const EXAMPLES: &[Examples] = &[
             "cellgov dev fuzz replay --artifact target/fuzz-findings/finding.json --reduced",
         ],
     },
+    Examples {
+        path: "dev fuzz evaluate",
+        lines: &[
+            "cellgov dev fuzz evaluate ppu-instruction --trials 30 --cases 1000 --output target/fuzz-evaluation/ppu-instruction.json",
+            "cellgov dev fuzz evaluate spu-sequence --trials 30 --cases 200 --sequence-words 16 --output candidate.json --baseline baseline.json",
+        ],
+    },
+    Examples {
+        path: "dev fuzz compare",
+        lines: &["cellgov dev fuzz compare --baseline baseline.json --candidate candidate.json"],
+    },
 ];
 
 /// The block `path`'s help leads with, or `None` when it declares none.

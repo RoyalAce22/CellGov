@@ -7,6 +7,7 @@ use std::time::Duration;
 use super::artifact::run_replay;
 use super::campaign::{run_campaign, FuzzEngine};
 use super::error::FuzzCliError;
+use super::evaluate::{run_compare, run_evaluate};
 use super::scan::{run_raw, run_semantic};
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{FuzzArgs, FuzzCommand};
@@ -42,6 +43,8 @@ pub(super) fn run_inner_with_quiet(
         FuzzCommand::Semantic(args) => run_semantic(args, quiet),
         FuzzCommand::Raw(args) => run_raw(args, quiet),
         FuzzCommand::Replay(args) => run_replay(args),
+        FuzzCommand::Evaluate(args) => run_evaluate(args, quiet),
+        FuzzCommand::Compare(args) => run_compare(args),
     }
 }
 

@@ -4,6 +4,7 @@
 
 pub mod artifact;
 pub mod decoder_manifest;
+pub mod evaluation;
 pub mod ppu;
 pub mod ppu_paths;
 pub mod ppu_reference;
