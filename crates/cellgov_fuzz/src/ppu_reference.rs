@@ -526,29 +526,46 @@ pub fn compare_reference(
         &run.stop.pc,
         &mut comparison,
     );
-    compare_unavailable(
+    compare_field(
         PpuReferenceComponent::StopLr,
         &expected.stop.lr,
+        &run.stop.diagnostics.lr,
         &mut comparison,
     );
-    compare_unavailable(
+    compare_field(
         PpuReferenceComponent::StopSyscallLev,
         &expected.stop.syscall_lev,
+        &run.stop.diagnostics.syscall_lev,
         &mut comparison,
     );
-    compare_unavailable(
+    compare_field(
         PpuReferenceComponent::StopFaultingEa,
         &expected.stop.faulting_ea,
+        &run.stop.diagnostics.faulting_ea,
         &mut comparison,
     );
-    compare_unavailable(
+    let fault_registers =
+        run.stop
+            .diagnostics
+            .fault_regs
+            .as_ref()
+            .map(|registers| PpuReferenceFaultRegisters {
+                gpr: registers.gprs.to_vec(),
+                lr: registers.lr,
+                ctr: registers.ctr,
+                xer: registers.xer,
+                cr: registers.cr,
+            });
+    compare_field(
         PpuReferenceComponent::StopFaultRegisters,
         &expected.stop.fault_registers,
+        &fault_registers,
         &mut comparison,
     );
-    compare_unavailable(
+    compare_field(
         PpuReferenceComponent::StopSyscallArgs,
         &expected.stop.syscall_args,
+        &run.stop.syscall_args.map(|args| args.to_vec()),
         &mut comparison,
     );
     compare_field(
@@ -849,30 +866,6 @@ fn validate_provenance_text(field: &'static str, value: &str) -> Result<(), PpuR
         return Err(PpuReferenceError::EmptyProvenance { field });
     }
     Ok(())
-}
-
-fn compare_unavailable<T>(
-    field: PpuReferenceComponent,
-    expected: &ReferenceField<T>,
-    comparison: &mut PpuReferenceComparison,
-) {
-    let (status, reason) = match expected {
-        ReferenceField::Value { .. } => (
-            PpuReferenceFieldStatus::Unsupported,
-            "the internal path result does not represent this runtime field".to_string(),
-        ),
-        ReferenceField::Undefined { reason } => {
-            (PpuReferenceFieldStatus::Undefined, reason.clone())
-        }
-        ReferenceField::Unsupported { reason } => {
-            (PpuReferenceFieldStatus::Unsupported, reason.clone())
-        }
-    };
-    comparison.unrepresented.push(PpuUnrepresentedField {
-        field,
-        status,
-        reason,
-    });
 }
 
 fn compare_state(

@@ -5,7 +5,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
-use cellgov_exec::{ExecutionContext, ExecutionUnit, YieldReason};
+use cellgov_exec::{
+    ExecutionContext, ExecutionUnit, FaultRegisterDump, LocalDiagnostics, YieldReason,
+};
 use cellgov_mem::RegionView;
 use cellgov_mem::{ByteRange, GuestAddr, GuestMemory, MemError, PageSize, Region};
 use cellgov_ppu::decode::decode;
@@ -46,6 +48,10 @@ pub struct PpuPathStop {
     pub fault: Option<cellgov_effects::FaultKind>,
     /// The program counter from the final runtime step.
     pub pc: Option<u64>,
+    /// Full fault-site or syscall diagnostics.
+    pub diagnostics: LocalDiagnostics,
+    /// Raw syscall number and arguments.
+    pub syscall_args: Option<[u64; 9]>,
 }
 
 /// Records the final result for one internal PPU path.
@@ -339,6 +345,8 @@ fn run_path(
         reason: result.yield_reason,
         fault: result.fault,
         pc: result.local_diagnostics.pc,
+        diagnostics: result.local_diagnostics,
+        syscall_args: result.syscall_args,
     };
     let executed_pcs = trace.0.borrow().clone();
     Ok(PpuPathRun {
@@ -376,6 +384,8 @@ fn run_plain(
         reason: YieldReason::BudgetExhausted,
         fault: None,
         pc: Some(0),
+        diagnostics: LocalDiagnostics::with_pc(0),
+        syscall_args: None,
     };
     for _ in 0..words {
         let step_pc = state.pc;
@@ -396,6 +406,7 @@ fn run_plain(
         };
         let raw = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
         let Ok(instruction) = decode(raw) else {
+            let diagnostics = fault_diagnostics(&state, step_pc, None);
             state = initial.clone();
             data.copy_from_slice(initial_data);
             reservations = initial_reservations(initial);
@@ -405,6 +416,8 @@ fn run_plain(
                 reason: YieldReason::Fault,
                 fault: Some(FaultKind::Guest(cellgov_ppu::FAULT_DECODE_ERROR)),
                 pc: Some(step_pc),
+                diagnostics,
+                syscall_args: None,
             };
             break;
         };
@@ -429,6 +442,15 @@ fn run_plain(
             ExecuteVerdict::Continue => state.pc = state.pc.wrapping_add(4),
             ExecuteVerdict::Branch => {}
             ExecuteVerdict::Fault(fault) => {
+                let ea = match fault {
+                    cellgov_ppu::exec::PpuFault::PcOutOfRange(addr)
+                    | cellgov_ppu::exec::PpuFault::InvalidAddress(addr)
+                    | cellgov_ppu::exec::PpuFault::AlignmentInterrupt(addr) => Some(*addr),
+                    cellgov_ppu::exec::PpuFault::UnsupportedSyscall(_)
+                    | cellgov_ppu::exec::PpuFault::UnimplementedInstruction(_)
+                    | cellgov_ppu::exec::PpuFault::ProgramTrap(_) => None,
+                };
+                let diagnostics = fault_diagnostics(&state, step_pc, ea);
                 state = initial.clone();
                 data.copy_from_slice(initial_data);
                 reservations = initial_reservations(initial);
@@ -438,10 +460,21 @@ fn run_plain(
                     reason: YieldReason::Fault,
                     fault: Some(FaultKind::Guest(fault.guest_code())),
                     pc: Some(step_pc),
+                    diagnostics,
+                    syscall_args: None,
                 };
                 break;
             }
-            ExecuteVerdict::MemFault(_) => {
+            ExecuteVerdict::MemFault(error) => {
+                let ea = match error {
+                    MemError::Unmapped(context) => Some(context.addr),
+                    MemError::ReservedWrite { addr, .. }
+                    | MemError::ReservedStrictRead { addr, .. } => Some(*addr),
+                    MemError::LengthMismatch
+                    | MemError::OverlappingRegions
+                    | MemError::RegionOverflow { .. } => None,
+                };
+                let diagnostics = fault_diagnostics(&state, step_pc, ea);
                 state = initial.clone();
                 data.copy_from_slice(initial_data);
                 reservations = initial_reservations(initial);
@@ -451,19 +484,28 @@ fn run_plain(
                     reason: YieldReason::Fault,
                     fault: Some(FaultKind::Guest(cellgov_ppu::FAULT_INVALID_ADDRESS)),
                     pc: Some(step_pc),
+                    diagnostics,
+                    syscall_args: None,
                 };
                 break;
             }
-            ExecuteVerdict::Syscall { .. } => {
+            ExecuteVerdict::Syscall { lev } => {
                 stop = PpuPathStop {
                     reason: YieldReason::Syscall,
                     fault: None,
                     pc: Some(step_pc),
+                    diagnostics: LocalDiagnostics::with_pc_lr_syscall_lev(
+                        step_pc,
+                        state.lr(),
+                        *lev,
+                    ),
+                    syscall_args: Some(cellgov_ppu::state::ppu_syscall_args(&state)),
                 };
                 break;
             }
             ExecuteVerdict::BufferFull => {
                 stop.pc = Some(step_pc);
+                stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
                 break;
             }
         }
@@ -488,6 +530,7 @@ fn run_plain(
                 .filter(|effect| !is_read_intent(effect)),
         );
         stop.pc = Some(step_pc);
+        stop.diagnostics = LocalDiagnostics::with_pc(step_pc);
     }
     Ok(PpuPathRun {
         path: PpuExecutionPath::Plain,
@@ -510,6 +553,23 @@ fn run_plain(
 
 fn is_read_intent(effect: &cellgov_effects::Effect) -> bool {
     matches!(effect, cellgov_effects::Effect::SharedReadIntent { .. })
+}
+
+fn fault_diagnostics(state: &PpuState, pc: u64, ea: Option<u64>) -> LocalDiagnostics {
+    let fields = PpuArchitecturalState::capture(state);
+    LocalDiagnostics {
+        pc: Some(pc),
+        lr: Some(fields.lr),
+        syscall_lev: None,
+        faulting_ea: ea,
+        fault_regs: Some(FaultRegisterDump {
+            gprs: fields.gpr,
+            lr: fields.lr,
+            ctr: fields.ctr,
+            xer: fields.xer,
+            cr: fields.cr,
+        }),
+    }
 }
 
 fn refuse_commit(path: PpuExecutionPath, observed: &PpuObservation) -> Result<(), PpuPathError> {
