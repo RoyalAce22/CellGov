@@ -61,8 +61,10 @@ pub struct CancellationBoundary(pub u64);
 
 /// Schedules cases without changing their replay identity.
 ///
-/// Each case's stable index fixes its replay identity.
-/// [Krook2023 p:5 s:Testing]
+/// Each case's stable index fixes its replay identity. A shard takes every
+/// count-th index by stride, the way parallel testers take sizes i, i+k,
+/// i+2k. The shards together cover exactly the sequential run's cases.
+/// [Krook2023 p:4 s:4 Design and Implementation (testing loop)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CampaignSchedule {

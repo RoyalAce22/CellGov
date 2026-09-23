@@ -179,6 +179,9 @@ pub enum FiniteSweepError<E: Error + 'static, S: Error + 'static> {
 /// Evaluates partitions sequentially. A host may schedule partitions itself
 /// and pass its results to [`reduce_finite_results`].
 ///
+/// The results merge in domain order, so the report is the same whatever the
+/// completion order. [Krook2023 p:4 s:4 Design and Implementation (testing loop)]
+///
 /// # Errors
 ///
 /// Returns a typed refusal for invalid scheduling, failed workers or targets,

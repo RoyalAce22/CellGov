@@ -175,6 +175,7 @@ pub struct PpuMetamorphicComparison {
 }
 
 /// Complete PPU state at one execution boundary.
+// [Wang2024 p:340:17 s:3.9] A run must expose its final state, or a divergence between two runs cannot be seen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PpuObservation {
     /// Architectural state after commit or fault rollback.
@@ -199,6 +200,7 @@ pub struct PpuObservation {
 
 impl PpuObservation {
     /// Compare the complete observations, then apply a named mask.
+    // [Martignoni2009 p:127 s:2.2] Two executions agree only when the program counter, registers, memory and exception state all match afterwards.
     pub fn compare(&self, other: &Self, check: PpuObservationCheck) -> PpuObservationComparison {
         let mut complete = BTreeSet::new();
         if self.state != other.state {
@@ -345,7 +347,7 @@ pub struct PpuObservationInput<'a> {
 }
 
 /// Finish one PPU batch through the interpreter-owned observation contract.
-// [Armstrong2019 p:71:1 s:Abstract] The observation is derived beside the executable ISA state.
+// [Armstrong2019 p:71:23 s:7] Validation of an executable ISA model runs the model and checks the behaviour it exhibits.
 pub fn finish_observation(
     input: PpuObservationInput<'_>,
 ) -> Result<PpuObservation, PpuObservationError> {

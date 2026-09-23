@@ -283,6 +283,7 @@ fn finished(results: &EvaluationResults, side: ResultsSide) -> Result<(), Compar
     }
 }
 
+// [Klees2018 p:2129 s:4 Statistically Sound Comparisons] A win rate alone says nothing about how large the win is; the effect size does.
 fn verdict(direction: Direction, superiority: Superiority) -> MetricVerdict {
     if superiority.magnitude() < Magnitude::Medium {
         return MetricVerdict::Indistinguishable;

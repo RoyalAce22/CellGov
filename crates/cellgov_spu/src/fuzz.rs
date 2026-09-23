@@ -299,7 +299,7 @@ impl SpuSequenceInteraction {
 
     /// Prepares register and channel inputs for the selected dependency.
     pub fn prepare_state(self, state: &mut SpuState, data_base: u32) {
-        // [Wang2024 p:340:1 s:Abstract] Static state tracking preserves dependencies among generated operations.
+        // [Wang2024 p:340:16 s:3.8] Every generation step establishes the preconditions its instructions need, so the program is well defined.
         match self {
             Self::Channel | Self::Dma | Self::DmaGet | Self::MemoryRead | Self::Reservation => {
                 state.set_reg_word_splat(1, data_base);
@@ -510,6 +510,7 @@ impl SpuGenerationDescriptor {
     }
 
     /// Produces valid same-kind words by clearing one encoded operand bit.
+    // [Regehr2012 p:4 s:5.2] A reducer that emits only variants it knows are valid never chases a difference an invalid variant caused.
     pub fn shrink(&self, raw: u32) -> Vec<u32> {
         self.operands
             .iter()
@@ -607,7 +608,7 @@ impl SpuInstruction {
         raw: u32,
         relation: SpuMetamorphicRelation,
     ) -> Result<SpuMetamorphicCase, SpuRelationRefusal> {
-        // [Le2014 p:147 s:Abstract] Input-constrained variants permit comparison only after their preconditions hold.
+        // [Le2014 p:219 s:3.1.1] The partner is equivalent to the original only over inputs on which both are defined.
         if !self.fuzz_descriptor().relations.contains(&relation)
             || relation == SpuMetamorphicRelation::Deterministic
         {

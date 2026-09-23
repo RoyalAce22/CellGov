@@ -4,6 +4,10 @@ use std::any::Any;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// Stable panic payload retained without addresses or `Debug` formatting.
+///
+/// Process-dependent text such as an address would make equal failures
+/// look distinct, so the payload omits it from the identity.
+/// [Chen2013 p:3 s:2.3 Distance Functions for Test Cases]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", content = "message", rename_all = "snake_case")]
 pub enum TargetPanicPayload {

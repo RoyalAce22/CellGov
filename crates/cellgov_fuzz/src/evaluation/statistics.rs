@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 
 use serde::{Deserialize, Serialize};
 
+// [Klees2018 p:2128 s:4 Statistically Sound Comparisons] The paper reports the median of its trials with the extremes and interval bounds around it, and calls an average with no spread misleading. This summary carries the median and the spread.
 /// Five-number summary over sorted samples.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

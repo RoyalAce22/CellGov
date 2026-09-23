@@ -8,6 +8,10 @@ use cellgov_effects::EffectKind;
 use crate::{CaseEligibility, CaseFeature, InstructionIdentity, OutcomeIdentity};
 
 /// Policy used to order retained semantic cases.
+///
+/// Every scheduler chooses between cases it knows little about and cases it
+/// believes productive. The policy names which side wins a tie.
+/// [Manes2021 p:8 s:4.1 The Fuzz Configuration Scheduling Problem]
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]
@@ -291,6 +295,9 @@ pub struct CampaignDistribution {
 }
 
 /// Deterministic bounded set of retained cases.
+///
+/// A campaign that keeps every interesting case grows without bound, so the
+/// set holds a bounded selection. [Manes2021 p:15 s:7.2 Maintaining a Minset]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetainedCases {
     config: RetentionConfig,
@@ -360,6 +367,9 @@ impl RetainedCases {
         case_index: u64,
         observation: SemanticObservation,
     ) -> RetentionDecision {
+        // [Petsios2017 p:619 s:III.A Guidance Engines] The guidance state is the
+        // set of distinct observation tuples seen so far, so a repeat adds
+        // nothing.
         if let Some(representative) = self.observations.get(&observation).copied() {
             if let Some(entry) = self.entries.get_mut(&representative) {
                 entry.occurrences = entry.occurrences.saturating_add(1);
@@ -370,7 +380,9 @@ impl RetainedCases {
             return RetentionDecision::Rejected;
         }
 
-        // [Petsios2017 p:615 s:Abstract] Behavioral asymmetry focuses testing on semantic bugs.
+        // [Petsios2017 p:618 s:III Methodology] A score that preserves the
+        // relative asymmetry between references finds more semantic bugs than
+        // one that only rewards coverage, so asymmetry carries its own weight.
         let (score, novelty_score, asymmetry_score) = self.scores(&observation);
         let candidate = RetainedCase {
             case_index,
@@ -641,7 +653,9 @@ impl EvaluationDistribution {
     ///
     /// Returns [`EvaluationError`] for fewer than two trials, repeated seeds,
     /// or unequal attempted-case budgets.
-    // [Klees2018 p:2123 s:Introduction] Fuzzer evaluations sample a distribution across trials.
+    // [Klees2018 p:2127 s:4 Statistically Sound Comparisons] A single run is
+    // not evidence; a claim needs many trials and a comparison of their
+    // distributions.
     pub fn from_trials(
         trials: impl IntoIterator<Item = TrialMetrics>,
     ) -> Result<Self, EvaluationError> {
@@ -655,6 +669,8 @@ impl EvaluationDistribution {
         if trials.windows(2).any(|pair| pair[0].seed == pair[1].seed) {
             return Err(EvaluationError::RepeatedSeed);
         }
+        // [Klees2018 p:2130 s:6 Timeouts] Relative performance changes over the
+        // course of a run, so trials compare only at one attempted-case budget.
         let attempted_budget = trials[0].attempted;
         if let Some(trial) = trials
             .iter()

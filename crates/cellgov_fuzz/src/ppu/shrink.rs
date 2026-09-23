@@ -12,6 +12,7 @@ pub(crate) fn shrink_instruction_words(words: &[u32]) -> Vec<ReductionCandidate>
 }
 
 /// Shorter or same-kind-smaller sequences; every word keeps its decoded kind.
+// [Regehr2012 p:3 s:3.2] The reducer proposes variants that each remove one region of the failing case.
 pub(crate) fn shrink_sequence_words(words: &[u32]) -> Vec<ReductionCandidate> {
     let mut candidates = Vec::new();
     if words.len() > 1 {

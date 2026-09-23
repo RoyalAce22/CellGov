@@ -331,6 +331,7 @@ struct MetamorphicRun<'a> {
     baseline: &'a ObservedStep,
 }
 
+// [Le2014 p:219 s:3.1.2] Each equivalent variant runs on the same input as the original, and any disagreement is a finding.
 fn run_metamorphic_checks(
     report: &mut FuzzReport,
     run: MetamorphicRun<'_>,

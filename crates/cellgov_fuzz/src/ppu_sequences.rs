@@ -157,8 +157,8 @@ pub enum PpuSequenceCampaignError {
 }
 
 /// Generates one sequence from a stable seed and case index.
-// [Wang2024 p:340:1 s:Abstract] Generation tracks state and dependencies while it constructs a program.
-// [Padhye2019 p:329 s:Abstract] Typed parameters map deterministic mutations into structural program changes.
+// [Wang2024 p:340:16 s:3.8] Every generation step establishes the preconditions of the instruction it emits, so the program is well defined and deterministic for every path.
+// [Padhye2019 p:332 s:3.1] A fixed parameter sequence maps deterministically to a structurally valid input, and a changed parameter maps to a structural change.
 pub fn generate_dependency_sequence(seed: u64, case_index: u64) -> PpuGeneratedSequence {
     let family =
         PpuSequenceFamily::ALL[(case_index % PpuSequenceFamily::ALL.len() as u64) as usize];

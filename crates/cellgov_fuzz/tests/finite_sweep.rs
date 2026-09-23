@@ -248,7 +248,7 @@ fn invalid_scheduling_refuses_before_any_target_call() {
 
 #[test]
 fn interpreter_descriptors_supply_a_finite_domain_without_a_second_opcode_grammar() {
-    // [Veggalam2016 p:581 s:Abstract] Useful interpreter inputs must be valid yet reach varied behavior.
+    // [Veggalam2016 p:582 s:1 Introduction] An input the interpreter's front end rejects tests only that front end, so the input grammar decides what the fuzz reaches.
     let words = generation_descriptors()
         .into_iter()
         .map(|descriptor| descriptor.canonical_word)

@@ -10,6 +10,10 @@ pub enum CaseEligibility {
     /// CellGov does not model a precondition needed by the selected check.
     Unsupported,
     /// The architecture does not define the selected check for this case.
+    ///
+    /// A difference on a construct the architecture leaves undefined is
+    /// not a defect, so the case enters no comparison.
+    /// [McKeeman1998 p:101 s:Differential Testing]
     Undefined,
 }
 

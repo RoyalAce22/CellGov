@@ -8,6 +8,7 @@ use cellgov_spu::fuzz::{SpuFuzzDescriptor, SpuOutcomeClass};
 use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::GenerationStrategy;
 
+// [Yang2011 p:2 s:2.2] A case whose meaning the architecture leaves undefined cannot expose a wrong result, so it enters no check.
 pub(super) fn assess_instruction_case(
     strategy: GenerationStrategy,
     has_undefined_operands: bool,

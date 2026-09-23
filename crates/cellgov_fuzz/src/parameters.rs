@@ -7,7 +7,8 @@ use crate::GeneratorError;
 /// Supplies ordered choices to one interpreter-owned encoding descriptor.
 ///
 /// Untyped parameter mutations become structural input mutations after a descriptor maps each
-/// value to its declared operand field. [Padhye2019 p:329 s:Abstract]
+/// value to its declared operand field. A parametric generator maps a fixed parameter sequence
+/// to a structured input the same way. [Padhye2019 p:332 s:3.1 Parametric Generators]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct ParameterStream(Vec<u32>);

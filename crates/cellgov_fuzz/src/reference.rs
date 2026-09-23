@@ -12,6 +12,7 @@ pub enum ReferenceField<T> {
         value: T,
     },
     /// The architecture leaves this field undefined.
+    // [Jiang2022 p:7 s:4.2] Most device and emulator inconsistencies trace to behaviour the manual leaves undefined, so the comparison skips such a field.
     Undefined {
         /// Source-specific reason.
         reason: String,

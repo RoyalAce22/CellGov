@@ -94,6 +94,7 @@ pub enum SpuObservationComponent {
 }
 
 /// Complete SPU state, outcome, and effect observation.
+// [Wang2024 p:340:17 s:3.9] A run must expose its final state, or a divergence between two runs cannot be seen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpuObservation {
     /// Architectural state after execution.
@@ -115,7 +116,7 @@ pub struct SpuObservationComparison {
 
 impl SpuObservation {
     /// Captures the complete state and typed outcome after one instruction.
-    // [Armstrong2019 p:71:1 s:Abstract] Executable ISA models can be used to validate architectural behavior.
+    // [Armstrong2019 p:71:23 s:7] Validation of an executable ISA model runs the model and checks the behaviour it exhibits.
     pub fn capture(state: &SpuState, outcome: &SpuStepOutcome) -> Self {
         Self::from_parts(SpuObservableSnapshot::capture(state), outcome.clone())
     }
@@ -138,6 +139,7 @@ impl SpuObservation {
     }
 
     /// Compares every architectural and outcome component.
+    // [Martignoni2009 p:127 s:2.2] Two executions agree only when the program counter, registers, memory and exception state all match afterwards.
     pub fn compare(&self, other: &Self) -> SpuObservationComparison {
         let mut differences = BTreeSet::new();
         if self.state.regs != other.state.regs {

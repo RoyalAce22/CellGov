@@ -15,9 +15,11 @@
 //!   whole directory, so nothing skips.
 //!
 //! Identity is the artifact's semantic fingerprint and finding kind, never
-//! its rendered text. [Chen2013 p:1 s:Abstract] The stored case is the
-//! reducer's fixpoint, so the witness is the smallest case that keeps the
-//! fingerprint. [Regehr2012 p:1 s:Abstract]
+//! its rendered text. The defect itself is not observable, so two records
+//! name one defect when the features that estimate it agree.
+//! [Chen2013 p:2 s:2.1 Definitions] The stored case is the reducer's
+//! fixpoint, the case left when no transform yields a variant that keeps
+//! the fingerprint. [Regehr2012 p:6 s:6.3 A Modular Reducer]
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -218,6 +220,9 @@ pub fn promote(
             name: name.to_owned(),
         });
     }
+    // [Chen2013 p:8 s:4.5 The Importance of Test-Case Reduction] Unreduced
+    // cases bury the trigger in unrelated content. A reduced case is a
+    // canonical witness, so the store takes nothing else.
     if !matches!(
         artifact.reduction,
         ArtifactReduction::Reduced { .. } | ArtifactReduction::Irreducible
@@ -226,6 +231,8 @@ pub fn promote(
             name: name.to_owned(),
         });
     }
+    // [Manes2021 p:13 s:6.3.1 Deduplication] One record per defect: a second
+    // case with the same identity is a duplicate.
     if let Some(other) = existing.iter().find(|other| {
         other.artifact.finding_kind == artifact.finding_kind
             && other.artifact.fingerprint == artifact.fingerprint

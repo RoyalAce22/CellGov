@@ -345,6 +345,7 @@ fn spu_relation_check(relation: SpuMetamorphicRelation) -> CheckIdentity {
     }
 }
 
+// [Le2014 p:219 s:3.1.2] Each equivalent variant runs on the same input as the original, and any disagreement is a finding.
 #[allow(clippy::too_many_arguments)]
 fn run_metamorphic_checks(
     report: &mut FuzzReport,

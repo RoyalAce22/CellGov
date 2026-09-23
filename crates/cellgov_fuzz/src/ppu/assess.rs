@@ -10,6 +10,7 @@ use cellgov_ppu::state::PpuState;
 use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::GenerationStrategy;
 
+// [Yang2011 p:2 s:2.2] A case whose meaning the architecture leaves undefined cannot expose a wrong result, so it enters no check.
 pub(super) fn assess_instruction_case(
     strategy: GenerationStrategy,
     instruction: &PpuInstruction,

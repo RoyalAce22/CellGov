@@ -66,7 +66,7 @@ pub(super) fn run_campaign(
     engine: FuzzEngine,
     quiet: bool,
 ) -> Result<CommandExitCode, FuzzCliError> {
-    // [Manes2021 p:1 s:Abstract] A model fuzzer has distinct stages with separate design decisions.
+    // [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model fuzzer runs one preprocessing step before its iteration loop. Every refusal below lands in that step, before the loop schedules the first case.
     if !matches!(args.check, FuzzCheck::All) {
         return Err(FuzzCliError::CheckUnavailable);
     }
@@ -162,6 +162,7 @@ pub(super) fn run_campaign(
     let mut harness_failure = None;
     let mut artifact_index = 0u64;
     let mut artifact_failure = None;
+    // [Manes2021 p:3 s:2.3 Fuzz Testing Algorithm] The model loop iterates until its time limit passes or its continue check says stop; this loop keeps both exits.
     while offset < limit {
         if timeout.is_some_and(|bound| start.elapsed() >= bound) {
             break;

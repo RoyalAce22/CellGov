@@ -2,7 +2,9 @@
 //! one maps to, and the one place that renders their terminal text.
 //!
 //! Identity stays in the records: callers compare a fingerprint or a case
-//! index as a value, and rendered text carries none. [Chen2013 p:1 s:Abstract]
+//! index as a value, and rendered text carries none.
+//! [Chen2013 p:2 s:1 Introduction] A triage that filters failures by text
+//! patterns over their output is the ad hoc one the fuzzer-taming work replaces.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -274,7 +274,7 @@ pub enum SpuReferenceError {
 }
 
 /// Parses and validates a bounded repository reference artifact.
-// [Jiang2022 p:1 s:Abstract] Specification-generated representative streams can expose real-device and emulator differences.
+// [Jiang2022 p:4 s:3] Cases come from the machine-readable specification, and a separate engine compares them on real devices and emulators.
 pub fn parse_reference_json(json: &str) -> Result<SpuReferenceArtifact, SpuReferenceError> {
     let artifact: SpuReferenceArtifact = serde_json::from_str(json)?;
     artifact.validate()?;
@@ -282,7 +282,7 @@ pub fn parse_reference_json(json: &str) -> Result<SpuReferenceArtifact, SpuRefer
 }
 
 /// Replays a reference without a device, network, or external runner.
-// [Martignoni2009 p:129 s:Abstract] Compare final state from identical emulator and hardware inputs.
+// [Martignoni2009 p:127 s:2.3] Both CPUs start from the same synthetic state and execute the case; the comparison reads only their final states.
 pub fn replay_reference(
     artifact: &SpuReferenceArtifact,
 ) -> Result<SpuReferenceReplay, SpuReferenceError> {
@@ -328,7 +328,8 @@ pub fn replay_reference(
 }
 
 /// Compares the independent source against the complete internal observation.
-// [Watt2023 p:110:1 s:Abstract] A practical oracle must have a justified specification link.
+// [Watt2023 p:110:2 s:1] A reference earns its trust from its proven correspondence to the specification, independent of the implementation it checks.
+// [Martignoni2009 p:127 s:2.2] The compared state is the program counter, the registers, the memory, and the exception. After an exception the other three stay as they were.
 pub fn compare_reference(
     expected: &SpuReferenceExpected,
     loaded: &SpuObservableSnapshot,

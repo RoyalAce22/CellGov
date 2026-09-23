@@ -4,8 +4,10 @@
 //! must reach; the command that runs the set and the tests that prove it
 //! read the same list. A smoke campaign is deterministic and bounded, so a
 //! continuous build runs it in seconds on every platform. The long runs
-//! stay in the sweep, explicit and scheduled.
-//! [Klees2018 p:2123 s:Introduction]
+//! stay in the sweep, explicit and scheduled. A short run understates what
+//! a fuzzer finds and can invert a comparison, so the smoke set gates only
+//! determinism and coverage.
+//! [Klees2018 p:2130 s:6 Timeouts]
 //!
 //! A bounded campaign that reaches nothing proves nothing. Every campaign
 //! carries a coverage floor pinned from a measured run; a run under the floor

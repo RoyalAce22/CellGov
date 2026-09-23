@@ -196,7 +196,7 @@ impl SemanticSweepReport {
 
 /// Compares PPU recipes with their decoder and interpreter-owned kind set.
 pub fn sweep_ppu(descriptors: &[PpuGenerationDescriptor]) -> SemanticSweepReport {
-    // [Jiang2022 p:1 s:Abstract] Examiner generates representative streams from machine-readable specifications and compares devices with emulators.
+    // [Jiang2022 p:5 s:3.1.1] Each encoding symbol gets a small mutation set: the boundary values of an immediate and a few fixed register indices.
     let expected = expected_ppu_kinds()
         .into_iter()
         .map(InstructionIdentity::Ppu)
@@ -449,8 +449,9 @@ fn sweep_descriptors(
 ) -> SemanticSweepReport {
     let mut report = SemanticSweepReport {
         encoder_tier: SemanticEncoderTier::DescriptorRoundTrip,
-        // [Jiang2022 p:1 s:Abstract] Representative specification cases require comparison
-        // against an independently observed device; local agreement cannot claim that tier.
+        // [Jiang2022 p:6 s:3.2.2] An inconsistent stream is one whose final state on the emulator differs
+        // from the real device's. Local decoder and descriptor agreement never compares against a device,
+        // so it cannot claim that tier.
         observation_tier: SemanticObservationTier::DescriptorOnly,
         expected_kinds,
         witnesses: Vec::new(),

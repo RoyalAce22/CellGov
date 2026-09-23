@@ -413,7 +413,9 @@ impl FuzzFindingArtifact {
         reference: ArtifactReference,
         artifact_path: &Path,
     ) -> Result<Self, ArtifactError> {
-        // [Klees2018 p:2123 s:Introduction] Evaluation records seed and timeout settings and samples performance across trials.
+        // [Klees2018 p:2126 s:3 Overview and Experimental Setup] A result is
+        // interpretable only with its parameters stated, so the artifact keeps
+        // them beside the finding.
         let path = artifact_path.to_str().ok_or(ArtifactError::NonUtf8Path)?;
         let artifact = Self {
             schema_version: FINDING_ARTIFACT_VERSION,
@@ -615,6 +617,8 @@ impl FuzzFindingArtifact {
         if let RunOutcome::HarnessFailure(source) = replay.outcome {
             return Err(ArtifactReplayError::HarnessFailure { source });
         }
+        // [Regehr2012 p:10 s:7.7 When Does Reduction Fail?] A crash's identifying
+        // string tells one defect from another.
         // A target panic with a changed message is a different finding, so the payload compares
         // like the fingerprint. Engines never reduce, so the comparison skips the reduction and a
         // reduced artifact still replays its original case.

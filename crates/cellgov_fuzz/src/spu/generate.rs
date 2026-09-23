@@ -57,10 +57,10 @@ pub(super) fn structured_sequence(
     rng: &mut Rng,
     count: usize,
 ) -> Result<GeneratedSequence, GeneratorError> {
-    // [Wang2024 p:340:1 s:Abstract] Generated programs track program state statically.
+    // [Wang2024 p:340:9 s:3.2] Generation records which places earlier words wrote so later words can read them.
     if count >= 3 && rng.chance(1, 8)? {
-        // [Padhye2019 p:329 s:Abstract] Structural parameter mutation retains valid inputs.
-        // [Feng2026 p:25 s:Abstract] Paired runs compare normalized fault outcomes.
+        // [Padhye2019 p:332 s:3.1] One random draw selects a whole structured program, so every draw yields a valid input.
+        // [Feng2026 p:32 s:4.3.2] The comparison normalizes the two runs' fault signatures before it compares them.
         let choices = SpuSequenceInteraction::ALL.len();
         let index = rng.below(choices as u64)? as usize;
         let interaction = SpuSequenceInteraction::ALL[index];
@@ -173,7 +173,7 @@ fn structured_generated_word_for_descriptor(
     rng: &mut Rng,
     forced_alias: Option<u32>,
 ) -> Result<GeneratedWord, GeneratorError> {
-    // [Yang2011 p:1 s:Abstract] Only valid typed operand combinations reach comparison.
+    // [Yang2011 p:3 s:2.3] The generator drops a candidate the safety filter rejects and draws again until one passes.
     for _ in 0..STRUCTURED_ENCODING_ATTEMPTS {
         let parameters = generated_spu_parameters(descriptor, rng, forced_alias)?;
         match descriptor.encode(parameters.stream.values()) {
@@ -193,6 +193,7 @@ fn structured_generated_word_for_descriptor(
     })
 }
 
+// [Padhye2019 p:332 s:3.1] Each random draw becomes one typed operand value, so every draw sequence encodes a structured word.
 fn generated_spu_parameters(
     descriptor: &SpuGenerationDescriptor,
     rng: &mut Rng,
@@ -296,7 +297,7 @@ pub(super) fn state_aware_state(
     state.channels.pending_mbox_rt = None;
     state.channels.pending_get = None;
     state.reservation = Some(ReservedLine::containing(u64::from(STRUCTURED_LS_DATA_BASE)));
-    // [Wang2024 p:340:1 s:Abstract] Generated programs track program state statically.
+    // [Wang2024 p:340:10 s:3.2] The generator filters candidate inputs to values that satisfy the instruction's precondition before it uses one.
     if let Some(input) = input {
         let value = if input.preferred.is_some() && rng.chance(1, 2)? {
             input.preferred.unwrap_or(0)

@@ -51,6 +51,10 @@ impl Rng {
     }
 
     /// Draws values that emphasize arithmetic edge cases.
+    ///
+    /// Zero, the extremes and single set bits are the values byte-level
+    /// fuzzers substitute as interesting.
+    /// [Padhye2019 p:331 s:2.2 Coverage-Guided Fuzzing]
     pub fn interesting_u64(&mut self) -> Result<u64, GeneratorError> {
         Ok(match self.below(8)? {
             0 => 0,
@@ -94,6 +98,10 @@ impl Rng {
     }
 
     /// Limits candidate generation to preserve deterministic case size.
+    ///
+    /// The method discards a draw the decoder refuses and redraws a bounded
+    /// number of times, so an accepted word is valid by construction.
+    /// [Yang2011 p:3 s:2.3 Randomly Generating Programs]
     pub(crate) fn decoder_accepted_words(
         &mut self,
         count: usize,

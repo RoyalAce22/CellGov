@@ -76,7 +76,7 @@ pub(super) fn structured_sequence(
     } else {
         PpuSequenceClass::ReplacesXer
     };
-    // [Wang2024 p:340:1 s:Abstract] Generated programs track program state statically.
+    // [Wang2024 p:340:9 s:3.2] Generation records which places earlier words wrote so later words can read them.
     let chain_register = rng.chance(3, 4)?.then(|| rng.next_u32());
     let mut words = Vec::with_capacity(count);
     let mut features = BTreeSet::new();
@@ -170,7 +170,7 @@ fn structured_generated_word_for_descriptor(
     rng: &mut Rng,
     forced_alias: Option<u32>,
 ) -> Result<GeneratedWord, GeneratorError> {
-    // [Yang2011 p:1 s:Abstract] Only valid typed operand combinations reach comparison.
+    // [Yang2011 p:3 s:2.3] The generator drops a candidate the safety filter rejects and draws again until one passes.
     for _ in 0..STRUCTURED_ENCODING_ATTEMPTS {
         let parameters = generated_ppu_parameters(descriptor, rng, forced_alias)?;
         match descriptor.encode(parameters.stream.values()) {
@@ -190,6 +190,7 @@ fn structured_generated_word_for_descriptor(
     })
 }
 
+// [Padhye2019 p:332 s:3.1] Each random draw becomes one typed operand value, so every draw sequence encodes a structured word.
 fn generated_ppu_parameters(
     descriptor: &PpuGenerationDescriptor,
     rng: &mut Rng,
@@ -278,6 +279,7 @@ fn random_state_for_instruction(
     rng: &mut Rng,
 ) -> Result<PpuState, GeneratorError> {
     let mut state = random_state(rng)?;
+    // [Wang2024 p:340:10 s:3.2] The generator filters candidate inputs to values that satisfy the instruction's precondition before it uses one.
     if let PpuInstruction::Lswx { rt, ra, rb } = *instruction {
         // [PPC-Book1 p:48 s:3.3] The XER byte count determines the wrapping
         // destination-register range, which must exclude both address registers.

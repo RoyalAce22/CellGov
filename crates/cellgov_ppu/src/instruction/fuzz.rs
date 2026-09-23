@@ -461,6 +461,7 @@ impl PpuGenerationDescriptor {
     }
 
     /// Produces valid exact-kind words by clearing one encoded operand bit.
+    // [Regehr2012 p:4 s:5.2] A reducer that emits only variants it knows are valid never chases a difference an invalid variant caused.
     pub fn shrink(&self, raw: u32) -> Vec<u32> {
         self.operands
             .iter()
@@ -621,7 +622,7 @@ impl PpuInstruction {
     }
 
     /// Builds an eligible partner for one declared relation.
-    // [Le2014 p:147 s:Abstract] A metamorphic partner is equivalent only under stated input conditions.
+    // [Le2014 p:219 s:3.1.1] The partner is equivalent to the original only over inputs on which both are defined.
     pub fn metamorphic_case(
         &self,
         raw: u32,

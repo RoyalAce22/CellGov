@@ -219,7 +219,9 @@ impl DecoderCampaignManifest {
         ppu: &SemanticSweepReport,
         spu: &SemanticSweepReport,
     ) -> Result<Self, DecoderManifestError> {
-        // [Chen2013 p:1 s:Abstract] Diverse failure-triggering cases are ranked ahead of repeated ones.
+        // [Chen2013 p:2 s:2.1 Definitions] The manifest ranks failures so that any
+        // prefix of the list covers as many distinct defects as possible. Repeats
+        // of one fingerprint fall behind the first case of every other.
         let mut raw_partitions = raw_partitions.to_vec();
         raw_partitions
             .sort_by_key(|artifact| (decoder_order(artifact.decoder), artifact.domain.first));
@@ -340,7 +342,9 @@ impl DecoderCampaignManifest {
         decoder: RawDecoder,
         json: &str,
     ) -> Result<(), DecoderManifestError> {
-        // [Jiang2022 p:1 s:Abstract] Device observations provide a comparison tier independent of emulator execution.
+        // [Jiang2022 p:4 s:2.2.3 Differential Testing] A word executed on a real
+        // device is a comparison tier independent of the emulator. Only that
+        // kind of record counts as external evidence here.
         let canonical = match decoder {
             RawDecoder::Ppu => serde_json::to_string(&parse_ppu_reference(json)?)?,
             RawDecoder::Spu => serde_json::to_string(&parse_spu_reference(json)?)?,
@@ -733,6 +737,10 @@ fn semantic_failure(decoder: RawDecoder, finding: &SemanticSweepFinding) -> Deco
 }
 
 /// Removes set bits while the caller confirms the exact same semantic fingerprint.
+///
+/// Each cleared bit is one shortening step; the reducer keeps it when the
+/// fingerprint holds and restores it when the fingerprint changes.
+/// [McKeeman1998 p:105 s:Test Reduction]
 pub fn minimize_decoder_failure(
     original: DecoderReplay,
     fingerprint: &DecoderFailureFingerprint,

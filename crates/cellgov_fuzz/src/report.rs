@@ -133,10 +133,12 @@ pub enum OutcomeIdentity {
 
 /// Stable identity used to bucket and rank semantically equal findings.
 ///
-/// Fingerprints let callers group redundant failures before they rank diverse cases.
-/// [Chen2013 p:1 s:Abstract]
-/// The check and divergence fields record behavioral asymmetry across references.
-/// [Petsios2017 p:615 s:Abstract]
+/// Fingerprints let callers group redundant failures before they rank diverse
+/// cases. Equal fingerprints sort late, distinct ones early, the order a
+/// furthest-point-first ranking produces. [Chen2013 p:3 s:2.2 Ranking Test Cases]
+/// The check and divergence fields record behavioral asymmetry across
+/// references, the per-reference output tuple that output delta-diversity
+/// tracks. [Petsios2017 p:619 s:III.A Guidance Engines]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SemanticFingerprint {
     /// Engine that produced the finding.
@@ -491,8 +493,9 @@ impl FuzzReport {
 
 /// Terminal classification of a fuzz-engine invocation.
 ///
-/// Target disagreement and target crashes remain distinct findings.
-/// [McKeeman1998 p:100 s:Abstract]
+/// Target disagreement and target crashes remain distinct findings, the way a
+/// test analyzer files crashes, abnormal ends and output differences apart.
+/// [McKeeman1998 p:105 s:Test Analysis]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunOutcome {
     /// Every scheduled case completed without a finding.

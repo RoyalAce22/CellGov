@@ -10,8 +10,11 @@ pub const DEFAULT_REDUCTION_BUDGET: u64 = 4_096;
 
 /// How a reducer chooses among the accepted candidates of one round.
 ///
-/// Deterministic shrinking preserves the sequential minimal result; greedy
-/// shrinking trades that guarantee for speed. [Krook2023 p:1 s:Abstract]
+/// Deterministic shrinking accepts the earliest-ordered reproduced candidate,
+/// so a parallel driver settles on the same local minimum as a sequential
+/// walk of the candidate list. Greedy shrinking accepts whichever reproduced
+/// candidate finishes first and may settle elsewhere.
+/// [Krook2023 p:5 s:4 Design and Implementation]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ReductionPolicy {
@@ -157,8 +160,9 @@ enum SessionState {
 
 /// Round-driven reducer that a sequential or parallel driver advances.
 ///
-/// A generic fixpoint computation invokes modular transformations.
-/// [Regehr2012 p:1 s:Abstract]
+/// The session runs pluggable transforms against the current case until a
+/// round accepts no variant, the global fixpoint of a modular reducer.
+/// [Regehr2012 p:6 s:6.3 A Modular Reducer]
 #[derive(Debug, Clone)]
 pub struct ReductionSession {
     request: ReductionRequest,
@@ -371,6 +375,10 @@ impl ReductionSession {
 
 /// Reduces sequentially; each round evaluates in order and stops at the first reproduced candidate.
 ///
+/// The search continues from each accepted candidate without backtracking,
+/// so the result is a local minimum.
+/// [Krook2023 p:2 s:2 What Are the Challenges?]
+///
 /// # Errors
 ///
 /// Propagates evaluator failures and the session's refusals.
@@ -487,11 +495,17 @@ pub fn classify_run(finding: &Finding, run: &FuzzRun) -> Result<CandidateVerdict
             source: Box::new(source.clone()),
         });
     }
+    // [Regehr2012 p:4 s:5.1 The Validity Problem] A variant that shows the
+    // divergence only because it left defined behaviour is not a valid test
+    // case. A reducer that accepts one stays stuck there.
     // Applicability comes before identity: an undefined or unsupported case
     // enters no check and reproduces nothing.
     if run.report.unsupported_cases > 0 || run.report.undefined_cases > 0 {
         return Ok(CandidateVerdict::Inapplicable);
     }
+    // [Regehr2012 p:10 s:7.7 When Does Reduction Fail?] A variant that triggers
+    // a different defect is a failed reduction, so the verdict compares the
+    // crash's identifying string as well as the fingerprint.
     if let Some(reproduced) = run.report.findings.iter().find(|candidate| {
         candidate.kind == finding.kind
             && candidate.fingerprint == finding.fingerprint

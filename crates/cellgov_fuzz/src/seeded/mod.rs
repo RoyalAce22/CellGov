@@ -3,11 +3,13 @@
 //! Every hook in this module is an identity outside test builds. A test seeds
 //! one defect for its thread, runs an engine through the public entry points,
 //! and asserts the finding kind that defect must produce; the same campaign
-//! without the defect must stay clean. A defect that reaches every run of a
-//! self-differential check the same way is invisible to it, which is why an
-//! independent reference remains a separate tier. [Watt2023 p:110:1 s:Abstract]
+//! without the defect must stay clean. Simple bugs seeded into the
+//! implementation and found within minutes validate the fuzzing
+//! configuration itself. [Watt2023 p:110:20 s:5.2] A defect that reaches
+//! every run of a self-differential check the same way is invisible to it,
+//! so an independent reference remains a separate tier. [Watt2023 p:110:2 s:1]
 //! Seeded disagreement, crash, and corrupted state prove each comparison tier
-//! can detect them. [McKeeman1998 p:100 s:Abstract]
+//! can detect them. [McKeeman1998 p:101 s:Differential Testing]
 //!
 //! Each hook sits at the boundary its defect corrupts, so removing the check
 //! that boundary feeds turns exactly one named test red:
