@@ -1,44 +1,189 @@
 use super::*;
+use cellgov_spu::fuzz::{generation_descriptors, SpuSequenceInteraction};
+use cellgov_sync::{ReservedLine, RESERVATION_LINE_BYTES};
+
+use crate::case::{CaseEligibility, EligibilityReason};
+use crate::spu::assess::assess_sequence_case;
+use crate::spu::generate::STRUCTURED_LS_DATA_BASE;
+
+fn observed_step(outcome: SpuStepOutcome) -> ObservedStep {
+    ObservedStep {
+        outcome,
+        state: SpuObservableSnapshot::capture(&SpuState::new()),
+    }
+}
 
 #[test]
-fn structured_generation_selects_every_interaction_with_bounded_linked_parameters() {
-    let descriptors = generation_descriptors();
-    let mut reached = BTreeSet::new();
-    for case in 0..4_096 {
-        let mut rng = Rng::for_case(FuzzConfig::default().campaign_version, 7, case);
-        let generated =
-            structured_sequence(&descriptors, &mut rng, 4).expect("typed sequence must generate");
-        assert_eq!(generated.words.len(), 4);
-        if let Some((interaction, data_base)) = generated.interaction {
-            reached.insert(interaction);
-            assert!(data_base >= STRUCTURED_LS_DATA_BASE);
-            assert!(data_base as usize + RESERVATION_LINE_BYTES as usize <= SPU_LS_SIZE);
-            assert_eq!(data_base as usize % RESERVATION_LINE_BYTES as usize, 0);
-            let shorter = interaction
-                .shrink_words(&generated.words)
-                .expect("one trailing decoy is removable");
-            assert_eq!(shorter.len(), 3);
-            assert_eq!(&shorter[..], &generated.words[..3]);
-            if matches!(
-                interaction,
-                SpuSequenceInteraction::Branch | SpuSequenceInteraction::Channel
-            ) {
-                assert!(
-                    interaction.shrink_words(&shorter).is_none(),
-                    "branch target is protected"
-                );
-            } else {
-                assert_eq!(
-                    interaction
-                        .shrink_words(&shorter)
-                        .expect("second decoy is removable")
-                        .len(),
-                    2
-                );
-            }
-        }
+fn an_spu_sequence_retains_terminal_effects() {
+    let mut initial = SpuState::new();
+    let rd_in_mbox = (0x00d_u32 << 21) | (29 << 7) | 2;
+    initial.ls[..4].copy_from_slice(&rd_in_mbox.to_be_bytes());
+
+    let (observed, decoded, _) = run_sequence(&initial, 1);
+
+    assert_eq!(decoded, 1);
+    assert!(matches!(
+        observed.terminal_outcome,
+        Some(SpuStepOutcome::Yield { ref effects, .. }) if !effects.is_empty()
+    ));
+}
+
+#[test]
+fn a_faulting_spu_sequence_discards_prior_state() {
+    let mut initial = SpuState::new();
+    let il_r3_one = (0x081u32 << 23) | (1 << 7) | 3;
+    let unsupported_rchcnt = (0x00fu32 << 21) | (8 << 7) | 2;
+    initial.ls[..4].copy_from_slice(&il_r3_one.to_be_bytes());
+    initial.ls[4..8].copy_from_slice(&unsupported_rchcnt.to_be_bytes());
+
+    let (observed, decoded, _) = run_sequence(&initial, 2);
+
+    assert_eq!(decoded, 2);
+    assert_eq!(observed.state.regs[3], [0; 16]);
+    assert_eq!(observed.state.pc, 0);
+    assert!(matches!(
+        observed.terminal_outcome,
+        Some(SpuStepOutcome::Fault(_))
+    ));
+}
+
+#[test]
+fn self_modified_decode_refusal_is_a_terminal_observation() {
+    let mut initial = SpuState::new();
+    initial.regs[0] = [0xff; 16];
+    let stqd_r0_at_16 = 0x2400_4080u32;
+    let nop = 0x4020_007fu32;
+    for (index, word) in [stqd_r0_at_16, nop, nop, nop, nop].iter().enumerate() {
+        let start = index * 4;
+        initial.ls[start..start + 4].copy_from_slice(&word.to_be_bytes());
     }
-    assert_eq!(reached, BTreeSet::from(SpuSequenceInteraction::ALL));
+
+    let (observed, decoded, _) = run_sequence(&initial, 5);
+
+    assert_eq!(decoded, 4);
+    assert_eq!(observed.decode_refusal, Some((16, u32::MAX)));
+}
+
+#[test]
+fn replay_requires_the_deterministic_relation() {
+    assert!(!requests_replay(&[]));
+    assert!(requests_replay(&[SpuMetamorphicRelation::Deterministic]));
+}
+
+#[test]
+fn spu_replay_asymmetry_uses_the_strongest_changed_axis() {
+    let first = observed_step(SpuStepOutcome::Continue);
+
+    assert_eq!(
+        spu_outcome_class_asymmetry(SpuOutcomeClass::Continue),
+        CrossReferenceAsymmetry::Outcome
+    );
+    assert_eq!(
+        spu_outcome_class_asymmetry(SpuOutcomeClass::Fault),
+        CrossReferenceAsymmetry::Fault
+    );
+
+    let mut second = first.clone();
+    second.state.regs[0][0] = 1;
+    assert_eq!(
+        spu_step_replay_asymmetry(&first, &second),
+        CrossReferenceAsymmetry::State
+    );
+
+    let second = observed_step(SpuStepOutcome::Branch);
+    assert_eq!(
+        spu_step_replay_asymmetry(&first, &second),
+        CrossReferenceAsymmetry::Outcome
+    );
+
+    let second = observed_step(SpuStepOutcome::Fault(
+        cellgov_spu::exec::SpuFault::UnsupportedChannelCount(0),
+    ));
+    assert_eq!(
+        spu_step_replay_asymmetry(&first, &second),
+        CrossReferenceAsymmetry::Fault
+    );
+
+    let rd_in_mbox = (0x00d_u32 << 21) | (29 << 7) | 2;
+    let instruction = cellgov_spu::decode::decode(rd_in_mbox).unwrap();
+    let first = run_once(&instruction, &SpuState::new());
+    let mut second = first.clone();
+    let SpuStepOutcome::Yield { effects, .. } = &mut second.outcome else {
+        panic!("mailbox read must yield");
+    };
+    effects.push(Effect::ClockRead { source: UNIT });
+    assert_eq!(
+        spu_step_replay_asymmetry(&first, &second),
+        CrossReferenceAsymmetry::Effect
+    );
+}
+
+#[test]
+fn spu_sequence_replay_compares_depth_and_execution_order() {
+    let observed = ObservedSequence {
+        state: SpuObservableSnapshot::capture(&SpuState::new()),
+        terminal_outcome: Some(SpuStepOutcome::Continue),
+        decode_refusal: None,
+        deterministic: true,
+        has_undefined_operands: false,
+        has_unmodeled_execution: false,
+        footprint_violations: BTreeSet::new(),
+    };
+    let nop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop);
+    let lnop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Lnop);
+    let first = (observed.clone(), 2, vec![nop, lnop]);
+    let reordered = (observed.clone(), 2, vec![lnop, nop]);
+    let deeper = (observed, 3, vec![nop, lnop]);
+    let mut refusal = first.clone();
+    refusal.0.decode_refusal = Some((8, u32::MAX));
+
+    assert_eq!(
+        spu_sequence_replay_asymmetry(&first, &reordered),
+        CrossReferenceAsymmetry::State
+    );
+    assert_eq!(
+        spu_sequence_replay_asymmetry(&first, &deeper),
+        CrossReferenceAsymmetry::State
+    );
+    assert_eq!(
+        spu_sequence_replay_asymmetry(&first, &refusal),
+        CrossReferenceAsymmetry::Outcome
+    );
+}
+
+#[test]
+fn spu_observation_preserves_the_first_executed_kind() {
+    let nop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Nop);
+    let lnop = InstructionIdentity::Spu(cellgov_spu::instruction::SpuInstructionKind::Lnop);
+    let assessment = CaseAssessment::new(
+        CaseEligibility::Eligible,
+        EligibilityReason::InterpreterContract,
+        BTreeSet::new(),
+    );
+    let state = SpuObservableSnapshot::capture(&SpuState::new());
+
+    let observation = spu_observation(
+        [lnop, nop],
+        &assessment,
+        SpuTerminalObservation::Execution(Some(&SpuStepOutcome::Continue)),
+        &state,
+        state.clone(),
+        2,
+        CrossReferenceAsymmetry::None,
+    );
+
+    assert_eq!(observation.first_instruction_kind, Some(lnop));
+
+    let refusal = spu_observation(
+        [lnop, nop],
+        &assessment,
+        SpuTerminalObservation::DecodeRefusal(Some(&SpuStepOutcome::Continue)),
+        &state,
+        state.clone(),
+        2,
+        CrossReferenceAsymmetry::None,
+    );
+    assert_eq!(refusal.outcome, Some(OutcomeIdentity::SpuDecodeRefusal));
 }
 
 #[test]
@@ -73,14 +218,14 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             words.len(),
             words.len(),
             GenerationStrategy::Structured,
-            &std::cell::Cell::new(None),
+            &Cell::new(None),
         );
         let replay = run_generated_sequence(
             &initial,
             words.len(),
             words.len(),
             GenerationStrategy::Structured,
-            &std::cell::Cell::new(None),
+            &Cell::new(None),
         );
         assert_eq!(
             spu_sequence_replay_asymmetry(&first, &replay),
@@ -168,7 +313,7 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             SpuSequenceInteraction::Stop => {
                 assert_eq!(first.2.len(), 2);
                 assert!(first.0.has_unmodeled_execution);
-                // The campaign does not model STOP's external signal, so it refuses comparison.
+                // STOP raises an external signal the campaign does not model, so the case is unsupported.
                 assert_eq!(
                     assess_sequence_case(
                         GenerationStrategy::Structured,
@@ -241,7 +386,7 @@ fn an_spu_sequence_does_not_execute_beyond_its_generated_words() {
         2,
         2,
         GenerationStrategy::Structured,
-        &std::cell::Cell::new(None),
+        &Cell::new(None),
     );
 
     assert_eq!(decoded, 1);

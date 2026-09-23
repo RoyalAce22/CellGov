@@ -35,9 +35,9 @@ fn module_file(stem: &str) -> PathBuf {
     }
 }
 
-/// Test files a module declares, as names under `src/tests/`.
-fn declares_test_file(stem: &str) -> Vec<String> {
-    let text = std::fs::read_to_string(module_file(stem)).expect("readable module");
+/// Test files a module file declares, as names under a `tests/` directory.
+fn declared_test_files(module: &Path) -> Vec<String> {
+    let text = std::fs::read_to_string(module).expect("readable module");
     text.lines()
         .filter_map(|line| {
             line.trim()
@@ -52,6 +52,49 @@ fn declares_test_file(stem: &str) -> Vec<String> {
         .collect()
 }
 
+fn declares_test_file(stem: &str) -> Vec<String> {
+    declared_test_files(&module_file(stem))
+}
+
+/// The `src/<stem>/tests/` directory of a directory module that keeps its
+/// tests beside its submodules.
+fn nested_tests_dir(stem: &str) -> Option<PathBuf> {
+    let dir = src_dir().join(stem).join("tests");
+    dir.is_dir().then_some(dir)
+}
+
+/// The submodule files of a directory module by stem, `mod.rs` excluded.
+fn submodules(stem: &str) -> Vec<(String, PathBuf)> {
+    let mut files: Vec<(String, PathBuf)> = std::fs::read_dir(src_dir().join(stem))
+        .expect("module directory")
+        .map(|entry| entry.expect("module entry").path())
+        .filter(|path| path.is_file())
+        .filter_map(|path| {
+            let sub = path.file_stem()?.to_string_lossy().into_owned();
+            (sub != "mod").then_some((sub, path))
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+/// Files under `tests_dir` that no `#[path]` line in `declared` names.
+fn undeclared_in(tests_dir: &Path, declared: &[String]) -> Vec<String> {
+    let mut orphans: Vec<String> = std::fs::read_dir(tests_dir)
+        .expect("tests directory")
+        .map(|entry| {
+            entry
+                .expect("test entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .filter(|name| name.ends_with(".rs") && !declared.contains(name))
+        .collect();
+    orphans.sort();
+    orphans
+}
+
 #[test]
 fn every_source_module_declares_a_direct_test_file_that_exists() {
     let modules = source_modules();
@@ -60,8 +103,36 @@ fn every_source_module_declares_a_direct_test_file_that_exists() {
         modules.iter().any(|stem| stem == "seeded"),
         "a directory module is walked: {modules:?}"
     );
+    assert!(
+        modules.iter().any(|stem| nested_tests_dir(stem).is_some()),
+        "a directory module with nested tests is walked: {modules:?}"
+    );
     let tests_dir = src_dir().join("tests");
     for module in &modules {
+        if let Some(nested) = nested_tests_dir(module) {
+            assert_eq!(
+                declares_test_file(module),
+                Vec::<String>::new(),
+                "{module}/mod.rs declares test files although {module}/tests/ holds them"
+            );
+            let subs = submodules(module);
+            assert!(!subs.is_empty(), "{module}/ declares no submodule");
+            for (sub, path) in subs {
+                let direct = format!("{sub}_tests.rs");
+                let files = declared_test_files(&path);
+                assert!(
+                    files.contains(&direct),
+                    "{module}/{sub}.rs does not declare tests/{direct}; it declares {files:?}"
+                );
+                for file in files {
+                    assert!(
+                        nested.join(&file).is_file(),
+                        "{module}/{sub}.rs declares tests/{file}, which does not exist"
+                    );
+                }
+            }
+            continue;
+        }
         let owner = TESTED_ELSEWHERE
             .iter()
             .find(|(tested, _)| tested == module)
@@ -83,21 +154,25 @@ fn every_source_module_declares_a_direct_test_file_that_exists() {
 
 #[test]
 fn every_test_file_is_declared_by_a_source_module() {
-    let tests_dir = src_dir().join("tests");
-    let declared: Vec<String> = source_modules()
+    let modules = source_modules();
+    let declared: Vec<String> = modules
         .iter()
         .flat_map(|module| declares_test_file(module))
         .collect();
-    let mut orphans = Vec::new();
-    for entry in std::fs::read_dir(&tests_dir).expect("tests directory") {
-        let name = entry
-            .expect("test entry")
-            .file_name()
-            .to_string_lossy()
-            .into_owned();
-        if name.ends_with(".rs") && !declared.contains(&name) {
-            orphans.push(name);
-        }
+    let mut orphans = undeclared_in(&src_dir().join("tests"), &declared);
+    for module in &modules {
+        let Some(nested) = nested_tests_dir(module) else {
+            continue;
+        };
+        let declared: Vec<String> = submodules(module)
+            .iter()
+            .flat_map(|(_, path)| declared_test_files(path))
+            .collect();
+        orphans.extend(
+            undeclared_in(&nested, &declared)
+                .into_iter()
+                .map(|name| format!("{module}/tests/{name}")),
+        );
     }
     assert_eq!(
         orphans,
