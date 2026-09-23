@@ -30,6 +30,8 @@ fn fingerprint() -> ArtifactFingerprint {
 fn record(stored: bool, reduction: ArtifactReduction) -> ArtifactRecord {
     ArtifactRecord {
         path: PathBuf::from("out").join("finding.json"),
+        campaign_version: 3,
+        seed: 7,
         case_index: 12,
         finding_kind: FindingKind::IllegalOutcome,
         fingerprint: fingerprint(),
@@ -245,11 +247,11 @@ fn the_summary_names_each_artifact_with_its_exact_replay_command() {
     );
     assert_eq!(
         lines[1],
-        format!("fuzz: finding case=12 kind=IllegalOutcome check=LegalOutcome divergence=Outcome reduction=not attempted artifact=stored {replay}")
+        format!("fuzz: finding version=3 seed=7 case=12 kind=IllegalOutcome check=LegalOutcome divergence=Outcome reduction=not attempted artifact=stored {replay}")
     );
     assert_eq!(
         lines[2],
-        format!("fuzz: finding case=12 kind=IllegalOutcome check=LegalOutcome divergence=Outcome reduction=reduced to 1 words artifact=not stored {replay}")
+        format!("fuzz: finding version=3 seed=7 case=12 kind=IllegalOutcome check=LegalOutcome divergence=Outcome reduction=reduced to 1 words artifact=not stored {replay}")
     );
     assert_eq!(
         text,

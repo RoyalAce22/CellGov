@@ -9,6 +9,7 @@ mod error;
 mod evaluate;
 mod outcome;
 mod scan;
+mod smoke;
 
 pub(crate) use entry::run_with_quiet;
 pub(crate) use error::FuzzCliError;
@@ -28,3 +29,7 @@ mod guard_tests;
 #[cfg(test)]
 #[path = "tests/evaluate_tests.rs"]
 mod evaluate_tests;
+
+#[cfg(test)]
+#[path = "tests/smoke_tests.rs"]
+mod smoke_tests;

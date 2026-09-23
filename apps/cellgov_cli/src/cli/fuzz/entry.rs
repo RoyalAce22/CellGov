@@ -9,6 +9,7 @@ use super::campaign::{run_campaign, FuzzEngine};
 use super::error::FuzzCliError;
 use super::evaluate::{run_compare, run_evaluate};
 use super::scan::{run_raw, run_semantic};
+use super::smoke::{run_promote, run_smoke};
 use crate::cli::exit::{CommandError, CommandExitCode};
 use crate::cli::parse::{FuzzArgs, FuzzCommand};
 
@@ -45,6 +46,8 @@ pub(super) fn run_inner_with_quiet(
         FuzzCommand::Replay(args) => run_replay(args),
         FuzzCommand::Evaluate(args) => run_evaluate(args, quiet),
         FuzzCommand::Compare(args) => run_compare(args),
+        FuzzCommand::Smoke(args) => run_smoke(args, quiet),
+        FuzzCommand::Promote(args) => run_promote(args),
     }
 }
 

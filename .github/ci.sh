@@ -19,6 +19,20 @@ test_suite() {
     cargo check --workspace --all-targets --locked --features "$external_data_features"
     cargo test --workspace --locked
     cargo test --workspace --release --locked
+    # The bounded fuzz smoke set, in both profiles: a debug invariant a raw
+    # word trips is a finding only in the debug build. Every finding is
+    # held to a promoted regression; an unpromoted one fails the build with
+    # its artifact and exact replay printed.
+    #
+    # The artifacts directory starts empty. CI restores `target` from its
+    # cache, and a stored artifact refuses a later finding at the same path
+    # whose evidence differs, which would fail the set for a stale file
+    # rather than for the run.
+    rm -rf target/fuzz-smoke
+    cargo run -p cellgov_cli --locked -- dev fuzz smoke \
+        --artifacts-dir target/fuzz-smoke/debug --regressions crates/cellgov_fuzz/regressions
+    cargo run -p cellgov_cli --locked --release -- dev fuzz smoke \
+        --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions
     cargo test -p cellgov_install --locked --features decrypt
     cargo test -p cellgov_install --release --locked --features decrypt
     cargo test -p cellgov_compare --locked --no-default-features

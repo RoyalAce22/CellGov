@@ -312,6 +312,7 @@ dependencies = [
  "cellgov_ppu",
  "cellgov_spu",
  "cellgov_sync",
+ "cellgov_testkit",
  "cellgov_time",
  "serde",
  "serde_json",

@@ -7,6 +7,7 @@ use cellgov_fuzz::artifact::{
 };
 use cellgov_fuzz::evaluation::{ComparisonError, EvaluationPlanError, ResultsError};
 use cellgov_fuzz::raw_decode::{RawDecodeError, MAX_RAW_DECODE_PANIC_SAMPLES};
+use cellgov_fuzz::regression::RegressionError;
 
 use super::outcome;
 use crate::cli::exit_codes;
@@ -114,6 +115,8 @@ pub(crate) enum FuzzCliError {
     EvaluationComparison(#[from] ComparisonError),
     #[error("fuzz: evaluation trial seed {seed} failed inside the harness: {message}")]
     TrialHarness { seed: u64, message: String },
+    #[error("fuzz: {0}")]
+    Regressions(#[from] RegressionError),
 }
 
 impl FuzzCliError {
@@ -136,7 +139,8 @@ impl FuzzCliError {
             ),
             Self::EvaluationResults(_)
             | Self::EvaluationRead { .. }
-            | Self::TrialHarness { .. } => false,
+            | Self::TrialHarness { .. }
+            | Self::Regressions(_) => false,
             Self::ReferenceRead { .. }
             | Self::PpuReference(_)
             | Self::SpuReference(_)
@@ -213,6 +217,7 @@ impl FuzzCliError {
             | Self::EvaluationResults(_)
             | Self::EvaluationRead { .. }
             | Self::EvaluationComparison(_)
+            | Self::Regressions(_)
             | Self::ArtifactReplay(
                 ArtifactReplayError::ReferenceMismatch
                 | ArtifactReplayError::PpuReference(_)

@@ -1,5 +1,6 @@
 //! SPU fuzz engines built on interpreter-owned descriptors.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
@@ -732,12 +733,14 @@ fn run_sequences_inner(
             initial.ls[start..start + 4].copy_from_slice(&word.to_be_bytes());
         }
         let program_words = words.len();
+        let executing = Cell::new(None);
         let first = match call_target(|| {
             run_generated_sequence(
                 &initial,
                 config.sequence_words as usize,
                 program_words,
                 config.strategy,
+                &executing,
             )
         }) {
             Ok(first) => first,
@@ -745,7 +748,7 @@ fn run_sequences_inner(
                 record_target_panic(
                     report,
                     CheckIdentity::SpuExecutor,
-                    None,
+                    executing.get(),
                     words.clone(),
                     iteration,
                     payload,
@@ -791,12 +794,14 @@ fn run_sequences_inner(
         }
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if first.0.deterministic {
+            let executing = Cell::new(None);
             let second = match call_target(|| {
                 run_generated_sequence(
                     &initial,
                     config.sequence_words as usize,
                     program_words,
                     config.strategy,
+                    &executing,
                 )
             }) {
                 Ok(mut second) => {
@@ -807,7 +812,7 @@ fn run_sequences_inner(
                     record_target_panic(
                         report,
                         CheckIdentity::SpuExecutor,
-                        None,
+                        executing.get(),
                         words.clone(),
                         iteration,
                         payload,
@@ -1066,11 +1071,12 @@ fn optional_outcome_effects(outcome: Option<&SpuStepOutcome>) -> &[Effect] {
     outcome.map_or(&[], outcome_effects)
 }
 
+#[cfg(test)]
 fn run_sequence(
     initial: &SpuState,
     budget: usize,
 ) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
-    run_sequence_with_limit(initial, budget, None)
+    run_sequence_with_limit(initial, budget, None, &Cell::new(None))
 }
 
 fn run_generated_sequence(
@@ -1078,19 +1084,24 @@ fn run_generated_sequence(
     budget: usize,
     program_words: usize,
     strategy: GenerationStrategy,
+    executing: &Cell<Option<InstructionIdentity>>,
 ) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
     match strategy {
         GenerationStrategy::Structured => {
-            run_sequence_with_limit(initial, budget, Some(program_words))
+            run_sequence_with_limit(initial, budget, Some(program_words), executing)
         }
-        GenerationStrategy::RawWords => run_sequence(initial, budget),
+        GenerationStrategy::RawWords => run_sequence_with_limit(initial, budget, None, executing),
     }
 }
 
+/// Runs a sequence and keeps `executing` at the instruction the executor is
+/// inside. A panic that unwinds out of the run then still names the
+/// instruction that raised it.
 fn run_sequence_with_limit(
     initial: &SpuState,
     budget: usize,
     program_words: Option<usize>,
+    executing: &Cell<Option<InstructionIdentity>>,
 ) -> (ObservedSequence, u64, Vec<InstructionIdentity>) {
     seeded::executor_boundary();
     let mut state = initial.clone();
@@ -1114,6 +1125,7 @@ fn run_sequence_with_limit(
         let Some(raw) = state.fetch() else {
             break;
         };
+        executing.set(None);
         let Ok(instruction) = seeded::spu_decode(raw) else {
             decode_refusal = Some((state.pc, raw));
             break;
@@ -1123,7 +1135,9 @@ fn run_sequence_with_limit(
         has_unmodeled_execution |= !encoding_execution_is_supported(raw);
         deterministic &= requests_replay(descriptor.relations);
         decoded += 1;
-        kinds.push(InstructionIdentity::Spu(descriptor.kind));
+        let identity = InstructionIdentity::Spu(descriptor.kind);
+        kinds.push(identity);
+        executing.set(Some(identity));
         let before = state.clone();
         let outcome = execute(&instruction, &mut state, UNIT);
         seeded::spu_observed(

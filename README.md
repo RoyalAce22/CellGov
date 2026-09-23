@@ -63,7 +63,8 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 CI runs those on both platforms and additionally `cargo test
 --release`, the `cellgov_install` tests with `--features decrypt`,
-and `cellgov_compare` with `--no-default-features`.
+`cellgov_compare` with `--no-default-features`, and the bounded fuzz
+smoke set (`cellgov dev fuzz smoke`) in both build profiles.
 
 The workspace has no
 runtime dependency on RPCS3. `cellgov_compare` gates its RPCS3

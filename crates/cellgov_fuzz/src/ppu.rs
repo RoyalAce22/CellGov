@@ -1,5 +1,6 @@
 //! PPU fuzz engines built on interpreter-owned descriptors.
 
+use std::cell::Cell;
 use std::collections::BTreeSet;
 
 use cellgov_effects::Effect;
@@ -769,21 +770,23 @@ fn run_sequences_inner(
         if words.is_empty() {
             return Err(InvariantError::EmptyGeneratedSequence.into());
         }
-        let first = match call_target(|| run_sequence(&words, &initial, &memory)) {
-            Ok(Ok(first)) => first,
-            Ok(Err(error)) => return Err(error.into()),
-            Err(payload) => {
-                record_target_panic(
-                    report,
-                    CheckIdentity::PpuExecutor,
-                    None,
-                    words.clone(),
-                    iteration,
-                    payload,
-                )?;
-                continue;
-            }
-        };
+        let executing = Cell::new(None);
+        let first =
+            match call_target(|| run_sequence_tracked(&words, &initial, &memory, &executing)) {
+                Ok(Ok(first)) => first,
+                Ok(Err(error)) => return Err(error.into()),
+                Err(payload) => {
+                    record_target_panic(
+                        report,
+                        CheckIdentity::PpuExecutor,
+                        executing.get(),
+                        words.clone(),
+                        iteration,
+                        payload,
+                    )?;
+                    continue;
+                }
+            };
         report.reached_many(first.decoded, first.decoded_kinds.iter().copied())?;
         let mut features = generated.features;
         features.extend(state_features);
@@ -815,36 +818,38 @@ fn run_sequences_inner(
         }
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if first.observed.deterministic {
-            let second = match call_target(|| run_sequence(&words, &initial, &memory)) {
-                Ok(Ok(mut second)) => {
-                    seeded::ppu_replayed(&mut second.observed.observation);
-                    second
-                }
-                Ok(Err(error)) => return Err(error.into()),
-                Err(payload) => {
-                    record_target_panic(
-                        report,
-                        CheckIdentity::PpuExecutor,
-                        None,
-                        words.clone(),
-                        iteration,
-                        payload,
-                    )?;
-                    report.observe_case(
-                        iteration,
-                        ppu_observation(
-                            first.executed_kinds.iter().copied(),
-                            &assessment,
-                            PpuTerminalObservation::from_sequence(&first.observed),
-                            &first.observed.observation.committed_effects,
-                            first.executed,
-                            ppu_sequence_changed(&initial, &first.observed),
-                            CrossReferenceAsymmetry::TargetPanic,
-                        ),
-                    )?;
-                    continue;
-                }
-            };
+            let executing = Cell::new(None);
+            let second =
+                match call_target(|| run_sequence_tracked(&words, &initial, &memory, &executing)) {
+                    Ok(Ok(mut second)) => {
+                        seeded::ppu_replayed(&mut second.observed.observation);
+                        second
+                    }
+                    Ok(Err(error)) => return Err(error.into()),
+                    Err(payload) => {
+                        record_target_panic(
+                            report,
+                            CheckIdentity::PpuExecutor,
+                            executing.get(),
+                            words.clone(),
+                            iteration,
+                            payload,
+                        )?;
+                        report.observe_case(
+                            iteration,
+                            ppu_observation(
+                                first.executed_kinds.iter().copied(),
+                                &assessment,
+                                PpuTerminalObservation::from_sequence(&first.observed),
+                                &first.observed.observation.committed_effects,
+                                first.executed,
+                                ppu_sequence_changed(&initial, &first.observed),
+                                CrossReferenceAsymmetry::TargetPanic,
+                            ),
+                        )?;
+                        continue;
+                    }
+                };
             let replay_asymmetry = ppu_sequence_replay_asymmetry(&first, &second);
             if replay_asymmetry != CrossReferenceAsymmetry::None {
                 asymmetry = asymmetry.max(replay_asymmetry);
@@ -1130,10 +1135,23 @@ fn replay_asymmetry(
     asymmetry
 }
 
+#[cfg(test)]
 fn run_sequence(
     words: &[u32],
     initial: &PpuState,
     memory: &[u8],
+) -> Result<ObservedSequenceRun, PpuObservationError> {
+    run_sequence_tracked(words, initial, memory, &Cell::new(None))
+}
+
+/// Runs a sequence and keeps `executing` at the instruction the executor is
+/// inside. A panic that unwinds out of the run then still names the
+/// instruction that raised it.
+fn run_sequence_tracked(
+    words: &[u32],
+    initial: &PpuState,
+    memory: &[u8],
+    executing: &Cell<Option<InstructionIdentity>>,
 ) -> Result<ObservedSequenceRun, PpuObservationError> {
     seeded::executor_boundary();
     let mut state = initial.clone();
@@ -1159,6 +1177,7 @@ fn run_sequence(
         let Some(&raw) = words.get(index) else {
             break;
         };
+        executing.set(None);
         let Ok(instruction) = seeded::ppu_decode(raw) else {
             decode_refusal = Some((state.pc, raw));
             break;
@@ -1168,6 +1187,7 @@ fn run_sequence(
         decoded += 1;
         let identity = InstructionIdentity::Ppu(descriptor.kind);
         decoded_kinds.push(identity);
+        executing.set(Some(identity));
         let verdict = execute(
             &instruction,
             &mut state,

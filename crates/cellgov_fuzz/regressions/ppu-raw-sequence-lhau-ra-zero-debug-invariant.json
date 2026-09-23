@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "campaign": {
+    "campaign_version": 4,
+    "seed": 1,
+    "strategy": "raw_words",
+    "schedule": {
+      "cases": {
+        "first": 0,
+        "count": 300
+      },
+      "shard": {
+        "index": 0,
+        "count": 1
+      },
+      "cancellation": null
+    },
+    "retention": {
+      "capacity": 256,
+      "per_kind_capacity": 8,
+      "novelty_weight": 8,
+      "rarity_weight": 4,
+      "asymmetry_weight": 16,
+      "policy": "balanced"
+    },
+    "max_findings": 64,
+    "sequence_words": 32
+  },
+  "execution": {
+    "workers": 1,
+    "deadline_ms": null,
+    "progress": false,
+    "check": "all",
+    "reduction": {
+      "kind": "on_finding",
+      "policy": "deterministic",
+      "budget": 4096
+    }
+  },
+  "original": {
+    "replay": {
+      "campaign_version": 4,
+      "target": "PpuSequence",
+      "strategy": "raw_words",
+      "seed": 1,
+      "case_index": 78,
+      "sequence_words": 32
+    },
+    "words": [
+      2789945794,
+      948212998,
+      1815630714,
+      2942352046,
+      3223682624,
+      544387693,
+      760080761,
+      3170065261,
+      3351861037,
+      1666911102,
+      2563833667,
+      3676317962,
+      3624112639,
+      3161653568,
+      2529123648,
+      2856183103,
+      2076454530,
+      1984001763,
+      4253310707,
+      2750005179,
+      3641295637,
+      3907387946,
+      1658525596,
+      2732916356,
+      2566064884,
+      794388050,
+      1741349989,
+      2416295629,
+      2979566333,
+      3179145458,
+      931329544,
+      845443075
+    ],
+    "state_source": "versioned_generator"
+  },
+  "finding_kind": "TargetPanic",
+  "fingerprint": {
+    "target": "PpuSequence",
+    "instruction_kind": "Ppu(Ordinary(Lhau))",
+    "check": "PpuExecutor",
+    "divergence": "TargetPanic",
+    "outcome": null,
+    "effect": null
+  },
+  "reference": {
+    "kind": "local"
+  },
+  "observation": null,
+  "coverage": {
+    "cases": 300,
+    "decoded": 1116,
+    "eligible": 282,
+    "unsupported": 0,
+    "undefined": 0,
+    "finding_counts": {
+      "TargetPanic": 18
+    }
+  },
+  "reduction": {
+    "kind": "reduced",
+    "words": [
+      2942352046
+    ]
+  },
+  "panic_payload": {
+    "kind": "string",
+    "message": "lhau invalid form: RA=0, RT=27"
+  },
+  "replay_command": [
+    "cellgov",
+    "dev",
+    "fuzz",
+    "replay",
+    "--artifact",
+    "crates/cellgov_fuzz/regressions/ppu-raw-sequence-lhau-ra-zero-debug-invariant.json"
+  ]
+}

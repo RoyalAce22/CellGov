@@ -73,12 +73,14 @@ fn every_spu_interaction_recipe_executes_its_dependency_and_detects_seeded_leaks
             words.len(),
             words.len(),
             GenerationStrategy::Structured,
+            &std::cell::Cell::new(None),
         );
         let replay = run_generated_sequence(
             &initial,
             words.len(),
             words.len(),
             GenerationStrategy::Structured,
+            &std::cell::Cell::new(None),
         );
         assert_eq!(
             spu_sequence_replay_asymmetry(&first, &replay),
@@ -234,7 +236,13 @@ fn an_spu_sequence_does_not_execute_beyond_its_generated_words() {
     initial.ls[..4].copy_from_slice(&branch_to_third_word.to_be_bytes());
     initial.ls[8..12].copy_from_slice(&branch.canonical_word.to_be_bytes());
 
-    let (_, decoded, _) = run_generated_sequence(&initial, 2, 2, GenerationStrategy::Structured);
+    let (_, decoded, _) = run_generated_sequence(
+        &initial,
+        2,
+        2,
+        GenerationStrategy::Structured,
+        &std::cell::Cell::new(None),
+    );
 
     assert_eq!(decoded, 1);
 }

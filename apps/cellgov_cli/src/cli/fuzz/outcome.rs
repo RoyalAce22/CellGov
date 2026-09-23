@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use cellgov_fuzz::artifact::{ArtifactFingerprint, ArtifactReduction};
 use cellgov_fuzz::evaluation::{Comparison, ComparisonVerdict, EvaluationSummary};
 use cellgov_fuzz::raw_decode::{RawDecodeStatus, RawDecoder};
+use cellgov_fuzz::regression::Regression;
 use cellgov_fuzz::{FindingKind, FuzzTarget};
 
 use crate::cli::exit::CommandExitCode;
@@ -33,12 +34,18 @@ pub(crate) const EXIT_NOT_REPRODUCED: i32 = exit_codes::command_specific(15);
 /// Exit code: an evaluation regressed a validity or coverage metric against
 /// its baseline.
 pub(crate) const EXIT_REGRESSION: i32 = exit_codes::command_specific(16);
+/// Exit code: a smoke campaign reached less than its coverage floor.
+pub(crate) const EXIT_VACUOUS: i32 = exit_codes::command_specific(17);
 
 /// One retained finding's artifact, as the summary names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ArtifactRecord {
     /// Path the artifact write targeted.
     pub path: PathBuf,
+    /// Generator version the finding replays under.
+    pub campaign_version: u32,
+    /// Master seed the finding replays under.
+    pub seed: u64,
     /// Original case index.
     pub case_index: u64,
     pub finding_kind: FindingKind,
@@ -56,6 +63,168 @@ impl ArtifactRecord {
     pub fn replay_command(&self) -> String {
         format!("cellgov dev fuzz replay --artifact {}", self.path.display())
     }
+
+    /// One summary line for the finding, after `prefix`.
+    fn render(&self, prefix: &str) -> String {
+        format!(
+            "{prefix}version={} seed={} case={} kind={:?} check={} divergence={} reduction={} artifact={} {}\n",
+            self.campaign_version,
+            self.seed,
+            self.case_index,
+            self.finding_kind,
+            self.fingerprint.check,
+            self.fingerprint.divergence,
+            describe_reduction(&self.reduction),
+            if self.stored { "stored" } else { "not stored" },
+            self.replay_command(),
+        )
+    }
+}
+
+fn describe_reduction(reduction: &ArtifactReduction) -> String {
+    match reduction {
+        ArtifactReduction::NotAttempted => "not attempted".to_owned(),
+        ArtifactReduction::Reduced { words } => format!("reduced to {} words", words.len()),
+        ArtifactReduction::Irreducible => "irreducible".to_owned(),
+        ArtifactReduction::Failed { reason } => format!("failed ({reason})"),
+    }
+}
+
+/// One smoke campaign's run, as the summary names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SmokeCampaignSummary {
+    /// Campaign name from the smoke set.
+    pub name: &'static str,
+    /// Generator version the campaign ran under.
+    pub campaign_version: u32,
+    /// Master seed.
+    pub seed: u64,
+    /// Cases considered.
+    pub cases: u64,
+    /// Cases eligible for their check.
+    pub eligible: u64,
+    /// Distinct instruction kinds executed.
+    pub instruction_kinds: u64,
+    /// Findings the engine counted, retained or not.
+    pub findings: u64,
+    /// Findings the engine retained with their evidence.
+    pub retained: u64,
+    /// Retained findings a promoted regression covers.
+    pub promoted: u64,
+    /// Findings no promoted regression covers: retained ones with no entry,
+    /// and every counted finding past the retention bound.
+    pub unpromoted: u64,
+    /// Whether the run reached the campaign's coverage floor.
+    pub covered: bool,
+}
+
+/// Terminal state of the smoke set, in exit precedence order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SmokeOutcome {
+    /// The command could not store a finding's artifact.
+    EvidenceNotStored,
+    /// An engine failed inside the harness.
+    HarnessFailure,
+    /// A retained finding's reduction failed.
+    ReductionFailed,
+    /// A retained finding no promoted regression covers.
+    Unpromoted,
+    /// A campaign reached less than its coverage floor.
+    Vacuous,
+    /// Every campaign reached its floor and a promoted regression covers
+    /// every finding.
+    Clean,
+}
+
+impl SmokeOutcome {
+    #[must_use]
+    pub fn classify(
+        evidence_not_stored: bool,
+        harness_failure: bool,
+        reductions_failed: u64,
+        unpromoted: u64,
+        vacuous: bool,
+    ) -> Self {
+        if evidence_not_stored {
+            Self::EvidenceNotStored
+        } else if harness_failure {
+            Self::HarnessFailure
+        } else if reductions_failed > 0 {
+            Self::ReductionFailed
+        } else if unpromoted > 0 {
+            Self::Unpromoted
+        } else if vacuous {
+            Self::Vacuous
+        } else {
+            Self::Clean
+        }
+    }
+
+    /// The documented exit status for this outcome.
+    #[must_use]
+    pub const fn exit_code(self) -> CommandExitCode {
+        match self {
+            Self::EvidenceNotStored => CommandExitCode::new(EXIT_EVIDENCE_NOT_STORED),
+            Self::HarnessFailure => CommandExitCode::new(EXIT_HARNESS_FAILURE),
+            Self::ReductionFailed => CommandExitCode::new(EXIT_REDUCTION_FAILED),
+            Self::Unpromoted => CommandExitCode::new(exit_codes::FAILED),
+            Self::Vacuous => CommandExitCode::new(EXIT_VACUOUS),
+            Self::Clean => CommandExitCode::SUCCESS,
+        }
+    }
+}
+
+/// Renders one smoke campaign's line.
+#[must_use]
+pub(crate) fn render_smoke_campaign(summary: &SmokeCampaignSummary) -> String {
+    format!(
+        "fuzz smoke: {} version={} seed={} cases={} eligible={} instruction_kinds={} findings={} retained={} promoted={} unpromoted={} coverage={}\n",
+        summary.name,
+        summary.campaign_version,
+        summary.seed,
+        summary.cases,
+        summary.eligible,
+        summary.instruction_kinds,
+        summary.findings,
+        summary.retained,
+        summary.promoted,
+        summary.unpromoted,
+        if summary.covered { "reached" } else { "under floor" },
+    )
+}
+
+/// Renders one smoke finding's line, with the regression that covers it.
+#[must_use]
+pub(crate) fn render_smoke_finding(
+    campaign: &str,
+    record: &ArtifactRecord,
+    promoted: Option<&str>,
+) -> String {
+    record.render(&format!(
+        "fuzz smoke: finding campaign={campaign} promoted={} ",
+        promoted.unwrap_or("none")
+    ))
+}
+
+/// Renders the smoke set's closing line.
+#[must_use]
+pub(crate) fn render_smoke_outcome(campaigns: usize, outcome: SmokeOutcome) -> String {
+    format!("fuzz smoke: campaigns={campaigns} outcome={outcome:?}\n")
+}
+
+/// Renders one promotion: the entry and the finding it now witnesses.
+#[must_use]
+pub(crate) fn render_promotion(regression: &Regression) -> String {
+    format!(
+        "fuzz promote: {} status={:?} profile={:?} kind={} check={} divergence={} artifact={}\n",
+        regression.entry.name,
+        regression.entry.status,
+        regression.entry.profile,
+        regression.artifact.finding_kind,
+        regression.artifact.fingerprint.check,
+        regression.artifact.fingerprint.divergence,
+        regression.path.display(),
+    )
 }
 
 /// Counts of one generated campaign, accumulated over every worker run.
@@ -341,21 +510,7 @@ pub(crate) fn render_campaign_summary(
         summary.cancelled,
     );
     for artifact in &summary.artifacts {
-        let reduction = match &artifact.reduction {
-            ArtifactReduction::NotAttempted => "not attempted".to_owned(),
-            ArtifactReduction::Reduced { words } => format!("reduced to {} words", words.len()),
-            ArtifactReduction::Irreducible => "irreducible".to_owned(),
-            ArtifactReduction::Failed { reason } => format!("failed ({reason})"),
-        };
-        text.push_str(&format!(
-            "fuzz: finding case={} kind={:?} check={} divergence={} reduction={reduction} artifact={} {}\n",
-            artifact.case_index,
-            artifact.finding_kind,
-            artifact.fingerprint.check,
-            artifact.fingerprint.divergence,
-            if artifact.stored { "stored" } else { "not stored" },
-            artifact.replay_command(),
-        ));
+        text.push_str(&artifact.render("fuzz: finding "));
     }
     text
 }

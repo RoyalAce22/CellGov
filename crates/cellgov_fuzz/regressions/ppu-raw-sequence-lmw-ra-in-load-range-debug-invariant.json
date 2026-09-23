@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "campaign": {
+    "campaign_version": 4,
+    "seed": 1,
+    "strategy": "raw_words",
+    "schedule": {
+      "cases": {
+        "first": 0,
+        "count": 300
+      },
+      "shard": {
+        "index": 0,
+        "count": 1
+      },
+      "cancellation": null
+    },
+    "retention": {
+      "capacity": 256,
+      "per_kind_capacity": 8,
+      "novelty_weight": 8,
+      "rarity_weight": 4,
+      "asymmetry_weight": 16,
+      "policy": "balanced"
+    },
+    "max_findings": 64,
+    "sequence_words": 32
+  },
+  "execution": {
+    "workers": 1,
+    "deadline_ms": null,
+    "progress": false,
+    "check": "all",
+    "reduction": {
+      "kind": "on_finding",
+      "policy": "deterministic",
+      "budget": 4096
+    }
+  },
+  "original": {
+    "replay": {
+      "campaign_version": 4,
+      "target": "PpuSequence",
+      "strategy": "raw_words",
+      "seed": 1,
+      "case_index": 188,
+      "sequence_words": 32
+    },
+    "words": [
+      3132936337,
+      3739224586,
+      1731680334,
+      1608557507,
+      1834015386,
+      565648671,
+      1762653010,
+      1837652656,
+      2894219440,
+      270372393,
+      4224380452,
+      1726335363,
+      873061528,
+      3032336401,
+      2765610094,
+      3156915016,
+      3552891657,
+      3049367663,
+      1432884540,
+      2581584471,
+      2504966928,
+      3953187604,
+      1705693252,
+      3117277723,
+      2705224314,
+      870141867,
+      1355778101,
+      756900826,
+      1987907164,
+      2487944479,
+      596053088,
+      3898944728
+    ],
+    "state_source": "versioned_generator"
+  },
+  "finding_kind": "TargetPanic",
+  "fingerprint": {
+    "target": "PpuSequence",
+    "instruction_kind": "Ppu(Ordinary(Lmw))",
+    "check": "PpuExecutor",
+    "divergence": "TargetPanic",
+    "outcome": null,
+    "effect": null
+  },
+  "reference": {
+    "kind": "local"
+  },
+  "observation": null,
+  "coverage": {
+    "cases": 300,
+    "decoded": 1116,
+    "eligible": 282,
+    "unsupported": 0,
+    "undefined": 0,
+    "finding_counts": {
+      "TargetPanic": 18
+    }
+  },
+  "reduction": {
+    "kind": "reduced",
+    "words": [
+      3132936337
+    ]
+  },
+  "panic_payload": {
+    "kind": "string",
+    "message": "lmw invalid form: RA=28 must be non-zero and outside [21..=31]; a guest encoding with RA in the load range would silently corrupt RA mid-loop"
+  },
+  "replay_command": [
+    "cellgov",
+    "dev",
+    "fuzz",
+    "replay",
+    "--artifact",
+    "crates/cellgov_fuzz/regressions/ppu-raw-sequence-lmw-ra-in-load-range-debug-invariant.json"
+  ]
+}

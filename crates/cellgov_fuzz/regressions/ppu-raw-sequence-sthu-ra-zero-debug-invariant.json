@@ -1,0 +1,126 @@
+{
+  "schema_version": 2,
+  "campaign": {
+    "campaign_version": 4,
+    "seed": 1,
+    "strategy": "raw_words",
+    "schedule": {
+      "cases": {
+        "first": 0,
+        "count": 300
+      },
+      "shard": {
+        "index": 0,
+        "count": 1
+      },
+      "cancellation": null
+    },
+    "retention": {
+      "capacity": 256,
+      "per_kind_capacity": 8,
+      "novelty_weight": 8,
+      "rarity_weight": 4,
+      "asymmetry_weight": 16,
+      "policy": "balanced"
+    },
+    "max_findings": 64,
+    "sequence_words": 32
+  },
+  "execution": {
+    "workers": 1,
+    "deadline_ms": null,
+    "progress": false,
+    "check": "all",
+    "reduction": {
+      "kind": "on_finding",
+      "policy": "deterministic",
+      "budget": 4096
+    }
+  },
+  "original": {
+    "replay": {
+      "campaign_version": 4,
+      "target": "PpuSequence",
+      "strategy": "raw_words",
+      "seed": 1,
+      "case_index": 1,
+      "sequence_words": 32
+    },
+    "words": [
+      942667852,
+      1830663020,
+      3030402862,
+      3541937597,
+      1079878712,
+      3305023240,
+      3463797074,
+      3717259535,
+      894242296,
+      2901319996,
+      1753711262,
+      824923301,
+      588299594,
+      1818156892,
+      1565257338,
+      2888615527,
+      2023793643,
+      834337889,
+      792128311,
+      2556622035,
+      3631241340,
+      1921760868,
+      3249482551,
+      3727383990,
+      1775379718,
+      2489646394,
+      1565077606,
+      973628520,
+      956953945,
+      1838024821,
+      3253377429,
+      2999119413
+    ],
+    "state_source": "versioned_generator"
+  },
+  "finding_kind": "TargetPanic",
+  "fingerprint": {
+    "target": "PpuSequence",
+    "instruction_kind": "Ppu(Ordinary(Sthu))",
+    "check": "PpuExecutor",
+    "divergence": "TargetPanic",
+    "outcome": null,
+    "effect": null
+  },
+  "reference": {
+    "kind": "local"
+  },
+  "observation": null,
+  "coverage": {
+    "cases": 300,
+    "decoded": 1116,
+    "eligible": 282,
+    "unsupported": 0,
+    "undefined": 0,
+    "finding_counts": {
+      "TargetPanic": 18
+    }
+  },
+  "reduction": {
+    "kind": "reduced",
+    "words": [
+      3030402862
+    ]
+  },
+  "panic_payload": {
+    "kind": "string",
+    "message": "sthu invalid form: RA=0"
+  },
+  "replay_command": [
+    "cellgov",
+    "dev",
+    "fuzz",
+    "replay",
+    "--artifact",
+    "crates/cellgov_fuzz/regressions/ppu-raw-sequence-sthu-ra-zero-debug-invariant.json"
+  ]
+}

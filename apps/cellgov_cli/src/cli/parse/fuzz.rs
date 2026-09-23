@@ -34,6 +34,10 @@ pub(crate) enum FuzzCommand {
     Evaluate(FuzzEvaluateArgs),
     /// Rank a stored evaluation against a baseline at equal budgets.
     Compare(FuzzCompareArgs),
+    /// Run the bounded smoke set and hold every finding to a promoted regression.
+    Smoke(FuzzSmokeArgs),
+    /// Promote a minimized finding artifact into a regression directory as open.
+    Promote(FuzzPromoteArgs),
 }
 
 /// Input construction strategy supported by instruction and sequence engines.
@@ -349,6 +353,74 @@ pub(crate) struct FuzzEvaluateArgs {
     /// Stored evaluation to rank these results against.
     #[arg(long, value_name = "PATH")]
     pub baseline: Option<PathBuf>,
+}
+
+/// The outcomes `dev fuzz smoke` has beyond the shared 0-5 contract.
+pub(crate) const SMOKE_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   a campaign retained a finding no promoted regression covers; its
+      artifact names the exact replay. Also the shared failed-operation
+      status when --regressions could not be loaded
+  12  an engine failed inside the harness rather than the target
+  13  a finding's artifact could not be stored; its evidence was printed
+  14  a retained finding's reduction failed; its original case is stored
+  17  a campaign reached less than its coverage floor
+  141 stdout was closed by a downstream reader";
+
+/// Settings for the bounded smoke set.
+#[derive(Debug, Args)]
+#[command(after_help = SMOKE_EXIT_CODES)]
+pub(crate) struct FuzzSmokeArgs {
+    /// Directory that receives one minimized artifact per retained finding.
+    #[arg(long, value_name = "DIR", default_value = "target/fuzz-smoke")]
+    pub artifacts_dir: PathBuf,
+    /// Regression directory whose open entries cover known findings.
+    #[arg(long, value_name = "DIR")]
+    pub regressions: Option<PathBuf>,
+    /// Maximum candidate evaluations spent reducing each finding.
+    #[arg(long, default_value_t = cellgov_fuzz::reduce::DEFAULT_REDUCTION_BUDGET)]
+    pub reduction_budget: u64,
+    /// Report a line after each campaign.
+    #[arg(long)]
+    pub progress: bool,
+}
+
+/// The outcomes `dev fuzz promote` has beyond the shared 0-5 contract.
+pub(crate) const PROMOTE_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   the artifact could not be read, the regression directory could not
+      be loaded or written, the artifact is not minimized, or the finding
+      or name is already promoted
+  141 stdout was closed by a downstream reader";
+
+/// Build profile a promoted finding reproduces in.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum FuzzRegressionProfile {
+    /// Debug and release builds alike.
+    Both,
+    /// Debug builds only.
+    Debug,
+    /// Release builds only.
+    Release,
+}
+
+/// Settings for the promotion of one finding.
+#[derive(Debug, Args)]
+#[command(after_help = PROMOTE_EXIT_CODES)]
+pub(crate) struct FuzzPromoteArgs {
+    /// Minimized finding artifact to promote.
+    #[arg(long, value_name = "PATH")]
+    pub artifact: PathBuf,
+    /// Regression directory that receives the artifact and the manifest entry.
+    #[arg(long, value_name = "DIR")]
+    pub regressions: PathBuf,
+    /// Name of the regression: lowercase letters, digits, '-' and '_'.
+    #[arg(long)]
+    pub name: String,
+    /// What the finding is, in one sentence.
+    #[arg(long)]
+    pub summary: String,
+    /// Build profile the finding reproduces in.
+    #[arg(long, value_enum, default_value_t = FuzzRegressionProfile::Both)]
+    pub profile: FuzzRegressionProfile,
 }
 
 /// Two stored evaluations to rank.

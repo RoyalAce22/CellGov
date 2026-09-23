@@ -353,6 +353,19 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         path: "dev fuzz compare",
         lines: &["cellgov dev fuzz compare --baseline baseline.json --candidate candidate.json"],
     },
+    Examples {
+        path: "dev fuzz smoke",
+        lines: &[
+            "cellgov dev fuzz smoke --regressions crates/cellgov_fuzz/regressions",
+            "cellgov dev fuzz smoke --artifacts-dir target/fuzz-smoke/release --regressions crates/cellgov_fuzz/regressions",
+        ],
+    },
+    Examples {
+        path: "dev fuzz promote",
+        lines: &[
+            "cellgov dev fuzz promote --artifact target/fuzz-smoke/ppu-instruction-raw-words-3-0.json --regressions crates/cellgov_fuzz/regressions --name ppu-sthu-ra-zero --summary sthu-with-RA=0-trips-the-invalid-form-invariant --profile debug",
+        ],
+    },
 ];
 
 /// The block `path`'s help leads with, or `None` when it declares none.

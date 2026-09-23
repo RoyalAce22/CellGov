@@ -105,8 +105,13 @@ pub(super) fn run_campaign(
     // `FuzzFindingArtifact::from_finding` refuses a non-UTF-8 replay path
     // only after the campaign ran, and its error carries no finding. This
     // check refuses the directory before the campaign schedules a case.
-    if args.artifacts_dir.to_str().is_none() {
-        return Err(FuzzCliError::Invalid("artifacts-dir must be valid UTF-8"));
+    let artifacts_dir = args
+        .artifacts_dir
+        .to_str()
+        .ok_or(FuzzCliError::Invalid("artifacts-dir must be valid UTF-8"))?
+        .trim_end_matches(['/', '\\']);
+    if artifacts_dir.is_empty() {
+        return Err(FuzzCliError::Invalid("artifacts-dir must not be empty"));
     }
     let (first, count) = args
         .replay_case
@@ -197,8 +202,12 @@ pub(super) fn run_campaign(
         let runs = run_workers(work)?;
         for run in runs {
             for finding in &run.report.findings {
-                let path = args.artifacts_dir.join(format!(
-                    "{:?}-{:?}-{}-{}-{}.json",
+                // Portable text, spelled as `regression::promote` spells a
+                // stored replay path: the directory as the caller gave it,
+                // one forward slash, then the file.
+                let path = std::path::PathBuf::from(format!(
+                    "{}/{:?}-{:?}-{}-{}-{}.json",
+                    artifacts_dir,
                     engine.target(),
                     campaign_config.strategy,
                     args.seed,
@@ -223,6 +232,8 @@ pub(super) fn run_campaign(
                 }
                 let mut record = ArtifactRecord {
                     path: path.clone(),
+                    campaign_version: finding.replay.campaign_version.0,
+                    seed: finding.replay.seed,
                     case_index: finding.replay.case_index,
                     finding_kind: finding.kind,
                     fingerprint: ArtifactFingerprint::from(&finding.fingerprint),

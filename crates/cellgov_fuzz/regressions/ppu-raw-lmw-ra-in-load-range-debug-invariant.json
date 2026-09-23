@@ -1,0 +1,92 @@
+{
+  "schema_version": 2,
+  "campaign": {
+    "campaign_version": 4,
+    "seed": 1,
+    "strategy": "raw_words",
+    "schedule": {
+      "cases": {
+        "first": 0,
+        "count": 300
+      },
+      "shard": {
+        "index": 0,
+        "count": 1
+      },
+      "cancellation": null
+    },
+    "retention": {
+      "capacity": 256,
+      "per_kind_capacity": 8,
+      "novelty_weight": 8,
+      "rarity_weight": 4,
+      "asymmetry_weight": 16,
+      "policy": "balanced"
+    },
+    "max_findings": 64,
+    "sequence_words": 32
+  },
+  "execution": {
+    "workers": 1,
+    "deadline_ms": null,
+    "progress": false,
+    "check": "all",
+    "reduction": {
+      "kind": "on_finding",
+      "policy": "deterministic",
+      "budget": 4096
+    }
+  },
+  "original": {
+    "replay": {
+      "campaign_version": 4,
+      "target": "PpuInstruction",
+      "strategy": "raw_words",
+      "seed": 1,
+      "case_index": 190,
+      "sequence_words": 32
+    },
+    "words": [
+      3132936337
+    ],
+    "state_source": "versioned_generator"
+  },
+  "finding_kind": "TargetPanic",
+  "fingerprint": {
+    "target": "PpuInstruction",
+    "instruction_kind": "Ppu(Ordinary(Lmw))",
+    "check": "PpuExecutor",
+    "divergence": "TargetPanic",
+    "outcome": null,
+    "effect": null
+  },
+  "reference": {
+    "kind": "local"
+  },
+  "observation": null,
+  "coverage": {
+    "cases": 300,
+    "decoded": 210,
+    "eligible": 205,
+    "unsupported": 0,
+    "undefined": 0,
+    "finding_counts": {
+      "TargetPanic": 5
+    }
+  },
+  "reduction": {
+    "kind": "irreducible"
+  },
+  "panic_payload": {
+    "kind": "string",
+    "message": "lmw invalid form: RA=28 must be non-zero and outside [21..=31]; a guest encoding with RA in the load range would silently corrupt RA mid-loop"
+  },
+  "replay_command": [
+    "cellgov",
+    "dev",
+    "fuzz",
+    "replay",
+    "--artifact",
+    "crates/cellgov_fuzz/regressions/ppu-raw-lmw-ra-in-load-range-debug-invariant.json"
+  ]
+}
