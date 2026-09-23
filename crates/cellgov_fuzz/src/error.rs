@@ -247,4 +247,7 @@ pub enum FuzzError {
     /// An internal harness invariant failed.
     #[error("fuzz harness invariant failed: {0}")]
     Invariant(#[from] InvariantError),
+    /// The interpreter-owned PPU observation rejected a batch.
+    #[error("PPU observation failed: {0}")]
+    PpuObservation(#[from] cellgov_ppu::observation::PpuObservationError),
 }

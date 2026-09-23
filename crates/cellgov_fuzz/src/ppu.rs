@@ -5,13 +5,16 @@ use std::collections::BTreeSet;
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::RegionView;
-use cellgov_ppu::differential::PpuStateSnapshot;
 use cellgov_ppu::exec::{execute, ExecuteVerdict};
 use cellgov_ppu::instruction::fuzz::{
     generation_descriptors, PpuGenerationDescriptor, PpuGenerationError, PpuMetamorphicRelation,
     PpuOperandClass, PpuOutcomeClass, PpuSequenceClass, PpuSequenceFlow,
 };
 use cellgov_ppu::instruction::PpuInstruction;
+use cellgov_ppu::observation::{
+    finish_observation, PpuArchitecturalState, PpuObservation, PpuObservationCheck,
+    PpuObservationComponent, PpuObservationError, PpuObservationInput, PpuObservedOutcome,
+};
 use cellgov_ppu::state::PpuState;
 use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_sync::ReservedLine;
@@ -56,25 +59,15 @@ struct GeneratedParameters {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedStep {
     verdict: ExecuteVerdict,
-    state: PpuStateSnapshot,
-    pc: u64,
-    vrsave: u32,
-    vrsave_written: bool,
-    tb: u64,
-    effects: Vec<Effect>,
+    observation: PpuObservation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedSequence {
-    state: PpuStateSnapshot,
-    pc: u64,
-    vrsave: u32,
-    vrsave_written: bool,
-    tb: u64,
+    observation: PpuObservation,
     terminal_verdict: Option<ExecuteVerdict>,
     decode_refusal: Option<(u64, u32)>,
     deterministic: bool,
-    effects: Vec<Effect>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,11 +83,22 @@ struct ObservedSequenceRun {
 enum PpuTerminalObservation<'a> {
     Execution(Option<&'a ExecuteVerdict>),
     DecodeRefusal(Option<&'a ExecuteVerdict>),
+    CommitRefusal(Option<&'a ExecuteVerdict>),
 }
 
 impl<'a> PpuTerminalObservation<'a> {
+    fn from_step(observed: &'a ObservedStep) -> Self {
+        if observed.observation.commit_error.is_some() {
+            Self::CommitRefusal(Some(&observed.verdict))
+        } else {
+            Self::Execution(Some(&observed.verdict))
+        }
+    }
+
     fn from_sequence(observed: &'a ObservedSequence) -> Self {
-        if observed.decode_refusal.is_some() {
+        if observed.observation.commit_error.is_some() {
+            Self::CommitRefusal(observed.terminal_verdict.as_ref())
+        } else if observed.decode_refusal.is_some() {
             Self::DecodeRefusal(observed.terminal_verdict.as_ref())
         } else {
             Self::Execution(observed.terminal_verdict.as_ref())
@@ -103,7 +107,9 @@ impl<'a> PpuTerminalObservation<'a> {
 
     fn verdict(self) -> Option<&'a ExecuteVerdict> {
         match self {
-            Self::Execution(verdict) | Self::DecodeRefusal(verdict) => verdict,
+            Self::Execution(verdict)
+            | Self::DecodeRefusal(verdict)
+            | Self::CommitRefusal(verdict) => verdict,
         }
     }
 }
@@ -192,7 +198,8 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         let mut memory = vec![0u8; DATA_LEN];
         rng.fill(&mut memory);
         let first = match call_target(|| run_once(&instruction, &initial, &memory)) {
-            Ok(first) => first,
+            Ok(Ok(first)) => first,
+            Ok(Err(error)) => return Err(error.into()),
             Err(payload) => {
                 record_target_panic(
                     report,
@@ -217,7 +224,7 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         );
         report.assessed(&assessment)?;
         report.executed(1)?;
-        report.observed_effects(first.effects.iter().map(Effect::kind))?;
+        report.observed_effects(first.observation.committed_effects.iter().map(Effect::kind))?;
         let outcome = PpuOutcomeClass::from_verdict(&first.verdict);
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if !descriptor.outcomes.contains(&outcome) {
@@ -238,7 +245,8 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
             )?;
         }
         if let Some(effect) = first
-            .effects
+            .observation
+            .staged_effects
             .iter()
             .map(Effect::kind)
             .find(|effect| !descriptor.effects.contains(effect))
@@ -265,8 +273,8 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 ppu_observation(
                     [identity],
                     &assessment,
-                    PpuTerminalObservation::Execution(Some(&first.verdict)),
-                    &first.effects,
+                    PpuTerminalObservation::from_step(&first),
+                    &first.observation.committed_effects,
                     1,
                     ppu_step_changed(&initial, &first),
                     asymmetry,
@@ -276,7 +284,8 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         }
         if requests_replay(descriptor.relations) {
             let second = match call_target(|| run_once(&instruction, &initial, &memory)) {
-                Ok(second) => second,
+                Ok(Ok(second)) => second,
+                Ok(Err(error)) => return Err(error.into()),
                 Err(payload) => {
                     record_target_panic(
                         report,
@@ -291,8 +300,8 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                         ppu_observation(
                             [identity],
                             &assessment,
-                            PpuTerminalObservation::Execution(Some(&first.verdict)),
-                            &first.effects,
+                            PpuTerminalObservation::from_step(&first),
+                            &first.observation.committed_effects,
                             1,
                             ppu_step_changed(&initial, &first),
                             CrossReferenceAsymmetry::TargetPanic,
@@ -325,8 +334,8 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
             ppu_observation(
                 [identity],
                 &assessment,
-                PpuTerminalObservation::Execution(Some(&first.verdict)),
-                &first.effects,
+                PpuTerminalObservation::from_step(&first),
+                &first.observation.committed_effects,
                 1,
                 ppu_step_changed(&initial, &first),
                 asymmetry,
@@ -413,7 +422,8 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             return Err(InvariantError::EmptyGeneratedSequence.into());
         }
         let first = match call_target(|| run_sequence(&words, &initial, &memory)) {
-            Ok(first) => first,
+            Ok(Ok(first)) => first,
+            Ok(Err(error)) => return Err(error.into()),
             Err(payload) => {
                 record_target_panic(
                     report,
@@ -432,7 +442,14 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
         let assessment = assess_sequence_case(config.strategy, first.executed, features);
         report.assessed(&assessment)?;
         report.executed(first.executed)?;
-        report.observed_effects(first.observed.effects.iter().map(Effect::kind))?;
+        report.observed_effects(
+            first
+                .observed
+                .observation
+                .committed_effects
+                .iter()
+                .map(Effect::kind),
+        )?;
         if assessment.eligibility != CaseEligibility::Eligible {
             report.observe_case(
                 iteration,
@@ -440,7 +457,7 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                     first.executed_kinds.iter().copied(),
                     &assessment,
                     PpuTerminalObservation::from_sequence(&first.observed),
-                    &first.observed.effects,
+                    &first.observed.observation.committed_effects,
                     first.executed,
                     ppu_sequence_changed(&initial, &first.observed),
                     CrossReferenceAsymmetry::None,
@@ -451,7 +468,8 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
         let mut asymmetry = CrossReferenceAsymmetry::None;
         if first.observed.deterministic {
             let second = match call_target(|| run_sequence(&words, &initial, &memory)) {
-                Ok(second) => second,
+                Ok(Ok(second)) => second,
+                Ok(Err(error)) => return Err(error.into()),
                 Err(payload) => {
                     record_target_panic(
                         report,
@@ -467,7 +485,7 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                             first.executed_kinds.iter().copied(),
                             &assessment,
                             PpuTerminalObservation::from_sequence(&first.observed),
-                            &first.observed.effects,
+                            &first.observed.observation.committed_effects,
                             first.executed,
                             ppu_sequence_changed(&initial, &first.observed),
                             CrossReferenceAsymmetry::TargetPanic,
@@ -501,7 +519,7 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
                 first.executed_kinds.iter().copied(),
                 &assessment,
                 PpuTerminalObservation::from_sequence(&first.observed),
-                &first.observed.effects,
+                &first.observed.observation.committed_effects,
                 first.executed,
                 ppu_sequence_changed(&initial, &first.observed),
                 asymmetry,
@@ -511,7 +529,11 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
     Ok(())
 }
 
-fn run_once(instruction: &PpuInstruction, initial: &PpuState, memory: &[u8]) -> ObservedStep {
+fn run_once(
+    instruction: &PpuInstruction,
+    initial: &PpuState,
+    memory: &[u8],
+) -> Result<ObservedStep, PpuObservationError> {
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
@@ -524,27 +546,33 @@ fn run_once(instruction: &PpuInstruction, initial: &PpuState, memory: &[u8]) -> 
         &mut effects,
         &mut stores,
     );
-    stores.flush(&mut effects, UNIT);
-    // Mirror `PpuExecutionUnit::close_block`: clock reads emit one guest-visible ClockRead effect at the block boundary.
-    if state.clock_read {
-        effects.push(Effect::ClockRead { source: UNIT });
-    }
-    ObservedStep {
-        verdict,
-        state: PpuStateSnapshot::capture(&state),
-        pc: state.pc,
-        vrsave: state.vrsave,
-        vrsave_written: state.vrsave_written,
-        tb: state.tb,
+    let observation = finish_fuzz_observation(PpuObservationInput {
+        initial_state: initial,
+        final_state: &state,
+        memory_base: DATA_REGION_BASE,
+        initial_memory: memory,
+        outcome: PpuObservedOutcome::Execution(verdict.clone()),
         effects,
-    }
+        stores,
+        unit: UNIT,
+    })?;
+    Ok(ObservedStep {
+        verdict,
+        observation,
+    })
+}
+
+fn finish_fuzz_observation(
+    input: PpuObservationInput<'_>,
+) -> Result<PpuObservation, PpuObservationError> {
+    finish_observation(input)
 }
 
 fn ppu_observation(
     kinds: impl IntoIterator<Item = InstructionIdentity>,
     assessment: &CaseAssessment,
     terminal: PpuTerminalObservation<'_>,
-    effects: &[Effect],
+    committed_effects: &[Effect],
     depth: u64,
     state_changed: bool,
     asymmetry: CrossReferenceAsymmetry,
@@ -552,12 +580,15 @@ fn ppu_observation(
     let kinds = kinds.into_iter().collect::<Vec<_>>();
     let verdict = terminal.verdict();
     let outcome = verdict.map(PpuOutcomeClass::from_verdict);
-    let state_transition = match outcome {
-        Some(PpuOutcomeClass::Fault | PpuOutcomeClass::MemoryFault) if !state_changed => {
-            StateTransitionClass::FaultDiscarded
-        }
-        _ if !effects.is_empty() => StateTransitionClass::Effect,
-        Some(PpuOutcomeClass::Branch) => StateTransitionClass::ControlFlow,
+    let state_transition = match (terminal, outcome) {
+        (PpuTerminalObservation::DecodeRefusal(_), _) => StateTransitionClass::FaultDiscarded,
+        (PpuTerminalObservation::CommitRefusal(_), _) => StateTransitionClass::CommitRefused,
+        (
+            PpuTerminalObservation::Execution(_),
+            Some(PpuOutcomeClass::Fault | PpuOutcomeClass::MemoryFault),
+        ) if !state_changed => StateTransitionClass::FaultDiscarded,
+        _ if !committed_effects.is_empty() => StateTransitionClass::Effect,
+        (_, Some(PpuOutcomeClass::Branch)) => StateTransitionClass::ControlFlow,
         _ if state_changed => StateTransitionClass::ArchitecturalState,
         _ => StateTransitionClass::Unchanged,
     };
@@ -568,10 +599,11 @@ fn ppu_observation(
         eligibility: assessment.eligibility,
         outcome: match terminal {
             PpuTerminalObservation::DecodeRefusal(_) => Some(OutcomeIdentity::PpuDecodeRefusal),
+            PpuTerminalObservation::CommitRefusal(_) => Some(OutcomeIdentity::PpuCommitRefusal),
             PpuTerminalObservation::Execution(_) => outcome.map(outcome_identity),
         },
         state_transition,
-        effects: effects.iter().map(Effect::kind).collect(),
+        effects: committed_effects.iter().map(Effect::kind).collect(),
         boundaries: SemanticObservation::boundaries_from_features(&assessment.features),
         sequence_depth: depth,
         asymmetry,
@@ -579,34 +611,52 @@ fn ppu_observation(
 }
 
 fn ppu_step_changed(initial: &PpuState, observed: &ObservedStep) -> bool {
-    observed.state != PpuStateSnapshot::capture(initial)
-        || observed.pc != initial.pc
-        || observed.vrsave != initial.vrsave
-        || observed.vrsave_written != initial.vrsave_written
-        || observed.tb != initial.tb
+    observed.observation.state != PpuArchitecturalState::capture(initial)
 }
 
 fn ppu_sequence_changed(initial: &PpuState, observed: &ObservedSequence) -> bool {
-    observed.state != PpuStateSnapshot::capture(initial)
-        || observed.pc != initial.pc
-        || observed.vrsave != initial.vrsave
-        || observed.vrsave_written != initial.vrsave_written
-        || observed.tb != initial.tb
+    observed.observation.state != PpuArchitecturalState::capture(initial)
 }
 
 fn ppu_step_replay_asymmetry(
     first: &ObservedStep,
     second: &ObservedStep,
 ) -> CrossReferenceAsymmetry {
-    let state_differs = first.state != second.state
-        || first.pc != second.pc
-        || first.vrsave != second.vrsave
-        || first.vrsave_written != second.vrsave_written
-        || first.tb != second.tb;
+    let comparison = first.observation.compare(
+        &second.observation,
+        PpuObservationCheck::DeterministicReplay,
+    );
+    let state_differs = comparison.relevant_differences.iter().any(|component| {
+        matches!(
+            component,
+            PpuObservationComponent::State
+                | PpuObservationComponent::Memory
+                | PpuObservationComponent::Reservations
+                | PpuObservationComponent::StoreBuffer
+                | PpuObservationComponent::FaultDiscard
+        )
+    });
+    let mut outcome_asymmetry =
+        ppu_observed_outcome_asymmetry(&first.observation.outcome, &second.observation.outcome)
+            .max(ppu_verdict_asymmetry(
+                Some(&first.verdict),
+                Some(&second.verdict),
+            ));
+    if comparison
+        .relevant_differences
+        .contains(&PpuObservationComponent::Outcome)
+    {
+        outcome_asymmetry = outcome_asymmetry.max(CrossReferenceAsymmetry::Outcome);
+    }
     replay_asymmetry(
         state_differs,
-        ppu_verdict_asymmetry(Some(&first.verdict), Some(&second.verdict)),
-        first.effects != second.effects,
+        outcome_asymmetry,
+        comparison.relevant_differences.iter().any(|component| {
+            matches!(
+                component,
+                PpuObservationComponent::StagedEffects | PpuObservationComponent::CommittedEffects
+            )
+        }),
     )
 }
 
@@ -615,28 +665,49 @@ fn ppu_sequence_replay_asymmetry(
     second: &ObservedSequenceRun,
 ) -> CrossReferenceAsymmetry {
     let decode_refusal_differs = first.observed.decode_refusal != second.observed.decode_refusal;
-    let state_or_trajectory_differs = first.observed.state != second.observed.state
-        || first.observed.pc != second.observed.pc
-        || first.observed.vrsave != second.observed.vrsave
-        || first.observed.vrsave_written != second.observed.vrsave_written
-        || first.observed.tb != second.observed.tb
-        || decode_refusal_differs
+    let comparison = first.observed.observation.compare(
+        &second.observed.observation,
+        PpuObservationCheck::DeterministicReplay,
+    );
+    let state_or_trajectory_differs = comparison.relevant_differences.iter().any(|component| {
+        matches!(
+            component,
+            PpuObservationComponent::State
+                | PpuObservationComponent::Memory
+                | PpuObservationComponent::Reservations
+                | PpuObservationComponent::StoreBuffer
+                | PpuObservationComponent::FaultDiscard
+        )
+    }) || decode_refusal_differs
         || first.observed.deterministic != second.observed.deterministic
         || first.decoded != second.decoded
         || first.decoded_kinds != second.decoded_kinds
         || first.executed != second.executed
         || first.executed_kinds != second.executed_kinds;
-    let mut outcome_asymmetry = ppu_verdict_asymmetry(
+    let mut outcome_asymmetry = ppu_observed_outcome_asymmetry(
+        &first.observed.observation.outcome,
+        &second.observed.observation.outcome,
+    )
+    .max(ppu_verdict_asymmetry(
         first.observed.terminal_verdict.as_ref(),
         second.observed.terminal_verdict.as_ref(),
-    );
-    if first.observed.decode_refusal.is_some() != second.observed.decode_refusal.is_some() {
+    ));
+    if comparison
+        .relevant_differences
+        .contains(&PpuObservationComponent::Outcome)
+        || first.observed.decode_refusal.is_some() != second.observed.decode_refusal.is_some()
+    {
         outcome_asymmetry = outcome_asymmetry.max(CrossReferenceAsymmetry::Outcome);
     }
     replay_asymmetry(
         state_or_trajectory_differs,
         outcome_asymmetry,
-        first.observed.effects != second.observed.effects,
+        comparison.relevant_differences.iter().any(|component| {
+            matches!(
+                component,
+                PpuObservationComponent::StagedEffects | PpuObservationComponent::CommittedEffects
+            )
+        }),
     )
 }
 
@@ -650,6 +721,27 @@ fn ppu_verdict_asymmetry(
     if [first, second].into_iter().flatten().any(|verdict| {
         ppu_outcome_asymmetry(PpuOutcomeClass::from_verdict(verdict))
             == CrossReferenceAsymmetry::Fault
+    }) {
+        CrossReferenceAsymmetry::Fault
+    } else {
+        CrossReferenceAsymmetry::Outcome
+    }
+}
+
+fn ppu_observed_outcome_asymmetry(
+    first: &PpuObservedOutcome,
+    second: &PpuObservedOutcome,
+) -> CrossReferenceAsymmetry {
+    if first == second {
+        return CrossReferenceAsymmetry::None;
+    }
+    if [first, second].into_iter().any(|outcome| {
+        matches!(
+            outcome,
+            PpuObservedOutcome::Execution(verdict)
+                if ppu_outcome_asymmetry(PpuOutcomeClass::from_verdict(verdict))
+                    == CrossReferenceAsymmetry::Fault
+        )
     }) {
         CrossReferenceAsymmetry::Fault
     } else {
@@ -684,7 +776,11 @@ fn replay_asymmetry(
     asymmetry
 }
 
-fn run_sequence(words: &[u32], initial: &PpuState, memory: &[u8]) -> ObservedSequenceRun {
+fn run_sequence(
+    words: &[u32],
+    initial: &PpuState,
+    memory: &[u8],
+) -> Result<ObservedSequenceRun, PpuObservationError> {
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
@@ -735,36 +831,44 @@ fn run_sequence(words: &[u32], initial: &PpuState, memory: &[u8]) -> ObservedSeq
             ExecuteVerdict::Continue => state.pc = state.pc.wrapping_add(4),
             ExecuteVerdict::Branch => {}
             ExecuteVerdict::Fault(_) | ExecuteVerdict::MemFault(_) => {
-                // The runtime fault-discard rule hides state and effects from a faulting batch.
-                state = initial.clone();
-                effects.clear();
-                stores.clear();
                 break;
             }
             ExecuteVerdict::Syscall { .. } | ExecuteVerdict::BufferFull => break,
         }
     }
-    stores.flush(&mut effects, UNIT);
-    if state.clock_read {
-        effects.push(Effect::ClockRead { source: UNIT });
-    }
-    ObservedSequenceRun {
+    let outcome = match decode_refusal {
+        Some((pc, raw)) => PpuObservedOutcome::DecodeRefusal {
+            pc,
+            raw,
+            prior: terminal_verdict.clone(),
+        },
+        None => terminal_verdict
+            .clone()
+            .map(PpuObservedOutcome::Execution)
+            .unwrap_or(PpuObservedOutcome::NoInstruction),
+    };
+    let observation = finish_fuzz_observation(PpuObservationInput {
+        initial_state: initial,
+        final_state: &state,
+        memory_base: DATA_REGION_BASE,
+        initial_memory: memory,
+        outcome,
+        effects,
+        stores,
+        unit: UNIT,
+    })?;
+    Ok(ObservedSequenceRun {
         observed: ObservedSequence {
-            state: PpuStateSnapshot::capture(&state),
-            pc: state.pc,
-            vrsave: state.vrsave,
-            vrsave_written: state.vrsave_written,
-            tb: state.tb,
+            observation,
             terminal_verdict,
             decode_refusal,
             deterministic,
-            effects,
         },
         decoded,
         decoded_kinds,
         executed,
         executed_kinds,
-    }
+    })
 }
 
 #[cfg(test)]

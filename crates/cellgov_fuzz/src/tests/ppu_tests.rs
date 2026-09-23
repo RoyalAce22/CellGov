@@ -15,19 +15,21 @@ fn seeded_vrsave_is_valid_for_an_immediate_read() {
         &PpuInstruction::Mfvrsave { rt: 0 },
         &initial,
         &[0; DATA_LEN],
-    );
+    )
+    .unwrap();
 
-    assert_eq!(observed.state.gpr[0], u64::from(initial.vrsave));
+    assert_eq!(observed.observation.state.gpr[0], u64::from(initial.vrsave));
 }
 
 #[test]
 fn a_time_base_read_is_part_of_the_observed_effects() {
     let initial = PpuState::new();
     let instruction = cellgov_ppu::decode::decode(mftb(3)).unwrap();
-    let observed = run_once(&instruction, &initial, &[0; DATA_LEN]);
+    let observed = run_once(&instruction, &initial, &[0; DATA_LEN]).unwrap();
 
     assert!(observed
-        .effects
+        .observation
+        .committed_effects
         .iter()
         .any(|effect| matches!(effect, Effect::ClockRead { source } if *source == UNIT)));
 }
@@ -35,7 +37,7 @@ fn a_time_base_read_is_part_of_the_observed_effects() {
 #[test]
 fn a_ppu_sequence_retains_terminal_effects() {
     let initial = PpuState::new();
-    let run = run_sequence(&[mftb(3)], &initial, &[0; DATA_LEN]);
+    let run = run_sequence(&[mftb(3)], &initial, &[0; DATA_LEN]).unwrap();
 
     assert_eq!(run.decoded, 1);
     assert_eq!(run.executed, 1);
@@ -45,9 +47,66 @@ fn a_ppu_sequence_retains_terminal_effects() {
     ));
     assert!(run
         .observed
-        .effects
+        .observation
+        .committed_effects
         .iter()
         .any(|effect| matches!(effect, Effect::ClockRead { source } if *source == UNIT)));
+}
+
+#[test]
+fn a_commit_refusal_is_not_a_successful_fuzz_observation() {
+    let state = PpuState::new();
+    let mut stores = StoreBuffer::new();
+    assert!(stores.insert(DATA_REGION_BASE - 4, 4, 0x1122_3344));
+
+    let observation = finish_fuzz_observation(PpuObservationInput {
+        initial_state: &state,
+        final_state: &state,
+        memory_base: DATA_REGION_BASE,
+        initial_memory: &[0; DATA_LEN],
+        outcome: PpuObservedOutcome::Execution(ExecuteVerdict::Continue),
+        effects: Vec::new(),
+        stores,
+        unit: UNIT,
+    })
+    .unwrap();
+
+    assert!(matches!(
+        observation.commit_error,
+        Some(PpuObservationError::WriteOutOfRange {
+            kind: cellgov_effects::EffectKind::SharedWriteIntent,
+            addr,
+            len: 4,
+        }) if addr == DATA_REGION_BASE - 4
+    ));
+    assert!(observation.committed_effects.is_empty());
+    assert!(matches!(
+        observation.staged_effects.as_slice(),
+        [Effect::SharedWriteIntent { .. }]
+    ));
+    let observed = ObservedStep {
+        verdict: ExecuteVerdict::Continue,
+        observation,
+    };
+    let assessment = CaseAssessment::new(
+        CaseEligibility::Eligible,
+        EligibilityReason::InterpreterContract,
+        BTreeSet::new(),
+    );
+    let semantic = ppu_observation(
+        [],
+        &assessment,
+        PpuTerminalObservation::from_step(&observed),
+        &observed.observation.committed_effects,
+        1,
+        ppu_step_changed(&state, &observed),
+        CrossReferenceAsymmetry::None,
+    );
+    assert_eq!(semantic.outcome, Some(OutcomeIdentity::PpuCommitRefusal));
+    assert_eq!(
+        semantic.state_transition,
+        StateTransitionClass::CommitRefused
+    );
 }
 
 #[test]
@@ -61,11 +120,12 @@ fn a_ppu_sequence_fetches_from_the_branch_target() {
         &[branch_over_next_word, li_r3_one, nop],
         &initial,
         &[0; DATA_LEN],
-    );
+    )
+    .unwrap();
 
     assert_eq!(run.decoded, 2);
     assert_eq!(run.executed, 2);
-    assert_eq!(run.observed.state.gpr[3], 0);
+    assert_eq!(run.observed.observation.state.gpr[3], 0);
 }
 
 #[test]
@@ -74,17 +134,51 @@ fn a_faulting_ppu_sequence_discards_prior_state() {
     let lwz_r4_r5 = (32 << 26) | (4 << 21) | (5 << 16);
     let initial = PpuState::new();
 
-    let run = run_sequence(&[li_r3_one, lwz_r4_r5], &initial, &[0; DATA_LEN]);
+    let run = run_sequence(&[li_r3_one, lwz_r4_r5], &initial, &[0; DATA_LEN]).unwrap();
 
     assert_eq!(run.decoded, 2);
     assert_eq!(run.executed, 2);
-    assert_eq!(run.observed.state.gpr[3], 0);
-    assert_eq!(run.observed.pc, 0);
-    assert!(run.observed.effects.is_empty());
+    assert_eq!(run.observed.observation.state.gpr[3], 0);
+    assert_eq!(run.observed.observation.state.pc, 0);
+    assert!(run.observed.observation.committed_effects.is_empty());
+    assert!(run.observed.observation.fault_discarded);
     assert!(matches!(
         run.observed.terminal_verdict,
         Some(ExecuteVerdict::MemFault(_))
     ));
+}
+
+#[test]
+fn fault_discarded_effects_are_not_guest_visible() {
+    let lwz_r3_r4 = (32 << 26) | (3 << 21) | (4 << 16);
+    let lwz_r5_r6 = (32 << 26) | (5 << 21) | (6 << 16);
+    let mut initial = PpuState::new();
+    initial.set_gpr(4, DATA_BASE);
+
+    let run = run_sequence(&[lwz_r3_r4, lwz_r5_r6], &initial, &[0; DATA_LEN]).unwrap();
+
+    assert!(!run.observed.observation.staged_effects.is_empty());
+    assert!(run.observed.observation.committed_effects.is_empty());
+    let assessment = CaseAssessment::new(
+        CaseEligibility::Eligible,
+        EligibilityReason::InterpreterContract,
+        BTreeSet::new(),
+    );
+    let observation = ppu_observation(
+        run.executed_kinds.iter().copied(),
+        &assessment,
+        PpuTerminalObservation::from_sequence(&run.observed),
+        &run.observed.observation.committed_effects,
+        run.executed,
+        ppu_sequence_changed(&initial, &run.observed),
+        CrossReferenceAsymmetry::None,
+    );
+
+    assert_eq!(
+        observation.state_transition,
+        StateTransitionClass::FaultDiscarded
+    );
+    assert!(observation.effects.is_empty());
 }
 
 #[test]
@@ -191,14 +285,21 @@ fn replay_requires_the_deterministic_relation() {
 }
 
 fn observed_step(verdict: ExecuteVerdict) -> ObservedStep {
+    let state = PpuState::new();
+    let observation = finish_observation(PpuObservationInput {
+        initial_state: &state,
+        final_state: &state,
+        memory_base: DATA_REGION_BASE,
+        initial_memory: &[0; DATA_LEN],
+        outcome: PpuObservedOutcome::Execution(verdict.clone()),
+        effects: Vec::new(),
+        stores: StoreBuffer::new(),
+        unit: UNIT,
+    })
+    .unwrap();
     ObservedStep {
         verdict,
-        state: PpuStateSnapshot::zero(),
-        pc: 0,
-        vrsave: 0,
-        vrsave_written: false,
-        tb: 0,
-        effects: Vec::new(),
+        observation,
     }
 }
 
@@ -216,10 +317,26 @@ fn ppu_replay_asymmetry_uses_the_strongest_changed_axis() {
     );
 
     let mut second = first.clone();
-    second.state.gpr[0] = 1;
+    second.observation.state.gpr[0] = 1;
     assert_eq!(
         ppu_step_replay_asymmetry(&first, &second),
         CrossReferenceAsymmetry::State
+    );
+
+    let mut second = first.clone();
+    second.observation.outcome = PpuObservedOutcome::Execution(ExecuteVerdict::Branch);
+    assert_eq!(
+        ppu_step_replay_asymmetry(&first, &second),
+        CrossReferenceAsymmetry::Outcome
+    );
+
+    let mut second = first.clone();
+    second.observation.outcome = PpuObservedOutcome::Execution(ExecuteVerdict::Fault(
+        cellgov_ppu::exec::PpuFault::UnimplementedInstruction(0),
+    ));
+    assert_eq!(
+        ppu_step_replay_asymmetry(&first, &second),
+        CrossReferenceAsymmetry::Fault
     );
 
     let mut second = first.clone();
@@ -230,7 +347,10 @@ fn ppu_replay_asymmetry_uses_the_strongest_changed_axis() {
     );
 
     let mut second = first.clone();
-    second.effects.push(Effect::ClockRead { source: UNIT });
+    second
+        .observation
+        .committed_effects
+        .push(Effect::ClockRead { source: UNIT });
     assert_eq!(
         ppu_step_replay_asymmetry(&first, &second),
         CrossReferenceAsymmetry::Effect
@@ -239,7 +359,10 @@ fn ppu_replay_asymmetry_uses_the_strongest_changed_axis() {
     let mut second = first.clone();
     second.verdict =
         ExecuteVerdict::Fault(cellgov_ppu::exec::PpuFault::UnimplementedInstruction(0));
-    second.effects.push(Effect::ClockRead { source: UNIT });
+    second
+        .observation
+        .committed_effects
+        .push(Effect::ClockRead { source: UNIT });
     assert_eq!(
         ppu_step_replay_asymmetry(&first, &second),
         CrossReferenceAsymmetry::Fault
@@ -248,16 +371,22 @@ fn ppu_replay_asymmetry_uses_the_strongest_changed_axis() {
 
 #[test]
 fn ppu_sequence_replay_compares_decoded_and_executed_depth_and_order() {
+    let state = PpuState::new();
     let observed = ObservedSequence {
-        state: PpuStateSnapshot::zero(),
-        pc: 0,
-        vrsave: 0,
-        vrsave_written: false,
-        tb: 0,
+        observation: finish_observation(PpuObservationInput {
+            initial_state: &state,
+            final_state: &state,
+            memory_base: DATA_REGION_BASE,
+            initial_memory: &[0; DATA_LEN],
+            outcome: PpuObservedOutcome::Execution(ExecuteVerdict::Continue),
+            effects: Vec::new(),
+            stores: StoreBuffer::new(),
+            unit: UNIT,
+        })
+        .unwrap(),
         terminal_verdict: Some(ExecuteVerdict::Continue),
         decode_refusal: None,
         deterministic: true,
-        effects: Vec::new(),
     };
     let ori = InstructionIdentity::Ppu(PpuFuzzKind::Ordinary(PpuInstructionKind::Ori));
     let xori = InstructionIdentity::Ppu(PpuFuzzKind::Ordinary(PpuInstructionKind::Xori));
@@ -278,6 +407,8 @@ fn ppu_sequence_replay_compares_decoded_and_executed_depth_and_order() {
     executed_deeper.executed = 3;
     let mut refusal = first.clone();
     refusal.observed.decode_refusal = Some((8, u32::MAX));
+    let mut outcome = first.clone();
+    outcome.observed.observation.outcome = PpuObservedOutcome::NoInstruction;
 
     assert_eq!(
         ppu_sequence_replay_asymmetry(&first, &decoded_reordered),
@@ -299,6 +430,10 @@ fn ppu_sequence_replay_compares_decoded_and_executed_depth_and_order() {
         ppu_sequence_replay_asymmetry(&first, &refusal),
         CrossReferenceAsymmetry::Outcome
     );
+    assert_eq!(
+        ppu_sequence_replay_asymmetry(&first, &outcome),
+        CrossReferenceAsymmetry::Outcome
+    );
 }
 
 #[test]
@@ -310,7 +445,7 @@ fn buffer_full_is_decoded_but_not_counted_as_executed() {
     let mut initial = PpuState::new();
     initial.set_gpr(4, DATA_BASE);
 
-    let run = run_sequence(&words, &initial, &[0; DATA_LEN]);
+    let run = run_sequence(&words, &initial, &[0; DATA_LEN]).unwrap();
 
     assert_eq!(run.decoded, 65);
     assert_eq!(run.decoded_kinds.len(), 65);
@@ -331,7 +466,7 @@ fn buffer_full_is_decoded_but_not_counted_as_executed() {
         run.executed_kinds.iter().copied(),
         &assessment,
         PpuTerminalObservation::from_sequence(&run.observed),
-        &run.observed.effects,
+        &run.observed.observation.committed_effects,
         run.executed,
         ppu_sequence_changed(&initial, &run.observed),
         CrossReferenceAsymmetry::None,
@@ -372,6 +507,10 @@ fn ppu_observation_preserves_the_first_executed_kind() {
         CrossReferenceAsymmetry::None,
     );
     assert_eq!(refusal.outcome, Some(OutcomeIdentity::PpuDecodeRefusal));
+    assert_eq!(
+        refusal.state_transition,
+        StateTransitionClass::FaultDiscarded
+    );
 }
 
 #[test]
@@ -667,7 +806,7 @@ fn a_memory_fault_retracts_unmet_state_features() {
         imm: 0,
     };
     let state = PpuState::new();
-    let observed = run_once(&instruction, &state, &[0; DATA_LEN]);
+    let observed = run_once(&instruction, &state, &[0; DATA_LEN]).unwrap();
     assert!(matches!(observed.verdict, ExecuteVerdict::MemFault(_)));
     let assessment = assess_instruction_case(
         GenerationStrategy::Structured,

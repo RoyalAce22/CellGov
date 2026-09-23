@@ -30,12 +30,25 @@ const CAPACITY: usize = 64;
 /// `value: u128` payload's capacity (`stvx`/`dcbz`-by-granule peak at
 /// 16 bytes per entry).
 // [PPC-Book2 p:10 s:1.7.3.1 Reservations] a later lwarx/ldarx clears the earlier reservation and establishes a new one; a stwcx./stdcx. clears only the reservation that precedes it.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StoreEntry {
     addr: u64,
     len: u8,
     emit_at: Option<usize>,
     value: u128,
+}
+
+/// One pending store at the current PPU block boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingStore {
+    /// Guest address of the first byte.
+    pub addr: u64,
+    /// Architectural store width in bytes.
+    pub len: u8,
+    /// Effect-list position that a conditional store reserves.
+    pub conditional_effect_index: Option<usize>,
+    /// Big-endian value in the forwarding buffer.
+    pub value: u128,
 }
 
 impl StoreEntry {
@@ -104,6 +117,19 @@ impl StoreBuffer {
     #[inline]
     pub fn is_full(&self) -> bool {
         self.entries.len() >= CAPACITY
+    }
+
+    /// Returns a program-order record of pending stores.
+    pub fn snapshot(&self) -> Vec<PendingStore> {
+        self.entries
+            .iter()
+            .map(|entry| PendingStore {
+                addr: entry.addr,
+                len: entry.len,
+                conditional_effect_index: entry.emit_at,
+                value: entry.value,
+            })
+            .collect()
     }
 
     /// Whether `n` more entries fit. Multi-store instructions

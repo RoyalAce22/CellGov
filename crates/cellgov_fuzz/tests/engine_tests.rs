@@ -59,7 +59,11 @@ fn structured_instruction_campaigns_decode_every_generated_case() {
     };
 
     for run in [ppu::run_instructions(config), spu::run_instructions(config)] {
-        assert!(!matches!(run.outcome, RunOutcome::HarnessFailure(_)));
+        assert!(
+            !matches!(run.outcome, RunOutcome::HarnessFailure(_)),
+            "{:?}",
+            run.outcome
+        );
         assert_eq!(run.report.cases, 2_048);
         assert_eq!(run.report.decoded, 2_048);
     }

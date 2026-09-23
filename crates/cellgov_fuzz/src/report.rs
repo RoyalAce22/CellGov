@@ -101,6 +101,8 @@ pub enum OutcomeIdentity {
     PpuBufferFull,
     /// PPU sequence stopped when its next word did not decode.
     PpuDecodeRefusal,
+    /// PPU execution emitted a batch the commit contract refused.
+    PpuCommitRefusal,
     /// Ordinary SPU completion.
     SpuContinue,
     /// SPU branch.

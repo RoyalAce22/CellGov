@@ -111,6 +111,8 @@ pub enum StateTransitionClass {
     Effect,
     /// Fault discard restored the entry state.
     FaultDiscarded,
+    /// Commit validation refused every staged effect.
+    CommitRefused,
 }
 
 /// Boundary class reached by generated operands or state.

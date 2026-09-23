@@ -118,6 +118,20 @@ pub(crate) struct PpuSnapshotFields {
     pub reservation: Option<ReservedLine>,
 }
 
+pub(crate) struct PpuObservationFields {
+    pub gpr: [u64; GPR_COUNT],
+    pub fpr: [u64; FPR_COUNT],
+    pub vr: [u128; VR_COUNT],
+    pub pc: u64,
+    pub cr: u32,
+    pub lr: u64,
+    pub ctr: u64,
+    pub xer: u64,
+    pub vrsave: u32,
+    pub tb: u64,
+    pub reservation: Option<ReservedLine>,
+}
+
 impl PpuState {
     /// The exhaustive pattern requires each new state field to join the snapshot or have an instrumentation-only exclusion.
     pub(crate) fn snapshot_fields(&self) -> PpuSnapshotFields {
@@ -152,6 +166,45 @@ impl PpuState {
             lr: *lr,
             ctr: *ctr,
             xer: *xer,
+            reservation: *reservation,
+        }
+    }
+
+    pub(crate) fn observation_fields(&self) -> PpuObservationFields {
+        let Self {
+            gpr,
+            fpr,
+            vr,
+            pc,
+            cr,
+            lr,
+            ctr,
+            xer,
+            vrsave,
+            vrsave_written: _,
+            clock_read: _,
+            mfvrsave_executed: _,
+            ldarx_executed: _,
+            stdcx_executed: _,
+            lwarx_executed: _,
+            stwcx_executed: _,
+            mem_fault_arm_entries: _,
+            mem_fault_unmapped_routed: _,
+            dcbz_executed: _,
+            tb,
+            reservation,
+        } = self;
+        PpuObservationFields {
+            gpr: *gpr.as_array(),
+            fpr: *fpr.as_array(),
+            vr: *vr.as_array(),
+            pc: *pc,
+            cr: *cr,
+            lr: *lr,
+            ctr: *ctr,
+            xer: *xer,
+            vrsave: *vrsave,
+            tb: *tb,
             reservation: *reservation,
         }
     }
