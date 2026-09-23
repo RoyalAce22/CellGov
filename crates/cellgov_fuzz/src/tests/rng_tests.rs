@@ -1,8 +1,15 @@
 use super::*;
 
 #[test]
+fn campaign_version_one_preserves_the_original_case_mapping() {
+    let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 7, 0);
+
+    assert_eq!(rng.next_u64(), 0x044c_3cd7_f43c_661c);
+}
+
+#[test]
 fn accepted_word_generation_reports_bound_exhaustion() {
-    let mut rng = Rng::for_iter(7, 0);
+    let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 7, 0);
 
     assert!(matches!(
         rng.decoder_accepted_words(1, |_| Ok(false)),
@@ -12,7 +19,7 @@ fn accepted_word_generation_reports_bound_exhaustion() {
 
 #[test]
 fn accepted_word_generation_reports_decoder_panics() {
-    let mut rng = Rng::for_iter(7, 0);
+    let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 7, 0);
 
     assert!(matches!(
         rng.decoder_accepted_words(1, |_| Err(crate::TargetPanicPayload::NonString)),
@@ -22,7 +29,7 @@ fn accepted_word_generation_reports_decoder_panics() {
 
 #[test]
 fn invalid_probability_bounds_are_typed_refusals() {
-    let mut rng = Rng::for_iter(7, 0);
+    let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 7, 0);
 
     assert_eq!(
         rng.chance(2, 1),

@@ -11,10 +11,10 @@ use crate::boundary::{call_harness, call_target};
 use crate::error::{FuzzError, InvariantError};
 use crate::report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
-    InstructionIdentity, OutcomeIdentity, ReductionOutcome, ReplayCoordinates, SemanticFingerprint,
+    InstructionIdentity, OutcomeIdentity, ReductionOutcome, SemanticFingerprint,
 };
 use crate::rng::{Rng, WordGenerationFailure};
-use crate::{FuzzConfig, TargetPanicPayload};
+use crate::{FuzzConfig, ReplayCoordinates, TargetPanicPayload};
 
 const UNIT: UnitId = UnitId::new(0);
 
@@ -41,9 +41,9 @@ pub fn run_instructions(config: FuzzConfig) -> FuzzRun {
 
 fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
     config.validate(None)?;
-    for iteration in config.iterations() {
+    for iteration in config.case_indices()? {
         report.considered()?;
-        let mut rng = Rng::for_iter(config.seed, iteration);
+        let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
         let raw = rng.next_u32();
         let decoded = match call_target(|| cellgov_spu::decode::decode(raw)) {
             Ok(decoded) => decoded,
@@ -160,10 +160,10 @@ pub fn run_sequences(config: FuzzConfig) -> FuzzRun {
 
 fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
     config.validate(Some((SPU_LS_SIZE / 4).min(crate::MAX_SEQUENCE_WORDS)))?;
-    for iteration in config.iterations() {
+    for iteration in config.case_indices()? {
         report.considered()?;
-        let mut rng = Rng::for_iter(config.seed, iteration);
-        let words = rng.decoder_accepted_words(config.sequence_words, |raw| {
+        let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
+        let words = rng.decoder_accepted_words(config.sequence_words as usize, |raw| {
             call_target(|| cellgov_spu::decode::decode(raw)).map(|decoded| decoded.is_ok())
         });
         let words = match words {
@@ -193,7 +193,7 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             }
             initial.ls[start..start + 4].copy_from_slice(&word.to_be_bytes());
         }
-        let first = match call_target(|| run_sequence(&initial, config.sequence_words)) {
+        let first = match call_target(|| run_sequence(&initial, config.sequence_words as usize)) {
             Ok(first) => first,
             Err(payload) => {
                 record_target_panic(
@@ -209,20 +209,21 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
         };
         report.reached_many(first.1, first.2.iter().copied())?;
         if first.0.deterministic {
-            let second = match call_target(|| run_sequence(&initial, config.sequence_words)) {
-                Ok(second) => second,
-                Err(payload) => {
-                    record_target_panic(
-                        report,
-                        CheckIdentity::SpuExecutor,
-                        None,
-                        words.clone(),
-                        iteration,
-                        payload,
-                    )?;
-                    continue;
-                }
-            };
+            let second =
+                match call_target(|| run_sequence(&initial, config.sequence_words as usize)) {
+                    Ok(second) => second,
+                    Err(payload) => {
+                        record_target_panic(
+                            report,
+                            CheckIdentity::SpuExecutor,
+                            None,
+                            words.clone(),
+                            iteration,
+                            payload,
+                        )?;
+                        continue;
+                    }
+                };
             if first.0 != second.0 {
                 record(
                     report,
@@ -395,7 +396,12 @@ fn record(
     report.finding(Finding {
         fingerprint,
         kind,
-        replay: ReplayCoordinates::new(report.seed, iteration),
+        replay: ReplayCoordinates::new(
+            report.target,
+            report.seed,
+            iteration,
+            report.sequence_words,
+        ),
         original_words,
         reduction: ReductionOutcome::NotAttempted,
         panic_payload: None,
@@ -420,7 +426,12 @@ fn record_target_panic(
             effect: None,
         },
         kind: FindingKind::TargetPanic,
-        replay: ReplayCoordinates::new(report.seed, iteration),
+        replay: ReplayCoordinates::new(
+            report.target,
+            report.seed,
+            iteration,
+            report.sequence_words,
+        ),
         original_words,
         reduction: ReductionOutcome::NotAttempted,
         panic_payload: Some(payload),
@@ -432,8 +443,16 @@ fn guarded_run(
     config: FuzzConfig,
     run: impl FnOnce(&mut FuzzReport) -> Result<(), FuzzError>,
 ) -> FuzzRun {
-    let mut report = FuzzReport::new(target, config.seed, config.max_findings);
+    let mut report = FuzzReport::new(
+        target,
+        config.seed,
+        config.max_findings as usize,
+        config.sequence_words,
+    );
     match call_harness(|| run(&mut report)) {
+        Ok(Ok(())) if config.schedule.is_cancelled() && report.is_clean() => {
+            FuzzRun::cancelled(report)
+        }
         Ok(Ok(())) => FuzzRun::completed(report),
         Ok(Err(error)) => FuzzRun::failed(report, error),
         Err(_) => FuzzRun::failed(

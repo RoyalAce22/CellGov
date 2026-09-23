@@ -14,8 +14,9 @@ pub(crate) enum WordGenerationFailure {
 const WORD_GENERATION_ATTEMPTS: usize = 64;
 
 impl Rng {
-    pub fn for_iter(seed: u64, iter: u64) -> Self {
-        let mut r = Self(seed ^ iter.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    pub fn for_case(_version: crate::CampaignVersion, seed: u64, case_index: u64) -> Self {
+        // Campaign version 1 preserves this seed/index mapping for replay compatibility.
+        let mut r = Self(seed ^ case_index.wrapping_mul(0x9E37_79B9_7F4A_7C15));
         r.next_u64();
         r
     }

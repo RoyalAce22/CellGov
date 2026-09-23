@@ -3,9 +3,41 @@
 /// Invalid caller-supplied campaign configuration.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ConfigurationError {
+    /// The campaign artifact uses a generator format this build cannot replay.
+    #[error("campaign version {found:?} does not match supported version {supported:?}")]
+    UnsupportedCampaignVersion {
+        /// Version carried by the campaign artifact.
+        found: crate::CampaignVersion,
+        /// Version understood by this engine.
+        supported: crate::CampaignVersion,
+    },
     /// The campaign contains no cases.
     #[error("fuzz campaign must contain at least one case")]
     ZeroIterations,
+    /// The requested range exceeds the case-index space.
+    #[error("case range starting at {first} with count {count} overflows the index space")]
+    CaseRangeOverflow {
+        /// First requested case index.
+        first: u64,
+        /// Number of requested cases.
+        count: u64,
+    },
+    /// The shard does not name one member of a nonempty partition.
+    #[error("campaign shard {index} is invalid for a partition of {count}")]
+    InvalidShard {
+        /// Zero-based shard number.
+        index: u32,
+        /// Total number of shards.
+        count: u32,
+    },
+    /// The cancellation point lies beyond the declared case range.
+    #[error("cancellation offset {offset} exceeds campaign count {count}")]
+    CancellationOutOfRange {
+        /// Requested stop offset.
+        offset: u64,
+        /// Declared case count.
+        count: u64,
+    },
     /// A sequence campaign contains no instructions.
     #[error("fuzz sequence must contain at least one instruction")]
     ZeroSequenceWords,
@@ -117,9 +149,9 @@ pub enum ReductionError {
 #[error("replay version {found} does not match supported version {supported}")]
 pub struct ReplayVersionError {
     /// Version carried by the replay record.
-    pub found: u32,
+    pub found: crate::CampaignVersion,
     /// Version understood by this engine.
-    pub supported: u32,
+    pub supported: crate::CampaignVersion,
 }
 
 /// The harness refused to continue after an internal invariant failed.

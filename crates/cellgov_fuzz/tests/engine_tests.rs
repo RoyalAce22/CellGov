@@ -1,14 +1,20 @@
 //! Integration tests for the public fuzz-engine API.
 
-use cellgov_fuzz::{ppu, spu, FuzzConfig};
+use cellgov_fuzz::{ppu, spu, CampaignSchedule, CaseRange, FuzzConfig};
 
 fn small_config() -> FuzzConfig {
     FuzzConfig {
         seed: 7,
-        first_iteration: 0,
-        iterations: 16,
+        schedule: CampaignSchedule {
+            cases: CaseRange {
+                first: 0,
+                count: 16,
+            },
+            ..CampaignSchedule::default()
+        },
         max_findings: 4,
         sequence_words: 4,
+        ..FuzzConfig::default()
     }
 }
 

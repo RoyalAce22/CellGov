@@ -310,6 +310,8 @@ dependencies = [
  "cellgov_ppu",
  "cellgov_spu",
  "cellgov_sync",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

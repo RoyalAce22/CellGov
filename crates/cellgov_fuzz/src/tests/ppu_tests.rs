@@ -7,7 +7,7 @@ fn mftb(rt: u32) -> u32 {
 
 #[test]
 fn seeded_vrsave_is_valid_for_an_immediate_read() {
-    let mut rng = Rng::for_iter(7, 0);
+    let mut rng = Rng::for_case(crate::CAMPAIGN_VERSION, 7, 0);
     let initial = random_state(&mut rng).unwrap();
     let observed = run_once(
         &PpuInstruction::Mfvrsave { rt: 0 },
@@ -84,7 +84,6 @@ fn a_faulting_ppu_sequence_discards_prior_state() {
 #[test]
 fn a_zero_word_ppu_sequence_is_an_invalid_configuration() {
     let run = run_sequences(FuzzConfig {
-        iterations: 1,
         sequence_words: 0,
         ..FuzzConfig::default()
     });
@@ -149,6 +148,37 @@ fn unexpected_panics_keep_partial_report_evidence() {
 }
 
 #[test]
+fn cancellation_does_not_hide_a_target_panic() {
+    let config = FuzzConfig {
+        schedule: crate::CampaignSchedule {
+            cancellation: Some(crate::CancellationBoundary(1)),
+            ..crate::CampaignSchedule::default()
+        },
+        ..FuzzConfig::default()
+    };
+    let run = guarded_run(FuzzTarget::PpuInstruction, config, |report| {
+        report.considered()?;
+        record_target_panic(
+            report,
+            CheckIdentity::PpuDecoder,
+            None,
+            vec![0],
+            0,
+            TargetPanicPayload::NonString,
+        )?;
+        Ok(())
+    });
+
+    assert_eq!(run.outcome, RunOutcome::TargetPanic);
+    assert_eq!(run.report.cases, 1);
+    assert_eq!(run.report.findings.len(), 1);
+    assert_eq!(
+        run.report.findings[0].replay.target,
+        FuzzTarget::PpuInstruction
+    );
+}
+
+#[test]
 fn replay_requires_the_deterministic_relation() {
     assert!(!requests_replay(&[]));
     assert!(requests_replay(&[PpuMetamorphicRelation::Deterministic]));
@@ -156,8 +186,8 @@ fn replay_requires_the_deterministic_relation() {
 
 #[test]
 fn panic_presentation_does_not_change_semantic_identity() {
-    let mut left = FuzzReport::new(FuzzTarget::PpuInstruction, 7, 1);
-    let mut right = FuzzReport::new(FuzzTarget::PpuInstruction, 7, 1);
+    let mut left = FuzzReport::new(FuzzTarget::PpuInstruction, 7, 1, 1);
+    let mut right = FuzzReport::new(FuzzTarget::PpuInstruction, 7, 1, 1);
 
     record_target_panic(
         &mut left,

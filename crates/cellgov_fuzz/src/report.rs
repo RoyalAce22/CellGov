@@ -9,9 +9,6 @@ use cellgov_spu::instruction::SpuInstructionKind;
 use crate::error::{FuzzError, InvariantError};
 use crate::TargetPanicPayload;
 
-/// Version of the deterministic case-to-input mapping.
-pub const CAMPAIGN_VERSION: u32 = 1;
-
 /// Stable interpreter-owned identity of a decoded instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum InstructionIdentity {
@@ -22,7 +19,9 @@ pub enum InstructionIdentity {
 }
 
 /// Fuzz engine whose case produced a finding.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum FuzzTarget {
     /// One decoded PPU instruction.
     PpuInstruction,
@@ -34,38 +33,7 @@ pub enum FuzzTarget {
     SpuSequence,
 }
 
-/// Exact coordinates needed to reproduce a generated case.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ReplayCoordinates {
-    /// Version of the deterministic generator behavior.
-    pub campaign_version: u32,
-    /// Master campaign seed.
-    pub seed: u64,
-    /// Case index within the campaign's stable coordinate space.
-    pub case_index: u64,
-}
-
-impl ReplayCoordinates {
-    pub(crate) fn new(seed: u64, case_index: u64) -> Self {
-        Self {
-            campaign_version: CAMPAIGN_VERSION,
-            seed,
-            case_index,
-        }
-    }
-
-    /// Refuses coordinates created by a different generator version.
-    pub fn validate(self) -> Result<(), crate::ReplayVersionError> {
-        if self.campaign_version == CAMPAIGN_VERSION {
-            Ok(())
-        } else {
-            Err(crate::ReplayVersionError {
-                found: self.campaign_version,
-                supported: CAMPAIGN_VERSION,
-            })
-        }
-    }
-}
+use crate::ReplayCoordinates;
 
 /// Validation rule or target boundary associated with a finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -225,10 +193,16 @@ pub struct FuzzReport {
     /// First bounded set of reproducible findings.
     pub findings: Vec<Finding>,
     max_findings: usize,
+    pub(crate) sequence_words: u32,
 }
 
 impl FuzzReport {
-    pub(crate) fn new(target: FuzzTarget, seed: u64, max_findings: usize) -> Self {
+    pub(crate) fn new(
+        target: FuzzTarget,
+        seed: u64,
+        max_findings: usize,
+        sequence_words: u32,
+    ) -> Self {
         Self {
             target,
             seed,
@@ -238,6 +212,7 @@ impl FuzzReport {
             finding_counts: BTreeMap::new(),
             findings: Vec::new(),
             max_findings,
+            sequence_words,
         }
     }
 
@@ -357,6 +332,13 @@ impl FuzzRun {
     pub(crate) fn failed(report: FuzzReport, error: impl Into<FuzzError>) -> Self {
         Self {
             outcome: RunOutcome::HarnessFailure(error.into()),
+            report,
+        }
+    }
+
+    pub(crate) fn cancelled(report: FuzzReport) -> Self {
+        Self {
+            outcome: RunOutcome::Cancelled,
             report,
         }
     }
