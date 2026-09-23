@@ -44,7 +44,11 @@ pub use retention::{
     RetentionClass, RetentionConfig, RetentionConfigError, RetentionDecision, SemanticObservation,
     StateTransitionClass, TrialMetrics,
 };
-pub use sweep::{ppu_decode_partition, spu_decode_partition, DecodePanic, DecodeSweepReport};
+pub use sweep::{
+    finite_partition_bounds, ppu_decode_partition, reduce_finite_results, spu_decode_partition,
+    sweep_finite, DecodePanic, DecodeSweepReport, FiniteCase, FinitePartitionError,
+    FiniteSweepError, FiniteSweepReport, FiniteVerdict,
+};
 
 /// Reusable configuration shared by all fuzz engines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
