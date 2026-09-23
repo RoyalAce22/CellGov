@@ -28,6 +28,10 @@ pub(crate) enum FuzzCommand {
     Semantic(FuzzSemanticArgs),
     /// Scan raw instruction words through one decoder.
     Raw(FuzzRawArgs),
+    /// Classify every PPU word in a range against the decoder, the encoder and the gap tables.
+    Census(FuzzCensusArgs),
+    /// Merge census shards that tile one word interval into one result.
+    CensusMerge(FuzzCensusMergeArgs),
     /// Replay a versioned finding artifact against its original engine.
     Replay(FuzzReplayArgs),
     /// Run repeated trials of one engine at one budget and store their distributions.
@@ -105,6 +109,24 @@ pub(crate) const RAW_EXIT_CODES: &str = "Exit codes particular to this command:
       sweep failed before its words were classified
   10  the scan ended on --deadline-ms or --cancel-after before every
       word ran, with no panic
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz census` has beyond the shared 0-5 contract.
+pub(crate) const CENSUS_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   a word broke a census property: a decoded word did not round-trip
+      through the encoder, a rejection named a mnemonic outside the gap
+      tables, a word under primary opcode 0 decoded, or the decoder
+      panicked; also the shared failed-operation status when --output
+      could not be written or a worker failed
+  141 stdout was closed by a downstream reader";
+
+/// The outcomes `dev fuzz census-merge` has beyond the shared 0-5 contract.
+pub(crate) const CENSUS_MERGE_EXIT_CODES: &str = "Exit codes particular to this command:
+  1   the merged census holds a finding; also the shared failed-operation
+      status when an input could not be read or parsed, carries a foreign
+      schema version or inconsistent counts, the inputs do not tile one
+      contiguous interval, --full found a shard missing at either end,
+      or --output could not be written
   141 stdout was closed by a downstream reader";
 
 /// The outcomes `dev fuzz replay` has beyond the shared 0-5 contract.
@@ -280,6 +302,57 @@ pub(crate) struct FuzzRawArgs {
     /// Request a same-class reduced case.
     #[arg(long, value_enum, default_value_t = FuzzReduction::None)]
     pub reduction: FuzzReduction,
+}
+
+/// Settings for a bounded or sharded PPU decoder census.
+///
+/// The census decodes and re-encodes every word in the range and checks
+/// each rejection against the gap tables. The whole 32-bit space takes
+/// about two minutes on one core and splits evenly across --workers and
+/// across --shards.
+#[derive(Debug, Args)]
+#[command(after_help = CENSUS_EXIT_CODES)]
+#[command(group = clap::ArgGroup::new("census-scope").required(true).args(["full", "count"]))]
+pub(crate) struct FuzzCensusArgs {
+    /// Cover one shard of the full 32-bit word space.
+    #[arg(long, conflicts_with = "count")]
+    pub full: bool,
+    /// First bounded word, in hexadecimal.
+    #[arg(long, conflicts_with = "full", value_parser = value::hex_u32)]
+    pub start: Option<u32>,
+    /// Bounded word count.
+    #[arg(long)]
+    pub count: Option<u64>,
+    /// Zero-based full-domain shard index.
+    #[arg(long, conflicts_with = "count")]
+    pub shard: Option<u32>,
+    /// Number of full-domain shards.
+    #[arg(long, conflicts_with = "count")]
+    pub shards: Option<u32>,
+    /// Host worker count; defaults to available parallelism.
+    #[arg(long)]
+    pub workers: Option<usize>,
+    /// Report progress after each bounded batch.
+    #[arg(long)]
+    pub progress: bool,
+    /// Write the versioned JSON result here.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
+}
+
+/// Settings for merging census shards.
+#[derive(Debug, Args)]
+#[command(after_help = CENSUS_MERGE_EXIT_CODES)]
+pub(crate) struct FuzzCensusMergeArgs {
+    /// Versioned census results that tile one contiguous word interval.
+    #[arg(required = true, value_name = "PATH")]
+    pub inputs: Vec<PathBuf>,
+    /// Refuse a merged interval that does not cover the whole 32-bit word space.
+    #[arg(long)]
+    pub full: bool,
+    /// Write the merged JSON result here.
+    #[arg(long, value_name = "PATH")]
+    pub output: Option<PathBuf>,
 }
 
 /// Exact replay of one stored finding artifact.

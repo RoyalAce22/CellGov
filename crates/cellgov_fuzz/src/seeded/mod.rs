@@ -17,6 +17,7 @@
 //! | Boundary                      | Defects                              | Check that must fire        |
 //! | ----------------------------- | ------------------------------------ | --------------------------- |
 //! | decoder and executor calls    | `DecoderPanic`, `ExecutorPanic`      | target-panic capture        |
+//! | encoder call                  | `EncoderMismatch`                    | census round-trip class     |
 //! | first-run outcome class       | `IllegalOutcome`                     | legal-outcome contract      |
 //! | first-run effect classes      | `IllegalEffect`                      | legal-effect contract       |
 //! | SPU registers after execution | `IllegalFootprint`, `CommonMode`     | allowed footprint, or none  |

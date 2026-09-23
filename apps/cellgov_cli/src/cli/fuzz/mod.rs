@@ -4,6 +4,7 @@
 
 mod artifact;
 mod campaign;
+mod census;
 mod entry;
 mod error;
 mod evaluate;
@@ -33,3 +34,7 @@ mod evaluate_tests;
 #[cfg(test)]
 #[path = "tests/smoke_tests.rs"]
 mod smoke_tests;
+
+#[cfg(test)]
+#[path = "tests/census_tests.rs"]
+mod census_tests;

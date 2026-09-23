@@ -1,5 +1,11 @@
 name: decoder-sweep
 
+# The exhaustive decoder jobs: every one of the 2^32 PPU words classified
+# against the decoder, the encoder and the gap tables, and every SPU word
+# scanned for a decoder panic. Neither belongs in the continuous build,
+# which runs only bounded samples. The PPU census takes about two minutes
+# on one core for the whole space; each of the sixteen shards here is a
+# fraction of that, and the merge job proves the shards tile the space.
 on:
   schedule:
     - cron: '31 4 * * 0'
@@ -12,15 +18,23 @@ concurrency:
   group: decoder-sweep-${{ github.ref }}
   cancel-in-progress: false
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
-  full-raw-domain:
+  # One shard of the PPU census. A shard fails on its own findings: a
+  # decoded word that does not round-trip, a rejection that names a
+  # mnemonic outside the gap tables, a decoded word under primary 0, or
+  # a panic. Its artifact carries the per-opcode histogram and the first
+  # finding words.
+  ppu-census:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
-        decoder: [ppu, spu]
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -31,21 +45,104 @@ jobs:
         with:
           toolchain: '1.95.0'
 
-      - name: Build the offline decoder command
+      - name: Build the offline decoder commands
         run: cargo build --release -p cellgov_cli --locked
 
-      - name: Sweep one complete-domain shard
+      - name: Classify one shard of the PPU word space
         run: |
           mkdir -p target/decoder-sweep
-          target/release/cellgov dev decoder-sweep '${{ matrix.decoder }}' \
+          target/release/cellgov dev fuzz census \
             --full --shard '${{ matrix.shard }}' --shards 16 \
-            --output 'target/decoder-sweep/${{ matrix.decoder }}-${{ matrix.shard }}.json'
+            --output 'target/decoder-sweep/ppu-census-${{ matrix.shard }}.json'
 
-      - name: Preserve replayable shard evidence
+      - name: Preserve the shard's replayable evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: decoder-${{ matrix.decoder }}-${{ matrix.shard }}
-          path: target/decoder-sweep/*.json
+          name: ppu-census-${{ matrix.shard }}
+          path: target/decoder-sweep/ppu-census-*.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The sixteen shards must tile the whole space: a shard that was lost
+  # or covered twice fails the merge, and the merged histogram is the
+  # one map of how much of the ISA the decoder implements. A job with
+  # `needs` is skipped when any needed job did not succeed, so without
+  # the condition a shard that exits 1 on a finding would skip the merge
+  # instead of failing it, and a lost shard would never reach the
+  # tiling check.
+  ppu-census-merge:
+    needs: ppu-census
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: '1.95.0'
+
+      - name: Build the offline decoder commands
+        run: cargo build --release -p cellgov_cli --locked
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: ppu-census-*
+          path: target/decoder-sweep/shards
+          merge-multiple: true
+
+      - name: Merge the shards into one census
+        run: |
+          target/release/cellgov dev fuzz census-merge --full \
+            target/decoder-sweep/shards/ppu-census-*.json \
+            --output target/decoder-sweep/ppu-census.json
+
+      - name: Preserve the merged census
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ppu-census
+          path: target/decoder-sweep/ppu-census.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  # The SPU decoder has no total encoder yet, so its full-space job keeps
+  # the raw panic scan.
+  spu-raw:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+        with:
+          toolchain: '1.95.0'
+
+      - name: Build the offline decoder commands
+        run: cargo build --release -p cellgov_cli --locked
+
+      - name: Scan one shard of the SPU word space
+        run: |
+          mkdir -p target/decoder-sweep
+          target/release/cellgov dev fuzz raw spu \
+            --full --shard '${{ matrix.shard }}' --shards 16 \
+            --output 'target/decoder-sweep/spu-raw-${{ matrix.shard }}.json'
+
+      - name: Preserve the shard's replayable evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spu-raw-${{ matrix.shard }}
+          path: target/decoder-sweep/spu-raw-*.json
           if-no-files-found: warn
           retention-days: 14

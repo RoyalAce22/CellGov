@@ -3,6 +3,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod artifact;
+pub mod decode_census;
 pub mod decoder_manifest;
 pub mod evaluation;
 pub mod ppu;

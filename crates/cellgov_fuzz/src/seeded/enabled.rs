@@ -74,6 +74,18 @@ pub(crate) fn ppu_decode(
     cellgov_ppu::decode::decode(raw)
 }
 
+/// Encodes a PPU instruction at the encoder boundary.
+pub(crate) fn ppu_encode(
+    instruction: &PpuInstruction,
+) -> Result<u32, cellgov_ppu::instruction::encode::EncodeError> {
+    let word = cellgov_ppu::instruction::encode::encode(instruction)?;
+    Ok(if active() == Some(SeededDefect::EncoderMismatch) {
+        word ^ 1
+    } else {
+        word
+    })
+}
+
 /// Decodes an SPU word at the decoder boundary.
 pub(crate) fn spu_decode(
     raw: u32,

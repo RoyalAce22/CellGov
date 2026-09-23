@@ -336,6 +336,20 @@ pub(crate) const EXAMPLES: &[Examples] = &[
         ],
     },
     Examples {
+        path: "dev fuzz census",
+        lines: &[
+            "cellgov dev fuzz census --start 0x7c000000 --count 1048576 --output census-bounded.json",
+            "cellgov dev fuzz census --full --shard 0 --shards 16 --output census-shard0.json",
+        ],
+    },
+    Examples {
+        path: "dev fuzz census-merge",
+        lines: &[
+            "cellgov dev fuzz census-merge census-shard0.json census-shard1.json --output census.json",
+            "cellgov dev fuzz census-merge --full census-shard*.json --output census.json",
+        ],
+    },
+    Examples {
         path: "dev fuzz replay",
         lines: &[
             "cellgov dev fuzz replay --artifact target/fuzz-findings/finding.json",

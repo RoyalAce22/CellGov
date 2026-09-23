@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use super::artifact::run_replay;
 use super::campaign::{run_campaign, FuzzEngine};
+use super::census::{run_census, run_census_merge};
 use super::error::FuzzCliError;
 use super::evaluate::{run_compare, run_evaluate};
 use super::scan::{run_raw, run_semantic};
@@ -43,6 +44,8 @@ pub(super) fn run_inner_with_quiet(
         FuzzCommand::SpuSequence(args) => run_campaign(args, FuzzEngine::SpuSequence, quiet),
         FuzzCommand::Semantic(args) => run_semantic(args, quiet),
         FuzzCommand::Raw(args) => run_raw(args, quiet),
+        FuzzCommand::Census(args) => run_census(args, quiet),
+        FuzzCommand::CensusMerge(args) => run_census_merge(args),
         FuzzCommand::Replay(args) => run_replay(args),
         FuzzCommand::Evaluate(args) => run_evaluate(args, quiet),
         FuzzCommand::Compare(args) => run_compare(args),

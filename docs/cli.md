@@ -1856,6 +1856,72 @@ Exit codes particular to this command:
   141 stdout was closed by a downstream reader
 ```
 
+##### `cellgov dev fuzz census`
+
+Classify every PPU word in a range against the decoder, the encoder and the gap tables.
+
+```console
+$ cellgov dev fuzz census --start 0x7c000000 --count 1048576 --output census-bounded.json
+$ cellgov dev fuzz census --full --shard 0 --shards 16 --output census-shard0.json
+```
+
+```
+Usage: cellgov dev fuzz census [OPTIONS] <--full|--count <COUNT>>
+```
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--full` | -- | Cover one shard of the full 32-bit word space. |
+| `--start` | `START` | First bounded word, in hexadecimal. |
+| `--count` | `COUNT` | Bounded word count. |
+| `--shard` | `SHARD` | Zero-based full-domain shard index. |
+| `--shards` | `SHARDS` | Number of full-domain shards. |
+| `--workers` | `WORKERS` | Host worker count; defaults to available parallelism. |
+| `--progress` | -- | Report progress after each bounded batch. |
+| `--output` | `PATH` | Write the versioned JSON result here. |
+
+```
+Exit codes particular to this command:
+  1   a word broke a census property: a decoded word did not round-trip
+      through the encoder, a rejection named a mnemonic outside the gap
+      tables, a word under primary opcode 0 decoded, or the decoder
+      panicked; also the shared failed-operation status when --output
+      could not be written or a worker failed
+  141 stdout was closed by a downstream reader
+```
+
+##### `cellgov dev fuzz census-merge`
+
+Merge census shards that tile one word interval into one result.
+
+```console
+$ cellgov dev fuzz census-merge census-shard0.json census-shard1.json --output census.json
+$ cellgov dev fuzz census-merge --full census-shard*.json --output census.json
+```
+
+```
+Usage: cellgov dev fuzz census-merge [OPTIONS] <PATH>...
+```
+
+| Argument | Description |
+| --- | --- |
+| `PATH` | Versioned census results that tile one contiguous word interval. Required. |
+
+| Option | Value | Description |
+| --- | --- | --- |
+| `--full` | -- | Refuse a merged interval that does not cover the whole 32-bit word space. |
+| `--output` | `PATH` | Write the merged JSON result here. |
+
+```
+Exit codes particular to this command:
+  1   the merged census holds a finding; also the shared failed-operation
+      status when an input could not be read or parsed, carries a foreign
+      schema version or inconsistent counts, the inputs do not tile one
+      contiguous interval, --full found a shard missing at either end,
+      or --output could not be written
+  141 stdout was closed by a downstream reader
+```
+
 ##### `cellgov dev fuzz replay`
 
 Replay a versioned finding artifact against its original engine.

@@ -32,10 +32,10 @@ pub(crate) use diff::{
 pub(crate) use entry::try_parse;
 pub(crate) use entry::{die_usage, parse_or_exit};
 pub(crate) use fuzz::{
-    FuzzArgs, FuzzCampaignArgs, FuzzCheck, FuzzCommand, FuzzCompareArgs, FuzzEvaluateArgs,
-    FuzzEvaluateEngine, FuzzPromoteArgs, FuzzRawArgs, FuzzRawDecoder, FuzzReduction,
-    FuzzReductionPolicy, FuzzRegressionProfile, FuzzReplayArgs, FuzzSemanticArgs,
-    FuzzSemanticTarget, FuzzSmokeArgs, FuzzStrategy,
+    FuzzArgs, FuzzCampaignArgs, FuzzCensusArgs, FuzzCensusMergeArgs, FuzzCheck, FuzzCommand,
+    FuzzCompareArgs, FuzzEvaluateArgs, FuzzEvaluateEngine, FuzzPromoteArgs, FuzzRawArgs,
+    FuzzRawDecoder, FuzzReduction, FuzzReductionPolicy, FuzzRegressionProfile, FuzzReplayArgs,
+    FuzzSemanticArgs, FuzzSemanticTarget, FuzzSmokeArgs, FuzzStrategy,
 };
 #[cfg(test)]
 pub(crate) use fuzz::{

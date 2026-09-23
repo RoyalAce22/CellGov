@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use cellgov_fuzz::artifact::{
     ArtifactError, ArtifactReduction, ArtifactReplayError, FuzzFindingArtifact,
 };
+use cellgov_fuzz::decode_census::DecodeCensusError;
 use cellgov_fuzz::evaluation::{ComparisonError, EvaluationPlanError, ResultsError};
 use cellgov_fuzz::raw_decode::{RawDecodeError, MAX_RAW_DECODE_PANIC_SAMPLES};
 use cellgov_fuzz::regression::RegressionError;
@@ -40,6 +41,24 @@ pub(crate) enum FuzzCliError {
     ReferenceMismatch,
     #[error("fuzz: raw decoder scan: {0}")]
     Raw(#[from] RawDecodeError),
+    #[error("fuzz: decoder census: {0}")]
+    Census(#[from] DecodeCensusError),
+    #[error("fuzz: census read {}: {source}", path.display())]
+    CensusRead {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("fuzz: census partition: {0}")]
+    CensusPartition(#[source] cellgov_fuzz::FinitePartitionError),
+    #[error("fuzz: census offset overflows the 32-bit word space")]
+    CensusOffsetOverflow,
+    #[error("fuzz: census progress channel closed before the workers finished")]
+    CensusProgressClosed,
+    #[error(
+        "fuzz: merged census covers 0x{first:08x} for {count} words, not the whole 32-bit space"
+    )]
+    CensusIncomplete { first: u32, count: u64 },
     #[error("fuzz: JSON serialization: {0}")]
     Json(#[from] serde_json::Error),
     #[error("fuzz: write {}: {source}", path.display())]
@@ -131,6 +150,14 @@ impl FuzzCliError {
             | Self::Harness(cellgov_fuzz::FuzzError::Configuration(_))
             | Self::EvaluationPlan(_) => true,
             Self::Raw(source) => source.is_invalid_request(),
+            // An interval the census cannot cover is a refused request; a
+            // part that cannot be merged or parsed is a failed operation.
+            Self::Census(source) => matches!(source, DecodeCensusError::Domain(_)),
+            Self::CensusRead { .. }
+            | Self::CensusPartition(_)
+            | Self::CensusOffsetOverflow
+            | Self::CensusProgressClosed
+            | Self::CensusIncomplete { .. } => false,
             // Two results the command cannot rank are a refused request. An
             // incomplete or unfinished result is a failed operation.
             Self::EvaluationComparison(source) => !matches!(
@@ -202,6 +229,12 @@ impl FuzzCliError {
             | Self::Configuration(_)
             | Self::RawFindingLimit
             | Self::Raw(_)
+            | Self::Census(_)
+            | Self::CensusRead { .. }
+            | Self::CensusPartition(_)
+            | Self::CensusOffsetOverflow
+            | Self::CensusProgressClosed
+            | Self::CensusIncomplete { .. }
             | Self::ReferenceRead { .. }
             | Self::PpuReference(_)
             | Self::SpuReference(_)

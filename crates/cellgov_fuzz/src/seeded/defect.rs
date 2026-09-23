@@ -5,6 +5,8 @@
 pub(crate) enum SeededDefect {
     /// Every decoder call panics.
     DecoderPanic,
+    /// Every encoder call returns a word one bit away from the canonical one.
+    EncoderMismatch,
     /// Every executor call panics.
     ExecutorPanic,
     /// The first run reports an outcome class outside the descriptor.

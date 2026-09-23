@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use cellgov_fuzz::artifact::{ArtifactFingerprint, ArtifactReduction};
+use cellgov_fuzz::decode_census::ClassCounts;
 use cellgov_fuzz::evaluation::{Comparison, ComparisonVerdict, EvaluationSummary};
 use cellgov_fuzz::raw_decode::{RawDecodeStatus, RawDecoder};
 use cellgov_fuzz::regression::Regression;
@@ -407,6 +408,37 @@ impl RawSummary {
     }
 }
 
+/// One decoder census or merge of census shards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CensusSummary {
+    /// Command that produced the result.
+    pub command: &'static str,
+    /// Words in the covered interval.
+    pub words: u64,
+    /// Counts by class.
+    pub classes: ClassCounts,
+    /// Words under primary opcode 0 that decoded.
+    pub primary_zero_decoded: u64,
+    /// Words that broke a census property.
+    pub findings: u64,
+    /// Wall time the command took.
+    pub elapsed_seconds: u64,
+    /// Path that received the versioned result.
+    pub output: Option<PathBuf>,
+}
+
+impl CensusSummary {
+    /// The documented exit status for this census.
+    #[must_use]
+    pub const fn exit_code(&self) -> CommandExitCode {
+        if self.findings > 0 {
+            CommandExitCode::new(exit_codes::FAILED)
+        } else {
+            CommandExitCode::SUCCESS
+        }
+    }
+}
+
 /// One stored evaluation, as the summary names it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EvaluationOutcome {
@@ -535,6 +567,38 @@ pub(crate) fn render_semantic_summary(summary: &SemanticSummary) -> String {
     format!(
         "fuzz semantic {}: kinds={} witnesses={} findings={} refusals={}\n",
         summary.interpreter, summary.kinds, summary.witnesses, summary.findings, summary.refusals
+    )
+}
+
+#[must_use]
+pub(crate) fn render_census_progress(processed: u64, domain: u64) -> String {
+    format!("fuzz census: {processed} of {domain} words")
+}
+
+#[must_use]
+pub(crate) fn render_census_summary(summary: &CensusSummary) -> String {
+    let destination = summary
+        .output
+        .as_ref()
+        .map_or_else(String::new, |path| format!(" -> {}", path.display()));
+    let classes = summary.classes;
+    format!(
+        "{}: {} words in {}s; canonical={} reserved_bits={} alias={} round_trip_failures={} \
+         arm_unimplemented={} arm_unlisted={} not_recognized={} panics={} \
+         primary_zero_decoded={} findings={}{destination}\n",
+        summary.command,
+        summary.words,
+        summary.elapsed_seconds,
+        classes.canonical,
+        classes.reserved_bits,
+        classes.alias,
+        classes.round_trip_failures,
+        classes.arm_unimplemented,
+        classes.arm_unlisted,
+        classes.not_recognized,
+        classes.panics,
+        summary.primary_zero_decoded,
+        summary.findings,
     )
 }
 
