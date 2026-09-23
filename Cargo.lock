@@ -310,6 +310,7 @@ dependencies = [
  "cellgov_ppu",
  "cellgov_spu",
  "cellgov_sync",
+ "thiserror",
 ]
 
 [[package]]

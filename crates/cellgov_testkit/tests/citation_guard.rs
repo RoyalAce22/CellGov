@@ -58,6 +58,23 @@ const DOCUMENTS: &[(&str, PageGrammar)] = &[
     ("FlanaganFreund2009", PageGrammar::Integer),
     ("Rodriguez2015", PageGrammar::Integer),
     ("Kokologiannakis2024", PageGrammar::Integer),
+    ("McKeeman1998", PageGrammar::Integer),
+    ("Martignoni2009", PageGrammar::Integer),
+    ("Yang2011", PageGrammar::Integer),
+    ("Regehr2012", PageGrammar::Integer),
+    ("Chen2013", PageGrammar::Integer),
+    ("Le2014", PageGrammar::Integer),
+    ("Veggalam2016", PageGrammar::Integer),
+    ("Petsios2017", PageGrammar::Integer),
+    ("Klees2018", PageGrammar::Integer),
+    ("Armstrong2019", PageGrammar::ArticlePage),
+    ("Padhye2019", PageGrammar::Integer),
+    ("Manes2021", PageGrammar::Integer),
+    ("Jiang2022", PageGrammar::Integer),
+    ("Watt2023", PageGrammar::ArticlePage),
+    ("Krook2023", PageGrammar::Integer),
+    ("Wang2024", PageGrammar::ArticlePage),
+    ("Feng2026", PageGrammar::Integer),
 ];
 
 /// Floor on the population the guard validates. The tree carries

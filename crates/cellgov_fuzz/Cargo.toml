@@ -19,3 +19,4 @@ cellgov_mem = { path = "../cellgov_mem" }
 cellgov_ppu = { path = "../cellgov_ppu" }
 cellgov_spu = { path = "../cellgov_spu" }
 cellgov_sync = { path = "../cellgov_sync" }
+thiserror = "2"

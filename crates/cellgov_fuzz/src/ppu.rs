@@ -1,7 +1,5 @@
 //! PPU fuzz engines built on interpreter-owned descriptors.
 
-use std::panic::{catch_unwind, AssertUnwindSafe};
-
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::RegionView;
@@ -13,9 +11,14 @@ use cellgov_ppu::state::PpuState;
 use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_sync::ReservedLine;
 
-use crate::report::{Finding, FindingKind, FuzzReport, FuzzTarget, InstructionIdentity};
+use crate::boundary::{call_harness, call_target};
+use crate::error::{FuzzError, GeneratorError, InvariantError};
+use crate::report::{
+    CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
+    InstructionIdentity, OutcomeIdentity, ReductionOutcome, ReplayCoordinates, SemanticFingerprint,
+};
 use crate::rng::{Rng, WordGenerationFailure};
-use crate::FuzzConfig;
+use crate::{FuzzConfig, TargetPanicPayload};
 
 const UNIT: UnitId = UnitId::new(0);
 const DATA_BASE: u64 = 0x1000_0000;
@@ -46,148 +49,213 @@ struct ObservedSequence {
 }
 
 /// Checks each decoded PPU instruction against its descriptor.
-pub fn run_instructions(config: FuzzConfig) -> FuzzReport {
-    let mut report = FuzzReport::new(FuzzTarget::PpuInstruction, config.seed, config.max_findings);
+pub fn run_instructions(config: FuzzConfig) -> FuzzRun {
+    guarded_run(FuzzTarget::PpuInstruction, config, |report| {
+        run_instructions_inner(config, report)
+    })
+}
+
+fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
+    config.validate(None)?;
     for iteration in config.iterations() {
-        report.cases += 1;
+        report.considered()?;
         let mut rng = Rng::for_iter(config.seed, iteration);
         let raw = rng.next_u32();
-        let decoded = catch_unwind(AssertUnwindSafe(|| cellgov_ppu::decode::decode(raw)));
-        let Ok(Ok(instruction)) = decoded else {
-            if decoded.is_err() {
-                record(&mut report, FindingKind::Panic, None, raw, iteration);
+        let decoded = match call_target(|| cellgov_ppu::decode::decode(raw)) {
+            Ok(decoded) => decoded,
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuDecoder,
+                    None,
+                    vec![raw],
+                    iteration,
+                    payload,
+                )?;
+                continue;
             }
-            continue;
         };
+        let Ok(instruction) = decoded else { continue };
         let descriptor = instruction.fuzz_descriptor(raw);
         let identity = InstructionIdentity::Ppu(descriptor.kind);
-        report.reached(identity);
-        let initial = random_state(&mut rng);
+        report.reached(identity)?;
+        let initial = random_state(&mut rng)?;
         let mut memory = vec![0u8; DATA_LEN];
         rng.fill(&mut memory);
-        let first = catch_unwind(AssertUnwindSafe(|| {
-            run_once(&instruction, &initial, &memory)
-        }));
-        let Ok(first) = first else {
-            record(
-                &mut report,
-                FindingKind::Panic,
-                Some(identity),
-                raw,
-                iteration,
-            );
-            continue;
+        let first = match call_target(|| run_once(&instruction, &initial, &memory)) {
+            Ok(first) => first,
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuExecutor,
+                    Some(identity),
+                    vec![raw],
+                    iteration,
+                    payload,
+                )?;
+                continue;
+            }
         };
         if requests_replay(descriptor.relations) {
-            let second = run_once(&instruction, &initial, &memory);
+            let second = match call_target(|| run_once(&instruction, &initial, &memory)) {
+                Ok(second) => second,
+                Err(payload) => {
+                    record_target_panic(
+                        report,
+                        CheckIdentity::PpuExecutor,
+                        Some(identity),
+                        vec![raw],
+                        iteration,
+                        payload,
+                    )?;
+                    continue;
+                }
+            };
             if first != second {
                 record(
-                    &mut report,
+                    report,
                     FindingKind::Nondeterministic,
-                    Some(identity),
-                    raw,
+                    SemanticFingerprint {
+                        target: FuzzTarget::PpuInstruction,
+                        instruction_kind: Some(identity),
+                        check: CheckIdentity::DeterministicReplay,
+                        divergence: DivergenceClass::ArchitecturalState,
+                        outcome: None,
+                        effect: None,
+                    },
+                    vec![raw],
                     iteration,
-                );
+                )?;
             }
         }
-        if !descriptor
-            .outcomes
-            .contains(&PpuOutcomeClass::from_verdict(&first.verdict))
-        {
+        let outcome = PpuOutcomeClass::from_verdict(&first.verdict);
+        if !descriptor.outcomes.contains(&outcome) {
             record(
-                &mut report,
+                report,
                 FindingKind::IllegalOutcome,
-                Some(identity),
-                raw,
+                SemanticFingerprint {
+                    target: FuzzTarget::PpuInstruction,
+                    instruction_kind: Some(identity),
+                    check: CheckIdentity::LegalOutcome,
+                    divergence: DivergenceClass::Outcome,
+                    outcome: Some(outcome_identity(outcome)),
+                    effect: None,
+                },
+                vec![raw],
                 iteration,
-            );
+            )?;
         }
-        if first
+        if let Some(effect) = first
             .effects
             .iter()
-            .any(|effect| !descriptor.effects.contains(&effect.kind()))
+            .map(Effect::kind)
+            .find(|effect| !descriptor.effects.contains(effect))
         {
             record(
-                &mut report,
+                report,
                 FindingKind::IllegalEffect,
-                Some(identity),
-                raw,
+                SemanticFingerprint {
+                    target: FuzzTarget::PpuInstruction,
+                    instruction_kind: Some(identity),
+                    check: CheckIdentity::LegalEffect,
+                    divergence: DivergenceClass::Effect,
+                    outcome: None,
+                    effect: Some(effect),
+                },
+                vec![raw],
                 iteration,
-            );
+            )?;
         }
     }
-    report
+    Ok(())
 }
 
 /// Replays PPU instruction sequences to find nondeterministic outcomes.
-pub fn run_sequences(config: FuzzConfig) -> FuzzReport {
-    let mut report = FuzzReport::new(FuzzTarget::PpuSequence, config.seed, config.max_findings);
-    if config.sequence_words == 0 {
-        record(
-            &mut report,
-            FindingKind::InvalidConfiguration,
-            None,
-            0,
-            config.first_iteration,
-        );
-        return report;
-    }
+pub fn run_sequences(config: FuzzConfig) -> FuzzRun {
+    guarded_run(FuzzTarget::PpuSequence, config, |report| {
+        run_sequences_inner(config, report)
+    })
+}
+
+fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<(), FuzzError> {
+    config.validate(Some(crate::MAX_SEQUENCE_WORDS))?;
     for iteration in config.iterations() {
-        report.cases += 1;
+        report.considered()?;
         let mut rng = Rng::for_iter(config.seed, iteration);
         let words = rng.decoder_accepted_words(config.sequence_words, |raw| {
-            catch_unwind(AssertUnwindSafe(|| cellgov_ppu::decode::decode(raw)))
-                .map(|decoded| decoded.is_ok())
-                .map_err(|_| ())
+            call_target(|| cellgov_ppu::decode::decode(raw)).map(|decoded| decoded.is_ok())
         });
         let words = match words {
             Ok(words) => words,
-            Err(WordGenerationFailure::DecoderPanic(raw)) => {
-                record(&mut report, FindingKind::Panic, None, raw, iteration);
-                continue;
-            }
-            Err(WordGenerationFailure::Exhausted(raw)) => {
-                record(
-                    &mut report,
-                    FindingKind::GenerationExhausted,
+            Err(WordGenerationFailure::DecoderPanic(raw, payload)) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuDecoder,
                     None,
-                    raw,
+                    vec![raw],
                     iteration,
-                );
+                    payload,
+                )?;
                 continue;
             }
+            Err(WordGenerationFailure::Exhausted(error)) => return Err(error.into()),
         };
-        let mut initial = random_state(&mut rng);
+        let mut initial = random_state(&mut rng)?;
         initial.pc = 0;
         let mut memory = vec![0u8; DATA_LEN];
         rng.fill(&mut memory);
-        let first = catch_unwind(AssertUnwindSafe(|| run_sequence(&words, &initial, &memory)));
-        let Ok(first) = first else {
-            record(
-                &mut report,
-                FindingKind::Panic,
-                None,
-                words.first().copied().unwrap_or(0),
-                iteration,
-            );
-            continue;
+        if words.is_empty() {
+            return Err(InvariantError::EmptyGeneratedSequence.into());
+        }
+        let first = match call_target(|| run_sequence(&words, &initial, &memory)) {
+            Ok(first) => first,
+            Err(payload) => {
+                record_target_panic(
+                    report,
+                    CheckIdentity::PpuExecutor,
+                    None,
+                    words.clone(),
+                    iteration,
+                    payload,
+                )?;
+                continue;
+            }
         };
-        report.decoded += first.1;
-        report.instruction_kinds.extend(first.2.iter().copied());
+        report.reached_many(first.1, first.2.iter().copied())?;
         if first.0.deterministic {
-            let second = run_sequence(&words, &initial, &memory);
+            let second = match call_target(|| run_sequence(&words, &initial, &memory)) {
+                Ok(second) => second,
+                Err(payload) => {
+                    record_target_panic(
+                        report,
+                        CheckIdentity::PpuExecutor,
+                        None,
+                        words.clone(),
+                        iteration,
+                        payload,
+                    )?;
+                    continue;
+                }
+            };
             if first.0 != second.0 {
                 record(
-                    &mut report,
+                    report,
                     FindingKind::Nondeterministic,
-                    None,
-                    words.first().copied().unwrap_or(0),
+                    SemanticFingerprint {
+                        target: FuzzTarget::PpuSequence,
+                        instruction_kind: None,
+                        check: CheckIdentity::DeterministicReplay,
+                        divergence: DivergenceClass::ArchitecturalState,
+                        outcome: None,
+                        effect: None,
+                    },
+                    words.clone(),
                     iteration,
-                );
+                )?;
             }
         }
     }
-    report
+    Ok(())
 }
 
 fn run_once(instruction: &PpuInstruction, initial: &PpuState, memory: &[u8]) -> ObservedStep {
@@ -296,20 +364,20 @@ fn run_sequence(
     )
 }
 
-fn random_state(rng: &mut Rng) -> PpuState {
+fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
     let mut state = PpuState::new();
     let mut gpr = [0u64; 32];
     let mut fpr = [0u64; 32];
     let mut vr = [0u128; 32];
     for value in &mut gpr {
-        *value = if rng.chance(1, 3) {
-            DATA_BASE + rng.below(DATA_LEN as u64)
+        *value = if rng.chance(1, 3)? {
+            DATA_BASE + rng.below(DATA_LEN as u64)?
         } else {
-            rng.mixed_u64()
+            rng.mixed_u64()?
         };
     }
     for value in &mut fpr {
-        *value = rng.fp_bits();
+        *value = rng.fp_bits()?;
     }
     for value in &mut vr {
         *value = (u128::from(rng.next_u64()) << 64) | u128::from(rng.next_u64());
@@ -326,32 +394,89 @@ fn random_state(rng: &mut Rng) -> PpuState {
     // The executor treats a seeded VRSAVE value as initialized, as after `mtvrsave`.
     state.vrsave_written = true;
     state.tb = rng.next_u64();
-    state.set_reservation(
-        rng.chance(1, 2)
-            .then(|| ReservedLine::containing(DATA_BASE + rng.below(DATA_LEN as u64))),
-    );
-    state
+    state.set_reservation(if rng.chance(1, 2)? {
+        Some(ReservedLine::containing(
+            DATA_BASE + rng.below(DATA_LEN as u64)?,
+        ))
+    } else {
+        None
+    });
+    Ok(state)
 }
 
 fn requests_replay(relations: &[PpuMetamorphicRelation]) -> bool {
     relations.contains(&PpuMetamorphicRelation::Deterministic)
 }
 
+fn outcome_identity(outcome: PpuOutcomeClass) -> OutcomeIdentity {
+    match outcome {
+        PpuOutcomeClass::Continue => OutcomeIdentity::PpuContinue,
+        PpuOutcomeClass::Branch => OutcomeIdentity::PpuBranch,
+        PpuOutcomeClass::Syscall => OutcomeIdentity::PpuSyscall,
+        PpuOutcomeClass::Fault => OutcomeIdentity::PpuFault,
+        PpuOutcomeClass::MemoryFault => OutcomeIdentity::PpuMemoryFault,
+        PpuOutcomeClass::BufferFull => OutcomeIdentity::PpuBufferFull,
+    }
+}
+
 fn record(
     report: &mut FuzzReport,
     kind: FindingKind,
-    instruction_kind: Option<InstructionIdentity>,
-    raw: u32,
+    fingerprint: SemanticFingerprint,
+    original_words: Vec<u32>,
     iteration: u64,
-) {
+) -> Result<(), InvariantError> {
     report.finding(Finding {
-        target: report.target,
+        fingerprint,
         kind,
-        instruction_kind,
-        raw,
-        seed: report.seed,
-        iteration,
-    });
+        replay: ReplayCoordinates::new(report.seed, iteration),
+        original_words,
+        reduction: ReductionOutcome::NotAttempted,
+        panic_payload: None,
+    })
+}
+
+fn record_target_panic(
+    report: &mut FuzzReport,
+    check: CheckIdentity,
+    instruction_kind: Option<InstructionIdentity>,
+    original_words: Vec<u32>,
+    iteration: u64,
+    payload: TargetPanicPayload,
+) -> Result<(), InvariantError> {
+    report.finding(Finding {
+        fingerprint: SemanticFingerprint {
+            target: report.target,
+            instruction_kind,
+            check,
+            divergence: DivergenceClass::TargetPanic,
+            outcome: None,
+            effect: None,
+        },
+        kind: FindingKind::TargetPanic,
+        replay: ReplayCoordinates::new(report.seed, iteration),
+        original_words,
+        reduction: ReductionOutcome::NotAttempted,
+        panic_payload: Some(payload),
+    })
+}
+
+fn guarded_run(
+    target: FuzzTarget,
+    config: FuzzConfig,
+    run: impl FnOnce(&mut FuzzReport) -> Result<(), FuzzError>,
+) -> FuzzRun {
+    let mut report = FuzzReport::new(target, config.seed, config.max_findings);
+    match call_harness(|| run(&mut report)) {
+        Ok(Ok(())) => FuzzRun::completed(report),
+        Ok(Err(error)) => FuzzRun::failed(report, error),
+        Err(_) => FuzzRun::failed(
+            report,
+            InvariantError::UnexpectedPanic {
+                stage: "PPU campaign",
+            },
+        ),
+    }
 }
 
 #[cfg(test)]
