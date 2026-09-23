@@ -876,7 +876,6 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 Some(l) => l.addr() == line.addr(),
                 None => false,
             };
-            state.reservation = None;
             if success {
                 let lsa_usize = lsa as usize;
                 // The line is 128 bytes wherever MFC_LSA points, and
@@ -888,6 +887,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                 else {
                     return SpuStepOutcome::Fault(SpuFault::LsOutOfRange(lsa));
                 };
+                state.reservation = None;
                 // The store covers the line the reservation named, as
                 // the getllar arm's read did.
                 let range = ByteRange::new(GuestAddr::new(line.addr()), RESERVATION_LINE_BYTES)
@@ -903,6 +903,7 @@ fn execute_mfc_cmd(cmd: u32, state: &mut SpuState, unit_id: UnitId) -> SpuStepOu
                     reason: YieldReason::DmaSubmitted,
                 }
             } else {
+                state.reservation = None;
                 state.channels.atomic_status = MFC_ATOMIC_STAT_S;
                 SpuStepOutcome::Continue
             }

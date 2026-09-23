@@ -22,6 +22,7 @@ pub mod exec;
 pub mod fuzz;
 pub mod instruction;
 pub mod loader;
+pub mod observation;
 pub mod state;
 
 use crate::exec::{SpuFault, SpuStepOutcome};

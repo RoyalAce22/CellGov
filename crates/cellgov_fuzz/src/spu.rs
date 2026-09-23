@@ -10,6 +10,7 @@ use cellgov_spu::fuzz::{
     SpuFuzzDescriptor, SpuGenerationDescriptor, SpuGenerationError, SpuMetamorphicRelation,
     SpuOperandClass, SpuOutcomeClass, SpuSequenceFlow, SpuStateInput,
 };
+use cellgov_spu::observation::{SpuAllowedFootprint, SpuObservation, SpuObservationComponent};
 use cellgov_spu::state::{SpuObservableSnapshot, SpuState, SPU_LS_SIZE};
 use cellgov_sync::{ReservedLine, RESERVATION_LINE_BYTES};
 
@@ -288,6 +289,38 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                     divergence: DivergenceClass::Effect,
                     outcome: None,
                     effect: Some(effect),
+                },
+                vec![raw],
+                iteration,
+            )?;
+        }
+        let complete = SpuObservation::from_parts(first.state.clone(), first.outcome.clone());
+        for component in
+            SpuAllowedFootprint::for_instruction(&instruction).violations(&initial, &complete)
+        {
+            let divergence = match component {
+                SpuObservationComponent::ProgramCounter => DivergenceClass::ControlFlow,
+                SpuObservationComponent::Effects => DivergenceClass::Effect,
+                SpuObservationComponent::Registers
+                | SpuObservationComponent::LocalStore
+                | SpuObservationComponent::Channels
+                | SpuObservationComponent::Reservation
+                | SpuObservationComponent::Outcome
+                | SpuObservationComponent::FaultDiscard => DivergenceClass::ArchitecturalState,
+            };
+            asymmetry = asymmetry.max(CrossReferenceAsymmetry::State);
+            record(
+                report,
+                FindingKind::IllegalFootprint,
+                SemanticFingerprint {
+                    target: FuzzTarget::SpuInstruction,
+                    instruction_kind: Some(identity),
+                    check: CheckIdentity::AllowedFootprint,
+                    divergence,
+                    outcome: Some(outcome_identity(SpuOutcomeClass::from_outcome(
+                        &first.outcome,
+                    ))),
+                    effect: None,
                 },
                 vec![raw],
                 iteration,
@@ -583,10 +616,24 @@ fn spu_step_replay_asymmetry(
     first: &ObservedStep,
     second: &ObservedStep,
 ) -> CrossReferenceAsymmetry {
+    let first_observation = SpuObservation::from_parts(first.state.clone(), first.outcome.clone());
+    let second_observation =
+        SpuObservation::from_parts(second.state.clone(), second.outcome.clone());
+    let differences = first_observation.compare(&second_observation).differences;
     replay_asymmetry(
-        first.state != second.state,
+        differences.iter().any(|component| {
+            matches!(
+                component,
+                SpuObservationComponent::Registers
+                    | SpuObservationComponent::LocalStore
+                    | SpuObservationComponent::ProgramCounter
+                    | SpuObservationComponent::Channels
+                    | SpuObservationComponent::Reservation
+                    | SpuObservationComponent::FaultDiscard
+            )
+        }),
         spu_outcome_asymmetry(Some(&first.outcome), Some(&second.outcome)),
-        outcome_effects(&first.outcome) != outcome_effects(&second.outcome),
+        differences.contains(&SpuObservationComponent::Effects),
     )
 }
 

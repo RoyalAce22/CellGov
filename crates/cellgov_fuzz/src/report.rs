@@ -65,6 +65,8 @@ pub enum CheckIdentity {
     LegalOutcome,
     /// Interpreter-owned legal-effect contract.
     LegalEffect,
+    /// Interpreter-owned SPU state and effect footprint.
+    AllowedFootprint,
     /// Sequence program-counter contract.
     ProgramCounter,
     /// Caller-supplied external reference.
@@ -160,6 +162,8 @@ pub enum FindingKind {
     IllegalOutcome,
     /// Execution emitted an effect class outside the descriptor.
     IllegalEffect,
+    /// Execution changed SPU state outside the instruction's allowed footprint.
+    IllegalFootprint,
     /// An instruction sequence produced an invalid program counter.
     InvalidProgramCounter,
     /// The target explicitly classified the case as unsupported.
