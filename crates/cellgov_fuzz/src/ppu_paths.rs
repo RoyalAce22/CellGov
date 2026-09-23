@@ -1,6 +1,7 @@
 //! Runs internal PPU paths for differential optimization-consistency checks. Agreement does not establish hardware accuracy.
 
 use std::collections::BTreeSet;
+use std::{cell::RefCell, rc::Rc};
 
 use cellgov_effects::FaultKind;
 use cellgov_event::UnitId;
@@ -58,6 +59,22 @@ pub struct PpuPathRun {
     pub stop: PpuPathStop,
     /// The number of instruction slots that retired.
     pub retired: u64,
+    /// Program counters dispatched in execution order.
+    pub executed_pcs: Vec<u64>,
+}
+
+#[derive(Default)]
+struct DispatchTrace(RefCell<Vec<u64>>);
+
+impl cellgov_ppu::PpuTap for DispatchTrace {
+    fn dispatch(
+        &self,
+        _unit: UnitId,
+        _insn: &cellgov_ppu::instruction::PpuInstruction,
+        state: &PpuState,
+    ) {
+        self.0.borrow_mut().push(state.pc);
+    }
 }
 
 /// First typed disagreement between two internal paths.
@@ -104,6 +121,14 @@ pub enum PpuPathError {
         /// The instruction count that exceeds the guest budget range.
         words: usize,
     },
+    /// A requested code rewrite does not name a sequence word.
+    #[error("PPU path code mutation word {word_index} is outside {words} words")]
+    CodeMutationOutOfRange {
+        /// Rejected word index.
+        word_index: usize,
+        /// Number of generated words.
+        words: usize,
+    },
 }
 
 /// Compares internal paths with the same instruction sequence, PPU state, and data.
@@ -113,18 +138,49 @@ pub fn run_all_paths(
     initial: &PpuState,
     data: &[u8],
 ) -> Result<Vec<PpuPathRun>, PpuPathError> {
+    run_paths(words, initial, data, None)
+}
+
+/// Compares internal paths after rewriting one word and invalidating any cached shadow slots.
+pub fn run_all_paths_after_code_mutation(
+    words: &[u32],
+    initial: &PpuState,
+    data: &[u8],
+    word_index: usize,
+    replacement: u32,
+) -> Result<Vec<PpuPathRun>, PpuPathError> {
+    if word_index >= words.len() {
+        return Err(PpuPathError::CodeMutationOutOfRange {
+            word_index,
+            words: words.len(),
+        });
+    }
+    run_paths(words, initial, data, Some((word_index, replacement)))
+}
+
+fn run_paths(
+    words: &[u32],
+    initial: &PpuState,
+    data: &[u8],
+    mutation: Option<(usize, u32)>,
+) -> Result<Vec<PpuPathRun>, PpuPathError> {
     if words.is_empty() {
         return Err(PpuPathError::EmptySequence);
     }
     if data.is_empty() {
         return Err(PpuPathError::EmptyData);
     }
-    let code = words
+    let shadow_code = words
         .iter()
         .copied()
         .chain(std::iter::repeat_n(24 << 26, words.len()))
         .flat_map(u32::to_be_bytes)
         .collect::<Vec<_>>();
+    let mut code = shadow_code.clone();
+    if let Some((word_index, replacement)) = mutation {
+        let start = word_index * 4;
+        code[start..start + 4].copy_from_slice(&replacement.to_be_bytes());
+    }
     [
         PpuExecutionPath::Plain,
         PpuExecutionPath::Forwarded,
@@ -132,7 +188,17 @@ pub fn run_all_paths(
         PpuExecutionPath::Fused,
     ]
     .into_iter()
-    .map(|path| run_path(path, &code, words.len(), initial, data))
+    .map(|path| {
+        run_path(
+            path,
+            &code,
+            &shadow_code,
+            words.len(),
+            initial,
+            data,
+            mutation.map(|(word_index, _)| (word_index * 4) as u64),
+        )
+    })
     .collect()
 }
 
@@ -162,9 +228,11 @@ pub fn first_path_divergence(runs: &[PpuPathRun]) -> Option<PpuPathDivergence> {
 fn run_path(
     path: PpuExecutionPath,
     code: &[u8],
+    shadow_code: &[u8],
     words: usize,
     initial: &PpuState,
     initial_data: &[u8],
+    invalidated_pc: Option<u64>,
 ) -> Result<PpuPathRun, PpuPathError> {
     if path == PpuExecutionPath::Plain {
         return run_plain(code, words, initial, initial_data);
@@ -173,12 +241,22 @@ fn run_path(
         Budget::new(u64::try_from(words).map_err(|_| PpuPathError::BudgetOverflow { words })?);
     let mut unit = PpuExecutionUnit::new(UNIT);
     *unit.state_mut() = initial.clone();
+    let trace = Rc::new(DispatchTrace::default());
+    unit.set_tap(trace.clone());
     match path {
         PpuExecutionPath::Quickened => {
-            unit.set_instruction_shadow(PredecodedShadow::build_quickened(0, code));
+            let mut shadow = PredecodedShadow::build_quickened(0, shadow_code);
+            if let Some(pc) = invalidated_pc {
+                shadow.invalidate_range(pc, 4);
+            }
+            unit.set_instruction_shadow(shadow);
         }
         PpuExecutionPath::Fused => {
-            unit.set_instruction_shadow(PredecodedShadow::build(0, code));
+            let mut shadow = PredecodedShadow::build(0, shadow_code);
+            if let Some(pc) = invalidated_pc {
+                shadow.invalidate_range(pc, 4);
+            }
+            unit.set_instruction_shadow(shadow);
         }
         PpuExecutionPath::Plain | PpuExecutionPath::Forwarded => {}
     }
@@ -226,6 +304,7 @@ fn run_path(
         fault: result.fault,
         pc: result.local_diagnostics.pc,
     };
+    let executed_pcs = trace.0.borrow().clone();
     Ok(PpuPathRun {
         path,
         observation: PpuObservation {
@@ -241,6 +320,7 @@ fn run_path(
         },
         stop,
         retired,
+        executed_pcs,
     })
 }
 
@@ -254,6 +334,7 @@ fn run_plain(
     let mut data = initial_data.to_vec();
     let mut reservations = initial_reservations(initial);
     let mut effects_all = Vec::new();
+    let mut executed_pcs = Vec::new();
     let mut retired = 0u64;
     let mut stop = PpuPathStop {
         reason: YieldReason::BudgetExhausted,
@@ -292,6 +373,7 @@ fn run_plain(
             break;
         };
         let entry = state.clone();
+        executed_pcs.push(step_pc);
         let mut effects = Vec::new();
         let mut stores = StoreBuffer::new();
         let views = [RegionView::plain(DATA_BASE, &data)];
@@ -382,6 +464,7 @@ fn run_plain(
         },
         stop,
         retired,
+        executed_pcs,
     })
 }
 
