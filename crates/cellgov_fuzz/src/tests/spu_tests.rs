@@ -143,6 +143,52 @@ fn replay_requires_the_deterministic_relation() {
 }
 
 #[test]
+fn an_unexpected_fault_remains_eligible_for_contract_checks() {
+    let descriptor = cellgov_spu::instruction::SpuInstruction::Ai {
+        rt: 0,
+        ra: 1,
+        imm: 0,
+    }
+    .fuzz_descriptor();
+    assert_eq!(descriptor.outcomes, &[SpuOutcomeClass::Continue]);
+
+    let assessment = assess_instruction_case(
+        GenerationStrategy::Structured,
+        false,
+        true,
+        descriptor,
+        &SpuStepOutcome::Fault(cellgov_spu::exec::SpuFault::LsOutOfRange(0)),
+        BTreeSet::new(),
+    );
+
+    assert_eq!(assessment.eligibility, CaseEligibility::Eligible);
+}
+
+#[test]
+fn declared_state_input_replaces_the_selected_register_word() {
+    const EXPECTED: &[u32] = &[3, 5, 8];
+
+    let mut descriptor = cellgov_spu::instruction::SpuInstruction::Ai {
+        rt: 0,
+        ra: 1,
+        imm: 0,
+    }
+    .fuzz_descriptor();
+    descriptor.state_input = Some(cellgov_spu::fuzz::SpuStateInput {
+        register: 7,
+        values: EXPECTED,
+        preferred: None,
+    });
+    let config = FuzzConfig::default();
+    let mut rng = Rng::for_case(config.campaign_version, config.seed, 0);
+
+    let (state, _) = state_aware_state(&mut rng, descriptor.state_input)
+        .expect("declared state inputs must construct state");
+
+    assert!(EXPECTED.contains(&state.reg_word(7)));
+}
+
+#[test]
 fn oversized_sequences_are_typed_refusals() {
     let run = run_sequences(FuzzConfig {
         sequence_words: (SPU_LS_SIZE / 4 + 1) as u32,

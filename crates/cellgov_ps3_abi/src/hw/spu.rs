@@ -68,6 +68,15 @@ pub const MFC_WR_TAG_MASK: u8 = 22;
 /// Write tag status update request (0=immediate, 1=any, 2=all).
 // [CBEA p:122 s:9.3 MFC Tag-Group Status Channels] MFC_WrTagUpdate, channel 23.
 pub const MFC_WR_TAG_UPDATE: u8 = 23;
+/// Requests a tag status update without waiting.
+// [CBE-Handbook p:459 s:17.10 MFC Tag-Group Management Channels] TS=00 requests an immediate update.
+pub const MFC_TAG_UPDATE_IMMEDIATE: u32 = 0;
+/// Requests a tag status update after any enabled group completes.
+// [CBE-Handbook p:459 s:17.10 MFC Tag-Group Management Channels] TS=01 waits for any enabled group.
+pub const MFC_TAG_UPDATE_ANY: u32 = 1;
+/// Requests a tag status update after all enabled groups complete.
+// [CBE-Handbook p:459 s:17.10 MFC Tag-Group Management Channels] TS=10 waits for all enabled groups.
+pub const MFC_TAG_UPDATE_ALL: u32 = 2;
 /// Read tag status; blocks until masked tags complete.
 // [CBEA p:122 s:9.3 MFC Tag-Group Status Channels] MFC_RdTagStat, channel 24, read-blocking.
 pub const MFC_RD_TAG_STAT: u8 = 24;

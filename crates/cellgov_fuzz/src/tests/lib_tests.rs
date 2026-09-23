@@ -96,9 +96,9 @@ fn version_one_artifacts_parse_as_raw_words_then_receive_a_typed_refusal() {
 }
 
 #[test]
-fn version_two_artifacts_require_an_explicit_generation_strategy() {
+fn version_three_artifacts_require_an_explicit_generation_strategy() {
     let config = serde_json::from_value::<FuzzConfig>(serde_json::json!({
-        "campaign_version": 2,
+        "campaign_version": 3,
         "seed": 7,
         "schedule": {
             "cases": { "first": 0, "count": 1 },
@@ -109,7 +109,7 @@ fn version_two_artifacts_require_an_explicit_generation_strategy() {
         "sequence_words": 1,
     }));
     let replay = serde_json::from_value::<ReplayCoordinates>(serde_json::json!({
-        "campaign_version": 2,
+        "campaign_version": 3,
         "target": "PpuInstruction",
         "seed": 7,
         "case_index": 0,
@@ -145,6 +145,57 @@ fn campaign_version_mismatch_is_a_typed_refusal() {
         .case_indices(),
         Err(ConfigurationError::UnsupportedCampaignVersion { .. })
     ));
+}
+
+#[test]
+fn inapplicable_cases_are_classified_without_becoming_findings() {
+    let mut report = FuzzReport::new(
+        FuzzTarget::PpuInstruction,
+        7,
+        GenerationStrategy::Structured,
+        4,
+        1,
+    );
+    report
+        .assessed(&CaseAssessment::new(
+            CaseEligibility::Unsupported,
+            EligibilityReason::UnmetStatePrecondition,
+            [CaseFeature::MappedMemory],
+        ))
+        .unwrap();
+    report
+        .assessed(&CaseAssessment::new(
+            CaseEligibility::Undefined,
+            EligibilityReason::ArchitecturallyUndefined,
+            [],
+        ))
+        .unwrap();
+
+    assert_eq!(report.eligibility_rate(), Some((0, 2)));
+    assert!(report.findings.is_empty());
+    assert_eq!(
+        FuzzRun::completed(report).outcome,
+        RunOutcome::UnsupportedAndUndefinedCases
+    );
+}
+
+#[test]
+fn legacy_inapplicability_findings_do_not_become_clean_completion() {
+    for (kind, expected) in [
+        (FindingKind::Unsupported, RunOutcome::UnsupportedCase),
+        (FindingKind::Undefined, RunOutcome::UndefinedCase),
+    ] {
+        let mut report = FuzzReport::new(
+            FuzzTarget::PpuInstruction,
+            7,
+            GenerationStrategy::Structured,
+            4,
+            1,
+        );
+        report.finding_counts.insert(kind, 1);
+
+        assert_eq!(FuzzRun::completed(report).outcome, expected);
+    }
 }
 
 #[test]
@@ -283,7 +334,7 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(
         serde_json::to_value(config).unwrap(),
         serde_json::json!({
-            "campaign_version": 2,
+            "campaign_version": 3,
             "seed": 0x0123_4567_89ab_cdef_u64,
             "strategy": "structured",
             "schedule": {
@@ -298,7 +349,7 @@ fn campaign_and_replay_artifacts_round_trip() {
     assert_eq!(
         serde_json::to_value(replay).unwrap(),
         serde_json::json!({
-            "campaign_version": 2,
+            "campaign_version": 3,
             "target": "PpuSequence",
             "strategy": "structured",
             "seed": 0x0123_4567_89ab_cdef_u64,

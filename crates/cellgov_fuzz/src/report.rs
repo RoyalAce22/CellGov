@@ -6,6 +6,7 @@ use cellgov_effects::EffectKind;
 use cellgov_ppu::instruction::fuzz::PpuFuzzKind;
 use cellgov_spu::instruction::SpuInstructionKind;
 
+use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::error::{FuzzError, InvariantError};
 use crate::TargetPanicPayload;
 
@@ -188,6 +189,22 @@ pub struct FuzzReport {
     pub cases: u64,
     /// Successfully decoded cases.
     pub decoded: u64,
+    /// Cases eligible for their selected semantic check.
+    pub eligible_cases: u64,
+    /// Counts cases that CellGov refuses for an unmodeled precondition.
+    pub unsupported_cases: u64,
+    /// Counts cases for which the architecture does not define the selected check.
+    pub undefined_cases: u64,
+    /// Counts eligibility reasons in assessed cases.
+    pub eligibility_reasons: BTreeMap<EligibilityReason, u64>,
+    /// Counts semantic features in assessed cases.
+    pub case_features: BTreeMap<CaseFeature, u64>,
+    /// Counts guest-visible effect classes that executed cases emit.
+    pub effect_classes: BTreeMap<EffectKind, u64>,
+    /// Counts instructions that assessed cases execute.
+    pub executed_steps: u64,
+    /// Records the largest instruction depth that one case executes.
+    pub max_executed_depth: u64,
     /// Stable instruction kinds reached.
     pub instruction_kinds: BTreeSet<InstructionIdentity>,
     /// Finding counts by rule.
@@ -212,6 +229,14 @@ impl FuzzReport {
             strategy,
             cases: 0,
             decoded: 0,
+            eligible_cases: 0,
+            unsupported_cases: 0,
+            undefined_cases: 0,
+            eligibility_reasons: BTreeMap::new(),
+            case_features: BTreeMap::new(),
+            effect_classes: BTreeMap::new(),
+            executed_steps: 0,
+            max_executed_depth: 0,
             instruction_kinds: BTreeSet::new(),
             finding_counts: BTreeMap::new(),
             findings: Vec::new(),
@@ -248,6 +273,71 @@ impl FuzzReport {
             .ok_or(InvariantError::CounterOverflow { counter: "decoded" })?;
         self.instruction_kinds.extend(kinds);
         Ok(())
+    }
+
+    pub(crate) fn assessed(&mut self, assessment: &CaseAssessment) -> Result<(), InvariantError> {
+        let counter = match assessment.eligibility {
+            CaseEligibility::Eligible => &mut self.eligible_cases,
+            CaseEligibility::Unsupported => &mut self.unsupported_cases,
+            CaseEligibility::Undefined => &mut self.undefined_cases,
+        };
+        *counter = counter
+            .checked_add(1)
+            .ok_or(InvariantError::CounterOverflow {
+                counter: "case eligibility",
+            })?;
+        for reason in &assessment.reasons {
+            let count = self.eligibility_reasons.entry(*reason).or_insert(0);
+            *count = count
+                .checked_add(1)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "eligibility reason",
+                })?;
+        }
+        for feature in &assessment.features {
+            let count = self.case_features.entry(*feature).or_insert(0);
+            *count = count
+                .checked_add(1)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "case feature",
+                })?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn executed(&mut self, depth: u64) -> Result<(), InvariantError> {
+        self.executed_steps =
+            self.executed_steps
+                .checked_add(depth)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "executed steps",
+                })?;
+        self.max_executed_depth = self.max_executed_depth.max(depth);
+        Ok(())
+    }
+
+    pub(crate) fn observed_effects(
+        &mut self,
+        effects: impl IntoIterator<Item = EffectKind>,
+    ) -> Result<(), InvariantError> {
+        for effect in effects {
+            let count = self.effect_classes.entry(effect).or_insert(0);
+            *count = count
+                .checked_add(1)
+                .ok_or(InvariantError::CounterOverflow {
+                    counter: "effect class",
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Reports the exact eligible-case ratio without floating-point rounding.
+    pub fn eligibility_rate(&self) -> Option<(u64, u64)> {
+        let classified = self
+            .eligible_cases
+            .checked_add(self.unsupported_cases)?
+            .checked_add(self.undefined_cases)?;
+        (classified != 0).then_some((self.eligible_cases, classified))
     }
 
     pub(crate) fn finding(&mut self, finding: Finding) -> Result<(), InvariantError> {
@@ -304,6 +394,12 @@ pub struct FuzzRun {
 
 impl FuzzRun {
     pub(crate) fn completed(report: FuzzReport) -> Self {
+        let has_unsupported = report.unsupported_cases != 0
+            || report
+                .finding_counts
+                .contains_key(&FindingKind::Unsupported);
+        let has_undefined = report.undefined_cases != 0
+            || report.finding_counts.contains_key(&FindingKind::Undefined);
         let outcome = if report
             .finding_counts
             .contains_key(&FindingKind::TargetPanic)
@@ -315,15 +411,10 @@ impl FuzzRun {
             .any(|kind| !matches!(kind, FindingKind::Unsupported | FindingKind::Undefined))
         {
             RunOutcome::SemanticFinding
-        } else if report.is_clean() {
+        } else if report.is_clean() && report.eligible_cases != 0 {
             RunOutcome::CleanCompletion
         } else {
-            match (
-                report
-                    .finding_counts
-                    .contains_key(&FindingKind::Unsupported),
-                report.finding_counts.contains_key(&FindingKind::Undefined),
-            ) {
+            match (has_unsupported, has_undefined) {
                 (true, false) => RunOutcome::UnsupportedCase,
                 (false, true) => RunOutcome::UndefinedCase,
                 (true, true) => RunOutcome::UnsupportedAndUndefinedCases,

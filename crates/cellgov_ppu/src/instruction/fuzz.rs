@@ -9,6 +9,7 @@ use strum::VariantArray;
 
 use super::ops::{Fp59Op, Fp59Shape, Fp63Op, Fp63Shape, VaOp, VaShape, VxOp, VxShape};
 use super::{PpuInstruction, PpuInstructionKind};
+use crate::state::PpuState;
 
 /// Encoding form used by a decoded PPU instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +165,26 @@ pub enum PpuSequenceClass {
     ReplacesXer,
 }
 
+/// Control-flow behavior relevant to bounded sequence generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PpuSequenceFlow {
+    /// Execution normally advances to the next generated word.
+    Linear,
+    /// Execution depends on architectural state that earlier words can replace.
+    StateDependent,
+    /// Execution can select another program counter.
+    ControlTransfer,
+    /// Execution ends the generated sequence at this instruction.
+    Terminal,
+}
+
+/// Register dependency a descriptor can preserve across generated words.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PpuSequenceDependency {
+    /// The instruction reads and replaces one general-purpose register.
+    GeneralPurposeRegister,
+}
+
 /// One packed operand field in a PPU encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PpuOperandField {
@@ -201,6 +222,10 @@ pub struct PpuGenerationDescriptor {
     pub form: PpuEncodingForm,
     /// Sequence-level state interaction.
     pub sequence_class: PpuSequenceClass,
+    /// Governs where generation may place this instruction.
+    pub sequence_flow: PpuSequenceFlow,
+    /// Marks a register dependency that generation can preserve.
+    pub sequence_dependency: Option<PpuSequenceDependency>,
     /// Known decodable word used when every operand is at its canonical value.
     pub canonical_word: u32,
     /// Typed operand fields in low-to-high bit order.
@@ -353,6 +378,8 @@ pub fn generation_descriptor(raw: u32) -> Option<PpuGenerationDescriptor> {
         kind: contract.kind,
         form: contract.form,
         sequence_class: sequence_class(contract.kind),
+        sequence_flow: sequence_flow(contract.outcomes),
+        sequence_dependency: sequence_dependency(contract.kind),
         canonical_word: raw,
         operands: operand_fields(raw, instruction, contract),
     })
@@ -400,6 +427,31 @@ impl PpuInstruction {
             effects,
             outcomes,
             relations: RELATIONS,
+        }
+    }
+
+    /// Classifies instruction-state pairs that fuzz comparison must exclude.
+    pub fn fuzz_case_is_architecturally_undefined(&self, state: &PpuState) -> bool {
+        use PpuInstruction as I;
+
+        match *self {
+            // [PPC-Book1 p:58 s:3.3.8] Word division leaves half of RT undefined.
+            I::Divw { .. } | I::Divwu { .. } => true,
+            // [PPC-Book1 p:58 s:3.3.8] Signed doubleword division is undefined for zero and MIN/-1.
+            I::Divd { ra, rb, .. } => {
+                let dividend = state.gpr[ra as usize] as i64;
+                let divisor = state.gpr[rb as usize] as i64;
+                divisor == 0 || (dividend == i64::MIN && divisor == -1)
+            }
+            // [PPC-Book1 p:59 s:3.3.8] Unsigned doubleword division is undefined for zero.
+            I::Divdu { rb, .. } => state.gpr[rb as usize] == 0,
+            // [PowerISA-3.1 p:I128 s:3.3] mfocrf leaves RT undefined unless FXM is one-hot.
+            I::Mfocrf { crm, .. } => crm.count_ones() != 1,
+            // [PPC-Book1 p:124 s:5.1.1] mtocrf leaves CR undefined unless FXM is one-hot.
+            I::Mtocrf { crm, .. } => crm.count_ones() != 1,
+            // [PPC-Book1 p:48 s:3.3] lswx leaves RT undefined when the byte count is zero.
+            I::Lswx { .. } => state.xer_tbc() == 0,
+            _ => false,
         }
     }
 }
@@ -458,6 +510,8 @@ fn build_generation_descriptors() -> Vec<PpuGenerationDescriptor> {
                 kind,
                 form: contract.form,
                 sequence_class: sequence_class(kind),
+                sequence_flow: sequence_flow(contract.outcomes),
+                sequence_dependency: sequence_dependency(kind),
                 canonical_word,
                 operands: operand_fields(canonical_word, instruction, contract),
             })
@@ -906,6 +960,32 @@ fn sequence_class(kind: PpuFuzzKind) -> PpuSequenceClass {
         PpuFuzzKind::Ordinary(PpuInstructionKind::Mtxer) => PpuSequenceClass::ReplacesXer,
         _ => PpuSequenceClass::Independent,
     }
+}
+
+fn sequence_flow(outcomes: &[PpuOutcomeClass]) -> PpuSequenceFlow {
+    if outcomes.contains(&PpuOutcomeClass::Branch) {
+        PpuSequenceFlow::ControlTransfer
+    } else if outcomes.contains(&PpuOutcomeClass::Syscall) || outcomes == FAULT {
+        PpuSequenceFlow::Terminal
+    } else if outcomes != CONTINUE {
+        PpuSequenceFlow::StateDependent
+    } else {
+        PpuSequenceFlow::Linear
+    }
+}
+
+fn sequence_dependency(kind: PpuFuzzKind) -> Option<PpuSequenceDependency> {
+    // [PPC-Book1 p:66 s:3.3.13] These logical-immediate forms read RS and replace RA.
+    matches!(
+        kind,
+        PpuFuzzKind::Ordinary(
+            PpuInstructionKind::Ori
+                | PpuInstructionKind::Oris
+                | PpuInstructionKind::Xori
+                | PpuInstructionKind::Xoris
+        )
+    )
+    .then_some(PpuSequenceDependency::GeneralPurposeRegister)
 }
 
 fn extract_bits(word: u32, mask: u32) -> u32 {

@@ -11,6 +11,90 @@ fn generation_registry_covers_every_instruction_kind() {
 }
 
 #[test]
+fn sequence_flow_keeps_state_and_control_ownership_in_the_descriptor() {
+    let descriptors = generation_descriptors();
+    let flow = |kind| {
+        descriptors
+            .iter()
+            .find(|descriptor| descriptor.kind == kind)
+            .map(|descriptor| descriptor.sequence_flow)
+            .expect("instruction must have a generation descriptor")
+    };
+
+    assert_eq!(flow(SpuInstructionKind::Ai), SpuSequenceFlow::Linear);
+    assert_eq!(
+        flow(SpuInstructionKind::Lqd),
+        SpuSequenceFlow::StateDependent
+    );
+    assert_eq!(
+        flow(SpuInstructionKind::Br),
+        SpuSequenceFlow::ControlTransfer
+    );
+    assert_eq!(flow(SpuInstructionKind::Stop), SpuSequenceFlow::Terminal);
+    assert_eq!(
+        flow(SpuInstructionKind::Heq),
+        SpuSequenceFlow::StateDependent
+    );
+    let wrch = descriptors
+        .iter()
+        .find(|descriptor| descriptor.kind == SpuInstructionKind::Wrch)
+        .expect("WRCH must have a generation descriptor");
+    let mut parameters = wrch.canonical_parameters();
+    let channel = wrch
+        .operands
+        .iter()
+        .position(|field| field.class == SpuOperandClass::Channel)
+        .expect("WRCH must expose its channel operand");
+    parameters[channel] = u32::from(spu::MFC_CMD);
+    let word = wrch
+        .encode(&parameters)
+        .expect("MFC command channel must preserve the WRCH kind");
+    let mfc_command =
+        generation_descriptor(word).expect("MFC command write must have a generation descriptor");
+    assert_eq!(mfc_command.sequence_flow, SpuSequenceFlow::StateDependent);
+}
+
+#[test]
+fn channel_operands_prefer_interpreter_owned_architected_selectors() {
+    let descriptors = generation_descriptors();
+    let channels = |kind| {
+        descriptors
+            .iter()
+            .find(|descriptor| descriptor.kind == kind)
+            .map(|descriptor| descriptor.channel_values)
+            .expect("channel instruction must have a generation descriptor")
+    };
+
+    assert_eq!(
+        channels(SpuInstructionKind::Rdch),
+        &[
+            spu::MFC_RD_TAG_STAT as u32,
+            spu::MFC_RD_ATOMIC_STAT as u32,
+            spu::SPU_RD_IN_MBOX as u32,
+            spu::SPU_RD_MACH_STAT as u32,
+        ]
+    );
+    assert_eq!(
+        channels(SpuInstructionKind::Wrch),
+        &[
+            spu::MFC_LSA as u32,
+            spu::MFC_EAH as u32,
+            spu::MFC_EAL as u32,
+            spu::MFC_SIZE as u32,
+            spu::MFC_TAG_ID as u32,
+            spu::MFC_CMD as u32,
+            spu::MFC_WR_TAG_MASK as u32,
+            spu::MFC_WR_TAG_UPDATE as u32,
+        ]
+    );
+    assert_eq!(
+        channels(SpuInstructionKind::Rchcnt),
+        &[spu::SPU_RD_MACH_STAT as u32]
+    );
+    assert!(channels(SpuInstructionKind::Ai).is_empty());
+}
+
+#[test]
 fn generated_witnesses_and_structural_operations_preserve_kind() {
     let mut saw_alias = false;
     let mut saw_immediate_boundary = false;
@@ -231,15 +315,23 @@ fn indirect_branch_generation_rejects_the_reserved_interrupt_pair() {
 
         let mut parameters = descriptor.canonical_parameters();
         parameters[enable] = 1;
-        assert!(descriptor.encode(&parameters).is_ok());
+        let enable_only = descriptor
+            .encode(&parameters)
+            .expect("the enable-only option must encode");
+        assert!(!encoding_execution_is_supported(enable_only));
         parameters[enable] = 0;
         parameters[disable] = 1;
-        assert!(descriptor.encode(&parameters).is_ok());
+        let disable_only = descriptor
+            .encode(&parameters)
+            .expect("the disable-only option must encode");
+        assert!(!encoding_execution_is_supported(disable_only));
         parameters[enable] = 1;
-        assert_eq!(
-            descriptor.encode(&parameters),
-            Err(SpuGenerationError::InvalidOperands)
-        );
+        let undefined = descriptor
+            .encode(&parameters)
+            .expect_err("the reserved interrupt pair must not encode");
+        assert_eq!(undefined, SpuGenerationError::InvalidOperands);
+        let raw_with_reserved_pair = descriptor.canonical_word | 0x000c_0000;
+        assert!(encoding_has_undefined_operands(raw_with_reserved_pair));
     }
 }
 
@@ -266,6 +358,9 @@ fn hbr_generation_rejects_prefetch_with_a_nonzero_offset() {
         descriptor.encode(&[1, 0, 1]),
         Err(SpuGenerationError::InvalidOperands)
     );
+    assert!(encoding_has_undefined_operands(
+        descriptor.canonical_word | 0x0010_0001
+    ));
 }
 
 #[test]
@@ -335,6 +430,42 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
             SpuOutcomeClass::Fault,
         ]
     );
+    let input = wrch
+        .state_input
+        .expect("MFC command writes need an executable command value");
+    assert_eq!(input.register, 0);
+    assert_eq!(input.preferred, Some(spu::MFC_PUTLLC));
+    assert_eq!(
+        input.values,
+        &[
+            spu::MFC_PUT,
+            spu::MFC_GET,
+            spu::MFC_GETLLAR,
+            spu::MFC_PUTLLC
+        ]
+    );
+
+    let tag_update = SpuInstruction::Wrch {
+        channel: spu::MFC_WR_TAG_UPDATE,
+        rt: 7,
+    }
+    .fuzz_descriptor();
+    let tag_update_input = tag_update
+        .state_input
+        .expect("tag-update writes need a defined request selector");
+    assert_eq!(tag_update_input.register, 7);
+    assert_eq!(
+        tag_update_input.preferred,
+        Some(spu::MFC_TAG_UPDATE_IMMEDIATE)
+    );
+    assert_eq!(
+        tag_update_input.values,
+        &[
+            spu::MFC_TAG_UPDATE_IMMEDIATE,
+            spu::MFC_TAG_UPDATE_ANY,
+            spu::MFC_TAG_UPDATE_ALL,
+        ]
+    );
 
     let wrch_parameter = SpuInstruction::Wrch {
         channel: spu::MFC_LSA,
@@ -355,6 +486,28 @@ fn outcome_and_effect_contracts_are_instruction_specific() {
     let unsupported = SpuInstruction::Rdch { rt: 0, channel: 0 }.fuzz_descriptor();
     assert_eq!(unsupported.effects, &[]);
     assert_eq!(unsupported.outcomes, &[SpuOutcomeClass::Fault]);
+    assert!(!unsupported.decoded_execution_supported);
+
+    let unmodeled_architected_channel = SpuInstruction::Wrch {
+        channel: spu::SPU_WR_OUT_INTR_MBOX,
+        rt: 0,
+    }
+    .fuzz_descriptor();
+    assert!(!unmodeled_architected_channel.decoded_execution_supported);
+    let unmodeled_outbound_mailbox = SpuInstruction::Wrch {
+        channel: spu::SPU_WR_OUT_MBOX,
+        rt: 0,
+    }
+    .fuzz_descriptor();
+    assert!(!unmodeled_outbound_mailbox.decoded_execution_supported);
+    assert!(wrch.decoded_execution_supported);
+    assert!(
+        !SpuInstruction::Heq
+            .fuzz_descriptor()
+            .decoded_execution_supported
+    );
+    let stop = SpuInstruction::Stop { signal: 0 }.fuzz_descriptor();
+    assert!(!stop.decoded_execution_supported);
 
     assert_eq!(
         SpuInstruction::Br { offset: 0 }.fuzz_descriptor().outcomes,

@@ -1,5 +1,7 @@
 //! PPU fuzz engines built on interpreter-owned descriptors.
 
+use std::collections::BTreeSet;
+
 use cellgov_effects::Effect;
 use cellgov_event::UnitId;
 use cellgov_mem::RegionView;
@@ -7,7 +9,7 @@ use cellgov_ppu::differential::PpuStateSnapshot;
 use cellgov_ppu::exec::{execute, ExecuteVerdict};
 use cellgov_ppu::instruction::fuzz::{
     generation_descriptors, PpuGenerationDescriptor, PpuGenerationError, PpuMetamorphicRelation,
-    PpuOperandClass, PpuOutcomeClass, PpuSequenceClass,
+    PpuOperandClass, PpuOutcomeClass, PpuSequenceClass, PpuSequenceFlow,
 };
 use cellgov_ppu::instruction::PpuInstruction;
 use cellgov_ppu::state::PpuState;
@@ -15,6 +17,7 @@ use cellgov_ppu::store_buffer::StoreBuffer;
 use cellgov_sync::ReservedLine;
 
 use crate::boundary::{call_harness, call_target};
+use crate::case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 use crate::error::{FuzzError, GeneratorError, InvariantError};
 use crate::report::{
     CheckIdentity, DivergenceClass, Finding, FindingKind, FuzzReport, FuzzRun, FuzzTarget,
@@ -27,8 +30,27 @@ use crate::{
 
 const UNIT: UnitId = UnitId::new(0);
 const DATA_BASE: u64 = 0x1000_0000;
-const DATA_LEN: usize = 16 * 1024;
+const DATA_REGION_BASE: u64 = DATA_BASE - 32 * 1024;
+const DATA_LEN: usize = 64 * 1024;
 const STRUCTURED_ENCODING_ATTEMPTS: usize = 64;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GeneratedWord {
+    raw: u32,
+    features: BTreeSet<CaseFeature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GeneratedSequence {
+    words: Vec<u32>,
+    features: BTreeSet<CaseFeature>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GeneratedParameters {
+    stream: ParameterStream,
+    features: BTreeSet<CaseFeature>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ObservedStep {
@@ -87,10 +109,10 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
     for iteration in iterations {
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
-        let raw = match config.strategy {
+        let generated = match config.strategy {
             GenerationStrategy::Structured => {
-                match call_target(|| structured_word(&descriptors, &mut rng)) {
-                    Ok(Ok(raw)) => raw,
+                match call_target(|| structured_generated_word(&descriptors, &mut rng, None)) {
+                    Ok(Ok(generated)) => generated,
                     Ok(Err(error)) => return Err(error.into()),
                     Err(payload) => {
                         record_target_panic(
@@ -105,8 +127,12 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                     }
                 }
             }
-            GenerationStrategy::RawWords => rng.next_u32(),
+            GenerationStrategy::RawWords => GeneratedWord {
+                raw: rng.next_u32(),
+                features: BTreeSet::new(),
+            },
         };
+        let raw = generated.raw;
         let decoded = match call_target(|| cellgov_ppu::decode::decode(raw)) {
             Ok(decoded) => decoded,
             Err(payload) => {
@@ -125,9 +151,11 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
         let descriptor = instruction.fuzz_descriptor(raw);
         let identity = InstructionIdentity::Ppu(descriptor.kind);
         report.reached(identity)?;
-        let initial = match config.strategy {
-            GenerationStrategy::Structured => random_state_for_instruction(&instruction, &mut rng)?,
-            GenerationStrategy::RawWords => random_state(&mut rng)?,
+        let (initial, state_features) = match config.strategy {
+            GenerationStrategy::Structured => {
+                state_aware_state_for_instruction(&instruction, &mut rng)?
+            }
+            GenerationStrategy::RawWords => (random_state(&mut rng)?, BTreeSet::new()),
         };
         let mut memory = vec![0u8; DATA_LEN];
         rng.fill(&mut memory);
@@ -145,38 +173,19 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 continue;
             }
         };
-        if requests_replay(descriptor.relations) {
-            let second = match call_target(|| run_once(&instruction, &initial, &memory)) {
-                Ok(second) => second,
-                Err(payload) => {
-                    record_target_panic(
-                        report,
-                        CheckIdentity::PpuExecutor,
-                        Some(identity),
-                        vec![raw],
-                        iteration,
-                        payload,
-                    )?;
-                    continue;
-                }
-            };
-            if first != second {
-                record(
-                    report,
-                    FindingKind::Nondeterministic,
-                    SemanticFingerprint {
-                        target: FuzzTarget::PpuInstruction,
-                        instruction_kind: Some(identity),
-                        check: CheckIdentity::DeterministicReplay,
-                        divergence: DivergenceClass::ArchitecturalState,
-                        outcome: None,
-                        effect: None,
-                    },
-                    vec![raw],
-                    iteration,
-                )?;
-            }
-        }
+        let mut features = generated.features;
+        features.extend(state_features);
+        let assessment = assess_instruction_case(
+            config.strategy,
+            &instruction,
+            &initial,
+            descriptor,
+            &first.verdict,
+            features,
+        );
+        report.assessed(&assessment)?;
+        report.executed(1)?;
+        report.observed_effects(first.effects.iter().map(Effect::kind))?;
         let outcome = PpuOutcomeClass::from_verdict(&first.verdict);
         if !descriptor.outcomes.contains(&outcome) {
             record(
@@ -215,6 +224,41 @@ fn run_instructions_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result
                 iteration,
             )?;
         }
+        if assessment.eligibility != CaseEligibility::Eligible {
+            continue;
+        }
+        if requests_replay(descriptor.relations) {
+            let second = match call_target(|| run_once(&instruction, &initial, &memory)) {
+                Ok(second) => second,
+                Err(payload) => {
+                    record_target_panic(
+                        report,
+                        CheckIdentity::PpuExecutor,
+                        Some(identity),
+                        vec![raw],
+                        iteration,
+                        payload,
+                    )?;
+                    continue;
+                }
+            };
+            if first != second {
+                record(
+                    report,
+                    FindingKind::Nondeterministic,
+                    SemanticFingerprint {
+                        target: FuzzTarget::PpuInstruction,
+                        instruction_kind: Some(identity),
+                        check: CheckIdentity::DeterministicReplay,
+                        divergence: DivergenceClass::ArchitecturalState,
+                        outcome: None,
+                        effect: None,
+                    },
+                    vec![raw],
+                    iteration,
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -252,24 +296,27 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
     for iteration in iterations {
         report.considered()?;
         let mut rng = Rng::for_case(config.campaign_version, config.seed, iteration);
-        let words = match config.strategy {
+        let generated = match config.strategy {
             GenerationStrategy::Structured => {
                 match call_target(|| {
-                    structured_words(&descriptors, &mut rng, config.sequence_words as usize)
+                    structured_sequence(&descriptors, &mut rng, config.sequence_words as usize)
                 }) {
-                    Ok(Ok(words)) => Ok(words),
+                    Ok(Ok(generated)) => Ok(generated),
                     Ok(Err(error)) => Err(WordGenerationFailure::Exhausted(error)),
                     Err(payload) => Err(WordGenerationFailure::DecoderPanic(0, payload)),
                 }
             }
-            GenerationStrategy::RawWords => {
-                rng.decoder_accepted_words(config.sequence_words as usize, |raw| {
+            GenerationStrategy::RawWords => rng
+                .decoder_accepted_words(config.sequence_words as usize, |raw| {
                     call_target(|| cellgov_ppu::decode::decode(raw)).map(|decoded| decoded.is_ok())
                 })
-            }
+                .map(|words| GeneratedSequence {
+                    words,
+                    features: BTreeSet::new(),
+                }),
         };
-        let words = match words {
-            Ok(words) => words,
+        let generated = match generated {
+            Ok(generated) => generated,
             Err(WordGenerationFailure::DecoderPanic(raw, payload)) => {
                 record_target_panic(
                     report,
@@ -283,7 +330,9 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             }
             Err(WordGenerationFailure::Exhausted(error)) => return Err(error.into()),
         };
-        let mut initial = random_state_for_sequence(config.strategy, &mut rng)?;
+        let words = generated.words;
+        let (mut initial, state_features) =
+            state_aware_state_for_sequence(config.strategy, &mut rng)?;
         initial.pc = 0;
         let mut memory = vec![0u8; DATA_LEN];
         rng.fill(&mut memory);
@@ -305,6 +354,15 @@ fn run_sequences_inner(config: FuzzConfig, report: &mut FuzzReport) -> Result<()
             }
         };
         report.reached_many(first.1, first.2.iter().copied())?;
+        let mut features = generated.features;
+        features.extend(state_features);
+        let assessment = assess_sequence_case(config.strategy, first.1, features);
+        report.assessed(&assessment)?;
+        report.executed(first.1)?;
+        report.observed_effects(first.0.effects.iter().map(Effect::kind))?;
+        if assessment.eligibility != CaseEligibility::Eligible {
+            continue;
+        }
         if first.0.deterministic {
             let second = match call_target(|| run_sequence(&words, &initial, &memory)) {
                 Ok(second) => second,
@@ -345,7 +403,7 @@ fn run_once(instruction: &PpuInstruction, initial: &PpuState, memory: &[u8]) -> 
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
-    let views = [RegionView::plain(DATA_BASE, memory)];
+    let views = [RegionView::plain(DATA_REGION_BASE, memory)];
     let verdict = execute(
         instruction,
         &mut state,
@@ -378,7 +436,7 @@ fn run_sequence(
     let mut state = initial.clone();
     let mut effects = Vec::new();
     let mut stores = StoreBuffer::new();
-    let views = [RegionView::plain(DATA_BASE, memory)];
+    let views = [RegionView::plain(DATA_REGION_BASE, memory)];
     let mut decoded = 0u64;
     let mut kinds = Vec::new();
     let mut terminal_verdict = None;
@@ -447,11 +505,20 @@ fn run_sequence(
     )
 }
 
+#[cfg(test)]
 fn structured_words(
     descriptors: &[PpuGenerationDescriptor],
     rng: &mut Rng,
     count: usize,
 ) -> Result<Vec<u32>, GeneratorError> {
+    structured_sequence(descriptors, rng, count).map(|generated| generated.words)
+}
+
+fn structured_sequence(
+    descriptors: &[PpuGenerationDescriptor],
+    rng: &mut Rng,
+    count: usize,
+) -> Result<GeneratedSequence, GeneratorError> {
     // [PPC-Book1 p:48 s:3.3] lswx validity depends on the XER byte count.
     // The interpreter replaces that count only through mtxer, so one of the two
     // instruction kinds is omitted deterministically from each generated sequence.
@@ -460,27 +527,65 @@ fn structured_words(
     } else {
         PpuSequenceClass::ReplacesXer
     };
-    (0..count)
-        .map(|_| structured_word_excluding(descriptors, rng, excluded))
-        .collect()
+    // [Wang2024 p:340:1 s:Abstract] Generated programs track program state statically.
+    let chain_register = rng.chance(3, 4)?.then(|| rng.next_u32());
+    let mut words = Vec::with_capacity(count);
+    let mut features = BTreeSet::new();
+    for index in 0..count {
+        let linear_only = index + 1 < count;
+        let generated = structured_generated_word_excluding(
+            descriptors,
+            rng,
+            excluded,
+            chain_register,
+            linear_only,
+        )?;
+        words.push(generated.raw);
+        features.extend(generated.features);
+    }
+    if chain_register.is_some() && count > 1 {
+        features.insert(CaseFeature::DependencyChain);
+    }
+    Ok(GeneratedSequence { words, features })
 }
 
-fn structured_word_excluding(
+fn structured_generated_word_excluding(
     descriptors: &[PpuGenerationDescriptor],
     rng: &mut Rng,
     excluded: PpuSequenceClass,
-) -> Result<u32, GeneratorError> {
+    forced_alias: Option<u32>,
+    linear_only: bool,
+) -> Result<GeneratedWord, GeneratorError> {
+    let eligible = descriptors
+        .iter()
+        .filter(|descriptor| {
+            descriptor.sequence_class != excluded
+                && (forced_alias.is_none() || descriptor.sequence_dependency.is_some())
+                && (descriptor.sequence_flow == PpuSequenceFlow::Linear
+                    || (!linear_only
+                        && descriptor.sequence_flow == PpuSequenceFlow::ControlTransfer))
+        })
+        .collect::<Vec<_>>();
+    if eligible.is_empty() {
+        return Err(GeneratorError::EmptyDescriptorRegistry {
+            target: "PPU sequence",
+        });
+    }
     for _ in 0..STRUCTURED_ENCODING_ATTEMPTS {
-        if descriptors.is_empty() {
-            return Err(GeneratorError::EmptyDescriptorRegistry { target: "PPU" });
-        }
-        let index = rng.below(descriptors.len() as u64)? as usize;
-        let Some(descriptor) = descriptors.get(index) else {
+        let index = rng.below(eligible.len() as u64)? as usize;
+        let Some(descriptor) = eligible.get(index).copied() else {
             return Err(GeneratorError::EmptyDescriptorRegistry { target: "PPU" });
         };
-        if descriptor.sequence_class != excluded {
-            return structured_word_for_descriptor(descriptor, rng);
+        let mut generated =
+            match structured_generated_word_for_descriptor(descriptor, rng, forced_alias) {
+                Ok(generated) => generated,
+                Err(GeneratorError::ConstraintAttemptsExhausted { .. }) => continue,
+                Err(error) => return Err(error),
+            };
+        if descriptor.sequence_flow == PpuSequenceFlow::ControlTransfer {
+            generated.features.insert(CaseFeature::ControlledFlow);
         }
+        return Ok(generated);
     }
     Err(GeneratorError::ConstraintAttemptsExhausted {
         target: "PPU sequence descriptor",
@@ -488,10 +593,19 @@ fn structured_word_excluding(
     })
 }
 
+#[cfg(test)]
 fn structured_word(
     descriptors: &[PpuGenerationDescriptor],
     rng: &mut Rng,
 ) -> Result<u32, GeneratorError> {
+    structured_generated_word(descriptors, rng, None).map(|generated| generated.raw)
+}
+
+fn structured_generated_word(
+    descriptors: &[PpuGenerationDescriptor],
+    rng: &mut Rng,
+    forced_alias: Option<u32>,
+) -> Result<GeneratedWord, GeneratorError> {
     if descriptors.is_empty() {
         return Err(GeneratorError::EmptyDescriptorRegistry { target: "PPU" });
     }
@@ -499,18 +613,24 @@ fn structured_word(
     let Some(descriptor) = descriptors.get(index) else {
         return Err(GeneratorError::EmptyDescriptorRegistry { target: "PPU" });
     };
-    structured_word_for_descriptor(descriptor, rng)
+    structured_generated_word_for_descriptor(descriptor, rng, forced_alias)
 }
 
-fn structured_word_for_descriptor(
+fn structured_generated_word_for_descriptor(
     descriptor: &PpuGenerationDescriptor,
     rng: &mut Rng,
-) -> Result<u32, GeneratorError> {
+    forced_alias: Option<u32>,
+) -> Result<GeneratedWord, GeneratorError> {
     // [Yang2011 p:1 s:Abstract] Only valid typed operand combinations reach comparison.
     for _ in 0..STRUCTURED_ENCODING_ATTEMPTS {
-        let parameters = ppu_parameters(descriptor, rng)?;
-        match descriptor.encode(parameters.values()) {
-            Ok(raw) => return Ok(raw),
+        let parameters = generated_ppu_parameters(descriptor, rng, forced_alias)?;
+        match descriptor.encode(parameters.stream.values()) {
+            Ok(raw) => {
+                return Ok(GeneratedWord {
+                    raw,
+                    features: parameters.features,
+                })
+            }
             Err(PpuGenerationError::InvalidOperands) => {}
             Err(error) => return Err(error.into()),
         }
@@ -521,16 +641,31 @@ fn structured_word_for_descriptor(
     })
 }
 
-fn ppu_parameters(
+fn generated_ppu_parameters(
     descriptor: &PpuGenerationDescriptor,
     rng: &mut Rng,
-) -> Result<ParameterStream, GeneratorError> {
-    let alias = rng.chance(1, 8)?.then(|| rng.next_u32());
+    forced_alias: Option<u32>,
+) -> Result<GeneratedParameters, GeneratorError> {
+    let alias = match forced_alias {
+        Some(value) => Some(value),
+        None => rng.chance(1, 8)?.then(|| rng.next_u32()),
+    };
+    let register_fields = descriptor
+        .operands
+        .iter()
+        .filter(|field| field.class == PpuOperandClass::Register)
+        .count();
+    let mut features = BTreeSet::new();
+    // [PPC-Book1 p:104 s:4.6.2] Equal field values can name separate FPR and GPR banks.
+    if alias.is_some() && register_fields > 1 && descriptor.sequence_dependency.is_some() {
+        features.insert(CaseFeature::OperandAlias);
+    }
     let mut values = Vec::with_capacity(descriptor.operands.len());
     for field in &descriptor.operands {
         let value = if field.class == PpuOperandClass::Register && alias.is_some() {
             alias.unwrap_or(0) & field.maximum()
         } else if rng.chance(1, 4)? {
+            features.insert(CaseFeature::OperandBoundary);
             let boundaries = field.boundary_values();
             let boundary_index = rng.below(boundaries.len() as u64)? as usize;
             boundaries.get(boundary_index).copied().ok_or(
@@ -543,7 +678,10 @@ fn ppu_parameters(
         };
         values.push(value);
     }
-    Ok(ParameterStream::new(values))
+    Ok(GeneratedParameters {
+        stream: ParameterStream::new(values),
+        features,
+    })
 }
 
 fn random_state(rng: &mut Rng) -> Result<PpuState, GeneratorError> {
@@ -615,6 +753,18 @@ fn random_state_for_instruction(
     Ok(state)
 }
 
+fn state_aware_state_for_instruction(
+    instruction: &PpuInstruction,
+    rng: &mut Rng,
+) -> Result<(PpuState, BTreeSet<CaseFeature>), GeneratorError> {
+    let mut state = random_state_for_instruction(instruction, rng)?;
+    bias_ppu_address_state(&mut state);
+    Ok((
+        state,
+        BTreeSet::from([CaseFeature::MappedMemory, CaseFeature::Reservation]),
+    ))
+}
+
 fn random_state_for_sequence(
     strategy: GenerationStrategy,
     rng: &mut Rng,
@@ -627,12 +777,110 @@ fn random_state_for_sequence(
     Ok(state)
 }
 
+fn state_aware_state_for_sequence(
+    strategy: GenerationStrategy,
+    rng: &mut Rng,
+) -> Result<(PpuState, BTreeSet<CaseFeature>), GeneratorError> {
+    let mut state = random_state_for_sequence(strategy, rng)?;
+    let mut features = BTreeSet::new();
+    if strategy == GenerationStrategy::Structured {
+        bias_ppu_address_state(&mut state);
+        features.extend([CaseFeature::MappedMemory, CaseFeature::Reservation]);
+    }
+    Ok((state, features))
+}
+
+fn bias_ppu_address_state(state: &mut PpuState) {
+    for register in 0..32 {
+        let value = match register % 4 {
+            0 => 0,
+            1 => DATA_BASE,
+            2 => DATA_BASE + 64,
+            _ => DATA_BASE - 64,
+        };
+        state.set_gpr(register, value);
+    }
+    state.set_reservation(Some(ReservedLine::containing(DATA_BASE)));
+}
+
 fn lswx_registers_are_valid(rt: u8, ra: u8, rb: u8, byte_count: u8) -> bool {
     let register_count = byte_count.div_ceil(4);
     !(0..register_count).any(|index| {
         let destination = rt.wrapping_add(index) & 31;
         destination == ra || destination == rb
     })
+}
+
+fn assess_instruction_case(
+    strategy: GenerationStrategy,
+    instruction: &PpuInstruction,
+    initial: &PpuState,
+    descriptor: cellgov_ppu::instruction::fuzz::PpuFuzzDescriptor,
+    verdict: &ExecuteVerdict,
+    mut features: BTreeSet<CaseFeature>,
+) -> CaseAssessment {
+    if instruction.fuzz_case_is_architecturally_undefined(initial) {
+        return CaseAssessment::new(
+            CaseEligibility::Undefined,
+            EligibilityReason::ArchitecturallyUndefined,
+            features,
+        );
+    }
+    let outcome = PpuOutcomeClass::from_verdict(verdict);
+    if strategy == GenerationStrategy::Structured
+        && matches!(
+            outcome,
+            PpuOutcomeClass::MemoryFault | PpuOutcomeClass::Fault
+        )
+        && descriptor.outcomes.contains(&PpuOutcomeClass::Continue)
+        && descriptor.outcomes.contains(&outcome)
+    {
+        if outcome == PpuOutcomeClass::MemoryFault {
+            features.remove(&CaseFeature::MappedMemory);
+            features.remove(&CaseFeature::Reservation);
+        }
+        return CaseAssessment::new(
+            CaseEligibility::Unsupported,
+            EligibilityReason::UnmetStatePrecondition,
+            features,
+        );
+    }
+    if strategy == GenerationStrategy::Structured && descriptor.outcomes == [PpuOutcomeClass::Fault]
+    {
+        features.insert(CaseFeature::NamedFaultBoundary);
+        return CaseAssessment::new(
+            CaseEligibility::Eligible,
+            EligibilityReason::NamedFaultBoundary,
+            features,
+        )
+        .with_reason(EligibilityReason::InterpreterContract);
+    }
+    let reason = match strategy {
+        GenerationStrategy::Structured => EligibilityReason::StatePreconditions,
+        GenerationStrategy::RawWords => EligibilityReason::DecoderRobustness,
+    };
+    CaseAssessment::new(CaseEligibility::Eligible, reason, features)
+        .with_reason(EligibilityReason::InterpreterContract)
+}
+
+fn assess_sequence_case(
+    strategy: GenerationStrategy,
+    executed_depth: u64,
+    features: BTreeSet<CaseFeature>,
+) -> CaseAssessment {
+    if strategy == GenerationStrategy::Structured && executed_depth == 0 {
+        return CaseAssessment::new(
+            CaseEligibility::Unsupported,
+            EligibilityReason::UnmetStatePrecondition,
+            features,
+        );
+    }
+    let reason = match strategy {
+        GenerationStrategy::Structured => EligibilityReason::StatePreconditions,
+        GenerationStrategy::RawWords => EligibilityReason::DecoderRobustness,
+    };
+    CaseAssessment::new(CaseEligibility::Eligible, reason, features)
+        .with_reason(EligibilityReason::InterpreterContract)
 }
 
 fn requests_replay(relations: &[PpuMetamorphicRelation]) -> bool {

@@ -9,6 +9,7 @@ pub mod sweep;
 
 mod boundary;
 mod campaign;
+mod case;
 mod error;
 mod parameters;
 mod rng;
@@ -21,6 +22,7 @@ pub use campaign::{
     CampaignSchedule, CampaignShard, CampaignVersion, CancellationBoundary, CaseIndices, CaseRange,
     GenerationStrategy, ReplayCoordinates, CAMPAIGN_VERSION,
 };
+pub use case::{CaseAssessment, CaseEligibility, CaseFeature, EligibilityReason};
 pub use error::{
     ConfigurationError, FuzzError, GeneratorError, InvariantError, ReductionError,
     ReferenceDisagreement, ReplayVersionError, ReportingError, SynchronizationError, WorkerError,
@@ -70,10 +72,8 @@ impl<'de> serde::Deserialize<'de> for FuzzConfig {
         let artifact = <FuzzConfigArtifact as serde::Deserialize>::deserialize(deserializer)?;
         let strategy = match (artifact.campaign_version, artifact.strategy) {
             (_, Some(strategy)) => strategy,
-            (CAMPAIGN_VERSION, None) => {
-                return Err(serde::de::Error::missing_field("strategy"));
-            }
-            (_, None) => GenerationStrategy::RawWords,
+            (CampaignVersion(1), None) => GenerationStrategy::RawWords,
+            (_, None) => return Err(serde::de::Error::missing_field("strategy")),
         };
         Ok(Self {
             campaign_version: artifact.campaign_version,

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{ConfigurationError, FuzzTarget, ReplayVersionError};
 
 /// Version of the deterministic case-to-input mapping.
-pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(2);
+pub const CAMPAIGN_VERSION: CampaignVersion = CampaignVersion(3);
 
 /// Specifies how a fuzz campaign constructs input.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -207,10 +207,8 @@ impl<'de> Deserialize<'de> for ReplayCoordinates {
         let artifact = ReplayCoordinatesArtifact::deserialize(deserializer)?;
         let strategy = match (artifact.campaign_version, artifact.strategy) {
             (_, Some(strategy)) => strategy,
-            (CAMPAIGN_VERSION, None) => {
-                return Err(serde::de::Error::missing_field("strategy"));
-            }
-            (_, None) => GenerationStrategy::RawWords,
+            (CampaignVersion(1), None) => GenerationStrategy::RawWords,
+            (_, None) => return Err(serde::de::Error::missing_field("strategy")),
         };
         Ok(Self {
             campaign_version: artifact.campaign_version,

@@ -89,6 +89,21 @@ pub struct SpuFuzzDescriptor {
     pub outcomes: &'static [SpuOutcomeClass],
     /// Relations that apply to this instruction.
     pub relations: &'static [SpuMetamorphicRelation],
+    /// Whether the executor supports this decoded instruction.
+    pub decoded_execution_supported: bool,
+    /// Register input for a state-dependent instruction.
+    pub state_input: Option<SpuStateInput>,
+}
+
+/// Input choices for one register that needs defined state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SpuStateInput {
+    /// Register that receives the selected word.
+    pub register: u8,
+    /// Values that satisfy the execution precondition.
+    pub values: &'static [u32],
+    /// Value the generator selects more often for effect coverage.
+    pub preferred: Option<u32>,
 }
 
 /// Semantic class of one encoded SPU operand field.
@@ -102,6 +117,19 @@ pub enum SpuOperandClass {
     Channel,
     /// Carries a one-bit encoding option.
     Flag,
+}
+
+/// Control-flow behavior relevant to bounded sequence generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpuSequenceFlow {
+    /// Execution normally advances to the next generated word.
+    Linear,
+    /// Execution depends on architectural state that earlier words can replace.
+    StateDependent,
+    /// Execution can select another program counter.
+    ControlTransfer,
+    /// Execution ends the generated sequence at this instruction.
+    Terminal,
 }
 
 /// One packed operand field in an SPU encoding.
@@ -139,6 +167,10 @@ pub struct SpuGenerationDescriptor {
     pub kind: SpuInstructionKind,
     /// Encoding form.
     pub form: SpuEncodingForm,
+    /// Control-flow behavior in a generated sequence.
+    pub sequence_flow: SpuSequenceFlow,
+    /// Channel selectors that the generator selects more often.
+    pub channel_values: &'static [u32],
     /// Known decodable word used for canonical operand values.
     pub canonical_word: u32,
     /// Typed operand fields in low-to-high bit order.
@@ -282,6 +314,8 @@ pub fn generation_descriptor(raw: u32) -> Option<SpuGenerationDescriptor> {
     Some(SpuGenerationDescriptor {
         kind: contract.kind,
         form: contract.form,
+        sequence_flow: sequence_flow(contract.kind, contract.outcomes),
+        channel_values: channel_values(contract.kind),
         canonical_word: raw,
         operands: operand_fields(raw, instruction, contract),
     })
@@ -320,6 +354,8 @@ impl SpuInstruction {
             effects,
             outcomes,
             relations: RELATIONS,
+            decoded_execution_supported: execution_supported(*self),
+            state_input: state_input(*self),
         }
     }
 }
@@ -345,6 +381,8 @@ fn build_generation_descriptors() -> Vec<SpuGenerationDescriptor> {
             Some(SpuGenerationDescriptor {
                 kind,
                 form: contract.form,
+                sequence_flow: sequence_flow(kind, contract.outcomes),
+                channel_values: channel_values(kind),
                 canonical_word,
                 operands: operand_fields(canonical_word, instruction, contract),
             })
@@ -490,6 +528,141 @@ fn exact_kind(raw: u32) -> Option<SpuInstructionKind> {
     crate::decode::decode(raw)
         .ok()
         .map(SpuInstructionKind::from)
+}
+
+/// Tests a decoded word for undefined operand combinations.
+pub fn encoding_has_undefined_operands(raw: u32) -> bool {
+    exact_kind(raw).is_some_and(|kind| !operand_combination_is_valid(kind, raw))
+}
+
+/// Tests whether the executor supports a decoded word.
+pub fn encoding_execution_is_supported(raw: u32) -> bool {
+    let Ok(instruction) = crate::decode::decode(raw) else {
+        return false;
+    };
+    if !execution_supported(instruction) {
+        return false;
+    }
+    let kind = SpuInstructionKind::from(instruction);
+    let controls_interrupts = matches!(
+        kind,
+        SpuInstructionKind::Bi
+            | SpuInstructionKind::Bisl
+            | SpuInstructionKind::Biz
+            | SpuInstructionKind::Binz
+            | SpuInstructionKind::Bihz
+            | SpuInstructionKind::Bihnz
+    ) && raw & 0x000c_0000 != 0;
+    // [SPU-ISA p:178 s:7 Compare, Branch, and Halt Instructions] BI's E and D
+    // options replace interrupt-enable state, which the executor does not model.
+    // [SPU-ISA p:181 s:7 Compare, Branch, and Halt Instructions] BISL has the
+    // same interrupt-control options.
+    // [SPU-ISA p:186 s:7 Compare, Branch, and Halt Instructions] BIZ has the
+    // same interrupt-control options.
+    // [SPU-ISA p:187 s:7 Compare, Branch, and Halt Instructions] BINZ has the
+    // same interrupt-control options.
+    // [SPU-ISA p:188 s:7 Compare, Branch, and Halt Instructions] BIHZ has the
+    // same interrupt-control options.
+    // [SPU-ISA p:189 s:7 Compare, Branch, and Halt Instructions] BIHNZ has the
+    // same interrupt-control options.
+    !controls_interrupts
+}
+
+fn sequence_flow(kind: SpuInstructionKind, outcomes: &[SpuOutcomeClass]) -> SpuSequenceFlow {
+    // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ can stop
+    // execution when its two source values compare equal.
+    if kind == SpuInstructionKind::Heq {
+        return SpuSequenceFlow::StateDependent;
+    }
+    if outcomes.contains(&SpuOutcomeClass::Branch) {
+        SpuSequenceFlow::ControlTransfer
+    } else if outcomes == FAULT || outcomes == YIELD {
+        SpuSequenceFlow::Terminal
+    } else if outcomes != CONTINUE {
+        SpuSequenceFlow::StateDependent
+    } else {
+        SpuSequenceFlow::Linear
+    }
+}
+
+const MFC_COMMAND_INPUTS: &[u32] = &[
+    spu::MFC_PUT,
+    spu::MFC_GET,
+    spu::MFC_GETLLAR,
+    spu::MFC_PUTLLC,
+];
+const MFC_TAG_UPDATE_INPUTS: &[u32] = &[
+    spu::MFC_TAG_UPDATE_IMMEDIATE,
+    spu::MFC_TAG_UPDATE_ANY,
+    spu::MFC_TAG_UPDATE_ALL,
+];
+
+fn state_input(instruction: SpuInstruction) -> Option<SpuStateInput> {
+    match instruction {
+        SpuInstruction::Wrch {
+            channel: spu::MFC_CMD,
+            rt,
+        } => Some(SpuStateInput {
+            register: rt,
+            values: MFC_COMMAND_INPUTS,
+            preferred: Some(spu::MFC_PUTLLC),
+        }),
+        SpuInstruction::Wrch {
+            channel: spu::MFC_WR_TAG_UPDATE,
+            rt,
+        } => Some(SpuStateInput {
+            register: rt,
+            values: MFC_TAG_UPDATE_INPUTS,
+            preferred: Some(spu::MFC_TAG_UPDATE_IMMEDIATE),
+        }),
+        _ => None,
+    }
+}
+
+fn execution_supported(instruction: SpuInstruction) -> bool {
+    match instruction {
+        SpuInstruction::Rdch { channel, .. } => RDCH_CHANNELS.contains(&u32::from(channel)),
+        SpuInstruction::Wrch { channel, .. } => WRCH_CHANNELS.contains(&u32::from(channel)),
+        SpuInstruction::Rchcnt { channel, .. } => RCHCNT_CHANNELS.contains(&u32::from(channel)),
+        // [SPU-ISA p:150 s:7 Compare, Branch, and Halt Instructions] HEQ can
+        // stop execution, but the current instruction representation retains
+        // neither source register needed to decide that outcome.
+        SpuInstruction::Heq => false,
+        // [SPU-ISA p:238 s:10 Control Instructions] STOP signals its 14-bit
+        // value to the external environment, while the executor only records
+        // that the unit finished.
+        SpuInstruction::Stop { .. } => false,
+        _ => true,
+    }
+}
+
+const RDCH_CHANNELS: &[u32] = &[
+    spu::MFC_RD_TAG_STAT as u32,
+    spu::MFC_RD_ATOMIC_STAT as u32,
+    spu::SPU_RD_IN_MBOX as u32,
+    spu::SPU_RD_MACH_STAT as u32,
+];
+// [CBE-Handbook p:463 s:17.12 SPU Mailbox Channels] Outbound mailbox writes
+// send guest-visible messages, so they stay unsupported until execution emits them.
+const WRCH_CHANNELS: &[u32] = &[
+    spu::MFC_LSA as u32,
+    spu::MFC_EAH as u32,
+    spu::MFC_EAL as u32,
+    spu::MFC_SIZE as u32,
+    spu::MFC_TAG_ID as u32,
+    spu::MFC_CMD as u32,
+    spu::MFC_WR_TAG_MASK as u32,
+    spu::MFC_WR_TAG_UPDATE as u32,
+];
+const RCHCNT_CHANNELS: &[u32] = &[spu::SPU_RD_MACH_STAT as u32];
+
+fn channel_values(kind: SpuInstructionKind) -> &'static [u32] {
+    match kind {
+        SpuInstructionKind::Rdch => RDCH_CHANNELS,
+        SpuInstructionKind::Wrch => WRCH_CHANNELS,
+        SpuInstructionKind::Rchcnt => RCHCNT_CHANNELS,
+        _ => &[],
+    }
 }
 
 fn operand_combination_is_valid(kind: SpuInstructionKind, word: u32) -> bool {

@@ -33,6 +33,48 @@ fn sequence_classes_keep_xer_ownership_in_the_descriptor() {
 }
 
 #[test]
+fn sequence_flow_keeps_state_and_control_ownership_in_the_descriptor() {
+    let descriptors = generation_descriptors();
+    let flow = |kind| {
+        descriptors
+            .iter()
+            .find(|descriptor| descriptor.kind == PpuFuzzKind::Ordinary(kind))
+            .map(|descriptor| descriptor.sequence_flow)
+            .expect("instruction must have a generation descriptor")
+    };
+
+    assert_eq!(flow(PpuInstructionKind::Addi), PpuSequenceFlow::Linear);
+    assert_eq!(
+        flow(PpuInstructionKind::Lwz),
+        PpuSequenceFlow::StateDependent
+    );
+    assert_eq!(
+        flow(PpuInstructionKind::B),
+        PpuSequenceFlow::ControlTransfer
+    );
+    assert_eq!(flow(PpuInstructionKind::Sc), PpuSequenceFlow::Terminal);
+}
+
+#[test]
+fn sequence_dependencies_name_only_read_write_register_forms() {
+    let descriptors = generation_descriptors();
+    let dependency = |kind| {
+        descriptors
+            .iter()
+            .find(|descriptor| descriptor.kind == PpuFuzzKind::Ordinary(kind))
+            .map(|descriptor| descriptor.sequence_dependency)
+            .expect("instruction must have a generation descriptor")
+    };
+
+    assert_eq!(
+        dependency(PpuInstructionKind::Ori),
+        Some(PpuSequenceDependency::GeneralPurposeRegister)
+    );
+    assert_eq!(dependency(PpuInstructionKind::Addi), None);
+    assert_eq!(dependency(PpuInstructionKind::Lfs), None);
+}
+
+#[test]
 fn generated_witnesses_and_structural_operations_preserve_exact_kind() {
     let mut saw_alias = false;
     let mut saw_immediate_boundary = false;
