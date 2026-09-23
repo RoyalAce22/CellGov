@@ -67,6 +67,8 @@ pub struct PpuPathRun {
     pub retired: u64,
     /// Program counters dispatched in execution order.
     pub executed_pcs: Vec<u64>,
+    /// Committed-memory reads in data-region order, excluding fully forwarded loads.
+    pub committed_data_reads: Vec<ByteRange>,
 }
 
 #[derive(Default)]
@@ -96,6 +98,8 @@ pub struct PpuPathDivergence {
     pub stop_differs: bool,
     /// Whether the retired instruction count differs.
     pub retired_differs: bool,
+    /// Whether the committed data-read footprints differ.
+    pub data_reads_differ: bool,
 }
 
 /// Failure to construct or observe an internal path.
@@ -119,6 +123,18 @@ pub enum PpuPathError {
         staged_effects: Vec<cellgov_effects::Effect>,
         /// Effects accepted by the commit boundary.
         committed_effects: Vec<cellgov_effects::Effect>,
+    },
+    /// A write exceeds the forwarding model's entry width.
+    #[error("PPU path forwarding write has unsupported width {length}")]
+    ForwardingWidth {
+        /// Width in bytes.
+        length: u64,
+    },
+    /// The forwarding model cannot hold another write.
+    #[error("PPU path forwarding buffer is full at address 0x{addr:016x}")]
+    ForwardingCapacity {
+        /// First guest byte of the refused write.
+        addr: u64,
     },
     /// The instruction sequence contains no instructions.
     #[error("PPU path sequence must contain at least one instruction")]
@@ -252,13 +268,19 @@ pub fn first_path_divergence(runs: &[PpuPathRun]) -> Option<PpuPathDivergence> {
                 .compare(&right.observation, PpuObservationCheck::DeterministicReplay);
             let stop_differs = left.stop != right.stop;
             let retired_differs = left.retired != right.retired;
-            if !comparison.complete_differences.is_empty() || stop_differs || retired_differs {
+            let data_reads_differ = left.committed_data_reads != right.committed_data_reads;
+            if !comparison.complete_differences.is_empty()
+                || stop_differs
+                || retired_differs
+                || data_reads_differ
+            {
                 return Some(PpuPathDivergence {
                     left: left.path,
                     right: right.path,
                     observation: comparison.complete_differences,
                     stop_differs,
                     retired_differs,
+                    data_reads_differ,
                 });
             }
         }
@@ -305,6 +327,7 @@ fn run_path(
     let mut data = initial_data.to_vec();
     let mut reservations = initial_reservations(initial);
     let mut effects_all = Vec::new();
+    let mut committed_data_reads = Vec::new();
     let mut retired = 0u64;
     let mut final_result = None;
     let batches = 1;
@@ -326,6 +349,16 @@ fn run_path(
             unit: UNIT,
         })?;
         refuse_commit(path, &observed)?;
+        committed_data_reads.extend(observed.committed_effects.iter().filter_map(|effect| {
+            match effect {
+                cellgov_effects::Effect::SharedReadIntent { range, .. }
+                    if range.start().raw() >= DATA_BASE =>
+                {
+                    Some(*range)
+                }
+                _ => None,
+            }
+        }));
         data = observed.memory;
         reservations = reservation_table(&observed.reservations);
         effects_all.extend(
@@ -365,6 +398,7 @@ fn run_path(
         stop,
         retired,
         executed_pcs,
+        committed_data_reads,
     })
 }
 
@@ -378,6 +412,8 @@ fn run_plain(
     let mut data = initial_data.to_vec();
     let mut reservations = initial_reservations(initial);
     let mut effects_all = Vec::new();
+    let mut committed_data_reads = Vec::new();
+    let mut forwarding = StoreBuffer::new();
     let mut executed_pcs = Vec::new();
     let mut retired = 0u64;
     let mut stop = PpuPathStop {
@@ -411,6 +447,8 @@ fn run_plain(
             data.copy_from_slice(initial_data);
             reservations = initial_reservations(initial);
             effects_all.clear();
+            committed_data_reads.clear();
+            forwarding.clear();
             retired = 0;
             stop = PpuPathStop {
                 reason: YieldReason::Fault,
@@ -455,6 +493,8 @@ fn run_plain(
                 data.copy_from_slice(initial_data);
                 reservations = initial_reservations(initial);
                 effects_all.clear();
+                committed_data_reads.clear();
+                forwarding.clear();
                 retired = 0;
                 stop = PpuPathStop {
                     reason: YieldReason::Fault,
@@ -479,6 +519,8 @@ fn run_plain(
                 data.copy_from_slice(initial_data);
                 reservations = initial_reservations(initial);
                 effects_all.clear();
+                committed_data_reads.clear();
+                forwarding.clear();
                 retired = 0;
                 stop = PpuPathStop {
                     reason: YieldReason::Fault,
@@ -521,6 +563,40 @@ fn run_plain(
             unit: UNIT,
         })?;
         refuse_commit(PpuExecutionPath::Plain, &observed)?;
+        committed_data_reads.extend(observed.committed_effects.iter().filter_map(|effect| {
+            match effect {
+                cellgov_effects::Effect::SharedReadIntent { range, .. }
+                    if u8::try_from(range.length()).ok().is_none_or(|len| {
+                        forwarding.forward(range.start().raw(), len).is_none()
+                    }) =>
+                {
+                    Some(*range)
+                }
+                _ => None,
+            }
+        }));
+        for effect in &observed.committed_effects {
+            let (range, bytes) = match effect {
+                cellgov_effects::Effect::SharedWriteIntent { range, bytes, .. }
+                | cellgov_effects::Effect::ConditionalStore { range, bytes, .. } => (range, bytes),
+                _ => continue,
+            };
+            let len = u8::try_from(range.length())
+                .ok()
+                .filter(|len| (1..=16).contains(len))
+                .ok_or(PpuPathError::ForwardingWidth {
+                    length: range.length(),
+                })?;
+            let value = bytes
+                .bytes()
+                .iter()
+                .fold(0u128, |value, byte| (value << 8) | u128::from(*byte));
+            if !forwarding.insert(range.start().raw(), len, value) {
+                return Err(PpuPathError::ForwardingCapacity {
+                    addr: range.start().raw(),
+                });
+            }
+        }
         data = observed.memory;
         reservations = reservation_table(&observed.reservations);
         effects_all.extend(
@@ -548,6 +624,7 @@ fn run_plain(
         stop,
         retired,
         executed_pcs,
+        committed_data_reads,
     })
 }
 
