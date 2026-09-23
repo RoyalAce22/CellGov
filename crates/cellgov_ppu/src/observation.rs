@@ -74,6 +74,8 @@ pub enum PpuObservedOutcome {
     },
     /// The sequence ended before it fetched an instruction.
     NoInstruction,
+    /// One execution-unit batch result.
+    RuntimeStep(Box<cellgov_exec::ExecutionStepResult>),
 }
 
 impl PpuObservedOutcome {
@@ -90,7 +92,12 @@ impl PpuObservedOutcome {
             // `PpuExecutionUnit::run_batch` routes a decoder refusal through
             // `fault_yield`, which discards the whole atomic batch.
             Self::DecodeRefusal { .. } => true,
+            Self::RuntimeStep(result) => result.yield_reason == cellgov_exec::YieldReason::Fault,
         }
+    }
+
+    fn effects_include_closed_block_metadata(&self) -> bool {
+        matches!(self, Self::RuntimeStep(_))
     }
 }
 
@@ -358,7 +365,7 @@ pub fn finish_observation(
         || initial_state.stwcx_executed != final_state.stwcx_executed;
     let staged_effects = if !fault_discarded {
         stores.flush(&mut effects, unit);
-        if final_state.clock_read {
+        if final_state.clock_read && !outcome.effects_include_closed_block_metadata() {
             effects.push(Effect::ClockRead { source: unit });
         }
         effects.clone()

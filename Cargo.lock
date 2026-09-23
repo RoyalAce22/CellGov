@@ -306,10 +306,12 @@ version = "0.0.0"
 dependencies = [
  "cellgov_effects",
  "cellgov_event",
+ "cellgov_exec",
  "cellgov_mem",
  "cellgov_ppu",
  "cellgov_spu",
  "cellgov_sync",
+ "cellgov_time",
  "serde",
  "serde_json",
  "thiserror",

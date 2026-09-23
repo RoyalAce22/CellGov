@@ -3,6 +3,7 @@
 #![cfg_attr(test, allow(clippy::unwrap_used))]
 
 pub mod ppu;
+pub mod ppu_paths;
 pub mod report;
 pub mod spu;
 pub mod sweep;

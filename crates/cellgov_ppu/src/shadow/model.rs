@@ -26,6 +26,15 @@ impl PredecodedShadow {
     /// `[base, base + bytes.len())` falls back to live decode +
     /// `refresh` on the hot path.
     pub fn build(base: u64, bytes: &[u8]) -> Self {
+        Self::build_with_fusion(base, bytes, true)
+    }
+
+    /// Builds a shadow with quickening but without fused pairs.
+    pub fn build_quickened(base: u64, bytes: &[u8]) -> Self {
+        Self::build_with_fusion(base, bytes, false)
+    }
+
+    fn build_with_fusion(base: u64, bytes: &[u8], fuse_pairs: bool) -> Self {
         let n_slots = bytes.len() / 4;
         let mut slots = Vec::with_capacity(n_slots);
         for i in 0..n_slots {
@@ -37,7 +46,9 @@ impl PredecodedShadow {
         let stale = vec![false; n_slots];
         let mut shadow = Self { base, slots, stale };
         shadow.quicken();
-        shadow.super_pair();
+        if fuse_pairs {
+            shadow.super_pair();
+        }
         shadow
     }
 

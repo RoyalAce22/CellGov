@@ -29,3 +29,21 @@ pub enum PpuFault {
     #[error("PPU alignment interrupt on misaligned reservation EA 0x{0:016x}")]
     AlignmentInterrupt(u64),
 }
+
+impl PpuFault {
+    /// Returns the guest fault code published by the execution unit.
+    pub fn guest_code(&self) -> u32 {
+        match *self {
+            Self::PcOutOfRange(_) => crate::FAULT_PC_OUT_OF_RANGE,
+            Self::InvalidAddress(_) => crate::FAULT_INVALID_ADDRESS,
+            Self::UnsupportedSyscall(number) => {
+                crate::FAULT_UNSUPPORTED_SYSCALL | (number as u32 & 0xffff)
+            }
+            Self::UnimplementedInstruction(opcode) => {
+                crate::FAULT_UNIMPLEMENTED_INSN | (opcode as u32 & 0xffff)
+            }
+            Self::ProgramTrap(to) => crate::FAULT_PROGRAM_TRAP | (u32::from(to) & 0xffff),
+            Self::AlignmentInterrupt(_) => crate::FAULT_ALIGNMENT_INTERRUPT,
+        }
+    }
+}

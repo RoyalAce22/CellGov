@@ -642,18 +642,7 @@ impl PpuExecutionUnit {
                         _ => self.fault_diag(step_pc),
                     };
                     // Mask guards against upper-bit collision with the category prefix.
-                    let code = match f {
-                        PpuFault::PcOutOfRange(_) => FAULT_PC_OUT_OF_RANGE,
-                        PpuFault::InvalidAddress(_) => FAULT_INVALID_ADDRESS,
-                        PpuFault::UnsupportedSyscall(n) => {
-                            FAULT_UNSUPPORTED_SYSCALL | (n as u32 & 0xFFFF)
-                        }
-                        PpuFault::UnimplementedInstruction(xo) => {
-                            FAULT_UNIMPLEMENTED_INSN | (xo as u32 & 0xFFFF)
-                        }
-                        PpuFault::ProgramTrap(to) => FAULT_PROGRAM_TRAP | (to as u32 & 0xFFFF),
-                        PpuFault::AlignmentInterrupt(_) => FAULT_ALIGNMENT_INTERRUPT,
-                    };
+                    let code = f.guest_code();
                     return self.fault_yield(&entry, effects, diag, code);
                 }
                 ExecuteVerdict::MemFault(e) => {
